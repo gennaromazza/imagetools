@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
+  buildAutoLayoutResult,
   changePageTemplate,
   clearSlotAssignment,
   createAutoLayoutPlan,
@@ -24,6 +25,7 @@ import { InputPanel } from "./components/InputPanel";
 import { LayoutPreviewBoard } from "./components/LayoutPreviewBoard";
 import { OutputPanel } from "./components/OutputPanel";
 import { PanelSection } from "./components/PanelSection";
+import { ProjectPhotoSelectorModal } from "./components/ProjectPhotoSelectorModal";
 import { ResultPanel } from "./components/ResultPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { Sidebar } from "./components/Sidebar";
@@ -66,8 +68,17 @@ function syncResultRequest(current: AutoLayoutResult, nextRequest: AutoLayoutReq
   };
 }
 
+function syncResultWithSelection(
+  current: AutoLayoutResult,
+  nextRequest: AutoLayoutRequest
+): AutoLayoutResult {
+  return buildAutoLayoutResult(nextRequest, current.pages, current.availableTemplates);
+}
+
 export function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>("setup");
+  const [allAssets, setAllAssets] = useState(() => mockWeddingAssets);
+  const [activeAssetIds, setActiveAssetIds] = useState<string[]>(() => mockWeddingAssets.map((asset) => asset.id));
   const [request, setRequest] = useState<AutoLayoutRequest>(() => buildInitialRequest());
   const [result, setResult] = useState<AutoLayoutResult>(() => createAutoLayoutPlan(buildInitialRequest()));
   const [selectedPageId, setSelectedPageId] = useState<string | null>("page-1");
@@ -79,12 +90,26 @@ export function App() {
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [outputDirectoryHandle, setOutputDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [studioPanel, setStudioPanel] = useState<StudioPanel>("slot");
+  const [isProjectSelectorOpen, setIsProjectSelectorOpen] = useState(false);
   const [activityLog, setActivityLog] = useState<string[]>([
     "Campione reale matrimonio caricato.",
     "Studio pronto: prima imposta il progetto, poi rifinisci i layout."
   ]);
   const [isPlanningPending, startPlanningTransition] = useTransition();
   const [isEditingPending, startEditingTransition] = useTransition();
+
+  function buildRequestWithSelection(
+    baseRequest: AutoLayoutRequest,
+    sourceAssets: typeof allAssets,
+    selectedIds: string[]
+  ): AutoLayoutRequest {
+    const selectedSet = new Set(selectedIds);
+
+    return {
+      ...baseRequest,
+      assets: sourceAssets.filter((asset) => selectedSet.has(asset.id))
+    };
+  }
 
   useEffect(() => {
     if (!result.pages.find((page) => page.id === selectedPageId)) {
@@ -139,9 +164,25 @@ export function App() {
   }
 
   function applyPlanningRequest(nextRequest: AutoLayoutRequest) {
+    const nextSelectedRequest = buildRequestWithSelection(nextRequest, allAssets, activeAssetIds);
+
     startPlanningTransition(() => {
-      setRequest(nextRequest);
-      setResult(createAutoLayoutPlan(nextRequest));
+      setRequest(nextSelectedRequest);
+      setResult(createAutoLayoutPlan(nextSelectedRequest));
+      setExportMessage(null);
+    });
+  }
+
+  function applyPlanningRequestWithAssets(
+    nextRequest: AutoLayoutRequest,
+    sourceAssets: typeof allAssets,
+    selectedIds: string[]
+  ) {
+    const nextSelectedRequest = buildRequestWithSelection(nextRequest, sourceAssets, selectedIds);
+
+    startPlanningTransition(() => {
+      setRequest(nextSelectedRequest);
+      setResult(createAutoLayoutPlan(nextSelectedRequest));
       setExportMessage(null);
     });
   }
@@ -221,15 +262,32 @@ export function App() {
   }
 
   function handleAssetDropped(pageId: string, slotId: string, imageId: string) {
+    const imageAlreadyActive = activeAssetIds.includes(imageId);
+    const nextActiveIds = imageAlreadyActive ? activeAssetIds : [...activeAssetIds, imageId];
+    const nextRequest = imageAlreadyActive
+      ? request
+      : buildRequestWithSelection(request, allAssets, nextActiveIds);
+
     startEditingTransition(() => {
-      setResult((current) =>
-        placeImageInSlot(current, { imageId, targetPageId: pageId, targetSlotId: slotId })
-      );
+      if (!imageAlreadyActive) {
+        setActiveAssetIds(nextActiveIds);
+        setRequest(nextRequest);
+      }
+
+      setResult((current) => {
+        const baseResult = imageAlreadyActive ? current : syncResultWithSelection(current, nextRequest);
+
+        return placeImageInSlot(baseResult, { imageId, targetPageId: pageId, targetSlotId: slotId });
+      });
     });
     setDragState(null);
     setSelectedPageId(pageId);
     setSelectedSlotKey(`${pageId}:${slotId}`);
-    pushActivity(`Foto assegnata manualmente allo slot ${pageId}:${slotId}.`);
+    pushActivity(
+      imageAlreadyActive
+        ? `Foto assegnata manualmente allo slot ${pageId}:${slotId}.`
+        : `Foto attivata dal catalogo e assegnata allo slot ${pageId}:${slotId}.`
+    );
   }
 
   function handleTemplateChange(pageId: string, templateId: string) {
@@ -351,13 +409,15 @@ export function App() {
       const folderLabel = inferFolderLabelFromFiles(files);
       const nextRequest = {
         ...request,
-        assets,
         sourceFolderPath: folderLabel || request.sourceFolderPath
       };
+      const nextIds = assets.map((asset) => asset.id);
 
+      setAllAssets(assets);
+      setActiveAssetIds(nextIds);
       setUsesMockData(false);
       setOutputDirectoryHandle(null);
-      applyPlanningRequest(nextRequest);
+      applyPlanningRequestWithAssets(nextRequest, assets, nextIds);
       pushActivity(`Caricate ${assets.length} immagini da ${folderLabel || "file selezionati"}.`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Impossibile importare i file selezionati.";
@@ -370,13 +430,15 @@ export function App() {
   function handleLoadMockData() {
     const nextRequest = {
       ...request,
-      assets: mockWeddingAssets,
       sourceFolderPath: DEFAULT_AUTO_LAYOUT_REQUEST.sourceFolderPath
     };
+    const nextIds = mockWeddingAssets.map((asset) => asset.id);
 
+    setAllAssets(mockWeddingAssets);
+    setActiveAssetIds(nextIds);
     setUsesMockData(true);
     setOutputDirectoryHandle(null);
-    applyPlanningRequest(nextRequest);
+    applyPlanningRequestWithAssets(nextRequest, mockWeddingAssets, nextIds);
     pushActivity("Campione reale matrimonio ripristinato.");
   }
 
@@ -424,7 +486,8 @@ export function App() {
           </div>
 
           <div className="header-badges">
-            <span className="badge">{result.summary.totalImages} foto caricate</span>
+            <span className="badge">{result.summary.totalImages} foto attive</span>
+            <span className="badge">{allAssets.length} nel catalogo</span>
             <span className="badge">{result.pages.length} fogli previsti</span>
             <span className="badge">{request.sheet.label}</span>
             <span className="badge">{isPlanningPending ? "Aggiornamento layout..." : "Layout aggiornato"}</span>
@@ -434,7 +497,8 @@ export function App() {
         {renderStepSwitcher()}
 
         <div className="context-strip">
-          <span>{usesMockData ? "Demo fotografica reale" : "Servizio importato"}: {request.assets.length} immagini</span>
+          <span>{usesMockData ? "Demo fotografica reale" : "Servizio importato"}: {allAssets.length} immagini caricate</span>
+          <span>{activeAssetIds.length} foto attive per il layout</span>
           <span>Formato foglio: {request.sheet.label}</span>
           <span>Output: {request.output.folderPath}</span>
         </div>
@@ -444,6 +508,8 @@ export function App() {
             <PanelSection title={sections.input.title} description={sections.input.description}>
               <InputPanel
                 sourceFolderPath={request.sourceFolderPath}
+                loadedImages={allAssets.length}
+                activeImages={activeAssetIds.length}
                 totalImages={result.summary.totalImages}
                 verticalCount={result.summary.verticalCount}
                 horizontalCount={result.summary.horizontalCount}
@@ -455,6 +521,7 @@ export function App() {
                 }
                 onFolderSelected={handleFolderSelected}
                 onLoadMockData={handleLoadMockData}
+                onOpenSelector={() => setIsProjectSelectorOpen(true)}
               />
             </PanelSection>
 
@@ -559,7 +626,8 @@ export function App() {
         {renderStepSwitcher()}
 
         <div className="studio-shell__statusbar">
-            <span>{request.assets.length} foto caricate</span>
+            <span>{allAssets.length} foto nel catalogo</span>
+            <span>{request.assets.length} foto attive</span>
             <span>{usedImagesCount} gia' impaginate</span>
             <span>{result.unassignedAssets.length} ancora libere</span>
             <span>Output: {request.output.folderPath}</span>
@@ -571,6 +639,8 @@ export function App() {
             <LayoutPreviewBoard
               result={result}
               assets={result.request.assets}
+              availableAssetsForPicker={allAssets}
+              activeAssetIds={activeAssetIds}
               assetsById={assetsById}
               usageByAssetId={usageByAssetId}
               selectedPageId={selectedPageId}
@@ -748,6 +818,20 @@ export function App() {
             ) : null}
           </div>
         </section>
+
+        {isProjectSelectorOpen ? (
+          <ProjectPhotoSelectorModal
+            assets={allAssets}
+            activeAssetIds={activeAssetIds}
+            onClose={() => setIsProjectSelectorOpen(false)}
+            onApply={(nextIds) => {
+              setActiveAssetIds(nextIds);
+              applyPlanningRequestWithAssets({ ...request }, allAssets, nextIds);
+              setIsProjectSelectorOpen(false);
+              pushActivity(`${nextIds.length} foto attivate per il progetto su ${allAssets.length} caricate.`);
+            }}
+          />
+        ) : null}
       </>
     );
   }

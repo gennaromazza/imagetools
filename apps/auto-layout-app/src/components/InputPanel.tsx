@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 
 interface InputPanelProps {
   sourceFolderPath: string;
+  loadedImages: number;
+  activeImages: number;
   totalImages: number;
   verticalCount: number;
   horizontalCount: number;
@@ -11,10 +13,13 @@ interface InputPanelProps {
   onSourceFolderChange: (value: string) => void;
   onFolderSelected: (files: FileList | null) => void;
   onLoadMockData: () => void;
+  onOpenSelector: () => void;
 }
 
 export function InputPanel({
   sourceFolderPath,
+  loadedImages,
+  activeImages,
   totalImages,
   verticalCount,
   horizontalCount,
@@ -23,7 +28,8 @@ export function InputPanel({
   usesMockData,
   onSourceFolderChange,
   onFolderSelected,
-  onLoadMockData
+  onLoadMockData,
+  onOpenSelector
 }: InputPanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -53,6 +59,10 @@ export function InputPanel({
             Ripristina demo
           </button>
         ) : null}
+
+        <button type="button" className="ghost-button" onClick={onOpenSelector}>
+          Seleziona foto progetto
+        </button>
       </div>
 
       <input
@@ -76,13 +86,24 @@ export function InputPanel({
 
       <div className="stats-grid">
         <div className="stat-card">
-          <span>Immagini totali</span>
+          <span>Foto caricate</span>
+          <strong>{loadedImages}</strong>
+        </div>
+        <div className="stat-card stat-card--highlight">
+          <span>Foto attive</span>
+          <strong>{activeImages}</strong>
+        </div>
+        <div className="stat-card">
+          <span>Nel piano</span>
           <strong>{totalImages}</strong>
         </div>
         <div className="stat-card">
           <span>Verticali</span>
           <strong>{verticalCount}</strong>
         </div>
+      </div>
+
+      <div className="stats-grid stats-grid--compact">
         <div className="stat-card">
           <span>Orizzontali</span>
           <strong>{horizontalCount}</strong>
@@ -95,8 +116,8 @@ export function InputPanel({
 
       <p className="helper-copy">
         {usesMockData
-          ? "L'app parte con un piccolo set fotografico reale cosi' puoi vedere subito preview, fogli ed export. Usa 'Carica cartella immagini' per passare al servizio vero."
-          : "Il layout corrente si basa sulle immagini che hai selezionato nel browser. Sono supportati JPG e PNG con preview reali nei fogli."}
+          ? "L'app parte con un piccolo set fotografico reale cosi' puoi vedere subito preview, fogli ed export. Puoi comunque aprire la selezione progetto e decidere quali foto usare."
+          : "Puoi caricare molte piu foto di quelle che finiranno nei fogli. Con 'Seleziona foto progetto' scegli il sottoinsieme realmente usato per l'impaginazione."}
       </p>
     </div>
   );

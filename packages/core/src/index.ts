@@ -1,4 +1,5 @@
 export { createAutoLayoutPlan } from "./create-auto-layout-plan";
+export { buildAutoLayoutResult } from "./result-state";
 export {
   changePageTemplate,
   clearSlotAssignment,
