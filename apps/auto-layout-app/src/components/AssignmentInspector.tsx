@@ -25,7 +25,8 @@ export function AssignmentInspector({
     return (
       <div className="stack">
         <p className="helper-copy">
-          {pageLabel ? `${pageLabel}, slot ${slot.id}` : `Slot ${slot.id}`} e' vuoto. Trascina una foto dal banco laterale per riempirlo.
+          {pageLabel ? `${pageLabel}, slot ${slot.id}` : `Slot ${slot.id}`} e' vuoto. Trascina una foto
+          nella spread per riempirlo.
         </p>
       </div>
     );
@@ -37,7 +38,7 @@ export function AssignmentInspector({
         {asset.previewUrl ? <img src={asset.previewUrl} alt={asset.fileName} className="inspector-card__image" /> : null}
         <div>
           <strong>{asset.fileName}</strong>
-          <p>{pageLabel ? `${pageLabel} · slot ${slot.id}` : `Slot ${slot.id}`}</p>
+          <p>{pageLabel ? `${pageLabel} | slot ${slot.id}` : `Slot ${slot.id}`}</p>
         </div>
       </div>
 

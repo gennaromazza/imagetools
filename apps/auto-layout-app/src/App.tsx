@@ -20,7 +20,6 @@ import type {
 } from "@photo-tools/shared-types";
 import { AUTO_LAYOUT_SECTIONS, TOOL_NAVIGATION } from "@photo-tools/ui-schema";
 import { AssignmentInspector } from "./components/AssignmentInspector";
-import { AssetWorkbench } from "./components/AssetWorkbench";
 import { InputPanel } from "./components/InputPanel";
 import { LayoutPreviewBoard } from "./components/LayoutPreviewBoard";
 import { OutputPanel } from "./components/OutputPanel";
@@ -427,7 +426,9 @@ export function App() {
             >
               <LayoutPreviewBoard
                 result={result}
+                assets={result.request.assets}
                 assetsById={assetsById}
+                usageByAssetId={usageByAssetId}
                 selectedPageId={selectedPageId}
                 selectedSlotKey={selectedSlotKey}
                 dragState={dragState}
@@ -443,9 +444,16 @@ export function App() {
                     sourceSlotId: slotId
                   })
                 }
+                onDragAssetStart={(imageId) =>
+                  setDragState({
+                    kind: "asset",
+                    imageId
+                  })
+                }
                 onDragEnd={() => setDragState(null)}
                 onDrop={handleDrop}
                 onAssetDropped={handleAssetDropped}
+                onDropToUnused={handleDropToUnused}
                 onTemplateChange={handleTemplateChange}
                 onRemovePage={handleRemovePage}
               />
@@ -455,25 +463,6 @@ export function App() {
           <div className="workspace-grid__side">
             <PanelSection title={sections.result.title} description={sections.result.description}>
               <ResultPanel result={result} />
-            </PanelSection>
-
-            <PanelSection
-              title="Banco Foto"
-              description="Tutte le immagini del servizio con stato usata/non usata e drag and drop verso i fogli."
-            >
-              <AssetWorkbench
-                assets={result.request.assets}
-                usageByAssetId={usageByAssetId}
-                dragImageId={dragState?.imageId ?? null}
-                onDragAssetStart={(imageId) =>
-                  setDragState({
-                    kind: "asset",
-                    imageId
-                  })
-                }
-                onDragEnd={() => setDragState(null)}
-                onDropToUnused={handleDropToUnused}
-              />
             </PanelSection>
 
             <PanelSection

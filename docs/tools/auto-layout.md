@@ -25,7 +25,9 @@ Il tool oggi include:
 
 - preview vere delle immagini nei fogli, non solo nomi file
 - dataset demo fotografico reale per vedere subito il comportamento dell'app
+- sala impaginazione in stile editor album con spread centrale
 - banco foto con stato `usata / non usata`
+- ribbon foto interna alla sala impaginazione per drag and drop rapido
 - drag and drop tra banco foto e fogli
 - drag and drop tra slot e fogli diversi
 - creazione rapida di un nuovo foglio dalle immagini non usate
@@ -168,9 +170,11 @@ La UI e' organizzata in cinque aree operative.
 
 ### 3. Anteprima Fogli
 
+- spread centrale con doppia pagina affiancata
 - preview reali con immagini
 - selezione slot
 - cambio template foglio
+- pulsante rapido che apre i template compatibili per il foglio attivo
 - rimozione foglio
 - creazione nuovo foglio da immagini non usate
 
@@ -178,7 +182,7 @@ La UI e' organizzata in cinque aree operative.
 
 - tutte le immagini del servizio
 - badge implicito usata/non usata
-- trascinamento verso i fogli
+- trascinamento verso i fogli dalla ribbon interna o dal banco foto
 - drop zone per rimettere una foto tra le non usate
 
 ### 5. Controllo Slot

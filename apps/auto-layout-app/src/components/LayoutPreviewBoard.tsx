@@ -8,6 +8,8 @@ import type {
 } from "@photo-tools/shared-types";
 import { ImageSlotPreview } from "./ImageSlotPreview";
 
+type AssetFilter = "all" | "unused" | "used";
+
 interface DragState {
   kind: "asset" | "slot";
   imageId: string;
@@ -15,17 +17,27 @@ interface DragState {
   sourceSlotId?: string;
 }
 
+interface AssetUsage {
+  pageId: string;
+  pageNumber: number;
+  slotId: string;
+}
+
 interface LayoutPreviewBoardProps {
   result: AutoLayoutResult;
+  assets: ImageAsset[];
   assetsById: Map<string, ImageAsset>;
+  usageByAssetId: Map<string, AssetUsage>;
   selectedPageId: string | null;
   selectedSlotKey: string | null;
   dragState: DragState | null;
   onSelectPage: (pageId: string, slotId?: string) => void;
   onStartSlotDrag: (pageId: string, slotId: string, imageId: string) => void;
+  onDragAssetStart: (imageId: string) => void;
   onDragEnd: () => void;
   onDrop: (move: LayoutMove) => void;
   onAssetDropped: (pageId: string, slotId: string, imageId: string) => void;
+  onDropToUnused: () => void;
   onTemplateChange: (pageId: string, templateId: string) => void;
   onRemovePage: (pageId: string) => void;
 }
@@ -164,22 +176,43 @@ function renderSheetSurface(
   );
 }
 
+function renderEmptySheetPlaceholder(label: string) {
+  return (
+    <div className="sheet-preview sheet-preview--hero sheet-preview--placeholder">
+      <div className="sheet-preview__placeholder-copy">
+        <strong>{label}</strong>
+        <span>Seleziona un altro foglio oppure crea nuove pagine dalle foto non usate.</span>
+      </div>
+    </div>
+  );
+}
+
 export function LayoutPreviewBoard({
   result,
+  assets,
   assetsById,
+  usageByAssetId,
   selectedPageId,
   selectedSlotKey,
   dragState,
   onSelectPage,
   onStartSlotDrag,
+  onDragAssetStart,
   onDragEnd,
   onDrop,
   onAssetDropped,
+  onDropToUnused,
   onTemplateChange,
   onRemovePage
 }: LayoutPreviewBoardProps) {
   const [isTemplateChooserOpen, setIsTemplateChooserOpen] = useState(false);
+  const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const activePage = result.pages.find((page) => page.id === selectedPageId) ?? result.pages[0] ?? null;
+  const activeIndex = activePage ? result.pages.findIndex((page) => page.id === activePage.id) : 0;
+  const spreadStartIndex = activeIndex <= 0 ? 0 : activeIndex % 2 === 0 ? activeIndex : activeIndex - 1;
+  const spreadPages = result.pages.slice(spreadStartIndex, spreadStartIndex + 2);
+  const leftPage = spreadPages[0] ?? null;
+  const rightPage = spreadPages[1] ?? null;
   const compatibleTemplates = useMemo(
     () =>
       activePage
@@ -187,6 +220,16 @@ export function LayoutPreviewBoard({
         : [],
     [activePage, result.availableTemplates]
   );
+  const filteredAssets = assets.filter((asset) => {
+    const isUsed = usageByAssetId.has(asset.id);
+    if (assetFilter === "unused") {
+      return !isUsed;
+    }
+    if (assetFilter === "used") {
+      return isUsed;
+    }
+    return true;
+  });
 
   useEffect(() => {
     setIsTemplateChooserOpen(false);
@@ -201,9 +244,13 @@ export function LayoutPreviewBoard({
       <div className="layout-studio__topbar">
         <div>
           <span className="layout-studio__eyebrow">Sala Impaginazione</span>
-          <h3>Foglio {activePage.pageNumber} · {activePage.templateLabel}</h3>
+          <h3>
+            Spread {leftPage?.pageNumber ?? "-"}
+            {rightPage ? `-${rightPage.pageNumber}` : ""}
+            {" "} | foglio attivo {activePage.pageNumber}
+          </h3>
           <p>
-            {activePage.assignments.length} foto posizionate · formato {activePage.sheetSpec.label} ·
+            {activePage.assignments.length} foto posizionate | formato {activePage.sheetSpec.label} |
             margine {activePage.sheetSpec.marginCm.toFixed(1)} cm
           </p>
         </div>
@@ -211,7 +258,11 @@ export function LayoutPreviewBoard({
         <div className="layout-studio__top-actions">
           <button
             type="button"
-            className={isTemplateChooserOpen ? "secondary-button layout-studio__template-button layout-studio__template-button--active" : "secondary-button layout-studio__template-button"}
+            className={
+              isTemplateChooserOpen
+                ? "secondary-button layout-studio__template-button layout-studio__template-button--active"
+                : "secondary-button layout-studio__template-button"
+            }
             onClick={() => setIsTemplateChooserOpen((current) => !current)}
           >
             Template per questo foglio
@@ -273,8 +324,8 @@ export function LayoutPreviewBoard({
             className="rail-button"
             onClick={() => onSelectPage(activePage.id, activePage.slotDefinitions[0]?.id)}
           >
-            <span>S</span>
-            <small>Slot</small>
+            <span>F</span>
+            <small>Focus</small>
           </button>
           <div className="rail-metric">
             <small>Foto</small>
@@ -287,18 +338,45 @@ export function LayoutPreviewBoard({
         </div>
 
         <div className="layout-studio__canvas">
-          {renderSheetSurface(
-            activePage,
-            assetsById,
-            selectedSlotKey,
-            dragState,
-            onSelectPage,
-            onStartSlotDrag,
-            onDragEnd,
-            onDrop,
-            onAssetDropped,
-            "hero"
-          )}
+          <div className="spread-canvas">
+            <div className="spread-canvas__page">
+              {leftPage
+                ? renderSheetSurface(
+                    leftPage,
+                    assetsById,
+                    selectedSlotKey,
+                    dragState,
+                    onSelectPage,
+                    onStartSlotDrag,
+                    onDragEnd,
+                    onDrop,
+                    onAssetDropped,
+                    "hero"
+                  )
+                : renderEmptySheetPlaceholder("Pagina sinistra")}
+              {leftPage ? <span className="spread-canvas__page-number">{leftPage.pageNumber}</span> : null}
+            </div>
+
+            <div className="spread-canvas__gutter" />
+
+            <div className="spread-canvas__page">
+              {rightPage
+                ? renderSheetSurface(
+                    rightPage,
+                    assetsById,
+                    selectedSlotKey,
+                    dragState,
+                    onSelectPage,
+                    onStartSlotDrag,
+                    onDragEnd,
+                    onDrop,
+                    onAssetDropped,
+                    "hero"
+                  )
+                : renderEmptySheetPlaceholder("Pagina destra")}
+              <span className="spread-canvas__page-number">{rightPage?.pageNumber ?? spreadStartIndex + 2}</span>
+            </div>
+          </div>
         </div>
 
         <div className="layout-studio__rail layout-studio__rail--right">
@@ -314,17 +392,17 @@ export function LayoutPreviewBoard({
             <small>DPI</small>
             <strong>{activePage.sheetSpec.dpi}</strong>
           </div>
-          {activePage.warnings.length > 0 ? (
-            <div className="rail-warning">
-              {activePage.warnings.map((warning) => (
-                <span key={warning}>{warning}</span>
-              ))}
-            </div>
-          ) : (
-            <div className="rail-warning rail-warning--ok">
-              <span>Foglio coerente e pronto alla rifinitura.</span>
-            </div>
-          )}
+          <div
+            className={dragState ? "rail-warning rail-warning--drop" : "rail-warning rail-warning--ok"}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={() => onDropToUnused()}
+          >
+            <span>
+              {dragState
+                ? "Rilascia qui per togliere la foto dal layout"
+                : activePage.warnings[0] ?? "Drop rapido per riportare una foto tra le non usate."}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -358,6 +436,61 @@ export function LayoutPreviewBoard({
             </button>
           );
         })}
+      </div>
+
+      <div className="layout-photo-ribbon">
+        <div className="layout-photo-ribbon__header">
+          <div className="segmented-control">
+            {([
+              ["all", "Tutte"],
+              ["unused", "Non usate"],
+              ["used", "Usate"]
+            ] as [AssetFilter, string][]).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={assetFilter === value ? "segment segment--active" : "segment"}
+                onClick={() => setAssetFilter(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="helper-inline">
+            {usageByAssetId.size} usate | {assets.length - usageByAssetId.size} libere
+          </span>
+        </div>
+
+        <div className="layout-photo-ribbon__track">
+          {filteredAssets.map((asset) => {
+            const usage = usageByAssetId.get(asset.id);
+            const isActive = dragState?.imageId === asset.id;
+
+            return (
+              <button
+                key={asset.id}
+                type="button"
+                draggable
+                className={isActive ? "ribbon-photo ribbon-photo--dragging" : "ribbon-photo"}
+                onDragStart={(event) => {
+                  event.dataTransfer.setData("text/plain", asset.id);
+                  onDragAssetStart(asset.id);
+                }}
+                onDragEnd={onDragEnd}
+              >
+                {asset.previewUrl ? (
+                  <img src={asset.previewUrl} alt={asset.fileName} className="ribbon-photo__image" />
+                ) : (
+                  <div className="ribbon-photo__placeholder">{asset.fileName}</div>
+                )}
+                <div className="ribbon-photo__meta">
+                  <strong>{asset.fileName}</strong>
+                  <span>{usage ? `Foglio ${usage.pageNumber}` : "Disponibile"}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
