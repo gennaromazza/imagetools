@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   changePageTemplate,
   clearSlotAssignment,
@@ -30,6 +30,8 @@ import { Sidebar } from "./components/Sidebar";
 import { inferFolderLabelFromFiles, loadImageAssetsFromFiles } from "./browser-image-assets";
 import { mockWeddingAssets } from "./mock/wedding-selection";
 import { exportSheets } from "./sheet-renderer";
+
+type AppScreen = "setup" | "studio";
 
 interface DragState {
   kind: "asset" | "slot";
@@ -64,6 +66,7 @@ function syncResultRequest(current: AutoLayoutResult, nextRequest: AutoLayoutReq
 }
 
 export function App() {
+  const [currentScreen, setCurrentScreen] = useState<AppScreen>("setup");
   const [request, setRequest] = useState<AutoLayoutRequest>(() => buildInitialRequest());
   const [result, setResult] = useState<AutoLayoutResult>(() => createAutoLayoutPlan(buildInitialRequest()));
   const [selectedPageId, setSelectedPageId] = useState<string | null>("page-1");
@@ -76,8 +79,9 @@ export function App() {
   const [outputDirectoryHandle, setOutputDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
   const [activityLog, setActivityLog] = useState<string[]>([
     "Campione reale matrimonio caricato.",
-    "Banco foto e preview fogli pronti."
+    "Studio pronto: prima imposta il progetto, poi rifinisci i layout."
   ]);
+  const [isPlanningPending, startPlanningTransition] = useTransition();
 
   useEffect(() => {
     if (!result.pages.find((page) => page.id === selectedPageId)) {
@@ -102,14 +106,21 @@ export function App() {
   }, [result, selectedSlotKey]);
 
   const sections = Object.fromEntries(AUTO_LAYOUT_SECTIONS.map((section) => [section.id, section]));
-  const assetsById = new Map(result.request.assets.map((asset) => [asset.id, asset]));
-  const usageByAssetId = new Map(
-    result.pages.flatMap((page) =>
-      page.assignments.map((assignment) => [
-        assignment.imageId,
-        { pageId: page.id, pageNumber: page.pageNumber, slotId: assignment.slotId }
-      ] as const)
-    )
+  const assetsById = useMemo(
+    () => new Map(result.request.assets.map((asset) => [asset.id, asset] as const)),
+    [result.request.assets]
+  );
+  const usageByAssetId = useMemo(
+    () =>
+      new Map(
+        result.pages.flatMap((page) =>
+          page.assignments.map((assignment) => [
+            assignment.imageId,
+            { pageId: page.id, pageNumber: page.pageNumber, slotId: assignment.slotId }
+          ] as const)
+        )
+      ),
+    [result.pages]
   );
   const selectedPage = result.pages.find((page) => page.id === selectedPageId) ?? null;
   const selectedSlotId = selectedSlotKey?.split(":")[1] ?? null;
@@ -118,15 +129,18 @@ export function App() {
   const selectedAsset = selectedAssignment ? assetsById.get(selectedAssignment.imageId) : undefined;
   const supportsDirectoryPicker = typeof window !== "undefined" && "showDirectoryPicker" in window;
   const usedImagesCount = result.summary.totalImages - result.unassignedAssets.length;
+  const canOpenStudio = result.pages.length > 0 && request.assets.length > 0;
 
   function pushActivity(entry: string) {
     setActivityLog((current) => [entry, ...current].slice(0, 12));
   }
 
   function applyPlanningRequest(nextRequest: AutoLayoutRequest) {
-    setRequest(nextRequest);
-    setResult(createAutoLayoutPlan(nextRequest));
-    setExportMessage(null);
+    startPlanningTransition(() => {
+      setRequest(nextRequest);
+      setResult(createAutoLayoutPlan(nextRequest));
+      setExportMessage(null);
+    });
   }
 
   function updateOutput(field: "folderPath" | "fileNamePattern" | "quality" | "format", value: string | number) {
@@ -349,28 +363,58 @@ export function App() {
     pushActivity("Campione reale matrimonio ripristinato.");
   }
 
-  return (
-    <div className="app-shell">
-      <Sidebar tools={TOOL_NAVIGATION} activeToolId="auto-layout" />
+  function renderStepSwitcher() {
+    return (
+      <div className="workflow-switcher">
+        <button
+          type="button"
+          className={currentScreen === "setup" ? "workflow-step workflow-step--active" : "workflow-step"}
+          onClick={() => setCurrentScreen("setup")}
+        >
+          <span>1</span>
+          <strong>Imposta Progetto</strong>
+          <small>Formato, gap, foto e parametri</small>
+        </button>
+        <button
+          type="button"
+          className={currentScreen === "studio" ? "workflow-step workflow-step--active" : "workflow-step"}
+          onClick={() => {
+            if (canOpenStudio) {
+              setCurrentScreen("studio");
+            }
+          }}
+          disabled={!canOpenStudio}
+        >
+          <span>2</span>
+          <strong>Studio Layout</strong>
+          <small>Spread, modifica rapida ed export</small>
+        </button>
+      </div>
+    );
+  }
 
-      <main className="workspace">
+  function renderSetupScreen() {
+    return (
+      <>
         <header className="workspace__header">
           <div>
             <span className="workspace__eyebrow">Impaginazione Automatica</span>
-            <h2>Preview vere, smistamento rapido e export pronto per il banco stampa</h2>
+            <h2>Prepara il progetto prima di entrare nello studio layout</h2>
             <p>
-              Seleziona le foto, lascia che il motore proponga i fogli e poi rifinisci tutto con
-              drag and drop, controlli per slot ed esportazione immediata.
+              In questa schermata imposti formato foglio, bordi, gap, numero di fogli e sorgente
+              immagini. Quando il progetto e' pronto passi alla modifica visuale a pieno schermo.
             </p>
           </div>
 
           <div className="header-badges">
             <span className="badge">{result.summary.totalImages} foto caricate</span>
-            <span className="badge">{usedImagesCount} gia' posizionate</span>
-            <span className="badge">{result.unassignedAssets.length} ancora libere</span>
-            <span className="badge">{result.pages.length} fogli pronti</span>
+            <span className="badge">{result.pages.length} fogli previsti</span>
+            <span className="badge">{request.sheet.label}</span>
+            <span className="badge">{isPlanningPending ? "Aggiornamento layout..." : "Layout aggiornato"}</span>
           </div>
         </header>
+
+        {renderStepSwitcher()}
 
         <div className="context-strip">
           <span>{usesMockData ? "Demo fotografica reale" : "Servizio importato"}: {request.assets.length} immagini</span>
@@ -409,55 +453,6 @@ export function App() {
                 onAllowTemplateVariationChange={handleAllowTemplateVariationChange}
               />
             </PanelSection>
-
-            <PanelSection
-              title={sections.preview.title}
-              description={sections.preview.description}
-              actions={
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={result.unassignedAssets.length === 0}
-                  onClick={handleCreatePageFromUnused}
-                >
-                  Nuovo foglio dalle non usate
-                </button>
-              }
-            >
-              <LayoutPreviewBoard
-                result={result}
-                assets={result.request.assets}
-                assetsById={assetsById}
-                usageByAssetId={usageByAssetId}
-                selectedPageId={selectedPageId}
-                selectedSlotKey={selectedSlotKey}
-                dragState={dragState}
-                onSelectPage={(pageId, slotId) => {
-                  setSelectedPageId(pageId);
-                  setSelectedSlotKey(slotId ? `${pageId}:${slotId}` : null);
-                }}
-                onStartSlotDrag={(pageId, slotId, imageId) =>
-                  setDragState({
-                    kind: "slot",
-                    imageId,
-                    sourcePageId: pageId,
-                    sourceSlotId: slotId
-                  })
-                }
-                onDragAssetStart={(imageId) =>
-                  setDragState({
-                    kind: "asset",
-                    imageId
-                  })
-                }
-                onDragEnd={() => setDragState(null)}
-                onDrop={handleDrop}
-                onAssetDropped={handleAssetDropped}
-                onDropToUnused={handleDropToUnused}
-                onTemplateChange={handleTemplateChange}
-                onRemovePage={handleRemovePage}
-              />
-            </PanelSection>
           </div>
 
           <div className="workspace-grid__side">
@@ -465,9 +460,194 @@ export function App() {
               <ResultPanel result={result} />
             </PanelSection>
 
+            <PanelSection title={sections.output.title} description={sections.output.description}>
+              <OutputPanel
+                request={request}
+                isExporting={isExporting}
+                exportMessage={exportMessage}
+                supportsDirectoryPicker={supportsDirectoryPicker}
+                onOutputChange={updateOutput}
+                onPickOutputFolder={handlePickOutputFolder}
+                onGenerate={handleGenerate}
+              />
+            </PanelSection>
+
+            <PanelSection
+              title="Registro Attivita"
+              description="Traccia operativa della sessione corrente, utile durante la vendita e la stampa."
+            >
+              <ul className="activity-log">
+                {activityLog.map((entry, index) => (
+                  <li key={`${entry}-${index}`}>{entry}</li>
+                ))}
+              </ul>
+            </PanelSection>
+          </div>
+        </div>
+
+        <div className="setup-footer">
+          <div>
+            <strong>Quando il progetto e' pronto, apri lo studio layout.</strong>
+            <p>La seconda schermata usa tutto lo schermo del PC per spread, modifica rapida ed export.</p>
+          </div>
+          <button
+            type="button"
+            className="primary-button setup-footer__action"
+            disabled={!canOpenStudio}
+            onClick={() => setCurrentScreen("studio")}
+          >
+            Apri studio layout
+          </button>
+        </div>
+      </>
+    );
+  }
+
+  function renderStudioScreen() {
+    return (
+      <>
+        <header className="studio-shell__header">
+          <div className="studio-shell__intro">
+            <span className="workspace__eyebrow">Studio Layout</span>
+            <h2>Modifica i layout a pieno schermo e tieni l'export sempre a portata di mano</h2>
+            <p>
+              Lo studio e' ottimizzato per PC: spread centrali ampie, ribbon foto interna, controlli
+              slot laterali ed export sempre visibile nella barra superiore.
+            </p>
+          </div>
+
+          <div className="studio-shell__actions">
+            <button type="button" className="ghost-button" onClick={() => setCurrentScreen("setup")}>
+              Torna alle impostazioni
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              disabled={result.unassignedAssets.length === 0}
+              onClick={handleCreatePageFromUnused}
+            >
+              Nuovo foglio dalle non usate
+            </button>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleGenerate}
+              disabled={isExporting || result.pages.length === 0}
+            >
+              {isExporting ? "Esportazione in corso..." : "Esporta"}
+            </button>
+          </div>
+        </header>
+
+        {renderStepSwitcher()}
+
+        <div className="studio-shell__statusbar">
+          <span>{request.assets.length} foto caricate</span>
+          <span>{usedImagesCount} gia' impaginate</span>
+          <span>{result.unassignedAssets.length} ancora libere</span>
+          <span>Output: {request.output.folderPath}</span>
+        </div>
+
+        <div className="studio-shell__content">
+          <div className="studio-shell__board">
+            <LayoutPreviewBoard
+              result={result}
+              assets={result.request.assets}
+              assetsById={assetsById}
+              usageByAssetId={usageByAssetId}
+              selectedPageId={selectedPageId}
+              selectedSlotKey={selectedSlotKey}
+              dragState={dragState}
+              onSelectPage={(pageId, slotId) => {
+                setSelectedPageId(pageId);
+                setSelectedSlotKey(slotId ? `${pageId}:${slotId}` : null);
+              }}
+              onStartSlotDrag={(pageId, slotId, imageId) =>
+                setDragState({
+                  kind: "slot",
+                  imageId,
+                  sourcePageId: pageId,
+                  sourceSlotId: slotId
+                })
+              }
+              onDragAssetStart={(imageId) =>
+                setDragState({
+                  kind: "asset",
+                  imageId
+                })
+              }
+              onDragEnd={() => setDragState(null)}
+              onDrop={handleDrop}
+              onAssetDropped={handleAssetDropped}
+              onDropToUnused={handleDropToUnused}
+              onTemplateChange={handleTemplateChange}
+              onRemovePage={handleRemovePage}
+            />
+          </div>
+
+          <aside className="studio-shell__side">
+            <PanelSection
+              title="Stato Progetto"
+              description="Riepilogo rapido del lavoro corrente mentre modifichi la spread."
+            >
+              <div className="studio-summary-grid">
+                <div className="stat-card stat-card--highlight">
+                  <span>Fogli</span>
+                  <strong>{result.pages.length}</strong>
+                </div>
+                <div className="stat-card">
+                  <span>Usate</span>
+                  <strong>{usedImagesCount}</strong>
+                </div>
+                <div className="stat-card">
+                  <span>Libere</span>
+                  <strong>{result.unassignedAssets.length}</strong>
+                </div>
+                <div className="stat-card">
+                  <span>DPI</span>
+                  <strong>{request.sheet.dpi}</strong>
+                </div>
+              </div>
+            </PanelSection>
+
+            <PanelSection
+              title="Azioni Foglio"
+              description="Azioni immediate sulla pagina attiva e sul progetto."
+            >
+              <div className="stack">
+                <button
+                  type="button"
+                  className="secondary-button studio-side__button"
+                  disabled={result.unassignedAssets.length === 0}
+                  onClick={handleCreatePageFromUnused}
+                >
+                  Aggiungi nuovo foglio
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button studio-side__button"
+                  disabled={!selectedPage}
+                  onClick={() => {
+                    if (selectedPage) {
+                      handleRemovePage(selectedPage.id);
+                    }
+                  }}
+                >
+                  Elimina foglio attivo
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button studio-side__button"
+                  onClick={() => setCurrentScreen("setup")}
+                >
+                  Torna alla preparazione
+                </button>
+              </div>
+            </PanelSection>
+
             <PanelSection
               title="Controllo Slot"
-              description="Regola manualmente il riquadro selezionato senza perdere il resto del foglio."
+              description="Regola manualmente il riquadro selezionato senza perdere il resto della spread."
             >
               <AssignmentInspector
                 pageLabel={selectedPage ? `Foglio ${selectedPage.pageNumber}` : null}
@@ -503,7 +683,10 @@ export function App() {
               />
             </PanelSection>
 
-            <PanelSection title={sections.output.title} description={sections.output.description}>
+            <PanelSection
+              title="Output"
+              description="Percorso, formato e bottone export sempre pronti anche mentre modifichi."
+            >
               <OutputPanel
                 request={request}
                 isExporting={isExporting}
@@ -514,19 +697,18 @@ export function App() {
                 onGenerate={handleGenerate}
               />
             </PanelSection>
-
-            <PanelSection
-              title="Registro Attivita"
-              description="Traccia operativa della sessione corrente, utile durante la vendita e la stampa."
-            >
-              <ul className="activity-log">
-                {activityLog.map((entry, index) => (
-                  <li key={`${entry}-${index}`}>{entry}</li>
-                ))}
-              </ul>
-            </PanelSection>
-          </div>
+          </aside>
         </div>
+      </>
+    );
+  }
+
+  return (
+    <div className={currentScreen === "studio" ? "app-shell app-shell--studio" : "app-shell"}>
+      {currentScreen === "setup" ? <Sidebar tools={TOOL_NAVIGATION} activeToolId="auto-layout" /> : null}
+
+      <main className={currentScreen === "studio" ? "workspace workspace--studio" : "workspace"}>
+        {currentScreen === "setup" ? renderSetupScreen() : renderStudioScreen()}
       </main>
     </div>
   );

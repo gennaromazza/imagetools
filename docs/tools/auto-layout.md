@@ -25,6 +25,7 @@ Il tool oggi include:
 
 - preview vere delle immagini nei fogli, non solo nomi file
 - dataset demo fotografico reale per vedere subito il comportamento dell'app
+- flusso separato in due schermate: `impostazione progetto` e `studio layout`
 - sala impaginazione in stile editor album con spread centrale
 - banco foto con stato `usata / non usata`
 - ribbon foto interna alla sala impaginazione per drag and drop rapido
@@ -150,15 +151,32 @@ L'utente puo':
 
 ## Esperienza utente
 
-La UI e' organizzata in cinque aree operative.
+La UI ora e' organizzata in due fasi operative principali.
 
-### 1. Sorgente
+### 1. Impostazione Progetto
+
+- caricamento cartella immagini
+- impostazione formato, margini, gap, DPI
+- scelta del criterio di pianificazione
+- preview del riepilogo progetto
+- definizione output
+- ingresso nello studio layout solo quando il progetto e' pronto
+
+### 2. Studio Layout
+
+- spread centrale a doppia pagina
+- export sempre visibile nella barra superiore
+- ribbon foto e strip fogli interne allo studio
+- pannello laterale per slot, azioni foglio e output
+- modifica rapida a pieno schermo, pensata per uso PC
+
+### Area Setup: Sorgente
 
 - caricamento cartella immagini
 - switch tra demo e immagini reali
 - conteggio verticale / orizzontale / quadrato
 
-### 2. Impostazioni Layout
+### Area Setup: Impostazioni Layout
 
 - preset foglio
 - margini
@@ -168,7 +186,7 @@ La UI e' organizzata in cinque aree operative.
 - scelta tra `fogli desiderati` e `foto per foglio`
 - toggle per permettere o meno la variazione automatica dei template
 
-### 3. Anteprima Fogli
+### Area Studio: Anteprima Fogli
 
 - spread centrale con doppia pagina affiancata
 - preview reali con immagini
@@ -178,14 +196,14 @@ La UI e' organizzata in cinque aree operative.
 - rimozione foglio
 - creazione nuovo foglio da immagini non usate
 
-### 4. Banco Foto
+### Area Studio: Banco Foto
 
 - tutte le immagini del servizio
 - badge implicito usata/non usata
 - trascinamento verso i fogli dalla ribbon interna o dal banco foto
 - drop zone per rimettere una foto tra le non usate
 
-### 5. Controllo Slot
+### Area Studio: Controllo Slot
 
 - zoom
 - offset orizzontale
@@ -195,7 +213,7 @@ La UI e' organizzata in cinque aree operative.
 - lock
 - svuota slot
 
-### 6. Output
+### Output
 
 - nome cartella di output
 - naming file

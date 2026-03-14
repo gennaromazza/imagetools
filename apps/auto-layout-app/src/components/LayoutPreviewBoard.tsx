@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import type {
   AutoLayoutResult,
   GeneratedPageLayout,
@@ -9,6 +9,7 @@ import type {
 import { ImageSlotPreview } from "./ImageSlotPreview";
 
 type AssetFilter = "all" | "unused" | "used";
+type PageSectionFilter = "all" | "opening" | "middle" | "finale";
 
 interface DragState {
   kind: "asset" | "slot";
@@ -207,6 +208,7 @@ export function LayoutPreviewBoard({
 }: LayoutPreviewBoardProps) {
   const [isTemplateChooserOpen, setIsTemplateChooserOpen] = useState(false);
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
+  const [pageSectionFilter, setPageSectionFilter] = useState<PageSectionFilter>("all");
   const activePage = result.pages.find((page) => page.id === selectedPageId) ?? result.pages[0] ?? null;
   const activeIndex = activePage ? result.pages.findIndex((page) => page.id === activePage.id) : 0;
   const spreadStartIndex = activeIndex <= 0 ? 0 : activeIndex % 2 === 0 ? activeIndex : activeIndex - 1;
@@ -230,6 +232,25 @@ export function LayoutPreviewBoard({
     }
     return true;
   });
+  const sectionedPages = result.pages.filter((page, index, pages) => {
+    if (pageSectionFilter === "all") {
+      return true;
+    }
+
+    const third = Math.max(1, Math.ceil(pages.length / 3));
+
+    if (pageSectionFilter === "opening") {
+      return index < third;
+    }
+
+    if (pageSectionFilter === "middle") {
+      return index >= third && index < third * 2;
+    }
+
+    return index >= third * 2;
+  });
+  const deferredAssets = useDeferredValue(filteredAssets);
+  const deferredPages = useDeferredValue(sectionedPages);
 
   useEffect(() => {
     setIsTemplateChooserOpen(false);
@@ -407,7 +428,25 @@ export function LayoutPreviewBoard({
       </div>
 
       <div className="layout-strip">
-        {result.pages.map((page) => {
+        <div className="layout-strip__sections">
+          {([
+            ["all", "Tutti"],
+            ["opening", "Apertura"],
+            ["middle", "Centro"],
+            ["finale", "Finale"]
+          ] as [PageSectionFilter, string][]).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              className={pageSectionFilter === value ? "layout-strip__section layout-strip__section--active" : "layout-strip__section"}
+              onClick={() => setPageSectionFilter(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {deferredPages.map((page) => {
           const isActive = page.id === activePage.id;
 
           return (
@@ -462,7 +501,7 @@ export function LayoutPreviewBoard({
         </div>
 
         <div className="layout-photo-ribbon__track">
-          {filteredAssets.map((asset) => {
+          {deferredAssets.map((asset) => {
             const usage = usageByAssetId.get(asset.id);
             const isActive = dragState?.imageId === asset.id;
 
