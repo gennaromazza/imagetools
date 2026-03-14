@@ -32,6 +32,7 @@ import { mockWeddingAssets } from "./mock/wedding-selection";
 import { exportSheets } from "./sheet-renderer";
 
 type AppScreen = "setup" | "studio";
+type StudioPanel = "page" | "slot" | "output" | "activity";
 
 interface DragState {
   kind: "asset" | "slot";
@@ -77,6 +78,7 @@ export function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [outputDirectoryHandle, setOutputDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [studioPanel, setStudioPanel] = useState<StudioPanel>("slot");
   const [activityLog, setActivityLog] = useState<string[]>([
     "Campione reale matrimonio caricato.",
     "Studio pronto: prima imposta il progetto, poi rifinisci i layout."
@@ -611,71 +613,82 @@ export function App() {
               onRemovePage={handleRemovePage}
             />
           </div>
+        </div>
 
-          <aside className="studio-shell__side">
-            <PanelSection
-              title="Stato Progetto"
-              description="Riepilogo rapido del lavoro corrente mentre modifichi la spread."
-            >
-              <div className="studio-summary-grid">
-                <div className="stat-card stat-card--highlight">
-                  <span>Fogli</span>
-                  <strong>{result.pages.length}</strong>
+        <section className="studio-dock">
+          <div className="studio-dock__tabs">
+            {([
+              ["page", "Foglio"],
+              ["slot", "Slot"],
+              ["output", "Output"],
+              ["activity", "Attivita"]
+            ] as [StudioPanel, string][]).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={studioPanel === value ? "studio-dock__tab studio-dock__tab--active" : "studio-dock__tab"}
+                onClick={() => setStudioPanel(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div className="studio-dock__panel">
+            {studioPanel === "page" ? (
+              <div className="studio-dock__grid">
+                <div className="studio-summary-grid">
+                  <div className="stat-card stat-card--highlight">
+                    <span>Fogli</span>
+                    <strong>{result.pages.length}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span>Usate</span>
+                    <strong>{usedImagesCount}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span>Libere</span>
+                    <strong>{result.unassignedAssets.length}</strong>
+                  </div>
+                  <div className="stat-card">
+                    <span>DPI</span>
+                    <strong>{request.sheet.dpi}</strong>
+                  </div>
                 </div>
-                <div className="stat-card">
-                  <span>Usate</span>
-                  <strong>{usedImagesCount}</strong>
-                </div>
-                <div className="stat-card">
-                  <span>Libere</span>
-                  <strong>{result.unassignedAssets.length}</strong>
-                </div>
-                <div className="stat-card">
-                  <span>DPI</span>
-                  <strong>{request.sheet.dpi}</strong>
+
+                <div className="studio-dock__actions">
+                  <button
+                    type="button"
+                    className="secondary-button studio-side__button"
+                    disabled={result.unassignedAssets.length === 0}
+                    onClick={handleCreatePageFromUnused}
+                  >
+                    Aggiungi nuovo foglio
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button studio-side__button"
+                    disabled={!selectedPage}
+                    onClick={() => {
+                      if (selectedPage) {
+                        handleRemovePage(selectedPage.id);
+                      }
+                    }}
+                  >
+                    Elimina foglio attivo
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button studio-side__button"
+                    onClick={() => setCurrentScreen("setup")}
+                  >
+                    Torna alla preparazione
+                  </button>
                 </div>
               </div>
-            </PanelSection>
+            ) : null}
 
-            <PanelSection
-              title="Azioni Foglio"
-              description="Azioni immediate sulla pagina attiva e sul progetto."
-            >
-              <div className="stack">
-                <button
-                  type="button"
-                  className="secondary-button studio-side__button"
-                  disabled={result.unassignedAssets.length === 0}
-                  onClick={handleCreatePageFromUnused}
-                >
-                  Aggiungi nuovo foglio
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button studio-side__button"
-                  disabled={!selectedPage}
-                  onClick={() => {
-                    if (selectedPage) {
-                      handleRemovePage(selectedPage.id);
-                    }
-                  }}
-                >
-                  Elimina foglio attivo
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button studio-side__button"
-                  onClick={() => setCurrentScreen("setup")}
-                >
-                  Torna alla preparazione
-                </button>
-              </div>
-            </PanelSection>
-
-            <PanelSection
-              title="Controllo Slot"
-              description="Regola manualmente il riquadro selezionato senza perdere il resto della spread."
-            >
+            {studioPanel === "slot" ? (
               <AssignmentInspector
                 pageLabel={selectedPage ? `Foglio ${selectedPage.pageNumber}` : null}
                 slot={selectedSlot}
@@ -712,12 +725,9 @@ export function App() {
                   pushActivity(`Slot ${selectedSlot.id} svuotato manualmente.`);
                 }}
               />
-            </PanelSection>
+            ) : null}
 
-            <PanelSection
-              title="Output"
-              description="Percorso, formato e bottone export sempre pronti anche mentre modifichi."
-            >
+            {studioPanel === "output" ? (
               <OutputPanel
                 request={request}
                 isExporting={isExporting}
@@ -727,9 +737,17 @@ export function App() {
                 onPickOutputFolder={handlePickOutputFolder}
                 onGenerate={handleGenerate}
               />
-            </PanelSection>
-          </aside>
-        </div>
+            ) : null}
+
+            {studioPanel === "activity" ? (
+              <ul className="activity-log">
+                {activityLog.map((entry, index) => (
+                  <li key={`${entry}-${index}`}>{entry}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </section>
       </>
     );
   }
