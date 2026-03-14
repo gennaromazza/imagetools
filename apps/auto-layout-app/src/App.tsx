@@ -82,6 +82,7 @@ export function App() {
     "Studio pronto: prima imposta il progetto, poi rifinisci i layout."
   ]);
   const [isPlanningPending, startPlanningTransition] = useTransition();
+  const [isEditingPending, startEditingTransition] = useTransition();
 
   useEffect(() => {
     if (!result.pages.find((page) => page.id === selectedPageId)) {
@@ -210,13 +211,19 @@ export function App() {
   }
 
   function handleDrop(move: LayoutMove) {
-    setResult((current) => moveImageBetweenSlots(current, move));
+    startEditingTransition(() => {
+      setResult((current) => moveImageBetweenSlots(current, move));
+    });
     setDragState(null);
     pushActivity(`Foto scambiata tra ${move.sourcePageId}:${move.sourceSlotId} e ${move.targetPageId}:${move.targetSlotId}.`);
   }
 
   function handleAssetDropped(pageId: string, slotId: string, imageId: string) {
-    setResult((current) => placeImageInSlot(current, { imageId, targetPageId: pageId, targetSlotId: slotId }));
+    startEditingTransition(() => {
+      setResult((current) =>
+        placeImageInSlot(current, { imageId, targetPageId: pageId, targetSlotId: slotId })
+      );
+    });
     setDragState(null);
     setSelectedPageId(pageId);
     setSelectedSlotKey(`${pageId}:${slotId}`);
@@ -224,17 +231,23 @@ export function App() {
   }
 
   function handleTemplateChange(pageId: string, templateId: string) {
-    setResult((current) => changePageTemplate(current, { pageId, templateId }));
+    startEditingTransition(() => {
+      setResult((current) => changePageTemplate(current, { pageId, templateId }));
+    });
     pushActivity(`Template aggiornato sul foglio ${pageId}.`);
   }
 
   function handleRemovePage(pageId: string) {
-    setResult((current) => removePage(current, { pageId }));
+    startEditingTransition(() => {
+      setResult((current) => removePage(current, { pageId }));
+    });
     pushActivity(`Foglio ${pageId} rimosso. Le sue foto sono tornate disponibili.`);
   }
 
   function handleCreatePageFromUnused() {
-    setResult((current) => createPage(current));
+    startEditingTransition(() => {
+      setResult((current) => createPage(current));
+    });
     pushActivity("Nuovo foglio creato a partire dalle foto non usate.");
   }
 
@@ -249,12 +262,14 @@ export function App() {
       return;
     }
 
-    setResult((current) =>
-      clearSlotAssignment(current, {
-        pageId: usage.pageId,
-        slotId: usage.slotId
-      })
-    );
+    startEditingTransition(() => {
+      setResult((current) =>
+        clearSlotAssignment(current, {
+          pageId: usage.pageId,
+          slotId: usage.slotId
+        })
+      );
+    });
     setDragState(null);
     pushActivity(`Foto rimossa dal foglio ${usage.pageNumber} e riportata tra le non usate.`);
   }
@@ -542,11 +557,12 @@ export function App() {
         {renderStepSwitcher()}
 
         <div className="studio-shell__statusbar">
-          <span>{request.assets.length} foto caricate</span>
-          <span>{usedImagesCount} gia' impaginate</span>
-          <span>{result.unassignedAssets.length} ancora libere</span>
-          <span>Output: {request.output.folderPath}</span>
-        </div>
+            <span>{request.assets.length} foto caricate</span>
+            <span>{usedImagesCount} gia' impaginate</span>
+            <span>{result.unassignedAssets.length} ancora libere</span>
+            <span>Output: {request.output.folderPath}</span>
+            <span>{isEditingPending ? "Aggiornamento foglio..." : "Editor pronto"}</span>
+          </div>
 
         <div className="studio-shell__content">
           <div className="studio-shell__board">
@@ -580,6 +596,17 @@ export function App() {
               onDrop={handleDrop}
               onAssetDropped={handleAssetDropped}
               onDropToUnused={handleDropToUnused}
+              onClearSlot={(pageId, slotId) => {
+                startEditingTransition(() => {
+                  setResult((current) =>
+                    clearSlotAssignment(current, {
+                      pageId,
+                      slotId
+                    })
+                  );
+                });
+                pushActivity(`Foto rimossa manualmente dallo slot ${pageId}:${slotId}.`);
+              }}
               onTemplateChange={handleTemplateChange}
               onRemovePage={handleRemovePage}
             />
@@ -659,25 +686,29 @@ export function App() {
                     return;
                   }
 
-                  setResult((current) =>
-                    updateSlotAssignment(current, {
-                      pageId: selectedPage.id,
-                      slotId: selectedSlot.id,
-                      changes
-                    })
-                  );
+                  startEditingTransition(() => {
+                    setResult((current) =>
+                      updateSlotAssignment(current, {
+                        pageId: selectedPage.id,
+                        slotId: selectedSlot.id,
+                        changes
+                      })
+                    );
+                  });
                 }}
                 onClear={() => {
                   if (!selectedPage || !selectedSlot) {
                     return;
                   }
 
-                  setResult((current) =>
-                    clearSlotAssignment(current, {
-                      pageId: selectedPage.id,
-                      slotId: selectedSlot.id
-                    })
-                  );
+                  startEditingTransition(() => {
+                    setResult((current) =>
+                      clearSlotAssignment(current, {
+                        pageId: selectedPage.id,
+                        slotId: selectedSlot.id
+                      })
+                    );
+                  });
                   pushActivity(`Slot ${selectedSlot.id} svuotato manualmente.`);
                 }}
               />

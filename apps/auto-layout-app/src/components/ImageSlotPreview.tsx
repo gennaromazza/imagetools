@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { ImageAsset, LayoutAssignment } from "@photo-tools/shared-types";
 
 interface ImageSlotPreviewProps {
@@ -6,7 +7,7 @@ interface ImageSlotPreviewProps {
   label: string;
 }
 
-export function ImageSlotPreview({ asset, assignment, label }: ImageSlotPreviewProps) {
+function ImageSlotPreviewComponent({ asset, assignment, label }: ImageSlotPreviewProps) {
   if (!asset || !assignment || !asset.previewUrl) {
     return <div className="slot-empty">Trascina qui una foto</div>;
   }
@@ -18,6 +19,7 @@ export function ImageSlotPreview({ asset, assignment, label }: ImageSlotPreviewP
       <img
         src={asset.previewUrl}
         alt={asset.fileName}
+        loading="lazy"
         draggable={false}
         style={{
           objectFit: imageFit,
@@ -31,3 +33,5 @@ export function ImageSlotPreview({ asset, assignment, label }: ImageSlotPreviewP
     </div>
   );
 }
+
+export const ImageSlotPreview = memo(ImageSlotPreviewComponent);

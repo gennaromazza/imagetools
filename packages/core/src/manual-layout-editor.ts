@@ -213,13 +213,23 @@ export function changePageTemplate(
   }
 
   const template = findTemplate(result.availableTemplates, request.templateId);
-  const assets = result.request.assets.filter((asset) =>
-    collectAssignedImageIds(page).includes(asset.id)
-  );
+  const currentImageIds = page.imageIds.length > 0 ? page.imageIds : collectAssignedImageIds(page);
+  const assets = currentImageIds
+    .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
+    .filter(Boolean) as typeof result.request.assets;
   const previousAssignments = new Map(page.assignments.map((assignment) => [assignment.imageId, assignment]));
   const assignments = assignImagesToTemplate(assets, template, result.request.fitMode).map((assignment) => ({
-    ...assignment,
-    ...(previousAssignments.get(assignment.imageId) ?? {})
+    ...(previousAssignments.get(assignment.imageId)
+      ? {
+          fitMode: previousAssignments.get(assignment.imageId)?.fitMode,
+          zoom: previousAssignments.get(assignment.imageId)?.zoom,
+          offsetX: previousAssignments.get(assignment.imageId)?.offsetX,
+          offsetY: previousAssignments.get(assignment.imageId)?.offsetY,
+          rotation: previousAssignments.get(assignment.imageId)?.rotation,
+          locked: previousAssignments.get(assignment.imageId)?.locked
+        }
+      : {}),
+    ...assignment
   }));
 
   const pages = clonePages(result).map((item) =>

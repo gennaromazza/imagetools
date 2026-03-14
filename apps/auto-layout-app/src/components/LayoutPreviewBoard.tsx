@@ -39,6 +39,7 @@ interface LayoutPreviewBoardProps {
   onDrop: (move: LayoutMove) => void;
   onAssetDropped: (pageId: string, slotId: string, imageId: string) => void;
   onDropToUnused: () => void;
+  onClearSlot: (pageId: string, slotId: string) => void;
   onTemplateChange: (pageId: string, templateId: string) => void;
   onRemovePage: (pageId: string) => void;
 }
@@ -82,6 +83,7 @@ function renderSheetSurface(
   onDragEnd: () => void,
   onDrop: (move: LayoutMove) => void,
   onAssetDropped: (pageId: string, slotId: string, imageId: string) => void,
+  onClearSlot: (pageId: string, slotId: string) => void,
   size: "hero" | "thumb"
 ) {
   const interactive = size === "hero";
@@ -141,26 +143,41 @@ function renderSheetSurface(
             }
           >
             {interactive ? (
-              <button
-                type="button"
-                className="slot-asset"
-                draggable={Boolean(assignment)}
-                onDragStart={(event) => {
-                  if (!assignment) {
-                    return;
-                  }
+              <>
+                <button
+                  type="button"
+                  className="slot-asset"
+                  draggable={Boolean(assignment)}
+                  onDragStart={(event) => {
+                    if (!assignment) {
+                      return;
+                    }
 
-                  event.dataTransfer.setData("text/plain", assignment.imageId);
-                  onStartSlotDrag(page.id, slot.id, assignment.imageId);
-                }}
-                onDragEnd={onDragEnd}
-              >
-                <ImageSlotPreview
-                  asset={asset}
-                  assignment={assignment}
-                  label={assignment ? asset?.fileName ?? assignment.imageId : slot.id}
-                />
-              </button>
+                    event.dataTransfer.setData("text/plain", assignment.imageId);
+                    onStartSlotDrag(page.id, slot.id, assignment.imageId);
+                  }}
+                  onDragEnd={onDragEnd}
+                >
+                  <ImageSlotPreview
+                    asset={asset}
+                    assignment={assignment}
+                    label={assignment ? asset?.fileName ?? assignment.imageId : slot.id}
+                  />
+                </button>
+                {assignment ? (
+                  <button
+                    type="button"
+                    className="slot-action slot-action--remove"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onClearSlot(page.id, slot.id);
+                    }}
+                    aria-label={`Rimuovi foto dallo slot ${slot.id}`}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </>
             ) : (
               <div className="slot-asset slot-asset--thumb">
                 <ImageSlotPreview
@@ -203,6 +220,7 @@ export function LayoutPreviewBoard({
   onDrop,
   onAssetDropped,
   onDropToUnused,
+  onClearSlot,
   onTemplateChange,
   onRemovePage
 }: LayoutPreviewBoardProps) {
@@ -372,6 +390,7 @@ export function LayoutPreviewBoard({
                     onDragEnd,
                     onDrop,
                     onAssetDropped,
+                    onClearSlot,
                     "hero"
                   )
                 : renderEmptySheetPlaceholder("Pagina sinistra")}
@@ -392,6 +411,7 @@ export function LayoutPreviewBoard({
                     onDragEnd,
                     onDrop,
                     onAssetDropped,
+                    onClearSlot,
                     "hero"
                   )
                 : renderEmptySheetPlaceholder("Pagina destra")}
@@ -467,6 +487,7 @@ export function LayoutPreviewBoard({
                   onDragEnd,
                   onDrop,
                   onAssetDropped,
+                  onClearSlot,
                   "thumb"
                 )}
               </div>

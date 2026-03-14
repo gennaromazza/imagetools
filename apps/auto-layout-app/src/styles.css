@@ -324,6 +324,8 @@ img {
 
 .panel-section {
   padding: var(--space-4);
+  content-visibility: auto;
+  contain-intrinsic-size: 420px;
 }
 
 .panel-section__header {
@@ -502,6 +504,8 @@ img {
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent),
     #2b2a28;
   border: 1px solid rgba(255, 255, 255, 0.07);
+  content-visibility: auto;
+  contain-intrinsic-size: 960px;
 }
 
 .layout-studio__topbar {
@@ -784,6 +788,33 @@ img {
   overflow: hidden;
 }
 
+.slot-action {
+  position: absolute;
+  top: 0.7rem;
+  right: 0.7rem;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(15, 15, 15, 0.66);
+  color: #fff8ef;
+  display: grid;
+  place-items: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.sheet-slot:hover .slot-action,
+.sheet-slot--selected .slot-action {
+  opacity: 1;
+}
+
+.slot-action:hover {
+  background: rgba(155, 53, 45, 0.88);
+}
+
 .slot-asset--thumb {
   pointer-events: none;
 }
@@ -852,6 +883,8 @@ img {
   overflow-x: auto;
   padding-bottom: 0.25rem;
   align-items: start;
+  content-visibility: auto;
+  contain-intrinsic-size: 220px;
 }
 
 .layout-strip__sections {
@@ -884,6 +917,8 @@ img {
   border-radius: 22px;
   background: rgba(20, 20, 19, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  content-visibility: auto;
+  contain-intrinsic-size: 280px;
 }
 
 .layout-photo-ribbon__header {
@@ -911,6 +946,7 @@ img {
   text-align: left;
   display: grid;
   gap: 0.55rem;
+  transition: transform 120ms ease, border-color 120ms ease, opacity 120ms ease;
 }
 
 .ribbon-photo--dragging {
