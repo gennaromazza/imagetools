@@ -1387,10 +1387,10 @@ function AppContent() {
 
   function handlePageSheetFieldChange(
     pageId: string,
-    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi",
+    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm",
     value: number
   ) {
-    if (!Number.isFinite(value) || value <= 0) {
+    if (!Number.isFinite(value) || (value <= 0 && field !== "marginCm" && field !== "gapCm" && field !== "photoBorderWidthCm")) {
       return;
     }
 
@@ -1418,6 +1418,27 @@ function AppContent() {
         isDimensionField
           ? `Aspect ratio del foglio ${pageLabel} aggiornato a ${nextWidth}x${nextHeight} cm.`
           : `Impostazioni tecniche del foglio ${pageLabel} aggiornate.`
+    });
+  }
+
+  function handlePageSheetStyleChange(
+    pageId: string,
+    changes: {
+      backgroundColor?: string;
+      backgroundImageUrl?: string;
+      photoBorderColor?: string;
+      photoBorderWidthCm?: number;
+    },
+    activity = "Aspetto del foglio aggiornato."
+  ) {
+    const nextResult = updatePageSheetSpec(result, {
+      pageId,
+      changes
+    });
+
+    commitStudioChange({
+      result: nextResult,
+      activity
     });
   }
 
@@ -1948,6 +1969,7 @@ function AppContent() {
               onRebalancePage={handleRebalancePage}
               onPageSheetPresetChange={handlePageSheetPresetChange}
               onPageSheetFieldChange={handlePageSheetFieldChange}
+              onPageSheetStyleChange={handlePageSheetStyleChange}
               recentlyRebalancedPageId={recentlyRebalancedPageId}
               onAssetsMetadataChange={handleAssetsMetadataChange}
               onUpdateSlotAssignment={handleUpdateSelectedSlotAssignment}

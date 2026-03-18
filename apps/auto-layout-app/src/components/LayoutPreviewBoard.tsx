@@ -90,8 +90,18 @@ interface LayoutPreviewBoardProps {
   onPageSheetPresetChange: (pageId: string, presetId: string) => void;
   onPageSheetFieldChange: (
     pageId: string,
-    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi",
+    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm",
     value: number
+  ) => void;
+  onPageSheetStyleChange: (
+    pageId: string,
+    changes: {
+      backgroundColor?: string;
+      backgroundImageUrl?: string;
+      photoBorderColor?: string;
+      photoBorderWidthCm?: number;
+    },
+    activity?: string
   ) => void;
   recentlyRebalancedPageId?: string | null;
   onAssetsMetadataChange?: (
@@ -137,6 +147,17 @@ function formatMeasurement(value: number): string {
 
 function formatAspectRatioLabel(page: GeneratedPageLayout): string {
   return `${formatMeasurement(page.sheetSpec.widthCm)}:${formatMeasurement(page.sheetSpec.heightCm)}`;
+}
+
+function getSheetPreviewStyle(page: GeneratedPageLayout): CSSProperties {
+  const backgroundImage = page.sheetSpec.backgroundImageUrl?.trim();
+  return {
+    aspectRatio: getSheetAspectRatio(page),
+    backgroundColor: page.sheetSpec.backgroundColor ?? "#ffffff",
+    backgroundImage: backgroundImage ? `url("${backgroundImage}")` : undefined,
+    backgroundSize: backgroundImage ? "cover" : undefined,
+    backgroundPosition: backgroundImage ? "center" : undefined
+  };
 }
 
 function getSlotDisplayRect(
@@ -496,7 +517,7 @@ const SheetSurface = memo(function SheetSurface({
       ]
         .filter(Boolean)
         .join(" ")}
-      style={{ aspectRatio: getSheetAspectRatio(page) }}
+      style={getSheetPreviewStyle(page)}
       onDragOver={
         interactive
           ? (event) => {
@@ -559,11 +580,14 @@ const SheetSurface = memo(function SheetSurface({
               .join(" ")}
             style={(() => {
               const slotRect = getSlotDisplayRect(page, slot);
+              const borderWidthPx = Math.max(0, (page.sheetSpec.photoBorderWidthCm ?? 0) * (size === "hero" ? 14 : 7));
               return {
                 left: `${slotRect.left * 100}%`,
                 top: `${slotRect.top * 100}%`,
                 width: `${slotRect.width * 100}%`,
-                height: `${slotRect.height * 100}%`
+                height: `${slotRect.height * 100}%`,
+                ["--slot-border-width" as string]: `${borderWidthPx}px`,
+                ["--slot-border-color" as string]: page.sheetSpec.photoBorderColor ?? "#ffffff"
               };
             })()}
             onClick={interactive ? () => onSelectPage(page.id, slot.id) : undefined}
@@ -998,6 +1022,7 @@ export function LayoutPreviewBoard({
   onContextMenu,
   onPageSheetPresetChange,
   onPageSheetFieldChange,
+  onPageSheetStyleChange,
   recentlyRebalancedPageId,
   onAssetsMetadataChange,
   onUpdateSlotAssignment,
@@ -1018,6 +1043,7 @@ export function LayoutPreviewBoard({
   const [layoutStripScrollLeft, setLayoutStripScrollLeft] = useState(0);
   const [layoutStripViewportWidth, setLayoutStripViewportWidth] = useState(0);
   const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
+  const backgroundUploadInputRef = useRef<HTMLInputElement | null>(null);
   const layoutStripRef = useRef<HTMLDivElement>(null);
   const layoutStripFrameRef = useRef<number | null>(null);
   const resizeStateRef = useRef<{ pane: ResizePane; startX: number; startWidth: number } | null>(null);
@@ -1159,6 +1185,31 @@ export function LayoutPreviewBoard({
   const handleCropTargetClose = useCallback(() => {
     setCropTarget(null);
   }, []);
+
+  const handleBackgroundUpload = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file || !activePage) {
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result !== "string") {
+          return;
+        }
+
+        onPageSheetStyleChange(
+          activePage.id,
+          { backgroundImageUrl: reader.result },
+          `Sfondo immagine assegnato al foglio ${activePage.pageNumber}.`
+        );
+      };
+      reader.readAsDataURL(file);
+      event.target.value = "";
+    },
+    [activePage, onPageSheetStyleChange]
+  );
 
   const handleAssetFilterChange = useCallback((filter: AssetFilter) => {
     setAssetFilter(filter);
@@ -2162,6 +2213,87 @@ export function LayoutPreviewBoard({
                 <span>
                   Margine foglio = distanza dai bordi del foglio. Gap foto = spazio bianco tra le foto dello stesso foglio.
                 </span>
+              </div>
+
+              <div className="inspector-panel inspector-panel--nested">
+                <span className="inspector-panel__eyebrow">Sfondo foglio</span>
+                <div className="inline-grid inline-grid--2">
+                  <label className="field inspector-field">
+                    <span>Colore sfondo</span>
+                    <input
+                      type="color"
+                      value={activePage.sheetSpec.backgroundColor ?? "#ffffff"}
+                      onChange={(event) =>
+                        onPageSheetStyleChange(
+                          activePage.id,
+                          { backgroundColor: event.target.value },
+                          `Colore di sfondo aggiornato per il foglio ${activePage.pageNumber}.`
+                        )
+                      }
+                    />
+                  </label>
+                  <div className="field inspector-field">
+                    <span>Immagine sfondo</span>
+                    <div className="button-row">
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick={() => backgroundUploadInputRef.current?.click()}
+                      >
+                        Carica immagine
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        disabled={!activePage.sheetSpec.backgroundImageUrl}
+                        onClick={() =>
+                          onPageSheetStyleChange(
+                            activePage.id,
+                            { backgroundImageUrl: "" },
+                            `Sfondo immagine rimosso dal foglio ${activePage.pageNumber}.`
+                          )
+                        }
+                      >
+                        Rimuovi
+                      </button>
+                    </div>
+                    <input
+                      ref={backgroundUploadInputRef}
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={handleBackgroundUpload}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="inspector-panel inspector-panel--nested">
+                <span className="inspector-panel__eyebrow">Bordo foto</span>
+                <div className="inline-grid inline-grid--2">
+                  <label className="field inspector-field">
+                    <span>Colore bordo</span>
+                    <input
+                      type="color"
+                      value={activePage.sheetSpec.photoBorderColor ?? "#ffffff"}
+                      onChange={(event) =>
+                        onPageSheetStyleChange(
+                          activePage.id,
+                          { photoBorderColor: event.target.value },
+                          `Colore bordo foto aggiornato per il foglio ${activePage.pageNumber}.`
+                        )
+                      }
+                    />
+                  </label>
+                  <CommitOnBlurNumberField
+                    label="Spessore bordo"
+                    className="inspector-field"
+                    min="0"
+                    step="0.05"
+                    value={activePage.sheetSpec.photoBorderWidthCm ?? 0}
+                    onCommit={(value) => onPageSheetFieldChange(activePage.id, "photoBorderWidthCm", Math.max(0, value))}
+                  />
+                </div>
               </div>
 
               <div className="button-row inspector-sheet-settings__actions">

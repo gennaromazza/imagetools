@@ -146,7 +146,11 @@ function normalizeRequest(rawRequest: unknown, fallbackAssets: ImageAsset[]): Au
       dpi: toNumberValue(sheet.dpi, DEFAULT_PROJECT_REQUEST.sheet.dpi),
       marginCm: toNumberValue(sheet.marginCm, DEFAULT_PROJECT_REQUEST.sheet.marginCm),
       gapCm: toNumberValue(sheet.gapCm, DEFAULT_PROJECT_REQUEST.sheet.gapCm),
-      bleedCm: toNumberValue(sheet.bleedCm, DEFAULT_PROJECT_REQUEST.sheet.bleedCm ?? 0)
+      bleedCm: toNumberValue(sheet.bleedCm, DEFAULT_PROJECT_REQUEST.sheet.bleedCm ?? 0),
+      backgroundColor: toStringValue(sheet.backgroundColor, DEFAULT_PROJECT_REQUEST.sheet.backgroundColor ?? "#ffffff"),
+      backgroundImageUrl: typeof sheet.backgroundImageUrl === "string" ? sheet.backgroundImageUrl : "",
+      photoBorderColor: toStringValue(sheet.photoBorderColor, DEFAULT_PROJECT_REQUEST.sheet.photoBorderColor ?? "#ffffff"),
+      photoBorderWidthCm: toNumberValue(sheet.photoBorderWidthCm, DEFAULT_PROJECT_REQUEST.sheet.photoBorderWidthCm ?? 0)
     },
     output: {
       ...DEFAULT_PROJECT_REQUEST.output,

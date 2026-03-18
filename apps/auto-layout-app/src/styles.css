@@ -1548,6 +1548,13 @@ img {
   padding: 1rem;
 }
 
+.inspector-panel--nested {
+  padding: 0.9rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+}
+
 .inspector-panel .stack {
   gap: 0.9rem;
 }
@@ -1906,6 +1913,8 @@ img {
   inset: 0;
   overflow: hidden;
   border-radius: 18px;
+  border: var(--slot-border-width, 0px) solid var(--slot-border-color, transparent);
+  box-sizing: border-box;
 }
 
 .slot-media__frame {

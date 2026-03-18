@@ -17,7 +17,11 @@ export const DEFAULT_SHEET_SPEC: SheetSpec = {
   heightCm: 20,
   dpi: 300,
   marginCm: 1,
-  gapCm: 0.4
+  gapCm: 0.4,
+  backgroundColor: "#ffffff",
+  backgroundImageUrl: "",
+  photoBorderColor: "#ffffff",
+  photoBorderWidthCm: 0
 };
 
 export const DEFAULT_AUTO_LAYOUT_REQUEST: Omit<AutoLayoutRequest, "assets"> = {

@@ -47,6 +47,10 @@ export interface SheetSpec {
   marginCm: number;
   gapCm: number;
   bleedCm?: number;
+  backgroundColor?: string;
+  backgroundImageUrl?: string;
+  photoBorderColor?: string;
+  photoBorderWidthCm?: number;
 }
 
 export interface LayoutSlot {
@@ -198,7 +202,12 @@ export interface RemovePageRequest {
 
 export interface UpdatePageSheetSpecRequest {
   pageId: string;
-  changes: Partial<Pick<SheetSpec, "presetId" | "label" | "widthCm" | "heightCm" | "dpi" | "marginCm" | "gapCm" | "bleedCm">>;
+  changes: Partial<
+    Pick<
+      SheetSpec,
+      "presetId" | "label" | "widthCm" | "heightCm" | "dpi" | "marginCm" | "gapCm" | "bleedCm" | "backgroundColor" | "backgroundImageUrl" | "photoBorderColor" | "photoBorderWidthCm"
+    >
+  >;
 }
 
 export interface ToolNavigationItem {

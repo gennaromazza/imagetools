@@ -108,7 +108,9 @@ async function drawAssignment(
   x: number,
   y: number,
   width: number,
-  height: number
+  height: number,
+  borderColor: string,
+  borderWidthPx: number
 ): Promise<void> {
   const assetUrl = getAssetUrl(asset);
 
@@ -147,6 +149,17 @@ async function drawAssignment(
     drawWidth,
     drawHeight
   );
+
+  if (borderWidthPx > 0) {
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = borderWidthPx;
+    ctx.strokeRect(
+      x + borderWidthPx / 2,
+      y + borderWidthPx / 2,
+      Math.max(0, width - borderWidthPx),
+      Math.max(0, height - borderWidthPx)
+    );
+  }
   ctx.restore();
 }
 
@@ -166,8 +179,20 @@ export async function renderSheetPage(
 
   const marginPx = cmToPx(page.sheetSpec.marginCm, dpi);
 
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = page.sheetSpec.backgroundColor || "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (page.sheetSpec.backgroundImageUrl) {
+    try {
+      const backgroundImage = await loadDecodedImage(page.sheetSpec.backgroundImageUrl);
+      ctx.drawImage(backgroundImage, 0, 0, canvas.width, canvas.height);
+    } catch {
+      // Ignore invalid background image and keep fallback color
+    }
+  }
+
+  const borderWidthPx = cmToPx(page.sheetSpec.photoBorderWidthCm ?? 0, dpi);
+  const borderColor = page.sheetSpec.photoBorderColor || "#ffffff";
 
   for (const slot of page.slotDefinitions) {
     const { x: slotX, y: slotY, width: slotWidth, height: slotHeight } = getRenderedSlotRect(
@@ -185,7 +210,7 @@ export async function renderSheetPage(
     if (assignment) {
       const asset = assetsById.get(assignment.imageId);
       if (asset) {
-        await drawAssignment(ctx, asset, assignment, slotX, slotY, slotWidth, slotHeight);
+        await drawAssignment(ctx, asset, assignment, slotX, slotY, slotWidth, slotHeight, borderColor, borderWidthPx);
       }
     }
 
