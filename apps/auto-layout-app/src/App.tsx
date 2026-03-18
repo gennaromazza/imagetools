@@ -1162,6 +1162,19 @@ function AppContent() {
     });
   }
 
+  function handleRebalancePage(pageId: string) {
+    const page = result.pages.find((item) => item.id === pageId);
+    if (!page) {
+      return;
+    }
+
+    const nextResult = rebalancePagesForAssignedImages(result, [pageId]);
+    commitStudioChange({
+      result: nextResult,
+      activity: `Foglio ${page.pageNumber} riadattato automaticamente.`
+    });
+  }
+
   function handleRemovePage(pageId: string) {
     const pageToDelete = result.pages.find((p) => p.id === pageId);
     if (!pageToDelete) return;
@@ -1857,6 +1870,7 @@ function AppContent() {
               onCreatePageFromUnused={handleCreatePageFromUnused}
               onCreatePageWithImage={handleCreatePageWithImage}
               onRemovePage={handleRemovePage}
+              onRebalancePage={handleRebalancePage}
               onPageSheetPresetChange={handlePageSheetPresetChange}
               onPageSheetFieldChange={handlePageSheetFieldChange}
               onAssetsMetadataChange={handleAssetsMetadataChange}

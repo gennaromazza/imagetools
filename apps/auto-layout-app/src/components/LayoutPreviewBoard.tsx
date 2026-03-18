@@ -77,6 +77,7 @@ interface LayoutPreviewBoardProps {
   onCreatePageFromUnused: () => void;
   onCreatePageWithImage: (imageId: string) => void;
   onRemovePage: (pageId: string) => void;
+  onRebalancePage: (pageId: string) => void;
   onContextMenu?: (event: MouseEvent, page: GeneratedPageLayout) => void;
   onPageSheetPresetChange: (pageId: string, presetId: string) => void;
   onPageSheetFieldChange: (
@@ -877,6 +878,7 @@ export function LayoutPreviewBoard({
   onCreatePageFromUnused,
   onCreatePageWithImage,
   onRemovePage,
+  onRebalancePage,
   onContextMenu,
   onPageSheetPresetChange,
   onPageSheetFieldChange,
@@ -1589,6 +1591,14 @@ export function LayoutPreviewBoard({
                         <div className="layout-studio__page-card-actions">
                           <button
                             type="button"
+                            className="ghost-button"
+                            onClick={() => onRebalancePage(page.id)}
+                            title="Riadatta automaticamente il layout di questo foglio in base alle foto presenti"
+                          >
+                            Riadatta foglio
+                          </button>
+                          <button
+                            type="button"
                             className={isActive ? "secondary-button" : "ghost-button"}
                             onClick={() => handleJumpToPage(page)}
                           >
@@ -1796,7 +1806,7 @@ export function LayoutPreviewBoard({
 
               <div className="inline-grid inline-grid--3">
                 <CommitOnBlurNumberField
-                  label="Margine"
+                  label="Margine foglio"
                   className="inspector-field"
                   min="0"
                   step="0.1"
@@ -1805,7 +1815,7 @@ export function LayoutPreviewBoard({
                 />
 
                 <CommitOnBlurNumberField
-                  label="Gap"
+                  label="Gap foto"
                   className="inspector-field"
                   min="0"
                   step="0.1"
@@ -1821,6 +1831,64 @@ export function LayoutPreviewBoard({
                   value={activePage.sheetSpec.dpi}
                   onCommit={(value) => onPageSheetFieldChange(activePage.id, "dpi", value)}
                 />
+              </div>
+
+              <div className="inspector-sheet-settings__help">
+                <strong>Come funziona</strong>
+                <span>
+                  Margine foglio = distanza dai bordi del foglio. Gap foto = spazio bianco tra le foto dello stesso foglio.
+                </span>
+              </div>
+
+              <div className="button-row inspector-sheet-settings__actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  title="Riduce lo spazio tra le foto di 0,1 cm"
+                  onClick={() =>
+                    onPageSheetFieldChange(activePage.id, "gapCm", Math.max(0, Number((activePage.sheetSpec.gapCm - 0.1).toFixed(1))))
+                  }
+                >
+                  Gap -
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  title="Aumenta lo spazio tra le foto di 0,1 cm"
+                  onClick={() =>
+                    onPageSheetFieldChange(activePage.id, "gapCm", Number((activePage.sheetSpec.gapCm + 0.1).toFixed(1)))
+                  }
+                >
+                  Gap +
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  title="Riduce il margine del foglio di 0,1 cm"
+                  onClick={() =>
+                    onPageSheetFieldChange(activePage.id, "marginCm", Math.max(0, Number((activePage.sheetSpec.marginCm - 0.1).toFixed(1))))
+                  }
+                >
+                  Margine -
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  title="Aumenta il margine del foglio di 0,1 cm"
+                  onClick={() =>
+                    onPageSheetFieldChange(activePage.id, "marginCm", Number((activePage.sheetSpec.marginCm + 0.1).toFixed(1)))
+                  }
+                >
+                  Margine +
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  title="Ricalcola il layout del foglio corrente in base alle foto già presenti"
+                  onClick={() => onRebalancePage(activePage.id)}
+                >
+                  Riadatta questo foglio
+                </button>
               </div>
 
 	              <div className="inspector-sheet-settings__ratio">

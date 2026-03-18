@@ -1336,6 +1336,29 @@ img {
   color: var(--text-muted);
 }
 
+.inspector-sheet-settings__help {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.8rem 0.95rem;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(35, 41, 37, 0.7);
+}
+
+.inspector-sheet-settings__help strong {
+  font-size: 0.82rem;
+}
+
+.inspector-sheet-settings__help span {
+  color: var(--text-muted);
+  line-height: 1.45;
+  font-size: 0.82rem;
+}
+
+.inspector-sheet-settings__actions {
+  align-items: stretch;
+}
+
 .inspector-sheet-settings__presets {
   justify-content: flex-start;
 }
