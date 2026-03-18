@@ -106,6 +106,8 @@ interface LayoutPreviewBoardProps {
     activity?: string
   ) => void;
   recentlyRebalancedPageId?: string | null;
+  recentlyAddedPageId?: string | null;
+  recentlyAddedSlotKey?: string | null;
   onAssetsMetadataChange?: (
     changesById: Map<string, Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>>
   ) => void;
@@ -466,6 +468,7 @@ interface SheetSurfaceProps {
   page: GeneratedPageLayout;
   assetsById: Map<string, ImageAsset>;
   selectedSlotKey: string | null;
+  recentlyAddedSlotKey?: string | null;
   dragState: DragState | null;
   onSelectPage: (pageId: string, slotId?: string) => void;
   onStartSlotDrag: (pageId: string, slotId: string, imageId: string) => void;
@@ -494,6 +497,7 @@ const SheetSurface = memo(function SheetSurface({
   page,
   assetsById,
   selectedSlotKey,
+  recentlyAddedSlotKey,
   dragState,
   onSelectPage,
   onStartSlotDrag,
@@ -626,6 +630,7 @@ const SheetSurface = memo(function SheetSurface({
         const assignment = assignmentsBySlotId.get(slot.id);
         const asset = assignment ? assetsById.get(assignment.imageId) : undefined;
         const isSelected = selectedSlotKey === `${page.id}:${slot.id}`;
+        const isRecentlyAdded = recentlyAddedSlotKey === `${page.id}:${slot.id}`;
         const isDragging =
           dragState?.kind === "slot" &&
           dragState.sourcePageId === page.id &&
@@ -641,6 +646,7 @@ const SheetSurface = memo(function SheetSurface({
             className={[
               "sheet-slot",
               isSelected ? "sheet-slot--selected" : "",
+              isRecentlyAdded ? "sheet-slot--recently-added" : "",
               isDragging ? "sheet-slot--dragging" : "",
               isDropTarget ? "sheet-slot--drag-target" : "",
               assignment ? "" : "sheet-slot--empty"
@@ -1121,6 +1127,8 @@ export function LayoutPreviewBoard({
   onPageSheetFieldChange,
   onPageSheetStyleChange,
   recentlyRebalancedPageId,
+  recentlyAddedPageId,
+  recentlyAddedSlotKey,
   onAssetsMetadataChange,
   onUpdateSlotAssignment,
   zoom
@@ -2089,13 +2097,20 @@ export function LayoutPreviewBoard({
                 {pagesForStudio.map((page) => {
                   const isActive = page.id === activePage.id;
                   const showRebalancedBadge = recentlyRebalancedPageId === page.id;
+                  const showAddedBadge = recentlyAddedPageId === page.id;
 
                   return (
                     <section
                       key={page.id}
                       data-page-id={page.id}
                       id={`layout-page-${page.id}`}
-                      className={isActive ? "layout-studio__page-card layout-studio__page-card--active" : "layout-studio__page-card"}
+                      className={[
+                        "layout-studio__page-card",
+                        isActive ? "layout-studio__page-card--active" : "",
+                        showAddedBadge ? "layout-studio__page-card--recently-added" : ""
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                       onClick={(event) => handleSelectPageFromCard(event, page)}
                     >
                       <div className="layout-studio__page-card-header">
@@ -2105,7 +2120,14 @@ export function LayoutPreviewBoard({
                           <p>
                             {page.assignments.length} foto | {page.sheetSpec.label} | gap {page.sheetSpec.gapCm.toFixed(1)} cm
                           </p>
-                          {showRebalancedBadge ? (
+                          {showAddedBadge ? (
+                            <span
+                              className="layout-studio__page-feedback layout-studio__page-feedback--added"
+                              aria-live="polite"
+                            >
+                              Foto aggiunta
+                            </span>
+                          ) : showRebalancedBadge ? (
                             <span className="layout-studio__page-feedback" aria-live="polite">
                               Foglio riorganizzato
                             </span>
@@ -2277,6 +2299,7 @@ export function LayoutPreviewBoard({
                           page={page}
                           assetsById={assetsById}
                           selectedSlotKey={selectedSlotKey}
+                          recentlyAddedSlotKey={recentlyAddedSlotKey}
                           dragState={dragState}
                           onSelectPage={onSelectPage}
                           onStartSlotDrag={onStartSlotDrag}

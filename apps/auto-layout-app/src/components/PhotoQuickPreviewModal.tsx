@@ -63,9 +63,11 @@ export function PhotoQuickPreviewModal({
   onUpdateAsset
 }: PhotoQuickPreviewModalProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const assignFeedbackTimeoutRef = useRef<number | null>(null);
   const [filterPickStatus, setFilterPickStatus] = useState<PickStatusFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [filterMinRating, setFilterMinRating] = useState(DEFAULT_PHOTO_FILTERS.minimumRating);
   const [filterColorLabel, setFilterColorLabel] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
+  const [assignFeedbackPageNumber, setAssignFeedbackPageNumber] = useState<number | null>(null);
 
   const usage = asset ? usageByAssetId?.get(asset.id) : undefined;
   const activePage = useMemo(
@@ -171,6 +173,7 @@ export function PhotoQuickPreviewModal({
     activePage &&
       (!(activePage.isAtCapacity ?? false) || usage?.pageId === activePage.id)
   );
+  const showAssignSuccess = activePage?.pageNumber === assignFeedbackPageNumber;
 
   const handleAssignToActivePage = useCallback(() => {
     if (!asset || !activePage || !activePageCanAccept || !onAddToPage) {
@@ -178,7 +181,27 @@ export function PhotoQuickPreviewModal({
     }
 
     onAddToPage(activePage.id, asset.id);
+    setAssignFeedbackPageNumber(activePage.pageNumber);
+    if (assignFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(assignFeedbackTimeoutRef.current);
+    }
+    assignFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setAssignFeedbackPageNumber((current) => (current === activePage.pageNumber ? null : current));
+      assignFeedbackTimeoutRef.current = null;
+    }, 1800);
   }, [activePage, activePageCanAccept, asset, onAddToPage]);
+
+  useEffect(() => {
+    setAssignFeedbackPageNumber(null);
+  }, [asset?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (assignFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(assignFeedbackTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const toggleNativeFullscreen = useCallback(async () => {
     const element = stageRef.current;
@@ -279,7 +302,7 @@ export function PhotoQuickPreviewModal({
       aria-modal="true"
       aria-label="Anteprima foto a schermo intero"
     >
-      <div className="quick-preview__chrome">
+      <div className="quick-preview__chrome" onClick={(event) => event.stopPropagation()}>
         <div className="quick-preview__title">
           <strong>{asset.fileName}</strong>
           <span>
@@ -524,7 +547,13 @@ export function PhotoQuickPreviewModal({
         ) : null}
 
         {pages.length > 0 && onAddToPage ? (
-          <div className="quick-preview__assign-bar">
+          <div
+            className={
+              showAssignSuccess
+                ? "quick-preview__assign-bar quick-preview__assign-bar--success"
+                : "quick-preview__assign-bar"
+            }
+          >
             <div className="quick-preview__assign-copy">
               <strong>
                 {activePage
@@ -538,12 +567,21 @@ export function PhotoQuickPreviewModal({
                     : "Il foglio attivo e' pieno. Torna nello studio e crea o seleziona un altro foglio."
                   : "Seleziona prima un foglio nello studio per usare l'aggiunta rapida da questa preview."}
               </span>
+              {showAssignSuccess ? (
+                <span className="quick-preview__assign-success" aria-live="polite">
+                  Foto aggiunta al foglio attivo {assignFeedbackPageNumber}.
+                </span>
+              ) : null}
             </div>
 
             <div className="quick-preview__assign-actions">
               <button
                 type="button"
-                className="secondary-button quick-preview__assign-button quick-preview__assign-button--active"
+                className={
+                  showAssignSuccess
+                    ? "secondary-button quick-preview__assign-button quick-preview__assign-button--active quick-preview__assign-button--success"
+                    : "secondary-button quick-preview__assign-button quick-preview__assign-button--active"
+                }
                 onClick={handleAssignToActivePage}
                 disabled={!activePage || !activePageCanAccept}
               >

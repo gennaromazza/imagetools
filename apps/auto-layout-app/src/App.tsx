@@ -302,6 +302,8 @@ function AppContent() {
   const [exportProgressState, setExportProgressState] = useState<ExportProgressState>(() => createInitialExportProgressState());
   const [quickPreviewAssetId, setQuickPreviewAssetId] = useState<string | null>(null);
   const [recentlyRebalancedPageId, setRecentlyRebalancedPageId] = useState<string | null>(null);
+  const [recentlyAddedPageId, setRecentlyAddedPageId] = useState<string | null>(null);
+  const [recentlyAddedSlotKey, setRecentlyAddedSlotKey] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean;
@@ -314,6 +316,7 @@ function AppContent() {
   });
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const rebalanceBadgeTimeoutRef = useRef<number | null>(null);
+  const recentlyAddedTimeoutRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
 
   // History management
@@ -336,6 +339,20 @@ function AppContent() {
     rebalanceBadgeTimeoutRef.current = window.setTimeout(() => {
       setRecentlyRebalancedPageId((current) => (current === pageId ? null : current));
       rebalanceBadgeTimeoutRef.current = null;
+    }, 1800);
+  }, []);
+
+  const markRecentlyAddedPlacement = useCallback((pageId: string, slotId: string) => {
+    const nextSlotKey = `${pageId}:${slotId}`;
+    setRecentlyAddedPageId(pageId);
+    setRecentlyAddedSlotKey(nextSlotKey);
+    if (recentlyAddedTimeoutRef.current !== null) {
+      window.clearTimeout(recentlyAddedTimeoutRef.current);
+    }
+    recentlyAddedTimeoutRef.current = window.setTimeout(() => {
+      setRecentlyAddedPageId((current) => (current === pageId ? null : current));
+      setRecentlyAddedSlotKey((current) => (current === nextSlotKey ? null : current));
+      recentlyAddedTimeoutRef.current = null;
     }, 1800);
   }, []);
 
@@ -933,6 +950,9 @@ function AppContent() {
       if (rebalanceBadgeTimeoutRef.current !== null) {
         window.clearTimeout(rebalanceBadgeTimeoutRef.current);
       }
+      if (recentlyAddedTimeoutRef.current !== null) {
+        window.clearTimeout(recentlyAddedTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -1164,7 +1184,7 @@ function AppContent() {
     nextResult = rebalancePagesForAssignedImages(nextResult, [pageId, previousUsage?.pageId ?? ""]);
     const nextPlacement = findImagePlacement(nextResult, imageId);
 
-    commitStudioChange({
+    const changed = commitStudioChange({
       result: nextResult,
       request: nextRequest,
       activeAssetIds: nextActiveIds,
@@ -1177,10 +1197,15 @@ function AppContent() {
             ? `Foto assegnata manualmente al foglio ${pageId} con aggiornamento layout.`
             : `Foto attivata dal catalogo e assegnata al foglio ${pageId}.`
     });
+
+    if (changed && nextPlacement) {
+      markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
+    }
   }
 
   function handleAddImageToPage(pageId: string, imageId: string) {
     const previousUsage = usageByAssetId.get(imageId);
+    const targetPage = result.pages.find((page) => page.id === pageId);
     const imageAlreadyActive = activeAssetIds.includes(imageId);
     const nextActiveIds = imageAlreadyActive ? activeAssetIds : [...activeAssetIds, imageId];
     const nextRequest = imageAlreadyActive
@@ -1198,7 +1223,7 @@ function AppContent() {
     }
 
     const nextPlacement = findImagePlacement(nextResult, imageId);
-    commitStudioChange({
+    const changed = commitStudioChange({
       result: nextResult,
       request: nextRequest,
       activeAssetIds: nextActiveIds,
@@ -1213,6 +1238,19 @@ function AppContent() {
             ? `Foglio ${pageId} espanso con una nuova foto e layout aggiornato.`
             : `Foto attivata dal catalogo e aggiunta al foglio ${pageId}.`
     });
+
+    if (changed && nextPlacement) {
+      markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
+      return;
+    }
+
+    if (!changed) {
+      toast.addToast(
+        `Il foglio ${targetPage?.pageNumber ?? pageId} non puo accogliere altre foto con i template disponibili.`,
+        "warning",
+        4500
+      );
+    }
   }
 
   function handleTemplateChange(pageId: string, templateId: string) {
@@ -1312,7 +1350,7 @@ function AppContent() {
     const nextResult = createPage(baseResult, { imageIds: [imageId] });
     const newPage = nextResult.pages[nextResult.pages.length - 1];
 
-    commitStudioChange({
+    const changed = commitStudioChange({
       result: nextResult,
       request: nextRequest,
       activeAssetIds: nextActiveIds,
@@ -1322,6 +1360,10 @@ function AppContent() {
         ? `Foto spostata in un nuovo foglio creato automaticamente.`
         : `Nuovo foglio creato con la foto trascinata.`
     });
+
+    if (changed && newPage?.slotDefinitions[0]) {
+      markRecentlyAddedPlacement(newPage.id, newPage.slotDefinitions[0].id);
+    }
   }
 
   function handleDropToUnused() {
@@ -1979,6 +2021,8 @@ function AppContent() {
               onPageSheetFieldChange={handlePageSheetFieldChange}
               onPageSheetStyleChange={handlePageSheetStyleChange}
               recentlyRebalancedPageId={recentlyRebalancedPageId}
+              recentlyAddedPageId={recentlyAddedPageId}
+              recentlyAddedSlotKey={recentlyAddedSlotKey}
               onAssetsMetadataChange={handleAssetsMetadataChange}
               onUpdateSlotAssignment={handleUpdateSelectedSlotAssignment}
               onContextMenu={handleContextMenu}
