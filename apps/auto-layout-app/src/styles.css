@@ -1692,7 +1692,6 @@ img {
   box-shadow: inset 0 0 0 2px rgba(226, 155, 88, 0.45);
 }
 
-.sheet-slot--dragging .slot-action,
 .sheet-slot--dragging .slot-quick-toolbar {
   opacity: 1;
 }
@@ -1722,101 +1721,30 @@ img {
   cursor: grabbing;
 }
 
-.slot-action {
-  position: absolute;
-  top: 0.7rem;
-  right: 0.7rem;
-  z-index: 6;
-  width: 32px;
-  height: 32px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(15, 15, 15, 0.66);
-  color: #fff8ef;
-  display: grid;
-  place-items: center;
-  font-size: 1.1rem;
-  line-height: 1;
-  opacity: 0;
-  transition: opacity 120ms ease, background 120ms ease;
-}
-
-.slot-action--remove {
-  background: rgba(120, 44, 40, 0.92);
-  border-color: rgba(255, 255, 255, 0.28);
-}
-
-.slot-action--remove:hover {
-  background: rgba(155, 53, 45, 0.98);
-}
-
-.sheet-slot:hover .slot-action,
-.sheet-slot--selected .slot-action {
-  opacity: 1;
-}
-
-.sheet-slot--empty .slot-action--replace {
-  opacity: 1;
-}
-
-.slot-action:hover {
-  background: rgba(155, 53, 45, 0.88);
-}
-
-.slot-action--replace {
-  left: 0.7rem;
-  right: auto;
-  width: auto;
-  min-width: 60px;
-  padding: 0 0.75rem;
-  background: rgba(15, 15, 15, 0.7);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.slot-action--replace:hover {
-  background: rgba(226, 155, 88, 0.84);
-  color: #201611;
-}
-
-.slot-action--drag {
-  right: 3.4rem;
-  width: auto;
-  min-width: 72px;
-  padding: 0 0.75rem;
-  background: rgba(26, 26, 26, 0.76);
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  cursor: grab;
-}
-
-.slot-action--drag:active {
-  cursor: grabbing;
-}
-
-.slot-action--drag:hover {
-  background: rgba(83, 112, 109, 0.88);
-}
-
 .slot-quick-toolbar {
   position: absolute;
   left: 0.7rem;
   right: 0.7rem;
   bottom: 0.7rem;
   z-index: 5;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 0.35rem;
-  justify-content: center;
-  opacity: 0;
+  justify-items: center;
+  opacity: 1;
   transition: opacity 120ms ease;
 }
 
 .sheet-slot:hover .slot-quick-toolbar,
-.sheet-slot--selected .slot-quick-toolbar {
+.sheet-slot--selected .slot-quick-toolbar,
+.sheet-slot--empty .slot-quick-toolbar {
   opacity: 1;
+}
+
+.slot-quick-toolbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: center;
 }
 
 .slot-quick-toolbar__button {
@@ -1838,6 +1766,16 @@ img {
 .slot-quick-toolbar__button--active {
   background: rgba(226, 155, 88, 0.88);
   color: #201611;
+}
+
+.slot-quick-toolbar__button--accent {
+  background: rgba(226, 155, 88, 0.84);
+  color: #201611;
+}
+
+.slot-quick-toolbar__button--danger {
+  background: rgba(120, 44, 40, 0.92);
+  border-color: rgba(255, 255, 255, 0.28);
 }
 
 .slot-asset--thumb {
