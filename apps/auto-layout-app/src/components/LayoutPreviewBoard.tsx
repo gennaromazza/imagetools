@@ -794,7 +794,7 @@ const SheetSurface = memo(function SheetSurface({
                       return;
                     }
 
-                    if (!(event.ctrlKey || event.metaKey)) {
+                    if (!event.altKey) {
                       return;
                     }
 
@@ -1249,7 +1249,7 @@ export function LayoutPreviewBoard({
   const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
   const [leftRailWidth, setLeftRailWidth] = useState(260);
   const [inspectorWidth, setInspectorWidth] = useState(320);
-  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
   const [layoutStripScrollLeft, setLayoutStripScrollLeft] = useState(0);
   const [layoutStripViewportWidth, setLayoutStripViewportWidth] = useState(0);
   const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
@@ -1610,6 +1610,23 @@ export function LayoutPreviewBoard({
     [handleJumpToPage]
   );
 
+  const handleSelectPageFromCard = useCallback(
+    (event: MouseEvent<HTMLElement>, page: GeneratedPageLayout) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "button, input, select, textarea, label, .sheet-slot, .slot-quick-toolbar, .sheet-ruler, .sheet-ruler-corner, .layout-studio__page-rearrange-banner, .layout-studio__page-header-dropzone, .sheet-add-target"
+        )
+      ) {
+        return;
+      }
+
+      setManualPageSelectionLock(page.id, 800);
+      onSelectPage(page.id, page.slotDefinitions[0]?.id);
+    },
+    [onSelectPage, setManualPageSelectionLock]
+  );
+
   const scheduleDragPageJump = useCallback(
     (page: GeneratedPageLayout | null) => {
       if (!dragState || !page) {
@@ -1874,7 +1891,7 @@ export function LayoutPreviewBoard({
   }
   const workspaceStyle = {
     "--layout-rail-width": `${leftRailWidth}px`,
-    "--layout-inspector-width": isInspectorCollapsed ? "0px" : `${inspectorWidth}px`
+    "--layout-inspector-width": "0px"
   } as CSSProperties;
 
   return (
@@ -2219,6 +2236,7 @@ export function LayoutPreviewBoard({
                       data-page-id={page.id}
                       id={`layout-page-${page.id}`}
                       className={isActive ? "layout-studio__page-card layout-studio__page-card--active" : "layout-studio__page-card"}
+                      onClick={(event) => handleSelectPageFromCard(event, page)}
                     >
                       <div className="layout-studio__page-card-header">
                         <div>

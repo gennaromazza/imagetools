@@ -115,7 +115,7 @@ export function AssignmentInspector({
           ))}
         </div>
         <small className="helper-inline">
-          Puoi trascinare direttamente la foto per centrarla o riposizionarla anche dopo zoom, fill o crop. Sul canvas puoi usare Ctrl piu rotellina per lo zoom, doppio click e la toolbar rapida nello slot. Per spostarla in un altro foglio usa il bottone Sposta sullo slot.
+          Puoi trascinare direttamente la foto per centrarla o riposizionarla anche dopo zoom, fill o crop. Sul canvas puoi usare Alt piu rotellina per lo zoom, doppio click e la toolbar rapida nello slot. Per spostarla in un altro foglio usa il bottone Sposta sullo slot.
         </small>
         <button type="button" className="ghost-button" onClick={onOpenCropEditor}>
           Apri editor crop
@@ -187,3 +187,4 @@ export function AssignmentInspector({
     </div>
   );
 }
+
