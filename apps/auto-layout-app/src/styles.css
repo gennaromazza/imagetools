@@ -2219,7 +2219,7 @@ img {
 
 .slot-media {
   position: relative;
-  background: #ffffff;
+  background: transparent;
 }
 
 .slot-media__viewport {
@@ -2227,6 +2227,7 @@ img {
   inset: 0;
   overflow: hidden;
   border-radius: 18px;
+  background: transparent;
   border: var(--slot-border-width, 0px) solid var(--slot-border-color, transparent);
   box-sizing: border-box;
 }

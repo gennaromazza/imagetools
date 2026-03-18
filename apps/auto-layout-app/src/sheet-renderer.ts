@@ -204,9 +204,6 @@ export async function renderSheetPage(
     );
     const assignment = page.assignments.find((item) => item.slotId === slot.id);
 
-    ctx.fillStyle = "#f1ebe4";
-    ctx.fillRect(slotX, slotY, slotWidth, slotHeight);
-
     if (assignment) {
       const asset = assetsById.get(assignment.imageId);
       if (asset) {
