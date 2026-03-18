@@ -1,7 +1,21 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
+import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
+import { PhotoColorContextMenu } from "./PhotoColorContextMenu";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
-import { COLOR_LABEL_NAMES, COLOR_LABELS, formatAssetStars, getAssetPickStatus, getAssetRating, PICK_STATUS_LABELS } from "../photo-classification";
+import {
+  COLOR_LABEL_NAMES,
+  COLOR_LABELS,
+  DEFAULT_PHOTO_FILTERS,
+  formatAssetStars,
+  getAssetColorLabel,
+  getAssetPickStatus,
+  getAssetRating,
+  getColorShortcutHint,
+  matchesPhotoFilters,
+  PICK_STATUS_LABELS,
+  resolvePhotoClassificationShortcut
+} from "../photo-classification";
 
 interface UsageInfo {
   pageNumber: number;
@@ -31,26 +45,36 @@ export function ProjectPhotoSelectorModal({
 }: ProjectPhotoSelectorModalProps) {
   const [localAssets, setLocalAssets] = useState<ImageAsset[]>(assets);
   const [localSelection, setLocalSelection] = useState<string[]>(activeAssetIds);
-  const [quickSelectCount, setQuickSelectCount] = useState<number>(Math.min(activeAssetIds.length || assets.length, assets.length));
+  const [quickSelectCount, setQuickSelectCount] = useState<number>(
+    Math.min(activeAssetIds.length || assets.length, assets.length)
+  );
   const [sortBy, setSortBy] = useState<SortMode>("name");
-  const [pickFilter, setPickFilter] = useState<PickFilter>("all");
+  const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [usageFilter, setUsageFilter] = useState<UsageFilter>("all");
-  const [colorFilter, setColorFilter] = useState<ColorFilter>("all");
-  const [minimumRating, setMinimumRating] = useState<number>(0);
+  const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
+  const [minimumRating, setMinimumRating] = useState<number>(DEFAULT_PHOTO_FILTERS.minimumRating);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
+  const [contextMenuState, setContextMenuState] = useState<{
+    assetId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const deferredAssets = useDeferredValue(localAssets);
   const selectionSet = useMemo(() => new Set(localSelection), [localSelection]);
 
   const visibleAssets = useMemo(() => {
     const filtered = deferredAssets.filter((asset) => {
-      const assetPickStatus = getAssetPickStatus(asset);
-      const assetRating = getAssetRating(asset);
-      const assetUsage = usageByAssetId.has(asset.id);
-
-      if (pickFilter !== "all" && assetPickStatus !== pickFilter) {
+      if (
+        !matchesPhotoFilters(asset, {
+          pickStatus: pickFilter,
+          minimumRating,
+          colorLabel: colorFilter
+        })
+      ) {
         return false;
       }
 
+      const assetUsage = usageByAssetId.has(asset.id);
       if (usageFilter === "used" && !assetUsage) {
         return false;
       }
@@ -59,24 +83,22 @@ export function ProjectPhotoSelectorModal({
         return false;
       }
 
-      if (colorFilter !== "all" && asset.colorLabel !== colorFilter) {
-        return false;
-      }
-
-      if (assetRating < minimumRating) {
-        return false;
-      }
-
       return true;
     });
 
     filtered.sort((left, right) => {
       if (sortBy === "rating") {
-        return getAssetRating(right) - getAssetRating(left) || left.fileName.localeCompare(right.fileName);
+        return (
+          getAssetRating(right) - getAssetRating(left) ||
+          left.fileName.localeCompare(right.fileName)
+        );
       }
 
       if (sortBy === "orientation") {
-        return left.orientation.localeCompare(right.orientation) || left.fileName.localeCompare(right.fileName);
+        return (
+          left.orientation.localeCompare(right.orientation) ||
+          left.fileName.localeCompare(right.fileName)
+        );
       }
 
       return left.fileName.localeCompare(right.fileName);
@@ -85,7 +107,32 @@ export function ProjectPhotoSelectorModal({
     return filtered;
   }, [colorFilter, deferredAssets, minimumRating, pickFilter, sortBy, usageByAssetId, usageFilter]);
 
-  const previewAsset = previewAssetId ? localAssets.find((asset) => asset.id === previewAssetId) ?? null : null;
+  const previewAsset = previewAssetId
+    ? localAssets.find((asset) => asset.id === previewAssetId) ?? null
+    : null;
+
+  useEffect(() => {
+    if (!contextMenuState) {
+      return;
+    }
+
+    const closeMenu = () => setContextMenuState(null);
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener("mousedown", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [contextMenuState]);
 
   function toggleAsset(imageId: string) {
     setLocalSelection((current) =>
@@ -100,10 +147,31 @@ export function ProjectPhotoSelectorModal({
     setLocalSelection(nextIds);
   }
 
-  function updateAsset(imageId: string, changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>) {
+  function updateAsset(
+    imageId: string,
+    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
+  ) {
     setLocalAssets((current) =>
       current.map((asset) => (asset.id === imageId ? { ...asset, ...changes } : asset))
     );
+  }
+
+  function applyKeyboardShortcut(
+    asset: ImageAsset,
+    input: {
+      key: string;
+      code?: string;
+      ctrlKey: boolean;
+      metaKey: boolean;
+    }
+  ) {
+    const shortcutChanges = resolvePhotoClassificationShortcut(input);
+    if (!shortcutChanges) {
+      return false;
+    }
+
+    updateAsset(asset.id, shortcutChanges);
+    return true;
   }
 
   function selectVisibleAssets() {
@@ -111,11 +179,19 @@ export function ProjectPhotoSelectorModal({
   }
 
   function activatePickedAssets() {
-    setLocalSelection(localAssets.filter((asset) => getAssetPickStatus(asset) === "picked").map((asset) => asset.id));
+    setLocalSelection(
+      localAssets
+        .filter((asset) => getAssetPickStatus(asset) === "picked")
+        .map((asset) => asset.id)
+    );
   }
 
   function excludeRejectedAssets() {
-    setLocalSelection(localAssets.filter((asset) => getAssetPickStatus(asset) !== "rejected").map((asset) => asset.id));
+    setLocalSelection(
+      localAssets
+        .filter((asset) => getAssetPickStatus(asset) !== "rejected")
+        .map((asset) => asset.id)
+    );
   }
 
   return (
@@ -126,17 +202,25 @@ export function ProjectPhotoSelectorModal({
             <div>
               <strong>Selezione foto del progetto</strong>
               <p>
-                Rivedi le foto a pieno schermo, assegna stelle e colori, poi decidi quali entrano davvero nel layout.
+                Rivedi le foto a schermo grande, assegna stelle e colori e scegli quali entrano
+                davvero nel layout.
               </p>
             </div>
-            <button type="button" className="ghost-button" onClick={onClose}>
-              Chiudi
-            </button>
+            <div className="button-row">
+              <PhotoClassificationHelpButton title="Scorciatoie selezione progetto" />
+              <button type="button" className="ghost-button" onClick={onClose}>
+                Chiudi
+              </button>
+            </div>
           </div>
 
           <div className="modal-toolbar modal-toolbar--selector">
             <div className="button-row">
-              <button type="button" className="ghost-button" onClick={() => setLocalSelection(deferredAssets.map((asset) => asset.id))}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setLocalSelection(deferredAssets.map((asset) => asset.id))}
+              >
                 Seleziona tutte
               </button>
               <button type="button" className="ghost-button" onClick={selectVisibleAssets}>
@@ -148,7 +232,11 @@ export function ProjectPhotoSelectorModal({
               <button type="button" className="ghost-button" onClick={excludeRejectedAssets}>
                 Escludi scartate
               </button>
-              <button type="button" className="ghost-button" onClick={() => setLocalSelection([])}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setLocalSelection([])}
+              >
                 Svuota selezione
               </button>
             </div>
@@ -235,6 +323,7 @@ export function ProjectPhotoSelectorModal({
               const usage = usageByAssetId.get(asset.id);
               const pickStatus = getAssetPickStatus(asset);
               const rating = getAssetRating(asset);
+              const colorLabel = getAssetColorLabel(asset);
 
               return (
                 <button
@@ -244,24 +333,54 @@ export function ProjectPhotoSelectorModal({
                   className={isSelected ? "modal-photo-card modal-photo-card--active" : "modal-photo-card"}
                   onClick={() => toggleAsset(asset.id)}
                   onDoubleClick={() => setPreviewAssetId(asset.id)}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setContextMenuState({
+                      assetId: asset.id,
+                      x: event.clientX,
+                      y: event.clientY
+                    });
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === " ") {
                       event.preventDefault();
                       setPreviewAssetId(asset.id);
+                      return;
+                    }
+
+                    if (
+                      applyKeyboardShortcut(asset, {
+                        key: event.key,
+                        code: event.code,
+                        ctrlKey: event.ctrlKey,
+                        metaKey: event.metaKey
+                      })
+                    ) {
+                      event.preventDefault();
                     }
                   }}
                 >
                   <div className="modal-photo-card__image-shell">
                     {previewUrl ? (
-                      <img src={previewUrl} alt={asset.fileName} className="modal-photo-card__image" loading="lazy" />
+                      <img
+                        src={previewUrl}
+                        alt={asset.fileName}
+                        className="modal-photo-card__image"
+                        loading="lazy"
+                      />
                     ) : (
                       <div className="modal-photo-card__placeholder">{asset.fileName}</div>
                     )}
 
                     <div className="modal-photo-card__top-badges">
-                      <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>{PICK_STATUS_LABELS[pickStatus]}</span>
-                      {asset.colorLabel ? (
-                        <span className={`asset-color-dot asset-color-dot--${asset.colorLabel}`} title={COLOR_LABEL_NAMES[asset.colorLabel]} />
+                      <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>
+                        {PICK_STATUS_LABELS[pickStatus]}
+                      </span>
+                      {colorLabel ? (
+                        <span
+                          className={`asset-color-dot asset-color-dot--${colorLabel}`}
+                          title={COLOR_LABEL_NAMES[colorLabel]}
+                        />
                       ) : null}
                     </div>
 
@@ -280,13 +399,18 @@ export function ProjectPhotoSelectorModal({
                         <button
                           key={value}
                           type="button"
-                          className={value <= rating ? "modal-photo-card__tiny-star modal-photo-card__tiny-star--active" : "modal-photo-card__tiny-star"}
+                          className={
+                            value <= rating
+                              ? "modal-photo-card__tiny-star modal-photo-card__tiny-star--active"
+                              : "modal-photo-card__tiny-star"
+                          }
                           onClick={(event) => {
                             event.stopPropagation();
                             updateAsset(asset.id, { rating: value });
                           }}
+                          title={`${value} stella${value > 1 ? "e" : ""} | tasto ${value}`}
                         >
-                          ★
+                          *
                         </button>
                       ))}
                     </div>
@@ -297,14 +421,17 @@ export function ProjectPhotoSelectorModal({
                           key={value}
                           type="button"
                           className={
-                            asset.colorLabel === value
+                            colorLabel === value
                               ? `asset-color-dot asset-color-dot--${value} asset-color-dot--selected`
                               : `asset-color-dot asset-color-dot--${value}`
                           }
                           onClick={(event) => {
                             event.stopPropagation();
-                            updateAsset(asset.id, { colorLabel: asset.colorLabel === value ? null : value });
+                            updateAsset(asset.id, {
+                              colorLabel: colorLabel === value ? null : value
+                            });
                           }}
+                          title={`${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}`}
                         />
                       ))}
                     </div>
@@ -316,13 +443,18 @@ export function ProjectPhotoSelectorModal({
 
           <div className="modal-panel__footer">
             <p className="selector-shortcuts">
-              `Spazio` anteprima · `1-5` stelle · `P/X/U` stato · `6-9` colori · doppio click fullscreen
+              Usa Info per tutte le scorciatoie. Spazio apre la preview, 1-5 assegna stelle,
+              P/X/U cambia stato e Ctrl/Cmd + 6/7/8/9/V assegna i colori.
             </p>
             <div className="button-row">
               <button type="button" className="ghost-button" onClick={onClose}>
                 Annulla
               </button>
-              <button type="button" className="primary-button" onClick={() => onApply(localSelection, localAssets)}>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => onApply(localSelection, localAssets)}
+              >
                 Usa {localSelection.length} foto nel progetto
               </button>
             </div>
@@ -338,6 +470,21 @@ export function ProjectPhotoSelectorModal({
         onSelectAsset={setPreviewAssetId}
         onUpdateAsset={updateAsset}
       />
+
+      {contextMenuState ? (
+        <PhotoColorContextMenu
+          x={contextMenuState.x}
+          y={contextMenuState.y}
+          selectedColor={
+            localAssets.find((asset) => asset.id === contextMenuState.assetId)?.colorLabel ?? null
+          }
+          title="Etichetta colore"
+          onSelect={(colorLabel) => {
+            updateAsset(contextMenuState.assetId, { colorLabel });
+            setContextMenuState(null);
+          }}
+        />
+      ) : null}
     </>
   );
 }

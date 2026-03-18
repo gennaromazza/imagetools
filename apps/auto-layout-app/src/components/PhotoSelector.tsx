@@ -1,13 +1,20 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
+import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
+import { PhotoColorContextMenu } from "./PhotoColorContextMenu";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
 import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
+  DEFAULT_PHOTO_FILTERS,
   formatAssetStars,
+  getAssetColorLabel,
   getAssetPickStatus,
   getAssetRating,
-  PICK_STATUS_LABELS
+  getColorShortcutHint,
+  matchesPhotoFilters,
+  PICK_STATUS_LABELS,
+  resolvePhotoClassificationShortcut
 } from "../photo-classification";
 
 interface PhotoSelectorProps {
@@ -28,33 +35,40 @@ export function PhotoSelector({
   onPhotosChange
 }: PhotoSelectorProps) {
   const [sortBy, setSortBy] = useState<SortMode>("name");
-  const [pickFilter, setPickFilter] = useState<PickFilter>("all");
-  const [minimumRating, setMinimumRating] = useState(0);
-  const [colorFilter, setColorFilter] = useState<ColorFilter>("all");
+  const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
+  const [minimumRating, setMinimumRating] = useState(DEFAULT_PHOTO_FILTERS.minimumRating);
+  const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
+  const [contextMenuState, setContextMenuState] = useState<{
+    assetId: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const visiblePhotos = useMemo(() => {
-    const filtered = photos.filter((photo) => {
-      if (pickFilter !== "all" && getAssetPickStatus(photo) !== pickFilter) {
-        return false;
-      }
-
-      if (colorFilter !== "all" && photo.colorLabel !== colorFilter) {
-        return false;
-      }
-
-      return getAssetRating(photo) >= minimumRating;
-    });
+    const filtered = photos.filter((photo) =>
+      matchesPhotoFilters(photo, {
+        pickStatus: pickFilter,
+        minimumRating,
+        colorLabel: colorFilter
+      })
+    );
 
     filtered.sort((left, right) => {
       if (sortBy === "rating") {
-        return getAssetRating(right) - getAssetRating(left) || left.fileName.localeCompare(right.fileName);
+        return (
+          getAssetRating(right) - getAssetRating(left) ||
+          left.fileName.localeCompare(right.fileName)
+        );
       }
 
       if (sortBy === "orientation") {
-        return left.orientation.localeCompare(right.orientation) || left.fileName.localeCompare(right.fileName);
+        return (
+          left.orientation.localeCompare(right.orientation) ||
+          left.fileName.localeCompare(right.fileName)
+        );
       }
 
       return left.fileName.localeCompare(right.fileName);
@@ -63,29 +77,53 @@ export function PhotoSelector({
     return filtered;
   }, [colorFilter, minimumRating, photos, pickFilter, sortBy]);
 
-  const previewAsset = previewAssetId ? visiblePhotos.find((photo) => photo.id === previewAssetId) ?? null : null;
+  const previewAsset = previewAssetId
+    ? visiblePhotos.find((photo) => photo.id === previewAssetId) ?? null
+    : null;
+
+  useEffect(() => {
+    if (!contextMenuState) {
+      return;
+    }
+
+    const closeMenu = () => setContextMenuState(null);
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener("mousedown", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [contextMenuState]);
 
   function togglePhoto(id: string) {
-    const newSelection = new Set(selectedSet);
+    const nextSelection = new Set(selectedSet);
 
-    if (newSelection.has(id)) {
-      newSelection.delete(id);
+    if (nextSelection.has(id)) {
+      nextSelection.delete(id);
     } else {
-      newSelection.add(id);
+      nextSelection.add(id);
     }
 
-    onSelectionChange(Array.from(newSelection));
+    onSelectionChange(Array.from(nextSelection));
   }
 
-  function toggleAll(select: boolean) {
-    if (select) {
-      onSelectionChange(photos.map((photo) => photo.id));
-    } else {
-      onSelectionChange([]);
-    }
+  function toggleAll(selectAll: boolean) {
+    onSelectionChange(selectAll ? photos.map((photo) => photo.id) : []);
   }
 
-  function updatePhoto(id: string, changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>) {
+  function updatePhoto(
+    id: string,
+    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
+  ) {
     if (!onPhotosChange) {
       return;
     }
@@ -93,55 +131,22 @@ export function PhotoSelector({
     onPhotosChange(photos.map((photo) => (photo.id === id ? { ...photo, ...changes } : photo)));
   }
 
-  function applyKeyboardShortcut(photo: ImageAsset, key: string) {
-    const normalizedKey = key.toLowerCase();
-
-    if (/^[0-5]$/.test(key)) {
-      updatePhoto(photo.id, { rating: Number(key) });
-      return true;
+  function applyKeyboardShortcut(
+    photo: ImageAsset,
+    input: {
+      key: string;
+      code?: string;
+      ctrlKey: boolean;
+      metaKey: boolean;
+    }
+  ) {
+    const shortcutChanges = resolvePhotoClassificationShortcut(input);
+    if (!shortcutChanges) {
+      return false;
     }
 
-    if (normalizedKey === "p") {
-      updatePhoto(photo.id, { pickStatus: "picked" });
-      return true;
-    }
-
-    if (normalizedKey === "x") {
-      updatePhoto(photo.id, { pickStatus: "rejected" });
-      return true;
-    }
-
-    if (normalizedKey === "u") {
-      updatePhoto(photo.id, { pickStatus: "unmarked" });
-      return true;
-    }
-
-    if (key === "6") {
-      updatePhoto(photo.id, { colorLabel: "red" });
-      return true;
-    }
-
-    if (key === "7") {
-      updatePhoto(photo.id, { colorLabel: "yellow" });
-      return true;
-    }
-
-    if (key === "8") {
-      updatePhoto(photo.id, { colorLabel: "green" });
-      return true;
-    }
-
-    if (key === "9") {
-      updatePhoto(photo.id, { colorLabel: "blue" });
-      return true;
-    }
-
-    if (normalizedKey === "v") {
-      updatePhoto(photo.id, { colorLabel: "purple" });
-      return true;
-    }
-
-    return false;
+    updatePhoto(photo.id, shortcutChanges);
+    return true;
   }
 
   const allSelected = photos.length > 0 && selectedIds.length === photos.length;
@@ -155,13 +160,22 @@ export function PhotoSelector({
             <span className="photo-selector__count">
               {selectedIds.length} di {photos.length} foto selezionate
             </span>
-            <span className="photo-selector__count">{visiblePhotos.length} visibili con i filtri</span>
+            <span className="photo-selector__count">
+              {visiblePhotos.length} visibili con i filtri
+            </span>
           </div>
 
           <div className="photo-selector__actions">
+            <PhotoClassificationHelpButton title="Scorciatoie selezione iniziale" />
             <button
               type="button"
-              className={`checkbox-button ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`}
+              className={`checkbox-button ${
+                allSelected
+                  ? "checkbox-button--checked"
+                  : someSelected
+                    ? "checkbox-button--indeterminate"
+                    : ""
+              }`}
               onClick={() => toggleAll(!allSelected)}
               aria-label={allSelected ? "Deseleziona tutte" : "Seleziona tutte"}
             >
@@ -182,14 +196,22 @@ export function PhotoSelector({
         </div>
 
         <div className="photo-selector__filters">
-          <select className="photo-selector__sort" value={pickFilter} onChange={(event) => setPickFilter(event.target.value as PickFilter)}>
+          <select
+            className="photo-selector__sort"
+            value={pickFilter}
+            onChange={(event) => setPickFilter(event.target.value as PickFilter)}
+          >
             <option value="all">Tutti gli stati</option>
             <option value="picked">Solo pick</option>
             <option value="rejected">Solo scartate</option>
             <option value="unmarked">Solo neutre</option>
           </select>
 
-          <select className="photo-selector__sort" value={minimumRating} onChange={(event) => setMinimumRating(Number(event.target.value))}>
+          <select
+            className="photo-selector__sort"
+            value={minimumRating}
+            onChange={(event) => setMinimumRating(Number(event.target.value))}
+          >
             <option value={0}>Tutte le stelle</option>
             <option value={1}>1+ stelle</option>
             <option value={2}>2+ stelle</option>
@@ -198,7 +220,11 @@ export function PhotoSelector({
             <option value={5}>5 stelle</option>
           </select>
 
-          <select className="photo-selector__sort" value={colorFilter} onChange={(event) => setColorFilter(event.target.value as ColorFilter)}>
+          <select
+            className="photo-selector__sort"
+            value={colorFilter}
+            onChange={(event) => setColorFilter(event.target.value as ColorFilter)}
+          >
             <option value="all">Tutti i colori</option>
             {COLOR_LABELS.map((value) => (
               <option key={value} value={value}>
@@ -211,55 +237,101 @@ export function PhotoSelector({
         <div className="photo-selector__grid">
           {visiblePhotos.length === 0 ? (
             <div className="photo-selector__empty">
-              <p>Nessuna foto disponibile con i filtri attuali</p>
+              <p>Nessuna foto disponibile con i filtri attuali.</p>
             </div>
           ) : (
             visiblePhotos.map((photo) => {
               const isSelected = selectedSet.has(photo.id);
               const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
-              const aspectRatio = photo.width > 0 && photo.height > 0 ? `${photo.width} / ${photo.height}` : undefined;
+              const aspectRatio =
+                photo.width > 0 && photo.height > 0
+                  ? `${photo.width} / ${photo.height}`
+                  : undefined;
               const rating = getAssetRating(photo);
               const pickStatus = getAssetPickStatus(photo);
+              const colorLabel = getAssetColorLabel(photo);
 
               return (
                 <div
                   key={photo.id}
                   className={`photo-card ${isSelected ? "photo-card--selected" : ""}`}
-                  onClick={() => togglePhoto(photo.id)}
                   role="button"
                   tabIndex={0}
                   aria-pressed={isSelected}
                   aria-label={`${photo.fileName}${isSelected ? ", selezionata" : ""}`}
                   data-preview-asset-id={photo.id}
+                  onClick={() => togglePhoto(photo.id)}
+                  onDoubleClick={() => setPreviewAssetId(photo.id)}
+                  onContextMenu={(event) => {
+                    if (!onPhotosChange) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    setContextMenuState({
+                      assetId: photo.id,
+                      x: event.clientX,
+                      y: event.clientY
+                    });
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
                       togglePhoto(photo.id);
+                      return;
                     }
 
                     if (event.key === " ") {
                       event.preventDefault();
                       setPreviewAssetId(photo.id);
+                      return;
                     }
 
-                    if (applyKeyboardShortcut(photo, event.key)) {
+                    if (
+                      applyKeyboardShortcut(photo, {
+                        key: event.key,
+                        code: event.code,
+                        ctrlKey: event.ctrlKey,
+                        metaKey: event.metaKey
+                      })
+                    ) {
                       event.preventDefault();
                     }
                   }}
-                  onDoubleClick={() => setPreviewAssetId(photo.id)}
                 >
-                  <div className="photo-card__image-wrapper" style={aspectRatio ? { aspectRatio } : undefined}>
+                  <div
+                    className="photo-card__image-wrapper"
+                    style={aspectRatio ? { aspectRatio } : undefined}
+                  >
                     {previewUrl ? (
-                      <img src={previewUrl} alt={photo.fileName} className="photo-card__image" loading="lazy" />
+                      <img
+                        src={previewUrl}
+                        alt={photo.fileName}
+                        className="photo-card__image"
+                        loading="lazy"
+                      />
                     ) : (
-                      <div className="photo-card__image photo-card__image--placeholder">{photo.fileName}</div>
+                      <div className="photo-card__image photo-card__image--placeholder">
+                        {photo.fileName}
+                      </div>
                     )}
                     <div className="photo-card__top-badges">
-                      <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>{PICK_STATUS_LABELS[pickStatus]}</span>
-                      {photo.colorLabel ? <span className={`asset-color-dot asset-color-dot--${photo.colorLabel}`} /> : null}
+                      <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>
+                        {PICK_STATUS_LABELS[pickStatus]}
+                      </span>
+                      {colorLabel ? (
+                        <span
+                          className={`asset-color-dot asset-color-dot--${colorLabel}`}
+                          title={COLOR_LABEL_NAMES[colorLabel]}
+                        />
+                      ) : null}
                     </div>
                     <div className="photo-card__overlay">
-                      <div className={`photo-card__checkbox ${isSelected ? "photo-card__checkbox--checked" : ""}`}>
+                      <div
+                        className={`photo-card__checkbox ${
+                          isSelected ? "photo-card__checkbox--checked" : ""
+                        }`}
+                      >
                         {isSelected ? "OK" : ""}
                       </div>
                     </div>
@@ -284,11 +356,15 @@ export function PhotoSelector({
                         <button
                           key={value}
                           type="button"
-                          className={value <= rating ? "modal-photo-card__tiny-star modal-photo-card__tiny-star--active" : "modal-photo-card__tiny-star"}
+                          className={
+                            value <= rating
+                              ? "modal-photo-card__tiny-star modal-photo-card__tiny-star--active"
+                              : "modal-photo-card__tiny-star"
+                          }
                           onClick={() => updatePhoto(photo.id, { rating: value })}
-                          title={`${value} stella${value > 1 ? "e" : ""} · tasto ${value}`}
+                          title={`${value} stella${value > 1 ? "e" : ""} | tasto ${value}`}
                         >
-                          ★
+                          *
                         </button>
                       ))}
                     </div>
@@ -298,14 +374,18 @@ export function PhotoSelector({
                         <button
                           key={value}
                           type="button"
-                          className={pickStatus === value ? "quick-preview__pill quick-preview__pill--active" : "quick-preview__pill"}
+                          className={
+                            pickStatus === value
+                              ? "quick-preview__pill quick-preview__pill--active"
+                              : "quick-preview__pill"
+                          }
                           onClick={() => updatePhoto(photo.id, { pickStatus: value })}
                           title={
                             value === "picked"
-                              ? "Segna come Pick · tasto P"
+                              ? "Segna come pick | tasto P"
                               : value === "rejected"
-                                ? "Segna come scartata · tasto X"
-                                : "Torna neutra · tasto U"
+                                ? "Segna come scartata | tasto X"
+                                : "Torna neutra | tasto U"
                           }
                         >
                           {PICK_STATUS_LABELS[value]}
@@ -319,14 +399,16 @@ export function PhotoSelector({
                           key={value}
                           type="button"
                           className={
-                            photo.colorLabel === value
+                            colorLabel === value
                               ? `asset-color-dot asset-color-dot--${value} asset-color-dot--selected`
                               : `asset-color-dot asset-color-dot--${value}`
                           }
-                          onClick={() => updatePhoto(photo.id, { colorLabel: photo.colorLabel === value ? null : value })}
-                          title={`${COLOR_LABEL_NAMES[value]} · tasto ${
-                            value === "red" ? "6" : value === "yellow" ? "7" : value === "green" ? "8" : value === "blue" ? "9" : "V"
-                          }`}
+                          onClick={() =>
+                            updatePhoto(photo.id, {
+                              colorLabel: colorLabel === value ? null : value
+                            })
+                          }
+                          title={`${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}`}
                         />
                       ))}
                     </div>
@@ -339,7 +421,8 @@ export function PhotoSelector({
 
         <div className="photo-selector__footer">
           <p className="photo-selector__hint">
-            Seleziona le foto che vuoi impaginare. `Spazio` apre la review, `1-5` stelle, `P/X/U` stato, `6=rosso`, `7=giallo`, `8=verde`, `9=blu`, `V=viola`.
+            Usa Info per tutte le scorciatoie. Tasto destro o Ctrl/Cmd + 6/7/8/9/V per i colori,
+            1-5 per le stelle, P/X/U per lo stato e Spazio per la preview grande.
           </p>
         </div>
       </div>
@@ -351,6 +434,21 @@ export function PhotoSelector({
         onSelectAsset={setPreviewAssetId}
         onUpdateAsset={(assetId, changes) => updatePhoto(assetId, changes)}
       />
+
+      {contextMenuState ? (
+        <PhotoColorContextMenu
+          x={contextMenuState.x}
+          y={contextMenuState.y}
+          selectedColor={
+            photos.find((photo) => photo.id === contextMenuState.assetId)?.colorLabel ?? null
+          }
+          title="Etichetta colore"
+          onSelect={(colorLabel) => {
+            updatePhoto(contextMenuState.assetId, { colorLabel });
+            setContextMenuState(null);
+          }}
+        />
+      ) : null}
     </>
   );
 }

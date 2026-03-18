@@ -1,6 +1,18 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
-import { COLOR_LABELS, formatAssetStars, getAssetPickStatus, getAssetRating, PICK_STATUS_LABELS } from "../photo-classification";
+import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
+import { PhotoColorContextMenu } from "./PhotoColorContextMenu";
+import {
+  COLOR_LABEL_NAMES,
+  COLOR_LABELS,
+  DEFAULT_PHOTO_FILTERS,
+  formatAssetStars,
+  getAssetPickStatus,
+  getAssetRating,
+  matchesPhotoFilters,
+  PICK_STATUS_LABELS,
+  resolvePhotoClassificationShortcut
+} from "../photo-classification";
 
 interface RibbonUsage {
   pageNumber: number;
@@ -20,6 +32,9 @@ interface PhotoRibbonProps {
   onDragAssetStart: (imageId: string) => void;
   onDragEnd: () => void;
   onAssetDoubleClick?: (imageId: string) => void;
+  onAssetsMetadataChange?: (
+    changesById: Map<string, Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>>
+  ) => void;
 }
 
 const ITEM_WIDTH = 120;
@@ -34,34 +49,50 @@ function PhotoRibbonContent({
   onAssetFilterChange,
   onDragAssetStart,
   onDragEnd,
-  onAssetDoubleClick
+  onAssetDoubleClick,
+  onAssetsMetadataChange
 }: PhotoRibbonProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [visibleItems, setVisibleItems] = useState(8);
-  const [pickFilter, setPickFilter] = useState<"all" | PickStatus>("all");
-  const [minimumRating, setMinimumRating] = useState(0);
-  const [colorFilter, setColorFilter] = useState<"all" | ColorLabel>("all");
+  const [pickFilter, setPickFilter] = useState<"all" | PickStatus>(DEFAULT_PHOTO_FILTERS.pickStatus);
+  const [minimumRating, setMinimumRating] = useState(DEFAULT_PHOTO_FILTERS.minimumRating);
+  const [colorFilter, setColorFilter] = useState<"all" | ColorLabel>(DEFAULT_PHOTO_FILTERS.colorLabel);
+  const [contextMenuState, setContextMenuState] = useState<{
+    assetId: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const filteredAssets = useMemo(
     () =>
-      assets.filter((asset) => {
-        if (pickFilter !== "all" && getAssetPickStatus(asset) !== pickFilter) {
-          return false;
-        }
-
-        if (colorFilter !== "all" && asset.colorLabel !== colorFilter) {
-          return false;
-        }
-
-        return getAssetRating(asset) >= minimumRating;
-      }),
+      assets.filter((asset) =>
+        matchesPhotoFilters(asset, {
+          pickStatus: pickFilter,
+          minimumRating,
+          colorLabel: colorFilter
+        })
+      ),
     [assets, colorFilter, minimumRating, pickFilter]
   );
 
   const startIndex = Math.max(0, Math.floor(scrollLeft / ITEM_WIDTH) - 1);
   const endIndex = Math.min(startIndex + visibleItems + OVERSCAN_ITEMS, filteredAssets.length);
+
+  const updateAssetMetadata = useCallback(
+    (
+      assetId: string,
+      changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
+    ) => {
+      if (!onAssetsMetadataChange) {
+        return;
+      }
+
+      onAssetsMetadataChange(new Map([[assetId, changes]]));
+    },
+    [onAssetsMetadataChange]
+  );
 
   const handleScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const nextScrollLeft = event.currentTarget.scrollLeft;
@@ -110,10 +141,40 @@ function PhotoRibbonContent({
     };
   }, []);
 
-  const visibleAssets = variant === "vertical" ? filteredAssets : filteredAssets.slice(startIndex, endIndex);
+  useEffect(() => {
+    if (!contextMenuState) {
+      return;
+    }
+
+    const closeMenu = () => setContextMenuState(null);
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeMenu();
+      }
+    };
+
+    window.addEventListener("mousedown", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("mousedown", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [contextMenuState]);
+
+  const visibleAssets =
+    variant === "vertical" ? filteredAssets : filteredAssets.slice(startIndex, endIndex);
 
   return (
-    <div className={variant === "vertical" ? "layout-photo-ribbon layout-photo-ribbon--vertical" : "layout-photo-ribbon"}>
+    <div
+      className={
+        variant === "vertical"
+          ? "layout-photo-ribbon layout-photo-ribbon--vertical"
+          : "layout-photo-ribbon"
+      }
+    >
       <div className="layout-photo-ribbon__header">
         <div className="segmented-control">
           {([
@@ -134,6 +195,10 @@ function PhotoRibbonContent({
         <span className="helper-inline">
           {usageByAssetId.size} usate | {assets.length - usageByAssetId.size} libere
         </span>
+        <PhotoClassificationHelpButton
+          className="layout-photo-ribbon__help"
+          title="Scorciatoie libreria foto"
+        />
       </div>
 
       <div className="layout-photo-ribbon__filters">
@@ -166,7 +231,11 @@ function PhotoRibbonContent({
         <div className="layout-photo-ribbon__color-filter" aria-label="Filtra per colore">
           <button
             type="button"
-            className={colorFilter === "all" ? "layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--all layout-photo-ribbon__color-chip--active" : "layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--all"}
+            className={
+              colorFilter === "all"
+                ? "layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--all layout-photo-ribbon__color-chip--active"
+                : "layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--all"
+            }
             onClick={() => setColorFilter("all")}
           >
             Tutti
@@ -181,7 +250,7 @@ function PhotoRibbonContent({
                   : `layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--${value}`
               }
               onClick={() => setColorFilter(value)}
-              title={value}
+              title={COLOR_LABEL_NAMES[value]}
             />
           ))}
         </div>
@@ -190,13 +259,23 @@ function PhotoRibbonContent({
       <div className="layout-photo-ribbon__track-wrapper">
         <div
           ref={scrollContainerRef}
-          className={variant === "vertical" ? "layout-photo-ribbon__track layout-photo-ribbon__track--vertical" : "layout-photo-ribbon__track"}
+          className={
+            variant === "vertical"
+              ? "layout-photo-ribbon__track layout-photo-ribbon__track--vertical"
+              : "layout-photo-ribbon__track"
+          }
           onScroll={variant === "vertical" ? undefined : handleScroll}
           role="region"
-          aria-label={variant === "vertical" ? "Libreria foto verticale" : "Nastro fotografico - usa frecce per scorrere"}
+          aria-label={
+            variant === "vertical"
+              ? "Libreria foto verticale"
+              : "Nastro fotografico - usa frecce per scorrere"
+          }
           tabIndex={0}
         >
-          {variant === "horizontal" && startIndex > 0 ? <div style={{ width: startIndex * ITEM_WIDTH, flexShrink: 0 }} /> : null}
+          {variant === "horizontal" && startIndex > 0 ? (
+            <div style={{ width: startIndex * ITEM_WIDTH, flexShrink: 0 }} />
+          ) : null}
 
           {visibleAssets.map((asset) => {
             const usage = usageByAssetId.get(asset.id);
@@ -211,22 +290,44 @@ function PhotoRibbonContent({
                 type="button"
                 draggable
                 data-preview-asset-id={asset.id}
-                className={
-                  [
-                    "ribbon-photo",
-                    variant === "vertical" ? "ribbon-photo--vertical" : "",
-                    isActive ? "ribbon-photo--dragging" : "",
-                    isUsed ? "ribbon-photo--used" : "",
-                    asset.colorLabel ? `ribbon-photo--label-${asset.colorLabel}` : ""
-                  ]
-                    .filter(Boolean)
-                    .join(" ")
-                }
+                className={[
+                  "ribbon-photo",
+                  variant === "vertical" ? "ribbon-photo--vertical" : "",
+                  isActive ? "ribbon-photo--dragging" : "",
+                  isUsed ? "ribbon-photo--used" : "",
+                  asset.colorLabel ? `ribbon-photo--label-${asset.colorLabel}` : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", asset.id);
                   onDragAssetStart(asset.id);
                 }}
                 onDragEnd={onDragEnd}
+                onContextMenu={(event) => {
+                  if (!onAssetsMetadataChange) {
+                    return;
+                  }
+                  event.preventDefault();
+                  setContextMenuState({
+                    assetId: asset.id,
+                    x: event.clientX,
+                    y: event.clientY
+                  });
+                }}
+                onKeyDown={(event) => {
+                  const shortcutChanges = resolvePhotoClassificationShortcut({
+                    key: event.key,
+                    code: event.code,
+                    ctrlKey: event.ctrlKey,
+                    metaKey: event.metaKey
+                  });
+
+                  if (shortcutChanges) {
+                    event.preventDefault();
+                    updateAssetMetadata(asset.id, shortcutChanges);
+                  }
+                }}
                 onDoubleClick={() => onAssetDoubleClick?.(asset.id)}
               >
                 {asset.thumbnailUrl ?? asset.previewUrl ? (
@@ -241,9 +342,15 @@ function PhotoRibbonContent({
                 )}
                 {isUsed ? <span className="ribbon-photo__usage-overlay">Usata</span> : null}
                 <div className="ribbon-photo__badges">
-                  <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>{PICK_STATUS_LABELS[pickStatus]}</span>
-                  {asset.colorLabel ? <span className={`asset-color-dot asset-color-dot--${asset.colorLabel}`} /> : null}
-                  {usage ? <span className="ribbon-photo__usage-chip">{`Foglio ${usage.pageNumber}`}</span> : null}
+                  <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>
+                    {PICK_STATUS_LABELS[pickStatus]}
+                  </span>
+                  {asset.colorLabel ? (
+                    <span className={`asset-color-dot asset-color-dot--${asset.colorLabel}`} />
+                  ) : null}
+                  {usage ? (
+                    <span className="ribbon-photo__usage-chip">{`Foglio ${usage.pageNumber}`}</span>
+                  ) : null}
                 </div>
                 <div className="ribbon-photo__meta">
                   <strong>{asset.fileName?.substring(0, 12)}</strong>
@@ -255,7 +362,9 @@ function PhotoRibbonContent({
           })}
 
           {variant === "horizontal" && endIndex < filteredAssets.length ? (
-            <div style={{ width: (filteredAssets.length - endIndex) * ITEM_WIDTH, flexShrink: 0 }} />
+            <div
+              style={{ width: (filteredAssets.length - endIndex) * ITEM_WIDTH, flexShrink: 0 }}
+            />
           ) : null}
         </div>
       </div>
@@ -263,10 +372,24 @@ function PhotoRibbonContent({
       <div className="layout-photo-ribbon__hint">
         <small>
           {variant === "vertical"
-            ? `${filteredAssets.length} foto visibili · Trascina a destra per assegnare | Doppio click per lo slot selezionato`
-            : `${filteredAssets.length} foto visibili · Usa frecce sx/dx per scorrere | Doppio click per assegnare allo slot selezionato`}
+            ? `${filteredAssets.length} foto visibili | Doppio click assegna allo slot | Ctrl/Cmd + 6/7/8/9/V imposta il colore`
+            : `${filteredAssets.length} foto visibili | Usa frecce sx/dx per scorrere | Ctrl/Cmd + 6/7/8/9/V imposta il colore`}
         </small>
       </div>
+
+      {contextMenuState ? (
+        <PhotoColorContextMenu
+          x={contextMenuState.x}
+          y={contextMenuState.y}
+          selectedColor={
+            assets.find((asset) => asset.id === contextMenuState.assetId)?.colorLabel ?? null
+          }
+          onSelect={(colorLabel) => {
+            updateAssetMetadata(contextMenuState.assetId, { colorLabel });
+            setContextMenuState(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

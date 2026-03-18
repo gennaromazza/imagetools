@@ -2182,7 +2182,6 @@ function AppContent() {
           onClose={() => setQuickPreviewAssetId(null)}
           onSelectAsset={setQuickPreviewAssetId}
           onAddToPage={handleAddImageToPage}
-          onCreatePageWithAsset={handleCreatePageWithImage}
           onJumpToPage={(pageId) => {
             const page = result.pages.find((item) => item.id === pageId);
             if (!page) {

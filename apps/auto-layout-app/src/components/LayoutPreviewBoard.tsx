@@ -1814,6 +1814,7 @@ export function LayoutPreviewBoard({
               onAssetFilterChange={handleAssetFilterChange}
               onDragAssetStart={onDragAssetStart}
               onDragEnd={onDragEnd}
+              onAssetsMetadataChange={onAssetsMetadataChange}
               onAssetDoubleClick={
                 selectedSlot
                   ? (imageId) => onAssetDropped(activePage.id, selectedSlot.id, imageId)

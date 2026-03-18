@@ -2500,6 +2500,10 @@ img {
   align-items: center;
 }
 
+.layout-photo-ribbon__help {
+  margin-left: auto;
+}
+
 .layout-photo-ribbon__filters {
   display: flex;
   gap: 0.6rem;
@@ -2765,6 +2769,100 @@ img {
   color: #dcead8;
   font-size: 0.66rem;
   font-weight: 700;
+}
+
+.ribbon-color-menu {
+  position: fixed;
+  z-index: 220;
+  display: grid;
+  gap: 0.65rem;
+  min-width: 180px;
+  padding: 0.85rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(19, 21, 20, 0.96);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
+}
+
+.ribbon-color-menu__title {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.72);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ribbon-color-menu__clear {
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  padding: 0.45rem 0.7rem;
+  text-align: left;
+}
+
+.ribbon-color-menu__swatches {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.shortcut-help {
+  position: relative;
+}
+
+.shortcut-help__button {
+  min-height: 38px;
+  padding-inline: 0.85rem;
+}
+
+.shortcut-help__popover {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 230;
+  display: grid;
+  gap: 0.75rem;
+  width: min(320px, calc(100vw - 2rem));
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(19, 21, 20, 0.97);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
+}
+
+.shortcut-help__title {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.shortcut-help__list {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shortcut-help__item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: center;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.shortcut-help__kbd {
+  min-width: 92px;
+  padding: 0.28rem 0.45rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.77rem;
+  font-weight: 700;
+  text-align: center;
 }
 
 .layout-strip__item {
