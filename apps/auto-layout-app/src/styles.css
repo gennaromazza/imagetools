@@ -1230,6 +1230,27 @@ img {
   color: var(--text-muted);
 }
 
+.layout-studio__page-rearrange-banner {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.8rem 0.95rem;
+  border-radius: 18px;
+  border: 2px dashed rgba(142, 178, 142, 0.72);
+  background: rgba(28, 73, 42, 0.14);
+  color: #e7f3e7;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.14);
+}
+
+.layout-studio__page-rearrange-banner strong {
+  font-size: 0.86rem;
+}
+
+.layout-studio__page-rearrange-banner span {
+  color: rgba(231, 243, 231, 0.86);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .layout-studio__page-feedback {
   display: inline-flex;
   margin-top: 0.45rem;

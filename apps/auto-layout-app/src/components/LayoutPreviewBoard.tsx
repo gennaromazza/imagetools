@@ -1800,6 +1800,23 @@ export function LayoutPreviewBoard({
                         </div>
                       </div>
 
+                      {dragState?.kind === "slot" && dragState.sourcePageId === page.id ? (
+                        <div
+                          className="layout-studio__page-rearrange-banner"
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            onAddToPage(page.id, dragState.imageId);
+                          }}
+                        >
+                          <strong>Riadatta questo foglio</strong>
+                          <span>Rilascia qui per riorganizzare automaticamente il layout attorno alla foto trascinata.</span>
+                        </div>
+                      ) : null}
+
                       <SheetSurface
                         page={page}
                         assetsById={assetsById}
