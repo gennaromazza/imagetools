@@ -587,6 +587,8 @@ const SheetSurface = memo(function SheetSurface({
     startOffsetY: number;
     width: number;
     height: number;
+    sensitivityX: number;
+    sensitivityY: number;
     moved: boolean;
   } | null>(null);
   const panFrameRef = useRef<number | null>(null);
@@ -819,6 +821,16 @@ const SheetSurface = memo(function SheetSurface({
                     }
 
                     const rect = event.currentTarget.getBoundingClientRect();
+                    const sensitivityX = clampValue(
+                      (60 * Math.max(0.35, assignment.cropWidth ?? 1)) / Math.max(1, assignment.zoom),
+                      12,
+                      60
+                    );
+                    const sensitivityY = clampValue(
+                      (60 * Math.max(0.35, assignment.cropHeight ?? 1)) / Math.max(1, assignment.zoom),
+                      12,
+                      60
+                    );
                     panStateRef.current = {
                       pointerId: event.pointerId,
                       slotId: slot.id,
@@ -828,6 +840,8 @@ const SheetSurface = memo(function SheetSurface({
                       startOffsetY: assignment.offsetY,
                       width: rect.width,
                       height: rect.height,
+                      sensitivityX,
+                      sensitivityY,
                       moved: false
                     };
 
@@ -850,13 +864,15 @@ const SheetSurface = memo(function SheetSurface({
 
                     panState.moved = true;
 
+                    const effectiveWidth = Math.max(panState.width, 220);
+                    const effectiveHeight = Math.max(panState.height, 220);
                     const nextOffsetX = Math.max(
                       -100,
-                      Math.min(100, panState.startOffsetX + (deltaX / Math.max(panState.width, 1)) * 60)
+                      Math.min(100, panState.startOffsetX + (deltaX / effectiveWidth) * panState.sensitivityX)
                     );
                     const nextOffsetY = Math.max(
                       -100,
-                      Math.min(100, panState.startOffsetY + (deltaY / Math.max(panState.height, 1)) * 60)
+                      Math.min(100, panState.startOffsetY + (deltaY / effectiveHeight) * panState.sensitivityY)
                     );
 
                     schedulePanUpdate(slot.id, nextOffsetX, nextOffsetY);
@@ -2891,6 +2907,8 @@ export function LayoutPreviewBoard({
     </div>
   );
 }
+
+
 
 
 
