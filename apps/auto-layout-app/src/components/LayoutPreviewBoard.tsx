@@ -84,6 +84,9 @@ interface LayoutPreviewBoardProps {
     field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi",
     value: number
   ) => void;
+  onAssetsMetadataChange?: (
+    changesById: Map<string, Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>>
+  ) => void;
   onUpdateSlotAssignment: (
     pageId: string,
     slotId: string,
@@ -877,6 +880,7 @@ export function LayoutPreviewBoard({
   onContextMenu,
   onPageSheetPresetChange,
   onPageSheetFieldChange,
+  onAssetsMetadataChange,
   onUpdateSlotAssignment,
   zoom
 }: LayoutPreviewBoardProps) {
@@ -1892,6 +1896,7 @@ export function LayoutPreviewBoard({
           title={`Scegli la foto per foglio ${replaceTarget.pageNumber}, slot ${replaceTarget.slotId}`}
           onClose={handleReplaceTargetClose}
           onChoose={handleReplaceAsset}
+          onAssetsMetadataChange={onAssetsMetadataChange}
         />
       ) : null}
     </div>

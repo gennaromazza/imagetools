@@ -1859,6 +1859,7 @@ function AppContent() {
               onRemovePage={handleRemovePage}
               onPageSheetPresetChange={handlePageSheetPresetChange}
               onPageSheetFieldChange={handlePageSheetFieldChange}
+              onAssetsMetadataChange={handleAssetsMetadataChange}
               onUpdateSlotAssignment={handleUpdateSelectedSlotAssignment}
               onContextMenu={handleContextMenu}
               zoom={zoom}
