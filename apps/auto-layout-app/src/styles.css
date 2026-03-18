@@ -4640,6 +4640,12 @@ img {
   gap: 0.75rem;
 }
 
+.photo-selector__filters {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
 .checkbox-button {
   padding: 0.5rem 1rem;
   background: rgba(160, 130, 80, 0.2);
@@ -4766,6 +4772,28 @@ img {
   transition: background 120ms ease-out;
 }
 
+.photo-card__top-badges {
+  position: absolute;
+  top: 0.45rem;
+  left: 0.45rem;
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  z-index: 2;
+}
+
+.photo-card__stars {
+  position: absolute;
+  right: 0.45rem;
+  bottom: 0.45rem;
+  padding: 0.25rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(12, 14, 13, 0.74);
+  color: #ffd57a;
+  font-size: 0.7rem;
+  z-index: 2;
+}
+
 .photo-card:hover .photo-card__overlay {
   background: rgba(0, 0, 0, 0.3);
 }
@@ -4834,6 +4862,19 @@ img {
 .photo-card__dimensions {
   font-family: monospace;
   letter-spacing: 0.5px;
+}
+
+.photo-card__toolbar {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.photo-card__tiny-actions,
+.photo-card__toolbar-row {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .photo-selector__footer {

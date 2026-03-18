@@ -148,6 +148,15 @@ function buildInitialRequest(): AutoLayoutRequest {
   };
 }
 
+function buildEmptyRequest(): AutoLayoutRequest {
+  return {
+    ...DEFAULT_AUTO_LAYOUT_REQUEST,
+    assets: [],
+    output: { ...DEFAULT_AUTO_LAYOUT_REQUEST.output },
+    sheet: { ...DEFAULT_AUTO_LAYOUT_REQUEST.sheet }
+  };
+}
+
 function buildRenderQueue(request: AutoLayoutRequest, result: AutoLayoutResult): RenderJob[] {
   return result.pages.map((page) => ({
     pageId: page.id,
@@ -408,11 +417,13 @@ function AppContent() {
 
   const createNewProject = () => {
     resetStudioHistory();
-    setRequest(buildInitialRequest());
-    setResult(createAutoLayoutPlan(buildInitialRequest()));
-    setActiveAssetIds(mockWeddingAssets.map((a) => a.id));
-    setAllAssets(mockWeddingAssets);
-    setUsesMockData(true);
+    const emptyRequest = buildEmptyRequest();
+    setRequest(emptyRequest);
+    setResult(createAutoLayoutPlan(emptyRequest));
+    setActiveAssetIds([]);
+    setAllAssets([]);
+    setUsesMockData(false);
+    setCurrentSessionFiles(new Map());
     setCurrentProjectId(null);
     setShowOnboardingWizard(true);
     setCurrentScreen("setup");
@@ -2096,6 +2107,10 @@ function AppContent() {
         onClose={() => setShowOnboardingWizard(false)}
         onComplete={handleWizardComplete}
         currentRequest={request}
+        onAssetsChange={(nextAssets) => {
+          setAllAssets(nextAssets);
+          setRequest((current) => ({ ...current, assets: nextAssets }));
+        }}
         onFolderSelected={handleFolderSelected}
         onLoadMockData={handleLoadMockData}
       />

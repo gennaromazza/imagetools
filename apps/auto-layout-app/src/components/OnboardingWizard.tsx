@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SHEET_PRESETS } from "@photo-tools/presets";
-import type { AutoLayoutRequest } from "@photo-tools/shared-types";
+import type { AutoLayoutRequest, ImageAsset } from "@photo-tools/shared-types";
 import { DismissibleBanner } from "./DismissibleBanner";
 import { PhotoSelector } from "./PhotoSelector";
 
@@ -10,6 +10,7 @@ interface OnboardingWizardProps {
   onClose: () => void;
   onComplete: (request: AutoLayoutRequest, projectName: string) => void;
   currentRequest: AutoLayoutRequest;
+  onAssetsChange?: (assets: ImageAsset[]) => void;
   onFolderSelected?: (files: FileList | null) => void;
   onLoadMockData?: () => void;
 }
@@ -22,6 +23,7 @@ export function OnboardingWizard({
   onClose,
   onComplete,
   currentRequest,
+  onAssetsChange,
   onFolderSelected,
   onLoadMockData
 }: OnboardingWizardProps) {
@@ -33,6 +35,15 @@ export function OnboardingWizard({
   const [planningMode, setPlanningMode] = useState<"fogli" | "foto">("fogli");
   const [plannedValue, setPlannedValue] = useState(currentRequest.desiredSheetCount ?? 5);
   const [dismissedWelcomeBanner, setDismissedWelcomeBanner] = useState(false);
+
+  useEffect(() => {
+    if (!fileInputRef.current) {
+      return;
+    }
+
+    fileInputRef.current.setAttribute("webkitdirectory", "");
+    fileInputRef.current.setAttribute("directory", "");
+  }, []);
 
   if (!isOpen) return null;
 
@@ -267,6 +278,7 @@ export function OnboardingWizard({
                 photos={currentRequest.assets}
                 selectedIds={selectedPhotoIds}
                 onSelectionChange={setSelectedPhotoIds}
+                onPhotosChange={onAssetsChange}
               />
             </div>
 
