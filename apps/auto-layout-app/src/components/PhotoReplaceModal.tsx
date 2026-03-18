@@ -63,6 +63,10 @@ export function PhotoReplaceModal({
   }, [assets, currentImageId]);
 
   const currentUsage = useMemo(() => usageByAssetId.get(currentImageId ?? ""), [currentImageId, usageByAssetId]);
+  const currentAsset = useMemo(
+    () => localAssets.find((asset) => asset.id === currentImageId) ?? null,
+    [currentImageId, localAssets]
+  );
   const normalizedSearchQuery = searchQuery.trim().toLowerCase();
 
   function updateAsset(imageId: string, changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>) {
@@ -127,6 +131,42 @@ export function PhotoReplaceModal({
     (focusedAssetId ? localAssets.find((asset) => asset.id === focusedAssetId) : null) ??
     visibleAssets[0] ??
     null;
+  const suggestedAssets = useMemo(() => {
+    const currentOrientation = currentAsset?.orientation ?? null;
+
+    const scoredAssets = deferredAssets
+      .filter((asset) => asset.id !== currentImageId)
+      .map((asset) => {
+        let score = 0;
+
+        if (!usageByAssetId.has(asset.id)) {
+          score += 40;
+        }
+
+        if (activeAssetSet.has(asset.id)) {
+          score += 12;
+        }
+
+        if (getAssetPickStatus(asset) === "picked") {
+          score += 32;
+        }
+
+        if (getAssetPickStatus(asset) === "rejected") {
+          score -= 50;
+        }
+
+        score += getAssetRating(asset) * 8;
+
+        if (currentOrientation && asset.orientation === currentOrientation) {
+          score += 18;
+        }
+
+        return { asset, score };
+      })
+      .sort((left, right) => right.score - left.score || left.asset.fileName.localeCompare(right.asset.fileName));
+
+    return scoredAssets.slice(0, 8).map((item) => item.asset);
+  }, [activeAssetSet, currentAsset, currentImageId, deferredAssets, usageByAssetId]);
   const previewAsset = previewAssetId ? localAssets.find((asset) => asset.id === previewAssetId) ?? null : null;
 
   return (
@@ -174,6 +214,61 @@ export function PhotoReplaceModal({
               </label>
             </div>
           </div>
+
+          {suggestedAssets.length > 0 ? (
+            <section className="modal-photo-section">
+              <div className="modal-photo-section__header">
+                <strong>Candidate migliori per questo slot</strong>
+                <span>{suggestedAssets.length}</span>
+              </div>
+              <p className="helper-copy">
+                Priorita a foto pick, piu votate, non ancora usate e con orientamento coerente.
+              </p>
+              <div className="modal-photo-grid">
+                {suggestedAssets.map((asset) => {
+                  const usage = usageByAssetId.get(asset.id);
+                  const pickStatus = getAssetPickStatus(asset);
+                  const rating = getAssetRating(asset);
+                  const colorLabel = getAssetColorLabel(asset);
+                  const previewUrl = asset.thumbnailUrl ?? asset.previewUrl ?? asset.sourceUrl;
+
+                  return (
+                    <button
+                      key={`suggested-${asset.id}`}
+                      type="button"
+                      className="modal-photo-card"
+                      onClick={() => setFocusedAssetId(asset.id)}
+                      onDoubleClick={() => onChoose(asset.id)}
+                    >
+                      <div className="modal-photo-card__image-shell">
+                        {previewUrl ? (
+                          <img src={previewUrl} alt={asset.fileName} className="modal-photo-card__image" loading="lazy" />
+                        ) : (
+                          <div className="modal-photo-card__placeholder">{asset.fileName}</div>
+                        )}
+                        <div className="modal-photo-card__top-badges">
+                          <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>
+                            {PICK_STATUS_LABELS[pickStatus]}
+                          </span>
+                          {colorLabel ? (
+                            <span
+                              className={`asset-color-dot asset-color-dot--${colorLabel} asset-color-dot--selected`}
+                              title={COLOR_LABEL_NAMES[colorLabel]}
+                            />
+                          ) : null}
+                        </div>
+                        {rating > 0 ? <span className="modal-photo-card__stars">{formatAssetStars(asset)}</span> : null}
+                      </div>
+                      <div className="modal-photo-card__meta">
+                        <strong>{asset.fileName}</strong>
+                        <span>{usage ? `Usata nel foglio ${usage.pageNumber}` : "Ancora libera nel layout"}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
 
           <div className="selector-filters">
             <label className="field">
