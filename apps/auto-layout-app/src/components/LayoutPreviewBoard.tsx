@@ -126,6 +126,8 @@ interface CommitOnBlurNumberFieldProps {
   min?: string;
   step?: string;
   className?: string;
+  unit?: string;
+  allowZero?: boolean;
   onCommit: (value: number) => void;
 }
 
@@ -269,6 +271,8 @@ function CommitOnBlurNumberField({
   min = "1",
   step = "0.1",
   className,
+  unit,
+  allowZero = false,
   onCommit
 }: CommitOnBlurNumberFieldProps) {
   const [draftValue, setDraftValue] = useState(() => formatMeasurement(value));
@@ -280,7 +284,7 @@ function CommitOnBlurNumberField({
   const commitDraft = useCallback(() => {
     const parsed = Number(draftValue);
 
-    if (!Number.isFinite(parsed) || parsed <= 0) {
+    if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0)) {
       setDraftValue(formatMeasurement(value));
       return;
     }
@@ -296,24 +300,28 @@ function CommitOnBlurNumberField({
   return (
     <label className={className ? `field ${className}` : "field"}>
       <span>{label}</span>
-      <input
-        type="number"
-        min={min}
-        step={step}
-        value={draftValue}
-        onChange={(event) => setDraftValue(event.target.value)}
-        onBlur={commitDraft}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") {
-            event.currentTarget.blur();
-          }
+      <div className={unit ? "field__input-with-unit" : undefined}>
+        <input
+          type="number"
+          min={min}
+          step={step}
+          inputMode="decimal"
+          value={draftValue}
+          onChange={(event) => setDraftValue(event.target.value)}
+          onBlur={commitDraft}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
 
-          if (event.key === "Escape") {
-            setDraftValue(formatMeasurement(value));
-            event.preventDefault();
-          }
-        }}
-      />
+            if (event.key === "Escape") {
+              setDraftValue(formatMeasurement(value));
+              event.preventDefault();
+            }
+          }}
+        />
+        {unit ? <span className="field__unit">{unit}</span> : null}
+      </div>
     </label>
   );
 }
@@ -2185,6 +2193,8 @@ export function LayoutPreviewBoard({
                   className="inspector-field"
                   min="0"
                   step="0.1"
+                  unit="cm"
+                  allowZero
                   value={activePage.sheetSpec.marginCm}
                   onCommit={(value) => onPageSheetFieldChange(activePage.id, "marginCm", value)}
                 />
@@ -2194,6 +2204,8 @@ export function LayoutPreviewBoard({
                   className="inspector-field"
                   min="0"
                   step="0.1"
+                  unit="cm"
+                  allowZero
                   value={activePage.sheetSpec.gapCm}
                   onCommit={(value) => onPageSheetFieldChange(activePage.id, "gapCm", value)}
                 />
@@ -2213,6 +2225,7 @@ export function LayoutPreviewBoard({
                 <span>
                   Margine foglio = distanza dai bordi del foglio. Gap foto = spazio bianco tra le foto dello stesso foglio.
                 </span>
+                <span>Se imposti `Gap foto` a `0 cm`, le foto si toccano senza spazio bianco tra uno slot e l'altro.</span>
               </div>
 
               <div className="inspector-panel inspector-panel--nested">

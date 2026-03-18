@@ -695,6 +695,25 @@ img {
   padding: 0;
 }
 
+.field__input-with-unit {
+  position: relative;
+}
+
+.field__input-with-unit input {
+  padding-right: 3rem;
+}
+
+.field__unit {
+  position: absolute;
+  right: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  pointer-events: none;
+}
+
 .inline-grid {
   display: grid;
   gap: var(--space-3);
@@ -1788,7 +1807,7 @@ img {
 
 .sheet-slot {
   position: absolute;
-  padding: 0.3rem;
+  padding: 0;
   border-radius: 22px;
   transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
