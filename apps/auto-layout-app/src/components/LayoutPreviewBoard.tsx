@@ -395,8 +395,21 @@ function CommitOnBlurNumberField({
     }
 
     setDraftValue(formatMeasurement(value));
-  }, [draftValue, onCommit, value]);
+  }, [allowZero, draftValue, onCommit, value]);
 
+
+  useEffect(() => {
+    const parsed = Number(draftValue);
+    if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0) || parsed === value) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      onCommit(parsed);
+    }, 120);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [allowZero, draftValue, onCommit, value]);
   return (
     <label className={className ? `field ${className}` : "field"}>
       <span>{label}</span>
@@ -2870,6 +2883,7 @@ export function LayoutPreviewBoard({
     </div>
   );
 }
+
 
 
 
