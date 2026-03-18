@@ -1,0 +1,24 @@
+{
+  "name": "photo-tools",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev:auto-layout",
+    "dev:auto-layout": "npm --workspace @photo-tools/auto-layout-app run dev",
+    "dev:all:auto-layout": "npm run dev:auto-layout",
+    "dev:image-party-frame": "npm --workspace @photo-tools/image-party-frame-app run dev",
+    "dev:all:image-party-frame": "npm --workspace @photo-tools/image-party-frame-app run dev:all",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}

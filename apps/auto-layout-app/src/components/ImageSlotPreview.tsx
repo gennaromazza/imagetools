@@ -1,0 +1,38 @@
+import { memo } from "react";
+import type { ImageAsset, LayoutAssignment } from "@photo-tools/shared-types";
+
+interface ImageSlotPreviewProps {
+  asset?: ImageAsset;
+  assignment?: LayoutAssignment;
+  label: string;
+}
+
+function ImageSlotPreviewComponent({ asset, assignment, label }: ImageSlotPreviewProps) {
+  if (!asset || !assignment || !asset.previewUrl) {
+    return <div className="slot-empty">Trascina qui una foto</div>;
+  }
+
+  const imageFit = assignment.fitMode === "fit" ? "contain" : "cover";
+
+  return (
+    <div className="slot-media">
+      <img
+        src={asset.previewUrl}
+        alt={asset.fileName}
+        loading="lazy"
+        draggable={false}
+        style={{
+          objectFit: imageFit,
+          objectPosition: `calc(50% + ${assignment.offsetX}%) calc(50% + ${assignment.offsetY}%)`,
+          transform: `scale(${Math.max(0.4, assignment.zoom)}) rotate(${assignment.rotation}deg)`
+        }}
+      />
+      <div className="slot-media__meta">
+        <span>{label}</span>
+        <small>{assignment.fitMode}</small>
+      </div>
+    </div>
+  );
+}
+
+export const ImageSlotPreview = memo(ImageSlotPreviewComponent);

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+build/
+.DS_Store
+coverage/
+*.log
+TEST FOTO/
+*.env
+apps/image-party-frame/exports/
+apps/image-party-frame/uploads/
+apps/image-party-frame/temp-test.png

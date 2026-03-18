@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "declaration": true,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@photo-tools/core": ["packages/core/src/index.ts"],
+      "@photo-tools/filesystem": ["packages/filesystem/src/index.ts"],
+      "@photo-tools/layout-engine": ["packages/layout-engine/src/index.ts"],
+      "@photo-tools/presets": ["packages/presets/src/index.ts"],
+      "@photo-tools/shared-types": ["packages/shared-types/src/index.ts"],
+      "@photo-tools/ui-schema": ["packages/ui-schema/src/index.ts"]
+    }
+  }
+}
