@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
 import {
@@ -168,8 +169,7 @@ export function PhotoReplaceModal({
     return scoredAssets.slice(0, 8).map((item) => item.asset);
   }, [activeAssetSet, currentAsset, currentImageId, deferredAssets, usageByAssetId]);
   const previewAsset = previewAssetId ? localAssets.find((asset) => asset.id === previewAssetId) ?? null : null;
-
-  return (
+  const modalContent = (
     <>
       <div className="modal-backdrop" onClick={onClose}>
         <div className="modal-panel modal-panel--wide" onClick={(event) => event.stopPropagation()}>
@@ -510,4 +510,10 @@ export function PhotoReplaceModal({
       ) : null}
     </>
   );
+
+  if (typeof document === "undefined") {
+    return modalContent;
+  }
+
+  return createPortal(modalContent, document.body);
 }

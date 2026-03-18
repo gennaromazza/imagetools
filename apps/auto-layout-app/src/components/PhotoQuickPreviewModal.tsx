@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import {
   COLOR_LABEL_NAMES,
@@ -206,8 +207,7 @@ export function PhotoQuickPreviewModal({
   const rating = getAssetRating(asset);
   const pickStatus = getAssetPickStatus(asset);
   const colorLabel = getAssetColorLabel(asset);
-
-  return (
+  const previewContent = (
     <div className="quick-preview" onClick={onClose} role="dialog" aria-modal="true" aria-label="Anteprima foto a schermo intero">
       <div className="quick-preview__chrome">
         <div className="quick-preview__title">
@@ -339,4 +339,10 @@ export function PhotoQuickPreviewModal({
       ) : null}
     </div>
   );
+
+  if (typeof document === "undefined") {
+    return previewContent;
+  }
+
+  return createPortal(previewContent, document.body);
 }
