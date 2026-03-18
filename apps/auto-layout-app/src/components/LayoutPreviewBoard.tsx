@@ -1521,9 +1521,43 @@ export function LayoutPreviewBoard({
     },
     [replaceTarget, onAssetDropped, onSelectPage]
   );
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
+  const autoScrollVelocityRef = useRef(0);
+  const autoScrollTargetRef = useRef<HTMLElement | Window | null>(null);
+  const dragPageJumpTimeoutRef = useRef<number | null>(null);
+  const dragPageJumpTargetIdRef = useRef<string | null>(null);
+  const manualPageSelectionRef = useRef<{ pageId: string; expiresAt: number } | null>(null);
+
+  const clearDragPageJump = useCallback(() => {
+    if (dragPageJumpTimeoutRef.current !== null) {
+      window.clearTimeout(dragPageJumpTimeoutRef.current);
+      dragPageJumpTimeoutRef.current = null;
+    }
+    dragPageJumpTargetIdRef.current = null;
+    setDragChipTargetPageId(null);
+  }, []);
+
+  const setManualPageSelectionLock = useCallback((pageId: string, durationMs = 1200) => {
+    manualPageSelectionRef.current = {
+      pageId,
+      expiresAt: Date.now() + durationMs
+    };
+  }, []);
+
+  const clearManualPageSelectionLock = useCallback((pageId?: string) => {
+    if (!manualPageSelectionRef.current) {
+      return;
+    }
+
+    if (!pageId || manualPageSelectionRef.current.pageId === pageId) {
+      manualPageSelectionRef.current = null;
+    }
+  }, []);
 
   const handleJumpToPage = useCallback(
     (page: GeneratedPageLayout) => {
+      setManualPageSelectionLock(page.id);
       onSelectPage(page.id, page.slotDefinitions[0]?.id);
 
       if (typeof document !== "undefined") {
@@ -1535,24 +1569,9 @@ export function LayoutPreviewBoard({
         });
       }
     },
-    [onSelectPage]
+    [onSelectPage, setManualPageSelectionLock]
   );
 
-  const canvasRef = useRef<HTMLDivElement | null>(null);
-  const autoScrollFrameRef = useRef<number | null>(null);
-  const autoScrollVelocityRef = useRef(0);
-  const autoScrollTargetRef = useRef<HTMLElement | Window | null>(null);
-  const dragPageJumpTimeoutRef = useRef<number | null>(null);
-  const dragPageJumpTargetIdRef = useRef<string | null>(null);
-
-  const clearDragPageJump = useCallback(() => {
-    if (dragPageJumpTimeoutRef.current !== null) {
-      window.clearTimeout(dragPageJumpTimeoutRef.current);
-      dragPageJumpTimeoutRef.current = null;
-    }
-    dragPageJumpTargetIdRef.current = null;
-    setDragChipTargetPageId(null);
-  }, []);
 
   const scheduleDragPageJump = useCallback(
     (page: GeneratedPageLayout | null) => {
@@ -1748,6 +1767,18 @@ export function LayoutPreviewBoard({
           return;
         }
 
+        const manualSelection = manualPageSelectionRef.current;
+        if (manualSelection) {
+          if (Date.now() < manualSelection.expiresAt) {
+            if (bestPageId === manualSelection.pageId && bestRatio >= 0.55) {
+              clearManualPageSelectionLock(bestPageId);
+            }
+            return;
+          }
+
+          clearManualPageSelectionLock();
+        }
+
         const nextPage = pagesForStudio.find((page) => page.id === bestPageId);
         if (!nextPage) {
           return;
@@ -1767,7 +1798,7 @@ export function LayoutPreviewBoard({
     return () => {
       observer.disconnect();
     };
-  }, [activePage?.id, dragState, onSelectPage, pagesForStudio]);
+  }, [activePage?.id, clearManualPageSelectionLock, dragState, onSelectPage, pagesForStudio]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -2839,6 +2870,9 @@ export function LayoutPreviewBoard({
     </div>
   );
 }
+
+
+
 
 
 
