@@ -8,6 +8,7 @@ import {
   createPage,
   moveImageBetweenSlots,
   placeImageInSlot,
+  rearrangePageImages,
   rebalancePagesForAssignedImages,
   removePage,
   updatePageSheetSpec,
@@ -1062,7 +1063,19 @@ function AppContent() {
       result.pages.find((page) => page.id === move.sourcePageId)?.assignments.find((assignment) => assignment.slotId === move.sourceSlotId)?.imageId ??
       dragState?.imageId ??
       null;
-    let nextResult = moveImageBetweenSlots(result, move);
+    const targetPage = result.pages.find((page) => page.id === move.targetPageId);
+    const targetAssignment = targetPage?.assignments.find((assignment) => assignment.slotId === move.targetSlotId);
+    const isSamePageOccupiedDrop =
+      move.sourcePageId === move.targetPageId &&
+      move.sourceSlotId !== move.targetSlotId &&
+      Boolean(targetAssignment) &&
+      Boolean(draggedImageId);
+    let nextResult = isSamePageOccupiedDrop && draggedImageId
+      ? rearrangePageImages(result, {
+          pageId: move.targetPageId,
+          preferredImageId: draggedImageId
+        })
+      : moveImageBetweenSlots(result, move);
 
     if (move.sourcePageId !== move.targetPageId) {
       nextResult = rebalancePagesForAssignedImages(nextResult, [move.sourcePageId, move.targetPageId]);
@@ -1075,7 +1088,9 @@ function AppContent() {
       selectedSlotKey: nextPlacement ? `${nextPlacement.pageId}:${nextPlacement.slotId}` : null,
       activity:
         move.sourcePageId === move.targetPageId
-          ? `Foto riposizionata nel foglio ${move.targetPageId}.`
+          ? isSamePageOccupiedDrop
+            ? `Foglio ${move.targetPageId} riorganizzato automaticamente attorno alla foto spostata.`
+            : `Foto riposizionata nel foglio ${move.targetPageId}.`
           : `Foto spostata tra fogli con riadattamento automatico dei layout.`
     });
   }
@@ -1129,7 +1144,9 @@ function AppContent() {
       selectedPageId: nextPlacement?.pageId ?? pageId,
       selectedSlotKey: nextPlacement ? `${nextPlacement.pageId}:${nextPlacement.slotId}` : selectedSlotKey,
       activity:
-        previousUsage && previousUsage.pageId !== pageId
+        previousUsage?.pageId === pageId
+          ? `Foglio ${pageId} riorganizzato automaticamente attorno alla foto selezionata.`
+          : previousUsage && previousUsage.pageId !== pageId
           ? `Foto aggiunta al foglio ${nextPlacement?.pageNumber ?? pageId} e layout riadattato automaticamente.`
           : imageAlreadyActive
             ? `Foglio ${pageId} espanso con una nuova foto e layout aggiornato.`

@@ -249,7 +249,10 @@ export function addImageToPage(
   }
 
   if (existingPlacement?.page.id === targetPage.id) {
-    return result;
+    return rearrangePageImages(result, {
+      pageId: request.pageId,
+      preferredImageId: request.imageId
+    });
   }
 
   if (existingPlacement) {
@@ -292,6 +295,75 @@ export function addImageToPage(
     warnings:
       assignments.length < assets.length
         ? ["Il foglio non puo' contenere tutte le foto: scegli un altro layout o crea un nuovo foglio."]
+        : []
+  });
+
+  Object.assign(targetPage, nextPage);
+  return finalize(result, pages);
+}
+
+export function rearrangePageImages(
+  result: AutoLayoutResult,
+  request: { pageId: string; preferredImageId?: string }
+): AutoLayoutResult {
+  const pages = clonePages(result);
+  const targetPage = pages.find((page) => page.id === request.pageId);
+
+  if (!targetPage) {
+    return result;
+  }
+
+  const imageIds = collectAssignedImageIds(targetPage);
+  if (imageIds.length === 0) {
+    return result;
+  }
+
+  const preferredImageId = request.preferredImageId;
+  const prioritizedImageIds =
+    preferredImageId && imageIds.includes(preferredImageId)
+      ? [preferredImageId, ...imageIds.filter((imageId) => imageId !== preferredImageId)]
+      : imageIds;
+
+  const assets = prioritizedImageIds
+    .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
+    .filter(Boolean) as typeof result.request.assets;
+
+  if (assets.length === 0) {
+    return result;
+  }
+
+  const compatibleTemplates = result.availableTemplates.filter(
+    (template) => assets.length >= template.minPhotos && assets.length <= template.maxPhotos
+  );
+  const alternativeTemplates = compatibleTemplates.filter((template) => template.id !== targetPage.templateId);
+  const nextTemplate =
+    alternativeTemplates.length > 0
+      ? selectBestTemplate(assets, alternativeTemplates, targetPage.sheetSpec)
+      : selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
+  const previousAssignments = new Map(targetPage.assignments.map((assignment) => [assignment.imageId, assignment]));
+  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode).map((assignment) => ({
+    ...(previousAssignments.get(assignment.imageId)
+      ? {
+          fitMode: previousAssignments.get(assignment.imageId)?.fitMode,
+          zoom: previousAssignments.get(assignment.imageId)?.zoom,
+          offsetX: previousAssignments.get(assignment.imageId)?.offsetX,
+          offsetY: previousAssignments.get(assignment.imageId)?.offsetY,
+          rotation: previousAssignments.get(assignment.imageId)?.rotation,
+          locked: previousAssignments.get(assignment.imageId)?.locked
+        }
+      : {}),
+    ...assignment
+  }));
+
+  const nextPage = syncPageImageIds({
+    ...targetPage,
+    templateId: nextTemplate.id,
+    templateLabel: nextTemplate.label,
+    slotDefinitions: nextTemplate.slots,
+    assignments,
+    warnings:
+      assignments.length < assets.length
+        ? ["Alcune immagini non possono essere inserite nel template selezionato."]
         : []
   });
 

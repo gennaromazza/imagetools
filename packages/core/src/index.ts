@@ -7,6 +7,7 @@ export {
   createPage,
   moveImageBetweenSlots,
   placeImageInSlot,
+  rearrangePageImages,
   rebalancePagesForAssignedImages,
   removePage,
   updatePageSheetSpec,

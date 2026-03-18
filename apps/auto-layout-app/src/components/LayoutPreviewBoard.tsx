@@ -488,7 +488,9 @@ const SheetSurface = memo(function SheetSurface({
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
                       setDragIntentLabel(
                         assignment
-                          ? "Rilascia per spostare o scambiare la foto in questo slot"
+                          ? dragState.sourcePageId === page.id
+                            ? "Rilascia per riorganizzare automaticamente questo foglio attorno alla foto trascinata"
+                            : "Rilascia per spostare o scambiare la foto in questo slot"
                           : "Rilascia per spostare la foto in questo slot"
                       );
                       return;
@@ -758,7 +760,9 @@ const SheetSurface = memo(function SheetSurface({
             event.dataTransfer.dropEffect = "move";
             setDragIntentLabel(
               dragState.kind === "slot"
-                ? "Rilascia per spostare questa foto qui e riadattare il layout del foglio"
+                ? dragState.sourcePageId === page.id
+                  ? "Rilascia per riorganizzare questo foglio attorno alla foto trascinata"
+                  : "Rilascia per spostare questa foto qui e riadattare il layout del foglio"
                 : "Rilascia per aggiungere la foto e ricalcolare il layout del foglio"
             );
           }}
@@ -776,7 +780,9 @@ const SheetSurface = memo(function SheetSurface({
           <strong>Riadatta questo foglio</strong>
           <span>
             {dragState.kind === "slot"
-              ? "Rilascia qui per spostare questa foto in questo foglio e aggiornare il layout."
+              ? dragState.sourcePageId === page.id
+                ? "Rilascia qui per riorganizzare il foglio corrente attorno a questa foto."
+                : "Rilascia qui per spostare questa foto in questo foglio e aggiornare il layout."
               : "Rilascia qui per aggiungere la foto a questo foglio e ricalcolare l'impaginazione."}
           </span>
         </div>
