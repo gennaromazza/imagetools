@@ -934,6 +934,18 @@ img {
   font-weight: 700;
 }
 
+.template-drawer__recommend-badge {
+  display: inline-flex;
+  justify-self: start;
+  padding: 0.28rem 0.58rem;
+  border-radius: 999px;
+  border: 1px solid rgba(142, 178, 142, 0.4);
+  background: rgba(142, 178, 142, 0.14);
+  color: #d8ead8;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
 .template-card {
   display: grid;
   gap: 0.8rem;
@@ -951,6 +963,11 @@ img {
   transform: translateY(-1px);
   border-color: rgba(226, 155, 88, 0.45);
   background: rgba(226, 155, 88, 0.1);
+}
+
+.template-card--recommended {
+  border-color: rgba(142, 178, 142, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(142, 178, 142, 0.18);
 }
 
 .template-card strong {

@@ -11,6 +11,7 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { SHEET_PRESETS } from "@photo-tools/presets";
+import { selectBestTemplate } from "@photo-tools/layout-engine";
 import type {
   AutoLayoutResult,
   GeneratedPageLayout,
@@ -982,6 +983,21 @@ export function LayoutPreviewBoard({
 
     return null;
   }, [activePage, compatibleTemplates, templatePreviewId]);
+  const recommendedTemplateId = useMemo(() => {
+    if (!activePage || compatibleTemplates.length === 0) {
+      return null;
+    }
+
+    const currentAssets = activePage.imageIds
+      .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
+      .filter(Boolean) as ImageAsset[];
+
+    if (currentAssets.length === 0) {
+      return null;
+    }
+
+    return selectBestTemplate(currentAssets, compatibleTemplates, activePage.sheetSpec).id;
+  }, [activePage, compatibleTemplates, result.request.assets]);
   
   const filteredAssets = useMemo(
     () =>
@@ -1631,6 +1647,9 @@ export function LayoutPreviewBoard({
                         ? "Stessa struttura attuale"
                         : "Selezionalo per vedere questo foglio riorganizzato con un layout alternativo"}
                     </span>
+                    {previewTemplate && previewTemplate.id === recommendedTemplateId ? (
+                      <span className="template-drawer__recommend-badge">Consigliato</span>
+                    ) : null}
                     <span className="template-drawer__density-badge">
                       {describeTemplateDensity(activePage.slotDefinitions, previewTemplate?.slots ?? null)}
                     </span>
@@ -1643,11 +1662,13 @@ export function LayoutPreviewBoard({
                   <button
                     key={template.id}
                     type="button"
-                    className={
-                      template.id === activePage.templateId
-                        ? "template-card template-card--active"
-                        : "template-card"
-                    }
+                    className={[
+                      "template-card",
+                      template.id === activePage.templateId ? "template-card--active" : "",
+                      template.id === recommendedTemplateId ? "template-card--recommended" : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     onMouseEnter={() => setTemplatePreviewId(template.id)}
                     onFocus={() => setTemplatePreviewId(template.id)}
                     onClick={() => handleTemplateSelect(template.id)}
@@ -1655,6 +1676,9 @@ export function LayoutPreviewBoard({
                     {renderTemplateMiniMap(template)}
                     <strong>{template.label}</strong>
                     <span>{template.description}</span>
+                    {template.id === recommendedTemplateId ? (
+                      <span className="template-drawer__recommend-badge">Consigliato</span>
+                    ) : null}
                     <span className="template-drawer__density-badge">
                       {describeTemplateDensity(activePage.slotDefinitions, template.slots)}
                     </span>
