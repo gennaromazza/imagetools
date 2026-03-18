@@ -733,7 +733,33 @@ const SheetSurface = memo(function SheetSurface({
                   type="button"
                   data-preview-asset-id={assignment?.imageId}
                   className={canReposition ? "slot-asset slot-asset--repositionable" : "slot-asset"}
-                  draggable={false}
+                  draggable={Boolean(assignment)}
+                  title={
+                    assignment
+                      ? "Trascina per spostare la foto tra slot e fogli. Usa Alt piu trascinamento per riposizionarla dentro lo slot."
+                      : "Trascina qui una foto per assegnarla allo slot."
+                  }
+                  onDragStart={(event) => {
+                    if (!assignment) {
+                      event.preventDefault();
+                      return;
+                    }
+
+                    if (event.altKey) {
+                      event.preventDefault();
+                      return;
+                    }
+
+                    event.stopPropagation();
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", assignment.imageId);
+                    onStartSlotDrag(page.id, slot.id, assignment.imageId);
+                    setStableDragIntentLabel("Trascina la foto su uno slot, un foglio o l'area non usate");
+                  }}
+                  onDragEnd={(event) => {
+                    event.stopPropagation();
+                    onDragEnd();
+                  }}
                   onWheel={(event) => {
                     if (!assignment || !interactive) {
                       return;
@@ -761,7 +787,7 @@ const SheetSurface = memo(function SheetSurface({
                     });
                   }}
                   onPointerDown={(event) => {
-                    if (!assignment || !canReposition || event.button !== 0) {
+                    if (!assignment || !canReposition || event.button !== 0 || !event.altKey) {
                       return;
                     }
 
@@ -865,26 +891,6 @@ const SheetSurface = memo(function SheetSurface({
 
                   {assignment ? (
                     <div className="slot-quick-toolbar__group slot-quick-toolbar__group--top-right">
-                      <button
-                        type="button"
-                        className="slot-quick-toolbar__button"
-                        draggable
-                        onClick={(event) => event.stopPropagation()}
-                        onDragStart={(event) => {
-                          event.stopPropagation();
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", assignment.imageId);
-                          onStartSlotDrag(page.id, slot.id, assignment.imageId);
-                        }}
-                        onDragEnd={(event) => {
-                          event.stopPropagation();
-                          onDragEnd();
-                        }}
-                        aria-label={`Sposta foto dallo slot ${slot.id}`}
-                        title="Trascina per spostare o aggiungere in un altro foglio"
-                      >
-                        Sposta
-                      </button>
                       <button
                         type="button"
                         className="slot-quick-toolbar__button slot-quick-toolbar__button--danger"
