@@ -57,10 +57,7 @@ interface CropTarget {
   slotId: string;
 }
 
-type ResizePane = "left" | "right";
-
-const LAYOUT_STRIP_ITEM_WIDTH = 206;
-const LAYOUT_STRIP_OVERSCAN = 3;
+type ResizePane = "left";
 
 interface LayoutPreviewBoardProps {
   result: AutoLayoutResult;
@@ -166,8 +163,6 @@ function getSheetPreviewStyle(page: GeneratedPageLayout): CSSProperties {
     backgroundPosition: backgroundImage ? "center" : undefined
   };
 }
-
-const SHEET_RULER_SIZE = 28;
 
 function normalizeGuides(values: number[] | undefined, maxCm: number): number[] {
   if (!Array.isArray(values)) {
@@ -298,54 +293,6 @@ function buildAssignmentsBySlotId(page: GeneratedPageLayout): Map<string, Layout
   return new Map(page.assignments.map((assignment) => [assignment.slotId, assignment] as const));
 }
 
-function resolveDropSlotId(
-  page: GeneratedPageLayout,
-  assignmentsBySlotId: Map<string, LayoutAssignment>,
-  clientX: number,
-  clientY: number,
-  previewRect: DOMRect
-): string | null {
-  if (previewRect.width <= 0 || previewRect.height <= 0) {
-    return page.slotDefinitions.find((slot) => !assignmentsBySlotId.has(slot.id))?.id ?? page.slotDefinitions[0]?.id ?? null;
-  }
-
-  const relativeX = (clientX - previewRect.left) / previewRect.width;
-  const relativeY = (clientY - previewRect.top) / previewRect.height;
-  const emptySlots = page.slotDefinitions.filter((slot) => !assignmentsBySlotId.has(slot.id));
-  const directSlot = emptySlots.find((slot) => {
-    const rect = getSlotDisplayRect(page, slot);
-    return (
-      relativeX >= rect.left &&
-      relativeX <= rect.left + rect.width &&
-      relativeY >= rect.top &&
-      relativeY <= rect.top + rect.height
-    );
-  });
-
-  if (directSlot) {
-    return directSlot.id;
-  }
-
-  const candidateSlots = emptySlots;
-  if (candidateSlots.length === 0) {
-    return null;
-  }
-
-  const nearestSlot = candidateSlots.reduce<GeneratedPageLayout["slotDefinitions"][number] | null>((bestSlot, slot) => {
-    const rect = getSlotDisplayRect(page, slot);
-    const slotCenterX = rect.left + rect.width / 2;
-    const slotCenterY = rect.top + rect.height / 2;
-    const bestRect = bestSlot ? getSlotDisplayRect(page, bestSlot) : null;
-    const bestCenterX = bestRect ? bestRect.left + bestRect.width / 2 : 0;
-    const bestCenterY = bestRect ? bestRect.top + bestRect.height / 2 : 0;
-    const slotDistance = Math.hypot(relativeX - slotCenterX, relativeY - slotCenterY);
-    const bestDistance = bestSlot ? Math.hypot(relativeX - bestCenterX, relativeY - bestCenterY) : Number.POSITIVE_INFINITY;
-    return slotDistance < bestDistance ? slot : bestSlot;
-  }, null);
-
-  return nearestSlot?.id ?? null;
-}
-
 function findVerticalScrollContainer(element: HTMLElement | null): HTMLElement | Window {
   let current = element?.parentElement ?? null;
 
@@ -397,19 +344,6 @@ function CommitOnBlurNumberField({
     setDraftValue(formatMeasurement(value));
   }, [allowZero, draftValue, onCommit, value]);
 
-
-  useEffect(() => {
-    const parsed = Number(draftValue);
-    if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0) || parsed === value) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      onCommit(parsed);
-    }, 120);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [allowZero, draftValue, onCommit, value]);
   return (
     <label className={className ? `field ${className}` : "field"}>
       <span>{label}</span>
@@ -578,6 +512,7 @@ const SheetSurface = memo(function SheetSurface({
   const assignmentsBySlotId = useMemo(() => buildAssignmentsBySlotId(page), [page]);
   const previewRef = useRef<HTMLDivElement | null>(null);
   const [dragIntentLabel, setDragIntentLabel] = useState<string | null>(null);
+  const dragIntentLabelRef = useRef<string | null>(null);
   const panStateRef = useRef<{
     pointerId: number;
     slotId: string;
@@ -604,9 +539,19 @@ const SheetSurface = memo(function SheetSurface({
 
   useEffect(() => {
     if (!dragState) {
+      dragIntentLabelRef.current = null;
       setDragIntentLabel(null);
     }
   }, [dragState]);
+
+  const setStableDragIntentLabel = useCallback((nextLabel: string | null) => {
+    if (dragIntentLabelRef.current === nextLabel) {
+      return;
+    }
+
+    dragIntentLabelRef.current = nextLabel;
+    setDragIntentLabel(nextLabel);
+  }, []);
 
   const flushPanUpdate = useCallback(() => {
     if (pendingPanRef.current) {
@@ -646,7 +591,7 @@ const SheetSurface = memo(function SheetSurface({
           ? (event) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
-              setDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
+              setStableDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
             }
           : undefined
       }
@@ -654,7 +599,7 @@ const SheetSurface = memo(function SheetSurface({
 	        interactive
 	          ? (event) => {
 	              event.preventDefault();
-                setDragIntentLabel(null);
+                setStableDragIntentLabel(null);
 	            }
 	          : undefined
 	      }
@@ -662,7 +607,7 @@ const SheetSurface = memo(function SheetSurface({
         interactive
           ? (event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setDragIntentLabel(null);
+                setStableDragIntentLabel(null);
               }
             }
           : undefined
@@ -725,7 +670,7 @@ const SheetSurface = memo(function SheetSurface({
                     }
 
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
-                      setDragIntentLabel(
+                      setStableDragIntentLabel(
                         assignment
                           ? dragState.sourcePageId === page.id
                             ? "Rilascia per riorganizzare automaticamente questo foglio attorno alla foto trascinata"
@@ -735,7 +680,7 @@ const SheetSurface = memo(function SheetSurface({
                       return;
                     }
 
-                    setDragIntentLabel(
+                    setStableDragIntentLabel(
                       assignment
                         ? "Rilascia per sostituire la foto in questo slot"
                         : "Rilascia per inserire la foto in questo slot"
@@ -755,7 +700,7 @@ const SheetSurface = memo(function SheetSurface({
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
                       if (dragState.sourcePageId !== page.id && assignment) {
                         onAddToPage(page.id, dragState.imageId);
-                        setDragIntentLabel(null);
+                        setStableDragIntentLabel(null);
                         return;
                       }
 
@@ -769,7 +714,7 @@ const SheetSurface = memo(function SheetSurface({
                     }
 
                     onAssetDropped(page.id, slot.id, dragState.imageId);
-                    setDragIntentLabel(null);
+                    setStableDragIntentLabel(null);
                   }
                 : undefined
             }
@@ -777,7 +722,7 @@ const SheetSurface = memo(function SheetSurface({
               interactive
                 ? (event) => {
                     event.stopPropagation();
-                    setDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
+                    setStableDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
                   }
                 : undefined
             }
@@ -1041,7 +986,7 @@ const SheetSurface = memo(function SheetSurface({
             event.preventDefault();
             event.stopPropagation();
             event.dataTransfer.dropEffect = "move";
-            setDragIntentLabel(
+            setStableDragIntentLabel(
               dragState.kind === "slot"
                 ? dragState.sourcePageId === page.id
                   ? "Rilascia per riorganizzare questo foglio attorno alla foto trascinata"
@@ -1053,11 +998,11 @@ const SheetSurface = memo(function SheetSurface({
             event.preventDefault();
             event.stopPropagation();
             onAddToPage(page.id, dragState.imageId);
-            setDragIntentLabel(null);
+            setStableDragIntentLabel(null);
           }}
           onDragLeave={(event) => {
             event.stopPropagation();
-            setDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
+            setStableDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
           }}
         >
           <strong>Riadatta questo foglio</strong>
@@ -1076,60 +1021,6 @@ const SheetSurface = memo(function SheetSurface({
         </div>
       ) : null}
     </div>
-  );
-});
-
-function renderSheetThumbnail(page: GeneratedPageLayout, isActive: boolean) {
-  const assignmentsBySlotId = buildAssignmentsBySlotId(page);
-
-  return (
-    <div
-      className={isActive ? "sheet-thumbnail sheet-thumbnail--active" : "sheet-thumbnail"}
-      style={{ aspectRatio: getSheetAspectRatio(page) }}
-      aria-hidden="true"
-    >
-      {renderGuideLines(page)}
-      {page.slotDefinitions.map((slot) => {
-        const hasAssignment = assignmentsBySlotId.has(slot.id);
-
-        return (
-          <span
-            key={slot.id}
-            className={hasAssignment ? "sheet-thumbnail__slot sheet-thumbnail__slot--filled" : "sheet-thumbnail__slot"}
-            style={{
-              left: `${slot.x * 100}%`,
-              top: `${slot.y * 100}%`,
-              width: `${slot.width * 100}%`,
-              height: `${slot.height * 100}%`
-            }}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
-const SheetThumbnailCard = memo(function SheetThumbnailCard({
-  page,
-  isActive,
-  onSelect
-}: {
-  page: GeneratedPageLayout;
-  isActive: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className={isActive ? "layout-strip__item layout-strip__item--active" : "layout-strip__item"}
-      onClick={onSelect}
-    >
-      <div className="layout-strip__thumb">
-        {renderSheetThumbnail(page, isActive)}
-      </div>
-      <strong>Foglio {page.pageNumber}</strong>
-      <span>{page.templateLabel}</span>
-    </button>
   );
 });
 
@@ -1193,16 +1084,6 @@ function SheetWithRulers({
     </div>
   );
 }
-function renderEmptySheetPlaceholder(label: string) {
-  return (
-    <div className="sheet-preview sheet-preview--hero sheet-preview--placeholder">
-      <div className="sheet-preview__placeholder-copy">
-        <strong>{label}</strong>
-        <span>Seleziona un altro foglio oppure crea nuove pagine dalle foto non usate.</span>
-      </div>
-    </div>
-  );
-}
 
 export function LayoutPreviewBoard({
   result,
@@ -1239,7 +1120,6 @@ export function LayoutPreviewBoard({
   zoom
 }: LayoutPreviewBoardProps) {
   const [isTemplateChooserOpen, setIsTemplateChooserOpen] = useState(false);
-  const [isLayoutStripExpanded, setIsLayoutStripExpanded] = useState(false);
   const [templateApplyScope, setTemplateApplyScope] = useState<"single" | "visible">("single");
   const [templatePreviewId, setTemplatePreviewId] = useState<string | null>(null);
   const [pendingTemplateChange, setPendingTemplateChange] = useState<TemplateChangeConfirmation | null>(null);
@@ -1248,22 +1128,14 @@ export function LayoutPreviewBoard({
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null);
   const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
   const [leftRailWidth, setLeftRailWidth] = useState(260);
-  const [inspectorWidth, setInspectorWidth] = useState(320);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
-  const [layoutStripScrollLeft, setLayoutStripScrollLeft] = useState(0);
-  const [layoutStripViewportWidth, setLayoutStripViewportWidth] = useState(0);
   const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
+  const dragChipTargetPageIdRef = useRef<string | null>(null);
   const [verticalGuideDraft, setVerticalGuideDraft] = useState("0");
   const [horizontalGuideDraft, setHorizontalGuideDraft] = useState("0");
-  const layoutStripRef = useRef<HTMLDivElement>(null);
-  const layoutStripFrameRef = useRef<number | null>(null);
   const resizeStateRef = useRef<{ pane: ResizePane; startX: number; startWidth: number } | null>(null);
   const activePage = result.pages.find((page) => page.id === selectedPageId) ?? result.pages[0] ?? null;
   const activeIndex = activePage ? result.pages.findIndex((page) => page.id === activePage.id) : 0;
-  const spreadStartIndex = activeIndex <= 0 ? 0 : activeIndex % 2 === 0 ? activeIndex : activeIndex - 1;
-  const spreadPages = result.pages.slice(spreadStartIndex, spreadStartIndex + 2);
-  const leftPage = spreadPages[0] ?? null;
-  const rightPage = spreadPages[1] ?? null;
   const previousPage = activeIndex > 0 ? result.pages[activeIndex - 1] ?? null : null;
   const nextPage = activeIndex >= 0 ? result.pages[activeIndex + 1] ?? null : null;
   const compatibleTemplates = useMemo(
@@ -1294,15 +1166,15 @@ export function LayoutPreviewBoard({
     }
 
     const currentAssets = activePage.imageIds
-      .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
-      .filter(Boolean) as ImageAsset[];
+      .map((imageId) => assetsById.get(imageId))
+      .filter((asset): asset is ImageAsset => Boolean(asset));
 
     if (currentAssets.length === 0) {
       return null;
     }
 
     return selectBestTemplate(currentAssets, compatibleTemplates, activePage.sheetSpec).id;
-  }, [activePage, compatibleTemplates, result.request.assets]);
+  }, [activePage, assetsById, compatibleTemplates]);
   
   const filteredAssets = useMemo(
     () =>
@@ -1374,23 +1246,6 @@ export function LayoutPreviewBoard({
   const cropSlot = cropTarget && cropPage ? cropPage.slotDefinitions.find((slot) => slot.id === cropTarget.slotId) : undefined;
   const cropAssignment = cropTarget && cropPage ? buildAssignmentsBySlotId(cropPage).get(cropTarget.slotId) : undefined;
   const cropAsset = cropAssignment ? assetsById.get(cropAssignment.imageId) : undefined;
-  const virtualizedStripStartIndex = useMemo(
-    () => Math.max(0, Math.floor(layoutStripScrollLeft / LAYOUT_STRIP_ITEM_WIDTH) - 1),
-    [layoutStripScrollLeft]
-  );
-  const visibleStripItems = useMemo(
-    () => Math.max(1, Math.ceil(layoutStripViewportWidth / LAYOUT_STRIP_ITEM_WIDTH) + LAYOUT_STRIP_OVERSCAN),
-    [layoutStripViewportWidth]
-  );
-  const virtualizedStripEndIndex = useMemo(
-    () => Math.min(deferredPages.length, virtualizedStripStartIndex + visibleStripItems),
-    [deferredPages.length, visibleStripItems, virtualizedStripStartIndex]
-  );
-  const visibleStripPages = useMemo(
-    () => deferredPages.slice(virtualizedStripStartIndex, virtualizedStripEndIndex),
-    [deferredPages, virtualizedStripEndIndex, virtualizedStripStartIndex]
-  );
-
   // Memoized callbacks to reduce re-renders
   const handleReplaceTargetOpen = useCallback(
     (pageId: string, pageNumber: number, slotId: string, currentImageId?: string) => {
@@ -1510,17 +1365,14 @@ export function LayoutPreviewBoard({
       resizeStateRef.current = {
         pane,
         startX: event.clientX,
-        startWidth: pane === "left" ? leftRailWidth : inspectorWidth
+        startWidth: leftRailWidth
       };
       if (typeof document !== "undefined") {
         document.body.style.cursor = "col-resize";
         document.body.style.userSelect = "none";
       }
-      if (pane === "right" && isInspectorCollapsed) {
-        setIsInspectorCollapsed(false);
-      }
     },
-    [inspectorWidth, isInspectorCollapsed, leftRailWidth]
+    [leftRailWidth]
   );
 
   const handleTemplateSelect = useCallback(
@@ -1572,7 +1424,19 @@ export function LayoutPreviewBoard({
       dragPageJumpTimeoutRef.current = null;
     }
     dragPageJumpTargetIdRef.current = null;
-    setDragChipTargetPageId(null);
+    if (dragChipTargetPageIdRef.current !== null) {
+      dragChipTargetPageIdRef.current = null;
+      setDragChipTargetPageId(null);
+    }
+  }, []);
+
+  const setStableDragChipTargetPageId = useCallback((pageId: string | null) => {
+    if (dragChipTargetPageIdRef.current === pageId) {
+      return;
+    }
+
+    dragChipTargetPageIdRef.current = pageId;
+    setDragChipTargetPageId(pageId);
   }, []);
 
   const setManualPageSelectionLock = useCallback((pageId: string, durationMs = 1200) => {
@@ -1670,10 +1534,10 @@ export function LayoutPreviewBoard({
 
   useEffect(() => {
     if (!dragState) {
-      setDragChipTargetPageId(null);
+      setStableDragChipTargetPageId(null);
       clearDragPageJump();
     }
-  }, [clearDragPageJump, dragState]);
+  }, [clearDragPageJump, dragState, setStableDragChipTargetPageId]);
 
   const runAutoScroll = useCallback(() => {
     const target = autoScrollTargetRef.current;
@@ -1751,29 +1615,6 @@ export function LayoutPreviewBoard({
       clearDragPageJump();
     };
   }, [clearDragPageJump, dragState, stopAutoScroll]);
-
-  useEffect(() => {
-    const stripElement = layoutStripRef.current;
-
-    if (!stripElement) {
-      return;
-    }
-
-    const updateViewport = () => {
-      setLayoutStripViewportWidth(stripElement.clientWidth);
-    };
-
-    updateViewport();
-    const resizeObserver = new ResizeObserver(updateViewport);
-    resizeObserver.observe(stripElement);
-
-    return () => {
-      resizeObserver.disconnect();
-      if (layoutStripFrameRef.current !== null) {
-        cancelAnimationFrame(layoutStripFrameRef.current);
-      }
-    };
-  }, [isLayoutStripExpanded]);
 
   useEffect(() => {
     const preloadPages = result.pages.slice(Math.max(0, activeIndex - 1), Math.min(result.pages.length, activeIndex + 2));
@@ -1874,10 +1715,7 @@ export function LayoutPreviewBoard({
 
       if (resizeState.pane === "left") {
         setLeftRailWidth(clampValue(resizeState.startWidth + deltaX, 220, 420));
-        return;
       }
-
-      setInspectorWidth(clampValue(resizeState.startWidth - deltaX, 240, 420));
     };
 
     const handlePointerUp = () => {
@@ -1898,8 +1736,7 @@ export function LayoutPreviewBoard({
     return <p className="helper-copy">Non ci sono ancora fogli da mostrare.</p>;
   }
   const workspaceStyle = {
-    "--layout-rail-width": `${leftRailWidth}px`,
-    "--layout-inspector-width": "0px"
+    "--layout-rail-width": `${leftRailWidth}px`
   } as CSSProperties;
 
   return (
@@ -1908,7 +1745,7 @@ export function LayoutPreviewBoard({
         <div className="sheet-toolbar__summary">
           <span className="sheet-toolbar__eyebrow">Foglio attivo</span>
           <strong>
-            {activePage.sheetSpec.label} · {formatMeasurement(activePage.sheetSpec.widthCm)} x{" "}
+            {activePage.sheetSpec.label} | {formatMeasurement(activePage.sheetSpec.widthCm)} x{" "}
             {formatMeasurement(activePage.sheetSpec.heightCm)} cm
           </strong>
           <span>{pagesForStudio.length} fogli visibili | aspect ratio {activeAspectRatio} | template {activePage.templateLabel}</span>
@@ -2087,7 +1924,7 @@ export function LayoutPreviewBoard({
                         ? (event) => {
                             event.preventDefault();
                             event.dataTransfer.dropEffect = "move";
-                            setDragChipTargetPageId(page.id);
+                            setStableDragChipTargetPageId(page.id);
                             scheduleDragPageJump(page);
                           }
                         : undefined
@@ -2251,7 +2088,7 @@ export function LayoutPreviewBoard({
                           <span className="layout-studio__rail-eyebrow">Foglio {page.pageNumber}</span>
                           <strong>{page.templateLabel}</strong>
                           <p>
-                            {page.assignments.length} foto · {page.sheetSpec.label} · gap {page.sheetSpec.gapCm.toFixed(1)} cm
+                            {page.assignments.length} foto | {page.sheetSpec.label} | gap {page.sheetSpec.gapCm.toFixed(1)} cm
                           </p>
                           {showRebalancedBadge ? (
                             <span className="layout-studio__page-feedback" aria-live="polite">
@@ -2528,29 +2365,6 @@ export function LayoutPreviewBoard({
 
         </div>
 
-        <div
-          className={
-            isInspectorCollapsed
-              ? "layout-studio__splitter layout-studio__splitter--right layout-studio__splitter--collapsed"
-              : "layout-studio__splitter layout-studio__splitter--right"
-          }
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Ridimensiona pannello destro"
-          onPointerDown={handlePaneResizeStart("right")}
-        >
-          <button
-            type="button"
-            className="layout-studio__splitter-toggle"
-            onClick={(event) => {
-              event.stopPropagation();
-              setIsInspectorCollapsed((current) => !current);
-            }}
-          >
-            {isInspectorCollapsed ? "Mostra pannello" : "Nascondi pannello"}
-          </button>
-        </div>
-
         <aside
           className={
             isInspectorCollapsed
@@ -2679,14 +2493,14 @@ export function LayoutPreviewBoard({
                 </label>
                 <div className="inline-grid inline-grid--3">
                   <label className="field inspector-field">
-                    <span>Unità righello</span>
+                    <span>Unita righello</span>
                     <select
                       value={activePage.sheetSpec.rulerUnit ?? "cm"}
                       onChange={(event) =>
                         onPageSheetStyleChange(
                           activePage.id,
                           { rulerUnit: event.target.value as RulerUnit },
-                          `Unità righello aggiornata per il foglio ${activePage.pageNumber}.`
+                          `Unita righello aggiornata per il foglio ${activePage.pageNumber}.`
                         )
                       }
                     >
@@ -2838,7 +2652,7 @@ export function LayoutPreviewBoard({
               </div>
 
 	              <div className="inspector-sheet-settings__ratio">
-	                Aspect ratio {activeAspectRatio} · margine {activePage.sheetSpec.marginCm.toFixed(1)} cm · gap{" "}
+	                Aspect ratio {activeAspectRatio} | margine {activePage.sheetSpec.marginCm.toFixed(1)} cm | gap{" "}
                   {activePage.sheetSpec.gapCm.toFixed(1)} cm
 	              </div>
 

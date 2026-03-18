@@ -1113,9 +1113,7 @@ img {
   grid-template-columns:
     var(--layout-rail-width, 260px)
     14px
-    minmax(0, 1fr)
-    14px
-    var(--layout-inspector-width, 320px);
+    minmax(0, 1fr);
   gap: var(--space-3);
   align-items: start;
 }
@@ -1153,33 +1151,9 @@ img {
   border-color: rgba(226, 155, 88, 0.35);
 }
 
-.layout-studio__splitter--right {
-  display: grid;
-  align-items: center;
-  justify-items: center;
-}
-
 .layout-studio__splitter--collapsed {
   background: rgba(226, 155, 88, 0.12);
   border-color: rgba(226, 155, 88, 0.4);
-}
-
-.layout-studio__splitter-toggle {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 0.4rem 0;
-  cursor: pointer;
-}
-
-.layout-studio__splitter-toggle:hover {
-  color: var(--text);
 }
 
 .layout-studio__rail-panel {
@@ -5734,14 +5708,6 @@ img {
   font-size: 0.9rem;
   color: #8b8680;
   margin: 0;
-}
-
-.layout-studio__workspace {
-  grid-template-columns: var(--layout-rail-width, 260px) 14px minmax(0, 1fr);
-}
-
-.layout-studio__splitter--right {
-  display: none;
 }
 
 .layout-studio__inspector {
