@@ -2080,6 +2080,31 @@ img {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
+.ribbon-photo--label-red {
+  border-color: rgba(185, 101, 88, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(185, 101, 88, 0.35);
+}
+
+.ribbon-photo--label-yellow {
+  border-color: rgba(215, 185, 95, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(215, 185, 95, 0.32);
+}
+
+.ribbon-photo--label-green {
+  border-color: rgba(111, 159, 104, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(111, 159, 104, 0.32);
+}
+
+.ribbon-photo--label-blue {
+  border-color: rgba(95, 137, 200, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(95, 137, 200, 0.34);
+}
+
+.ribbon-photo--label-purple {
+  border-color: rgba(139, 111, 199, 0.88);
+  box-shadow: inset 0 0 0 1px rgba(139, 111, 199, 0.34);
+}
+
 .ribbon-photo__image,
 .ribbon-photo__placeholder {
   width: 100%;

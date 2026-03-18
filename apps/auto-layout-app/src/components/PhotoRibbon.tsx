@@ -213,11 +213,11 @@ function PhotoRibbonContent({
                 className={
                   variant === "vertical"
                     ? isActive
-                      ? "ribbon-photo ribbon-photo--vertical ribbon-photo--dragging"
-                      : "ribbon-photo ribbon-photo--vertical"
+                      ? `ribbon-photo ribbon-photo--vertical ribbon-photo--dragging${asset.colorLabel ? ` ribbon-photo--label-${asset.colorLabel}` : ""}`
+                      : `ribbon-photo ribbon-photo--vertical${asset.colorLabel ? ` ribbon-photo--label-${asset.colorLabel}` : ""}`
                     : isActive
-                      ? "ribbon-photo ribbon-photo--dragging"
-                      : "ribbon-photo"
+                      ? `ribbon-photo ribbon-photo--dragging${asset.colorLabel ? ` ribbon-photo--label-${asset.colorLabel}` : ""}`
+                      : `ribbon-photo${asset.colorLabel ? ` ribbon-photo--label-${asset.colorLabel}` : ""}`
                 }
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", asset.id);

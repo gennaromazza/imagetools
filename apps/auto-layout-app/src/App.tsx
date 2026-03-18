@@ -657,7 +657,7 @@ function AppContent() {
     setRequest(wizardRequest);
     setResult(plannedResult);
     setShowOnboardingWizard(false);
-    setCurrentScreen("setup");
+    setCurrentScreen("studio");
     pushActivity(`Progetto "${wizardProjectName}" creato con successo.`);
   };
 

@@ -93,6 +93,57 @@ export function PhotoSelector({
     onPhotosChange(photos.map((photo) => (photo.id === id ? { ...photo, ...changes } : photo)));
   }
 
+  function applyKeyboardShortcut(photo: ImageAsset, key: string) {
+    const normalizedKey = key.toLowerCase();
+
+    if (/^[0-5]$/.test(key)) {
+      updatePhoto(photo.id, { rating: Number(key) });
+      return true;
+    }
+
+    if (normalizedKey === "p") {
+      updatePhoto(photo.id, { pickStatus: "picked" });
+      return true;
+    }
+
+    if (normalizedKey === "x") {
+      updatePhoto(photo.id, { pickStatus: "rejected" });
+      return true;
+    }
+
+    if (normalizedKey === "u") {
+      updatePhoto(photo.id, { pickStatus: "unmarked" });
+      return true;
+    }
+
+    if (key === "6") {
+      updatePhoto(photo.id, { colorLabel: "red" });
+      return true;
+    }
+
+    if (key === "7") {
+      updatePhoto(photo.id, { colorLabel: "yellow" });
+      return true;
+    }
+
+    if (key === "8") {
+      updatePhoto(photo.id, { colorLabel: "green" });
+      return true;
+    }
+
+    if (key === "9") {
+      updatePhoto(photo.id, { colorLabel: "blue" });
+      return true;
+    }
+
+    if (normalizedKey === "v") {
+      updatePhoto(photo.id, { colorLabel: "purple" });
+      return true;
+    }
+
+    return false;
+  }
+
   const allSelected = photos.length > 0 && selectedIds.length === photos.length;
   const someSelected = selectedIds.length > 0 && selectedIds.length < photos.length;
 
@@ -190,6 +241,10 @@ export function PhotoSelector({
                       event.preventDefault();
                       setPreviewAssetId(photo.id);
                     }
+
+                    if (applyKeyboardShortcut(photo, event.key)) {
+                      event.preventDefault();
+                    }
                   }}
                   onDoubleClick={() => setPreviewAssetId(photo.id)}
                 >
@@ -231,6 +286,7 @@ export function PhotoSelector({
                           type="button"
                           className={value <= rating ? "modal-photo-card__tiny-star modal-photo-card__tiny-star--active" : "modal-photo-card__tiny-star"}
                           onClick={() => updatePhoto(photo.id, { rating: value })}
+                          title={`${value} stella${value > 1 ? "e" : ""} · tasto ${value}`}
                         >
                           ★
                         </button>
@@ -244,6 +300,13 @@ export function PhotoSelector({
                           type="button"
                           className={pickStatus === value ? "quick-preview__pill quick-preview__pill--active" : "quick-preview__pill"}
                           onClick={() => updatePhoto(photo.id, { pickStatus: value })}
+                          title={
+                            value === "picked"
+                              ? "Segna come Pick · tasto P"
+                              : value === "rejected"
+                                ? "Segna come scartata · tasto X"
+                                : "Torna neutra · tasto U"
+                          }
                         >
                           {PICK_STATUS_LABELS[value]}
                         </button>
@@ -261,6 +324,9 @@ export function PhotoSelector({
                               : `asset-color-dot asset-color-dot--${value}`
                           }
                           onClick={() => updatePhoto(photo.id, { colorLabel: photo.colorLabel === value ? null : value })}
+                          title={`${COLOR_LABEL_NAMES[value]} · tasto ${
+                            value === "red" ? "6" : value === "yellow" ? "7" : value === "green" ? "8" : value === "blue" ? "9" : "V"
+                          }`}
                         />
                       ))}
                     </div>
@@ -273,7 +339,7 @@ export function PhotoSelector({
 
         <div className="photo-selector__footer">
           <p className="photo-selector__hint">
-            Seleziona le foto che vuoi impaginare. `Spazio` apre la review, `1-5` stelle, `P/X/U` stato, `6-9` colori.
+            Seleziona le foto che vuoi impaginare. `Spazio` apre la review, `1-5` stelle, `P/X/U` stato, `6=rosso`, `7=giallo`, `8=verde`, `9=blu`, `V=viola`.
           </p>
         </div>
       </div>
