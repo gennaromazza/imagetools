@@ -1,6 +1,7 @@
 export type ImageOrientation = "vertical" | "horizontal" | "square";
 export type PickStatus = "picked" | "rejected" | "unmarked";
 export type ColorLabel = "red" | "yellow" | "green" | "blue" | "purple";
+export type RulerUnit = "cm" | "px";
 
 export type FitMode = "fit" | "fill" | "crop";
 
@@ -51,6 +52,10 @@ export interface SheetSpec {
   backgroundImageUrl?: string;
   photoBorderColor?: string;
   photoBorderWidthCm?: number;
+  showRulers?: boolean;
+  rulerUnit?: RulerUnit;
+  verticalGuidesCm?: number[];
+  horizontalGuidesCm?: number[];
 }
 
 export interface LayoutSlot {
@@ -205,7 +210,7 @@ export interface UpdatePageSheetSpecRequest {
   changes: Partial<
     Pick<
       SheetSpec,
-      "presetId" | "label" | "widthCm" | "heightCm" | "dpi" | "marginCm" | "gapCm" | "bleedCm" | "backgroundColor" | "backgroundImageUrl" | "photoBorderColor" | "photoBorderWidthCm"
+      "presetId" | "label" | "widthCm" | "heightCm" | "dpi" | "marginCm" | "gapCm" | "bleedCm" | "backgroundColor" | "backgroundImageUrl" | "photoBorderColor" | "photoBorderWidthCm" | "showRulers" | "rulerUnit" | "verticalGuidesCm" | "horizontalGuidesCm"
     >
   >;
 }

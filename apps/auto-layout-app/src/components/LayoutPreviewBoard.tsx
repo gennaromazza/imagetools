@@ -14,6 +14,7 @@ import { SHEET_PRESETS } from "@photo-tools/presets";
 import { selectBestTemplate } from "@photo-tools/layout-engine";
 import type {
   AutoLayoutResult,
+  RulerUnit,
   GeneratedPageLayout,
   ImageAsset,
   LayoutAssignment,
@@ -100,6 +101,10 @@ interface LayoutPreviewBoardProps {
       backgroundImageUrl?: string;
       photoBorderColor?: string;
       photoBorderWidthCm?: number;
+      showRulers?: boolean;
+      rulerUnit?: RulerUnit;
+      verticalGuidesCm?: number[];
+      horizontalGuidesCm?: number[];
     },
     activity?: string
   ) => void;
@@ -162,6 +167,101 @@ function getSheetPreviewStyle(page: GeneratedPageLayout): CSSProperties {
   };
 }
 
+const SHEET_RULER_SIZE = 28;
+
+function normalizeGuides(values: number[] | undefined, maxCm: number): number[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      values
+        .filter((value) => Number.isFinite(value) && value > 0 && value < maxCm)
+        .map((value) => Number(value.toFixed(3)))
+    )
+  ).sort((left, right) => left - right);
+}
+
+function cmToPixels(cm: number, dpi: number): number {
+  return (cm / 2.54) * dpi;
+}
+
+function pixelsToCm(px: number, dpi: number): number {
+  return (px / dpi) * 2.54;
+}
+
+function formatGuideValue(cm: number, page: GeneratedPageLayout, unit: RulerUnit): string {
+  if (unit === "px") {
+    return `${Math.round(cmToPixels(cm, page.sheetSpec.dpi))} px`;
+  }
+
+  return `${formatMeasurement(cm)} cm`;
+}
+
+function buildRulerTicks(page: GeneratedPageLayout, axis: "horizontal" | "vertical"): Array<{ position: number; label?: string; major: boolean }> {
+  const sizeCm = axis === "horizontal" ? page.sheetSpec.widthCm : page.sheetSpec.heightCm;
+  const sizePx = cmToPixels(sizeCm, page.sheetSpec.dpi);
+  const unit = page.sheetSpec.rulerUnit ?? "cm";
+  const majorStep = unit === "px" ? 100 : 1;
+  const minorStep = unit === "px" ? 50 : 0.5;
+  const totalUnits = unit === "px" ? sizePx : sizeCm;
+  const ticks: Array<{ position: number; label?: string; major: boolean }> = [];
+
+  for (let value = 0; value <= totalUnits + 0.001; value += minorStep) {
+    const rounded = Number(value.toFixed(3));
+    const position = totalUnits <= 0 ? 0 : rounded / totalUnits;
+    const major = Math.abs((rounded / majorStep) - Math.round(rounded / majorStep)) < 0.001;
+    ticks.push({
+      position: Math.min(1, Math.max(0, position)),
+      label: major ? `${Math.round(rounded)}` : undefined,
+      major
+    });
+  }
+
+  return ticks;
+}
+
+function guideCmFromPointer(event: MouseEvent<HTMLDivElement>, page: GeneratedPageLayout, axis: "horizontal" | "vertical"): number {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const ratio = axis === "horizontal"
+    ? (event.clientX - rect.left) / Math.max(rect.width, 1)
+    : (event.clientY - rect.top) / Math.max(rect.height, 1);
+  const maxCm = axis === "horizontal" ? page.sheetSpec.widthCm : page.sheetSpec.heightCm;
+  return Number((Math.min(1, Math.max(0, ratio)) * maxCm).toFixed(3));
+}
+
+function renderGuideLines(page: GeneratedPageLayout) {
+  if (!page.sheetSpec.showRulers) {
+    return null;
+  }
+
+  const verticalGuides = normalizeGuides(page.sheetSpec.verticalGuidesCm, page.sheetSpec.widthCm);
+  const horizontalGuides = normalizeGuides(page.sheetSpec.horizontalGuidesCm, page.sheetSpec.heightCm);
+
+  if (verticalGuides.length === 0 && horizontalGuides.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="sheet-guide-layer" aria-hidden="true">
+      {verticalGuides.map((guideCm) => (
+        <span
+          key={`v-${guideCm}`}
+          className="sheet-guide sheet-guide--vertical"
+          style={{ left: `${(guideCm / Math.max(page.sheetSpec.widthCm, 0.1)) * 100}%` }}
+        />
+      ))}
+      {horizontalGuides.map((guideCm) => (
+        <span
+          key={`h-${guideCm}`}
+          className="sheet-guide sheet-guide--horizontal"
+          style={{ top: `${(guideCm / Math.max(page.sheetSpec.heightCm, 0.1)) * 100}%` }}
+        />
+      ))}
+    </div>
+  );
+}
 function getSlotDisplayRect(
   page: GeneratedPageLayout,
   slot: GeneratedPageLayout["slotDefinitions"][number]
@@ -561,6 +661,7 @@ const SheetSurface = memo(function SheetSurface({
           : undefined
       }
     >
+      {renderGuideLines(page)}
       {page.slotDefinitions.map((slot) => {
         const assignment = assignmentsBySlotId.get(slot.id);
         const asset = assignment ? assetsById.get(assignment.imageId) : undefined;
@@ -958,6 +1059,7 @@ function renderSheetThumbnail(page: GeneratedPageLayout, isActive: boolean) {
       style={{ aspectRatio: getSheetAspectRatio(page) }}
       aria-hidden="true"
     >
+      {renderGuideLines(page)}
       {page.slotDefinitions.map((slot) => {
         const hasAssignment = assignmentsBySlotId.has(slot.id);
 
@@ -1002,6 +1104,66 @@ const SheetThumbnailCard = memo(function SheetThumbnailCard({
   );
 });
 
+function SheetWithRulers({
+  page,
+  children,
+  onPageSheetStyleChange
+}: {
+  page: GeneratedPageLayout;
+  children: import("react").ReactNode;
+  onPageSheetStyleChange: LayoutPreviewBoardProps["onPageSheetStyleChange"];
+}) {
+  const showRulers = page.sheetSpec.showRulers ?? false;
+  const horizontalTicks = useMemo(() => buildRulerTicks(page, "horizontal"), [page]);
+  const verticalTicks = useMemo(() => buildRulerTicks(page, "vertical"), [page]);
+
+  const addGuideFromRuler = useCallback((axis: "horizontal" | "vertical", event: MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextGuideCm = guideCmFromPointer(event, page, axis);
+    const field = axis === "horizontal" ? "verticalGuidesCm" : "horizontalGuidesCm";
+    const maxCm = axis === "horizontal" ? page.sheetSpec.widthCm : page.sheetSpec.heightCm;
+    const nextGuides = normalizeGuides([...(page.sheetSpec[field] ?? []), nextGuideCm], maxCm);
+    onPageSheetStyleChange(
+      page.id,
+      { [field]: nextGuides },
+      `${axis === "horizontal" ? "Guida verticale" : "Guida orizzontale"} aggiunta al foglio ${page.pageNumber}.`
+    );
+  }, [onPageSheetStyleChange, page]);
+
+  if (!showRulers) {
+    return <>{children}</>;
+  }
+
+  return (
+    <div className="sheet-ruler-frame">
+      <div className="sheet-ruler-corner" aria-hidden="true" />
+      <div className="sheet-ruler sheet-ruler--top" onClick={(event) => addGuideFromRuler("horizontal", event)}>
+        {horizontalTicks.map((tick) => (
+          <span
+            key={`top-${tick.position}-${tick.label ?? "minor"}`}
+            className={tick.major ? "sheet-ruler__tick sheet-ruler__tick--major" : "sheet-ruler__tick"}
+            style={{ left: `${tick.position * 100}%` }}
+          >
+            {tick.label ? <small>{tick.label}</small> : null}
+          </span>
+        ))}
+      </div>
+      <div className="sheet-ruler sheet-ruler--left" onClick={(event) => addGuideFromRuler("vertical", event)}>
+        {verticalTicks.map((tick) => (
+          <span
+            key={`left-${tick.position}-${tick.label ?? "minor"}`}
+            className={tick.major ? "sheet-ruler__tick sheet-ruler__tick--major" : "sheet-ruler__tick"}
+            style={{ top: `${tick.position * 100}%` }}
+          >
+            {tick.label ? <small>{tick.label}</small> : null}
+          </span>
+        ))}
+      </div>
+      <div className="sheet-ruler-frame__surface">{children}</div>
+    </div>
+  );
+}
 function renderEmptySheetPlaceholder(label: string) {
   return (
     <div className="sheet-preview sheet-preview--hero sheet-preview--placeholder">
@@ -1063,6 +1225,8 @@ export function LayoutPreviewBoard({
   const [layoutStripViewportWidth, setLayoutStripViewportWidth] = useState(0);
   const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
   const backgroundUploadInputRef = useRef<HTMLInputElement | null>(null);
+  const [verticalGuideDraft, setVerticalGuideDraft] = useState("0");
+  const [horizontalGuideDraft, setHorizontalGuideDraft] = useState("0");
   const layoutStripRef = useRef<HTMLDivElement>(null);
   const layoutStripFrameRef = useRef<number | null>(null);
   const resizeStateRef = useRef<{ pane: ResizePane; startX: number; startWidth: number } | null>(null);
@@ -1151,6 +1315,22 @@ export function LayoutPreviewBoard({
   const deferredAssets = useDeferredValue(filteredAssets);
   const deferredPages = useDeferredValue(sectionedPages);
   const activeAspectRatio = activePage ? formatAspectRatioLabel(activePage) : null;
+  const pageGuides = useMemo(
+    () => ({
+      verticalGuidesCm: normalizeGuides(activePage?.sheetSpec.verticalGuidesCm, activePage?.sheetSpec.widthCm ?? 0),
+      horizontalGuidesCm: normalizeGuides(activePage?.sheetSpec.horizontalGuidesCm, activePage?.sheetSpec.heightCm ?? 0)
+    }),
+    [activePage]
+  );
+
+  useEffect(() => {
+    if (!activePage) {
+      return;
+    }
+
+    setVerticalGuideDraft("0");
+    setHorizontalGuideDraft("0");
+  }, [activePage?.id, activePage?.sheetSpec.rulerUnit]);
   const activeAssignmentsBySlotId = useMemo(
     () => (activePage ? buildAssignmentsBySlotId(activePage) : new Map<string, LayoutAssignment>()),
     [activePage]
@@ -1230,6 +1410,43 @@ export function LayoutPreviewBoard({
     [activePage, onPageSheetStyleChange]
   );
 
+  const upsertGuide = useCallback(
+    (axis: "vertical" | "horizontal", displayValue: number) => {
+      if (!activePage || !Number.isFinite(displayValue) || displayValue < 0) {
+        return;
+      }
+
+      const unit = activePage.sheetSpec.rulerUnit ?? "cm";
+      const maxCm = axis === "vertical" ? activePage.sheetSpec.widthCm : activePage.sheetSpec.heightCm;
+      const nextCm = unit === "px" ? pixelsToCm(displayValue, activePage.sheetSpec.dpi) : displayValue;
+      const field = axis === "vertical" ? "verticalGuidesCm" : "horizontalGuidesCm";
+      const nextGuides = normalizeGuides([...(pageGuides[field] ?? []), nextCm], maxCm);
+
+      onPageSheetStyleChange(
+        activePage.id,
+        { [field]: nextGuides },
+        `${axis === "vertical" ? "Guida verticale" : "Guida orizzontale"} aggiunta al foglio ${activePage.pageNumber}.`
+      );
+    },
+    [activePage, onPageSheetStyleChange, pageGuides]
+  );
+
+  const removeGuide = useCallback(
+    (axis: "vertical" | "horizontal", guideCm: number) => {
+      if (!activePage) {
+        return;
+      }
+
+      const field = axis === "vertical" ? "verticalGuidesCm" : "horizontalGuidesCm";
+      const nextGuides = (pageGuides[field] ?? []).filter((value) => value !== guideCm);
+      onPageSheetStyleChange(
+        activePage.id,
+        { [field]: nextGuides },
+        `${axis === "vertical" ? "Guida verticale" : "Guida orizzontale"} rimossa dal foglio ${activePage.pageNumber}.`
+      );
+    },
+    [activePage, onPageSheetStyleChange, pageGuides]
+  );
   const handleAssetFilterChange = useCallback((filter: AssetFilter) => {
     setAssetFilter(filter);
   }, []);
@@ -2000,24 +2217,26 @@ export function LayoutPreviewBoard({
                         </div>
                       ) : null}
 
-                      <SheetSurface
-                        page={page}
-                        assetsById={assetsById}
-                        selectedSlotKey={selectedSlotKey}
-                        dragState={dragState}
-                        onSelectPage={onSelectPage}
-                        onStartSlotDrag={onStartSlotDrag}
-                        onDragEnd={onDragEnd}
-                        onDrop={onDrop}
-                        onAssetDropped={onAssetDropped}
-                        onAddToPage={onAddToPage}
-                        onClearSlot={onClearSlot}
-                        onOpenPicker={handleReplaceTargetOpen}
-                        onOpenCropEditor={handleCropTargetOpen}
-                        onContextMenu={onContextMenu}
-                        onUpdateSlotAssignment={onUpdateSlotAssignment}
-                        size="hero"
-                      />
+                      <SheetWithRulers page={page} onPageSheetStyleChange={onPageSheetStyleChange}>
+                        <SheetSurface
+                          page={page}
+                          assetsById={assetsById}
+                          selectedSlotKey={selectedSlotKey}
+                          dragState={dragState}
+                          onSelectPage={onSelectPage}
+                          onStartSlotDrag={onStartSlotDrag}
+                          onDragEnd={onDragEnd}
+                          onDrop={onDrop}
+                          onAssetDropped={onAssetDropped}
+                          onAddToPage={onAddToPage}
+                          onClearSlot={onClearSlot}
+                          onOpenPicker={handleReplaceTargetOpen}
+                          onOpenCropEditor={handleCropTargetOpen}
+                          onContextMenu={onContextMenu}
+                          onUpdateSlotAssignment={onUpdateSlotAssignment}
+                          size="hero"
+                        />
+                      </SheetWithRulers>
                     </section>
                   );
                 })}
@@ -2320,6 +2539,131 @@ export function LayoutPreviewBoard({
                 </div>
               </div>
 
+              <div className="inspector-panel inspector-panel--nested">
+                <span className="inspector-panel__eyebrow">Righelli e guide</span>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={activePage.sheetSpec.showRulers ?? false}
+                    onChange={(event) =>
+                      onPageSheetStyleChange(
+                        activePage.id,
+                        { showRulers: event.target.checked },
+                        `Righelli ${event.target.checked ? "attivati" : "nascosti"} sul foglio ${activePage.pageNumber}.`
+                      )
+                    }
+                  />
+                  <span>Mostra righelli sul foglio</span>
+                </label>
+                <div className="inline-grid inline-grid--3">
+                  <label className="field inspector-field">
+                    <span>Unità righello</span>
+                    <select
+                      value={activePage.sheetSpec.rulerUnit ?? "cm"}
+                      onChange={(event) =>
+                        onPageSheetStyleChange(
+                          activePage.id,
+                          { rulerUnit: event.target.value as RulerUnit },
+                          `Unità righello aggiornata per il foglio ${activePage.pageNumber}.`
+                        )
+                      }
+                    >
+                      <option value="cm">Centimetri</option>
+                      <option value="px">Pixel</option>
+                    </select>
+                  </label>
+                  <label className="field inspector-field">
+                    <span>Guida verticale</span>
+                    <div className="field__input-with-unit">
+                      <input
+                        type="number"
+                        min="0"
+                        step={activePage.sheetSpec.rulerUnit === "px" ? "10" : "0.1"}
+                        value={verticalGuideDraft}
+                        onChange={(event) => setVerticalGuideDraft(event.target.value)}
+                      />
+                      <span className="field__unit">{activePage.sheetSpec.rulerUnit ?? "cm"}</span>
+                    </div>
+                  </label>
+                  <button
+                    type="button"
+                    className="ghost-button inspector-guide-add"
+                    onClick={() => {
+                      const parsed = Number(verticalGuideDraft);
+                      if (Number.isFinite(parsed)) {
+                        upsertGuide("vertical", parsed);
+                      }
+                    }}
+                  >
+                    Aggiungi verticale
+                  </button>
+                </div>
+                <div className="inline-grid inline-grid--2">
+                  <label className="field inspector-field">
+                    <span>Guida orizzontale</span>
+                    <div className="field__input-with-unit">
+                      <input
+                        type="number"
+                        min="0"
+                        step={activePage.sheetSpec.rulerUnit === "px" ? "10" : "0.1"}
+                        value={horizontalGuideDraft}
+                        onChange={(event) => setHorizontalGuideDraft(event.target.value)}
+                      />
+                      <span className="field__unit">{activePage.sheetSpec.rulerUnit ?? "cm"}</span>
+                    </div>
+                  </label>
+                  <button
+                    type="button"
+                    className="ghost-button inspector-guide-add"
+                    onClick={() => {
+                      const parsed = Number(horizontalGuideDraft);
+                      if (Number.isFinite(parsed)) {
+                        upsertGuide("horizontal", parsed);
+                      }
+                    }}
+                  >
+                    Aggiungi orizzontale
+                  </button>
+                </div>
+                <div className="inspector-guide-lists">
+                  <div className="inspector-guide-list">
+                    <strong>Verticali</strong>
+                    <div className="inspector-guide-list__items">
+                      {pageGuides.verticalGuidesCm.length > 0 ? pageGuides.verticalGuidesCm.map((guideCm) => (
+                        <button
+                          key={`v-${guideCm}`}
+                          type="button"
+                          className="inspector-guide-chip"
+                          onClick={() => removeGuide("vertical", guideCm)}
+                          title="Clicca per rimuovere la guida"
+                        >
+                          {formatGuideValue(guideCm, activePage, activePage.sheetSpec.rulerUnit ?? "cm")}
+                        </button>
+                      )) : <span className="helper-inline">Nessuna</span>}
+                    </div>
+                  </div>
+                  <div className="inspector-guide-list">
+                    <strong>Orizzontali</strong>
+                    <div className="inspector-guide-list__items">
+                      {pageGuides.horizontalGuidesCm.length > 0 ? pageGuides.horizontalGuidesCm.map((guideCm) => (
+                        <button
+                          key={`h-${guideCm}`}
+                          type="button"
+                          className="inspector-guide-chip"
+                          onClick={() => removeGuide("horizontal", guideCm)}
+                          title="Clicca per rimuovere la guida"
+                        >
+                          {formatGuideValue(guideCm, activePage, activePage.sheetSpec.rulerUnit ?? "cm")}
+                        </button>
+                      )) : <span className="helper-inline">Nessuna</span>}
+                    </div>
+                  </div>
+                </div>
+                <div className="inspector-sheet-settings__help">
+                  <strong>Uso rapido</strong>
+                  <span>Clicca sul righello in alto per creare una guida verticale e su quello a sinistra per una guida orizzontale.</span>
+                </div>
+              </div>
               <div className="button-row inspector-sheet-settings__actions">
                 <button
                   type="button"
@@ -2495,3 +2839,20 @@ export function LayoutPreviewBoard({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

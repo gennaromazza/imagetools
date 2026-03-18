@@ -1428,6 +1428,10 @@ function AppContent() {
       backgroundImageUrl?: string;
       photoBorderColor?: string;
       photoBorderWidthCm?: number;
+      showRulers?: boolean;
+      rulerUnit?: "cm" | "px";
+      verticalGuidesCm?: number[];
+      horizontalGuidesCm?: number[];
     },
     activity = "Aspetto del foglio aggiornato."
   ) {

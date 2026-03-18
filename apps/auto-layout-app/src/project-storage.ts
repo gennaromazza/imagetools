@@ -1,6 +1,6 @@
 import { buildAutoLayoutResult, createAutoLayoutPlan } from "@photo-tools/core";
 import { DEFAULT_AUTO_LAYOUT_REQUEST } from "@photo-tools/presets";
-import type { AutoLayoutRequest, AutoLayoutResult, ColorLabel, ImageAsset, OutputFormat, PickStatus } from "@photo-tools/shared-types";
+import type { AutoLayoutRequest, AutoLayoutResult, ColorLabel, ImageAsset, OutputFormat, PickStatus, RulerUnit } from "@photo-tools/shared-types";
 import type { Project } from "./components/ProjectDashboard";
 
 export const PROJECTS_STORAGE_KEY = "imagetool-projects";
@@ -40,6 +40,20 @@ function toColorLabel(value: unknown): ColorLabel | null {
 
 function toOutputFormat(value: unknown, fallback: OutputFormat): OutputFormat {
   return value === "jpg" || value === "png" || value === "tif" ? value : fallback;
+}
+
+function toRulerUnit(value: unknown, fallback: RulerUnit): RulerUnit {
+  return value === "px" || value === "cm" ? value : fallback;
+}
+
+function toGuideArray(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((item): item is number => typeof item === "number" && Number.isFinite(item))
+    .map((item) => Number(item.toFixed(3)));
 }
 
 function normalizeImageAsset(rawAsset: unknown): ImageAsset | null {
@@ -150,7 +164,11 @@ function normalizeRequest(rawRequest: unknown, fallbackAssets: ImageAsset[]): Au
       backgroundColor: toStringValue(sheet.backgroundColor, DEFAULT_PROJECT_REQUEST.sheet.backgroundColor ?? "#ffffff"),
       backgroundImageUrl: typeof sheet.backgroundImageUrl === "string" ? sheet.backgroundImageUrl : "",
       photoBorderColor: toStringValue(sheet.photoBorderColor, DEFAULT_PROJECT_REQUEST.sheet.photoBorderColor ?? "#ffffff"),
-      photoBorderWidthCm: toNumberValue(sheet.photoBorderWidthCm, DEFAULT_PROJECT_REQUEST.sheet.photoBorderWidthCm ?? 0)
+      photoBorderWidthCm: toNumberValue(sheet.photoBorderWidthCm, DEFAULT_PROJECT_REQUEST.sheet.photoBorderWidthCm ?? 0),
+      showRulers: toBooleanValue(sheet.showRulers, DEFAULT_PROJECT_REQUEST.sheet.showRulers ?? false),
+      rulerUnit: toRulerUnit(sheet.rulerUnit, DEFAULT_PROJECT_REQUEST.sheet.rulerUnit ?? "cm"),
+      verticalGuidesCm: toGuideArray(sheet.verticalGuidesCm),
+      horizontalGuidesCm: toGuideArray(sheet.horizontalGuidesCm)
     },
     output: {
       ...DEFAULT_PROJECT_REQUEST.output,

@@ -21,7 +21,11 @@ export const DEFAULT_SHEET_SPEC: SheetSpec = {
   backgroundColor: "#ffffff",
   backgroundImageUrl: "",
   photoBorderColor: "#ffffff",
-  photoBorderWidthCm: 0
+  photoBorderWidthCm: 0,
+  showRulers: false,
+  rulerUnit: "cm",
+  verticalGuidesCm: [],
+  horizontalGuidesCm: []
 };
 
 export const DEFAULT_AUTO_LAYOUT_REQUEST: Omit<AutoLayoutRequest, "assets"> = {
