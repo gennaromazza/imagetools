@@ -891,6 +891,7 @@ export function LayoutPreviewBoard({
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
   const [layoutStripScrollLeft, setLayoutStripScrollLeft] = useState(0);
   const [layoutStripViewportWidth, setLayoutStripViewportWidth] = useState(0);
+  const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
   const layoutStripRef = useRef<HTMLDivElement>(null);
   const layoutStripFrameRef = useRef<number | null>(null);
   const resizeStateRef = useRef<{ pane: ResizePane; startX: number; startWidth: number } | null>(null);
@@ -1082,6 +1083,7 @@ export function LayoutPreviewBoard({
       dragPageJumpTimeoutRef.current = null;
     }
     dragPageJumpTargetIdRef.current = null;
+    setDragChipTargetPageId(null);
   }, []);
 
   const scheduleDragPageJump = useCallback(
@@ -1116,6 +1118,13 @@ export function LayoutPreviewBoard({
       autoScrollFrameRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    if (!dragState) {
+      setDragChipTargetPageId(null);
+      clearDragPageJump();
+    }
+  }, [clearDragPageJump, dragState]);
 
   const runAutoScroll = useCallback(() => {
     const target = autoScrollTargetRef.current;
@@ -1432,6 +1441,7 @@ export function LayoutPreviewBoard({
             <div className="layout-studio__subbar-pages" role="tablist" aria-label="Indice fogli compatto">
               {pagesForStudio.map((page) => {
                 const isActive = page.id === activePage.id;
+                const isDragTarget = dragChipTargetPageId === page.id;
 
                 return (
                   <button
@@ -1439,10 +1449,51 @@ export function LayoutPreviewBoard({
                     type="button"
                     role="tab"
                     aria-selected={isActive}
-                    className={isActive ? "layout-studio__subbar-chip layout-studio__subbar-chip--active" : "layout-studio__subbar-chip"}
+                    className={[
+                      "layout-studio__subbar-chip",
+                      isActive ? "layout-studio__subbar-chip--active" : "",
+                      isDragTarget ? "layout-studio__subbar-chip--drop-target" : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
                     onClick={() => handleJumpToPage(page)}
+                    onDragOver={
+                      dragState
+                        ? (event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                            setDragChipTargetPageId(page.id);
+                            scheduleDragPageJump(page);
+                          }
+                        : undefined
+                    }
+                    onDragLeave={
+                      dragState
+                        ? (event) => {
+                            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                              clearDragPageJump();
+                            }
+                          }
+                        : undefined
+                    }
+                    onDrop={
+                      dragState
+                        ? (event) => {
+                            event.preventDefault();
+                            stopAutoScroll();
+                            clearDragPageJump();
+                            handleJumpToPage(page);
+                            onAddToPage(page.id, dragState.imageId);
+                          }
+                        : undefined
+                    }
+                    title={
+                      dragState
+                        ? `Trascina qui per andare al foglio ${page.pageNumber} e rilasciare la foto`
+                        : `Vai al foglio ${page.pageNumber}`
+                    }
                   >
-                    Foglio {page.pageNumber}
+                    {dragState && isDragTarget ? `Rilascia su foglio ${page.pageNumber}` : `Foglio ${page.pageNumber}`}
                   </button>
                 );
               })}
