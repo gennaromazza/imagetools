@@ -85,6 +85,7 @@ interface LayoutPreviewBoardProps {
     field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi",
     value: number
   ) => void;
+  recentlyRebalancedPageId?: string | null;
   onAssetsMetadataChange?: (
     changesById: Map<string, Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>>
   ) => void;
@@ -888,6 +889,7 @@ export function LayoutPreviewBoard({
   onContextMenu,
   onPageSheetPresetChange,
   onPageSheetFieldChange,
+  recentlyRebalancedPageId,
   onAssetsMetadataChange,
   onUpdateSlotAssignment,
   zoom
@@ -1579,6 +1581,7 @@ export function LayoutPreviewBoard({
               <div className="layout-studio__page-column">
                 {pagesForStudio.map((page) => {
                   const isActive = page.id === activePage.id;
+                  const showRebalancedBadge = recentlyRebalancedPageId === page.id;
 
                   return (
                     <section
@@ -1593,6 +1596,11 @@ export function LayoutPreviewBoard({
                           <p>
                             {page.assignments.length} foto · {page.sheetSpec.label} · gap {page.sheetSpec.gapCm.toFixed(1)} cm
                           </p>
+                          {showRebalancedBadge ? (
+                            <span className="layout-studio__page-feedback" aria-live="polite">
+                              Foglio riorganizzato
+                            </span>
+                          ) : null}
                         </div>
                         <div className="layout-studio__page-card-actions">
                           <button

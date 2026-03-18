@@ -273,6 +273,7 @@ function AppContent() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [exportProgressState, setExportProgressState] = useState<ExportProgressState>(() => createInitialExportProgressState());
   const [quickPreviewAssetId, setQuickPreviewAssetId] = useState<string | null>(null);
+  const [recentlyRebalancedPageId, setRecentlyRebalancedPageId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean;
@@ -284,6 +285,7 @@ function AppContent() {
     projects: []
   });
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const rebalanceBadgeTimeoutRef = useRef<number | null>(null);
   const isMountedRef = useRef(true);
 
   // History management
@@ -297,6 +299,17 @@ function AppContent() {
   const handleToggleFullscreen = () => {
     setIsFullscreen(!isFullscreen);
   };
+
+  const markPageRebalanced = useCallback((pageId: string) => {
+    setRecentlyRebalancedPageId(pageId);
+    if (rebalanceBadgeTimeoutRef.current !== null) {
+      window.clearTimeout(rebalanceBadgeTimeoutRef.current);
+    }
+    rebalanceBadgeTimeoutRef.current = window.setTimeout(() => {
+      setRecentlyRebalancedPageId((current) => (current === pageId ? null : current));
+      rebalanceBadgeTimeoutRef.current = null;
+    }, 1800);
+  }, []);
 
   const handleContextMenu = (event: MouseEvent, page: GeneratedPageLayout) => {
     event.preventDefault();
@@ -883,6 +896,14 @@ function AppContent() {
     isProjectSelectorOpen
   ]);
 
+  useEffect(() => {
+    return () => {
+      if (rebalanceBadgeTimeoutRef.current !== null) {
+        window.clearTimeout(rebalanceBadgeTimeoutRef.current);
+      }
+    };
+  }, []);
+
   function pushActivity(entry: string) {
     setActivityLog((current) => [entry, ...current].slice(0, 12));
   }
@@ -1081,6 +1102,10 @@ function AppContent() {
       nextResult = rebalancePagesForAssignedImages(nextResult, [move.sourcePageId, move.targetPageId]);
     }
 
+    if (move.sourcePageId === move.targetPageId && isSamePageOccupiedDrop) {
+      markPageRebalanced(move.targetPageId);
+    }
+
     const nextPlacement = draggedImageId ? findImagePlacement(nextResult, draggedImageId) : null;
     commitStudioChange({
       result: nextResult,
@@ -1136,6 +1161,10 @@ function AppContent() {
       nextResult = rebalancePagesForAssignedImages(nextResult, [previousUsage.pageId]);
     }
 
+    if (previousUsage?.pageId === pageId) {
+      markPageRebalanced(pageId);
+    }
+
     const nextPlacement = findImagePlacement(nextResult, imageId);
     commitStudioChange({
       result: nextResult,
@@ -1186,6 +1215,7 @@ function AppContent() {
     }
 
     const nextResult = rebalancePagesForAssignedImages(result, [pageId]);
+    markPageRebalanced(pageId);
     commitStudioChange({
       result: nextResult,
       activity: `Foglio ${page.pageNumber} riadattato automaticamente.`
@@ -1890,6 +1920,7 @@ function AppContent() {
               onRebalancePage={handleRebalancePage}
               onPageSheetPresetChange={handlePageSheetPresetChange}
               onPageSheetFieldChange={handlePageSheetFieldChange}
+              recentlyRebalancedPageId={recentlyRebalancedPageId}
               onAssetsMetadataChange={handleAssetsMetadataChange}
               onUpdateSlotAssignment={handleUpdateSelectedSlotAssignment}
               onContextMenu={handleContextMenu}

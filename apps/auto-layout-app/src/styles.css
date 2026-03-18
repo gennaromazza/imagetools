@@ -1154,6 +1154,41 @@ img {
   color: var(--text-muted);
 }
 
+.layout-studio__page-feedback {
+  display: inline-flex;
+  margin-top: 0.45rem;
+  padding: 0.3rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(142, 178, 142, 0.16);
+  border: 1px solid rgba(142, 178, 142, 0.36);
+  color: #d8ead8;
+  font-size: 0.74rem;
+  font-weight: 700;
+  animation: page-feedback-fade 1.8s ease;
+}
+
+@keyframes page-feedback-fade {
+  0% {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  18% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  82% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
 .layout-studio__page-card-actions {
   flex-shrink: 0;
   margin-left: auto;
