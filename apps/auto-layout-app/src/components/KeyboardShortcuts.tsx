@@ -12,6 +12,17 @@ interface KeyboardShortcutsProps {
   onEscape?: () => void;
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(
+    target.isContentEditable ||
+      target.closest("input, textarea, select, [contenteditable='true'], [role='textbox']")
+  );
+}
+
 export function KeyboardShortcuts({
   onUndo,
   onRedo,
@@ -24,6 +35,10 @@ export function KeyboardShortcuts({
   onEscape
 }: KeyboardShortcutsProps) {
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    if (isEditableTarget(event.target)) {
+      return;
+    }
+
     const { ctrlKey, metaKey, shiftKey, key } = event;
     const cmdOrCtrl = ctrlKey || metaKey;
 
