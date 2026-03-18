@@ -950,7 +950,7 @@ const SheetSurface = memo(function SheetSurface({
                         aria-label={`Rimuovi foto dallo slot ${slot.id}`}
                         title="Rimuovi foto dallo slot"
                       >
-                        �
+                        ×
                       </button>
                     </div>
                   ) : null}
@@ -1253,7 +1253,6 @@ export function LayoutPreviewBoard({
   const [layoutStripScrollLeft, setLayoutStripScrollLeft] = useState(0);
   const [layoutStripViewportWidth, setLayoutStripViewportWidth] = useState(0);
   const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
-  const backgroundUploadInputRef = useRef<HTMLInputElement | null>(null);
   const [verticalGuideDraft, setVerticalGuideDraft] = useState("0");
   const [horizontalGuideDraft, setHorizontalGuideDraft] = useState("0");
   const layoutStripRef = useRef<HTMLDivElement>(null);
@@ -1414,13 +1413,14 @@ export function LayoutPreviewBoard({
     setCropTarget(null);
   }, []);
 
-  const handleBackgroundUpload = useCallback(
-    async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePageBackgroundUpload = useCallback(
+    (page: GeneratedPageLayout, event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
-      if (!file || !activePage) {
+      if (!file) {
         return;
       }
 
+      const input = event.currentTarget;
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result !== "string") {
@@ -1428,15 +1428,23 @@ export function LayoutPreviewBoard({
         }
 
         onPageSheetStyleChange(
-          activePage.id,
+          page.id,
           { backgroundImageUrl: reader.result },
-          `Sfondo immagine assegnato al foglio ${activePage.pageNumber}.`
+          `Sfondo immagine assegnato al foglio ${page.pageNumber}.`
         );
       };
       reader.readAsDataURL(file);
-      event.target.value = "";
+      input.value = "";
     },
-    [activePage, onPageSheetStyleChange]
+    [onPageSheetStyleChange]
+  );
+
+  const adjustPageBorderWidth = useCallback(
+    (page: GeneratedPageLayout, delta: number) => {
+      const nextValue = Math.max(0, Number(((page.sheetSpec.photoBorderWidthCm ?? 0) + delta).toFixed(2)));
+      onPageSheetFieldChange(page.id, "photoBorderWidthCm", nextValue);
+    },
+    [onPageSheetFieldChange]
   );
 
   const upsertGuide = useCallback(
@@ -2157,7 +2165,7 @@ export function LayoutPreviewBoard({
                   </div>
 
                   <div className="template-drawer__compare-arrow" aria-hidden="true">
-                    →
+                    â†’
                   </div>
 
                   <div className="template-drawer__compare-card template-drawer__compare-card--preview">
@@ -2268,6 +2276,115 @@ export function LayoutPreviewBoard({
                               Rilascia qui per riorganizzare
                             </div>
                           ) : null}
+                          <div
+                            className="layout-studio__page-style-toolbar"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <div className="layout-studio__page-style-group">
+                              <span className="layout-studio__page-style-label">Sfondo</span>
+                              <label
+                                className="layout-studio__page-color-chip"
+                                title={`Colore di sfondo del foglio ${page.pageNumber}`}
+                              >
+                                <input
+                                  type="color"
+                                  value={page.sheetSpec.backgroundColor ?? "#ffffff"}
+                                  onChange={(event) =>
+                                    onPageSheetStyleChange(
+                                      page.id,
+                                      { backgroundColor: event.target.value },
+                                      `Colore di sfondo aggiornato per il foglio ${page.pageNumber}.`
+                                    )
+                                  }
+                                />
+                              </label>
+                              <label
+                                className={
+                                  page.sheetSpec.backgroundImageUrl
+                                    ? "layout-studio__page-style-button layout-studio__page-style-button--active"
+                                    : "layout-studio__page-style-button"
+                                }
+                                title={`Carica un'immagine di sfondo per il foglio ${page.pageNumber}`}
+                              >
+                                Img
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  hidden
+                                  onChange={(event) => handlePageBackgroundUpload(page, event)}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                className="layout-studio__page-style-button"
+                                disabled={!page.sheetSpec.backgroundImageUrl}
+                                onClick={() =>
+                                  onPageSheetStyleChange(
+                                    page.id,
+                                    { backgroundImageUrl: "" },
+                                    `Sfondo immagine rimosso dal foglio ${page.pageNumber}.`
+                                  )
+                                }
+                                title={`Rimuovi l'immagine di sfondo dal foglio ${page.pageNumber}`}
+                              >
+                                Reset
+                              </button>
+                            </div>
+                            <div className="layout-studio__page-style-group">
+                              <span className="layout-studio__page-style-label">Bordi</span>
+                              <label
+                                className="layout-studio__page-color-chip"
+                                title={`Colore bordo foto del foglio ${page.pageNumber}`}
+                              >
+                                <input
+                                  type="color"
+                                  value={page.sheetSpec.photoBorderColor ?? "#ffffff"}
+                                  onChange={(event) =>
+                                    onPageSheetStyleChange(
+                                      page.id,
+                                      { photoBorderColor: event.target.value },
+                                      `Colore bordo foto aggiornato per il foglio ${page.pageNumber}.`
+                                    )
+                                  }
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                className="layout-studio__page-style-button"
+                                onClick={() => adjustPageBorderWidth(page, -0.05)}
+                                title={`Riduci lo spessore del bordo nel foglio ${page.pageNumber}`}
+                              >
+                                -
+                              </button>
+                              <label
+                                className="layout-studio__page-style-number"
+                                title={`Spessore bordo foto del foglio ${page.pageNumber}`}
+                              >
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.05"
+                                  value={page.sheetSpec.photoBorderWidthCm ?? 0}
+                                  onChange={(event) => {
+                                    const nextValue = Number(event.target.value);
+                                    if (!Number.isFinite(nextValue)) {
+                                      return;
+                                    }
+                                    onPageSheetFieldChange(page.id, "photoBorderWidthCm", Math.max(0, nextValue));
+                                  }}
+                                />
+                                <span>cm</span>
+                              </label>
+                              <button
+                                type="button"
+                                className="layout-studio__page-style-button"
+                                onClick={() => adjustPageBorderWidth(page, 0.05)}
+                                title={`Aumenta lo spessore del bordo nel foglio ${page.pageNumber}`}
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
                           <button
                             type="button"
                             className="ghost-button"
@@ -2545,87 +2662,6 @@ export function LayoutPreviewBoard({
               </div>
 
               <div className="inspector-panel inspector-panel--nested">
-                <span className="inspector-panel__eyebrow">Sfondo foglio</span>
-                <div className="inline-grid inline-grid--2">
-                  <label className="field inspector-field">
-                    <span>Colore sfondo</span>
-                    <input
-                      type="color"
-                      value={activePage.sheetSpec.backgroundColor ?? "#ffffff"}
-                      onChange={(event) =>
-                        onPageSheetStyleChange(
-                          activePage.id,
-                          { backgroundColor: event.target.value },
-                          `Colore di sfondo aggiornato per il foglio ${activePage.pageNumber}.`
-                        )
-                      }
-                    />
-                  </label>
-                  <div className="field inspector-field">
-                    <span>Immagine sfondo</span>
-                    <div className="button-row">
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        onClick={() => backgroundUploadInputRef.current?.click()}
-                      >
-                        Carica immagine
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-button"
-                        disabled={!activePage.sheetSpec.backgroundImageUrl}
-                        onClick={() =>
-                          onPageSheetStyleChange(
-                            activePage.id,
-                            { backgroundImageUrl: "" },
-                            `Sfondo immagine rimosso dal foglio ${activePage.pageNumber}.`
-                          )
-                        }
-                      >
-                        Rimuovi
-                      </button>
-                    </div>
-                    <input
-                      ref={backgroundUploadInputRef}
-                      type="file"
-                      accept="image/*"
-                      hidden
-                      onChange={handleBackgroundUpload}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="inspector-panel inspector-panel--nested">
-                <span className="inspector-panel__eyebrow">Bordo foto</span>
-                <div className="inline-grid inline-grid--2">
-                  <label className="field inspector-field">
-                    <span>Colore bordo</span>
-                    <input
-                      type="color"
-                      value={activePage.sheetSpec.photoBorderColor ?? "#ffffff"}
-                      onChange={(event) =>
-                        onPageSheetStyleChange(
-                          activePage.id,
-                          { photoBorderColor: event.target.value },
-                          `Colore bordo foto aggiornato per il foglio ${activePage.pageNumber}.`
-                        )
-                      }
-                    />
-                  </label>
-                  <CommitOnBlurNumberField
-                    label="Spessore bordo"
-                    className="inspector-field"
-                    min="0"
-                    step="0.05"
-                    value={activePage.sheetSpec.photoBorderWidthCm ?? 0}
-                    onCommit={(value) => onPageSheetFieldChange(activePage.id, "photoBorderWidthCm", Math.max(0, value))}
-                  />
-                </div>
-              </div>
-
-              <div className="inspector-panel inspector-panel--nested">
                 <span className="inspector-panel__eyebrow">Righelli e guide</span>
                 <label className="check-row">
                   <input
@@ -2643,14 +2679,14 @@ export function LayoutPreviewBoard({
                 </label>
                 <div className="inline-grid inline-grid--3">
                   <label className="field inspector-field">
-                    <span>Unit� righello</span>
+                    <span>Unità righello</span>
                     <select
                       value={activePage.sheetSpec.rulerUnit ?? "cm"}
                       onChange={(event) =>
                         onPageSheetStyleChange(
                           activePage.id,
                           { rulerUnit: event.target.value as RulerUnit },
-                          `Unit� righello aggiornata per il foglio ${activePage.pageNumber}.`
+                          `Unità righello aggiornata per il foglio ${activePage.pageNumber}.`
                         )
                       }
                     >
@@ -2794,7 +2830,7 @@ export function LayoutPreviewBoard({
                 <button
                   type="button"
                   className="secondary-button"
-                  title="Ricalcola il layout del foglio corrente in base alle foto già presenti"
+                  title="Ricalcola il layout del foglio corrente in base alle foto gia presenti"
                   onClick={() => onRebalancePage(activePage.id)}
                 >
                   Riadatta questo foglio
