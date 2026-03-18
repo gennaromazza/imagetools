@@ -1818,13 +1818,14 @@ img {
   position: absolute;
   left: 0.7rem;
   right: 0.7rem;
-  bottom: 0.7rem;
+  top: 0.7rem;
   z-index: 5;
   display: grid;
   gap: 0.35rem;
   justify-items: center;
   opacity: 1;
   transition: opacity 120ms ease;
+  pointer-events: none;
 }
 
 .sheet-slot:hover .slot-quick-toolbar,
@@ -1838,6 +1839,7 @@ img {
   flex-wrap: wrap;
   gap: 0.35rem;
   justify-content: center;
+  pointer-events: auto;
 }
 
 .slot-quick-toolbar__button {

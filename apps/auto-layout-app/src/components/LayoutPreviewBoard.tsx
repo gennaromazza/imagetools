@@ -563,7 +563,7 @@ const SheetSurface = memo(function SheetSurface({
                         assignment
                           ? dragState.sourcePageId === page.id
                             ? "Rilascia per riorganizzare automaticamente questo foglio attorno alla foto trascinata"
-                            : "Rilascia per spostare o scambiare la foto in questo slot"
+                            : "Rilascia per aggiungere questa foto a questo foglio e riadattare il layout"
                           : "Rilascia per spostare la foto in questo slot"
                       );
                       return;
@@ -587,6 +587,12 @@ const SheetSurface = memo(function SheetSurface({
                     }
 
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
+                      if (dragState.sourcePageId !== page.id && assignment) {
+                        onAddToPage(page.id, dragState.imageId);
+                        setDragIntentLabel(null);
+                        return;
+                      }
+
                       onDrop({
                         sourcePageId: dragState.sourcePageId,
                         sourceSlotId: dragState.sourceSlotId,
