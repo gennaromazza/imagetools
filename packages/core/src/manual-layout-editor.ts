@@ -293,7 +293,15 @@ export function addImageToPage(
     return result;
   }
 
-  const nextTemplate = selectBestTemplate(assets, result.availableTemplates, targetPage.sheetSpec);
+  const compatibleTemplates = result.availableTemplates.filter(
+    (template) => assets.length >= template.minPhotos && assets.length <= template.maxPhotos
+  );
+
+  if (compatibleTemplates.length === 0) {
+    return result;
+  }
+
+  const nextTemplate = selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
   const previousAssignments = new Map(targetPage.assignments.map((assignment) => [assignment.imageId, assignment]));
   const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode).map((assignment) =>
     withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
@@ -348,6 +356,9 @@ export function rearrangePageImages(
   const compatibleTemplates = result.availableTemplates.filter(
     (template) => assets.length >= template.minPhotos && assets.length <= template.maxPhotos
   );
+  if (compatibleTemplates.length === 0) {
+    return result;
+  }
   const alternativeTemplates = compatibleTemplates.filter((template) => template.id !== targetPage.templateId);
   const nextTemplate =
     alternativeTemplates.length > 0

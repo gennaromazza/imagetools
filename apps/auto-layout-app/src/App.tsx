@@ -771,6 +771,10 @@ function AppContent() {
       ),
     [result.pages]
   );
+  const maxTemplateCapacity = useMemo(
+    () => result.availableTemplates.reduce((highest, template) => Math.max(highest, template.maxPhotos), 0),
+    [result.availableTemplates]
+  );
   const selectedPage = result.pages.find((page) => page.id === selectedPageId) ?? null;
   const selectedSlotId = selectedSlotKey?.split(":")[1] ?? null;
   const selectedSlot = selectedPage?.slotDefinitions.find((slot) => slot.id === selectedSlotId);
@@ -2160,12 +2164,25 @@ function AppContent() {
           pages={result.pages.map((page) => ({
             id: page.id,
             pageNumber: page.pageNumber,
-            templateLabel: page.templateLabel
+            templateLabel: page.templateLabel,
+            photoCount: page.assignments.length,
+            capacity: maxTemplateCapacity,
+            isAtCapacity: page.assignments.length >= maxTemplateCapacity,
+            previewUrls: page.assignments
+              .slice(0, 4)
+              .map(
+                (assignment) =>
+                  assetsById.get(assignment.imageId)?.thumbnailUrl ??
+                  assetsById.get(assignment.imageId)?.previewUrl ??
+                  assetsById.get(assignment.imageId)?.sourceUrl
+              )
+              .filter((url): url is string => Boolean(url))
           }))}
           activePageId={selectedPageId}
           onClose={() => setQuickPreviewAssetId(null)}
           onSelectAsset={setQuickPreviewAssetId}
           onAddToPage={handleAddImageToPage}
+          onCreatePageWithAsset={handleCreatePageWithImage}
           onJumpToPage={(pageId) => {
             const page = result.pages.find((item) => item.id === pageId);
             if (!page) {
