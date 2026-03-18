@@ -1854,14 +1854,9 @@ img {
 
 .slot-quick-toolbar {
   position: absolute;
-  left: 0.7rem;
-  right: 0.7rem;
-  top: 0.7rem;
+  inset: 0;
   z-index: 5;
-  display: grid;
-  gap: 0.35rem;
-  justify-items: center;
-  opacity: 1;
+  opacity: 0;
   transition: opacity 120ms ease;
   pointer-events: none;
 }
@@ -1872,17 +1867,67 @@ img {
   opacity: 1;
 }
 
-.slot-quick-toolbar__row {
+.slot-quick-toolbar__group {
+  position: absolute;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
-  justify-content: center;
+  align-items: center;
   pointer-events: auto;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.sheet-slot:hover .slot-quick-toolbar__group,
+.sheet-slot--selected .slot-quick-toolbar__group,
+.sheet-slot--empty .slot-quick-toolbar__group {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.slot-quick-toolbar__group--top-left {
+  top: 0.6rem;
+  left: 0.6rem;
+}
+
+.slot-quick-toolbar__group--top-right {
+  top: 0.6rem;
+  right: 0.6rem;
+  justify-content: flex-end;
+}
+
+.slot-quick-toolbar__group--bottom-center {
+  left: 50%;
+  bottom: 0.65rem;
+  transform: translateX(-50%) translateY(4px);
+  justify-content: center;
+  max-width: calc(100% - 6rem);
+}
+
+.sheet-slot:hover .slot-quick-toolbar__group--bottom-center,
+.sheet-slot--selected .slot-quick-toolbar__group--bottom-center,
+.sheet-slot--empty .slot-quick-toolbar__group--bottom-center {
+  transform: translateX(-50%) translateY(0);
+}
+
+.slot-quick-toolbar__group--right-center {
+  top: 50%;
+  right: 0.6rem;
+  transform: translateY(-50%) translateX(4px);
+  flex-direction: column;
+}
+
+.sheet-slot:hover .slot-quick-toolbar__group--right-center,
+.sheet-slot--selected .slot-quick-toolbar__group--right-center,
+.sheet-slot--empty .slot-quick-toolbar__group--right-center {
+  transform: translateY(-50%) translateX(0);
 }
 
 .slot-quick-toolbar__button {
-  min-height: 28px;
-  padding: 0.3rem 0.55rem;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0.34rem 0.58rem;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(15, 15, 15, 0.72);
@@ -1890,6 +1935,7 @@ img {
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .slot-quick-toolbar__button:hover {
@@ -1909,6 +1955,12 @@ img {
 .slot-quick-toolbar__button--danger {
   background: rgba(120, 44, 40, 0.92);
   border-color: rgba(255, 255, 255, 0.28);
+}
+
+.slot-quick-toolbar__button--icon {
+  width: 32px;
+  padding-inline: 0;
+  justify-content: center;
 }
 
 .slot-asset--thumb {

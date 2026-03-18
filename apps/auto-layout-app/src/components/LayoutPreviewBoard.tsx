@@ -769,7 +769,7 @@ const SheetSurface = memo(function SheetSurface({
                   />
                 </button>
                 <div className="slot-quick-toolbar" onClick={(event) => event.stopPropagation()}>
-                  <div className="slot-quick-toolbar__row">
+                  <div className="slot-quick-toolbar__group slot-quick-toolbar__group--top-left">
                     <button
                       type="button"
                       className="slot-quick-toolbar__button slot-quick-toolbar__button--accent"
@@ -782,10 +782,14 @@ const SheetSurface = memo(function SheetSurface({
                           ? `Sostituisci foto nello slot ${slot.id}`
                           : `Scegli una foto per lo slot ${slot.id}`
                       }
+                      title="Scegli o sostituisci la foto"
                     >
                       Foto
                     </button>
-                    {assignment ? (
+                  </div>
+
+                  {assignment ? (
+                    <div className="slot-quick-toolbar__group slot-quick-toolbar__group--top-right">
                       <button
                         type="button"
                         className="slot-quick-toolbar__button"
@@ -802,12 +806,10 @@ const SheetSurface = memo(function SheetSurface({
                           onDragEnd();
                         }}
                         aria-label={`Sposta foto dallo slot ${slot.id}`}
-                        title="Trascina per spostare o sostituire in un altro foglio"
+                        title="Trascina per spostare o aggiungere in un altro foglio"
                       >
                         Sposta
                       </button>
-                    ) : null}
-                    {assignment ? (
                       <button
                         type="button"
                         className="slot-quick-toolbar__button slot-quick-toolbar__button--danger"
@@ -816,63 +818,72 @@ const SheetSurface = memo(function SheetSurface({
                           onClearSlot(page.id, slot.id);
                         }}
                         aria-label={`Rimuovi foto dallo slot ${slot.id}`}
+                        title="Rimuovi foto dallo slot"
                       >
-                        Ã—
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {assignment ? (
-                    <div className="slot-quick-toolbar__row">
-                      {([
-                        ["fit", "Adatta"],
-                        ["fill", "Riempi"],
-                        ["crop", "Crop"]
-                      ] as const).map(([mode, label]) => (
-                        <button
-                          key={mode}
-                          type="button"
-                          className={
-                            assignment.fitMode === mode
-                              ? "slot-quick-toolbar__button slot-quick-toolbar__button--active"
-                              : "slot-quick-toolbar__button"
-                          }
-                          onClick={() => {
-                            if (mode === "crop") {
-                              onOpenCropEditor(page.id, slot.id);
-                              return;
-                            }
-                            onUpdateSlotAssignment(page.id, slot.id, { fitMode: mode });
-                          }}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        className="slot-quick-toolbar__button"
-                        onClick={() =>
-                          onUpdateSlotAssignment(page.id, slot.id, {
-                            zoom: Math.max(0.7, assignment.zoom - 0.1)
-                          })
-                        }
-                        aria-label="Riduci zoom"
-                      >
-                        -
-                      </button>
-                      <button
-                        type="button"
-                        className="slot-quick-toolbar__button"
-                        onClick={() =>
-                          onUpdateSlotAssignment(page.id, slot.id, {
-                            zoom: Math.min(2.2, assignment.zoom + 0.1)
-                          })
-                        }
-                        aria-label="Aumenta zoom"
-                      >
-                        +
+                        ×
                       </button>
                     </div>
+                  ) : null}
+
+                  {assignment ? (
+                    <>
+                      <div className="slot-quick-toolbar__group slot-quick-toolbar__group--bottom-center">
+                        {([
+                          ["fit", "Adatta"],
+                          ["fill", "Riempi"],
+                          ["crop", "Crop"]
+                        ] as const).map(([mode, label]) => (
+                          <button
+                            key={mode}
+                            type="button"
+                            className={
+                              assignment.fitMode === mode
+                                ? "slot-quick-toolbar__button slot-quick-toolbar__button--active"
+                                : "slot-quick-toolbar__button"
+                            }
+                            onClick={() => {
+                              if (mode === "crop") {
+                                onOpenCropEditor(page.id, slot.id);
+                                return;
+                              }
+                              onUpdateSlotAssignment(page.id, slot.id, { fitMode: mode });
+                            }}
+                            title={label}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="slot-quick-toolbar__group slot-quick-toolbar__group--right-center">
+                        <button
+                          type="button"
+                          className="slot-quick-toolbar__button slot-quick-toolbar__button--icon"
+                          onClick={() =>
+                            onUpdateSlotAssignment(page.id, slot.id, {
+                              zoom: Math.max(0.7, assignment.zoom - 0.1)
+                            })
+                          }
+                          aria-label="Riduci zoom"
+                          title="Riduci zoom"
+                        >
+                          -
+                        </button>
+                        <button
+                          type="button"
+                          className="slot-quick-toolbar__button slot-quick-toolbar__button--icon"
+                          onClick={() =>
+                            onUpdateSlotAssignment(page.id, slot.id, {
+                              zoom: Math.min(2.2, assignment.zoom + 0.1)
+                            })
+                          }
+                          aria-label="Aumenta zoom"
+                          title="Aumenta zoom"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </>
                   ) : null}
                 </div>
               </>
