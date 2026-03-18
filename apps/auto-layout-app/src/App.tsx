@@ -103,6 +103,34 @@ type BrowserFile = File & {
   webkitRelativePath: string;
 };
 
+function UndoIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M6.2 3.2 2.7 6.7l3.5 3.5.7-.7-2.3-2.3H9a3.5 3.5 0 1 1 0 7H6.5v-1H9a2.5 2.5 0 1 0 0-5H4.6l2.3-2.3-.7-.7Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function RedoIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="m9.8 3.2-.7.7 2.3 2.3H7a3.5 3.5 0 1 0 0 7h2.5v-1H7a2.5 2.5 0 1 1 0-5h4.4l-2.3 2.3.7.7 3.5-3.5-3.5-3.5Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function FullscreenIcon({ active }: { active: boolean }) {
+  return active ? (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M3 6V3h3v1H4v2H3Zm9 0V4h-2V3h3v3h-1Zm-9 4h1v2h2v1H3v-3Zm9 0h1v3h-3v-1h2v-2Z" fill="currentColor" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path d="M3 3h4v1H4v3H3V3Zm6 0h4v4h-1V4H9V3ZM3 9h1v3h3v1H3V9Zm9 0h1v4H9v-1h3V9Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 function createInitialExportProgressState(): ExportProgressState {
   return {
     isOpen: false,
@@ -1626,7 +1654,7 @@ function AppContent() {
               }}
               aria-label="Torna alla lista dei progetti"
             >
-              ← Progetti
+              Torna ai progetti
             </button>
           </div>
         </header>
@@ -1820,7 +1848,7 @@ function AppContent() {
                 title="Annulla (Ctrl+Z)"
                 aria-label="Annulla ultima modifica"
               >
-                ↶
+                <UndoIcon />
               </button>
               <button
                 type="button"
@@ -1830,7 +1858,7 @@ function AppContent() {
                 title="Ripristina (Ctrl+Y)"
                 aria-label="Ripristina modifica annullata"
               >
-                ↷
+                <RedoIcon />
               </button>
               <div className="toolbar-separator" />
               <ZoomControls
@@ -1845,7 +1873,7 @@ function AppContent() {
                 title={isFullscreen ? "Esci da schermo intero" : "Schermo intero (F11)"}
                 aria-label={isFullscreen ? "Esci da schermo intero" : "Attiva schermo intero"}
               >
-                {isFullscreen ? "🗗" : "🗖"}
+                <FullscreenIcon active={isFullscreen} />
               </button>
             </div>
 
@@ -1859,7 +1887,7 @@ function AppContent() {
                 }}
                 aria-label="Torna al setup progetto"
               >
-                ← Impostazioni
+                Indietro a impostazioni
               </button>
               <button
                 type="button"
@@ -1867,7 +1895,7 @@ function AppContent() {
                 onClick={() => setCurrentScreen("dashboard")}
                 aria-label="Torna alla lista dei progetti"
               >
-                ← Progetti
+                Torna ai progetti
               </button>
               <button
                 type="button"
@@ -2203,3 +2231,4 @@ export function App() {
     </ErrorBoundary>
   );
 }
+
