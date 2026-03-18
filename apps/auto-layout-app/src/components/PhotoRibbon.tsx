@@ -203,6 +203,7 @@ function PhotoRibbonContent({
             const isActive = dragState?.imageId === asset.id;
             const rating = getAssetRating(asset);
             const pickStatus = getAssetPickStatus(asset);
+            const isUsed = Boolean(usage);
 
             return (
               <button
@@ -211,13 +212,15 @@ function PhotoRibbonContent({
                 draggable
                 data-preview-asset-id={asset.id}
                 className={
-                  variant === "vertical"
-                    ? isActive
-                      ? `ribbon-photo ribbon-photo--vertical ribbon-photo--dragging${asset.colorLabel ? ` ribbon-photo--label-${asset.colorLabel}` : ""}`
-                      : `ribbon-photo ribbon-photo--vertical${asset.colorLabel ? ` ribbon-photo--label-${asset.colorLabel}` : ""}`
-                    : isActive
-                      ? `ribbon-photo ribbon-photo--dragging${asset.colorLabel ? ` ribbon-photo--label-${asset.colorLabel}` : ""}`
-                      : `ribbon-photo${asset.colorLabel ? ` ribbon-photo--label-${asset.colorLabel}` : ""}`
+                  [
+                    "ribbon-photo",
+                    variant === "vertical" ? "ribbon-photo--vertical" : "",
+                    isActive ? "ribbon-photo--dragging" : "",
+                    isUsed ? "ribbon-photo--used" : "",
+                    asset.colorLabel ? `ribbon-photo--label-${asset.colorLabel}` : ""
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
                 }
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", asset.id);
@@ -236,9 +239,11 @@ function PhotoRibbonContent({
                 ) : (
                   <div className="ribbon-photo__placeholder">{asset.fileName}</div>
                 )}
+                {isUsed ? <span className="ribbon-photo__usage-overlay">Usata</span> : null}
                 <div className="ribbon-photo__badges">
                   <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>{PICK_STATUS_LABELS[pickStatus]}</span>
                   {asset.colorLabel ? <span className={`asset-color-dot asset-color-dot--${asset.colorLabel}`} /> : null}
+                  {usage ? <span className="ribbon-photo__usage-chip">{`Foglio ${usage.pageNumber}`}</span> : null}
                 </div>
                 <div className="ribbon-photo__meta">
                   <strong>{asset.fileName?.substring(0, 12)}</strong>

@@ -15,8 +15,12 @@ interface PhotoQuickPreviewModalProps {
   asset: ImageAsset | null;
   assets?: ImageAsset[];
   usageByAssetId?: Map<string, { pageNumber: number; pageId?: string; slotId?: string }>;
+  pages?: Array<{ id: string; pageNumber: number; templateLabel?: string }>;
+  activePageId?: string | null;
   onClose: () => void;
   onSelectAsset?: (assetId: string) => void;
+  onAddToPage?: (pageId: string, assetId: string) => void;
+  onJumpToPage?: (pageId: string) => void;
   onUpdateAsset?: (
     assetId: string,
     changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
@@ -33,8 +37,12 @@ export function PhotoQuickPreviewModal({
   asset,
   assets = [],
   usageByAssetId,
+  pages = [],
+  activePageId,
   onClose,
   onSelectAsset,
+  onAddToPage,
+  onJumpToPage,
   onUpdateAsset
 }: PhotoQuickPreviewModalProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -95,6 +103,22 @@ export function PhotoQuickPreviewModal({
     [asset, onUpdateAsset]
   );
 
+  const activePage = useMemo(
+    () => pages.find((page) => page.id === activePageId) ?? null,
+    [activePageId, pages]
+  );
+
+  const handleAddToPage = useCallback(
+    (pageId: string) => {
+      if (!asset || !onAddToPage) {
+        return;
+      }
+
+      onAddToPage(pageId, asset.id);
+    },
+    [asset, onAddToPage]
+  );
+
   const toggleNativeFullscreen = useCallback(async () => {
     const element = stageRef.current;
     if (!element) {
@@ -132,6 +156,12 @@ export function PhotoQuickPreviewModal({
       if (event.key === "ArrowRight") {
         event.preventDefault();
         handleNavigate("next");
+        return;
+      }
+
+      if (event.key === "Enter" && activePage && onAddToPage) {
+        event.preventDefault();
+        onAddToPage(activePage.id, asset.id);
         return;
       }
 
@@ -196,7 +226,7 @@ export function PhotoQuickPreviewModal({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [asset, handleNavigate, onClose, onUpdateAsset, updateColorLabel, updatePickStatus, updateRating]);
+  }, [activePage, asset, handleNavigate, onAddToPage, onClose, onUpdateAsset, updateColorLabel, updatePickStatus, updateRating]);
 
   if (!asset) {
     return null;
@@ -291,6 +321,60 @@ export function PhotoQuickPreviewModal({
           </div>
         </div>
       </div>
+
+      {pages.length > 0 && onAddToPage ? (
+        <div className="quick-preview__assign-bar" onClick={(event) => event.stopPropagation()}>
+          <div className="quick-preview__assign-copy">
+            <strong>Aggiungi direttamente al layout</strong>
+            <span>
+              {activePage
+                ? `Invio aggiunge al foglio attivo ${activePage.pageNumber}.`
+                : "Scegli un foglio qui sotto per aggiungere subito la foto."}
+            </span>
+          </div>
+          <div className="quick-preview__assign-actions">
+            {activePage ? (
+              <button
+                type="button"
+                className="secondary-button quick-preview__assign-button quick-preview__assign-button--active"
+                onClick={() => handleAddToPage(activePage.id)}
+              >
+                {`Aggiungi al foglio attivo ${activePage.pageNumber}`}
+              </button>
+            ) : null}
+            {usage?.pageId && onJumpToPage ? (
+              <button
+                type="button"
+                className="ghost-button quick-preview__assign-button"
+                onClick={() => onJumpToPage(usage.pageId!)}
+              >
+                {`Vai al foglio ${usage.pageNumber}`}
+              </button>
+            ) : null}
+          </div>
+          <div className="quick-preview__page-strip">
+            {pages.map((page) => {
+              const isActivePage = page.id === activePageId;
+              return (
+                <button
+                  key={page.id}
+                  type="button"
+                  className={
+                    isActivePage
+                      ? "quick-preview__page-chip quick-preview__page-chip--active"
+                      : "quick-preview__page-chip"
+                  }
+                  onClick={() => handleAddToPage(page.id)}
+                  title={page.templateLabel ? page.templateLabel : `Foglio ${page.pageNumber}`}
+                >
+                  <strong>{`Foglio ${page.pageNumber}`}</strong>
+                  <span>{isActivePage ? "Attivo" : "Aggiungi qui"}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       <div className="quick-preview__stage" ref={stageRef} onClick={(event) => event.stopPropagation()}>
         {previousAsset ? (

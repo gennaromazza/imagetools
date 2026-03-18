@@ -2153,8 +2153,23 @@ function AppContent() {
           asset={quickPreviewAsset}
           assets={allAssets}
           usageByAssetId={usageByAssetId}
+          pages={result.pages.map((page) => ({
+            id: page.id,
+            pageNumber: page.pageNumber,
+            templateLabel: page.templateLabel
+          }))}
+          activePageId={selectedPageId}
           onClose={() => setQuickPreviewAssetId(null)}
           onSelectAsset={setQuickPreviewAssetId}
+          onAddToPage={handleAddImageToPage}
+          onJumpToPage={(pageId) => {
+            const page = result.pages.find((item) => item.id === pageId);
+            if (!page) {
+              return;
+            }
+            setSelectedPageId(pageId);
+            setSelectedSlotKey(page.slotDefinitions[0] ? `${page.id}:${page.slotDefinitions[0].id}` : null);
+          }}
           onUpdateAsset={(assetId, changes) => {
             handleAssetsMetadataChange(new Map([[assetId, changes]]));
           }}
