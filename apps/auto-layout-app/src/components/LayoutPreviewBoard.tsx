@@ -1418,6 +1418,70 @@ export function LayoutPreviewBoard({
     preloadImageUrls(preloadUrls);
   }, [activeIndex, assetsById, result.pages]);
 
+  const pagesForStudio = deferredPages.length > 0 ? deferredPages : result.pages;
+
+  useEffect(() => {
+    const canvasElement = canvasRef.current;
+    if (!canvasElement || pagesForStudio.length === 0 || dragState) {
+      return;
+    }
+
+    const ratioByPageId = new Map<string, number>();
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        let shouldUpdate = false;
+
+        for (const entry of entries) {
+          const pageId = (entry.target as HTMLElement).dataset.pageId;
+          if (!pageId) {
+            continue;
+          }
+
+          ratioByPageId.set(pageId, entry.isIntersecting ? entry.intersectionRatio : 0);
+          shouldUpdate = true;
+        }
+
+        if (!shouldUpdate) {
+          return;
+        }
+
+        let bestPageId: string | null = null;
+        let bestRatio = 0;
+
+        for (const page of pagesForStudio) {
+          const ratio = ratioByPageId.get(page.id) ?? 0;
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            bestPageId = page.id;
+          }
+        }
+
+        if (!bestPageId || bestPageId === activePage?.id || bestRatio < 0.42) {
+          return;
+        }
+
+        const nextPage = pagesForStudio.find((page) => page.id === bestPageId);
+        if (!nextPage) {
+          return;
+        }
+
+        onSelectPage(nextPage.id, nextPage.slotDefinitions[0]?.id);
+      },
+      {
+        root: canvasElement,
+        threshold: [0.2, 0.35, 0.5, 0.65, 0.8]
+      }
+    );
+
+    const pageElements = canvasElement.querySelectorAll<HTMLElement>("[data-page-id]");
+    pageElements.forEach((element) => observer.observe(element));
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [activePage?.id, dragState, onSelectPage, pagesForStudio]);
+
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       const resizeState = resizeStateRef.current;
@@ -1453,8 +1517,6 @@ export function LayoutPreviewBoard({
   if (!activePage) {
     return <p className="helper-copy">Non ci sono ancora fogli da mostrare.</p>;
   }
-
-  const pagesForStudio = deferredPages.length > 0 ? deferredPages : result.pages;
   const workspaceStyle = {
     "--layout-rail-width": `${leftRailWidth}px`,
     "--layout-inspector-width": isInspectorCollapsed ? "0px" : `${inspectorWidth}px`
@@ -1799,6 +1861,7 @@ export function LayoutPreviewBoard({
                   return (
                     <section
                       key={page.id}
+                      data-page-id={page.id}
                       id={`layout-page-${page.id}`}
                       className={isActive ? "layout-studio__page-card layout-studio__page-card--active" : "layout-studio__page-card"}
                     >

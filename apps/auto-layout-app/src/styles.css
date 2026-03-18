@@ -1298,11 +1298,18 @@ img {
   border-radius: 26px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(20, 20, 19, 0.82);
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
 .layout-studio__page-card--active {
-  border-color: rgba(226, 155, 88, 0.38);
-  background: rgba(226, 155, 88, 0.06);
+  border-color: rgba(226, 155, 88, 0.52);
+  background:
+    linear-gradient(180deg, rgba(226, 155, 88, 0.1), rgba(226, 155, 88, 0.04)),
+    rgba(20, 20, 19, 0.9);
+  box-shadow:
+    0 0 0 1px rgba(226, 155, 88, 0.18),
+    0 18px 34px rgba(0, 0, 0, 0.18);
+  transform: translateY(-1px);
 }
 
 .layout-studio__page-card-header {
@@ -1316,6 +1323,11 @@ img {
 .layout-studio__page-card-header strong {
   display: block;
   margin: 0.2rem 0 0.3rem;
+  transition: color 140ms ease;
+}
+
+.layout-studio__page-card--active .layout-studio__page-card-header strong {
+  color: #f6d8b4;
 }
 
 .layout-studio__page-card-header p {
