@@ -87,6 +87,20 @@ function getAssignmentTransform(
   };
 }
 
+function getAssignmentCrop(assignment: LayoutAssignment, image: HTMLImageElement) {
+  const cropLeft = Math.min(1, Math.max(0, assignment.cropLeft ?? 0));
+  const cropTop = Math.min(1, Math.max(0, assignment.cropTop ?? 0));
+  const cropWidth = Math.min(1, Math.max(0.05, assignment.cropWidth ?? 1));
+  const cropHeight = Math.min(1, Math.max(0.05, assignment.cropHeight ?? 1));
+
+  return {
+    sx: cropLeft * image.naturalWidth,
+    sy: cropTop * image.naturalHeight,
+    sw: cropWidth * image.naturalWidth,
+    sh: cropHeight * image.naturalHeight
+  };
+}
+
 async function drawAssignment(
   ctx: CanvasRenderingContext2D,
   asset: ImageAsset,
@@ -111,18 +125,23 @@ async function drawAssignment(
   }
 
   const image = await loadDecodedImage(assetUrl);
+  const crop = getAssignmentCrop(assignment, image);
   const baseScale =
     assignment.fitMode === "fit"
-      ? Math.min(width / image.naturalWidth, height / image.naturalHeight)
-      : Math.max(width / image.naturalWidth, height / image.naturalHeight);
+      ? Math.min(width / crop.sw, height / crop.sh)
+      : Math.max(width / crop.sw, height / crop.sh);
   const transform = getAssignmentTransform(assignment, width, height);
-  const drawWidth = image.naturalWidth * baseScale * transform.scale;
-  const drawHeight = image.naturalHeight * baseScale * transform.scale;
+  const drawWidth = crop.sw * baseScale * transform.scale;
+  const drawHeight = crop.sh * baseScale * transform.scale;
 
   ctx.translate(x + width / 2, y + height / 2);
   ctx.rotate(transform.rotationRad);
   ctx.drawImage(
     image,
+    crop.sx,
+    crop.sy,
+    crop.sw,
+    crop.sh,
     -drawWidth / 2 + transform.translateX,
     -drawHeight / 2 + transform.translateY,
     drawWidth,

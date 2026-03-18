@@ -22,6 +22,7 @@ import type {
 } from "@photo-tools/shared-types";
 import { AssignmentInspector } from "./AssignmentInspector";
 import { ConfirmModal } from "./ConfirmModal";
+import { CropEditorModal } from "./CropEditorModal";
 import { ImageSlotPreview } from "./ImageSlotPreview";
 import { preloadImageUrls } from "../image-cache";
 import { PhotoReplaceModal } from "./PhotoReplaceModal";
@@ -48,6 +49,11 @@ interface ReplaceTarget {
   pageNumber: number;
   slotId: string;
   currentImageId?: string;
+}
+
+interface CropTarget {
+  pageId: string;
+  slotId: string;
 }
 
 type ResizePane = "left" | "right";
@@ -94,7 +100,12 @@ interface LayoutPreviewBoardProps {
   onUpdateSlotAssignment: (
     pageId: string,
     slotId: string,
-    changes: Partial<Pick<LayoutAssignment, "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked">>
+    changes: Partial<
+      Pick<
+        LayoutAssignment,
+        "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked" | "cropLeft" | "cropTop" | "cropWidth" | "cropHeight"
+      >
+    >
   ) => void;
   zoom: number;
 }
@@ -388,11 +399,17 @@ interface SheetSurfaceProps {
   onAddToPage: (pageId: string, imageId: string) => void;
   onClearSlot: (pageId: string, slotId: string) => void;
   onOpenPicker: (pageId: string, pageNumber: number, slotId: string, currentImageId?: string) => void;
+  onOpenCropEditor: (pageId: string, slotId: string) => void;
   onContextMenu?: (event: MouseEvent, page: GeneratedPageLayout) => void;
   onUpdateSlotAssignment: (
     pageId: string,
     slotId: string,
-    changes: Partial<Pick<LayoutAssignment, "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked">>
+    changes: Partial<
+      Pick<
+        LayoutAssignment,
+        "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked" | "cropLeft" | "cropTop" | "cropWidth" | "cropHeight"
+      >
+    >
   ) => void;
   size: "hero" | "thumb";
 }
@@ -410,6 +427,7 @@ const SheetSurface = memo(function SheetSurface({
   onAddToPage,
   onClearSlot,
   onOpenPicker,
+  onOpenCropEditor,
   onContextMenu,
   onUpdateSlotAssignment,
   size
@@ -715,6 +733,7 @@ const SheetSurface = memo(function SheetSurface({
                     asset={asset}
                     assignment={assignment}
                     label={assignment ? asset?.fileName ?? assignment.imageId : slot.id}
+                    slot={slot}
                   />
                 </button>
                 <div className="slot-quick-toolbar" onClick={(event) => event.stopPropagation()}>
@@ -786,7 +805,13 @@ const SheetSurface = memo(function SheetSurface({
                               ? "slot-quick-toolbar__button slot-quick-toolbar__button--active"
                               : "slot-quick-toolbar__button"
                           }
-                          onClick={() => onUpdateSlotAssignment(page.id, slot.id, { fitMode: mode })}
+                          onClick={() => {
+                            if (mode === "crop") {
+                              onOpenCropEditor(page.id, slot.id);
+                              return;
+                            }
+                            onUpdateSlotAssignment(page.id, slot.id, { fitMode: mode });
+                          }}
                         >
                           {label}
                         </button>
@@ -825,6 +850,7 @@ const SheetSurface = memo(function SheetSurface({
                   asset={asset}
                   assignment={assignment}
                   label={assignment ? asset?.fileName ?? assignment.imageId : slot.id}
+                  slot={slot}
                 />
               </div>
             )}
@@ -985,6 +1011,7 @@ export function LayoutPreviewBoard({
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [pageSectionFilter, setPageSectionFilter] = useState<PageSectionFilter>("all");
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null);
+  const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
   const [leftRailWidth, setLeftRailWidth] = useState(260);
   const [inspectorWidth, setInspectorWidth] = useState(320);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
@@ -1090,6 +1117,10 @@ export function LayoutPreviewBoard({
       : undefined;
   const selectedAssignment = selectedSlot ? activeAssignmentsBySlotId.get(selectedSlot.id) : undefined;
   const selectedAsset = selectedAssignment ? assetsById.get(selectedAssignment.imageId) : undefined;
+  const cropPage = cropTarget ? result.pages.find((page) => page.id === cropTarget.pageId) : null;
+  const cropSlot = cropTarget && cropPage ? cropPage.slotDefinitions.find((slot) => slot.id === cropTarget.slotId) : undefined;
+  const cropAssignment = cropTarget && cropPage ? buildAssignmentsBySlotId(cropPage).get(cropTarget.slotId) : undefined;
+  const cropAsset = cropAssignment ? assetsById.get(cropAssignment.imageId) : undefined;
   const virtualizedStripStartIndex = useMemo(
     () => Math.max(0, Math.floor(layoutStripScrollLeft / LAYOUT_STRIP_ITEM_WIDTH) - 1),
     [layoutStripScrollLeft]
@@ -1119,6 +1150,14 @@ export function LayoutPreviewBoard({
 
   const handleReplaceTargetClose = useCallback(() => {
     setReplaceTarget(null);
+  }, []);
+
+  const handleCropTargetOpen = useCallback((pageId: string, slotId: string) => {
+    setCropTarget({ pageId, slotId });
+  }, []);
+
+  const handleCropTargetClose = useCallback(() => {
+    setCropTarget(null);
   }, []);
 
   const handleAssetFilterChange = useCallback((filter: AssetFilter) => {
@@ -1841,6 +1880,7 @@ export function LayoutPreviewBoard({
                         onAddToPage={onAddToPage}
                         onClearSlot={onClearSlot}
                         onOpenPicker={handleReplaceTargetOpen}
+                        onOpenCropEditor={handleCropTargetOpen}
                         onContextMenu={onContextMenu}
                         onUpdateSlotAssignment={onUpdateSlotAssignment}
                         size="hero"
@@ -2162,6 +2202,12 @@ export function LayoutPreviewBoard({
 
                 onClearSlot(activePage.id, selectedSlot.id);
               }}
+              onOpenCropEditor={() => {
+                if (!selectedSlot) {
+                  return;
+                }
+                handleCropTargetOpen(activePage.id, selectedSlot.id);
+              }}
             />
           </div>
 
@@ -2186,6 +2232,18 @@ export function LayoutPreviewBoard({
           onClose={handleReplaceTargetClose}
           onChoose={handleReplaceAsset}
           onAssetsMetadataChange={onAssetsMetadataChange}
+        />
+      ) : null}
+
+      {cropTarget && cropPage && cropSlot && cropAssignment && cropAsset ? (
+        <CropEditorModal
+          asset={cropAsset}
+          assignment={cropAssignment}
+          slot={cropSlot}
+          onClose={handleCropTargetClose}
+          onApply={(changes) => {
+            onUpdateSlotAssignment(cropPage.id, cropSlot.id, changes);
+          }}
         />
       ) : null}
 

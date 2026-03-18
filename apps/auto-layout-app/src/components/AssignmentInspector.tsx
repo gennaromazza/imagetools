@@ -6,8 +6,16 @@ interface AssignmentInspectorProps {
   slot?: LayoutSlot;
   assignment?: LayoutAssignment;
   asset?: ImageAsset;
-  onChange: (changes: Partial<Pick<LayoutAssignment, "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked">>) => void;
+  onChange: (
+    changes: Partial<
+      Pick<
+        LayoutAssignment,
+        "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked" | "cropLeft" | "cropTop" | "cropWidth" | "cropHeight"
+      >
+    >
+  ) => void;
   onClear: () => void;
+  onOpenCropEditor: () => void;
 }
 
 export function AssignmentInspector({
@@ -16,7 +24,8 @@ export function AssignmentInspector({
   assignment,
   asset,
   onChange,
-  onClear
+  onClear,
+  onOpenCropEditor
 }: AssignmentInspectorProps) {
   const [draftZoom, setDraftZoom] = useState(assignment?.zoom ?? 1);
   const [draftOffsetX, setDraftOffsetX] = useState(assignment?.offsetX ?? 0);
@@ -108,6 +117,9 @@ export function AssignmentInspector({
         <small className="helper-inline">
           Puoi trascinare direttamente la foto per centrarla o riposizionarla anche dopo zoom, fill o crop. Sul canvas puoi usare Ctrl piu rotellina per lo zoom, doppio click e la toolbar rapida nello slot. Per spostarla in un altro foglio usa il bottone Sposta sullo slot.
         </small>
+        <button type="button" className="ghost-button" onClick={onOpenCropEditor}>
+          Apri editor crop
+        </button>
       </div>
 
       <label className="field">

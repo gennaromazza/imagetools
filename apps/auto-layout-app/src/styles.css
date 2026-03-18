@@ -1889,11 +1889,25 @@ img {
   background: #ffffff;
 }
 
-.slot-media img {
-  width: 100%;
-  height: 100%;
-  object-position: center;
-  transition: transform 140ms ease, object-position 140ms ease;
+.slot-media__viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: 18px;
+}
+
+.slot-media__frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: center center;
+  transition: transform 140ms ease, width 140ms ease, height 140ms ease;
+}
+
+.slot-media__image {
+  position: absolute;
+  object-fit: cover;
+  transition: left 140ms ease, top 140ms ease, width 140ms ease, height 140ms ease;
   user-select: none;
   pointer-events: none;
 }
@@ -2625,6 +2639,114 @@ img {
 
 .modal-toolbar__search {
   width: min(320px, 100%);
+}
+
+.chip {
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.chip--active {
+  border-color: rgba(226, 155, 88, 0.45);
+  background: rgba(226, 155, 88, 0.12);
+  color: var(--text);
+}
+
+.crop-editor-backdrop {
+  z-index: 90;
+}
+
+.crop-editor-modal {
+  width: min(980px, calc(100vw - 3rem));
+  display: grid;
+  gap: 1rem;
+}
+
+.crop-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.crop-editor-stage {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 22px;
+  overflow: hidden;
+  background:
+    linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,0.04) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.04) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.04) 75%),
+    rgba(20, 20, 19, 0.85);
+  background-size: 28px 28px;
+  background-position: 0 0, 0 14px, 14px -14px, -14px 0;
+}
+
+.crop-editor-stage__image,
+.crop-editor-stage__image-frame {
+  position: absolute;
+}
+
+.crop-editor-stage__image {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.crop-editor-stage__image-frame {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  pointer-events: none;
+}
+
+.crop-editor-stage__crop-box {
+  position: absolute;
+  border: 2px solid rgba(226, 155, 88, 0.95);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42);
+  border-radius: 18px;
+  cursor: move;
+}
+
+.crop-editor-stage__handle {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(242, 236, 229, 0.96);
+  border: 2px solid rgba(43, 49, 45, 0.9);
+}
+
+.crop-editor-stage__handle--nw {
+  left: -7px;
+  top: -7px;
+  cursor: nwse-resize;
+}
+
+.crop-editor-stage__handle--ne {
+  right: -7px;
+  top: -7px;
+  cursor: nesw-resize;
+}
+
+.crop-editor-stage__handle--sw {
+  left: -7px;
+  bottom: -7px;
+  cursor: nesw-resize;
+}
+
+.crop-editor-stage__handle--se {
+  right: -7px;
+  bottom: -7px;
+  cursor: nwse-resize;
 }
 
 .modal-status {

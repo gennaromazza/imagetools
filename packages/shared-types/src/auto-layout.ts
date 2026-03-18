@@ -80,6 +80,10 @@ export interface LayoutAssignment {
   offsetY: number;
   rotation: number;
   locked: boolean;
+  cropLeft?: number;
+  cropTop?: number;
+  cropWidth?: number;
+  cropHeight?: number;
 }
 
 export interface GeneratedPageLayout {
@@ -175,7 +179,12 @@ export interface ClearSlotAssignmentRequest {
 export interface UpdateSlotAssignmentRequest {
   pageId: string;
   slotId: string;
-  changes: Partial<Pick<LayoutAssignment, "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked">>;
+  changes: Partial<
+    Pick<
+      LayoutAssignment,
+      "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked" | "cropLeft" | "cropTop" | "cropWidth" | "cropHeight"
+    >
+  >;
 }
 
 export interface CreatePageRequest {

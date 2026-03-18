@@ -65,6 +65,35 @@ function findAssignment(
   return null;
 }
 
+function withPreservedAssignmentState(
+  assignment: LayoutAssignment,
+  previous?: LayoutAssignment
+): LayoutAssignment {
+  if (!previous) {
+    return {
+      ...assignment,
+      cropLeft: assignment.cropLeft ?? 0,
+      cropTop: assignment.cropTop ?? 0,
+      cropWidth: assignment.cropWidth ?? 1,
+      cropHeight: assignment.cropHeight ?? 1
+    };
+  }
+
+  return {
+    ...assignment,
+    fitMode: previous.fitMode,
+    zoom: previous.zoom,
+    offsetX: previous.offsetX,
+    offsetY: previous.offsetY,
+    rotation: previous.rotation,
+    locked: previous.locked,
+    cropLeft: previous.cropLeft ?? 0,
+    cropTop: previous.cropTop ?? 0,
+    cropWidth: previous.cropWidth ?? 1,
+    cropHeight: previous.cropHeight ?? 1
+  };
+}
+
 export function moveImageBetweenSlots(
   result: AutoLayoutResult,
   move: LayoutMove
@@ -153,19 +182,9 @@ export function rebalancePagesForAssignedImages(
 
     const nextTemplate = selectBestTemplate(assets, result.availableTemplates, page.sheetSpec);
     const previousAssignments = new Map(page.assignments.map((assignment) => [assignment.imageId, assignment]));
-    const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode).map((assignment) => ({
-      ...(previousAssignments.get(assignment.imageId)
-        ? {
-            fitMode: previousAssignments.get(assignment.imageId)?.fitMode,
-            zoom: previousAssignments.get(assignment.imageId)?.zoom,
-            offsetX: previousAssignments.get(assignment.imageId)?.offsetX,
-            offsetY: previousAssignments.get(assignment.imageId)?.offsetY,
-            rotation: previousAssignments.get(assignment.imageId)?.rotation,
-            locked: previousAssignments.get(assignment.imageId)?.locked
-          }
-        : {}),
-      ...assignment
-    }));
+    const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode).map((assignment) =>
+      withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
+    );
 
     const nextPage = syncPageImageIds({
       ...page,
@@ -226,7 +245,11 @@ export function placeImageInSlot(
     offsetX: 0,
     offsetY: 0,
     rotation: 0,
-    locked: false
+    locked: false,
+    cropLeft: 0,
+    cropTop: 0,
+    cropWidth: 1,
+    cropHeight: 1
   });
 
   return finalize(result, pages);
@@ -272,19 +295,9 @@ export function addImageToPage(
 
   const nextTemplate = selectBestTemplate(assets, result.availableTemplates, targetPage.sheetSpec);
   const previousAssignments = new Map(targetPage.assignments.map((assignment) => [assignment.imageId, assignment]));
-  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode).map((assignment) => ({
-    ...(previousAssignments.get(assignment.imageId)
-      ? {
-          fitMode: previousAssignments.get(assignment.imageId)?.fitMode,
-          zoom: previousAssignments.get(assignment.imageId)?.zoom,
-          offsetX: previousAssignments.get(assignment.imageId)?.offsetX,
-          offsetY: previousAssignments.get(assignment.imageId)?.offsetY,
-          rotation: previousAssignments.get(assignment.imageId)?.rotation,
-          locked: previousAssignments.get(assignment.imageId)?.locked
-        }
-      : {}),
-    ...assignment
-  }));
+  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode).map((assignment) =>
+    withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
+  );
 
   const nextPage = syncPageImageIds({
     ...targetPage,
@@ -341,19 +354,9 @@ export function rearrangePageImages(
       ? selectBestTemplate(assets, alternativeTemplates, targetPage.sheetSpec)
       : selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
   const previousAssignments = new Map(targetPage.assignments.map((assignment) => [assignment.imageId, assignment]));
-  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode).map((assignment) => ({
-    ...(previousAssignments.get(assignment.imageId)
-      ? {
-          fitMode: previousAssignments.get(assignment.imageId)?.fitMode,
-          zoom: previousAssignments.get(assignment.imageId)?.zoom,
-          offsetX: previousAssignments.get(assignment.imageId)?.offsetX,
-          offsetY: previousAssignments.get(assignment.imageId)?.offsetY,
-          rotation: previousAssignments.get(assignment.imageId)?.rotation,
-          locked: previousAssignments.get(assignment.imageId)?.locked
-        }
-      : {}),
-    ...assignment
-  }));
+  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode).map((assignment) =>
+    withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
+  );
 
   const nextPage = syncPageImageIds({
     ...targetPage,
@@ -425,19 +428,9 @@ export function changePageTemplate(
     .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
     .filter(Boolean) as typeof result.request.assets;
   const previousAssignments = new Map(page.assignments.map((assignment) => [assignment.imageId, assignment]));
-  const assignments = assignImagesToTemplate(assets, template, result.request.fitMode).map((assignment) => ({
-    ...(previousAssignments.get(assignment.imageId)
-      ? {
-          fitMode: previousAssignments.get(assignment.imageId)?.fitMode,
-          zoom: previousAssignments.get(assignment.imageId)?.zoom,
-          offsetX: previousAssignments.get(assignment.imageId)?.offsetX,
-          offsetY: previousAssignments.get(assignment.imageId)?.offsetY,
-          rotation: previousAssignments.get(assignment.imageId)?.rotation,
-          locked: previousAssignments.get(assignment.imageId)?.locked
-        }
-      : {}),
-    ...assignment
-  }));
+  const assignments = assignImagesToTemplate(assets, template, result.request.fitMode).map((assignment) =>
+    withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
+  );
 
   const pages = clonePages(result).map((item) =>
     item.id === request.pageId
@@ -478,7 +471,9 @@ export function createPage(
   const template = request.templateId
     ? findTemplate(result.availableTemplates, request.templateId)
     : selectBestTemplate(assets, result.availableTemplates, result.request.sheet);
-  const assignments = assignImagesToTemplate(assets, template, result.request.fitMode);
+  const assignments = assignImagesToTemplate(assets, template, result.request.fitMode).map((assignment) =>
+    withPreservedAssignmentState(assignment)
+  );
   const highestPageNumber = result.pages.reduce((highest, page) => Math.max(highest, page.pageNumber), 0);
   const nextPageId = `page-${highestPageNumber + 1}`;
   const pages = [
