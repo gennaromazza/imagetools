@@ -303,6 +303,25 @@ function renderTemplateMiniMap(template: LayoutTemplate) {
   );
 }
 
+function renderSlotMiniMap(slots: LayoutTemplate["slots"]) {
+  return (
+    <div className="template-card__map">
+      {slots.map((slot) => (
+        <span
+          key={slot.id}
+          className="template-card__slot"
+          style={{
+            left: `${slot.x * 100}%`,
+            top: `${slot.y * 100}%`,
+            width: `${slot.width * 100}%`,
+            height: `${slot.height * 100}%`
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 interface SheetSurfaceProps {
   page: GeneratedPageLayout;
   assetsById: Map<string, ImageAsset>;
@@ -897,6 +916,7 @@ export function LayoutPreviewBoard({
   const [isTemplateChooserOpen, setIsTemplateChooserOpen] = useState(false);
   const [isLayoutStripExpanded, setIsLayoutStripExpanded] = useState(false);
   const [templateApplyScope, setTemplateApplyScope] = useState<"single" | "visible">("single");
+  const [templatePreviewId, setTemplatePreviewId] = useState<string | null>(null);
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [pageSectionFilter, setPageSectionFilter] = useState<PageSectionFilter>("all");
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null);
@@ -924,6 +944,21 @@ export function LayoutPreviewBoard({
         : [],
     [activePage, result.availableTemplates]
   );
+  const previewTemplate = useMemo(() => {
+    if (templatePreviewId) {
+      return compatibleTemplates.find((template) => template.id === templatePreviewId) ?? null;
+    }
+
+    if (activePage) {
+      return (
+        compatibleTemplates.find((template) => template.id !== activePage.templateId) ??
+        compatibleTemplates.find((template) => template.id === activePage.templateId) ??
+        null
+      );
+    }
+
+    return null;
+  }, [activePage, compatibleTemplates, templatePreviewId]);
   
   const filteredAssets = useMemo(
     () =>
@@ -1203,6 +1238,7 @@ export function LayoutPreviewBoard({
   useEffect(() => {
     setIsTemplateChooserOpen(false);
     setReplaceTarget(null);
+    setTemplatePreviewId(null);
   }, [activePage?.id]);
 
   useEffect(() => {
@@ -1546,6 +1582,36 @@ export function LayoutPreviewBoard({
                 </div>
               </div>
 
+              {activePage ? (
+                <div className="template-drawer__compare">
+                  <div className="template-drawer__compare-card">
+                    <span className="layout-studio__rail-eyebrow">Attuale</span>
+                    {renderSlotMiniMap(activePage.slotDefinitions)}
+                    <strong>{activePage.templateLabel}</strong>
+                    <span>{activePage.assignments.length} foto sul foglio corrente</span>
+                  </div>
+
+                  <div className="template-drawer__compare-arrow" aria-hidden="true">
+                    →
+                  </div>
+
+                  <div className="template-drawer__compare-card template-drawer__compare-card--preview">
+                    <span className="layout-studio__rail-eyebrow">Anteprima</span>
+                    {previewTemplate ? (
+                      renderTemplateMiniMap(previewTemplate)
+                    ) : (
+                      <div className="template-drawer__compare-empty">Nessuna anteprima disponibile</div>
+                    )}
+                    <strong>{previewTemplate?.label ?? activePage.templateLabel}</strong>
+                    <span>
+                      {previewTemplate?.id === activePage.templateId
+                        ? "Stessa struttura attuale"
+                        : "Selezionalo per vedere questo foglio riorganizzato con un layout alternativo"}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="template-drawer__grid">
                 {compatibleTemplates.map((template) => (
                   <button
@@ -1556,6 +1622,8 @@ export function LayoutPreviewBoard({
                         ? "template-card template-card--active"
                         : "template-card"
                     }
+                    onMouseEnter={() => setTemplatePreviewId(template.id)}
+                    onFocus={() => setTemplatePreviewId(template.id)}
                     onClick={() => handleTemplateSelect(template.id)}
                   >
                     {renderTemplateMiniMap(template)}
