@@ -46,11 +46,16 @@ function ImageSlotPreviewComponent({ asset, assignment, label, slot }: ImageSlot
   frameWidth *= Math.max(0.4, assignment.zoom);
   frameHeight *= Math.max(0.4, assignment.zoom);
 
+  const overflowX = Math.max(0, frameWidth - 100);
+  const overflowY = Math.max(0, frameHeight - 100);
+  const offsetXPercent = (assignment.offsetX / 100) * (overflowX / 2);
+  const offsetYPercent = (assignment.offsetY / 100) * (overflowY / 2);
+
   const frameStyle = {
     width: `${frameWidth}%`,
     height: `${frameHeight}%`,
-    left: `calc(50% + ${assignment.offsetX * 0.22}%)`,
-    top: `calc(50% + ${assignment.offsetY * 0.22}%)`,
+    left: `calc(50% + ${offsetXPercent}%)`,
+    top: `calc(50% + ${offsetYPercent}%)`,
     transform: `translate(-50%, -50%) rotate(${assignment.rotation}deg)`
   };
 

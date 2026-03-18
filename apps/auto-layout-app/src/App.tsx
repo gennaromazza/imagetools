@@ -18,6 +18,7 @@ import { DEFAULT_AUTO_LAYOUT_REQUEST, SHEET_PRESETS } from "@photo-tools/presets
 import type {
   AutoLayoutRequest,
   AutoLayoutResult,
+  CropStrategy,
   FitMode,
   GeneratedPageLayout,
   ImageAsset,
@@ -1111,6 +1112,10 @@ function AppContent() {
     applyPlanningRequest({ ...request, fitMode: value });
   }
 
+  function handleCropStrategyChange(value: CropStrategy) {
+    applyPlanningRequest({ ...request, cropStrategy: value });
+  }
+
   function handlePlanningModeChange(value: PlanningMode) {
     applyPlanningRequest({ ...request, planningMode: value });
   }
@@ -1174,6 +1179,10 @@ function AppContent() {
 
   function handleAssetDropped(pageId: string, slotId: string, imageId: string) {
     const previousUsage = usageByAssetId.get(imageId);
+    const previousTargetTemplate = result.pages.find((page) => page.id === pageId)?.templateId;
+    const previousSourceTemplate = previousUsage?.pageId
+      ? result.pages.find((page) => page.id === previousUsage.pageId)?.templateId
+      : undefined;
     const imageAlreadyActive = activeAssetIds.includes(imageId);
     const nextActiveIds = imageAlreadyActive ? activeAssetIds : [...activeAssetIds, imageId];
     const nextRequest = imageAlreadyActive
@@ -1200,12 +1209,46 @@ function AppContent() {
 
     if (changed && nextPlacement) {
       markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
+
+      const nextTargetPage = nextResult.pages.find((page) => page.id === pageId);
+      const targetTemplateChanged =
+        Boolean(previousTargetTemplate) &&
+        Boolean(nextTargetPage?.templateId) &&
+        previousTargetTemplate !== nextTargetPage?.templateId;
+
+      if (targetTemplateChanged) {
+        toast.addToast(
+          `Layout aggiornato automaticamente sul foglio ${nextTargetPage?.pageNumber ?? pageId}: ${nextTargetPage?.templateLabel}.`,
+          "success",
+          3500
+        );
+      }
+
+      if (previousUsage?.pageId && previousUsage.pageId !== pageId) {
+        const nextSourcePage = nextResult.pages.find((page) => page.id === previousUsage.pageId);
+        const sourceTemplateChanged =
+          Boolean(previousSourceTemplate) &&
+          Boolean(nextSourcePage?.templateId) &&
+          previousSourceTemplate !== nextSourcePage?.templateId;
+
+        if (sourceTemplateChanged) {
+          toast.addToast(
+            `Layout riadattato anche sul foglio ${nextSourcePage?.pageNumber ?? previousUsage.pageId}.`,
+            "success",
+            3000
+          );
+        }
+      }
     }
   }
 
   function handleAddImageToPage(pageId: string, imageId: string) {
     const previousUsage = usageByAssetId.get(imageId);
     const targetPage = result.pages.find((page) => page.id === pageId);
+    const previousTargetTemplate = targetPage?.templateId;
+    const previousSourceTemplate = previousUsage?.pageId
+      ? result.pages.find((page) => page.id === previousUsage.pageId)?.templateId
+      : undefined;
     const imageAlreadyActive = activeAssetIds.includes(imageId);
     const nextActiveIds = imageAlreadyActive ? activeAssetIds : [...activeAssetIds, imageId];
     const nextRequest = imageAlreadyActive
@@ -1241,6 +1284,37 @@ function AppContent() {
 
     if (changed && nextPlacement) {
       markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
+
+      const nextTargetPage = nextResult.pages.find((page) => page.id === pageId);
+      const targetTemplateChanged =
+        Boolean(previousTargetTemplate) &&
+        Boolean(nextTargetPage?.templateId) &&
+        previousTargetTemplate !== nextTargetPage?.templateId;
+
+      if (targetTemplateChanged) {
+        toast.addToast(
+          `Layout aggiornato automaticamente sul foglio ${nextTargetPage?.pageNumber ?? pageId}: ${nextTargetPage?.templateLabel}.`,
+          "success",
+          3500
+        );
+      }
+
+      if (previousUsage?.pageId && previousUsage.pageId !== pageId) {
+        const nextSourcePage = nextResult.pages.find((page) => page.id === previousUsage.pageId);
+        const sourceTemplateChanged =
+          Boolean(previousSourceTemplate) &&
+          Boolean(nextSourcePage?.templateId) &&
+          previousSourceTemplate !== nextSourcePage?.templateId;
+
+        if (sourceTemplateChanged) {
+          toast.addToast(
+            `Layout riadattato anche sul foglio ${nextSourcePage?.pageNumber ?? previousUsage.pageId}.`,
+            "success",
+            3000
+          );
+        }
+      }
+
       return;
     }
 
@@ -1849,6 +1923,7 @@ function AppContent() {
                       onSheetPresetChange={handleSheetPresetChange}
                       onSheetFieldChange={handleSheetFieldChange}
                       onFitModeChange={handleFitModeChange}
+                      onCropStrategyChange={handleCropStrategyChange}
                       onPlanningModeChange={handlePlanningModeChange}
                       onDesiredSheetCountChange={handleDesiredSheetCountChange}
                       onMaxPhotosPerSheetChange={handleMaxPhotosPerSheetChange}

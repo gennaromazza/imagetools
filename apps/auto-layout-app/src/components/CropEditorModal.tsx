@@ -106,6 +106,7 @@ export function CropEditorModal({ asset, assignment, slot, onClose, onApply }: C
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [stageRect, setStageRect] = useState<DOMRect | null>(null);
   const [aspectPreset, setAspectPreset] = useState<AspectPreset>("slot");
+  const [preserveOutputAspect, setPreserveOutputAspect] = useState(() => assignment.fitMode === "fit");
   const [cropRect, setCropRect] = useState<CropRect>(() => getInitialCropRect(assignment, asset, slot));
   const dragStateRef = useRef<{
     action: CropAction;
@@ -242,7 +243,7 @@ export function CropEditorModal({ asset, assignment, slot, onClose, onApply }: C
 
   const applyCrop = () => {
     onApply({
-      fitMode: "crop",
+      fitMode: preserveOutputAspect ? "fit" : "crop",
       zoom: 1,
       offsetX: 0,
       offsetY: 0,
@@ -288,6 +289,14 @@ export function CropEditorModal({ asset, assignment, slot, onClose, onApply }: C
           >
             Reset
           </button>
+          <label className="check-row crop-editor-toolbar__toggle">
+            <input
+              type="checkbox"
+              checked={preserveOutputAspect}
+              onChange={(event) => setPreserveOutputAspect(event.target.checked)}
+            />
+            <span>Mantieni ratio crop in output</span>
+          </label>
         </div>
 
         <div

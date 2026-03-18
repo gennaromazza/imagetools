@@ -31,6 +31,7 @@ import { PhotoRibbon } from "./PhotoRibbon";
 
 type AssetFilter = "all" | "unused" | "used";
 type PageSectionFilter = "all" | "opening" | "middle" | "finale";
+type DragDropMode = "precision" | "smart";
 
 interface DragState {
   kind: "asset" | "slot";
@@ -491,6 +492,7 @@ interface SheetSurfaceProps {
     >
   ) => void;
   size: "hero" | "thumb";
+  dragDropMode: DragDropMode;
 }
 
 const SheetSurface = memo(function SheetSurface({
@@ -510,7 +512,8 @@ const SheetSurface = memo(function SheetSurface({
   onOpenCropEditor,
   onContextMenu,
   onUpdateSlotAssignment,
-  size
+  size,
+  dragDropMode
 }: SheetSurfaceProps) {
   const interactive = size === "hero";
   const assignmentsBySlotId = useMemo(() => buildAssignmentsBySlotId(page), [page]);
@@ -676,11 +679,14 @@ const SheetSurface = memo(function SheetSurface({
                     }
 
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
+                      const isCrossPageMove = dragState.sourcePageId !== page.id;
                       setStableDragIntentLabel(
                         assignment
-                          ? dragState.sourcePageId === page.id
-                            ? "Rilascia per riorganizzare automaticamente questo foglio attorno alla foto trascinata"
-                            : "Rilascia per aggiungere questa foto a questo foglio e riadattare il layout"
+                          ? dragDropMode === "precision"
+                            ? "Rilascia per scambiare le foto tra i due slot"
+                            : isCrossPageMove
+                              ? "Rilascia per spostare la foto su questo foglio con riadattamento automatico"
+                              : "Rilascia per riorganizzare automaticamente il foglio attorno alla foto"
                           : "Rilascia per spostare la foto in questo slot"
                       );
                       return;
@@ -704,7 +710,7 @@ const SheetSurface = memo(function SheetSurface({
                     }
 
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
-                      if (dragState.sourcePageId !== page.id && assignment) {
+                      if (assignment && dragDropMode === "smart") {
                         onAddToPage(page.id, dragState.imageId);
                         setStableDragIntentLabel(null);
                         return;
@@ -1139,6 +1145,7 @@ export function LayoutPreviewBoard({
   const [pendingTemplateChange, setPendingTemplateChange] = useState<TemplateChangeConfirmation | null>(null);
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [pageSectionFilter, setPageSectionFilter] = useState<PageSectionFilter>("all");
+  const [dragDropMode, setDragDropMode] = useState<DragDropMode>("precision");
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null);
   const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
   const [leftRailWidth, setLeftRailWidth] = useState(260);
@@ -1189,6 +1196,37 @@ export function LayoutPreviewBoard({
 
     return selectBestTemplate(currentAssets, compatibleTemplates, activePage.sheetSpec).id;
   }, [activePage, assetsById, compatibleTemplates]);
+  const templatesByPageId = useMemo(() => {
+    const map = new Map<string, LayoutTemplate[]>();
+
+    for (const page of result.pages) {
+      map.set(page.id, getTemplateOptions(result.availableTemplates, Math.max(page.imageIds.length, 1)));
+    }
+
+    return map;
+  }, [result.availableTemplates, result.pages]);
+  const recommendedTemplateByPageId = useMemo(() => {
+    const map = new Map<string, string>();
+
+    for (const page of result.pages) {
+      const pageTemplates = templatesByPageId.get(page.id) ?? [];
+      if (pageTemplates.length === 0) {
+        continue;
+      }
+
+      const currentAssets = page.imageIds
+        .map((imageId) => assetsById.get(imageId))
+        .filter((asset): asset is ImageAsset => Boolean(asset));
+
+      if (currentAssets.length === 0) {
+        continue;
+      }
+
+      map.set(page.id, selectBestTemplate(currentAssets, pageTemplates, page.sheetSpec).id);
+    }
+
+    return map;
+  }, [assetsById, result.pages, templatesByPageId]);
   
   const filteredAssets = useMemo(
     () =>
@@ -1923,6 +1961,28 @@ export function LayoutPreviewBoard({
               </div>
             </div>
 
+            <div className="layout-studio__subbar-group">
+              <span className="layout-studio__rail-eyebrow">Modalita drag/drop</span>
+              <div className="layout-studio__subbar-filters">
+                <button
+                  type="button"
+                  className={dragDropMode === "precision" ? "segment segment--active" : "segment"}
+                  onClick={() => setDragDropMode("precision")}
+                  title="Slot occupato: swap diretto, massimo controllo"
+                >
+                  Precisione
+                </button>
+                <button
+                  type="button"
+                  className={dragDropMode === "smart" ? "segment segment--active" : "segment"}
+                  onClick={() => setDragDropMode("smart")}
+                  title="Slot occupato: riadattamento automatico del foglio"
+                >
+                  Smart
+                </button>
+              </div>
+            </div>
+
             <div className="layout-studio__subbar-pages" role="tablist" aria-label="Indice fogli compatto">
               {pagesForStudio.map((page) => {
                 const isActive = page.id === activePage.id;
@@ -2134,6 +2194,39 @@ export function LayoutPreviewBoard({
                           ) : null}
                         </div>
                         <div className="layout-studio__page-card-actions">
+                          <select
+                            className="layout-studio__page-quick-template"
+                            value={page.templateId}
+                            onChange={(event) => onTemplateChange(page.id, event.target.value)}
+                            title="Cambia template con un click"
+                          >
+                            {(templatesByPageId.get(page.id) ?? []).map((template) => (
+                              <option key={template.id} value={template.id}>
+                                {template.label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => {
+                              const recommendedTemplate = recommendedTemplateByPageId.get(page.id);
+                              if (recommendedTemplate) {
+                                onTemplateChange(page.id, recommendedTemplate);
+                              }
+                            }}
+                            title="Applica il template consigliato"
+                          >
+                            Auto consigliato
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost-button"
+                            onClick={() => onRebalancePage(page.id)}
+                            title="Ricalcola il layout con impostazioni correnti"
+                          >
+                            Smart refresh
+                          </button>
                           {dragState?.kind === "slot" && dragState.sourcePageId === page.id ? (
                             <div
                               className="layout-studio__page-header-dropzone"
@@ -2313,6 +2406,7 @@ export function LayoutPreviewBoard({
                           onContextMenu={onContextMenu}
                           onUpdateSlotAssignment={onUpdateSlotAssignment}
                           size="hero"
+                          dragDropMode={dragDropMode}
                         />
                       </SheetWithRulers>
                     </section>

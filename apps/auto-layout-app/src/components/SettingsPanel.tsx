@@ -1,5 +1,5 @@
 import { SHEET_PRESETS } from "@photo-tools/presets";
-import type { AutoLayoutRequest, FitMode, PlanningMode } from "@photo-tools/shared-types";
+import type { AutoLayoutRequest, CropStrategy, FitMode, PlanningMode } from "@photo-tools/shared-types";
 
 interface SettingsPanelProps {
   request: AutoLayoutRequest;
@@ -9,6 +9,7 @@ interface SettingsPanelProps {
     value: number
   ) => void;
   onFitModeChange: (value: FitMode) => void;
+  onCropStrategyChange: (value: CropStrategy) => void;
   onPlanningModeChange: (value: PlanningMode) => void;
   onDesiredSheetCountChange: (value: number) => void;
   onMaxPhotosPerSheetChange: (value: number) => void;
@@ -20,6 +21,7 @@ export function SettingsPanel({
   onSheetPresetChange,
   onSheetFieldChange,
   onFitModeChange,
+  onCropStrategyChange,
   onPlanningModeChange,
   onDesiredSheetCountChange,
   onMaxPhotosPerSheetChange,
@@ -110,6 +112,26 @@ export function SettingsPanel({
       </div>
 
       <div className="field">
+        <span>Strategia ritaglio automatico</span>
+        <div className="segmented-control">
+          {([
+            ["balanced", "Bilanciato"],
+            ["portraitSafe", "Ritratto Safe"],
+            ["landscapeSafe", "Paesaggio Safe"]
+          ] as [CropStrategy, string][]).map(([strategy, label]) => (
+            <button
+              key={strategy}
+              type="button"
+              className={request.cropStrategy === strategy ? "segment segment--active" : "segment"}
+              onClick={() => onCropStrategyChange(strategy)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="field">
         <span>Modalita pianificazione</span>
         <div className="segmented-control">
           {(["desiredSheetCount", "maxPhotosPerSheet"] as PlanningMode[]).map((mode) => (
@@ -138,13 +160,13 @@ export function SettingsPanel({
       ) : (
         <label className="field">
           <span>Numero massimo di foto per foglio</span>
-          <input
-            type="number"
-            min="1"
-            max="4"
-            value={request.maxPhotosPerSheet ?? 2}
-            onChange={(event) => onMaxPhotosPerSheetChange(Number(event.target.value))}
-          />
+            <input
+              type="number"
+              min="1"
+              max="20"
+              value={request.maxPhotosPerSheet ?? 2}
+              onChange={(event) => onMaxPhotosPerSheetChange(Number(event.target.value))}
+            />
         </label>
       )}
 

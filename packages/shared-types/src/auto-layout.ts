@@ -5,6 +5,8 @@ export type RulerUnit = "cm" | "px";
 
 export type FitMode = "fit" | "fill" | "crop";
 
+export type CropStrategy = "balanced" | "portraitSafe" | "landscapeSafe";
+
 export type OutputFormat = "jpg" | "png" | "tif";
 
 export type PlanningMode = "desiredSheetCount" | "maxPhotosPerSheet";
@@ -120,6 +122,7 @@ export interface AutoLayoutRequest {
   assets: ImageAsset[];
   sheet: SheetSpec;
   fitMode: FitMode;
+  cropStrategy: CropStrategy;
   planningMode: PlanningMode;
   desiredSheetCount?: number;
   maxPhotosPerSheet?: number;

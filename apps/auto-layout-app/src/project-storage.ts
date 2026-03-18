@@ -140,6 +140,12 @@ function normalizeRequest(rawRequest: unknown, fallbackAssets: ImageAsset[]): Au
       request.fitMode === "fit" || request.fitMode === "fill" || request.fitMode === "crop"
         ? request.fitMode
         : DEFAULT_PROJECT_REQUEST.fitMode,
+    cropStrategy:
+      request.cropStrategy === "balanced" ||
+      request.cropStrategy === "portraitSafe" ||
+      request.cropStrategy === "landscapeSafe"
+        ? request.cropStrategy
+        : DEFAULT_PROJECT_REQUEST.cropStrategy,
     planningMode:
       request.planningMode === "desiredSheetCount" || request.planningMode === "maxPhotosPerSheet"
         ? request.planningMode
@@ -180,6 +186,25 @@ function normalizeRequest(rawRequest: unknown, fallbackAssets: ImageAsset[]): Au
   };
 }
 
+function mergeTemplatesById(
+  primary: AutoLayoutResult["availableTemplates"],
+  secondary: AutoLayoutResult["availableTemplates"]
+): AutoLayoutResult["availableTemplates"] {
+  const merged = [...primary];
+  const existing = new Set(primary.map((template) => template.id));
+
+  for (const template of secondary) {
+    if (existing.has(template.id)) {
+      continue;
+    }
+
+    merged.push(template);
+    existing.add(template.id);
+  }
+
+  return merged;
+}
+
 function normalizeResult(rawResult: unknown, fallbackRequest: AutoLayoutRequest): AutoLayoutResult | undefined {
   if (!isRecord(rawResult)) {
     return undefined;
@@ -193,12 +218,15 @@ function normalizeResult(rawResult: unknown, fallbackRequest: AutoLayoutRequest)
   }
 
   try {
+    const storedTemplates = Array.isArray(rawResult.availableTemplates)
+      ? (rawResult.availableTemplates as AutoLayoutResult["availableTemplates"])
+      : [];
+    const availableTemplates = mergeTemplatesById(storedTemplates, fallbackPlan.availableTemplates);
+
     return buildAutoLayoutResult(
       request,
       rawResult.pages as AutoLayoutResult["pages"],
-      Array.isArray(rawResult.availableTemplates)
-        ? (rawResult.availableTemplates as AutoLayoutResult["availableTemplates"])
-        : fallbackPlan.availableTemplates
+      availableTemplates
     );
   } catch {
     return fallbackPlan;

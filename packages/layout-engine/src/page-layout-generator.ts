@@ -3,7 +3,7 @@ import type {
   GeneratedPageLayout,
   LayoutTemplate
 } from "@photo-tools/shared-types";
-import { DEFAULT_LAYOUT_TEMPLATES } from "./default-templates";
+import { DEFAULT_LAYOUT_TEMPLATES } from "./default-templates.js";
 import { groupAssetsForSheets } from "./group-assets";
 import { assignImagesToTemplate } from "./slot-assignment";
 import { selectBestTemplate } from "./select-template";
@@ -55,7 +55,7 @@ export function generatePageLayouts(
       fixedTemplate && group.length >= fixedTemplate.minPhotos && group.length <= fixedTemplate.maxPhotos
         ? fixedTemplate
         : selectBestTemplate(group, templates, request.sheet);
-    const assignments = assignImagesToTemplate(group, template, request.fitMode);
+    const assignments = assignImagesToTemplate(group, template, request.fitMode, request.cropStrategy);
 
     return {
       id: `page-${index + 1}`,
