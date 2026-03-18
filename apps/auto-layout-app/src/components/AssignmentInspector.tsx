@@ -44,7 +44,7 @@ export function AssignmentInspector({
       return;
     }
 
-    const timeoutId = window.setTimeout(() => onChange({ zoom: draftZoom }), 80);
+    const timeoutId = window.setTimeout(() => onChange({ fitMode: "fit", zoom: draftZoom }), 80);
     return () => window.clearTimeout(timeoutId);
   }, [assignment, draftZoom, onChange]);
 
@@ -53,7 +53,7 @@ export function AssignmentInspector({
       return;
     }
 
-    const timeoutId = window.setTimeout(() => onChange({ offsetX: draftOffsetX }), 80);
+    const timeoutId = window.setTimeout(() => onChange({ fitMode: "fit", offsetX: draftOffsetX }), 80);
     return () => window.clearTimeout(timeoutId);
   }, [assignment, draftOffsetX, onChange]);
 
@@ -62,7 +62,7 @@ export function AssignmentInspector({
       return;
     }
 
-    const timeoutId = window.setTimeout(() => onChange({ offsetY: draftOffsetY }), 80);
+    const timeoutId = window.setTimeout(() => onChange({ fitMode: "fit", offsetY: draftOffsetY }), 80);
     return () => window.clearTimeout(timeoutId);
   }, [assignment, draftOffsetY, onChange]);
 
@@ -115,10 +115,10 @@ export function AssignmentInspector({
           ))}
         </div>
         <small className="helper-inline">
-          Trascina direttamente la foto per spostarla tra slot e fogli. Usa Alt piu trascinamento per riposizionarla nello slot, Alt piu rotellina per lo zoom e doppio click per il reset rapido.
+          Trascina direttamente la foto per spostarla tra slot e fogli. Per riposizionarla senza tagli usa Alt piu trascinamento oppure il pulsante editor crop.
         </small>
         <button type="button" className="ghost-button" onClick={onOpenCropEditor}>
-          Apri editor crop
+          Riposiziona senza tagli
         </button>
       </div>
 

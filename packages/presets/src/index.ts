@@ -32,7 +32,7 @@ export const DEFAULT_AUTO_LAYOUT_REQUEST: Omit<AutoLayoutRequest, "assets"> = {
   jobName: "wedding-service-layout",
   sourceFolderPath: "C:/jobs/wedding-2026/selected",
   sheet: DEFAULT_SHEET_SPEC,
-  fitMode: "fill",
+  fitMode: "fit",
   cropStrategy: "balanced",
   planningMode: "desiredSheetCount",
   desiredSheetCount: 8,

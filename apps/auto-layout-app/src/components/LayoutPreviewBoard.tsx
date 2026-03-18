@@ -783,7 +783,7 @@ const SheetSurface = memo(function SheetSurface({
 
                     event.preventDefault();
                     const nextZoom = Math.max(0.7, Math.min(2.2, assignment.zoom + (event.deltaY > 0 ? -0.08 : 0.08)));
-                    onUpdateSlotAssignment(page.id, slot.id, { zoom: nextZoom });
+                    onUpdateSlotAssignment(page.id, slot.id, { fitMode: "fit", zoom: nextZoom });
                   }}
                   onDoubleClick={(event) => {
                     if (!assignment || !interactive) {
@@ -799,37 +799,16 @@ const SheetSurface = memo(function SheetSurface({
                     });
                   }}
                   onPointerDown={(event) => {
-                    if (!assignment || !canReposition || event.button !== 0 || !event.altKey) {
+                    if (!assignment || !canReposition || event.button !== 0) {
                       return;
                     }
 
-                    const rect = event.currentTarget.getBoundingClientRect();
-                    const sensitivityX = clampValue(
-                      (60 * Math.max(0.35, assignment.cropWidth ?? 1)) / Math.max(1, assignment.zoom),
-                      12,
-                      60
-                    );
-                    const sensitivityY = clampValue(
-                      (60 * Math.max(0.35, assignment.cropHeight ?? 1)) / Math.max(1, assignment.zoom),
-                      12,
-                      60
-                    );
-                    panStateRef.current = {
-                      pointerId: event.pointerId,
-                      slotId: slot.id,
-                      startX: event.clientX,
-                      startY: event.clientY,
-                      startOffsetX: assignment.offsetX,
-                      startOffsetY: assignment.offsetY,
-                      width: rect.width,
-                      height: rect.height,
-                      sensitivityX,
-                      sensitivityY,
-                      moved: false
-                    };
+                    if (!event.altKey) {
+                      return;
+                    }
 
                     onSelectPage(page.id, slot.id);
-                    event.currentTarget.setPointerCapture(event.pointerId);
+                    onOpenCropEditor(page.id, slot.id);
                     event.preventDefault();
                   }}
                   onPointerMove={(event) => {
@@ -954,6 +933,7 @@ const SheetSurface = memo(function SheetSurface({
                           className="slot-quick-toolbar__button slot-quick-toolbar__button--icon"
                           onClick={() =>
                             onUpdateSlotAssignment(page.id, slot.id, {
+                              fitMode: "fit",
                               zoom: Math.max(0.7, assignment.zoom - 0.1)
                             })
                           }
@@ -967,6 +947,7 @@ const SheetSurface = memo(function SheetSurface({
                           className="slot-quick-toolbar__button slot-quick-toolbar__button--icon"
                           onClick={() =>
                             onUpdateSlotAssignment(page.id, slot.id, {
+                              fitMode: "fit",
                               zoom: Math.min(2.2, assignment.zoom + 0.1)
                             })
                           }
