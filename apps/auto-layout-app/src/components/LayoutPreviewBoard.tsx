@@ -1586,6 +1586,14 @@ export function LayoutPreviewBoard({
   );
 
 
+  const handleOpenInspectorForPage = useCallback(
+    (page: GeneratedPageLayout) => {
+      setIsInspectorCollapsed(false);
+      handleJumpToPage(page);
+    },
+    [handleJumpToPage]
+  );
+
   const scheduleDragPageJump = useCallback(
     (page: GeneratedPageLayout | null) => {
       if (!dragState || !page) {
@@ -2229,10 +2237,10 @@ export function LayoutPreviewBoard({
                           <button
                             type="button"
                             className="ghost-button"
-                            onClick={() => onRebalancePage(page.id)}
-                            title="Riadatta automaticamente il layout di questo foglio in base alle foto presenti"
+                            onClick={() => handleOpenInspectorForPage(page)}
+                            title="Apri l'inspector direttamente su questo foglio"
                           >
-                            Riadatta foglio
+                            Inspector
                           </button>
                           <button
                             type="button"
@@ -2883,6 +2891,7 @@ export function LayoutPreviewBoard({
     </div>
   );
 }
+
 
 
 
