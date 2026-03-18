@@ -49,7 +49,9 @@ function ImageSlotPreviewComponent({ asset, assignment, label, slot }: ImageSlot
   const frameStyle = {
     width: `${frameWidth}%`,
     height: `${frameHeight}%`,
-    transform: `translate(calc(-50% + ${assignment.offsetX * 0.22}% ), calc(-50% + ${assignment.offsetY * 0.22}% )) rotate(${assignment.rotation}deg)`
+    left: `calc(50% + ${assignment.offsetX * 0.22}%)`,
+    top: `calc(50% + ${assignment.offsetY * 0.22}%)`,
+    transform: `translate(-50%, -50%) rotate(${assignment.rotation}deg)`
   };
 
   const imageStyle = {
