@@ -21,6 +21,7 @@ import type {
   LayoutTemplate
 } from "@photo-tools/shared-types";
 import { AssignmentInspector } from "./AssignmentInspector";
+import { ConfirmModal } from "./ConfirmModal";
 import { ImageSlotPreview } from "./ImageSlotPreview";
 import { preloadImageUrls } from "../image-cache";
 import { PhotoReplaceModal } from "./PhotoReplaceModal";
@@ -304,6 +305,11 @@ function renderTemplateMiniMap(template: LayoutTemplate) {
   );
 }
 
+interface TemplateChangeConfirmation {
+  templateId: string;
+  applyScope: "single" | "visible";
+}
+
 function renderSlotMiniMap(slots: LayoutTemplate["slots"]) {
   return (
     <div className="template-card__map">
@@ -344,6 +350,29 @@ function describeTemplateDensity(
   }
 
   return difference < 0 ? "Layout piu arioso" : "Layout piu compatto";
+}
+
+function getLargestSlot(slots: LayoutTemplate["slots"]) {
+  return [...slots].sort((left, right) => right.width * right.height - left.width * left.height)[0] ?? null;
+}
+
+function requiresTemplateChangeConfirmation(
+  currentSlots: LayoutTemplate["slots"],
+  nextSlots: LayoutTemplate["slots"]
+): boolean {
+  const currentLargest = getLargestSlot(currentSlots);
+  const nextLargest = getLargestSlot(nextSlots);
+
+  if (!currentLargest || !nextLargest) {
+    return false;
+  }
+
+  const currentArea = currentLargest.width * currentLargest.height;
+  const nextArea = nextLargest.width * nextLargest.height;
+  const areaDelta = Math.abs(nextArea - currentArea);
+  const orientationChanged = currentLargest.expectedOrientation !== nextLargest.expectedOrientation;
+
+  return areaDelta >= 0.12 || orientationChanged;
 }
 
 interface SheetSurfaceProps {
@@ -941,6 +970,7 @@ export function LayoutPreviewBoard({
   const [isLayoutStripExpanded, setIsLayoutStripExpanded] = useState(false);
   const [templateApplyScope, setTemplateApplyScope] = useState<"single" | "visible">("single");
   const [templatePreviewId, setTemplatePreviewId] = useState<string | null>(null);
+  const [pendingTemplateChange, setPendingTemplateChange] = useState<TemplateChangeConfirmation | null>(null);
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [pageSectionFilter, setPageSectionFilter] = useState<PageSectionFilter>("all");
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null);
@@ -1122,6 +1152,17 @@ export function LayoutPreviewBoard({
   const handleTemplateSelect = useCallback(
     (templateId: string) => {
       if (activePage) {
+        const selectedTemplate = compatibleTemplates.find((template) => template.id === templateId);
+        const shouldConfirm =
+          Boolean(selectedTemplate) &&
+          templateId !== activePage.templateId &&
+          requiresTemplateChangeConfirmation(activePage.slotDefinitions, selectedTemplate?.slots ?? []);
+
+        if (shouldConfirm) {
+          setPendingTemplateChange({ templateId, applyScope: templateApplyScope });
+          return;
+        }
+
         if (templateApplyScope === "visible") {
           onApplyTemplateToPages(deferredPages.map((page) => page.id), templateId);
         } else {
@@ -1130,7 +1171,7 @@ export function LayoutPreviewBoard({
         setIsTemplateChooserOpen(false);
       }
     },
-    [activePage, deferredPages, onApplyTemplateToPages, onTemplateChange, templateApplyScope]
+    [activePage, compatibleTemplates, deferredPages, onApplyTemplateToPages, onTemplateChange, templateApplyScope]
   );
 
   const handleReplaceAsset = useCallback(
@@ -1278,6 +1319,7 @@ export function LayoutPreviewBoard({
     setIsTemplateChooserOpen(false);
     setReplaceTarget(null);
     setTemplatePreviewId(null);
+    setPendingTemplateChange(null);
   }, [activePage?.id]);
 
   useEffect(() => {
@@ -1724,6 +1766,22 @@ export function LayoutPreviewBoard({
                           ) : null}
                         </div>
                         <div className="layout-studio__page-card-actions">
+                          {dragState?.kind === "slot" && dragState.sourcePageId === page.id ? (
+                            <div
+                              className="layout-studio__page-header-dropzone"
+                              onDragOver={(event) => {
+                                event.preventDefault();
+                                event.dataTransfer.dropEffect = "move";
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault();
+                                onAddToPage(page.id, dragState.imageId);
+                              }}
+                              title="Rilascia qui per riorganizzare il foglio corrente"
+                            >
+                              Rilascia qui per riorganizzare
+                            </div>
+                          ) : null}
                           <button
                             type="button"
                             className="ghost-button"
@@ -2101,6 +2159,33 @@ export function LayoutPreviewBoard({
           onChoose={handleReplaceAsset}
           onAssetsMetadataChange={onAssetsMetadataChange}
         />
+      ) : null}
+
+      {pendingTemplateChange && activePage ? (
+        <ConfirmModal
+          title="Confermare il cambio template?"
+          description={
+            pendingTemplateChange.applyScope === "visible"
+              ? `Il nuovo template puo cambiare in modo sensibile la gerarchia visiva del foglio attivo e degli altri fogli visibili.`
+              : "Il nuovo template puo cambiare in modo sensibile la gerarchia visiva del foglio corrente."
+          }
+          confirmText="Applica template"
+          cancelText="Mantieni attuale"
+          isDangerous={false}
+          onConfirm={() => {
+            if (pendingTemplateChange.applyScope === "visible") {
+              onApplyTemplateToPages(deferredPages.map((page) => page.id), pendingTemplateChange.templateId);
+            } else {
+              onTemplateChange(activePage.id, pendingTemplateChange.templateId);
+            }
+            setIsTemplateChooserOpen(false);
+          }}
+          onCancel={() => setPendingTemplateChange(null)}
+        >
+          <p className="helper-copy">
+            Usa questa conferma quando vuoi procedere comunque con un layout che sposta l'enfasi delle foto rispetto alla struttura attuale.
+          </p>
+        </ConfirmModal>
       ) : null}
     </div>
   );
