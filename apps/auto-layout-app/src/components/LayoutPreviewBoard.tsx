@@ -1736,7 +1736,8 @@ export function LayoutPreviewBoard({
     return <p className="helper-copy">Non ci sono ancora fogli da mostrare.</p>;
   }
   const workspaceStyle = {
-    "--layout-rail-width": `${leftRailWidth}px`
+    "--layout-rail-width": `${leftRailWidth}px`,
+    "--layout-inspector-width": "clamp(320px, 30vw, 400px)"
   } as CSSProperties;
 
   return (
@@ -1787,7 +1788,14 @@ export function LayoutPreviewBoard({
         </div>
       </div>
 
-      <div className="layout-studio__workspace" style={workspaceStyle}>
+      <div
+        className={
+          isInspectorCollapsed
+            ? "layout-studio__workspace"
+            : "layout-studio__workspace layout-studio__workspace--inspector-open"
+        }
+        style={workspaceStyle}
+      >
         <aside className="layout-studio__rail">
           <div className="layout-studio__rail-panel">
             <span className="layout-studio__rail-eyebrow">Libreria foto</span>

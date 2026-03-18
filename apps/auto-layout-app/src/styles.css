@@ -1118,6 +1118,14 @@ img {
   align-items: start;
 }
 
+.layout-studio__workspace--inspector-open {
+  grid-template-columns:
+    var(--layout-rail-width, 260px)
+    14px
+    minmax(0, 1fr)
+    minmax(320px, var(--layout-inspector-width, 380px));
+}
+
 .layout-studio__rail,
 .layout-studio__main {
   display: grid;
@@ -5708,27 +5716,6 @@ img {
   font-size: 0.9rem;
   color: #8b8680;
   margin: 0;
-}
-
-.layout-studio__inspector {
-  position: fixed;
-  top: 5.5rem;
-  right: 1rem;
-  bottom: 1rem;
-  width: min(420px, calc(100vw - 2rem));
-  max-height: none;
-  z-index: 28;
-  padding: 1rem;
-  border-radius: 26px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(17, 17, 16, 0.96);
-  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.34);
-  overflow-y: auto;
-  backdrop-filter: blur(14px);
-}
-
-.layout-studio__inspector--collapsed {
-  display: none;
 }
 
 .layout-studio__page-card {
