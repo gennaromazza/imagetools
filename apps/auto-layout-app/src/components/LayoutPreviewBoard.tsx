@@ -981,7 +981,9 @@ export function LayoutPreviewBoard({
   // Memoized callbacks to reduce re-renders
   const handleReplaceTargetOpen = useCallback(
     (pageId: string, pageNumber: number, slotId: string, currentImageId?: string) => {
-      setReplaceTarget({ pageId, pageNumber, slotId, currentImageId });
+      window.setTimeout(() => {
+        setReplaceTarget({ pageId, pageNumber, slotId, currentImageId });
+      }, 0);
     },
     []
   );

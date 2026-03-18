@@ -1538,6 +1538,7 @@ img {
   position: absolute;
   top: 0.7rem;
   right: 0.7rem;
+  z-index: 6;
   width: 32px;
   height: 32px;
   border-radius: 999px;
@@ -1616,6 +1617,7 @@ img {
   left: 0.7rem;
   right: 0.7rem;
   bottom: 0.7rem;
+  z-index: 5;
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
