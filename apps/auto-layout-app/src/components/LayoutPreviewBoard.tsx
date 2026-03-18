@@ -322,6 +322,29 @@ function renderSlotMiniMap(slots: LayoutTemplate["slots"]) {
   );
 }
 
+function getTemplateDensity(slots: LayoutTemplate["slots"]): number {
+  return slots.reduce((total, slot) => total + slot.width * slot.height, 0);
+}
+
+function describeTemplateDensity(
+  currentSlots: LayoutTemplate["slots"],
+  previewSlots: LayoutTemplate["slots"] | null
+): string {
+  if (!previewSlots) {
+    return "Nessuna comparazione disponibile";
+  }
+
+  const currentDensity = getTemplateDensity(currentSlots);
+  const previewDensity = getTemplateDensity(previewSlots);
+  const difference = previewDensity - currentDensity;
+
+  if (Math.abs(difference) < 0.04) {
+    return "Densita simile";
+  }
+
+  return difference < 0 ? "Layout piu arioso" : "Layout piu compatto";
+}
+
 interface SheetSurfaceProps {
   page: GeneratedPageLayout;
   assetsById: Map<string, ImageAsset>;
@@ -1608,6 +1631,9 @@ export function LayoutPreviewBoard({
                         ? "Stessa struttura attuale"
                         : "Selezionalo per vedere questo foglio riorganizzato con un layout alternativo"}
                     </span>
+                    <span className="template-drawer__density-badge">
+                      {describeTemplateDensity(activePage.slotDefinitions, previewTemplate?.slots ?? null)}
+                    </span>
                   </div>
                 </div>
               ) : null}
@@ -1629,6 +1655,9 @@ export function LayoutPreviewBoard({
                     {renderTemplateMiniMap(template)}
                     <strong>{template.label}</strong>
                     <span>{template.description}</span>
+                    <span className="template-drawer__density-badge">
+                      {describeTemplateDensity(activePage.slotDefinitions, template.slots)}
+                    </span>
                   </button>
                 ))}
               </div>
