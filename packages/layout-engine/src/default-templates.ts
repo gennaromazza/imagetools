@@ -22,9 +22,22 @@ function buildGridSlots(count: number, columns: number, rows: number): LayoutSlo
 }
 
 function getGridDimensions(count: number): { columns: number; rows: number } {
+  // Grid dimensions strategy:
+  // - Prefer wider layouts (more columns, fewer rows) for better visual balance
+  // - Limit rows to max 5 to avoid overly tall layouts
+  // - Each cell should be substantial in size
+
+  if (count <= 3) {
+    return { columns: count, rows: 1 };
+  }
+
   if (count <= 6) {
-    const columns = 2;
+    const columns = Math.ceil(count / 3) || 2;
     return { columns, rows: Math.ceil(count / columns) };
+  }
+
+  if (count <= 8) {
+    return { columns: 4, rows: 2 };
   }
 
   if (count <= 12) {
@@ -32,8 +45,25 @@ function getGridDimensions(count: number): { columns: number; rows: number } {
     return { columns, rows: Math.ceil(count / columns) };
   }
 
-  const columns = 4;
-  return { columns, rows: Math.ceil(count / columns) };
+  if (count <= 15) {
+    // Prefer 3 columns with 5 rows instead of 4 columns with 4 rows
+    return { columns: 3, rows: 5 };
+  }
+
+  if (count <= 18) {
+    // 6 columns with 3 rows = better proportions than 4x5
+    return { columns: 6, rows: 3 };
+  }
+
+  if (count <= 20) {
+    // 5 columns with 4 rows = better proportions than 4x5
+    return { columns: 5, rows: 4 };
+  }
+
+  // For > 20: use wider format but cap at reasonable width
+  const columns = Math.min(6, Math.ceil(Math.sqrt(count * 1.5)));
+  const rows = Math.ceil(count / columns);
+  return { columns, rows: Math.min(rows, 6) };
 }
 
 function createDenseGridTemplate(count: number): LayoutTemplate {

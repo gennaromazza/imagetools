@@ -21,17 +21,16 @@ import type {
   LayoutMove,
   LayoutTemplate
 } from "@photo-tools/shared-types";
-import { AssignmentInspector } from "./AssignmentInspector";
 import { ConfirmModal } from "./ConfirmModal";
+import { InspectorPanel } from "./InspectorPanel";
 import { CropEditorModal } from "./CropEditorModal";
-import { ImageSlotPreview } from "./ImageSlotPreview";
+import { SheetSurface, buildAssignmentsBySlotId } from "./SheetSurface";
 import { preloadImageUrls } from "../image-cache";
 import { PhotoReplaceModal } from "./PhotoReplaceModal";
 import { PhotoRibbon } from "./PhotoRibbon";
 
 type AssetFilter = "all" | "unused" | "used";
 type PageSectionFilter = "all" | "opening" | "middle" | "finale";
-type DragDropMode = "precision" | "smart";
 
 interface DragState {
   kind: "asset" | "slot";
@@ -125,21 +124,184 @@ interface LayoutPreviewBoardProps {
   zoom: number;
 }
 
-interface CommitOnBlurNumberFieldProps {
-  label: string;
-  value: number;
-  min?: string;
-  step?: string;
-  className?: string;
-  unit?: string;
-  allowZero?: boolean;
-  onCommit: (value: number) => void;
+interface PreservedCropInfo {
+  assignmentId: string;
+  aspect: number;
 }
+
+interface TemplateCropCompatibility {
+  matchedCount: number;
+  totalCount: number;
+  fullyCompatible: boolean;
+  meanDistance: number;
+}
+
+interface PageCropGuidance {
+  preservedCount: number;
+  fullyCompatibleTemplateCount: number;
+  currentTemplateCompatible: boolean;
+  recommendedTemplateCompatible: boolean;
+  recommendedTemplateId: string | null;
+  tone: "ok" | "warning" | "critical" | null;
+  title: string | null;
+  detail: string | null;
+}
+
+const PRESERVED_CROP_TEMPLATE_TOLERANCE = 0.22;
 
 function getTemplateOptions(templates: LayoutTemplate[], photoCount: number): LayoutTemplate[] {
   return templates.filter(
     (template) => photoCount >= template.minPhotos && photoCount <= template.maxPhotos
   );
+}
+
+function normalizedAspectDistance(left: number, right: number): number {
+  return Math.abs(Math.log(Math.max(left, 0.0001) / Math.max(right, 0.0001)));
+}
+
+function normalizeRotation(value: number): number {
+  const rounded = Math.round(value);
+  const wrapped = ((rounded % 360) + 360) % 360;
+  return wrapped > 180 ? wrapped - 360 : wrapped;
+}
+
+function getPreservedCropAspect(asset: ImageAsset, assignment: LayoutAssignment): number {
+  const cropWidth = Math.min(1, Math.max(0.05, assignment.cropWidth ?? 1));
+  const cropHeight = Math.min(1, Math.max(0.05, assignment.cropHeight ?? 1));
+  let aspect = Math.max(asset.aspectRatio, 0.01) * (cropWidth / cropHeight);
+  if (Math.abs(normalizeRotation(assignment.rotation ?? 0)) % 180 === 90) {
+    aspect = 1 / Math.max(aspect, 0.01);
+  }
+  return Math.max(aspect, 0.01);
+}
+
+function collectPreservedCropInfo(
+  page: GeneratedPageLayout,
+  assetsById: Map<string, ImageAsset>
+): PreservedCropInfo[] {
+  return page.assignments
+    .filter((assignment) => assignment.fitMode === "fit")
+    .map((assignment) => {
+      const asset = assetsById.get(assignment.imageId);
+      if (!asset) {
+        return null;
+      }
+
+      return {
+        assignmentId: assignment.imageId,
+        aspect: getPreservedCropAspect(asset, assignment)
+      };
+    })
+    .filter((item): item is PreservedCropInfo => Boolean(item));
+}
+
+function evaluateTemplateCropCompatibility(
+  template: LayoutTemplate,
+  preservedCrops: PreservedCropInfo[]
+): TemplateCropCompatibility {
+  if (preservedCrops.length === 0) {
+    return {
+      matchedCount: 0,
+      totalCount: 0,
+      fullyCompatible: true,
+      meanDistance: 0
+    };
+  }
+
+  let matchedCount = 0;
+  let distanceTotal = 0;
+
+  for (const crop of preservedCrops) {
+    const bestDistance = template.slots.reduce((best, slot) => {
+      const slotAspect = slot.width / Math.max(slot.height, 0.0001);
+      return Math.min(best, normalizedAspectDistance(crop.aspect, slotAspect));
+    }, Number.POSITIVE_INFINITY);
+
+    distanceTotal += bestDistance;
+    if (bestDistance <= PRESERVED_CROP_TEMPLATE_TOLERANCE) {
+      matchedCount += 1;
+    }
+  }
+
+  return {
+    matchedCount,
+    totalCount: preservedCrops.length,
+    fullyCompatible: matchedCount === preservedCrops.length,
+    meanDistance: distanceTotal / preservedCrops.length
+  };
+}
+
+function buildPageCropGuidance(
+  preservedCrops: PreservedCropInfo[],
+  templates: LayoutTemplate[],
+  currentTemplateId: string,
+  recommendedTemplateId: string | null
+): PageCropGuidance {
+  if (preservedCrops.length === 0) {
+    return {
+      preservedCount: 0,
+      fullyCompatibleTemplateCount: 0,
+      currentTemplateCompatible: true,
+      recommendedTemplateCompatible: true,
+      recommendedTemplateId,
+      tone: null,
+      title: null,
+      detail: null
+    };
+  }
+
+  const compatibilityByTemplateId = new Map(
+    templates.map((template) => [template.id, evaluateTemplateCropCompatibility(template, preservedCrops)])
+  );
+  const fullyCompatibleTemplateCount = Array.from(compatibilityByTemplateId.values()).filter(
+    (compatibility) => compatibility.fullyCompatible
+  ).length;
+  const currentTemplateCompatible = compatibilityByTemplateId.get(currentTemplateId)?.fullyCompatible ?? false;
+  const recommendedTemplateCompatible = recommendedTemplateId
+    ? compatibilityByTemplateId.get(recommendedTemplateId)?.fullyCompatible ?? false
+    : false;
+
+  if (currentTemplateCompatible) {
+    return {
+      preservedCount: preservedCrops.length,
+      fullyCompatibleTemplateCount,
+      currentTemplateCompatible,
+      recommendedTemplateCompatible,
+      recommendedTemplateId,
+      tone: "ok",
+      title: preservedCrops.length === 1 ? "Crop preservato compatibile" : "Crop preservati compatibili",
+      detail:
+        fullyCompatibleTemplateCount === 1
+          ? "Il template attuale e l'unico che valorizza bene questo crop preservato."
+          : `Il template attuale valorizza bene questi crop preservati. Template compatibili: ${fullyCompatibleTemplateCount}.`
+    };
+  }
+
+  if (fullyCompatibleTemplateCount > 0) {
+    return {
+      preservedCount: preservedCrops.length,
+      fullyCompatibleTemplateCount,
+      currentTemplateCompatible,
+      recommendedTemplateCompatible,
+      recommendedTemplateId,
+      tone: "warning",
+      title: "Crop preservato da riallineare",
+      detail: recommendedTemplateCompatible
+        ? "Il template consigliato valorizza meglio i crop preservati di questo foglio."
+        : `Esistono ${fullyCompatibleTemplateCount} template piu adatti ai crop preservati di questo foglio.`
+    };
+  }
+
+  return {
+    preservedCount: preservedCrops.length,
+    fullyCompatibleTemplateCount,
+    currentTemplateCompatible,
+    recommendedTemplateCompatible,
+    recommendedTemplateId,
+    tone: "critical",
+    title: "Nessun template ideale",
+    detail: "I crop preservati restano validi, ma nessun template disponibile li valorizza davvero bene."
+  };
 }
 
 function getSheetAspectRatio(page: GeneratedPageLayout): string {
@@ -150,10 +312,6 @@ function getSheetAspectRatio(page: GeneratedPageLayout): string {
 
 function formatMeasurement(value: number): string {
   return Number.isInteger(value) ? `${value}` : value.toFixed(1);
-}
-
-function formatAspectRatioLabel(page: GeneratedPageLayout): string {
-  return `${formatMeasurement(page.sheetSpec.widthCm)}:${formatMeasurement(page.sheetSpec.heightCm)}`;
 }
 
 function getSheetPreviewStyle(page: GeneratedPageLayout): CSSProperties {
@@ -183,18 +341,6 @@ function normalizeGuides(values: number[] | undefined, maxCm: number): number[] 
 
 function cmToPixels(cm: number, dpi: number): number {
   return (cm / 2.54) * dpi;
-}
-
-function pixelsToCm(px: number, dpi: number): number {
-  return (px / dpi) * 2.54;
-}
-
-function formatGuideValue(cm: number, page: GeneratedPageLayout, unit: RulerUnit): string {
-  if (unit === "px") {
-    return `${Math.round(cmToPixels(cm, page.sheetSpec.dpi))} px`;
-  }
-
-  return `${formatMeasurement(cm)} cm`;
 }
 
 function buildRulerTicks(page: GeneratedPageLayout, axis: "horizontal" | "vertical"): Array<{ position: number; label?: string; major: boolean }> {
@@ -292,10 +438,6 @@ function clampValue(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function buildAssignmentsBySlotId(page: GeneratedPageLayout): Map<string, LayoutAssignment> {
-  return new Map(page.assignments.map((assignment) => [assignment.slotId, assignment] as const));
-}
-
 function findVerticalScrollContainer(element: HTMLElement | null): HTMLElement | Window {
   let current = element?.parentElement ?? null;
 
@@ -313,67 +455,6 @@ function findVerticalScrollContainer(element: HTMLElement | null): HTMLElement |
   }
 
   return window;
-}
-
-function CommitOnBlurNumberField({
-  label,
-  value,
-  min = "1",
-  step = "0.1",
-  className,
-  unit,
-  allowZero = false,
-  onCommit
-}: CommitOnBlurNumberFieldProps) {
-  const [draftValue, setDraftValue] = useState(() => formatMeasurement(value));
-
-  useEffect(() => {
-    setDraftValue(formatMeasurement(value));
-  }, [value]);
-
-  const commitDraft = useCallback(() => {
-    const parsed = Number(draftValue);
-
-    if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0)) {
-      setDraftValue(formatMeasurement(value));
-      return;
-    }
-
-    if (parsed !== value) {
-      onCommit(parsed);
-      return;
-    }
-
-    setDraftValue(formatMeasurement(value));
-  }, [allowZero, draftValue, onCommit, value]);
-
-  return (
-    <label className={className ? `field ${className}` : "field"}>
-      <span>{label}</span>
-      <div className={unit ? "field__input-with-unit" : undefined}>
-        <input
-          type="number"
-          min={min}
-          step={step}
-          inputMode="decimal"
-          value={draftValue}
-          onChange={(event) => setDraftValue(event.target.value)}
-          onBlur={commitDraft}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.currentTarget.blur();
-            }
-
-            if (event.key === "Escape") {
-              setDraftValue(formatMeasurement(value));
-              event.preventDefault();
-            }
-          }}
-        />
-        {unit ? <span className="field__unit">{unit}</span> : null}
-      </div>
-    </label>
-  );
 }
 
 function renderTemplateMiniMap(template: LayoutTemplate) {
@@ -464,564 +545,6 @@ function requiresTemplateChangeConfirmation(
 
   return areaDelta >= 0.12 || orientationChanged;
 }
-
-interface SheetSurfaceProps {
-  page: GeneratedPageLayout;
-  assetsById: Map<string, ImageAsset>;
-  selectedSlotKey: string | null;
-  recentlyAddedSlotKey?: string | null;
-  dragState: DragState | null;
-  onSelectPage: (pageId: string, slotId?: string) => void;
-  onStartSlotDrag: (pageId: string, slotId: string, imageId: string) => void;
-  onDragEnd: () => void;
-  onDrop: (move: LayoutMove) => void;
-  onAssetDropped: (pageId: string, slotId: string, imageId: string) => void;
-  onAddToPage: (pageId: string, imageId: string) => void;
-  onClearSlot: (pageId: string, slotId: string) => void;
-  onOpenPicker: (pageId: string, pageNumber: number, slotId: string, currentImageId?: string) => void;
-  onOpenCropEditor: (pageId: string, slotId: string) => void;
-  onContextMenu?: (event: MouseEvent, page: GeneratedPageLayout) => void;
-  onUpdateSlotAssignment: (
-    pageId: string,
-    slotId: string,
-    changes: Partial<
-      Pick<
-        LayoutAssignment,
-        "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked" | "cropLeft" | "cropTop" | "cropWidth" | "cropHeight"
-      >
-    >
-  ) => void;
-  size: "hero" | "thumb";
-  dragDropMode: DragDropMode;
-}
-
-const SheetSurface = memo(function SheetSurface({
-  page,
-  assetsById,
-  selectedSlotKey,
-  recentlyAddedSlotKey,
-  dragState,
-  onSelectPage,
-  onStartSlotDrag,
-  onDragEnd,
-  onDrop,
-  onAssetDropped,
-  onAddToPage,
-  onClearSlot,
-  onOpenPicker,
-  onOpenCropEditor,
-  onContextMenu,
-  onUpdateSlotAssignment,
-  size,
-  dragDropMode
-}: SheetSurfaceProps) {
-  const interactive = size === "hero";
-  const assignmentsBySlotId = useMemo(() => buildAssignmentsBySlotId(page), [page]);
-  const previewRef = useRef<HTMLDivElement | null>(null);
-  const [dragIntentLabel, setDragIntentLabel] = useState<string | null>(null);
-  const dragIntentLabelRef = useRef<string | null>(null);
-  const panStateRef = useRef<{
-    pointerId: number;
-    slotId: string;
-    startX: number;
-    startY: number;
-    startOffsetX: number;
-    startOffsetY: number;
-    width: number;
-    height: number;
-    sensitivityX: number;
-    sensitivityY: number;
-    moved: boolean;
-  } | null>(null);
-  const panFrameRef = useRef<number | null>(null);
-  const pendingPanRef = useRef<{ slotId: string; offsetX: number; offsetY: number } | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (panFrameRef.current !== null) {
-        cancelAnimationFrame(panFrameRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!dragState) {
-      dragIntentLabelRef.current = null;
-      setDragIntentLabel(null);
-    }
-  }, [dragState]);
-
-  const setStableDragIntentLabel = useCallback((nextLabel: string | null) => {
-    if (dragIntentLabelRef.current === nextLabel) {
-      return;
-    }
-
-    dragIntentLabelRef.current = nextLabel;
-    setDragIntentLabel(nextLabel);
-  }, []);
-
-  const flushPanUpdate = useCallback(() => {
-    if (pendingPanRef.current) {
-      onUpdateSlotAssignment(page.id, pendingPanRef.current.slotId, {
-        offsetX: pendingPanRef.current.offsetX,
-        offsetY: pendingPanRef.current.offsetY
-      });
-      pendingPanRef.current = null;
-    }
-
-    panFrameRef.current = null;
-  }, [onUpdateSlotAssignment, page.id]);
-
-  const schedulePanUpdate = useCallback(
-    (slotId: string, offsetX: number, offsetY: number) => {
-      pendingPanRef.current = { slotId, offsetX, offsetY };
-
-      if (panFrameRef.current === null) {
-        panFrameRef.current = requestAnimationFrame(flushPanUpdate);
-      }
-    },
-    [flushPanUpdate]
-  );
-
-  return (
-    <div
-      ref={previewRef}
-      className={[
-        size === "hero" ? "sheet-preview sheet-preview--hero" : "sheet-preview sheet-preview--thumb",
-        interactive && dragState ? "sheet-preview--drag-over" : ""
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      style={getSheetPreviewStyle(page)}
-      onDragOver={
-        interactive
-          ? (event) => {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              setStableDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
-            }
-          : undefined
-      }
-	      onDrop={
-	        interactive
-	          ? (event) => {
-	              event.preventDefault();
-                setStableDragIntentLabel(null);
-	            }
-	          : undefined
-	      }
-      onDragLeave={
-        interactive
-          ? (event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                setStableDragIntentLabel(null);
-              }
-            }
-          : undefined
-      }
-      onContextMenu={
-        interactive && onContextMenu
-          ? (event) => {
-              event.preventDefault();
-              onContextMenu(event, page);
-            }
-          : undefined
-      }
-    >
-      {renderGuideLines(page)}
-      {page.slotDefinitions.map((slot) => {
-        const assignment = assignmentsBySlotId.get(slot.id);
-        const asset = assignment ? assetsById.get(assignment.imageId) : undefined;
-        const isSelected = selectedSlotKey === `${page.id}:${slot.id}`;
-        const isRecentlyAdded = recentlyAddedSlotKey === `${page.id}:${slot.id}`;
-        const isDragging =
-          dragState?.kind === "slot" &&
-          dragState.sourcePageId === page.id &&
-          dragState.sourceSlotId === slot.id;
-        const canReposition = Boolean(interactive && assignment);
-        const isDropTarget =
-          Boolean(dragState) &&
-          !(dragState?.kind === "slot" && dragState.sourcePageId === page.id && dragState.sourceSlotId === slot.id);
-
-        return (
-          <div
-            key={slot.id}
-            className={[
-              "sheet-slot",
-              isSelected ? "sheet-slot--selected" : "",
-              isRecentlyAdded ? "sheet-slot--recently-added" : "",
-              isDragging ? "sheet-slot--dragging" : "",
-              isDropTarget ? "sheet-slot--drag-target" : "",
-              assignment ? "" : "sheet-slot--empty"
-            ]
-              .filter(Boolean)
-              .join(" ")}
-            style={(() => {
-              const slotRect = getSlotDisplayRect(page, slot);
-              const borderWidthPx = Math.max(0, (page.sheetSpec.photoBorderWidthCm ?? 0) * (size === "hero" ? 14 : 7));
-              return {
-                left: `${slotRect.left * 100}%`,
-                top: `${slotRect.top * 100}%`,
-                width: `${slotRect.width * 100}%`,
-                height: `${slotRect.height * 100}%`,
-                ["--slot-border-width" as string]: `${borderWidthPx}px`,
-                ["--slot-border-color" as string]: page.sheetSpec.photoBorderColor ?? "#ffffff"
-              };
-            })()}
-            onClick={interactive ? () => onSelectPage(page.id, slot.id) : undefined}
-            onDragOver={
-              interactive
-                ? (event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    if (!dragState) {
-                      return;
-                    }
-
-                    if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
-                      const isCrossPageMove = dragState.sourcePageId !== page.id;
-                      setStableDragIntentLabel(
-                        assignment
-                          ? dragDropMode === "precision"
-                            ? "Rilascia per scambiare le foto tra i due slot"
-                            : isCrossPageMove
-                              ? "Rilascia per spostare la foto su questo foglio con riadattamento automatico"
-                              : "Rilascia per riorganizzare automaticamente il foglio attorno alla foto"
-                          : "Rilascia per spostare la foto in questo slot"
-                      );
-                      return;
-                    }
-
-                    setStableDragIntentLabel(
-                      assignment
-                        ? "Rilascia per sostituire la foto in questo slot"
-                        : "Rilascia per inserire la foto in questo slot"
-                    );
-                  }
-                : undefined
-            }
-            onDrop={
-              interactive
-                ? (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (!dragState) {
-                      return;
-                    }
-
-                    if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
-                      if (assignment && dragDropMode === "smart") {
-                        onAddToPage(page.id, dragState.imageId);
-                        setStableDragIntentLabel(null);
-                        return;
-                      }
-
-                      onDrop({
-                        sourcePageId: dragState.sourcePageId,
-                        sourceSlotId: dragState.sourceSlotId,
-                        targetPageId: page.id,
-                        targetSlotId: slot.id
-                      });
-                      return;
-                    }
-
-                    onAssetDropped(page.id, slot.id, dragState.imageId);
-                    setStableDragIntentLabel(null);
-                  }
-                : undefined
-            }
-            onDragLeave={
-              interactive
-                ? (event) => {
-                    event.stopPropagation();
-                    setStableDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
-                  }
-                : undefined
-            }
-          >
-            {interactive ? (
-              <>
-                <button
-                  type="button"
-                  data-preview-asset-id={assignment?.imageId}
-                  className={canReposition ? "slot-asset slot-asset--repositionable" : "slot-asset"}
-                  draggable={Boolean(assignment)}
-                  title={
-                    assignment
-                      ? "Trascina per spostare la foto tra slot e fogli. Usa Alt piu trascinamento per riposizionarla dentro lo slot."
-                      : "Trascina qui una foto per assegnarla allo slot."
-                  }
-                  onDragStart={(event) => {
-                    if (!assignment) {
-                      event.preventDefault();
-                      return;
-                    }
-
-                    if (event.altKey) {
-                      event.preventDefault();
-                      return;
-                    }
-
-                    event.stopPropagation();
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", assignment.imageId);
-                    onStartSlotDrag(page.id, slot.id, assignment.imageId);
-                    setStableDragIntentLabel("Trascina la foto su uno slot, un foglio o l'area non usate");
-                  }}
-                  onDragEnd={(event) => {
-                    event.stopPropagation();
-                    onDragEnd();
-                  }}
-                  onWheel={(event) => {
-                    if (!assignment || !interactive) {
-                      return;
-                    }
-
-                    if (!event.altKey) {
-                      return;
-                    }
-
-                    event.preventDefault();
-                    const nextZoom = Math.max(0.7, Math.min(2.2, assignment.zoom + (event.deltaY > 0 ? -0.08 : 0.08)));
-                    onUpdateSlotAssignment(page.id, slot.id, { fitMode: "fit", zoom: nextZoom });
-                  }}
-                  onDoubleClick={(event) => {
-                    if (!assignment || !interactive) {
-                      return;
-                    }
-
-                    event.preventDefault();
-                    onUpdateSlotAssignment(page.id, slot.id, {
-                      zoom: 1,
-                      offsetX: 0,
-                      offsetY: 0,
-                      rotation: 0
-                    });
-                  }}
-                  onPointerDown={(event) => {
-                    if (!assignment || !canReposition || event.button !== 0) {
-                      return;
-                    }
-
-                    if (!event.altKey) {
-                      return;
-                    }
-
-                    onSelectPage(page.id, slot.id);
-                    onOpenCropEditor(page.id, slot.id);
-                    event.preventDefault();
-                  }}
-                  onPointerMove={(event) => {
-                    const panState = panStateRef.current;
-                    if (!panState || panState.pointerId !== event.pointerId) {
-                      return;
-                    }
-
-                    const deltaX = event.clientX - panState.startX;
-                    const deltaY = event.clientY - panState.startY;
-
-                    if (!panState.moved && Math.abs(deltaX) + Math.abs(deltaY) < 3) {
-                      return;
-                    }
-
-                    panState.moved = true;
-
-                    const effectiveWidth = Math.max(panState.width, 220);
-                    const effectiveHeight = Math.max(panState.height, 220);
-                    const nextOffsetX = Math.max(
-                      -100,
-                      Math.min(100, panState.startOffsetX + (deltaX / effectiveWidth) * panState.sensitivityX)
-                    );
-                    const nextOffsetY = Math.max(
-                      -100,
-                      Math.min(100, panState.startOffsetY + (deltaY / effectiveHeight) * panState.sensitivityY)
-                    );
-
-                    schedulePanUpdate(slot.id, nextOffsetX, nextOffsetY);
-                  }}
-                  onPointerUp={(event) => {
-                    if (!panStateRef.current || panStateRef.current.pointerId !== event.pointerId) {
-                      return;
-                    }
-
-                    flushPanUpdate();
-                    panStateRef.current = null;
-                    event.currentTarget.releasePointerCapture(event.pointerId);
-                  }}
-                  onPointerCancel={() => {
-                    flushPanUpdate();
-                    panStateRef.current = null;
-                  }}
-                >
-                  <ImageSlotPreview
-                    asset={asset}
-                    assignment={assignment}
-                    label={assignment ? asset?.fileName ?? assignment.imageId : slot.id}
-                    slot={slot}
-                  />
-                </button>
-                <div className="slot-quick-toolbar" onClick={(event) => event.stopPropagation()}>
-                  <div className="slot-quick-toolbar__group slot-quick-toolbar__group--top-left">
-                    <button
-                      type="button"
-                      className="slot-quick-toolbar__button slot-quick-toolbar__button--accent"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onOpenPicker(page.id, page.pageNumber, slot.id, assignment?.imageId);
-                      }}
-                      aria-label={
-                        assignment
-                          ? `Sostituisci foto nello slot ${slot.id}`
-                          : `Scegli una foto per lo slot ${slot.id}`
-                      }
-                      title="Scegli o sostituisci la foto"
-                    >
-                      Foto
-                    </button>
-                  </div>
-
-                  {assignment ? (
-                    <div className="slot-quick-toolbar__group slot-quick-toolbar__group--top-right">
-                      <button
-                        type="button"
-                        className="slot-quick-toolbar__button slot-quick-toolbar__button--danger"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onClearSlot(page.id, slot.id);
-                        }}
-                        aria-label={`Rimuovi foto dallo slot ${slot.id}`}
-                        title="Rimuovi foto dallo slot"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {assignment ? (
-                    <>
-                      <div className="slot-quick-toolbar__group slot-quick-toolbar__group--bottom-center">
-                        {([
-                          ["fit", "Adatta"],
-                          ["fill", "Riempi"],
-                          ["crop", "Crop"]
-                        ] as const).map(([mode, label]) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            className={
-                              assignment.fitMode === mode
-                                ? "slot-quick-toolbar__button slot-quick-toolbar__button--active"
-                                : "slot-quick-toolbar__button"
-                            }
-                            onClick={() => {
-                              if (mode === "crop") {
-                                onOpenCropEditor(page.id, slot.id);
-                                return;
-                              }
-                              onUpdateSlotAssignment(page.id, slot.id, { fitMode: mode });
-                            }}
-                            title={label}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="slot-quick-toolbar__group slot-quick-toolbar__group--right-center">
-                        <button
-                          type="button"
-                          className="slot-quick-toolbar__button slot-quick-toolbar__button--icon"
-                          onClick={() =>
-                            onUpdateSlotAssignment(page.id, slot.id, {
-                              fitMode: "fit",
-                              zoom: Math.max(0.7, assignment.zoom - 0.1)
-                            })
-                          }
-                          aria-label="Riduci zoom"
-                          title="Riduci zoom"
-                        >
-                          -
-                        </button>
-                        <button
-                          type="button"
-                          className="slot-quick-toolbar__button slot-quick-toolbar__button--icon"
-                          onClick={() =>
-                            onUpdateSlotAssignment(page.id, slot.id, {
-                              fitMode: "fit",
-                              zoom: Math.min(2.2, assignment.zoom + 0.1)
-                            })
-                          }
-                          aria-label="Aumenta zoom"
-                          title="Aumenta zoom"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-              </>
-            ) : (
-              <div className="slot-asset slot-asset--thumb">
-                <ImageSlotPreview
-                  asset={asset}
-                  assignment={assignment}
-                  label={assignment ? asset?.fileName ?? assignment.imageId : slot.id}
-                  slot={slot}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {interactive && dragState ? (
-        <div
-          className={
-            dragState.kind === "slot"
-              ? "sheet-add-target sheet-add-target--slot-drag"
-              : "sheet-add-target"
-          }
-          onDragOver={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            event.dataTransfer.dropEffect = "move";
-            setStableDragIntentLabel(
-              dragState.kind === "slot"
-                ? dragState.sourcePageId === page.id
-                  ? "Rilascia per riorganizzare questo foglio attorno alla foto trascinata"
-                  : "Rilascia per spostare questa foto qui e riadattare il layout del foglio"
-                : "Rilascia per aggiungere la foto e ricalcolare il layout del foglio"
-            );
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onAddToPage(page.id, dragState.imageId);
-            setStableDragIntentLabel(null);
-          }}
-          onDragLeave={(event) => {
-            event.stopPropagation();
-            setStableDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
-          }}
-        >
-          <strong>Riadatta questo foglio</strong>
-          <span>
-            {dragState.kind === "slot"
-              ? dragState.sourcePageId === page.id
-                ? "Rilascia qui per riorganizzare il foglio corrente attorno a questa foto."
-                : "Rilascia qui per spostare questa foto in questo foglio e aggiornare il layout."
-              : "Rilascia qui per aggiungere la foto a questo foglio e ricalcolare l'impaginazione."}
-          </span>
-        </div>
-      ) : null}
-      {interactive && dragState && dragIntentLabel ? (
-        <div className="sheet-drag-intent" aria-live="polite">
-          {dragIntentLabel}
-        </div>
-      ) : null}
-    </div>
-  );
-});
 
 function SheetWithRulers({
   page,
@@ -1126,15 +649,12 @@ export function LayoutPreviewBoard({
   const [pendingTemplateChange, setPendingTemplateChange] = useState<TemplateChangeConfirmation | null>(null);
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [pageSectionFilter, setPageSectionFilter] = useState<PageSectionFilter>("all");
-  const [dragDropMode, setDragDropMode] = useState<DragDropMode>("precision");
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null);
   const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
   const [leftRailWidth, setLeftRailWidth] = useState(260);
   const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
   const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
   const dragChipTargetPageIdRef = useRef<string | null>(null);
-  const [verticalGuideDraft, setVerticalGuideDraft] = useState("0");
-  const [horizontalGuideDraft, setHorizontalGuideDraft] = useState("0");
   const resizeStateRef = useRef<{ pane: ResizePane; startX: number; startWidth: number } | null>(null);
   const activePage = result.pages.find((page) => page.id === selectedPageId) ?? result.pages[0] ?? null;
   const activeIndex = activePage ? result.pages.findIndex((page) => page.id === activePage.id) : 0;
@@ -1208,6 +728,24 @@ export function LayoutPreviewBoard({
 
     return map;
   }, [assetsById, result.pages, templatesByPageId]);
+  const pageCropGuidanceByPageId = useMemo(() => {
+    const map = new Map<string, PageCropGuidance>();
+
+    for (const page of result.pages) {
+      const preservedCrops = collectPreservedCropInfo(page, assetsById);
+      map.set(
+        page.id,
+        buildPageCropGuidance(
+          preservedCrops,
+          templatesByPageId.get(page.id) ?? [],
+          page.templateId,
+          recommendedTemplateByPageId.get(page.id) ?? null
+        )
+      );
+    }
+
+    return map;
+  }, [assetsById, recommendedTemplateByPageId, result.pages, templatesByPageId]);
   
   const filteredAssets = useMemo(
     () =>
@@ -1247,23 +785,6 @@ export function LayoutPreviewBoard({
   );
   const deferredAssets = useDeferredValue(filteredAssets);
   const deferredPages = useDeferredValue(sectionedPages);
-  const activeAspectRatio = activePage ? formatAspectRatioLabel(activePage) : null;
-  const pageGuides = useMemo(
-    () => ({
-      verticalGuidesCm: normalizeGuides(activePage?.sheetSpec.verticalGuidesCm, activePage?.sheetSpec.widthCm ?? 0),
-      horizontalGuidesCm: normalizeGuides(activePage?.sheetSpec.horizontalGuidesCm, activePage?.sheetSpec.heightCm ?? 0)
-    }),
-    [activePage]
-  );
-
-  useEffect(() => {
-    if (!activePage) {
-      return;
-    }
-
-    setVerticalGuideDraft("0");
-    setHorizontalGuideDraft("0");
-  }, [activePage?.id, activePage?.sheetSpec.rulerUnit]);
   const activeAssignmentsBySlotId = useMemo(
     () => (activePage ? buildAssignmentsBySlotId(activePage) : new Map<string, LayoutAssignment>()),
     [activePage]
@@ -1279,6 +800,14 @@ export function LayoutPreviewBoard({
   const cropSlot = cropTarget && cropPage ? cropPage.slotDefinitions.find((slot) => slot.id === cropTarget.slotId) : undefined;
   const cropAssignment = cropTarget && cropPage ? buildAssignmentsBySlotId(cropPage).get(cropTarget.slotId) : undefined;
   const cropAsset = cropAssignment ? assetsById.get(cropAssignment.imageId) : undefined;
+  const activePageCropGuidance = activePage ? pageCropGuidanceByPageId.get(activePage.id) ?? null : null;
+  const previewTemplateCropCompatibility = useMemo(
+    () =>
+      activePage && previewTemplate
+        ? evaluateTemplateCropCompatibility( previewTemplate, collectPreservedCropInfo(activePage, assetsById))
+        : null,
+    [activePage, assetsById, previewTemplate]
+  );
   // Memoized callbacks to reduce re-renders
   const handleReplaceTargetOpen = useCallback(
     (pageId: string, pageNumber: number, slotId: string, currentImageId?: string) => {
@@ -1333,44 +862,6 @@ export function LayoutPreviewBoard({
       onPageSheetFieldChange(page.id, "photoBorderWidthCm", nextValue);
     },
     [onPageSheetFieldChange]
-  );
-
-  const upsertGuide = useCallback(
-    (axis: "vertical" | "horizontal", displayValue: number) => {
-      if (!activePage || !Number.isFinite(displayValue) || displayValue < 0) {
-        return;
-      }
-
-      const unit = activePage.sheetSpec.rulerUnit ?? "cm";
-      const maxCm = axis === "vertical" ? activePage.sheetSpec.widthCm : activePage.sheetSpec.heightCm;
-      const nextCm = unit === "px" ? pixelsToCm(displayValue, activePage.sheetSpec.dpi) : displayValue;
-      const field = axis === "vertical" ? "verticalGuidesCm" : "horizontalGuidesCm";
-      const nextGuides = normalizeGuides([...(pageGuides[field] ?? []), nextCm], maxCm);
-
-      onPageSheetStyleChange(
-        activePage.id,
-        { [field]: nextGuides },
-        `${axis === "vertical" ? "Guida verticale" : "Guida orizzontale"} aggiunta al foglio ${activePage.pageNumber}.`
-      );
-    },
-    [activePage, onPageSheetStyleChange, pageGuides]
-  );
-
-  const removeGuide = useCallback(
-    (axis: "vertical" | "horizontal", guideCm: number) => {
-      if (!activePage) {
-        return;
-      }
-
-      const field = axis === "vertical" ? "verticalGuidesCm" : "horizontalGuidesCm";
-      const nextGuides = (pageGuides[field] ?? []).filter((value) => value !== guideCm);
-      onPageSheetStyleChange(
-        activePage.id,
-        { [field]: nextGuides },
-        `${axis === "vertical" ? "Guida verticale" : "Guida orizzontale"} rimossa dal foglio ${activePage.pageNumber}.`
-      );
-    },
-    [activePage, onPageSheetStyleChange, pageGuides]
   );
   const handleAssetFilterChange = useCallback((filter: AssetFilter) => {
     setAssetFilter(filter);
@@ -1775,45 +1266,35 @@ export function LayoutPreviewBoard({
 
   return (
     <div className="layout-studio">
-      <div className="sheet-toolbar">
-        <div className="sheet-toolbar__summary">
-          <span className="sheet-toolbar__eyebrow">Foglio attivo</span>
-          <strong>
-            {activePage.sheetSpec.label} | {formatMeasurement(activePage.sheetSpec.widthCm)} x{" "}
-            {formatMeasurement(activePage.sheetSpec.heightCm)} cm
-          </strong>
-          <span>{pagesForStudio.length} fogli visibili | aspect ratio {activeAspectRatio} | template {activePage.templateLabel}</span>
+      <div className="layout-studio__context-bar">
+        <div className="layout-studio__context-bar-info">
+          <span className="layout-studio__context-bar-label">Foglio {activePage.pageNumber}</span>
+          <span className="layout-studio__context-bar-meta">
+            {activePage.sheetSpec.label} · {formatMeasurement(activePage.sheetSpec.widthCm)}×{formatMeasurement(activePage.sheetSpec.heightCm)}cm · {activePage.templateLabel}
+          </span>
         </div>
 
-        <div className="sheet-toolbar__actions">
+        <div className="layout-studio__context-bar-actions">
           <button
             type="button"
-            className={dragState ? "secondary-button layout-studio__new-page-button layout-studio__new-page-button--drag" : "secondary-button layout-studio__new-page-button"}
+            className="secondary-button secondary-button--compact"
             onClick={onCreatePageFromUnused}
             onDragOver={(event) => {
-              if (!dragState) {
-                return;
-              }
+              if (!dragState) return;
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
             }}
             onDrop={(event) => {
-              if (!dragState) {
-                return;
-              }
+              if (!dragState) return;
               event.preventDefault();
               onCreatePageWithImage(dragState.imageId);
             }}
           >
-            {dragState ? "Rilascia per creare un nuovo foglio" : "Nuovo foglio"}
+            {dragState ? "Rilascia qui per nuovo foglio" : "Nuovo foglio"}
           </button>
           <button
             type="button"
-            className={
-              isTemplateChooserOpen
-                ? "secondary-button layout-studio__template-button layout-studio__template-button--active"
-                : "secondary-button layout-studio__template-button"
-            }
+            className={`secondary-button secondary-button--compact ${isTemplateChooserOpen ? "is-active" : ""}`}
             onClick={handleTemplateChooserToggle}
           >
             Template
@@ -1829,64 +1310,34 @@ export function LayoutPreviewBoard({
         }
         style={workspaceStyle}
       >
-        <aside className="layout-studio__rail">
-          <div className="layout-studio__rail-panel">
-            <span className="layout-studio__rail-eyebrow">Libreria foto</span>
-            <PhotoRibbon
-              assets={deferredAssets}
-              assetFilter={assetFilter}
-              usageByAssetId={usageByAssetId}
-              dragState={dragState}
-              variant="vertical"
-              onAssetFilterChange={handleAssetFilterChange}
-              onDragAssetStart={onDragAssetStart}
-              onDragEnd={onDragEnd}
-              onAssetsMetadataChange={onAssetsMetadataChange}
-              onAssetDoubleClick={
-                selectedSlot
-                  ? (imageId) => onAssetDropped(activePage.id, selectedSlot.id, imageId)
-                  : undefined
-              }
-            />
-          </div>
-
-          <div className="layout-studio__rail-panel">
-            <span className="layout-studio__rail-eyebrow">Azioni rapide</span>
-            <button
-              type="button"
-              className={dragState ? "secondary-button layout-studio__new-page-button layout-studio__new-page-button--drag" : "secondary-button layout-studio__new-page-button"}
-              onClick={onCreatePageFromUnused}
-              onDragOver={(event) => {
-                if (!dragState) {
-                  return;
-                }
-                event.preventDefault();
-                event.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(event) => {
-                if (!dragState) {
-                  return;
-                }
-                event.preventDefault();
-                onCreatePageWithImage(dragState.imageId);
-              }}
-            >
-              {dragState ? "Rilascia per creare un nuovo foglio" : "Nuovo foglio"}
-            </button>
-
-            <div
-              className={dragState ? "inspector-dropzone inspector-dropzone--active" : "inspector-dropzone"}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => onDropToUnused()}
-            >
-              <strong>Area rimozione</strong>
-              <span>
-                {dragState
-                  ? "Rilascia qui per togliere la foto dal layout"
-                  : activePage.warnings[0] ?? "Trascina qui una foto per riportarla tra le non usate."}
-              </span>
+        <aside className="layout-studio__sidebar">
+          <PhotoRibbon
+            assets={deferredAssets}
+            assetFilter={assetFilter}
+            usageByAssetId={usageByAssetId}
+            dragState={dragState}
+            variant="vertical"
+            onAssetFilterChange={handleAssetFilterChange}
+            onDragAssetStart={onDragAssetStart}
+            onDragEnd={onDragEnd}
+            onAssetsMetadataChange={onAssetsMetadataChange}
+            onAssetDoubleClick={
+              selectedSlot
+                ? (imageId) => onAssetDropped(activePage.id, selectedSlot.id, imageId)
+                : undefined
+            }
+          />
+          {dragState && (
+            <div className="layout-studio__sidebar-dropzone">
+              <div
+                className="inspector-dropzone inspector-dropzone--active"
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() => onDropToUnused()}
+              >
+                <strong>Rimuovi dal layout</strong>
+              </div>
             </div>
-          </div>
+          )}
         </aside>
 
         <div
@@ -1898,131 +1349,97 @@ export function LayoutPreviewBoard({
         />
 
         <div className="layout-studio__main">
-          <div className="layout-studio__subbar">
-            <div className="layout-studio__subbar-group">
-              <span className="layout-studio__rail-eyebrow">Filtri fogli</span>
-              <div className="layout-studio__subbar-filters">
-                {([
-                  ["all", "Tutti"],
-                  ["opening", "Apertura"],
-                  ["middle", "Centro"],
-                  ["finale", "Finale"]
-                ] as [PageSectionFilter, string][]).map(([value, label]) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className={pageSectionFilter === value ? "segment segment--active" : "segment"}
-                    onClick={() => handlePageSectionFilterChange(value)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+          <div className="layout-studio__unified-nav">
+            <div className="layout-studio__unified-nav-filters">
+              {([
+                ["all", "Tutti"],
+                ["opening", "Apertura"],
+                ["middle", "Centro"],
+                ["finale", "Finale"]
+              ] as [PageSectionFilter, string][]).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={pageSectionFilter === value ? "segment segment--active" : "segment"}
+                  onClick={() => handlePageSectionFilterChange(value)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
 
-            <div className="layout-studio__subbar-group">
-              <span className="layout-studio__rail-eyebrow">Scorri fogli</span>
-              <div className="layout-studio__subbar-actions">
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => previousPage && handleJumpToPage(previousPage)}
-                  disabled={!previousPage}
-                >
-                  Foglio precedente
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => nextPage && handleJumpToPage(nextPage)}
-                  disabled={!nextPage}
-                >
-                  Foglio successivo
-                </button>
-              </div>
-            </div>
+            <div className="layout-studio__unified-nav-controls">
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => previousPage && handleJumpToPage(previousPage)}
+                disabled={!previousPage}
+                title="Foglio precedente"
+              >
+                ←
+              </button>
+              <div className="layout-studio__unified-nav-tabs" role="tablist">
+                {pagesForStudio.map((page) => {
+                  const isActive = page.id === activePage.id;
+                  const isDragTarget = dragChipTargetPageId === page.id;
 
-            <div className="layout-studio__subbar-group">
-              <span className="layout-studio__rail-eyebrow">Modalita drag/drop</span>
-              <div className="layout-studio__subbar-filters">
-                <button
-                  type="button"
-                  className={dragDropMode === "precision" ? "segment segment--active" : "segment"}
-                  onClick={() => setDragDropMode("precision")}
-                  title="Slot occupato: swap diretto, massimo controllo"
-                >
-                  Precisione
-                </button>
-                <button
-                  type="button"
-                  className={dragDropMode === "smart" ? "segment segment--active" : "segment"}
-                  onClick={() => setDragDropMode("smart")}
-                  title="Slot occupato: riadattamento automatico del foglio"
-                >
-                  Smart
-                </button>
-              </div>
-            </div>
-
-            <div className="layout-studio__subbar-pages" role="tablist" aria-label="Indice fogli compatto">
-              {pagesForStudio.map((page) => {
-                const isActive = page.id === activePage.id;
-                const isDragTarget = dragChipTargetPageId === page.id;
-
-                return (
-                  <button
-                    key={page.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={isActive}
-                    className={[
-                      "layout-studio__subbar-chip",
-                      isActive ? "layout-studio__subbar-chip--active" : "",
-                      isDragTarget ? "layout-studio__subbar-chip--drop-target" : ""
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    onClick={() => handleJumpToPage(page)}
-                    onDragOver={
-                      dragState
-                        ? (event) => {
-                            event.preventDefault();
-                            event.dataTransfer.dropEffect = "move";
-                            setStableDragChipTargetPageId(page.id);
-                            scheduleDragPageJump(page);
-                          }
-                        : undefined
-                    }
-                    onDragLeave={
-                      dragState
-                        ? (event) => {
-                            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                              clearDragPageJump();
+                  return (
+                    <button
+                      key={page.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={isActive}
+                      className={[
+                        "layout-studio__tab",
+                        isActive ? "layout-studio__tab--active" : "",
+                        isDragTarget ? "layout-studio__tab--drop-target" : ""
+                      ].filter(Boolean).join(" ")}
+                      onClick={() => handleJumpToPage(page)}
+                      onDragOver={
+                        dragState
+                          ? (event) => {
+                              event.preventDefault();
+                              event.dataTransfer.dropEffect = "move";
+                              setStableDragChipTargetPageId(page.id);
+                              scheduleDragPageJump(page);
                             }
-                          }
-                        : undefined
-                    }
-                    onDrop={
-                      dragState
-                        ? (event) => {
-                            event.preventDefault();
-                            stopAutoScroll();
-                            clearDragPageJump();
-                            handleJumpToPage(page);
-                            onAddToPage(page.id, dragState.imageId);
-                          }
-                        : undefined
-                    }
-                    title={
-                      dragState
-                        ? `Trascina qui per andare al foglio ${page.pageNumber} e rilasciare la foto`
-                        : `Vai al foglio ${page.pageNumber}`
-                    }
-                  >
-                    {dragState && isDragTarget ? `Rilascia su foglio ${page.pageNumber}` : `Foglio ${page.pageNumber}`}
-                  </button>
-                );
-              })}
+                          : undefined
+                      }
+                      onDragLeave={
+                        dragState
+                          ? (event) => {
+                              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                                clearDragPageJump();
+                              }
+                            }
+                          : undefined
+                      }
+                      onDrop={
+                        dragState
+                          ? (event) => {
+                              event.preventDefault();
+                              stopAutoScroll();
+                              clearDragPageJump();
+                              handleJumpToPage(page);
+                              onAddToPage(page.id, dragState.imageId);
+                            }
+                          : undefined
+                      }
+                    >
+                      {page.pageNumber}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                className="icon-button"
+                onClick={() => nextPage && handleJumpToPage(nextPage)}
+                disabled={!nextPage}
+                title="Foglio successivo"
+              >
+                →
+              </button>
             </div>
           </div>
 
@@ -2056,6 +1473,13 @@ export function LayoutPreviewBoard({
                 </div>
               </div>
 
+              {activePageCropGuidance?.tone ? (
+                <div className={`template-drawer__notice template-drawer__notice--${activePageCropGuidance.tone}`}>
+                  <strong>{activePageCropGuidance.title}</strong>
+                  <span>{activePageCropGuidance.detail}</span>
+                </div>
+              ) : null}
+
               {activePage ? (
                 <div className="template-drawer__compare">
                   <div className="template-drawer__compare-card">
@@ -2063,6 +1487,11 @@ export function LayoutPreviewBoard({
                     {renderSlotMiniMap(activePage.slotDefinitions)}
                     <strong>{activePage.templateLabel}</strong>
                     <span>{activePage.assignments.length} foto sul foglio corrente</span>
+                    {activePageCropGuidance?.tone ? (
+                      <span className={`template-drawer__crop-badge template-drawer__crop-badge--${activePageCropGuidance.tone}`}>
+                        {activePageCropGuidance.preservedCount} crop preservat{activePageCropGuidance.preservedCount === 1 ? "o" : "i"}
+                      </span>
+                    ) : null}
                   </div>
 
                   <div className="template-drawer__compare-arrow" aria-hidden="true">
@@ -2085,6 +1514,17 @@ export function LayoutPreviewBoard({
                     {previewTemplate && previewTemplate.id === recommendedTemplateId ? (
                       <span className="template-drawer__recommend-badge">Consigliato</span>
                     ) : null}
+                    {previewTemplateCropCompatibility && previewTemplateCropCompatibility.totalCount > 0 ? (
+                      <span
+                        className={
+                          previewTemplateCropCompatibility.fullyCompatible
+                            ? "template-drawer__crop-badge template-drawer__crop-badge--ok"
+                            : "template-drawer__crop-badge template-drawer__crop-badge--warning"
+                        }
+                      >
+                        Crop preservati {previewTemplateCropCompatibility.matchedCount}/{previewTemplateCropCompatibility.totalCount}
+                      </span>
+                    ) : null}
                     <span className="template-drawer__density-badge">
                       {describeTemplateDensity(activePage.slotDefinitions, previewTemplate?.slots ?? null)}
                     </span>
@@ -2093,32 +1533,55 @@ export function LayoutPreviewBoard({
               ) : null}
 
               <div className="template-drawer__grid">
-                {compatibleTemplates.map((template) => (
-                  <button
-                    key={template.id}
-                    type="button"
-                    className={[
-                      "template-card",
-                      template.id === activePage.templateId ? "template-card--active" : "",
-                      template.id === recommendedTemplateId ? "template-card--recommended" : ""
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                    onMouseEnter={() => setTemplatePreviewId(template.id)}
-                    onFocus={() => setTemplatePreviewId(template.id)}
-                    onClick={() => handleTemplateSelect(template.id)}
-                  >
-                    {renderTemplateMiniMap(template)}
-                    <strong>{template.label}</strong>
-                    <span>{template.description}</span>
-                    {template.id === recommendedTemplateId ? (
-                      <span className="template-drawer__recommend-badge">Consigliato</span>
-                    ) : null}
-                    <span className="template-drawer__density-badge">
-                      {describeTemplateDensity(activePage.slotDefinitions, template.slots)}
-                    </span>
-                  </button>
-                ))}
+                {compatibleTemplates.map((template) => {
+                  const templateCropCompatibility = evaluateTemplateCropCompatibility(
+                    template,
+                    collectPreservedCropInfo(activePage, assetsById)
+                  );
+
+                  return (
+                    <button
+                      key={template.id}
+                      type="button"
+                      className={[
+                        "template-card",
+                        template.id === activePage.templateId ? "template-card--active" : "",
+                        template.id === recommendedTemplateId ? "template-card--recommended" : "",
+                        templateCropCompatibility.totalCount > 0 && !templateCropCompatibility.fullyCompatible
+                          ? "template-card--crop-warning"
+                          : ""
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                      onMouseEnter={() => setTemplatePreviewId(template.id)}
+                      onFocus={() => setTemplatePreviewId(template.id)}
+                      onClick={() => handleTemplateSelect(template.id)}
+                    >
+                      {renderTemplateMiniMap(template)}
+                      <strong>{template.label}</strong>
+                      <span>{template.description}</span>
+                      {template.id === recommendedTemplateId ? (
+                        <span className="template-drawer__recommend-badge">Consigliato</span>
+                      ) : null}
+                      {templateCropCompatibility.totalCount > 0 ? (
+                        <span
+                          className={
+                            templateCropCompatibility.fullyCompatible
+                              ? "template-drawer__crop-badge template-drawer__crop-badge--ok"
+                              : templateCropCompatibility.matchedCount > 0
+                                ? "template-drawer__crop-badge template-drawer__crop-badge--warning"
+                                : "template-drawer__crop-badge template-drawer__crop-badge--critical"
+                          }
+                        >
+                          Crop preservati {templateCropCompatibility.matchedCount}/{templateCropCompatibility.totalCount}
+                        </span>
+                      ) : null}
+                      <span className="template-drawer__density-badge">
+                        {describeTemplateDensity(activePage.slotDefinitions, template.slots)}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           ) : null}
@@ -2139,6 +1602,7 @@ export function LayoutPreviewBoard({
                   const isActive = page.id === activePage.id;
                   const showRebalancedBadge = recentlyRebalancedPageId === page.id;
                   const showAddedBadge = recentlyAddedPageId === page.id;
+                  const pageCropGuidance = pageCropGuidanceByPageId.get(page.id) ?? null;
 
                   return (
                     <section
@@ -2154,13 +1618,19 @@ export function LayoutPreviewBoard({
                         .join(" ")}
                       onClick={(event) => handleSelectPageFromCard(event, page)}
                     >
-                      <div className="layout-studio__page-card-header">
-                        <div>
-                          <span className="layout-studio__rail-eyebrow">Foglio {page.pageNumber}</span>
-                          <strong>{page.templateLabel}</strong>
-                          <p>
-                            {page.assignments.length} foto | {page.sheetSpec.label} | gap {page.sheetSpec.gapCm.toFixed(1)} cm
-                          </p>
+                      <div className="page-context-header">
+                        {/* ── LEFT: Identity ── */}
+                        <div className="page-context-header__identity">
+                          <span className="page-context-header__page-number">Foglio {page.pageNumber}</span>
+                          <strong className="page-context-header__template-name">{page.templateLabel}</strong>
+                          <span className="page-context-header__meta">
+                            {page.assignments.length} foto · {page.sheetSpec.label} · gap {page.sheetSpec.gapCm.toFixed(1)} cm
+                          </span>
+                          {pageCropGuidance?.tone ? (
+                            <span className={`page-context-header__crop-badge page-context-header__crop-badge--${pageCropGuidance.tone}`}>
+                              {pageCropGuidance.title}
+                            </span>
+                          ) : null}
                           {showAddedBadge ? (
                             <span
                               className="layout-studio__page-feedback layout-studio__page-feedback--added"
@@ -2174,9 +1644,11 @@ export function LayoutPreviewBoard({
                             </span>
                           ) : null}
                         </div>
-                        <div className="layout-studio__page-card-actions">
+
+                        {/* ── CENTER: Layout actions ── */}
+                        <div className="page-context-header__layout-actions">
                           <select
-                            className="layout-studio__page-quick-template"
+                            className="page-context-header__template-select"
                             value={page.templateId}
                             onChange={(event) => onTemplateChange(page.id, event.target.value)}
                             title="Cambia template con un click"
@@ -2189,7 +1661,7 @@ export function LayoutPreviewBoard({
                           </select>
                           <button
                             type="button"
-                            className="ghost-button"
+                            className="page-context-header__action-btn"
                             onClick={() => {
                               const recommendedTemplate = recommendedTemplateByPageId.get(page.id);
                               if (recommendedTemplate) {
@@ -2198,15 +1670,15 @@ export function LayoutPreviewBoard({
                             }}
                             title="Applica il template consigliato"
                           >
-                            Auto consigliato
+                            Auto
                           </button>
                           <button
                             type="button"
-                            className="ghost-button"
+                            className="page-context-header__action-btn"
                             onClick={() => onRebalancePage(page.id)}
                             title="Ricalcola il layout con impostazioni correnti"
                           >
-                            Smart refresh
+                            Refresh
                           </button>
                           {dragState?.kind === "slot" && dragState.sourcePageId === page.id ? (
                             <div
@@ -2221,15 +1693,19 @@ export function LayoutPreviewBoard({
                               }}
                               title="Rilascia qui per riorganizzare il foglio corrente"
                             >
-                              Rilascia qui per riorganizzare
+                              Rilascia qui
                             </div>
                           ) : null}
+                        </div>
+
+                        {/* ── RIGHT: Appearance + State ── */}
+                        <div className="page-context-header__right">
                           <div
-                            className="layout-studio__page-style-toolbar"
+                            className="page-context-header__appearance"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            <div className="layout-studio__page-style-group">
-                              <span className="layout-studio__page-style-label">Sfondo</span>
+                            <div className="page-context-header__style-group">
+                              <span className="page-context-header__style-label">Sfondo</span>
                               <label
                                 className="layout-studio__page-color-chip"
                                 title={`Colore di sfondo del foglio ${page.pageNumber}`}
@@ -2275,11 +1751,11 @@ export function LayoutPreviewBoard({
                                 }
                                 title={`Rimuovi l'immagine di sfondo dal foglio ${page.pageNumber}`}
                               >
-                                Reset
+                                ✕
                               </button>
                             </div>
-                            <div className="layout-studio__page-style-group">
-                              <span className="layout-studio__page-style-label">Bordi</span>
+                            <div className="page-context-header__style-group">
+                              <span className="page-context-header__style-label">Bordi</span>
                               <label
                                 className="layout-studio__page-color-chip"
                                 title={`Colore bordo foto del foglio ${page.pageNumber}`}
@@ -2300,54 +1776,46 @@ export function LayoutPreviewBoard({
                                 type="button"
                                 className="layout-studio__page-style-button"
                                 onClick={() => adjustPageBorderWidth(page, -0.05)}
-                                title={`Riduci lo spessore del bordo nel foglio ${page.pageNumber}`}
+                                title="Riduci spessore bordo"
                               >
-                                -
+                                −
                               </button>
-                              <label
-                                className="layout-studio__page-style-number"
-                                title={`Spessore bordo foto del foglio ${page.pageNumber}`}
-                              >
-                                <input
-                                  type="number"
-                                  min="0"
-                                  step="0.05"
-                                  value={page.sheetSpec.photoBorderWidthCm ?? 0}
-                                  onChange={(event) => {
-                                    const nextValue = Number(event.target.value);
-                                    if (!Number.isFinite(nextValue)) {
-                                      return;
-                                    }
-                                    onPageSheetFieldChange(page.id, "photoBorderWidthCm", Math.max(0, nextValue));
-                                  }}
-                                />
-                                <span>cm</span>
-                              </label>
+                              <span className="page-context-header__border-value">
+                                {(page.sheetSpec.photoBorderWidthCm ?? 0).toFixed(2)} cm
+                              </span>
                               <button
                                 type="button"
                                 className="layout-studio__page-style-button"
                                 onClick={() => adjustPageBorderWidth(page, 0.05)}
-                                title={`Aumenta lo spessore del bordo nel foglio ${page.pageNumber}`}
+                                title="Aumenta spessore bordo"
                               >
                                 +
                               </button>
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            className="ghost-button"
-                            onClick={() => handleOpenInspectorForPage(page)}
-                            title="Apri l'inspector direttamente su questo foglio"
-                          >
-                            Inspector
-                          </button>
-                          <button
-                            type="button"
-                            className={isActive ? "secondary-button" : "ghost-button"}
-                            onClick={() => handleJumpToPage(page)}
-                          >
-                            {isActive ? "Foglio attivo" : "Vai al foglio"}
-                          </button>
+                          <div className="page-context-header__state">
+                            <button
+                              type="button"
+                              className="page-context-header__action-btn"
+                              onClick={() => handleOpenInspectorForPage(page)}
+                              title="Apri l'inspector direttamente su questo foglio"
+                            >
+                              Inspector
+                            </button>
+                            <span
+                              className={
+                                isActive
+                                  ? "page-context-header__status-chip page-context-header__status-chip--active"
+                                  : "page-context-header__status-chip"
+                              }
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => handleJumpToPage(page)}
+                              onKeyDown={(event) => { if (event.key === "Enter") handleJumpToPage(page); }}
+                            >
+                              {isActive ? "Attivo" : `Vai al foglio`}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -2382,12 +1850,10 @@ export function LayoutPreviewBoard({
                           onAssetDropped={onAssetDropped}
                           onAddToPage={onAddToPage}
                           onClearSlot={onClearSlot}
-                          onOpenPicker={handleReplaceTargetOpen}
                           onOpenCropEditor={handleCropTargetOpen}
                           onContextMenu={onContextMenu}
                           onUpdateSlotAssignment={onUpdateSlotAssignment}
                           size="hero"
-                          dragDropMode={dragDropMode}
                         />
                       </SheetWithRulers>
                     </section>
@@ -2478,360 +1944,22 @@ export function LayoutPreviewBoard({
 
         </div>
 
-        <aside
-          className={
-            isInspectorCollapsed
-              ? "layout-studio__inspector layout-studio__inspector--collapsed"
-              : "layout-studio__inspector"
-          }
-        >
-          <div className="layout-studio__inspector-header">
-            <span className="layout-studio__rail-eyebrow">Inspector</span>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => setIsInspectorCollapsed(true)}
-            >
-              Nascondi
-            </button>
-          </div>
-          <div className="inspector-panel inspector-panel--metrics">
-            <div className="inspector-metric">
-              <small>Foglio</small>
-              <strong>{activePage.pageNumber}</strong>
-            </div>
-            <div className="inspector-metric">
-              <small>Foto</small>
-              <strong>{activePage.assignments.length}</strong>
-            </div>
-            <div className="inspector-metric">
-              <small>Slot</small>
-              <strong>{activePage.slotDefinitions.length}</strong>
-            </div>
-            <div className="inspector-metric">
-              <small>DPI</small>
-              <strong>{activePage.sheetSpec.dpi}</strong>
-            </div>
-          </div>
-
-          <div className="inspector-panel">
-            <span className="inspector-panel__eyebrow">Formato foglio</span>
-            <div className="inspector-sheet-settings">
-              <label className="field inspector-field">
-                <span>Preset</span>
-                <select
-                  value={activePage.sheetSpec.presetId}
-                  onChange={(event) => onPageSheetPresetChange(activePage.id, event.target.value)}
-                >
-                  {SHEET_PRESETS.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-	              <div className="inline-grid inline-grid--2">
-	                <CommitOnBlurNumberField
-	                  label="Larghezza"
-	                  className="inspector-field"
-                  value={activePage.sheetSpec.widthCm}
-                  onCommit={(value) => onPageSheetFieldChange(activePage.id, "widthCm", value)}
-                />
-
-                <CommitOnBlurNumberField
-                  label="Altezza"
-                  className="inspector-field"
-                  value={activePage.sheetSpec.heightCm}
-	                  onCommit={(value) => onPageSheetFieldChange(activePage.id, "heightCm", value)}
-	                />
-	              </div>
-
-              <div className="inline-grid inline-grid--3">
-                <CommitOnBlurNumberField
-                  label="Margine foglio"
-                  className="inspector-field"
-                  min="0"
-                  step="0.1"
-                  unit="cm"
-                  allowZero
-                  value={activePage.sheetSpec.marginCm}
-                  onCommit={(value) => onPageSheetFieldChange(activePage.id, "marginCm", value)}
-                />
-
-                <CommitOnBlurNumberField
-                  label="Gap foto"
-                  className="inspector-field"
-                  min="0"
-                  step="0.1"
-                  unit="cm"
-                  allowZero
-                  value={activePage.sheetSpec.gapCm}
-                  onCommit={(value) => onPageSheetFieldChange(activePage.id, "gapCm", value)}
-                />
-
-                <CommitOnBlurNumberField
-                  label="DPI"
-                  className="inspector-field"
-                  min="72"
-                  step="50"
-                  value={activePage.sheetSpec.dpi}
-                  onCommit={(value) => onPageSheetFieldChange(activePage.id, "dpi", value)}
-                />
-              </div>
-
-              <div className="inspector-sheet-settings__help">
-                <strong>Come funziona</strong>
-                <span>
-                  Margine foglio = distanza dai bordi del foglio. Gap foto = spazio bianco tra le foto dello stesso foglio.
-                </span>
-                <span>Se imposti `Gap foto` a `0 cm`, le foto si toccano senza spazio bianco tra uno slot e l'altro.</span>
-              </div>
-
-              <div className="inspector-panel inspector-panel--nested">
-                <span className="inspector-panel__eyebrow">Righelli e guide</span>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={activePage.sheetSpec.showRulers ?? false}
-                    onChange={(event) =>
-                      onPageSheetStyleChange(
-                        activePage.id,
-                        { showRulers: event.target.checked },
-                        `Righelli ${event.target.checked ? "attivati" : "nascosti"} sul foglio ${activePage.pageNumber}.`
-                      )
-                    }
-                  />
-                  <span>Mostra righelli sul foglio</span>
-                </label>
-                <div className="inline-grid inline-grid--3">
-                  <label className="field inspector-field">
-                    <span>Unita righello</span>
-                    <select
-                      value={activePage.sheetSpec.rulerUnit ?? "cm"}
-                      onChange={(event) =>
-                        onPageSheetStyleChange(
-                          activePage.id,
-                          { rulerUnit: event.target.value as RulerUnit },
-                          `Unita righello aggiornata per il foglio ${activePage.pageNumber}.`
-                        )
-                      }
-                    >
-                      <option value="cm">Centimetri</option>
-                      <option value="px">Pixel</option>
-                    </select>
-                  </label>
-                  <label className="field inspector-field">
-                    <span>Guida verticale</span>
-                    <div className="field__input-with-unit">
-                      <input
-                        type="number"
-                        min="0"
-                        step={activePage.sheetSpec.rulerUnit === "px" ? "10" : "0.1"}
-                        value={verticalGuideDraft}
-                        onChange={(event) => setVerticalGuideDraft(event.target.value)}
-                      />
-                      <span className="field__unit">{activePage.sheetSpec.rulerUnit ?? "cm"}</span>
-                    </div>
-                  </label>
-                  <button
-                    type="button"
-                    className="ghost-button inspector-guide-add"
-                    onClick={() => {
-                      const parsed = Number(verticalGuideDraft);
-                      if (Number.isFinite(parsed)) {
-                        upsertGuide("vertical", parsed);
-                      }
-                    }}
-                  >
-                    Aggiungi verticale
-                  </button>
-                </div>
-                <div className="inline-grid inline-grid--2">
-                  <label className="field inspector-field">
-                    <span>Guida orizzontale</span>
-                    <div className="field__input-with-unit">
-                      <input
-                        type="number"
-                        min="0"
-                        step={activePage.sheetSpec.rulerUnit === "px" ? "10" : "0.1"}
-                        value={horizontalGuideDraft}
-                        onChange={(event) => setHorizontalGuideDraft(event.target.value)}
-                      />
-                      <span className="field__unit">{activePage.sheetSpec.rulerUnit ?? "cm"}</span>
-                    </div>
-                  </label>
-                  <button
-                    type="button"
-                    className="ghost-button inspector-guide-add"
-                    onClick={() => {
-                      const parsed = Number(horizontalGuideDraft);
-                      if (Number.isFinite(parsed)) {
-                        upsertGuide("horizontal", parsed);
-                      }
-                    }}
-                  >
-                    Aggiungi orizzontale
-                  </button>
-                </div>
-                <div className="inspector-guide-lists">
-                  <div className="inspector-guide-list">
-                    <strong>Verticali</strong>
-                    <div className="inspector-guide-list__items">
-                      {pageGuides.verticalGuidesCm.length > 0 ? pageGuides.verticalGuidesCm.map((guideCm) => (
-                        <button
-                          key={`v-${guideCm}`}
-                          type="button"
-                          className="inspector-guide-chip"
-                          onClick={() => removeGuide("vertical", guideCm)}
-                          title="Clicca per rimuovere la guida"
-                        >
-                          {formatGuideValue(guideCm, activePage, activePage.sheetSpec.rulerUnit ?? "cm")}
-                        </button>
-                      )) : <span className="helper-inline">Nessuna</span>}
-                    </div>
-                  </div>
-                  <div className="inspector-guide-list">
-                    <strong>Orizzontali</strong>
-                    <div className="inspector-guide-list__items">
-                      {pageGuides.horizontalGuidesCm.length > 0 ? pageGuides.horizontalGuidesCm.map((guideCm) => (
-                        <button
-                          key={`h-${guideCm}`}
-                          type="button"
-                          className="inspector-guide-chip"
-                          onClick={() => removeGuide("horizontal", guideCm)}
-                          title="Clicca per rimuovere la guida"
-                        >
-                          {formatGuideValue(guideCm, activePage, activePage.sheetSpec.rulerUnit ?? "cm")}
-                        </button>
-                      )) : <span className="helper-inline">Nessuna</span>}
-                    </div>
-                  </div>
-                </div>
-                <div className="inspector-sheet-settings__help">
-                  <strong>Uso rapido</strong>
-                  <span>Clicca sul righello in alto per creare una guida verticale e su quello a sinistra per una guida orizzontale.</span>
-                </div>
-              </div>
-              <div className="button-row inspector-sheet-settings__actions">
-                <button
-                  type="button"
-                  className="ghost-button"
-                  title="Riduce lo spazio tra le foto di 0,1 cm"
-                  onClick={() =>
-                    onPageSheetFieldChange(activePage.id, "gapCm", Math.max(0, Number((activePage.sheetSpec.gapCm - 0.1).toFixed(1))))
-                  }
-                >
-                  Gap -
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  title="Aumenta lo spazio tra le foto di 0,1 cm"
-                  onClick={() =>
-                    onPageSheetFieldChange(activePage.id, "gapCm", Number((activePage.sheetSpec.gapCm + 0.1).toFixed(1)))
-                  }
-                >
-                  Gap +
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  title="Riduce il margine del foglio di 0,1 cm"
-                  onClick={() =>
-                    onPageSheetFieldChange(activePage.id, "marginCm", Math.max(0, Number((activePage.sheetSpec.marginCm - 0.1).toFixed(1))))
-                  }
-                >
-                  Margine -
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  title="Aumenta il margine del foglio di 0,1 cm"
-                  onClick={() =>
-                    onPageSheetFieldChange(activePage.id, "marginCm", Number((activePage.sheetSpec.marginCm + 0.1).toFixed(1)))
-                  }
-                >
-                  Margine +
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  title="Ricalcola il layout del foglio corrente in base alle foto gia presenti"
-                  onClick={() => onRebalancePage(activePage.id)}
-                >
-                  Riadatta questo foglio
-                </button>
-              </div>
-
-	              <div className="inspector-sheet-settings__ratio">
-	                Aspect ratio {activeAspectRatio} | margine {activePage.sheetSpec.marginCm.toFixed(1)} cm | gap{" "}
-                  {activePage.sheetSpec.gapCm.toFixed(1)} cm
-	              </div>
-
-              <div className="sheet-toolbar__presets inspector-sheet-settings__presets">
-                {(["13x18", "15x20", "20x15", "20x30", "30x20", "a4"] as const).map((presetId) => {
-                  const preset = SHEET_PRESETS.find((item) => item.id === presetId);
-                  if (!preset) {
-                    return null;
-                  }
-
-                  const isActive = activePage.sheetSpec.presetId === preset.id;
-
-                  return (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      className={isActive ? "sheet-toolbar__chip sheet-toolbar__chip--active" : "sheet-toolbar__chip"}
-                      onClick={() => onPageSheetPresetChange(activePage.id, preset.id)}
-                    >
-                      {preset.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="inspector-panel">
-            <span className="inspector-panel__eyebrow">Slot selezionato</span>
-            <AssignmentInspector
-              pageLabel={`Foglio ${activePage.pageNumber}`}
-              slot={selectedSlot}
-              assignment={selectedAssignment}
-              asset={selectedAsset}
-              onChange={(changes) => {
-                if (!selectedSlot) {
-                  return;
-                }
-
-                onUpdateSlotAssignment(activePage.id, selectedSlot.id, changes);
-              }}
-              onClear={() => {
-                if (!selectedSlot) {
-                  return;
-                }
-
-                onClearSlot(activePage.id, selectedSlot.id);
-              }}
-              onOpenCropEditor={() => {
-                if (!selectedSlot) {
-                  return;
-                }
-                handleCropTargetOpen(activePage.id, selectedSlot.id);
-              }}
-            />
-          </div>
-
-          <div className="inspector-panel">
-            <span className="inspector-panel__eyebrow">Azioni foglio</span>
-            <div className="inspector-actions">
-              <button type="button" className="ghost-button" onClick={() => onRemovePage(activePage.id)}>
-                Elimina foglio
-              </button>
-            </div>
-          </div>
-        </aside>
+        <InspectorPanel
+          activePage={activePage}
+          selectedSlot={selectedSlot}
+          selectedAssignment={selectedAssignment}
+          selectedAsset={selectedAsset}
+          isCollapsed={isInspectorCollapsed}
+          onCollapse={() => setIsInspectorCollapsed(true)}
+          onPageSheetPresetChange={onPageSheetPresetChange}
+          onPageSheetFieldChange={onPageSheetFieldChange}
+          onPageSheetStyleChange={onPageSheetStyleChange}
+          onUpdateSlotAssignment={onUpdateSlotAssignment}
+          onClearSlot={onClearSlot}
+          onRebalancePage={onRebalancePage}
+          onRemovePage={onRemovePage}
+          onOpenCropEditor={handleCropTargetOpen}
+        />
       </div>
 
       {replaceTarget ? (
@@ -2852,6 +1980,7 @@ export function LayoutPreviewBoard({
           asset={cropAsset}
           assignment={cropAssignment}
           slot={cropSlot}
+          availableTemplates={templatesByPageId.get(cropPage.id) ?? []}
           onClose={handleCropTargetClose}
           onApply={(changes) => {
             onUpdateSlotAssignment(cropPage.id, cropSlot.id, changes);

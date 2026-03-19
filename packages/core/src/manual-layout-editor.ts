@@ -1,11 +1,13 @@
-import { assignImagesToTemplate, selectBestTemplate } from "@photo-tools/layout-engine";
+import { assignImagesToTemplate, buildInitialCropForSlot, selectBestTemplate } from "@photo-tools/layout-engine";
 import type {
   AutoLayoutResult,
   ChangePageTemplateRequest,
   ClearSlotAssignmentRequest,
   CreatePageRequest,
   GeneratedPageLayout,
+  ImageAsset,
   LayoutAssignment,
+  LayoutSlot,
   LayoutMove,
   LayoutTemplate,
   PlaceImageInSlotRequest,
@@ -87,10 +89,87 @@ function withPreservedAssignmentState(
     offsetY: previous.offsetY,
     rotation: previous.rotation,
     locked: previous.locked,
-    cropLeft: previous.cropLeft ?? 0,
-    cropTop: previous.cropTop ?? 0,
-    cropWidth: previous.cropWidth ?? 1,
-    cropHeight: previous.cropHeight ?? 1
+    cropLeft: previous.fitMode === "fit" ? previous.cropLeft ?? 0 : assignment.cropLeft ?? 0,
+    cropTop: previous.fitMode === "fit" ? previous.cropTop ?? 0 : assignment.cropTop ?? 0,
+    cropWidth: previous.fitMode === "fit" ? previous.cropWidth ?? 1 : assignment.cropWidth ?? 1,
+    cropHeight: previous.fitMode === "fit" ? previous.cropHeight ?? 1 : assignment.cropHeight ?? 1
+  };
+}
+
+function normalizeRotation(value: number): number {
+  const rounded = Math.round(value);
+  const wrapped = ((rounded % 360) + 360) % 360;
+  return wrapped > 180 ? wrapped - 360 : wrapped;
+}
+
+function getEffectiveAssignmentAspect(asset: ImageAsset, assignment: LayoutAssignment): number {
+  const cropWidth = Math.min(1, Math.max(0.05, assignment.cropWidth ?? 1));
+  const cropHeight = Math.min(1, Math.max(0.05, assignment.cropHeight ?? 1));
+  let aspect = Math.max(0.01, asset.aspectRatio) * (cropWidth / cropHeight);
+  const normalizedRotation = Math.abs(normalizeRotation(assignment.rotation ?? 0));
+
+  if (normalizedRotation >= 45 && normalizedRotation <= 135) {
+    aspect = 1 / Math.max(aspect, 0.01);
+  }
+
+  return Math.max(aspect, 0.01);
+}
+
+function getOrientationFromAspect(aspect: number): ImageAsset["orientation"] {
+  if (aspect > 1.08) {
+    return "horizontal";
+  }
+
+  if (aspect < 0.92) {
+    return "vertical";
+  }
+
+  return "square";
+}
+
+function toLayoutAwareAsset(asset: ImageAsset, previous?: LayoutAssignment): ImageAsset {
+  if (!previous || previous.fitMode !== "fit") {
+    return asset;
+  }
+
+  const aspectRatio = getEffectiveAssignmentAspect(asset, previous);
+
+  return {
+    ...asset,
+    aspectRatio,
+    orientation: getOrientationFromAspect(aspectRatio)
+  };
+}
+
+function collectAssetsForLayout(
+  result: AutoLayoutResult,
+  imageIds: string[],
+  previousAssignments?: Map<string, LayoutAssignment>
+): ImageAsset[] {
+  return imageIds
+    .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
+    .filter((asset): asset is ImageAsset => Boolean(asset))
+    .map((asset) => toLayoutAwareAsset(asset, previousAssignments?.get(asset.id)));
+}
+
+function reflowAssignmentForSlot(
+  assignment: LayoutAssignment,
+  asset: ImageAsset | undefined,
+  slot: LayoutSlot | undefined,
+  cropStrategy: AutoLayoutResult["request"]["cropStrategy"]
+): LayoutAssignment {
+  if (!asset || !slot || assignment.fitMode === "fit") {
+    return assignment;
+  }
+
+  const initialCrop = buildInitialCropForSlot(asset, slot, cropStrategy, assignment.fitMode);
+
+  return {
+    ...assignment,
+    cropLeft: initialCrop.cropLeft,
+    cropTop: initialCrop.cropTop,
+    cropWidth: initialCrop.cropWidth,
+    cropHeight: initialCrop.cropHeight
   };
 }
 
@@ -118,30 +197,65 @@ export function moveImageBetweenSlots(
   }
 
   if (sourcePage.id === targetPage.id) {
+    const targetSlot = targetPage.slotDefinitions.find((slot) => slot.id === move.targetSlotId);
+    const sourceSlot = sourcePage.slotDefinitions.find((slot) => slot.id === move.sourceSlotId);
+    const sourceAsset = result.request.assets.find((asset) => asset.id === sourceAssignment.imageId);
     sourceAssignment.slotId = move.targetSlotId;
+    Object.assign(
+      sourceAssignment,
+      reflowAssignmentForSlot(sourceAssignment, sourceAsset, targetSlot, result.request.cropStrategy)
+    );
 
     if (targetAssignment) {
       targetAssignment.slotId = move.sourceSlotId;
+      const targetAsset = result.request.assets.find((asset) => asset.id === targetAssignment.imageId);
+      Object.assign(
+        targetAssignment,
+        reflowAssignmentForSlot(targetAssignment, targetAsset, sourceSlot, result.request.cropStrategy)
+      );
     }
   } else if (targetAssignment) {
+    const sourceSlot = sourcePage.slotDefinitions.find((slot) => slot.id === move.sourceSlotId);
+    const targetSlot = targetPage.slotDefinitions.find((slot) => slot.id === move.targetSlotId);
+    const sourceAsset = result.request.assets.find((asset) => asset.id === sourceAssignment.imageId);
+    const targetAsset = result.request.assets.find((asset) => asset.id === targetAssignment.imageId);
     sourcePage.assignments = sourcePage.assignments.map((assignment) =>
       assignment === sourceAssignment
-        ? { ...targetAssignment, slotId: move.sourceSlotId }
+        ? reflowAssignmentForSlot(
+            { ...targetAssignment, slotId: move.sourceSlotId },
+            targetAsset,
+            sourceSlot,
+            result.request.cropStrategy
+          )
         : assignment
     );
     targetPage.assignments = targetPage.assignments.map((assignment) =>
       assignment === targetAssignment
-        ? { ...sourceAssignment, slotId: move.targetSlotId }
+        ? reflowAssignmentForSlot(
+            { ...sourceAssignment, slotId: move.targetSlotId },
+            sourceAsset,
+            targetSlot,
+            result.request.cropStrategy
+          )
         : assignment
     );
   } else {
+    const targetSlot = targetPage.slotDefinitions.find((slot) => slot.id === move.targetSlotId);
+    const sourceAsset = result.request.assets.find((asset) => asset.id === sourceAssignment.imageId);
     sourcePage.assignments = sourcePage.assignments.filter(
       (assignment) => assignment !== sourceAssignment
     );
-    targetPage.assignments.push({
-      ...sourceAssignment,
-      slotId: move.targetSlotId
-    });
+    targetPage.assignments.push(
+      reflowAssignmentForSlot(
+        {
+          ...sourceAssignment,
+          slotId: move.targetSlotId
+        },
+        sourceAsset,
+        targetSlot,
+        result.request.cropStrategy
+      )
+    );
   }
 
   return finalize(result, pages);
@@ -172,16 +286,14 @@ export function rebalancePagesForAssignedImages(
       continue;
     }
 
-    const assets = imageIds
-      .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
-      .filter(Boolean) as typeof result.request.assets;
+    const previousAssignments = new Map(page.assignments.map((assignment) => [assignment.imageId, assignment]));
+    const assets = collectAssetsForLayout(result, imageIds, previousAssignments);
 
     if (assets.length === 0) {
       continue;
     }
 
     const nextTemplate = selectBestTemplate(assets, result.availableTemplates, page.sheetSpec);
-    const previousAssignments = new Map(page.assignments.map((assignment) => [assignment.imageId, assignment]));
     const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
       withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
     );
@@ -192,10 +304,15 @@ export function rebalancePagesForAssignedImages(
       templateLabel: nextTemplate.label,
       slotDefinitions: nextTemplate.slots,
       assignments,
-      warnings:
-        assignments.length < assets.length
-          ? ["Alcune immagini non possono essere inserite nel template selezionato."]
-          : []
+      warnings: (() => {
+        if (assignments.length >= assets.length) return [];
+        const unassignedCount = assets.length - assignments.length;
+        const slotCount = nextTemplate.slots.length;
+        return [
+          `${unassignedCount} ${unassignedCount === 1 ? "foto" : "foto"} non ${unassignedCount === 1 ? "è stata" : "sono state"} inserite. ` +
+          `Template ha ${assignments.length}/${slotCount} slot utilizzati. Considera un layout più grande.`
+        ];
+      })()
     });
 
     Object.assign(page, nextPage);
@@ -238,6 +355,15 @@ export function placeImageInSlot(
   );
 
   targetPage.assignments.push({
+    ...buildInitialCropForSlot(
+      result.request.assets.find((asset) => asset.id === request.imageId) ?? {
+        aspectRatio: 1,
+        orientation: "square"
+      } as ImageAsset,
+      slot,
+      result.request.cropStrategy,
+      result.request.fitMode
+    ),
     slotId: request.targetSlotId,
     imageId: request.imageId,
     fitMode: result.request.fitMode,
@@ -245,11 +371,7 @@ export function placeImageInSlot(
     offsetX: 0,
     offsetY: 0,
     rotation: 0,
-    locked: false,
-    cropLeft: 0,
-    cropTop: 0,
-    cropWidth: 1,
-    cropHeight: 1
+    locked: false
   });
 
   return finalize(result, pages);
@@ -285,9 +407,8 @@ export function addImageToPage(
   }
 
   const nextImageIds = [...collectAssignedImageIds(targetPage), request.imageId];
-  const assets = nextImageIds
-    .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
-    .filter(Boolean) as typeof result.request.assets;
+  const previousAssignments = new Map(targetPage.assignments.map((assignment) => [assignment.imageId, assignment]));
+  const assets = collectAssetsForLayout(result, nextImageIds, previousAssignments);
 
   if (assets.length === 0) {
     return result;
@@ -302,7 +423,6 @@ export function addImageToPage(
   }
 
   const nextTemplate = selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
-  const previousAssignments = new Map(targetPage.assignments.map((assignment) => [assignment.imageId, assignment]));
   const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
     withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
   );
@@ -313,10 +433,15 @@ export function addImageToPage(
     templateLabel: nextTemplate.label,
     slotDefinitions: nextTemplate.slots,
     assignments,
-    warnings:
-      assignments.length < assets.length
-        ? ["Il foglio non puo' contenere tutte le foto: scegli un altro layout o crea un nuovo foglio."]
-        : []
+    warnings: (() => {
+      if (assignments.length >= assets.length) return [];
+      const unassignedCount = assets.length - assignments.length;
+      const slotCount = nextTemplate.slots.length;
+      return [
+        `${unassignedCount} ${unassignedCount === 1 ? "foto" : "foto"} non ${unassignedCount === 1 ? "è stata" : "sono state"} inserite. ` +
+        `Template ha ${assignments.length}/${slotCount} slot utilizzati. Scegli un layout più grande o crea un nuovo foglio.`
+      ];
+    })()
   });
 
   Object.assign(targetPage, nextPage);
@@ -345,9 +470,8 @@ export function rearrangePageImages(
       ? [preferredImageId, ...imageIds.filter((imageId) => imageId !== preferredImageId)]
       : imageIds;
 
-  const assets = prioritizedImageIds
-    .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
-    .filter(Boolean) as typeof result.request.assets;
+  const previousAssignments = new Map(targetPage.assignments.map((assignment) => [assignment.imageId, assignment]));
+  const assets = collectAssetsForLayout(result, prioritizedImageIds, previousAssignments);
 
   if (assets.length === 0) {
     return result;
@@ -364,7 +488,6 @@ export function rearrangePageImages(
     alternativeTemplates.length > 0
       ? selectBestTemplate(assets, alternativeTemplates, targetPage.sheetSpec)
       : selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
-  const previousAssignments = new Map(targetPage.assignments.map((assignment) => [assignment.imageId, assignment]));
   const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
     withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
   );
@@ -375,10 +498,15 @@ export function rearrangePageImages(
     templateLabel: nextTemplate.label,
     slotDefinitions: nextTemplate.slots,
     assignments,
-    warnings:
-      assignments.length < assets.length
-        ? ["Alcune immagini non possono essere inserite nel template selezionato."]
-        : []
+    warnings: (() => {
+      if (assignments.length >= assets.length) return [];
+      const unassignedCount = assets.length - assignments.length;
+      const slotCount = nextTemplate.slots.length;
+      return [
+        `${unassignedCount} ${unassignedCount === 1 ? "foto" : "foto"} non ${unassignedCount === 1 ? "è stata" : "sono state"} inserite. ` +
+        `Template ha ${assignments.length}/${slotCount} slot utilizzati. Scegli un layout più grande o crea un nuovo foglio.`
+      ];
+    })()
   });
 
   Object.assign(targetPage, nextPage);
@@ -435,10 +563,8 @@ export function changePageTemplate(
 
   const template = findTemplate(result.availableTemplates, request.templateId);
   const currentImageIds = page.imageIds.length > 0 ? page.imageIds : collectAssignedImageIds(page);
-  const assets = currentImageIds
-    .map((imageId) => result.request.assets.find((asset) => asset.id === imageId))
-    .filter(Boolean) as typeof result.request.assets;
   const previousAssignments = new Map(page.assignments.map((assignment) => [assignment.imageId, assignment]));
+  const assets = collectAssetsForLayout(result, currentImageIds, previousAssignments);
   const assignments = assignImagesToTemplate(assets, template, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
     withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
   );
@@ -451,10 +577,15 @@ export function changePageTemplate(
           templateLabel: template.label,
           slotDefinitions: template.slots,
           assignments,
-          warnings:
-            assignments.length < assets.length
-              ? ["Alcune immagini non possono essere inserite nel template selezionato."]
-              : []
+          warnings: (() => {
+            if (assignments.length >= assets.length) return [];
+            const unassignedCount = assets.length - assignments.length;
+            const slotCount = template.slots.length;
+            return [
+              `${unassignedCount} ${unassignedCount === 1 ? "foto" : "foto"} non ${unassignedCount === 1 ? "è stata" : "sono state"} inserite. ` +
+              `Template ha ${assignments.length}/${slotCount} slot utilizzati. Prova un layout più grande.`
+            ];
+          })()
         })
       : item
   );
@@ -498,10 +629,15 @@ export function createPage(
       slotDefinitions: template.slots,
       assignments,
       imageIds: assignments.map((assignment) => assignment.imageId),
-      warnings:
-        assignments.length < assets.length
-          ? ["Alcune immagini non possono essere inserite nel template selezionato."]
-          : []
+      warnings: (() => {
+        if (assignments.length >= assets.length) return [];
+        const unassignedCount = assets.length - assignments.length;
+        const slotCount = template.slots.length;
+        return [
+          `${unassignedCount} ${unassignedCount === 1 ? "foto" : "foto"} non ${unassignedCount === 1 ? "è stata" : "sono state"} inserite. ` +
+          `Template ha ${assignments.length}/${slotCount} slot utilizzati. Prova un layout più grande o aggiungine un altro.`
+        ];
+      })()
     }
   ];
 

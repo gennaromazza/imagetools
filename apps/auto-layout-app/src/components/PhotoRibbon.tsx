@@ -60,6 +60,7 @@ function PhotoRibbonContent({
   const [pickFilter, setPickFilter] = useState<"all" | PickStatus>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<"all" | ColorLabel>(DEFAULT_PHOTO_FILTERS.colorLabel);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const hasActiveFilters =
     pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all";
@@ -185,8 +186,19 @@ function PhotoRibbonContent({
           : "layout-photo-ribbon"
       }
     >
-      <div className="layout-photo-ribbon__header">
-        <div className="segmented-control">
+      {/* ── COMPACT HEADER ── */}
+      <div className="ribbon-header-compact">
+        <div className="ribbon-header-compact__top">
+          <span className="ribbon-header-compact__title">Libreria foto</span>
+          <span className="ribbon-header-compact__count">
+            {usageByAssetId.size} usate · {assets.length - usageByAssetId.size} libere
+          </span>
+          <PhotoClassificationHelpButton
+            className="ribbon-header-compact__help"
+            title="Scorciatoie libreria foto"
+          />
+        </div>
+        <div className="ribbon-header-compact__segments">
           {([
             ["all", "Tutte"],
             ["unused", "Non usate"],
@@ -202,98 +214,105 @@ function PhotoRibbonContent({
             </button>
           ))}
         </div>
-        <span className="helper-inline">
-          {usageByAssetId.size} usate | {assets.length - usageByAssetId.size} libere
-        </span>
-        <PhotoClassificationHelpButton
-          className="layout-photo-ribbon__help"
-          title="Scorciatoie libreria foto"
-        />
       </div>
 
-      <div className="layout-photo-ribbon__filters">
-        {hasActiveFilters ? (
-          <button
-            type="button"
-            className="layout-photo-ribbon__reset"
-            onClick={resetFilters}
-            title="Azzera tutti i filtri"
-          >
-            ✕ Azzera
-          </button>
-        ) : null}
-
-        <select
-          className={
-            pickFilter !== "all"
-              ? "layout-photo-ribbon__select layout-photo-ribbon__select--active"
-              : "layout-photo-ribbon__select"
-          }
-          value={pickFilter}
-          onChange={(event) => setPickFilter(event.target.value as "all" | PickStatus)}
-          aria-label="Filtra per stato"
+      {/* ── COLLAPSIBLE ADVANCED FILTERS ── */}
+      <div className="ribbon-filters-collapsible">
+        <button
+          type="button"
+          className={`ribbon-filters-collapsible__toggle ${hasActiveFilters ? "ribbon-filters-collapsible__toggle--active" : ""}`}
+          onClick={() => setFiltersOpen((prev) => !prev)}
         >
-          <option value="all">Tutti gli stati</option>
-          <option value="picked">Solo pick</option>
-          <option value="rejected">Solo scartate</option>
-          <option value="unmarked">Solo neutre</option>
-        </select>
+          <span>Filtri avanzati {hasActiveFilters ? `(${[pickFilter !== "all" ? 1 : 0, ratingFilter !== "any" ? 1 : 0, colorFilter !== "all" ? 1 : 0].reduce((a, b) => a + b, 0)})` : ""}</span>
+          <span className="ribbon-filters-collapsible__arrow">{filtersOpen ? "▴" : "▾"}</span>
+        </button>
+        {filtersOpen && (
+          <div className="ribbon-filters-collapsible__body">
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                className="layout-photo-ribbon__reset"
+                onClick={resetFilters}
+                title="Azzera tutti i filtri"
+              >
+                ✕ Azzera
+              </button>
+            ) : null}
 
-        <select
-          className={
-            ratingFilter !== "any"
-              ? "layout-photo-ribbon__select layout-photo-ribbon__select--active"
-              : "layout-photo-ribbon__select"
-          }
-          value={ratingFilter}
-          onChange={(event) => setRatingFilter(event.target.value)}
-          aria-label="Filtra per stelle"
-        >
-          <option value="any">Tutte le stelle</option>
-          <optgroup label="Minimo">
-            <option value="1+">★ 1+ stelle</option>
-            <option value="2+">★★ 2+ stelle</option>
-            <option value="3+">★★★ 3+ stelle</option>
-            <option value="4+">★★★★ 4+ stelle</option>
-          </optgroup>
-          <optgroup label="Esattamente">
-            <option value="0">Senza stelle</option>
-            <option value="1">★ Solo 1</option>
-            <option value="2">★★ Solo 2</option>
-            <option value="3">★★★ Solo 3</option>
-            <option value="4">★★★★ Solo 4</option>
-            <option value="5">★★★★★ Solo 5</option>
-          </optgroup>
-        </select>
-
-        <div className="layout-photo-ribbon__color-filter" aria-label="Filtra per colore">
-          <button
-            type="button"
-            className={
-              colorFilter === "all"
-                ? "layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--all layout-photo-ribbon__color-chip--active"
-                : "layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--all"
-            }
-            onClick={() => setColorFilter("all")}
-          >
-            Tutti
-          </button>
-          {COLOR_LABELS.map((value) => (
-            <button
-              key={value}
-              type="button"
+            <select
               className={
-                colorFilter === value
-                  ? `layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--${value} layout-photo-ribbon__color-chip--active`
-                  : `layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--${value}`
+                pickFilter !== "all"
+                  ? "layout-photo-ribbon__select layout-photo-ribbon__select--active"
+                  : "layout-photo-ribbon__select"
               }
-              onClick={() => setColorFilter(value)}
-              title={COLOR_LABEL_NAMES[value]}
-            />
-          ))}
-        </div>
+              value={pickFilter}
+              onChange={(event) => setPickFilter(event.target.value as "all" | PickStatus)}
+              aria-label="Filtra per stato"
+            >
+              <option value="all">Tutti gli stati</option>
+              <option value="picked">Solo pick</option>
+              <option value="rejected">Solo scartate</option>
+              <option value="unmarked">Solo neutre</option>
+            </select>
+
+            <select
+              className={
+                ratingFilter !== "any"
+                  ? "layout-photo-ribbon__select layout-photo-ribbon__select--active"
+                  : "layout-photo-ribbon__select"
+              }
+              value={ratingFilter}
+              onChange={(event) => setRatingFilter(event.target.value)}
+              aria-label="Filtra per stelle"
+            >
+              <option value="any">Tutte le stelle</option>
+              <optgroup label="Minimo">
+                <option value="1+">★ 1+ stelle</option>
+                <option value="2+">★★ 2+ stelle</option>
+                <option value="3+">★★★ 3+ stelle</option>
+                <option value="4+">★★★★ 4+ stelle</option>
+              </optgroup>
+              <optgroup label="Esattamente">
+                <option value="0">Senza stelle</option>
+                <option value="1">★ Solo 1</option>
+                <option value="2">★★ Solo 2</option>
+                <option value="3">★★★ Solo 3</option>
+                <option value="4">★★★★ Solo 4</option>
+                <option value="5">★★★★★ Solo 5</option>
+              </optgroup>
+            </select>
+
+            <div className="layout-photo-ribbon__color-filter" aria-label="Filtra per colore">
+              <button
+                type="button"
+                className={
+                  colorFilter === "all"
+                    ? "layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--all layout-photo-ribbon__color-chip--active"
+                    : "layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--all"
+                }
+                onClick={() => setColorFilter("all")}
+              >
+                Tutti
+              </button>
+              {COLOR_LABELS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={
+                    colorFilter === value
+                      ? `layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--${value} layout-photo-ribbon__color-chip--active`
+                      : `layout-photo-ribbon__color-chip layout-photo-ribbon__color-chip--${value}`
+                  }
+                  onClick={() => setColorFilter(value)}
+                  title={COLOR_LABEL_NAMES[value]}
+                />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
+      {/* ── PHOTO LIST ── */}
       <div className="layout-photo-ribbon__track-wrapper">
         <div
           ref={scrollContainerRef}
@@ -339,7 +358,7 @@ function PhotoRibbonContent({
                   .join(" ")}
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", asset.id);
-                  onDragAssetStart(asset.id);
+                  setTimeout(() => onDragAssetStart(asset.id), 0);
                 }}
                 onDragEnd={onDragEnd}
                 onContextMenu={(event) => {
@@ -391,13 +410,19 @@ function PhotoRibbonContent({
                     <span className={`asset-color-dot asset-color-dot--${asset.colorLabel}`} />
                   ) : null}
                   {usage ? (
-                    <span className="ribbon-photo__usage-chip">{`Foglio ${usage.pageNumber}`}</span>
+                    <span className="ribbon-photo__usage-chip">{`F.${usage.pageNumber}`}</span>
                   ) : null}
                 </div>
                 <div className="ribbon-photo__meta">
-                  <strong>{asset.fileName?.substring(0, 12)}</strong>
-                  <span>{usage ? `Foglio ${usage.pageNumber}` : "Disponibile"}</span>
-                  {rating > 0 ? <small>{formatAssetStars(asset)}</small> : null}
+                  <strong>{asset.fileName?.substring(0, 14)}</strong>
+                  {variant === "vertical" ? (
+                    <span>{usage ? `Foglio ${usage.pageNumber}` : "Disponibile"}{rating > 0 ? ` · ${formatAssetStars(asset)}` : ""}</span>
+                  ) : (
+                    <>
+                      <span>{usage ? `Foglio ${usage.pageNumber}` : "Disponibile"}</span>
+                      {rating > 0 ? <small>{formatAssetStars(asset)}</small> : null}
+                    </>
+                  )}
                 </div>
               </button>
             );
@@ -412,11 +437,7 @@ function PhotoRibbonContent({
       </div>
 
       <div className="layout-photo-ribbon__hint">
-        <small>
-          {variant === "vertical"
-            ? `${filteredAssets.length} foto visibili | Doppio click assegna allo slot | Ctrl/Cmd + 6/7/8/9/V imposta il colore`
-            : `${filteredAssets.length} foto visibili | Usa frecce sx/dx per scorrere | Ctrl/Cmd + 6/7/8/9/V imposta il colore`}
-        </small>
+        <small>{filteredAssets.length} foto visibili</small>
       </div>
 
       {contextMenuState ? (

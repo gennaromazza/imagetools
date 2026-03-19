@@ -843,7 +843,7 @@ function AppContent() {
     (
       pageId: string,
       slotId: string,
-      changes: Partial<Pick<LayoutAssignment, "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked">>
+      changes: Partial<Pick<LayoutAssignment, "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked" | "cropLeft" | "cropTop" | "cropWidth" | "cropHeight">>
     ) => {
       const nextResult = updateSlotAssignment(result, {
         pageId,
@@ -1155,9 +1155,11 @@ function AppContent() {
         })
       : moveImageBetweenSlots(result, move);
 
-    if (move.sourcePageId !== move.targetPageId) {
-      nextResult = rebalancePagesForAssignedImages(nextResult, [move.sourcePageId, move.targetPageId]);
-    }
+    // FIX: Do not rigorously rebalance pages after manual slot-to-slot move,
+    // as it destroys the explicit slot assignment choice.
+    // if (move.sourcePageId !== move.targetPageId) {
+    //   nextResult = rebalancePagesForAssignedImages(nextResult, [move.sourcePageId, move.targetPageId]);
+    // }
 
     if (move.sourcePageId === move.targetPageId && isSamePageOccupiedDrop) {
       markPageRebalanced(move.targetPageId);
@@ -1190,7 +1192,9 @@ function AppContent() {
       : buildRequestWithSelection(request, allAssets, nextActiveIds);
     const baseResult = imageAlreadyActive ? result : syncResultWithSelection(result, nextRequest);
     let nextResult = placeImageInSlot(baseResult, { imageId, targetPageId: pageId, targetSlotId: slotId });
-    nextResult = rebalancePagesForAssignedImages(nextResult, [pageId, previousUsage?.pageId ?? ""]);
+    if (previousUsage?.pageId && previousUsage.pageId !== pageId) {
+      nextResult = rebalancePagesForAssignedImages(nextResult, [previousUsage.pageId]);
+    }
     const nextPlacement = findImagePlacement(nextResult, imageId);
 
     const changed = commitStudioChange({
@@ -1977,91 +1981,72 @@ function AppContent() {
   function renderStudioScreen() {
     return (
       <>
-        <header className="studio-shell__header studio-shell__header--compact">
-          <div className="studio-shell__summary">
-            <p>
-              {result.pages.length} fogli | {usedImagesCount} foto usate | {result.unassignedAssets.length} libere
-            </p>
+        <header className="global-topbar">
+          <div className="global-topbar__stats">
+            {result.pages.length} fogli · {usedImagesCount} usate · {result.unassignedAssets.length} libere
           </div>
 
-          <div className="studio-shell__actions">
-            <div className="studio-shell__toolbar">
-              <button
-                type="button"
-                className="toolbar-button"
-                disabled={!canUndo}
-                onClick={undo}
-                title="Annulla (Ctrl+Z)"
-                aria-label="Annulla ultima modifica"
-              >
-                <UndoIcon />
-              </button>
-              <button
-                type="button"
-                className="toolbar-button"
-                disabled={!canRedo}
-                onClick={redo}
-                title="Ripristina (Ctrl+Y)"
-                aria-label="Ripristina modifica annullata"
-              >
-                <RedoIcon />
-              </button>
-              <div className="toolbar-separator" />
-              <ZoomControls
-                zoom={zoom}
-                onZoomChange={handleZoomChange}
-              />
-              <div className="toolbar-separator" />
-              <button
-                type="button"
-                className="toolbar-button"
-                onClick={handleToggleFullscreen}
-                title={isFullscreen ? "Esci da schermo intero" : "Schermo intero (F11)"}
-                aria-label={isFullscreen ? "Esci da schermo intero" : "Attiva schermo intero"}
-              >
-                <FullscreenIcon active={isFullscreen} />
-              </button>
-            </div>
+          <div className="global-topbar__center">
+            <button
+              type="button"
+              className="toolbar-button"
+              disabled={!canUndo}
+              onClick={undo}
+              title="Annulla (Ctrl+Z)"
+            >
+              <UndoIcon />
+            </button>
+            <button
+              type="button"
+              className="toolbar-button"
+              disabled={!canRedo}
+              onClick={redo}
+              title="Ripristina (Ctrl+Y)"
+            >
+              <RedoIcon />
+            </button>
+            <div className="toolbar-separator" />
+            <ZoomControls
+              zoom={zoom}
+              onZoomChange={handleZoomChange}
+            />
+            <div className="toolbar-separator" />
+            <button
+              type="button"
+              className="toolbar-button"
+              onClick={handleToggleFullscreen}
+              title={isFullscreen ? "Esci da schermo intero" : "Schermo intero (F11)"}
+            >
+              <FullscreenIcon active={isFullscreen} />
+            </button>
+          </div>
 
-            <div className="studio-shell__main-actions">
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => {
-                  persistCurrentProject();
-                  setCurrentScreen("setup");
-                }}
-                aria-label="Torna al setup progetto"
-              >
-                Indietro a impostazioni
-              </button>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setCurrentScreen("dashboard")}
-                aria-label="Torna alla lista dei progetti"
-              >
-                Torna ai progetti
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={result.unassignedAssets.length === 0}
-                onClick={handleCreatePageFromUnused}
-                aria-label="Crea un nuovo foglio dalle foto non ancora usate"
-              >
-                Nuovo foglio dalle non usate
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={handleGenerate}
-                disabled={isExporting || result.pages.length === 0}
-                aria-label="Esporta i fogli di stampa generati"
-              >
-                {isExporting ? "Esportazione in corso..." : "Esporta"}
-              </button>
-            </div>
+          <div className="global-topbar__actions">
+            <button
+              type="button"
+              className="tertiary-action"
+              onClick={() => {
+                persistCurrentProject();
+                setCurrentScreen("setup");
+              }}
+            >
+              Impostazioni
+            </button>
+            <button
+              type="button"
+              className="tertiary-action"
+              onClick={() => setCurrentScreen("dashboard")}
+            >
+              Progetti
+            </button>
+            <button
+              type="button"
+              className="primary-button primary-button--compact"
+              onClick={handleGenerate}
+              disabled={isExporting || result.pages.length === 0}
+            >
+              {isExporting ? "Esportazione..." : "Esporta"}
+            </button>
           </div>
         </header>
 

@@ -13,16 +13,30 @@ function normalizedAspectDistance(left: number, right: number): number {
   return Math.abs(Math.log(safeLeft / safeRight));
 }
 
-function buildInitialCropForSlot(
+export function buildInitialCropForSlot(
   asset: ImageAsset,
   slot: LayoutSlot,
-  cropStrategy: CropStrategy = "balanced"
+  cropStrategy: CropStrategy = "balanced",
+  fitMode: FitMode = "fill"
 ): {
   cropLeft: number;
   cropTop: number;
   cropWidth: number;
   cropHeight: number;
 } {
+  // When using "fit" mode, preserve the original image's aspect ratio
+  // by showing the full image (no cropping). The rendering layer will
+  // handle letterboxing to fit the image within the slot.
+  if (fitMode === "fit") {
+    return {
+      cropLeft: 0,
+      cropTop: 0,
+      cropWidth: 1,
+      cropHeight: 1
+    };
+  }
+
+  // For "fill" and "crop" modes, crop to match the slot's aspect ratio
   const imageAspect = Math.max(asset.aspectRatio, 0.01);
   const slotAspect = Math.max(slot.width / Math.max(slot.height, 0.001), 0.01);
 
@@ -73,7 +87,15 @@ function scoreAssetForSlot(asset: ImageAsset, slot: LayoutSlot): number {
   const aspectDistance = normalizedAspectDistance(slotAspectRatio, asset.aspectRatio);
   const aspectScore = Math.max(0, 42 - aspectDistance * 30);
 
-  return orientationMatch + aspectScore + slot.priority * 0.08;
+  // Rating bonus: prioritize higher-rated photos
+  // Rating ranges from 0-5, converting to 0-30 points (6 points per star)
+  const ratingBonus = (asset.rating ?? 0) * 6;
+
+  // Slot priority: increased from 0.08 to 0.3 to make premium slots genuinely premium
+  // Priority typically ranges 1-120, so this contributes 0.3-36 points
+  const priorityBonus = slot.priority * 0.3;
+
+  return orientationMatch + aspectScore + ratingBonus + priorityBonus;
 }
 
 function pickBestAsset(slot: LayoutSlot, remainingAssets: ImageAsset[]): ImageAsset | undefined {
@@ -152,7 +174,7 @@ export function assignImagesToTemplate(
       continue;
     }
 
-    const initialCrop = buildInitialCropForSlot(asset, slot, cropStrategy);
+    const initialCrop = buildInitialCropForSlot(asset, slot, cropStrategy, fitMode);
 
     assignments.push({
       slotId: slot.id,
