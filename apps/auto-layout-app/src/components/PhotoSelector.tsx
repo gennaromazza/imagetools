@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
+import { preloadImageUrls } from "../image-cache";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import { PhotoColorContextMenu } from "./PhotoColorContextMenu";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
@@ -36,7 +37,7 @@ export function PhotoSelector({
 }: PhotoSelectorProps) {
   const [sortBy, setSortBy] = useState<SortMode>("name");
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
-  const [minimumRating, setMinimumRating] = useState(DEFAULT_PHOTO_FILTERS.minimumRating);
+  const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [contextMenuState, setContextMenuState] = useState<{
@@ -44,14 +45,25 @@ export function PhotoSelector({
     x: number;
     y: number;
   } | null>(null);
+  const [focusedPhotoId, setFocusedPhotoId] = useState<string | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const hasActiveFilters =
+    pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all";
+
+  function resetFilters() {
+    setPickFilter("all");
+    setRatingFilter("any");
+    setColorFilter("all");
+  }
 
   const visiblePhotos = useMemo(() => {
     const filtered = photos.filter((photo) =>
       matchesPhotoFilters(photo, {
         pickStatus: pickFilter,
-        minimumRating,
+        ratingFilter,
         colorLabel: colorFilter
       })
     );
@@ -75,10 +87,11 @@ export function PhotoSelector({
     });
 
     return filtered;
-  }, [colorFilter, minimumRating, photos, pickFilter, sortBy]);
+  }, [colorFilter, ratingFilter, photos, pickFilter, sortBy]);
 
+  // Search in all photos so preview doesn't close when filters change
   const previewAsset = previewAssetId
-    ? visiblePhotos.find((photo) => photo.id === previewAssetId) ?? null
+    ? (photos.find((p) => p.id === previewAssetId) ?? null)
     : null;
 
   useEffect(() => {
@@ -87,22 +100,81 @@ export function PhotoSelector({
     }
 
     const closeMenu = () => setContextMenuState(null);
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeMenu();
-      }
-    };
-
     window.addEventListener("mousedown", closeMenu);
     window.addEventListener("scroll", closeMenu, true);
-    window.addEventListener("keydown", handleEscape);
-
     return () => {
       window.removeEventListener("mousedown", closeMenu);
       window.removeEventListener("scroll", closeMenu, true);
-      window.removeEventListener("keydown", handleEscape);
     };
   }, [contextMenuState]);
+
+  // Consolidated keyboard handler: Escape chain + arrow navigation
+  const handleWindowKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      // Context menu open: only handle Escape
+      if (contextMenuState) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setContextMenuState(null);
+        }
+        return;
+      }
+      // Quick preview open: let it handle keys
+      if (previewAssetId) return;
+
+      // Arrow navigation within grid
+      const arrowKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+      if (!arrowKeys.includes(event.key)) return;
+
+      const target = event.target as HTMLElement;
+      if (target.closest("select, input, textarea")) return;
+
+      event.preventDefault();
+      if (visiblePhotos.length === 0) return;
+
+      const currentIndex = focusedPhotoId
+        ? visiblePhotos.findIndex((p) => p.id === focusedPhotoId)
+        : -1;
+
+      const grid = gridRef.current;
+      let cols = 4;
+      if (grid) {
+        const firstCard = grid.querySelector<HTMLElement>(".photo-card");
+        if (firstCard && firstCard.offsetWidth > 0) {
+          cols = Math.max(1, Math.floor(grid.clientWidth / firstCard.offsetWidth));
+        }
+      }
+
+      let nextIndex: number;
+      if (currentIndex < 0) {
+        nextIndex = 0;
+      } else if (event.key === "ArrowRight") {
+        nextIndex = Math.min(visiblePhotos.length - 1, currentIndex + 1);
+      } else if (event.key === "ArrowLeft") {
+        nextIndex = Math.max(0, currentIndex - 1);
+      } else if (event.key === "ArrowDown") {
+        nextIndex = Math.min(visiblePhotos.length - 1, currentIndex + cols);
+      } else {
+        nextIndex = Math.max(0, currentIndex - cols);
+      }
+
+      if (nextIndex !== currentIndex || currentIndex < 0) {
+        const next = visiblePhotos[nextIndex];
+        setFocusedPhotoId(next.id);
+        const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${next.id}"]`);
+        if (el) {
+          el.focus();
+          el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+      }
+    },
+    [contextMenuState, focusedPhotoId, previewAssetId, visiblePhotos]
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => window.removeEventListener("keydown", handleWindowKeyDown);
+  }, [handleWindowKeyDown]);
 
   function togglePhoto(id: string) {
     const nextSelection = new Set(selectedSet);
@@ -117,7 +189,15 @@ export function PhotoSelector({
   }
 
   function toggleAll(selectAll: boolean) {
-    onSelectionChange(selectAll ? photos.map((photo) => photo.id) : []);
+    if (selectAll) {
+      // When filters are active, select only visible photos
+      const idsToSelect = hasActiveFilters
+        ? visiblePhotos.map((p) => p.id)
+        : photos.map((p) => p.id);
+      onSelectionChange(idsToSelect);
+    } else {
+      onSelectionChange([]);
+    }
   }
 
   function updatePhoto(
@@ -159,9 +239,7 @@ export function PhotoSelector({
           <div className="photo-selector__stats">
             <span className="photo-selector__count">
               {selectedIds.length} di {photos.length} foto selezionate
-            </span>
-            <span className="photo-selector__count">
-              {visiblePhotos.length} visibili con i filtri
+              {hasActiveFilters ? ` — ${visiblePhotos.length} visibili con i filtri` : ""}
             </span>
           </div>
 
@@ -178,6 +256,7 @@ export function PhotoSelector({
               }`}
               onClick={() => toggleAll(!allSelected)}
               aria-label={allSelected ? "Deseleziona tutte" : "Seleziona tutte"}
+              title={hasActiveFilters ? "Seleziona solo le foto visibili con i filtri attivi" : "Seleziona tutte"}
             >
               {allSelected ? "Tutte" : someSelected ? "Alcune" : "Nessuna"}
             </button>
@@ -196,8 +275,19 @@ export function PhotoSelector({
         </div>
 
         <div className="photo-selector__filters">
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              className="photo-selector__reset-filters"
+              onClick={resetFilters}
+              title="Azzera tutti i filtri"
+            >
+              ✕ Azzera filtri
+            </button>
+          ) : null}
+
           <select
-            className="photo-selector__sort"
+            className={pickFilter !== "all" ? "photo-selector__sort photo-selector__sort--active" : "photo-selector__sort"}
             value={pickFilter}
             onChange={(event) => setPickFilter(event.target.value as PickFilter)}
           >
@@ -208,20 +298,29 @@ export function PhotoSelector({
           </select>
 
           <select
-            className="photo-selector__sort"
-            value={minimumRating}
-            onChange={(event) => setMinimumRating(Number(event.target.value))}
+            className={ratingFilter !== "any" ? "photo-selector__sort photo-selector__sort--active" : "photo-selector__sort"}
+            value={ratingFilter}
+            onChange={(event) => setRatingFilter(event.target.value)}
           >
-            <option value={0}>Tutte le stelle</option>
-            <option value={1}>1+ stelle</option>
-            <option value={2}>2+ stelle</option>
-            <option value={3}>3+ stelle</option>
-            <option value={4}>4+ stelle</option>
-            <option value={5}>5 stelle</option>
+            <option value="any">Tutte le stelle</option>
+            <optgroup label="Minimo">
+              <option value="1+">★ 1 o più</option>
+              <option value="2+">★★ 2 o più</option>
+              <option value="3+">★★★ 3 o più</option>
+              <option value="4+">★★★★ 4 o più</option>
+            </optgroup>
+            <optgroup label="Esattamente">
+              <option value="0">Senza stelle</option>
+              <option value="1">★ Solo 1</option>
+              <option value="2">★★ Solo 2</option>
+              <option value="3">★★★ Solo 3</option>
+              <option value="4">★★★★ Solo 4</option>
+              <option value="5">★★★★★ Solo 5</option>
+            </optgroup>
           </select>
 
           <select
-            className="photo-selector__sort"
+            className={colorFilter !== "all" ? "photo-selector__sort photo-selector__sort--active" : "photo-selector__sort"}
             value={colorFilter}
             onChange={(event) => setColorFilter(event.target.value as ColorFilter)}
           >
@@ -234,7 +333,7 @@ export function PhotoSelector({
           </select>
         </div>
 
-        <div className="photo-selector__grid">
+        <div ref={gridRef} className="photo-selector__grid">
           {visiblePhotos.length === 0 ? (
             <div className="photo-selector__empty">
               <p>Nessuna foto disponibile con i filtri attuali.</p>
@@ -261,6 +360,10 @@ export function PhotoSelector({
                   aria-label={`${photo.fileName}${isSelected ? ", selezionata" : ""}`}
                   data-preview-asset-id={photo.id}
                   onClick={() => togglePhoto(photo.id)}
+                  onFocus={() => setFocusedPhotoId(photo.id)}
+                  onMouseEnter={() => {
+                    if (photo.previewUrl) preloadImageUrls([photo.previewUrl]);
+                  }}
                   onDoubleClick={() => setPreviewAssetId(photo.id)}
                   onContextMenu={(event) => {
                     if (!onPhotosChange) {

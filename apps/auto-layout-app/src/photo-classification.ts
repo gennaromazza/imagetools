@@ -18,7 +18,8 @@ export const PICK_STATUS_LABELS: Record<PickStatus, string> = {
 
 export interface PhotoFilterState {
   pickStatus: "all" | PickStatus;
-  minimumRating: number;
+  /** "any" | "0".."5" (esatto) | "1+".."4+" (minimo) */
+  ratingFilter: string;
   colorLabel: "all" | ColorLabel;
 }
 
@@ -49,7 +50,7 @@ export const PHOTO_CLASSIFICATION_SHORTCUTS: PhotoShortcutItem[] = [
 
 export const DEFAULT_PHOTO_FILTERS: PhotoFilterState = {
   pickStatus: "all",
-  minimumRating: 0,
+  ratingFilter: "any",
   colorLabel: "all"
 };
 
@@ -79,7 +80,17 @@ export function matchesPhotoFilters(asset: ImageAsset, filters: PhotoFilterState
     return false;
   }
 
-  return getAssetRating(asset) >= filters.minimumRating;
+  const rf = filters.ratingFilter ?? "any";
+  if (rf !== "any") {
+    const rating = getAssetRating(asset);
+    if (rf.endsWith("+")) {
+      if (rating < Number(rf.slice(0, -1))) return false;
+    } else {
+      if (rating !== Number(rf)) return false;
+    }
+  }
+
+  return true;
 }
 
 export function getColorShortcutHint(colorLabel: ColorLabel): string {

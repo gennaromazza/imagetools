@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
+import { preloadImageUrls } from "../image-cache";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import { PhotoColorContextMenu } from "./PhotoColorContextMenu";
 import {
@@ -57,8 +58,17 @@ function PhotoRibbonContent({
   const [scrollLeft, setScrollLeft] = useState(0);
   const [visibleItems, setVisibleItems] = useState(8);
   const [pickFilter, setPickFilter] = useState<"all" | PickStatus>(DEFAULT_PHOTO_FILTERS.pickStatus);
-  const [minimumRating, setMinimumRating] = useState(DEFAULT_PHOTO_FILTERS.minimumRating);
+  const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<"all" | ColorLabel>(DEFAULT_PHOTO_FILTERS.colorLabel);
+
+  const hasActiveFilters =
+    pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all";
+
+  function resetFilters() {
+    setPickFilter("all");
+    setRatingFilter("any");
+    setColorFilter("all");
+  }
   const [contextMenuState, setContextMenuState] = useState<{
     assetId: string;
     x: number;
@@ -70,11 +80,11 @@ function PhotoRibbonContent({
       assets.filter((asset) =>
         matchesPhotoFilters(asset, {
           pickStatus: pickFilter,
-          minimumRating,
+          ratingFilter,
           colorLabel: colorFilter
         })
       ),
-    [assets, colorFilter, minimumRating, pickFilter]
+    [assets, colorFilter, ratingFilter, pickFilter]
   );
 
   const startIndex = Math.max(0, Math.floor(scrollLeft / ITEM_WIDTH) - 1);
@@ -202,8 +212,23 @@ function PhotoRibbonContent({
       </div>
 
       <div className="layout-photo-ribbon__filters">
+        {hasActiveFilters ? (
+          <button
+            type="button"
+            className="layout-photo-ribbon__reset"
+            onClick={resetFilters}
+            title="Azzera tutti i filtri"
+          >
+            ✕ Azzera
+          </button>
+        ) : null}
+
         <select
-          className="layout-photo-ribbon__select"
+          className={
+            pickFilter !== "all"
+              ? "layout-photo-ribbon__select layout-photo-ribbon__select--active"
+              : "layout-photo-ribbon__select"
+          }
           value={pickFilter}
           onChange={(event) => setPickFilter(event.target.value as "all" | PickStatus)}
           aria-label="Filtra per stato"
@@ -215,17 +240,30 @@ function PhotoRibbonContent({
         </select>
 
         <select
-          className="layout-photo-ribbon__select"
-          value={minimumRating}
-          onChange={(event) => setMinimumRating(Number(event.target.value))}
-          aria-label="Filtra per stelle minime"
+          className={
+            ratingFilter !== "any"
+              ? "layout-photo-ribbon__select layout-photo-ribbon__select--active"
+              : "layout-photo-ribbon__select"
+          }
+          value={ratingFilter}
+          onChange={(event) => setRatingFilter(event.target.value)}
+          aria-label="Filtra per stelle"
         >
-          <option value={0}>Tutte le stelle</option>
-          <option value={1}>1+ stelle</option>
-          <option value={2}>2+ stelle</option>
-          <option value={3}>3+ stelle</option>
-          <option value={4}>4+ stelle</option>
-          <option value={5}>5 stelle</option>
+          <option value="any">Tutte le stelle</option>
+          <optgroup label="Minimo">
+            <option value="1+">★ 1+ stelle</option>
+            <option value="2+">★★ 2+ stelle</option>
+            <option value="3+">★★★ 3+ stelle</option>
+            <option value="4+">★★★★ 4+ stelle</option>
+          </optgroup>
+          <optgroup label="Esattamente">
+            <option value="0">Senza stelle</option>
+            <option value="1">★ Solo 1</option>
+            <option value="2">★★ Solo 2</option>
+            <option value="3">★★★ Solo 3</option>
+            <option value="4">★★★★ Solo 4</option>
+            <option value="5">★★★★★ Solo 5</option>
+          </optgroup>
         </select>
 
         <div className="layout-photo-ribbon__color-filter" aria-label="Filtra per colore">
@@ -327,6 +365,10 @@ function PhotoRibbonContent({
                     event.preventDefault();
                     updateAssetMetadata(asset.id, shortcutChanges);
                   }
+                }}
+                onMouseEnter={() => {
+                  const url = asset.previewUrl ?? asset.thumbnailUrl;
+                  if (url) preloadImageUrls([url]);
                 }}
                 onDoubleClick={() => onAssetDoubleClick?.(asset.id)}
               >

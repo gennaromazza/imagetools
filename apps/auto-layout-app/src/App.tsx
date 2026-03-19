@@ -2285,8 +2285,8 @@ function AppContent() {
             pageNumber: page.pageNumber,
             templateLabel: page.templateLabel,
             photoCount: page.assignments.length,
-            capacity: maxTemplateCapacity,
-            isAtCapacity: page.assignments.length >= maxTemplateCapacity,
+            capacity: page.slotDefinitions.length,
+            isAtCapacity: page.assignments.length >= page.slotDefinitions.length,
             previewUrls: page.assignments
               .slice(0, 4)
               .map(
@@ -2308,6 +2308,7 @@ function AppContent() {
             }
             setSelectedPageId(pageId);
             setSelectedSlotKey(page.slotDefinitions[0] ? `${page.id}:${page.slotDefinitions[0].id}` : null);
+            setQuickPreviewAssetId(null);
           }}
           onUpdateAsset={(assetId, changes) => {
             handleAssetsMetadataChange(new Map([[assetId, changes]]));

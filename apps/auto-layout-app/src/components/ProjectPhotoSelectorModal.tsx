@@ -1,5 +1,6 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { createPortal, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
+import { preloadImageUrls } from "../image-cache";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import { PhotoColorContextMenu } from "./PhotoColorContextMenu";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
@@ -52,22 +53,35 @@ export function ProjectPhotoSelectorModal({
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [usageFilter, setUsageFilter] = useState<UsageFilter>("all");
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
-  const [minimumRating, setMinimumRating] = useState<number>(DEFAULT_PHOTO_FILTERS.minimumRating);
+  const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [contextMenuState, setContextMenuState] = useState<{
     assetId: string;
     x: number;
     y: number;
   } | null>(null);
+  const [focusedAssetId, setFocusedAssetId] = useState<string | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   const deferredAssets = useDeferredValue(localAssets);
   const selectionSet = useMemo(() => new Set(localSelection), [localSelection]);
+
+  // Derived state
+  const hasActiveFilters =
+    pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all" || usageFilter !== "all";
+
+  function resetFilters() {
+    setPickFilter("all");
+    setRatingFilter("any");
+    setColorFilter("all");
+    setUsageFilter("all");
+  }
 
   const visibleAssets = useMemo(() => {
     const filtered = deferredAssets.filter((asset) => {
       if (
         !matchesPhotoFilters(asset, {
           pickStatus: pickFilter,
-          minimumRating,
+          ratingFilter,
           colorLabel: colorFilter
         })
       ) {
@@ -105,7 +119,7 @@ export function ProjectPhotoSelectorModal({
     });
 
     return filtered;
-  }, [colorFilter, deferredAssets, minimumRating, pickFilter, sortBy, usageByAssetId, usageFilter]);
+  }, [colorFilter, deferredAssets, ratingFilter, pickFilter, sortBy, usageByAssetId, usageFilter]);
 
   const previewAsset = previewAssetId
     ? localAssets.find((asset) => asset.id === previewAssetId) ?? null
@@ -117,20 +131,13 @@ export function ProjectPhotoSelectorModal({
     }
 
     const closeMenu = () => setContextMenuState(null);
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeMenu();
-      }
-    };
 
     window.addEventListener("mousedown", closeMenu);
     window.addEventListener("scroll", closeMenu, true);
-    window.addEventListener("keydown", handleEscape);
 
     return () => {
       window.removeEventListener("mousedown", closeMenu);
       window.removeEventListener("scroll", closeMenu, true);
-      window.removeEventListener("keydown", handleEscape);
     };
   }, [contextMenuState]);
 
@@ -194,32 +201,123 @@ export function ProjectPhotoSelectorModal({
     );
   }
 
-  return (
+  // Consolidated keyboard handler: Escape priority chain + arrow navigation
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Priority 1: context menu open → Escape closes it, nothing else
+      if (contextMenuState) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setContextMenuState(null);
+        }
+        return;
+      }
+
+      // Priority 2: quick-preview open → let PhotoQuickPreviewModal handle keys
+      if (previewAssetId) {
+        return;
+      }
+
+      // Priority 3: Escape closes selector
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+
+      // Priority 4: Arrow keys navigate the grid
+      const arrowKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
+      if (!arrowKeys.includes(event.key)) {
+        return;
+      }
+
+      // Don't steal arrows from form controls
+      const target = event.target as HTMLElement;
+      if (target.closest("select, input, textarea")) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (visibleAssets.length === 0) {
+        return;
+      }
+
+      const currentIndex = focusedAssetId
+        ? visibleAssets.findIndex((a) => a.id === focusedAssetId)
+        : -1;
+
+      // Detect column count from actual DOM dimensions
+      const grid = gridRef.current;
+      let cols = 4;
+      if (grid) {
+        const firstCard = grid.querySelector<HTMLElement>(".modal-photo-card");
+        if (firstCard && firstCard.offsetWidth > 0) {
+          cols = Math.max(1, Math.floor(grid.clientWidth / firstCard.offsetWidth));
+        }
+      }
+
+      let nextIndex: number;
+      if (currentIndex < 0) {
+        nextIndex = 0;
+      } else if (event.key === "ArrowRight") {
+        nextIndex = Math.min(visibleAssets.length - 1, currentIndex + 1);
+      } else if (event.key === "ArrowLeft") {
+        nextIndex = Math.max(0, currentIndex - 1);
+      } else if (event.key === "ArrowDown") {
+        nextIndex = Math.min(visibleAssets.length - 1, currentIndex + cols);
+      } else {
+        // ArrowUp
+        nextIndex = Math.max(0, currentIndex - cols);
+      }
+
+      if (nextIndex !== currentIndex || currentIndex < 0) {
+        const nextAsset = visibleAssets[nextIndex];
+        setFocusedAssetId(nextAsset.id);
+        const button = grid?.querySelector<HTMLElement>(
+          `[data-preview-asset-id="${nextAsset.id}"]`
+        );
+        if (button) {
+          button.focus();
+          button.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [contextMenuState, focusedAssetId, onClose, previewAssetId, visibleAssets]);
+
+  const modalContent = (
     <>
-      <div className="modal-backdrop" onClick={onClose}>
-        <div className="modal-panel modal-panel--wide" onClick={(event) => event.stopPropagation()}>
-          <div className="modal-panel__header">
-            <div>
-              <strong>Selezione foto del progetto</strong>
-              <p>
-                Rivedi le foto a schermo grande, assegna stelle e colori e scegli quali entrano
-                davvero nel layout.
-              </p>
-            </div>
-            <div className="button-row">
-              <PhotoClassificationHelpButton title="Scorciatoie selezione progetto" />
-              <button type="button" className="ghost-button" onClick={onClose}>
-                Chiudi
-              </button>
-            </div>
+      <div className="modal-panel modal-panel--wide" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-panel__header">
+          <div>
+            <strong>Selezione foto del progetto</strong>
+            <p>
+              Rivedi le foto a schermo grande, assegna stelle e colori e scegli quali entrano
+              davvero nel layout.
+            </p>
           </div>
+          <div className="button-row">
+            <PhotoClassificationHelpButton title="Scorciatoie selezione progetto" />
+            <button type="button" className="ghost-button" onClick={onClose}>
+              Chiudi
+            </button>
+          </div>
+        </div>
 
           <div className="modal-toolbar modal-toolbar--selector">
             <div className="button-row">
               <button
                 type="button"
                 className="ghost-button"
-                onClick={() => setLocalSelection(deferredAssets.map((asset) => asset.id))}
+                onClick={() => setLocalSelection(
+                  hasActiveFilters
+                    ? visibleAssets.map((asset) => asset.id)
+                    : deferredAssets.map((asset) => asset.id)
+                )}
+                title={hasActiveFilters ? "Attiva solo le foto visibili con i filtri" : "Seleziona tutte le foto"}
               >
                 Seleziona tutte
               </button>
@@ -273,9 +371,24 @@ export function ProjectPhotoSelectorModal({
           </div>
 
           <div className="selector-filters">
+            {hasActiveFilters ? (
+              <div className="selector-filters__reset">
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={resetFilters}
+                >
+                  ✕ Azzera filtri
+                </button>
+              </div>
+            ) : null}
+
             <label className="field">
               <span>Stato</span>
-              <select value={pickFilter} onChange={(event) => setPickFilter(event.target.value as PickFilter)}>
+              <select
+                className={pickFilter !== "all" ? "field__select field__select--active" : undefined}
+                value={pickFilter}
+                onChange={(event) => setPickFilter(event.target.value as PickFilter)}>
                 <option value="all">Tutti</option>
                 <option value="picked">Pick</option>
                 <option value="rejected">Scartate</option>
@@ -285,7 +398,10 @@ export function ProjectPhotoSelectorModal({
 
             <label className="field">
               <span>Uso nel layout</span>
-              <select value={usageFilter} onChange={(event) => setUsageFilter(event.target.value as UsageFilter)}>
+              <select
+                className={usageFilter !== "all" ? "field__select field__select--active" : undefined}
+                value={usageFilter}
+                onChange={(event) => setUsageFilter(event.target.value as UsageFilter)}>
                 <option value="all">Tutte</option>
                 <option value="used">Gia usate</option>
                 <option value="unused">Ancora libere</option>
@@ -294,7 +410,10 @@ export function ProjectPhotoSelectorModal({
 
             <label className="field">
               <span>Colore</span>
-              <select value={colorFilter} onChange={(event) => setColorFilter(event.target.value as ColorFilter)}>
+              <select
+                className={colorFilter !== "all" ? "field__select field__select--active" : undefined}
+                value={colorFilter}
+                onChange={(event) => setColorFilter(event.target.value as ColorFilter)}>
                 <option value="all">Tutti</option>
                 {COLOR_LABELS.map((value) => (
                   <option key={value} value={value}>
@@ -305,18 +424,31 @@ export function ProjectPhotoSelectorModal({
             </label>
 
             <label className="field">
-              <span>Minimo stelle</span>
-              <select value={minimumRating} onChange={(event) => setMinimumRating(Number(event.target.value))}>
-                {[0, 1, 2, 3, 4, 5].map((value) => (
-                  <option key={value} value={value}>
-                    {value === 0 ? "Nessun minimo" : `${value}+`}
-                  </option>
-                ))}
+              <span>Stelle</span>
+              <select
+                className={ratingFilter !== "any" ? "field__select field__select--active" : undefined}
+                value={ratingFilter}
+                onChange={(event) => setRatingFilter(event.target.value)}>
+                <option value="any">Tutte le stelle</option>
+                <optgroup label="Minimo">
+                  <option value="1+">★ 1 o più</option>
+                  <option value="2+">★★ 2 o più</option>
+                  <option value="3+">★★★ 3 o più</option>
+                  <option value="4+">★★★★ 4 o più</option>
+                </optgroup>
+                <optgroup label="Esattamente">
+                  <option value="0">Senza stelle</option>
+                  <option value="1">★ Solo 1</option>
+                  <option value="2">★★ Solo 2</option>
+                  <option value="3">★★★ Solo 3</option>
+                  <option value="4">★★★★ Solo 4</option>
+                  <option value="5">★★★★★ Solo 5</option>
+                </optgroup>
               </select>
             </label>
           </div>
 
-          <div className="modal-photo-grid modal-photo-grid--selector">
+          <div ref={gridRef} className="modal-photo-grid modal-photo-grid--selector">
             {visibleAssets.map((asset) => {
               const isSelected = selectionSet.has(asset.id);
               const previewUrl = asset.thumbnailUrl ?? asset.previewUrl ?? asset.sourceUrl;
@@ -332,6 +464,10 @@ export function ProjectPhotoSelectorModal({
                   data-preview-asset-id={asset.id}
                   className={isSelected ? "modal-photo-card modal-photo-card--active" : "modal-photo-card"}
                   onClick={() => toggleAsset(asset.id)}
+                  onFocus={() => setFocusedAssetId(asset.id)}
+                  onMouseEnter={() => {
+                    if (asset.previewUrl) preloadImageUrls([asset.previewUrl]);
+                  }}
                   onDoubleClick={() => setPreviewAssetId(asset.id)}
                   onContextMenu={(event) => {
                     event.preventDefault();
@@ -460,7 +596,6 @@ export function ProjectPhotoSelectorModal({
             </div>
           </div>
         </div>
-      </div>
 
       <PhotoQuickPreviewModal
         asset={previewAsset}
@@ -486,5 +621,12 @@ export function ProjectPhotoSelectorModal({
         />
       ) : null}
     </>
+  );
+
+  return createPortal(
+    <div className="modal-fullscreen-backdrop" onClick={onClose}>
+      {modalContent}
+    </div>,
+    document.body
   );
 }

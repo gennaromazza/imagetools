@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
+import { preloadImageUrls } from "../image-cache";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import {
   COLOR_LABEL_NAMES,
@@ -65,7 +66,7 @@ export function PhotoQuickPreviewModal({
   const stageRef = useRef<HTMLDivElement | null>(null);
   const assignFeedbackTimeoutRef = useRef<number | null>(null);
   const [filterPickStatus, setFilterPickStatus] = useState<PickStatusFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
-  const [filterMinRating, setFilterMinRating] = useState(DEFAULT_PHOTO_FILTERS.minimumRating);
+  const [filterRating, setFilterRating] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [filterColorLabel, setFilterColorLabel] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
   const [assignFeedbackPageNumber, setAssignFeedbackPageNumber] = useState<number | null>(null);
 
@@ -76,18 +77,18 @@ export function PhotoQuickPreviewModal({
   );
 
   const hasActiveFilters =
-    filterPickStatus !== "all" || filterMinRating > 0 || filterColorLabel !== "all";
+    filterPickStatus !== "all" || filterRating !== "any" || filterColorLabel !== "all";
 
   const filteredAssets = useMemo(
     () =>
       assets.filter((item) =>
         matchesPhotoFilters(item, {
           pickStatus: filterPickStatus,
-          minimumRating: filterMinRating,
+          ratingFilter: filterRating,
           colorLabel: filterColorLabel
         })
       ),
-    [assets, filterColorLabel, filterMinRating, filterPickStatus]
+    [assets, filterColorLabel, filterRating, filterPickStatus]
   );
 
   useEffect(() => {
@@ -195,6 +196,19 @@ export function PhotoQuickPreviewModal({
     setAssignFeedbackPageNumber(null);
   }, [asset?.id]);
 
+  // Preload adjacent assets so navigation feels instant
+  useEffect(() => {
+    if (currentIndex < 0) return;
+    const toPreload: string[] = [];
+    for (const delta of [-2, -1, 1, 2]) {
+      const a = navigationAssets[currentIndex + delta];
+      if (!a) continue;
+      if (a.previewUrl) toPreload.push(a.previewUrl);
+      if (a.thumbnailUrl) toPreload.push(a.thumbnailUrl);
+    }
+    preloadImageUrls(toPreload);
+  }, [currentIndex, navigationAssets]);
+
   useEffect(() => {
     return () => {
       if (assignFeedbackTimeoutRef.current !== null) {
@@ -229,19 +243,26 @@ export function PhotoQuickPreviewModal({
         return;
       }
 
-      if (event.key === "ArrowLeft") {
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
         event.preventDefault();
         handleNavigate("previous");
         return;
       }
 
-      if (event.key === "ArrowRight") {
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") {
         event.preventDefault();
         handleNavigate("next");
         return;
       }
 
-      if (event.key === "Enter" && activePage && onAddToPage) {
+      if (event.key === "Enter" && activePage && activePageCanAccept && onAddToPage) {
+        const target = event.target;
+        if (
+          target instanceof HTMLElement &&
+          target.closest("input, textarea, select, button, [contenteditable='true']") !== null
+        ) {
+          return;
+        }
         event.preventDefault();
         handleAssignToActivePage();
         return;
@@ -289,7 +310,7 @@ export function PhotoQuickPreviewModal({
     return null;
   }
 
-  const previewUrl = asset.sourceUrl ?? asset.previewUrl ?? asset.thumbnailUrl;
+  const previewUrl = asset.previewUrl ?? asset.thumbnailUrl ?? asset.sourceUrl;
   const rating = getAssetRating(asset);
   const pickStatus = getAssetPickStatus(asset);
   const colorLabel = getAssetColorLabel(asset);
@@ -302,151 +323,14 @@ export function PhotoQuickPreviewModal({
       aria-modal="true"
       aria-label="Anteprima foto a schermo intero"
     >
-      <div className="quick-preview__chrome" onClick={(event) => event.stopPropagation()}>
-        <div className="quick-preview__title">
-          <strong>{asset.fileName}</strong>
-          <span>
-            {asset.width} x {asset.height} | {orientationLabels[asset.orientation]}
-            {usage ? ` | Foglio ${usage.pageNumber}` : " | Non ancora usata nel layout"}
-          </span>
-        </div>
-
-        <div className="quick-preview__actions">
-          <span className="quick-preview__stars">{formatAssetStars(asset)}</span>
-          <PhotoClassificationHelpButton title="Scorciatoie preview foto" />
-          <button
-            type="button"
-            className="ghost-button quick-preview__action"
-            onClick={toggleNativeFullscreen}
-          >
-            Fullscreen
-          </button>
-          <button type="button" className="ghost-button quick-preview__action" onClick={onClose}>
-            Chiudi
-          </button>
-        </div>
-      </div>
-
-      <div className="quick-preview__meta-bar" onClick={(event) => event.stopPropagation()}>
-        <div className="quick-preview__meta-group">
-          <span className="quick-preview__meta-label">Stelle</span>
-          <div className="quick-preview__stars-editor">
-            {[1, 2, 3, 4, 5].map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={
-                  value <= rating
-                    ? "quick-preview__star quick-preview__star--active"
-                    : "quick-preview__star"
-                }
-                onClick={() => updateRating(value)}
-              >
-                *
-              </button>
-            ))}
-            <button
-              type="button"
-              className="ghost-button quick-preview__tiny-action"
-              onClick={() => updateRating(0)}
-            >
-              Azzera
-            </button>
-          </div>
-        </div>
-
-        <div className="quick-preview__meta-group">
-          <span className="quick-preview__meta-label">Stato</span>
-          <div className="quick-preview__pill-row">
-            {(["picked", "rejected", "unmarked"] as PickStatus[]).map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={
-                  pickStatus === value
-                    ? "quick-preview__pill quick-preview__pill--active"
-                    : "quick-preview__pill"
-                }
-                onClick={() => updatePickStatus(value)}
-              >
-                {PICK_STATUS_LABELS[value]}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="quick-preview__meta-group">
-          <span className="quick-preview__meta-label">Colore</span>
-          <div className="quick-preview__color-row">
-            <button
-              type="button"
-              className={
-                colorLabel === null
-                  ? "quick-preview__color-chip quick-preview__color-chip--clear quick-preview__color-chip--selected"
-                  : "quick-preview__color-chip quick-preview__color-chip--clear"
-              }
-              onClick={() => updateColorLabel(null)}
-            >
-              Nessuno
-            </button>
-            {COLOR_LABELS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={
-                  colorLabel === value
-                    ? `quick-preview__color-chip quick-preview__color-chip--${value} quick-preview__color-chip--selected`
-                    : `quick-preview__color-chip quick-preview__color-chip--${value}`
-                }
-                onClick={() => updateColorLabel(value)}
-                title={`${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}`}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="quick-preview__stage" ref={stageRef} onClick={(event) => event.stopPropagation()}>
-        {previousAsset ? (
-          <button
-            type="button"
-            className="quick-preview__nav quick-preview__nav--prev"
-            onClick={() => handleNavigate("previous")}
-          >
-            {"<"}
-          </button>
-        ) : null}
-
-        {previewUrl ? (
-          <img
-            src={previewUrl}
-            alt={asset.fileName}
-            className="quick-preview__image"
-            draggable={false}
-            onDoubleClick={toggleNativeFullscreen}
-          />
-        ) : (
-          <div className="quick-preview__placeholder">{asset.fileName}</div>
-        )}
-
-        {nextAsset ? (
-          <button
-            type="button"
-            className="quick-preview__nav quick-preview__nav--next"
-            onClick={() => handleNavigate("next")}
-          >
-            {">"}
-          </button>
-        ) : null}
-      </div>
-
-      <div className="quick-preview__footer" onClick={(event) => event.stopPropagation()}>
-        {assets.length > 1 ? (
-          <div className="quick-preview__filter-bar">
+      {/* ── SIDEBAR SINISTRA: filtri + thumbnail verticali ── */}
+      {assets.length > 1 ? (
+        <div className="quick-preview__sidebar" onClick={(event) => event.stopPropagation()}>
+          <div className="quick-preview__sidebar-filters">
             <div className="quick-preview__filter-summary">
               {hasActiveFilters
-                ? `${filteredAssets.length} foto corrispondono ai filtri`
-                : `${assets.length} foto nel set corrente`}
+                ? `${filteredAssets.length} di ${assets.length} foto`
+                : `${assets.length} foto`}
             </div>
             <div className="quick-preview__filter-controls">
               <label className="quick-preview__filter-field">
@@ -469,15 +353,24 @@ export function PhotoQuickPreviewModal({
                 <span>Stelle</span>
                 <select
                   className="quick-preview__filter-select"
-                  value={String(filterMinRating)}
-                  onChange={(event) => setFilterMinRating(Number(event.target.value))}
+                  value={filterRating}
+                  onChange={(event) => setFilterRating(event.target.value)}
                 >
-                  <option value="0">Tutte</option>
-                  <option value="1">1+ stella</option>
-                  <option value="2">2+ stelle</option>
-                  <option value="3">3+ stelle</option>
-                  <option value="4">4+ stelle</option>
-                  <option value="5">5 stelle</option>
+                  <option value="any">Tutte</option>
+                  <optgroup label="Minimo">
+                    <option value="1+">★ 1+</option>
+                    <option value="2+">★★ 2+</option>
+                    <option value="3+">★★★ 3+</option>
+                    <option value="4+">★★★★ 4+</option>
+                  </optgroup>
+                  <optgroup label="Esatto">
+                    <option value="0">Senza stelle</option>
+                    <option value="1">★ Solo 1</option>
+                    <option value="2">★★ Solo 2</option>
+                    <option value="3">★★★ Solo 3</option>
+                    <option value="4">★★★★ Solo 4</option>
+                    <option value="5">★★★★★ Solo 5</option>
+                  </optgroup>
                 </select>
               </label>
             </div>
@@ -491,7 +384,7 @@ export function PhotoQuickPreviewModal({
                 }
                 onClick={() => setFilterColorLabel("all")}
               >
-                Tutti i colori
+                Tutti
               </button>
               {COLOR_LABELS.map((value) => (
                 <button
@@ -508,43 +401,184 @@ export function PhotoQuickPreviewModal({
               ))}
             </div>
           </div>
-        ) : null}
 
-        {previewStrip.length > 0 ? (
-          <div className="quick-preview__strip">
-            {previewStrip.map((item) => {
-              const itemPreview = item.thumbnailUrl ?? item.previewUrl ?? item.sourceUrl;
-              const isActive = item.id === asset.id;
+          {previewStrip.length > 0 ? (
+            <div className="quick-preview__strip">
+              {previewStrip.map((item) => {
+                const itemPreview = item.thumbnailUrl ?? item.previewUrl ?? item.sourceUrl;
+                const isActive = item.id === asset.id;
 
-              return (
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={
+                      isActive
+                        ? "quick-preview__thumb quick-preview__thumb--active"
+                        : "quick-preview__thumb"
+                    }
+                    onClick={() => onSelectAsset?.(item.id)}
+                  >
+                    {itemPreview ? (
+                      <img
+                        src={itemPreview}
+                        alt={item.fileName}
+                        className="quick-preview__thumb-image"
+                      />
+                    ) : (
+                      item.fileName
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          ) : hasActiveFilters ? (
+            <div className="quick-preview__empty-filter">
+              Nessuna foto corrisponde ai filtri attivi.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* ── AREA PRINCIPALE DESTRA: chrome + meta + foto + assign ── */}
+      <div className="quick-preview__main" onClick={(event) => event.stopPropagation()}>
+        <div className="quick-preview__chrome">
+          <div className="quick-preview__title">
+            <strong>{asset.fileName}</strong>
+            <span>
+              {asset.width} x {asset.height} | {orientationLabels[asset.orientation]}
+              {usage ? ` | Foglio ${usage.pageNumber}` : " | Non ancora usata nel layout"}
+            </span>
+          </div>
+
+          <div className="quick-preview__actions">
+            <span className="quick-preview__stars">{formatAssetStars(asset)}</span>
+            <PhotoClassificationHelpButton title="Scorciatoie preview foto" />
+            <button
+              type="button"
+              className="ghost-button quick-preview__action"
+              onClick={toggleNativeFullscreen}
+            >
+              Fullscreen
+            </button>
+            <button type="button" className="ghost-button quick-preview__action" onClick={onClose}>
+              Chiudi
+            </button>
+          </div>
+        </div>
+
+        <div className="quick-preview__meta-bar">
+          <div className="quick-preview__meta-group">
+            <span className="quick-preview__meta-label">Stelle</span>
+            <div className="quick-preview__stars-editor">
+              {[1, 2, 3, 4, 5].map((value) => (
                 <button
-                  key={item.id}
+                  key={value}
                   type="button"
                   className={
-                    isActive
-                      ? "quick-preview__thumb quick-preview__thumb--active"
-                      : "quick-preview__thumb"
+                    value <= rating
+                      ? "quick-preview__star quick-preview__star--active"
+                      : "quick-preview__star"
                   }
-                  onClick={() => onSelectAsset?.(item.id)}
+                  onClick={() => updateRating(value)}
                 >
-                  {itemPreview ? (
-                    <img
-                      src={itemPreview}
-                      alt={item.fileName}
-                      className="quick-preview__thumb-image"
-                    />
-                  ) : (
-                    item.fileName
-                  )}
+                  *
                 </button>
-              );
-            })}
+              ))}
+              <button
+                type="button"
+                className="ghost-button quick-preview__tiny-action"
+                onClick={() => updateRating(0)}
+              >
+                Azzera
+              </button>
+            </div>
           </div>
-        ) : hasActiveFilters ? (
-          <div className="quick-preview__empty-filter">
-            Nessuna foto corrisponde ai filtri attivi.
+
+          <div className="quick-preview__meta-group">
+            <span className="quick-preview__meta-label">Stato</span>
+            <div className="quick-preview__pill-row">
+              {(["picked", "rejected", "unmarked"] as PickStatus[]).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={
+                    pickStatus === value
+                      ? "quick-preview__pill quick-preview__pill--active"
+                      : "quick-preview__pill"
+                  }
+                  onClick={() => updatePickStatus(value)}
+                >
+                  {PICK_STATUS_LABELS[value]}
+                </button>
+              ))}
+            </div>
           </div>
-        ) : null}
+
+          <div className="quick-preview__meta-group">
+            <span className="quick-preview__meta-label">Colore</span>
+            <div className="quick-preview__color-row">
+              <button
+                type="button"
+                className={
+                  colorLabel === null
+                    ? "quick-preview__color-chip quick-preview__color-chip--clear quick-preview__color-chip--selected"
+                    : "quick-preview__color-chip quick-preview__color-chip--clear"
+                }
+                onClick={() => updateColorLabel(null)}
+              >
+                Nessuno
+              </button>
+              {COLOR_LABELS.map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={
+                    colorLabel === value
+                      ? `quick-preview__color-chip quick-preview__color-chip--${value} quick-preview__color-chip--selected`
+                      : `quick-preview__color-chip quick-preview__color-chip--${value}`
+                  }
+                  onClick={() => updateColorLabel(value)}
+                  title={`${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="quick-preview__stage" ref={stageRef}>
+          {previousAsset ? (
+            <button
+              type="button"
+              className="quick-preview__nav quick-preview__nav--prev"
+              onClick={() => handleNavigate("previous")}
+            >
+              {"<"}
+            </button>
+          ) : null}
+
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt={asset.fileName}
+              className="quick-preview__image"
+              draggable={false}
+              onDoubleClick={toggleNativeFullscreen}
+            />
+          ) : (
+            <div className="quick-preview__placeholder">{asset.fileName}</div>
+          )}
+
+          {nextAsset ? (
+            <button
+              type="button"
+              className="quick-preview__nav quick-preview__nav--next"
+              onClick={() => handleNavigate("next")}
+            >
+              {">"}
+            </button>
+          ) : null}
+        </div>
 
         {pages.length > 0 && onAddToPage ? (
           <div
@@ -563,9 +597,11 @@ export function PhotoQuickPreviewModal({
               <span>
                 {activePage
                   ? activePageCanAccept
-                    ? "Premi Invio per aggiungere questa foto al foglio attivo."
-                    : "Il foglio attivo e' pieno. Torna nello studio e crea o seleziona un altro foglio."
-                  : "Seleziona prima un foglio nello studio per usare l'aggiunta rapida da questa preview."}
+                    ? usage?.pageId === activePage.id
+                      ? "La foto è già in questo foglio. Premi Invio per riorganizzarlo."
+                      : "Premi Invio per aggiungere questa foto al foglio attivo."
+                    : "Il foglio attivo è pieno. Seleziona un altro foglio nello studio."
+                  : "Seleziona un foglio nello studio per usare l'aggiunta rapida."}
               </span>
               {showAssignSuccess ? (
                 <span className="quick-preview__assign-success" aria-live="polite">
@@ -585,12 +621,14 @@ export function PhotoQuickPreviewModal({
                 onClick={handleAssignToActivePage}
                 disabled={!activePage || !activePageCanAccept}
               >
-                {activePage
-                  ? `Aggiungi al foglio attivo ${activePage.pageNumber}`
-                  : "Nessun foglio attivo"}
+                {!activePage
+                  ? "Nessun foglio attivo"
+                  : usage?.pageId === activePage.id
+                  ? `Riorganizza foglio ${activePage.pageNumber}`
+                  : `Aggiungi al foglio ${activePage.pageNumber}`}
               </button>
 
-              {usage?.pageId && onJumpToPage ? (
+              {usage?.pageId && onJumpToPage && usage.pageId !== activePage?.id ? (
                 <button
                   type="button"
                   className="ghost-button quick-preview__assign-button"
