@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { FitMode, ImageAsset, LayoutAssignment, LayoutSlot } from "@photo-tools/shared-types";
+import type { ImageAsset, LayoutAssignment, LayoutSlot } from "@photo-tools/shared-types";
 
 interface AssignmentInspectorProps {
   pageLabel: string | null;
@@ -44,7 +44,7 @@ export function AssignmentInspector({
       return;
     }
 
-    const timeoutId = window.setTimeout(() => onChange({ fitMode: "fit", zoom: draftZoom }), 80);
+    const timeoutId = window.setTimeout(() => onChange({ zoom: draftZoom }), 80);
     return () => window.clearTimeout(timeoutId);
   }, [assignment, draftZoom, onChange]);
 
@@ -53,7 +53,7 @@ export function AssignmentInspector({
       return;
     }
 
-    const timeoutId = window.setTimeout(() => onChange({ fitMode: "fit", offsetX: draftOffsetX }), 80);
+    const timeoutId = window.setTimeout(() => onChange({ offsetX: draftOffsetX }), 80);
     return () => window.clearTimeout(timeoutId);
   }, [assignment, draftOffsetX, onChange]);
 
@@ -62,7 +62,7 @@ export function AssignmentInspector({
       return;
     }
 
-    const timeoutId = window.setTimeout(() => onChange({ fitMode: "fit", offsetY: draftOffsetY }), 80);
+    const timeoutId = window.setTimeout(() => onChange({ offsetY: draftOffsetY }), 80);
     return () => window.clearTimeout(timeoutId);
   }, [assignment, draftOffsetY, onChange]);
 
@@ -103,22 +103,22 @@ export function AssignmentInspector({
       <div className="field">
         <span>Adattamento slot</span>
         <div className="segmented-control">
-          {(["fit", "fill", "crop"] as FitMode[]).map((mode) => (
+          {(["fit", "fill"] as const).map((mode) => (
             <button
               key={mode}
               type="button"
               className={assignment.fitMode === mode ? "segment segment--active" : "segment"}
               onClick={() => onChange({ fitMode: mode })}
             >
-              {mode === "fit" ? "Adatta" : mode === "fill" ? "Riempi" : "Crop"}
+              {mode === "fit" ? "Adatta" : "Riempi"}
             </button>
           ))}
         </div>
         <small className="helper-inline">
-          Trascina direttamente la foto per spostarla tra slot e fogli. Per riposizionarla senza tagli usa Alt piu trascinamento oppure il pulsante editor crop.
+          Usa Adatta o Riempi per il comportamento dello slot. Per rifinire inquadratura e posizione apri l'editor crop, che lavora sempre entro i vincoli del riquadro.
         </small>
         <button type="button" className="ghost-button" onClick={onOpenCropEditor}>
-          Riposiziona senza tagli
+          Apri editor crop
         </button>
       </div>
 

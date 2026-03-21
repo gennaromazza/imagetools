@@ -414,7 +414,7 @@ function PhotoRibbonContent({
                   ) : null}
                 </div>
                 <div className="ribbon-photo__meta">
-                  <strong>{asset.fileName?.substring(0, 14)}</strong>
+                  <strong>{variant === "vertical" ? asset.fileName : asset.fileName?.substring(0, 14)}</strong>
                   {variant === "vertical" ? (
                     <span>{usage ? `Foglio ${usage.pageNumber}` : "Disponibile"}{rating > 0 ? ` · ${formatAssetStars(asset)}` : ""}</span>
                   ) : (

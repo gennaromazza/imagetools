@@ -51,6 +51,8 @@ import { Stepper } from "./components/Stepper";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ProjectDashboard, type Project } from "./components/ProjectDashboard";
 import { ImportProgressModal } from "./components/ImportProgressModal";
+import { InspectorPanel } from "./components/InspectorPanel";
+import { StudioProvider } from "./components/StudioContext";
 import {
   inferFolderLabelFromFiles,
   loadImageAssetsFromFiles,
@@ -279,6 +281,8 @@ function AppContent() {
   const [selectedPageId, setSelectedPageId] = useState<string | null>("page-1");
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>("page-1:hero");
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [stagedImageIds, setStagedImageIds] = useState<string[]>([]);
+  const [isTransferTrayPinned, setIsTransferTrayPinned] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgressState, setImportProgressState] = useState<ImportProgressState>(
     createInitialImportProgressState()
@@ -299,12 +303,15 @@ function AppContent() {
   const [showOnboardingWizard, setShowOnboardingWizard] = useState(false);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [zoomMode, setZoomMode] = useState<"manual" | "fit">("fit");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [exportProgressState, setExportProgressState] = useState<ExportProgressState>(() => createInitialExportProgressState());
   const [quickPreviewAssetId, setQuickPreviewAssetId] = useState<string | null>(null);
   const [recentlyRebalancedPageId, setRecentlyRebalancedPageId] = useState<string | null>(null);
   const [recentlyAddedPageId, setRecentlyAddedPageId] = useState<string | null>(null);
   const [recentlyAddedSlotKey, setRecentlyAddedSlotKey] = useState<string | null>(null);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(false);
+  const [cropTarget, setCropTarget] = useState<{ pageId: string; slotId: string } | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean;
@@ -325,7 +332,12 @@ function AppContent() {
 
   // New handlers for enhanced features
   const handleZoomChange = (newZoom: number) => {
+    setZoomMode("manual");
     setZoom(newZoom);
+  };
+
+  const handleZoomFit = () => {
+    setZoomMode("fit");
   };
 
   const handleToggleFullscreen = () => {
@@ -815,6 +827,22 @@ function AppContent() {
     setSelectedPageId(pageId);
     setSelectedSlotKey(slotId ? `${pageId}:${slotId}` : null);
   }, []);
+  const stageImage = useCallback((imageId: string) => {
+    setStagedImageIds((current) => (current.includes(imageId) ? current : [...current, imageId]));
+  }, []);
+  const unstageImage = useCallback((imageId: string) => {
+    setStagedImageIds((current) => current.filter((id) => id !== imageId));
+  }, []);
+  const clearStagedImages = useCallback(() => {
+    setStagedImageIds([]);
+  }, []);
+  const consumeStagedImage = useCallback((imageId: string) => {
+    if (isTransferTrayPinned) {
+      return;
+    }
+
+    setStagedImageIds((current) => current.filter((id) => id !== imageId));
+  }, [isTransferTrayPinned]);
   const handleStartSlotDrag = useCallback((pageId: string, slotId: string, imageId: string) => {
     setDragState({
       kind: "slot",
@@ -1166,7 +1194,7 @@ function AppContent() {
     }
 
     const nextPlacement = draggedImageId ? findImagePlacement(nextResult, draggedImageId) : null;
-    commitStudioChange({
+    const changed = commitStudioChange({
       result: nextResult,
       selectedPageId: nextPlacement?.pageId ?? move.targetPageId,
       selectedSlotKey: nextPlacement ? `${nextPlacement.pageId}:${nextPlacement.slotId}` : null,
@@ -1177,10 +1205,18 @@ function AppContent() {
             : `Foto riposizionata nel foglio ${move.targetPageId}.`
           : `Foto spostata tra fogli con riadattamento automatico dei layout.`
     });
+
+    if (changed && draggedImageId) {
+      unstageImage(draggedImageId);
+    }
   }
 
   function handleAssetDropped(pageId: string, slotId: string, imageId: string) {
     const previousUsage = usageByAssetId.get(imageId);
+    const replacedImageId =
+      result.pages
+        .find((page) => page.id === pageId)
+        ?.assignments.find((assignment) => assignment.slotId === slotId)?.imageId ?? null;
     const previousTargetTemplate = result.pages.find((page) => page.id === pageId)?.templateId;
     const previousSourceTemplate = previousUsage?.pageId
       ? result.pages.find((page) => page.id === previousUsage.pageId)?.templateId
@@ -1212,6 +1248,10 @@ function AppContent() {
     });
 
     if (changed && nextPlacement) {
+      consumeStagedImage(imageId);
+      if (dragState?.kind === "asset" && replacedImageId && replacedImageId !== imageId) {
+        stageImage(replacedImageId);
+      }
       markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
 
       const nextTargetPage = nextResult.pages.find((page) => page.id === pageId);
@@ -1287,6 +1327,7 @@ function AppContent() {
     });
 
     if (changed && nextPlacement) {
+      consumeStagedImage(imageId);
       markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
 
       const nextTargetPage = nextResult.pages.find((page) => page.id === pageId);
@@ -1440,6 +1481,7 @@ function AppContent() {
     });
 
     if (changed && newPage?.slotDefinitions[0]) {
+      consumeStagedImage(imageId);
       markRecentlyAddedPlacement(newPage.id, newPage.slotDefinitions[0].id);
     }
   }
@@ -1468,6 +1510,8 @@ function AppContent() {
       selectedSlotKey: nextPage?.slotDefinitions[0] ? `${nextPage.id}:${nextPage.slotDefinitions[0].id}` : null,
       activity: `Foto rimossa dal foglio ${usage.pageNumber} e riportata tra le non usate.`
     });
+
+    unstageImage(dragState.imageId);
   }
 
   function handleClearSlot(pageId: string, slotId: string) {
@@ -1778,6 +1822,61 @@ function AppContent() {
     });
   }
 
+const handleOpenCropEditor = useCallback((pageId: string, slotId: string) => {
+    setCropTarget({ pageId, slotId });
+  }, []);
+
+  const handleCloseCropEditor = useCallback(() => {
+    setCropTarget(null);
+  }, []);
+
+  const currentStudioContextValue = useMemo(() => {
+    const activePage = result.pages.find(p => p.id === selectedPageId) || null;
+    let selectedSlot = undefined;
+    let selectedAssignment = undefined;
+    let selectedAsset = undefined;
+
+    if (activePage && selectedSlotKey) {
+      const [pId, sId] = selectedSlotKey.split(":");
+      if (pId === activePage.id) {
+        selectedSlot = activePage.slotDefinitions.find(s => s.id === sId);
+        selectedAssignment = activePage.assignments.find(a => a.slotId === sId);
+        if (selectedAssignment?.imageId) {
+          selectedAsset = assetsById.get(selectedAssignment.imageId);
+        }
+      }
+    }
+
+    return {
+      activePage,
+      selectedSlot,
+      selectedAssignment,
+      selectedAsset,
+      isInspectorCollapsed,
+      setIsInspectorCollapsed,
+        cropTarget,
+        onUpdateSlotAssignment: handleUpdateSelectedSlotAssignment,
+        onClearSlot: handleClearSlot,
+        onOpenCropEditor: handleOpenCropEditor,
+        onCloseCropEditor: handleCloseCropEditor,
+        onPageSheetPresetChange: handlePageSheetPresetChange,
+        onPageSheetFieldChange: handlePageSheetFieldChange,
+      };
+    }, [
+      result.pages,
+      selectedPageId,
+      selectedSlotKey,
+      assetsById,
+      isInspectorCollapsed,
+      cropTarget,
+      handleUpdateSelectedSlotAssignment,
+      handleClearSlot,
+      handleOpenCropEditor,
+      handleCloseCropEditor,
+      handlePageSheetPresetChange,
+      handlePageSheetFieldChange
+    ]);
+
   function renderStepSwitcher() {
     return <Stepper currentStep={currentScreen === "studio" ? "studio" : "setup"} canProceed={canOpenStudio} />;
   }
@@ -1980,7 +2079,7 @@ function AppContent() {
 
   function renderStudioScreen() {
     return (
-      <>
+      <StudioProvider value={currentStudioContextValue}>
         <header className="global-topbar">
           <div className="global-topbar__stats">
             {result.pages.length} fogli · {usedImagesCount} usate · {result.unassignedAssets.length} libere
@@ -2009,6 +2108,7 @@ function AppContent() {
             <ZoomControls
               zoom={zoom}
               onZoomChange={handleZoomChange}
+              onZoomFit={handleZoomFit}
             />
             <div className="toolbar-separator" />
             <button
@@ -2062,6 +2162,12 @@ function AppContent() {
               selectedPageId={selectedPageId}
               selectedSlotKey={selectedSlotKey}
               dragState={dragState}
+              stagedImageIds={stagedImageIds}
+              isTransferTrayPinned={isTransferTrayPinned}
+              onToggleTransferTrayPinned={() => setIsTransferTrayPinned((current) => !current)}
+              onStageImage={stageImage}
+              onUnstageImage={unstageImage}
+              onClearStagedImages={clearStagedImages}
               onSelectPage={handleSelectPage}
               onStartSlotDrag={handleStartSlotDrag}
               onDragAssetStart={handleDragAssetStart}
@@ -2087,8 +2193,13 @@ function AppContent() {
               onUpdateSlotAssignment={handleUpdateSelectedSlotAssignment}
               onContextMenu={handleContextMenu}
               zoom={zoom}
+              zoomMode={zoomMode}
+              onZoomResolved={setZoom}
+              isInspectorCollapsed={isInspectorCollapsed}
+              setIsInspectorCollapsed={setIsInspectorCollapsed}
             />
           </div>
+          <InspectorPanel />
         </div>
 
         <section className="studio-dock">
@@ -2313,13 +2424,14 @@ function AppContent() {
           onRedo={redo}
           onDelete={handleDeleteSelected}
           onDuplicate={selectedPageId ? () => handleDuplicatePage(selectedPageId) : undefined}
+          onZoomFit={handleZoomFit}
           onFullscreen={handleToggleFullscreen}
           onEscape={() => {
             setQuickPreviewAssetId(null);
             setContextMenu({ isOpen: false, position: { x: 0, y: 0 }, items: [] });
           }}
         />
-      </>
+      </StudioProvider>
     );
   }
 

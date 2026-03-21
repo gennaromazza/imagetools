@@ -2,14 +2,12 @@
  * SheetSurface — renders one page's photo slots with pure drag-and-drop interactions.
  *
  * Interactions:
- *  - Click slot → selects slot (shows controls in AssignmentInspector on the right panel)
+ *  - Click slot → selects slot (shows controls in AssignmentInspector rail)
  *  - Drag ribbon photo → assign to slot
  *  - Drag slot photo → swap/move to another slot (same or cross-page)
- *  - Drop slot photo on "Riadatta" zone → smart template rebalance
  *  - Double-click slot → reset zoom / offset / rotation
  *  - Alt + scroll → zoom the photo within the slot
  *  - Pointer drag (no Alt, no DnD) → pan the photo within the slot
- *  - Alt + click → open crop editor
  *  - Minimal "×" badge visible on hover / selected → clear the slot
  *  - Keyboard Del/Backspace → handled in App.tsx for selected slot
  *
@@ -143,7 +141,7 @@ interface SheetSurfaceProps {
   onClearSlot: (pageId: string, slotId: string) => void;
   onOpenCropEditor: (pageId: string, slotId: string) => void;
   onContextMenu?: (event: MouseEvent, page: GeneratedPageLayout) => void;
-  onUpdateSlotAssignment: (
+  onUpdateSlotAssignment?: (
     pageId: string,
     slotId: string,
     changes: Partial<
@@ -194,6 +192,8 @@ export const SheetSurface = memo(function SheetSurface({
   // Drag intent label — contextual hint shown as an overlay during drag
   const [dragIntentLabel, setDragIntentLabel] = useState<string | null>(null);
   const dragIntentLabelRef = useRef<string | null>(null);
+  const [hoveredDropSlotId, setHoveredDropSlotId] = useState<string | null>(null);
+  const [isCanvasAddTarget, setIsCanvasAddTarget] = useState(false);
 
   const setStableDragIntentLabel = useCallback((next: string | null) => {
     if (dragIntentLabelRef.current === next) return;
@@ -205,6 +205,8 @@ export const SheetSurface = memo(function SheetSurface({
     if (!dragState) {
       dragIntentLabelRef.current = null;
       setDragIntentLabel(null);
+      setHoveredDropSlotId(null);
+      setIsCanvasAddTarget(false);
     }
   }, [dragState]);
 
@@ -268,7 +270,14 @@ export const SheetSurface = memo(function SheetSurface({
           ? (event) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
-              setStableDragIntentLabel("Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio");
+              const target = event.target as HTMLElement | null;
+              const overSlot = Boolean(target?.closest(".sheet-slot"));
+              setIsCanvasAddTarget(!overSlot);
+              setStableDragIntentLabel(
+                overSlot
+                  ? "Scegli uno slot (vuoto = aggiungi, pieno = sostituisci/scambia) oppure parcheggia la foto per spostarla su un altro foglio."
+                  : "Rilascia nello spazio bianco per aggiungere la foto a questo foglio e aggiornare il template se serve."
+              );
             }
           : undefined
       }
@@ -276,7 +285,14 @@ export const SheetSurface = memo(function SheetSurface({
         interactive
           ? (event) => {
               event.preventDefault();
+              const target = event.target as HTMLElement | null;
+              const overSlot = Boolean(target?.closest(".sheet-slot"));
+              if (dragState && !overSlot) {
+                onAddToPage(page.id, dragState.imageId);
+              }
               setStableDragIntentLabel(null);
+              setHoveredDropSlotId(null);
+              setIsCanvasAddTarget(false);
             }
           : undefined
       }
@@ -285,6 +301,7 @@ export const SheetSurface = memo(function SheetSurface({
           ? (event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                 setStableDragIntentLabel(null);
+                setIsCanvasAddTarget(false);
               }
             }
           : undefined
@@ -299,6 +316,13 @@ export const SheetSurface = memo(function SheetSurface({
       }
     >
       {renderGuideLines(page)}
+
+      {interactive && dragState && isCanvasAddTarget ? (
+        <div className="sheet-preview__add-indicator" aria-hidden="true">
+          <span className="sheet-preview__add-indicator-icon">+</span>
+          <span className="sheet-preview__add-indicator-label">Aggiungi al foglio</span>
+        </div>
+      ) : null}
 
       {page.slotDefinitions.map((slot) => {
         const assignment = assignmentsBySlotId.get(slot.id);
@@ -350,6 +374,9 @@ export const SheetSurface = memo(function SheetSurface({
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
                     if (!dragState) return;
+                    if (hoveredDropSlotId !== slot.id) {
+                      setHoveredDropSlotId(slot.id);
+                    }
 
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
                       setStableDragIntentLabel(
@@ -374,6 +401,7 @@ export const SheetSurface = memo(function SheetSurface({
                     event.preventDefault();
                     event.stopPropagation();
                     if (!dragState) return;
+                    setHoveredDropSlotId(null);
 
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
                       // Always precision: swap if both occupied, move if target is empty
@@ -396,13 +424,36 @@ export const SheetSurface = memo(function SheetSurface({
               interactive
                 ? (event) => {
                     event.stopPropagation();
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                      setHoveredDropSlotId((current) => (current === slot.id ? null : current));
+                    }
                     setStableDragIntentLabel(
-                      "Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio"
+                      "Scegli uno slot (vuoto = aggiungi, pieno = sostituisci/scambia) oppure parcheggia la foto per spostarla su un altro foglio."
                     );
                   }
                 : undefined
             }
           >
+            {interactive && dragState && hoveredDropSlotId === slot.id && isDropTarget ? (
+              <div
+                className={[
+                  "sheet-slot__drop-indicator",
+                  assignment
+                    ? dragState.kind === "slot"
+                      ? "sheet-slot__drop-indicator--swap"
+                      : "sheet-slot__drop-indicator--replace"
+                    : "sheet-slot__drop-indicator--add"
+                ].join(" ")}
+                aria-hidden="true"
+              >
+                {assignment
+                  ? dragState.kind === "slot"
+                    ? "⇄"
+                    : "⟲"
+                  : "+"}
+              </div>
+            ) : null}
+
             {interactive ? (
               <>
                 {/* ── Draggable photo button ──────────────────────────────── */}
@@ -413,9 +464,12 @@ export const SheetSurface = memo(function SheetSurface({
                   draggable={Boolean(assignment)}
                   title={
                     assignment
-                      ? "Trascina per spostare. Doppio clic per resettare. Alt+scroll per zoom. Alt+clic per regolare il crop."
+                      ? "Trascina per spostare. Doppio clic per resettare. Alt+scroll per zoom."
                       : "Trascina qui una foto dalla ribbon di sinistra per assegnarla."
                   }
+                  onClick={() => {
+                    onSelectPage(page.id, slot.id);
+                  }}
                   onDragStart={(event) => {
                     if (!assignment) { event.preventDefault(); return; }
                     if (event.altKey) { event.preventDefault(); return; }
@@ -424,7 +478,9 @@ export const SheetSurface = memo(function SheetSurface({
                     event.dataTransfer.setData("text/plain", assignment.imageId);
                       setTimeout(() => {
                         onStartSlotDrag(page.id, slot.id, assignment.imageId);
-                        setStableDragIntentLabel("Trascina la foto su uno slot o sull'area di rimozione");
+                        setStableDragIntentLabel(
+                          "Trascina la foto su uno slot (vuoto = sposta, pieno = scambia) oppure parcheggiala per spostarla su un altro foglio."
+                        );
                       }, 0);
                   }}
                   onDragEnd={(event) => {
@@ -435,27 +491,20 @@ export const SheetSurface = memo(function SheetSurface({
                     if (!assignment || !interactive || !event.altKey) return;
                     event.preventDefault();
                     const nextZoom = Math.max(0.7, Math.min(2.2, assignment.zoom + (event.deltaY > 0 ? -0.08 : 0.08)));
-                    onUpdateSlotAssignment(page.id, slot.id, { fitMode: "fit", zoom: nextZoom });
+                    onUpdateSlotAssignment(page.id, slot.id, { zoom: nextZoom });
                   }}
                   onDoubleClick={(event) => {
                     if (!assignment || !interactive) return;
                     event.preventDefault();
-                    onUpdateSlotAssignment(page.id, slot.id, {
-                      zoom: 1,
-                      offsetX: 0,
-                      offsetY: 0,
-                      rotation: 0,
-                    });
+                    onSelectPage(page.id, slot.id);
+                    onOpenCropEditor(page.id, slot.id);
                   }}
                   onPointerDown={(event) => {
-                    if (!assignment || !canReposition || event.button !== 0) return;
-
-                    if (event.altKey) {
+                    if (event.button === 0) {
                       onSelectPage(page.id, slot.id);
-                      onOpenCropEditor(page.id, slot.id);
-                      event.preventDefault();
-                      return;
                     }
+
+                    if (!assignment || !canReposition || event.button !== 0) return;
 
                     // Start pan capture for non-DnD repositioning
                     const rect = event.currentTarget.getBoundingClientRect();
@@ -550,50 +599,6 @@ export const SheetSurface = memo(function SheetSurface({
           </div>
         );
       })}
-
-      {/* ── Smart-riadatta drop zone (appears during any drag) ─────────────── */}
-      {interactive && dragState ? (
-        <div
-          className={
-            dragState.kind === "slot"
-              ? "sheet-add-target sheet-add-target--slot-drag"
-              : "sheet-add-target"
-          }
-          onDragOver={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            event.dataTransfer.dropEffect = "move";
-            setStableDragIntentLabel(
-              dragState.kind === "slot"
-                ? dragState.sourcePageId === page.id
-                  ? "Rilascia per riorganizzare questo foglio attorno alla foto trascinata"
-                  : "Rilascia per spostare questa foto qui e riadattare il layout del foglio"
-                : "Rilascia per aggiungere la foto e ricalcolare il layout del foglio"
-            );
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            onAddToPage(page.id, dragState.imageId);
-            setStableDragIntentLabel(null);
-          }}
-          onDragLeave={(event) => {
-            event.stopPropagation();
-            setStableDragIntentLabel(
-              "Scegli uno slot oppure usa la zona tratteggiata per riadattare il foglio"
-            );
-          }}
-        >
-          <strong>Riadatta questo foglio</strong>
-          <span>
-            {dragState.kind === "slot"
-              ? dragState.sourcePageId === page.id
-                ? "Rilascia qui per riorganizzare il foglio corrente attorno a questa foto."
-                : "Rilascia qui per spostare questa foto in questo foglio e aggiornare il layout."
-              : "Rilascia qui per aggiungere la foto a questo foglio e ricalcolare l'impaginazione."}
-          </span>
-        </div>
-      ) : null}
 
       {/* ── Drag intent label overlay ─────────────────────────────────────── */}
       {interactive && dragState && dragIntentLabel ? (

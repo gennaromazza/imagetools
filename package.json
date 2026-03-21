@@ -14,6 +14,7 @@
     "dev:all:auto-layout": "npm run dev:auto-layout",
     "dev:image-party-frame": "npm --workspace @photo-tools/image-party-frame-app run dev",
     "dev:all:image-party-frame": "npm --workspace @photo-tools/image-party-frame-app run dev:all",
+    "dev:photo-selector": "npm --workspace @photo-tools/photo-selector-app run dev",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

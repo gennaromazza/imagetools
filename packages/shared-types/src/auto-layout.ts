@@ -29,6 +29,8 @@ export interface ImageAsset {
   fileName: string;
   path: string;
   sourceFileKey?: string;
+  xmpHasEdits?: boolean;
+  xmpEditInfo?: string;
   rating?: number;
   pickStatus?: PickStatus;
   colorLabel?: ColorLabel | null;

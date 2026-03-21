@@ -23,6 +23,7 @@ function ImageSlotPreviewComponent({ asset, assignment, label, slot }: ImageSlot
   const cropTop = clamp(assignment.cropTop ?? 0, 0, 1);
   const cropWidth = clamp(assignment.cropWidth ?? 1, 0.05, 1);
   const cropHeight = clamp(assignment.cropHeight ?? 1, 0.05, 1);
+
   const cropAspect = (imageAspect * cropWidth) / Math.max(cropHeight, 0.001);
   const fitMode = assignment.fitMode;
 

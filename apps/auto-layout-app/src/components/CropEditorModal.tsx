@@ -317,12 +317,7 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
   const stageRef = useRef<HTMLDivElement | null>(null);
   const lastSyncedStateRef = useRef<string>("");
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
-  const [aspectPreset, setAspectPreset] = useState<AspectPreset>(() => detectAspectPreset(initialCrop, slot, imageAspect));
-  const [customAspectRatio, setCustomAspectRatio] = useState<number | null>(null);
-  const [customAspectInput, setCustomAspectInput] = useState("");
-  const [preserveOutputAspect, setPreserveOutputAspect] = useState(() =>
-    shouldPreserveOutputAspect(assignment, initialCrop, imageAspect, slot)
-  );
+  const [aspectPreset, setAspectPreset] = useState<AspectPreset>("slot");
   const [cropRect, setCropRect] = useState<CropRect>(initialCrop);
   const [draftRotation, setDraftRotation] = useState<number>(() => normalizeRotation(assignment.rotation ?? 0));
   const [isDragging, setIsDragging] = useState(false);
@@ -335,7 +330,7 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
     startY: number;
     initialRect: CropRect;
   } | null>(null);
-  const currentAspect = customAspectRatio ?? getAspectRatio(aspectPreset, slot);
+  const currentAspect = getAspectRatio(aspectPreset, slot);
   const slotAspect = slot.width / Math.max(slot.height, 0.0001);
   const assignmentStateKey = [
     assignment.cropLeft ?? "",
@@ -381,39 +376,10 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
 
     lastSyncedStateRef.current = assignmentStateKey;
     setCropRect(initialCrop);
-    setAspectPreset(detectAspectPreset(initialCrop, slot, imageAspect));
-    setCustomAspectRatio(null);
-    setCustomAspectInput("");
-    setPreserveOutputAspect(shouldPreserveOutputAspect(assignment, initialCrop, imageAspect, slot));
+    setAspectPreset("slot");
     setDraftRotation(normalizeRotation(assignment.rotation ?? 0));
     setIsDragging(false);
   }, [assignment.fitMode, assignment.rotation, assignmentStateKey, imageAspect, initialCrop, slot]);
-
-  const applyCustomAspectRatio = () => {
-    const parsedRatio = parseAspectRatioInput(customAspectInput);
-    if (!parsedRatio) {
-      return;
-    }
-
-    setAspectPreset("free");
-    setCustomAspectRatio(parsedRatio);
-    setCustomAspectInput(formatAspectRatioInput(parsedRatio));
-    setPreserveOutputAspect(true);
-    setCropRect((current) => fitRectToAspect(current, parsedRatio, imageAspect));
-  };
-
-  const invertCurrentAspectRatio = () => {
-    if (!currentAspect) {
-      return;
-    }
-
-    const invertedRatio = 1 / currentAspect;
-    setAspectPreset("free");
-    setCustomAspectRatio(invertedRatio);
-    setCustomAspectInput(formatAspectRatioInput(invertedRatio));
-    setPreserveOutputAspect(true);
-    setCropRect((current) => fitRectToAspect(current, invertedRatio, imageAspect));
-  };
 
   useEffect(() => {
     const element = stageRef.current;
@@ -601,7 +567,7 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
     const normalizedCrop = normalizeRect(cropRect);
 
     onApply({
-      fitMode: preserveOutputAspect ? "fit" : "crop",
+      fitMode: "crop",
       zoom: 1,
       offsetX: 0,
       offsetY: 0,
@@ -627,22 +593,12 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
     const cropVis = cropPxW / Math.max(cropPxH, 1);
     let sw: number;
     let sh: number;
-    if (preserveOutputAspect) {
-      if (cropVis > slotAspect) {
-        sw = cropPxW;
-        sh = cropPxW / Math.max(slotAspect, 0.001);
-      } else {
-        sh = cropPxH;
-        sw = cropPxH * slotAspect;
-      }
+    if (cropVis > slotAspect) {
+      sh = cropPxH;
+      sw = cropPxH * slotAspect;
     } else {
-      if (cropVis > slotAspect) {
-        sh = cropPxH;
-        sw = cropPxH * slotAspect;
-      } else {
-        sw = cropPxW;
-        sh = cropPxW / Math.max(slotAspect, 0.001);
-      }
+      sw = cropPxW;
+      sh = cropPxW / Math.max(slotAspect, 0.001);
     }
     return {
       left: `${cx - sw / 2}px`,
@@ -650,44 +606,9 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
       width: `${sw}px`,
       height: `${sh}px`,
     };
-  }, [cropRect, displayedImageRect, preserveOutputAspect, slotAspect]);
+  }, [cropRect, displayedImageRect, slotAspect]);
 
-  const previewStatus =
-    preserveOutputAspect && layoutCompatibility.hasTemplateContext && !layoutCompatibility.hasAnyCompatibleTemplate
-      ? {
-          tone: "warning",
-          title: "Nessun layout ideale",
-          message:
-            "Questo crop preservato resta valido e verra mostrato correttamente, ma nei template disponibili non esiste uno slot davvero vicino a questo ratio.",
-          detail:
-            layoutCompatibility.closestTemplateLabel && layoutCompatibility.closestSlotId
-              ? `Il match piu vicino e ${layoutCompatibility.closestTemplateLabel} / slot ${layoutCompatibility.closestSlotId}. Se vuoi riempire meglio la pagina, prova un ratio diverso o disattiva \"Mantieni ratio crop in output\".`
-              : 'Se vuoi riempire meglio la pagina, prova un ratio diverso o disattiva "Mantieni ratio crop in output".'
-        }
-      : preserveOutputAspect && layoutCompatibility.hasTemplateContext && !layoutCompatibility.currentSlotCompatible
-      ? {
-          tone: "warning",
-          title: "Layout da cambiare",
-          message:
-            layoutCompatibility.compatibleTemplateCount === 1
-              ? "Questo crop preservato non e ideale per lo slot attuale, ma esiste 1 template compatibile."
-              : `Questo crop preservato non e ideale per lo slot attuale, ma esistono ${layoutCompatibility.compatibleTemplateCount} template compatibili.`,
-          detail:
-            layoutCompatibility.closestTemplateLabel && layoutCompatibility.closestSlotId
-              ? `Per valorizzarlo meglio, passa a ${layoutCompatibility.closestTemplateLabel} / slot ${layoutCompatibility.closestSlotId}.`
-              : "Per valorizzarlo meglio, valuta un template con slot piu vicino al nuovo ratio."
-        }
-      : preserveOutputAspect && layoutCompatibility.hasTemplateContext
-        ? {
-            tone: "ok",
-            title: "Crop sostenibile",
-            message:
-              layoutCompatibility.compatibleTemplateCount === 1
-                ? "Il ratio preservato trova 1 layout compatibile tra i template disponibili."
-                : `Il ratio preservato trova ${layoutCompatibility.compatibleTemplateCount} layout compatibili tra i template disponibili.`,
-            detail: "Se cambi template o fai rebalance, il sistema cerchera di mantenere questo rapporto in modo coerente."
-          }
-        : null;
+  const previewStatus = null;
 
   return createPortal(
     <div className="modal-backdrop crop-editor-backdrop" onClick={onClose}>
@@ -699,7 +620,7 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
             <div className="crop-editor-modal__meta">
               <span className="crop-editor-modal__meta-chip">Crop {cropRatioLabel}</span>
               <span className="crop-editor-modal__meta-chip">Slot {slotRatioLabel}</span>
-              <span className="crop-editor-modal__meta-chip">Modo {preserveOutputAspect ? "preservato" : "adattivo"}</span>
+              <span className="crop-editor-modal__meta-chip">Modo vincolato allo slot</span>
             </div>
           </div>
           <button type="button" className="ghost-button" onClick={onClose}>
@@ -710,24 +631,6 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
         <div className="crop-editor-modal__body">
         <div className="crop-controls">
           <div className="crop-toolbar">
-            <div className="crop-toolbar__ratios">
-              {(["free", "slot", "1:1", "3:4", "4:5", "2:3", "16:9"] as AspectPreset[]).map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  className={aspectPreset === preset && customAspectRatio === null ? "crop-toolbar__ratio-btn crop-toolbar__ratio-btn--active" : "crop-toolbar__ratio-btn"}
-                  onClick={() => {
-                    setCustomAspectRatio(null);
-                    setCustomAspectInput("");
-                    setAspectPreset(preset);
-                    setPreserveOutputAspect(preset === "slot" ? shouldPreserveOutputAspect(assignment, initialCrop, imageAspect, slot) : preset !== "free");
-                    setCropRect((current) => fitRectToAspect(current, getAspectRatio(preset, slot), imageAspect));
-                  }}
-                >
-                  {preset === "free" ? "Libero" : preset === "slot" ? "Slot" : preset}
-                </button>
-              ))}
-            </div>
             <button
               type="button"
               className={advancedOpen ? "crop-toolbar__toggle-btn crop-toolbar__toggle-btn--active" : "crop-toolbar__toggle-btn"}
@@ -740,24 +643,9 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
           {advancedOpen ? (
             <div className="crop-advanced">
               <div className="crop-advanced__field">
-                <label className="crop-advanced__label">Ratio personalizzato</label>
+                <label className="crop-advanced__label">Vincoli</label>
                 <div className="crop-advanced__ratio-row">
-                  <input
-                    type="text"
-                    inputMode="text"
-                    className="crop-advanced__input"
-                    placeholder="es. 9:16"
-                    value={customAspectInput}
-                    onChange={(event) => setCustomAspectInput(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        applyCustomAspectRatio();
-                      }
-                    }}
-                  />
-                  <button type="button" className="ghost-button" onClick={applyCustomAspectRatio}>Applica</button>
-                  <button type="button" className="ghost-button" onClick={invertCurrentAspectRatio} disabled={!currentAspect}>Inverti</button>
+                  <span className="crop-advanced__input">Il crop resta agganciato al ratio dello slot {slotRatioLabel}.</span>
                   <button
                     type="button"
                     className="ghost-button"
@@ -765,9 +653,6 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
                       const defaultRect = getDefaultCropRect(asset, slot);
                       setCropRect(defaultRect);
                       setAspectPreset("slot");
-                      setCustomAspectRatio(null);
-                      setCustomAspectInput("");
-                      setPreserveOutputAspect(false);
                     }}
                   >
                     Reset
@@ -799,15 +684,6 @@ export function CropEditorModal({ asset, assignment, slot, availableTemplates, o
                   />
                 </div>
               </div>
-
-              <label className="crop-advanced__check">
-                <input
-                  type="checkbox"
-                  checked={preserveOutputAspect}
-                  onChange={(event) => setPreserveOutputAspect(event.target.checked)}
-                />
-                <span>Mantieni ratio crop in output</span>
-              </label>
             </div>
           ) : null}
         </div>

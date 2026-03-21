@@ -3,6 +3,7 @@ import { memo, useCallback } from "react";
 interface ZoomControlsProps {
   zoom: number;
   onZoomChange: (zoom: number) => void;
+  onZoomFit?: () => void;
   minZoom?: number;
   maxZoom?: number;
   step?: number;
@@ -46,6 +47,7 @@ function FitIcon() {
 function ZoomControlsContent({
   zoom,
   onZoomChange,
+  onZoomFit,
   minZoom = 0.25,
   maxZoom = 4,
   step = 0.25
@@ -61,8 +63,8 @@ function ZoomControlsContent({
   }, [zoom, step, minZoom, onZoomChange]);
 
   const handleZoomToFit = useCallback(() => {
-    onZoomChange(1);
-  }, [onZoomChange]);
+    onZoomFit?.();
+  }, [onZoomFit]);
 
   const handleZoomSelect = useCallback((newZoom: number) => {
     onZoomChange(newZoom);

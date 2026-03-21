@@ -1,9 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SHEET_PRESETS } from "@photo-tools/presets";
 import type {
   GeneratedPageLayout,
@@ -12,10 +7,7 @@ import type {
   RulerUnit,
 } from "@photo-tools/shared-types";
 import { AssignmentInspector } from "./AssignmentInspector";
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Utility helpers
-// ═══════════════════════════════════════════════════════════════════════════
+import { useStudio } from "./StudioContext";
 
 function formatMeasurement(value: number): string {
   return Number.isInteger(value) ? `${value}` : value.toFixed(1);
@@ -25,37 +17,31 @@ function normalizeGuides(values: number[] | undefined, maxCm: number): number[] 
   if (!Array.isArray(values)) {
     return [];
   }
+
   return Array.from(
     new Set(
       values
-        .filter((v) => Number.isFinite(v) && v > 0 && v < maxCm)
-        .map((v) => Number(v.toFixed(3)))
+        .filter((entry) => Number.isFinite(entry) && entry > 0 && entry < maxCm)
+        .map((entry) => Number(entry.toFixed(3)))
     )
-  ).sort((a, b) => a - b);
+  ).sort((left, right) => left - right);
 }
 
 function cmToPixels(cm: number, dpi: number): number {
   return (cm / 2.54) * dpi;
 }
 
-function pixelsToCm(px: number, dpi: number): number {
-  return (px / dpi) * 2.54;
-}
-
 function formatGuideValue(cm: number, page: GeneratedPageLayout, unit: RulerUnit): string {
   if (unit === "px") {
     return `${Math.round(cmToPixels(cm, page.sheetSpec.dpi))} px`;
   }
+
   return `${formatMeasurement(cm)} cm`;
 }
 
 function formatAspectRatioLabel(page: GeneratedPageLayout): string {
   return `${formatMeasurement(page.sheetSpec.widthCm)}:${formatMeasurement(page.sheetSpec.heightCm)}`;
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CommitOnBlurNumberField — shared inline input
-// ═══════════════════════════════════════════════════════════════════════════
 
 interface CommitOnBlurNumberFieldProps {
   label: string;
@@ -90,10 +76,12 @@ function CommitOnBlurNumberField({
       setDraftValue(formatMeasurement(value));
       return;
     }
+
     if (parsed !== value) {
       onCommit(parsed);
       return;
     }
+
     setDraftValue(formatMeasurement(value));
   }, [allowZero, draftValue, onCommit, value]);
 
@@ -110,7 +98,10 @@ function CommitOnBlurNumberField({
           onChange={(event) => setDraftValue(event.target.value)}
           onBlur={commitDraft}
           onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+
             if (event.key === "Escape") {
               setDraftValue(formatMeasurement(value));
               event.preventDefault();
@@ -122,25 +113,6 @@ function CommitOnBlurNumberField({
     </label>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 1. InspectorHeader
-// ═══════════════════════════════════════════════════════════════════════════
-
-function InspectorHeader({ onCollapse }: { onCollapse: () => void }) {
-  return (
-    <div className="layout-studio__inspector-header">
-      <span className="layout-studio__rail-eyebrow">Inspector</span>
-      <button type="button" className="ghost-button" onClick={onCollapse}>
-        Nascondi
-      </button>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 2. InspectorSummary
-// ═══════════════════════════════════════════════════════════════════════════
 
 interface InspectorSummaryProps {
   pageNumber: number;
@@ -172,10 +144,6 @@ function InspectorSummary({ pageNumber, assignmentsCount, slotsCount, dpi }: Ins
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 3. InspectorSheetSection
-// ═══════════════════════════════════════════════════════════════════════════
-
 interface InspectorSheetSectionProps {
   activePage: GeneratedPageLayout;
   onPageSheetPresetChange: (pageId: string, presetId: string) => void;
@@ -186,7 +154,7 @@ interface InspectorSheetSectionProps {
   ) => void;
 }
 
-function InspectorSheetSection({
+export function InspectorSheetSection({
   activePage,
   onPageSheetPresetChange,
   onPageSheetFieldChange,
@@ -204,7 +172,9 @@ function InspectorSheetSection({
           onChange={(event) => onPageSheetPresetChange(activePage.id, event.target.value)}
         >
           {SHEET_PRESETS.map((preset) => (
-            <option key={preset.id} value={preset.id}>{preset.label}</option>
+            <option key={preset.id} value={preset.id}>
+              {preset.label}
+            </option>
           ))}
         </select>
       </label>
@@ -212,7 +182,10 @@ function InspectorSheetSection({
       <div className="sheet-toolbar__presets inspector-sheet-settings__presets">
         {(["13x18", "15x20", "20x15", "20x30", "30x20", "a4"] as const).map((presetId) => {
           const preset = SHEET_PRESETS.find((item) => item.id === presetId);
-          if (!preset) return null;
+          if (!preset) {
+            return null;
+          }
+
           const isActive = activePage.sheetSpec.presetId === preset.id;
           return (
             <button
@@ -232,13 +205,13 @@ function InspectorSheetSection({
           label="Larghezza"
           className="inspector-field"
           value={activePage.sheetSpec.widthCm}
-          onCommit={(v) => onPageSheetFieldChange(activePage.id, "widthCm", v)}
+          onCommit={(value) => onPageSheetFieldChange(activePage.id, "widthCm", value)}
         />
         <CommitOnBlurNumberField
           label="Altezza"
           className="inspector-field"
           value={activePage.sheetSpec.heightCm}
-          onCommit={(v) => onPageSheetFieldChange(activePage.id, "heightCm", v)}
+          onCommit={(value) => onPageSheetFieldChange(activePage.id, "heightCm", value)}
         />
       </div>
 
@@ -251,7 +224,7 @@ function InspectorSheetSection({
           unit="cm"
           allowZero
           value={activePage.sheetSpec.marginCm}
-          onCommit={(v) => onPageSheetFieldChange(activePage.id, "marginCm", v)}
+          onCommit={(value) => onPageSheetFieldChange(activePage.id, "marginCm", value)}
         />
         <CommitOnBlurNumberField
           label="Gap"
@@ -261,7 +234,7 @@ function InspectorSheetSection({
           unit="cm"
           allowZero
           value={activePage.sheetSpec.gapCm}
-          onCommit={(v) => onPageSheetFieldChange(activePage.id, "gapCm", v)}
+          onCommit={(value) => onPageSheetFieldChange(activePage.id, "gapCm", value)}
         />
         <CommitOnBlurNumberField
           label="DPI"
@@ -269,7 +242,7 @@ function InspectorSheetSection({
           min="72"
           step="50"
           value={activePage.sheetSpec.dpi}
-          onCommit={(v) => onPageSheetFieldChange(activePage.id, "dpi", v)}
+          onCommit={(value) => onPageSheetFieldChange(activePage.id, "dpi", value)}
         />
       </div>
 
@@ -278,7 +251,13 @@ function InspectorSheetSection({
           type="button"
           className="ghost-button"
           title="Riduce gap di 0,1 cm"
-          onClick={() => onPageSheetFieldChange(activePage.id, "gapCm", Math.max(0, Number((activePage.sheetSpec.gapCm - 0.1).toFixed(1))))}
+          onClick={() =>
+            onPageSheetFieldChange(
+              activePage.id,
+              "gapCm",
+              Math.max(0, Number((activePage.sheetSpec.gapCm - 0.1).toFixed(1)))
+            )
+          }
         >
           Gap −
         </button>
@@ -286,7 +265,9 @@ function InspectorSheetSection({
           type="button"
           className="ghost-button"
           title="Aumenta gap di 0,1 cm"
-          onClick={() => onPageSheetFieldChange(activePage.id, "gapCm", Number((activePage.sheetSpec.gapCm + 0.1).toFixed(1)))}
+          onClick={() =>
+            onPageSheetFieldChange(activePage.id, "gapCm", Number((activePage.sheetSpec.gapCm + 0.1).toFixed(1)))
+          }
         >
           Gap +
         </button>
@@ -294,7 +275,13 @@ function InspectorSheetSection({
           type="button"
           className="ghost-button"
           title="Riduce margine di 0,1 cm"
-          onClick={() => onPageSheetFieldChange(activePage.id, "marginCm", Math.max(0, Number((activePage.sheetSpec.marginCm - 0.1).toFixed(1))))}
+          onClick={() =>
+            onPageSheetFieldChange(
+              activePage.id,
+              "marginCm",
+              Math.max(0, Number((activePage.sheetSpec.marginCm - 0.1).toFixed(1)))
+            )
+          }
         >
           Margine −
         </button>
@@ -302,7 +289,9 @@ function InspectorSheetSection({
           type="button"
           className="ghost-button"
           title="Aumenta margine di 0,1 cm"
-          onClick={() => onPageSheetFieldChange(activePage.id, "marginCm", Number((activePage.sheetSpec.marginCm + 0.1).toFixed(1)))}
+          onClick={() =>
+            onPageSheetFieldChange(activePage.id, "marginCm", Number((activePage.sheetSpec.marginCm + 0.1).toFixed(1)))
+          }
         >
           Margine +
         </button>
@@ -315,10 +304,6 @@ function InspectorSheetSection({
     </div>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 4. InspectorGuidesSection
-// ═══════════════════════════════════════════════════════════════════════════
 
 interface InspectorGuidesSectionProps {
   activePage: GeneratedPageLayout;
@@ -336,7 +321,7 @@ interface InspectorGuidesSectionProps {
   ) => void;
 }
 
-function InspectorGuidesSection({
+export function InspectorGuidesSection({
   activePage,
   pageGuides,
   verticalGuideDraft,
@@ -390,28 +375,50 @@ function InspectorGuidesSection({
         <label className="field inspector-field">
           <span>Verticale</span>
           <div className="field__input-with-unit">
-            <input type="number" min="0" step={stepSize} value={verticalGuideDraft} onChange={(e) => setVerticalGuideDraft(e.target.value)} />
+            <input
+              type="number"
+              min="0"
+              step={stepSize}
+              value={verticalGuideDraft}
+              onChange={(event) => setVerticalGuideDraft(event.target.value)}
+            />
             <span className="field__unit">{rulerUnit}</span>
           </div>
         </label>
         <button
           type="button"
           className="ghost-button inspector-guide-add"
-          onClick={() => { const n = Number(verticalGuideDraft); if (Number.isFinite(n)) upsertGuide("vertical", n); }}
+          onClick={() => {
+            const nextValue = Number(verticalGuideDraft);
+            if (Number.isFinite(nextValue)) {
+              upsertGuide("vertical", nextValue);
+            }
+          }}
         >
           +
         </button>
         <label className="field inspector-field">
           <span>Orizzontale</span>
           <div className="field__input-with-unit">
-            <input type="number" min="0" step={stepSize} value={horizontalGuideDraft} onChange={(e) => setHorizontalGuideDraft(e.target.value)} />
+            <input
+              type="number"
+              min="0"
+              step={stepSize}
+              value={horizontalGuideDraft}
+              onChange={(event) => setHorizontalGuideDraft(event.target.value)}
+            />
             <span className="field__unit">{rulerUnit}</span>
           </div>
         </label>
         <button
           type="button"
           className="ghost-button inspector-guide-add"
-          onClick={() => { const n = Number(horizontalGuideDraft); if (Number.isFinite(n)) upsertGuide("horizontal", n); }}
+          onClick={() => {
+            const nextValue = Number(horizontalGuideDraft);
+            if (Number.isFinite(nextValue)) {
+              upsertGuide("horizontal", nextValue);
+            }
+          }}
         >
           +
         </button>
@@ -436,6 +443,7 @@ function InspectorGuidesSection({
               : <span className="helper-inline">Nessuna</span>}
           </div>
         </div>
+
         <div className="inspector-guide-list">
           <strong>Orizzontali</strong>
           <div className="inspector-guide-list__items">
@@ -463,10 +471,6 @@ function InspectorGuidesSection({
     </div>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 5. InspectorSlotSection
-// ═══════════════════════════════════════════════════════════════════════════
 
 interface InspectorSlotSectionProps {
   activePage: GeneratedPageLayout;
@@ -505,15 +509,21 @@ function InspectorSlotSection({
         assignment={selectedAssignment}
         asset={selectedAsset}
         onChange={(changes) => {
-          if (!selectedSlot) return;
+          if (!selectedSlot) {
+            return;
+          }
           onUpdateSlotAssignment(activePage.id, selectedSlot.id, changes);
         }}
         onClear={() => {
-          if (!selectedSlot) return;
+          if (!selectedSlot) {
+            return;
+          }
           onClearSlot(activePage.id, selectedSlot.id);
         }}
         onOpenCropEditor={() => {
-          if (!selectedSlot) return;
+          if (!selectedSlot) {
+            return;
+          }
           onOpenCropEditor(activePage.id, selectedSlot.id);
         }}
       />
@@ -521,17 +531,13 @@ function InspectorSlotSection({
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 6. InspectorPageActions
-// ═══════════════════════════════════════════════════════════════════════════
-
 interface InspectorPageActionsProps {
   activePageId: string;
   onRebalancePage: (pageId: string) => void;
   onRemovePage: (pageId: string) => void;
 }
 
-function InspectorPageActions({ activePageId, onRebalancePage, onRemovePage }: InspectorPageActionsProps) {
+export function InspectorPageActions({ activePageId, onRebalancePage, onRemovePage }: InspectorPageActionsProps) {
   return (
     <div className="inspector-section inspector-section--actions">
       <span className="inspector-section__eyebrow">Azioni foglio</span>
@@ -556,9 +562,7 @@ function InspectorPageActions({ activePageId, onRebalancePage, onRemovePage }: I
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// InspectorPanel — orchestrator
-// ═══════════════════════════════════════════════════════════════════════════
+type InspectorTool = "overview" | "slot";
 
 export interface InspectorPanelProps {
   activePage: GeneratedPageLayout;
@@ -567,26 +571,6 @@ export interface InspectorPanelProps {
   selectedAsset?: ImageAsset;
   isCollapsed: boolean;
   onCollapse: () => void;
-  onPageSheetPresetChange: (pageId: string, presetId: string) => void;
-  onPageSheetFieldChange: (
-    pageId: string,
-    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm",
-    value: number
-  ) => void;
-  onPageSheetStyleChange: (
-    pageId: string,
-    changes: {
-      backgroundColor?: string;
-      backgroundImageUrl?: string;
-      photoBorderColor?: string;
-      photoBorderWidthCm?: number;
-      showRulers?: boolean;
-      rulerUnit?: RulerUnit;
-      verticalGuidesCm?: number[];
-      horizontalGuidesCm?: number[];
-    },
-    activity?: string
-  ) => void;
   onUpdateSlotAssignment: (
     pageId: string,
     slotId: string,
@@ -598,123 +582,139 @@ export interface InspectorPanelProps {
     >
   ) => void;
   onClearSlot: (pageId: string, slotId: string) => void;
-  onRebalancePage: (pageId: string) => void;
-  onRemovePage: (pageId: string) => void;
   onOpenCropEditor: (pageId: string, slotId: string) => void;
 }
 
-export function InspectorPanel({
-  activePage,
-  selectedSlot,
-  selectedAssignment,
-  selectedAsset,
-  isCollapsed,
-  onCollapse,
-  onPageSheetPresetChange,
-  onPageSheetFieldChange,
-  onPageSheetStyleChange,
-  onUpdateSlotAssignment,
-  onClearSlot,
-  onRebalancePage,
-  onRemovePage,
-  onOpenCropEditor,
-}: InspectorPanelProps) {
-  const [verticalGuideDraft, setVerticalGuideDraft] = useState("0");
-  const [horizontalGuideDraft, setHorizontalGuideDraft] = useState("0");
+export function InspectorPanel() {
+  const {
+    activePage,
+    selectedSlot,
+    selectedAssignment,
+    selectedAsset,
+    isInspectorCollapsed: isCollapsed,
+    setIsInspectorCollapsed,
+    onUpdateSlotAssignment,
+    onClearSlot,
+    onOpenCropEditor,
+    onPageSheetPresetChange,
+    onPageSheetFieldChange,
+  } = useStudio();
 
-  const pageGuides = useMemo(
-    () => ({
-      verticalGuidesCm: normalizeGuides(activePage.sheetSpec.verticalGuidesCm, activePage.sheetSpec.widthCm),
-      horizontalGuidesCm: normalizeGuides(activePage.sheetSpec.horizontalGuidesCm, activePage.sheetSpec.heightCm),
-    }),
-    [activePage]
-  );
+  const [activeTool, setActiveTool] = useState<InspectorTool | null>(null);
 
   useEffect(() => {
-    setVerticalGuideDraft("0");
-    setHorizontalGuideDraft("0");
-  }, [activePage.id, activePage.sheetSpec.rulerUnit]);
+    if (activePage?.id) {
+      setActiveTool(null);
+    }
+  }, [activePage?.id]);
 
-  const upsertGuide = useCallback(
-    (axis: "vertical" | "horizontal", displayValue: number) => {
-      if (!Number.isFinite(displayValue) || displayValue < 0) return;
-      const unit = activePage.sheetSpec.rulerUnit ?? "cm";
-      const maxCm = axis === "vertical" ? activePage.sheetSpec.widthCm : activePage.sheetSpec.heightCm;
-      const nextCm = unit === "px" ? pixelsToCm(displayValue, activePage.sheetSpec.dpi) : displayValue;
-      const field = axis === "vertical" ? "verticalGuidesCm" : "horizontalGuidesCm";
-      const nextGuides = normalizeGuides([...(pageGuides[field] ?? []), nextCm], maxCm);
-      onPageSheetStyleChange(
-        activePage.id,
-        { [field]: nextGuides },
-        `${axis === "vertical" ? "Guida verticale" : "Guida orizzontale"} aggiunta al foglio ${activePage.pageNumber}.`
-      );
-    },
-    [activePage, onPageSheetStyleChange, pageGuides]
-  );
+  if (!activePage) {
+    return null;
+  }
 
-  const removeGuide = useCallback(
-    (axis: "vertical" | "horizontal", guideCm: number) => {
-      const field = axis === "vertical" ? "verticalGuidesCm" : "horizontalGuidesCm";
-      const nextGuides = (pageGuides[field] ?? []).filter((v) => v !== guideCm);
-      onPageSheetStyleChange(
-        activePage.id,
-        { [field]: nextGuides },
-        `${axis === "vertical" ? "Guida verticale" : "Guida orizzontale"} rimossa dal foglio ${activePage.pageNumber}.`
-      );
-    },
-    [activePage, onPageSheetStyleChange, pageGuides]
-  );
+  const onCollapse = () => setIsInspectorCollapsed(!isCollapsed);
+
+  const slotDescription = !selectedSlot
+    ? "Seleziona una foto o uno slot"
+    : selectedAsset
+      ? `${selectedSlot.id} · ${selectedAsset.fileName}`
+      : `Slot ${selectedSlot.id}`;
+
+  if (isCollapsed) {
+    return (
+      <aside className="layout-studio__inspector layout-studio__inspector--collapsed">
+        <div className="layout-studio__inspector-rail">
+          <button
+            type="button"
+            className="layout-studio__inspector-tool"
+            onClick={onCollapse}
+            title="Mostra inspector"
+            aria-label="Mostra inspector"
+          >
+            ←
+          </button>
+        </div>
+      </aside>
+    );
+  }
 
   return (
-    <aside
-      className={
-        isCollapsed
-          ? "layout-studio__inspector layout-studio__inspector--collapsed"
-          : "layout-studio__inspector"
-      }
-    >
-      <InspectorHeader onCollapse={onCollapse} />
+    <aside className="layout-studio__inspector">
+      <div className="layout-studio__inspector-rail">
+        <button
+          type="button"
+          className={activeTool === "overview" ? "layout-studio__inspector-tool layout-studio__inspector-tool--active" : "layout-studio__inspector-tool"}
+          onClick={() => setActiveTool((current) => (current === "overview" ? null : "overview"))}
+          title="Panoramica foglio"
+          aria-label="Panoramica foglio"
+        >
+          i
+        </button>
 
-      <InspectorSummary
-        pageNumber={activePage.pageNumber}
-        assignmentsCount={activePage.assignments.length}
-        slotsCount={activePage.slotDefinitions.length}
-        dpi={activePage.sheetSpec.dpi}
-      />
+        <button
+          type="button"
+          className={activeTool === "slot" ? "layout-studio__inspector-tool layout-studio__inspector-tool--active" : "layout-studio__inspector-tool"}
+          onClick={() => setActiveTool((current) => (current === "slot" ? null : "slot"))}
+          title={selectedSlot ? "Regola foto selezionata" : "Seleziona prima una foto"}
+          aria-label="Regola foto selezionata"
+          disabled={!selectedSlot}
+        >
+          ◫
+        </button>
 
-      <InspectorSheetSection
-        activePage={activePage}
-        onPageSheetPresetChange={onPageSheetPresetChange}
-        onPageSheetFieldChange={onPageSheetFieldChange}
-      />
+        <button
+          type="button"
+          className="layout-studio__inspector-tool"
+          onClick={onCollapse}
+          title="Nascondi inspector"
+          aria-label="Nascondi inspector"
+        >
+          ×
+        </button>
+      </div>
 
-      <InspectorGuidesSection
-        activePage={activePage}
-        pageGuides={pageGuides}
-        verticalGuideDraft={verticalGuideDraft}
-        horizontalGuideDraft={horizontalGuideDraft}
-        setVerticalGuideDraft={setVerticalGuideDraft}
-        setHorizontalGuideDraft={setHorizontalGuideDraft}
-        upsertGuide={upsertGuide}
-        removeGuide={removeGuide}
-        onPageSheetStyleChange={onPageSheetStyleChange}
-      />
+      {activeTool ? (
+        <div className="layout-studio__inspector-flyout">
+          <div className="layout-studio__inspector-flyout-header">
+            <div className="layout-studio__inspector-context">
+              <span className="layout-studio__rail-eyebrow">Inspector</span>
+              <strong>{activeTool === "slot" ? "Foto" : "Panoramica"}</strong>
+              <span className="layout-studio__inspector-context-meta">
+                {activeTool === "slot"
+                  ? slotDescription
+                  : `${activePage.assignments.length}/${activePage.slotDefinitions.length} foto · ${activePage.sheetSpec.label}`}
+              </span>
+            </div>
 
-      <InspectorSlotSection
-        activePage={activePage}
-        selectedSlot={selectedSlot}
-        selectedAssignment={selectedAssignment}
-        selectedAsset={selectedAsset}
-        onUpdateSlotAssignment={onUpdateSlotAssignment}
-        onClearSlot={onClearSlot}
-        onOpenCropEditor={onOpenCropEditor}
-      />
+            <button
+              type="button"
+              className="ghost-button ghost-button--small"
+              onClick={() => setActiveTool(null)}
+            >
+              Chiudi
+            </button>
+          </div>
 
-      <InspectorPageActions
-        activePageId={activePage.id}
-        onRebalancePage={onRebalancePage}
-        onRemovePage={onRemovePage}
-      />
+          {activeTool === "overview" ? (
+            <InspectorSummary
+              pageNumber={activePage.pageNumber}
+              assignmentsCount={activePage.assignments.length}
+              slotsCount={activePage.slotDefinitions.length}
+              dpi={activePage.sheetSpec.dpi}
+            />
+          ) : (
+            <InspectorSlotSection
+              activePage={activePage}
+              selectedSlot={selectedSlot}
+              selectedAssignment={selectedAssignment}
+              selectedAsset={selectedAsset}
+              onUpdateSlotAssignment={onUpdateSlotAssignment}
+              onClearSlot={onClearSlot}
+              onOpenCropEditor={onOpenCropEditor}
+            />
+          )}
+        </div>
+      ) : null}
     </aside>
   );
 }

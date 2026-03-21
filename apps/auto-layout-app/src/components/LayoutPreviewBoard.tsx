@@ -1,4 +1,4 @@
-import {
+﻿import {
   memo,
   useDeferredValue,
   useEffect,
@@ -22,8 +22,9 @@ import type {
   LayoutTemplate
 } from "@photo-tools/shared-types";
 import { ConfirmModal } from "./ConfirmModal";
-import { InspectorPanel } from "./InspectorPanel";
+import { PageSettingsPanel } from "./PageSettingsPanel";
 import { CropEditorModal } from "./CropEditorModal";
+import { useStudio } from "./StudioContext";
 import { SheetSurface, buildAssignmentsBySlotId } from "./SheetSurface";
 import { preloadImageUrls } from "../image-cache";
 import { PhotoReplaceModal } from "./PhotoReplaceModal";
@@ -52,12 +53,8 @@ interface ReplaceTarget {
   currentImageId?: string;
 }
 
-interface CropTarget {
-  pageId: string;
-  slotId: string;
-}
-
 type ResizePane = "left";
+type PageHeaderPanel = "background" | "border";
 
 interface LayoutPreviewBoardProps {
   result: AutoLayoutResult;
@@ -69,6 +66,12 @@ interface LayoutPreviewBoardProps {
   selectedPageId: string | null;
   selectedSlotKey: string | null;
   dragState: DragState | null;
+  stagedImageIds: string[];
+  isTransferTrayPinned: boolean;
+  onToggleTransferTrayPinned: () => void;
+  onStageImage: (imageId: string) => void;
+  onUnstageImage: (imageId: string) => void;
+  onClearStagedImages: () => void;
   onSelectPage: (pageId: string, slotId?: string) => void;
   onStartSlotDrag: (pageId: string, slotId: string, imageId: string) => void;
   onDragAssetStart: (imageId: string) => void;
@@ -111,17 +114,9 @@ interface LayoutPreviewBoardProps {
   onAssetsMetadataChange?: (
     changesById: Map<string, Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>>
   ) => void;
-  onUpdateSlotAssignment: (
-    pageId: string,
-    slotId: string,
-    changes: Partial<
-      Pick<
-        LayoutAssignment,
-        "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked" | "cropLeft" | "cropTop" | "cropWidth" | "cropHeight"
-      >
-    >
-  ) => void;
   zoom: number;
+  zoomMode: "manual" | "fit";
+  onZoomResolved: (zoom: number) => void;
 }
 
 interface PreservedCropInfo {
@@ -148,6 +143,17 @@ interface PageCropGuidance {
 }
 
 const PRESERVED_CROP_TEMPLATE_TOLERANCE = 0.22;
+
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(
+    target.isContentEditable ||
+      target.closest("input, textarea, select, [contenteditable='true'], [role='textbox']")
+  );
+}
 
 function getTemplateOptions(templates: LayoutTemplate[], photoCount: number): LayoutTemplate[] {
   return templates.filter(
@@ -617,6 +623,12 @@ export function LayoutPreviewBoard({
   selectedPageId,
   selectedSlotKey,
   dragState,
+  stagedImageIds,
+  isTransferTrayPinned,
+  onToggleTransferTrayPinned,
+  onStageImage,
+  onUnstageImage,
+  onClearStagedImages,
   onSelectPage,
   onStartSlotDrag,
   onDragAssetStart,
@@ -640,8 +652,9 @@ export function LayoutPreviewBoard({
   recentlyAddedPageId,
   recentlyAddedSlotKey,
   onAssetsMetadataChange,
-  onUpdateSlotAssignment,
-  zoom
+  zoom,
+  zoomMode,
+  onZoomResolved
 }: LayoutPreviewBoardProps) {
   const [isTemplateChooserOpen, setIsTemplateChooserOpen] = useState(false);
   const [templateApplyScope, setTemplateApplyScope] = useState<"single" | "visible">("single");
@@ -650,12 +663,25 @@ export function LayoutPreviewBoard({
   const [assetFilter, setAssetFilter] = useState<AssetFilter>("all");
   const [pageSectionFilter, setPageSectionFilter] = useState<PageSectionFilter>("all");
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null);
-  const [cropTarget, setCropTarget] = useState<CropTarget | null>(null);
-  const [leftRailWidth, setLeftRailWidth] = useState(260);
-  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState(true);
+  
+  const { cropTarget, onOpenCropEditor: handleCropTargetOpen, onCloseCropEditor: handleCropTargetClose, onUpdateSlotAssignment } = useStudio();
+
+  const [leftRailWidth, setLeftRailWidth] = useState(236);
+  const [isPageSettingsOpen, setIsPageSettingsOpen] = useState(false);
+  const [openPageHeaderPanel, setOpenPageHeaderPanel] = useState<{ pageId: string; panel: PageHeaderPanel } | null>(null);
   const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
+  const [isTransferTrayOpen, setIsTransferTrayOpen] = useState(true);
+  const [trayPosition, setTrayPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragChipTargetPageIdRef = useRef<string | null>(null);
   const resizeStateRef = useRef<{ pane: ResizePane; startX: number; startWidth: number } | null>(null);
+  const trayRef = useRef<HTMLDivElement | null>(null);
+  const trayRailRef = useRef<HTMLDivElement | null>(null);
+  const trayDragStateRef = useRef<{
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
   const activePage = result.pages.find((page) => page.id === selectedPageId) ?? result.pages[0] ?? null;
   const activeIndex = activePage ? result.pages.findIndex((page) => page.id === activePage.id) : 0;
   const previousPage = activeIndex > 0 ? result.pages[activeIndex - 1] ?? null : null;
@@ -666,6 +692,10 @@ export function LayoutPreviewBoard({
         ? getTemplateOptions(result.availableTemplates, Math.max(activePage.imageIds.length, 1))
         : [],
     [activePage, result.availableTemplates]
+  );
+  const availableAssetsById = useMemo(
+    () => new Map(availableAssetsForPicker.map((asset) => [asset.id, asset] as const)),
+    [availableAssetsForPicker]
   );
   const previewTemplate = useMemo(() => {
     if (templatePreviewId) {
@@ -820,14 +850,6 @@ export function LayoutPreviewBoard({
 
   const handleReplaceTargetClose = useCallback(() => {
     setReplaceTarget(null);
-  }, []);
-
-  const handleCropTargetOpen = useCallback((pageId: string, slotId: string) => {
-    setCropTarget({ pageId, slotId });
-  }, []);
-
-  const handleCropTargetClose = useCallback(() => {
-    setCropTarget(null);
   }, []);
 
   const handlePageBackgroundUpload = useCallback(
@@ -998,13 +1020,51 @@ export function LayoutPreviewBoard({
   );
 
 
-  const handleOpenInspectorForPage = useCallback(
+  const handleOpenPageSettingsForPage = useCallback(
     (page: GeneratedPageLayout) => {
-      setIsInspectorCollapsed(false);
+      setIsPageSettingsOpen(true);
       handleJumpToPage(page);
     },
     [handleJumpToPage]
   );
+
+  const handleTogglePageHeaderPanel = useCallback((pageId: string, panel: PageHeaderPanel) => {
+    setOpenPageHeaderPanel((current) =>
+      current?.pageId === pageId && current.panel === panel ? null : { pageId, panel }
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!openPageHeaderPanel) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(".page-context-header__appearance") ||
+        target?.closest(".page-context-header__style-popover")
+      ) {
+        return;
+      }
+
+      setOpenPageHeaderPanel(null);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenPageHeaderPanel(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openPageHeaderPanel]);
 
   const handleSelectPageFromCard = useCallback(
     (event: MouseEvent<HTMLElement>, page: GeneratedPageLayout) => {
@@ -1120,6 +1180,119 @@ export function LayoutPreviewBoard({
     },
     [dragState, runAutoScroll, stopAutoScroll]
   );
+
+  useEffect(() => {
+    if (zoomMode !== "fit" || typeof window === "undefined") {
+      return;
+    }
+
+    const computeFitZoom = () => {
+      const canvasElement = canvasRef.current;
+      const pageElement = document.getElementById(`layout-page-${activePage.id}`);
+      if (!canvasElement || !pageElement) {
+        return;
+      }
+
+      const canvasRect = canvasElement.getBoundingClientRect();
+      const availableWidth = Math.max(canvasRect.width - 32, 320);
+      const availableHeight = Math.max(window.innerHeight - canvasRect.top - 40, 320);
+      const widthZoom = availableWidth / Math.max(pageElement.offsetWidth, 1);
+      const heightZoom = availableHeight / Math.max(pageElement.offsetHeight, 1);
+      const nextZoom = Math.max(0.5, Math.min(1, Math.min(widthZoom, heightZoom)));
+
+      onZoomResolved(Number(nextZoom.toFixed(2)));
+    };
+
+    computeFitZoom();
+    window.addEventListener("resize", computeFitZoom);
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => computeFitZoom())
+        : null;
+
+    if (resizeObserver) {
+      if (canvasRef.current) {
+        resizeObserver.observe(canvasRef.current);
+      }
+
+      const pageElement = document.getElementById(`layout-page-${activePage.id}`);
+      if (pageElement) {
+        resizeObserver.observe(pageElement);
+      }
+    }
+
+    return () => {
+      window.removeEventListener("resize", computeFitZoom);
+      resizeObserver?.disconnect();
+    };
+  }, [activePage.id, leftRailWidth, onZoomResolved, zoomMode]);
+
+  useEffect(() => {
+    const trayRailElement = trayRailRef.current;
+    if (!trayRailElement) {
+      return;
+    }
+
+    const clampTrayPosition = (x: number, y: number) => {
+      const trayWidth = trayRef.current?.offsetWidth ?? 400;
+      const maxLeftTravel = Math.max(0, trayRailElement.clientWidth - trayWidth - 12);
+      const maxY = 28;
+
+      return {
+        x: Math.min(0, Math.max(-maxLeftTravel, x)),
+        y: Math.min(Math.max(0, y), maxY)
+      };
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const dragState = trayDragStateRef.current;
+      if (!dragState) {
+        return;
+      }
+
+      setTrayPosition(
+        clampTrayPosition(
+          dragState.originX + (event.clientX - dragState.startX),
+          dragState.originY + (event.clientY - dragState.startY)
+        )
+      );
+    };
+
+    const handlePointerUp = () => {
+      const trayWidth = trayRef.current?.offsetWidth ?? 400;
+      const maxLeftTravel = Math.max(0, trayRailElement.clientWidth - trayWidth - 12);
+      const snapThreshold = Math.min(88, Math.max(44, maxLeftTravel * 0.28));
+
+      setTrayPosition((current) => {
+        const snappedX =
+          maxLeftTravel <= 0
+            ? 0
+            : Math.abs(current.x) <= snapThreshold
+              ? 0
+              : Math.abs(current.x + maxLeftTravel) <= snapThreshold
+                ? -maxLeftTravel
+                : current.x;
+
+        return clampTrayPosition(snappedX, current.y);
+      });
+      trayDragStateRef.current = null;
+    };
+
+    const handleResize = () => {
+      setTrayPosition((current) => clampTrayPosition(current.x, current.y));
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
 
   useEffect(() => {
     setIsTemplateChooserOpen(false);
@@ -1261,7 +1434,7 @@ export function LayoutPreviewBoard({
   }
   const workspaceStyle = {
     "--layout-rail-width": `${leftRailWidth}px`,
-    "--layout-inspector-width": "clamp(320px, 30vw, 400px)"
+    "--layout-inspector-width": "clamp(272px, 22vw, 320px)"
   } as CSSProperties;
 
   return (
@@ -1270,27 +1443,24 @@ export function LayoutPreviewBoard({
         <div className="layout-studio__context-bar-info">
           <span className="layout-studio__context-bar-label">Foglio {activePage.pageNumber}</span>
           <span className="layout-studio__context-bar-meta">
-            {activePage.sheetSpec.label} · {formatMeasurement(activePage.sheetSpec.widthCm)}×{formatMeasurement(activePage.sheetSpec.heightCm)}cm · {activePage.templateLabel}
+            {activePage.sheetSpec.label} · {formatMeasurement(activePage.sheetSpec.widthCm)}×{formatMeasurement(activePage.sheetSpec.heightCm)} cm · {activePage.templateLabel}
           </span>
         </div>
 
         <div className="layout-studio__context-bar-actions">
           <button
             type="button"
+            className={`secondary-button secondary-button--compact ${isPageSettingsOpen ? "is-active" : ""}`}
+            onClick={() => setIsPageSettingsOpen((current) => !current)}
+          >
+            Foglio
+          </button>
+          <button
+            type="button"
             className="secondary-button secondary-button--compact"
             onClick={onCreatePageFromUnused}
-            onDragOver={(event) => {
-              if (!dragState) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-            }}
-            onDrop={(event) => {
-              if (!dragState) return;
-              event.preventDefault();
-              onCreatePageWithImage(dragState.imageId);
-            }}
           >
-            {dragState ? "Rilascia qui per nuovo foglio" : "Nuovo foglio"}
+            Nuovo foglio
           </button>
           <button
             type="button"
@@ -1302,14 +1472,7 @@ export function LayoutPreviewBoard({
         </div>
       </div>
 
-      <div
-        className={
-          isInspectorCollapsed
-            ? "layout-studio__workspace"
-            : "layout-studio__workspace layout-studio__workspace--inspector-open"
-        }
-        style={workspaceStyle}
-      >
+      <div className="layout-studio__workspace" style={workspaceStyle}>
         <aside className="layout-studio__sidebar">
           <PhotoRibbon
             assets={deferredAssets}
@@ -1321,23 +1484,12 @@ export function LayoutPreviewBoard({
             onDragAssetStart={onDragAssetStart}
             onDragEnd={onDragEnd}
             onAssetsMetadataChange={onAssetsMetadataChange}
-            onAssetDoubleClick={
-              selectedSlot
-                ? (imageId) => onAssetDropped(activePage.id, selectedSlot.id, imageId)
-                : undefined
-            }
-          />
-          {dragState && (
-            <div className="layout-studio__sidebar-dropzone">
-              <div
-                className="inspector-dropzone inspector-dropzone--active"
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={() => onDropToUnused()}
-              >
-                <strong>Rimuovi dal layout</strong>
-              </div>
-            </div>
-          )}
+              onAssetDoubleClick={
+                selectedSlot
+                  ? (imageId) => onAssetDropped(activePage.id, selectedSlot.id, imageId)
+                  : undefined
+              }
+            />
         </aside>
 
         <div
@@ -1495,7 +1647,7 @@ export function LayoutPreviewBoard({
                   </div>
 
                   <div className="template-drawer__compare-arrow" aria-hidden="true">
-                    â†’
+                    →
                   </div>
 
                   <div className="template-drawer__compare-card template-drawer__compare-card--preview">
@@ -1586,6 +1738,195 @@ export function LayoutPreviewBoard({
             </div>
           ) : null}
 
+          <PageSettingsPanel
+            activePage={activePage}
+            isOpen={isPageSettingsOpen}
+            onClose={() => setIsPageSettingsOpen(false)}
+            onPageSheetPresetChange={onPageSheetPresetChange}
+            onPageSheetFieldChange={onPageSheetFieldChange}
+            onPageSheetStyleChange={onPageSheetStyleChange}
+            onRebalancePage={onRebalancePage}
+            onRemovePage={onRemovePage}
+          />
+
+          <div
+            ref={trayRailRef}
+            className={
+              isTransferTrayOpen
+                ? "layout-studio__transfer-tray layout-studio__transfer-tray--open"
+                : "layout-studio__transfer-tray layout-studio__transfer-tray--closed"
+            }
+            aria-label="Parcheggio spostamenti"
+          >
+            {isTransferTrayOpen ? (
+              <div
+                ref={trayRef}
+                className="transfer-tray"
+                style={{ transform: `translate3d(${trayPosition.x}px, ${trayPosition.y}px, 0)` }}
+              >
+                <div
+                  className="transfer-tray__header"
+                  onPointerDown={(event) => {
+                    const target = event.target as HTMLElement | null;
+                    if (target?.closest("button")) {
+                      return;
+                    }
+
+                    trayDragStateRef.current = {
+                      startX: event.clientX,
+                      startY: event.clientY,
+                      originX: trayPosition.x,
+                      originY: trayPosition.y
+                    };
+                  }}
+                >
+                  <strong>Parcheggio</strong>
+                  <span className="transfer-tray__meta">
+                    {stagedImageIds.length > 0
+                      ? `${stagedImageIds.length} foto pronte${isTransferTrayPinned ? " - pin attivo" : ""}`
+                      : "Trascina qui una foto per spostarla"}
+                  </span>
+                  <button
+                    type="button"
+                    className="ghost-button transfer-tray__close"
+                    onClick={() => setIsTransferTrayOpen(false)}
+                    title="Chiudi parcheggio"
+                    aria-label="Chiudi parcheggio"
+                  >
+                    ×
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      isTransferTrayPinned
+                        ? "ghost-button transfer-tray__pin transfer-tray__pin--active"
+                        : "ghost-button transfer-tray__pin"
+                    }
+                    onClick={onToggleTransferTrayPinned}
+                    aria-pressed={isTransferTrayPinned}
+                    title={
+                      isTransferTrayPinned
+                        ? "Pin attivo: le foto restano nel parcheggio anche dopo il drop"
+                        : "Attiva il pin per mantenere le foto nel parcheggio dopo il drop"
+                    }
+                  >
+                    Pin
+                  </button>
+                  {stagedImageIds.length > 0 ? (
+                    <button
+                      type="button"
+                      className="ghost-button transfer-tray__clear"
+                      onClick={onClearStagedImages}
+                      title="Svuota il parcheggio"
+                    >
+                      Svuota
+                    </button>
+                  ) : null}
+                </div>
+
+                <div
+                  className={[
+                    "transfer-tray__dropzone",
+                    dragState ? "transfer-tray__dropzone--active" : ""
+                  ].filter(Boolean).join(" ")}
+                  onDragOver={(event) => {
+                    if (!dragState) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(event) => {
+                    if (!dragState) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onStageImage(dragState.imageId);
+                  }}
+                >
+                  {stagedImageIds.length === 0 ? (
+                    <span className="transfer-tray__empty">
+                      Rilascia qui una foto. Poi vai al foglio giusto e trascinala nello slot (vuoto = aggiungi, pieno = sostituisci/scambia).
+                    </span>
+                  ) : (
+                    <div className="transfer-tray__items" role="list" aria-label="Foto parcheggiate">
+                      {stagedImageIds.map((imageId) => {
+                        const asset = availableAssetsById.get(imageId) ?? assetsById.get(imageId) ?? null;
+                        const usage = usageByAssetId.get(imageId);
+                        const previewUrl = asset?.thumbnailUrl ?? asset?.previewUrl ?? null;
+                        const label = usage ? `F.${usage.pageNumber}` : "Libera";
+                        const title = asset?.fileName ? `${asset.fileName} (${label})` : `${imageId} (${label})`;
+
+                        return (
+                          <div key={imageId} className="transfer-tray__item" role="listitem">
+                            <button
+                              type="button"
+                              className="transfer-tray__item-btn"
+                              draggable
+                              title={title}
+                              onDragStart={(event) => {
+                                event.dataTransfer.effectAllowed = "move";
+                                event.dataTransfer.setData("text/plain", imageId);
+                                setTimeout(() => onDragAssetStart(imageId), 0);
+                              }}
+                              onDragEnd={onDragEnd}
+                            >
+                              {previewUrl ? (
+                                <img
+                                  src={previewUrl}
+                                  alt={asset?.fileName ?? imageId}
+                                  className="transfer-tray__item-image"
+                                  loading="lazy"
+                                />
+                              ) : (
+                                <div className="transfer-tray__item-placeholder">
+                                  {(asset?.fileName ?? imageId).slice(0, 10)}
+                                </div>
+                              )}
+                              <span className="transfer-tray__item-badge">{label}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              className="transfer-tray__item-remove"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onUnstageImage(imageId);
+                              }}
+                              aria-label="Rimuovi dal parcheggio"
+                              title="Rimuovi dal parcheggio"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="ghost-button transfer-tray-launcher"
+                onClick={() => setIsTransferTrayOpen(true)}
+                title="Apri parcheggio"
+                aria-label={
+                  stagedImageIds.length > 0
+                    ? `Apri parcheggio con ${stagedImageIds.length} foto`
+                    : "Apri parcheggio"
+                }
+              >
+                <span className="transfer-tray-launcher__icon" aria-hidden="true">
+                  ⤴
+                </span>
+                <span className="transfer-tray-launcher__label">Parcheggio</span>
+                {stagedImageIds.length > 0 ? (
+                  <span className="transfer-tray-launcher__count" aria-hidden="true">
+                    {stagedImageIds.length}
+                  </span>
+                ) : null}
+              </button>
+            )}
+          </div>
+
           <div
             ref={canvasRef}
             className="layout-studio__canvas layout-studio__canvas--vertical"
@@ -1619,7 +1960,6 @@ export function LayoutPreviewBoard({
                       onClick={(event) => handleSelectPageFromCard(event, page)}
                     >
                       <div className="page-context-header">
-                        {/* ── LEFT: Identity ── */}
                         <div className="page-context-header__identity">
                           <span className="page-context-header__page-number">Foglio {page.pageNumber}</span>
                           <strong className="page-context-header__template-name">{page.templateLabel}</strong>
@@ -1645,7 +1985,6 @@ export function LayoutPreviewBoard({
                           ) : null}
                         </div>
 
-                        {/* ── CENTER: Layout actions ── */}
                         <div className="page-context-header__layout-actions">
                           <select
                             className="page-context-header__template-select"
@@ -1680,286 +2019,226 @@ export function LayoutPreviewBoard({
                           >
                             Refresh
                           </button>
-                          {dragState?.kind === "slot" && dragState.sourcePageId === page.id ? (
-                            <div
-                              className="layout-studio__page-header-dropzone"
-                              onDragOver={(event) => {
-                                event.preventDefault();
-                                event.dataTransfer.dropEffect = "move";
-                              }}
-                              onDrop={(event) => {
-                                event.preventDefault();
-                                onAddToPage(page.id, dragState.imageId);
-                              }}
-                              title="Rilascia qui per riorganizzare il foglio corrente"
-                            >
-                              Rilascia qui
-                            </div>
-                          ) : null}
                         </div>
 
-                        {/* ── RIGHT: Appearance + State ── */}
                         <div className="page-context-header__right">
                           <div
                             className="page-context-header__appearance"
                             onClick={(event) => event.stopPropagation()}
                           >
-                            <div className="page-context-header__style-group">
-                              <span className="page-context-header__style-label">Sfondo</span>
-                              <label
-                                className="layout-studio__page-color-chip"
-                                title={`Colore di sfondo del foglio ${page.pageNumber}`}
-                              >
-                                <input
-                                  type="color"
-                                  value={page.sheetSpec.backgroundColor ?? "#ffffff"}
-                                  onChange={(event) =>
-                                    onPageSheetStyleChange(
-                                      page.id,
-                                      { backgroundColor: event.target.value },
-                                      `Colore di sfondo aggiornato per il foglio ${page.pageNumber}.`
-                                    )
-                                  }
-                                />
-                              </label>
-                              <label
-                                className={
-                                  page.sheetSpec.backgroundImageUrl
-                                    ? "layout-studio__page-style-button layout-studio__page-style-button--active"
-                                    : "layout-studio__page-style-button"
-                                }
-                                title={`Carica un'immagine di sfondo per il foglio ${page.pageNumber}`}
-                              >
-                                Img
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  hidden
-                                  onChange={(event) => handlePageBackgroundUpload(page, event)}
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                className="layout-studio__page-style-button"
-                                disabled={!page.sheetSpec.backgroundImageUrl}
-                                onClick={() =>
-                                  onPageSheetStyleChange(
-                                    page.id,
-                                    { backgroundImageUrl: "" },
-                                    `Sfondo immagine rimosso dal foglio ${page.pageNumber}.`
-                                  )
-                                }
-                                title={`Rimuovi l'immagine di sfondo dal foglio ${page.pageNumber}`}
-                              >
-                                ✕
-                              </button>
-                            </div>
-                            <div className="page-context-header__style-group">
-                              <span className="page-context-header__style-label">Bordi</span>
-                              <label
-                                className="layout-studio__page-color-chip"
-                                title={`Colore bordo foto del foglio ${page.pageNumber}`}
-                              >
-                                <input
-                                  type="color"
-                                  value={page.sheetSpec.photoBorderColor ?? "#ffffff"}
-                                  onChange={(event) =>
-                                    onPageSheetStyleChange(
-                                      page.id,
-                                      { photoBorderColor: event.target.value },
-                                      `Colore bordo foto aggiornato per il foglio ${page.pageNumber}.`
-                                    )
-                                  }
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                className="layout-studio__page-style-button"
-                                onClick={() => adjustPageBorderWidth(page, -0.05)}
-                                title="Riduci spessore bordo"
-                              >
-                                −
-                              </button>
-                              <span className="page-context-header__border-value">
+                            <button
+                              type="button"
+                              className={
+                                openPageHeaderPanel?.pageId === page.id && openPageHeaderPanel.panel === "background"
+                                  ? "page-context-header__style-toggle page-context-header__style-toggle--active"
+                                  : "page-context-header__style-toggle"
+                              }
+                              onClick={() => handleTogglePageHeaderPanel(page.id, "background")}
+                              title={`Apri i controlli sfondo del foglio ${page.pageNumber}`}
+                            >
+                              <span className="page-context-header__style-toggle-label">Sfondo</span>
+                              <span
+                                className="page-context-header__style-swatch"
+                                style={{ backgroundColor: page.sheetSpec.backgroundColor ?? "#ffffff" }}
+                                aria-hidden="true"
+                              />
+                              {page.sheetSpec.backgroundImageUrl ? (
+                                <span className="page-context-header__style-pill">Img</span>
+                              ) : null}
+                            </button>
+
+                            <button
+                              type="button"
+                              className={
+                                openPageHeaderPanel?.pageId === page.id && openPageHeaderPanel.panel === "border"
+                                  ? "page-context-header__style-toggle page-context-header__style-toggle--active"
+                                  : "page-context-header__style-toggle"
+                              }
+                              onClick={() => handleTogglePageHeaderPanel(page.id, "border")}
+                              title={`Apri i controlli bordo del foglio ${page.pageNumber}`}
+                            >
+                              <span className="page-context-header__style-toggle-label">Bordi</span>
+                              <span
+                                className="page-context-header__style-swatch"
+                                style={{ backgroundColor: page.sheetSpec.photoBorderColor ?? "#ffffff" }}
+                                aria-hidden="true"
+                              />
+                              <span className="page-context-header__style-pill">
                                 {(page.sheetSpec.photoBorderWidthCm ?? 0).toFixed(2)} cm
                               </span>
-                              <button
-                                type="button"
-                                className="layout-studio__page-style-button"
-                                onClick={() => adjustPageBorderWidth(page, 0.05)}
-                                title="Aumenta spessore bordo"
-                              >
-                                +
-                              </button>
-                            </div>
+                            </button>
+
+                            <button
+                              type="button"
+                              className={
+                                page.sheetSpec.showRulers
+                                  ? "page-context-header__style-toggle page-context-header__style-toggle--active"
+                                  : "page-context-header__style-toggle"
+                              }
+                              onClick={() =>
+                                onPageSheetStyleChange(
+                                  page.id,
+                                  { showRulers: !(page.sheetSpec.showRulers ?? false) },
+                                  `Righelli ${(page.sheetSpec.showRulers ?? false) ? "nascosti" : "attivati"} sul foglio ${page.pageNumber}.`
+                                )
+                              }
+                              title={`Attiva o disattiva i righelli del foglio ${page.pageNumber}`}
+                            >
+                              <span className="page-context-header__style-toggle-label">Righelli</span>
+                              <span className="page-context-header__style-pill">
+                                {page.sheetSpec.showRulers ? (page.sheetSpec.rulerUnit ?? "cm").toUpperCase() : "Off"}
+                              </span>
+                            </button>
                           </div>
+                          {openPageHeaderPanel?.pageId === page.id ? (
+                            <div
+                              className="page-context-header__style-popover"
+                              onClick={(event) => event.stopPropagation()}
+                            >
+                              {openPageHeaderPanel.panel === "background" ? (
+                                <div className="page-context-header__style-group">
+                                  <span className="page-context-header__style-label">Sfondo</span>
+                                  <label
+                                    className="layout-studio__page-color-chip"
+                                    title={`Colore di sfondo del foglio ${page.pageNumber}`}
+                                  >
+                                    <input
+                                      type="color"
+                                      value={page.sheetSpec.backgroundColor ?? "#ffffff"}
+                                      onChange={(event) =>
+                                        onPageSheetStyleChange(
+                                          page.id,
+                                          { backgroundColor: event.target.value },
+                                          `Colore di sfondo aggiornato per il foglio ${page.pageNumber}.`
+                                        )
+                                      }
+                                    />
+                                  </label>
+                                  <label
+                                    className={
+                                      page.sheetSpec.backgroundImageUrl
+                                        ? "layout-studio__page-style-button layout-studio__page-style-button--active"
+                                        : "layout-studio__page-style-button"
+                                    }
+                                    title={`Carica un'immagine di sfondo per il foglio ${page.pageNumber}`}
+                                  >
+                                    Img
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      hidden
+                                      onChange={(event) => handlePageBackgroundUpload(page, event)}
+                                    />
+                                  </label>
+                                  <button
+                                    type="button"
+                                    className="layout-studio__page-style-button"
+                                    disabled={!page.sheetSpec.backgroundImageUrl}
+                                    onClick={() =>
+                                      onPageSheetStyleChange(
+                                        page.id,
+                                        { backgroundImageUrl: "" },
+                                        `Sfondo immagine rimosso dal foglio ${page.pageNumber}.`
+                                      )
+                                    }
+                                    title={`Rimuovi l'immagine di sfondo dal foglio ${page.pageNumber}`}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="page-context-header__style-group">
+                                  <span className="page-context-header__style-label">Bordi</span>
+                                  <label
+                                    className="layout-studio__page-color-chip"
+                                    title={`Colore bordo foto del foglio ${page.pageNumber}`}
+                                  >
+                                    <input
+                                      type="color"
+                                      value={page.sheetSpec.photoBorderColor ?? "#ffffff"}
+                                      onChange={(event) =>
+                                        onPageSheetStyleChange(
+                                          page.id,
+                                          { photoBorderColor: event.target.value },
+                                          `Colore bordo foto aggiornato per il foglio ${page.pageNumber}.`
+                                        )
+                                      }
+                                    />
+                                  </label>
+                                  <button
+                                    type="button"
+                                    className="layout-studio__page-style-button"
+                                    onClick={() => adjustPageBorderWidth(page, -0.05)}
+                                    title="Riduci spessore bordo"
+                                  >
+                                    −
+                                  </button>
+                                  <span className="page-context-header__border-value">
+                                    {(page.sheetSpec.photoBorderWidthCm ?? 0).toFixed(2)} cm
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="layout-studio__page-style-button"
+                                    onClick={() => adjustPageBorderWidth(page, 0.05)}
+                                    title="Aumenta spessore bordo"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
                           <div className="page-context-header__state">
                             <button
                               type="button"
                               className="page-context-header__action-btn"
-                              onClick={() => handleOpenInspectorForPage(page)}
-                              title="Apri l'inspector direttamente su questo foglio"
+                              onClick={() => handleOpenPageSettingsForPage(page)}
+                              title="Apri le impostazioni del foglio corrente"
                             >
-                              Inspector
+                              Foglio
                             </button>
-                            <span
-                              className={
-                                isActive
-                                  ? "page-context-header__status-chip page-context-header__status-chip--active"
-                                  : "page-context-header__status-chip"
-                              }
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => handleJumpToPage(page)}
-                              onKeyDown={(event) => { if (event.key === "Enter") handleJumpToPage(page); }}
-                            >
-                              {isActive ? "Attivo" : `Vai al foglio`}
-                            </span>
+                            {isActive ? (
+                              <span className="page-context-header__status-chip page-context-header__status-chip--active">
+                                Attivo
+                              </span>
+                            ) : null}
                           </div>
                         </div>
                       </div>
 
-                      {dragState?.kind === "slot" && dragState.sourcePageId === page.id ? (
-                        <div
-                          className="layout-studio__page-rearrange-banner"
-                          onDragOver={(event) => {
-                            event.preventDefault();
-                            event.dataTransfer.dropEffect = "move";
-                          }}
-                          onDrop={(event) => {
-                            event.preventDefault();
-                            onAddToPage(page.id, dragState.imageId);
-                          }}
-                        >
-                          <strong>Riadatta questo foglio</strong>
-                          <span>Rilascia qui per riorganizzare automaticamente il layout attorno alla foto trascinata.</span>
+                      <div
+                        className="layout-studio__page-content"
+                      >
+                        <div className="layout-studio__page-sheet">
+                          <SheetWithRulers page={page} onPageSheetStyleChange={onPageSheetStyleChange}>
+                            <SheetSurface
+                              page={page}
+                              assetsById={assetsById}
+                              selectedSlotKey={selectedSlotKey}
+                              recentlyAddedSlotKey={recentlyAddedSlotKey}
+                              dragState={dragState}
+                              onSelectPage={onSelectPage}
+                              onStartSlotDrag={onStartSlotDrag}
+                              onDragEnd={onDragEnd}
+                              onDrop={onDrop}
+                              onAssetDropped={onAssetDropped}
+                              onAddToPage={onAddToPage}
+                              onClearSlot={onClearSlot}
+                              onOpenCropEditor={handleCropTargetOpen}
+                              onContextMenu={onContextMenu}
+                              size="hero"
+                            />
+                          </SheetWithRulers>
                         </div>
-                      ) : null}
-
-                      <SheetWithRulers page={page} onPageSheetStyleChange={onPageSheetStyleChange}>
-                        <SheetSurface
-                          page={page}
-                          assetsById={assetsById}
-                          selectedSlotKey={selectedSlotKey}
-                          recentlyAddedSlotKey={recentlyAddedSlotKey}
-                          dragState={dragState}
-                          onSelectPage={onSelectPage}
-                          onStartSlotDrag={onStartSlotDrag}
-                          onDragEnd={onDragEnd}
-                          onDrop={onDrop}
-                          onAssetDropped={onAssetDropped}
-                          onAddToPage={onAddToPage}
-                          onClearSlot={onClearSlot}
-                          onOpenCropEditor={handleCropTargetOpen}
-                          onContextMenu={onContextMenu}
-                          onUpdateSlotAssignment={onUpdateSlotAssignment}
-                          size="hero"
-                        />
-                      </SheetWithRulers>
+                      </div>
                     </section>
                   );
                 })}
               </div>
             </div>
           </div>
-
-          {dragState ? (
-            <div className="layout-studio__drag-dock">
-              {previousPage ? (
-                <button
-                  type="button"
-                  className="ghost-button layout-studio__drag-dock-button layout-studio__drag-dock-button--jump"
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    scheduleDragPageJump(previousPage);
-                  }}
-                  onDragLeave={clearDragPageJump}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    clearDragPageJump();
-                  }}
-                >
-                  Tieni qui per andare al foglio {previousPage.pageNumber}
-                </button>
-              ) : null}
-
-              {nextPage ? (
-                <button
-                  type="button"
-                  className="ghost-button layout-studio__drag-dock-button layout-studio__drag-dock-button--jump"
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    scheduleDragPageJump(nextPage);
-                  }}
-                  onDragLeave={clearDragPageJump}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    clearDragPageJump();
-                  }}
-                >
-                  Tieni qui per andare al foglio {nextPage.pageNumber}
-                </button>
-              ) : null}
-
-              <button
-                type="button"
-                className="secondary-button layout-studio__drag-dock-button"
-                onClick={() => onCreatePageWithImage(dragState.imageId)}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  clearDragPageJump();
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  clearDragPageJump();
-                  onCreatePageWithImage(dragState.imageId);
-                }}
-              >
-                {dragState.kind === "slot"
-                  ? "Rilascia o clicca qui per creare un nuovo foglio"
-                  : "Rilascia qui per creare un nuovo foglio"}
-              </button>
-
-              <div
-                className="inspector-dropzone inspector-dropzone--active layout-studio__drag-dock-dropzone"
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                  clearDragPageJump();
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  clearDragPageJump();
-                  onDropToUnused();
-                }}
-              >
-                <strong>Rimuovi dal layout</strong>
-                <span>Rilascia qui per riportare la foto tra le non usate.</span>
-              </div>
-            </div>
-          ) : null}
-
         </div>
 
-        <InspectorPanel
-          activePage={activePage}
-          selectedSlot={selectedSlot}
-          selectedAssignment={selectedAssignment}
-          selectedAsset={selectedAsset}
-          isCollapsed={isInspectorCollapsed}
-          onCollapse={() => setIsInspectorCollapsed(true)}
-          onPageSheetPresetChange={onPageSheetPresetChange}
-          onPageSheetFieldChange={onPageSheetFieldChange}
-          onPageSheetStyleChange={onPageSheetStyleChange}
-          onUpdateSlotAssignment={onUpdateSlotAssignment}
-          onClearSlot={onClearSlot}
-          onRebalancePage={onRebalancePage}
-          onRemovePage={onRemovePage}
-          onOpenCropEditor={handleCropTargetOpen}
-        />
       </div>
 
       {replaceTarget ? (
@@ -1982,9 +2261,7 @@ export function LayoutPreviewBoard({
           slot={cropSlot}
           availableTemplates={templatesByPageId.get(cropPage.id) ?? []}
           onClose={handleCropTargetClose}
-          onApply={(changes) => {
-            onUpdateSlotAssignment(cropPage.id, cropSlot.id, changes);
-          }}
+          onApply={(changes) => { onUpdateSlotAssignment(cropPage.id, cropSlot.id, changes); }}
         />
       ) : null}
 
@@ -2017,6 +2294,9 @@ export function LayoutPreviewBoard({
     </div>
   );
 }
+
+
+
 
 
 
