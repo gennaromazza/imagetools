@@ -1,0 +1,6 @@
+Flask==3.1.1
+flask-cors==5.0.0
+rembg==2.0.67
+onnxruntime
+opencv-python-headless
+Pillow==11.3.0

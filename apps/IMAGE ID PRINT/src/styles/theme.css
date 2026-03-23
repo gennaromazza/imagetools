@@ -1,0 +1,110 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+
+  /* October Mist - Day */
+  --background: #f3eee7;
+  --foreground: #4e4a46;
+  --card: #ffffff;
+  --card-foreground: #4e4a46;
+  --popover: #ffffff;
+  --popover-foreground: #4e4a46;
+  --primary: #b7c4b2;
+  --primary-foreground: #334039;
+  --secondary: #e4d4c3;
+  --secondary-foreground: #4e4a46;
+  --muted: #d8e1d4;
+  --muted-foreground: #7d766f;
+  --accent: #cfafa3;
+  --accent-foreground: #4e4a46;
+  --destructive: #b96558;
+  --destructive-foreground: #ffffff;
+  --border: #ddd5cd;
+  --input: transparent;
+  --input-background: #f6f2ec;
+  --switch-background: #b8b1a9;
+  --ring: #b89a63;
+  --radius: 0.75rem;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+
+  /* App tokens */
+  --app-bg: #1f2421;
+  --app-topbar: rgba(31, 36, 33, 0.96);
+  --app-surface: #2b312d;
+  --app-surface-strong: #353c38;
+  --app-field: #232925;
+  --app-field-hover: #2b312d;
+  --app-border: #434a45;
+  --app-border-strong: #4b5750;
+  --app-text: #f2ece5;
+  --app-text-muted: #c9c1b7;
+  --app-text-subtle: #9f978e;
+  --brand-primary: #66756b;
+  --brand-primary-strong: #4b5750;
+  --brand-primary-soft: rgba(103, 117, 107, 0.18);
+  --brand-primary-foreground: #f2ece5;
+  --brand-secondary: #d4c1aa;
+  --brand-accent: #b89a63;
+  --success: #8eb28e;
+  --danger: #d4a39c;
+  --danger-soft: rgba(212, 163, 156, 0.28);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    font-size: var(--font-size);
+    color-scheme: dark;
+  }
+
+  body {
+    background: radial-gradient(circle at top, rgba(103, 117, 107, 0.18), transparent 32%),
+      linear-gradient(180deg, #1f2421 0%, #232925 100%);
+    color: var(--app-text);
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+
+  body::selection {
+    background: rgba(184, 154, 99, 0.35);
+    color: #f2ece5;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--app-bg);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--app-border);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--app-border-strong);
+  }
+}

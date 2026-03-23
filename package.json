@@ -17,6 +17,7 @@
     "dev:photo-selector": "npm --workspace @photo-tools/photo-selector-app run dev",
     "dev:archivio-flow": "npm --workspace @photo-tools/archivio-flow run dev",
     "dev:all:archivio-flow": "npm --workspace @photo-tools/archivio-flow run dev:all",
+    "dev:image-id-print": "npm --workspace @photo-tools/image-id-print run dev",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
