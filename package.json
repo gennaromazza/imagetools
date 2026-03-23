@@ -15,6 +15,8 @@
     "dev:image-party-frame": "npm --workspace @photo-tools/image-party-frame-app run dev",
     "dev:all:image-party-frame": "npm --workspace @photo-tools/image-party-frame-app run dev:all",
     "dev:photo-selector": "npm --workspace @photo-tools/photo-selector-app run dev",
+    "dev:archivio-flow": "npm --workspace @photo-tools/archivio-flow run dev",
+    "dev:all:archivio-flow": "npm --workspace @photo-tools/archivio-flow run dev:all",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

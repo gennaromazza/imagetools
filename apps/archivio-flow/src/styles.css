@@ -1,0 +1,425 @@
+/* ─── Design tokens (identical to auto-layout-app) ─────────────────────────── */
+:root {
+  color-scheme: dark;
+  --bg: #1f2421;
+  --bg-elevated: #232925;
+  --bg-panel: #2b312d;
+  --bg-panel-soft: rgba(103, 117, 107, 0.1);
+  --line: rgba(201, 193, 183, 0.12);
+  --line-strong: rgba(184, 154, 99, 0.42);
+  --text: #f2ece5;
+  --text-muted: #c9c1b7;
+  --accent: #b89a63;
+  --accent-soft: rgba(184, 154, 99, 0.12);
+  --accent-strong: #d4c1aa;
+  --success: #8eb28e;
+  --danger: #d4a39c;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+  --radius-lg: 26px;
+  --radius-md: 18px;
+  --radius-sm: 12px;
+  --space-2: 0.75rem;
+  --space-3: 1rem;
+  --space-4: 1.5rem;
+  --space-5: 2rem;
+}
+
+/* ─── Reset ─────────────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  min-height: 100%;
+  margin: 0;
+  font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top center, rgba(184, 154, 99, 0.12), transparent 24%),
+    radial-gradient(circle at bottom left, rgba(103, 117, 107, 0.16), transparent 30%),
+    linear-gradient(180deg, #1f2421 0%, #232925 100%);
+  color: var(--text);
+}
+
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+img { display: block; max-width: 100%; }
+
+/* ─── App shell ──────────────────────────────────────────────────────────────── */
+.app-shell {
+  min-height: 100vh;
+  display: block;
+}
+
+.app-shell--with-sidebar {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ─── Sidebar ────────────────────────────────────────────────────────────────── */
+.sidebar {
+  padding: var(--space-4) var(--space-3);
+  border-right: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+    rgba(31, 36, 33, 0.97);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.sidebar__brand {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1.25rem;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(184, 154, 99, 0.08), rgba(103, 117, 107, 0.04)),
+    var(--bg-panel);
+  box-shadow: var(--shadow);
+}
+
+.sidebar__brand h1 {
+  margin: 0.2rem 0 0;
+  font-family: "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+  font-size: 1.15rem;
+  letter-spacing: 0.01em;
+}
+
+.sidebar__brand p {
+  margin: 0.3rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+/* ─── Workspace ──────────────────────────────────────────────────────────────── */
+.workspace {
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+/* ─── Layout utilities ───────────────────────────────────────────────────────── */
+.stack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.inline-grid {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.inline-grid--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* ─── Panel cards ────────────────────────────────────────────────────────────── */
+.panel-section {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(43, 49, 45, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.workspace__header {
+  padding: var(--space-5);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-4);
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: rgba(43, 49, 45, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.workspace__header h2 {
+  margin: 0.2rem 0 0.5rem;
+  font-family: "Bahnschrift", "Segoe UI Variable Display", sans-serif;
+}
+
+.workspace__header-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* ─── Fields ─────────────────────────────────────────────────────────────────── */
+.field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.field span {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  color: var(--text);
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 140ms ease, transform 140ms ease;
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+/* ─── Stat cards ─────────────────────────────────────────────────────────────── */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.stat-card {
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+  display: grid;
+  gap: 0.3rem;
+  text-align: left;
+  color: var(--text);
+}
+
+.stat-card span {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.stat-card strong {
+  font-size: 1.25rem;
+}
+
+.stat-card small {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.stat-card--highlight {
+  border-color: var(--line-strong);
+  background: linear-gradient(180deg, rgba(226, 155, 88, 0.15), rgba(255, 255, 255, 0.03));
+}
+
+/* ─── Message box ────────────────────────────────────────────────────────────── */
+.message-box {
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  border: 1px solid rgba(216, 170, 93, 0.3);
+  background: rgba(216, 170, 93, 0.08);
+  color: var(--text);
+}
+
+.message-box p {
+  margin: 0;
+}
+
+/* ─── Check row ──────────────────────────────────────────────────────────────── */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--text-muted);
+}
+
+/* ─── Workflow steps (sidebar nav) ───────────────────────────────────────────── */
+.workflow-step {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem 1.1rem;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(35, 41, 37, 0.82);
+  color: var(--text);
+  text-align: left;
+  width: 100%;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.workflow-step span {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.workflow-step span[aria-hidden="true"] {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.workflow-step strong {
+  display: block;
+  margin-top: 0.35rem;
+}
+
+.workflow-step small {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.workflow-step--active {
+  border-color: var(--line-strong);
+  background: rgba(184, 154, 99, 0.1);
+}
+
+/* ─── Tool pill ──────────────────────────────────────────────────────────────── */
+.tool-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tool-pill span {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+
+.tool-pill strong {
+  font-size: 0.88rem;
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────────────────── */
+.primary-button {
+  border: 0;
+  padding: 0.95rem 1.2rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #d4c1aa, #b89a63);
+  color: #1f2421;
+  font-weight: 700;
+  box-shadow: 0 18px 34px rgba(184, 154, 99, 0.18);
+}
+
+.secondary-button,
+.ghost-button {
+  border-radius: 999px;
+  padding: 0.8rem 1rem;
+  font-weight: 600;
+}
+
+.secondary-button {
+  border: 1px solid var(--line-strong);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.ghost-button {
+  border: 1px solid var(--line);
+  background: rgba(35, 41, 37, 0.72);
+  color: var(--text-muted);
+}
+
+.primary-button:hover,
+.secondary-button:hover,
+.ghost-button:hover {
+  transform: translateY(-1px);
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.secondary-button:hover {
+  background: rgba(184, 154, 99, 0.18);
+  color: var(--text);
+}
+
+.ghost-button:hover {
+  border-color: rgba(103, 117, 107, 0.45);
+  background: rgba(43, 49, 45, 0.96);
+  color: var(--text);
+}
+
+.primary-button:disabled,
+.secondary-button:disabled,
+.ghost-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ─── Setup footer (CTA bar) ─────────────────────────────────────────────────── */
+.setup-footer {
+  padding: 1.1rem 1.25rem;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: rgba(28, 24, 21, 0.9);
+  box-shadow: var(--shadow);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.setup-footer strong {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.setup-footer p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.setup-footer__action {
+  min-width: 200px;
+}
+
+/* ─── Sheet plan list (job cards) ────────────────────────────────────────────── */
+.sheet-plan {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sheet-plan li {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.sheet-plan li:hover {
+  border-color: rgba(184, 154, 99, 0.25);
+  background: rgba(184, 154, 99, 0.04);
+}
+
+/* ─── Responsive ─────────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .app-shell--with-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .inline-grid--2 {
+    grid-template-columns: 1fr;
+  }
+}
