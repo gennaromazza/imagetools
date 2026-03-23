@@ -123,10 +123,13 @@ interface LowQualityProgressState {
 const COPY_CONCURRENCY_MAX = 6;
 const COPY_CONCURRENCY_MIN = 2;
 const JPG_CONCURRENCY = 2;
+const JOB_FILE_COUNT_CACHE_TTL_MS = 10 * 60 * 1000;
 const IMPORTABLE_EXT = new Set([
   ".raf", ".cr2", ".cr3", ".arw", ".nef", ".dng", ".orf", ".rw2", ".pef", ".srw",
   ".jpg", ".jpeg", ".xmp",
 ]);
+
+const jobFileCountCache = new Map<string, { count: number; expiresAt: number }>();
 
 function createEmptyImportProgress(): ImportProgressState {
   return {
@@ -718,12 +721,84 @@ async function collectJpgSourcesForLowQuality(jobFolderPath: string): Promise<{ 
   return { sourceRoot: path.join(jobFolderPath, "FOTO_SD"), jpgFiles: [] };
 }
 
+async function countImportableFilesInDirectory(rootPath: string, applyJobRootSkips = false): Promise<number> {
+  if (!fs.existsSync(rootPath)) return 0;
+
+  let count = 0;
+  for await (const srcFile of walkFiles(rootPath)) {
+    if (!isImportableFile(srcFile)) continue;
+    if (applyJobRootSkips && shouldSkipSourceFileForLowQuality(rootPath, srcFile)) continue;
+    count += 1;
+  }
+
+  return count;
+}
+
+async function resolveJobFileCount(jobFolderPath: string): Promise<number> {
+  const fotoSdDir = path.join(jobFolderPath, "FOTO_SD");
+  if (fs.existsSync(fotoSdDir)) {
+    const fotoSdCount = await countImportableFilesInDirectory(fotoSdDir);
+    if (fotoSdCount > 0) return fotoSdCount;
+  }
+
+  return countImportableFilesInDirectory(jobFolderPath, true);
+}
+
+function getJobFileCountCacheKey(jobFolderPath: string): string {
+  return path.resolve(jobFolderPath).toLowerCase();
+}
+
+function readCachedJobFileCount(jobFolderPath: string): number | null {
+  const cacheKey = getJobFileCountCacheKey(jobFolderPath);
+  const cached = jobFileCountCache.get(cacheKey);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    jobFileCountCache.delete(cacheKey);
+    return null;
+  }
+  return cached.count;
+}
+
+function writeCachedJobFileCount(jobFolderPath: string, count: number): void {
+  jobFileCountCache.set(getJobFileCountCacheKey(jobFolderPath), {
+    count,
+    expiresAt: Date.now() + JOB_FILE_COUNT_CACHE_TTL_MS,
+  });
+}
+
 function withFolderStatus(job: Job): Job {
   return {
     ...job,
     folderExists: fs.existsSync(job.percorsoCartella),
     hasLowQualityFiles: hasLowQualityOutputs(job.percorsoCartella),
   };
+}
+
+async function hydrateArchiveListJob(job: Job): Promise<Job> {
+  const jobWithStatus = withFolderStatus(job);
+  if (!jobWithStatus.folderExists) return jobWithStatus;
+
+  const needsDynamicFileCount = jobWithStatus.id.startsWith("fs:") || (jobWithStatus.numeroFile ?? 0) <= 0;
+  if (!needsDynamicFileCount) return jobWithStatus;
+
+  const cachedCount = readCachedJobFileCount(jobWithStatus.percorsoCartella);
+  if (cachedCount !== null) {
+    return {
+      ...jobWithStatus,
+      numeroFile: cachedCount,
+    };
+  }
+
+  try {
+    const fileCount = await resolveJobFileCount(jobWithStatus.percorsoCartella);
+    writeCachedJobFileCount(jobWithStatus.percorsoCartella, fileCount);
+    return {
+      ...jobWithStatus,
+      numeroFile: fileCount,
+    };
+  } catch {
+    return jobWithStatus;
+  }
 }
 
 function withArchiveMetadata(job: Job, archiveRoot: string, hierarchy: ArchiveHierarchyConfig): Job {
@@ -1963,11 +2038,17 @@ app.post("/api/import", async (req: Request, res: Response) => {
 app.get("/api/jobs", async (_req: Request, res: Response) => {
   const settings = loadSettings();
   const registeredJobs = cleanupMissingJobs()
-    .map((job) => withArchiveMetadata(withFolderStatus(job), settings.archiveRoot, settings.archiveHierarchy));
+    .map((job) => withArchiveMetadata(job, settings.archiveRoot, settings.archiveHierarchy));
   const discoveredJobs = await discoverArchiveJobs(settings.archiveRoot, registeredJobs, settings.archiveHierarchy);
-  const allJobs = [...registeredJobs, ...discoveredJobs.map(withFolderStatus)]
+  const jobsForList = [...registeredJobs, ...discoveredJobs]
     .sort((a, b) => new Date(b.dataCreazione).getTime() - new Date(a.dataCreazione).getTime());
-  res.json(allJobs);
+  const hydratedJobs = new Array<Job>(jobsForList.length);
+
+  await runWithConcurrency(jobsForList, 6, async (job, index) => {
+    hydratedJobs[index] = await hydrateArchiveListJob(job);
+  });
+
+  res.json(hydratedJobs);
 });
 
 /**
