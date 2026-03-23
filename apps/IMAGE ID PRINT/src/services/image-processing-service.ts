@@ -34,6 +34,7 @@ export interface AiProcessingOptions {
   autoFitToDocument: boolean
   autoFitRatioThreshold: number
   expandWhiteCanvas: boolean
+  backgroundRefine: number
   generativeRefillEdges: boolean
   upscale2x: boolean
   enhancePortrait: boolean
@@ -60,6 +61,7 @@ export function defaultAiOptions(): AiProcessingOptions {
     autoFitToDocument: true,
     autoFitRatioThreshold: 0.16,
     expandWhiteCanvas: false,
+    backgroundRefine: 0.35,
     generativeRefillEdges: false,
     upscale2x: false,
     enhancePortrait: false,
@@ -93,6 +95,7 @@ export function inferAiOptionsForSource(
   inferred.autoFitToDocument = true
   inferred.autoFitRatioThreshold = ratioDiff > 0.35 ? 0.12 : 0.16
   inferred.expandWhiteCanvas = ratioDiff > 0.25
+  inferred.backgroundRefine = 0.45
   inferred.expandPaddingPx = ratioDiff > 0.45 ? 70 : ratioDiff > 0.25 ? 50 : 40
   inferred.upscale2x = width < 900 || height < 900
   inferred.enhancePortrait = true
@@ -155,7 +158,9 @@ export async function processCanvasWithAi(
         const originalH = working.height
         const scaled = resizeCanvasToMax(working, 1500)
         const blob = await canvasToBlob(scaled, 'image/jpeg', 0.9)
-        const removedBlob = await removeBackgroundWithLocalService(blob)
+        const removedBlob = await removeBackgroundWithLocalService(blob, 20000, {
+          backgroundRefine: options.backgroundRefine,
+        })
         const removedImg = await blobToImage(removedBlob)
         // Scale result back to original dimensions
         working = scaleCanvas(imageToCanvas(removedImg), originalW, originalH)

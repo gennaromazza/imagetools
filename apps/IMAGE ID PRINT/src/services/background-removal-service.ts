@@ -6,6 +6,10 @@ const BASE_URL = (
 const REMBG_ENDPOINT = `${BASE_URL}/remove-background`
 const HEALTH_ENDPOINT = `${BASE_URL}/health`
 
+export interface BackgroundRemovalOptions {
+  backgroundRefine?: number
+}
+
 export async function isRembgAvailable(timeoutMs = 3000): Promise<boolean> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -22,6 +26,7 @@ export async function isRembgAvailable(timeoutMs = 3000): Promise<boolean> {
 export async function removeBackgroundWithLocalService(
   inputBlob: Blob,
   timeoutMs = 20000,
+  options: BackgroundRemovalOptions = {},
 ): Promise<Blob> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -29,6 +34,8 @@ export async function removeBackgroundWithLocalService(
   try {
     const formData = new FormData()
     formData.append('image', inputBlob, 'input.png')
+    const refine = Math.max(0, Math.min(1, options.backgroundRefine ?? 0.35))
+    formData.append('backgroundRefine', String(refine))
 
     const res = await fetch(REMBG_ENDPOINT, {
       method: 'POST',

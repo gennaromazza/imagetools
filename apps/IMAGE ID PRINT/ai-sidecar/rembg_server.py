@@ -13,6 +13,45 @@ MAX_UPLOAD_MB = 50
 MAX_PIXELS = 12000 * 12000
 
 
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def parse_background_refine(form_value: str | None) -> float:
+    if not form_value:
+        return 0.35
+    try:
+        return clamp01(float(form_value))
+    except Exception:
+        return 0.35
+
+
+def refine_background_edges(output_png_bytes: bytes, refine_strength: float) -> bytes:
+    if refine_strength <= 0.001:
+        return output_png_bytes
+
+    with Image.open(BytesIO(output_png_bytes)) as out_img:
+        rgba = np.array(out_img.convert("RGBA"), dtype=np.uint8)
+
+    rgb = rgba[:, :, :3].astype(np.float32)
+    alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+
+    # Tighten low-opacity fringe to cut residual background noise.
+    edge_tighten = np.clip((0.55 - alpha) / 0.55, 0.0, 1.0) * refine_strength
+    alpha_refined = np.clip(alpha - edge_tighten * 0.35, 0.0, 1.0)
+
+    # Decontaminate color spill near semi-transparent hair borders.
+    fringe_weight = np.clip((0.75 - alpha_refined) / 0.75, 0.0, 1.0) * refine_strength
+    rgb = rgb + (255.0 - rgb) * (fringe_weight[..., None] * 0.55)
+
+    rgba[:, :, :3] = np.clip(rgb, 0, 255).astype(np.uint8)
+    rgba[:, :, 3] = np.clip(alpha_refined * 255.0, 0, 255).astype(np.uint8)
+
+    out_io = BytesIO()
+    Image.fromarray(rgba, mode="RGBA").save(out_io, format="PNG")
+    return out_io.getvalue()
+
+
 @app.get("/health")
 def health():
     return jsonify({"ok": True, "service": "rembg-sidecar"})
@@ -40,7 +79,21 @@ def remove_background():
         return jsonify({"error": "Invalid image format"}), 400
 
     try:
-        output = remove(image_bytes)
+        refine_strength = parse_background_refine(request.form.get("backgroundRefine"))
+
+        alpha_matting = refine_strength >= 0.2
+        fg_threshold = int(235 + refine_strength * 20)
+        bg_threshold = int(max(5, 30 - refine_strength * 20))
+        erode_size = int(3 + refine_strength * 12)
+
+        output = remove(
+            image_bytes,
+            alpha_matting=alpha_matting,
+            alpha_matting_foreground_threshold=min(255, fg_threshold),
+            alpha_matting_background_threshold=max(1, bg_threshold),
+            alpha_matting_erode_structure_size=max(1, erode_size),
+        )
+        output = refine_background_edges(output, refine_strength)
         out_io = BytesIO(output)
         out_io.seek(0)
         return send_file(out_io, mimetype="image/png")

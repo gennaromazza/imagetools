@@ -9,3 +9,7 @@ TEST FOTO/
 apps/image-party-frame/exports/
 apps/image-party-frame/uploads/
 apps/image-party-frame/temp-test.png
+
+# Local Python environments
+.venv/
+**/.venv/

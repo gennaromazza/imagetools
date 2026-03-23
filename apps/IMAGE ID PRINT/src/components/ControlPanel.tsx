@@ -295,6 +295,15 @@ export function ControlPanel({
           />
 
           <SliderInput
+            label="Rifinitura sfondo/capelli"
+            value={aiOptions.backgroundRefine}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, backgroundRefine: v }))}
+          />
+
+          <SliderInput
             label="Soglia adattamento formato"
             value={aiOptions.autoFitRatioThreshold}
             min={0.05}
