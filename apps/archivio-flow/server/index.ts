@@ -44,6 +44,13 @@ interface Job {
   dataCreazione: string;
   numeroFile: number;
   folderExists?: boolean;
+  hasLowQualityFiles?: boolean;
+}
+
+interface ArchiveHierarchyConfig {
+  yearLevel: number | null;
+  categoryLevel: number | null;
+  jobLevel: number;
 }
 
 interface ImportRequest {
@@ -72,6 +79,7 @@ interface ImportProgressState {
   active: boolean;
   phase: "idle" | "copying" | "compressing" | "done" | "error";
   startedAt: number | null;
+  phaseStartedAt: number | null;
   updatedAt: number;
   scannedFiles: number;
   plannedFiles: number;
@@ -86,7 +94,29 @@ interface ImportProgressState {
   estimatedRemainingSec: number | null;
   targetFolder: string;
   jpgEnabled: boolean;
+  jpgPlanned: number;
   jpgDone: number;
+  error: string | null;
+}
+
+interface LowQualityProgressState {
+  active: boolean;
+  jobId: string;
+  jobName: string;
+  phase: "idle" | "scanning" | "compressing" | "done" | "error";
+  startedAt: number | null;
+  phaseStartedAt: number | null;
+  updatedAt: number;
+  totalJpg: number;
+  processedJpg: number;
+  generated: number;
+  skippedExisting: number;
+  errors: number;
+  overwrite: boolean;
+  elapsedMs: number;
+  estimatedRemainingSec: number | null;
+  outputDir: string;
+  sourceRoot: string;
   error: string | null;
 }
 
@@ -103,6 +133,7 @@ function createEmptyImportProgress(): ImportProgressState {
     active: false,
     phase: "idle",
     startedAt: null,
+    phaseStartedAt: null,
     updatedAt: Date.now(),
     scannedFiles: 0,
     plannedFiles: 0,
@@ -117,12 +148,38 @@ function createEmptyImportProgress(): ImportProgressState {
     estimatedRemainingSec: null,
     targetFolder: "",
     jpgEnabled: false,
+    jpgPlanned: 0,
     jpgDone: 0,
     error: null,
   };
 }
 
 let importProgress: ImportProgressState = createEmptyImportProgress();
+
+function createEmptyLowQualityProgress(): LowQualityProgressState {
+  return {
+    active: false,
+    jobId: "",
+    jobName: "",
+    phase: "idle",
+    startedAt: null,
+    phaseStartedAt: null,
+    updatedAt: Date.now(),
+    totalJpg: 0,
+    processedJpg: 0,
+    generated: 0,
+    skippedExisting: 0,
+    errors: 0,
+    overwrite: false,
+    elapsedMs: 0,
+    estimatedRemainingSec: null,
+    outputDir: "",
+    sourceRoot: "",
+    error: null,
+  };
+}
+
+let lowQualityProgress: LowQualityProgressState = createEmptyLowQualityProgress();
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -549,15 +606,128 @@ function cleanupMissingJobs(): Job[] {
   return next;
 }
 
+function directoryHasAnyFile(dirPath: string): boolean {
+  if (!fs.existsSync(dirPath)) return false;
+  const stack = [dirPath];
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current) continue;
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (entry.isFile()) return true;
+      if (entry.isDirectory()) {
+        stack.push(path.join(current, entry.name));
+      }
+    }
+  }
+
+  return false;
+}
+
+function hasLowQualityOutputs(jobFolderPath: string): boolean {
+  const directCandidates = [
+    "BASSA_QUALITA",
+    "BASSA QUALITA",
+    "BASSA-QUALITA",
+    "bassa_qualita",
+    "bassa qualita",
+  ];
+
+  for (const candidate of directCandidates) {
+    if (directoryHasAnyFile(path.join(jobFolderPath, candidate))) {
+      return true;
+    }
+  }
+
+  let rootEntries: fs.Dirent[];
+  try {
+    rootEntries = fs.readdirSync(jobFolderPath, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+
+  const semanticCandidates = rootEntries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((name) => {
+      const normalized = name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      return normalized.includes("bassa") && normalized.includes("qualita");
+    });
+
+  for (const dirName of semanticCandidates) {
+    if (directoryHasAnyFile(path.join(jobFolderPath, dirName))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function normalizeDirToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isLowQualityDirName(dirName: string): boolean {
+  const normalized = normalizeDirToken(dirName);
+  return normalized.includes("bassa") && normalized.includes("qualita");
+}
+
+function isExportDirName(dirName: string): boolean {
+  const normalized = normalizeDirToken(dirName);
+  return normalized === "export" || normalized.startsWith("export");
+}
+
+function shouldSkipSourceFileForLowQuality(sourceRoot: string, sourceFile: string): boolean {
+  const relative = path.relative(sourceRoot, sourceFile);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) return true;
+  const firstSegment = relative.split(path.sep)[0] ?? "";
+  if (!firstSegment) return false;
+  return isLowQualityDirName(firstSegment) || isExportDirName(firstSegment);
+}
+
+async function collectJpgSourcesForLowQuality(jobFolderPath: string): Promise<{ sourceRoot: string; jpgFiles: string[] }> {
+  const candidateRoots = [
+    path.join(jobFolderPath, "FOTO_SD"),
+    jobFolderPath,
+  ];
+  const JPG_EXT = new Set([".jpg", ".jpeg"]);
+
+  for (const candidateRoot of candidateRoots) {
+    if (!fs.existsSync(candidateRoot)) continue;
+
+    const jpgFiles: string[] = [];
+    for await (const srcFile of walkFiles(candidateRoot)) {
+      if (!JPG_EXT.has(path.extname(srcFile).toLowerCase())) continue;
+      if (shouldSkipSourceFileForLowQuality(candidateRoot, srcFile)) continue;
+      jpgFiles.push(srcFile);
+    }
+
+    if (jpgFiles.length > 0) {
+      return { sourceRoot: candidateRoot, jpgFiles };
+    }
+  }
+
+  return { sourceRoot: path.join(jobFolderPath, "FOTO_SD"), jpgFiles: [] };
+}
+
 function withFolderStatus(job: Job): Job {
   return {
     ...job,
     folderExists: fs.existsSync(job.percorsoCartella),
+    hasLowQualityFiles: hasLowQualityOutputs(job.percorsoCartella),
   };
 }
 
-function withArchiveMetadata(job: Job, archiveRoot: string): Job {
-  const location = extractArchiveLocationInfo(job.percorsoCartella, archiveRoot);
+function withArchiveMetadata(job: Job, archiveRoot: string, hierarchy: ArchiveHierarchyConfig): Job {
+  const location = extractArchiveLocationInfo(job.percorsoCartella, archiveRoot, hierarchy);
   return {
     ...job,
     annoArchivio: job.annoArchivio ?? location.annoArchivio,
@@ -623,7 +793,39 @@ function isYearFolder(dirName: string): boolean {
   return /^\d{4}$/.test(dirName.trim());
 }
 
-function extractArchiveLocationInfo(folderPath: string, archiveRoot: string): ArchiveLocationInfo {
+function sanitizeHierarchyLevel(rawValue: unknown, fallback: number | null, min = 1, max = 8): number | null {
+  if (rawValue === null || rawValue === undefined || rawValue === "") return fallback;
+  const parsed = Number.parseInt(String(rawValue), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed <= 0) return null;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function normalizeArchiveHierarchy(raw: Partial<ArchiveHierarchyConfig> | undefined): ArchiveHierarchyConfig {
+  const normalized: ArchiveHierarchyConfig = {
+    yearLevel: sanitizeHierarchyLevel(raw?.yearLevel, 1),
+    categoryLevel: sanitizeHierarchyLevel(raw?.categoryLevel, 2),
+    jobLevel: sanitizeHierarchyLevel(raw?.jobLevel, 3) ?? 3,
+  };
+
+  if (normalized.yearLevel !== null && normalized.yearLevel >= normalized.jobLevel) {
+    normalized.yearLevel = null;
+  }
+  if (normalized.categoryLevel !== null && normalized.categoryLevel >= normalized.jobLevel) {
+    normalized.categoryLevel = null;
+  }
+
+  return normalized;
+}
+
+function getSegmentAtLevel(segments: string[], level: number | null): string | undefined {
+  if (level === null || level <= 0) return undefined;
+  const index = level - 1;
+  if (index < 0 || index >= segments.length) return undefined;
+  return segments[index];
+}
+
+function extractArchiveLocationInfo(folderPath: string, archiveRoot: string, hierarchy: ArchiveHierarchyConfig): ArchiveLocationInfo {
   const normalizedRoot = archiveRoot.trim();
   if (!normalizedRoot) return {};
 
@@ -642,25 +844,26 @@ function extractArchiveLocationInfo(folderPath: string, archiveRoot: string): Ar
   }
 
   const segments = relative.split(path.sep).filter(Boolean);
-  if (segments.length < 2) return {};
+  if (segments.length === 0) return {};
 
-  if (isYearFolder(segments[0]!)) {
+  const annoArchivio = getSegmentAtLevel(segments, hierarchy.yearLevel);
+  const categoriaArchivio = getSegmentAtLevel(segments, hierarchy.categoryLevel);
+
+  if (annoArchivio || categoriaArchivio) {
     return {
-      annoArchivio: segments[0]!,
-      categoriaArchivio: segments[1]!,
+      annoArchivio,
+      categoriaArchivio,
     };
   }
 
-  if (isYearFolder(path.basename(rootPath)) && segments.length >= 2) {
+  if (hierarchy.yearLevel === 1 && isYearFolder(path.basename(rootPath)) && segments.length >= 1) {
     return {
       annoArchivio: path.basename(rootPath),
-      categoriaArchivio: segments[0]!,
+      categoriaArchivio: categoriaArchivio ?? segments[0],
     };
   }
 
-  return {
-    categoriaArchivio: segments[0]!,
-  };
+  return {};
 }
 
 function getArchiveCategoryLabel(dirName: string): string | null {
@@ -810,7 +1013,7 @@ function looksLikeJobFolder(dirPath: string): boolean {
   }
 }
 
-async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[]): Promise<Job[]> {
+async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[], hierarchy: ArchiveHierarchyConfig): Promise<Job[]> {
   const normalizedRoot = archiveRoot.trim();
   if (!normalizedRoot) return [];
 
@@ -827,19 +1030,21 @@ async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[]): Promi
   const discovered: Job[] = [];
   const discoveredPaths = new Set<string>();
 
-  function pushDiscoveredJob(fullPath: string, folderName: string, folderStat: fs.Stats, categoryFolderName?: string, yearFolderName?: string): void {
+  function pushDiscoveredJob(fullPath: string, folderName: string, folderStat: fs.Stats, relativeSegments: string[]): void {
     const normalizedFull = path.resolve(fullPath).toLowerCase();
     if (knownPaths.has(normalizedFull) || discoveredPaths.has(normalizedFull)) return;
 
     const fallbackIsoDate = new Date(folderStat.birthtimeMs || folderStat.mtimeMs).toISOString().slice(0, 10);
-    const fallbackLocation = extractArchiveLocationInfo(fullPath, rootPath);
+    const annoArchivio = getSegmentAtLevel(relativeSegments, hierarchy.yearLevel);
+    const categoriaArchivio = getSegmentAtLevel(relativeSegments, hierarchy.categoryLevel);
+    const fallbackLocation = extractArchiveLocationInfo(fullPath, rootPath, hierarchy);
     discovered.push({
       id: `fs:${normalizedFull}`,
-      nomeLavoro: normalizeDiscoveredJobName(folderName, categoryFolderName ?? fallbackLocation.categoriaArchivio ?? null),
+      nomeLavoro: normalizeDiscoveredJobName(folderName, categoriaArchivio ?? fallbackLocation.categoriaArchivio ?? null),
       dataLavoro: normalizeDiscoveredJobDate(folderName, fallbackIsoDate),
       autore: "Archivio",
-      annoArchivio: yearFolderName ?? fallbackLocation.annoArchivio,
-      categoriaArchivio: categoryFolderName ?? fallbackLocation.categoriaArchivio,
+      annoArchivio: annoArchivio ?? fallbackLocation.annoArchivio,
+      categoriaArchivio: categoriaArchivio ?? fallbackLocation.categoriaArchivio,
       percorsoCartella: fullPath,
       nomeCartella: folderName,
       dataCreazione: new Date(folderStat.birthtimeMs || folderStat.mtimeMs).toISOString(),
@@ -875,45 +1080,23 @@ async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[]): Promi
     return directories;
   }
 
-  async function scanCategoryDirectory(categoryPath: string, categoryFolderName: string, yearFolderName?: string): Promise<void> {
-    const jobDirs = await listDirectories(categoryPath);
+  async function walkArchive(currentPath: string, depth: number, segments: string[]): Promise<void> {
+    if (depth >= hierarchy.jobLevel) return;
 
-    for (const jobDir of jobDirs) {
-      pushDiscoveredJob(jobDir.fullPath, jobDir.name, jobDir.stat, categoryFolderName, yearFolderName);
+    const dirs = await listDirectories(currentPath);
+    for (const dir of dirs) {
+      const nextDepth = depth + 1;
+      const nextSegments = [...segments, dir.name];
+
+      if (nextDepth === hierarchy.jobLevel) {
+        pushDiscoveredJob(dir.fullPath, dir.name, dir.stat, nextSegments);
+      } else {
+        await walkArchive(dir.fullPath, nextDepth, nextSegments);
+      }
     }
   }
 
-  async function scanYearDirectory(yearPath: string, yearFolderName: string): Promise<void> {
-    const categoryDirs = await listDirectories(yearPath);
-
-    for (const categoryDir of categoryDirs) {
-      await scanCategoryDirectory(categoryDir.fullPath, categoryDir.name, yearFolderName);
-    }
-  }
-
-  const rootDirs = await listDirectories(rootPath);
-  const yearDirs = rootDirs.filter((dir) => isYearFolder(dir.name));
-
-  if (yearDirs.length > 0) {
-    for (const yearDir of yearDirs) {
-      await scanYearDirectory(yearDir.fullPath, yearDir.name);
-    }
-    return discovered;
-  }
-
-  if (isYearFolder(path.basename(rootPath))) {
-    await scanYearDirectory(rootPath, path.basename(rootPath));
-    return discovered;
-  }
-
-  const rootCategoryDirs = rootDirs.filter((dir) => !isYearFolder(dir.name));
-  if (rootCategoryDirs.length > 0) {
-    for (const categoryDir of rootCategoryDirs) {
-      await scanCategoryDirectory(categoryDir.fullPath, categoryDir.name);
-    }
-    return discovered;
-  }
-
+  await walkArchive(rootPath, 0, []);
   return discovered;
 }
 
@@ -922,6 +1105,7 @@ interface Settings {
   defaultDestinazione: string;
   defaultAutore: string;
   cartellePredefinite: string[];
+  archiveHierarchy: ArchiveHierarchyConfig;
 }
 
 function loadSettings(): Settings {
@@ -941,10 +1125,17 @@ function loadSettings(): Settings {
         defaultDestinazione: typeof raw.defaultDestinazione === "string" ? raw.defaultDestinazione : "",
         defaultAutore: typeof raw.defaultAutore === "string" ? raw.defaultAutore : "",
         cartellePredefinite,
+        archiveHierarchy: normalizeArchiveHierarchy(raw.archiveHierarchy),
       };
     }
   } catch { /* ignore */ }
-  return { archiveRoot: "", defaultDestinazione: "", defaultAutore: "", cartellePredefinite: [] };
+  return {
+    archiveRoot: "",
+    defaultDestinazione: "",
+    defaultAutore: "",
+    cartellePredefinite: [],
+    archiveHierarchy: normalizeArchiveHierarchy(undefined),
+  };
 }
 
 function saveSettings(s: Settings): void {
@@ -952,6 +1143,19 @@ function saveSettings(s: Settings): void {
 }
 
 function computeEstimatedRemainingSec(snapshot: ImportProgressState): number | null {
+  if (snapshot.phase === "compressing" && snapshot.jpgEnabled) {
+    const planned = Math.max(0, snapshot.jpgPlanned);
+    if (planned <= 0) return null;
+    const elapsedFromPhaseSec = snapshot.phaseStartedAt
+      ? (Date.now() - snapshot.phaseStartedAt) / 1000
+      : 0;
+    if (elapsedFromPhaseSec < 1.5 || snapshot.jpgDone <= 0) return null;
+    const remaining = Math.max(0, planned - snapshot.jpgDone);
+    const itemsPerSec = snapshot.jpgDone / elapsedFromPhaseSec;
+    if (itemsPerSec <= 0.01) return null;
+    return Math.ceil(remaining / itemsPerSec);
+  }
+
   if (!snapshot.startedAt) return null;
   const elapsedSec = (Date.now() - snapshot.startedAt) / 1000;
   if (elapsedSec < 1.5) return null;
@@ -965,16 +1169,54 @@ function computeEstimatedRemainingSec(snapshot: ImportProgressState): number | n
 }
 
 function updateImportProgress(patch: Partial<ImportProgressState>): void {
+  const nextPhase = patch.phase;
+  const phaseChanged = Boolean(nextPhase && nextPhase !== importProgress.phase);
   importProgress = {
     ...importProgress,
+    ...(phaseChanged ? { phaseStartedAt: Date.now() } : {}),
     ...patch,
   };
+  if (phaseChanged && importProgress.phase === "done") {
+    importProgress.phaseStartedAt = null;
+  }
   if (importProgress.startedAt) {
     importProgress.elapsedMs = Date.now() - importProgress.startedAt;
   }
   importProgress.copyConcurrency = Math.max(COPY_CONCURRENCY_MIN, importProgress.copyConcurrency);
   importProgress.updatedAt = Date.now();
   importProgress.estimatedRemainingSec = computeEstimatedRemainingSec(importProgress);
+}
+
+function computeLowQualityEstimatedRemainingSec(snapshot: LowQualityProgressState): number | null {
+  if (!snapshot.active || snapshot.phase !== "compressing") return null;
+  if (snapshot.totalJpg <= 0 || snapshot.processedJpg <= 0) return null;
+  if (!snapshot.phaseStartedAt) return null;
+
+  const elapsedSec = (Date.now() - snapshot.phaseStartedAt) / 1000;
+  if (elapsedSec < 1.5) return null;
+
+  const remaining = Math.max(0, snapshot.totalJpg - snapshot.processedJpg);
+  const itemsPerSec = snapshot.processedJpg / elapsedSec;
+  if (itemsPerSec <= 0.01) return null;
+  return Math.ceil(remaining / itemsPerSec);
+}
+
+function updateLowQualityProgress(patch: Partial<LowQualityProgressState>): void {
+  const nextPhase = patch.phase;
+  const phaseChanged = Boolean(nextPhase && nextPhase !== lowQualityProgress.phase);
+  lowQualityProgress = {
+    ...lowQualityProgress,
+    ...(phaseChanged ? { phaseStartedAt: Date.now() } : {}),
+    ...patch,
+  };
+  if (lowQualityProgress.startedAt) {
+    lowQualityProgress.elapsedMs = Date.now() - lowQualityProgress.startedAt;
+  }
+  if (phaseChanged && lowQualityProgress.phase === "done") {
+    lowQualityProgress.phaseStartedAt = null;
+  }
+  lowQualityProgress.updatedAt = Date.now();
+  lowQualityProgress.estimatedRemainingSec = computeLowQualityEstimatedRemainingSec(lowQualityProgress);
 }
 
 // ── Routes ─────────────────────────────────────────────────────────────────────
@@ -1035,22 +1277,39 @@ app.get("/api/import-progress", (_req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/low-quality-progress
+ * Returns progress snapshot for BASSA_QUALITA generation.
+ */
+app.get("/api/low-quality-progress", (_req: Request, res: Response) => {
+  const progressPct = lowQualityProgress.totalJpg > 0
+    ? Math.min(100, Math.round((lowQualityProgress.processedJpg / lowQualityProgress.totalJpg) * 100))
+    : 0;
+
+  res.json({
+    ...lowQualityProgress,
+    progressPct,
+  });
+});
+
+/**
  * POST /api/settings
  */
 app.post("/api/settings", (req: Request, res: Response) => {
-  const { archiveRoot, defaultDestinazione, defaultAutore, cartellePredefinite } = req.body as Partial<Settings>;
+  const { archiveRoot, defaultDestinazione, defaultAutore, cartellePredefinite, archiveHierarchy } = req.body as Partial<Settings>;
   const current = loadSettings();
   const normalizedCartelle = Array.isArray(cartellePredefinite)
     ? Array.from(new Set(cartellePredefinite
         .map((v) => sanitizeFolderSegment(String(v ?? "")))
         .filter((v) => v.length > 0)))
     : current.cartellePredefinite;
+  const normalizedHierarchy = normalizeArchiveHierarchy(archiveHierarchy ?? current.archiveHierarchy);
 
   const updated: Settings = {
     archiveRoot: typeof archiveRoot === "string" ? archiveRoot.trim() : current.archiveRoot,
     defaultDestinazione: typeof defaultDestinazione === "string" ? defaultDestinazione.trim() : current.defaultDestinazione,
     defaultAutore: typeof defaultAutore === "string" ? defaultAutore.trim() : current.defaultAutore,
     cartellePredefinite: normalizedCartelle,
+    archiveHierarchy: normalizedHierarchy,
   };
   saveSettings(updated);
   res.json({ ok: true, settings: updated });
@@ -1616,6 +1875,7 @@ app.post("/api/import", async (req: Request, res: Response) => {
     updateImportProgress({ phase: "compressing", inFlight: 0 });
     const JPG_EXT = new Set([".jpg", ".jpeg"]);
     const jpgFiles = copiedDestPaths.filter((f) => JPG_EXT.has(path.extname(f).toLowerCase()));
+    updateImportProgress({ jpgPlanned: jpgFiles.length, jpgDone: 0 });
     await runWithConcurrency(jpgFiles, JPG_CONCURRENCY, async (src) => {
       const relativeFromFotoSd = path.relative(fotoSdDir, src);
       const destPath = path.join(bassaQualitaDir, relativeFromFotoSd);
@@ -1703,8 +1963,8 @@ app.post("/api/import", async (req: Request, res: Response) => {
 app.get("/api/jobs", async (_req: Request, res: Response) => {
   const settings = loadSettings();
   const registeredJobs = cleanupMissingJobs()
-    .map((job) => withArchiveMetadata(withFolderStatus(job), settings.archiveRoot));
-  const discoveredJobs = await discoverArchiveJobs(settings.archiveRoot, registeredJobs);
+    .map((job) => withArchiveMetadata(withFolderStatus(job), settings.archiveRoot, settings.archiveHierarchy));
+  const discoveredJobs = await discoverArchiveJobs(settings.archiveRoot, registeredJobs, settings.archiveHierarchy);
   const allJobs = [...registeredJobs, ...discoveredJobs.map(withFolderStatus)]
     .sort((a, b) => new Date(b.dataCreazione).getTime() - new Date(a.dataCreazione).getTime());
   res.json(allJobs);
@@ -1774,15 +2034,39 @@ app.post("/api/jobs/:id/generate-low-quality", async (req: Request, res: Respons
   if (!jobId) return void res.status(400).json({ error: "id lavoro mancante" });
 
   const overwrite = Boolean(req.body?.overwrite);
-  const jobs = loadJobs();
-  const job = jobs.find((j) => j.id === jobId);
+
+  if (lowQualityProgress.active && lowQualityProgress.jobId !== jobId) {
+    return void res.status(409).json({
+      error: `Generazione BQ già in corso per ${lowQualityProgress.jobName || "un altro lavoro"}`,
+    });
+  }
+
+  lowQualityProgress = createEmptyLowQualityProgress();
+  updateLowQualityProgress({
+    active: true,
+    phase: "scanning",
+    startedAt: Date.now(),
+    overwrite,
+    jobId,
+  });
+
+  const registeredJobs = cleanupMissingJobs();
+  let job = registeredJobs.find((j) => j.id === jobId);
+
+  if (!job && jobId.startsWith("fs:")) {
+    const settings = loadSettings();
+    const discoveredJobs = await discoverArchiveJobs(settings.archiveRoot, registeredJobs, settings.archiveHierarchy);
+    job = discoveredJobs.find((j) => j.id === jobId);
+  }
+
   if (!job) return void res.status(404).json({ error: "Lavoro non trovato" });
 
-  const fotoSdDir = path.join(job.percorsoCartella, "FOTO_SD");
+  updateLowQualityProgress({
+    jobName: job.nomeLavoro,
+    outputDir: path.join(job.percorsoCartella, "BASSA_QUALITA"),
+  });
+
   const bassaQualitaDir = path.join(job.percorsoCartella, "BASSA_QUALITA");
-  if (!fs.existsSync(fotoSdDir)) {
-    return void res.status(404).json({ error: "Cartella FOTO_SD non trovata" });
-  }
 
   fs.mkdirSync(bassaQualitaDir, { recursive: true });
 
@@ -1792,38 +2076,90 @@ app.post("/api/jobs/:id/generate-low-quality", async (req: Request, res: Respons
   let skippedExisting = 0;
   let errors = 0;
 
-  const jpgFiles: string[] = [];
-  const JPG_EXT = new Set([".jpg", ".jpeg"]);
-  for await (const srcFile of walkFiles(fotoSdDir)) {
-    if (JPG_EXT.has(path.extname(srcFile).toLowerCase())) {
-      jpgFiles.push(srcFile);
-    }
+  const { sourceRoot, jpgFiles } = await collectJpgSourcesForLowQuality(job.percorsoCartella);
+  updateLowQualityProgress({ sourceRoot });
+  if (jpgFiles.length === 0) {
+    updateLowQualityProgress({
+      active: false,
+      phase: "error",
+      error: "Nessun JPG trovato nella cartella lavoro per generare BASSA_QUALITA",
+      totalJpg: 0,
+      processedJpg: 0,
+    });
+    return void res.status(404).json({
+      error: "Nessun JPG trovato nella cartella lavoro per generare BASSA_QUALITA",
+    });
   }
   totalJpg = jpgFiles.length;
 
-  await runWithConcurrency(jpgFiles, JPG_CONCURRENCY, async (src) => {
-    const relativeFromFotoSd = path.relative(fotoSdDir, src);
-    const destPath = path.join(bassaQualitaDir, relativeFromFotoSd);
-    if (!overwrite) {
-      try {
-        await fs.promises.access(destPath, fs.constants.F_OK);
-        skippedExisting += 1;
-        return;
-      } catch {
-        /* continue and generate */
-      }
-    }
+  let processedJpg = 0;
+  updateLowQualityProgress({
+    phase: "compressing",
+    totalJpg,
+    processedJpg: 0,
+    generated: 0,
+    skippedExisting: 0,
+    errors: 0,
+    error: null,
+  });
 
-    try {
-      await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
-      await sharp(src)
-        .resize({ width: 1920, withoutEnlargement: true })
-        .jpeg({ quality: 70 })
-        .toFile(destPath);
-      generated += 1;
-    } catch {
-      errors += 1;
-    }
+  try {
+    await runWithConcurrency(jpgFiles, JPG_CONCURRENCY, async (src) => {
+      const relativeFromFotoSd = path.relative(sourceRoot, src);
+      const destPath = path.join(bassaQualitaDir, relativeFromFotoSd);
+      if (!overwrite) {
+        try {
+          await fs.promises.access(destPath, fs.constants.F_OK);
+          skippedExisting += 1;
+          processedJpg += 1;
+          updateLowQualityProgress({
+            processedJpg,
+            generated,
+            skippedExisting,
+            errors,
+          });
+          return;
+        } catch {
+          /* continue and generate */
+        }
+      }
+
+      try {
+        await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+        await sharp(src)
+          .resize({ width: 1920, withoutEnlargement: true })
+          .jpeg({ quality: 70 })
+          .toFile(destPath);
+        generated += 1;
+      } catch {
+        errors += 1;
+      } finally {
+        processedJpg += 1;
+        updateLowQualityProgress({
+          processedJpg,
+          generated,
+          skippedExisting,
+          errors,
+        });
+      }
+    });
+  } catch (error) {
+    updateLowQualityProgress({
+      active: false,
+      phase: "error",
+      error: `Errore generazione BASSA_QUALITA: ${String(error)}`,
+    });
+    return void res.status(500).json({ error: `Errore generazione BASSA_QUALITA: ${String(error)}` });
+  }
+
+  updateLowQualityProgress({
+    active: false,
+    phase: "done",
+    processedJpg,
+    generated,
+    skippedExisting,
+    errors,
+    error: null,
   });
 
   res.json({

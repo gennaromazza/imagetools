@@ -17,6 +17,43 @@ interface FilterPreviewData {
   sampleFiles: Array<{ filePath: string; fileName: string; mtimeMs: number; size: number; ext: string; isJpg: boolean }>;
 }
 
+interface ArchiveHierarchySettings {
+  yearLevel: number | null;
+  categoryLevel: number | null;
+  jobLevel: number;
+}
+
+const DEFAULT_ARCHIVE_HIERARCHY: ArchiveHierarchySettings = {
+  yearLevel: 1,
+  categoryLevel: 2,
+  jobLevel: 3,
+};
+
+function normalizeHierarchyLevel(rawValue: unknown, fallback: number | null): number | null {
+  if (rawValue === null || rawValue === undefined || rawValue === "") return fallback;
+  const parsed = Number.parseInt(String(rawValue), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (parsed <= 0) return null;
+  return Math.min(8, Math.max(1, parsed));
+}
+
+function normalizeHierarchyConfig(raw?: Partial<ArchiveHierarchySettings>): ArchiveHierarchySettings {
+  const normalized: ArchiveHierarchySettings = {
+    yearLevel: normalizeHierarchyLevel(raw?.yearLevel, DEFAULT_ARCHIVE_HIERARCHY.yearLevel),
+    categoryLevel: normalizeHierarchyLevel(raw?.categoryLevel, DEFAULT_ARCHIVE_HIERARCHY.categoryLevel),
+    jobLevel: normalizeHierarchyLevel(raw?.jobLevel, DEFAULT_ARCHIVE_HIERARCHY.jobLevel) ?? DEFAULT_ARCHIVE_HIERARCHY.jobLevel,
+  };
+
+  if (normalized.yearLevel !== null && normalized.yearLevel >= normalized.jobLevel) {
+    normalized.yearLevel = null;
+  }
+  if (normalized.categoryLevel !== null && normalized.categoryLevel >= normalized.jobLevel) {
+    normalized.categoryLevel = null;
+  }
+
+  return normalized;
+}
+
 interface ImportedRangeRecord {
   startMs: number;
   endMs: number;
@@ -50,6 +87,59 @@ function formatDurationSeconds(seconds: number): string {
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+async function openFolderInExplorer(folderPath: string) {
+  if (!folderPath) return;
+  try {
+    await fetch("/api/open-folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderPath }),
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+function playCompletionTone() {
+  try {
+    const audioCtx = new window.AudioContext();
+    const oscillator = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(880, audioCtx.currentTime);
+    oscillator.frequency.linearRampToValueAtTime(1320, audioCtx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.08, audioCtx.currentTime + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.4);
+    oscillator.connect(gain);
+    gain.connect(audioCtx.destination);
+    oscillator.start();
+    oscillator.stop(audioCtx.currentTime + 0.42);
+    window.setTimeout(() => {
+      void audioCtx.close();
+    }, 520);
+  } catch {
+    /* ignore audio errors */
+  }
+}
+
+async function showCompletionDesktopNotification(title: string, body: string) {
+  if (!("Notification" in window)) return;
+  try {
+    let permission = Notification.permission;
+    if (permission === "default") {
+      permission = await Notification.requestPermission();
+    }
+    if (permission !== "granted") return;
+    new Notification(title, {
+      body,
+      icon: "/favicon.ico",
+    });
+  } catch {
+    /* ignore notification errors */
+  }
 }
 
 export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) {
@@ -88,12 +178,18 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const [usaLavoroEsistente, setUsaLavoroEsistente] = useState(false);
   const [jobsEsistenti, setJobsEsistenti] = useState<Job[]>([]);
   const [existingJobId, setExistingJobId] = useState("");
+  const [existingJobSearch, setExistingJobSearch] = useState("");
 
   // ── Import state ─────────────────────────────────────────────────────────────
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<ImportResult | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgressSnapshot | null>(null);
+  const [openFolderOnFinish, setOpenFolderOnFinish] = useState(true);
+  const [desktopNotifyOnFinish, setDesktopNotifyOnFinish] = useState(true);
+  const [soundNotifyOnFinish, setSoundNotifyOnFinish] = useState(true);
+  const autoOpenedJobRef = useRef<string | null>(null);
+  const notifiedJobRef = useRef<string | null>(null);
 
   // ── Settings ─────────────────────────────────────────────────────────────────
   const [savedDestinazione, setSavedDestinazione] = useState("");
@@ -102,6 +198,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const [savedAutore, setSavedAutore] = useState("");
   const [cartellePredefinite, setCartellePredefinite] = useState<string[]>([]);
   const [savedCartellePredefinite, setSavedCartellePredefinite] = useState<string[]>([]);
+  const [archiveHierarchy, setArchiveHierarchy] = useState<ArchiveHierarchySettings>(DEFAULT_ARCHIVE_HIERARCHY);
+  const [savedArchiveHierarchy, setSavedArchiveHierarchy] = useState<ArchiveHierarchySettings>(DEFAULT_ARCHIVE_HIERARCHY);
   const [nuovaCartellaPredefinita, setNuovaCartellaPredefinita] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -116,9 +214,16 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: { archiveRoot?: string; defaultDestinazione?: string; defaultAutore?: string; cartellePredefinite?: string[] } | null) => {
+      .then((data: {
+        archiveRoot?: string;
+        defaultDestinazione?: string;
+        defaultAutore?: string;
+        cartellePredefinite?: string[];
+        archiveHierarchy?: Partial<ArchiveHierarchySettings>;
+      } | null) => {
         const normalizedArchiveRoot = data?.archiveRoot?.trim() ?? "";
         const normalizedDefaultDestinazione = data?.defaultDestinazione?.trim() || normalizedArchiveRoot;
+        const normalizedHierarchy = normalizeHierarchyConfig(data?.archiveHierarchy);
         if (normalizedArchiveRoot) {
           setArchiveRoot(normalizedArchiveRoot);
           setSavedArchiveRoot(normalizedArchiveRoot);
@@ -136,6 +241,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           setCartellePredefinite(filtered);
           setSavedCartellePredefinite(filtered);
         }
+        setArchiveHierarchy(normalizedHierarchy);
+        setSavedArchiveHierarchy(normalizedHierarchy);
       })
       .catch(() => {/* server not ready */})
       .finally(() => {
@@ -224,6 +331,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           defaultDestinazione: normalizedDefaultDestinazione,
           defaultAutore: autore.trim(),
           cartellePredefinite,
+          archiveHierarchy,
         }),
       });
       if (res.ok) {
@@ -234,6 +342,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         }
         setSavedAutore(autore.trim());
         setSavedCartellePredefinite(cartellePredefinite);
+        setSavedArchiveHierarchy(archiveHierarchy);
         setSettingsFeedback({
           type: "success",
           message: showSpinner ? "Impostazioni salvate." : "Impostazioni salvate automaticamente.",
@@ -381,6 +490,26 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   }
 
   const selectedExistingJob = jobsEsistenti.find((j) => j.id === existingJobId) ?? null;
+  const normalizedExistingJobSearch = existingJobSearch.trim().toLowerCase();
+  const filteredExistingJobs = normalizedExistingJobSearch
+    ? jobsEsistenti.filter((job) => {
+        const haystack = [
+          job.nomeLavoro,
+          job.dataLavoro,
+          job.autore,
+          job.annoArchivio ?? "",
+          job.categoriaArchivio ?? "",
+          job.percorsoCartella,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(normalizedExistingJobSearch);
+      })
+    : jobsEsistenti;
+  const existingJobsForSelect =
+    selectedExistingJob && !filteredExistingJobs.some((job) => job.id === selectedExistingJob.id)
+      ? [selectedExistingJob, ...filteredExistingJobs]
+      : filteredExistingJobs;
   const currentSdKey = sdPath.trim();
   const importedRangesForCurrentSd = currentSdKey ? (importedRangesBySd[currentSdKey] ?? []) : [];
   const effectiveDestinazione = destinazione.trim() || archiveRoot.trim() || savedDestinazione || savedArchiveRoot;
@@ -403,7 +532,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     archiveRoot.trim() !== savedArchiveRoot ||
     destinazione.trim() !== savedDestinazione ||
     autore.trim() !== savedAutore ||
-    JSON.stringify(cartellePredefinite) !== JSON.stringify(savedCartellePredefinite);
+    JSON.stringify(cartellePredefinite) !== JSON.stringify(savedCartellePredefinite) ||
+    JSON.stringify(archiveHierarchy) !== JSON.stringify(savedArchiveHierarchy);
 
   useEffect(() => {
     if (!settingsLoaded || !settingsChanged || savingSettings) return;
@@ -418,7 +548,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [settingsLoaded, settingsChanged, savingSettings, archiveRoot, destinazione, autore, cartellePredefinite]);
+  }, [settingsLoaded, settingsChanged, savingSettings, archiveRoot, destinazione, autore, cartellePredefinite, archiveHierarchy]);
 
   function applyEventoRapido(nomeEvento: string) {
     setSottoCartella(nomeEvento);
@@ -622,6 +752,41 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     };
   }, [importing]);
 
+  useEffect(() => {
+    if (!importSuccess || !openFolderOnFinish) return;
+    if (autoOpenedJobRef.current === importSuccess.job.id) return;
+    autoOpenedJobRef.current = importSuccess.job.id;
+    void openFolderInExplorer(importSuccess.job.percorsoCartella);
+  }, [importSuccess, openFolderOnFinish]);
+
+  useEffect(() => {
+    if (!importSuccess) return;
+    if (notifiedJobRef.current === importSuccess.job.id) return;
+    notifiedJobRef.current = importSuccess.job.id;
+
+    if (soundNotifyOnFinish) {
+      playCompletionTone();
+    }
+
+    if (desktopNotifyOnFinish) {
+      void showCompletionDesktopNotification(
+        "Archivio Flow: import completato",
+        `${importSuccess.job.nomeLavoro} · ${importSuccess.copiedFiles} file copiati${importSuccess.jpgGenerati > 0 ? ` · ${importSuccess.jpgGenerati} JPG BQ` : ""}`
+      );
+    }
+  }, [importSuccess, desktopNotifyOnFinish, soundNotifyOnFinish]);
+
+  const progressPhase = importProgress?.phase ?? "copying";
+  const copyStepDone = progressPhase === "compressing" || progressPhase === "done";
+  const bqStepVisible = Boolean(importProgress?.jpgEnabled ?? generaJpg);
+  const bqStepDone = !bqStepVisible || progressPhase === "done";
+  const copyProgressPct = copyStepDone ? 100 : Math.max(3, importProgress?.progressPct ?? 3);
+  const bqProgressPct = bqStepVisible
+    ? (importProgress?.jpgPlanned ?? 0) > 0
+      ? Math.min(100, Math.round(((importProgress?.jpgDone ?? 0) / Math.max(importProgress?.jpgPlanned ?? 1, 1)) * 100))
+      : (progressPhase === "done" ? 100 : 0)
+    : 100;
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="stack">
@@ -670,6 +835,81 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)" }}>
               Archivio lavori usera questa cartella per leggere anche lavori non creati da Archivio Flow.
             </p>
+
+            <div className="stack" style={{ gap: "0.55rem" }}>
+              <span style={{ fontSize: "0.88rem", color: "var(--text-muted)" }}>
+                Livelli gerarchia archivio (relativi alla radice)
+              </span>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.6rem" }}>
+                <label className="field" style={{ gap: "0.35rem" }}>
+                  <span>Livello Anno</span>
+                  <select
+                    value={archiveHierarchy.yearLevel ?? 0}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10);
+                      setArchiveHierarchy((prev) => normalizeHierarchyConfig({
+                        ...prev,
+                        yearLevel: Number.isFinite(parsed) && parsed > 0 ? parsed : null,
+                      }));
+                    }}
+                  >
+                    <option value={0}>Nessuno</option>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={4}>4</option>
+                    <option value={5}>5</option>
+                    <option value={6}>6</option>
+                  </select>
+                </label>
+
+                <label className="field" style={{ gap: "0.35rem" }}>
+                  <span>Livello Categoria</span>
+                  <select
+                    value={archiveHierarchy.categoryLevel ?? 0}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10);
+                      setArchiveHierarchy((prev) => normalizeHierarchyConfig({
+                        ...prev,
+                        categoryLevel: Number.isFinite(parsed) && parsed > 0 ? parsed : null,
+                      }));
+                    }}
+                  >
+                    <option value={0}>Nessuno</option>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={4}>4</option>
+                    <option value={5}>5</option>
+                    <option value={6}>6</option>
+                  </select>
+                </label>
+
+                <label className="field" style={{ gap: "0.35rem" }}>
+                  <span>Livello Lavoro</span>
+                  <select
+                    value={archiveHierarchy.jobLevel}
+                    onChange={(e) => {
+                      const parsed = Number.parseInt(e.target.value, 10);
+                      setArchiveHierarchy((prev) => normalizeHierarchyConfig({
+                        ...prev,
+                        jobLevel: Number.isFinite(parsed) && parsed > 0 ? parsed : prev.jobLevel,
+                      }));
+                    }}
+                  >
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                    <option value={4}>4</option>
+                    <option value={5}>5</option>
+                    <option value={6}>6</option>
+                  </select>
+                </label>
+              </div>
+              <span style={{ marginTop: "0.1rem", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                Esempio: anno=1, categoria=2, lavoro=3 per strutture tipo Anno/Categoria/NomeLavoro.
+              </span>
+            </div>
 
             <div className="field">
               <span>Nuova cartella predefinita</span>
@@ -1141,6 +1381,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                 setUsaLavoroEsistente(e.target.checked);
                 if (!e.target.checked) {
                   setExistingJobId("");
+                  setExistingJobSearch("");
                 }
               }}
               style={{ width: 16, height: 16, cursor: "pointer" }}
@@ -1149,17 +1390,33 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           </label>
 
           {usaLavoroEsistente && (
-            <label className="field">
-              <span>Seleziona lavoro esistente</span>
-              <select value={existingJobId} onChange={(e) => setExistingJobId(e.target.value)}>
-                <option value="">-- seleziona --</option>
-                {jobsEsistenti.map((job) => (
-                  <option key={job.id} value={job.id}>
-                    {job.nomeLavoro} · {job.dataLavoro}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="stack" style={{ gap: "0.55rem" }}>
+              <label className="field">
+                <span>Cerca lavoro esistente</span>
+                <input
+                  type="text"
+                  value={existingJobSearch}
+                  onChange={(e) => setExistingJobSearch(e.target.value)}
+                  placeholder="es. Ferdinando, 2026-06, matrimoni"
+                />
+              </label>
+
+              <label className="field">
+                <span>Seleziona lavoro esistente</span>
+                <select value={existingJobId} onChange={(e) => setExistingJobId(e.target.value)}>
+                  <option value="">-- seleziona --</option>
+                  {existingJobsForSelect.map((job) => (
+                    <option key={job.id} value={job.id}>
+                      {job.nomeLavoro} · {job.dataLavoro} · {job.autore}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                {filteredExistingJobs.length} risultati su {jobsEsistenti.length} lavori esistenti.
+              </span>
+            </div>
           )}
 
           <div className="inline-grid inline-grid--2">
@@ -1313,50 +1570,108 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
       </div>
 
       {/* Error / result feedback */}
-      {importing && importProgress && (
+      {importing && (
         <div
-          className="message-box"
-          style={{ borderColor: "rgba(184, 154, 99, 0.35)", background: "rgba(184, 154, 99, 0.08)" }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 10, 9, 0.72)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 60,
+            padding: "1rem",
+          }}
         >
-          <p style={{ marginBottom: "0.55rem" }}>
-            Stato import: <strong>{importProgress.phase === "compressing" ? "Compressione JPG" : "Copia file"}</strong>
-          </p>
-
           <div
+            className="panel-section"
             style={{
-              width: "100%",
-              height: 10,
-              borderRadius: 999,
-              background: "rgba(255,255,255,0.08)",
-              overflow: "hidden",
-              marginBottom: "0.6rem",
+              width: "min(760px, 100%)",
+              padding: "1.1rem",
+              borderColor: "var(--line-strong)",
+              background: "rgba(27, 33, 30, 0.98)",
             }}
           >
-            <div
-              style={{
-                width: `${Math.max(3, importProgress.progressPct)}%`,
-                height: "100%",
-                background: "linear-gradient(90deg, #b89a63, #d4c1aa)",
-                transition: "width 220ms ease",
-              }}
-            />
-          </div>
+            <div className="stack" style={{ gap: "0.8rem" }}>
+              <strong style={{ fontSize: "1.02rem" }}>Stato import in corso</strong>
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                {progressPhase === "compressing"
+                  ? "Fase 2/2: esportazione BASSA_QUALITA"
+                  : "Fase 1/2: copia file in FOTO_SD"}
+              </p>
 
-          <p style={{ margin: 0, fontSize: "0.9rem" }}>
-            {importProgress.completedScheduled}/{Math.max(importProgress.knownTotal, 1)} file elaborati · copiati {importProgress.copiedFiles} · saltati {importProgress.skippedFiles}
-          </p>
-          <p style={{ margin: "0.35rem 0 0", fontSize: "0.84rem", color: "var(--text-muted)" }}>
-            Scansionati {importProgress.scannedFiles} · concorrenza {importProgress.copyConcurrency} · in coda {importProgress.inFlight}
-          </p>
-          <p style={{ margin: "0.35rem 0 0", fontSize: "0.84rem", color: "var(--text-muted)" }}>
-            Trascorso {formatDurationSeconds(importProgress.elapsedMs / 1000)}
-            {importProgress.estimatedRemainingSec !== null && ` · Stimato restante ${formatDurationSeconds(importProgress.estimatedRemainingSec)}`}
-          </p>
-          {importProgress.jpgEnabled && importProgress.phase === "compressing" && (
-            <p style={{ margin: "0.35rem 0 0", fontSize: "0.84rem", color: "var(--text-muted)" }}>
-              JPG generati: {importProgress.jpgDone}
-            </p>
-          )}
+              <div style={{ display: "grid", gap: "0.55rem" }}>
+                <div style={{ display: "grid", gap: "0.35rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.86rem" }}>
+                    <span style={{ color: copyStepDone ? "var(--success)" : "var(--text)" }}>
+                      {copyStepDone ? "✓" : "⏳"} Copia file
+                    </span>
+                    <span style={{ color: "var(--text-muted)" }}>{copyProgressPct}%</span>
+                  </div>
+                  <div style={{ width: "100%", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        width: `${copyProgressPct}%`,
+                        height: "100%",
+                        background: "linear-gradient(90deg, #b89a63, #d4c1aa)",
+                        transition: "width 220ms ease",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {bqStepVisible && (
+                  <div style={{ display: "grid", gap: "0.35rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.86rem" }}>
+                      <span style={{ color: bqStepDone ? "var(--success)" : "var(--text)" }}>
+                        {bqStepDone ? "✓" : "⏳"} Export Bassa Qualita
+                      </span>
+                      <span style={{ color: "var(--text-muted)" }}>{bqProgressPct}%</span>
+                    </div>
+                    <div style={{ width: "100%", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                      <div
+                        style={{
+                          width: `${Math.max(0, bqProgressPct)}%`,
+                          height: "100%",
+                          background: "linear-gradient(90deg, #7ea37e, #9ac69a)",
+                          transition: "width 220ms ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                <div className="stat-card">
+                  <span>File elaborati</span>
+                  <strong style={{ fontSize: "1.05rem" }}>
+                    {(importProgress?.completedScheduled ?? 0)}/{Math.max(importProgress?.knownTotal ?? 1, 1)}
+                  </strong>
+                </div>
+                <div className="stat-card">
+                  <span>JPG BQ</span>
+                  <strong style={{ fontSize: "1.05rem" }}>
+                    {importProgress?.jpgDone ?? 0}/{Math.max(importProgress?.jpgPlanned ?? 0, 0)}
+                  </strong>
+                </div>
+                <div className="stat-card">
+                  <span>Tempo stimato</span>
+                  <strong style={{ fontSize: "1.05rem" }}>
+                    {importProgress?.estimatedRemainingSec !== null
+                      ? formatDurationSeconds(importProgress?.estimatedRemainingSec ?? 0)
+                      : "calcolo..."}
+                  </strong>
+                </div>
+              </div>
+
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
+                Trascorso {formatDurationSeconds((importProgress?.elapsedMs ?? 0) / 1000)} · Copiati {importProgress?.copiedFiles ?? 0} · Saltati {importProgress?.skippedFiles ?? 0}
+              </p>
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", wordBreak: "break-all" }}>
+                Destinazione: {importProgress?.targetFolder || effectiveDestinazione}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1394,6 +1709,15 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
               </a>
             </p>
           )}
+          <div className="button-row" style={{ marginTop: "0.6rem" }}>
+            <button
+              className="secondary-button"
+              style={{ padding: "0.5rem 0.8rem", fontSize: "0.86rem" }}
+              onClick={() => { void openFolderInExplorer(importSuccess.job.percorsoCartella); }}
+            >
+              📂 Apri cartella lavoro
+            </button>
+          </div>
         </div>
       )}
 
@@ -1405,6 +1729,33 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             Tutti i file verranno copiati nella cartella{" "}
             <code style={{ fontSize: "0.88rem" }}>FOTO_SD</code> del lavoro.
           </p>
+          <label className="check-row" style={{ marginTop: "0.45rem", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={openFolderOnFinish}
+              onChange={(e) => setOpenFolderOnFinish(e.target.checked)}
+              style={{ width: 16, height: 16, cursor: "pointer" }}
+            />
+            <span>Apri automaticamente la cartella al termine</span>
+          </label>
+          <label className="check-row" style={{ marginTop: "0.35rem", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={desktopNotifyOnFinish}
+              onChange={(e) => setDesktopNotifyOnFinish(e.target.checked)}
+              style={{ width: 16, height: 16, cursor: "pointer" }}
+            />
+            <span>Mostra notifica desktop a fine import</span>
+          </label>
+          <label className="check-row" style={{ marginTop: "0.35rem", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={soundNotifyOnFinish}
+              onChange={(e) => setSoundNotifyOnFinish(e.target.checked)}
+              style={{ width: 16, height: 16, cursor: "pointer" }}
+            />
+            <span>Riproduci suono a fine import</span>
+          </label>
         </div>
         <div className="setup-footer__action">
           <button
