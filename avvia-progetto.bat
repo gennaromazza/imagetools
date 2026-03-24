@@ -26,10 +26,16 @@ echo ==============================
 echo        IMAGETOOLS SUITE
 echo ==============================
 echo.
+
+
+
 echo 1. Auto Layout App
 echo 2. Image Party Frame
+echo 3. Archivio Flow
+echo 4. Image ID Print
+echo 5. Photo Selector
 echo.
-set /p TOOL_CHOICE=Seleziona il tool da avviare [1-2]: 
+set /p TOOL_CHOICE=Seleziona il tool da avviare [1-5]: 
 
 if "%TOOL_CHOICE%"=="1" (
   call "%~dp0avvia-auto-layout.bat"
@@ -38,6 +44,21 @@ if "%TOOL_CHOICE%"=="1" (
 
 if "%TOOL_CHOICE%"=="2" (
   call "%~dp0avvia-image-party-frame.bat"
+  exit /b %errorlevel%
+)
+
+if "%TOOL_CHOICE%"=="3" (
+  call "%~dp0avvia-archivio-flow.bat"
+  exit /b %errorlevel%
+)
+
+if "%TOOL_CHOICE%"=="4" (
+  call "%~dp0avvia-image-id-print.bat"
+  exit /b %errorlevel%
+)
+
+if "%TOOL_CHOICE%"=="5" (
+  call "%~dp0avvia-photo-selector.bat"
   exit /b %errorlevel%
 )
 

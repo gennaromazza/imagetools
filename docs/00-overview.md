@@ -2,67 +2,116 @@
 
 ## 00. Overview & Current Project State
 
-Questo documento descrive l'architettura del repository nello stato attuale verificato il 16 marzo 2026.
-La visione del progetto resta quella di una suite di strumenti per fotografi. Oggi il monorepo include
-due prodotti operativi con target differenti: `auto-layout-app` e `image-party-frame-app`.
 
-## 1. Obiettivo del repository
+# FileX Suite — Overview & Stato Attuale
 
-Il repository ospita strumenti per velocizzare workflow fotografici reali:
+Questo documento descrive l’architettura e la visione della suite **FileX** (ex ImageTools), aggiornata a marzo 2026.
 
-- impaginazione automatica di fogli multifoto
-- revisione manuale del layout con drag and drop
-- export locale dei fogli generati
+## 1. Visione e Obiettivo
+
+FileX è una suite modulare di strumenti per workflow fotografici professionali:
+
+- impaginazione automatica multifoto
+- framing batch e crop live
+- export locale e batch
+- import e archiviazione lavori da SD
+- selezione e classificazione foto
 - base architetturale riutilizzabile per futuri tool
 
-L'obiettivo non e' una raccolta di script isolati, ma un sistema modulare in cui UI, logica di
-layout, preset e tipi condivisi restano separati.
+L’obiettivo è un ecosistema integrato, non una raccolta di script isolati: UI, logica, preset e tipi condivisi sono separati e riusabili.
 
-## 2. Stato reale al 16 marzo 2026
+## 2. Tool Principali (Marzo 2026)
 
-Il progetto oggi include:
+- `auto-layout-app`: impaginazione automatica multifoto (React + Vite)
+- `image-party-frame`: batch framing, crop live, export eventi (React + Vite + Express)
+- `IMAGE ID PRINT`: foto documento pronte per la stampa, AI/sidecar (React + Vite + Python)
+- `archivio-flow`: import e archiviazione lavori da SD (React + Vite + Express)
+- `photo-selector-app`: selezione e classificazione foto avanzata (React + Vite)
 
-- una app browser-first `apps/auto-layout-app` sviluppata con React + Vite
-- una app browser-first `apps/image-party-frame` sviluppata con React + Vite + server locale Express
-- un motore di planning in `packages/layout-engine`
-- un layer di orchestrazione e modifica manuale in `packages/core`
-- preset foglio e request di default in `packages/presets`
-- contratti condivisi in `packages/shared-types`
-- schema UI condiviso in `packages/ui-schema`
-- un package `packages/filesystem` pronto per utilizzi Node/browser futuri
+Moduli condivisi:
+- `packages/layout-engine`, `core`, `presets`, `shared-types`, `ui-schema`, `filesystem`
 
-Funzionalita' gia' disponibili nell'app:
+## 3. Stato reale (marzo 2026)
 
-- dashboard progetti
-- wizard di onboarding
-- fase di setup progetto
-- studio layout con modifica manuale
-- undo/redo
-- duplicazione, riordino e rimozione fogli
-- selezione foto attive del progetto
-- salvataggio automatico dei progetti in `localStorage`
-- persistenza delle immagini in `IndexedDB`
-- export fogli in `jpg` e `png`
-- import/export progetto in file `.imagetool`
+Tutti i tool sono funzionanti e integrabili, ma la suite non è ancora completamente unificata a livello di branding, launcher e stack tecnologico.
 
-Funzionalita' gia' disponibili in `image-party-frame-app`:
+**Funzionalità già disponibili:**
+- dashboard progetti, wizard onboarding, setup, studio layout, undo/redo, duplicazione/riordino/rimozione fogli, selezione foto, salvataggio automatico, export/import progetti, batch framing, crop live, AI background removal, archiviazione lavori, selezione/classificazione foto.
 
-- creazione progetto da cartella immagini
-- selezione template preset o custom
-- builder template custom con libreria locale
-- ordinamento template drag and drop
-- validazione layout, workspace crop live e confronto immagine
-- export batch con server locale `express + sharp`
-- import/export pacchetti JSON per progetto e libreria template
+**Funzionalità in sviluppo o da consolidare:**
+- plugin Photoshop/UXP, renderer desktop, export TIFF, suite test automatica, packaging desktop finale, workflow multi-tool completamente integrato.
 
-Al momento non esistono ancora:
+## 4. Roadmap Unificazione FileX
 
-- plugin Photoshop / UXP
-- renderer desktop nativo
-- export TIFF reale lato browser
-- suite test automatica
-- workflow multi-tool oltre ad `auto-layout`
-- packaging desktop finale Windows/macOS
+1. Allineamento documentazione e naming (FileX branding)
+2. Aggiornamento launcher principale per includere tutti i tool
+3. Uniformazione stack tecnologico (React, dipendenze, pattern UI)
+4. Refactor moduli condivisi e servizi
+5. Packaging desktop e distribuzione facilitata
+
+## 5. Struttura attuale del repository
+
+```text
+filex/
+  apps/
+    auto-layout-app/
+    image-party-frame/
+    IMAGE ID PRINT/
+    archivio-flow/
+    photo-selector-app/
+
+  docs/
+    00-overview.md
+    01-tech-stack.md
+    02-ui-system.md
+    tools/
+      auto-layout.md
+      image-party-frame.md
+      image-id-print.md
+      archivio-flow.md
+      photo-selector.md
+
+  packages/
+    core/
+    filesystem/
+    layout-engine/
+    presets/
+    shared-types/
+    ui-schema/
+```
+
+## 6. Flusso applicativo tipico
+
+1. Creazione o apertura progetto dalla dashboard
+2. Caricamento immagini reali o dataset demo
+3. Selezione foto attive/classificazione
+4. Configurazione foglio, strategia di planning/output
+5. Generazione piano iniziale/framing/crop
+6. Revisione layout, editing manuale, AI background removal
+7. Export fogli, export batch, archiviazione lavori
+
+## 7. Regole architetturali confermate
+
+- UI separata dalla logica di layout
+- moduli engine/core/preset/tipi condivisi
+- preset e valori di default fuori dalla UI
+- modifiche manuali passano dal core
+- ogni aggiornamento importante va riflesso nella documentazione
+
+## 8. Documentazione attiva
+
+- `docs/00-overview.md`: visione generale e stato del repository
+- `docs/01-tech-stack.md`: stack effettivamente in uso
+- `docs/02-ui-system.md`: flusso UI reale dell’app
+- `docs/tools/`: comportamento dei singoli tool
+
+## 9. Prossimi passi
+
+- Allineamento documentazione e branding FileX
+- Aggiornamento launcher e onboarding
+- Uniformazione stack tecnologico
+- Refactor moduli condivisi
+- Packaging desktop
 
 ## 3. Architettura attuale
 
