@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
-import type { ImageAsset, LayoutAssignment, LayoutSlot } from "@photo-tools/shared-types";
+import type { GeneratedPageLayout, ImageAsset, LayoutAssignment, LayoutSlot } from "@photo-tools/shared-types";
+import { getEffectiveSlotAspectRatio } from "../utils/slot-geometry";
 
 interface AssignmentInspectorProps {
   pageLabel: string | null;
   slot?: LayoutSlot;
   assignment?: LayoutAssignment;
   asset?: ImageAsset;
+  sheetSpec?: GeneratedPageLayout["sheetSpec"];
+  slotCount?: number;
   onChange: (
     changes: Partial<
       Pick<
@@ -18,65 +20,41 @@ interface AssignmentInspectorProps {
   onOpenCropEditor: () => void;
 }
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getAutoFillCrop(
+  asset: ImageAsset,
+  slot: LayoutSlot,
+  sheetSpec?: GeneratedPageLayout["sheetSpec"],
+  slotCount = 1
+) {
+  const imageAspect = asset.aspectRatio > 0 ? asset.aspectRatio : 1;
+  const slotAspect = getEffectiveSlotAspectRatio(slot, sheetSpec, slotCount);
+
+  if (imageAspect > slotAspect) {
+    const width = clamp(slotAspect / imageAspect, 0.08, 1);
+    return { cropLeft: (1 - width) / 2, cropTop: 0, cropWidth: width, cropHeight: 1 };
+  }
+
+  const height = clamp(imageAspect / slotAspect, 0.08, 1);
+  return { cropLeft: 0, cropTop: (1 - height) / 2, cropWidth: 1, cropHeight: height };
+}
+
 export function AssignmentInspector({
   pageLabel,
   slot,
   assignment,
   asset,
+  sheetSpec,
+  slotCount = 1,
   onChange,
   onClear,
   onOpenCropEditor
 }: AssignmentInspectorProps) {
-  const [draftZoom, setDraftZoom] = useState(assignment?.zoom ?? 1);
-  const [draftOffsetX, setDraftOffsetX] = useState(assignment?.offsetX ?? 0);
-  const [draftOffsetY, setDraftOffsetY] = useState(assignment?.offsetY ?? 0);
-  const [draftRotation, setDraftRotation] = useState(assignment?.rotation ?? 0);
-
-  useEffect(() => {
-    setDraftZoom(assignment?.zoom ?? 1);
-    setDraftOffsetX(assignment?.offsetX ?? 0);
-    setDraftOffsetY(assignment?.offsetY ?? 0);
-    setDraftRotation(assignment?.rotation ?? 0);
-  }, [assignment?.zoom, assignment?.offsetX, assignment?.offsetY, assignment?.rotation]);
-
-  useEffect(() => {
-    if (!assignment || draftZoom === assignment.zoom) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => onChange({ zoom: draftZoom }), 80);
-    return () => window.clearTimeout(timeoutId);
-  }, [assignment, draftZoom, onChange]);
-
-  useEffect(() => {
-    if (!assignment || draftOffsetX === assignment.offsetX) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => onChange({ offsetX: draftOffsetX }), 80);
-    return () => window.clearTimeout(timeoutId);
-  }, [assignment, draftOffsetX, onChange]);
-
-  useEffect(() => {
-    if (!assignment || draftOffsetY === assignment.offsetY) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => onChange({ offsetY: draftOffsetY }), 80);
-    return () => window.clearTimeout(timeoutId);
-  }, [assignment, draftOffsetY, onChange]);
-
-  useEffect(() => {
-    if (!assignment || draftRotation === assignment.rotation) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => onChange({ rotation: draftRotation }), 80);
-    return () => window.clearTimeout(timeoutId);
-  }, [assignment, draftRotation, onChange]);
-
   if (!slot) {
-    return <p className="helper-copy">Seleziona uno slot per regolare foto, crop e comportamento del singolo riquadro.</p>;
+    return <p className="helper-copy">Seleziona uno slot per regolare foto, foglio e inquadratura finale del riquadro.</p>;
   }
 
   if (!assignment || !asset) {
@@ -89,6 +67,34 @@ export function AssignmentInspector({
       </div>
     );
   }
+
+  const isManualCrop = assignment.fitMode === "crop";
+  const activeMode = assignment.fitMode === "fit" ? "fit" : "fill";
+
+  const applyMode = (mode: "fit" | "fill") => {
+    if (mode === "fit") {
+      onChange({
+        fitMode: "fit",
+        zoom: 1,
+        offsetX: 0,
+        offsetY: 0,
+        cropLeft: 0,
+        cropTop: 0,
+        cropWidth: 1,
+        cropHeight: 1
+      });
+      return;
+    }
+
+    const autoFillCrop = getAutoFillCrop(asset, slot, sheetSpec, slotCount);
+    onChange({
+      fitMode: "fill",
+      zoom: 1,
+      offsetX: 0,
+      offsetY: 0,
+      ...autoFillCrop
+    });
+  };
 
   return (
     <div className="stack">
@@ -107,70 +113,45 @@ export function AssignmentInspector({
             <button
               key={mode}
               type="button"
-              className={assignment.fitMode === mode ? "segment segment--active" : "segment"}
-              onClick={() => onChange({ fitMode: mode })}
+              className={activeMode === mode ? "segment segment--active" : "segment"}
+              onClick={() => applyMode(mode)}
             >
               {mode === "fit" ? "Adatta" : "Riempi"}
             </button>
           ))}
         </div>
         <small className="helper-inline">
-          Usa Adatta o Riempi per il comportamento dello slot. Per rifinire inquadratura e posizione apri l'editor crop, che lavora sempre entro i vincoli del riquadro.
+          Il template definisce lo slot. Qui scegli se vedere tutta la foto o riempire il riquadro.
+          L'inquadratura manuale si fa sempre dall'editor dedicato.
         </small>
-        <button type="button" className="ghost-button" onClick={onOpenCropEditor}>
-          Apri editor crop
-        </button>
       </div>
 
-      <label className="field">
-        <span>Zoom</span>
-        <input
-          type="range"
-          min="0.7"
-          max="2.2"
-          step="0.05"
-          value={draftZoom}
-          onChange={(event) => setDraftZoom(Number(event.target.value))}
-        />
-      </label>
-
-      <div className="inline-grid inline-grid--2">
-        <label className="field">
-          <span>Spostamento X</span>
-          <input
-            type="range"
-            min="-100"
-            max="100"
-            step="1"
-            value={draftOffsetX}
-            onChange={(event) => setDraftOffsetX(Number(event.target.value))}
-          />
-        </label>
-
-        <label className="field">
-          <span>Spostamento Y</span>
-          <input
-            type="range"
-            min="-100"
-            max="100"
-            step="1"
-            value={draftOffsetY}
-            onChange={(event) => setDraftOffsetY(Number(event.target.value))}
-          />
-        </label>
+      <div className="field">
+        <span>Inquadratura</span>
+        {isManualCrop ? (
+          <small className="helper-inline">
+            Inquadratura manuale attiva. Se cambi template o slot, il sistema prova a preservarla e riadattarla.
+          </small>
+        ) : (
+          <small className="helper-inline">
+            Nessun crop manuale attivo. Apri l'editor per decidere esattamente cosa deve restare visibile nello slot.
+          </small>
+        )}
+        <div className="inline-grid inline-grid--2">
+          <button type="button" className="ghost-button" onClick={onOpenCropEditor}>
+            Modifica inquadratura
+          </button>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => applyMode("fill")}
+            disabled={!isManualCrop}
+            title={isManualCrop ? "Ripristina il riempimento automatico dello slot" : "Nessun crop manuale da ripristinare"}
+          >
+            Reset inquadratura
+          </button>
+        </div>
       </div>
-
-      <label className="field">
-        <span>Rotazione</span>
-        <input
-          type="range"
-          min="-25"
-          max="25"
-          step="1"
-          value={draftRotation}
-          onChange={(event) => setDraftRotation(Number(event.target.value))}
-        />
-      </label>
 
       <label className="check-row">
         <input
@@ -181,10 +162,15 @@ export function AssignmentInspector({
         <span>Blocca questo slot</span>
       </label>
 
-      <button type="button" className="ghost-button" onClick={onClear}>
+      <button
+        type="button"
+        className="ghost-button"
+        onClick={onClear}
+        disabled={assignment.locked}
+        title={assignment.locked ? "Sblocca lo slot per rimuovere la foto" : "Rimuovi foto dallo slot"}
+      >
         Rimuovi foto dallo slot
       </button>
     </div>
   );
 }
-

@@ -508,6 +508,8 @@ function InspectorSlotSection({
         slot={selectedSlot}
         assignment={selectedAssignment}
         asset={selectedAsset}
+        sheetSpec={activePage.sheetSpec}
+        slotCount={activePage.slotDefinitions.length}
         onChange={(changes) => {
           if (!selectedSlot) {
             return;

@@ -54,6 +54,7 @@ export function isBrowserDecodable(name: string): boolean {
 export const fileStore = new Map<string, File>();
 const fileHandleStore = new Map<string, FileSystemFileHandle>();
 const assetPathStore = new Map<string, string>();
+const livePreviewStore = new Map<string, string>();
 const sidecarHandleByAssetId = new Map<string, FileSystemFileHandle>();
 const sidecarHandleByStemPath = new Map<string, FileSystemFileHandle>();
 const directoryHandleByPath = new Map<string, FileSystemDirectoryHandle>();
@@ -87,6 +88,63 @@ function dirname(path: string): string {
   const slash = path.replace(/\\/g, "/");
   const i = slash.lastIndexOf("/");
   return i >= 0 ? slash.slice(0, i) : "";
+}
+
+function detectOrientation(width: number, height: number): "horizontal" | "vertical" | "square" {
+  if (width === height) return "square";
+  return height > width ? "vertical" : "horizontal";
+}
+
+function revokeLivePreviewUrl(assetId: string): void {
+  const current = livePreviewStore.get(assetId);
+  if (current) {
+    URL.revokeObjectURL(current);
+    livePreviewStore.delete(assetId);
+  }
+}
+
+function invalidateOnDemandPreview(assetId: string): void {
+  const current = onDemandPreviewStore.get(assetId);
+  if (current) {
+    URL.revokeObjectURL(current);
+    onDemandPreviewStore.delete(assetId);
+  }
+  onDemandPreviewPromiseStore.delete(assetId);
+}
+
+async function readImageDimensions(file: File): Promise<{ width: number; height: number } | null> {
+  if (!isBrowserDecodable(file.name)) {
+    return null;
+  }
+
+  try {
+    if ("createImageBitmap" in window) {
+      const bmp = await createImageBitmap(file);
+      const width = bmp.width;
+      const height = bmp.height;
+      bmp.close();
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    try {
+      const dims = await new Promise<{ width: number; height: number } | null>((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(
+          img.naturalWidth > 0 && img.naturalHeight > 0
+            ? { width: img.naturalWidth, height: img.naturalHeight }
+            : null
+        );
+        img.onerror = () => resolve(null);
+        img.src = objectUrl;
+      });
+      return dims;
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  } catch {
+    return null;
+  }
 }
 
 // ── Asset ID helpers (mirrored from browser-image-assets) ──────────────
@@ -327,8 +385,12 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
   for (const url of onDemandPreviewStore.values()) {
     URL.revokeObjectURL(url);
   }
+  for (const url of livePreviewStore.values()) {
+    URL.revokeObjectURL(url);
+  }
   onDemandPreviewStore.clear();
   onDemandPreviewPromiseStore.clear();
+  livePreviewStore.clear();
   fileHandleStore.clear();
   assetPathStore.clear();
   sidecarHandleByAssetId.clear();
@@ -479,6 +541,79 @@ export async function createOnDemandPreviewAsync(
   return task;
 }
 
+export interface AssetDiskChange {
+  id: string;
+  sourceFileKey: string;
+  thumbnailUrl?: string;
+  previewUrl?: string;
+  sourceUrl?: string;
+  width?: number;
+  height?: number;
+  orientation?: "horizontal" | "vertical" | "square";
+  aspectRatio?: number;
+}
+
+/**
+ * Checks whether selected assets were modified on disk by external tools (e.g. Photoshop).
+ * If changed, refreshes the in-memory file store and invalidates cached on-demand previews.
+ */
+export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<AssetDiskChange[]> {
+  if (assetIds.length === 0) return [];
+
+  const changes: AssetDiskChange[] = [];
+  const uniqueIds = Array.from(new Set(assetIds));
+
+  for (const assetId of uniqueIds) {
+    const handle = fileHandleStore.get(assetId);
+    if (!handle) continue;
+
+    try {
+      const latestFile = await handle.getFile();
+      const currentFile = fileStore.get(assetId);
+      const hasChanged =
+        !currentFile ||
+        currentFile.lastModified !== latestFile.lastModified ||
+        currentFile.size !== latestFile.size;
+
+      if (!hasChanged) continue;
+
+      fileStore.set(assetId, latestFile);
+      invalidateOnDemandPreview(assetId);
+
+      const relativePath = assetPathStore.get(assetId) ?? latestFile.name;
+      const next: AssetDiskChange = {
+        id: assetId,
+        sourceFileKey: buildSourceFileKey(latestFile, relativePath),
+      };
+
+      if (isBrowserDecodable(latestFile.name)) {
+        revokeLivePreviewUrl(assetId);
+        const liveUrl = URL.createObjectURL(latestFile);
+        livePreviewStore.set(assetId, liveUrl);
+        preloadImageUrls([liveUrl]);
+
+        next.thumbnailUrl = liveUrl;
+        next.previewUrl = liveUrl;
+        next.sourceUrl = liveUrl;
+
+        const dims = await readImageDimensions(latestFile);
+        if (dims) {
+          next.width = dims.width;
+          next.height = dims.height;
+          next.orientation = detectOrientation(dims.width, dims.height);
+          next.aspectRatio = dims.width / dims.height;
+        }
+      }
+
+      changes.push(next);
+    } catch {
+      // Ignore single-file read failures and continue checking the others.
+    }
+  }
+
+  return changes;
+}
+
 // ── Subfolder extraction ───────────────────────────────────────────────
 
 /**
@@ -511,6 +646,150 @@ export function extractSubfolders(
     .map(([folder, count]) => ({ folder, count }))
     .sort((a, b) => a.folder.localeCompare(b.folder));
   return result;
+}
+
+// ── File operations (copy / move / save-as) ───────────────────────────
+
+type FileOpResult = "ok" | "cancelled" | "error" | "no-file" | "unsupported";
+
+/** Returns the relative virtual path for an asset (e.g. "Folder/sub/IMG_001.CR3") */
+export function getAssetRelativePath(assetId: string): string | null {
+  return assetPathStore.get(assetId) ?? null;
+}
+
+/**
+ * Copy one or more assets to a user-chosen destination folder (FSAA).
+ * Opens ONE directory picker for all files.
+ */
+export async function copyAssetsToFolder(assetIds: string[]): Promise<FileOpResult> {
+  if (assetIds.length === 0) return "no-file";
+  if (!("showDirectoryPicker" in window)) return "unsupported";
+
+  let destDirHandle: FileSystemDirectoryHandle;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    destDirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return "cancelled";
+    return "error";
+  }
+
+  let hasError = false;
+  for (const assetId of assetIds) {
+    const file = fileStore.get(assetId);
+    if (!file) { hasError = true; continue; }
+    try {
+      const destFileHandle = await destDirHandle.getFileHandle(file.name, { create: true });
+      const writable = await destFileHandle.createWritable();
+      await writable.write(await file.arrayBuffer());
+      await writable.close();
+    } catch {
+      hasError = true;
+    }
+  }
+
+  return hasError ? "error" : "ok";
+}
+
+/**
+ * Move one or more assets to a user-chosen destination folder (FSAA).
+ * Copies the bytes, then removes the originals using the stored parent handle.
+ * Returns the list of successfully moved assetIds.
+ */
+export async function moveAssetsToFolder(assetIds: string[]): Promise<{ result: FileOpResult; movedIds: string[] }> {
+  if (assetIds.length === 0) return { result: "no-file", movedIds: [] };
+  if (!("showDirectoryPicker" in window)) return { result: "unsupported", movedIds: [] };
+
+  let destDirHandle: FileSystemDirectoryHandle;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    destDirHandle = await (window as any).showDirectoryPicker({ mode: "readwrite" });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return { result: "cancelled", movedIds: [] };
+    return { result: "error", movedIds: [] };
+  }
+
+  let hasError = false;
+  const movedIds: string[] = [];
+
+  for (const assetId of assetIds) {
+    const file = fileStore.get(assetId);
+    if (!file) { hasError = true; continue; }
+
+    try {
+      const relativePath = assetPathStore.get(assetId);
+      if (!relativePath) {
+        hasError = true;
+        continue;
+      }
+      const parentPath = dirname(relativePath);
+      const parentHandle = directoryHandleByPath.get(parentPath);
+      if (!parentHandle) {
+        // No source directory handle (e.g. webkitdirectory fallback): cannot perform a true move.
+        hasError = true;
+        continue;
+      }
+
+      const destFileHandle = await destDirHandle.getFileHandle(file.name, { create: true });
+      const writable = await destFileHandle.createWritable();
+      await writable.write(await file.arrayBuffer());
+      await writable.close();
+
+      // Remove from source. If this fails, treat as partial failure and keep asset in UI.
+      await parentHandle.removeEntry(file.name);
+
+      assetPathStore.delete(assetId);
+      fileStore.delete(assetId);
+      fileHandleStore.delete(assetId);
+      movedIds.push(assetId);
+    } catch {
+      hasError = true;
+    }
+  }
+
+  return { result: hasError ? "error" : "ok", movedIds };
+}
+
+/**
+ * Save a single asset to a user-chosen location (like "Save As").
+ * Falls back to a normal download if showSaveFilePicker is unavailable.
+ */
+export async function saveAssetAs(assetId: string): Promise<FileOpResult> {
+  const file = fileStore.get(assetId);
+  if (!file) return "no-file";
+
+  // Fallback for browsers without showSaveFilePicker (Firefox, Safari)
+  if (!("showSaveFilePicker" in window)) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    return "ok";
+  }
+
+  try {
+    const ext = extOf(file.name).replace(".", "").toLowerCase();
+    const mimeType = ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+      : ext === "png" ? "image/png"
+      : ext === "webp" ? "image/webp"
+      : "application/octet-stream";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handle = await (window as any).showSaveFilePicker({
+      suggestedName: file.name,
+      types: [{ description: "File immagine", accept: { [mimeType]: [`.${ext}`] } }],
+    });
+    const writable = await handle.createWritable();
+    await writable.write(await file.arrayBuffer());
+    await writable.close();
+    return "ok";
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return "cancelled";
+    return "error";
+  }
 }
 
 // ── Recent folders ─────────────────────────────────────────────────────

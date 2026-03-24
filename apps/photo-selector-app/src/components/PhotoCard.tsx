@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { preloadImageUrls } from "../services/image-cache";
 import {
@@ -55,10 +56,13 @@ export const PhotoCard = memo(
     const raw = isRawFile(photo.fileName);
 
     const prevClassRef = useRef({ rating, pickStatus, colorLabel });
+    const cardRef = useRef<HTMLDivElement>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const feedbackTimeoutRef = useRef<number | null>(null);
     const feedbackTokenRef = useRef(0);
     const [feedback, setFeedback] = useState<CardFeedback | null>(null);
+    const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [hoverPos, setHoverPos] = useState<{ top: number; left: number; right: number; imgSrc: string } | null>(null);
 
     useEffect(() => {
       const prev = prevClassRef.current;
@@ -121,6 +125,9 @@ export const PhotoCard = memo(
         if (feedbackTimeoutRef.current !== null) {
           window.clearTimeout(feedbackTimeoutRef.current);
         }
+        if (hoverTimerRef.current !== null) {
+          clearTimeout(hoverTimerRef.current);
+        }
       };
     }, []);
 
@@ -128,17 +135,38 @@ export const PhotoCard = memo(
       photo.orientation === "vertical" ? "↕" : photo.orientation === "square" ? "◻" : "↔";
     return (
       <div
-        className={`photo-card ${isSelected ? "photo-card--selected" : ""}`}
+        className={`photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}`}
         role="option"
         tabIndex={0}
         aria-selected={isSelected}
         aria-label={`${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`}
         aria-keyshortcuts="Enter Space 1 2 3 4 5 P X U"
+        ref={cardRef}
         data-preview-asset-id={photo.id}
         onClick={(event) => onToggle(photo.id, event)}
         onFocus={() => onFocus(photo.id)}
         onMouseEnter={() => {
           if (photo.previewUrl) preloadImageUrls([photo.previewUrl]);
+          const imgSrc = photo.previewUrl ?? photo.thumbnailUrl ?? null;
+          if (!imgSrc) return;
+          hoverTimerRef.current = setTimeout(() => {
+            if (!cardRef.current) return;
+            const rect = cardRef.current.getBoundingClientRect();
+            const spaceRight = window.innerWidth - rect.right;
+            setHoverPos({
+              top: Math.max(8, rect.top),
+              left: spaceRight >= 220 ? rect.right + 8 : rect.left - 228,
+              right: spaceRight >= 220 ? -1 : rect.right,
+              imgSrc,
+            });
+          }, 550);
+        }}
+        onMouseLeave={() => {
+          if (hoverTimerRef.current !== null) {
+            clearTimeout(hoverTimerRef.current);
+            hoverTimerRef.current = null;
+          }
+          setHoverPos(null);
         }}
         onDoubleClick={() => onPreview(photo.id)}
         onContextMenu={(event) => {
@@ -328,6 +356,21 @@ export const PhotoCard = memo(
             </div>
           </div>
         ) : null}
+        {hoverPos !== null &&
+          createPortal(
+            <div
+              className="photo-card__hover-preview"
+              style={{ top: hoverPos.top, left: hoverPos.left }}
+            >
+              <img
+                src={hoverPos.imgSrc}
+                alt={photo.fileName}
+                className="photo-card__hover-img"
+              />
+              <div className="photo-card__hover-name">{photo.fileName}</div>
+            </div>,
+            document.body
+          )}
       </div>
     );
   },

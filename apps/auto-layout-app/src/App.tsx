@@ -8,7 +8,6 @@ import {
   createPage,
   moveImageBetweenSlots,
   placeImageInSlot,
-  rearrangePageImages,
   rebalancePagesForAssignedImages,
   removePage,
   updatePageSheetSpec,
@@ -45,13 +44,13 @@ import { Sidebar } from "./components/Sidebar";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { ExportProgressModal } from "./components/ExportProgressModal";
 import { PhotoQuickPreviewModal } from "./components/PhotoQuickPreviewModal";
+import { SlotPhotoEditorModal } from "./components/SlotPhotoEditorModal";
 import { useToast } from "./components/ToastProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Stepper } from "./components/Stepper";
 import { OnboardingWizard } from "./components/OnboardingWizard";
 import { ProjectDashboard, type Project } from "./components/ProjectDashboard";
 import { ImportProgressModal } from "./components/ImportProgressModal";
-import { InspectorPanel } from "./components/InspectorPanel";
 import { StudioProvider } from "./components/StudioContext";
 import {
   inferFolderLabelFromFiles,
@@ -100,6 +99,11 @@ interface ImportProgressState {
   processed: number;
   currentFile: string | null;
   folderLabel: string;
+}
+
+interface SlotPhotoEditorTarget {
+  pageId: string;
+  slotId: string;
 }
 
 type BrowserFile = File & {
@@ -307,6 +311,8 @@ function AppContent() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [exportProgressState, setExportProgressState] = useState<ExportProgressState>(() => createInitialExportProgressState());
   const [quickPreviewAssetId, setQuickPreviewAssetId] = useState<string | null>(null);
+  const [slotPhotoEditorTarget, setSlotPhotoEditorTarget] = useState<SlotPhotoEditorTarget | null>(null);
+  const [slotPhotoEditorReturnTarget, setSlotPhotoEditorReturnTarget] = useState<SlotPhotoEditorTarget | null>(null);
   const [recentlyRebalancedPageId, setRecentlyRebalancedPageId] = useState<string | null>(null);
   const [recentlyAddedPageId, setRecentlyAddedPageId] = useState<string | null>(null);
   const [recentlyAddedSlotKey, setRecentlyAddedSlotKey] = useState<string | null>(null);
@@ -801,6 +807,15 @@ function AppContent() {
       ),
     [result.pages]
   );
+  const lockedAssetIds = useMemo(
+    () =>
+      new Set(
+        result.pages.flatMap((page) =>
+          page.assignments.filter((assignment) => assignment.locked).map((assignment) => assignment.imageId)
+        )
+      ),
+    [result.pages]
+  );
   const maxTemplateCapacity = useMemo(
     () => result.availableTemplates.reduce((highest, template) => Math.max(highest, template.maxPhotos), 0),
     [result.availableTemplates]
@@ -812,6 +827,14 @@ function AppContent() {
     ? selectedPage?.assignments.find((assignment) => assignment.slotId === selectedSlot.id)
     : undefined;
   const selectedAsset = selectedAssignment ? assetsById.get(selectedAssignment.imageId) ?? null : null;
+  const slotEditorPage = slotPhotoEditorTarget
+    ? result.pages.find((page) => page.id === slotPhotoEditorTarget.pageId) ?? null
+    : null;
+  const slotEditorSlot = slotEditorPage?.slotDefinitions.find((slot) => slot.id === slotPhotoEditorTarget?.slotId) ?? null;
+  const slotEditorAssignment = slotEditorSlot
+    ? slotEditorPage?.assignments.find((assignment) => assignment.slotId === slotEditorSlot.id) ?? null
+    : null;
+  const slotEditorAsset = slotEditorAssignment ? assetsById.get(slotEditorAssignment.imageId) ?? null : null;
   const allAssetsById = useMemo(
     () => new Map(allAssets.map((asset) => [asset.id, asset] as const)),
     [allAssets]
@@ -943,16 +966,20 @@ function AppContent() {
         selectedPage &&
         selectedSlot
       ) {
-        const nextResult = clearSlotAssignment(result, {
+        const clearedResult = clearSlotAssignment(result, {
           pageId: selectedPage.id,
           slotId: selectedSlot.id
         });
+        const nextResult = rebalancePagesForAssignedImages(clearedResult, [selectedPage.id]);
+        const nextPage = nextResult.pages.find((page) => page.id === selectedPage.id);
 
         if (nextResult !== result) {
           event.preventDefault();
           commitStudioChange({
             result: nextResult,
-            activity: `Slot ${selectedSlot.id} svuotato da tastiera.`
+            selectedPageId: nextPage?.id ?? selectedPage.id,
+            selectedSlotKey: nextPage?.slotDefinitions[0] ? `${nextPage.id}:${nextPage.slotDefinitions[0].id}` : null,
+            activity: `Foto rimossa da tastiera dallo slot ${selectedSlot.id}.`
           });
         }
       }
@@ -1171,27 +1198,18 @@ function AppContent() {
       null;
     const targetPage = result.pages.find((page) => page.id === move.targetPageId);
     const targetAssignment = targetPage?.assignments.find((assignment) => assignment.slotId === move.targetSlotId);
-    const isSamePageOccupiedDrop =
+    const isOccupiedTargetDrop =
       move.sourcePageId === move.targetPageId &&
       move.sourceSlotId !== move.targetSlotId &&
       Boolean(targetAssignment) &&
       Boolean(draggedImageId);
-    let nextResult = isSamePageOccupiedDrop && draggedImageId
-      ? rearrangePageImages(result, {
-          pageId: move.targetPageId,
-          preferredImageId: draggedImageId
-        })
-      : moveImageBetweenSlots(result, move);
+    const nextResult = moveImageBetweenSlots(result, move);
 
     // FIX: Do not rigorously rebalance pages after manual slot-to-slot move,
     // as it destroys the explicit slot assignment choice.
     // if (move.sourcePageId !== move.targetPageId) {
     //   nextResult = rebalancePagesForAssignedImages(nextResult, [move.sourcePageId, move.targetPageId]);
     // }
-
-    if (move.sourcePageId === move.targetPageId && isSamePageOccupiedDrop) {
-      markPageRebalanced(move.targetPageId);
-    }
 
     const nextPlacement = draggedImageId ? findImagePlacement(nextResult, draggedImageId) : null;
     const changed = commitStudioChange({
@@ -1200,10 +1218,12 @@ function AppContent() {
       selectedSlotKey: nextPlacement ? `${nextPlacement.pageId}:${nextPlacement.slotId}` : null,
       activity:
         move.sourcePageId === move.targetPageId
-          ? isSamePageOccupiedDrop
-            ? `Foglio ${move.targetPageId} riorganizzato automaticamente attorno alla foto spostata.`
+          ? isOccupiedTargetDrop
+            ? `Foto scambiate manualmente nel foglio ${move.targetPageId}.`
             : `Foto riposizionata nel foglio ${move.targetPageId}.`
-          : `Foto spostata tra fogli con riadattamento automatico dei layout.`
+          : targetAssignment
+            ? `Foto scambiate tra fogli mantenendo gli slot scelti manualmente.`
+            : `Foto spostata tra fogli mantenendo lo slot di destinazione.`
     });
 
     if (changed && draggedImageId) {
@@ -1212,6 +1232,15 @@ function AppContent() {
   }
 
   function handleAssetDropped(pageId: string, slotId: string, imageId: string) {
+    if (lockedAssetIds.has(imageId)) {
+      toast.addToast(
+        "La foto e bloccata nello slot corrente. Sblocca lo slot prima di spostarla o sostituirla.",
+        "warning",
+        4200
+      );
+      return;
+    }
+
     const previousUsage = usageByAssetId.get(imageId);
     const replacedImageId =
       result.pages
@@ -1222,13 +1251,24 @@ function AppContent() {
       ? result.pages.find((page) => page.id === previousUsage.pageId)?.templateId
       : undefined;
     const imageAlreadyActive = activeAssetIds.includes(imageId);
+    const isSamePageReposition =
+      imageAlreadyActive &&
+      previousUsage?.pageId === pageId &&
+      previousUsage.slotId !== slotId;
     const nextActiveIds = imageAlreadyActive ? activeAssetIds : [...activeAssetIds, imageId];
     const nextRequest = imageAlreadyActive
       ? request
       : buildRequestWithSelection(request, allAssets, nextActiveIds);
     const baseResult = imageAlreadyActive ? result : syncResultWithSelection(result, nextRequest);
-    let nextResult = placeImageInSlot(baseResult, { imageId, targetPageId: pageId, targetSlotId: slotId });
-    if (previousUsage?.pageId && previousUsage.pageId !== pageId) {
+    let nextResult = isSamePageReposition && previousUsage
+      ? moveImageBetweenSlots(result, {
+          sourcePageId: previousUsage.pageId,
+          sourceSlotId: previousUsage.slotId,
+          targetPageId: pageId,
+          targetSlotId: slotId
+        })
+      : placeImageInSlot(baseResult, { imageId, targetPageId: pageId, targetSlotId: slotId });
+    if (!isSamePageReposition && previousUsage?.pageId && previousUsage.pageId !== pageId) {
       nextResult = rebalancePagesForAssignedImages(nextResult, [previousUsage.pageId]);
     }
     const nextPlacement = findImagePlacement(nextResult, imageId);
@@ -1240,7 +1280,11 @@ function AppContent() {
       selectedPageId: nextPlacement?.pageId ?? pageId,
       selectedSlotKey: nextPlacement ? `${nextPlacement.pageId}:${nextPlacement.slotId}` : `${pageId}:${slotId}`,
       activity:
-        previousUsage && previousUsage.pageId !== pageId
+        isSamePageReposition
+          ? replacedImageId && replacedImageId !== imageId
+            ? `Foto scambiate manualmente nel foglio ${previousUsage?.pageNumber ?? pageId}.`
+            : `Foto riposizionata manualmente nel foglio ${previousUsage?.pageNumber ?? pageId}.`
+        : previousUsage && previousUsage.pageId !== pageId
           ? `Foto spostata dal foglio ${previousUsage.pageNumber} al foglio ${nextPlacement?.pageNumber ?? pageId} con riassetto automatico.`
           : imageAlreadyActive
             ? `Foto assegnata manualmente al foglio ${pageId} con aggiornamento layout.`
@@ -1249,7 +1293,7 @@ function AppContent() {
 
     if (changed && nextPlacement) {
       consumeStagedImage(imageId);
-      if (dragState?.kind === "asset" && replacedImageId && replacedImageId !== imageId) {
+      if (!isSamePageReposition && dragState?.kind === "asset" && replacedImageId && replacedImageId !== imageId) {
         stageImage(replacedImageId);
       }
       markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
@@ -1287,6 +1331,15 @@ function AppContent() {
   }
 
   function handleAddImageToPage(pageId: string, imageId: string) {
+    if (lockedAssetIds.has(imageId)) {
+      toast.addToast(
+        "La foto e bloccata nello slot corrente. Sblocca lo slot prima di spostarla su un altro foglio.",
+        "warning",
+        4200
+      );
+      return;
+    }
+
     const previousUsage = usageByAssetId.get(imageId);
     const targetPage = result.pages.find((page) => page.id === pageId);
     const previousTargetTemplate = targetPage?.templateId;
@@ -1450,6 +1503,15 @@ function AppContent() {
   }
 
   function handleCreatePageWithImage(imageId: string) {
+    if (lockedAssetIds.has(imageId)) {
+      toast.addToast(
+        "La foto e bloccata nello slot corrente. Sblocca lo slot prima di creare un nuovo foglio da questa foto.",
+        "warning",
+        4200
+      );
+      return;
+    }
+
     const previousUsage = usageByAssetId.get(imageId);
     const imageAlreadyActive = activeAssetIds.includes(imageId);
     const nextActiveIds = imageAlreadyActive ? activeAssetIds : [...activeAssetIds, imageId];
@@ -1822,13 +1884,39 @@ function AppContent() {
     });
   }
 
-const handleOpenCropEditor = useCallback((pageId: string, slotId: string) => {
+  const handleOpenCropEditor = useCallback((pageId: string, slotId: string) => {
+    setSlotPhotoEditorReturnTarget(null);
     setCropTarget({ pageId, slotId });
   }, []);
 
+  const handleOpenCropEditorFromSlotEditor = useCallback((pageId: string, slotId: string) => {
+    setSlotPhotoEditorReturnTarget({ pageId, slotId });
+    setSlotPhotoEditorTarget(null);
+    setCropTarget({ pageId, slotId });
+  }, []);
+
+  const handleOpenPhotoWindow = useCallback(
+    (pageId: string, slotId: string) => {
+      const page = result.pages.find((item) => item.id === pageId);
+      const assignment = page?.assignments.find((item) => item.slotId === slotId);
+      if (!page || !assignment) {
+        return;
+      }
+
+      setSelectedPageId(page.id);
+      setSelectedSlotKey(`${page.id}:${slotId}`);
+      setQuickPreviewAssetId(null);
+      setSlotPhotoEditorReturnTarget(null);
+      setSlotPhotoEditorTarget({ pageId: page.id, slotId });
+    },
+    [result.pages]
+  );
+
   const handleCloseCropEditor = useCallback(() => {
     setCropTarget(null);
-  }, []);
+    setSlotPhotoEditorTarget((current) => current ?? slotPhotoEditorReturnTarget);
+    setSlotPhotoEditorReturnTarget(null);
+  }, [slotPhotoEditorReturnTarget]);
 
   const currentStudioContextValue = useMemo(() => {
     const activePage = result.pages.find(p => p.id === selectedPageId) || null;
@@ -1854,15 +1942,15 @@ const handleOpenCropEditor = useCallback((pageId: string, slotId: string) => {
       selectedAsset,
       isInspectorCollapsed,
       setIsInspectorCollapsed,
-        cropTarget,
-        onUpdateSlotAssignment: handleUpdateSelectedSlotAssignment,
-        onClearSlot: handleClearSlot,
-        onOpenCropEditor: handleOpenCropEditor,
-        onCloseCropEditor: handleCloseCropEditor,
-        onPageSheetPresetChange: handlePageSheetPresetChange,
-        onPageSheetFieldChange: handlePageSheetFieldChange,
-      };
-    }, [
+      cropTarget,
+      onUpdateSlotAssignment: handleUpdateSelectedSlotAssignment,
+      onClearSlot: handleClearSlot,
+      onOpenCropEditor: handleOpenCropEditor,
+      onCloseCropEditor: handleCloseCropEditor,
+      onPageSheetPresetChange: handlePageSheetPresetChange,
+      onPageSheetFieldChange: handlePageSheetFieldChange
+    };
+  }, [
       result.pages,
       selectedPageId,
       selectedSlotKey,
@@ -2175,6 +2263,7 @@ const handleOpenCropEditor = useCallback((pageId: string, slotId: string) => {
               onDrop={handleDrop}
               onAssetDropped={handleAssetDropped}
               onAddToPage={handleAddImageToPage}
+              onOpenPhotoWindow={handleOpenPhotoWindow}
               onDropToUnused={handleDropToUnused}
               onClearSlot={handleClearSlot}
               onTemplateChange={handleTemplateChange}
@@ -2199,7 +2288,6 @@ const handleOpenCropEditor = useCallback((pageId: string, slotId: string) => {
               setIsInspectorCollapsed={setIsInspectorCollapsed}
             />
           </div>
-          <InspectorPanel />
         </div>
 
         <section className="studio-dock">
@@ -2405,11 +2493,32 @@ const handleOpenCropEditor = useCallback((pageId: string, slotId: string) => {
             setSelectedPageId(pageId);
             setSelectedSlotKey(page.slotDefinitions[0] ? `${page.id}:${page.slotDefinitions[0].id}` : null);
             setQuickPreviewAssetId(null);
+            setSlotPhotoEditorTarget(null);
           }}
           onUpdateAsset={(assetId, changes) => {
             handleAssetsMetadataChange(new Map([[assetId, changes]]));
           }}
         />
+
+        {slotEditorPage && slotEditorSlot && slotEditorAssignment ? (
+          <SlotPhotoEditorModal
+            asset={slotEditorAsset}
+            pageId={slotEditorPage.id}
+            pageLabel={`Foglio ${slotEditorPage.pageNumber}`}
+            sheetSpec={slotEditorPage.sheetSpec}
+            slotCount={slotEditorPage.slotDefinitions.length}
+            slot={slotEditorSlot}
+            assignment={slotEditorAssignment}
+            availableTemplates={result.availableTemplates}
+            onClose={() => setSlotPhotoEditorTarget(null)}
+            onUpdateSlotAssignment={handleUpdateSelectedSlotAssignment}
+            onClearSlot={(pageId, slotId) => {
+              handleClearSlot(pageId, slotId);
+              setSlotPhotoEditorTarget(null);
+            }}
+            onOpenCropEditor={handleOpenCropEditorFromSlotEditor}
+          />
+        ) : null}
 
         {contextMenu.isOpen ? (
           <ContextMenu
@@ -2428,6 +2537,7 @@ const handleOpenCropEditor = useCallback((pageId: string, slotId: string) => {
           onFullscreen={handleToggleFullscreen}
           onEscape={() => {
             setQuickPreviewAssetId(null);
+            setSlotPhotoEditorTarget(null);
             setContextMenu({ isOpen: false, position: { x: 0, y: 0 }, items: [] });
           }}
         />

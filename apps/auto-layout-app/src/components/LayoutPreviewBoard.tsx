@@ -29,6 +29,7 @@ import { SheetSurface, buildAssignmentsBySlotId } from "./SheetSurface";
 import { preloadImageUrls } from "../image-cache";
 import { PhotoReplaceModal } from "./PhotoReplaceModal";
 import { PhotoRibbon } from "./PhotoRibbon";
+import { getEffectiveSlotAspectRatio } from "../utils/slot-geometry";
 
 type AssetFilter = "all" | "unused" | "used";
 type PageSectionFilter = "all" | "opening" | "middle" | "finale";
@@ -114,9 +115,17 @@ interface LayoutPreviewBoardProps {
   onAssetsMetadataChange?: (
     changesById: Map<string, Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>>
   ) => void;
+  onOpenPhotoWindow: (pageId: string, slotId: string) => void;
+  onUpdateSlotAssignment: (
+    pageId: string,
+    slotId: string,
+    changes: Partial<Pick<LayoutAssignment, "fitMode" | "zoom" | "offsetX" | "offsetY" | "rotation" | "locked" | "cropLeft" | "cropTop" | "cropWidth" | "cropHeight">>
+  ) => void;
   zoom: number;
   zoomMode: "manual" | "fit";
   onZoomResolved: (zoom: number) => void;
+  isInspectorCollapsed: boolean;
+  setIsInspectorCollapsed: (collapsed: boolean) => void;
 }
 
 interface PreservedCropInfo {
@@ -186,7 +195,7 @@ function collectPreservedCropInfo(
   assetsById: Map<string, ImageAsset>
 ): PreservedCropInfo[] {
   return page.assignments
-    .filter((assignment) => assignment.fitMode === "fit")
+    .filter((assignment) => assignment.fitMode === "fit" || assignment.fitMode === "crop")
     .map((assignment) => {
       const asset = assetsById.get(assignment.imageId);
       if (!asset) {
@@ -203,7 +212,8 @@ function collectPreservedCropInfo(
 
 function evaluateTemplateCropCompatibility(
   template: LayoutTemplate,
-  preservedCrops: PreservedCropInfo[]
+  preservedCrops: PreservedCropInfo[],
+  sheetSpec?: GeneratedPageLayout["sheetSpec"]
 ): TemplateCropCompatibility {
   if (preservedCrops.length === 0) {
     return {
@@ -219,7 +229,7 @@ function evaluateTemplateCropCompatibility(
 
   for (const crop of preservedCrops) {
     const bestDistance = template.slots.reduce((best, slot) => {
-      const slotAspect = slot.width / Math.max(slot.height, 0.0001);
+      const slotAspect = getEffectiveSlotAspectRatio(slot, sheetSpec, template.slots.length);
       return Math.min(best, normalizedAspectDistance(crop.aspect, slotAspect));
     }, Number.POSITIVE_INFINITY);
 
@@ -241,7 +251,8 @@ function buildPageCropGuidance(
   preservedCrops: PreservedCropInfo[],
   templates: LayoutTemplate[],
   currentTemplateId: string,
-  recommendedTemplateId: string | null
+  recommendedTemplateId: string | null,
+  sheetSpec?: GeneratedPageLayout["sheetSpec"]
 ): PageCropGuidance {
   if (preservedCrops.length === 0) {
     return {
@@ -257,7 +268,7 @@ function buildPageCropGuidance(
   }
 
   const compatibilityByTemplateId = new Map(
-    templates.map((template) => [template.id, evaluateTemplateCropCompatibility(template, preservedCrops)])
+    templates.map((template) => [template.id, evaluateTemplateCropCompatibility(template, preservedCrops, sheetSpec)])
   );
   const fullyCompatibleTemplateCount = Array.from(compatibilityByTemplateId.values()).filter(
     (compatibility) => compatibility.fullyCompatible
@@ -645,6 +656,7 @@ export function LayoutPreviewBoard({
   onRemovePage,
   onRebalancePage,
   onContextMenu,
+  onOpenPhotoWindow,
   onPageSheetPresetChange,
   onPageSheetFieldChange,
   onPageSheetStyleChange,
@@ -652,9 +664,12 @@ export function LayoutPreviewBoard({
   recentlyAddedPageId,
   recentlyAddedSlotKey,
   onAssetsMetadataChange,
+  onUpdateSlotAssignment,
   zoom,
   zoomMode,
-  onZoomResolved
+  onZoomResolved,
+  isInspectorCollapsed,
+  setIsInspectorCollapsed
 }: LayoutPreviewBoardProps) {
   const [isTemplateChooserOpen, setIsTemplateChooserOpen] = useState(false);
   const [templateApplyScope, setTemplateApplyScope] = useState<"single" | "visible">("single");
@@ -664,7 +679,7 @@ export function LayoutPreviewBoard({
   const [pageSectionFilter, setPageSectionFilter] = useState<PageSectionFilter>("all");
   const [replaceTarget, setReplaceTarget] = useState<ReplaceTarget | null>(null);
   
-  const { cropTarget, onOpenCropEditor: handleCropTargetOpen, onCloseCropEditor: handleCropTargetClose, onUpdateSlotAssignment } = useStudio();
+  const { cropTarget, onCloseCropEditor: handleCropTargetClose } = useStudio();
 
   const [leftRailWidth, setLeftRailWidth] = useState(236);
   const [isPageSettingsOpen, setIsPageSettingsOpen] = useState(false);
@@ -769,7 +784,8 @@ export function LayoutPreviewBoard({
           preservedCrops,
           templatesByPageId.get(page.id) ?? [],
           page.templateId,
-          recommendedTemplateByPageId.get(page.id) ?? null
+          recommendedTemplateByPageId.get(page.id) ?? null,
+          page.sheetSpec
         )
       );
     }
@@ -834,7 +850,11 @@ export function LayoutPreviewBoard({
   const previewTemplateCropCompatibility = useMemo(
     () =>
       activePage && previewTemplate
-        ? evaluateTemplateCropCompatibility( previewTemplate, collectPreservedCropInfo(activePage, assetsById))
+        ? evaluateTemplateCropCompatibility(
+            previewTemplate,
+            collectPreservedCropInfo(activePage, assetsById),
+            activePage.sheetSpec
+          )
         : null,
     [activePage, assetsById, previewTemplate]
   );
@@ -1688,7 +1708,8 @@ export function LayoutPreviewBoard({
                 {compatibleTemplates.map((template) => {
                   const templateCropCompatibility = evaluateTemplateCropCompatibility(
                     template,
-                    collectPreservedCropInfo(activePage, assetsById)
+                    collectPreservedCropInfo(activePage, assetsById),
+                    activePage.sheetSpec
                   );
 
                   return (
@@ -2224,8 +2245,9 @@ export function LayoutPreviewBoard({
                               onAssetDropped={onAssetDropped}
                               onAddToPage={onAddToPage}
                               onClearSlot={onClearSlot}
-                              onOpenCropEditor={handleCropTargetOpen}
+                              onOpenPhotoWindow={onOpenPhotoWindow}
                               onContextMenu={onContextMenu}
+                              onUpdateSlotAssignment={onUpdateSlotAssignment}
                               size="hero"
                             />
                           </SheetWithRulers>
@@ -2259,6 +2281,8 @@ export function LayoutPreviewBoard({
           asset={cropAsset}
           assignment={cropAssignment}
           slot={cropSlot}
+          sheetSpec={cropPage.sheetSpec}
+          slotCount={cropPage.slotDefinitions.length}
           availableTemplates={templatesByPageId.get(cropPage.id) ?? []}
           onClose={handleCropTargetClose}
           onApply={(changes) => { onUpdateSlotAssignment(cropPage.id, cropSlot.id, changes); }}

@@ -10,6 +10,11 @@ function normalizedAspectDistance(left: number, right: number): number {
   return Math.abs(Math.log(safeLeft / safeRight));
 }
 
+function getSlotAspectRatio(templateSlot: LayoutTemplate["slots"][number], sheet: SheetSpec): number {
+  const sheetAspect = Math.max(sheet.widthCm, 0.1) / Math.max(sheet.heightCm, 0.1);
+  return Math.max((templateSlot.width * sheetAspect) / Math.max(templateSlot.height, 0.001), 0.01);
+}
+
 function estimateCropLoss(slotAspect: number, imageAspect: number): number {
   const safeSlot = Math.max(slotAspect, 0.01);
   const safeImage = Math.max(imageAspect, 0.01);
@@ -103,7 +108,7 @@ function scoreTemplate(
   }, 0);
 
   const sortedSlotRatios = template.slots
-    .map((slot) => slot.width / Math.max(slot.height, 0.01))
+    .map((slot) => getSlotAspectRatio(slot, sheet))
     .sort((left, right) => left - right);
   const sortedAssetRatios = assets
     .map((asset) => Math.max(asset.aspectRatio, 0.01))

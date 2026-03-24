@@ -53,7 +53,7 @@ function createBonusPages(
 
   groups.forEach((group, index) => {
     const template = selectBestTemplate(group, templates, request.sheet);
-    const assignments = assignImagesToTemplate(group, template, request.fitMode, request.cropStrategy);
+    const assignments = assignImagesToTemplate(group, template, request.fitMode, request.cropStrategy, request.sheet);
 
     const warnings: string[] = [];
     if (assignments.length < group.length) {
@@ -88,7 +88,7 @@ export function generatePageLayouts(
   targetPhotosPerSheet: number;
   templates: LayoutTemplate[];
 } {
-  const templates = request.templates ?? DEFAULT_LAYOUT_TEMPLATES;
+  const templates = request.templates && request.templates.length > 0 ? request.templates : DEFAULT_LAYOUT_TEMPLATES;
   const targetPhotosPerSheet = resolveTargetPhotosPerSheet(request, templates);
   const groups = groupAssetsForSheets(request.assets, targetPhotosPerSheet);
   const fixedTemplate = !request.allowTemplateVariation && groups[0]
@@ -100,7 +100,7 @@ export function generatePageLayouts(
       fixedTemplate && group.length >= fixedTemplate.minPhotos && group.length <= fixedTemplate.maxPhotos
         ? fixedTemplate
         : selectBestTemplate(group, templates, request.sheet);
-    const assignments = assignImagesToTemplate(group, template, request.fitMode, request.cropStrategy);
+    const assignments = assignImagesToTemplate(group, template, request.fitMode, request.cropStrategy, request.sheet);
 
     const warnings: string[] = [];
     if (assignments.length < group.length) {

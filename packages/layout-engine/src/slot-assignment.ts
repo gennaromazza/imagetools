@@ -4,7 +4,8 @@ import type {
   ImageAsset,
   LayoutAssignment,
   LayoutSlot,
-  LayoutTemplate
+  LayoutTemplate,
+  SheetSpec
 } from "@photo-tools/shared-types";
 
 function normalizedAspectDistance(left: number, right: number): number {
@@ -13,11 +14,31 @@ function normalizedAspectDistance(left: number, right: number): number {
   return Math.abs(Math.log(safeLeft / safeRight));
 }
 
+function getSlotAspectRatio(slot: LayoutSlot, sheet?: SheetSpec, slotCount = 1): number {
+  if (!sheet) {
+    return Math.max(slot.width / Math.max(slot.height, 0.001), 0.01);
+  }
+
+  let width = slot.width * Math.max(sheet.widthCm, 0.1);
+  let height = slot.height * Math.max(sheet.heightCm, 0.1);
+
+  if (slotCount > 1 && sheet.gapCm > 0) {
+    const insetX = Math.min(sheet.gapCm / 2, width / 3);
+    const insetY = Math.min(sheet.gapCm / 2, height / 3);
+    width = Math.max(0.001, width - insetX * 2);
+    height = Math.max(0.001, height - insetY * 2);
+  }
+
+  return Math.max(width / Math.max(height, 0.001), 0.01);
+}
+
 export function buildInitialCropForSlot(
   asset: ImageAsset,
   slot: LayoutSlot,
   cropStrategy: CropStrategy = "balanced",
-  fitMode: FitMode = "fill"
+  fitMode: FitMode = "fill",
+  sheet?: SheetSpec,
+  slotCount = 1
 ): {
   cropLeft: number;
   cropTop: number;
@@ -38,7 +59,7 @@ export function buildInitialCropForSlot(
 
   // For "fill" and "crop" modes, crop to match the slot's aspect ratio
   const imageAspect = Math.max(asset.aspectRatio, 0.01);
-  const slotAspect = Math.max(slot.width / Math.max(slot.height, 0.001), 0.01);
+  const slotAspect = getSlotAspectRatio(slot, sheet, slotCount);
 
   if (imageAspect > slotAspect) {
     const cropWidth = Math.min(1, slotAspect / imageAspect);
@@ -73,7 +94,7 @@ export function buildInitialCropForSlot(
   };
 }
 
-function scoreAssetForSlot(asset: ImageAsset, slot: LayoutSlot): number {
+function scoreAssetForSlot(asset: ImageAsset, slot: LayoutSlot, sheet?: SheetSpec, slotCount = 1): number {
   const orientationMatch =
     slot.expectedOrientation === "any"
       ? 10
@@ -83,7 +104,7 @@ function scoreAssetForSlot(asset: ImageAsset, slot: LayoutSlot): number {
           ? 20
           : 0;
 
-  const slotAspectRatio = slot.width / slot.height;
+  const slotAspectRatio = getSlotAspectRatio(slot, sheet, slotCount);
   const aspectDistance = normalizedAspectDistance(slotAspectRatio, asset.aspectRatio);
   const aspectScore = Math.max(0, 42 - aspectDistance * 30);
 
@@ -98,9 +119,14 @@ function scoreAssetForSlot(asset: ImageAsset, slot: LayoutSlot): number {
   return orientationMatch + aspectScore + ratingBonus + priorityBonus;
 }
 
-function pickBestAsset(slot: LayoutSlot, remainingAssets: ImageAsset[]): ImageAsset | undefined {
+function pickBestAsset(
+  slot: LayoutSlot,
+  remainingAssets: ImageAsset[],
+  sheet?: SheetSpec,
+  slotCount = 1
+): ImageAsset | undefined {
   const scored = remainingAssets
-    .map((asset) => ({ asset, score: scoreAssetForSlot(asset, slot) }))
+    .map((asset) => ({ asset, score: scoreAssetForSlot(asset, slot, sheet, slotCount) }))
     .sort((left, right) => right.score - left.score);
 
   return scored[0]?.asset;
@@ -109,7 +135,9 @@ function pickBestAsset(slot: LayoutSlot, remainingAssets: ImageAsset[]): ImageAs
 function optimizeByPairSwaps(
   assignments: LayoutAssignment[],
   slotById: Map<string, LayoutSlot>,
-  assetById: Map<string, ImageAsset>
+  assetById: Map<string, ImageAsset>,
+  sheet?: SheetSpec,
+  slotCount = 1
 ): LayoutAssignment[] {
   const optimized = assignments.map((assignment) => ({ ...assignment }));
   if (optimized.length < 2) {
@@ -135,9 +163,11 @@ function optimizeByPairSwaps(
         }
 
         const currentScore =
-          scoreAssetForSlot(leftAsset, leftSlot) + scoreAssetForSlot(rightAsset, rightSlot);
+          scoreAssetForSlot(leftAsset, leftSlot, sheet, slotCount) +
+          scoreAssetForSlot(rightAsset, rightSlot, sheet, slotCount);
         const swappedScore =
-          scoreAssetForSlot(rightAsset, leftSlot) + scoreAssetForSlot(leftAsset, rightSlot);
+          scoreAssetForSlot(rightAsset, leftSlot, sheet, slotCount) +
+          scoreAssetForSlot(leftAsset, rightSlot, sheet, slotCount);
 
         if (swappedScore <= currentScore + 0.2) {
           continue;
@@ -161,20 +191,22 @@ export function assignImagesToTemplate(
   assets: ImageAsset[],
   template: LayoutTemplate,
   fitMode: FitMode,
-  cropStrategy: CropStrategy = "balanced"
+  cropStrategy: CropStrategy = "balanced",
+  sheet?: SheetSpec
 ): LayoutAssignment[] {
   const sortedSlots = [...template.slots].sort((left, right) => right.priority - left.priority);
   const remainingAssets = [...assets];
   const assignments: LayoutAssignment[] = [];
+  const slotCount = template.slots.length;
 
   for (const slot of sortedSlots) {
-    const asset = pickBestAsset(slot, remainingAssets);
+    const asset = pickBestAsset(slot, remainingAssets, sheet, slotCount);
 
     if (!asset) {
       continue;
     }
 
-    const initialCrop = buildInitialCropForSlot(asset, slot, cropStrategy, fitMode);
+    const initialCrop = buildInitialCropForSlot(asset, slot, cropStrategy, fitMode, sheet, slotCount);
 
     assignments.push({
       slotId: slot.id,
@@ -198,6 +230,6 @@ export function assignImagesToTemplate(
   const slotById = new Map(sortedSlots.map((slot) => [slot.id, slot]));
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
 
-  return optimizeByPairSwaps(assignments, slotById, assetById);
+  return optimizeByPairSwaps(assignments, slotById, assetById, sheet, slotCount);
 }
 

@@ -196,15 +196,24 @@ export function PhotoQuickPreviewModal({
     setAssignFeedbackPageNumber(null);
   }, [asset?.id]);
 
-  // Preload adjacent assets so navigation feels instant
   useEffect(() => {
-    if (currentIndex < 0) return;
+    if (currentIndex < 0) {
+      return;
+    }
+
     const toPreload: string[] = [];
     for (const delta of [-2, -1, 1, 2]) {
-      const a = navigationAssets[currentIndex + delta];
-      if (!a) continue;
-      if (a.previewUrl) toPreload.push(a.previewUrl);
-      if (a.thumbnailUrl) toPreload.push(a.thumbnailUrl);
+      const adjacentAsset = navigationAssets[currentIndex + delta];
+      if (!adjacentAsset) {
+        continue;
+      }
+
+      if (adjacentAsset.previewUrl) {
+        toPreload.push(adjacentAsset.previewUrl);
+      }
+      if (adjacentAsset.thumbnailUrl) {
+        toPreload.push(adjacentAsset.thumbnailUrl);
+      }
     }
     preloadImageUrls(toPreload);
   }, [currentIndex, navigationAssets]);
@@ -323,7 +332,6 @@ export function PhotoQuickPreviewModal({
       aria-modal="true"
       aria-label="Anteprima foto a schermo intero"
     >
-      {/* ── SIDEBAR SINISTRA: filtri + thumbnail verticali ── */}
       {assets.length > 1 ? (
         <div className="quick-preview__sidebar" onClick={(event) => event.stopPropagation()}>
           <div className="quick-preview__sidebar-filters">
@@ -338,9 +346,7 @@ export function PhotoQuickPreviewModal({
                 <select
                   className="quick-preview__filter-select"
                   value={filterPickStatus}
-                  onChange={(event) =>
-                    setFilterPickStatus(event.target.value as PickStatusFilter)
-                  }
+                  onChange={(event) => setFilterPickStatus(event.target.value as PickStatusFilter)}
                 >
                   <option value="all">Tutti</option>
                   <option value="picked">Pick</option>
@@ -358,18 +364,18 @@ export function PhotoQuickPreviewModal({
                 >
                   <option value="any">Tutte</option>
                   <optgroup label="Minimo">
-                    <option value="1+">★ 1+</option>
-                    <option value="2+">★★ 2+</option>
-                    <option value="3+">★★★ 3+</option>
-                    <option value="4+">★★★★ 4+</option>
+                    <option value="1+">* 1+</option>
+                    <option value="2+">** 2+</option>
+                    <option value="3+">*** 3+</option>
+                    <option value="4+">**** 4+</option>
                   </optgroup>
                   <optgroup label="Esatto">
                     <option value="0">Senza stelle</option>
-                    <option value="1">★ Solo 1</option>
-                    <option value="2">★★ Solo 2</option>
-                    <option value="3">★★★ Solo 3</option>
-                    <option value="4">★★★★ Solo 4</option>
-                    <option value="5">★★★★★ Solo 5</option>
+                    <option value="1">* Solo 1</option>
+                    <option value="2">** Solo 2</option>
+                    <option value="3">*** Solo 3</option>
+                    <option value="4">**** Solo 4</option>
+                    <option value="5">***** Solo 5</option>
                   </optgroup>
                 </select>
               </label>
@@ -440,7 +446,6 @@ export function PhotoQuickPreviewModal({
         </div>
       ) : null}
 
-      {/* ── AREA PRINCIPALE DESTRA: chrome + meta + foto + assign ── */}
       <div className="quick-preview__main" onClick={(event) => event.stopPropagation()}>
         <div className="quick-preview__chrome">
           <div className="quick-preview__title">
@@ -598,9 +603,9 @@ export function PhotoQuickPreviewModal({
                 {activePage
                   ? activePageCanAccept
                     ? usage?.pageId === activePage.id
-                      ? "La foto è già in questo foglio. Premi Invio per riorganizzarlo."
+                      ? "La foto e' gia' in questo foglio. Premi Invio per riorganizzarlo."
                       : "Premi Invio per aggiungere questa foto al foglio attivo."
-                    : "Il foglio attivo è pieno. Seleziona un altro foglio nello studio."
+                    : "Il foglio attivo e' pieno. Seleziona un altro foglio nello studio."
                   : "Seleziona un foglio nello studio per usare l'aggiunta rapida."}
               </span>
               {showAssignSuccess ? (
@@ -624,8 +629,8 @@ export function PhotoQuickPreviewModal({
                 {!activePage
                   ? "Nessun foglio attivo"
                   : usage?.pageId === activePage.id
-                  ? `Riorganizza foglio ${activePage.pageNumber}`
-                  : `Aggiungi al foglio ${activePage.pageNumber}`}
+                    ? `Riorganizza foglio ${activePage.pageNumber}`
+                    : `Aggiungi al foglio ${activePage.pageNumber}`}
               </button>
 
               {usage?.pageId && onJumpToPage && usage.pageId !== activePage?.id ? (

@@ -87,6 +87,138 @@ const DENSE_GRID_TEMPLATES: LayoutTemplate[] = Array.from(
   (_, index) => createDenseGridTemplate(index + 5)
 );
 
+const EARLY_STORY_TEMPLATES_2_TO_8: LayoutTemplate[] = [
+  {
+    id: "duo-cinema-landscape",
+    label: "Doppio Cinema",
+    description: "Due fasce ampie per panoramiche, location e scene larghe.",
+    style: "paired",
+    affinity: "landscape-heavy",
+    targetSheetOrientation: "landscape",
+    minPhotos: 2,
+    maxPhotos: 2,
+    slots: [
+      { id: "top-cinema", x: 0, y: 0, width: 1, height: 0.46, expectedOrientation: "horizontal", priority: 100 },
+      { id: "bottom-cinema", x: 0, y: 0.54, width: 1, height: 0.46, expectedOrientation: "horizontal", priority: 92 }
+    ]
+  },
+  {
+    id: "duo-portrait-stage",
+    label: "Doppio Stage",
+    description: "Due ritratti protagonisti con respiro laterale su fogli piu larghi.",
+    style: "paired",
+    affinity: "portrait-heavy",
+    targetSheetOrientation: "landscape",
+    minPhotos: 2,
+    maxPhotos: 2,
+    slots: [
+      { id: "left-stage", x: 0.07, y: 0, width: 0.4, height: 1, expectedOrientation: "vertical", priority: 98 },
+      { id: "right-stage", x: 0.53, y: 0, width: 0.4, height: 1, expectedOrientation: "vertical", priority: 96 }
+    ]
+  },
+  {
+    id: "trio-cinema-strips",
+    label: "Trio Cinema Strips",
+    description: "Tre bande orizzontali per racconti lineari e immagini widescreen.",
+    style: "editorial",
+    affinity: "landscape-heavy",
+    targetSheetOrientation: "any",
+    minPhotos: 3,
+    maxPhotos: 3,
+    slots: [
+      { id: "strip-1", x: 0, y: 0, width: 1, height: 0.3, expectedOrientation: "horizontal", priority: 100 },
+      { id: "strip-2", x: 0, y: 0.35, width: 1, height: 0.3, expectedOrientation: "horizontal", priority: 92 },
+      { id: "strip-3", x: 0, y: 0.7, width: 1, height: 0.3, expectedOrientation: "horizontal", priority: 84 }
+    ]
+  },
+  {
+    id: "trio-hero-band-inverse",
+    label: "Trio Hero Inverso",
+    description: "Hero largo in alto e coppia finale sotto per una chiusura pulita.",
+    style: "editorial",
+    affinity: "mixed",
+    targetSheetOrientation: "portrait",
+    minPhotos: 3,
+    maxPhotos: 3,
+    slots: [
+      { id: "hero-top", x: 0, y: 0, width: 1, height: 0.4, expectedOrientation: "horizontal", priority: 100 },
+      { id: "bottom-left", x: 0, y: 0.48, width: 0.49, height: 0.52, expectedOrientation: "vertical", priority: 88 },
+      { id: "bottom-right", x: 0.51, y: 0.48, width: 0.49, height: 0.52, expectedOrientation: "vertical", priority: 87 }
+    ]
+  },
+  {
+    id: "four-portrait-runway",
+    label: "Quattro Portrait Runway",
+    description: "Un ritratto guida con tre supporti per set verticali e storytelling umano.",
+    style: "collage",
+    affinity: "portrait-heavy",
+    targetSheetOrientation: "portrait",
+    minPhotos: 4,
+    maxPhotos: 4,
+    slots: [
+      { id: "hero-left", x: 0, y: 0, width: 0.34, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "top-mid", x: 0.38, y: 0, width: 0.29, height: 0.48, expectedOrientation: "vertical", priority: 91 },
+      { id: "top-right", x: 0.71, y: 0, width: 0.29, height: 0.48, expectedOrientation: "vertical", priority: 90 },
+      { id: "bottom-wide", x: 0.38, y: 0.52, width: 0.62, height: 0.48, expectedOrientation: "horizontal", priority: 89 }
+    ]
+  },
+  {
+    id: "four-cinema-mosaic",
+    label: "Quattro Cinema Mosaic",
+    description: "Due bande protagoniste e due pannelli centrali per immagini larghe.",
+    style: "editorial",
+    affinity: "landscape-heavy",
+    targetSheetOrientation: "any",
+    minPhotos: 4,
+    maxPhotos: 4,
+    slots: [
+      { id: "hero-top", x: 0, y: 0, width: 1, height: 0.3, expectedOrientation: "horizontal", priority: 100 },
+      { id: "mid-left", x: 0, y: 0.35, width: 0.49, height: 0.29, expectedOrientation: "horizontal", priority: 92 },
+      { id: "mid-right", x: 0.51, y: 0.35, width: 0.49, height: 0.29, expectedOrientation: "horizontal", priority: 91 },
+      { id: "bottom-band", x: 0, y: 0.69, width: 1, height: 0.31, expectedOrientation: "horizontal", priority: 88 }
+    ]
+  },
+  {
+    id: "seven-cinema-ribbon",
+    label: "Sette Cinema Ribbon",
+    description: "Hero superiore con doppia fascia di supporto per reportage ricchi.",
+    style: "editorial",
+    affinity: "landscape-heavy",
+    targetSheetOrientation: "portrait",
+    minPhotos: 7,
+    maxPhotos: 7,
+    slots: [
+      { id: "hero-top", x: 0, y: 0, width: 1, height: 0.33, expectedOrientation: "horizontal", priority: 100 },
+      { id: "mid-1", x: 0, y: 0.37, width: 0.32, height: 0.28, expectedOrientation: "vertical", priority: 90 },
+      { id: "mid-2", x: 0.34, y: 0.37, width: 0.32, height: 0.28, expectedOrientation: "vertical", priority: 89 },
+      { id: "mid-3", x: 0.68, y: 0.37, width: 0.32, height: 0.28, expectedOrientation: "vertical", priority: 88 },
+      { id: "bot-1", x: 0, y: 0.71, width: 0.235, height: 0.29, expectedOrientation: "any", priority: 87 },
+      { id: "bot-2", x: 0.255, y: 0.71, width: 0.235, height: 0.29, expectedOrientation: "any", priority: 86 },
+      { id: "bot-3", x: 0.51, y: 0.71, width: 0.235, height: 0.29, expectedOrientation: "any", priority: 85 }
+    ]
+  },
+  {
+    id: "eight-portrait-runway",
+    label: "Otto Portrait Runway",
+    description: "Hero verticale e mosaico laterale per selezioni ricche di ritratti.",
+    style: "collage",
+    affinity: "portrait-heavy",
+    targetSheetOrientation: "portrait",
+    minPhotos: 8,
+    maxPhotos: 8,
+    slots: [
+      { id: "hero-left", x: 0, y: 0, width: 0.34, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "top-1", x: 0.37, y: 0, width: 0.305, height: 0.23, expectedOrientation: "horizontal", priority: 92 },
+      { id: "top-2", x: 0.695, y: 0, width: 0.305, height: 0.23, expectedOrientation: "horizontal", priority: 91 },
+      { id: "mid-1", x: 0.37, y: 0.27, width: 0.305, height: 0.23, expectedOrientation: "horizontal", priority: 90 },
+      { id: "mid-2", x: 0.695, y: 0.27, width: 0.305, height: 0.23, expectedOrientation: "horizontal", priority: 89 },
+      { id: "bot-1", x: 0.37, y: 0.54, width: 0.19, height: 0.46, expectedOrientation: "vertical", priority: 88 },
+      { id: "bot-2", x: 0.59, y: 0.54, width: 0.19, height: 0.46, expectedOrientation: "vertical", priority: 87 },
+      { id: "bot-3", x: 0.81, y: 0.54, width: 0.19, height: 0.46, expectedOrientation: "vertical", priority: 86 }
+    ]
+  }
+];
+
 const STORY_TEMPLATES_5_TO_8: LayoutTemplate[] = [
   {
     id: "five-hero-cascade",
@@ -382,6 +514,115 @@ const STORY_TEMPLATES_9_TO_12: LayoutTemplate[] = [
   }
 ];
 
+const STORY_TEMPLATES_13_TO_16: LayoutTemplate[] = [
+  {
+    id: "thirteen-ribbon-matrix",
+    label: "Tredici Ribbon Matrix",
+    description: "Fascia hero centrale con corona di supporto per sequenze ricche.",
+    style: "editorial",
+    affinity: "landscape-heavy",
+    targetSheetOrientation: "portrait",
+    minPhotos: 13,
+    maxPhotos: 13,
+    slots: [
+      { id: "top-1", x: 0, y: 0, width: 0.235, height: 0.17, expectedOrientation: "vertical", priority: 91 },
+      { id: "top-2", x: 0.255, y: 0, width: 0.235, height: 0.17, expectedOrientation: "vertical", priority: 90 },
+      { id: "top-3", x: 0.51, y: 0, width: 0.235, height: 0.17, expectedOrientation: "vertical", priority: 89 },
+      { id: "top-4", x: 0.765, y: 0, width: 0.235, height: 0.17, expectedOrientation: "vertical", priority: 88 },
+      { id: "hero-band", x: 0, y: 0.21, width: 1, height: 0.27, expectedOrientation: "horizontal", priority: 100 },
+      { id: "mid-1", x: 0, y: 0.52, width: 0.235, height: 0.22, expectedOrientation: "any", priority: 87 },
+      { id: "mid-2", x: 0.255, y: 0.52, width: 0.235, height: 0.22, expectedOrientation: "any", priority: 86 },
+      { id: "mid-3", x: 0.51, y: 0.52, width: 0.235, height: 0.22, expectedOrientation: "any", priority: 85 },
+      { id: "mid-4", x: 0.765, y: 0.52, width: 0.235, height: 0.22, expectedOrientation: "any", priority: 84 },
+      { id: "bot-1", x: 0, y: 0.78, width: 0.235, height: 0.22, expectedOrientation: "any", priority: 83 },
+      { id: "bot-2", x: 0.255, y: 0.78, width: 0.235, height: 0.22, expectedOrientation: "any", priority: 82 },
+      { id: "bot-3", x: 0.51, y: 0.78, width: 0.235, height: 0.22, expectedOrientation: "any", priority: 81 },
+      { id: "bot-4", x: 0.765, y: 0.78, width: 0.235, height: 0.22, expectedOrientation: "any", priority: 80 }
+    ]
+  },
+  {
+    id: "fourteen-hero-column-grid",
+    label: "Quattordici Hero Column Grid",
+    description: "Hero verticale, tre bande narrative e una base da dieci immagini.",
+    style: "collage",
+    affinity: "mixed",
+    targetSheetOrientation: "portrait",
+    minPhotos: 14,
+    maxPhotos: 14,
+    slots: [
+      { id: "hero-left", x: 0, y: 0, width: 0.32, height: 0.58, expectedOrientation: "vertical", priority: 100 },
+      { id: "story-1", x: 0.35, y: 0, width: 0.65, height: 0.17, expectedOrientation: "horizontal", priority: 94 },
+      { id: "story-2", x: 0.35, y: 0.2, width: 0.65, height: 0.17, expectedOrientation: "horizontal", priority: 93 },
+      { id: "story-3", x: 0.35, y: 0.4, width: 0.65, height: 0.18, expectedOrientation: "horizontal", priority: 92 },
+      { id: "g1", x: 0, y: 0.62, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 89 },
+      { id: "g2", x: 0.204, y: 0.62, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 88 },
+      { id: "g3", x: 0.408, y: 0.62, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 87 },
+      { id: "g4", x: 0.612, y: 0.62, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 86 },
+      { id: "g5", x: 0.816, y: 0.62, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 85 },
+      { id: "g6", x: 0, y: 0.82, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 84 },
+      { id: "g7", x: 0.204, y: 0.82, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 83 },
+      { id: "g8", x: 0.408, y: 0.82, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 82 },
+      { id: "g9", x: 0.612, y: 0.82, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 81 },
+      { id: "g10", x: 0.816, y: 0.82, width: 0.184, height: 0.16, expectedOrientation: "any", priority: 80 }
+    ]
+  },
+  {
+    id: "fifteen-hero-ladder-wall",
+    label: "Quindici Hero Ladder",
+    description: "Hero verticale a sinistra con parete narrativa destra in piu livelli.",
+    style: "editorial",
+    affinity: "portrait-heavy",
+    targetSheetOrientation: "portrait",
+    minPhotos: 15,
+    maxPhotos: 15,
+    slots: [
+      { id: "hero-left", x: 0, y: 0, width: 0.29, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "top-1", x: 0.32, y: 0, width: 0.32, height: 0.15, expectedOrientation: "horizontal", priority: 94 },
+      { id: "top-2", x: 0.68, y: 0, width: 0.32, height: 0.15, expectedOrientation: "horizontal", priority: 93 },
+      { id: "top-3", x: 0.32, y: 0.18, width: 0.32, height: 0.15, expectedOrientation: "horizontal", priority: 92 },
+      { id: "top-4", x: 0.68, y: 0.18, width: 0.32, height: 0.15, expectedOrientation: "horizontal", priority: 91 },
+      { id: "hero-band-right", x: 0.32, y: 0.36, width: 0.68, height: 0.18, expectedOrientation: "horizontal", priority: 97 },
+      { id: "grid-1", x: 0.32, y: 0.58, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 89 },
+      { id: "grid-2", x: 0.553, y: 0.58, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 88 },
+      { id: "grid-3", x: 0.786, y: 0.58, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 87 },
+      { id: "grid-4", x: 0.32, y: 0.727, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 86 },
+      { id: "grid-5", x: 0.553, y: 0.727, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 85 },
+      { id: "grid-6", x: 0.786, y: 0.727, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 84 },
+      { id: "grid-7", x: 0.32, y: 0.874, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 83 },
+      { id: "grid-8", x: 0.553, y: 0.874, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 82 },
+      { id: "grid-9", x: 0.786, y: 0.874, width: 0.214, height: 0.126, expectedOrientation: "any", priority: 81 }
+    ]
+  },
+  {
+    id: "sixteen-double-ribbon-wall",
+    label: "Sedici Double Ribbon",
+    description: "Due bande hero e una parete ritmica per selezioni molto corpose.",
+    style: "editorial",
+    affinity: "mixed",
+    targetSheetOrientation: "portrait",
+    minPhotos: 16,
+    maxPhotos: 16,
+    slots: [
+      { id: "top-1", x: 0, y: 0, width: 0.32, height: 0.16, expectedOrientation: "horizontal", priority: 92 },
+      { id: "top-2", x: 0.34, y: 0, width: 0.32, height: 0.16, expectedOrientation: "horizontal", priority: 91 },
+      { id: "top-3", x: 0.68, y: 0, width: 0.32, height: 0.16, expectedOrientation: "horizontal", priority: 90 },
+      { id: "hero-upper", x: 0, y: 0.2, width: 1, height: 0.2, expectedOrientation: "horizontal", priority: 100 },
+      { id: "mid-1", x: 0, y: 0.44, width: 0.32, height: 0.135, expectedOrientation: "any", priority: 89 },
+      { id: "mid-2", x: 0.34, y: 0.44, width: 0.32, height: 0.135, expectedOrientation: "any", priority: 88 },
+      { id: "mid-3", x: 0.68, y: 0.44, width: 0.32, height: 0.135, expectedOrientation: "any", priority: 87 },
+      { id: "mid-4", x: 0, y: 0.595, width: 0.32, height: 0.135, expectedOrientation: "any", priority: 86 },
+      { id: "mid-5", x: 0.34, y: 0.595, width: 0.32, height: 0.135, expectedOrientation: "any", priority: 85 },
+      { id: "mid-6", x: 0.68, y: 0.595, width: 0.32, height: 0.135, expectedOrientation: "any", priority: 84 },
+      { id: "hero-lower", x: 0, y: 0.75, width: 1, height: 0.1, expectedOrientation: "horizontal", priority: 97 },
+      { id: "bot-1", x: 0, y: 0.89, width: 0.184, height: 0.11, expectedOrientation: "any", priority: 83 },
+      { id: "bot-2", x: 0.204, y: 0.89, width: 0.184, height: 0.11, expectedOrientation: "any", priority: 82 },
+      { id: "bot-3", x: 0.408, y: 0.89, width: 0.184, height: 0.11, expectedOrientation: "any", priority: 81 },
+      { id: "bot-4", x: 0.612, y: 0.89, width: 0.184, height: 0.11, expectedOrientation: "any", priority: 80 },
+      { id: "bot-5", x: 0.816, y: 0.89, width: 0.184, height: 0.11, expectedOrientation: "any", priority: 79 }
+    ]
+  }
+];
+
 export const DEFAULT_LAYOUT_TEMPLATES: LayoutTemplate[] = [
   {
     id: "single-hero",
@@ -558,7 +799,9 @@ export const DEFAULT_LAYOUT_TEMPLATES: LayoutTemplate[] = [
       { id: "bottom-right", x: 0.705, y: 0.345, width: 0.295, height: 0.655, expectedOrientation: "vertical", priority: 81 }
     ]
   },
+  ...EARLY_STORY_TEMPLATES_2_TO_8,
   ...STORY_TEMPLATES_5_TO_8,
   ...STORY_TEMPLATES_9_TO_12,
+  ...STORY_TEMPLATES_13_TO_16,
   ...DENSE_GRID_TEMPLATES
 ];

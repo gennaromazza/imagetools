@@ -5,7 +5,7 @@
  *  - Click slot → selects slot (shows controls in AssignmentInspector rail)
  *  - Drag ribbon photo → assign to slot
  *  - Drag slot photo → swap/move to another slot (same or cross-page)
- *  - Double-click slot → reset zoom / offset / rotation
+ *  - Double-click slot photo → open photo window
  *  - Alt + scroll → zoom the photo within the slot
  *  - Pointer drag (no Alt, no DnD) → pan the photo within the slot
  *  - Minimal "×" badge visible on hover / selected → clear the slot
@@ -139,9 +139,9 @@ interface SheetSurfaceProps {
   onAssetDropped: (pageId: string, slotId: string, imageId: string) => void;
   onAddToPage: (pageId: string, imageId: string) => void;
   onClearSlot: (pageId: string, slotId: string) => void;
-  onOpenCropEditor: (pageId: string, slotId: string) => void;
+  onOpenPhotoWindow: (pageId: string, slotId: string) => void;
   onContextMenu?: (event: MouseEvent, page: GeneratedPageLayout) => void;
-  onUpdateSlotAssignment?: (
+  onUpdateSlotAssignment: (
     pageId: string,
     slotId: string,
     changes: Partial<
@@ -180,7 +180,7 @@ export const SheetSurface = memo(function SheetSurface({
   onAssetDropped,
   onAddToPage,
   onClearSlot,
-  onOpenCropEditor,
+  onOpenPhotoWindow,
   onContextMenu,
   onUpdateSlotAssignment,
   size,
@@ -327,6 +327,7 @@ export const SheetSurface = memo(function SheetSurface({
       {page.slotDefinitions.map((slot) => {
         const assignment = assignmentsBySlotId.get(slot.id);
         const asset = assignment ? assetsById.get(assignment.imageId) : undefined;
+        const isLocked = Boolean(assignment?.locked);
         const isSelected = selectedSlotKey === `${page.id}:${slot.id}`;
         const isRecentlyAdded = recentlyAddedSlotKey === `${page.id}:${slot.id}`;
         const isDragging =
@@ -334,8 +335,10 @@ export const SheetSurface = memo(function SheetSurface({
           dragState.sourcePageId === page.id &&
           dragState.sourceSlotId === slot.id;
         const canReposition = Boolean(interactive && assignment);
+        const canDragAssignment = Boolean(interactive && assignment && !assignment.locked);
         const isDropTarget =
           Boolean(dragState) &&
+          !isLocked &&
           !(
             dragState?.kind === "slot" &&
             dragState.sourcePageId === page.id &&
@@ -378,6 +381,11 @@ export const SheetSurface = memo(function SheetSurface({
                       setHoveredDropSlotId(slot.id);
                     }
 
+                    if (isLocked) {
+                      setStableDragIntentLabel("Slot bloccato: sbloccalo per sostituire o scambiare la foto.");
+                      return;
+                    }
+
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
                       setStableDragIntentLabel(
                         assignment
@@ -402,6 +410,10 @@ export const SheetSurface = memo(function SheetSurface({
                     event.stopPropagation();
                     if (!dragState) return;
                     setHoveredDropSlotId(null);
+                    if (isLocked) {
+                      setStableDragIntentLabel("Slot bloccato: sbloccalo per sostituire o scambiare la foto.");
+                      return;
+                    }
 
                     if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
                       // Always precision: swap if both occupied, move if target is empty
@@ -461,10 +473,12 @@ export const SheetSurface = memo(function SheetSurface({
                   type="button"
                   data-preview-asset-id={assignment?.imageId}
                   className={canReposition ? "slot-asset slot-asset--repositionable" : "slot-asset"}
-                  draggable={Boolean(assignment)}
+                  draggable={canDragAssignment}
                   title={
                     assignment
-                      ? "Trascina per spostare. Doppio clic per resettare. Alt+scroll per zoom."
+                      ? assignment.locked
+                        ? "Slot bloccato: sbloccalo per spostare o sostituire la foto."
+                        : "Trascina per spostare. Doppio clic per aprire la finestra foto. Alt+scroll per zoom."
                       : "Trascina qui una foto dalla ribbon di sinistra per assegnarla."
                   }
                   onClick={() => {
@@ -472,6 +486,7 @@ export const SheetSurface = memo(function SheetSurface({
                   }}
                   onDragStart={(event) => {
                     if (!assignment) { event.preventDefault(); return; }
+                    if (assignment.locked) { event.preventDefault(); return; }
                     if (event.altKey) { event.preventDefault(); return; }
                     event.stopPropagation();
                     event.dataTransfer.effectAllowed = "move";
@@ -497,7 +512,7 @@ export const SheetSurface = memo(function SheetSurface({
                     if (!assignment || !interactive) return;
                     event.preventDefault();
                     onSelectPage(page.id, slot.id);
-                    onOpenCropEditor(page.id, slot.id);
+                    onOpenPhotoWindow(page.id, slot.id);
                   }}
                   onPointerDown={(event) => {
                     if (event.button === 0) {
@@ -567,6 +582,8 @@ export const SheetSurface = memo(function SheetSurface({
                     assignment={assignment}
                     label={assignment ? (asset?.fileName ?? assignment.imageId) : slot.id}
                     slot={slot}
+                    sheetSpec={page.sheetSpec}
+                    slotCount={page.slotDefinitions.length}
                   />
                 </button>
 
@@ -575,12 +592,13 @@ export const SheetSurface = memo(function SheetSurface({
                   <button
                     type="button"
                     className="slot-clear-badge"
+                    disabled={assignment.locked}
                     onClick={(event) => {
                       event.stopPropagation();
                       onClearSlot(page.id, slot.id);
                     }}
                     aria-label="Rimuovi foto dallo slot"
-                    title="Rimuovi foto (o tasto Canc)"
+                    title={assignment.locked ? "Sblocca lo slot per rimuovere la foto" : "Rimuovi foto (o tasto Canc)"}
                   >
                     ×
                   </button>
@@ -593,6 +611,8 @@ export const SheetSurface = memo(function SheetSurface({
                   assignment={assignment}
                   label={assignment ? (asset?.fileName ?? assignment.imageId) : slot.id}
                   slot={slot}
+                  sheetSpec={page.sheetSpec}
+                  slotCount={page.slotDefinitions.length}
                 />
               </div>
             )}

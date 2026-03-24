@@ -99,6 +99,55 @@ export function SelectionSummary({
     addToast(`Lista file esportata: ${stats.totalActive} nomi.`, "success");
   }
 
+  function handleExportCsv() {
+    if (stats.totalActive === 0) return;
+
+    const headers = ["fileName", "path", "rating", "pickStatus", "colorLabel"];
+    const rows = stats.active.map((a) => [
+      a.fileName,
+      a.path ?? "",
+      String(getAssetRating(a)),
+      getAssetPickStatus(a),
+      getAssetColorLabel(a) ?? "",
+    ]);
+    const csv = [headers, ...rows]
+      .map((r) => r.map((v) => `"${v.replace(/"/g, '""')}"`).join(","))
+      .join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(projectName || "selezione").replace(/[^a-zA-Z0-9_-]/g, "_")}_lista.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    addToast(`CSV esportato: ${stats.totalActive} foto.`, "success");
+  }
+
+  function handleExportJson() {
+    if (stats.totalActive === 0) return;
+
+    const data = stats.active.map((a) => ({
+      fileName: a.fileName,
+      path: a.path ?? "",
+      rating: getAssetRating(a),
+      pickStatus: getAssetPickStatus(a),
+      colorLabel: getAssetColorLabel(a) ?? null,
+    }));
+    const json = JSON.stringify(data, null, 2);
+    const blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(projectName || "selezione").replace(/[^a-zA-Z0-9_-]/g, "_")}_lista.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    addToast(`JSON esportato: ${stats.totalActive} foto.`, "success");
+  }
+
   return (
     <div className="stack">
       <div className="selection-summary__header">
@@ -122,6 +171,12 @@ export function SelectionSummary({
         </button>
         <button type="button" className="ghost-button" onClick={handleExportFileList} disabled={stats.totalActive === 0}>
           Esporta lista TXT
+        </button>
+        <button type="button" className="ghost-button" onClick={handleExportCsv} disabled={stats.totalActive === 0}>
+          Esporta CSV
+        </button>
+        <button type="button" className="ghost-button" onClick={handleExportJson} disabled={stats.totalActive === 0}>
+          Esporta JSON
         </button>
         <button
           type="button"

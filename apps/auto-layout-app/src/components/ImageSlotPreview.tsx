@@ -1,70 +1,42 @@
 import { memo } from "react";
-import type { ImageAsset, LayoutAssignment, LayoutSlot } from "@photo-tools/shared-types";
+import type { GeneratedPageLayout, ImageAsset, LayoutAssignment, LayoutSlot } from "@photo-tools/shared-types";
+import { getAssignmentViewportGeometry } from "../utils/assignment-rendering";
+import { getEffectiveSlotAspectRatio } from "../utils/slot-geometry";
 
 interface ImageSlotPreviewProps {
   asset?: ImageAsset;
   assignment?: LayoutAssignment;
   label: string;
   slot?: LayoutSlot;
+  sheetSpec?: GeneratedPageLayout["sheetSpec"];
+  slotCount?: number;
+  showMeta?: boolean;
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
+function ImageSlotPreviewComponent({ asset, assignment, label, slot, sheetSpec, slotCount, showMeta = true }: ImageSlotPreviewProps) {
+  const imageUrl = asset?.previewUrl ?? asset?.thumbnailUrl ?? asset?.sourceUrl;
 
-function ImageSlotPreviewComponent({ asset, assignment, label, slot }: ImageSlotPreviewProps) {
-  if (!asset || !assignment || !asset.previewUrl) {
+  if (!asset || !assignment || !imageUrl) {
     return <div className="slot-empty">Trascina qui una foto</div>;
   }
 
   const imageAspect = asset.aspectRatio > 0 ? asset.aspectRatio : 1;
-  const slotAspect = slot && slot.height > 0 ? slot.width / slot.height : imageAspect;
-  const cropLeft = clamp(assignment.cropLeft ?? 0, 0, 1);
-  const cropTop = clamp(assignment.cropTop ?? 0, 0, 1);
-  const cropWidth = clamp(assignment.cropWidth ?? 1, 0.05, 1);
-  const cropHeight = clamp(assignment.cropHeight ?? 1, 0.05, 1);
-
-  const cropAspect = (imageAspect * cropWidth) / Math.max(cropHeight, 0.001);
-  const fitMode = assignment.fitMode;
-
-  let frameWidth = 100;
-  let frameHeight = 100;
-
-  if (fitMode === "fit") {
-    if (cropAspect > slotAspect) {
-      frameHeight = (slotAspect / cropAspect) * 100;
-    } else {
-      frameWidth = (cropAspect / slotAspect) * 100;
-    }
-  } else {
-    if (cropAspect > slotAspect) {
-      frameWidth = (cropAspect / slotAspect) * 100;
-    } else {
-      frameHeight = (slotAspect / cropAspect) * 100;
-    }
-  }
-
-  frameWidth *= Math.max(0.4, assignment.zoom);
-  frameHeight *= Math.max(0.4, assignment.zoom);
-
-  const overflowX = Math.max(0, frameWidth - 100);
-  const overflowY = Math.max(0, frameHeight - 100);
-  const offsetXPercent = (assignment.offsetX / 100) * (overflowX / 2);
-  const offsetYPercent = (assignment.offsetY / 100) * (overflowY / 2);
+  const slotAspect = slot ? getEffectiveSlotAspectRatio(slot, sheetSpec, slotCount) : imageAspect;
+  const geometry = getAssignmentViewportGeometry(assignment, imageAspect, slotAspect);
 
   const frameStyle = {
-    width: `${frameWidth}%`,
-    height: `${frameHeight}%`,
-    left: `calc(50% + ${offsetXPercent}%)`,
-    top: `calc(50% + ${offsetYPercent}%)`,
+    width: `${geometry.frameWidthPercent}%`,
+    height: `${geometry.frameHeightPercent}%`,
+    left: `calc(50% + ${geometry.offsetXPercent}%)`,
+    top: `calc(50% + ${geometry.offsetYPercent}%)`,
     transform: `translate(-50%, -50%) rotate(${assignment.rotation}deg)`
   };
 
   const imageStyle = {
-    width: `${100 / cropWidth}%`,
-    height: `${100 / cropHeight}%`,
-    left: `${(-cropLeft / cropWidth) * 100}%`,
-    top: `${(-cropTop / cropHeight) * 100}%`
+    width: `${geometry.imageWidthPercent}%`,
+    height: `${geometry.imageHeightPercent}%`,
+    left: `${geometry.imageLeftPercent}%`,
+    top: `${geometry.imageTopPercent}%`
   };
 
   return (
@@ -72,7 +44,7 @@ function ImageSlotPreviewComponent({ asset, assignment, label, slot }: ImageSlot
       <div className="slot-media__viewport">
         <div className="slot-media__frame" style={frameStyle}>
           <img
-            src={asset.previewUrl}
+            src={imageUrl}
             alt={asset.fileName}
             loading="lazy"
             draggable={false}
@@ -81,10 +53,12 @@ function ImageSlotPreviewComponent({ asset, assignment, label, slot }: ImageSlot
           />
         </div>
       </div>
-      <div className="slot-media__meta">
-        <span>{label}</span>
-        <small>{assignment.fitMode}</small>
-      </div>
+      {showMeta ? (
+        <div className="slot-media__meta">
+          <span>{label}</span>
+          <small>{assignment.fitMode}</small>
+        </div>
+      ) : null}
     </div>
   );
 }

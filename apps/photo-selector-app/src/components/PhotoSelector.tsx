@@ -5,11 +5,14 @@ import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
 import { PhotoSearchBar } from "./PhotoSearchBar";
 import { PhotoCard } from "./PhotoCard";
 import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
-import { createOnDemandPreviewAsync, getSubfolder, extractSubfolders } from "../services/folder-access";
+import { CompareModal } from "./CompareModal";
+import { createOnDemandPreviewAsync, getSubfolder, extractSubfolders, copyAssetsToFolder, moveAssetsToFolder, saveAssetAs, getAssetRelativePath, detectChangedAssetsOnDisk } from "../services/folder-access";
 import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
   DEFAULT_PHOTO_FILTERS,
+  getAssetColorLabel,
+  getAssetPickStatus,
   getAssetRating,
   matchesPhotoFilters,
   resolvePhotoClassificationShortcut,
@@ -104,8 +107,24 @@ export function PhotoSelector({
   const [filterPresets, setFilterPresets] = useState<PhotoFilterPreset[]>([]);
   const [newPresetName, setNewPresetName] = useState("");
   const [timelineEntries, setTimelineEntries] = useState<Array<{ id: string; label: string }>>([]);
-  const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
   const [isBatchToolsOpen, setIsBatchToolsOpen] = useState(false);
+  const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const [cardSize, setCardSize] = useState<number>(() => {
+    const saved = localStorage.getItem("ps-card-size");
+    return saved ? Math.max(100, Math.min(320, Number(saved))) : 160;
+  });
+  const [rootFolderPath, setRootFolderPath] = useState<string>(
+    () => localStorage.getItem("ps-root-folder-path") ?? ""
+  );
+  const [preferredEditorPath, setPreferredEditorPath] = useState<string>(
+    () => localStorage.getItem("ps-preferred-editor-path") ?? ""
+  );
+
+  const setPreferredEditorPathPersisted = useCallback((value: string) => {
+    setPreferredEditorPath(value);
+    localStorage.setItem("ps-preferred-editor-path", value);
+  }, []);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [contextMenuState, setContextMenuState] = useState<{
     x: number;
@@ -115,8 +134,39 @@ export function PhotoSelector({
   const [focusedPhotoId, setFocusedPhotoId] = useState<string | null>(null);
   const lastClickedIdRef = useRef<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
+  const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const photosRef = useRef(photos);
+  useEffect(() => {
+    photosRef.current = photos;
+  }, [photos]);
+
+  const activeFilterCount = useMemo(
+    () =>
+      [
+        pickFilter !== "all",
+        ratingFilter !== "any",
+        colorFilter !== "all",
+        folderFilter !== "all",
+        seriesFilter !== "all",
+        timeClusterFilter !== "all",
+        searchQuery !== "",
+      ].filter(Boolean).length,
+    [pickFilter, ratingFilter, colorFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
+  );
+
+  const selectionStats = useMemo(() => {
+    if (selectedIds.length === 0) return null;
+    const sel = photos.filter((p) => selectedSet.has(p.id));
+    return {
+      picked: sel.filter((p) => getAssetPickStatus(p) === "picked").length,
+      rejected: sel.filter((p) => getAssetPickStatus(p) === "rejected").length,
+      highRating: sel.filter((p) => getAssetRating(p) >= 3).length,
+    };
+  }, [selectedIds, photos, selectedSet]);
+
   const hasActiveFilters =
     pickFilter !== "all" ||
     ratingFilter !== "any" ||
@@ -321,17 +371,12 @@ export function PhotoSelector({
     : null;
 
   useEffect(() => {
-    if (!contextMenuState) {
-      return;
+    // When context menu opens, cancel any active lasso drag to prevent
+    // pointer capture from routing events away from the menu.
+    if (contextMenuState) {
+      dragOriginRef.current = null;
+      setDragRect(null);
     }
-
-    const closeMenu = () => setContextMenuState(null);
-    window.addEventListener("mousedown", closeMenu);
-    window.addEventListener("scroll", closeMenu, true);
-    return () => {
-      window.removeEventListener("mousedown", closeMenu);
-      window.removeEventListener("scroll", closeMenu, true);
-    };
   }, [contextMenuState]);
 
   // Consolidated keyboard handler: Escape chain + arrow navigation
@@ -586,7 +631,7 @@ export function PhotoSelector({
   // Key insight: the URL must be stable for a given asset ID so the browser
   // can finish decoding large JPEGs without being interrupted by thumbnail
   // batch updates that change the asset object reference every ~120 ms.
-  const previewUrlRef = useRef<{ id: string; url: string } | null>(null);
+  const previewUrlRef = useRef<{ id: string; url: string; sourceFileKey?: string } | null>(null);
   const [asyncPreviewUrl, setAsyncPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -598,7 +643,11 @@ export function PhotoSelector({
       return;
     }
 
-    if (previewUrlRef.current && previewUrlRef.current.id === previewAsset.id) {
+    if (
+      previewUrlRef.current &&
+      previewUrlRef.current.id === previewAsset.id &&
+      previewUrlRef.current.sourceFileKey === previewAsset.sourceFileKey
+    ) {
       return;
     }
 
@@ -612,7 +661,7 @@ export function PhotoSelector({
     createOnDemandPreviewAsync(previewAsset.id, 0).then((url) => {
       if (!active) return;
       if (url) {
-        previewUrlRef.current = { id: previewAsset.id, url };
+        previewUrlRef.current = { id: previewAsset.id, url, sourceFileKey: previewAsset.sourceFileKey };
         setAsyncPreviewUrl(url);
       }
     });
@@ -650,7 +699,11 @@ export function PhotoSelector({
 
     if (previewAsset.previewUrl || previewAsset.sourceUrl) return previewAsset;
 
-    if (previewUrlRef.current && previewUrlRef.current.id === previewAsset.id) {
+    if (
+      previewUrlRef.current &&
+      previewUrlRef.current.id === previewAsset.id &&
+      previewUrlRef.current.sourceFileKey === previewAsset.sourceFileKey
+    ) {
       return {
         ...previewAsset,
         previewUrl: previewUrlRef.current.url,
@@ -667,6 +720,21 @@ export function PhotoSelector({
     () => visiblePhotos.filter((photo) => selectedSet.has(photo.id)).length,
     [selectedSet, visiblePhotos],
   );
+
+  const photoStats = useMemo(() => {
+    const ratingCounts = new Map<number, number>();
+    const pickCounts = new Map<PickStatus, number>();
+    const colorCounts = new Map<ColorLabel, number>();
+    for (const photo of photos) {
+      const r = getAssetRating(photo);
+      ratingCounts.set(r, (ratingCounts.get(r) ?? 0) + 1);
+      const ps = getAssetPickStatus(photo);
+      pickCounts.set(ps, (pickCounts.get(ps) ?? 0) + 1);
+      const cl = getAssetColorLabel(photo);
+      if (cl) colorCounts.set(cl, (colorCounts.get(cl) ?? 0) + 1);
+    }
+    return { ratingCounts, pickCounts, colorCounts };
+  }, [photos]);
 
   function selectVisible() {
     onSelectionChange(visiblePhotos.map((photo) => photo.id));
@@ -706,6 +774,24 @@ export function PhotoSelector({
     pushTimelineEntry(`Selezionate le foto con almeno ${minRating} stelle`);
   }
 
+  const scrolledInitialRef = useRef(false);
+  useEffect(() => {
+    if (scrolledInitialRef.current || selectedIds.length === 0 || visiblePhotos.length === 0) return;
+    scrolledInitialRef.current = true;
+    const firstId = selectedIds.find((id) => visiblePhotos.some((p) => p.id === id));
+    if (!firstId) return;
+    const timer = setTimeout(() => {
+      const el = gridRef.current?.querySelector<HTMLElement>(`[data-preview-asset-id="${firstId}"]`);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 200);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visiblePhotos.length]);
+
+  useEffect(() => {
+    localStorage.setItem("ps-card-size", String(cardSize));
+  }, [cardSize]);
+
   const handleUndoClick = useCallback(() => {
     onUndo?.();
     pushTimelineEntry("Annullata ultima modifica");
@@ -716,393 +802,711 @@ export function PhotoSelector({
     pushTimelineEntry("Ripristinata modifica annullata");
   }, [onRedo, pushTimelineEntry]);
 
+  // ── File operation handlers ──────────────────────────────────────────
+  const handleCopyFiles = useCallback(async (ids: string[]) => {
+    const result = await copyAssetsToFolder(ids);
+    if (result === "ok") pushTimelineEntry(`${ids.length === 1 ? "1 file" : `${ids.length} file`} copiato/i in cartella`);
+    else if (result === "unsupported") alert("Operazione non supportata da questo browser. Usa Chrome/Edge con accesso cartella nativo.");
+    else if (result === "error") alert("Errore durante la copia. Alcuni file potrebbero non essere stati copiati.");
+  }, [pushTimelineEntry]);
+
+  const handleMoveFiles = useCallback(async (ids: string[]) => {
+    const { result, movedIds } = await moveAssetsToFolder(ids);
+    if (result === "cancelled") return;
+    if (result === "unsupported") {
+      alert("Spostamento non supportato in questa modalita/browser. Per spostare fisicamente i file apri la cartella con accesso nativo (Chrome/Edge). ");
+      return;
+    }
+    if (movedIds.length > 0 && onPhotosChange) {
+      const movedSet = new Set(movedIds);
+      onPhotosChange(photos.filter((p) => !movedSet.has(p.id)));
+      onSelectionChange(selectedIds.filter((id) => !movedSet.has(id)));
+      pushTimelineEntry(`${movedIds.length === 1 ? "1 file" : `${movedIds.length} file`} spostato/i in cartella`);
+    }
+    if (result === "error") alert("Spostamento parziale/non riuscito: alcuni file non sono stati mossi. Le foto restano in griglia se la rimozione dal percorso originale non e riuscita.");
+  }, [onPhotosChange, onSelectionChange, photos, pushTimelineEntry, selectedIds]);
+
+  const handleSaveAs = useCallback(async (ids: string[]) => {
+    for (const id of ids) {
+      const result = await saveAssetAs(id);
+      if (result === "error") { alert("Errore durante il salvataggio del file."); break; }
+      if (result === "cancelled") break;
+    }
+  }, []);
+
+  const handleCopyPath = useCallback((ids: string[], root: string) => {
+    const paths = ids
+      .map((id) => getAssetRelativePath(id))
+      .filter(Boolean)
+      .map((rel) => root ? `${root.replace(/[\\/]+$/, "")}/${rel}` : rel!);
+    if (paths.length === 0) return;
+    void navigator.clipboard.writeText(paths.join("\n"));
+    pushTimelineEntry(`Percorso copiato negli appunti`);
+  }, [pushTimelineEntry]);
+
+  const handleOpenWithEditor = useCallback((ids: string[]) => {
+    if (!rootFolderPath.trim()) {
+      alert("Imposta prima la Cartella radice in Impostazioni > Editor esterno.");
+      return;
+    }
+
+    const editorFromStorage = localStorage.getItem("ps-preferred-editor-path") ?? "";
+    const editor = (preferredEditorPath.trim() || editorFromStorage.trim()).replace(/\//g, "\\");
+    const hasAbsoluteEditorPath = /^[a-zA-Z]:\\/.test(editor) && /\.(exe|bat|cmd)$/i.test(editor);
+    if (!hasAbsoluteEditorPath) {
+      alert("Nessun editor associato valido. Imposta il percorso completo dell'editor (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).");
+      return;
+    }
+
+    const root = rootFolderPath.trim().replace(/[\\/]+$/, "");
+    const absolutePaths = ids
+      .map((id) => getAssetRelativePath(id))
+      .filter((value): value is string => Boolean(value))
+      .map((relative) => `${root}/${relative}`.replace(/\//g, "\\"));
+
+    if (absolutePaths.length === 0) {
+      alert("Nessun percorso disponibile per le foto selezionate.");
+      return;
+    }
+
+    const escapeForBatch = (value: string) => value.replace(/"/g, '""');
+    const lines: string[] = [
+      "@echo off",
+      "setlocal",
+      "",
+      "REM Script generato da Photo Tools - Apri con editor",
+    ];
+
+    lines.push(`set "EDITOR=${escapeForBatch(editor)}"`);
+    lines.push("if not exist \"%EDITOR%\" (");
+    lines.push("  echo Editor non trovato: %EDITOR%");
+    lines.push("  echo Controlla il percorso in Impostazioni > Editor esterno");
+    lines.push("  pause");
+    lines.push("  exit /b 1");
+    lines.push(")");
+    lines.push("");
+    for (const filePath of absolutePaths) {
+      lines.push(`start "" "%EDITOR%" "${escapeForBatch(filePath)}"`);
+    }
+
+    lines.push("");
+    lines.push("exit /b 0");
+
+    const content = lines.join("\r\n");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `open-with-editor-${stamp}.bat`;
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+
+    void navigator.clipboard.writeText(absolutePaths.join("\n"));
+    pushTimelineEntry(
+      `${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} pronta/e per apri con editor (BAT scaricato)`
+    );
+    alert(
+      `Ho scaricato ${fileName}. Eseguilo per aprire ${absolutePaths.length} foto in editor.`
+    );
+  }, [preferredEditorPath, pushTimelineEntry, rootFolderPath]);
+
+  // Detect external edits (Photoshop overwrite) and refresh in-app previews automatically.
+  useEffect(() => {
+    if (!onPhotosChange) return;
+
+    let disposed = false;
+    let running = false;
+
+    const run = async () => {
+      if (running) return;
+      const targets = Array.from(new Set([
+        ...selectedIds,
+        ...(previewAssetId ? [previewAssetId] : []),
+      ]));
+      if (targets.length === 0) return;
+
+      running = true;
+      try {
+        const changes = await detectChangedAssetsOnDisk(targets);
+        if (disposed || changes.length === 0) return;
+
+        const byId = new Map(changes.map((change) => [change.id, change]));
+        const next = photosRef.current.map((asset) => {
+          const change = byId.get(asset.id);
+          if (!change) return asset;
+          return {
+            ...asset,
+            sourceFileKey: change.sourceFileKey,
+            thumbnailUrl: change.thumbnailUrl ?? asset.thumbnailUrl,
+            previewUrl: change.previewUrl ?? asset.previewUrl,
+            sourceUrl: change.sourceUrl ?? asset.sourceUrl,
+            width: change.width ?? asset.width,
+            height: change.height ?? asset.height,
+            orientation: change.orientation ?? asset.orientation,
+            aspectRatio: change.aspectRatio ?? asset.aspectRatio,
+          };
+        });
+
+        onPhotosChange(next);
+        if (changes.length > 0) {
+          pushTimelineEntry(
+            `${changes.length === 1 ? "1 foto aggiornata" : `${changes.length} foto aggiornate`} dopo modifica esterna`
+          );
+        }
+      } finally {
+        running = false;
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void run();
+    }, 2000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [onPhotosChange, previewAssetId, pushTimelineEntry, selectedIds]);
+
+  const editorPathStatus = useMemo(() => {
+    const value = preferredEditorPath.trim();
+    if (!value) {
+      return { kind: "empty" as const, text: "Non configurato" };
+    }
+    const hasDir = /[\\/]/.test(value);
+    const isExecutable = /\.(exe|bat|cmd)$/i.test(value);
+    if (hasDir && isExecutable) {
+      return { kind: "ok" as const, text: "Formato percorso OK" };
+    }
+    return { kind: "warn" as const, text: "Percorso incompleto o formato non valido" };
+  }, [preferredEditorPath]);
+
+  const handleBrowsePreferredEditor = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".exe,.bat,.cmd,application/x-msdownload";
+    input.style.display = "none";
+
+    input.onchange = () => {
+      const selected = input.files?.[0];
+      if (!selected) {
+        if (input.parentNode) {
+          input.parentNode.removeChild(input);
+        }
+        return;
+      }
+
+      const current = preferredEditorPath.trim();
+      const sep = Math.max(current.lastIndexOf("\\"), current.lastIndexOf("/"));
+      if (sep >= 0) {
+        const nextPath = `${current.slice(0, sep + 1)}${selected.name}`;
+        setPreferredEditorPathPersisted(nextPath);
+      }
+
+      if (sep < 0) {
+        alert(
+          "Selezionato file: " + selected.name + "\n\nIl browser non puo leggere il percorso assoluto. Usa uno dei preset Photoshop qui sotto o incolla il percorso completo (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe)."
+        );
+      }
+
+      if (input.parentNode) {
+        input.parentNode.removeChild(input);
+      }
+    };
+
+    document.body.appendChild(input);
+    input.click();
+  }, [preferredEditorPath, setPreferredEditorPathPersisted]);
+
   return (
-    <>
-      <div className="photo-selector">
-        <div className="photo-selector__controls">
-          <div className="photo-selector__stats">
-            <span className="photo-selector__count" aria-live="polite">
-              {selectedIds.length} di {photos.length} foto selezionate
-              {hasActiveFilters ? ` — ${visiblePhotos.length} visibili con i filtri` : ""}
-            </span>
-          </div>
-
-          <div className="photo-selector__actions">
-            {(onUndo || onRedo) ? (
-              <div className="photo-selector__action-cluster">
-                <span className="photo-selector__action-cluster-label">Cronologia</span>
-                <div className="photo-selector__undo-group">
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={handleUndoClick}
-                  disabled={!canUndo}
-                  title="Annulla (Ctrl+Z)"
-                  aria-label="Annulla"
-                >
-                  ↩
-                </button>
-                <button
-                  type="button"
-                  className="icon-button"
-                  onClick={handleRedoClick}
-                  disabled={!canRedo}
-                  title="Ripeti (Ctrl+Shift+Z)"
-                  aria-label="Ripeti"
-                >
-                  ↪
-                </button>
-                </div>
-              </div>
-            ) : null}
-            <div className="photo-selector__action-cluster">
-              <span className="photo-selector__action-cluster-label">Ricerca</span>
-              <div className="photo-selector__action-inline">
-                <PhotoSearchBar
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  resultCount={visiblePhotos.length}
-                  totalCount={photos.length}
-                />
-                <PhotoClassificationHelpButton title="Scorciatoie selezione iniziale" />
-              </div>
-            </div>
-            <div className="photo-selector__action-cluster">
-              <span className="photo-selector__action-cluster-label">Catalogo</span>
-              <div className="photo-selector__action-inline">
-                <button
-                  type="button"
-                  className={`checkbox-button ${
-                    allSelected
-                      ? "checkbox-button--checked"
-                      : someSelected
-                        ? "checkbox-button--indeterminate"
-                        : ""
-                  }`}
-                  onClick={() => toggleAll(!allSelected)}
-                  aria-label={allSelected ? "Deseleziona tutte" : "Seleziona tutte"}
-                  title={hasActiveFilters ? "Seleziona solo le foto visibili con i filtri attivi" : "Seleziona tutte"}
-                >
-                  {allSelected ? "Tutte" : someSelected ? "Alcune" : "Nessuna"}
-                </button>
-
-                <select
-                  className="photo-selector__sort"
-                  value={sortBy}
-                  onChange={(event) => setSortBy(event.target.value as SortMode)}
-                  aria-label="Ordina foto per"
-                >
-                  <option value="name">Ordina per nome</option>
-                  <option value="orientation">Ordina per orientamento</option>
-                  <option value="rating">Ordina per stelle</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="photo-selector__filters">
-          {hasActiveFilters ? (
+    <div className="photo-selector">
+      {/* ── FILTER BAR ── */}
+      <div className="photo-selector__filter-bar">
+        {hasActiveFilters && (
+          <div className="selector-filters__reset">
             <button
               type="button"
-              className="photo-selector__reset-filters"
+              className="ghost-button ghost-button--small"
               onClick={resetFilters}
-              title="Azzera tutti i filtri"
+              title={`${activeFilterCount} filtro/i attivo/i`}
             >
-              ✕ Azzera filtri
+              ✕ Azzera
+              {activeFilterCount > 0 && (
+                <span className="photo-selector__filter-count-badge">{activeFilterCount}</span>
+              )}
             </button>
-          ) : null}
+          </div>
+        )}
 
-          {subfolders.length > 1 ? (
+        {subfolders.length > 1 && (
+          <label className="field">
+            <span>Cartella</span>
             <select
-              className={folderFilter !== "all" ? "photo-selector__sort photo-selector__sort--active photo-selector__sort--folder" : "photo-selector__sort photo-selector__sort--folder"}
+              className={folderFilter !== "all" ? "field__select--active" : undefined}
               value={folderFilter}
               onChange={(event) => setFolderFilter(event.target.value)}
-              aria-label="Filtra per cartella"
             >
-              <option value="all">📁 Tutte le cartelle ({photos.length})</option>
+              <option value="all">Tutte ({photos.length})</option>
               {subfolders.map(({ folder, count }) => (
                 <option key={folder} value={folder}>
-                  {folder === "" ? "📄 Root" : `📂 ${folder}`} ({count})
+                  {folder === "" ? "Root" : folder} ({count})
                 </option>
               ))}
             </select>
-          ) : null}
+          </label>
+        )}
 
+        <label className="field">
+          <span>Stato</span>
           <select
-            className={pickFilter !== "all" ? "photo-selector__sort photo-selector__sort--active" : "photo-selector__sort"}
+            className={pickFilter !== "all" ? "field__select--active" : undefined}
             value={pickFilter}
             onChange={(event) => setPickFilter(event.target.value as PickFilter)}
           >
-            <option value="all">Tutti gli stati</option>
-            <option value="picked">Solo pick</option>
-            <option value="rejected">Solo scartate</option>
-            <option value="unmarked">Solo neutre</option>
+            <option value="all">Tutti</option>
+            <option value="picked">Pick</option>
+            <option value="rejected">Scartate</option>
+            <option value="unmarked">Neutre</option>
           </select>
+        </label>
 
+        <label className="field">
+          <span>Stelle</span>
           <select
-            className={ratingFilter !== "any" ? "photo-selector__sort photo-selector__sort--active" : "photo-selector__sort"}
+            className={ratingFilter !== "any" ? "field__select--active" : undefined}
             value={ratingFilter}
             onChange={(event) => setRatingFilter(event.target.value)}
           >
-            <option value="any">Tutte le stelle</option>
+            <option value="any">Tutte</option>
             <optgroup label="Minimo">
-              <option value="1+">★ 1 o più</option>
-              <option value="2+">★★ 2 o più</option>
-              <option value="3+">★★★ 3 o più</option>
-              <option value="4+">★★★★ 4 o più</option>
+              <option value="1+">★ 1+</option>
+              <option value="2+">★★ 2+</option>
+              <option value="3+">★★★ 3+</option>
+              <option value="4+">★★★★ 4+</option>
             </optgroup>
             <optgroup label="Esattamente">
               <option value="0">Senza stelle</option>
-              <option value="1">★ Solo 1</option>
-              <option value="2">★★ Solo 2</option>
-              <option value="3">★★★ Solo 3</option>
-              <option value="4">★★★★ Solo 4</option>
-              <option value="5">★★★★★ Solo 5</option>
+              <option value="1">★ 1</option>
+              <option value="2">★★ 2</option>
+              <option value="3">★★★ 3</option>
+              <option value="4">★★★★ 4</option>
+              <option value="5">★★★★★ 5</option>
             </optgroup>
           </select>
+        </label>
 
-          <select
-            className={colorFilter !== "all" ? "photo-selector__sort photo-selector__sort--active" : "photo-selector__sort"}
-            value={colorFilter}
-            onChange={(event) => setColorFilter(event.target.value as ColorFilter)}
-          >
-            <option value="all">Tutti i colori</option>
+        <div className="field photo-selector__color-filter">
+          <span>Colore</span>
+          <div className="photo-selector__color-filter-dots">
+            <button
+              type="button"
+              className={`photo-selector__color-all-btn${colorFilter === "all" ? " photo-selector__color-all-btn--active" : ""}`}
+              onClick={() => setColorFilter("all")}
+              title="Tutti i colori"
+            >
+              ✕
+            </button>
             {COLOR_LABELS.map((value) => (
-              <option key={value} value={value}>
-                {customColorNames[value]}
-              </option>
+              <button
+                key={value}
+                type="button"
+                className={`asset-color-dot asset-color-dot--${value}${colorFilter === value ? " asset-color-dot--selected" : ""}`}
+                onClick={() => setColorFilter(colorFilter === value ? "all" : value)}
+                title={customColorNames[value]}
+              />
             ))}
-          </select>
+          </div>
+        </div>
 
-          {seriesGroups.length > 1 ? (
+        {seriesGroups.length > 1 && (
+          <label className="field">
+            <span>Serie</span>
             <select
-              className={seriesFilter !== "all" ? "photo-selector__sort photo-selector__sort--active" : "photo-selector__sort"}
+              className={seriesFilter !== "all" ? "field__select--active" : undefined}
               value={seriesFilter}
               onChange={(event) => setSeriesFilter(event.target.value)}
-              aria-label="Filtra per serie di scatto"
             >
-              <option value="all">Tutte le serie</option>
+              <option value="all">Tutte</option>
               {seriesGroups.map(({ key, count }) => (
                 <option key={key} value={key}>
                   {key} ({count})
                 </option>
               ))}
             </select>
-          ) : null}
+          </label>
+        )}
 
-          {timeClusters.length > 1 ? (
+        {timeClusters.length > 1 && (
+          <label className="field">
+            <span>Fascia oraria</span>
             <select
-              className={timeClusterFilter !== "all" ? "photo-selector__sort photo-selector__sort--active" : "photo-selector__sort"}
+              className={timeClusterFilter !== "all" ? "field__select--active" : undefined}
               value={timeClusterFilter}
               onChange={(event) => setTimeClusterFilter(event.target.value)}
-              aria-label="Filtra per fascia oraria"
             >
-              <option value="all">Tutte le fasce orarie</option>
+              <option value="all">Tutte</option>
               {timeClusters.map(({ key, count }) => (
                 <option key={key} value={key}>
-                  {key === "orario-non-disponibile" ? "Orario non disponibile" : key} ({count})
+                  {key} ({count})
                 </option>
               ))}
             </select>
-          ) : null}
-        </div>
+          </label>
+        )}
 
-        <section className="photo-selector__collapsible-shell">
-          <div className="photo-selector__collapsible-header">
-            <div className="photo-selector__collapsible-copy">
-              <span className="photo-selector__workspace-label">Workspace avanzato</span>
-              <span className="photo-selector__collapsible-summary">
-                Preset filtri e nomi personalizzati etichette.
-              </span>
-            </div>
+        {filterPresets.length > 0 && (
+          <div className="photo-selector__preset-chips">
+            <span className="photo-selector__filter-bar-label">Preset</span>
+            {filterPresets.map((preset) => (
+              <button
+                key={preset.id}
+                className="photo-selector__preset-apply"
+                onClick={() => applyPreset(preset)}
+              >
+                {preset.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── TOOLBAR ── */}
+      <div className="photo-selector__controls">
+        <div className="photo-selector__action-inline">
+          <div className="photo-selector__undo-group">
             <button
               type="button"
-              className="ghost-button ghost-button--small"
-              onClick={() => setIsWorkspaceOpen((current) => !current)}
+              className="icon-button"
+              onClick={handleUndoClick}
+              disabled={!canUndo}
+              title="Annulla"
             >
-              {isWorkspaceOpen ? "Nascondi" : "Mostra"}
+              ↩
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={handleRedoClick}
+              disabled={!canRedo}
+              title="Ripeti"
+            >
+              ↪
             </button>
           </div>
-
-        <div
-          className="photo-selector__workspace-panel"
-          hidden={!isWorkspaceOpen}
-        >
-          <div className="photo-selector__workspace-group">
-            <span className="photo-selector__workspace-label">Preset filtri</span>
-            <div className="photo-selector__preset-form">
-              <input
-                className="photo-selector__preset-input"
-                value={newPresetName}
-                onChange={(event) => setNewPresetName(event.target.value)}
-                placeholder="Nome preset, ad esempio Cerimonia 3+"
-              />
-              <button
-                type="button"
-                className="ghost-button ghost-button--small"
-                onClick={handleSavePreset}
-                disabled={!newPresetName.trim()}
-              >
-                Salva preset
-              </button>
-            </div>
-            <div className="photo-selector__preset-list">
-              {filterPresets.length === 0 ? (
-                <span className="photo-selector__workspace-empty">
-                  Nessun preset salvato.
-                </span>
-              ) : (
-                filterPresets.map((preset) => (
-                  <div key={preset.id} className="photo-selector__preset-chip">
-                    <button
-                      type="button"
-                      className="photo-selector__preset-apply"
-                      onClick={() => applyPreset(preset)}
-                    >
-                      {preset.name}
-                    </button>
-                    <button
-                      type="button"
-                      className="photo-selector__preset-remove"
-                      aria-label={`Rimuovi preset ${preset.name}`}
-                      onClick={() => removePreset(preset.id)}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="photo-selector__workspace-group">
-            <span className="photo-selector__workspace-label">Nomi etichette colore</span>
-            <div className="photo-selector__label-grid">
-              {COLOR_LABELS.map((value) => (
-                <label key={value} className="photo-selector__label-editor">
-                  <span className="photo-selector__label-chip">
-                    <span className={`asset-color-dot asset-color-dot--${value}`} />
-                  </span>
-                  <input
-                    value={customColorNames[value]}
-                    onChange={(event) => handleColorNameChange(value, event.target.value)}
-                    aria-label={`Nome personalizzato etichetta ${COLOR_LABEL_NAMES[value]}`}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-        </section>
-
-        <div className="photo-selector__quick-actions-shell">
-          <span className="photo-selector__workspace-label">Azioni rapide</span>
-          <div className="photo-selector__quick-actions">
+          <div className="photo-selector__toolbar-divider" />
+          <button
+            type="button"
+            className={`checkbox-button photo-selector__toolbar-control ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`}
+            onClick={() => toggleAll(!allSelected)}
+          >
+            {allSelected ? "Deseleziona tutto" : "Seleziona tutto"}
+          </button>
+          <div className="photo-selector__toolbar-divider" />
           <button
             type="button"
             className="ghost-button ghost-button--small"
             onClick={selectVisible}
-            disabled={visiblePhotos.length === 0}
+            title="Seleziona le foto visibili"
           >
-            Seleziona visibili
-          </button>
-          <button
-            type="button"
-            className="ghost-button ghost-button--small"
-            onClick={addVisibleToSelection}
-            disabled={visiblePhotos.length === 0}
-          >
-            Aggiungi visibili
-          </button>
-          <button
-            type="button"
-            className="ghost-button ghost-button--small"
-            onClick={removeVisibleFromSelection}
-            disabled={visibleSelectedCount === 0}
-          >
-            Togli visibili
+            Visibili
           </button>
           <button
             type="button"
             className="ghost-button ghost-button--small"
             onClick={activatePickedOnly}
-            disabled={photos.length === 0}
+            title="Seleziona solo le foto Pick"
           >
             Solo pick
           </button>
-          <button
-            type="button"
-            className="ghost-button ghost-button--small"
-            onClick={excludeRejected}
-            disabled={selectedIds.length === 0}
-          >
-            Escludi scartate
-          </button>
-          <button
-            type="button"
-            className="ghost-button ghost-button--small"
-            onClick={() => selectByMinimumRating(3)}
-            disabled={photos.length === 0}
-          >
-            3+ stelle
-          </button>
-          <button
-            type="button"
-            className="ghost-button ghost-button--small"
-            onClick={() => selectByMinimumRating(5)}
-            disabled={photos.length === 0}
-          >
-            Solo 5 stelle
-          </button>
-          <span className="photo-selector__quick-summary">
-            {visibleSelectedCount}/{visiblePhotos.length} visibili attive
-          </span>
-        </div>
-        </div>
-
-        {timelineEntries.length > 0 ? (
-          <div className="photo-selector__timeline" aria-label="Cronologia azioni recenti">
-            <span className="photo-selector__timeline-label">Ultime azioni</span>
-            <div className="photo-selector__timeline-list">
-              {timelineEntries.map((entry) => (
-                <span key={entry.id} className="photo-selector__timeline-item">
-                  {entry.label}
-                </span>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {selectedIds.length > 0 ? (
-          <section
-            className="photo-selector__selection-bar"
-            aria-label="Azioni rapide per la selezione corrente"
-          >
-            <div className="photo-selector__collapsible-header">
-              <div className="photo-selector__selection-copy">
-                <span className="photo-selector__selection-count">
-                  {selectedIds.length === 1
-                    ? "1 foto selezionata"
-                    : `${selectedIds.length} foto selezionate`}
-                </span>
-                <span className="photo-selector__selection-meta">
-                  Batch rapido su stelle, stato, colore e gestione selezione.
-                </span>
-              </div>
-              <button
-                type="button"
-                className="ghost-button ghost-button--small"
-                onClick={() => setIsBatchToolsOpen((current) => !current)}
-              >
-                {isBatchToolsOpen ? "Chiudi strumenti batch" : "Apri strumenti batch"}
-              </button>
-            </div>
-
-            <div
-              className="photo-selector__selection-tools"
-              hidden={!isBatchToolsOpen}
+          {selectedIds.length >= 2 && selectedIds.length <= 4 && (
+            <button
+              type="button"
+              className="ghost-button ghost-button--small"
+              onClick={() => setIsCompareOpen(true)}
+              title={`Confronta ${selectedIds.length} foto selezionate`}
             >
+              Confronta
+            </button>
+          )}
+        </div>
+
+        <div className="photo-selector__action-inline photo-selector__toolbar-search">
+          <PhotoSearchBar
+            value={searchQuery}
+            onChange={setSearchQuery}
+            resultCount={visiblePhotos.length}
+            totalCount={photos.length}
+          />
+        </div>
+
+        <div className="photo-selector__action-inline">
+          <label className="photo-selector__zoom-label" title="Dimensione card">
+            <span>🔎</span>
+            <input
+              type="range"
+              className="photo-selector__zoom-slider"
+              min={100}
+              max={320}
+              step={10}
+              value={cardSize}
+              onChange={(e) => setCardSize(Number(e.target.value))}
+              aria-label="Dimensione card"
+            />
+          </label>
+          <div className="photo-selector__toolbar-divider" />
+          <select
+            className="photo-selector__sort photo-selector__toolbar-control"
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value as SortMode)}
+          >
+            <option value="name">AZ ↑ Nome</option>
+            <option value="orientation">Orientamento</option>
+            <option value="rating">Valutazione</option>
+          </select>
+          <button
+            type="button"
+            className={`icon-button${isSettingsPanelOpen ? " icon-button--active" : ""}`}
+            onClick={() => setIsSettingsPanelOpen((v) => !v)}
+            title="Impostazioni workspace"
+          >
+            ⚙
+          </button>
+          <PhotoClassificationHelpButton />
+        </div>
+      </div>
+
+      {/* ── QUICK STATS CHIPS ── */}
+      {photos.length > 0 && (
+        <div className="photo-selector__quick-stats">
+          {[1, 2, 3, 4, 5].map((r) => {
+            const count = photoStats.ratingCounts.get(r) ?? 0;
+            if (count === 0) return null;
+            const isActive = ratingFilter === String(r);
+            return (
+              <button
+                key={r}
+                type="button"
+                className={`photo-selector__qs-chip photo-selector__qs-chip--star${isActive ? " photo-selector__qs-chip--active" : ""}`}
+                onClick={() => setRatingFilter(isActive ? "any" : String(r))}
+                title={`${r} stelle — ${count} foto`}
+              >
+                {"★".repeat(r)}
+                <span className="photo-selector__qs-count">{count}</span>
+              </button>
+            );
+          })}
+          {(["picked", "rejected"] as PickStatus[]).map((ps) => {
+            const count = photoStats.pickCounts.get(ps) ?? 0;
+            if (count === 0) return null;
+            const isActive = pickFilter === ps;
+            return (
+              <button
+                key={ps}
+                type="button"
+                className={`photo-selector__qs-chip photo-selector__qs-chip--${ps}${isActive ? " photo-selector__qs-chip--active" : ""}`}
+                onClick={() => setPickFilter(isActive ? "all" : ps)}
+                title={ps === "picked" ? `Pick — ${count} foto` : `Scartate — ${count} foto`}
+              >
+                {ps === "picked" ? "✓" : "✕"}
+                <span className="photo-selector__qs-count">{count}</span>
+              </button>
+            );
+          })}
+          {COLOR_LABELS.map((cl) => {
+            const count = photoStats.colorCounts.get(cl) ?? 0;
+            if (count === 0) return null;
+            const isActive = colorFilter === cl;
+            return (
+              <button
+                key={cl}
+                type="button"
+                className={`photo-selector__qs-chip photo-selector__qs-chip--color-${cl}${isActive ? " photo-selector__qs-chip--active" : ""}`}
+                onClick={() => setColorFilter(isActive ? "all" : cl)}
+                title={`${customColorNames[cl]} — ${count} foto`}
+              >
+                <span
+                  className={`asset-color-dot asset-color-dot--${cl}`}
+                  style={{ width: "8px", height: "8px", minWidth: "8px" }}
+                />
+                <span className="photo-selector__qs-count">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── MAIN CONTENT ── */}
+      <div
+        ref={gridRef}
+        className="photo-selector__grid"
+        style={{ "--ps-card-min": `${cardSize}px` } as React.CSSProperties}
+        role="listbox"
+        onPointerDown={(e) => {
+          // Never start a lasso drag while the context menu is open
+          if (contextMenuState) return;
+          // Only start drag on the grid background (not on photo cards)
+          if ((e.target as HTMLElement).closest(".photo-card")) return;
+          if (e.button !== 0) return;
+          dragOriginRef.current = { x: e.clientX, y: e.clientY };
+          setDragRect(null);
+          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          if (!dragOriginRef.current) return;
+          const ox = dragOriginRef.current.x;
+          const oy = dragOriginRef.current.y;
+          const cx = e.clientX;
+          const cy = e.clientY;
+          const threshold = 6;
+          if (Math.abs(cx - ox) < threshold && Math.abs(cy - oy) < threshold) return;
+          setDragRect({
+            left: Math.min(ox, cx),
+            top: Math.min(oy, cy),
+            width: Math.abs(cx - ox),
+            height: Math.abs(cy - oy),
+          });
+        }}
+        onPointerUp={(e) => {
+          if (!dragOriginRef.current) return;
+          const origin = dragOriginRef.current;
+          dragOriginRef.current = null;
+
+          if (!dragRect) {
+            setDragRect(null);
+            return;
+          }
+
+          const selRect = {
+            left: dragRect.left,
+            top: dragRect.top,
+            right: dragRect.left + dragRect.width,
+            bottom: dragRect.top + dragRect.height,
+          };
+          setDragRect(null);
+
+          const grid = gridRef.current;
+          if (!grid) return;
+          const cards = grid.querySelectorAll<HTMLElement>("[data-preview-asset-id]");
+          const newIds: string[] = [];
+          for (let i = 0; i < cards.length; i++) {
+            const cr = cards[i].getBoundingClientRect();
+            const overlaps =
+              cr.left < selRect.right &&
+              cr.right > selRect.left &&
+              cr.top < selRect.bottom &&
+              cr.bottom > selRect.top;
+            if (overlaps) {
+              const id = cards[i].dataset.previewAssetId;
+              if (id) newIds.push(id);
+            }
+          }
+          if (newIds.length > 0) {
+            const base = e.shiftKey ? new Set(selectedIds) : new Set<string>();
+            for (const id of newIds) base.add(id);
+            onSelectionChange(Array.from(base));
+            pushTimelineEntry(`Selezionate ${newIds.length} foto con lasso`);
+          }
+        }}
+      >
+        {visiblePhotos.length === 0 ? (
+          <div className="photo-selector__empty">
+            <p>Nessuna foto trovata.</p>
+          </div>
+        ) : (
+          visiblePhotos.map((photo) => (
+            <PhotoCard
+              key={photo.id}
+              photo={photo}
+              isSelected={selectedSet.has(photo.id)}
+              onToggle={togglePhoto}
+              onUpdatePhoto={handleUpdatePhoto}
+              onFocus={handleFocus}
+              onPreview={handlePreview}
+              onContextMenu={handleContextMenu}
+              editable={!!onPhotosChange}
+            />
+          ))
+        )}
+        {dragRect && (
+          <div
+            className="photo-selector__drag-rect"
+            style={{
+              position: "fixed",
+              left: dragRect.left,
+              top: dragRect.top,
+              width: dragRect.width,
+              height: dragRect.height,
+            }}
+          />
+        )}
+      </div>
+
+      {/* ── STATUS BAR (Bridge Bottom Style) ── */}
+      <footer className="photo-selector__bottom-bar">
+        <div className="photo-selector__stats">
+          <span className="photo-selector__count">
+            {photos.length} elementi — {selectedIds.length} selezionati
+            {hasActiveFilters ? ` (${visiblePhotos.length} filtrati)` : ""}
+          </span>
+          {selectionStats && (
+            <div className="photo-selector__stat-chips">
+              {selectionStats.picked > 0 && (
+                <span className="photo-selector__stat-chip photo-selector__stat-chip--pick">
+                  Pick {selectionStats.picked}
+                </span>
+              )}
+              {selectionStats.rejected > 0 && (
+                <span className="photo-selector__stat-chip photo-selector__stat-chip--reject">
+                  Scart. {selectionStats.rejected}
+                </span>
+              )}
+              {selectionStats.highRating > 0 && (
+                <span className="photo-selector__stat-chip photo-selector__stat-chip--star">
+                  ★3+ {selectionStats.highRating}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        
+        {timelineEntries.length > 0 && (
+          canUndo ? (
+            <button
+              type="button"
+              className="photo-selector__timeline-status photo-selector__timeline-undo-btn"
+              onClick={handleUndoClick}
+              title="Clicca per annullare"
+            >
+              ↩ {timelineEntries[0].label}
+            </button>
+          ) : (
+            <div className="photo-selector__timeline-status">
+              {timelineEntries[0].label}
+            </div>
+          )
+        )}
+
+        <div className="photo-selector__footer-actions">
+          {selectedIds.length > 0 && (
+            <button 
+              className="ghost-button ghost-button--small" 
+              onClick={() => setIsBatchToolsOpen(!isBatchToolsOpen)}
+            >
+              {isBatchToolsOpen ? "Chiudi Batch" : "Apri Batch"}
+            </button>
+          )}
+        </div>
+      </footer>
+
+      {isBatchToolsOpen && selectedIds.length > 0 && (
+        <section
+          className="photo-selector__selection-bar photo-selector__batch-panel"
+        >
+          <div className="photo-selector__selection-tools">
               <div className="photo-selector__selection-group" aria-label="Valutazione">
                 <span className="photo-selector__selection-label">Stelle</span>
                 <div className="photo-selector__selection-stars">
@@ -1112,7 +1516,6 @@ export function PhotoSelector({
                       type="button"
                       className="photo-selector__batch-star"
                       onClick={() => applyBatchChanges(selectedIds, { rating: value })}
-                      title={`Assegna ${value} stella${value > 1 ? "e" : ""}`}
                     >
                       {Array.from({ length: value }, () => "★").join("")}
                     </button>
@@ -1140,6 +1543,14 @@ export function PhotoSelector({
                       {value === "picked" ? "Pick" : value === "rejected" ? "Scartata" : "Neutra"}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    className="ghost-button ghost-button--small"
+                    onClick={excludeRejected}
+                    title="Rimuovi dalla selezione le foto scartate"
+                  >
+                    − Escludi scartate
+                  </button>
                 </div>
               </div>
 
@@ -1158,74 +1569,14 @@ export function PhotoSelector({
                       key={value}
                       type="button"
                       className={`asset-color-dot asset-color-dot--${value}`}
-                      title={customColorNames[value]}
                       onClick={() => applyBatchChanges(selectedIds, { colorLabel: value })}
                     />
                   ))}
                 </div>
               </div>
-
-              <div className="photo-selector__selection-group" aria-label="Gestione selezione">
-                <span className="photo-selector__selection-label">Selezione</span>
-                <div className="photo-selector__selection-actions">
-                  <button
-                    type="button"
-                    className="ghost-button ghost-button--small"
-                    onClick={invertVisibleSelection}
-                  >
-                    Inverti visibili
-                  </button>
-                  <button
-                    type="button"
-                    className="ghost-button ghost-button--small"
-                    onClick={clearSelection}
-                  >
-                    Deseleziona
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        <div
-          ref={gridRef}
-          className="photo-selector__grid"
-          role="listbox"
-          aria-label="Griglia foto selezionabili"
-          aria-multiselectable="true"
-        >
-          {visiblePhotos.length === 0 ? (
-            <div className="photo-selector__empty">
-              <p>Nessuna foto disponibile con i filtri attuali.</p>
-            </div>
-          ) : (
-            visiblePhotos.map((photo) => (
-              <PhotoCard
-                key={photo.id}
-                photo={photo}
-                isSelected={selectedSet.has(photo.id)}
-                onToggle={togglePhoto}
-                onUpdatePhoto={handleUpdatePhoto}
-                onFocus={handleFocus}
-                onPreview={handlePreview}
-                onContextMenu={handleContextMenu}
-                editable={!!onPhotosChange}
-              />
-            ))
-          )}
-        </div>
-
-        <div className="photo-selector__footer">
-          <p className="photo-selector__hint">
-            Shift+click per selezionare un intervallo. Ctrl+Z / Ctrl+Shift+Z per annulla/ripeti.
-            Tasto destro o Ctrl/Cmd + 6/7/8/9/V per i colori, 1-5 stelle, P/X/U stato, Spazio preview.
-          </p>
-          <span className="sr-only" aria-live="polite">
-            {selectedIds.length === 1 ? "Una foto selezionata" : `${selectedIds.length} foto selezionate`}
-          </span>
-        </div>
-      </div>
+          </div>
+        </section>
+      )}
 
       <PhotoQuickPreviewModal
         asset={previewAssetWithUrl}
@@ -1235,12 +1586,193 @@ export function PhotoSelector({
         onUpdateAsset={(assetId, changes) => updatePhoto(assetId, changes)}
       />
 
+      {isSettingsPanelOpen && (        <aside className="photo-selector__settings-flyout" aria-label="Impostazioni workspace">
+          <div className="photo-selector__settings-header">
+            <span>Impostazioni</span>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => setIsSettingsPanelOpen(false)}
+              title="Chiudi"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="photo-selector__settings-section">
+            <h4 className="photo-selector__settings-section-title">Nomi etichette colore</h4>
+            {COLOR_LABELS.map((label) => (
+              <label key={label} className="photo-selector__settings-color-row">
+                <span className={`asset-color-dot asset-color-dot--${label}`} />
+                <input
+                  type="text"
+                  className="photo-selector__settings-color-input"
+                  value={customColorNames[label]}
+                  onChange={(e) => handleColorNameChange(label, e.target.value)}
+                  placeholder={COLOR_LABEL_NAMES[label]}
+                />
+              </label>
+            ))}
+          </div>
+
+          <div className="photo-selector__settings-section">
+            <h4 className="photo-selector__settings-section-title">
+              Editor esterno
+              <button
+                type="button"
+                className="photo-selector__settings-info-btn"
+                title="Imposta il percorso assoluto della cartella radice sul tuo PC (es. C:\Foto\Matrimonio). Questo permette di copiare il percorso completo di un file per aprirlo in Photoshop o qualsiasi altro editor esterno."
+              >
+                ?
+              </button>
+            </h4>
+            <label className="photo-selector__settings-color-row">
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Cartella radice</span>
+              <input
+                type="text"
+                className="photo-selector__settings-color-input"
+                value={rootFolderPath}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setRootFolderPath(val);
+                  localStorage.setItem("ps-root-folder-path", val);
+                }}
+                placeholder="C:\Utenti\Foto\Matrimonio"
+                spellCheck={false}
+              />
+            </label>
+            <label className="photo-selector__settings-color-row">
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Editor</span>
+              <div className="photo-selector__settings-input-with-button">
+                <input
+                  type="text"
+                  className="photo-selector__settings-color-input"
+                  value={preferredEditorPath}
+                  onChange={(e) => setPreferredEditorPathPersisted(e.target.value)}
+                  placeholder="C:\\Program Files\\Adobe\\Adobe Photoshop 2025\\Photoshop.exe"
+                  spellCheck={false}
+                />
+              </div>
+            </label>
+            <div className="photo-selector__settings-browse-row">
+              <button
+                type="button"
+                className="photo-selector__settings-browse-prominent"
+                onClick={() => void handleBrowsePreferredEditor()}
+                title="Seleziona l'eseguibile dell'editor (Photoshop.exe, ecc.)"
+              >
+                📂 Sfoglia editor...
+              </button>
+            </div>
+            <div className="photo-selector__settings-preset-row photo-selector__settings-editor-presets">
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => setPreferredEditorPathPersisted("C:\\Program Files\\Adobe\\Adobe Photoshop 2025\\Photoshop.exe")}
+                title="Imposta percorso Photoshop 2025"
+              >
+                Photoshop 2025
+              </button>
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => setPreferredEditorPathPersisted("C:\\Program Files\\Adobe\\Adobe Photoshop 2024\\Photoshop.exe")}
+                title="Imposta percorso Photoshop 2024"
+              >
+                Photoshop 2024
+              </button>
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => setPreferredEditorPathPersisted("C:\\Program Files\\Adobe\\Adobe Photoshop 2023\\Photoshop.exe")}
+                title="Imposta percorso Photoshop 2023"
+              >
+                Photoshop 2023
+              </button>
+            </div>
+            <p
+              className={`photo-selector__settings-path-status photo-selector__settings-path-status--${editorPathStatus.kind}`}
+            >
+              {editorPathStatus.text}
+            </p>
+            <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+              Usato per "Apri con editor" e "Copia percorso" nel menu contestuale.
+            </p>
+          </div>
+
+          <div className="photo-selector__settings-section">
+            <h4 className="photo-selector__settings-section-title">
+              Preset filtri
+              <button
+                type="button"
+                className="photo-selector__settings-info-btn"
+                title="Un preset salva la combinazione attuale di filtri (stelle, stato, colore, cartella...) con un nome. Utile per richiamare in un click un insieme di filtri che usi spesso — es. &#39;Migliori Pick&#39; = Pick + 4 stelle + verde."
+              >
+                ?
+              </button>
+            </h4>
+            <div className="photo-selector__settings-preset-row">
+              <input
+                type="text"
+                className="photo-selector__settings-color-input"
+                value={newPresetName}
+                onChange={(e) => setNewPresetName(e.target.value)}
+                placeholder="Nome preset…"
+                onKeyDown={(e) => e.key === "Enter" && handleSavePreset()}
+              />
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={handleSavePreset}
+                disabled={!newPresetName.trim()}
+              >
+                Salva
+              </button>
+            </div>
+            {filterPresets.length === 0 && (
+              <p className="photo-selector__settings-empty">Nessun preset salvato.</p>
+            )}
+            {filterPresets.map((preset) => (
+              <div key={preset.id} className="photo-selector__settings-preset-item">
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small photo-selector__settings-preset-name"
+                  onClick={() => applyPreset(preset)}
+                >
+                  {preset.name}
+                </button>
+                <button
+                  type="button"
+                  className="icon-button icon-button--danger"
+                  onClick={() => removePreset(preset.id)}
+                  title="Elimina preset"
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </aside>
+      )}
+
+      {/* Backdrop: transparent overlay that closes the context menu when clicked outside */}
+      {contextMenuState && (
+        <div
+          className="photo-selector__context-backdrop"
+          onClick={() => setContextMenuState(null)}
+          onContextMenu={(e) => e.preventDefault()}
+        />
+      )}
+
       {contextMenuState ? (
         <PhotoSelectionContextMenu
           x={contextMenuState.x}
           y={contextMenuState.y}
           targetCount={contextMenuState.targetIds.length}
           colorLabelNames={customColorNames}
+          hasFileAccess={"showDirectoryPicker" in window}
+          rootFolderPath={rootFolderPath || undefined}
+          targetPath={contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined}
           onApplyRating={(rating) => {
             applyBatchChanges(contextMenuState.targetIds, { rating });
             setContextMenuState(null);
@@ -1261,8 +1793,55 @@ export function PhotoSelector({
             clearSelection();
             setContextMenuState(null);
           }}
+          onToggleSelection={() => {
+            if (contextMenuState.targetIds.length === 1) {
+              togglePhoto(contextMenuState.targetIds[0]);
+            } else {
+              invertVisibleSelection();
+            }
+            setContextMenuState(null);
+          }}
+          onOpenPreview={() => {
+            if (contextMenuState.targetIds.length > 0) {
+              handlePreview(contextMenuState.targetIds[0]);
+            }
+            setContextMenuState(null);
+          }}
+          onCopyFiles={() => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            void handleCopyFiles(ids);
+          }}
+          onMoveFiles={() => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            void handleMoveFiles(ids);
+          }}
+          onSaveAs={() => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            void handleSaveAs(ids);
+          }}
+          onCopyPath={() => {
+            handleCopyPath(contextMenuState.targetIds, rootFolderPath);
+            setContextMenuState(null);
+          }}
+          onOpenWithEditor={() => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            handleOpenWithEditor(ids);
+          }}
         />
       ) : null}
-    </>
+
+      {isCompareOpen && selectedIds.length >= 2 && (
+        <CompareModal
+          photos={photos.filter((p) => selectedSet.has(p.id)).slice(0, 4)}
+          onClose={() => setIsCompareOpen(false)}
+          onUpdatePhoto={(id, changes) => updatePhoto(id, changes)}
+        />
+      )}
+    </div>
   );
 }
+

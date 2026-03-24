@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { preloadImageUrls } from "../services/image-cache";
-import { createOnDemandPreviewAsync, isRawFile } from "../services/folder-access";
+import { createOnDemandPreviewAsync, isRawFile, saveAssetAs } from "../services/folder-access";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import {
   COLOR_LABEL_NAMES,
@@ -450,6 +450,12 @@ export function PhotoQuickPreviewModal({
         return;
       }
 
+      if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        void toggleNativeFullscreen();
+        return;
+      }
+
       if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
         event.preventDefault();
         handleNavigate("previous");
@@ -661,6 +667,9 @@ export function PhotoQuickPreviewModal({
             <strong>{asset.fileName}</strong>
             <span>
               {asset.width} x {asset.height} | {orientationLabels[asset.orientation]}
+              {asset.width > 0 && asset.height > 0
+                ? ` | ${((asset.width * asset.height) / 1_000_000).toFixed(1)} MP`
+                : ""}
               {usage ? ` | Foglio ${usage.pageNumber}` : " | Non ancora usata nel layout"}
             </span>
             {asset.xmpHasEdits ? (
@@ -700,6 +709,14 @@ export function PhotoQuickPreviewModal({
               onClick={toggleNativeFullscreen}
             >
               Fullscreen
+            </button>
+            <button
+              type="button"
+              className="ghost-button quick-preview__action"
+              onClick={() => void saveAssetAs(asset.id)}
+              title="Salva una copia del file in una posizione a scelta per aprirlo in un editor esterno (Photoshop, Lightroom, ecc.)"
+            >
+              Salva copia
             </button>
             <button type="button" className="ghost-button quick-preview__action" onClick={onClose}>
               Chiudi

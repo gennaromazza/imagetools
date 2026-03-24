@@ -81,6 +81,8 @@ function withPreservedAssignmentState(
     };
   }
 
+  const preserveFraming = previous.fitMode === "crop" || previous.fitMode === "fit";
+
   return {
     ...assignment,
     fitMode: previous.fitMode,
@@ -89,10 +91,10 @@ function withPreservedAssignmentState(
     offsetY: previous.offsetY,
     rotation: previous.rotation,
     locked: previous.locked,
-    cropLeft: previous.fitMode === "fit" ? previous.cropLeft ?? 0 : assignment.cropLeft ?? 0,
-    cropTop: previous.fitMode === "fit" ? previous.cropTop ?? 0 : assignment.cropTop ?? 0,
-    cropWidth: previous.fitMode === "fit" ? previous.cropWidth ?? 1 : assignment.cropWidth ?? 1,
-    cropHeight: previous.fitMode === "fit" ? previous.cropHeight ?? 1 : assignment.cropHeight ?? 1
+    cropLeft: preserveFraming ? previous.cropLeft ?? 0 : assignment.cropLeft ?? 0,
+    cropTop: preserveFraming ? previous.cropTop ?? 0 : assignment.cropTop ?? 0,
+    cropWidth: preserveFraming ? previous.cropWidth ?? 1 : assignment.cropWidth ?? 1,
+    cropHeight: preserveFraming ? previous.cropHeight ?? 1 : assignment.cropHeight ?? 1
   };
 }
 
@@ -100,6 +102,183 @@ function normalizeRotation(value: number): number {
   const rounded = Math.round(value);
   const wrapped = ((rounded % 360) + 360) % 360;
   return wrapped > 180 ? wrapped - 360 : wrapped;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getSlotAspectRatio(
+  slot: LayoutSlot,
+  sheetSpec?: GeneratedPageLayout["sheetSpec"],
+  slotCount = 1
+): number {
+  if (!sheetSpec) {
+    return slot.width / Math.max(slot.height, 0.001);
+  }
+
+  let width = slot.width * sheetSpec.widthCm;
+  let height = slot.height * sheetSpec.heightCm;
+
+  if (slotCount > 1 && sheetSpec.gapCm > 0) {
+    const insetX = Math.min(sheetSpec.gapCm / 2, width / 3);
+    const insetY = Math.min(sheetSpec.gapCm / 2, height / 3);
+    width = Math.max(0.001, width - insetX * 2);
+    height = Math.max(0.001, height - insetY * 2);
+  }
+
+  return width / Math.max(height, 0.001);
+}
+
+function normalizeCropRect(assignment: LayoutAssignment) {
+  const width = clamp(assignment.cropWidth ?? 1, 0.05, 1);
+  const height = clamp(assignment.cropHeight ?? 1, 0.05, 1);
+
+  return {
+    left: clamp(assignment.cropLeft ?? 0, 0, 1 - width),
+    top: clamp(assignment.cropTop ?? 0, 0, 1 - height),
+    width,
+    height
+  };
+}
+
+function getRotatedBoundingAspect(aspect: number, rotation: number): number {
+  const radians = (Math.abs(normalizeRotation(rotation)) * Math.PI) / 180;
+  const width = Math.max(aspect, 0.001);
+  const height = 1;
+  const cos = Math.abs(Math.cos(radians));
+  const sin = Math.abs(Math.sin(radians));
+  const rotatedWidth = width * cos + height * sin;
+  const rotatedHeight = width * sin + height * cos;
+  return rotatedWidth / Math.max(rotatedHeight, 0.001);
+}
+
+function getSlotConstrainedCropAspect(
+  slot: LayoutSlot,
+  rotation: number,
+  sheetSpec?: GeneratedPageLayout["sheetSpec"],
+  slotCount = 1
+): number {
+  const slotAspect = getSlotAspectRatio(slot, sheetSpec, slotCount);
+  const normalizedRotation = Math.abs(normalizeRotation(rotation)) % 180;
+
+  if (normalizedRotation < 0.001) {
+    return slotAspect;
+  }
+
+  if (Math.abs(normalizedRotation - 90) < 0.001) {
+    return 1 / Math.max(slotAspect, 0.001);
+  }
+
+  if (Math.abs(normalizedRotation - 45) < 0.5 || Math.abs(normalizedRotation - 135) < 0.5) {
+    return slotAspect;
+  }
+
+  let low = 0.05;
+  let high = 20;
+  let bestAspect = slotAspect;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  const lowOutput = getRotatedBoundingAspect(low, normalizedRotation);
+  const highOutput = getRotatedBoundingAspect(high, normalizedRotation);
+  const increasing = highOutput >= lowOutput;
+
+  for (let step = 0; step < 40; step += 1) {
+    const mid = (low + high) / 2;
+    const output = getRotatedBoundingAspect(mid, normalizedRotation);
+    const distance = Math.abs(Math.log(output / Math.max(slotAspect, 0.001)));
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestAspect = mid;
+    }
+
+    if (increasing ? output < slotAspect : output > slotAspect) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return bestAspect;
+}
+
+function fitCropRectToAspect(
+  rect: ReturnType<typeof normalizeCropRect>,
+  targetAspect: number,
+  imageAspect: number
+) {
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  const targetArea = Math.max(0.05 * 0.05, rect.width * rect.height);
+  let width = Math.sqrt((targetArea * targetAspect) / Math.max(imageAspect, 0.0001));
+  let height = targetArea / Math.max(width, 0.05);
+  const maxWidthFromCenter = Math.max(0.05, Math.min(centerX, 1 - centerX) * 2);
+  const maxHeightFromCenter = Math.max(0.05, Math.min(centerY, 1 - centerY) * 2);
+
+  if (width > maxWidthFromCenter) {
+    width = maxWidthFromCenter;
+    height = (imageAspect * width) / Math.max(targetAspect, 0.0001);
+  }
+
+  if (height > maxHeightFromCenter) {
+    height = maxHeightFromCenter;
+    width = (targetAspect * height) / Math.max(imageAspect, 0.0001);
+  }
+
+  return {
+    left: clamp(centerX - width / 2, 0, 1 - width),
+    top: clamp(centerY - height / 2, 0, 1 - height),
+    width: clamp(width, 0.05, 1),
+    height: clamp(height, 0.05, 1)
+  };
+}
+
+function isAspectClose(left: number, right: number, tolerance = 0.05) {
+  return Math.abs(Math.log(left / Math.max(right, 0.0001))) <= tolerance;
+}
+
+function normalizeManualCropForSlot(
+  assignment: LayoutAssignment,
+  asset: ImageAsset | undefined,
+  slot: LayoutSlot | undefined,
+  sheetSpec?: GeneratedPageLayout["sheetSpec"],
+  slotCount = 1
+): LayoutAssignment {
+  if (!asset || !slot || assignment.fitMode !== "crop") {
+    return assignment;
+  }
+
+  const rect = normalizeCropRect(assignment);
+  const imageAspect = asset.aspectRatio > 0 ? asset.aspectRatio : 1;
+  const slotAspect = getSlotAspectRatio(slot, sheetSpec, slotCount);
+  const outputAspect = getRotatedBoundingAspect(
+    Math.max(imageAspect * (rect.width / Math.max(rect.height, 0.0001)), 0.0001),
+    assignment.rotation ?? 0
+  );
+
+  if (isAspectClose(outputAspect, slotAspect)) {
+    return {
+      ...assignment,
+      cropLeft: rect.left,
+      cropTop: rect.top,
+      cropWidth: rect.width,
+      cropHeight: rect.height
+    };
+  }
+
+  const adjustedRect = fitCropRectToAspect(
+    rect,
+    getSlotConstrainedCropAspect(slot, assignment.rotation ?? 0, sheetSpec, slotCount),
+    imageAspect
+  );
+
+  return {
+    ...assignment,
+    cropLeft: adjustedRect.left,
+    cropTop: adjustedRect.top,
+    cropWidth: adjustedRect.width,
+    cropHeight: adjustedRect.height
+  };
 }
 
 function getEffectiveAssignmentAspect(asset: ImageAsset, assignment: LayoutAssignment): number {
@@ -128,7 +307,7 @@ function getOrientationFromAspect(aspect: number): ImageAsset["orientation"] {
 }
 
 function toLayoutAwareAsset(asset: ImageAsset, previous?: LayoutAssignment): ImageAsset {
-  if (!previous || previous.fitMode !== "fit") {
+  if (!previous || (previous.fitMode !== "fit" && previous.fitMode !== "crop")) {
     return asset;
   }
 
@@ -156,13 +335,26 @@ function reflowAssignmentForSlot(
   assignment: LayoutAssignment,
   asset: ImageAsset | undefined,
   slot: LayoutSlot | undefined,
-  cropStrategy: AutoLayoutResult["request"]["cropStrategy"]
+  cropStrategy: AutoLayoutResult["request"]["cropStrategy"],
+  sheetSpec?: GeneratedPageLayout["sheetSpec"],
+  slotCount = 1
 ): LayoutAssignment {
   if (!asset || !slot || assignment.fitMode === "fit") {
     return assignment;
   }
 
-  const initialCrop = buildInitialCropForSlot(asset, slot, cropStrategy, assignment.fitMode);
+  if (assignment.fitMode === "crop") {
+    return normalizeManualCropForSlot(assignment, asset, slot, sheetSpec, slotCount);
+  }
+
+  const initialCrop = buildInitialCropForSlot(
+    asset,
+    slot,
+    cropStrategy,
+    assignment.fitMode,
+    sheetSpec,
+    slotCount
+  );
 
   return {
     ...assignment,
@@ -203,7 +395,14 @@ export function moveImageBetweenSlots(
     sourceAssignment.slotId = move.targetSlotId;
     Object.assign(
       sourceAssignment,
-      reflowAssignmentForSlot(sourceAssignment, sourceAsset, targetSlot, result.request.cropStrategy)
+      reflowAssignmentForSlot(
+        sourceAssignment,
+        sourceAsset,
+        targetSlot,
+        result.request.cropStrategy,
+        targetPage.sheetSpec,
+        targetPage.slotDefinitions.length
+      )
     );
 
     if (targetAssignment) {
@@ -211,7 +410,14 @@ export function moveImageBetweenSlots(
       const targetAsset = result.request.assets.find((asset) => asset.id === targetAssignment.imageId);
       Object.assign(
         targetAssignment,
-        reflowAssignmentForSlot(targetAssignment, targetAsset, sourceSlot, result.request.cropStrategy)
+        reflowAssignmentForSlot(
+          targetAssignment,
+          targetAsset,
+          sourceSlot,
+          result.request.cropStrategy,
+          sourcePage.sheetSpec,
+          sourcePage.slotDefinitions.length
+        )
       );
     }
   } else if (targetAssignment) {
@@ -225,7 +431,9 @@ export function moveImageBetweenSlots(
             { ...targetAssignment, slotId: move.sourceSlotId },
             targetAsset,
             sourceSlot,
-            result.request.cropStrategy
+            result.request.cropStrategy,
+            sourcePage.sheetSpec,
+            sourcePage.slotDefinitions.length
           )
         : assignment
     );
@@ -235,7 +443,9 @@ export function moveImageBetweenSlots(
             { ...sourceAssignment, slotId: move.targetSlotId },
             sourceAsset,
             targetSlot,
-            result.request.cropStrategy
+            result.request.cropStrategy,
+            targetPage.sheetSpec,
+            targetPage.slotDefinitions.length
           )
         : assignment
     );
@@ -253,7 +463,9 @@ export function moveImageBetweenSlots(
         },
         sourceAsset,
         targetSlot,
-        result.request.cropStrategy
+        result.request.cropStrategy,
+        targetPage.sheetSpec,
+        targetPage.slotDefinitions.length
       )
     );
   }
@@ -294,8 +506,15 @@ export function rebalancePagesForAssignedImages(
     }
 
     const nextTemplate = selectBestTemplate(assets, result.availableTemplates, page.sheetSpec);
-    const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
-      withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
+    const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+    const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy, page.sheetSpec).map((assignment) =>
+      normalizeManualCropForSlot(
+        withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId)),
+        assetById.get(assignment.imageId),
+        nextTemplate.slots.find((slot) => slot.id === assignment.slotId),
+        page.sheetSpec,
+        nextTemplate.slots.length
+      )
     );
 
     const nextPage = syncPageImageIds({
@@ -362,7 +581,9 @@ export function placeImageInSlot(
       } as ImageAsset,
       slot,
       result.request.cropStrategy,
-      result.request.fitMode
+      result.request.fitMode,
+      targetPage.sheetSpec,
+      targetPage.slotDefinitions.length
     ),
     slotId: request.targetSlotId,
     imageId: request.imageId,
@@ -423,8 +644,15 @@ export function addImageToPage(
   }
 
   const nextTemplate = selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
-  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
-    withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
+  const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy, targetPage.sheetSpec).map((assignment) =>
+    normalizeManualCropForSlot(
+      withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId)),
+      assetById.get(assignment.imageId),
+      nextTemplate.slots.find((slot) => slot.id === assignment.slotId),
+      targetPage.sheetSpec,
+      nextTemplate.slots.length
+    )
   );
 
   const nextPage = syncPageImageIds({
@@ -488,8 +716,15 @@ export function rearrangePageImages(
     alternativeTemplates.length > 0
       ? selectBestTemplate(assets, alternativeTemplates, targetPage.sheetSpec)
       : selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
-  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
-    withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
+  const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+  const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy, targetPage.sheetSpec).map((assignment) =>
+    normalizeManualCropForSlot(
+      withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId)),
+      assetById.get(assignment.imageId),
+      nextTemplate.slots.find((slot) => slot.id === assignment.slotId),
+      targetPage.sheetSpec,
+      nextTemplate.slots.length
+    )
   );
 
   const nextPage = syncPageImageIds({
@@ -539,11 +774,23 @@ export function updateSlotAssignment(
     page.id === request.pageId
       ? {
           ...page,
-          assignments: page.assignments.map((assignment) =>
-            assignment.slotId === request.slotId
-              ? { ...assignment, ...request.changes }
-              : assignment
-          )
+          assignments: page.assignments.map((assignment) => {
+            if (assignment.slotId !== request.slotId) {
+              return assignment;
+            }
+
+            const slot = page.slotDefinitions.find((item) => item.id === request.slotId);
+            const asset = result.request.assets.find((item) => item.id === assignment.imageId);
+            const nextAssignment = { ...assignment, ...request.changes };
+
+            return normalizeManualCropForSlot(
+              nextAssignment,
+              asset,
+              slot,
+              page.sheetSpec,
+              page.slotDefinitions.length
+            );
+          })
         }
       : page
   );
@@ -565,8 +812,15 @@ export function changePageTemplate(
   const currentImageIds = page.imageIds.length > 0 ? page.imageIds : collectAssignedImageIds(page);
   const previousAssignments = new Map(page.assignments.map((assignment) => [assignment.imageId, assignment]));
   const assets = collectAssetsForLayout(result, currentImageIds, previousAssignments);
-  const assignments = assignImagesToTemplate(assets, template, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
-    withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId))
+  const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+  const assignments = assignImagesToTemplate(assets, template, result.request.fitMode, result.request.cropStrategy, page.sheetSpec).map((assignment) =>
+    normalizeManualCropForSlot(
+      withPreservedAssignmentState(assignment, previousAssignments.get(assignment.imageId)),
+      assetById.get(assignment.imageId),
+      template.slots.find((slot) => slot.id === assignment.slotId),
+      page.sheetSpec,
+      template.slots.length
+    )
   );
 
   const pages = clonePages(result).map((item) =>
@@ -613,7 +867,7 @@ export function createPage(
   const template = request.templateId
     ? findTemplate(result.availableTemplates, request.templateId)
     : selectBestTemplate(assets, result.availableTemplates, result.request.sheet);
-  const assignments = assignImagesToTemplate(assets, template, result.request.fitMode, result.request.cropStrategy).map((assignment) =>
+  const assignments = assignImagesToTemplate(assets, template, result.request.fitMode, result.request.cropStrategy, result.request.sheet).map((assignment) =>
     withPreservedAssignmentState(assignment)
   );
   const highestPageNumber = result.pages.reduce((highest, page) => Math.max(highest, page.pageNumber), 0);
