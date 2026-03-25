@@ -2509,7 +2509,6 @@ function AppContent() {
             slotCount={slotEditorPage.slotDefinitions.length}
             slot={slotEditorSlot}
             assignment={slotEditorAssignment}
-            availableTemplates={result.availableTemplates}
             onClose={() => setSlotPhotoEditorTarget(null)}
             onUpdateSlotAssignment={handleUpdateSelectedSlotAssignment}
             onClearSlot={(pageId, slotId) => {

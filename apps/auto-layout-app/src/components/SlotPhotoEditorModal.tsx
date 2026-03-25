@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import type { GeneratedPageLayout, ImageAsset, LayoutAssignment, LayoutSlot, LayoutTemplate } from "@photo-tools/shared-types";
+import type { GeneratedPageLayout, ImageAsset, LayoutAssignment, LayoutSlot } from "@photo-tools/shared-types";
 import { AssignmentInspector } from "./AssignmentInspector";
 import { ImageSlotPreview } from "./ImageSlotPreview";
-import { CropEditorModal } from "./CropEditorModal";
 import { getEffectiveSlotAspectRatio } from "../utils/slot-geometry";
 
 interface SlotPhotoEditorModalProps {
@@ -14,7 +13,6 @@ interface SlotPhotoEditorModalProps {
   slotCount?: number;
   slot: LayoutSlot;
   assignment: LayoutAssignment;
-  availableTemplates?: LayoutTemplate[];
   onClose: () => void;
   onUpdateSlotAssignment: (
     pageId: string,
@@ -38,13 +36,11 @@ export function SlotPhotoEditorModal({
   slotCount = 1,
   slot,
   assignment,
-  availableTemplates,
   onClose,
   onUpdateSlotAssignment,
   onClearSlot,
   onOpenCropEditor
 }: SlotPhotoEditorModalProps) {
-  const [showCropInline, setShowCropInline] = useState(false);
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") {
@@ -89,84 +85,65 @@ export function SlotPhotoEditorModal({
           </button>
         </div>
 
-        {showCropInline ? (
-          <div className="slot-photo-editor__crop-inline">
-            <CropEditorModal
-              inline
-              asset={asset}
-              assignment={assignment}
-              slot={slot}
-              sheetSpec={sheetSpec}
-              slotCount={slotCount}
-              availableTemplates={availableTemplates}
-              onApply={(changes) => {
-                onUpdateSlotAssignment(pageId, slot.id, changes);
-                setShowCropInline(false);
-              }}
-              onClose={() => setShowCropInline(false)}
-            />
-          </div>
-        ) : (
-          <div className="slot-photo-editor__layout">
-            <div className="slot-photo-editor__visuals">
-              <div className="slot-photo-editor__sheet-preview">
-                <div className="slot-photo-editor__section-head">
-                  <strong>Risultato sul foglio</strong>
-                  <span>Anteprima reale dello slot aggiornabile in tempo reale</span>
-                </div>
-                <div className="slot-photo-editor__sheet-card">
-                  <div
-                    className="slot-photo-editor__sheet-card-inner"
-                    style={{ ...slotPreviewStyle, ["--slot-editor-aspect" as string]: String(slotAspect) }}
-                  >
-                    <ImageSlotPreview
-                      asset={asset}
-                      assignment={assignment}
-                      slot={slot}
-                      label={`${pageLabel} | slot ${slot.id}`}
-                      sheetSpec={sheetSpec}
-                      slotCount={slotCount}
-                      showMeta={false}
-                    />
-                  </div>
-                </div>
+        <div className="slot-photo-editor__layout">
+          <div className="slot-photo-editor__visuals">
+            <div className="slot-photo-editor__sheet-preview">
+              <div className="slot-photo-editor__section-head">
+                <strong>Risultato sul foglio</strong>
+                <span>Anteprima reale dello slot aggiornabile in tempo reale</span>
               </div>
-
-              <div className="slot-photo-editor__stage">
-                <div className="slot-photo-editor__section-head">
-                  <strong>Foto sorgente</strong>
-                  <span>Riferimento completo dell'immagine originale</span>
-                </div>
-                <div className="slot-photo-editor__stage-frame">
-                  {previewUrl ? (
-                    <img
-                      src={previewUrl}
-                      alt={asset.fileName}
-                      className="slot-photo-editor__image"
-                      draggable={false}
-                    />
-                  ) : (
-                    <div className="slot-photo-editor__placeholder">{asset.fileName}</div>
-                  )}
+              <div className="slot-photo-editor__sheet-card">
+                <div
+                  className="slot-photo-editor__sheet-card-inner"
+                  style={{ ...slotPreviewStyle, ["--slot-editor-aspect" as string]: String(slotAspect) }}
+                >
+                  <ImageSlotPreview
+                    asset={asset}
+                    assignment={assignment}
+                    slot={slot}
+                    label={`${pageLabel} | slot ${slot.id}`}
+                    sheetSpec={sheetSpec}
+                    slotCount={slotCount}
+                    showMeta={false}
+                  />
                 </div>
               </div>
             </div>
 
-            <aside className="slot-photo-editor__inspector">
-              <AssignmentInspector
-                pageLabel={pageLabel}
-                slot={slot}
-                assignment={assignment}
-                asset={asset}
-                sheetSpec={sheetSpec}
-                slotCount={slotCount}
-                onChange={(changes) => onUpdateSlotAssignment(pageId, slot.id, changes)}
-                onClear={() => onClearSlot(pageId, slot.id)}
-                onOpenCropEditor={() => setShowCropInline(true)}
-              />
-            </aside>
+            <div className="slot-photo-editor__stage">
+              <div className="slot-photo-editor__section-head">
+                <strong>Foto sorgente</strong>
+                <span>Riferimento completo dell'immagine originale</span>
+              </div>
+              <div className="slot-photo-editor__stage-frame">
+                {previewUrl ? (
+                  <img
+                    src={previewUrl}
+                    alt={asset.fileName}
+                    className="slot-photo-editor__image"
+                    draggable={false}
+                  />
+                ) : (
+                  <div className="slot-photo-editor__placeholder">{asset.fileName}</div>
+                )}
+              </div>
+            </div>
           </div>
-        )}
+
+          <aside className="slot-photo-editor__inspector">
+            <AssignmentInspector
+              pageLabel={pageLabel}
+              slot={slot}
+              assignment={assignment}
+              asset={asset}
+              sheetSpec={sheetSpec}
+              slotCount={slotCount}
+              onChange={(changes) => onUpdateSlotAssignment(pageId, slot.id, changes)}
+              onClear={() => onClearSlot(pageId, slot.id)}
+              onOpenCropEditor={() => onOpenCropEditor(pageId, slot.id)}
+            />
+          </aside>
+        </div>
       </div>
     </div>
   );

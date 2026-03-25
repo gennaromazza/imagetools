@@ -113,8 +113,15 @@ async function drawAssignment(
 
   const image = await loadDecodedImage(assetUrl);
   const crop = getAssignmentCrop(assignment, image);
-  const imageAspect = crop.sw / Math.max(crop.sh, 0.001);
-  const metrics = getAssignmentCanvasDrawMetrics(assignment, imageAspect, width, height);
+  const croppedImageAspect = crop.sw / Math.max(crop.sh, 0.001);
+  const renderAssignment = {
+    ...assignment,
+    cropLeft: 0,
+    cropTop: 0,
+    cropWidth: 1,
+    cropHeight: 1
+  };
+  const metrics = getAssignmentCanvasDrawMetrics(renderAssignment, croppedImageAspect, width, height);
 
   ctx.translate(x + width / 2, y + height / 2);
   ctx.rotate(metrics.rotationRad);
