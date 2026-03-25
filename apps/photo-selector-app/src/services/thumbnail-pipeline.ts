@@ -1,226 +1,313 @@
-/**
- * Thumbnail generation pipeline -- two-stage design.
- *
- * Stage 1 -- File read: read file bytes into ArrayBuffer concurrently
- *            WITHOUT claiming a worker slot.  We pre-read up to
- *            (poolSize x READ_AHEAD) files so workers never wait for I/O.
- *
- * Stage 2 -- Worker dispatch: once a buffer is ready, hand it to a free
- *            worker immediately (zero-copy ArrayBuffer transfer).
- *
- * Crash safety: every worker has an onerror handler so a crash (e.g. OOM
- * while processing a 24 MP RAW preview) is recovered gracefully instead of
- * deadlocking the entire pipeline.
- *
- * Priority queue: viewport items (priority 0) are processed first.
- * Batched result delivery (~120 ms) to minimise React re-renders.
- */
+import type { ThumbnailError, ThumbnailResult } from "../workers/thumbnail-worker";
 
-import type { ThumbnailResult, ThumbnailError } from "../workers/thumbnail-worker";
-
-const THUMBNAIL_MAX     = 420;
+const THUMBNAIL_MAX = 420;
 const THUMBNAIL_QUALITY = 0.72;
 const BATCH_INTERVAL_MS = 120;
-const READ_AHEAD        = 2;   // read this many buffers per worker slot ahead
 
 export interface ThumbnailUpdate {
   id: string;
   url: string;
   width: number;
   height: number;
+  sourceFileKey?: string;
 }
 
 type BatchCallback = (batch: ThumbnailUpdate[]) => void;
-type ErrorCallback = (failedCount: number) => void;
+type ErrorCallback = (failedCount: number, failedId: string) => void;
 
 interface QueueItem {
   id: string;
-  file: File;
-  priority: number; // 0 = viewport, 1 = nearby, 2 = distant
+  file?: File;
+  loadFile?: () => Promise<File | null>;
+  absolutePath?: string;
+  sourceFileKey?: string;
+  createSourceFileKey?: (file: File) => string;
+  priority: number;
 }
 
-interface ReadyBuffer {
+interface ActiveTask {
   id: string;
-  buffer: ArrayBuffer;
+  sourceFileKey?: string;
+  createSourceFileKey?: (file: File) => string;
+}
+
+function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 export class ThumbnailPipeline {
-  private workers       : Worker[] = [];
-  private busyWorkers   = new Set<Worker>();
-  private workerItemId  = new Map<Worker, string>(); // worker -> current item id
-  private queue         : QueueItem[] = [];
-  private processing    = new Set<string>(); // ids being read OR in a worker
-  private readingIds    = new Set<string>(); // ids currently being read from disk
-  private readyQueue    : ReadyBuffer[] = []; // buffers ready to send to a worker
-  private completed     = new Set<string>();
-  private failedIds     = new Set<string>();
-  private pendingBatch  : ThumbnailUpdate[] = [];
-  private batchTimer    : ReturnType<typeof setTimeout> | null = null;
-  private onBatch       : BatchCallback;
-  private onError       : ErrorCallback | null;
-  private destroyed     = false;
+  private workers: Worker[] = [];
+  private busyWorkers = new Map<Worker, ActiveTask>();
+  private queue: QueueItem[] = [];
+  private processing = new Set<string>();
+  private completed = new Set<string>();
+  private failedIds = new Set<string>();
+  private pendingBatch: ThumbnailUpdate[] = [];
+  private batchTimer: ReturnType<typeof setTimeout> | null = null;
+  private destroyed = false;
+  private onBatch: BatchCallback;
+  private onError: ErrorCallback | null;
 
   constructor(onBatch: BatchCallback, onError?: ErrorCallback) {
-    this.onBatch  = onBatch;
-    this.onError  = onError ?? null;
+    this.onBatch = onBatch;
+    this.onError = onError ?? null;
 
-    const cores    = navigator.hardwareConcurrency || 4;
+    const cores = navigator.hardwareConcurrency || 4;
     const poolSize = Math.max(2, Math.min(cores - 1, 8));
 
-    for (let i = 0; i < poolSize; i++) {
+    for (let i = 0; i < poolSize; i += 1) {
       const worker = new Worker(
         new URL("../workers/thumbnail-worker.ts", import.meta.url),
         { type: "module" },
       );
       worker.onmessage = (ev: MessageEvent<ThumbnailResult | ThumbnailError>) =>
-        this.handleResult(worker, ev.data);
+        this.handleWorkerResult(worker, ev.data);
       worker.onerror = () => this.handleWorkerCrash(worker);
       this.workers.push(worker);
     }
   }
 
-  enqueue(items: { id: string; file: File }[], priority = 2): void {
+  enqueue(
+    items: Array<Omit<QueueItem, "priority">>,
+    priority = 2,
+  ): void {
     for (const item of items) {
-      if (this.completed.has(item.id) || this.processing.has(item.id)) continue;
-      const idx = this.queue.findIndex((q) => q.id === item.id);
-      if (idx >= 0) {
-        this.queue[idx].priority = Math.min(this.queue[idx].priority, priority);
-      } else {
-        this.queue.push({ id: item.id, file: item.file, priority });
+      if (this.completed.has(item.id) || this.processing.has(item.id)) {
+        continue;
       }
+
+      const existing = this.queue.find((queued) => queued.id === item.id);
+      if (existing) {
+        existing.priority = Math.min(existing.priority, priority);
+        if (!existing.file && item.file) existing.file = item.file;
+        if (!existing.loadFile && item.loadFile) existing.loadFile = item.loadFile;
+        if (!existing.absolutePath && item.absolutePath) existing.absolutePath = item.absolutePath;
+        if (!existing.sourceFileKey && item.sourceFileKey) existing.sourceFileKey = item.sourceFileKey;
+        if (!existing.createSourceFileKey && item.createSourceFileKey) {
+          existing.createSourceFileKey = item.createSourceFileKey;
+        }
+        continue;
+      }
+
+      this.queue.push({
+        ...item,
+        priority,
+      });
     }
+
     this.sortQueue();
-    this.scheduleReads();
+    this.schedule();
   }
 
   updateViewport(visibleIds: Set<string>): void {
     let changed = false;
     for (const item of this.queue) {
-      const newPri = visibleIds.has(item.id) ? 0 : 2;
-      if (item.priority !== newPri) { item.priority = newPri; changed = true; }
-    }
-    if (changed) { this.sortQueue(); this.scheduleReads(); }
-  }
-
-  get pendingCount(): number   { return this.queue.length + this.processing.size; }
-  get completedCount(): number { return this.completed.size; }
-  get failedCount(): number    { return this.failedIds.size; }
-
-  destroy(): void {
-    this.destroyed = true;
-    if (this.batchTimer) clearTimeout(this.batchTimer);
-    this.flushBatch();
-    for (const w of this.workers) w.terminate();
-    this.workers    = [];
-    this.queue      = [];
-    this.readyQueue = [];
-    this.processing.clear();
-    this.readingIds.clear();
-  }
-
-  // -- Stage 1: read files into buffers -----------------------------------
-
-  private scheduleReads(): void {
-    if (this.destroyed) return;
-    const maxReading = this.workers.length * READ_AHEAD;
-
-    while (this.queue.length > 0 && this.readingIds.size < maxReading) {
-      const item = this.queue.shift()!;
-      if (this.completed.has(item.id) || this.processing.has(item.id)) continue;
-
-      this.processing.add(item.id);
-      this.readingIds.add(item.id);
-
-      item.file
-        .arrayBuffer()
-        .then((buffer) => {
-          if (this.destroyed) { this.processing.delete(item.id); return; }
-          this.readingIds.delete(item.id);
-          this.readyQueue.push({ id: item.id, buffer });
-          this.dispatchToWorkers();
-        })
-        .catch(() => {
-          this.readingIds.delete(item.id);
-          this.processing.delete(item.id);
-          this.failedIds.add(item.id);
-          if (this.onError) this.onError(this.failedIds.size);
-          this.scheduleReads();
-        });
-    }
-  }
-
-  // -- Stage 2: dispatch ready buffers to free workers --------------------
-
-  private dispatchToWorkers(): void {
-    if (this.destroyed) return;
-
-    while (this.readyQueue.length > 0) {
-      const worker = this.workers.find((w) => !this.busyWorkers.has(w));
-      if (!worker) break;
-
-      const item = this.readyQueue.shift()!;
-      this.busyWorkers.add(worker);
-      this.workerItemId.set(worker, item.id);
-
-      worker.postMessage(
-        { id: item.id, buffer: item.buffer, maxDimension: THUMBNAIL_MAX, quality: THUMBNAIL_QUALITY },
-        [item.buffer],
-      );
-
-      // A worker slot is now busy -- read one more file ahead
-      this.scheduleReads();
-    }
-  }
-
-  // -- Result / error handling --------------------------------------------
-
-  private releaseWorker(worker: Worker): string | undefined {
-    const id = this.workerItemId.get(worker);
-    this.busyWorkers.delete(worker);
-    this.workerItemId.delete(worker);
-    if (id) this.processing.delete(id);
-    return id;
-  }
-
-  private handleResult(worker: Worker, data: ThumbnailResult | ThumbnailError): void {
-    const id = this.releaseWorker(worker) ?? data.id;
-
-    if ("error" in data) {
-      this.failedIds.add(id);
-      if (this.onError) this.onError(this.failedIds.size);
-    } else {
-      this.completed.add(id);
-      const url = URL.createObjectURL(data.thumbnailBlob);
-      this.pendingBatch.push({ id, url, width: data.width, height: data.height });
-      if (!this.batchTimer) {
-        this.batchTimer = setTimeout(() => this.flushBatch(), BATCH_INTERVAL_MS);
+      const nextPriority = visibleIds.has(item.id) ? 0 : 2;
+      if (item.priority !== nextPriority) {
+        item.priority = nextPriority;
+        changed = true;
       }
     }
 
-    this.dispatchToWorkers();
-    this.scheduleReads();
-  }
-
-  /** Called when a worker throws an uncaught exception (e.g. OOM on a large RAW). */
-  private handleWorkerCrash(worker: Worker): void {
-    const id = this.releaseWorker(worker);
-    if (id) {
-      this.failedIds.add(id);
-      if (this.onError) this.onError(this.failedIds.size);
+    if (changed) {
+      this.sortQueue();
+      this.schedule();
     }
-    this.dispatchToWorkers();
-    this.scheduleReads();
   }
 
-  // -- Internals -----------------------------------------------------------
+  get pendingCount(): number {
+    return this.queue.length + this.processing.size;
+  }
+
+  get completedCount(): number {
+    return this.completed.size;
+  }
+
+  get failedCount(): number {
+    return this.failedIds.size;
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
+    this.flushBatch();
+    for (const worker of this.workers) {
+      worker.terminate();
+    }
+    this.workers = [];
+    this.busyWorkers.clear();
+    this.queue = [];
+    this.processing.clear();
+  }
 
   private sortQueue(): void {
-    this.queue.sort((a, b) => a.priority - b.priority);
+    this.queue.sort((left, right) => left.priority - right.priority);
+  }
+
+  private schedule(): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    while (this.queue.length > 0) {
+      const worker = this.workers.find((candidate) => !this.busyWorkers.has(candidate));
+      if (!worker) {
+        return;
+      }
+
+      const nextItem = this.queue.shift();
+      if (!nextItem) {
+        return;
+      }
+      if (this.completed.has(nextItem.id) || this.processing.has(nextItem.id)) {
+        continue;
+      }
+
+      this.processing.add(nextItem.id);
+      this.busyWorkers.set(worker, {
+        id: nextItem.id,
+        sourceFileKey: nextItem.sourceFileKey,
+        createSourceFileKey: nextItem.createSourceFileKey,
+      });
+      void this.dispatch(worker, nextItem);
+    }
+  }
+
+  private async dispatch(worker: Worker, item: QueueItem): Promise<void> {
+    if (
+      item.absolutePath &&
+      typeof window !== "undefined" &&
+      typeof window.filexDesktop?.getThumbnail === "function"
+    ) {
+      try {
+        const rendered = await window.filexDesktop.getThumbnail(
+          item.absolutePath,
+          THUMBNAIL_MAX,
+          THUMBNAIL_QUALITY,
+        );
+        const task = this.releaseWorker(worker) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
+        if (!rendered) {
+          this.markFailed(task.id);
+          return;
+        }
+
+        const blob = new Blob([toOwnedArrayBuffer(rendered.bytes)], { type: rendered.mimeType });
+        this.markCompleted({
+          id: task.id,
+          thumbnailBlob: blob,
+          width: rendered.width,
+          height: rendered.height,
+        }, task.sourceFileKey);
+        return;
+      } catch {
+        const task = this.releaseWorker(worker) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
+        this.markFailed(task.id);
+        return;
+      }
+    }
+
+    const file = item.file ?? await item.loadFile?.() ?? null;
+    if (!file) {
+      this.releaseWorker(worker);
+      this.markFailed(item.id);
+      return;
+    }
+
+    const task = this.busyWorkers.get(worker);
+    if (task && !task.sourceFileKey && item.createSourceFileKey) {
+      task.sourceFileKey = item.createSourceFileKey(file);
+    }
+
+    try {
+      const buffer = await file.arrayBuffer();
+      worker.postMessage(
+        {
+          id: item.id,
+          buffer,
+          maxDimension: THUMBNAIL_MAX,
+          quality: THUMBNAIL_QUALITY,
+        },
+        [buffer],
+      );
+    } catch {
+      this.releaseWorker(worker);
+      this.markFailed(item.id);
+    }
+  }
+
+  private handleWorkerResult(worker: Worker, data: ThumbnailResult | ThumbnailError): void {
+    const task = this.releaseWorker(worker) ?? { id: data.id };
+    if ("error" in data) {
+      this.markFailed(task.id);
+      return;
+    }
+
+    this.markCompleted(data, task.sourceFileKey);
+  }
+
+  private handleWorkerCrash(worker: Worker): void {
+    const task = this.releaseWorker(worker);
+    if (task) {
+      this.markFailed(task.id);
+    }
+  }
+
+  private releaseWorker(worker: Worker): ActiveTask | undefined {
+    const task = this.busyWorkers.get(worker);
+    this.busyWorkers.delete(worker);
+    if (task) {
+      this.processing.delete(task.id);
+    }
+    this.schedule();
+    return task;
+  }
+
+  private markCompleted(result: ThumbnailResult, sourceFileKey?: string): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.completed.add(result.id);
+    const url = URL.createObjectURL(result.thumbnailBlob);
+    this.pendingBatch.push({
+      id: result.id,
+      url,
+      width: result.width,
+      height: result.height,
+      sourceFileKey,
+    });
+
+    if (!this.batchTimer) {
+      this.batchTimer = setTimeout(() => this.flushBatch(), BATCH_INTERVAL_MS);
+    }
+
+    this.schedule();
+  }
+
+  private markFailed(id: string): void {
+    if (this.destroyed) {
+      return;
+    }
+
+    this.processing.delete(id);
+    this.failedIds.add(id);
+    if (this.onError) {
+      this.onError(this.failedIds.size, id);
+    }
+    this.schedule();
   }
 
   private flushBatch(): void {
     this.batchTimer = null;
-    if (this.pendingBatch.length === 0) return;
+    if (this.pendingBatch.length === 0) {
+      return;
+    }
+
     const batch = this.pendingBatch;
     this.pendingBatch = [];
     this.onBatch(batch);

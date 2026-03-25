@@ -5,12 +5,12 @@ import {
   hasNativeFolderAccess,
   openFolderNative,
   reopenRecentFolder,
-  type FolderEntry,
+  type FolderOpenResult,
   type RecentFolder,
 } from "../services/folder-access";
 
 interface FolderBrowserProps {
-  onFolderOpened: (name: string, entries: FolderEntry[]) => void;
+  onFolderOpened: (result: FolderOpenResult) => void;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -40,7 +40,7 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
   async function handleBrowse() {
     if (supportsNative) {
       const result = await openFolderNative();
-      if (result) onFolderOpened(result.name, result.entries);
+      if (result) onFolderOpened(result);
     } else {
       fileInputRef.current?.click();
     }
@@ -49,7 +49,7 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
   function handleFallbackInput(files: FileList | null) {
     if (!files || files.length === 0) return;
     const result = fileListToEntries(files);
-    onFolderOpened(result.name, result.entries);
+    onFolderOpened(result);
   }
 
   async function handleRecentFolderOpen(folder: RecentFolder) {
@@ -59,9 +59,9 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
 
     setOpeningRecentFolder(folder.name);
     try {
-      const result = await reopenRecentFolder(folder.name);
+      const result = await reopenRecentFolder(folder);
       if (result) {
-        onFolderOpened(result.name, result.entries);
+        onFolderOpened(result);
         return;
       }
 

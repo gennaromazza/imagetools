@@ -1,18 +1,23 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DesktopRuntimeInfo } from "@photo-tools/desktop-contracts";
 import type { ImageAsset, ImageOrientation } from "@photo-tools/shared-types";
 import {
   revokeImageAssetUrls,
 } from "./services/browser-image-assets";
+import { getDesktopRuntimeInfo } from "./services/desktop-runtime";
 import { loadImageAssets } from "./services/image-storage";
 import { clearImageCache } from "./services/image-cache";
 import {
   buildPlaceholderAssets,
   addRecentFolder,
+  buildSourceFileKey,
+  buildSourceFileKeyFromStats,
+  getFileForAsset,
   hasNativeFolderAccess,
   isRawFile,
   readSidecarXmp,
   writeSidecarXmp,
-  type FolderEntry,
+  type FolderOpenResult,
 } from "./services/folder-access";
 import { parseXmpState, upsertXmpState } from "./services/xmp-sidecar";
 import { ThumbnailPipeline, type ThumbnailUpdate } from "./services/thumbnail-pipeline";
@@ -34,6 +39,18 @@ import { SelectionSummary } from "./components/SelectionSummary";
 
 const PROJECT_ID = "photo-selector-default";
 const STORAGE_KEY = "photo-selector-state";
+const THUMBNAIL_BOOTSTRAP_COUNT = 24;
+const XMP_IMPORT_CONCURRENCY = 4;
+const XMP_IMPORT_START_DELAY_MS = 180;
+
+type ThumbnailPipelineEntry = {
+  id: string;
+  file?: File;
+  loadFile?: () => Promise<File | null>;
+  absolutePath?: string;
+  sourceFileKey?: string;
+  createSourceFileKey?: (file: File) => string;
+};
 
 interface PersistedState {
   projectName: string;
@@ -106,6 +123,7 @@ export function App() {
 
   // ── Persisted state ──────────────────────────────────────────────────
   const [projectName, setProjectName] = useState("Selezione foto");
+  const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntimeInfo | null>(null);
   const [sourceFolderPath, setSourceFolderPath] = useState("");
 
   // ── Asset catalog ────────────────────────────────────────────────────
@@ -143,6 +161,12 @@ export function App() {
     folderLabel: "",
   });
   const assetNameByIdRef = useRef(new Map<string, string>());
+  const thumbnailTotalCountRef = useRef(0);
+  const settledThumbnailIdsRef = useRef<Set<string>>(new Set());
+  const thumbnailEntryByIdRef = useRef(new Map<string, ThumbnailPipelineEntry>());
+  const visibleThumbnailIdsRef = useRef(new Set<string>());
+  const folderLoadSessionRef = useRef(0);
+  const xmpImportStartTimerRef = useRef<number | null>(null);
 
   // ── Restore from IndexedDB on mount ──────────────────────────────────
   useEffect(() => {
@@ -179,6 +203,10 @@ export function App() {
   // ── Cleanup pipeline on unmount ──────────────────────────────────────
   useEffect(() => {
     return () => {
+      folderLoadSessionRef.current += 1;
+      if (xmpImportStartTimerRef.current !== null) {
+        window.clearTimeout(xmpImportStartTimerRef.current);
+      }
       pipelineRef.current?.destroy();
     };
   }, []);
@@ -234,6 +262,49 @@ export function App() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [allAssets.length]);
 
+  const syncThumbnailProgress = useCallback((lastProcessedId?: string | null) => {
+    const total = thumbnailTotalCountRef.current;
+    const processed = Math.min(total, settledThumbnailIdsRef.current.size);
+
+    setThumbnailProgress({ done: processed, total });
+    setImportProgress((current) =>
+      current.isOpen
+        ? {
+            ...current,
+            phase: "preparing",
+            total,
+            processed,
+            currentFile: lastProcessedId
+              ? assetNameByIdRef.current.get(lastProcessedId) ?? current.currentFile
+              : current.currentFile,
+          }
+        : current
+    );
+  }, []);
+
+  const enqueueVisibleThumbnailEntries = useCallback((ids: Iterable<string>, priority = 0) => {
+    const pipeline = pipelineRef.current;
+    if (!pipeline) {
+      return;
+    }
+
+    const items: ThumbnailPipelineEntry[] = [];
+    for (const id of ids) {
+      if (settledThumbnailIdsRef.current.has(id)) {
+        continue;
+      }
+      const entry = thumbnailEntryByIdRef.current.get(id);
+      if (!entry) {
+        continue;
+      }
+      items.push(entry);
+    }
+
+    if (items.length > 0) {
+      pipeline.enqueue(items, priority);
+    }
+  }, []);
+
   // ── Thumbnail batch handler (called by pipeline every ~120 ms) ──────
   const handleThumbnailBatch = useCallback((batch: ThumbnailUpdate[]) => {
     setAllAssets((prev) => {
@@ -248,27 +319,15 @@ export function App() {
           height: update.height,
           orientation: detectOrientation(update.width, update.height),
           aspectRatio: update.width / update.height,
+          sourceFileKey: update.sourceFileKey ?? asset.sourceFileKey,
         };
       });
     });
 
-    // Update progress indicator
-    const pipeline = pipelineRef.current;
-    if (pipeline) {
-      const settledCount = pipeline.completedCount + pipeline.failedCount;
-      setThumbnailProgress({ done: settledCount, total: settledCount + pipeline.pendingCount });
-      setImportProgress((current) =>
-        current.isOpen
-          ? {
-              ...current,
-              phase: "preparing",
-              total: Math.max(current.total, settledCount + pipeline.pendingCount),
-              processed: settledCount,
-              currentFile: assetNameByIdRef.current.get(batch[batch.length - 1]?.id ?? "") ?? current.currentFile,
-            }
-          : current
-      );
+    for (const item of batch) {
+      settledThumbnailIdsRef.current.add(item.id);
     }
+    syncThumbnailProgress(batch[batch.length - 1]?.id ?? null);
 
     // Persist thumbnails to IndexedDB cache (fire-and-forget)
     for (const item of batch) {
@@ -276,26 +335,15 @@ export function App() {
         void cacheThumbnail(item.id, blob, item.width, item.height);
       }).catch(() => { /* non-critical */ });
     }
-  }, []);
+  }, [syncThumbnailProgress]);
 
   // Error handler for failed thumbnail generations (e.g. RAW files)
   const lastErrorToastRef = useRef(0);
-  const handleThumbnailError = useCallback((failedCount: number) => {
-    const pipeline = pipelineRef.current;
-    if (pipeline) {
-      const settledCount = pipeline.completedCount + pipeline.failedCount;
-      setThumbnailProgress({ done: settledCount, total: settledCount + pipeline.pendingCount });
-      setImportProgress((current) =>
-        current.isOpen
-          ? {
-              ...current,
-              phase: "preparing",
-              total: Math.max(current.total, settledCount + pipeline.pendingCount),
-              processed: settledCount,
-            }
-          : current
-      );
+  const handleThumbnailError = useCallback((failedCount: number, failedId: string) => {
+    if (failedId) {
+      settledThumbnailIdsRef.current.add(failedId);
     }
+    syncThumbnailProgress(failedId);
 
     // Debounce toast — show at most once per 5 seconds
     const now = Date.now();
@@ -305,7 +353,7 @@ export function App() {
       `${failedCount} foto non decodificabil${failedCount === 1 ? "e" : "i"} (formati RAW o non supportati).`,
       "warning",
     );
-  }, [addToast]);
+  }, [addToast, syncThumbnailProgress]);
 
   function isValidCachedThumbnail(asset: ImageAsset, hit: { width: number; height: number }): boolean {
     if (!isRawFile(asset.fileName)) return true;
@@ -317,7 +365,7 @@ export function App() {
 
   // ── Open folder (instant grid + streaming thumbnails) ────────────────
   const handleFolderOpened = useCallback(
-    (folderName: string, entries: FolderEntry[]) => {
+    ({ name: folderName, entries, rootPath }: FolderOpenResult) => {
       if (entries.length === 0) {
         addToast("Nessuna immagine supportata trovata nella cartella.", "warning");
         return;
@@ -325,6 +373,14 @@ export function App() {
 
       // 1. Destroy previous pipeline
       pipelineRef.current?.destroy();
+      folderLoadSessionRef.current += 1;
+      const folderLoadSession = folderLoadSessionRef.current;
+      thumbnailEntryByIdRef.current = new Map();
+      visibleThumbnailIdsRef.current = new Set();
+      if (xmpImportStartTimerRef.current !== null) {
+        window.clearTimeout(xmpImportStartTimerRef.current);
+        xmpImportStartTimerRef.current = null;
+      }
 
       // 2. Clean up previous blob URLs
       revokeImageAssetUrls(allAssets);
@@ -333,11 +389,11 @@ export function App() {
       // 3. Create placeholder assets INSTANTLY (no file reading)
       const assets = buildPlaceholderAssets(entries);
       assetNameByIdRef.current = new Map(assets.map((asset) => [asset.id, asset.fileName]));
-      const writableAccess = entries.some((entry) => !!entry.fileHandle);
+      const writableAccess = entries.some((entry) => !!entry.fileHandle || !!entry.absolutePath);
 
       setAllAssets(assets);
       setActiveAssetIds([]);
-      setSourceFolderPath(folderName);
+      setSourceFolderPath(rootPath ?? folderName);
       setHasWritableFolderAccess(writableAccess);
       setIsXmpBannerDismissed(false);
       setCurrentScreen("selection"); // instant — grid shows immediately
@@ -350,7 +406,7 @@ export function App() {
         lastSyncedAt: null,
       });
 
-      addRecentFolder(folderName, entries.length);
+      addRecentFolder(folderName, entries.length, rootPath);
       if (!writableAccess) {
         addToast(
           "Cartella aperta senza accesso completo ai sidecar XMP. Le modifiche restano locali finché non riapri la cartella con accesso scrivibile.",
@@ -428,15 +484,46 @@ export function App() {
 
       // 5. Check thumbnail cache, then start pipeline for ALL images (including RAW)
       const assetIdByPath = new Map(assets.map((asset) => [asset.path, asset.id]));
-      const pipelineEntries = entries
-        .map((e) => {
-          const id = assetIdByPath.get(e.relativePath);
-          return id ? { id, file: e.file } : null;
-        })
-        .filter((x): x is { id: string; file: File } => x !== null);
+      const pipelineEntries: ThumbnailPipelineEntry[] = [];
+      for (const entry of entries) {
+        const id = assetIdByPath.get(entry.relativePath);
+        if (!id) {
+          continue;
+        }
 
-      const allIds = pipelineEntries.map((e) => e.id);
+        pipelineEntries.push({
+          id,
+          file: entry.file,
+          loadFile: entry.file ? undefined : () => getFileForAsset(id),
+          absolutePath: entry.absolutePath,
+          sourceFileKey:
+            entry.file
+              ? buildSourceFileKey(entry.file, entry.relativePath)
+              : entry.size !== undefined && entry.lastModified !== undefined
+                ? buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
+                : undefined,
+          createSourceFileKey: entry.file || !entry.absolutePath
+            ? (file: File) => buildSourceFileKey(file, entry.relativePath)
+            : undefined,
+        });
+      }
+
+      thumbnailEntryByIdRef.current = new Map(pipelineEntries.map((entry) => [entry.id, entry]));
+      thumbnailTotalCountRef.current = pipelineEntries.length;
+      settledThumbnailIdsRef.current = new Set();
+      setThumbnailProgress({ done: 0, total: pipelineEntries.length });
+
+      if (pipelineEntries.length === 0) {
+        setImportProgress((current) => ({ ...current, isOpen: false, total: 0, processed: 0 }));
+        return;
+      }
+
+      const allIds = pipelineEntries.map((entry) => entry.id);
       void loadCachedThumbnails(allIds).then((cached) => {
+        if (folderLoadSessionRef.current !== folderLoadSession) {
+          return;
+        }
+
         const validCachedIds = new Set<string>();
 
         // Apply cached thumbnails instantly
@@ -446,6 +533,7 @@ export function App() {
               const hit = cached.get(asset.id);
               if (!hit) return asset;
               if (!isValidCachedThumbnail(asset, hit)) return asset;
+              if (asset.thumbnailUrl) return asset;
 
               validCachedIds.add(asset.id);
               return {
@@ -460,26 +548,17 @@ export function App() {
           );
         }
 
-        // Only enqueue uncached items
-        const uncached = pipelineEntries.filter((e) => !validCachedIds.has(e.id));
-        setThumbnailProgress({ done: validCachedIds.size, total: pipelineEntries.length });
-        setImportProgress((current) => ({
-          ...current,
-          isOpen: pipelineEntries.length > 0,
-          phase: "preparing",
-          supported: entries.length,
-          ignored: 0,
-          total: pipelineEntries.length,
-          processed: validCachedIds.size,
-          currentFile: validCachedIds.size > 0
-            ? assetNameByIdRef.current.get(Array.from(validCachedIds).at(-1) ?? "") ?? current.currentFile
-            : current.currentFile,
-        }));
+        for (const assetId of validCachedIds) {
+          settledThumbnailIdsRef.current.add(assetId);
+        }
+        syncThumbnailProgress(Array.from(validCachedIds).at(-1) ?? null);
 
+        const uncached = pipelineEntries.filter((entry) => !validCachedIds.has(entry.id));
         if (uncached.length > 0) {
           const pipeline = new ThumbnailPipeline(handleThumbnailBatch, handleThumbnailError);
           pipelineRef.current = pipeline;
-          pipeline.enqueue(uncached, 2);
+          pipeline.enqueue(uncached.slice(0, THUMBNAIL_BOOTSTRAP_COUNT), 0);
+          enqueueVisibleThumbnailEntries(visibleThumbnailIdsRef.current, 0);
         } else {
           setImportProgress((current) => ({ ...current, isOpen: false }));
         }
@@ -497,10 +576,19 @@ export function App() {
         }));
         const pipeline = new ThumbnailPipeline(handleThumbnailBatch, handleThumbnailError);
         pipelineRef.current = pipeline;
-        pipeline.enqueue(pipelineEntries, 2);
+        pipeline.enqueue(pipelineEntries.slice(0, THUMBNAIL_BOOTSTRAP_COUNT), 0);
+        enqueueVisibleThumbnailEntries(visibleThumbnailIdsRef.current, 0);
       });
     },
-    [addToast, allAssets, handleThumbnailBatch, handleThumbnailError, undoRedo]
+    [
+      addToast,
+      allAssets,
+      enqueueVisibleThumbnailEntries,
+      handleThumbnailBatch,
+      handleThumbnailError,
+      syncThumbnailProgress,
+      undoRedo,
+    ]
   );
 
   // ── Load mock data ───────────────────────────────────────────────────
@@ -604,7 +692,23 @@ export function App() {
 
   // ── Viewport tracking for pipeline priority ──────────────────────────
   const handleVisibleIdsChange = useCallback((ids: Set<string>) => {
+    visibleThumbnailIdsRef.current = ids;
+    enqueueVisibleThumbnailEntries(ids, 0);
     pipelineRef.current?.updateViewport(ids);
+  }, [enqueueVisibleThumbnailEntries]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getDesktopRuntimeInfo().then((runtimeInfo) => {
+      if (!cancelled) {
+        setDesktopRuntime(runtimeInfo);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -828,7 +932,9 @@ export function App() {
               title="Sincronizzazione XMP non attiva"
               message={hasNativeFolderAccess()
                 ? "La sessione e' stata riaperta senza il collegamento scrivibile alla cartella. Rating, pick e colori non verranno scritti nei sidecar finché non riapri la cartella."
-                : "Questo browser usa l'import fallback e non puo' scrivere i sidecar XMP. Per un workflow automatico stile Bridge/Photo Mechanic riapri il tool in Edge o Chrome."}
+                : desktopRuntime
+                  ? `La shell desktop FileX e' attiva per ${desktopRuntime.toolName}, ma in questa prima integrazione il flusso cartella/XMP usa ancora il bridge browser. Il collegamento nativo e' il prossimo step.`
+                  : "Questo browser usa l'import fallback e non puo' scrivere i sidecar XMP. Per un workflow automatico stile Bridge/Photo Mechanic riapri il tool in Edge o Chrome."}
               type="warning"
               action={sourceFolderPath
                 ? {
@@ -888,7 +994,7 @@ export function App() {
           />
         ) : null}
         <ImportProgressModal
-          isOpen={importProgress.isOpen}
+          isOpen={currentScreen === "browse" && importProgress.isOpen}
           phase={importProgress.phase}
           supported={importProgress.supported}
           ignored={importProgress.ignored}

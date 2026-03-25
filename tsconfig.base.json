@@ -15,6 +15,7 @@
     "baseUrl": ".",
     "paths": {
       "@photo-tools/core": ["packages/core/src/index.ts"],
+      "@photo-tools/desktop-contracts": ["packages/desktop-contracts/src/index.d.ts"],
       "@photo-tools/filesystem": ["packages/filesystem/src/index.ts"],
       "@photo-tools/layout-engine": ["packages/layout-engine/src/index.ts"],
       "@photo-tools/presets": ["packages/presets/src/index.ts"],

@@ -53,7 +53,9 @@ export function isBrowserDecodable(name: string): boolean {
 /** In-memory store: assetId → File.  Used for on-demand preview generation. */
 export const fileStore = new Map<string, File>();
 const fileHandleStore = new Map<string, FileSystemFileHandle>();
+const filePromiseStore = new Map<string, Promise<File | null>>();
 const assetPathStore = new Map<string, string>();
+const assetAbsolutePathStore = new Map<string, string>();
 const livePreviewStore = new Map<string, string>();
 const sidecarHandleByAssetId = new Map<string, FileSystemFileHandle>();
 const sidecarHandleByStemPath = new Map<string, FileSystemFileHandle>();
@@ -65,6 +67,24 @@ const rawPreviewPipeline =
     ? new RawPreviewPipeline()
     : null;
 let previewGeneration = 0;
+
+function hasDesktopFolderBridge(): boolean {
+  return typeof window !== "undefined" && typeof window.filexDesktop?.openFolder === "function";
+}
+
+function hasDesktopFileBridge(): boolean {
+  return typeof window !== "undefined" && typeof window.filexDesktop?.readFile === "function";
+}
+
+function hasDesktopPreviewBridge(): boolean {
+  return typeof window !== "undefined" && typeof window.filexDesktop?.getPreview === "function";
+}
+
+function hasDesktopSidecarBridge(): boolean {
+  return typeof window !== "undefined"
+    && typeof window.filexDesktop?.readSidecarXmp === "function"
+    && typeof window.filexDesktop?.writeSidecarXmp === "function";
+}
 
 function extensionOf(path: string): string {
   const i = path.lastIndexOf(".");
@@ -93,6 +113,12 @@ function dirname(path: string): string {
 function detectOrientation(width: number, height: number): "horizontal" | "vertical" | "square" {
   if (width === height) return "square";
   return height > width ? "vertical" : "horizontal";
+}
+
+function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
 }
 
 function revokeLivePreviewUrl(assetId: string): void {
@@ -162,22 +188,52 @@ function sanitizeId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
-function buildSourceFileKey(file: File, relativePath: string): string {
+export function buildSourceFileKey(file: File, relativePath: string): string {
   return `${relativePath}::${file.size}::${file.lastModified}`;
 }
 
-export function buildAssetId(file: File, relativePath: string): string {
-  const key = buildSourceFileKey(file, relativePath);
-  return `asset-${hashString(key)}-${sanitizeId(relativePath)}`;
+export function buildSourceFileKeyFromStats(
+  relativePath: string,
+  size: number,
+  lastModified: number,
+): string {
+  return `${relativePath}::${size}::${lastModified}`;
+}
+
+function buildPlaceholderSourceFileKey(relativePath: string): string {
+  return `${relativePath}::0::0`;
+}
+
+export function buildAssetId(relativePath: string): string {
+  const normalizedPath = relativePath.replace(/\\/g, "/");
+  return `asset-${hashString(normalizedPath.toLowerCase())}-${sanitizeId(normalizedPath)}`;
 }
 
 // ── Folder entry ───────────────────────────────────────────────────────
 
 export interface FolderEntry {
   name: string;
-  file: File;
+  file?: File;
   relativePath: string;
   fileHandle?: FileSystemFileHandle;
+  absolutePath?: string;
+  size?: number;
+  lastModified?: number;
+}
+
+export interface FolderOpenResult {
+  name: string;
+  entries: FolderEntry[];
+  rootPath?: string;
+}
+
+function isTopLevelRelativePath(relativePath: string): boolean {
+  const segments = relativePath.split("/").filter(Boolean);
+  return segments.length <= 2;
+}
+
+function keepTopLevelEntries(entries: FolderEntry[]): FolderEntry[] {
+  return entries.filter((entry) => isTopLevelRelativePath(entry.relativePath));
 }
 
 async function getRecentFolderHandleDb(): Promise<IDBDatabase | null> {
@@ -253,34 +309,25 @@ async function scanDirectoryHandle(dirHandle: FileSystemDirectoryHandle): Promis
   directoryHandleByPath.clear();
 
   const entries: FolderEntry[] = [];
-
-  async function scanDir(handle: FileSystemDirectoryHandle, pathPrefix: string) {
-    directoryHandleByPath.set(pathPrefix, handle);
-    for await (const [entryName, childHandle] of (handle as any).entries()) {
-      if (childHandle.kind === "directory") {
-        await scanDir(
-          childHandle as FileSystemDirectoryHandle,
-          `${pathPrefix}/${entryName}`
-        );
-      } else if (childHandle.kind === "file") {
-        const relPath = `${pathPrefix}/${entryName}`;
-        if (extensionOf(entryName) === ".xmp") {
-          sidecarHandleByStemPath.set(stemPath(relPath), childHandle as FileSystemFileHandle);
-          continue;
-        }
-        if (!isImageFile(entryName)) continue;
-        const file: File = await (childHandle as FileSystemFileHandle).getFile();
-        entries.push({
-          name: entryName,
-          file,
-          relativePath: relPath,
-          fileHandle: childHandle as FileSystemFileHandle,
-        });
-      }
+  directoryHandleByPath.set(dirHandle.name, dirHandle);
+  for await (const [entryName, childHandle] of (dirHandle as any).entries()) {
+    if (childHandle.kind !== "file") {
+      continue;
     }
+
+    const relPath = `${dirHandle.name}/${entryName}`;
+    if (extensionOf(entryName) === ".xmp") {
+      sidecarHandleByStemPath.set(stemPath(relPath), childHandle as FileSystemFileHandle);
+      continue;
+    }
+    if (!isImageFile(entryName)) continue;
+    entries.push({
+      name: entryName,
+      relativePath: relPath,
+      fileHandle: childHandle as FileSystemFileHandle,
+    });
   }
 
-  await scanDir(dirHandle, dirHandle.name);
   entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
   return entries;
 }
@@ -288,7 +335,8 @@ async function scanDirectoryHandle(dirHandle: FileSystemDirectoryHandle): Promis
 // ── File System Access API ─────────────────────────────────────────────
 
 export function hasNativeFolderAccess(): boolean {
-  return typeof window !== "undefined" && "showDirectoryPicker" in window;
+  return hasDesktopFolderBridge()
+    || (typeof window !== "undefined" && "showDirectoryPicker" in window);
 }
 
 /**
@@ -299,7 +347,27 @@ export function hasNativeFolderAccess(): boolean {
 export async function openFolderNative(): Promise<{
   name: string;
   entries: FolderEntry[];
+  rootPath?: string;
 } | null> {
+  if (hasDesktopFolderBridge()) {
+    const result = await window.filexDesktop?.openFolder();
+    if (!result) {
+      return null;
+    }
+
+    return {
+      name: result.name,
+      rootPath: result.rootPath,
+      entries: keepTopLevelEntries(result.entries.map((entry) => ({
+        name: entry.name,
+        relativePath: entry.relativePath,
+        absolutePath: entry.absolutePath,
+        size: entry.size,
+        lastModified: entry.lastModified,
+      }))),
+    };
+  }
+
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const dirHandle: FileSystemDirectoryHandle = await (window as any).showDirectoryPicker({
@@ -307,18 +375,38 @@ export async function openFolderNative(): Promise<{
     });
     const entries = await scanDirectoryHandle(dirHandle);
     void saveRecentFolderHandle(dirHandle.name, dirHandle);
-    return { name: dirHandle.name, entries };
+    return { name: dirHandle.name, rootPath: dirHandle.name, entries };
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") return null;
     throw err;
   }
 }
 
-export async function reopenRecentFolder(name: string): Promise<{
-  name: string;
-  entries: FolderEntry[];
-} | null> {
-  const handle = await loadRecentFolderHandle(name);
+export async function reopenRecentFolder(folder: RecentFolder): Promise<FolderOpenResult | null> {
+  if (hasDesktopFolderBridge()) {
+    if (!folder.path) {
+      return null;
+    }
+
+    const result = await window.filexDesktop?.reopenFolder(folder.path);
+    if (!result) {
+      return null;
+    }
+
+    return {
+      name: result.name,
+      rootPath: result.rootPath,
+      entries: keepTopLevelEntries(result.entries.map((entry) => ({
+        name: entry.name,
+        relativePath: entry.relativePath,
+        absolutePath: entry.absolutePath,
+        size: entry.size,
+        lastModified: entry.lastModified,
+      }))),
+    };
+  }
+
+  const handle = await loadRecentFolderHandle(folder.name);
   if (!handle) {
     return null;
   }
@@ -342,35 +430,34 @@ export async function reopenRecentFolder(name: string): Promise<{
     }
 
     const entries = await scanDirectoryHandle(handle);
-    return { name: handle.name, entries };
+    return { name: handle.name, rootPath: handle.name, entries };
   } catch {
-    void deleteRecentFolderHandle(name);
+    void deleteRecentFolderHandle(folder.name);
     return null;
   }
 }
 
 // ── Fallback: FileList from <input webkitdirectory> ────────────────────
 
-export function fileListToEntries(files: FileList): {
-  name: string;
-  entries: FolderEntry[];
-} {
+export function fileListToEntries(files: FileList): FolderOpenResult {
   const entries: FolderEntry[] = [];
   const first = files[0] as File & { webkitRelativePath?: string };
   const folderName = first?.webkitRelativePath?.split("/")[0] ?? "Cartella selezionata";
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i] as File & { webkitRelativePath?: string };
+    const relativePath = file.webkitRelativePath || file.name;
+    if (!isTopLevelRelativePath(relativePath)) continue;
     if (!isImageFile(file.name)) continue;
     entries.push({
       name: file.name,
       file,
-      relativePath: file.webkitRelativePath || file.name,
+      relativePath,
     });
   }
 
   entries.sort((a, b) => a.name.localeCompare(b.name));
-  return { name: folderName, entries };
+  return { name: folderName, rootPath: folderName, entries };
 }
 
 // ── Build placeholder assets from folder entries (instant) ─────────────
@@ -392,14 +479,21 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
   onDemandPreviewPromiseStore.clear();
   livePreviewStore.clear();
   fileHandleStore.clear();
+  filePromiseStore.clear();
   assetPathStore.clear();
+  assetAbsolutePathStore.clear();
   sidecarHandleByAssetId.clear();
   fileStore.clear();
 
   return entries.map((entry) => {
-    const id = buildAssetId(entry.file, entry.relativePath);
-    fileStore.set(id, entry.file);
+    const id = buildAssetId(entry.relativePath);
+    if (entry.file) {
+      fileStore.set(id, entry.file);
+    }
     assetPathStore.set(id, entry.relativePath);
+    if (entry.absolutePath) {
+      assetAbsolutePathStore.set(id, entry.absolutePath);
+    }
     if (entry.fileHandle) {
       fileHandleStore.set(id, entry.fileHandle);
     }
@@ -413,7 +507,11 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
       id,
       fileName: entry.name,
       path: entry.relativePath,
-      sourceFileKey: buildSourceFileKey(entry.file, entry.relativePath),
+      sourceFileKey: entry.file
+        ? buildSourceFileKey(entry.file, entry.relativePath)
+        : entry.size !== undefined && entry.lastModified !== undefined
+          ? buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
+          : buildPlaceholderSourceFileKey(entry.relativePath),
       rating: 0,
       pickStatus: "unmarked" as const,
       colorLabel: null,
@@ -426,6 +524,63 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
       sourceUrl: undefined,
     };
   });
+}
+
+export async function getFileForAsset(assetId: string): Promise<File | null> {
+  const existing = fileStore.get(assetId);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = filePromiseStore.get(assetId);
+  if (pending) {
+    return pending;
+  }
+
+  const handle = fileHandleStore.get(assetId);
+  if (handle) {
+    const task = handle.getFile()
+      .then((file) => {
+        fileStore.set(assetId, file);
+        return file;
+      })
+      .catch(() => null)
+      .finally(() => {
+        if (filePromiseStore.get(assetId) === task) {
+          filePromiseStore.delete(assetId);
+        }
+      });
+
+    filePromiseStore.set(assetId, task);
+    return task;
+  }
+
+  const absolutePath = assetAbsolutePathStore.get(assetId);
+  if (!absolutePath || !hasDesktopFileBridge()) {
+    return null;
+  }
+
+  const task = window.filexDesktop!.readFile(absolutePath)
+    .then((payload) => {
+      if (!payload) {
+        return null;
+      }
+
+      const file = new File([toOwnedArrayBuffer(payload.bytes)], payload.name, {
+        lastModified: payload.lastModified,
+      });
+      fileStore.set(assetId, file);
+      return file;
+    })
+    .catch(() => null)
+    .finally(() => {
+      if (filePromiseStore.get(assetId) === task) {
+        filePromiseStore.delete(assetId);
+      }
+    });
+
+  filePromiseStore.set(assetId, task);
+  return task;
 }
 
 async function ensureSidecarHandle(assetId: string): Promise<FileSystemFileHandle | null> {
@@ -452,16 +607,29 @@ async function ensureSidecarHandle(assetId: string): Promise<FileSystemFileHandl
 
 export async function readSidecarXmp(assetId: string): Promise<string | null> {
   const handle = sidecarHandleByAssetId.get(assetId);
-  if (!handle) return null;
-  try {
-    const file = await handle.getFile();
-    return await file.text();
-  } catch {
+  if (handle) {
+    try {
+      const file = await handle.getFile();
+      return await file.text();
+    } catch {
+      return null;
+    }
+  }
+
+  const absolutePath = assetAbsolutePathStore.get(assetId);
+  if (!absolutePath || !hasDesktopSidecarBridge()) {
     return null;
   }
+
+  return window.filexDesktop!.readSidecarXmp(absolutePath);
 }
 
 export async function writeSidecarXmp(assetId: string, xml: string): Promise<boolean> {
+  const absolutePath = assetAbsolutePathStore.get(assetId);
+  if (absolutePath && hasDesktopSidecarBridge()) {
+    return window.filexDesktop!.writeSidecarXmp(absolutePath, xml);
+  }
+
   const handle = await ensureSidecarHandle(assetId);
   if (!handle) return false;
   try {
@@ -492,11 +660,35 @@ export async function createOnDemandPreviewAsync(
     return pending;
   }
 
-  const file = fileStore.get(assetId);
-  if (!file) return null;
+  const absolutePath = assetAbsolutePathStore.get(assetId);
 
   const generation = previewGeneration;
   const task = (async () => {
+    if (absolutePath && hasDesktopPreviewBridge()) {
+      try {
+        const preview = await window.filexDesktop!.getPreview(absolutePath);
+        if (!preview) {
+          return null;
+        }
+
+        const blob = new Blob([toOwnedArrayBuffer(preview.bytes)], { type: preview.mimeType });
+        const url = URL.createObjectURL(blob);
+        if (generation !== previewGeneration) {
+          URL.revokeObjectURL(url);
+          return null;
+        }
+
+        onDemandPreviewStore.set(assetId, url);
+        preloadImageUrls([url]);
+        return url;
+      } catch {
+        return null;
+      }
+    }
+
+    const file = await getFileForAsset(assetId);
+    if (!file) return null;
+
     // For browser-decodable formats, a blob URL to the original file works directly.
     if (isBrowserDecodable(file.name)) {
       const url = URL.createObjectURL(file);
@@ -565,10 +757,24 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
 
   for (const assetId of uniqueIds) {
     const handle = fileHandleStore.get(assetId);
-    if (!handle) continue;
+    const absolutePath = assetAbsolutePathStore.get(assetId);
+    if (!handle && (!absolutePath || !hasDesktopFileBridge())) continue;
 
     try {
-      const latestFile = await handle.getFile();
+      let latestFile: File | null = null;
+      if (handle) {
+        latestFile = await handle.getFile();
+      } else if (absolutePath) {
+        const payload = await window.filexDesktop!.readFile(absolutePath);
+        if (payload) {
+          latestFile = new File([toOwnedArrayBuffer(payload.bytes)], payload.name, {
+            lastModified: payload.lastModified,
+          });
+        }
+      }
+      if (!latestFile) {
+        continue;
+      }
       const currentFile = fileStore.get(assetId);
       const hasChanged =
         !currentFile ||
@@ -676,7 +882,7 @@ export async function copyAssetsToFolder(assetIds: string[]): Promise<FileOpResu
 
   let hasError = false;
   for (const assetId of assetIds) {
-    const file = fileStore.get(assetId);
+    const file = await getFileForAsset(assetId);
     if (!file) { hasError = true; continue; }
     try {
       const destFileHandle = await destDirHandle.getFileHandle(file.name, { create: true });
@@ -713,7 +919,7 @@ export async function moveAssetsToFolder(assetIds: string[]): Promise<{ result: 
   const movedIds: string[] = [];
 
   for (const assetId of assetIds) {
-    const file = fileStore.get(assetId);
+    const file = await getFileForAsset(assetId);
     if (!file) { hasError = true; continue; }
 
     try {
@@ -739,8 +945,10 @@ export async function moveAssetsToFolder(assetIds: string[]): Promise<{ result: 
       await parentHandle.removeEntry(file.name);
 
       assetPathStore.delete(assetId);
+      assetAbsolutePathStore.delete(assetId);
       fileStore.delete(assetId);
       fileHandleStore.delete(assetId);
+      filePromiseStore.delete(assetId);
       movedIds.push(assetId);
     } catch {
       hasError = true;
@@ -755,7 +963,7 @@ export async function moveAssetsToFolder(assetIds: string[]): Promise<{ result: 
  * Falls back to a normal download if showSaveFilePicker is unavailable.
  */
 export async function saveAssetAs(assetId: string): Promise<FileOpResult> {
-  const file = fileStore.get(assetId);
+  const file = await getFileForAsset(assetId);
   if (!file) return "no-file";
 
   // Fallback for browsers without showSaveFilePicker (Firefox, Safari)
@@ -799,6 +1007,7 @@ const MAX_RECENT = 8;
 
 export interface RecentFolder {
   name: string;
+  path?: string;
   imageCount: number;
   openedAt: number;
 }
@@ -812,10 +1021,10 @@ export function getRecentFolders(): RecentFolder[] {
   }
 }
 
-export function addRecentFolder(name: string, imageCount: number): void {
+export function addRecentFolder(name: string, imageCount: number, path?: string): void {
   try {
-    const recent = getRecentFolders().filter((f) => f.name !== name);
-    recent.unshift({ name, imageCount, openedAt: Date.now() });
+    const recent = getRecentFolders().filter((f) => f.name !== name || f.path !== path);
+    recent.unshift({ name, path, imageCount, openedAt: Date.now() });
     if (recent.length > MAX_RECENT) recent.length = MAX_RECENT;
     localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
   } catch {

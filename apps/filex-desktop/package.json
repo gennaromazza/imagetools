@@ -1,0 +1,65 @@
+{
+  "name": "@photo-tools/filex-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FileX Suite desktop shell for Windows packaging and native bridge work.",
+  "author": "FileX",
+  "type": "module",
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "build:shell": "tsc -p tsconfig.json",
+    "build:photo-selector": "npm run build:shell && npm --workspace @photo-tools/photo-selector-app run build",
+    "dev:photo-selector": "npm run build:shell && concurrently -k \"npm --workspace @photo-tools/photo-selector-app run dev -- --host 127.0.0.1 --port 4175\" \"wait-on tcp:127.0.0.1:4175 && cross-env FILEX_TOOL=photo-selector-app FILEX_RENDERER_MODE=dev FILEX_RENDERER_URL=http://127.0.0.1:4175 electron .\"",
+    "start:photo-selector": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron .",
+    "dist:photo-selector:win": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --win nsis"
+  },
+  "dependencies": {
+    "@photo-tools/desktop-contracts": "0.1.0"
+  },
+  "devDependencies": {
+    "concurrently": "8.2.2",
+    "cross-env": "10.1.0",
+    "electron": "41.0.4",
+    "electron-builder": "26.8.1",
+    "wait-on": "9.0.4"
+  },
+  "build": {
+    "appId": "studio.filex.desktop",
+    "productName": "FileX Suite",
+    "asar": true,
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../photo-selector-app/dist",
+        "to": "apps/photo-selector-app/dist",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "FileX-Suite-${version}-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

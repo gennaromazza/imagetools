@@ -1,0 +1,8 @@
+{
+  "name": "@photo-tools/desktop-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.d.ts",
+  "types": "./src/index.d.ts"
+}

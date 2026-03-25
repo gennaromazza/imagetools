@@ -18,6 +18,9 @@
     "dev:archivio-flow": "npm --workspace @photo-tools/archivio-flow run dev",
     "dev:all:archivio-flow": "npm --workspace @photo-tools/archivio-flow run dev:all",
     "dev:image-id-print": "npm --workspace @photo-tools/image-id-print run dev",
+    "dev:filex-desktop:photo-selector": "npm --workspace @photo-tools/filex-desktop run dev:photo-selector",
+    "build:filex-desktop:photo-selector": "npm --workspace @photo-tools/filex-desktop run build:photo-selector",
+    "dist:filex-desktop:photo-selector:win": "npm --workspace @photo-tools/filex-desktop run dist:photo-selector:win",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },

@@ -6,6 +6,8 @@ coverage/
 *.log
 TEST FOTO/
 *.env
+dist-electron/
+apps/filex-desktop/release/
 apps/image-party-frame/exports/
 apps/image-party-frame/uploads/
 apps/image-party-frame/temp-test.png
