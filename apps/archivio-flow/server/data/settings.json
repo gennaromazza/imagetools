@@ -1,11 +1,16 @@
 {
   "archiveRoot": "E:\\",
-  "defaultDestinazione": "E:\\2026\\MATRIMONI",
+  "defaultDestinazione": "E:\\2026\\BATTESIMI",
   "defaultAutore": "GENNARO",
   "cartellePredefinite": [
     "Promessa",
     "Matrimonio",
     "Prewedding",
     "Anteprima"
-  ]
+  ],
+  "archiveHierarchy": {
+    "yearLevel": 1,
+    "categoryLevel": 2,
+    "jobLevel": 3
+  }
 }
