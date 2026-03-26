@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { preloadImageUrls } from "../services/image-cache";
+import { notePhotoCardRender } from "../services/performance-utils";
 import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
@@ -44,9 +45,11 @@ export const PhotoCard = memo(
     onUpdatePhoto,
     onFocus,
     onPreview,
-    onContextMenu,
-    editable,
-  }: PhotoCardProps) {
+  onContextMenu,
+  editable,
+}: PhotoCardProps) {
+    notePhotoCardRender(photo.id);
+
     const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
     const aspectRatio =
       photo.width > 0 && photo.height > 0 ? `${photo.width} / ${photo.height}` : undefined;
@@ -375,7 +378,17 @@ export const PhotoCard = memo(
     );
   },
   (prev, next) =>
-    prev.photo === next.photo &&
     prev.isSelected === next.isSelected &&
-    prev.editable === next.editable
+    prev.editable === next.editable &&
+    prev.photo.id === next.photo.id &&
+    prev.photo.fileName === next.photo.fileName &&
+    prev.photo.thumbnailUrl === next.photo.thumbnailUrl &&
+    prev.photo.previewUrl === next.photo.previewUrl &&
+    prev.photo.sourceUrl === next.photo.sourceUrl &&
+    prev.photo.width === next.photo.width &&
+    prev.photo.height === next.photo.height &&
+    prev.photo.orientation === next.photo.orientation &&
+    getAssetRating(prev.photo) === getAssetRating(next.photo) &&
+    getAssetPickStatus(prev.photo) === getAssetPickStatus(next.photo) &&
+    getAssetColorLabel(prev.photo) === getAssetColorLabel(next.photo)
 );

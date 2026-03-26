@@ -1,3 +1,6 @@
+import { useEffect } from "react";
+import type { FolderOpenDiagnostics } from "../services/folder-access";
+
 interface ImportProgressModalProps {
   isOpen: boolean;
   phase: "reading" | "preparing";
@@ -7,6 +10,22 @@ interface ImportProgressModalProps {
   processed: number;
   currentFile: string | null;
   folderLabel: string;
+  diagnostics: FolderOpenDiagnostics | null;
+  onDismiss: () => void;
+  onCancel: () => void;
+}
+
+function formatDiagnosticsSource(source: FolderOpenDiagnostics["source"]): string {
+  switch (source) {
+    case "desktop-native":
+      return "Desktop Windows";
+    case "browser-native":
+      return "Browser picker";
+    case "file-input":
+      return "Fallback input";
+    default:
+      return source;
+  }
 }
 
 export function ImportProgressModal({
@@ -17,8 +36,29 @@ export function ImportProgressModal({
   total,
   processed,
   currentFile,
-  folderLabel
+  folderLabel,
+  diagnostics,
+  onDismiss,
+  onCancel,
 }: ImportProgressModalProps) {
+  useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      onDismiss();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isOpen, onDismiss]);
+
   if (!isOpen) {
     return null;
   }
@@ -32,11 +72,11 @@ export function ImportProgressModal({
       : "Sto preparando anteprime e metadati delle foto per la schermata selezione.";
 
   return (
-    <div className="modal-backdrop">
+    <aside className="import-progress-panel" aria-live="polite">
       <div
-        className="modal-panel modal-panel--import"
+        className="modal-panel modal-panel--import import-progress-panel__content"
         role="dialog"
-        aria-modal="true"
+        aria-modal="false"
         aria-labelledby="import-progress-title"
       >
         <div className="modal-panel__header">
@@ -44,6 +84,15 @@ export function ImportProgressModal({
             <h2 id="import-progress-title">Caricamento foto in corso</h2>
             <p>{folderLabel || "Preparazione cartella selezionata"}</p>
           </div>
+          <button
+            type="button"
+            className="import-progress-panel__close"
+            onClick={onDismiss}
+            aria-label="Nascondi pannello caricamento"
+            title="Nascondi"
+          >
+            x
+          </button>
         </div>
 
         <div className="modal-panel__body import-progress">
@@ -77,15 +126,37 @@ export function ImportProgressModal({
             <strong>{currentFile ?? phaseDescription}</strong>
           </div>
 
+          {diagnostics ? (
+            <div className="import-progress__diagnostics">
+              <div className="import-progress__diagnostics-header">
+                <strong>Diagnostica import</strong>
+                <span>{formatDiagnosticsSource(diagnostics.source)}</span>
+              </div>
+              <div className="import-progress__diagnostics-grid">
+                <span>Path selezionato</span>
+                <strong title={diagnostics.selectedPath}>{diagnostics.selectedPath}</strong>
+                <span>Top-level caricati</span>
+                <strong>{diagnostics.topLevelSupportedCount}</strong>
+                <span>Annidati scartati</span>
+                <strong>{diagnostics.nestedSupportedDiscardedCount}</strong>
+                <span>Totale supportate viste</span>
+                <strong>{diagnostics.totalSupportedSeen}</strong>
+              </div>
+            </div>
+          ) : null}
+
           <p className="import-progress__hint">{phaseDescription}</p>
         </div>
 
         <div className="modal-panel__footer">
-          <button type="button" className="ghost-button" disabled>
-            Importazione in corso...
+          <button type="button" className="ghost-button" onClick={onDismiss}>
+            Nascondi
+          </button>
+          <button type="button" className="secondary-button" onClick={onCancel}>
+            Annulla caricamento
           </button>
         </div>
       </div>
-    </div>
+    </aside>
   );
 }

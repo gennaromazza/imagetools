@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { DesktopRuntimeInfo } from "@photo-tools/desktop-contracts";
+import type { DesktopRuntimeInfo, DesktopThumbnailCacheLookupEntry } from "@photo-tools/desktop-contracts";
 import {
   openFolderDesktop,
   readFileFromDisk,
@@ -10,6 +10,14 @@ import {
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
 import { getDesktopPreview, getDesktopThumbnail } from "./native-image-service.js";
+import {
+  chooseThumbnailCacheDirectory,
+  clearThumbnailCacheDirectory,
+  getCachedThumbnailsFromDisk,
+  getThumbnailCacheInfo,
+  resetThumbnailCacheDirectory,
+  setThumbnailCacheDirectory,
+} from "./thumbnail-disk-cache.js";
 import { getDesktopToolOrDefault } from "./tool-manifest.js";
 
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
@@ -106,9 +114,21 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:read-file", (_event, absolutePath: string) => readFileFromDisk(absolutePath));
   ipcMain.handle(
     "filex:get-thumbnail",
-    (_event, absolutePath: string, maxDimension: number, quality: number) =>
-      getDesktopThumbnail(absolutePath, maxDimension, quality),
+    (_event, absolutePath: string, maxDimension: number, quality: number, sourceFileKey?: string) =>
+      getDesktopThumbnail(absolutePath, maxDimension, quality, sourceFileKey),
   );
+  ipcMain.handle(
+    "filex:get-cached-thumbnails",
+    (_event, entries: DesktopThumbnailCacheLookupEntry[], maxDimension: number, quality: number) =>
+      getCachedThumbnailsFromDisk(entries, maxDimension, quality),
+  );
+  ipcMain.handle("filex:get-thumbnail-cache-info", () => getThumbnailCacheInfo());
+  ipcMain.handle("filex:choose-thumbnail-cache-directory", () => chooseThumbnailCacheDirectory());
+  ipcMain.handle("filex:set-thumbnail-cache-directory", (_event, directoryPath: string) =>
+    setThumbnailCacheDirectory(directoryPath),
+  );
+  ipcMain.handle("filex:reset-thumbnail-cache-directory", () => resetThumbnailCacheDirectory());
+  ipcMain.handle("filex:clear-thumbnail-cache", () => clearThumbnailCacheDirectory());
   ipcMain.handle("filex:get-preview", (_event, absolutePath: string) => getDesktopPreview(absolutePath));
   ipcMain.handle("filex:read-sidecar-xmp", (_event, absolutePath: string) =>
     readSidecarXmpFromAssetPath(absolutePath),

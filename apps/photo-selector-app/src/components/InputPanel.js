@@ -1,0 +1,16 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { useEffect, useRef } from "react";
+export function InputPanel({ sourceFolderPath, loadedImages, activeImages, totalImages, verticalCount, horizontalCount, squareCount, isImporting, usesMockData, onSourceFolderChange, onFolderSelected, onLoadMockData, onOpenSelector }) {
+    const fileInputRef = useRef(null);
+    useEffect(() => {
+        if (!fileInputRef.current) {
+            return;
+        }
+        fileInputRef.current.setAttribute("webkitdirectory", "");
+        fileInputRef.current.setAttribute("directory", "");
+    }, []);
+    return (_jsxs("div", { className: "stack", children: [_jsxs("div", { className: "button-row", children: [_jsx("button", { type: "button", className: "secondary-button", onClick: () => fileInputRef.current?.click(), disabled: isImporting, "aria-label": "Carica una cartella con immagini dal computer", children: isImporting ? "Importazione cartella..." : "Carica cartella immagini" }), !usesMockData ? (_jsx("button", { type: "button", className: "ghost-button", onClick: onLoadMockData, "aria-label": "Carica il set fotografico di esempio", children: "Ripristina demo" })) : null, _jsx("button", { type: "button", className: "ghost-button", onClick: onOpenSelector, "aria-label": "Apri il selettore di foto progetto", children: "Seleziona foto progetto" })] }), _jsx("input", { ref: fileInputRef, type: "file", accept: ".jpg,.jpeg,.png", multiple: true, className: "hidden-file-input", onChange: (event) => onFolderSelected(event.target.files) }), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Cartella sorgente" }), _jsx("input", { type: "text", value: sourceFolderPath, onChange: (event) => onSourceFolderChange(event.target.value), placeholder: "C:/jobs/wedding-2026/selected" })] }), _jsxs("div", { className: "stats-grid", children: [_jsxs("div", { className: "stat-card", children: [_jsx("span", { children: "Foto caricate" }), _jsx("strong", { children: loadedImages })] }), _jsxs("div", { className: "stat-card stat-card--highlight", children: [_jsx("span", { children: "Foto attive" }), _jsx("strong", { children: activeImages })] }), _jsxs("div", { className: "stat-card", children: [_jsx("span", { children: "Nel piano" }), _jsx("strong", { children: totalImages })] }), _jsxs("div", { className: "stat-card", children: [_jsx("span", { children: "Verticali" }), _jsx("strong", { children: verticalCount })] })] }), _jsxs("div", { className: "stats-grid stats-grid--compact", children: [_jsxs("div", { className: "stat-card", children: [_jsx("span", { children: "Orizzontali" }), _jsx("strong", { children: horizontalCount })] }), _jsxs("div", { className: "stat-card", children: [_jsx("span", { children: "Quadrate" }), _jsx("strong", { children: squareCount })] })] }), _jsx("p", { className: "helper-copy", children: usesMockData
+                    ? "L'app parte con un piccolo set fotografico reale cosi' puoi vedere subito preview, fogli ed export. Puoi comunque aprire la selezione progetto e decidere quali foto usare."
+                    : "Puoi caricare molte piu foto di quelle che finiranno nei fogli. Con 'Seleziona foto progetto' scegli il sottoinsieme realmente usato per l'impaginazione." })] }));
+}
+//# sourceMappingURL=InputPanel.js.map

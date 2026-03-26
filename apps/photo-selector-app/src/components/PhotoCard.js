@@ -1,0 +1,179 @@
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { memo, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { preloadImageUrls } from "../services/image-cache";
+import { notePhotoCardRender } from "../services/performance-utils";
+import { COLOR_LABEL_NAMES, COLOR_LABELS, formatAssetStars, getAssetColorLabel, getAssetPickStatus, getAssetRating, getColorShortcutHint, PICK_STATUS_LABELS, resolvePhotoClassificationShortcut, } from "../services/photo-classification";
+import { isRawFile } from "../services/folder-access";
+export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, editable, }) {
+    notePhotoCardRender(photo.id);
+    const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
+    const aspectRatio = photo.width > 0 && photo.height > 0 ? `${photo.width} / ${photo.height}` : undefined;
+    const rating = getAssetRating(photo);
+    const pickStatus = getAssetPickStatus(photo);
+    const colorLabel = getAssetColorLabel(photo);
+    const raw = isRawFile(photo.fileName);
+    const prevClassRef = useRef({ rating, pickStatus, colorLabel });
+    const cardRef = useRef(null);
+    const wrapperRef = useRef(null);
+    const feedbackTimeoutRef = useRef(null);
+    const feedbackTokenRef = useRef(0);
+    const [feedback, setFeedback] = useState(null);
+    const hoverTimerRef = useRef(null);
+    const [hoverPos, setHoverPos] = useState(null);
+    useEffect(() => {
+        const prev = prevClassRef.current;
+        let nextFeedback = null;
+        if (prev.rating !== rating) {
+            feedbackTokenRef.current += 1;
+            nextFeedback = {
+                kind: "star",
+                label: rating > 0 ? `${"★".repeat(rating)} assegnate` : "Stelle azzerate",
+                token: feedbackTokenRef.current,
+                value: rating,
+            };
+        }
+        else if (prev.pickStatus !== pickStatus) {
+            feedbackTokenRef.current += 1;
+            nextFeedback = {
+                kind: "pill",
+                label: `Stato: ${PICK_STATUS_LABELS[pickStatus]}`,
+                token: feedbackTokenRef.current,
+                value: pickStatus,
+            };
+        }
+        else if (prev.colorLabel !== colorLabel) {
+            feedbackTokenRef.current += 1;
+            nextFeedback = {
+                kind: "dot",
+                label: colorLabel ? `Colore: ${COLOR_LABEL_NAMES[colorLabel]}` : "Colore rimosso",
+                token: feedbackTokenRef.current,
+                value: colorLabel,
+            };
+        }
+        prevClassRef.current = { rating, pickStatus, colorLabel };
+        if (feedbackTimeoutRef.current !== null) {
+            window.clearTimeout(feedbackTimeoutRef.current);
+            feedbackTimeoutRef.current = null;
+        }
+        if (!nextFeedback) {
+            return;
+        }
+        setFeedback(nextFeedback);
+        if (wrapperRef.current) {
+            const el = wrapperRef.current;
+            el.classList.remove("photo-card__image-wrapper--flash");
+            void el.offsetWidth;
+            el.classList.add("photo-card__image-wrapper--flash");
+        }
+        feedbackTimeoutRef.current = window.setTimeout(() => {
+            setFeedback((current) => (current?.token === nextFeedback?.token ? null : current));
+            feedbackTimeoutRef.current = null;
+        }, 950);
+    }, [colorLabel, pickStatus, rating]);
+    useEffect(() => {
+        return () => {
+            if (feedbackTimeoutRef.current !== null) {
+                window.clearTimeout(feedbackTimeoutRef.current);
+            }
+            if (hoverTimerRef.current !== null) {
+                clearTimeout(hoverTimerRef.current);
+            }
+        };
+    }, []);
+    const orientationIcon = photo.orientation === "vertical" ? "↕" : photo.orientation === "square" ? "◻" : "↔";
+    return (_jsxs("div", { className: `photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}`, role: "option", tabIndex: 0, "aria-selected": isSelected, "aria-label": `${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`, "aria-keyshortcuts": "Enter Space 1 2 3 4 5 P X U", ref: cardRef, "data-preview-asset-id": photo.id, onClick: (event) => onToggle(photo.id, event), onFocus: () => onFocus(photo.id), onMouseEnter: () => {
+            if (photo.previewUrl)
+                preloadImageUrls([photo.previewUrl]);
+            const imgSrc = photo.previewUrl ?? photo.thumbnailUrl ?? null;
+            if (!imgSrc)
+                return;
+            hoverTimerRef.current = setTimeout(() => {
+                if (!cardRef.current)
+                    return;
+                const rect = cardRef.current.getBoundingClientRect();
+                const spaceRight = window.innerWidth - rect.right;
+                setHoverPos({
+                    top: Math.max(8, rect.top),
+                    left: spaceRight >= 220 ? rect.right + 8 : rect.left - 228,
+                    right: spaceRight >= 220 ? -1 : rect.right,
+                    imgSrc,
+                });
+            }, 550);
+        }, onMouseLeave: () => {
+            if (hoverTimerRef.current !== null) {
+                clearTimeout(hoverTimerRef.current);
+                hoverTimerRef.current = null;
+            }
+            setHoverPos(null);
+        }, onDoubleClick: () => onPreview(photo.id), onContextMenu: (event) => {
+            if (!editable)
+                return;
+            event.preventDefault();
+            onContextMenu(photo.id, event.clientX, event.clientY);
+        }, onKeyDown: (event) => {
+            if (event.key === "Enter") {
+                event.preventDefault();
+                onToggle(photo.id);
+                return;
+            }
+            if (event.key === " ") {
+                event.preventDefault();
+                onPreview(photo.id);
+                return;
+            }
+            if (editable) {
+                const changes = resolvePhotoClassificationShortcut({
+                    key: event.key,
+                    code: event.code,
+                    ctrlKey: event.ctrlKey,
+                    metaKey: event.metaKey,
+                });
+                if (changes) {
+                    event.preventDefault();
+                    onUpdatePhoto(photo.id, changes);
+                }
+            }
+        }, children: [_jsxs("div", { ref: wrapperRef, className: "photo-card__image-wrapper", style: aspectRatio ? { aspectRatio } : undefined, children: [previewUrl ? (_jsx("img", { src: previewUrl, alt: photo.fileName, className: "photo-card__image", loading: "lazy", decoding: "async" })) : (_jsx("div", { className: `photo-card__image photo-card__image--placeholder${raw ? " photo-card__image--placeholder-raw" : ""}`, children: _jsx("span", { className: "photo-card__placeholder-icon", children: raw ? "📷" : orientationIcon }) })), _jsxs("div", { className: "photo-card__top-badges", children: [_jsx("span", { className: `asset-pick-badge asset-pick-badge--${pickStatus}`, children: PICK_STATUS_LABELS[pickStatus] }), colorLabel ? (_jsx("span", { className: `asset-color-dot asset-color-dot--${colorLabel}`, title: COLOR_LABEL_NAMES[colorLabel] })) : (_jsx("span", { className: "photo-card__empty-color", children: "Nessun colore" }))] }), _jsx("div", { className: "photo-card__select-badge", children: _jsx("div", { className: `photo-card__check ${isSelected ? "photo-card__check--active" : ""}`, children: isSelected ? "✓" : "" }) }), raw ? (_jsx("span", { className: "asset-pick-badge asset-raw-badge photo-card__raw-badge", children: "RAW" })) : null, _jsx("div", { className: feedback?.kind === "star"
+                            ? "photo-card__stars photo-card__stars--feedback"
+                            : "photo-card__stars", children: rating > 0 ? formatAssetStars(photo) : "Senza stelle" }), feedback ? (_jsx("div", { className: `photo-card__feedback photo-card__feedback--${feedback.kind}`, children: feedback.label }, feedback.token)) : null] }), _jsxs("div", { className: "photo-card__info", children: [_jsx("div", { className: "photo-card__name", title: photo.fileName, children: photo.fileName }), _jsxs("div", { className: "photo-card__meta", children: [_jsx("span", { className: "photo-card__orientation-icon", title: photo.orientation, children: orientationIcon }), photo.width > 0 ? (_jsxs("span", { className: "photo-card__dimensions", children: [Math.round(photo.width), "\u00D7", Math.round(photo.height)] })) : null] })] }), editable ? (_jsxs("div", { className: "photo-card__toolbar", onClick: (event) => event.stopPropagation(), children: [_jsx("div", { className: "photo-card__tiny-actions", children: [1, 2, 3, 4, 5].map((value) => (_jsx("button", { type: "button", className: [
+                                "photo-card__star",
+                                value <= rating ? "photo-card__star--active" : "",
+                                feedback?.kind === "star" && feedback.value === value
+                                    ? "photo-card__star--flash"
+                                    : "",
+                            ].join(" "), onClick: () => onUpdatePhoto(photo.id, { rating: value }), title: `${value} stella${value > 1 ? "e" : ""} | tasto ${value}`, children: "\u2605" }, value))) }), _jsx("div", { className: "photo-card__toolbar-row", children: ["picked", "rejected", "unmarked"].map((value) => (_jsx("button", { type: "button", className: [
+                                "photo-card__pill",
+                                pickStatus === value ? "photo-card__pill--active" : "",
+                                feedback?.kind === "pill" && feedback.value === value
+                                    ? "photo-card__pill--flash"
+                                    : "",
+                            ].join(" "), onClick: () => onUpdatePhoto(photo.id, { pickStatus: value }), title: value === "picked"
+                                ? "Pick | P"
+                                : value === "rejected"
+                                    ? "Scarta | X"
+                                    : "Neutra | U", children: PICK_STATUS_LABELS[value] }, value))) }), _jsx("div", { className: "photo-card__toolbar-row", children: COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: [
+                                "asset-color-dot",
+                                `asset-color-dot--${value}`,
+                                colorLabel === value ? "asset-color-dot--selected" : "",
+                                feedback?.kind === "dot" && feedback.value === value
+                                    ? "asset-color-dot--flash"
+                                    : "",
+                            ].join(" "), onClick: () => onUpdatePhoto(photo.id, {
+                                colorLabel: colorLabel === value ? null : value,
+                            }), title: `${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}` }, value))) })] })) : null, hoverPos !== null &&
+                createPortal(_jsxs("div", { className: "photo-card__hover-preview", style: { top: hoverPos.top, left: hoverPos.left }, children: [_jsx("img", { src: hoverPos.imgSrc, alt: photo.fileName, className: "photo-card__hover-img" }), _jsx("div", { className: "photo-card__hover-name", children: photo.fileName })] }), document.body)] }));
+}, (prev, next) => prev.isSelected === next.isSelected &&
+    prev.editable === next.editable &&
+    prev.photo.id === next.photo.id &&
+    prev.photo.fileName === next.photo.fileName &&
+    prev.photo.thumbnailUrl === next.photo.thumbnailUrl &&
+    prev.photo.previewUrl === next.photo.previewUrl &&
+    prev.photo.sourceUrl === next.photo.sourceUrl &&
+    prev.photo.width === next.photo.width &&
+    prev.photo.height === next.photo.height &&
+    prev.photo.orientation === next.photo.orientation &&
+    getAssetRating(prev.photo) === getAssetRating(next.photo) &&
+    getAssetPickStatus(prev.photo) === getAssetPickStatus(next.photo) &&
+    getAssetColorLabel(prev.photo) === getAssetColorLabel(next.photo));
+//# sourceMappingURL=PhotoCard.js.map

@@ -26,6 +26,35 @@ const TAG_SUB_IFD = 0x014a;
 
 // ── Public API ─────────────────────────────────────────────────────────
 
+export interface EmbeddedJpegRange {
+  offset: number;
+  length: number;
+}
+
+export function locateEmbeddedJpegRange(buffer: ArrayBuffer): EmbeddedJpegRange | null {
+  const data = new Uint8Array(buffer);
+  if (data.length < 12) return null;
+
+  const candidates: EmbeddedJpegRange[] = [];
+
+  const tiffCandidate = tryTiffLocate(data);
+  if (tiffCandidate && tiffCandidate.length > 10_000) candidates.push(tiffCandidate);
+
+  const rafCandidate = tryRafLocate(data);
+  if (rafCandidate && rafCandidate.length > 10_000) candidates.push(rafCandidate);
+
+  if (candidates.length === 0) return null;
+
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i++) {
+    if (candidates[i].length > best.length) {
+      best = candidates[i];
+    }
+  }
+
+  return best;
+}
+
 /**
  * Extract the largest embedded JPEG preview from a RAW file.
  * Returns the JPEG as an ArrayBuffer, or null if none found.
@@ -208,6 +237,76 @@ function extractJpegSliceAtOffset(
 }
 
 // ── TIFF-based extraction ──────────────────────────────────────────────
+
+function pushCandidateRange(
+  candidates: EmbeddedJpegRange[],
+  offset: number,
+  length: number,
+): void {
+  if (offset > 0 && length > 10_000) {
+    candidates.push({ offset, length });
+  }
+}
+
+function tryTiffLocate(data: Uint8Array): EmbeddedJpegRange | null {
+  const b0 = data[0];
+  const b1 = data[1];
+  let le: boolean;
+
+  if (b0 === 0x49 && b1 === 0x49) {
+    le = true;
+  } else if (b0 === 0x4d && b1 === 0x4d) {
+    le = false;
+  } else {
+    return null;
+  }
+
+  const magic = readU16(data, 2, le);
+  if (magic !== 42 && magic !== 0x4f52) return null;
+
+  const firstIfdOffset = readU32(data, 4, le);
+  if (firstIfdOffset === 0 || firstIfdOffset >= data.length) return null;
+
+  const candidates: EmbeddedJpegRange[] = [];
+  let ifdOffset = firstIfdOffset;
+  let ifdCount = 0;
+  const maxIfdChain = 10;
+
+  while (
+    ifdOffset > 0 &&
+    ifdOffset < data.length - 2 &&
+    ifdCount < maxIfdChain
+  ) {
+    ifdCount++;
+    const result = parseIfd(data, new ArrayBuffer(0), ifdOffset, le);
+
+    pushCandidateRange(candidates, result.jpegOffset, result.jpegLength);
+    pushCandidateRange(candidates, result.stripOffset, result.stripLength);
+
+    for (const subOffset of result.subIfdOffsets) {
+      if (subOffset <= 0 || subOffset >= data.length - 2) {
+        continue;
+      }
+
+      const sub = parseIfd(data, new ArrayBuffer(0), subOffset, le);
+      pushCandidateRange(candidates, sub.jpegOffset, sub.jpegLength);
+      pushCandidateRange(candidates, sub.stripOffset, sub.stripLength);
+    }
+
+    ifdOffset = result.nextIfdOffset;
+  }
+
+  if (candidates.length === 0) return null;
+
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i++) {
+    if (candidates[i].length > best.length) {
+      best = candidates[i];
+    }
+  }
+
+  return best;
+}
 
 function tryTiffExtract(
   data: Uint8Array,
@@ -395,6 +494,22 @@ function parseIfd(
 
 // ── Fujifilm RAF extraction ────────────────────────────────────────────
 
+function tryRafLocate(data: Uint8Array): EmbeddedJpegRange | null {
+  if (data.length < 160) return null;
+
+  const magic = String.fromCharCode(...data.slice(0, 16));
+  if (!magic.startsWith("FUJIFILMCCD-RAW")) return null;
+
+  const jpegOffset = readU32BE(data, 84);
+  const jpegLength = readU32BE(data, 88);
+  if (jpegOffset === 0 || jpegLength === 0) return null;
+
+  return {
+    offset: jpegOffset,
+    length: jpegLength,
+  };
+}
+
 function tryRafExtract(
   data: Uint8Array,
   buffer: ArrayBuffer,
@@ -420,6 +535,48 @@ function tryRafExtract(
  * Walk the top-level boxes. The JPEG preview is usually inside an `mdat`
  * box or inside `uuid` boxes. We scan each box's payload for JPEG SOI.
  */
+function tryBmffLocate(data: Uint8Array): EmbeddedJpegRange | null {
+  if (data.length < 8) return null;
+
+  const b4 = data[4];
+  const b5 = data[5];
+  const b6 = data[6];
+  const b7 = data[7];
+  const isFtyp = b4 === 0x66 && b5 === 0x74 && b6 === 0x79 && b7 === 0x70;
+  if (!isFtyp) return null;
+
+  let best: EmbeddedJpegRange | null = null;
+  let pos = 0;
+  const len = data.length;
+
+  while (pos + 8 <= len) {
+    const boxSize = readU32(data, pos, false);
+    const boxEnd = boxSize === 0 ? len : pos + boxSize;
+    if (boxSize < 8 || boxEnd > len) break;
+
+    const type = String.fromCharCode(
+      data[pos + 4],
+      data[pos + 5],
+      data[pos + 6],
+      data[pos + 7],
+    );
+
+    if ((type === "mdat" || type === "uuid") && boxEnd - (pos + 8) > 10_000) {
+      const candidate = {
+        offset: pos + 8,
+        length: boxEnd - (pos + 8),
+      };
+      if (!best || candidate.length > best.length) {
+        best = candidate;
+      }
+    }
+
+    pos = boxEnd;
+  }
+
+  return best;
+}
+
 function tryBmffExtract(
   data: Uint8Array,
   buffer: ArrayBuffer,

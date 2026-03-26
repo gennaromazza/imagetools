@@ -22,6 +22,8 @@ export interface ThumbnailRequest {
   buffer: ArrayBuffer;
   maxDimension: number;
   quality: number;
+  isEmbeddedPreview?: boolean;
+  minimumPreviewShortSide?: number;
 }
 
 export interface ThumbnailResult {
@@ -34,6 +36,12 @@ export interface ThumbnailResult {
 export interface ThumbnailError {
   id: string;
   error: string;
+}
+
+export interface ThumbnailRetry {
+  id: string;
+  retryWithFullBuffer: true;
+  shortSide: number;
 }
 
 /**
@@ -67,11 +75,21 @@ async function resolveSource(
 }
 
 self.onmessage = async (event: MessageEvent<ThumbnailRequest>) => {
-  const { id, buffer, maxDimension, quality } = event.data;
+  const { id, buffer, maxDimension, quality, isEmbeddedPreview, minimumPreviewShortSide } = event.data;
 
   try {
     const { blob: sourceBlob, width: origWidth, height: origHeight } =
       await resolveSource(buffer);
+
+    const shortSide = Math.min(origWidth, origHeight);
+    if (isEmbeddedPreview && shortSide < (minimumPreviewShortSide ?? 0)) {
+      self.postMessage({
+        id,
+        retryWithFullBuffer: true,
+        shortSide,
+      } as ThumbnailRetry);
+      return;
+    }
 
     const scale      = Math.min(1, maxDimension / Math.max(origWidth, origHeight));
     const targetWidth  = Math.max(1, Math.round(origWidth  * scale));

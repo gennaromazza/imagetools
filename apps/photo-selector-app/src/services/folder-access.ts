@@ -225,6 +225,16 @@ export interface FolderOpenResult {
   name: string;
   entries: FolderEntry[];
   rootPath?: string;
+  diagnostics?: FolderOpenDiagnostics;
+}
+
+export interface FolderOpenDiagnostics {
+  source: "desktop-native" | "browser-native" | "file-input";
+  selectedPath: string;
+  topLevelSupportedCount: number;
+  nestedSupportedDiscardedCount: number;
+  totalSupportedSeen: number;
+  nestedDirectoriesSeen?: number;
 }
 
 function isTopLevelRelativePath(relativePath: string): boolean {
@@ -234,6 +244,37 @@ function isTopLevelRelativePath(relativePath: string): boolean {
 
 function keepTopLevelEntries(entries: FolderEntry[]): FolderEntry[] {
   return entries.filter((entry) => isTopLevelRelativePath(entry.relativePath));
+}
+
+function buildFolderDiagnostics(
+  source: FolderOpenDiagnostics["source"],
+  selectedPath: string,
+  topLevelSupportedCount: number,
+  nestedSupportedDiscardedCount: number,
+  nestedDirectoriesSeen = 0,
+): FolderOpenDiagnostics {
+  return {
+    source,
+    selectedPath,
+    topLevelSupportedCount,
+    nestedSupportedDiscardedCount,
+    totalSupportedSeen: topLevelSupportedCount + nestedSupportedDiscardedCount,
+    nestedDirectoriesSeen,
+  };
+}
+
+function toFolderOpenResult(
+  name: string,
+  rootPath: string | undefined,
+  entries: FolderEntry[],
+  diagnostics?: FolderOpenDiagnostics,
+): FolderOpenResult {
+  return {
+    name,
+    rootPath,
+    entries,
+    diagnostics,
+  };
 }
 
 async function getRecentFolderHandleDb(): Promise<IDBDatabase | null> {
@@ -304,7 +345,43 @@ async function deleteRecentFolderHandle(name: string): Promise<void> {
   });
 }
 
-async function scanDirectoryHandle(dirHandle: FileSystemDirectoryHandle): Promise<FolderEntry[]> {
+async function countNestedDirectoryHandleImagesInternal(
+  dirHandle: FileSystemDirectoryHandle,
+  includeCurrentFiles: boolean,
+): Promise<{
+  nestedSupportedDiscardedCount: number;
+  nestedDirectoriesSeen: number;
+}> {
+  let nestedSupportedDiscardedCount = 0;
+  let nestedDirectoriesSeen = 0;
+
+  for await (const [nestedName, nestedHandle] of (dirHandle as any).entries()) {
+    if (nestedHandle.kind === "file") {
+      if (includeCurrentFiles && isImageFile(nestedName)) {
+        nestedSupportedDiscardedCount += 1;
+      }
+      continue;
+    }
+
+    nestedDirectoriesSeen += 1;
+    const nestedResult = await countNestedDirectoryHandleImagesInternal(
+      nestedHandle as FileSystemDirectoryHandle,
+      true,
+    );
+    nestedDirectoriesSeen += nestedResult.nestedDirectoriesSeen;
+    nestedSupportedDiscardedCount += nestedResult.nestedSupportedDiscardedCount;
+  }
+
+  return {
+    nestedSupportedDiscardedCount,
+    nestedDirectoriesSeen,
+  };
+}
+
+async function scanDirectoryHandle(dirHandle: FileSystemDirectoryHandle): Promise<{
+  entries: FolderEntry[];
+  diagnostics: FolderOpenDiagnostics;
+}> {
   sidecarHandleByStemPath.clear();
   directoryHandleByPath.clear();
 
@@ -329,7 +406,18 @@ async function scanDirectoryHandle(dirHandle: FileSystemDirectoryHandle): Promis
   }
 
   entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
-  return entries;
+  const nestedCounts = await countNestedDirectoryHandleImagesInternal(dirHandle, false);
+
+  return {
+    entries,
+    diagnostics: buildFolderDiagnostics(
+      "browser-native",
+      dirHandle.name,
+      entries.length,
+      nestedCounts.nestedSupportedDiscardedCount,
+      nestedCounts.nestedDirectoriesSeen,
+    ),
+  };
 }
 
 // ── File System Access API ─────────────────────────────────────────────
@@ -341,31 +429,38 @@ export function hasNativeFolderAccess(): boolean {
 
 /**
  * Open a folder with the File System Access API (Chrome/Edge).
- * Recursively scans subfolders for image files.
+ * Reads only top-level files and keeps diagnostics about nested files.
  * Returns null if the user cancels the picker.
  */
-export async function openFolderNative(): Promise<{
-  name: string;
-  entries: FolderEntry[];
-  rootPath?: string;
-} | null> {
+export async function openFolderNative(): Promise<FolderOpenResult | null> {
   if (hasDesktopFolderBridge()) {
     const result = await window.filexDesktop?.openFolder();
     if (!result) {
       return null;
     }
 
-    return {
-      name: result.name,
-      rootPath: result.rootPath,
-      entries: keepTopLevelEntries(result.entries.map((entry) => ({
-        name: entry.name,
-        relativePath: entry.relativePath,
-        absolutePath: entry.absolutePath,
-        size: entry.size,
-        lastModified: entry.lastModified,
-      }))),
-    };
+    const mappedEntries = result.entries.map((entry) => ({
+      name: entry.name,
+      relativePath: entry.relativePath,
+      absolutePath: entry.absolutePath,
+      size: entry.size,
+      lastModified: entry.lastModified,
+    }));
+    const entries = keepTopLevelEntries(mappedEntries);
+    const diagnostics = buildFolderDiagnostics(
+      "desktop-native",
+      result.diagnostics?.selectedPath ?? result.rootPath,
+      entries.length,
+      result.diagnostics?.nestedSupportedDiscardedCount ?? Math.max(0, mappedEntries.length - entries.length),
+      result.diagnostics?.nestedDirectoriesSeen ?? 0,
+    );
+
+    return toFolderOpenResult(
+      result.name,
+      result.rootPath,
+      entries,
+      diagnostics,
+    );
   }
 
   try {
@@ -373,9 +468,9 @@ export async function openFolderNative(): Promise<{
     const dirHandle: FileSystemDirectoryHandle = await (window as any).showDirectoryPicker({
       mode: "readwrite",
     });
-    const entries = await scanDirectoryHandle(dirHandle);
+    const { entries, diagnostics } = await scanDirectoryHandle(dirHandle);
     void saveRecentFolderHandle(dirHandle.name, dirHandle);
-    return { name: dirHandle.name, rootPath: dirHandle.name, entries };
+    return toFolderOpenResult(dirHandle.name, dirHandle.name, entries, diagnostics);
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") return null;
     throw err;
@@ -393,17 +488,28 @@ export async function reopenRecentFolder(folder: RecentFolder): Promise<FolderOp
       return null;
     }
 
-    return {
-      name: result.name,
-      rootPath: result.rootPath,
-      entries: keepTopLevelEntries(result.entries.map((entry) => ({
-        name: entry.name,
-        relativePath: entry.relativePath,
-        absolutePath: entry.absolutePath,
-        size: entry.size,
-        lastModified: entry.lastModified,
-      }))),
-    };
+    const mappedEntries = result.entries.map((entry) => ({
+      name: entry.name,
+      relativePath: entry.relativePath,
+      absolutePath: entry.absolutePath,
+      size: entry.size,
+      lastModified: entry.lastModified,
+    }));
+    const entries = keepTopLevelEntries(mappedEntries);
+    const diagnostics = buildFolderDiagnostics(
+      "desktop-native",
+      result.diagnostics?.selectedPath ?? result.rootPath,
+      entries.length,
+      result.diagnostics?.nestedSupportedDiscardedCount ?? Math.max(0, mappedEntries.length - entries.length),
+      result.diagnostics?.nestedDirectoriesSeen ?? 0,
+    );
+
+    return toFolderOpenResult(
+      result.name,
+      result.rootPath,
+      entries,
+      diagnostics,
+    );
   }
 
   const handle = await loadRecentFolderHandle(folder.name);
@@ -429,8 +535,8 @@ export async function reopenRecentFolder(folder: RecentFolder): Promise<FolderOp
       return null;
     }
 
-    const entries = await scanDirectoryHandle(handle);
-    return { name: handle.name, rootPath: handle.name, entries };
+    const { entries, diagnostics } = await scanDirectoryHandle(handle);
+    return toFolderOpenResult(handle.name, handle.name, entries, diagnostics);
   } catch {
     void deleteRecentFolderHandle(folder.name);
     return null;
@@ -443,12 +549,16 @@ export function fileListToEntries(files: FileList): FolderOpenResult {
   const entries: FolderEntry[] = [];
   const first = files[0] as File & { webkitRelativePath?: string };
   const folderName = first?.webkitRelativePath?.split("/")[0] ?? "Cartella selezionata";
+  let nestedSupportedDiscardedCount = 0;
 
   for (let i = 0; i < files.length; i++) {
     const file = files[i] as File & { webkitRelativePath?: string };
     const relativePath = file.webkitRelativePath || file.name;
-    if (!isTopLevelRelativePath(relativePath)) continue;
     if (!isImageFile(file.name)) continue;
+    if (!isTopLevelRelativePath(relativePath)) {
+      nestedSupportedDiscardedCount += 1;
+      continue;
+    }
     entries.push({
       name: file.name,
       file,
@@ -457,7 +567,12 @@ export function fileListToEntries(files: FileList): FolderOpenResult {
   }
 
   entries.sort((a, b) => a.name.localeCompare(b.name));
-  return { name: folderName, rootPath: folderName, entries };
+  return toFolderOpenResult(
+    folderName,
+    folderName,
+    entries,
+    buildFolderDiagnostics("file-input", folderName, entries.length, nestedSupportedDiscardedCount),
+  );
 }
 
 // ── Build placeholder assets from folder entries (instant) ─────────────

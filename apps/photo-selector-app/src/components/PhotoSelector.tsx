@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DesktopThumbnailCacheInfo } from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
@@ -33,11 +34,21 @@ interface PhotoSelectorProps {
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  desktopThumbnailCacheInfo?: DesktopThumbnailCacheInfo | null;
+  isDesktopThumbnailCacheBusy?: boolean;
+  onChooseDesktopThumbnailCacheDirectory?: () => void | Promise<void>;
+  onSetDesktopThumbnailCacheDirectory?: (directoryPath: string) => void | Promise<void>;
+  onResetDesktopThumbnailCacheDirectory?: () => void | Promise<void>;
+  onClearDesktopThumbnailCache?: () => void | Promise<void>;
 }
 
 type SortMode = "name" | "orientation" | "rating";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
+
+const INITIAL_RENDER_BATCH = 180;
+const RENDER_BATCH_STEP = 180;
+const RENDER_THRESHOLD_PX = 900;
 
 function describeMetadataChanges(
   changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>,
@@ -84,6 +95,24 @@ function getTimeClusterKey(photo: ImageAsset): string {
   return `${day} ${time}`;
 }
 
+function formatBytes(totalBytes: number): string {
+  if (totalBytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = totalBytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const decimals = value >= 10 || unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+}
+
 export function PhotoSelector({
   photos,
   selectedIds,
@@ -94,6 +123,12 @@ export function PhotoSelector({
   onRedo,
   canUndo = false,
   canRedo = false,
+  desktopThumbnailCacheInfo = null,
+  isDesktopThumbnailCacheBusy = false,
+  onChooseDesktopThumbnailCacheDirectory,
+  onSetDesktopThumbnailCacheDirectory,
+  onResetDesktopThumbnailCacheDirectory,
+  onClearDesktopThumbnailCache,
 }: PhotoSelectorProps) {
   const [sortBy, setSortBy] = useState<SortMode>("name");
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
@@ -120,6 +155,7 @@ export function PhotoSelector({
   const [preferredEditorPath, setPreferredEditorPath] = useState<string>(
     () => localStorage.getItem("ps-preferred-editor-path") ?? ""
   );
+  const [desktopThumbnailCachePathInput, setDesktopThumbnailCachePathInput] = useState("");
 
   const setPreferredEditorPathPersisted = useCallback((value: string) => {
     setPreferredEditorPath(value);
@@ -136,12 +172,17 @@ export function PhotoSelector({
   const gridRef = useRef<HTMLDivElement>(null);
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [renderCount, setRenderCount] = useState(INITIAL_RENDER_BATCH);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const photosRef = useRef(photos);
   useEffect(() => {
     photosRef.current = photos;
   }, [photos]);
+
+  useEffect(() => {
+    setDesktopThumbnailCachePathInput(desktopThumbnailCacheInfo?.currentPath ?? "");
+  }, [desktopThumbnailCacheInfo?.currentPath]);
 
   const activeFilterCount = useMemo(
     () =>
@@ -365,6 +406,11 @@ export function PhotoSelector({
     return filtered;
   }, [colorFilter, folderFilter, photos, pickFilter, ratingFilter, searchQuery, seriesFilter, sortBy, timeClusterFilter]);
 
+  const renderedPhotos = useMemo(
+    () => visiblePhotos.slice(0, renderCount),
+    [renderCount, visiblePhotos],
+  );
+
   // Search in all photos so preview doesn't close when filters change
   const previewAsset = previewAssetId
     ? (photos.find((p) => p.id === previewAssetId) ?? null)
@@ -431,21 +477,43 @@ export function PhotoSelector({
 
       if (nextIndex !== currentIndex || currentIndex < 0) {
         const next = visiblePhotos[nextIndex];
-        setFocusedPhotoId(next.id);
-        const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${next.id}"]`);
-        if (el) {
-          el.focus();
-          el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        if (nextIndex >= renderCount) {
+          setRenderCount((current) => Math.max(current, nextIndex + RENDER_BATCH_STEP));
         }
+        setFocusedPhotoId(next.id);
+        requestAnimationFrame(() => {
+          const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${next.id}"]`);
+          if (el) {
+            el.focus();
+            el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+          }
+        });
       }
     },
-    [contextMenuState, focusedPhotoId, previewAssetId, visiblePhotos]
+    [contextMenuState, focusedPhotoId, previewAssetId, renderCount, visiblePhotos]
   );
 
   useEffect(() => {
     window.addEventListener("keydown", handleWindowKeyDown);
     return () => window.removeEventListener("keydown", handleWindowKeyDown);
   }, [handleWindowKeyDown]);
+
+  useEffect(() => {
+    setRenderCount(INITIAL_RENDER_BATCH);
+    visibleIdsRef.current.clear();
+    onVisibleIdsChange?.(new Set());
+  }, [
+    colorFilter,
+    folderFilter,
+    onVisibleIdsChange,
+    pickFilter,
+    ratingFilter,
+    searchQuery,
+    seriesFilter,
+    sortBy,
+    timeClusterFilter,
+    visiblePhotos.length,
+  ]);
 
   function togglePhoto(id: string, event?: React.MouseEvent) {
     const nextSelection = new Set(selectedSet);
@@ -985,6 +1053,19 @@ export function PhotoSelector({
     return { kind: "warn" as const, text: "Percorso incompleto o formato non valido" };
   }, [preferredEditorPath]);
 
+  const desktopThumbnailCacheStatus = useMemo(() => {
+    if (!desktopThumbnailCacheInfo) {
+      return null;
+    }
+
+    return {
+      kind: desktopThumbnailCacheInfo.usesCustomPath ? "ok" as const : "empty" as const,
+      text: desktopThumbnailCacheInfo.usesCustomPath
+        ? "Percorso personalizzato attivo"
+        : "Percorso predefinito attivo",
+    };
+  }, [desktopThumbnailCacheInfo]);
+
   const handleBrowsePreferredEditor = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
@@ -1021,6 +1102,15 @@ export function PhotoSelector({
     document.body.appendChild(input);
     input.click();
   }, [preferredEditorPath, setPreferredEditorPathPersisted]);
+
+  const handleApplyDesktopThumbnailCachePath = useCallback(() => {
+    const nextPath = desktopThumbnailCachePathInput.trim();
+    if (!nextPath || !onSetDesktopThumbnailCacheDirectory) {
+      return;
+    }
+
+    void onSetDesktopThumbnailCacheDirectory(nextPath);
+  }, [desktopThumbnailCachePathInput, onSetDesktopThumbnailCacheDirectory]);
 
   return (
     <div className="photo-selector">
@@ -1411,13 +1501,20 @@ export function PhotoSelector({
             pushTimelineEntry(`Selezionate ${newIds.length} foto con lasso`);
           }
         }}
+        onScroll={(event) => {
+          const target = event.currentTarget;
+          const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
+          if (remaining <= RENDER_THRESHOLD_PX && renderCount < visiblePhotos.length) {
+            setRenderCount((current) => Math.min(visiblePhotos.length, current + RENDER_BATCH_STEP));
+          }
+        }}
       >
         {visiblePhotos.length === 0 ? (
           <div className="photo-selector__empty">
             <p>Nessuna foto trovata.</p>
           </div>
         ) : (
-          visiblePhotos.map((photo) => (
+          renderedPhotos.map((photo) => (
             <PhotoCard
               key={photo.id}
               photo={photo}
@@ -1431,6 +1528,20 @@ export function PhotoSelector({
             />
           ))
         )}
+        {renderedPhotos.length < visiblePhotos.length ? (
+          <div className="photo-selector__render-more">
+            <span>
+              Mostrate {renderedPhotos.length} di {visiblePhotos.length} foto
+            </span>
+            <button
+              type="button"
+              className="ghost-button ghost-button--small"
+              onClick={() => setRenderCount((current) => Math.min(visiblePhotos.length, current + RENDER_BATCH_STEP))}
+            >
+              Carica altre
+            </button>
+          </div>
+        ) : null}
         {dragRect && (
           <div
             className="photo-selector__drag-rect"
@@ -1699,6 +1810,82 @@ export function PhotoSelector({
               Usato per "Apri con editor" e "Copia percorso" nel menu contestuale.
             </p>
           </div>
+
+          {desktopThumbnailCacheInfo ? (
+            <div className="photo-selector__settings-section">
+              <h4 className="photo-selector__settings-section-title">
+                Cache thumbnail desktop
+                <button
+                  type="button"
+                  className="photo-selector__settings-info-btn"
+                  title="Le anteprime vengono salvate su disco dal layer desktop Windows. Il percorso predefinito e' locale e veloce, ma puoi spostarlo dove preferisci."
+                >
+                  ?
+                </button>
+              </h4>
+              <label className="photo-selector__settings-color-row">
+                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Percorso</span>
+                <div className="photo-selector__settings-input-with-button">
+                  <input
+                    type="text"
+                    className="photo-selector__settings-color-input"
+                    value={desktopThumbnailCachePathInput}
+                    onChange={(e) => setDesktopThumbnailCachePathInput(e.target.value)}
+                    placeholder={desktopThumbnailCacheInfo.defaultPath}
+                    spellCheck={false}
+                    disabled={isDesktopThumbnailCacheBusy}
+                  />
+                </div>
+              </label>
+              <div className="photo-selector__settings-preset-row">
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={handleApplyDesktopThumbnailCachePath}
+                  disabled={isDesktopThumbnailCacheBusy || !desktopThumbnailCachePathInput.trim()}
+                >
+                  Applica
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={() => void onChooseDesktopThumbnailCacheDirectory?.()}
+                  disabled={isDesktopThumbnailCacheBusy || !onChooseDesktopThumbnailCacheDirectory}
+                >
+                  Sfoglia...
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={() => void onResetDesktopThumbnailCacheDirectory?.()}
+                  disabled={isDesktopThumbnailCacheBusy || !onResetDesktopThumbnailCacheDirectory}
+                >
+                  Default
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={() => void onClearDesktopThumbnailCache?.()}
+                  disabled={isDesktopThumbnailCacheBusy || !onClearDesktopThumbnailCache}
+                >
+                  Svuota cache
+                </button>
+              </div>
+              {desktopThumbnailCacheStatus ? (
+                <p
+                  className={`photo-selector__settings-path-status photo-selector__settings-path-status--${desktopThumbnailCacheStatus.kind}`}
+                >
+                  {desktopThumbnailCacheStatus.text}
+                </p>
+              ) : null}
+              <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                {desktopThumbnailCacheInfo.entryCount} anteprime, {formatBytes(desktopThumbnailCacheInfo.totalBytes)} su disco.
+              </p>
+              <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                Percorso predefinito: {desktopThumbnailCacheInfo.defaultPath}
+              </p>
+            </div>
+          ) : null}
 
           <div className="photo-selector__settings-section">
             <h4 className="photo-selector__settings-section-title">

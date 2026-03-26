@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, relative, sep } from "node:path";
 import type {
   DesktopFilePayload,
   DesktopFolderEntry,
+  DesktopFolderOpenDiagnostics,
   DesktopFolderOpenResult,
 } from "@photo-tools/desktop-contracts";
 
@@ -58,6 +59,55 @@ function sidecarPathForAsset(absolutePath: string): string {
   return join(assetDir, `${assetName}.xmp`);
 }
 
+async function countNestedSupportedFiles(rootPath: string): Promise<{
+  nestedSupportedDiscardedCount: number;
+  nestedDirectoriesSeen: number;
+}> {
+  let nestedSupportedDiscardedCount = 0;
+  let nestedDirectoriesSeen = 0;
+  const pendingDirectories: string[] = [];
+
+  const rootEntries = await readdir(rootPath, { withFileTypes: true });
+  for (const dirEntry of rootEntries) {
+    if (dirEntry.isSymbolicLink() || !dirEntry.isDirectory()) {
+      continue;
+    }
+
+    nestedDirectoriesSeen += 1;
+    pendingDirectories.push(join(rootPath, dirEntry.name));
+  }
+
+  while (pendingDirectories.length > 0) {
+    const currentPath = pendingDirectories.pop();
+    if (!currentPath) {
+      continue;
+    }
+
+    const dirEntries = await readdir(currentPath, { withFileTypes: true });
+    for (const dirEntry of dirEntries) {
+      if (dirEntry.isSymbolicLink()) {
+        continue;
+      }
+
+      const absolutePath = join(currentPath, dirEntry.name);
+      if (dirEntry.isDirectory()) {
+        nestedDirectoriesSeen += 1;
+        pendingDirectories.push(absolutePath);
+        continue;
+      }
+
+      if (dirEntry.isFile() && isImageFile(dirEntry.name)) {
+        nestedSupportedDiscardedCount += 1;
+      }
+    }
+  }
+
+  return {
+    nestedSupportedDiscardedCount,
+    nestedDirectoriesSeen,
+  };
+}
+
 async function scanFolderByPath(rootPath: string): Promise<DesktopFolderOpenResult> {
   const stats = await lstat(rootPath);
   if (!stats.isDirectory()) {
@@ -89,10 +139,21 @@ async function scanFolderByPath(rootPath: string): Promise<DesktopFolderOpenResu
 
   entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 
+  const nestedCounts = await countNestedSupportedFiles(normalizedRootPath);
+  const diagnostics: DesktopFolderOpenDiagnostics = {
+    source: "desktop-native",
+    selectedPath: normalizedRootPath,
+    topLevelSupportedCount: entries.length,
+    nestedSupportedDiscardedCount: nestedCounts.nestedSupportedDiscardedCount,
+    totalSupportedSeen: entries.length + nestedCounts.nestedSupportedDiscardedCount,
+    nestedDirectoriesSeen: nestedCounts.nestedDirectoriesSeen,
+  };
+
   return {
     name: rootName,
     rootPath: normalizedRootPath,
     entries,
+    diagnostics,
   };
 }
 

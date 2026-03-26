@@ -1118,6 +1118,19 @@ img {
   text-align: center;
 }
 
+.photo-selector__render-more {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(24, 29, 26, 0.78);
+  color: var(--text-muted);
+}
+
 .photo-selector__footer {
   padding: 1rem;
   background: rgba(160, 130, 80, 0.1);
@@ -1611,6 +1624,36 @@ img {
   width: min(560px, 100%);
 }
 
+.import-progress-panel {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 160;
+  width: min(460px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.import-progress-panel__content {
+  pointer-events: auto;
+}
+
+.import-progress-panel__close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(20, 24, 22, 0.78);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.import-progress-panel__close:hover {
+  background: rgba(33, 39, 36, 0.92);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text);
+}
+
 .modal-panel--confirm {
   max-width: 500px;
 }
@@ -1914,6 +1957,50 @@ img {
   margin: 0;
   color: var(--text-muted);
   line-height: 1.5;
+}
+
+.import-progress__diagnostics {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(18, 23, 20, 0.46);
+}
+
+.import-progress__diagnostics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.import-progress__diagnostics-header strong {
+  color: var(--text);
+}
+
+.import-progress__diagnostics-header span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.import-progress__diagnostics-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr);
+  gap: 0.55rem 0.9rem;
+  align-items: start;
+}
+
+.import-progress__diagnostics-grid span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.import-progress__diagnostics-grid strong {
+  color: #fff5e8;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
 }
 
 .progress-bar {
@@ -2989,6 +3076,25 @@ img {
   gap: 0.6rem;
 }
 
+.app-header__pipeline-status--button {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(24, 29, 26, 0.82);
+  color: inherit;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.app-header__pipeline-status--button:hover {
+  background: rgba(33, 39, 36, 0.92);
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.app-header__pipeline-status--button:active {
+  transform: translateY(1px);
+}
+
 .pipeline-progress {
   width: 100px;
   height: 6px;
@@ -3140,6 +3246,76 @@ img {
 .dismissible-banner__close:hover {
   background: rgba(35, 41, 37, 0.92);
   color: var(--text);
+}
+
+.folder-diagnostics-panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem 1.15rem;
+  border-radius: 22px;
+  border: 1px solid rgba(184, 154, 99, 0.24);
+  background:
+    linear-gradient(135deg, rgba(184, 154, 99, 0.08), rgba(103, 117, 107, 0.08)),
+    rgba(43, 49, 45, 0.94);
+  backdrop-filter: blur(12px);
+}
+
+.folder-diagnostics-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.folder-diagnostics-panel__header > div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.folder-diagnostics-panel__header strong {
+  color: var(--text);
+}
+
+.folder-diagnostics-panel__header span {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.folder-diagnostics-panel__badge {
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(184, 154, 99, 0.14);
+  border: 1px solid rgba(184, 154, 99, 0.24);
+  color: #fff5e8;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.folder-diagnostics-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.8rem;
+}
+
+.folder-diagnostics-panel__item {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 16px;
+  background: rgba(16, 20, 18, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.folder-diagnostics-panel__item span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.folder-diagnostics-panel__item strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 /* ── 19. Toast ────────────────────────────────────────────────────────── */

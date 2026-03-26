@@ -1,12 +1,38 @@
-import type { ThumbnailError, ThumbnailResult } from "../workers/thumbnail-worker";
+import type { ThumbnailError, ThumbnailResult, ThumbnailRetry } from "../workers/thumbnail-worker";
+import { perfLog, recordBytesRead } from "./performance-utils";
 
 const THUMBNAIL_MAX = 420;
 const THUMBNAIL_QUALITY = 0.72;
-const BATCH_INTERVAL_MS = 120;
+const EARLY_BATCH_INTERVAL_MS = 16;
+const STEADY_BATCH_INTERVAL_MS = 72;
+const EARLY_BATCH_COUNT = 48;
+const MAX_PENDING_BATCH_SIZE = 10;
+const RAW_PREVIEW_SCAN_BYTES = 512 * 1024;
+const MIN_EMBEDDED_PREVIEW_SHORT_SIDE = 800;
+const RAW_EXTENSIONS = new Set([
+  ".cr2",
+  ".cr3",
+  ".crw",
+  ".nef",
+  ".nrw",
+  ".arw",
+  ".srf",
+  ".sr2",
+  ".raf",
+  ".dng",
+  ".rw2",
+  ".orf",
+  ".pef",
+  ".srw",
+  ".3fr",
+  ".x3f",
+  ".gpr",
+]);
 
 export interface ThumbnailUpdate {
   id: string;
   url: string;
+  blob: Blob;
   width: number;
   height: number;
   sourceFileKey?: string;
@@ -23,12 +49,14 @@ interface QueueItem {
   sourceFileKey?: string;
   createSourceFileKey?: (file: File) => string;
   priority: number;
+  forceFullFile?: boolean;
 }
 
 interface ActiveTask {
   id: string;
   sourceFileKey?: string;
   createSourceFileKey?: (file: File) => string;
+  item: QueueItem;
 }
 
 function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -37,10 +65,51 @@ function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
+function isLikelyRawFile(fileName: string): boolean {
+  const dotIndex = fileName.lastIndexOf(".");
+  if (dotIndex < 0) {
+    return false;
+  }
+
+  return RAW_EXTENSIONS.has(fileName.slice(dotIndex).toLowerCase());
+}
+
+let rawExtractorModulePromise: Promise<typeof import("../workers/raw-jpeg-extractor")> | null = null;
+
+async function getRawExtractorModule() {
+  rawExtractorModulePromise ??= import("../workers/raw-jpeg-extractor");
+  return rawExtractorModulePromise;
+}
+
+async function tryReadEmbeddedPreview(file: File): Promise<ArrayBuffer | null> {
+  const headerBuffer = await file.slice(0, RAW_PREVIEW_SCAN_BYTES).arrayBuffer();
+  recordBytesRead("raw", headerBuffer.byteLength);
+
+  const { locateEmbeddedJpegRange } = await getRawExtractorModule();
+  const previewRange = locateEmbeddedJpegRange(headerBuffer);
+  if (!previewRange) {
+    return null;
+  }
+
+  const previewEnd = previewRange.offset + previewRange.length;
+  if (previewRange.offset < 0 || previewEnd > file.size || previewRange.length <= 10_000) {
+    return null;
+  }
+
+  if (previewEnd <= headerBuffer.byteLength) {
+    return headerBuffer.slice(previewRange.offset, previewEnd);
+  }
+
+  const previewBuffer = await file.slice(previewRange.offset, previewEnd).arrayBuffer();
+  recordBytesRead("raw", previewBuffer.byteLength);
+  return previewBuffer;
+}
+
 export class ThumbnailPipeline {
   private workers: Worker[] = [];
   private busyWorkers = new Map<Worker, ActiveTask>();
   private queue: QueueItem[] = [];
+  private queuedItems = new Map<string, QueueItem>();
   private processing = new Set<string>();
   private completed = new Set<string>();
   private failedIds = new Set<string>();
@@ -55,14 +124,16 @@ export class ThumbnailPipeline {
     this.onError = onError ?? null;
 
     const cores = navigator.hardwareConcurrency || 4;
-    const poolSize = Math.max(2, Math.min(cores - 1, 8));
+    const poolSize = Math.max(1, Math.min(cores, 8));
+
+    perfLog(`[PERF] thumbnail worker pool size            : ${poolSize}`);
 
     for (let i = 0; i < poolSize; i += 1) {
       const worker = new Worker(
         new URL("../workers/thumbnail-worker.ts", import.meta.url),
         { type: "module" },
       );
-      worker.onmessage = (ev: MessageEvent<ThumbnailResult | ThumbnailError>) =>
+      worker.onmessage = (ev: MessageEvent<ThumbnailResult | ThumbnailError | ThumbnailRetry>) =>
         this.handleWorkerResult(worker, ev.data);
       worker.onerror = () => this.handleWorkerCrash(worker);
       this.workers.push(worker);
@@ -78,7 +149,7 @@ export class ThumbnailPipeline {
         continue;
       }
 
-      const existing = this.queue.find((queued) => queued.id === item.id);
+      const existing = this.queuedItems.get(item.id);
       if (existing) {
         existing.priority = Math.min(existing.priority, priority);
         if (!existing.file && item.file) existing.file = item.file;
@@ -91,10 +162,12 @@ export class ThumbnailPipeline {
         continue;
       }
 
-      this.queue.push({
+      const queuedItem = {
         ...item,
         priority,
-      });
+      };
+      this.queue.push(queuedItem);
+      this.queuedItems.set(queuedItem.id, queuedItem);
     }
 
     this.sortQueue();
@@ -142,6 +215,7 @@ export class ThumbnailPipeline {
     this.workers = [];
     this.busyWorkers.clear();
     this.queue = [];
+    this.queuedItems.clear();
     this.processing.clear();
   }
 
@@ -164,6 +238,7 @@ export class ThumbnailPipeline {
       if (!nextItem) {
         return;
       }
+      this.queuedItems.delete(nextItem.id);
       if (this.completed.has(nextItem.id) || this.processing.has(nextItem.id)) {
         continue;
       }
@@ -173,6 +248,7 @@ export class ThumbnailPipeline {
         id: nextItem.id,
         sourceFileKey: nextItem.sourceFileKey,
         createSourceFileKey: nextItem.createSourceFileKey,
+        item: nextItem,
       });
       void this.dispatch(worker, nextItem);
     }
@@ -189,6 +265,7 @@ export class ThumbnailPipeline {
           item.absolutePath,
           THUMBNAIL_MAX,
           THUMBNAIL_QUALITY,
+          item.sourceFileKey,
         );
         const task = this.releaseWorker(worker) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
         if (!rendered) {
@@ -224,13 +301,34 @@ export class ThumbnailPipeline {
     }
 
     try {
+      if (!item.forceFullFile && isLikelyRawFile(file.name)) {
+        const previewBuffer = await tryReadEmbeddedPreview(file);
+        if (previewBuffer) {
+          worker.postMessage(
+            {
+              id: item.id,
+              buffer: previewBuffer,
+              maxDimension: THUMBNAIL_MAX,
+              quality: THUMBNAIL_QUALITY,
+              isEmbeddedPreview: true,
+              minimumPreviewShortSide: MIN_EMBEDDED_PREVIEW_SHORT_SIDE,
+            },
+            [previewBuffer],
+          );
+          return;
+        }
+      }
+
       const buffer = await file.arrayBuffer();
+      recordBytesRead(isLikelyRawFile(file.name) ? "raw" : "standard", buffer.byteLength);
       worker.postMessage(
         {
           id: item.id,
           buffer,
           maxDimension: THUMBNAIL_MAX,
           quality: THUMBNAIL_QUALITY,
+          isEmbeddedPreview: false,
+          minimumPreviewShortSide: MIN_EMBEDDED_PREVIEW_SHORT_SIDE,
         },
         [buffer],
       );
@@ -240,10 +338,29 @@ export class ThumbnailPipeline {
     }
   }
 
-  private handleWorkerResult(worker: Worker, data: ThumbnailResult | ThumbnailError): void {
-    const task = this.releaseWorker(worker) ?? { id: data.id };
+  private handleWorkerResult(worker: Worker, data: ThumbnailResult | ThumbnailError | ThumbnailRetry): void {
+    const task = this.releaseWorker(worker);
+    if ("retryWithFullBuffer" in data) {
+      const retryItem = task
+        ? { ...task.item, forceFullFile: true, priority: 0 }
+        : null;
+      if (retryItem) {
+        this.queue.unshift(retryItem);
+        this.sortQueue();
+        this.schedule();
+      } else {
+        this.markFailed(data.id);
+      }
+      return;
+    }
+
     if ("error" in data) {
-      this.markFailed(task.id);
+      this.markFailed(task?.id ?? data.id);
+      return;
+    }
+
+    if (!task) {
+      this.markFailed(data.id);
       return;
     }
 
@@ -277,13 +394,23 @@ export class ThumbnailPipeline {
     this.pendingBatch.push({
       id: result.id,
       url,
+      blob: result.thumbnailBlob,
       width: result.width,
       height: result.height,
       sourceFileKey,
     });
 
+    if (this.pendingBatch.length >= MAX_PENDING_BATCH_SIZE) {
+      this.flushBatch();
+      this.schedule();
+      return;
+    }
+
     if (!this.batchTimer) {
-      this.batchTimer = setTimeout(() => this.flushBatch(), BATCH_INTERVAL_MS);
+      const interval = this.completed.size <= EARLY_BATCH_COUNT
+        ? EARLY_BATCH_INTERVAL_MS
+        : STEADY_BATCH_INTERVAL_MS;
+      this.batchTimer = setTimeout(() => this.flushBatch(), interval);
     }
 
     this.schedule();
@@ -303,7 +430,10 @@ export class ThumbnailPipeline {
   }
 
   private flushBatch(): void {
-    this.batchTimer = null;
+    if (this.batchTimer) {
+      clearTimeout(this.batchTimer);
+      this.batchTimer = null;
+    }
     if (this.pendingBatch.length === 0) {
       return;
     }

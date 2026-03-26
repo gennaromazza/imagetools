@@ -1,10 +1,17 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DesktopRuntimeInfo } from "@photo-tools/desktop-contracts";
+import type { DesktopRuntimeInfo, DesktopThumbnailCacheInfo } from "@photo-tools/desktop-contracts";
 import type { ImageAsset, ImageOrientation } from "@photo-tools/shared-types";
 import {
   revokeImageAssetUrls,
 } from "./services/browser-image-assets";
 import { getDesktopRuntimeInfo } from "./services/desktop-runtime";
+import {
+  chooseDesktopThumbnailCacheDirectory,
+  clearDesktopThumbnailCache,
+  getDesktopThumbnailCacheInfo,
+  resetDesktopThumbnailCacheDirectory,
+  setDesktopThumbnailCacheDirectory,
+} from "./services/desktop-thumbnail-cache";
 import { loadImageAssets } from "./services/image-storage";
 import { clearImageCache } from "./services/image-cache";
 import {
@@ -17,11 +24,20 @@ import {
   isRawFile,
   readSidecarXmp,
   writeSidecarXmp,
+  type FolderOpenDiagnostics,
   type FolderOpenResult,
 } from "./services/folder-access";
 import { parseXmpState, upsertXmpState } from "./services/xmp-sidecar";
 import { ThumbnailPipeline, type ThumbnailUpdate } from "./services/thumbnail-pipeline";
-import { cacheThumbnail, loadCachedThumbnails } from "./services/thumbnail-cache";
+import { cacheThumbnailBatch, loadCachedThumbnails } from "./services/thumbnail-cache";
+import {
+  beginReactBatchMetric,
+  cancelReactBatchMetric,
+  finishReactBatchMetric,
+  perfTime,
+  perfTimeEnd,
+  resetPerfByteReadStats,
+} from "./services/performance-utils";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { buildSelectionResult } from "./types/selection";
 import { useToast } from "./components/ToastProvider";
@@ -40,8 +56,45 @@ import { SelectionSummary } from "./components/SelectionSummary";
 const PROJECT_ID = "photo-selector-default";
 const STORAGE_KEY = "photo-selector-state";
 const THUMBNAIL_BOOTSTRAP_COUNT = 24;
-const XMP_IMPORT_CONCURRENCY = 4;
-const XMP_IMPORT_START_DELAY_MS = 180;
+const XMP_IMPORT_CONCURRENCY = 16;
+const XMP_IMPORT_START_DELAY_MS = 0;
+const PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE = "[PERF] folder-open → first-thumbnail-visible";
+const PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE = "[PERF] first-thumbnail → grid-complete";
+const PERF_XMP_IMPORT = "[PERF] xmp-import start → xmp-import complete";
+
+function afterNextPaint(run: () => void): void {
+  if (typeof window === "undefined") {
+    run();
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(run);
+  });
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const safeConcurrency = Math.max(1, concurrency);
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  async function run(): Promise<void> {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(safeConcurrency, items.length) }, () => run()),
+  );
+  return results;
+}
 
 type ThumbnailPipelineEntry = {
   id: string;
@@ -93,6 +146,19 @@ function formatSyncTimestamp(timestamp: number | null): string {
   });
 }
 
+function formatFolderDiagnosticsSource(source: FolderOpenDiagnostics["source"]): string {
+  switch (source) {
+    case "desktop-native":
+      return "Desktop Windows";
+    case "browser-native":
+      return "Browser picker";
+    case "file-input":
+      return "Fallback input";
+    default:
+      return source;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // App
 // ═══════════════════════════════════════════════════════════════════════════
@@ -116,7 +182,10 @@ interface ImportProgressState {
   processed: number;
   currentFile: string | null;
   folderLabel: string;
+  diagnostics: FolderOpenDiagnostics | null;
 }
+
+import logo from "./assets/logo.png";
 
 export function App() {
   const { addToast } = useToast();
@@ -159,14 +228,22 @@ export function App() {
     processed: 0,
     currentFile: null,
     folderLabel: "",
+    diagnostics: null,
   });
+  const [isImportPanelDismissed, setIsImportPanelDismissed] = useState(false);
+  const [folderDiagnostics, setFolderDiagnostics] = useState<FolderOpenDiagnostics | null>(null);
+  const [desktopThumbnailCacheInfo, setDesktopThumbnailCacheInfo] = useState<DesktopThumbnailCacheInfo | null>(null);
+  const [isDesktopThumbnailCacheBusy, setIsDesktopThumbnailCacheBusy] = useState(false);
   const assetNameByIdRef = useRef(new Map<string, string>());
+  const assetIndexByIdRef = useRef(new Map<string, number>());
   const thumbnailTotalCountRef = useRef(0);
   const settledThumbnailIdsRef = useRef<Set<string>>(new Set());
   const thumbnailEntryByIdRef = useRef(new Map<string, ThumbnailPipelineEntry>());
   const visibleThumbnailIdsRef = useRef(new Set<string>());
   const folderLoadSessionRef = useRef(0);
   const xmpImportStartTimerRef = useRef<number | null>(null);
+  const hasLoggedFirstThumbnailRef = useRef(false);
+  const hasLoggedGridCompleteRef = useRef(false);
 
   // ── Restore from IndexedDB on mount ──────────────────────────────────
   useEffect(() => {
@@ -305,22 +382,61 @@ export function App() {
     }
   }, []);
 
+  const markFirstThumbnailVisible = useCallback(() => {
+    if (hasLoggedFirstThumbnailRef.current) {
+      return;
+    }
+
+    hasLoggedFirstThumbnailRef.current = true;
+    perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+    perfTime(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
+  }, []);
+
+  const markGridComplete = useCallback(() => {
+    if (!hasLoggedFirstThumbnailRef.current || hasLoggedGridCompleteRef.current) {
+      return;
+    }
+
+    hasLoggedGridCompleteRef.current = true;
+    perfTimeEnd(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
+  }, []);
+
   // ── Thumbnail batch handler (called by pipeline every ~120 ms) ──────
   const handleThumbnailBatch = useCallback((batch: ThumbnailUpdate[]) => {
-    setAllAssets((prev) => {
-      const lookup = new Map(batch.map((b) => [b.id, b]));
-      return prev.map((asset) => {
-        const update = lookup.get(asset.id);
-        if (!update) return asset;
-        return {
-          ...asset,
-          thumbnailUrl: update.url,
-          width: update.width,
-          height: update.height,
-          orientation: detectOrientation(update.width, update.height),
-          aspectRatio: update.width / update.height,
-          sourceFileKey: update.sourceFileKey ?? asset.sourceFileKey,
-        };
+    const renderMetricToken = beginReactBatchMetric(batch.length, allAssetsRef.current.length);
+    startTransition(() => {
+      setAllAssets((prev) => {
+        if (prev.length === 0) {
+          return prev;
+        }
+
+        const next = prev.slice();
+        let changed = false;
+
+        for (const update of batch) {
+          const index = assetIndexByIdRef.current.get(update.id);
+          if (index === undefined) {
+            continue;
+          }
+
+          const asset = next[index];
+          if (!asset) {
+            continue;
+          }
+
+          next[index] = {
+            ...asset,
+            thumbnailUrl: update.url,
+            width: update.width,
+            height: update.height,
+            orientation: detectOrientation(update.width, update.height),
+            aspectRatio: update.width / update.height,
+            sourceFileKey: update.sourceFileKey ?? asset.sourceFileKey,
+          };
+          changed = true;
+        }
+
+        return changed ? next : prev;
       });
     });
 
@@ -329,13 +445,22 @@ export function App() {
     }
     syncThumbnailProgress(batch[batch.length - 1]?.id ?? null);
 
-    // Persist thumbnails to IndexedDB cache (fire-and-forget)
-    for (const item of batch) {
-      fetch(item.url).then((r) => r.blob()).then((blob) => {
-        void cacheThumbnail(item.id, blob, item.width, item.height);
-      }).catch(() => { /* non-critical */ });
-    }
-  }, [syncThumbnailProgress]);
+    afterNextPaint(() => {
+      finishReactBatchMetric(renderMetricToken);
+      if (batch.length > 0) {
+        markFirstThumbnailVisible();
+      }
+    });
+
+    void cacheThumbnailBatch(
+      batch.map((item) => ({
+        id: item.id,
+        blob: item.blob,
+        width: item.width,
+        height: item.height,
+      })),
+    );
+  }, [markFirstThumbnailVisible, syncThumbnailProgress]);
 
   // Error handler for failed thumbnail generations (e.g. RAW files)
   const lastErrorToastRef = useRef(0);
@@ -363,10 +488,96 @@ export function App() {
     return minDimension >= 900;
   }
 
+  const stopCurrentImport = useCallback(() => {
+    folderLoadSessionRef.current += 1;
+    pipelineRef.current?.destroy();
+    pipelineRef.current = null;
+
+    if (xmpImportStartTimerRef.current !== null) {
+      window.clearTimeout(xmpImportStartTimerRef.current);
+      xmpImportStartTimerRef.current = null;
+    }
+
+    if (xmpSyncTimerRef.current !== null) {
+      window.clearTimeout(xmpSyncTimerRef.current);
+      xmpSyncTimerRef.current = null;
+    }
+
+    revokeImageAssetUrls(allAssetsRef.current);
+    clearImageCache();
+    assetNameByIdRef.current = new Map();
+    assetIndexByIdRef.current = new Map();
+    thumbnailEntryByIdRef.current = new Map();
+    visibleThumbnailIdsRef.current = new Set();
+    settledThumbnailIdsRef.current = new Set();
+    thumbnailTotalCountRef.current = 0;
+    pendingXmpSyncIdsRef.current.clear();
+    xmpSnapshotRef.current.clear();
+    hasLoggedFirstThumbnailRef.current = false;
+    hasLoggedGridCompleteRef.current = false;
+    cancelReactBatchMetric();
+    perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+    perfTimeEnd(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
+    perfTimeEnd(PERF_XMP_IMPORT);
+
+    setThumbnailProgress({ done: 0, total: 0 });
+    setImportProgress({
+      isOpen: false,
+      phase: "reading",
+      supported: 0,
+      ignored: 0,
+      total: 0,
+      processed: 0,
+      currentFile: null,
+      folderLabel: "",
+      diagnostics: null,
+    });
+    setIsImportPanelDismissed(false);
+    setAllAssets([]);
+    setActiveAssetIds([]);
+    setSourceFolderPath("");
+    setHasWritableFolderAccess(false);
+    setFolderDiagnostics(null);
+    setIsProjectSelectorOpen(false);
+    setCurrentScreen("browse");
+    setIsXmpBannerDismissed(false);
+    setXmpSyncState({
+      phase: "idle",
+      pending: 0,
+      failed: 0,
+      lastSyncedAt: null,
+    });
+    undoRedo.reset();
+  }, [undoRedo]);
+
+  const handleCancelImport = useCallback(() => {
+    stopCurrentImport();
+    addToast("Caricamento annullato. Torniamo alla scelta cartella.", "info");
+  }, [addToast, stopCurrentImport]);
+
   // ── Open folder (instant grid + streaming thumbnails) ────────────────
   const handleFolderOpened = useCallback(
-    ({ name: folderName, entries, rootPath }: FolderOpenResult) => {
+    ({ name: folderName, entries, rootPath, diagnostics }: FolderOpenResult) => {
+      const nextDiagnostics = diagnostics ?? {
+        source: "file-input",
+        selectedPath: rootPath ?? folderName,
+        topLevelSupportedCount: entries.length,
+        nestedSupportedDiscardedCount: 0,
+        totalSupportedSeen: entries.length,
+        nestedDirectoriesSeen: 0,
+      };
+      setFolderDiagnostics(nextDiagnostics);
+      setIsImportPanelDismissed(false);
+      hasLoggedFirstThumbnailRef.current = false;
+      hasLoggedGridCompleteRef.current = false;
+      cancelReactBatchMetric();
+      resetPerfByteReadStats();
+      perfTime(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+      perfTime(PERF_XMP_IMPORT);
+
       if (entries.length === 0) {
+        perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+        perfTimeEnd(PERF_XMP_IMPORT);
         addToast("Nessuna immagine supportata trovata nella cartella.", "warning");
         return;
       }
@@ -389,6 +600,7 @@ export function App() {
       // 3. Create placeholder assets INSTANTLY (no file reading)
       const assets = buildPlaceholderAssets(entries);
       assetNameByIdRef.current = new Map(assets.map((asset) => [asset.id, asset.fileName]));
+      assetIndexByIdRef.current = new Map(assets.map((asset, index) => [asset.id, index]));
       const writableAccess = entries.some((entry) => !!entry.fileHandle || !!entry.absolutePath);
 
       setAllAssets(assets);
@@ -423,64 +635,106 @@ export function App() {
         processed: 0,
         currentFile: entries[0]?.name ?? null,
         folderLabel: folderName,
+        diagnostics: nextDiagnostics,
       });
       addToast(`${entries.length} foto trovate in "${folderName}". Generazione anteprime…`, "info");
 
-      // 4. Import Adobe-compatible XMP sidecars (rating/label/pick) + app selection flag.
-      void Promise.all(
-        assets.map(async (asset) => {
-          const xml = await readSidecarXmp(asset.id);
-          if (!xml) return null;
-          return { id: asset.id, state: parseXmpState(xml) };
-        }),
-      ).then((records) => {
-        const valid = records.filter((r): r is { id: string; state: ReturnType<typeof parseXmpState> } => r !== null);
-        if (valid.length === 0) return;
+      // 4. Import Adobe-compatible XMP sidecars in background with limited concurrency.
+      const runXmpImport = () => {
+        void mapWithConcurrency(
+          assets,
+          XMP_IMPORT_CONCURRENCY,
+          async (asset) => {
+            if (folderLoadSessionRef.current !== folderLoadSession) {
+              return null;
+            }
 
-        const byId = new Map(valid.map((r) => [r.id, r.state]));
-        const selectedByXmp = valid
-          .filter((r) => r.state.selected === true)
-          .map((r) => r.id);
+            const xml = await readSidecarXmp(asset.id);
+            if (!xml) return null;
+            return { id: asset.id, state: parseXmpState(xml) };
+          },
+        ).then((records) => {
+          if (folderLoadSessionRef.current !== folderLoadSession) {
+            return;
+          }
 
-        setAllAssets((prev) =>
-          prev.map((asset) => {
-            const state = byId.get(asset.id);
-            if (!state) return asset;
-            const hasEdits = state.hasCameraRawAdjustments || state.hasPhotoshopAdjustments;
-            const xmpEditInfo = state.hasCameraRawAdjustments && state.hasPhotoshopAdjustments
-              ? "Camera Raw + Photoshop"
-              : state.hasCameraRawAdjustments
-                ? "Camera Raw"
-                : state.hasPhotoshopAdjustments
-                  ? "Photoshop"
-                  : undefined;
-            return {
-              ...asset,
-              rating: state.rating ?? asset.rating,
-              pickStatus: state.pickStatus ?? asset.pickStatus,
-              colorLabel: state.colorLabel !== undefined ? state.colorLabel : asset.colorLabel,
-              xmpHasEdits: hasEdits,
-              xmpEditInfo,
-            };
-          }),
-        );
+          const valid = records.filter((r): r is { id: string; state: ReturnType<typeof parseXmpState> } => r !== null);
+          if (valid.length === 0) return;
 
-        if (selectedByXmp.length > 0) {
-          setActiveAssetIds(selectedByXmp);
-        }
+          const selectedByXmp = valid
+            .filter((r) => r.state.selected === true)
+            .map((r) => r.id);
 
-        const editedBySidecar = valid.filter(
-          (r) => r.state.hasCameraRawAdjustments || r.state.hasPhotoshopAdjustments,
-        ).length;
-        if (editedBySidecar > 0) {
-          addToast(
-            `${editedBySidecar} foto con modifiche XMP (Camera Raw/Photoshop) rilevate.`,
-            "info",
-          );
-        }
-      }).catch(() => {
-        // Sidecar import is best-effort only.
-      });
+          startTransition(() => {
+            setAllAssets((prev) => {
+              if (prev.length === 0) {
+                return prev;
+              }
+
+              const next = prev.slice();
+              let changed = false;
+
+              for (const record of valid) {
+                const index = assetIndexByIdRef.current.get(record.id);
+                if (index === undefined) {
+                  continue;
+                }
+
+                const asset = next[index];
+                if (!asset) {
+                  continue;
+                }
+
+                const hasEdits = record.state.hasCameraRawAdjustments || record.state.hasPhotoshopAdjustments;
+                const xmpEditInfo = record.state.hasCameraRawAdjustments && record.state.hasPhotoshopAdjustments
+                  ? "Camera Raw + Photoshop"
+                  : record.state.hasCameraRawAdjustments
+                    ? "Camera Raw"
+                    : record.state.hasPhotoshopAdjustments
+                      ? "Photoshop"
+                      : undefined;
+
+                next[index] = {
+                  ...asset,
+                  rating: record.state.rating ?? asset.rating,
+                  pickStatus: record.state.pickStatus ?? asset.pickStatus,
+                  colorLabel: record.state.colorLabel !== undefined ? record.state.colorLabel : asset.colorLabel,
+                  xmpHasEdits: hasEdits,
+                  xmpEditInfo,
+                };
+                changed = true;
+              }
+
+              return changed ? next : prev;
+            });
+          });
+
+          if (selectedByXmp.length > 0) {
+            setActiveAssetIds(selectedByXmp);
+          }
+
+          const editedBySidecar = valid.filter(
+            (r) => r.state.hasCameraRawAdjustments || r.state.hasPhotoshopAdjustments,
+          ).length;
+          if (editedBySidecar > 0) {
+            addToast(
+              `${editedBySidecar} foto con modifiche XMP (Camera Raw/Photoshop) rilevate.`,
+              "info",
+            );
+          }
+        }).catch(() => {
+          // Sidecar import is best-effort only.
+        }).finally(() => {
+          xmpImportStartTimerRef.current = null;
+          perfTimeEnd(PERF_XMP_IMPORT);
+        });
+      };
+
+      if (XMP_IMPORT_START_DELAY_MS > 0) {
+        xmpImportStartTimerRef.current = window.setTimeout(runXmpImport, XMP_IMPORT_START_DELAY_MS);
+      } else {
+        runXmpImport();
+      }
 
       // 5. Check thumbnail cache, then start pipeline for ALL images (including RAW)
       const assetIdByPath = new Map(assets.map((asset) => [asset.path, asset.id]));
@@ -514,12 +768,13 @@ export function App() {
       setThumbnailProgress({ done: 0, total: pipelineEntries.length });
 
       if (pipelineEntries.length === 0) {
+        perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+        perfTimeEnd(PERF_XMP_IMPORT);
         setImportProgress((current) => ({ ...current, isOpen: false, total: 0, processed: 0 }));
         return;
       }
 
-      const allIds = pipelineEntries.map((entry) => entry.id);
-      void loadCachedThumbnails(allIds).then((cached) => {
+      void loadCachedThumbnails(pipelineEntries).then((cached) => {
         if (folderLoadSessionRef.current !== folderLoadSession) {
           return;
         }
@@ -528,24 +783,47 @@ export function App() {
 
         // Apply cached thumbnails instantly
         if (cached.size > 0) {
-          setAllAssets((prev) =>
-            prev.map((asset) => {
-              const hit = cached.get(asset.id);
-              if (!hit) return asset;
-              if (!isValidCachedThumbnail(asset, hit)) return asset;
-              if (asset.thumbnailUrl) return asset;
+          startTransition(() => {
+            setAllAssets((prev) => {
+              if (prev.length === 0) {
+                return prev;
+              }
 
-              validCachedIds.add(asset.id);
-              return {
-                ...asset,
-                thumbnailUrl: hit.url,
-                width: hit.width,
-                height: hit.height,
-                orientation: detectOrientation(hit.width, hit.height),
-                aspectRatio: hit.width / hit.height,
-              };
-            }),
-          );
+              const next = prev.slice();
+              let changed = false;
+
+              for (const [assetId, hit] of cached) {
+                const index = assetIndexByIdRef.current.get(assetId);
+                if (index === undefined) {
+                  continue;
+                }
+
+                const asset = next[index];
+                if (!asset || !isValidCachedThumbnail(asset, hit) || asset.thumbnailUrl) {
+                  continue;
+                }
+
+                validCachedIds.add(asset.id);
+                next[index] = {
+                  ...asset,
+                  thumbnailUrl: hit.url,
+                  width: hit.width,
+                  height: hit.height,
+                  orientation: detectOrientation(hit.width, hit.height),
+                  aspectRatio: hit.width / hit.height,
+                };
+                changed = true;
+              }
+
+              return changed ? next : prev;
+            });
+          });
+
+          afterNextPaint(() => {
+            if (validCachedIds.size > 0) {
+              markFirstThumbnailVisible();
+            }
+          });
         }
 
         for (const assetId of validCachedIds) {
@@ -560,9 +838,19 @@ export function App() {
           pipeline.enqueue(uncached.slice(0, THUMBNAIL_BOOTSTRAP_COUNT), 0);
           enqueueVisibleThumbnailEntries(visibleThumbnailIdsRef.current, 0);
         } else {
+          afterNextPaint(() => {
+            if (validCachedIds.size > 0) {
+              markFirstThumbnailVisible();
+            }
+            markGridComplete();
+          });
           setImportProgress((current) => ({ ...current, isOpen: false }));
         }
       }).catch(() => {
+        if (folderLoadSessionRef.current !== folderLoadSession) {
+          return;
+        }
+
         // Cache unavailable — enqueue everything to the pipeline
         setThumbnailProgress({ done: 0, total: pipelineEntries.length });
         setImportProgress((current) => ({
@@ -586,6 +874,8 @@ export function App() {
       enqueueVisibleThumbnailEntries,
       handleThumbnailBatch,
       handleThumbnailError,
+      markFirstThumbnailVisible,
+      markGridComplete,
       syncThumbnailProgress,
       undoRedo,
     ]
@@ -631,6 +921,67 @@ export function App() {
     setActiveAssetIds(nextIds);
     queueXmpSync(Array.from(changedIds));
   }, [queueXmpSync]);
+
+  const refreshDesktopThumbnailCacheInfo = useCallback(async () => {
+    const info = await getDesktopThumbnailCacheInfo();
+    setDesktopThumbnailCacheInfo(info);
+  }, []);
+
+  const handleChooseDesktopThumbnailCacheDirectory = useCallback(async () => {
+    setIsDesktopThumbnailCacheBusy(true);
+    try {
+      const info = await chooseDesktopThumbnailCacheDirectory();
+      if (info) {
+        setDesktopThumbnailCacheInfo(info);
+        addToast("Percorso cache thumbnail aggiornato.", "success");
+      }
+    } finally {
+      setIsDesktopThumbnailCacheBusy(false);
+    }
+  }, [addToast]);
+
+  const handleSetDesktopThumbnailCacheDirectory = useCallback(async (directoryPath: string) => {
+    setIsDesktopThumbnailCacheBusy(true);
+    try {
+      const info = await setDesktopThumbnailCacheDirectory(directoryPath);
+      if (info) {
+        setDesktopThumbnailCacheInfo(info);
+        addToast("Nuovo percorso cache applicato.", "success");
+      } else {
+        addToast("Non sono riuscito ad aggiornare il percorso cache.", "error");
+      }
+    } finally {
+      setIsDesktopThumbnailCacheBusy(false);
+    }
+  }, [addToast]);
+
+  const handleResetDesktopThumbnailCacheDirectory = useCallback(async () => {
+    setIsDesktopThumbnailCacheBusy(true);
+    try {
+      const info = await resetDesktopThumbnailCacheDirectory();
+      if (info) {
+        setDesktopThumbnailCacheInfo(info);
+        addToast("Cache riportata al percorso predefinito.", "success");
+      }
+    } finally {
+      setIsDesktopThumbnailCacheBusy(false);
+    }
+  }, [addToast]);
+
+  const handleClearDesktopThumbnailCache = useCallback(async () => {
+    setIsDesktopThumbnailCacheBusy(true);
+    try {
+      const cleared = await clearDesktopThumbnailCache();
+      if (cleared) {
+        addToast("Cache thumbnail svuotata.", "success");
+        await refreshDesktopThumbnailCacheInfo();
+      } else {
+        addToast("Non sono riuscito a svuotare la cache thumbnail.", "error");
+      }
+    } finally {
+      setIsDesktopThumbnailCacheBusy(false);
+    }
+  }, [addToast, refreshDesktopThumbnailCacheInfo]);
 
   const handleSelectorApply = useCallback(
     (nextIds: string[], nextAssets: ImageAsset[]) => {
@@ -712,6 +1063,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    void refreshDesktopThumbnailCacheInfo();
+  }, [refreshDesktopThumbnailCacheInfo]);
+
+  useEffect(() => {
     if (usesMockData || allAssets.length === 0) {
       setXmpSyncState({
         phase: "idle",
@@ -733,10 +1088,22 @@ export function App() {
   }, [allAssets.length, hasWritableFolderAccess, usesMockData]);
 
   useEffect(() => {
+    if (thumbnailProgress.total === 0 || thumbnailProgress.done < thumbnailProgress.total) {
+      return;
+    }
+
+    void refreshDesktopThumbnailCacheInfo();
+    afterNextPaint(() => {
+      markGridComplete();
+    });
+  }, [markGridComplete, refreshDesktopThumbnailCacheInfo, thumbnailProgress.done, thumbnailProgress.total]);
+
+  useEffect(() => {
     if (!importProgress.isOpen) return;
     if (importProgress.total === 0 || importProgress.processed < importProgress.total) return;
 
     const timeoutId = window.setTimeout(() => {
+      setIsImportPanelDismissed(false);
       setImportProgress((current) => (
         current.isOpen && current.processed >= current.total
           ? { ...current, isOpen: false }
@@ -844,6 +1211,7 @@ export function App() {
     <ErrorBoundary>
       <div className="photo-selector-app">
         <header className="app-header">
+          <img src={logo} alt="Logo" style={{ height: 40, marginRight: 16 }} />
           <div className="app-header__brand">
             <h1 className="app-header__title">Selezione Foto</h1>
             <span className="app-header__subtitle">Photo Tools Suite</span>
@@ -875,7 +1243,12 @@ export function App() {
           </nav>
           <div className="app-header__actions">
             {isGeneratingThumbnails ? (
-              <div className="app-header__pipeline-status">
+              <button
+                type="button"
+                className="app-header__pipeline-status app-header__pipeline-status--button"
+                onClick={() => setIsImportPanelDismissed(false)}
+                title="Mostra stato caricamento"
+              >
                 <div className="pipeline-progress">
                   <div
                     className="pipeline-progress__fill"
@@ -885,7 +1258,7 @@ export function App() {
                 <span className="pipeline-progress__label">
                   {thumbnailProgress.done}/{thumbnailProgress.total}
                 </span>
-              </div>
+              </button>
             ) : null}
             {allAssets.length > 0 ? (
               <button
@@ -945,6 +1318,42 @@ export function App() {
               onDismiss={() => setIsXmpBannerDismissed(true)}
             />
           ) : null}
+          {folderDiagnostics ? (
+            <div className="folder-diagnostics-panel" role="status" aria-live="polite">
+              <div className="folder-diagnostics-panel__header">
+                <div>
+                  <strong>Diagnostica cartella</strong>
+                  <span>{formatFolderDiagnosticsSource(folderDiagnostics.source)}</span>
+                </div>
+                <div className="folder-diagnostics-panel__badge">
+                  {folderDiagnostics.topLevelSupportedCount} top-level
+                </div>
+              </div>
+
+              <div className="folder-diagnostics-panel__grid">
+                <div className="folder-diagnostics-panel__item">
+                  <span>Path selezionato</span>
+                  <strong title={folderDiagnostics.selectedPath}>{folderDiagnostics.selectedPath}</strong>
+                </div>
+                <div className="folder-diagnostics-panel__item">
+                  <span>Top-level caricati</span>
+                  <strong>{folderDiagnostics.topLevelSupportedCount}</strong>
+                </div>
+                <div className="folder-diagnostics-panel__item">
+                  <span>Annidati scartati</span>
+                  <strong>{folderDiagnostics.nestedSupportedDiscardedCount}</strong>
+                </div>
+                <div className="folder-diagnostics-panel__item">
+                  <span>Totale supportate viste</span>
+                  <strong>{folderDiagnostics.totalSupportedSeen}</strong>
+                </div>
+                <div className="folder-diagnostics-panel__item">
+                  <span>Sottocartelle viste</span>
+                  <strong>{folderDiagnostics.nestedDirectoriesSeen ?? 0}</strong>
+                </div>
+              </div>
+            </div>
+          ) : null}
           {currentScreen === "browse" ? (
             <div className="app-section">
               <FolderBrowser
@@ -965,6 +1374,12 @@ export function App() {
                 onRedo={undoRedo.redo}
                 canUndo={undoRedo.canUndo}
                 canRedo={undoRedo.canRedo}
+                desktopThumbnailCacheInfo={desktopThumbnailCacheInfo}
+                isDesktopThumbnailCacheBusy={isDesktopThumbnailCacheBusy}
+                onChooseDesktopThumbnailCacheDirectory={handleChooseDesktopThumbnailCacheDirectory}
+                onSetDesktopThumbnailCacheDirectory={handleSetDesktopThumbnailCacheDirectory}
+                onResetDesktopThumbnailCacheDirectory={handleResetDesktopThumbnailCacheDirectory}
+                onClearDesktopThumbnailCache={handleClearDesktopThumbnailCache}
               />
             </div>
           ) : null}
@@ -994,7 +1409,7 @@ export function App() {
           />
         ) : null}
         <ImportProgressModal
-          isOpen={currentScreen === "browse" && importProgress.isOpen}
+          isOpen={importProgress.isOpen && !isImportPanelDismissed}
           phase={importProgress.phase}
           supported={importProgress.supported}
           ignored={importProgress.ignored}
@@ -1002,6 +1417,9 @@ export function App() {
           processed={importProgress.processed}
           currentFile={importProgress.currentFile}
           folderLabel={importProgress.folderLabel}
+          diagnostics={importProgress.diagnostics}
+          onDismiss={() => setIsImportPanelDismissed(true)}
+          onCancel={handleCancelImport}
         />
       </div>
     </ErrorBoundary>
