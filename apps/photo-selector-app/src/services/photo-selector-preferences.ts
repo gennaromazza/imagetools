@@ -3,11 +3,19 @@ import type { PhotoFilterState } from "./photo-classification";
 import { COLOR_LABEL_NAMES } from "./photo-classification";
 
 const PREFERENCES_KEY = "photo-selector-preferences-v1";
+export type ThumbnailProfile = "ultra-fast" | "fast" | "balanced";
+export type CustomLabelTone = "sand" | "rose" | "green" | "blue" | "purple" | "slate";
+export const DEFAULT_CUSTOM_LABEL_TONE: CustomLabelTone = "sand";
+export const CUSTOM_LABEL_SHORTCUT_OPTIONS = [
+  "A", "S", "D", "G", "H", "J", "K", "L", "Q", "W", "E", "R", "T", "Y",
+] as const;
+export type CustomLabelShortcut = (typeof CUSTOM_LABEL_SHORTCUT_OPTIONS)[number];
 
 export interface PhotoFilterPreset {
   id: string;
   name: string;
   filters: PhotoFilterState & {
+    customLabelFilter?: string;
     folderFilter?: string;
     seriesFilter?: string;
     timeClusterFilter?: string;
@@ -18,12 +26,122 @@ export interface PhotoFilterPreset {
 export interface PhotoSelectorPreferences {
   colorNames: Record<ColorLabel, string>;
   filterPresets: PhotoFilterPreset[];
+  customLabelsCatalog: string[];
+  customLabelColors: Record<string, CustomLabelTone>;
+  customLabelShortcuts: Record<string, CustomLabelShortcut | null>;
+  thumbnailProfile: ThumbnailProfile;
+  sortCacheEnabled: boolean;
 }
 
 export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
   colorNames: { ...COLOR_LABEL_NAMES },
   filterPresets: [],
+  customLabelsCatalog: [],
+  customLabelColors: {},
+  customLabelShortcuts: {},
+  thumbnailProfile: "ultra-fast",
+  sortCacheEnabled: true,
 };
+
+export function normalizeCustomLabelName(value: string): string {
+  return value.replace(/\s+/g, " ").trim().slice(0, 48);
+}
+
+export function normalizeCustomLabelsCatalog(values: string[] | undefined): string[] {
+  if (!values || values.length === 0) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of values) {
+    const cleaned = normalizeCustomLabelName(value);
+    if (!cleaned) {
+      continue;
+    }
+
+    const key = cleaned.toLocaleLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    normalized.push(cleaned);
+  }
+
+  return normalized;
+}
+
+export function normalizeCustomLabelTone(value: string | undefined): CustomLabelTone {
+  switch (value) {
+    case "rose":
+    case "green":
+    case "blue":
+    case "purple":
+    case "slate":
+    case "sand":
+      return value;
+    default:
+      return DEFAULT_CUSTOM_LABEL_TONE;
+  }
+}
+
+export function normalizeCustomLabelColors(
+  catalog: string[],
+  colors: Record<string, string> | undefined,
+): Record<string, CustomLabelTone> {
+  const normalized: Record<string, CustomLabelTone> = {};
+  if (!colors) {
+    for (const label of catalog) {
+      normalized[label] = DEFAULT_CUSTOM_LABEL_TONE;
+    }
+    return normalized;
+  }
+
+  const colorEntries = Object.entries(colors);
+  for (const label of catalog) {
+    const match = colorEntries.find(([key]) => key.toLocaleLowerCase() === label.toLocaleLowerCase());
+    normalized[label] = normalizeCustomLabelTone(match?.[1]);
+  }
+
+  return normalized;
+}
+
+export function normalizeCustomLabelShortcut(
+  value: string | null | undefined,
+): CustomLabelShortcut | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return CUSTOM_LABEL_SHORTCUT_OPTIONS.includes(normalized as CustomLabelShortcut)
+    ? normalized as CustomLabelShortcut
+    : null;
+}
+
+export function normalizeCustomLabelShortcuts(
+  catalog: string[],
+  shortcuts: Record<string, string | null> | undefined,
+): Record<string, CustomLabelShortcut | null> {
+  const normalized: Record<string, CustomLabelShortcut | null> = {};
+  const usedShortcuts = new Set<CustomLabelShortcut>();
+  const shortcutEntries = Object.entries(shortcuts ?? {});
+
+  for (const label of catalog) {
+    const match = shortcutEntries.find(([key]) => key.toLocaleLowerCase() === label.toLocaleLowerCase());
+    const nextShortcut = normalizeCustomLabelShortcut(match?.[1]);
+    if (!nextShortcut || usedShortcuts.has(nextShortcut)) {
+      normalized[label] = null;
+      continue;
+    }
+
+    usedShortcuts.add(nextShortcut);
+    normalized[label] = nextShortcut;
+  }
+
+  return normalized;
+}
 
 export function loadPhotoSelectorPreferences(): PhotoSelectorPreferences {
   if (typeof window === "undefined") {
@@ -37,22 +155,78 @@ export function loadPhotoSelectorPreferences(): PhotoSelectorPreferences {
     }
 
     const parsed = JSON.parse(raw) as Partial<PhotoSelectorPreferences>;
+    const customLabelsCatalog = normalizeCustomLabelsCatalog(parsed.customLabelsCatalog);
     return {
       colorNames: {
         ...COLOR_LABEL_NAMES,
         ...(parsed.colorNames ?? {}),
       },
       filterPresets: Array.isArray(parsed.filterPresets) ? parsed.filterPresets : [],
+      customLabelsCatalog,
+      customLabelColors: normalizeCustomLabelColors(
+        customLabelsCatalog,
+        (parsed.customLabelColors as Record<string, string> | undefined),
+      ),
+      customLabelShortcuts: normalizeCustomLabelShortcuts(
+        customLabelsCatalog,
+        parsed.customLabelShortcuts as Record<string, string | null> | undefined,
+      ),
+      thumbnailProfile:
+        parsed.thumbnailProfile === "balanced"
+          ? "balanced"
+          : parsed.thumbnailProfile === "fast"
+            ? "fast"
+            : "ultra-fast",
+      sortCacheEnabled: parsed.sortCacheEnabled !== false,
     };
   } catch {
     return DEFAULT_PHOTO_SELECTOR_PREFERENCES;
   }
 }
 
-export function savePhotoSelectorPreferences(preferences: PhotoSelectorPreferences): void {
+export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorPreferences>): void {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences));
+  const current = loadPhotoSelectorPreferences();
+  const next: PhotoSelectorPreferences = {
+    ...current,
+    ...preferences,
+    colorNames: {
+      ...current.colorNames,
+      ...(preferences.colorNames ?? {}),
+    },
+    customLabelsCatalog: normalizeCustomLabelsCatalog(
+      preferences.customLabelsCatalog ?? current.customLabelsCatalog,
+    ),
+    customLabelColors: {},
+    customLabelShortcuts: {},
+    thumbnailProfile:
+      preferences.thumbnailProfile === "balanced"
+        ? "balanced"
+        : preferences.thumbnailProfile === "fast"
+          ? "fast"
+          : preferences.thumbnailProfile === "ultra-fast"
+            ? "ultra-fast"
+            : current.thumbnailProfile,
+    sortCacheEnabled: preferences.sortCacheEnabled ?? current.sortCacheEnabled,
+  };
+
+  next.customLabelColors = normalizeCustomLabelColors(
+    next.customLabelsCatalog,
+    {
+      ...current.customLabelColors,
+      ...(preferences.customLabelColors ?? {}),
+    },
+  );
+  next.customLabelShortcuts = normalizeCustomLabelShortcuts(
+    next.customLabelsCatalog,
+    {
+      ...current.customLabelShortcuts,
+      ...(preferences.customLabelShortcuts ?? {}),
+    },
+  );
+
+  window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next));
 }

@@ -1,6 +1,6 @@
 import { measureAsync } from "./performance-utils";
 const SUPPORTED_EXTENSIONS = [".jpg", ".jpeg", ".png"];
-const THUMBNAIL_MAX_DIMENSION = 420;
+const THUMBNAIL_MAX_DIMENSION = 320;
 const PREVIEW_MAX_DIMENSION = 1600;
 const THUMBNAIL_JPEG_QUALITY = 0.68;
 const PREVIEW_JPEG_QUALITY = 0.8;

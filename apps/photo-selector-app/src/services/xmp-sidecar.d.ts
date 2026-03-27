@@ -3,6 +3,7 @@ export interface XmpState {
     rating?: number;
     pickStatus?: PickStatus;
     colorLabel?: ColorLabel | null;
+    customLabels?: string[];
     selected?: boolean;
     hasCameraRawAdjustments: boolean;
     hasPhotoshopAdjustments: boolean;

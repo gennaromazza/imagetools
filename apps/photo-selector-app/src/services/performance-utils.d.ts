@@ -1,4 +1,12 @@
 type ByteReadKind = "raw" | "standard";
+type ByteReadStats = {
+    totalBytes: number;
+    totalImages: number;
+    rawBytes: number;
+    rawImages: number;
+    standardBytes: number;
+    standardImages: number;
+};
 export declare function isPerfEnabled(): boolean;
 export declare function perfTime(label: string): void;
 export declare function perfTimeEnd(label: string): void;
@@ -6,6 +14,7 @@ export declare function perfLog(message: string, ...args: unknown[]): void;
 export declare function measureAsync<T>(label: string, run: () => Promise<T>): Promise<T>;
 export declare function resetPerfByteReadStats(): void;
 export declare function recordBytesRead(kind: ByteReadKind, bytes: number): void;
+export declare function getPerfByteReadStats(): ByteReadStats;
 export declare function beginReactBatchMetric(updatedCount: number, totalCount: number): number | null;
 export declare function notePhotoCardRender(assetId: string): void;
 export declare function finishReactBatchMetric(token: number | null): void;

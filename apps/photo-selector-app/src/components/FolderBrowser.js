@@ -30,8 +30,9 @@ export function FolderBrowser({ onFolderOpened }) {
     async function handleBrowse() {
         if (supportsNative) {
             const result = await openFolderNative();
-            if (result)
-                onFolderOpened(result);
+            if (result) {
+                await onFolderOpened(result);
+            }
         }
         else {
             fileInputRef.current?.click();
@@ -41,7 +42,7 @@ export function FolderBrowser({ onFolderOpened }) {
         if (!files || files.length === 0)
             return;
         const result = fileListToEntries(files);
-        onFolderOpened(result);
+        void onFolderOpened(result);
     }
     async function handleRecentFolderOpen(folder) {
         if (!supportsNative || openingRecentFolder) {
@@ -51,7 +52,7 @@ export function FolderBrowser({ onFolderOpened }) {
         try {
             const result = await reopenRecentFolder(folder);
             if (result) {
-                onFolderOpened(result);
+                await onFolderOpened(result);
                 return;
             }
             await handleBrowse();

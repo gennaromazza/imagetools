@@ -4,19 +4,24 @@ import type { DocumentPreset, SheetPreset, DpiValue, ExportFormat, LayoutResult 
 import { DEFAULT_DOCUMENT_PRESET } from './presets/document-presets'
 import { DEFAULT_SHEET_PRESET } from './presets/sheet-presets'
 import { calculateLayout } from './engines/layout-engine'
-import { exportSheet } from './engines/export-engine'
+import { exportSheet, renderSheetCanvas } from './engines/export-engine'
 import { mmToPx } from './lib/utils'
 import {
+  composeAiOutputCanvas,
   defaultAiOptions,
   inferAiOptionsForSource,
   processCanvasWithAi,
   suggestAiActions,
+  type AiRefinePayload,
   type AiProcessingOptions,
 } from './services/image-processing-service'
+import { checkDnpCompatibility, printForDnpRx1 } from './services/print-service'
 import { ControlPanel } from './components/ControlPanel'
+import { BackgroundRefineEditor } from './components/BackgroundRefineEditor'
 import { CropEditor } from './components/CropEditor'
 import { PreviewSheet } from './components/PreviewSheet'
 import { UploadZone } from './components/UploadZone'
+import idPrintLogo from './assets/id_print_logo.png'
 
 export default function App() {
   const MIN_LEFT_PANEL_W = 280
@@ -30,6 +35,7 @@ export default function App() {
   const [exportFormat, setExportFormat] = useState<ExportFormat>('jpg')
   const [croppedCanvas, setCroppedCanvas] = useState<HTMLCanvasElement | null>(null)
   const [aiCanvas, setAiCanvas] = useState<HTMLCanvasElement | null>(null)
+  const [aiRefinePayload, setAiRefinePayload] = useState<AiRefinePayload | null>(null)
   const [aiOptions, setAiOptions] = useState<AiProcessingOptions>(defaultAiOptions)
   const [isAiProcessing, setIsAiProcessing] = useState(false)
   const [aiWarnings, setAiWarnings] = useState<string[]>([])
@@ -40,7 +46,7 @@ export default function App() {
     if (!Number.isFinite(parsed)) return 312
     return Math.min(MAX_LEFT_PANEL_W, Math.max(MIN_LEFT_PANEL_W, parsed))
   })
-  const [centerPreviewMode, setCenterPreviewMode] = useState<'original' | 'compare' | 'ai'>('original')
+  const [centerPreviewMode, setCenterPreviewMode] = useState<'original' | 'compare' | 'ai' | 'refine'>('original')
   const [compareSplit, setCompareSplit] = useState(0.5)
   const [autoAiPending, setAutoAiPending] = useState(false)
   const aiPreviewCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -147,6 +153,7 @@ export default function App() {
     setImageElement(img)
     setCroppedCanvas(null)
     setAiCanvas(null)
+    setAiRefinePayload(null)
     setAiWarnings([])
     setCenterPreviewMode('original')
     setAiOptions(inferAiOptionsForSource(img, docPreset, dpi))
@@ -156,6 +163,7 @@ export default function App() {
   const handleCropUpdate = useCallback((canvas: HTMLCanvasElement) => {
     setCroppedCanvas(canvas)
     setAiCanvas(null)
+    setAiRefinePayload(null)
     setCenterPreviewMode('original')
   }, [])
 
@@ -165,6 +173,7 @@ export default function App() {
     // AI output is bound to the previous crop/preset. Invalidate it so
     // the user immediately sees the new document framing.
     setAiCanvas(null)
+    setAiRefinePayload(null)
     setAiWarnings([])
     setCenterPreviewMode('original')
     if (hadAiResult) {
@@ -194,6 +203,7 @@ export default function App() {
     try {
       const result = await processCanvasWithAi(croppedCanvas, aiOptions, docPreset)
       setAiCanvas(result.canvas)
+      setAiRefinePayload(result.refinePayload)
       setAiWarnings(result.warnings)
       setCenterPreviewMode('compare')
 
@@ -244,9 +254,30 @@ export default function App() {
 
   const handleResetAi = useCallback(() => {
     setAiCanvas(null)
+    setAiRefinePayload(null)
     setAiWarnings([])
     setCenterPreviewMode('original')
   }, [])
+
+  const handleStartRefine = useCallback(() => {
+    if (!aiCanvas || !aiRefinePayload) return
+    setCenterPreviewMode('refine')
+  }, [aiCanvas, aiRefinePayload])
+
+  const handleSaveRefine = useCallback((canvas: HTMLCanvasElement) => {
+    if (!aiRefinePayload) return
+    setAiRefinePayload({
+      ...aiRefinePayload,
+      editableCanvas: canvas,
+    })
+    setAiCanvas(composeAiOutputCanvas(canvas, aiRefinePayload.applyWhiteBackground, aiRefinePayload.edgeSoftness))
+    setCenterPreviewMode('ai')
+    toast.success('Scontorno raffinato')
+  }, [aiRefinePayload])
+
+  const handleCancelRefine = useCallback(() => {
+    setCenterPreviewMode(aiCanvas ? 'ai' : 'original')
+  }, [aiCanvas])
 
   const handleExport = useCallback(async () => {
     const sourceForExport = aiCanvas ?? croppedCanvas
@@ -264,6 +295,42 @@ export default function App() {
       setIsExporting(false)
     }
   }, [aiCanvas, croppedCanvas, layout, exportFormat, docPreset, sheetPreset, dpi])
+
+  const handlePrint = useCallback(async () => {
+    const sourceForPrint = aiCanvas ?? croppedCanvas
+    if (!sourceForPrint || isExporting || isAiProcessing) {
+      toast.warning('Stampa non disponibile', {
+        description: 'Attendi la fine di export o AI e verifica che ci sia almeno un layout valido.',
+      })
+      return
+    }
+
+    const printLayout = calculateLayout(docPreset, sheetPreset, 300)
+    if (!printLayout || printLayout.total === 0) {
+      toast.warning('Nessuna copia stampabile', {
+        description: 'Controlla formato documento e foglio prima di inviare alla stampante.',
+      })
+      return
+    }
+
+    const compatible = checkDnpCompatibility(sheetPreset.widthMm, sheetPreset.heightMm)
+    if (!compatible) {
+      toast.warning('Formato foglio non standard per DNP RX1', {
+        description: 'Media supportati: 10x15, 15x20, 15x23 cm. Procedo comunque con la stampa.',
+      })
+    }
+
+    try {
+      const printCanvas = renderSheetCanvas(sourceForPrint, printLayout)
+      await printForDnpRx1(printCanvas, sheetPreset.widthMm, sheetPreset.heightMm)
+      toast.success('Inviato alla stampante', {
+        description: compatible ? compatible.label : `${sheetPreset.widthMm}x${sheetPreset.heightMm} mm`,
+      })
+    } catch (err) {
+      console.error(err)
+      toast.error('Errore durante la stampa')
+    }
+  }, [aiCanvas, croppedCanvas, docPreset, isAiProcessing, isExporting, sheetPreset])
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -283,8 +350,12 @@ export default function App() {
         }}
       >
         <div className="w-6 h-6 rounded-md flex items-center justify-center shrink-0"
-          style={{ background: 'var(--brand-primary)' }}>
-          <span className="text-[10px] font-bold text-[var(--brand-primary-foreground)]">ID</span>
+          style={{ background: 'rgba(255,255,255,0.92)' }}>
+          <img
+            src={idPrintLogo}
+            alt="Image ID Print"
+            className="h-6 w-6 rounded-[6px] object-cover"
+          />
         </div>
         <span className="text-sm font-semibold text-[var(--app-text)]">Image ID Print</span>
         <span
@@ -341,6 +412,7 @@ export default function App() {
             onAiOptionsChange={setAiOptions}
             onApplyAi={handleApplyAi}
             onResetAi={handleResetAi}
+            onPrint={handlePrint}
             onExport={handleExport}
           />
         </div>
@@ -394,14 +466,33 @@ export default function App() {
                         ? 'border-[var(--brand-primary)] bg-[var(--brand-primary-soft)] text-[var(--brand-primary)]'
                         : 'border-[var(--app-border)] bg-[var(--app-field)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]',
                     ].join(' ')}
-                  >
+                    >
                     AI
+                  </button>
+                  <button
+                    onClick={handleStartRefine}
+                    className={[
+                      'text-xs py-1.5 px-2.5 rounded border transition-colors',
+                      centerPreviewMode === 'refine'
+                        ? 'border-[var(--brand-primary)] bg-[var(--brand-primary-soft)] text-[var(--brand-primary)]'
+                        : 'border-[var(--app-border)] bg-[var(--app-field)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]',
+                    ].join(' ')}
+                  >
+                    Refina scontorno
                   </button>
                 </div>
               )}
 
               <div className="flex-1 min-h-0">
-                {aiCanvas && centerPreviewMode === 'ai' ? (
+                {aiCanvas && centerPreviewMode === 'refine' ? (
+                  <BackgroundRefineEditor
+                    editableCanvas={aiRefinePayload?.editableCanvas ?? aiCanvas}
+                    restoreCanvas={aiRefinePayload?.restoreCanvas ?? croppedCanvas ?? aiCanvas}
+                    applyWhiteBackground={aiRefinePayload?.applyWhiteBackground ?? true}
+                    onCancel={handleCancelRefine}
+                    onSave={handleSaveRefine}
+                  />
+                ) : aiCanvas && centerPreviewMode === 'ai' ? (
                   <div className="flex flex-col h-full gap-3">
                     <div className="flex-1 flex items-center justify-center rounded-xl overflow-hidden bg-[var(--app-field)] min-h-0 p-3">
                       <canvas

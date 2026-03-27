@@ -64,4 +64,41 @@ export async function clearDesktopThumbnailCache() {
         return false;
     }
 }
+export async function getDesktopCacheLocationRecommendation() {
+    const api = getDesktopApi();
+    if (!api?.getCacheLocationRecommendation) {
+        return null;
+    }
+    try {
+        return await api.getCacheLocationRecommendation();
+    }
+    catch {
+        return null;
+    }
+}
+export async function migrateDesktopThumbnailCacheDirectory(directoryPath) {
+    const api = getDesktopApi();
+    if (!api?.migrateThumbnailCacheDirectory) {
+        return null;
+    }
+    try {
+        return await api.migrateThumbnailCacheDirectory(directoryPath);
+    }
+    catch {
+        return null;
+    }
+}
+export async function dismissDesktopCacheLocationRecommendation() {
+    const api = getDesktopApi();
+    if (!api?.dismissCacheLocationRecommendation) {
+        return false;
+    }
+    try {
+        await api.dismissCacheLocationRecommendation();
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 //# sourceMappingURL=desktop-thumbnail-cache.js.map

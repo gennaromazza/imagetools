@@ -10,7 +10,7 @@ import {
 } from "../services/folder-access";
 
 interface FolderBrowserProps {
-  onFolderOpened: (result: FolderOpenResult) => void;
+  onFolderOpened: (result: FolderOpenResult) => void | Promise<void>;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -40,7 +40,9 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
   async function handleBrowse() {
     if (supportsNative) {
       const result = await openFolderNative();
-      if (result) onFolderOpened(result);
+      if (result) {
+        await onFolderOpened(result);
+      }
     } else {
       fileInputRef.current?.click();
     }
@@ -49,7 +51,7 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
   function handleFallbackInput(files: FileList | null) {
     if (!files || files.length === 0) return;
     const result = fileListToEntries(files);
-    onFolderOpened(result);
+    void onFolderOpened(result);
   }
 
   async function handleRecentFolderOpen(folder: RecentFolder) {
@@ -61,7 +63,7 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
     try {
       const result = await reopenRecentFolder(folder);
       if (result) {
-        onFolderOpened(result);
+        await onFolderOpened(result);
         return;
       }
 

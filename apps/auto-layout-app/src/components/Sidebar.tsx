@@ -1,4 +1,5 @@
 import type { ToolNavigationItem } from "@photo-tools/shared-types";
+import autoLayoutLogo from "../assets/auto_layout_logo.png";
 
 interface SidebarProps {
   tools: ToolNavigationItem[];
@@ -9,6 +10,16 @@ export function Sidebar({ tools, activeToolId }: SidebarProps) {
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
+        <img
+          src={autoLayoutLogo}
+          alt="Auto Layout"
+          style={{
+            width: "100%",
+            maxWidth: "172px",
+            borderRadius: "18px",
+            boxShadow: "0 16px 28px rgba(0, 0, 0, 0.18)",
+          }}
+        />
         <span className="sidebar__eyebrow">ImageTools Suite</span>
         <h1>Auto Layout Studio</h1>
         <p>Stesso linguaggio visivo di Image Party Frame, adattato al planning e alla revisione dei fogli.</p>

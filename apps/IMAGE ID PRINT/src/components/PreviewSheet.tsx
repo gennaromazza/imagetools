@@ -16,17 +16,21 @@ export function PreviewSheet({ layout, croppedCanvas }: PreviewSheetProps) {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')!
+    const dpr = Math.max(1, window.devicePixelRatio || 1)
 
     if (!layout) {
       // Empty placeholder
-      canvas.width = PREVIEW_MAX_W
-      canvas.height = PREVIEW_MAX_H
+      canvas.width = Math.round(PREVIEW_MAX_W * dpr)
+      canvas.height = Math.round(PREVIEW_MAX_H * dpr)
+      canvas.style.width = `${PREVIEW_MAX_W}px`
+      canvas.style.height = `${PREVIEW_MAX_H}px`
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.fillStyle = '#f5f5f0'
-      ctx.fillRect(0, 0, canvas.width, canvas.height)
+      ctx.fillRect(0, 0, PREVIEW_MAX_W, PREVIEW_MAX_H)
       ctx.fillStyle = '#c9c1b7'
       ctx.font = '13px system-ui'
       ctx.textAlign = 'center'
-      ctx.fillText('Anteprima foglio', canvas.width / 2, canvas.height / 2)
+      ctx.fillText('Anteprima foglio', PREVIEW_MAX_W / 2, PREVIEW_MAX_H / 2)
       return
     }
 
@@ -38,8 +42,11 @@ export function PreviewSheet({ layout, croppedCanvas }: PreviewSheetProps) {
     const pw = Math.floor(layout.sheetWidthPx * scale)
     const ph = Math.floor(layout.sheetHeightPx * scale)
 
-    canvas.width = pw
-    canvas.height = ph
+    canvas.width = Math.round(pw * dpr)
+    canvas.height = Math.round(ph * dpr)
+    canvas.style.width = `${pw}px`
+    canvas.style.height = `${ph}px`
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
     // White sheet background
     ctx.fillStyle = '#ffffff'
@@ -55,7 +62,7 @@ export function PreviewSheet({ layout, croppedCanvas }: PreviewSheetProps) {
       if (croppedCanvas) {
         if (layout.photoRotated) {
           ctx.save()
-          ctx.translate(px + photoW / 2, py + photoH / 2)
+          ctx.translate(px + photoH / 2, py + photoW / 2)
           ctx.rotate(Math.PI / 2)
           ctx.drawImage(croppedCanvas, -photoH / 2, -photoW / 2, photoH, photoW)
           ctx.restore()

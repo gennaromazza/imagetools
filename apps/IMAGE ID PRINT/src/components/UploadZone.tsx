@@ -1,5 +1,6 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { Upload } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '../lib/utils'
 
 interface UploadZoneProps {
@@ -11,20 +12,33 @@ const ACCEPTED_TYPES = ['image/jpeg', 'image/png']
 
 export function UploadZone({ onImageLoaded, className }: UploadZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
 
   const handleFile = (file: File) => {
-    if (!ACCEPTED_TYPES.includes(file.type)) return
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      toast.error('Formato file non supportato', {
+        description: 'Usa un file JPG o PNG valido.',
+      })
+      return
+    }
     const url = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => {
       URL.revokeObjectURL(url)
       onImageLoaded(file, img)
     }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      toast.error('Immagine non leggibile', {
+        description: 'Il file selezionato sembra corrotto o non compatibile.',
+      })
+    }
     img.src = url
   }
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault()
+    setIsDragging(false)
     const file = e.dataTransfer.files[0]
     if (file) handleFile(file)
   }
@@ -40,12 +54,24 @@ export function UploadZone({ onImageLoaded, className }: UploadZoneProps) {
       className={cn(
         'flex flex-col items-center justify-center gap-5 rounded-xl border-2 border-dashed cursor-pointer',
         'transition-colors duration-200',
-        'border-[var(--app-border)] hover:border-[var(--brand-primary)]',
-        'bg-[var(--app-field)] hover:bg-[var(--app-field-hover)]',
+        isDragging
+          ? 'border-[var(--brand-primary)] bg-[var(--brand-primary-soft)]'
+          : 'border-[var(--app-border)] hover:border-[var(--brand-primary)] bg-[var(--app-field)] hover:bg-[var(--app-field-hover)]',
         'text-[var(--app-text-muted)] select-none',
         className,
       )}
-      onDragOver={(e) => e.preventDefault()}
+      onDragEnter={(e) => {
+        e.preventDefault()
+        setIsDragging(true)
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault()
+        setIsDragging(false)
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (!isDragging) setIsDragging(true)
+      }}
       onDrop={onDrop}
       onClick={() => inputRef.current?.click()}
       role="button"

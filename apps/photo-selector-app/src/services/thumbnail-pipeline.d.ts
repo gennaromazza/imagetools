@@ -8,6 +8,11 @@ export interface ThumbnailUpdate {
 }
 type BatchCallback = (batch: ThumbnailUpdate[]) => void;
 type ErrorCallback = (failedCount: number, failedId: string) => void;
+export interface ThumbnailPipelineOptions {
+    maxDimension?: number;
+    quality?: number;
+    minimumPreviewShortSide?: number;
+}
 interface QueueItem {
     id: string;
     file?: File;
@@ -21,6 +26,7 @@ interface QueueItem {
 export declare class ThumbnailPipeline {
     private workers;
     private busyWorkers;
+    private activeDesktopTasks;
     private queue;
     private queuedItems;
     private processing;
@@ -31,19 +37,27 @@ export declare class ThumbnailPipeline {
     private destroyed;
     private onBatch;
     private onError;
-    constructor(onBatch: BatchCallback, onError?: ErrorCallback);
+    private maxDimension;
+    private quality;
+    private minimumPreviewShortSide;
+    private desktopTaskLimit;
+    constructor(onBatch: BatchCallback, onError?: ErrorCallback, options?: ThumbnailPipelineOptions);
     enqueue(items: Array<Omit<QueueItem, "priority">>, priority?: number): void;
-    updateViewport(visibleIds: Set<string>): void;
+    updateViewport(visibleIds: Set<string>, prioritizedIds?: Set<string>): void;
     get pendingCount(): number;
     get completedCount(): number;
     get failedCount(): number;
+    updateOptions(options?: ThumbnailPipelineOptions): void;
+    invalidate(ids: Iterable<string>): void;
     destroy(): void;
     private sortQueue;
     private schedule;
+    private dispatchDesktop;
     private dispatch;
     private handleWorkerResult;
     private handleWorkerCrash;
     private releaseWorker;
+    private releaseDesktopTask;
     private markCompleted;
     private markFailed;
     private flushBatch;

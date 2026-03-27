@@ -14,6 +14,7 @@ interface ExportedProject {
     rating?: number;
     pickStatus?: ImageAsset["pickStatus"];
     colorLabel?: ImageAsset["colorLabel"];
+    customLabels?: string[];
     width: number;
     height: number;
     orientation: ImageOrientation;
@@ -49,6 +50,7 @@ async function imageAssetToExportFormat(asset: ImageAsset): Promise<ExportedProj
     rating: asset.rating ?? 0,
     pickStatus: asset.pickStatus ?? "unmarked",
     colorLabel: asset.colorLabel ?? null,
+    customLabels: asset.customLabels ?? [],
     width: asset.width,
     height: asset.height,
     orientation: asset.orientation,
@@ -69,6 +71,7 @@ function exportedAssetToImageAsset(exported: ExportedProject["assets"][0]): Imag
     rating: exported.rating ?? 0,
     pickStatus: exported.pickStatus ?? "unmarked",
     colorLabel: exported.colorLabel ?? null,
+    customLabels: exported.customLabels ?? [],
     width: exported.width,
     height: exported.height,
     orientation: exported.orientation,

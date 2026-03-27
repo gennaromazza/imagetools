@@ -7,8 +7,8 @@ import { measureAsync } from "./performance-utils";
 const DB_NAME = "imagetool-thumb-cache";
 const DB_VERSION = 1;
 const STORE_NAME = "thumbnails";
-const THUMBNAIL_CACHE_MAX_DIMENSION = 420;
-const THUMBNAIL_CACHE_QUALITY = 0.72;
+const DEFAULT_THUMBNAIL_CACHE_MAX_DIMENSION = 320;
+const DEFAULT_THUMBNAIL_CACHE_QUALITY = 0.72;
 let dbPromise = null;
 function canUseDesktopThumbnailCache() {
     return typeof window !== "undefined" && typeof window.filexDesktop?.getCachedThumbnails === "function";
@@ -79,15 +79,17 @@ export async function cacheThumbnailBatch(items) {
     });
 }
 /** Retrieve cached thumbnails for a list of asset IDs. Returns a Map of found entries. */
-export async function loadCachedThumbnails(entries) {
+export async function loadCachedThumbnails(entries, options) {
     const result = new Map();
     if (entries.length === 0)
         return result;
+    const maxDimension = options?.maxDimension ?? DEFAULT_THUMBNAIL_CACHE_MAX_DIMENSION;
+    const quality = options?.quality ?? DEFAULT_THUMBNAIL_CACHE_QUALITY;
     const desktopEntries = toDesktopLookupEntries(entries);
     if (desktopEntries.length > 0 && canUseDesktopThumbnailCache()) {
         await measureAsync(`[PERF] desktop cache bulk-read (${desktopEntries.length})`, async () => {
             try {
-                const cached = await window.filexDesktop.getCachedThumbnails(desktopEntries, THUMBNAIL_CACHE_MAX_DIMENSION, THUMBNAIL_CACHE_QUALITY);
+                const cached = await window.filexDesktop.getCachedThumbnails(desktopEntries, maxDimension, quality);
                 for (const hit of cached) {
                     const ownedBytes = new Uint8Array(hit.bytes.byteLength);
                     ownedBytes.set(hit.bytes);
@@ -110,14 +112,13 @@ export async function loadCachedThumbnails(entries) {
             const db = await getDB();
             const tx = db.transaction(STORE_NAME, "readonly");
             const store = tx.objectStore(STORE_NAME);
-            const requestedIds = new Set(ids);
-            const records = await new Promise((resolve, reject) => {
-                const req = store.getAll();
-                req.onsuccess = () => resolve(req.result ?? []);
+            const records = await Promise.all(ids.map((id) => new Promise((resolve, reject) => {
+                const req = store.get(id);
+                req.onsuccess = () => resolve(req.result ?? null);
                 req.onerror = () => reject(req.error);
-            });
+            })));
             for (const data of records) {
-                if (!requestedIds.has(data.id) || !data.blob) {
+                if (!data?.blob) {
                     continue;
                 }
                 result.set(data.id, {

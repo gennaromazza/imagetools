@@ -43,6 +43,9 @@ export function locateEmbeddedJpegRange(buffer: ArrayBuffer): EmbeddedJpegRange 
   const rafCandidate = tryRafLocate(data);
   if (rafCandidate && rafCandidate.length > 10_000) candidates.push(rafCandidate);
 
+  const bmffCandidate = tryBmffLocate(data);
+  if (bmffCandidate && bmffCandidate.length > 10_000) candidates.push(bmffCandidate);
+
   if (candidates.length === 0) return null;
 
   let best = candidates[0];

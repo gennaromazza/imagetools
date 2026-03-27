@@ -38,6 +38,35 @@ function toColorLabel(value: unknown): ColorLabel | null {
     : null;
 }
 
+function toCustomLabels(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") {
+      continue;
+    }
+
+    const cleaned = item.replace(/\s+/g, " ").trim().slice(0, 48);
+    if (!cleaned) {
+      continue;
+    }
+
+    const key = cleaned.toLocaleLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    normalized.push(cleaned);
+  }
+
+  return normalized;
+}
+
 function toOutputFormat(value: unknown, fallback: OutputFormat): OutputFormat {
   return value === "jpg" || value === "png" || value === "tif" ? value : fallback;
 }
@@ -79,6 +108,7 @@ function normalizeImageAsset(rawAsset: unknown): ImageAsset | null {
     rating: Math.max(0, Math.min(5, Math.round(toNumberValue(rawAsset.rating, 0)))),
     pickStatus: toPickStatus(rawAsset.pickStatus),
     colorLabel: toColorLabel(rawAsset.colorLabel),
+    customLabels: toCustomLabels(rawAsset.customLabels),
     width,
     height,
     orientation,

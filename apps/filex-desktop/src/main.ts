@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
-import { existsSync } from "node:fs";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { spawn } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { DesktopRuntimeInfo, DesktopThumbnailCacheLookupEntry } from "@photo-tools/desktop-contracts";
+import type { DesktopEditorCandidate, DesktopRuntimeInfo, DesktopThumbnailCacheLookupEntry } from "@photo-tools/desktop-contracts";
 import {
   openFolderDesktop,
   readFileFromDisk,
@@ -9,12 +10,20 @@ import {
   reopenFolderDesktop,
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
-import { getDesktopPreview, getDesktopThumbnail } from "./native-image-service.js";
+import {
+  getDesktopPreview,
+  getDesktopThumbnail,
+  shutdownDesktopImageService,
+  warmDesktopPreview,
+} from "./native-image-service.js";
 import {
   chooseThumbnailCacheDirectory,
   clearThumbnailCacheDirectory,
+  dismissCacheLocationRecommendation,
   getCachedThumbnailsFromDisk,
+  getCacheLocationRecommendation,
   getThumbnailCacheInfo,
+  migrateThumbnailCacheDirectory,
   resetThumbnailCacheDirectory,
   setThumbnailCacheDirectory,
 } from "./thumbnail-disk-cache.js";
@@ -23,6 +32,20 @@ import { getDesktopToolOrDefault } from "./tool-manifest.js";
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
+const appUserModelId = `studio.filex.${requestedTool.id}`;
+
+app.setName(requestedTool.productName);
+if (process.platform === "win32") {
+  app.setAppUserModelId(appUserModelId);
+}
+
+function resolveWindowIcon(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "branding", `${requestedTool.id}.png`);
+  }
+
+  return resolve(app.getAppPath(), "build", "branding", `${requestedTool.id}.png`);
+}
 
 function resolveRendererEntry(): string {
   if (app.isPackaged) {
@@ -37,6 +60,54 @@ function escapeHtml(value: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function sanitizeDesktopPath(value: string): string {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  const withoutQuotes = trimmed.replace(/^"+|"+$/g, "");
+  return withoutQuotes.replace(/\//g, "\\");
+}
+
+function getInstalledEditorCandidates(): DesktopEditorCandidate[] {
+  const roots = [
+    "C:\\Program Files\\Adobe",
+    "C:\\Program Files (x86)\\Adobe",
+  ];
+  const candidates: DesktopEditorCandidate[] = [];
+  const seen = new Set<string>();
+
+  for (const root of roots) {
+    if (!existsSync(root)) {
+      continue;
+    }
+
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(root, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && /^Adobe Photoshop\b/i.test(entry.name))
+        .map((entry) => entry.name);
+    } catch {
+      continue;
+    }
+
+    entries
+      .sort((left, right) => right.localeCompare(left, undefined, { numeric: true, sensitivity: "base" }))
+      .forEach((directoryName) => {
+        const executablePath = join(root, directoryName, "Photoshop.exe");
+        const normalizedPath = sanitizeDesktopPath(executablePath);
+        if (!existsSync(normalizedPath) || seen.has(normalizedPath.toLowerCase())) {
+          return;
+        }
+
+        seen.add(normalizedPath.toLowerCase());
+        candidates.push({
+          path: normalizedPath,
+          label: directoryName.replace(/^Adobe\s+/i, ""),
+        });
+      });
+  }
+
+  return candidates;
 }
 
 function buildMissingRendererHtml(entryPath: string): string {
@@ -111,6 +182,38 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle("filex:open-folder", () => openFolderDesktop());
   ipcMain.handle("filex:reopen-folder", (_event, rootPath: string) => reopenFolderDesktop(rootPath));
+  ipcMain.on("filex:start-drag-out", (event, absolutePaths: unknown) => {
+    const paths = Array.isArray(absolutePaths)
+      ? absolutePaths.filter((value): value is string => typeof value === "string" && value.length > 0 && existsSync(value))
+      : [];
+
+    if (paths.length === 0) {
+      return;
+    }
+
+    const iconPath = resolveWindowIcon();
+    const dragItem = paths.length > 1
+      ? { file: paths[0], files: paths, icon: iconPath }
+      : { file: paths[0], icon: iconPath };
+
+    try {
+      event.sender.startDrag(dragItem);
+    } catch (error) {
+      console.error("FileX startDrag failed", error);
+
+      if (paths.length > 1) {
+        try {
+          event.sender.startDrag({
+            file: paths[0],
+            icon: iconPath,
+          });
+          return;
+        } catch (fallbackError) {
+          console.error("FileX startDrag fallback failed", fallbackError);
+        }
+      }
+    }
+  });
   ipcMain.handle("filex:read-file", (_event, absolutePath: string) => readFileFromDisk(absolutePath));
   ipcMain.handle(
     "filex:get-thumbnail",
@@ -129,7 +232,85 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("filex:reset-thumbnail-cache-directory", () => resetThumbnailCacheDirectory());
   ipcMain.handle("filex:clear-thumbnail-cache", () => clearThumbnailCacheDirectory());
-  ipcMain.handle("filex:get-preview", (_event, absolutePath: string) => getDesktopPreview(absolutePath));
+  ipcMain.handle("filex:get-cache-location-recommendation", () => getCacheLocationRecommendation());
+  ipcMain.handle("filex:migrate-thumbnail-cache-directory", (_event, directoryPath: string) =>
+    migrateThumbnailCacheDirectory(directoryPath),
+  );
+  ipcMain.handle("filex:dismiss-cache-location-recommendation", () =>
+    dismissCacheLocationRecommendation(),
+  );
+  ipcMain.handle("filex:choose-editor-executable", async (_event, currentPath?: string) => {
+    const normalizedCurrentPath = sanitizeDesktopPath(currentPath ?? "");
+    const installedCandidates = getInstalledEditorCandidates();
+    const fallbackCandidate = installedCandidates[0]?.path ?? "";
+    const defaultPath = existsSync(normalizedCurrentPath) ? normalizedCurrentPath : fallbackCandidate;
+    const result = await dialog.showOpenDialog({
+      title: "Seleziona editor esterno",
+      defaultPath: defaultPath || undefined,
+      buttonLabel: "Usa questo editor",
+      properties: ["openFile"],
+      filters: [
+        { name: "Eseguibili Windows", extensions: ["exe", "bat", "cmd"] },
+        { name: "Tutti i file", extensions: ["*"] },
+      ],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return sanitizeDesktopPath(result.filePaths[0]);
+  });
+  ipcMain.handle("filex:get-installed-editor-candidates", () => getInstalledEditorCandidates());
+  ipcMain.handle(
+    "filex:get-preview",
+    (_event, absolutePath: string, options?: { maxDimension?: number; sourceFileKey?: string }) =>
+      getDesktopPreview(absolutePath, options?.maxDimension, options?.sourceFileKey),
+  );
+  ipcMain.handle(
+    "filex:warm-preview",
+    (_event, absolutePath: string, options?: { maxDimension?: number; sourceFileKey?: string }) =>
+      warmDesktopPreview(absolutePath, options?.maxDimension, options?.sourceFileKey),
+  );
+  ipcMain.handle(
+    "filex:open-with-editor",
+    async (_event, editorPath: string, absolutePaths: string[]) => {
+      const normalizedEditorPath = sanitizeDesktopPath(editorPath);
+      const targetPaths = Array.isArray(absolutePaths)
+        ? absolutePaths.filter((value): value is string => {
+            const normalizedValue = sanitizeDesktopPath(value);
+            return normalizedValue.length > 0 && existsSync(normalizedValue);
+          }).map((value) => sanitizeDesktopPath(value))
+        : [];
+
+      if (!normalizedEditorPath || !existsSync(normalizedEditorPath)) {
+        const installedEditors = getInstalledEditorCandidates();
+        const installedHint = installedEditors[0]
+          ? ` Editor rilevato: ${installedEditors[0].path}`
+          : "";
+        return { ok: false, error: `Editor non trovato o percorso non valido.${installedHint}` };
+      }
+
+      if (targetPaths.length === 0) {
+        return { ok: false, error: "Nessun file valido da aprire." };
+      }
+
+      try {
+        const child = spawn(normalizedEditorPath, targetPaths, {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: false,
+        });
+        child.unref();
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : "Impossibile aprire l'editor.",
+        };
+      }
+    },
+  );
   ipcMain.handle("filex:read-sidecar-xmp", (_event, absolutePath: string) =>
     readSidecarXmpFromAssetPath(absolutePath),
   );
@@ -155,13 +336,14 @@ async function loadRenderer(window: BrowserWindow): Promise<void> {
 
 async function createMainWindow(): Promise<void> {
   const mainWindow = new BrowserWindow({
-    title: `FileX Suite - ${requestedTool.displayName}`,
+    title: requestedTool.productName,
     width: requestedTool.defaultWindowWidth,
     height: requestedTool.defaultWindowHeight,
     minWidth: requestedTool.minWindowWidth,
     minHeight: requestedTool.minWindowHeight,
     autoHideMenuBar: true,
     backgroundColor: "#181d1a",
+    icon: resolveWindowIcon(),
     webPreferences: {
       preload: join(app.getAppPath(), "dist-electron", "preload.js"),
       contextIsolation: true,
@@ -175,7 +357,14 @@ async function createMainWindow(): Promise<void> {
     return { action: "deny" };
   });
 
+  mainWindow.webContents.on("will-prevent-unload", (event) => {
+    event.preventDefault();
+    mainWindow.destroy();
+  });
+
   await loadRenderer(mainWindow);
+
+  mainWindow.setTitle(requestedTool.productName);
 
   if (!app.isPackaged) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
@@ -200,4 +389,8 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.once("before-quit", () => {
+  void shutdownDesktopImageService();
 });

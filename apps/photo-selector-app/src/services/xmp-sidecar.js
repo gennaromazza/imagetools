@@ -1,3 +1,4 @@
+const RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const XMP_NS = "http://ns.adobe.com/xap/1.0/";
 const PHOTOSUITE_NS = "https://imagetool.local/ns/photosuite/1.0/";
 function toColorLabel(value) {
@@ -28,6 +29,29 @@ function clampRating(value) {
         return 0;
     return Math.max(0, Math.min(5, Math.round(value)));
 }
+function normalizeCustomLabelName(value) {
+    return value.replace(/\s+/g, " ").trim().slice(0, 48);
+}
+function normalizeCustomLabels(values) {
+    if (!values || values.length === 0) {
+        return [];
+    }
+    const seen = new Set();
+    const normalized = [];
+    for (const value of values) {
+        const cleaned = normalizeCustomLabelName(value);
+        if (!cleaned) {
+            continue;
+        }
+        const key = cleaned.toLocaleLowerCase();
+        if (seen.has(key)) {
+            continue;
+        }
+        seen.add(key);
+        normalized.push(cleaned);
+    }
+    return normalized;
+}
 function getDescriptionElement(doc) {
     const byTag = doc.getElementsByTagName("rdf:Description");
     if (byTag.length > 0)
@@ -35,12 +59,55 @@ function getDescriptionElement(doc) {
     const about = doc.querySelector("Description");
     if (about)
         return about;
-    const rdf = doc.createElementNS("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "rdf:RDF");
-    const desc = doc.createElementNS("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "rdf:Description");
-    desc.setAttributeNS("http://www.w3.org/1999/02/22-rdf-syntax-ns#", "rdf:about", "");
+    const rdf = doc.createElementNS(RDF_NS, "rdf:RDF");
+    const desc = doc.createElementNS(RDF_NS, "rdf:Description");
+    desc.setAttributeNS(RDF_NS, "rdf:about", "");
     rdf.appendChild(desc);
     doc.documentElement.appendChild(rdf);
     return desc;
+}
+function findDirectChildByNamespace(parent, namespaceUri, localName) {
+    for (const child of Array.from(parent.children)) {
+        const childLocalName = child.localName || child.tagName.split(":").pop() || child.tagName;
+        if ((child.namespaceURI === namespaceUri || child.tagName === `photosuite:${localName}`) && childLocalName === localName) {
+            return child;
+        }
+    }
+    return null;
+}
+function readCustomLabels(el) {
+    const container = findDirectChildByNamespace(el, PHOTOSUITE_NS, "CustomLabels");
+    if (!container) {
+        return undefined;
+    }
+    const values = Array.from(container.getElementsByTagNameNS(RDF_NS, "li"))
+        .map((node) => node.textContent ?? "")
+        .map((value) => normalizeCustomLabelName(value))
+        .filter(Boolean);
+    return normalizeCustomLabels(values);
+}
+function upsertCustomLabels(doc, desc, labels) {
+    const existing = findDirectChildByNamespace(desc, PHOTOSUITE_NS, "CustomLabels");
+    if (labels.length === 0) {
+        existing?.remove();
+        desc.removeAttribute("photosuite:CustomLabels");
+        desc.removeAttributeNS(PHOTOSUITE_NS, "CustomLabels");
+        return;
+    }
+    const container = existing ?? doc.createElementNS(PHOTOSUITE_NS, "photosuite:CustomLabels");
+    if (!existing) {
+        desc.appendChild(container);
+    }
+    while (container.firstChild) {
+        container.removeChild(container.firstChild);
+    }
+    const bag = doc.createElementNS(RDF_NS, "rdf:Bag");
+    for (const label of labels) {
+        const item = doc.createElementNS(RDF_NS, "rdf:li");
+        item.textContent = label;
+        bag.appendChild(item);
+    }
+    container.appendChild(bag);
 }
 export function parseXmpState(xml) {
     const result = { hasCameraRawAdjustments: false, hasPhotoshopAdjustments: false };
@@ -105,6 +172,10 @@ export function parseXmpState(xml) {
                 result.hasPhotoshopAdjustments = true;
             }
         }
+        const customLabels = readCustomLabels(el);
+        if (customLabels !== undefined) {
+            result.customLabels = customLabels;
+        }
     }
     return result;
 }
@@ -133,6 +204,7 @@ export function upsertXmpState(existingXml, asset, selected) {
         desc.removeAttributeNS(XMP_NS, "Label");
     }
     desc.setAttributeNS(PHOTOSUITE_NS, "photosuite:Selected", selected ? "True" : "False");
+    upsertCustomLabels(doc, desc, normalizeCustomLabels(asset.customLabels));
     return new XMLSerializer().serializeToString(doc);
 }
 //# sourceMappingURL=xmp-sidecar.js.map

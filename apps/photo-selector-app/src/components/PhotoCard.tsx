@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type DragEvent } from "react";
 import { createPortal } from "react-dom";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { preloadImageUrls } from "../services/image-cache";
@@ -15,6 +15,7 @@ import {
   resolvePhotoClassificationShortcut,
 } from "../services/photo-classification";
 import { isRawFile } from "../services/folder-access";
+import type { CustomLabelShortcut, CustomLabelTone } from "../services/photo-selector-preferences";
 
 interface PhotoCardProps {
   photo: ImageAsset;
@@ -22,11 +23,15 @@ interface PhotoCardProps {
   onToggle: (id: string, event?: React.MouseEvent) => void;
   onUpdatePhoto: (
     id: string,
-    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
+    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>
   ) => void;
   onFocus: (id: string) => void;
   onPreview: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
+  onExternalDragStart?: (id: string, event: DragEvent<HTMLDivElement>) => void;
+  canExternalDrag?: boolean;
+  customLabelColors?: Record<string, CustomLabelTone>;
+  customLabelShortcuts?: Record<string, CustomLabelShortcut | null>;
   editable: boolean;
 }
 
@@ -45,17 +50,20 @@ export const PhotoCard = memo(
     onUpdatePhoto,
     onFocus,
     onPreview,
-  onContextMenu,
-  editable,
-}: PhotoCardProps) {
+    onContextMenu,
+    onExternalDragStart,
+    canExternalDrag = false,
+    customLabelColors = {},
+    customLabelShortcuts = {},
+    editable,
+  }: PhotoCardProps) {
     notePhotoCardRender(photo.id);
 
     const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
-    const aspectRatio =
-      photo.width > 0 && photo.height > 0 ? `${photo.width} / ${photo.height}` : undefined;
     const rating = getAssetRating(photo);
     const pickStatus = getAssetPickStatus(photo);
     const colorLabel = getAssetColorLabel(photo);
+    const customLabels = photo.customLabels ?? [];
     const raw = isRawFile(photo.fileName);
 
     const prevClassRef = useRef({ rating, pickStatus, colorLabel });
@@ -66,6 +74,7 @@ export const PhotoCard = memo(
     const [feedback, setFeedback] = useState<CardFeedback | null>(null);
     const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [hoverPos, setHoverPos] = useState<{ top: number; left: number; right: number; imgSrc: string } | null>(null);
+    const [isToolbarVisible, setIsToolbarVisible] = useState(isSelected);
 
     useEffect(() => {
       const prev = prevClassRef.current;
@@ -124,6 +133,12 @@ export const PhotoCard = memo(
     }, [colorLabel, pickStatus, rating]);
 
     useEffect(() => {
+      if (isSelected) {
+        setIsToolbarVisible(true);
+      }
+    }, [isSelected]);
+
+    useEffect(() => {
       return () => {
         if (feedbackTimeoutRef.current !== null) {
           window.clearTimeout(feedbackTimeoutRef.current);
@@ -146,9 +161,21 @@ export const PhotoCard = memo(
         aria-keyshortcuts="Enter Space 1 2 3 4 5 P X U"
         ref={cardRef}
         data-preview-asset-id={photo.id}
+        draggable={canExternalDrag}
         onClick={(event) => onToggle(photo.id, event)}
-        onFocus={() => onFocus(photo.id)}
+        onDragStart={(event) => {
+          if (!canExternalDrag || !onExternalDragStart) {
+            event.preventDefault();
+            return;
+          }
+          onExternalDragStart(photo.id, event);
+        }}
+        onFocus={() => {
+          setIsToolbarVisible(true);
+          onFocus(photo.id);
+        }}
         onMouseEnter={() => {
+          setIsToolbarVisible(true);
           if (photo.previewUrl) preloadImageUrls([photo.previewUrl]);
           const imgSrc = photo.previewUrl ?? photo.thumbnailUrl ?? null;
           if (!imgSrc) return;
@@ -169,7 +196,19 @@ export const PhotoCard = memo(
             clearTimeout(hoverTimerRef.current);
             hoverTimerRef.current = null;
           }
+          if (!isSelected) {
+            setIsToolbarVisible(false);
+          }
           setHoverPos(null);
+        }}
+        onBlur={(event) => {
+          const nextTarget = event.relatedTarget;
+          if (cardRef.current?.contains(nextTarget as Node | null)) {
+            return;
+          }
+          if (!isSelected) {
+            setIsToolbarVisible(false);
+          }
         }}
         onDoubleClick={() => onPreview(photo.id)}
         onContextMenu={(event) => {
@@ -205,7 +244,6 @@ export const PhotoCard = memo(
         <div
           ref={wrapperRef}
           className="photo-card__image-wrapper"
-          style={aspectRatio ? { aspectRatio } : undefined}
         >
           {previewUrl ? (
             <img
@@ -285,9 +323,27 @@ export const PhotoCard = memo(
               </span>
             ) : null}
           </div>
+          {customLabels.length > 0 ? (
+            <div className="photo-card__labels" title={customLabels.join(", ")}>
+              {customLabels.slice(0, 2).map((label) => (
+                <span
+                  key={label}
+                  className={`photo-card__label-chip photo-card__label-chip--${customLabelColors[label] ?? "sand"}`}
+                  title={customLabelShortcuts[label] ? `${label} · tasto ${customLabelShortcuts[label]}` : label}
+                >
+                  {customLabelShortcuts[label] ? `${label} · ${customLabelShortcuts[label]}` : label}
+                </span>
+              ))}
+              {customLabels.length > 2 ? (
+                <span className="photo-card__label-chip photo-card__label-chip--more">
+                  +{customLabels.length - 2}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
-        {editable ? (
+        {editable && isToolbarVisible ? (
           <div className="photo-card__toolbar" onClick={(event) => event.stopPropagation()}>
             <div className="photo-card__tiny-actions">
               {[1, 2, 3, 4, 5].map((value) => (

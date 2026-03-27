@@ -1,12 +1,12 @@
 import { perfLog, recordBytesRead } from "./performance-utils";
-const THUMBNAIL_MAX = 420;
-const THUMBNAIL_QUALITY = 0.72;
+const DEFAULT_THUMBNAIL_MAX = 320;
+const DEFAULT_THUMBNAIL_QUALITY = 0.72;
 const EARLY_BATCH_INTERVAL_MS = 16;
 const STEADY_BATCH_INTERVAL_MS = 72;
 const EARLY_BATCH_COUNT = 48;
 const MAX_PENDING_BATCH_SIZE = 10;
 const RAW_PREVIEW_SCAN_BYTES = 512 * 1024;
-const MIN_EMBEDDED_PREVIEW_SHORT_SIDE = 800;
+const DEFAULT_MIN_EMBEDDED_PREVIEW_SHORT_SIDE = 800;
 const RAW_EXTENSIONS = new Set([
     ".cr2",
     ".cr3",
@@ -65,6 +65,7 @@ async function tryReadEmbeddedPreview(file) {
 export class ThumbnailPipeline {
     workers = [];
     busyWorkers = new Map();
+    activeDesktopTasks = new Map();
     queue = [];
     queuedItems = new Map();
     processing = new Set();
@@ -75,12 +76,21 @@ export class ThumbnailPipeline {
     destroyed = false;
     onBatch;
     onError;
-    constructor(onBatch, onError) {
+    maxDimension;
+    quality;
+    minimumPreviewShortSide;
+    desktopTaskLimit;
+    constructor(onBatch, onError, options) {
         this.onBatch = onBatch;
         this.onError = onError ?? null;
+        this.maxDimension = options?.maxDimension ?? DEFAULT_THUMBNAIL_MAX;
+        this.quality = options?.quality ?? DEFAULT_THUMBNAIL_QUALITY;
+        this.minimumPreviewShortSide = options?.minimumPreviewShortSide ?? DEFAULT_MIN_EMBEDDED_PREVIEW_SHORT_SIDE;
         const cores = navigator.hardwareConcurrency || 4;
-        const poolSize = Math.max(1, Math.min(cores, 8));
+        const poolSize = Math.max(2, Math.min(6, Math.max(2, cores - 1)));
+        this.desktopTaskLimit = Math.max(4, Math.min(12, cores));
         perfLog(`[PERF] thumbnail worker pool size            : ${poolSize}`);
+        perfLog(`[PERF] desktop thumbnail task limit          : ${this.desktopTaskLimit}`);
         for (let i = 0; i < poolSize; i += 1) {
             const worker = new Worker(new URL("../workers/thumbnail-worker.ts", import.meta.url), { type: "module" });
             worker.onmessage = (ev) => this.handleWorkerResult(worker, ev.data);
@@ -119,10 +129,16 @@ export class ThumbnailPipeline {
         this.sortQueue();
         this.schedule();
     }
-    updateViewport(visibleIds) {
+    updateViewport(visibleIds, prioritizedIds) {
         let changed = false;
         for (const item of this.queue) {
-            const nextPriority = visibleIds.has(item.id) ? 0 : 2;
+            const nextPriority = visibleIds.has(item.id)
+                ? 0
+                : prioritizedIds?.has(item.id)
+                    ? 1
+                    : item.priority <= 1
+                        ? 2
+                        : item.priority;
             if (item.priority !== nextPriority) {
                 item.priority = nextPriority;
                 changed = true;
@@ -142,6 +158,17 @@ export class ThumbnailPipeline {
     get failedCount() {
         return this.failedIds.size;
     }
+    updateOptions(options) {
+        this.maxDimension = options?.maxDimension ?? DEFAULT_THUMBNAIL_MAX;
+        this.quality = options?.quality ?? DEFAULT_THUMBNAIL_QUALITY;
+        this.minimumPreviewShortSide = options?.minimumPreviewShortSide ?? DEFAULT_MIN_EMBEDDED_PREVIEW_SHORT_SIDE;
+    }
+    invalidate(ids) {
+        for (const id of ids) {
+            this.completed.delete(id);
+            this.failedIds.delete(id);
+        }
+    }
     destroy() {
         this.destroyed = true;
         if (this.batchTimer) {
@@ -154,6 +181,7 @@ export class ThumbnailPipeline {
         }
         this.workers = [];
         this.busyWorkers.clear();
+        this.activeDesktopTasks.clear();
         this.queue = [];
         this.queuedItems.clear();
         this.processing.clear();
@@ -167,10 +195,29 @@ export class ThumbnailPipeline {
         }
         while (this.queue.length > 0) {
             const worker = this.workers.find((candidate) => !this.busyWorkers.has(candidate));
-            if (!worker) {
+            const canDispatchDesktopTask = typeof window !== "undefined" &&
+                typeof window.filexDesktop?.getThumbnail === "function" &&
+                this.activeDesktopTasks.size < this.desktopTaskLimit;
+            let nextIndex = -1;
+            let dispatchMode = null;
+            for (let index = 0; index < this.queue.length; index += 1) {
+                const candidate = this.queue[index];
+                const canUseDesktopPath = Boolean(candidate.absolutePath && typeof window !== "undefined" && typeof window.filexDesktop?.getThumbnail === "function");
+                if (canUseDesktopPath && canDispatchDesktopTask) {
+                    nextIndex = index;
+                    dispatchMode = "desktop";
+                    break;
+                }
+                if (!canUseDesktopPath && worker) {
+                    nextIndex = index;
+                    dispatchMode = "worker";
+                    break;
+                }
+            }
+            if (nextIndex < 0 || !dispatchMode) {
                 return;
             }
-            const nextItem = this.queue.shift();
+            const [nextItem] = this.queue.splice(nextIndex, 1);
             if (!nextItem) {
                 return;
             }
@@ -179,41 +226,54 @@ export class ThumbnailPipeline {
                 continue;
             }
             this.processing.add(nextItem.id);
-            this.busyWorkers.set(worker, {
+            const activeTask = {
                 id: nextItem.id,
                 sourceFileKey: nextItem.sourceFileKey,
                 createSourceFileKey: nextItem.createSourceFileKey,
                 item: nextItem,
-            });
+            };
+            if (dispatchMode === "desktop") {
+                this.activeDesktopTasks.set(nextItem.id, activeTask);
+                void this.dispatchDesktop(nextItem);
+                continue;
+            }
+            if (!worker) {
+                this.processing.delete(nextItem.id);
+                this.queue.unshift(nextItem);
+                this.queuedItems.set(nextItem.id, nextItem);
+                return;
+            }
+            this.busyWorkers.set(worker, activeTask);
             void this.dispatch(worker, nextItem);
         }
     }
-    async dispatch(worker, item) {
-        if (item.absolutePath &&
-            typeof window !== "undefined" &&
-            typeof window.filexDesktop?.getThumbnail === "function") {
-            try {
-                const rendered = await window.filexDesktop.getThumbnail(item.absolutePath, THUMBNAIL_MAX, THUMBNAIL_QUALITY, item.sourceFileKey);
-                const task = this.releaseWorker(worker) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
-                if (!rendered) {
-                    this.markFailed(task.id);
-                    return;
-                }
-                const blob = new Blob([toOwnedArrayBuffer(rendered.bytes)], { type: rendered.mimeType });
-                this.markCompleted({
-                    id: task.id,
-                    thumbnailBlob: blob,
-                    width: rendered.width,
-                    height: rendered.height,
-                }, task.sourceFileKey);
-                return;
-            }
-            catch {
-                const task = this.releaseWorker(worker) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
+    async dispatchDesktop(item) {
+        if (!item.absolutePath || typeof window === "undefined" || typeof window.filexDesktop?.getThumbnail !== "function") {
+            this.releaseDesktopTask(item.id);
+            this.markFailed(item.id);
+            return;
+        }
+        try {
+            const rendered = await window.filexDesktop.getThumbnail(item.absolutePath, this.maxDimension, this.quality, item.sourceFileKey);
+            const task = this.releaseDesktopTask(item.id) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
+            if (!rendered) {
                 this.markFailed(task.id);
                 return;
             }
+            const blob = new Blob([toOwnedArrayBuffer(rendered.bytes)], { type: rendered.mimeType });
+            this.markCompleted({
+                id: task.id,
+                thumbnailBlob: blob,
+                width: rendered.width,
+                height: rendered.height,
+            }, task.sourceFileKey);
         }
+        catch {
+            const task = this.releaseDesktopTask(item.id) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
+            this.markFailed(task.id);
+        }
+    }
+    async dispatch(worker, item) {
         const file = item.file ?? await item.loadFile?.() ?? null;
         if (!file) {
             this.releaseWorker(worker);
@@ -231,10 +291,10 @@ export class ThumbnailPipeline {
                     worker.postMessage({
                         id: item.id,
                         buffer: previewBuffer,
-                        maxDimension: THUMBNAIL_MAX,
-                        quality: THUMBNAIL_QUALITY,
+                        maxDimension: this.maxDimension,
+                        quality: this.quality,
                         isEmbeddedPreview: true,
-                        minimumPreviewShortSide: MIN_EMBEDDED_PREVIEW_SHORT_SIDE,
+                        minimumPreviewShortSide: this.minimumPreviewShortSide,
                     }, [previewBuffer]);
                     return;
                 }
@@ -244,10 +304,10 @@ export class ThumbnailPipeline {
             worker.postMessage({
                 id: item.id,
                 buffer,
-                maxDimension: THUMBNAIL_MAX,
-                quality: THUMBNAIL_QUALITY,
+                maxDimension: this.maxDimension,
+                quality: this.quality,
                 isEmbeddedPreview: false,
-                minimumPreviewShortSide: MIN_EMBEDDED_PREVIEW_SHORT_SIDE,
+                minimumPreviewShortSide: this.minimumPreviewShortSide,
             }, [buffer]);
         }
         catch {
@@ -290,6 +350,15 @@ export class ThumbnailPipeline {
     releaseWorker(worker) {
         const task = this.busyWorkers.get(worker);
         this.busyWorkers.delete(worker);
+        if (task) {
+            this.processing.delete(task.id);
+        }
+        this.schedule();
+        return task;
+    }
+    releaseDesktopTask(id) {
+        const task = this.activeDesktopTasks.get(id);
+        this.activeDesktopTasks.delete(id);
         if (task) {
             this.processing.delete(task.id);
         }

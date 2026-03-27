@@ -1,18 +1,45 @@
 import { app, nativeImage } from "electron";
 import { open } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import { basename, extname } from "node:path";
 import type { DesktopRenderedImage } from "@photo-tools/desktop-contracts";
+import { ExifTool } from "exiftool-vendored";
 import { extractEmbeddedJpeg, locateEmbeddedJpegRange } from "./raw-jpeg-extractor.js";
 import {
+  getCachedPreviewFromDisk,
   getCachedThumbnailsFromDisk,
+  storePreviewInDiskCache,
   storeThumbnailInDiskCache,
 } from "./thumbnail-disk-cache.js";
 
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const RAW_EXTENSIONS = new Set([
+  ".cr2", ".cr3", ".crw",
+  ".nef", ".nrw",
+  ".arw", ".srf", ".sr2",
+  ".raf",
+  ".dng",
+  ".rw2",
+  ".orf",
+  ".pef",
+  ".srw",
+  ".3fr",
+  ".x3f",
+  ".gpr",
+]);
 const RAW_HEADER_READ_BYTES = 512 * 1024;
+const RAW_PREFIX_SCAN_BYTES = 6 * 1024 * 1024;
+const RAW_FAST_PREVIEW_MAX_BYTES = 12 * 1024 * 1024;
 const MIN_EMBEDDED_JPEG_BYTES = 10_000;
+const PREVIEW_SOURCE_CACHE_MAX_ENTRIES = 24;
+const PREVIEW_SOURCE_CACHE_MAX_BYTES = 96 * 1024 * 1024;
+const RENDERED_PREVIEW_CACHE_MAX_ENTRIES = 48;
+const RENDERED_PREVIEW_CACHE_MAX_BYTES = 160 * 1024 * 1024;
 const PERF_ENABLED = !app.isPackaged;
+const RAW_EXIFTOOL_MAX_PROCS = Math.max(2, Math.min(8, Math.ceil(availableParallelism() / 2)));
+const RAW_EXIFTOOL_TAGS = ["PreviewImage", "JpgFromRaw", "ThumbnailImage"] as const;
+const JPG_FROM_RAW_FIRST_EXTENSIONS = new Set([".nef", ".nrw", ".rw2"]);
 
 const byteReadStats = {
   totalBytes: 0,
@@ -57,8 +84,122 @@ function toOwnedUint8Array(buffer: Buffer): Uint8Array {
   return copy;
 }
 
+interface ResolvedPreviewSource {
+  buffer: Buffer;
+  mimeType: string;
+  width: number;
+  height: number;
+}
+
+const previewSourceCache = new Map<string, ResolvedPreviewSource>();
+const previewSourcePromiseCache = new Map<string, Promise<ResolvedPreviewSource | null>>();
+let previewSourceCacheTotalBytes = 0;
+const renderedPreviewCache = new Map<string, DesktopRenderedImage>();
+let renderedPreviewCacheTotalBytes = 0;
+const rawPreviewExifTool = new ExifTool({
+  maxProcs: RAW_EXIFTOOL_MAX_PROCS,
+  spawnTimeoutMillis: 60_000,
+  taskTimeoutMillis: 60_000,
+});
+
+function touchPreviewSourceCacheEntry(
+  cacheKey: string,
+  entry: ResolvedPreviewSource,
+): ResolvedPreviewSource {
+  previewSourceCache.delete(cacheKey);
+  previewSourceCache.set(cacheKey, entry);
+  return entry;
+}
+
+function getCachedPreviewSource(cacheKey: string): ResolvedPreviewSource | null {
+  const cached = previewSourceCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  return touchPreviewSourceCacheEntry(cacheKey, cached);
+}
+
+function trimPreviewSourceCache(): void {
+  while (
+    previewSourceCache.size > PREVIEW_SOURCE_CACHE_MAX_ENTRIES ||
+    previewSourceCacheTotalBytes > PREVIEW_SOURCE_CACHE_MAX_BYTES
+  ) {
+    const oldest = previewSourceCache.entries().next().value as [string, ResolvedPreviewSource] | undefined;
+    if (!oldest) {
+      break;
+    }
+
+    previewSourceCache.delete(oldest[0]);
+    previewSourceCacheTotalBytes = Math.max(0, previewSourceCacheTotalBytes - oldest[1].buffer.byteLength);
+  }
+}
+
+function touchRenderedPreviewCacheEntry(
+  cacheKey: string,
+  entry: DesktopRenderedImage,
+): DesktopRenderedImage {
+  renderedPreviewCache.delete(cacheKey);
+  renderedPreviewCache.set(cacheKey, entry);
+  return entry;
+}
+
+function getCachedRenderedPreview(cacheKey: string): DesktopRenderedImage | null {
+  const cached = renderedPreviewCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  return touchRenderedPreviewCacheEntry(cacheKey, cached);
+}
+
+function trimRenderedPreviewCache(): void {
+  while (
+    renderedPreviewCache.size > RENDERED_PREVIEW_CACHE_MAX_ENTRIES ||
+    renderedPreviewCacheTotalBytes > RENDERED_PREVIEW_CACHE_MAX_BYTES
+  ) {
+    const oldest = renderedPreviewCache.entries().next().value as [string, DesktopRenderedImage] | undefined;
+    if (!oldest) {
+      break;
+    }
+
+    renderedPreviewCache.delete(oldest[0]);
+    renderedPreviewCacheTotalBytes = Math.max(0, renderedPreviewCacheTotalBytes - oldest[1].bytes.byteLength);
+  }
+}
+
+function cacheRenderedPreview(cacheKey: string, rendered: DesktopRenderedImage): DesktopRenderedImage {
+  const existing = renderedPreviewCache.get(cacheKey);
+  if (existing) {
+    renderedPreviewCacheTotalBytes = Math.max(0, renderedPreviewCacheTotalBytes - existing.bytes.byteLength);
+  }
+
+  renderedPreviewCache.delete(cacheKey);
+  renderedPreviewCache.set(cacheKey, rendered);
+  renderedPreviewCacheTotalBytes += rendered.bytes.byteLength;
+  trimRenderedPreviewCache();
+  return rendered;
+}
+
+function cachePreviewSource(cacheKey: string, source: ResolvedPreviewSource): ResolvedPreviewSource {
+  const existing = previewSourceCache.get(cacheKey);
+  if (existing) {
+    previewSourceCacheTotalBytes = Math.max(0, previewSourceCacheTotalBytes - existing.buffer.byteLength);
+  }
+
+  previewSourceCache.delete(cacheKey);
+  previewSourceCache.set(cacheKey, source);
+  previewSourceCacheTotalBytes += source.buffer.byteLength;
+  trimPreviewSourceCache();
+  return source;
+}
+
 function isBrowserDecodablePath(absolutePath: string): boolean {
   return STANDARD_EXTENSIONS.has(extname(absolutePath).toLowerCase());
+}
+
+function isRawPath(absolutePath: string): boolean {
+  return RAW_EXTENSIONS.has(extname(absolutePath).toLowerCase());
 }
 
 function getMimeTypeForPath(absolutePath: string): string {
@@ -66,6 +207,42 @@ function getMimeTypeForPath(absolutePath: string): string {
   if (ext === ".png") return "image/png";
   if (ext === ".webp") return "image/webp";
   return "image/jpeg";
+}
+
+function getMimeTypeForBuffer(buffer: Buffer): string {
+  if (
+    buffer.byteLength >= 8 &&
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+
+  if (
+    buffer.byteLength >= 12 &&
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer[8] === 0x57 &&
+    buffer[9] === 0x45 &&
+    buffer[10] === 0x42 &&
+    buffer[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+
+  return "image/jpeg";
+}
+
+function getRenderedPreviewCacheKey(absolutePath: string, maxDimension: number): string {
+  return `${absolutePath}::${Math.max(0, Math.round(maxDimension))}`;
 }
 
 async function readFileSlice(
@@ -119,6 +296,7 @@ async function tryReadEmbeddedPreviewBuffer(
     !candidate ||
     candidate.offset < 0 ||
     candidate.length < MIN_EMBEDDED_JPEG_BYTES ||
+    candidate.length > RAW_FAST_PREVIEW_MAX_BYTES ||
     candidate.offset + candidate.length > fileSize
   ) {
     return null;
@@ -129,47 +307,141 @@ async function tryReadEmbeddedPreviewBuffer(
   return previewBuffer.byteLength >= MIN_EMBEDDED_JPEG_BYTES ? previewBuffer : null;
 }
 
-async function resolvePreviewBuffer(absolutePath: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
-  let handle: FileHandle | null = null;
-
-  try {
-    handle = await open(absolutePath, "r");
-    if (isBrowserDecodablePath(absolutePath)) {
-      const fileBuffer = await handle.readFile();
-      recordDesktopBytesRead("standard", fileBuffer.byteLength);
-      return {
-        buffer: fileBuffer,
-        mimeType: getMimeTypeForPath(absolutePath),
-      };
-    }
-
-    const stats = await handle.stat();
-    const fastPreviewBuffer = await tryReadEmbeddedPreviewBuffer(handle, stats.size);
-    if (fastPreviewBuffer && decodeImage(fastPreviewBuffer)) {
-      return {
-        buffer: fastPreviewBuffer,
-        mimeType: "image/jpeg",
-      };
-    }
-
-    const fileBuffer = await handle.readFile();
-    recordDesktopBytesRead("raw", fileBuffer.byteLength);
-
-    const arrayBuffer = toArrayBufferView(fileBuffer);
-    const jpegBuffer = extractEmbeddedJpeg(arrayBuffer);
-    if (!jpegBuffer) {
-      return null;
-    }
-
-    return {
-      buffer: Buffer.from(jpegBuffer),
-      mimeType: "image/jpeg",
-    };
-  } catch {
+function resolvePreviewSourceFromBuffer(
+  buffer: Buffer,
+  mimeType: string,
+): ResolvedPreviewSource | null {
+  const decoded = decodeImage(buffer);
+  if (!decoded) {
     return null;
-  } finally {
-    await handle?.close().catch(() => {});
   }
+
+  return {
+    buffer,
+    mimeType,
+    width: decoded.width,
+    height: decoded.height,
+  };
+}
+
+async function tryExtractEmbeddedPreviewFromPrefix(
+  handle: FileHandle,
+  fileSize: number,
+): Promise<Buffer | null> {
+  const prefixLength = Math.min(fileSize, RAW_PREFIX_SCAN_BYTES);
+  if (prefixLength <= 0) {
+    return null;
+  }
+
+  const prefixBuffer = await readFileSlice(handle, 0, prefixLength);
+  recordDesktopBytesRead("raw", prefixBuffer.byteLength);
+  const jpegBuffer = extractEmbeddedJpeg(toArrayBufferView(prefixBuffer));
+  return jpegBuffer ? Buffer.from(jpegBuffer) : null;
+}
+
+async function tryExtractEmbeddedPreviewWithExifTool(
+  absolutePath: string,
+): Promise<ResolvedPreviewSource | null> {
+  if (!isRawPath(absolutePath)) {
+    return null;
+  }
+
+  const extension = extname(absolutePath).toLowerCase();
+  const tags = JPG_FROM_RAW_FIRST_EXTENSIONS.has(extension)
+    ? (["JpgFromRaw", "PreviewImage", "ThumbnailImage"] as const)
+    : RAW_EXIFTOOL_TAGS;
+
+  for (const tag of tags) {
+    try {
+      const previewBuffer = await rawPreviewExifTool.extractBinaryTagToBuffer(tag, absolutePath);
+      if (previewBuffer.byteLength < MIN_EMBEDDED_JPEG_BYTES) {
+        continue;
+      }
+
+      const resolved = resolvePreviewSourceFromBuffer(
+        previewBuffer,
+        getMimeTypeForBuffer(previewBuffer),
+      );
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+      // Fall through to the next tag or extractor strategy.
+    }
+  }
+
+  return null;
+}
+
+async function resolvePreviewBuffer(absolutePath: string): Promise<ResolvedPreviewSource | null> {
+  const cached = getCachedPreviewSource(absolutePath);
+  if (cached) {
+    return cached;
+  }
+
+  const pending = previewSourcePromiseCache.get(absolutePath);
+  if (pending) {
+    return pending;
+  }
+
+  const task = (async (): Promise<ResolvedPreviewSource | null> => {
+    let handle: FileHandle | null = null;
+
+    try {
+      handle = await open(absolutePath, "r");
+      if (isBrowserDecodablePath(absolutePath)) {
+        const fileBuffer = await handle.readFile();
+        recordDesktopBytesRead("standard", fileBuffer.byteLength);
+        const resolved = resolvePreviewSourceFromBuffer(
+          fileBuffer,
+          getMimeTypeForPath(absolutePath),
+        );
+        return resolved ? cachePreviewSource(absolutePath, resolved) : null;
+      }
+
+      const stats = await handle.stat();
+      const fastPreviewBuffer = await tryReadEmbeddedPreviewBuffer(handle, stats.size);
+      if (fastPreviewBuffer) {
+        const resolved = resolvePreviewSourceFromBuffer(fastPreviewBuffer, "image/jpeg");
+        if (resolved) {
+          return cachePreviewSource(absolutePath, resolved);
+        }
+      }
+
+      const exifToolPreview = await tryExtractEmbeddedPreviewWithExifTool(absolutePath);
+      if (exifToolPreview) {
+        return cachePreviewSource(absolutePath, exifToolPreview);
+      }
+
+      const prefixPreviewBuffer = await tryExtractEmbeddedPreviewFromPrefix(handle, stats.size);
+      if (prefixPreviewBuffer) {
+        const resolved = resolvePreviewSourceFromBuffer(prefixPreviewBuffer, "image/jpeg");
+        if (resolved) {
+          return cachePreviewSource(absolutePath, resolved);
+        }
+      }
+
+      const fileBuffer = await handle.readFile();
+      recordDesktopBytesRead("raw", fileBuffer.byteLength);
+
+      const arrayBuffer = toArrayBufferView(fileBuffer);
+      const jpegBuffer = extractEmbeddedJpeg(arrayBuffer);
+      if (!jpegBuffer) {
+        return null;
+      }
+
+      const resolved = resolvePreviewSourceFromBuffer(Buffer.from(jpegBuffer), "image/jpeg");
+      return resolved ? cachePreviewSource(absolutePath, resolved) : null;
+    } catch {
+      return null;
+    } finally {
+      previewSourcePromiseCache.delete(absolutePath);
+      await handle?.close().catch(() => {});
+    }
+  })();
+
+  previewSourcePromiseCache.set(absolutePath, task);
+  return task;
 }
 
 function decodeImage(buffer: Buffer) {
@@ -186,10 +458,88 @@ function decodeImage(buffer: Buffer) {
   return { decoded, width, height };
 }
 
-export async function getDesktopPreview(absolutePath: string): Promise<DesktopRenderedImage | null> {
+async function renderNativePreviewFromPath(
+  absolutePath: string,
+  maxDimension: number,
+): Promise<DesktopRenderedImage | null> {
+  if (maxDimension <= 0) {
+    return null;
+  }
+
+  try {
+    const thumbnail = await nativeImage.createThumbnailFromPath(absolutePath, {
+      width: maxDimension,
+      height: maxDimension,
+    });
+    if (thumbnail.isEmpty()) {
+      return null;
+    }
+
+    const { width, height } = thumbnail.getSize();
+    if (width <= 0 || height <= 0) {
+      return null;
+    }
+
+    const previewBuffer = thumbnail.toJPEG(90);
+    return {
+      bytes: toOwnedUint8Array(previewBuffer),
+      mimeType: "image/jpeg",
+      width,
+      height,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function getDesktopPreview(
+  absolutePath: string,
+  maxDimension = 0,
+  sourceFileKey?: string,
+): Promise<DesktopRenderedImage | null> {
+  const cacheKey = getRenderedPreviewCacheKey(absolutePath, maxDimension);
+  const cachedRendered = getCachedRenderedPreview(cacheKey);
+  if (cachedRendered) {
+    return cachedRendered;
+  }
+
+  const cachedDiskPreview = await getCachedPreviewFromDisk(absolutePath, sourceFileKey, maxDimension);
+  if (cachedDiskPreview) {
+    return cacheRenderedPreview(cacheKey, cachedDiskPreview);
+  }
+
+  if (!isRawPath(absolutePath)) {
+    const nativePreview = await renderNativePreviewFromPath(absolutePath, maxDimension);
+    if (nativePreview) {
+      const rendered = cacheRenderedPreview(cacheKey, nativePreview);
+      void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
+      return rendered;
+    }
+  }
+
   const source = await resolvePreviewBuffer(absolutePath);
+  if (!source && isRawPath(absolutePath)) {
+    const nativePreview = await renderNativePreviewFromPath(absolutePath, maxDimension);
+    if (nativePreview) {
+      const rendered = cacheRenderedPreview(cacheKey, nativePreview);
+      void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
+      return rendered;
+    }
+  }
+
   if (!source) {
     return null;
+  }
+
+  if (maxDimension <= 0 || Math.max(source.width, source.height) <= maxDimension) {
+    const rendered = cacheRenderedPreview(cacheKey, {
+      bytes: toOwnedUint8Array(source.buffer),
+      mimeType: source.mimeType,
+      width: source.width,
+      height: source.height,
+    });
+    void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
+    return rendered;
   }
 
   const decoded = decodeImage(source.buffer);
@@ -197,12 +547,32 @@ export async function getDesktopPreview(absolutePath: string): Promise<DesktopRe
     return null;
   }
 
-  return {
-    bytes: toOwnedUint8Array(source.buffer),
-    mimeType: source.mimeType,
-    width: decoded.width,
-    height: decoded.height,
-  };
+  const scale = Math.min(1, maxDimension / Math.max(decoded.width, decoded.height));
+  const targetWidth = Math.max(1, Math.round(decoded.width * scale));
+  const targetHeight = Math.max(1, Math.round(decoded.height * scale));
+  const resized = decoded.decoded.resize({
+    width: targetWidth,
+    height: targetHeight,
+    quality: "good",
+  });
+  const previewBuffer = resized.toJPEG(90);
+  const rendered = cacheRenderedPreview(cacheKey, {
+    bytes: toOwnedUint8Array(previewBuffer),
+    mimeType: "image/jpeg",
+    width: targetWidth,
+    height: targetHeight,
+  });
+  void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
+  return rendered;
+}
+
+export async function warmDesktopPreview(
+  absolutePath: string,
+  maxDimension = 0,
+  sourceFileKey?: string,
+): Promise<boolean> {
+  const rendered = await getDesktopPreview(absolutePath, maxDimension, sourceFileKey);
+  return Boolean(rendered);
 }
 
 export async function getDesktopThumbnail(
@@ -226,7 +596,23 @@ export async function getDesktopThumbnail(
     };
   }
 
+  if (!isRawPath(absolutePath)) {
+    const nativeRendered = await renderNativePreviewFromPath(absolutePath, maxDimension);
+    if (nativeRendered) {
+      void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, nativeRendered);
+      return nativeRendered;
+    }
+  }
+
   const source = await resolvePreviewBuffer(absolutePath);
+  if (!source && isRawPath(absolutePath)) {
+    const nativeRendered = await renderNativePreviewFromPath(absolutePath, maxDimension);
+    if (nativeRendered) {
+      void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, nativeRendered);
+      return nativeRendered;
+    }
+  }
+
   if (!source) {
     return null;
   }
@@ -249,8 +635,8 @@ export async function getDesktopThumbnail(
   const rendered: DesktopRenderedImage = {
     bytes: toOwnedUint8Array(thumbnailBuffer),
     mimeType: "image/jpeg",
-    width: decoded.width,
-    height: decoded.height,
+    width: source.width,
+    height: source.height,
   };
   void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, rendered);
   return rendered;
@@ -258,4 +644,9 @@ export async function getDesktopThumbnail(
 
 export function getDesktopDisplayName(absolutePath: string): string {
   return basename(absolutePath);
+}
+
+export async function shutdownDesktopImageService(): Promise<void> {
+  previewSourcePromiseCache.clear();
+  await rawPreviewExifTool.end().catch(() => {});
 }

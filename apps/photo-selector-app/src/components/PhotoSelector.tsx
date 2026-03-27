@@ -1,5 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DesktopThumbnailCacheInfo } from "@photo-tools/desktop-contracts";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import type {
+  DesktopCacheLocationRecommendation,
+  DesktopEditorCandidate,
+  DesktopThumbnailCacheInfo,
+} from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
@@ -7,7 +11,20 @@ import { PhotoSearchBar } from "./PhotoSearchBar";
 import { PhotoCard } from "./PhotoCard";
 import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
 import { CompareModal } from "./CompareModal";
-import { createOnDemandPreviewAsync, getSubfolder, extractSubfolders, copyAssetsToFolder, moveAssetsToFolder, saveAssetAs, getAssetRelativePath, detectChangedAssetsOnDisk } from "../services/folder-access";
+import {
+  createOnDemandPreviewAsync,
+  getCachedOnDemandPreviewUrl,
+  getSubfolder,
+  extractSubfolders,
+  copyAssetsToFolder,
+  moveAssetsToFolder,
+  saveAssetAs,
+  getAssetRelativePath,
+  getAssetAbsolutePath,
+  getAssetAbsolutePaths,
+  detectChangedAssetsOnDisk,
+  warmOnDemandPreviewCache,
+} from "../services/folder-access";
 import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
@@ -19,39 +36,114 @@ import {
   resolvePhotoClassificationShortcut,
 } from "../services/photo-classification";
 import {
+  CUSTOM_LABEL_SHORTCUT_OPTIONS,
+  DEFAULT_CUSTOM_LABEL_TONE,
+  normalizeCustomLabelColors,
   loadPhotoSelectorPreferences,
+  normalizeCustomLabelName,
+  normalizeCustomLabelsCatalog,
+  normalizeCustomLabelShortcut,
+  normalizeCustomLabelShortcuts,
   savePhotoSelectorPreferences,
+  type CustomLabelShortcut,
+  type CustomLabelTone,
   type PhotoFilterPreset,
+  type ThumbnailProfile,
 } from "../services/photo-selector-preferences";
+import {
+  buildPhotoSortSignature,
+  loadCachedPhotoSortOrder,
+  saveCachedPhotoSortOrder,
+} from "../services/photo-sort-cache";
 
 interface PhotoSelectorProps {
   photos: ImageAsset[];
+  metadataVersion: number;
+  sourceFolderPath?: string;
   selectedIds: string[];
   onSelectionChange: (selectedIds: string[]) => void;
   onPhotosChange?: (photos: ImageAsset[]) => void;
   onVisibleIdsChange?: (visibleIds: Set<string>) => void;
+  onPriorityIdsChange?: (priorityIds: Set<string>) => void;
+  onPreviewPriorityIdsChange?: (priorityIds: Set<string>) => void;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  thumbnailProfile?: ThumbnailProfile;
+  sortCacheEnabled?: boolean;
+  performanceSnapshot?: {
+    folderOpenToFirstThumbnailMs: number | null;
+    folderOpenToGridCompleteMs: number | null;
+    cachedThumbnailCount: number;
+    totalThumbnailCount: number;
+    bytesRead: number;
+    rawBytesRead: number;
+    standardBytesRead: number;
+    thumbnailProfile: ThumbnailProfile;
+    sortCacheEnabled: boolean;
+  } | null;
+  onThumbnailProfileChange?: (profile: ThumbnailProfile) => void;
+  onSortCacheEnabledChange?: (enabled: boolean) => void;
   desktopThumbnailCacheInfo?: DesktopThumbnailCacheInfo | null;
+  desktopCacheLocationRecommendation?: DesktopCacheLocationRecommendation | null;
   isDesktopThumbnailCacheBusy?: boolean;
+  isDesktopCacheRecommendationModalOpen?: boolean;
   onChooseDesktopThumbnailCacheDirectory?: () => void | Promise<void>;
   onSetDesktopThumbnailCacheDirectory?: (directoryPath: string) => void | Promise<void>;
+  onUseRecommendedDesktopThumbnailCacheDirectory?: () => void | Promise<void>;
   onResetDesktopThumbnailCacheDirectory?: () => void | Promise<void>;
   onClearDesktopThumbnailCache?: () => void | Promise<void>;
+  onSnoozeDesktopCacheRecommendation?: () => void | Promise<void>;
+  onDismissDesktopCacheRecommendation?: () => void | Promise<void>;
 }
 
 type SortMode = "name" | "orientation" | "rating";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
+type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>;
+const CUSTOM_LABEL_TONES: CustomLabelTone[] = ["sand", "rose", "green", "blue", "purple", "slate"];
 
-const INITIAL_RENDER_BATCH = 180;
-const RENDER_BATCH_STEP = 180;
-const RENDER_THRESHOLD_PX = 900;
+const GRID_GAP_PX = 12;
+const CARD_STAGE_HEIGHT_RATIO = 0.75;
+const QUICK_PREVIEW_FIT_MAX_DIMENSION = 2048;
+const CARD_CHROME_HEIGHT_PX = 64;
+const VIRTUAL_OVERSCAN_ROWS = 4;
+const ROOT_FOLDER_OVERRIDE_KEY = "ps-root-folder-path-override";
+const LEGACY_ROOT_FOLDER_KEY = "ps-root-folder-path";
+const KNOWN_EDITOR_PRESET_PATHS = [
+  "C:\\Program Files\\Adobe\\Adobe Photoshop 2026\\Photoshop.exe",
+  "C:\\Program Files\\Adobe\\Adobe Photoshop 2025\\Photoshop.exe",
+  "C:\\Program Files\\Adobe\\Adobe Photoshop 2024\\Photoshop.exe",
+  "C:\\Program Files\\Adobe\\Adobe Photoshop 2023\\Photoshop.exe",
+];
+
+function sanitizeEditorExecutablePath(value: string): string {
+  return value.trim().replace(/^"+|"+$/g, "").replace(/\//g, "\\");
+}
+
+function normalizeAssetCustomLabels(values: string[] | undefined): string[] {
+  return normalizeCustomLabelsCatalog(values);
+}
+
+function areStringArraysEqual(left: string[] | undefined, right: string[] | undefined): boolean {
+  const safeLeft = left ?? [];
+  const safeRight = right ?? [];
+  if (safeLeft.length !== safeRight.length) {
+    return false;
+  }
+
+  for (let index = 0; index < safeLeft.length; index += 1) {
+    if (safeLeft[index] !== safeRight[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 function describeMetadataChanges(
-  changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>,
+  changes: PhotoMetadataChanges,
   targetCount: number
 ): string {
   const subject = targetCount === 1 ? "1 foto" : `${targetCount} foto`;
@@ -65,6 +157,11 @@ function describeMetadataChanges(
   }
   if (changes.colorLabel !== undefined) {
     return `${subject}: etichetta ${changes.colorLabel ? COLOR_LABEL_NAMES[changes.colorLabel] : "rimossa"}`;
+  }
+  if (changes.customLabels !== undefined) {
+    return changes.customLabels.length > 0
+      ? `${subject}: etichette ${changes.customLabels.join(", ")}`
+      : `${subject}: etichette personalizzate rimosse`;
   }
   return `${subject}: metadati aggiornati`;
 }
@@ -113,34 +210,85 @@ function formatBytes(totalBytes: number): string {
   return `${value.toFixed(decimals)} ${units[unitIndex]}`;
 }
 
+function formatMilliseconds(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "n/d";
+  }
+
+  return `${value} ms`;
+}
+
+function formatVolumeSummary(
+  recommendation: DesktopCacheLocationRecommendation | null,
+): { current: string; recommended: string | null } {
+  const currentVolume = recommendation?.currentVolume;
+  const recommendedVolume = recommendation?.recommendedVolume;
+
+  const current = currentVolume
+    ? `${currentVolume.mountPath} · ${formatBytes(currentVolume.freeBytes)} liberi su ${formatBytes(currentVolume.totalBytes)}`
+    : "Volume attuale non disponibile";
+
+  const recommended = recommendedVolume && recommendation?.recommendedPath
+    ? `${recommendation.recommendedPath} · ${formatBytes(recommendedVolume.freeBytes)} liberi su ${formatBytes(recommendedVolume.totalBytes)}`
+    : null;
+
+  return { current, recommended };
+}
+
 export function PhotoSelector({
   photos,
+  metadataVersion,
+  sourceFolderPath = "",
   selectedIds,
   onSelectionChange,
   onPhotosChange,
   onVisibleIdsChange,
+  onPriorityIdsChange,
+  onPreviewPriorityIdsChange,
   onUndo,
   onRedo,
   canUndo = false,
   canRedo = false,
+  thumbnailProfile = "ultra-fast",
+  sortCacheEnabled = true,
+  performanceSnapshot = null,
+  onThumbnailProfileChange,
+  onSortCacheEnabledChange,
   desktopThumbnailCacheInfo = null,
+  desktopCacheLocationRecommendation = null,
   isDesktopThumbnailCacheBusy = false,
+  isDesktopCacheRecommendationModalOpen = false,
   onChooseDesktopThumbnailCacheDirectory,
   onSetDesktopThumbnailCacheDirectory,
+  onUseRecommendedDesktopThumbnailCacheDirectory,
   onResetDesktopThumbnailCacheDirectory,
   onClearDesktopThumbnailCache,
+  onSnoozeDesktopCacheRecommendation,
+  onDismissDesktopCacheRecommendation,
 }: PhotoSelectorProps) {
   const [sortBy, setSortBy] = useState<SortMode>("name");
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
+  const [customLabelFilter, setCustomLabelFilter] = useState<string>("all");
   const [folderFilter, setFolderFilter] = useState<string>("all");
   const [seriesFilter, setSeriesFilter] = useState<string>("all");
   const [timeClusterFilter, setTimeClusterFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [customColorNames, setCustomColorNames] = useState<Record<ColorLabel, string>>(() => ({ ...COLOR_LABEL_NAMES }));
+  const [customLabelsCatalog, setCustomLabelsCatalog] = useState<string[]>([]);
+  const [customLabelColors, setCustomLabelColors] = useState<Record<string, CustomLabelTone>>({});
+  const [customLabelShortcuts, setCustomLabelShortcuts] = useState<Record<string, CustomLabelShortcut | null>>({});
   const [filterPresets, setFilterPresets] = useState<PhotoFilterPreset[]>([]);
+  const [selectedThumbnailProfile, setSelectedThumbnailProfile] = useState<ThumbnailProfile>(thumbnailProfile);
+  const [isSortCacheEnabled, setIsSortCacheEnabled] = useState<boolean>(sortCacheEnabled);
   const [newPresetName, setNewPresetName] = useState("");
+  const [newCustomLabelName, setNewCustomLabelName] = useState("");
+  const [newCustomLabelTone, setNewCustomLabelTone] = useState<CustomLabelTone>(DEFAULT_CUSTOM_LABEL_TONE);
+  const [newCustomLabelShortcut, setNewCustomLabelShortcut] = useState<CustomLabelShortcut | null>(null);
+  const [newBatchCustomLabelName, setNewBatchCustomLabelName] = useState("");
+  const [newBatchCustomLabelTone, setNewBatchCustomLabelTone] = useState<CustomLabelTone>(DEFAULT_CUSTOM_LABEL_TONE);
+  const [newBatchCustomLabelShortcut, setNewBatchCustomLabelShortcut] = useState<CustomLabelShortcut | null>(null);
   const [timelineEntries, setTimelineEntries] = useState<Array<{ id: string; label: string }>>([]);
   const [isBatchToolsOpen, setIsBatchToolsOpen] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
@@ -149,17 +297,30 @@ export function PhotoSelector({
     const saved = localStorage.getItem("ps-card-size");
     return saved ? Math.max(100, Math.min(320, Number(saved))) : 160;
   });
-  const [rootFolderPath, setRootFolderPath] = useState<string>(
-    () => localStorage.getItem("ps-root-folder-path") ?? ""
+  const [rootFolderPathOverride, setRootFolderPathOverride] = useState<string>(
+    () => localStorage.getItem(ROOT_FOLDER_OVERRIDE_KEY) ?? localStorage.getItem(LEGACY_ROOT_FOLDER_KEY) ?? ""
   );
   const [preferredEditorPath, setPreferredEditorPath] = useState<string>(
     () => localStorage.getItem("ps-preferred-editor-path") ?? ""
   );
+  const [installedEditorCandidates, setInstalledEditorCandidates] = useState<DesktopEditorCandidate[]>([]);
   const [desktopThumbnailCachePathInput, setDesktopThumbnailCachePathInput] = useState("");
 
   const setPreferredEditorPathPersisted = useCallback((value: string) => {
-    setPreferredEditorPath(value);
-    localStorage.setItem("ps-preferred-editor-path", value);
+    const normalized = sanitizeEditorExecutablePath(value);
+    setPreferredEditorPath(normalized);
+    localStorage.setItem("ps-preferred-editor-path", normalized);
+  }, []);
+  const setRootFolderPathOverridePersisted = useCallback((value: string) => {
+    setRootFolderPathOverride(value);
+    const trimmed = value.trim();
+    if (trimmed) {
+      localStorage.setItem(ROOT_FOLDER_OVERRIDE_KEY, value);
+      localStorage.setItem(LEGACY_ROOT_FOLDER_KEY, value);
+    } else {
+      localStorage.removeItem(ROOT_FOLDER_OVERRIDE_KEY);
+      localStorage.removeItem(LEGACY_ROOT_FOLDER_KEY);
+    }
   }, []);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [contextMenuState, setContextMenuState] = useState<{
@@ -168,13 +329,30 @@ export function PhotoSelector({
     targetIds: string[];
   } | null>(null);
   const [focusedPhotoId, setFocusedPhotoId] = useState<string | null>(null);
+  const [previewStartsZoomed, setPreviewStartsZoomed] = useState(false);
+  const lastPreviewAssetIdRef = useRef<string | null>(null);
+  const pendingPreviewRestoreIdRef = useRef<string | null>(null);
   const lastClickedIdRef = useRef<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const scrollAnimationFrameRef = useRef<number | null>(null);
+  const pendingScrollTopRef = useRef<number | null>(null);
+  const lastVisibleIdsSignatureRef = useRef<string>("");
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
-  const [renderCount, setRenderCount] = useState(INITIAL_RENDER_BATCH);
+  const [gridViewport, setGridViewport] = useState({ width: 0, height: 720, scrollTop: 0 });
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const effectiveRootFolderPath = useMemo(
+    () => rootFolderPathOverride.trim() || sourceFolderPath.trim(),
+    [rootFolderPathOverride, sourceFolderPath],
+  );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const metadataPhotos = useMemo(() => photos, [metadataVersion, photos.length]);
+  const metadataAssetById = useMemo(
+    () => new Map(metadataPhotos.map((photo) => [photo.id, photo])),
+    [metadataPhotos],
+  );
+  const assetById = useMemo(() => new Map(photos.map((photo) => [photo.id, photo])), [photos]);
   const photosRef = useRef(photos);
   useEffect(() => {
     photosRef.current = photos;
@@ -190,32 +368,42 @@ export function PhotoSelector({
         pickFilter !== "all",
         ratingFilter !== "any",
         colorFilter !== "all",
+        customLabelFilter !== "all",
         folderFilter !== "all",
         seriesFilter !== "all",
         timeClusterFilter !== "all",
         searchQuery !== "",
       ].filter(Boolean).length,
-    [pickFilter, ratingFilter, colorFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
+    [pickFilter, ratingFilter, colorFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
   );
 
   const selectionStats = useMemo(() => {
     if (selectedIds.length === 0) return null;
-    const sel = photos.filter((p) => selectedSet.has(p.id));
+    const sel = selectedIds
+      .map((photoId) => metadataAssetById.get(photoId))
+      .filter((photo): photo is ImageAsset => !!photo);
     return {
       picked: sel.filter((p) => getAssetPickStatus(p) === "picked").length,
       rejected: sel.filter((p) => getAssetPickStatus(p) === "rejected").length,
       highRating: sel.filter((p) => getAssetRating(p) >= 3).length,
     };
-  }, [selectedIds, photos, selectedSet]);
+  }, [metadataAssetById, selectedIds]);
 
   const hasActiveFilters =
     pickFilter !== "all" ||
     ratingFilter !== "any" ||
     colorFilter !== "all" ||
+    customLabelFilter !== "all" ||
     folderFilter !== "all" ||
     seriesFilter !== "all" ||
     timeClusterFilter !== "all" ||
     searchQuery !== "";
+
+  const customLabelByShortcut = useMemo(() => {
+    const entries = Object.entries(customLabelShortcuts)
+      .filter((entry): entry is [string, CustomLabelShortcut] => Boolean(entry[1]));
+    return new Map(entries.map(([label, shortcut]) => [shortcut, label]));
+  }, [customLabelShortcuts]);
 
   const pushTimelineEntry = useCallback((label: string) => {
     setTimelineEntries((current) => [
@@ -228,11 +416,24 @@ export function PhotoSelector({
     const preferences = loadPhotoSelectorPreferences();
     setCustomColorNames(preferences.colorNames);
     setFilterPresets(preferences.filterPresets);
+    setCustomLabelsCatalog(preferences.customLabelsCatalog);
+    setCustomLabelColors(preferences.customLabelColors);
+    setCustomLabelShortcuts(preferences.customLabelShortcuts);
+    setSelectedThumbnailProfile(preferences.thumbnailProfile);
+    setIsSortCacheEnabled(preferences.sortCacheEnabled);
   }, []);
+
+  useEffect(() => {
+    setSelectedThumbnailProfile(thumbnailProfile);
+  }, [thumbnailProfile]);
+
+  useEffect(() => {
+    setIsSortCacheEnabled(sortCacheEnabled);
+  }, [sortCacheEnabled]);
 
   const applyPhotoChanges = useCallback((
     id: string,
-    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
+    changes: PhotoMetadataChanges
   ) => {
     if (!onPhotosChange) return;
 
@@ -245,11 +446,15 @@ export function PhotoSelector({
       const nextRating = changes.rating ?? photo.rating;
       const nextPickStatus = changes.pickStatus ?? photo.pickStatus;
       const nextColorLabel = changes.colorLabel !== undefined ? changes.colorLabel : photo.colorLabel;
+      const nextCustomLabels = changes.customLabels !== undefined
+        ? normalizeAssetCustomLabels(changes.customLabels)
+        : normalizeAssetCustomLabels(photo.customLabels);
 
       if (
         nextRating === photo.rating &&
         nextPickStatus === photo.pickStatus &&
-        nextColorLabel === photo.colorLabel
+        nextColorLabel === photo.colorLabel &&
+        areStringArraysEqual(nextCustomLabels, normalizeAssetCustomLabels(photo.customLabels))
       ) {
         return photo;
       }
@@ -257,7 +462,8 @@ export function PhotoSelector({
       changed = true;
       return {
         ...photo,
-        ...changes
+        ...changes,
+        customLabels: nextCustomLabels,
       };
     });
 
@@ -271,6 +477,7 @@ export function PhotoSelector({
     setPickFilter("all");
     setRatingFilter("any");
     setColorFilter("all");
+    setCustomLabelFilter("all");
     setFolderFilter("all");
     setSeriesFilter("all");
     setTimeClusterFilter("all");
@@ -279,13 +486,23 @@ export function PhotoSelector({
 
   const persistPreferences = useCallback((
     nextColorNames: Record<ColorLabel, string>,
-    nextFilterPresets: PhotoFilterPreset[]
+    nextFilterPresets: PhotoFilterPreset[],
+    nextCustomLabelsCatalog: string[],
+    nextCustomLabelColors: Record<string, CustomLabelTone>,
+    nextCustomLabelShortcuts: Record<string, CustomLabelShortcut | null>,
+    nextThumbnailProfile = selectedThumbnailProfile,
+    nextSortCacheEnabled = isSortCacheEnabled,
   ) => {
     savePhotoSelectorPreferences({
       colorNames: nextColorNames,
       filterPresets: nextFilterPresets,
+      customLabelsCatalog: nextCustomLabelsCatalog,
+      customLabelColors: nextCustomLabelColors,
+      customLabelShortcuts: nextCustomLabelShortcuts,
+      thumbnailProfile: nextThumbnailProfile,
+      sortCacheEnabled: nextSortCacheEnabled,
     });
-  }, []);
+  }, [isSortCacheEnabled, selectedThumbnailProfile]);
 
   const handleColorNameChange = useCallback((label: ColorLabel, value: string) => {
     setCustomColorNames((current) => {
@@ -293,10 +510,10 @@ export function PhotoSelector({
         ...current,
         [label]: value.trim() || COLOR_LABEL_NAMES[label],
       };
-      persistPreferences(next, filterPresets);
+      persistPreferences(next, filterPresets, customLabelsCatalog, customLabelColors, customLabelShortcuts);
       return next;
     });
-  }, [filterPresets, persistPreferences]);
+  }, [customLabelsCatalog, filterPresets, persistPreferences]);
 
   const handleSavePreset = useCallback(() => {
     const trimmedName = newPresetName.trim();
@@ -311,6 +528,7 @@ export function PhotoSelector({
         pickStatus: pickFilter,
         ratingFilter,
         colorLabel: colorFilter,
+        customLabelFilter,
         folderFilter,
         seriesFilter,
         timeClusterFilter,
@@ -320,16 +538,17 @@ export function PhotoSelector({
 
     setFilterPresets((current) => {
       const next = [nextPreset, ...current].slice(0, 12);
-      persistPreferences(customColorNames, next);
+      persistPreferences(customColorNames, next, customLabelsCatalog, customLabelColors, customLabelShortcuts);
       return next;
     });
     setNewPresetName("");
-  }, [colorFilter, customColorNames, folderFilter, newPresetName, persistPreferences, pickFilter, ratingFilter, searchQuery, seriesFilter, timeClusterFilter]);
+  }, [colorFilter, customColorNames, customLabelFilter, customLabelsCatalog, folderFilter, newPresetName, persistPreferences, pickFilter, ratingFilter, searchQuery, seriesFilter, timeClusterFilter]);
 
   const applyPreset = useCallback((preset: PhotoFilterPreset) => {
     setPickFilter(preset.filters.pickStatus);
     setRatingFilter(preset.filters.ratingFilter);
     setColorFilter(preset.filters.colorLabel);
+    setCustomLabelFilter(preset.filters.customLabelFilter ?? "all");
     setFolderFilter(preset.filters.folderFilter ?? "all");
     setSeriesFilter(preset.filters.seriesFilter ?? "all");
     setTimeClusterFilter(preset.filters.timeClusterFilter ?? "all");
@@ -339,82 +558,714 @@ export function PhotoSelector({
   const removePreset = useCallback((presetId: string) => {
     setFilterPresets((current) => {
       const next = current.filter((preset) => preset.id !== presetId);
-      persistPreferences(customColorNames, next);
+      persistPreferences(customColorNames, next, customLabelsCatalog, customLabelColors, customLabelShortcuts);
       return next;
     });
-  }, [customColorNames, persistPreferences]);
+  }, [customColorNames, customLabelsCatalog, persistPreferences]);
+
+  const persistCustomLabelsCatalog = useCallback((nextCatalog: string[]) => {
+    const normalized = normalizeCustomLabelsCatalog(nextCatalog);
+    setCustomLabelsCatalog(normalized);
+    const nextShortcuts = normalizeCustomLabelShortcuts(normalized, customLabelShortcuts);
+    setCustomLabelShortcuts(nextShortcuts);
+    persistPreferences(
+      customColorNames,
+      filterPresets,
+      normalized,
+      normalizeCustomLabelColors(normalized, customLabelColors),
+      nextShortcuts,
+    );
+    return normalized;
+  }, [customColorNames, customLabelColors, customLabelShortcuts, filterPresets, persistPreferences]);
+
+  const resolveCustomLabelTone = useCallback((label: string): CustomLabelTone => {
+    const match = Object.entries(customLabelColors).find(
+      ([key]) => key.toLocaleLowerCase() === label.toLocaleLowerCase(),
+    );
+    return match?.[1] ?? DEFAULT_CUSTOM_LABEL_TONE;
+  }, [customLabelColors]);
+
+  const resolveCustomLabelShortcut = useCallback((label: string): CustomLabelShortcut | null => {
+    const match = Object.entries(customLabelShortcuts).find(
+      ([key]) => key.toLocaleLowerCase() === label.toLocaleLowerCase(),
+    );
+    return match?.[1] ?? null;
+  }, [customLabelShortcuts]);
+
+  const handleCustomLabelToneChange = useCallback((label: string, tone: CustomLabelTone) => {
+    setCustomLabelColors((current) => {
+      const next = normalizeCustomLabelColors(customLabelsCatalog, {
+        ...current,
+        [label]: tone,
+      });
+      persistPreferences(customColorNames, filterPresets, customLabelsCatalog, next, customLabelShortcuts);
+      return next;
+    });
+  }, [customColorNames, customLabelShortcuts, customLabelsCatalog, filterPresets, persistPreferences]);
+
+  const handleCustomLabelShortcutChange = useCallback((label: string, shortcut: CustomLabelShortcut | null) => {
+    setCustomLabelShortcuts((current) => {
+      const nextEntries = Object.fromEntries(
+        Object.entries(current).map(([currentLabel, currentShortcut]) => {
+          if (currentLabel !== label && currentShortcut === shortcut && shortcut !== null) {
+            return [currentLabel, null];
+          }
+          return [currentLabel, currentShortcut];
+        }),
+      ) as Record<string, CustomLabelShortcut | null>;
+
+      const next = normalizeCustomLabelShortcuts(customLabelsCatalog, {
+        ...nextEntries,
+        [label]: shortcut,
+      });
+      persistPreferences(customColorNames, filterPresets, customLabelsCatalog, customLabelColors, next);
+      return next;
+    });
+  }, [customColorNames, customLabelColors, customLabelsCatalog, filterPresets, persistPreferences]);
+
+  const findCatalogCustomLabel = useCallback((label: string): string | null => {
+    const match = customLabelsCatalog.find(
+      (existingLabel) => existingLabel.toLocaleLowerCase() === label.toLocaleLowerCase(),
+    );
+    return match ?? null;
+  }, [customLabelsCatalog]);
+
+  const handleThumbnailProfileChange = useCallback((nextProfile: ThumbnailProfile) => {
+    setSelectedThumbnailProfile(nextProfile);
+    savePhotoSelectorPreferences({
+      thumbnailProfile: nextProfile,
+    });
+    onThumbnailProfileChange?.(nextProfile);
+    pushTimelineEntry(
+      nextProfile === "ultra-fast"
+        ? "Profilo anteprime: Ultra Fast"
+        : nextProfile === "fast"
+          ? "Profilo anteprime: Fast contact sheet"
+          : "Profilo anteprime: Bilanciato",
+    );
+  }, [onThumbnailProfileChange, pushTimelineEntry]);
+
+  const handleSortCacheEnabledChange = useCallback((nextEnabled: boolean) => {
+    setIsSortCacheEnabled(nextEnabled);
+    savePhotoSelectorPreferences({
+      sortCacheEnabled: nextEnabled,
+    });
+    onSortCacheEnabledChange?.(nextEnabled);
+    pushTimelineEntry(nextEnabled ? "Sort cache attivata" : "Sort cache disattivata");
+  }, [onSortCacheEnabledChange, pushTimelineEntry]);
+
+  const updateCustomLabelsForIds = useCallback((
+    targetIds: string[],
+    updater: (currentLabels: string[], photo: ImageAsset) => string[],
+    timelineLabel: string,
+  ) => {
+    if (!onPhotosChange || targetIds.length === 0) {
+      return;
+    }
+
+    const idSet = new Set(targetIds);
+    let changed = false;
+    const nextPhotos = photos.map((photo) => {
+      if (!idSet.has(photo.id)) {
+        return photo;
+      }
+
+      const currentLabels = normalizeAssetCustomLabels(photo.customLabels);
+      const nextLabels = normalizeAssetCustomLabels(updater(currentLabels, photo));
+      if (areStringArraysEqual(currentLabels, nextLabels)) {
+        return photo;
+      }
+
+      changed = true;
+      return {
+        ...photo,
+        customLabels: nextLabels,
+      };
+    });
+
+    if (changed) {
+      onPhotosChange(nextPhotos);
+      pushTimelineEntry(timelineLabel);
+    }
+  }, [onPhotosChange, photos, pushTimelineEntry]);
+
+  const assignCustomLabelToSelection = useCallback((label: string) => {
+    if (selectedIds.length === 0) {
+      return;
+    }
+
+    updateCustomLabelsForIds(
+      selectedIds,
+      (currentLabels) => (
+        currentLabels.some((currentLabel) => currentLabel.toLocaleLowerCase() === label.toLocaleLowerCase())
+          ? currentLabels
+          : [...currentLabels, label]
+      ),
+      `${selectedIds.length === 1 ? "1 foto" : `${selectedIds.length} foto`}: aggiunta etichetta ${label}`,
+    );
+  }, [selectedIds, updateCustomLabelsForIds]);
+
+  const toggleCustomLabelForIds = useCallback((targetIds: string[], label: string) => {
+    if (targetIds.length === 0) {
+      return;
+    }
+
+    const allHaveLabel = targetIds.every((id) => {
+      const asset = assetById.get(id);
+      return normalizeAssetCustomLabels(asset?.customLabels).some(
+        (currentLabel) => currentLabel.toLocaleLowerCase() === label.toLocaleLowerCase(),
+      );
+    });
+
+    updateCustomLabelsForIds(
+      targetIds,
+      (currentLabels) => allHaveLabel
+        ? currentLabels.filter((currentLabel) => currentLabel.toLocaleLowerCase() !== label.toLocaleLowerCase())
+        : [...currentLabels, label],
+      allHaveLabel
+        ? `${targetIds.length === 1 ? "1 foto" : `${targetIds.length} foto`}: rimossa etichetta ${label}`
+        : `${targetIds.length === 1 ? "1 foto" : `${targetIds.length} foto`}: aggiunta etichetta ${label}`,
+    );
+  }, [assetById, updateCustomLabelsForIds]);
+
+  const handleAddCustomLabelToCatalog = useCallback((
+    rawLabel: string,
+    options?: {
+      assignToSelection?: boolean;
+      tone?: CustomLabelTone;
+      shortcut?: CustomLabelShortcut | null;
+    },
+  ) => {
+    const requestedLabel = normalizeCustomLabelName(rawLabel);
+    if (!requestedLabel) {
+      return;
+    }
+
+    const assignToSelection = options?.assignToSelection ?? false;
+    const requestedTone = options?.tone ?? DEFAULT_CUSTOM_LABEL_TONE;
+    const requestedShortcut = options?.shortcut ?? null;
+
+    const existingLabel = findCatalogCustomLabel(requestedLabel);
+    const canonicalLabel = existingLabel ?? requestedLabel;
+    const nextCatalog = existingLabel
+      ? customLabelsCatalog
+      : persistCustomLabelsCatalog([...customLabelsCatalog, requestedLabel]);
+
+    if (existingLabel) {
+      handleCustomLabelToneChange(canonicalLabel, requestedTone);
+      handleCustomLabelShortcutChange(canonicalLabel, requestedShortcut);
+    } else {
+      setCustomLabelColors((current) => {
+        const nextColors = normalizeCustomLabelColors(
+          nextCatalog,
+          {
+            ...current,
+            [canonicalLabel]: current[canonicalLabel] ?? requestedTone,
+          },
+        );
+        return nextColors;
+      });
+
+      setCustomLabelShortcuts((current) => {
+        const next = normalizeCustomLabelShortcuts(nextCatalog, {
+          ...Object.fromEntries(
+            Object.entries(current).map(([label, currentShortcut]) => {
+              if (label !== canonicalLabel && currentShortcut === requestedShortcut && requestedShortcut !== null) {
+                return [label, null];
+              }
+              return [label, currentShortcut];
+            }),
+          ),
+          [canonicalLabel]: requestedShortcut,
+        });
+        persistPreferences(
+          customColorNames,
+          filterPresets,
+          nextCatalog,
+          normalizeCustomLabelColors(nextCatalog, {
+            ...customLabelColors,
+            [canonicalLabel]: requestedTone,
+          }),
+          next,
+        );
+        return next;
+      });
+    }
+
+    if (assignToSelection && selectedIds.length > 0) {
+      assignCustomLabelToSelection(canonicalLabel);
+    } else if (!existingLabel) {
+      pushTimelineEntry(`Nuova etichetta disponibile: ${canonicalLabel}`);
+    }
+  }, [
+    assignCustomLabelToSelection,
+    customColorNames,
+    customLabelColors,
+    customLabelShortcuts,
+    customLabelsCatalog,
+    filterPresets,
+    findCatalogCustomLabel,
+    handleCustomLabelShortcutChange,
+    handleCustomLabelToneChange,
+    persistCustomLabelsCatalog,
+    persistPreferences,
+    pushTimelineEntry,
+    selectedIds.length,
+  ]);
+
+  const handleRenameCustomLabel = useCallback((previousLabel: string, nextRawLabel: string) => {
+    const nextLabel = normalizeCustomLabelName(nextRawLabel);
+    if (!nextLabel || nextLabel === previousLabel) {
+      return;
+    }
+
+    const nextCatalog = customLabelsCatalog.map((label) => (label === previousLabel ? nextLabel : label));
+    persistCustomLabelsCatalog(nextCatalog);
+    setCustomLabelColors((current) => {
+      const previousTone = resolveCustomLabelTone(previousLabel);
+      const withoutPrevious = Object.fromEntries(
+        Object.entries(current).filter(([label]) => label !== previousLabel),
+      ) as Record<string, CustomLabelTone>;
+      const nextColors = normalizeCustomLabelColors(nextCatalog, {
+        ...withoutPrevious,
+        [nextLabel]: previousTone,
+      });
+      persistPreferences(
+        customColorNames,
+        filterPresets,
+        nextCatalog,
+        nextColors,
+        normalizeCustomLabelShortcuts(nextCatalog, {
+          ...customLabelShortcuts,
+          [nextLabel]: resolveCustomLabelShortcut(previousLabel),
+        }),
+      );
+      return nextColors;
+    });
+
+    setCustomLabelShortcuts((current) => {
+      const previousShortcut = resolveCustomLabelShortcut(previousLabel);
+      const withoutPrevious = Object.fromEntries(
+        Object.entries(current).filter(([label]) => label !== previousLabel),
+      ) as Record<string, CustomLabelShortcut | null>;
+      return normalizeCustomLabelShortcuts(nextCatalog, {
+        ...withoutPrevious,
+        [nextLabel]: previousShortcut,
+      });
+    });
+
+    updateCustomLabelsForIds(
+      photos.map((photo) => photo.id),
+      (currentLabels) => currentLabels.map((label) => (label === previousLabel ? nextLabel : label)),
+      `Etichetta rinominata: ${previousLabel} -> ${nextLabel}`,
+    );
+  }, [customColorNames, customLabelShortcuts, customLabelsCatalog, filterPresets, persistCustomLabelsCatalog, photos, resolveCustomLabelShortcut, resolveCustomLabelTone, updateCustomLabelsForIds]);
+
+  const handleRemoveCustomLabel = useCallback((labelToRemove: string) => {
+    const nextCatalog = customLabelsCatalog.filter((label) => label !== labelToRemove);
+    persistCustomLabelsCatalog(nextCatalog);
+    setCustomLabelColors((current) => {
+      const nextColors = normalizeCustomLabelColors(
+        nextCatalog,
+        Object.fromEntries(
+          Object.entries(current).filter(([label]) => label !== labelToRemove),
+        ) as Record<string, CustomLabelTone>,
+      );
+      persistPreferences(
+        customColorNames,
+        filterPresets,
+        nextCatalog,
+        nextColors,
+        normalizeCustomLabelShortcuts(nextCatalog, customLabelShortcuts),
+      );
+      return nextColors;
+    });
+    setCustomLabelShortcuts((current) =>
+      normalizeCustomLabelShortcuts(
+        nextCatalog,
+        Object.fromEntries(
+          Object.entries(current).filter(([label]) => label !== labelToRemove),
+        ) as Record<string, CustomLabelShortcut | null>,
+      )
+    );
+
+    updateCustomLabelsForIds(
+      photos.map((photo) => photo.id),
+      (currentLabels) => currentLabels.filter((label) => label !== labelToRemove),
+      `Etichetta rimossa: ${labelToRemove}`,
+    );
+  }, [customColorNames, customLabelShortcuts, customLabelsCatalog, filterPresets, persistCustomLabelsCatalog, photos, persistPreferences, updateCustomLabelsForIds]);
 
   // Extract unique subfolders for the folder filter dropdown
-  const subfolders = useMemo(() => extractSubfolders(photos), [photos]);
+  const subfolders = useMemo(() => extractSubfolders(metadataPhotos), [metadataPhotos]);
   const seriesGroups = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const photo of photos) {
+    for (const photo of metadataPhotos) {
       const key = getSeriesKey(photo);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return Array.from(counts.entries())
       .map(([key, count]) => ({ key, count }))
       .sort((left, right) => right.count - left.count || left.key.localeCompare(right.key));
-  }, [photos]);
+  }, [metadataPhotos]);
   const timeClusters = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const photo of photos) {
+    for (const photo of metadataPhotos) {
       const key = getTimeClusterKey(photo);
       counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return Array.from(counts.entries())
       .map(([key, count]) => ({ key, count }))
       .sort((left, right) => left.key.localeCompare(right.key));
-  }, [photos]);
+  }, [metadataPhotos]);
+  const customLabelFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const photo of metadataPhotos) {
+      for (const label of normalizeAssetCustomLabels(photo.customLabels)) {
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+      }
+    }
 
-  const visiblePhotos = useMemo(() => {
-    const lowerSearch = searchQuery.toLowerCase();
-    const filtered = photos.filter((photo) => {
+    return customLabelsCatalog
+      .map((label) => ({ label, count: counts.get(label) ?? 0 }))
+      .filter(({ count }) => count > 0);
+  }, [customLabelsCatalog, metadataPhotos]);
+
+  const sortedPhotoIds = useMemo(() => {
+    const signature = buildPhotoSortSignature(metadataPhotos, sortBy);
+    const knownIds = new Set(metadataPhotos.map((photo) => photo.id));
+
+    if (sourceFolderPath && isSortCacheEnabled) {
+      const cachedIds = loadCachedPhotoSortOrder(sourceFolderPath, sortBy, signature);
+      if (
+        cachedIds &&
+        cachedIds.length === metadataPhotos.length &&
+        cachedIds.every((photoId) => knownIds.has(photoId))
+      ) {
+        return cachedIds;
+      }
+    }
+
+    const orderedIds = metadataPhotos
+      .slice()
+      .sort((left, right) => {
+        if (sortBy === "rating") {
+          return (
+            getAssetRating(right) - getAssetRating(left) ||
+            left.fileName.localeCompare(right.fileName)
+          );
+        }
+
+        if (sortBy === "orientation") {
+          return (
+            left.orientation.localeCompare(right.orientation) ||
+            left.fileName.localeCompare(right.fileName)
+          );
+        }
+
+        return left.fileName.localeCompare(right.fileName);
+      })
+      .map((photo) => photo.id);
+
+    if (sourceFolderPath && isSortCacheEnabled) {
+      saveCachedPhotoSortOrder(sourceFolderPath, sortBy, signature, orderedIds);
+    }
+
+    return orderedIds;
+  }, [isSortCacheEnabled, metadataPhotos, sortBy, sourceFolderPath]);
+
+  const visiblePhotoIds = useMemo(() => {
+    const lowerSearch = deferredSearchQuery.toLowerCase();
+    const filteredIds: string[] = [];
+
+    for (const photoId of sortedPhotoIds) {
+      const photo = metadataAssetById.get(photoId);
+      if (!photo) {
+        continue;
+      }
+
       if (!matchesPhotoFilters(photo, {
         pickStatus: pickFilter,
         ratingFilter,
-        colorLabel: colorFilter
-      })) return false;
-
-      if (folderFilter !== "all" && getSubfolder(photo.path) !== folderFilter) return false;
-      if (seriesFilter !== "all" && getSeriesKey(photo) !== seriesFilter) return false;
-      if (timeClusterFilter !== "all" && getTimeClusterKey(photo) !== timeClusterFilter) return false;
-
-      if (lowerSearch && !photo.fileName.toLowerCase().includes(lowerSearch)) return false;
-
-      return true;
-    });
-
-    filtered.sort((left, right) => {
-      if (sortBy === "rating") {
-        return (
-          getAssetRating(right) - getAssetRating(left) ||
-          left.fileName.localeCompare(right.fileName)
-        );
+        colorLabel: colorFilter,
+      })) {
+        continue;
       }
 
-      if (sortBy === "orientation") {
-        return (
-          left.orientation.localeCompare(right.orientation) ||
-          left.fileName.localeCompare(right.fileName)
-        );
+      if (
+        customLabelFilter !== "all"
+        && !normalizeAssetCustomLabels(photo.customLabels).some(
+          (label) => label.toLocaleLowerCase() === customLabelFilter.toLocaleLowerCase(),
+        )
+      ) {
+        continue;
       }
 
-      return left.fileName.localeCompare(right.fileName);
-    });
+      if (folderFilter !== "all" && getSubfolder(photo.path) !== folderFilter) {
+        continue;
+      }
+      if (seriesFilter !== "all" && getSeriesKey(photo) !== seriesFilter) {
+        continue;
+      }
+      if (timeClusterFilter !== "all" && getTimeClusterKey(photo) !== timeClusterFilter) {
+        continue;
+      }
+      if (lowerSearch && !photo.fileName.toLowerCase().includes(lowerSearch)) {
+        continue;
+      }
 
-    return filtered;
-  }, [colorFilter, folderFilter, photos, pickFilter, ratingFilter, searchQuery, seriesFilter, sortBy, timeClusterFilter]);
+      filteredIds.push(photo.id);
+    }
+
+    return filteredIds;
+  }, [
+    colorFilter,
+    customLabelFilter,
+    deferredSearchQuery,
+    folderFilter,
+    metadataAssetById,
+    pickFilter,
+    ratingFilter,
+    seriesFilter,
+    sortedPhotoIds,
+    timeClusterFilter,
+  ]);
+
+  const visiblePhotos = useMemo(
+    () => visiblePhotoIds
+      .map((photoId) => assetById.get(photoId))
+      .filter((photo): photo is ImageAsset => !!photo),
+    [assetById, visiblePhotoIds],
+  );
+  const visiblePhotoIndexById = useMemo(
+    () => new Map(visiblePhotoIds.map((photoId, index) => [photoId, index])),
+    [visiblePhotoIds],
+  );
+  const visiblePhotoIdSet = useMemo(() => new Set(visiblePhotoIds), [visiblePhotoIds]);
+  const gridColumnCount = useMemo(() => {
+    const width = gridViewport.width || cardSize;
+    return Math.max(1, Math.floor((width + GRID_GAP_PX) / (cardSize + GRID_GAP_PX)));
+  }, [cardSize, gridViewport.width]);
+  const gridColumnWidth = useMemo(() => {
+    const width = gridViewport.width || cardSize;
+    return Math.max(
+      cardSize,
+      Math.floor((width - GRID_GAP_PX * Math.max(0, gridColumnCount - 1)) / gridColumnCount),
+    );
+  }, [cardSize, gridColumnCount, gridViewport.width]);
+  const cardStageHeight = useMemo(
+    () => Math.max(96, Math.round(gridColumnWidth * CARD_STAGE_HEIGHT_RATIO)),
+    [gridColumnWidth],
+  );
+  const gridRowHeight = useMemo(
+    () => cardStageHeight + CARD_CHROME_HEIGHT_PX + GRID_GAP_PX,
+    [cardStageHeight],
+  );
+  const totalVirtualRows = useMemo(
+    () => Math.max(1, Math.ceil(visiblePhotos.length / gridColumnCount)),
+    [gridColumnCount, visiblePhotos.length],
+  );
+  const visibleRowStart = useMemo(
+    () => Math.max(0, Math.floor(gridViewport.scrollTop / Math.max(1, gridRowHeight))),
+    [gridRowHeight, gridViewport.scrollTop],
+  );
+  const visibleRowEnd = useMemo(
+    () => Math.min(
+      totalVirtualRows,
+      Math.ceil((gridViewport.scrollTop + gridViewport.height) / Math.max(1, gridRowHeight)),
+    ),
+    [gridRowHeight, gridViewport.height, gridViewport.scrollTop, totalVirtualRows],
+  );
+  const virtualRowStart = Math.max(0, visibleRowStart - VIRTUAL_OVERSCAN_ROWS);
+  const virtualRowEnd = Math.min(totalVirtualRows, visibleRowEnd + VIRTUAL_OVERSCAN_ROWS);
+  const virtualStartIndex = virtualRowStart * gridColumnCount;
+  const virtualEndIndex = Math.min(visiblePhotos.length, virtualRowEnd * gridColumnCount);
+  const topSpacerHeight = virtualRowStart * gridRowHeight;
+  const bottomSpacerHeight = Math.max(0, (totalVirtualRows - virtualRowEnd) * gridRowHeight);
 
   const renderedPhotos = useMemo(
-    () => visiblePhotos.slice(0, renderCount),
-    [renderCount, visiblePhotos],
+    () => visiblePhotos.slice(virtualStartIndex, virtualEndIndex),
+    [virtualEndIndex, virtualStartIndex, visiblePhotos],
   );
 
   // Search in all photos so preview doesn't close when filters change
-  const previewAsset = previewAssetId
-    ? (photos.find((p) => p.id === previewAssetId) ?? null)
-    : null;
+  const previewAsset = previewAssetId ? (assetById.get(previewAssetId) ?? null) : null;
+  const previewPriorityIds = useMemo(() => {
+    if (!previewAssetId) {
+      return [];
+    }
+
+    const currentIndex = visiblePhotoIndexById.get(previewAssetId);
+    if (currentIndex === undefined) {
+      return [previewAssetId];
+    }
+
+    const ids: string[] = [];
+    const previousId = visiblePhotoIds[currentIndex - 1];
+    const currentId = visiblePhotoIds[currentIndex];
+    const nextId = visiblePhotoIds[currentIndex + 1];
+
+    if (previousId) {
+      ids.push(previousId);
+    }
+    if (currentId) {
+      ids.push(currentId);
+    }
+    if (nextId) {
+      ids.push(nextId);
+    }
+
+    return ids;
+  }, [previewAssetId, visiblePhotoIds, visiblePhotoIndexById]);
+
+  const openPreview = useCallback((photoId: string, startZoomed = false) => {
+    setFocusedPhotoId(photoId);
+    setPreviewStartsZoomed(startZoomed);
+    setPreviewAssetId(photoId);
+  }, []);
+
+  const closePreview = useCallback(() => {
+    pendingPreviewRestoreIdRef.current = previewAssetId ?? lastPreviewAssetIdRef.current;
+    setPreviewAssetId(null);
+    setPreviewStartsZoomed(false);
+  }, [previewAssetId]);
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) {
+      return;
+    }
+
+    const syncGridViewport = () => {
+      setGridViewport({
+        width: grid.clientWidth,
+        height: grid.clientHeight,
+        scrollTop: grid.scrollTop,
+      });
+    };
+
+    syncGridViewport();
+    const resizeObserver = new ResizeObserver(syncGridViewport);
+    resizeObserver.observe(grid);
+    window.addEventListener("resize", syncGridViewport);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", syncGridViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (scrollAnimationFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollAnimationFrameRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!onVisibleIdsChange) {
+      return;
+    }
+
+    const ids = renderedPhotos.map((photo) => photo.id);
+    const signature = ids.join("|");
+    if (signature === lastVisibleIdsSignatureRef.current) {
+      return;
+    }
+
+    lastVisibleIdsSignatureRef.current = signature;
+    onVisibleIdsChange(new Set(ids));
+  }, [onVisibleIdsChange, renderedPhotos]);
+
+  useEffect(() => {
+    if (!onPriorityIdsChange) {
+      return;
+    }
+
+    const ids = new Set<string>();
+
+    if (hasActiveFilters) {
+      for (const id of visiblePhotoIds.slice(0, 240)) {
+        ids.add(id);
+      }
+    }
+
+    for (const id of previewPriorityIds) {
+      ids.add(id);
+    }
+
+    onPriorityIdsChange(ids);
+  }, [hasActiveFilters, onPriorityIdsChange, previewPriorityIds, visiblePhotoIds]);
+
+  useEffect(() => {
+    if (!onPreviewPriorityIdsChange) {
+      return;
+    }
+
+    onPreviewPriorityIdsChange(new Set(previewPriorityIds));
+  }, [onPreviewPriorityIdsChange, previewPriorityIds]);
+
+  const scrollPhotoIntoView = useCallback((photoId: string, behavior: ScrollBehavior = "smooth") => {
+    const grid = gridRef.current;
+    const itemIndex = visiblePhotoIndexById.get(photoId);
+    if (!grid || itemIndex === undefined) {
+      return;
+    }
+
+    const rowIndex = Math.floor(itemIndex / gridColumnCount);
+    const rowTop = rowIndex * gridRowHeight;
+    const rowBottom = rowTop + gridRowHeight;
+    const viewportTop = grid.scrollTop;
+    const viewportBottom = viewportTop + grid.clientHeight;
+
+    if (rowTop < viewportTop) {
+      grid.scrollTo({ top: rowTop, behavior });
+    } else if (rowBottom > viewportBottom) {
+      grid.scrollTo({ top: Math.max(0, rowBottom - grid.clientHeight), behavior });
+    }
+  }, [gridColumnCount, gridRowHeight, visiblePhotoIndexById]);
+
+  useEffect(() => {
+    if (!previewAssetId) {
+      return;
+    }
+
+    setFocusedPhotoId(previewAssetId);
+    scrollPhotoIntoView(previewAssetId, "auto");
+  }, [previewAssetId, scrollPhotoIntoView]);
+
+  useEffect(() => {
+    if (previewAssetId) {
+      lastPreviewAssetIdRef.current = previewAssetId;
+      setFocusedPhotoId(previewAssetId);
+      return;
+    }
+
+    const restoreId = pendingPreviewRestoreIdRef.current;
+    if (!restoreId) {
+      return;
+    }
+
+    pendingPreviewRestoreIdRef.current = null;
+    setFocusedPhotoId(restoreId);
+    scrollPhotoIntoView(restoreId, "auto");
+
+    let rafA = 0;
+    let rafB = 0;
+    rafA = window.requestAnimationFrame(() => {
+      rafB = window.requestAnimationFrame(() => {
+        const grid = gridRef.current;
+        const card = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${restoreId}"]`);
+        card?.focus();
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafA);
+      window.cancelAnimationFrame(rafB);
+    };
+  }, [previewAssetId, scrollPhotoIntoView]);
 
   useEffect(() => {
     // When context menu opens, cancel any active lasso drag to prevent
@@ -439,18 +1290,58 @@ export function PhotoSelector({
       // Quick preview open: let it handle keys
       if (previewAssetId) return;
 
+      const target = event.target as HTMLElement;
+      if (target.closest("select, input, textarea")) return;
+
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
+        const normalizedKey = event.key.toLowerCase();
+        if (normalizedKey === "a") {
+          event.preventDefault();
+          toggleAll(true);
+          return;
+        }
+      }
+
+      if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+        const shortcutLabel = customLabelByShortcut.get(event.key.toUpperCase() as CustomLabelShortcut);
+        if (shortcutLabel) {
+          const targetIds = selectedIds.length > 0
+            ? selectedIds
+            : focusedPhotoId
+              ? [focusedPhotoId]
+              : [];
+          if (targetIds.length > 0) {
+            event.preventDefault();
+            toggleCustomLabelForIds(targetIds, shortcutLabel);
+            return;
+          }
+        }
+      }
+
+      if (
+        (event.key === "z" || event.key === "Z") &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
+        const targetPhotoId = focusedPhotoId ?? selectedIds[0] ?? visiblePhotoIds[0] ?? null;
+        if (!targetPhotoId) {
+          return;
+        }
+        event.preventDefault();
+        openPreview(targetPhotoId, true);
+        return;
+      }
+
       // Arrow navigation within grid
       const arrowKeys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"];
       if (!arrowKeys.includes(event.key)) return;
-
-      const target = event.target as HTMLElement;
-      if (target.closest("select, input, textarea")) return;
 
       event.preventDefault();
       if (visiblePhotos.length === 0) return;
 
       const currentIndex = focusedPhotoId
-        ? visiblePhotos.findIndex((p) => p.id === focusedPhotoId)
+        ? (visiblePhotoIndexById.get(focusedPhotoId) ?? -1)
         : -1;
 
       const grid = gridRef.current;
@@ -477,20 +1368,35 @@ export function PhotoSelector({
 
       if (nextIndex !== currentIndex || currentIndex < 0) {
         const next = visiblePhotos[nextIndex];
-        if (nextIndex >= renderCount) {
-          setRenderCount((current) => Math.max(current, nextIndex + RENDER_BATCH_STEP));
-        }
         setFocusedPhotoId(next.id);
+        scrollPhotoIntoView(next.id);
         requestAnimationFrame(() => {
-          const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${next.id}"]`);
-          if (el) {
-            el.focus();
-            el.scrollIntoView({ block: "nearest", behavior: "smooth" });
-          }
+          requestAnimationFrame(() => {
+            const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${next.id}"]`);
+            if (el) {
+              el.focus();
+            }
+          });
         });
       }
     },
-    [contextMenuState, focusedPhotoId, previewAssetId, renderCount, visiblePhotos]
+    [
+      contextMenuState,
+      focusedPhotoId,
+      hasActiveFilters,
+      onSelectionChange,
+      openPreview,
+      photos,
+      previewAssetId,
+      pushTimelineEntry,
+      scrollPhotoIntoView,
+      selectedIds,
+      toggleCustomLabelForIds,
+      visiblePhotoIds,
+      visiblePhotoIndexById,
+      visiblePhotos,
+      customLabelByShortcut,
+    ]
   );
 
   useEffect(() => {
@@ -499,19 +1405,30 @@ export function PhotoSelector({
   }, [handleWindowKeyDown]);
 
   useEffect(() => {
-    setRenderCount(INITIAL_RENDER_BATCH);
-    visibleIdsRef.current.clear();
+    const grid = gridRef.current;
+    if (grid) {
+      grid.scrollTo({ top: 0 });
+    }
+    setGridViewport((current) => ({ ...current, scrollTop: 0 }));
     onVisibleIdsChange?.(new Set());
+    onPriorityIdsChange?.(hasActiveFilters ? new Set(visiblePhotoIds.slice(0, 240)) : new Set());
+    onPreviewPriorityIdsChange?.(new Set(previewPriorityIds));
   }, [
     colorFilter,
+    customLabelFilter,
     folderFilter,
+    hasActiveFilters,
+    onPriorityIdsChange,
+    onPreviewPriorityIdsChange,
     onVisibleIdsChange,
     pickFilter,
+    previewPriorityIds,
     ratingFilter,
-    searchQuery,
+    deferredSearchQuery,
     seriesFilter,
     sortBy,
     timeClusterFilter,
+    visiblePhotoIds,
     visiblePhotos.length,
   ]);
 
@@ -520,8 +1437,8 @@ export function PhotoSelector({
 
     // Shift+click range selection
     if (event?.shiftKey && lastClickedIdRef.current) {
-      const lastIdx = visiblePhotos.findIndex((p) => p.id === lastClickedIdRef.current);
-      const curIdx = visiblePhotos.findIndex((p) => p.id === id);
+      const lastIdx = visiblePhotoIndexById.get(lastClickedIdRef.current) ?? -1;
+      const curIdx = visiblePhotoIndexById.get(id) ?? -1;
       if (lastIdx >= 0 && curIdx >= 0) {
         const [from, to] = lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
         for (let i = from; i <= to; i++) {
@@ -562,14 +1479,14 @@ export function PhotoSelector({
 
   function updatePhoto(
     id: string,
-    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
+    changes: PhotoMetadataChanges
   ) {
     applyPhotoChanges(id, changes);
   }
 
   const applyBatchChanges = useCallback((
     targetIds: string[],
-    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
+    changes: PhotoMetadataChanges
   ) => {
     if (!onPhotosChange || targetIds.length === 0) {
       return;
@@ -585,11 +1502,16 @@ export function PhotoSelector({
       const nextRating = changes.rating ?? photo.rating;
       const nextPickStatus = changes.pickStatus ?? photo.pickStatus;
       const nextColorLabel = changes.colorLabel !== undefined ? changes.colorLabel : photo.colorLabel;
+      const currentCustomLabels = normalizeAssetCustomLabels(photo.customLabels);
+      const nextCustomLabels = changes.customLabels !== undefined
+        ? normalizeAssetCustomLabels(changes.customLabels)
+        : currentCustomLabels;
 
       if (
         nextRating === photo.rating &&
         nextPickStatus === photo.pickStatus &&
-        nextColorLabel === photo.colorLabel
+        nextColorLabel === photo.colorLabel &&
+        areStringArraysEqual(currentCustomLabels, nextCustomLabels)
       ) {
         return photo;
       }
@@ -598,6 +1520,7 @@ export function PhotoSelector({
       return {
         ...photo,
         ...changes,
+        customLabels: nextCustomLabels,
       };
     });
 
@@ -606,6 +1529,89 @@ export function PhotoSelector({
       pushTimelineEntry(describeMetadataChanges(changes, targetIds.length));
     }
   }, [onPhotosChange, photos, pushTimelineEntry]);
+
+  const selectedCustomLabelCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const selectedId of selectedIds) {
+      const asset = assetById.get(selectedId);
+      if (!asset) {
+        continue;
+      }
+
+      for (const label of normalizeAssetCustomLabels(asset.customLabels)) {
+        counts.set(label, (counts.get(label) ?? 0) + 1);
+      }
+    }
+
+    return counts;
+  }, [assetById, selectedIds]);
+
+  const handleToggleBatchCustomLabel = useCallback((label: string) => {
+    const activeCount = selectedCustomLabelCounts.get(label) ?? 0;
+    const shouldRemove = selectedIds.length > 0 && activeCount === selectedIds.length;
+    updateCustomLabelsForIds(
+      selectedIds,
+      (currentLabels) => shouldRemove
+        ? currentLabels.filter((currentLabel) => currentLabel !== label)
+        : [...currentLabels, label],
+      shouldRemove
+        ? `${selectedIds.length === 1 ? "1 foto" : `${selectedIds.length} foto`}: rimossa etichetta ${label}`
+        : `${selectedIds.length === 1 ? "1 foto" : `${selectedIds.length} foto`}: aggiunta etichetta ${label}`,
+    );
+  }, [selectedCustomLabelCounts, selectedIds, updateCustomLabelsForIds]);
+
+  const handleClearBatchCustomLabels = useCallback(() => {
+    updateCustomLabelsForIds(
+      selectedIds,
+      () => [],
+      `${selectedIds.length === 1 ? "1 foto" : `${selectedIds.length} foto`}: etichette personalizzate azzerate`,
+    );
+  }, [selectedIds, updateCustomLabelsForIds]);
+
+  const selectedAbsolutePaths = useMemo(() => getAssetAbsolutePaths(selectedIds), [selectedIds]);
+  const canStartDesktopDragOut = selectedIds.length > 0
+    && typeof window !== "undefined"
+    && typeof window.filexDesktop?.startDragOut === "function"
+    && selectedAbsolutePaths.length === selectedIds.length;
+
+  const handleSelectionDragStart = useCallback((event: DragEvent<HTMLElement>) => {
+    if (!canStartDesktopDragOut) {
+      event.preventDefault();
+      return;
+    }
+
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(
+      "text/plain",
+      selectedAbsolutePaths.length === 1
+        ? selectedAbsolutePaths[0]
+        : `${selectedAbsolutePaths.length} file selezionati`
+    );
+    window.filexDesktop!.startDragOut(selectedAbsolutePaths);
+  }, [canStartDesktopDragOut, selectedAbsolutePaths]);
+
+  const handleCardExternalDragStart = useCallback((photoId: string, event: DragEvent<HTMLDivElement>) => {
+    const draggingSelection = selectedSet.has(photoId);
+    const targetPaths = draggingSelection
+      ? getAssetAbsolutePaths(selectedIds)
+      : getAssetAbsolutePaths([photoId]);
+
+    if (
+      targetPaths.length === 0
+      || typeof window.filexDesktop?.startDragOut !== "function"
+      || (draggingSelection && targetPaths.length !== selectedIds.length)
+    ) {
+      event.preventDefault();
+      return;
+    }
+
+    event.dataTransfer.effectAllowed = "copy";
+    event.dataTransfer.setData(
+      "text/plain",
+      targetPaths.length === 1 ? targetPaths[0] : `${targetPaths.length} file selezionati`
+    );
+    window.filexDesktop.startDragOut(targetPaths);
+  }, [selectedIds, selectedSet]);
 
   const clearSelection = useCallback(() => {
     onSelectionChange([]);
@@ -630,7 +1636,13 @@ export function PhotoSelector({
   }, []);
 
   const handlePreview = useCallback((id: string) => {
-    setPreviewAssetId(id);
+    openPreview(id, false);
+  }, [openPreview]);
+
+  const handlePreviewAssetSelection = useCallback((assetId: string) => {
+    lastPreviewAssetIdRef.current = assetId;
+    setFocusedPhotoId(assetId);
+    setPreviewAssetId(assetId);
   }, []);
 
   const handleContextMenu = useCallback((id: string, x: number, y: number) => {
@@ -639,61 +1651,9 @@ export function PhotoSelector({
     setContextMenuState({ x, y, targetIds });
   }, [onPhotosChange, selectedIds, selectedSet]);
 
-  const handleUpdatePhoto = useCallback((id: string, changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>) => {
+  const handleUpdatePhoto = useCallback((id: string, changes: PhotoMetadataChanges) => {
     applyPhotoChanges(id, changes);
   }, [applyPhotoChanges]);
-
-  // ── IntersectionObserver for viewport tracking (pipeline priority) ──
-  const observerRef = useRef<IntersectionObserver | null>(null);
-  const visibleIdsRef = useRef(new Set<string>());
-
-  useEffect(() => {
-    const grid = gridRef.current;
-    if (!grid || !onVisibleIdsChange) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        let changed = false;
-        for (const entry of entries) {
-          const el = entry.target as HTMLElement;
-          const id = el.dataset.previewAssetId;
-          if (!id) continue;
-          if (entry.isIntersecting) {
-            if (!visibleIdsRef.current.has(id)) { visibleIdsRef.current.add(id); changed = true; }
-          } else {
-            if (visibleIdsRef.current.has(id)) { visibleIdsRef.current.delete(id); changed = true; }
-          }
-        }
-        if (changed) onVisibleIdsChange(new Set(visibleIdsRef.current));
-      },
-      { root: grid, rootMargin: "200px 0px" }
-    );
-    observerRef.current = observer;
-
-    // Observe all cards currently in the grid
-    const cards = grid.querySelectorAll<HTMLElement>("[data-preview-asset-id]");
-    for (let i = 0; i < cards.length; i++) {
-      observer.observe(cards[i]);
-    }
-
-    // Auto-observe new cards added to the grid via MutationObserver
-    const mutation = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (let i = 0; i < m.addedNodes.length; i++) {
-          const node = m.addedNodes[i];
-          if (node instanceof HTMLElement && node.dataset.previewAssetId) {
-            observer.observe(node);
-          }
-        }
-      }
-    });
-    mutation.observe(grid, { childList: true });
-
-    return () => {
-      observer.disconnect();
-      mutation.disconnect();
-    };
-  }, [onVisibleIdsChange]);
 
   // ── On-demand preview URL for QuickPreviewModal ──
   // Key insight: the URL must be stable for a given asset ID so the browser
@@ -720,13 +1680,27 @@ export function PhotoSelector({
     }
 
     let active = true;
+    const cachedPreviewUrl = getCachedOnDemandPreviewUrl(previewAsset.id, {
+      maxDimension: QUICK_PREVIEW_FIT_MAX_DIMENSION,
+    });
 
     if (previewUrlRef.current) {
       previewUrlRef.current = null;
       setAsyncPreviewUrl(null);
     }
 
-    createOnDemandPreviewAsync(previewAsset.id, 0).then((url) => {
+    if (cachedPreviewUrl) {
+      previewUrlRef.current = {
+        id: previewAsset.id,
+        url: cachedPreviewUrl,
+        sourceFileKey: previewAsset.sourceFileKey,
+      };
+      setAsyncPreviewUrl(cachedPreviewUrl);
+    }
+
+    createOnDemandPreviewAsync(previewAsset.id, 0, {
+      maxDimension: QUICK_PREVIEW_FIT_MAX_DIMENSION,
+    }).then((url) => {
       if (!active) return;
       if (url) {
         previewUrlRef.current = { id: previewAsset.id, url, sourceFileKey: previewAsset.sourceFileKey };
@@ -739,28 +1713,30 @@ export function PhotoSelector({
     };
   }, [previewAsset]);
 
-  // Preload nearby assets in high quality to make arrow/space navigation instant.
+  // Keep preview warmup light here. The modal performs the heavier adjacent warmup.
   useEffect(() => {
     if (!previewAssetId || visiblePhotos.length === 0) return;
 
-    const currentIndex = visiblePhotos.findIndex((p) => p.id === previewAssetId);
+    const currentIndex = visiblePhotoIndexById.get(previewAssetId) ?? -1;
     if (currentIndex < 0) return;
 
     const idsToWarm: string[] = [];
-    for (let delta = 1; delta <= 5; delta++) {
+    for (let delta = 1; delta <= 1; delta++) {
       const prev = visiblePhotos[currentIndex - delta];
       const next = visiblePhotos[currentIndex + delta];
-      if (prev) idsToWarm.push(prev.id);
-      if (next) idsToWarm.push(next.id);
+      if (prev && (!prev.previewUrl || !prev.sourceUrl)) idsToWarm.push(prev.id);
+      if (next && (!next.previewUrl || !next.sourceUrl)) idsToWarm.push(next.id);
     }
 
     if (idsToWarm.length === 0) return;
     void Promise.all(
       idsToWarm.map((id, index) =>
-        createOnDemandPreviewAsync(id, index < 4 ? 1 : 2).catch(() => null)
+        warmOnDemandPreviewCache(id, index < 4 ? 1 : 2, {
+          maxDimension: QUICK_PREVIEW_FIT_MAX_DIMENSION,
+        }).catch(() => null)
       )
     );
-  }, [previewAssetId, visiblePhotos]);
+  }, [previewAssetId, visiblePhotoIndexById, visiblePhotos]);
 
   const previewAssetWithUrl = useMemo(() => {
     if (!previewAsset) return null;
@@ -785,15 +1761,15 @@ export function PhotoSelector({
   const allSelected = photos.length > 0 && selectedIds.length === photos.length;
   const someSelected = selectedIds.length > 0 && selectedIds.length < photos.length;
   const visibleSelectedCount = useMemo(
-    () => visiblePhotos.filter((photo) => selectedSet.has(photo.id)).length,
-    [selectedSet, visiblePhotos],
+    () => visiblePhotoIds.filter((photoId) => selectedSet.has(photoId)).length,
+    [selectedSet, visiblePhotoIds],
   );
 
   const photoStats = useMemo(() => {
     const ratingCounts = new Map<number, number>();
     const pickCounts = new Map<PickStatus, number>();
     const colorCounts = new Map<ColorLabel, number>();
-    for (const photo of photos) {
+    for (const photo of metadataPhotos) {
       const r = getAssetRating(photo);
       ratingCounts.set(r, (ratingCounts.get(r) ?? 0) + 1);
       const ps = getAssetPickStatus(photo);
@@ -802,7 +1778,7 @@ export function PhotoSelector({
       if (cl) colorCounts.set(cl, (colorCounts.get(cl) ?? 0) + 1);
     }
     return { ratingCounts, pickCounts, colorCounts };
-  }, [photos]);
+  }, [metadataPhotos]);
 
   function selectVisible() {
     onSelectionChange(visiblePhotos.map((photo) => photo.id));
@@ -819,8 +1795,7 @@ export function PhotoSelector({
   }
 
   function removeVisibleFromSelection() {
-    const visibleIds = new Set(visiblePhotos.map((photo) => photo.id));
-    onSelectionChange(selectedIds.filter((id) => !visibleIds.has(id)));
+    onSelectionChange(selectedIds.filter((id) => !visiblePhotoIdSet.has(id)));
     pushTimelineEntry("Rimosse dalla selezione le foto visibili");
   }
 
@@ -831,7 +1806,7 @@ export function PhotoSelector({
 
   function excludeRejected() {
     onSelectionChange(selectedIds.filter((id) => {
-      const photo = photos.find((asset) => asset.id === id);
+      const photo = assetById.get(id);
       return photo?.pickStatus !== "rejected";
     }));
     pushTimelineEntry("Escluse dalla selezione le scartate");
@@ -846,11 +1821,10 @@ export function PhotoSelector({
   useEffect(() => {
     if (scrolledInitialRef.current || selectedIds.length === 0 || visiblePhotos.length === 0) return;
     scrolledInitialRef.current = true;
-    const firstId = selectedIds.find((id) => visiblePhotos.some((p) => p.id === id));
+    const firstId = selectedIds.find((id) => visiblePhotoIdSet.has(id));
     if (!firstId) return;
     const timer = setTimeout(() => {
-      const el = gridRef.current?.querySelector<HTMLElement>(`[data-preview-asset-id="${firstId}"]`);
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      scrollPhotoIntoView(firstId, "smooth");
     }, 200);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -859,6 +1833,45 @@ export function PhotoSelector({
   useEffect(() => {
     localStorage.setItem("ps-card-size", String(cardSize));
   }, [cardSize]);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.filexDesktop?.getInstalledEditorCandidates !== "function"
+    ) {
+      return;
+    }
+
+    let active = true;
+    void window.filexDesktop.getInstalledEditorCandidates().then((candidates) => {
+      if (!active || !Array.isArray(candidates)) {
+        return;
+      }
+
+      setInstalledEditorCandidates(candidates);
+
+      const storedEditorPath = localStorage.getItem("ps-preferred-editor-path") ?? "";
+      const currentPath = sanitizeEditorExecutablePath(preferredEditorPath || storedEditorPath);
+      if (currentPath && candidates.some((candidate) => sanitizeEditorExecutablePath(candidate.path) === currentPath)) {
+        return;
+      }
+
+      const shouldAutoReplaceKnownPreset =
+        !currentPath || KNOWN_EDITOR_PRESET_PATHS.includes(currentPath);
+
+      if (shouldAutoReplaceKnownPreset && candidates.length > 0) {
+        setPreferredEditorPathPersisted(candidates[0].path);
+      }
+    }).catch(() => {
+      if (active) {
+        setInstalledEditorCandidates([]);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [preferredEditorPath, setPreferredEditorPathPersisted]);
 
   const handleUndoClick = useCallback(() => {
     onUndo?.();
@@ -903,37 +1916,62 @@ export function PhotoSelector({
   }, []);
 
   const handleCopyPath = useCallback((ids: string[], root: string) => {
-    const paths = ids
-      .map((id) => getAssetRelativePath(id))
-      .filter(Boolean)
-      .map((rel) => root ? `${root.replace(/[\\/]+$/, "")}/${rel}` : rel!);
+    const absolutePaths = getAssetAbsolutePaths(ids);
+    const paths = absolutePaths.length === ids.length
+      ? absolutePaths
+      : ids
+        .map((id) => getAssetRelativePath(id))
+        .filter(Boolean)
+        .map((rel) => root ? `${root.replace(/[\\/]+$/, "")}/${rel}` : rel!);
     if (paths.length === 0) return;
     void navigator.clipboard.writeText(paths.join("\n"));
     pushTimelineEntry(`Percorso copiato negli appunti`);
   }, [pushTimelineEntry]);
 
   const handleOpenWithEditor = useCallback((ids: string[]) => {
-    if (!rootFolderPath.trim()) {
-      alert("Imposta prima la Cartella radice in Impostazioni > Editor esterno.");
-      return;
-    }
-
     const editorFromStorage = localStorage.getItem("ps-preferred-editor-path") ?? "";
-    const editor = (preferredEditorPath.trim() || editorFromStorage.trim()).replace(/\//g, "\\");
+    const editor = sanitizeEditorExecutablePath(preferredEditorPath || editorFromStorage);
     const hasAbsoluteEditorPath = /^[a-zA-Z]:\\/.test(editor) && /\.(exe|bat|cmd)$/i.test(editor);
     if (!hasAbsoluteEditorPath) {
       alert("Nessun editor associato valido. Imposta il percorso completo dell'editor (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).");
       return;
     }
 
-    const root = rootFolderPath.trim().replace(/[\\/]+$/, "");
-    const absolutePaths = ids
-      .map((id) => getAssetRelativePath(id))
-      .filter((value): value is string => Boolean(value))
-      .map((relative) => `${root}/${relative}`.replace(/\//g, "\\"));
+    const directAbsolutePaths = getAssetAbsolutePaths(ids);
+    const absolutePaths = directAbsolutePaths.length === ids.length
+      ? directAbsolutePaths.map((value) => value.replace(/\//g, "\\"))
+      : ids
+        .map((id) => getAssetRelativePath(id))
+        .filter((value): value is string => Boolean(value))
+        .map((relative) => {
+          const root = effectiveRootFolderPath.trim().replace(/[\\/]+$/, "");
+          return `${root}/${relative}`.replace(/\//g, "\\");
+        });
 
     if (absolutePaths.length === 0) {
       alert("Nessun percorso disponibile per le foto selezionate.");
+      return;
+    }
+
+    if (
+      typeof window !== "undefined" &&
+      typeof window.filexDesktop?.openWithEditor === "function"
+    ) {
+      void window.filexDesktop.openWithEditor(editor, absolutePaths).then((result) => {
+        if (!result?.ok) {
+          alert(result?.error ?? "Impossibile aprire l'editor esterno.");
+          return;
+        }
+
+        pushTimelineEntry(
+          `${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} aperta/e nell'editor`
+        );
+      });
+      return;
+    }
+
+    if (!effectiveRootFolderPath.trim()) {
+      alert("Imposta prima la Cartella radice in Impostazioni > Editor esterno.");
       return;
     }
 
@@ -980,7 +2018,7 @@ export function PhotoSelector({
     alert(
       `Ho scaricato ${fileName}. Eseguilo per aprire ${absolutePaths.length} foto in editor.`
     );
-  }, [preferredEditorPath, pushTimelineEntry, rootFolderPath]);
+  }, [effectiveRootFolderPath, preferredEditorPath, pushTimelineEntry]);
 
   // Detect external edits (Photoshop overwrite) and refresh in-app previews automatically.
   useEffect(() => {
@@ -991,6 +2029,7 @@ export function PhotoSelector({
 
     const run = async () => {
       if (running) return;
+      if (typeof document !== "undefined" && document.hidden) return;
       const targets = Array.from(new Set([
         ...selectedIds,
         ...(previewAssetId ? [previewAssetId] : []),
@@ -1032,7 +2071,7 @@ export function PhotoSelector({
 
     const timer = window.setInterval(() => {
       void run();
-    }, 2000);
+    }, 4000);
 
     return () => {
       disposed = true;
@@ -1041,7 +2080,7 @@ export function PhotoSelector({
   }, [onPhotosChange, previewAssetId, pushTimelineEntry, selectedIds]);
 
   const editorPathStatus = useMemo(() => {
-    const value = preferredEditorPath.trim();
+    const value = sanitizeEditorExecutablePath(preferredEditorPath);
     if (!value) {
       return { kind: "empty" as const, text: "Non configurato" };
     }
@@ -1066,7 +2105,70 @@ export function PhotoSelector({
     };
   }, [desktopThumbnailCacheInfo]);
 
+  const cacheLocationSummary = useMemo(
+    () => formatVolumeSummary(desktopCacheLocationRecommendation),
+    [desktopCacheLocationRecommendation],
+  );
+
+  const canUseRecommendedCacheLocation = useMemo(() => {
+    const recommendedPath = desktopCacheLocationRecommendation?.recommendedPath;
+    if (!recommendedPath || !desktopThumbnailCacheInfo?.currentPath) {
+      return false;
+    }
+
+    return recommendedPath.trim().length > 0
+      && recommendedPath.trim().toLowerCase() !== desktopThumbnailCacheInfo.currentPath.trim().toLowerCase();
+  }, [desktopCacheLocationRecommendation?.recommendedPath, desktopThumbnailCacheInfo?.currentPath]);
+
+  const desktopCacheRecommendationStatus = useMemo(() => {
+    if (!desktopCacheLocationRecommendation) {
+      return null;
+    }
+
+    if (desktopCacheLocationRecommendation.shouldPrompt) {
+      return {
+        kind: "warn" as const,
+        text: "C: è stretto: conviene spostare la cache pesante su un disco più capiente.",
+      };
+    }
+
+    switch (desktopCacheLocationRecommendation.reason) {
+      case "already-custom":
+        return {
+          kind: "ok" as const,
+          text: "La cache è già fuori dal disco di sistema.",
+        };
+      case "dismissed":
+        return {
+          kind: "empty" as const,
+          text: "Suggerimento automatico disattivato.",
+        };
+      case "no-suitable-volume":
+        return {
+          kind: "empty" as const,
+          text: "Nessun altro disco capiente trovato per una migrazione consigliata.",
+        };
+      default:
+        return {
+          kind: "ok" as const,
+          text: "Configurazione cache attuale già adatta.",
+        };
+    }
+  }, [desktopCacheLocationRecommendation]);
+
   const handleBrowsePreferredEditor = useCallback(() => {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.filexDesktop?.chooseEditorExecutable === "function"
+    ) {
+      void window.filexDesktop.chooseEditorExecutable(preferredEditorPath).then((selectedPath) => {
+        if (selectedPath) {
+          setPreferredEditorPathPersisted(selectedPath);
+        }
+      });
+      return;
+    }
+
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".exe,.bat,.cmd,application/x-msdownload";
@@ -1211,6 +2313,24 @@ export function PhotoSelector({
             ))}
           </div>
         </div>
+
+        {customLabelFilterOptions.length > 0 && (
+          <label className="field">
+            <span>Label custom</span>
+            <select
+              className={customLabelFilter !== "all" ? "field__select--active" : undefined}
+              value={customLabelFilter}
+              onChange={(event) => setCustomLabelFilter(event.target.value)}
+            >
+              <option value="all">Tutte</option>
+              {customLabelFilterOptions.map(({ label, count }) => (
+                <option key={label} value={label}>
+                  {label} ({count})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         {seriesGroups.length > 1 && (
           <label className="field">
@@ -1433,7 +2553,10 @@ export function PhotoSelector({
       <div
         ref={gridRef}
         className="photo-selector__grid"
-        style={{ "--ps-card-min": `${cardSize}px` } as React.CSSProperties}
+        style={{
+          "--ps-card-min": `${cardSize}px`,
+          "--ps-card-stage-height": `${cardStageHeight}px`,
+        } as React.CSSProperties}
         role="listbox"
         onPointerDown={(e) => {
           // Never start a lasso drag while the context menu is open
@@ -1503,10 +2626,25 @@ export function PhotoSelector({
         }}
         onScroll={(event) => {
           const target = event.currentTarget;
-          const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
-          if (remaining <= RENDER_THRESHOLD_PX && renderCount < visiblePhotos.length) {
-            setRenderCount((current) => Math.min(visiblePhotos.length, current + RENDER_BATCH_STEP));
+          pendingScrollTopRef.current = target.scrollTop;
+          if (scrollAnimationFrameRef.current !== null) {
+            return;
           }
+
+          scrollAnimationFrameRef.current = window.requestAnimationFrame(() => {
+            scrollAnimationFrameRef.current = null;
+            const nextScrollTop = pendingScrollTopRef.current;
+            pendingScrollTopRef.current = null;
+            if (nextScrollTop === null) {
+              return;
+            }
+
+            setGridViewport((current) => (
+              current.scrollTop === nextScrollTop
+                ? current
+                : { ...current, scrollTop: nextScrollTop }
+            ));
+          });
         }}
       >
         {visiblePhotos.length === 0 ? (
@@ -1514,34 +2652,46 @@ export function PhotoSelector({
             <p>Nessuna foto trovata.</p>
           </div>
         ) : (
-          renderedPhotos.map((photo) => (
-            <PhotoCard
-              key={photo.id}
-              photo={photo}
-              isSelected={selectedSet.has(photo.id)}
-              onToggle={togglePhoto}
-              onUpdatePhoto={handleUpdatePhoto}
-              onFocus={handleFocus}
-              onPreview={handlePreview}
-              onContextMenu={handleContextMenu}
-              editable={!!onPhotosChange}
-            />
-          ))
+          <>
+            {topSpacerHeight > 0 ? (
+              <div
+                className="photo-selector__virtual-spacer"
+                style={{ height: topSpacerHeight }}
+                aria-hidden="true"
+              />
+            ) : null}
+            {renderedPhotos.map((photo) => (
+              <PhotoCard
+                key={photo.id}
+                photo={photo}
+                isSelected={selectedSet.has(photo.id)}
+                onToggle={togglePhoto}
+                onUpdatePhoto={handleUpdatePhoto}
+                onFocus={handleFocus}
+                onPreview={handlePreview}
+                onContextMenu={handleContextMenu}
+                onExternalDragStart={handleCardExternalDragStart}
+                customLabelColors={customLabelColors}
+                customLabelShortcuts={customLabelShortcuts}
+                canExternalDrag={typeof window !== "undefined"
+                  && typeof window.filexDesktop?.startDragOut === "function"
+                  && (
+                    selectedSet.has(photo.id)
+                      ? canStartDesktopDragOut
+                      : Boolean(getAssetAbsolutePath(photo.id))
+                  )}
+                editable={!!onPhotosChange}
+              />
+            ))}
+            {bottomSpacerHeight > 0 ? (
+              <div
+                className="photo-selector__virtual-spacer"
+                style={{ height: bottomSpacerHeight }}
+                aria-hidden="true"
+              />
+            ) : null}
+          </>
         )}
-        {renderedPhotos.length < visiblePhotos.length ? (
-          <div className="photo-selector__render-more">
-            <span>
-              Mostrate {renderedPhotos.length} di {visiblePhotos.length} foto
-            </span>
-            <button
-              type="button"
-              className="ghost-button ghost-button--small"
-              onClick={() => setRenderCount((current) => Math.min(visiblePhotos.length, current + RENDER_BATCH_STEP))}
-            >
-              Carica altre
-            </button>
-          </div>
-        ) : null}
         {dragRect && (
           <div
             className="photo-selector__drag-rect"
@@ -1602,6 +2752,20 @@ export function PhotoSelector({
         )}
 
         <div className="photo-selector__footer-actions">
+          {selectedIds.length > 0 && (
+            <button
+              type="button"
+              className={`ghost-button ghost-button--small${canStartDesktopDragOut ? " photo-selector__dragout-button" : ""}`}
+              draggable={canStartDesktopDragOut}
+              onDragStart={handleSelectionDragStart}
+              title={canStartDesktopDragOut
+                ? "Trascina la selezione direttamente dentro Auto Layout, Photoshop o un'altra app desktop."
+                : "Drag esterno disponibile nella versione desktop con cartella aperta in modalità nativa."}
+              disabled={!canStartDesktopDragOut}
+            >
+              Trascina fuori ({selectedIds.length})
+            </button>
+          )}
           {selectedIds.length > 0 && (
             <button 
               className="ghost-button ghost-button--small" 
@@ -1685,6 +2849,106 @@ export function PhotoSelector({
                   ))}
                 </div>
               </div>
+
+              <div className="photo-selector__selection-group" aria-label="Etichette personalizzate">
+                <span className="photo-selector__selection-label">Label custom</span>
+                <div className="photo-selector__selection-pills photo-selector__selection-pills--wrap">
+                  <button
+                    type="button"
+                    className="ghost-button ghost-button--small"
+                    onClick={handleClearBatchCustomLabels}
+                  >
+                    Azzera
+                  </button>
+                  {customLabelsCatalog.map((label) => {
+                    const activeCount = selectedCustomLabelCounts.get(label) ?? 0;
+                    const isActive = selectedIds.length > 0 && activeCount === selectedIds.length;
+                    const isPartial = activeCount > 0 && activeCount < selectedIds.length;
+                    const tone = resolveCustomLabelTone(label);
+                    return (
+                      <button
+                        key={label}
+                        type="button"
+                        className={[
+                          "photo-selector__batch-pill",
+                          "photo-selector__batch-pill--label",
+                          `photo-selector__batch-pill--${tone}`,
+                          isActive ? "photo-selector__batch-pill--active" : "",
+                          isPartial ? "photo-selector__batch-pill--partial" : "",
+                        ].filter(Boolean).join(" ")}
+                        onClick={() => handleToggleBatchCustomLabel(label)}
+                        title={isActive ? `Rimuovi ${label} dalla selezione` : `Assegna ${label} alla selezione`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="photo-selector__label-create-row">
+                  <input
+                    type="text"
+                    className="photo-selector__settings-color-input"
+                    value={newBatchCustomLabelName}
+                    onChange={(event) => setNewBatchCustomLabelName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        handleAddCustomLabelToCatalog(newBatchCustomLabelName, {
+                          assignToSelection: true,
+                          tone: newBatchCustomLabelTone,
+                          shortcut: newBatchCustomLabelShortcut,
+                        });
+                        setNewBatchCustomLabelName("");
+                        setNewBatchCustomLabelTone(DEFAULT_CUSTOM_LABEL_TONE);
+                        setNewBatchCustomLabelShortcut(null);
+                      }
+                    }}
+                    placeholder="Nuova etichetta, es. Album sposi"
+                  />
+                  <select
+                    className="photo-selector__settings-color-input"
+                    value={newBatchCustomLabelTone}
+                    onChange={(event) => setNewBatchCustomLabelTone(event.target.value as CustomLabelTone)}
+                    title="Colore etichetta"
+                  >
+                    {CUSTOM_LABEL_TONES.map((tone) => (
+                      <option key={tone} value={tone}>
+                        {`Colore ${tone}`}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="photo-selector__settings-color-input"
+                    value={newBatchCustomLabelShortcut ?? ""}
+                    onChange={(event) => setNewBatchCustomLabelShortcut(normalizeCustomLabelShortcut(event.target.value))}
+                    title="Tasto rapido"
+                  >
+                    <option value="">Nessun tasto</option>
+                    {CUSTOM_LABEL_SHORTCUT_OPTIONS.map((shortcut) => (
+                      <option key={shortcut} value={shortcut}>
+                        {`Tasto ${shortcut}`}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="ghost-button ghost-button--small"
+                    onClick={() => {
+                      handleAddCustomLabelToCatalog(newBatchCustomLabelName, {
+                        assignToSelection: true,
+                        tone: newBatchCustomLabelTone,
+                        shortcut: newBatchCustomLabelShortcut,
+                      });
+                      setNewBatchCustomLabelName("");
+                      setNewBatchCustomLabelTone(DEFAULT_CUSTOM_LABEL_TONE);
+                      setNewBatchCustomLabelShortcut(null);
+                    }}
+                    disabled={!newBatchCustomLabelName.trim()}
+                  >
+                    Aggiungi e assegna
+                  </button>
+                </div>
+              </div>
           </div>
         </section>
       )}
@@ -1692,8 +2956,13 @@ export function PhotoSelector({
       <PhotoQuickPreviewModal
         asset={previewAssetWithUrl}
         assets={visiblePhotos}
-        onClose={() => setPreviewAssetId(null)}
-        onSelectAsset={setPreviewAssetId}
+        thumbnailProfile={thumbnailProfile}
+        startZoomed={previewStartsZoomed}
+        customLabelsCatalog={customLabelsCatalog}
+        customLabelColors={customLabelColors}
+        customLabelShortcuts={customLabelShortcuts}
+        onClose={closePreview}
+        onSelectAsset={handlePreviewAssetSelection}
         onUpdateAsset={(assetId, changes) => updatePhoto(assetId, changes)}
       />
 
@@ -1727,6 +2996,168 @@ export function PhotoSelector({
           </div>
 
           <div className="photo-selector__settings-section">
+            <h4 className="photo-selector__settings-section-title">Etichette personalizzate</h4>
+            <p className="photo-selector__settings-empty">
+              Crea etichette tipo "Album sposi", "Trailer", "Dettagli sala". Ora puoi scegliere subito colore e tasto rapido, assegnarle alla selezione e ritrovarle sia in UI sia nei sidecar XMP.
+            </p>
+            <div className="photo-selector__label-grid">
+              {customLabelsCatalog.map((label) => (
+                <div key={label} className="photo-selector__label-editor">
+                  <span className={`photo-selector__label-chip photo-selector__label-chip--${resolveCustomLabelTone(label)}`}>
+                    Tag
+                  </span>
+                  <input
+                    type="text"
+                    defaultValue={label}
+                    onBlur={(event) => {
+                      const nextValue = normalizeCustomLabelName(event.target.value);
+                      if (!nextValue) {
+                        event.currentTarget.value = label;
+                        return;
+                      }
+                      handleRenameCustomLabel(label, nextValue);
+                      event.currentTarget.value = nextValue;
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                    }}
+                  />
+                  <div className="photo-selector__label-tone-picker" aria-label={`Colore ${label}`}>
+                    {CUSTOM_LABEL_TONES.map((tone) => (
+                      <button
+                        key={`${label}-${tone}`}
+                        type="button"
+                        className={
+                          resolveCustomLabelTone(label) === tone
+                            ? `photo-selector__label-tone photo-selector__label-tone--${tone} photo-selector__label-tone--active`
+                            : `photo-selector__label-tone photo-selector__label-tone--${tone}`
+                        }
+                        onClick={() => handleCustomLabelToneChange(label, tone)}
+                        title={`Usa colore ${tone} per ${label}`}
+                      />
+                    ))}
+                  </div>
+                  <select
+                    className="photo-selector__settings-color-input"
+                    value={resolveCustomLabelShortcut(label) ?? ""}
+                    onChange={(event) => handleCustomLabelShortcutChange(label, normalizeCustomLabelShortcut(event.target.value))}
+                    title={`Scorciatoia ${label}`}
+                  >
+                    <option value="">Nessun tasto</option>
+                    {CUSTOM_LABEL_SHORTCUT_OPTIONS.map((shortcut) => (
+                      <option key={`${label}-${shortcut}`} value={shortcut}>
+                        {`Tasto ${shortcut}`}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedIds.length > 0 ? (
+                    <button
+                      type="button"
+                      className="ghost-button ghost-button--small"
+                      title={`Assegna ${label} alle foto selezionate${resolveCustomLabelShortcut(label) ? ` · ${resolveCustomLabelShortcut(label)}` : ""}`}
+                      onClick={() => assignCustomLabelToSelection(label)}
+                    >
+                      {resolveCustomLabelShortcut(label) ? `Assegna · ${resolveCustomLabelShortcut(label)}` : "Assegna"}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="icon-button icon-button--danger"
+                    title={`Rimuovi ${label}`}
+                    onClick={() => handleRemoveCustomLabel(label)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="photo-selector__settings-preset-row">
+              <input
+                type="text"
+                className="photo-selector__settings-color-input"
+                value={newCustomLabelName}
+                onChange={(event) => setNewCustomLabelName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleAddCustomLabelToCatalog(newCustomLabelName, {
+                      tone: newCustomLabelTone,
+                      shortcut: newCustomLabelShortcut,
+                    });
+                    setNewCustomLabelName("");
+                    setNewCustomLabelTone(DEFAULT_CUSTOM_LABEL_TONE);
+                    setNewCustomLabelShortcut(null);
+                  }
+                }}
+                placeholder="Nuova etichetta workflow"
+              />
+              <select
+                className="photo-selector__settings-color-input"
+                value={newCustomLabelTone}
+                onChange={(event) => setNewCustomLabelTone(event.target.value as CustomLabelTone)}
+                title="Colore etichetta"
+              >
+                {CUSTOM_LABEL_TONES.map((tone) => (
+                  <option key={`new-${tone}`} value={tone}>
+                    {`Colore ${tone}`}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="photo-selector__settings-color-input"
+                value={newCustomLabelShortcut ?? ""}
+                onChange={(event) => setNewCustomLabelShortcut(normalizeCustomLabelShortcut(event.target.value))}
+                title="Tasto rapido"
+              >
+                <option value="">Nessun tasto</option>
+                {CUSTOM_LABEL_SHORTCUT_OPTIONS.map((shortcut) => (
+                  <option key={`new-shortcut-${shortcut}`} value={shortcut}>
+                    {`Tasto ${shortcut}`}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => {
+                  handleAddCustomLabelToCatalog(newCustomLabelName, {
+                    tone: newCustomLabelTone,
+                    shortcut: newCustomLabelShortcut,
+                  });
+                  setNewCustomLabelName("");
+                  setNewCustomLabelTone(DEFAULT_CUSTOM_LABEL_TONE);
+                  setNewCustomLabelShortcut(null);
+                }}
+                disabled={!newCustomLabelName.trim()}
+              >
+                Aggiungi
+              </button>
+              {selectedIds.length > 0 ? (
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={() => {
+                    handleAddCustomLabelToCatalog(newCustomLabelName, {
+                      assignToSelection: true,
+                      tone: newCustomLabelTone,
+                      shortcut: newCustomLabelShortcut,
+                    });
+                    setNewCustomLabelName("");
+                    setNewCustomLabelTone(DEFAULT_CUSTOM_LABEL_TONE);
+                    setNewCustomLabelShortcut(null);
+                  }}
+                  disabled={!newCustomLabelName.trim()}
+                >
+                  Aggiungi e assegna
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="photo-selector__settings-section">
             <h4 className="photo-selector__settings-section-title">
               Editor esterno
               <button
@@ -1742,16 +3173,25 @@ export function PhotoSelector({
               <input
                 type="text"
                 className="photo-selector__settings-color-input"
-                value={rootFolderPath}
+                value={effectiveRootFolderPath}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  setRootFolderPath(val);
-                  localStorage.setItem("ps-root-folder-path", val);
+                  setRootFolderPathOverridePersisted(e.target.value);
                 }}
-                placeholder="C:\Utenti\Foto\Matrimonio"
+                placeholder={sourceFolderPath || "C:\\Utenti\\Foto\\Matrimonio"}
                 spellCheck={false}
               />
             </label>
+            <div className="photo-selector__settings-preset-row">
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => setRootFolderPathOverridePersisted("")}
+                disabled={!rootFolderPathOverride.trim()}
+                title="Torna a usare automaticamente la cartella aperta"
+              >
+                Usa cartella aperta
+              </button>
+            </div>
             <label className="photo-selector__settings-color-row">
               <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Editor</span>
               <div className="photo-selector__settings-input-with-button">
@@ -1760,7 +3200,7 @@ export function PhotoSelector({
                   className="photo-selector__settings-color-input"
                   value={preferredEditorPath}
                   onChange={(e) => setPreferredEditorPathPersisted(e.target.value)}
-                  placeholder="C:\\Program Files\\Adobe\\Adobe Photoshop 2025\\Photoshop.exe"
+                  placeholder={installedEditorCandidates[0]?.path ?? "C:\\Program Files\\Adobe\\Adobe Photoshop 2026\\Photoshop.exe"}
                   spellCheck={false}
                 />
               </div>
@@ -1776,39 +3216,103 @@ export function PhotoSelector({
               </button>
             </div>
             <div className="photo-selector__settings-preset-row photo-selector__settings-editor-presets">
-              <button
-                type="button"
-                className="ghost-button ghost-button--small"
-                onClick={() => setPreferredEditorPathPersisted("C:\\Program Files\\Adobe\\Adobe Photoshop 2025\\Photoshop.exe")}
-                title="Imposta percorso Photoshop 2025"
-              >
-                Photoshop 2025
-              </button>
-              <button
-                type="button"
-                className="ghost-button ghost-button--small"
-                onClick={() => setPreferredEditorPathPersisted("C:\\Program Files\\Adobe\\Adobe Photoshop 2024\\Photoshop.exe")}
-                title="Imposta percorso Photoshop 2024"
-              >
-                Photoshop 2024
-              </button>
-              <button
-                type="button"
-                className="ghost-button ghost-button--small"
-                onClick={() => setPreferredEditorPathPersisted("C:\\Program Files\\Adobe\\Adobe Photoshop 2023\\Photoshop.exe")}
-                title="Imposta percorso Photoshop 2023"
-              >
-                Photoshop 2023
-              </button>
+              {(installedEditorCandidates.length > 0 ? installedEditorCandidates : KNOWN_EDITOR_PRESET_PATHS.map((path) => ({
+                path,
+                label: path.match(/Adobe Photoshop \d{4}/i)?.[0]?.replace(/^Adobe\s+/i, "") ?? "Photoshop",
+              }))).map((candidate) => (
+                <button
+                  key={candidate.path}
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={() => setPreferredEditorPathPersisted(candidate.path)}
+                  title={`Imposta percorso ${candidate.label}`}
+                >
+                  {candidate.label}
+                </button>
+              ))}
             </div>
             <p
               className={`photo-selector__settings-path-status photo-selector__settings-path-status--${editorPathStatus.kind}`}
             >
               {editorPathStatus.text}
             </p>
+            {installedEditorCandidates.length > 0 ? (
+              <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                Editor rilevato: {installedEditorCandidates[0].path}
+              </p>
+            ) : null}
+            <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+              {rootFolderPathOverride.trim()
+                ? `Override manuale attivo. Cartella aperta: ${sourceFolderPath || "n/d"}`
+                : sourceFolderPath
+                  ? `Auto dalla cartella aperta: ${sourceFolderPath}`
+                  : "Si auto-compila quando apri una cartella in modalità desktop."}
+            </p>
             <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
               Usato per "Apri con editor" e "Copia percorso" nel menu contestuale.
             </p>
+          </div>
+
+          <div className="photo-selector__settings-section">
+            <h4 className="photo-selector__settings-section-title">
+              Prestazioni
+              <button
+                type="button"
+                className="photo-selector__settings-info-btn"
+                title="Ultra Fast privilegia al massimo la reattivita' e alleggerisce anche la quick preview. Fast contact sheet mantiene un po' piu' dettaglio. Bilanciato punta di piu' alla pulizia visiva. Il profilo si applica subito ai task attivi e alla quick preview; riaprire la cartella rigenera tutta la cache con il nuovo profilo."
+              >
+                ?
+              </button>
+            </h4>
+            <label className="photo-selector__settings-color-row">
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Anteprime</span>
+              <select
+                className="photo-selector__settings-color-input"
+                value={selectedThumbnailProfile}
+                onChange={(event) => handleThumbnailProfileChange(
+                  event.target.value === "balanced"
+                    ? "balanced"
+                    : event.target.value === "fast"
+                      ? "fast"
+                      : "ultra-fast"
+                )}
+              >
+                <option value="ultra-fast">Ultra Fast</option>
+                <option value="balanced">Bilanciato</option>
+                <option value="fast">Fast contact sheet</option>
+              </select>
+            </label>
+            <label className="photo-selector__settings-color-row" style={{ alignItems: "center" }}>
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Sort cache</span>
+              <input
+                type="checkbox"
+                checked={isSortCacheEnabled}
+                onChange={(event) => handleSortCacheEnabledChange(event.target.checked)}
+              />
+            </label>
+            <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+              Profilo attivo: {
+                selectedThumbnailProfile === "ultra-fast"
+                  ? "Ultra Fast"
+                  : selectedThumbnailProfile === "fast"
+                    ? "Fast contact sheet"
+                    : "Bilanciato"
+              }.
+              {selectedThumbnailProfile !== thumbnailProfile ? " Aggiorno subito task attivi e quick preview; riaprire la cartella rigenera tutta la cache col nuovo profilo." : ""}
+            </p>
+            {performanceSnapshot ? (
+              <>
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  Primo thumbnail: {formatMilliseconds(performanceSnapshot.folderOpenToFirstThumbnailMs)} | Griglia completa: {formatMilliseconds(performanceSnapshot.folderOpenToGridCompleteMs)}
+                </p>
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  Cache colpite: {performanceSnapshot.cachedThumbnailCount}/{performanceSnapshot.totalThumbnailCount} | Letture disco: {formatBytes(performanceSnapshot.bytesRead)}
+                </p>
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  RAW: {formatBytes(performanceSnapshot.rawBytesRead)} | Standard: {formatBytes(performanceSnapshot.standardBytesRead)}
+                </p>
+              </>
+            ) : null}
           </div>
 
           {desktopThumbnailCacheInfo ? (
@@ -1818,11 +3322,14 @@ export function PhotoSelector({
                 <button
                   type="button"
                   className="photo-selector__settings-info-btn"
-                  title="Le anteprime vengono salvate su disco dal layer desktop Windows. Il percorso predefinito e' locale e veloce, ma puoi spostarlo dove preferisci."
+                  title="Spostiamo solo le cache pesanti gestite da Selezione Foto. AppData, Temp e cache Chromium di sistema restano nei percorsi di Windows."
                 >
                   ?
                 </button>
               </h4>
+              <p className="photo-selector__settings-empty" style={{ marginTop: "0.1rem" }}>
+                Spostiamo le cache pesanti gestite da Selezione Foto, non i percorsi di sistema di Windows.
+              </p>
               <label className="photo-selector__settings-color-row">
                 <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Percorso</span>
                 <div className="photo-selector__settings-input-with-button">
@@ -1865,6 +3372,18 @@ export function PhotoSelector({
                 <button
                   type="button"
                   className="ghost-button ghost-button--small"
+                  onClick={() => void onUseRecommendedDesktopThumbnailCacheDirectory?.()}
+                  disabled={
+                    isDesktopThumbnailCacheBusy
+                    || !onUseRecommendedDesktopThumbnailCacheDirectory
+                    || !canUseRecommendedCacheLocation
+                  }
+                >
+                  Usa percorso consigliato
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small"
                   onClick={() => void onClearDesktopThumbnailCache?.()}
                   disabled={isDesktopThumbnailCacheBusy || !onClearDesktopThumbnailCache}
                 >
@@ -1878,12 +3397,27 @@ export function PhotoSelector({
                   {desktopThumbnailCacheStatus.text}
                 </p>
               ) : null}
+              {desktopCacheRecommendationStatus ? (
+                <p
+                  className={`photo-selector__settings-path-status photo-selector__settings-path-status--${desktopCacheRecommendationStatus.kind}`}
+                >
+                  {desktopCacheRecommendationStatus.text}
+                </p>
+              ) : null}
               <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
                 {desktopThumbnailCacheInfo.entryCount} anteprime, {formatBytes(desktopThumbnailCacheInfo.totalBytes)} su disco.
               </p>
               <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
                 Percorso predefinito: {desktopThumbnailCacheInfo.defaultPath}
               </p>
+              <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                Drive attuale: {cacheLocationSummary.current}
+              </p>
+              {cacheLocationSummary.recommended ? (
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  Percorso consigliato: {cacheLocationSummary.recommended}
+                </p>
+              ) : null}
             </div>
           ) : null}
 
@@ -1942,6 +3476,71 @@ export function PhotoSelector({
         </aside>
       )}
 
+      {isDesktopCacheRecommendationModalOpen && desktopCacheLocationRecommendation?.recommendedPath ? (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="modal-panel photo-selector__cache-recommendation-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cache-recommendation-title"
+          >
+            <div className="modal-panel__header">
+              <div>
+                <strong id="cache-recommendation-title">Spazio disco e cache</strong>
+                <p>
+                  C: ha poco spazio libero. Possiamo spostare le cache pesanti gestite da Selezione Foto su un disco più capiente.
+                </p>
+              </div>
+            </div>
+            <div className="modal-panel__body">
+              <div className="photo-selector__cache-recommendation-grid">
+                <div className="photo-selector__cache-recommendation-card">
+                  <span className="photo-selector__cache-recommendation-label">Percorso attuale</span>
+                  <strong>{desktopCacheLocationRecommendation.currentPath}</strong>
+                  <p>{cacheLocationSummary.current}</p>
+                </div>
+                <div className="photo-selector__cache-recommendation-card">
+                  <span className="photo-selector__cache-recommendation-label">Percorso consigliato</span>
+                  <strong>{desktopCacheLocationRecommendation.recommendedPath}</strong>
+                  <p>{cacheLocationSummary.recommended ?? "Disco consigliato non disponibile"}</p>
+                </div>
+              </div>
+              <p className="photo-selector__settings-empty">
+                Copiamo thumbnail e quick preview già create, poi passiamo al nuovo percorso e liberiamo quello vecchio se tutto va bene.
+              </p>
+            </div>
+            <div className="modal-panel__footer">
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => void onSnoozeDesktopCacheRecommendation?.()}
+                disabled={isDesktopThumbnailCacheBusy || !onSnoozeDesktopCacheRecommendation}
+              >
+                Più tardi
+              </button>
+              <div className="photo-selector__cache-recommendation-actions">
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => void onDismissDesktopCacheRecommendation?.()}
+                  disabled={isDesktopThumbnailCacheBusy || !onDismissDesktopCacheRecommendation}
+                >
+                  Non mostrare più
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void onUseRecommendedDesktopThumbnailCacheDirectory?.()}
+                  disabled={isDesktopThumbnailCacheBusy || !onUseRecommendedDesktopThumbnailCacheDirectory}
+                >
+                  Sposta ora
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
       {/* Backdrop: transparent overlay that closes the context menu when clicked outside */}
       {contextMenuState && (
         <div
@@ -1958,7 +3557,7 @@ export function PhotoSelector({
           targetCount={contextMenuState.targetIds.length}
           colorLabelNames={customColorNames}
           hasFileAccess={"showDirectoryPicker" in window}
-          rootFolderPath={rootFolderPath || undefined}
+          rootFolderPath={effectiveRootFolderPath || undefined}
           targetPath={contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined}
           onApplyRating={(rating) => {
             applyBatchChanges(contextMenuState.targetIds, { rating });
@@ -2010,7 +3609,7 @@ export function PhotoSelector({
             void handleSaveAs(ids);
           }}
           onCopyPath={() => {
-            handleCopyPath(contextMenuState.targetIds, rootFolderPath);
+            handleCopyPath(contextMenuState.targetIds, effectiveRootFolderPath);
             setContextMenuState(null);
           }}
           onOpenWithEditor={() => {

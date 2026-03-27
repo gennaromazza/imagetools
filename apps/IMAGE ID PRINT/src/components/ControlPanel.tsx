@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import { ImagePlus, Download, Loader2, AlertTriangle, ChevronDown } from 'lucide-react'
+import { ImagePlus, Download, Loader2, AlertTriangle, ChevronDown, Printer } from 'lucide-react'
+import { toast } from 'sonner'
 import { cn } from '../lib/utils'
 import type { AiProcessingOptions } from '../services/image-processing-service'
 import type {
@@ -37,6 +38,7 @@ interface ControlPanelProps {
   onAiOptionsChange: (updater: (prev: AiProcessingOptions) => AiProcessingOptions) => void
   onApplyAi: () => void
   onResetAi: () => void
+  onPrint: () => void
   onExport: () => void
 }
 
@@ -51,6 +53,8 @@ const FORMAT_OPTIONS: { value: ExportFormat; label: string }[] = [
   { value: 'png', label: 'PNG' },
   { value: 'pdf', label: 'PDF' },
 ]
+
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png']
 
 type CategoryFilter = 'all' | Exclude<DocumentCategory, 'custom'>
 
@@ -94,6 +98,7 @@ export function ControlPanel({
   onAiOptionsChange,
   onApplyAi,
   onResetAi,
+  onPrint,
   onExport,
 }: ControlPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -101,34 +106,58 @@ export function ControlPanel({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
+    if (!ACCEPTED_TYPES.includes(file.type)) {
+      toast.error('Formato file non supportato', {
+        description: 'Usa un file JPG o PNG valido.',
+      })
+      e.target.value = ''
+      return
+    }
     const url = URL.createObjectURL(file)
     const img = new Image()
     img.onload = () => {
       URL.revokeObjectURL(url)
       onImageReplace(file, img)
     }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      toast.error('Immagine non leggibile', {
+        description: 'Il file selezionato sembra corrotto o non compatibile.',
+      })
+    }
     img.src = url
     e.target.value = ''
   }
 
   const isCustom = docPreset.id === 'custom'
-  const canExport = !!croppedCanvas && !!layout && layout.total > 0 && !isExporting
+  const canExport = !!croppedCanvas && !!layout && layout.total > 0 && !isExporting && !isAiProcessing
+  const canPrint = !!croppedCanvas && !!layout && layout.total > 0 && !isExporting && !isAiProcessing
   const [selectedCategory, setSelectedCategory] = useState<CategoryFilter>('all')
   const [selectedCountry, setSelectedCountry] = useState<string>('ALL')
   const [query, setQuery] = useState('')
   const [showAiAdvanced, setShowAiAdvanced] = useState(false)
+
+  const countryNameByCode = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const preset of DOCUMENT_PRESETS) {
+      if (!map.has(preset.countryCode)) {
+        map.set(preset.countryCode, preset.countryName)
+      }
+    }
+    return map
+  }, [])
 
   const countries = useMemo(() => {
     const unique = Array.from(new Set(DOCUMENT_PRESETS.filter((p) => p.enabled).map((p) => p.countryCode)))
     unique.sort((a, b) => {
       if (a === 'IT') return -1
       if (b === 'IT') return 1
-      const nameA = DOCUMENT_PRESETS.find((p) => p.countryCode === a)?.countryName ?? a
-      const nameB = DOCUMENT_PRESETS.find((p) => p.countryCode === b)?.countryName ?? b
+      const nameA = countryNameByCode.get(a) ?? a
+      const nameB = countryNameByCode.get(b) ?? b
       return nameA.localeCompare(nameB, 'it', { sensitivity: 'base' })
     })
     return ['ALL', ...unique]
-  }, [])
+  }, [countryNameByCode])
 
   const filteredPresets = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -157,7 +186,11 @@ export function ControlPanel({
   const autoSuggestion = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return null
-    if (q.includes('usa') || q.includes('us') || q.includes('america')) {
+    const tokens = q
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(' ')
+      .filter(Boolean)
+    if (tokens.includes('usa') || tokens.includes('us') || tokens.includes('america')) {
       return DOCUMENT_PRESETS.find((p) => p.id === 'us_visa') ?? null
     }
     return null
@@ -276,107 +309,105 @@ export function ControlPanel({
           {showAiAdvanced ? 'Nascondi controlli avanzati' : 'Mostra controlli avanzati'}
         </button>
 
-        <div className="grid grid-cols-1 gap-2 mt-2">
-          <NumberInput
-            label="Padding espansione (px)"
-            value={aiOptions.expandPaddingPx}
-            min={0}
-            max={500}
-            onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, expandPaddingPx: v }))}
-          />
+        {showAiAdvanced && (
+          <div className="grid grid-cols-1 gap-2 mt-2">
+            <NumberInput
+              label="Padding espansione (px)"
+              value={aiOptions.expandPaddingPx}
+              min={0}
+              max={500}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, expandPaddingPx: v }))}
+            />
 
-          <SliderInput
-            label="Morbidezza bordo"
-            value={aiOptions.edgeSoftness}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, edgeSoftness: v }))}
-          />
+            <SliderInput
+              label="Morbidezza bordo"
+              value={aiOptions.edgeSoftness}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, edgeSoftness: v }))}
+            />
 
-          <SliderInput
-            label="Rifinitura sfondo/capelli"
-            value={aiOptions.backgroundRefine}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, backgroundRefine: v }))}
-          />
+            <SliderInput
+              label="Rifinitura sfondo/capelli"
+              value={aiOptions.backgroundRefine}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, backgroundRefine: v }))}
+            />
 
-          <SliderInput
-            label="Soglia adattamento formato"
-            value={aiOptions.autoFitRatioThreshold}
-            min={0.05}
-            max={0.45}
-            step={0.01}
-            badgeLabel={autoFitProfileLabel}
-            onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, autoFitRatioThreshold: v }))}
-          />
+            <SliderInput
+              label="Soglia adattamento formato"
+              value={aiOptions.autoFitRatioThreshold}
+              min={0.05}
+              max={0.45}
+              step={0.01}
+              badgeLabel={autoFitProfileLabel}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, autoFitRatioThreshold: v }))}
+            />
 
-          {showAiAdvanced && (
-            <>
-              <SliderInput
-                label="Intensita refill"
-                value={aiOptions.refillIntensity}
-                min={0}
-                max={1}
-                step={0.05}
-                onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, refillIntensity: v }))}
-              />
+            <SliderInput
+              label="Intensita refill"
+              value={aiOptions.refillIntensity}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, refillIntensity: v }))}
+            />
 
-              <SliderInput
-                label="Calore tonalita pelle"
-                value={aiOptions.toneWarmth}
-                min={0}
-                max={1}
-                step={0.05}
-                onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, toneWarmth: v }))}
-              />
+            <SliderInput
+              label="Calore tonalita pelle"
+              value={aiOptions.toneWarmth}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, toneWarmth: v }))}
+            />
 
-              <SliderInput
-                label="Levigatura pelle"
-                value={aiOptions.skinSmoothing}
-                min={0}
-                max={1}
-                step={0.05}
-                onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, skinSmoothing: v }))}
-              />
+            <SliderInput
+              label="Levigatura pelle"
+              value={aiOptions.skinSmoothing}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, skinSmoothing: v }))}
+            />
 
-              <SliderInput
-                label="Riduzione imperfezioni"
-                value={aiOptions.blemishReduction}
-                min={0}
-                max={1}
-                step={0.05}
-                onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, blemishReduction: v }))}
-              />
+            <SliderInput
+              label="Riduzione imperfezioni"
+              value={aiOptions.blemishReduction}
+              min={0}
+              max={1}
+              step={0.05}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, blemishReduction: v }))}
+            />
 
-              <ToggleRow
-                label="Soft look viso"
-                checked={aiOptions.feminineSoftening}
-                onChange={(checked) => onAiOptionsChange((prev) => ({ ...prev, feminineSoftening: checked }))}
-              />
+            <ToggleRow
+              label="Soft look viso"
+              checked={aiOptions.feminineSoftening}
+              onChange={(checked) => onAiOptionsChange((prev) => ({ ...prev, feminineSoftening: checked }))}
+            />
 
-              <SliderInput
-                label="Rimodellamento viso"
-                value={aiOptions.faceSlimming}
-                min={0}
-                max={0.35}
-                step={0.01}
-                onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, faceSlimming: v }))}
-              />
+            <SliderInput
+              label="Rimodellamento viso"
+              value={aiOptions.faceSlimming}
+              min={0}
+              max={0.35}
+              step={0.01}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, faceSlimming: v }))}
+            />
 
-              <SliderInput
-                label="Rimodellamento naso"
-                value={aiOptions.noseRefinement}
-                min={0}
-                max={0.3}
-                step={0.01}
-                onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, noseRefinement: v }))}
-              />
-            </>
-          )}
-        </div>
+            <SliderInput
+              label="Rimodellamento naso"
+              value={aiOptions.noseRefinement}
+              min={0}
+              max={0.3}
+              step={0.01}
+              onChange={(v) => onAiOptionsChange((prev) => ({ ...prev, noseRefinement: v }))}
+            />
+          </div>
+        )}
 
         <div className="flex gap-2 mt-2">
           <button
@@ -450,7 +481,7 @@ export function ControlPanel({
             {countries
               .filter((c) => c !== 'ALL')
               .map((countryCode) => {
-                const countryName = DOCUMENT_PRESETS.find((p) => p.countryCode === countryCode)?.countryName ?? countryCode
+                const countryName = countryNameByCode.get(countryCode) ?? countryCode
                 return (
                   <option key={countryCode} value={countryCode}>
                     {countryName}
@@ -606,28 +637,44 @@ export function ControlPanel({
 
       {/* ── Export button (sticky) ── */}
       <div className="sticky bottom-0 pt-2 pb-1 bg-[var(--app-surface)]">
-        <button
-          onClick={onExport}
-          disabled={!canExport}
-          className={cn(
-            'w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all shrink-0',
-            canExport
-              ? 'bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-strong)] text-[var(--brand-primary-foreground)] shadow-md'
-              : 'bg-[var(--app-surface-strong)] text-[var(--app-text-subtle)] cursor-not-allowed',
-          )}
-        >
-          {isExporting ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              Esportazione...
-            </>
-          ) : (
-            <>
-              <Download size={16} />
-              Esporta {layout && layout.total > 0 ? `(${layout.total} copie)` : ''}
-            </>
-          )}
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={onPrint}
+            disabled={!canPrint}
+            title="Stampa direttamente su DNP RX1"
+            className={cn(
+              'w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all shrink-0 border',
+              canPrint
+                ? 'bg-[var(--app-surface-strong)] hover:bg-[var(--app-border)] text-[var(--app-text)] border-[var(--app-border)]'
+                : 'bg-[var(--app-surface-strong)] text-[var(--app-text-subtle)] border-[var(--app-border)] cursor-not-allowed',
+            )}
+          >
+            <Printer size={16} />
+            Stampa
+          </button>
+          <button
+            onClick={onExport}
+            disabled={!canExport}
+            className={cn(
+              'w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all shrink-0',
+              canExport
+                ? 'bg-[var(--brand-primary)] hover:bg-[var(--brand-primary-strong)] text-[var(--brand-primary-foreground)] shadow-md'
+                : 'bg-[var(--app-surface-strong)] text-[var(--app-text-subtle)] cursor-not-allowed',
+            )}
+          >
+            {isExporting ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Esportazione...
+              </>
+            ) : (
+              <>
+                <Download size={16} />
+                Esporta {layout && layout.total > 0 ? `(${layout.total} copie)` : ''}
+              </>
+            )}
+          </button>
+        </div>
       </div>
     </aside>
   )

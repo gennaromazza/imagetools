@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Job, ImportResult } from "./types";
 import { NuovoLavoroPanel } from "./components/NuovoLavoroPanel";
 import { ArchivioPanel } from "./components/ArchivioPanel";
+import archivioLogo from "./assets/photo_Archivie.png";
 
 type Screen = "nuovo" | "archivio" | "impostazioni";
 
@@ -44,6 +45,16 @@ export default function App() {
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
       <aside className="sidebar">
         <div className="sidebar__brand">
+          <img
+            src={archivioLogo}
+            alt="Archivio Flow"
+            style={{
+              width: "100%",
+              maxWidth: "172px",
+              borderRadius: "18px",
+              boxShadow: "0 16px 28px rgba(0, 0, 0, 0.18)",
+            }}
+          />
           <h1>Archivio Flow</h1>
           <p>Importa e organizza i tuoi scatti</p>
         </div>

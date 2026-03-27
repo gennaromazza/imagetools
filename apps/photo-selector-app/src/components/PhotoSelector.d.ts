@@ -1,21 +1,46 @@
-import type { DesktopThumbnailCacheInfo } from "@photo-tools/desktop-contracts";
+import type { DesktopCacheLocationRecommendation, DesktopThumbnailCacheInfo } from "@photo-tools/desktop-contracts";
 import type { ImageAsset } from "@photo-tools/shared-types";
+import { type ThumbnailProfile } from "../services/photo-selector-preferences";
 interface PhotoSelectorProps {
     photos: ImageAsset[];
+    metadataVersion: number;
+    sourceFolderPath?: string;
     selectedIds: string[];
     onSelectionChange: (selectedIds: string[]) => void;
     onPhotosChange?: (photos: ImageAsset[]) => void;
     onVisibleIdsChange?: (visibleIds: Set<string>) => void;
+    onPriorityIdsChange?: (priorityIds: Set<string>) => void;
+    onPreviewPriorityIdsChange?: (priorityIds: Set<string>) => void;
     onUndo?: () => void;
     onRedo?: () => void;
     canUndo?: boolean;
     canRedo?: boolean;
+    thumbnailProfile?: ThumbnailProfile;
+    sortCacheEnabled?: boolean;
+    performanceSnapshot?: {
+        folderOpenToFirstThumbnailMs: number | null;
+        folderOpenToGridCompleteMs: number | null;
+        cachedThumbnailCount: number;
+        totalThumbnailCount: number;
+        bytesRead: number;
+        rawBytesRead: number;
+        standardBytesRead: number;
+        thumbnailProfile: ThumbnailProfile;
+        sortCacheEnabled: boolean;
+    } | null;
+    onThumbnailProfileChange?: (profile: ThumbnailProfile) => void;
+    onSortCacheEnabledChange?: (enabled: boolean) => void;
     desktopThumbnailCacheInfo?: DesktopThumbnailCacheInfo | null;
+    desktopCacheLocationRecommendation?: DesktopCacheLocationRecommendation | null;
     isDesktopThumbnailCacheBusy?: boolean;
+    isDesktopCacheRecommendationModalOpen?: boolean;
     onChooseDesktopThumbnailCacheDirectory?: () => void | Promise<void>;
     onSetDesktopThumbnailCacheDirectory?: (directoryPath: string) => void | Promise<void>;
+    onUseRecommendedDesktopThumbnailCacheDirectory?: () => void | Promise<void>;
     onResetDesktopThumbnailCacheDirectory?: () => void | Promise<void>;
     onClearDesktopThumbnailCache?: () => void | Promise<void>;
+    onSnoozeDesktopCacheRecommendation?: () => void | Promise<void>;
+    onDismissDesktopCacheRecommendation?: () => void | Promise<void>;
 }
-export declare function PhotoSelector({ photos, selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onUndo, onRedo, canUndo, canRedo, desktopThumbnailCacheInfo, isDesktopThumbnailCacheBusy, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, }: PhotoSelectorProps): import("react/jsx-runtime").JSX.Element;
+export declare function PhotoSelector({ photos, metadataVersion, sourceFolderPath, selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onUndo, onRedo, canUndo, canRedo, thumbnailProfile, sortCacheEnabled, performanceSnapshot, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo, desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, }: PhotoSelectorProps): import("react/jsx-runtime").JSX.Element;
 export {};

@@ -53,6 +53,21 @@ export interface DesktopRenderedImage {
   height: number;
 }
 
+export interface DesktopPreviewOptions {
+  maxDimension?: number;
+  sourceFileKey?: string;
+}
+
+export interface DesktopOpenWithEditorResult {
+  ok: boolean;
+  error?: string;
+}
+
+export interface DesktopEditorCandidate {
+  path: string;
+  label: string;
+}
+
 export interface DesktopThumbnailCacheLookupEntry {
   id: string;
   absolutePath: string;
@@ -75,10 +90,46 @@ export interface DesktopThumbnailCacheInfo {
   totalBytes: number;
 }
 
+export interface DesktopStorageVolumeInfo {
+  mountPath: string;
+  label: string;
+  freeBytes: number;
+  totalBytes: number;
+  isSystem: boolean;
+  isWritable: boolean;
+}
+
+export type DesktopCacheRecommendationReason =
+  | "healthy"
+  | "low-space-recommendation"
+  | "already-custom"
+  | "no-suitable-volume"
+  | "dismissed"
+  | "unsupported-platform";
+
+export interface DesktopCacheLocationRecommendation {
+  shouldPrompt: boolean;
+  currentPath: string;
+  recommendedPath: string | null;
+  currentVolume: DesktopStorageVolumeInfo | null;
+  recommendedVolume: DesktopStorageVolumeInfo | null;
+  reason: DesktopCacheRecommendationReason;
+  dismissed: boolean;
+}
+
+export interface DesktopCacheMigrationResult {
+  ok: boolean;
+  cacheInfo?: DesktopThumbnailCacheInfo;
+  copiedEntries: number;
+  removedSourceEntries: number;
+  error?: string;
+}
+
 export interface FileXDesktopApi {
   getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
   openFolder: () => Promise<DesktopFolderOpenResult | null>;
   reopenFolder: (rootPath: string) => Promise<DesktopFolderOpenResult | null>;
+  startDragOut: (absolutePaths: string[]) => void;
   readFile: (absolutePath: string) => Promise<DesktopFilePayload | null>;
   getThumbnail: (
     absolutePath: string,
@@ -96,7 +147,23 @@ export interface FileXDesktopApi {
   setThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopThumbnailCacheInfo>;
   resetThumbnailCacheDirectory: () => Promise<DesktopThumbnailCacheInfo>;
   clearThumbnailCache: () => Promise<boolean>;
-  getPreview: (absolutePath: string) => Promise<DesktopRenderedImage | null>;
+  getCacheLocationRecommendation: () => Promise<DesktopCacheLocationRecommendation>;
+  migrateThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopCacheMigrationResult>;
+  dismissCacheLocationRecommendation: () => Promise<void>;
+  getPreview: (
+    absolutePath: string,
+    options?: DesktopPreviewOptions,
+  ) => Promise<DesktopRenderedImage | null>;
+  warmPreview: (
+    absolutePath: string,
+    options?: DesktopPreviewOptions,
+  ) => Promise<boolean>;
+  chooseEditorExecutable: (currentPath?: string) => Promise<string | null>;
+  getInstalledEditorCandidates: () => Promise<DesktopEditorCandidate[]>;
+  openWithEditor: (
+    editorPath: string,
+    absolutePaths: string[],
+  ) => Promise<DesktopOpenWithEditorResult>;
   readSidecarXmp: (absolutePath: string) => Promise<string | null>;
   writeSidecarXmp: (absolutePath: string, xml: string) => Promise<boolean>;
 }

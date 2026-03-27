@@ -102,13 +102,14 @@ export function SelectionSummary({
   function handleExportCsv() {
     if (stats.totalActive === 0) return;
 
-    const headers = ["fileName", "path", "rating", "pickStatus", "colorLabel"];
+    const headers = ["fileName", "path", "rating", "pickStatus", "colorLabel", "customLabels"];
     const rows = stats.active.map((a) => [
       a.fileName,
       a.path ?? "",
       String(getAssetRating(a)),
       getAssetPickStatus(a),
       getAssetColorLabel(a) ?? "",
+      (a.customLabels ?? []).join(" | "),
     ]);
     const csv = [headers, ...rows]
       .map((r) => r.map((v) => `"${v.replace(/"/g, '""')}"`).join(","))
@@ -134,6 +135,7 @@ export function SelectionSummary({
       rating: getAssetRating(a),
       pickStatus: getAssetPickStatus(a),
       colorLabel: getAssetColorLabel(a) ?? null,
+      customLabels: a.customLabels ?? [],
     }));
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: "application/json;charset=utf-8" });

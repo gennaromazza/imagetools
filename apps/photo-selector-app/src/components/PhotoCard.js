@@ -5,13 +5,13 @@ import { preloadImageUrls } from "../services/image-cache";
 import { notePhotoCardRender } from "../services/performance-utils";
 import { COLOR_LABEL_NAMES, COLOR_LABELS, formatAssetStars, getAssetColorLabel, getAssetPickStatus, getAssetRating, getColorShortcutHint, PICK_STATUS_LABELS, resolvePhotoClassificationShortcut, } from "../services/photo-classification";
 import { isRawFile } from "../services/folder-access";
-export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, editable, }) {
+export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, onExternalDragStart, canExternalDrag = false, customLabelColors = {}, customLabelShortcuts = {}, editable, }) {
     notePhotoCardRender(photo.id);
     const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
-    const aspectRatio = photo.width > 0 && photo.height > 0 ? `${photo.width} / ${photo.height}` : undefined;
     const rating = getAssetRating(photo);
     const pickStatus = getAssetPickStatus(photo);
     const colorLabel = getAssetColorLabel(photo);
+    const customLabels = photo.customLabels ?? [];
     const raw = isRawFile(photo.fileName);
     const prevClassRef = useRef({ rating, pickStatus, colorLabel });
     const cardRef = useRef(null);
@@ -21,6 +21,7 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
     const [feedback, setFeedback] = useState(null);
     const hoverTimerRef = useRef(null);
     const [hoverPos, setHoverPos] = useState(null);
+    const [isToolbarVisible, setIsToolbarVisible] = useState(isSelected);
     useEffect(() => {
         const prev = prevClassRef.current;
         let nextFeedback = null;
@@ -72,6 +73,11 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
         }, 950);
     }, [colorLabel, pickStatus, rating]);
     useEffect(() => {
+        if (isSelected) {
+            setIsToolbarVisible(true);
+        }
+    }, [isSelected]);
+    useEffect(() => {
         return () => {
             if (feedbackTimeoutRef.current !== null) {
                 window.clearTimeout(feedbackTimeoutRef.current);
@@ -82,7 +88,17 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
         };
     }, []);
     const orientationIcon = photo.orientation === "vertical" ? "↕" : photo.orientation === "square" ? "◻" : "↔";
-    return (_jsxs("div", { className: `photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}`, role: "option", tabIndex: 0, "aria-selected": isSelected, "aria-label": `${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`, "aria-keyshortcuts": "Enter Space 1 2 3 4 5 P X U", ref: cardRef, "data-preview-asset-id": photo.id, onClick: (event) => onToggle(photo.id, event), onFocus: () => onFocus(photo.id), onMouseEnter: () => {
+    return (_jsxs("div", { className: `photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}`, role: "option", tabIndex: 0, "aria-selected": isSelected, "aria-label": `${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`, "aria-keyshortcuts": "Enter Space 1 2 3 4 5 P X U", ref: cardRef, "data-preview-asset-id": photo.id, draggable: canExternalDrag, onClick: (event) => onToggle(photo.id, event), onDragStart: (event) => {
+            if (!canExternalDrag || !onExternalDragStart) {
+                event.preventDefault();
+                return;
+            }
+            onExternalDragStart(photo.id, event);
+        }, onFocus: () => {
+            setIsToolbarVisible(true);
+            onFocus(photo.id);
+        }, onMouseEnter: () => {
+            setIsToolbarVisible(true);
             if (photo.previewUrl)
                 preloadImageUrls([photo.previewUrl]);
             const imgSrc = photo.previewUrl ?? photo.thumbnailUrl ?? null;
@@ -105,7 +121,18 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
                 clearTimeout(hoverTimerRef.current);
                 hoverTimerRef.current = null;
             }
+            if (!isSelected) {
+                setIsToolbarVisible(false);
+            }
             setHoverPos(null);
+        }, onBlur: (event) => {
+            const nextTarget = event.relatedTarget;
+            if (cardRef.current?.contains(nextTarget)) {
+                return;
+            }
+            if (!isSelected) {
+                setIsToolbarVisible(false);
+            }
         }, onDoubleClick: () => onPreview(photo.id), onContextMenu: (event) => {
             if (!editable)
                 return;
@@ -134,9 +161,9 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
                     onUpdatePhoto(photo.id, changes);
                 }
             }
-        }, children: [_jsxs("div", { ref: wrapperRef, className: "photo-card__image-wrapper", style: aspectRatio ? { aspectRatio } : undefined, children: [previewUrl ? (_jsx("img", { src: previewUrl, alt: photo.fileName, className: "photo-card__image", loading: "lazy", decoding: "async" })) : (_jsx("div", { className: `photo-card__image photo-card__image--placeholder${raw ? " photo-card__image--placeholder-raw" : ""}`, children: _jsx("span", { className: "photo-card__placeholder-icon", children: raw ? "📷" : orientationIcon }) })), _jsxs("div", { className: "photo-card__top-badges", children: [_jsx("span", { className: `asset-pick-badge asset-pick-badge--${pickStatus}`, children: PICK_STATUS_LABELS[pickStatus] }), colorLabel ? (_jsx("span", { className: `asset-color-dot asset-color-dot--${colorLabel}`, title: COLOR_LABEL_NAMES[colorLabel] })) : (_jsx("span", { className: "photo-card__empty-color", children: "Nessun colore" }))] }), _jsx("div", { className: "photo-card__select-badge", children: _jsx("div", { className: `photo-card__check ${isSelected ? "photo-card__check--active" : ""}`, children: isSelected ? "✓" : "" }) }), raw ? (_jsx("span", { className: "asset-pick-badge asset-raw-badge photo-card__raw-badge", children: "RAW" })) : null, _jsx("div", { className: feedback?.kind === "star"
+        }, children: [_jsxs("div", { ref: wrapperRef, className: "photo-card__image-wrapper", children: [previewUrl ? (_jsx("img", { src: previewUrl, alt: photo.fileName, className: "photo-card__image", loading: "lazy", decoding: "async" })) : (_jsx("div", { className: `photo-card__image photo-card__image--placeholder${raw ? " photo-card__image--placeholder-raw" : ""}`, children: _jsx("span", { className: "photo-card__placeholder-icon", children: raw ? "📷" : orientationIcon }) })), _jsxs("div", { className: "photo-card__top-badges", children: [_jsx("span", { className: `asset-pick-badge asset-pick-badge--${pickStatus}`, children: PICK_STATUS_LABELS[pickStatus] }), colorLabel ? (_jsx("span", { className: `asset-color-dot asset-color-dot--${colorLabel}`, title: COLOR_LABEL_NAMES[colorLabel] })) : (_jsx("span", { className: "photo-card__empty-color", children: "Nessun colore" }))] }), _jsx("div", { className: "photo-card__select-badge", children: _jsx("div", { className: `photo-card__check ${isSelected ? "photo-card__check--active" : ""}`, children: isSelected ? "✓" : "" }) }), raw ? (_jsx("span", { className: "asset-pick-badge asset-raw-badge photo-card__raw-badge", children: "RAW" })) : null, _jsx("div", { className: feedback?.kind === "star"
                             ? "photo-card__stars photo-card__stars--feedback"
-                            : "photo-card__stars", children: rating > 0 ? formatAssetStars(photo) : "Senza stelle" }), feedback ? (_jsx("div", { className: `photo-card__feedback photo-card__feedback--${feedback.kind}`, children: feedback.label }, feedback.token)) : null] }), _jsxs("div", { className: "photo-card__info", children: [_jsx("div", { className: "photo-card__name", title: photo.fileName, children: photo.fileName }), _jsxs("div", { className: "photo-card__meta", children: [_jsx("span", { className: "photo-card__orientation-icon", title: photo.orientation, children: orientationIcon }), photo.width > 0 ? (_jsxs("span", { className: "photo-card__dimensions", children: [Math.round(photo.width), "\u00D7", Math.round(photo.height)] })) : null] })] }), editable ? (_jsxs("div", { className: "photo-card__toolbar", onClick: (event) => event.stopPropagation(), children: [_jsx("div", { className: "photo-card__tiny-actions", children: [1, 2, 3, 4, 5].map((value) => (_jsx("button", { type: "button", className: [
+                            : "photo-card__stars", children: rating > 0 ? formatAssetStars(photo) : "Senza stelle" }), feedback ? (_jsx("div", { className: `photo-card__feedback photo-card__feedback--${feedback.kind}`, children: feedback.label }, feedback.token)) : null] }), _jsxs("div", { className: "photo-card__info", children: [_jsx("div", { className: "photo-card__name", title: photo.fileName, children: photo.fileName }), _jsxs("div", { className: "photo-card__meta", children: [_jsx("span", { className: "photo-card__orientation-icon", title: photo.orientation, children: orientationIcon }), photo.width > 0 ? (_jsxs("span", { className: "photo-card__dimensions", children: [Math.round(photo.width), "\u00D7", Math.round(photo.height)] })) : null] }), customLabels.length > 0 ? (_jsxs("div", { className: "photo-card__labels", title: customLabels.join(", "), children: [customLabels.slice(0, 2).map((label) => (_jsx("span", { className: `photo-card__label-chip photo-card__label-chip--${customLabelColors[label] ?? "sand"}`, title: customLabelShortcuts[label] ? `${label} · tasto ${customLabelShortcuts[label]}` : label, children: customLabelShortcuts[label] ? `${label} · ${customLabelShortcuts[label]}` : label }, label))), customLabels.length > 2 ? (_jsxs("span", { className: "photo-card__label-chip photo-card__label-chip--more", children: ["+", customLabels.length - 2] })) : null] })) : null] }), editable && isToolbarVisible ? (_jsxs("div", { className: "photo-card__toolbar", onClick: (event) => event.stopPropagation(), children: [_jsx("div", { className: "photo-card__tiny-actions", children: [1, 2, 3, 4, 5].map((value) => (_jsx("button", { type: "button", className: [
                                 "photo-card__star",
                                 value <= rating ? "photo-card__star--active" : "",
                                 feedback?.kind === "star" && feedback.value === value

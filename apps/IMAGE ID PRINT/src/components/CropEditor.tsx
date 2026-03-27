@@ -14,12 +14,10 @@ interface CropEditorProps {
 export function CropEditor({ image, docPreset, onCropUpdate }: CropEditorProps) {
   const [showSilhouette, setShowSilhouette] = useState(true)
   const [isAutoAligning, setIsAutoAligning] = useState(false)
-  const { canvasRef, getCroppedCanvas, resetCrop, autoAlignToGuide } = useCropEngine(image, docPreset, onCropUpdate, showSilhouette)
+  const { canvasRef, resetCrop, autoAlignToGuide } = useCropEngine(image, docPreset, onCropUpdate, showSilhouette)
 
   const handleReset = () => {
     resetCrop()
-    const cropped = getCroppedCanvas()
-    if (cropped) onCropUpdate(cropped)
   }
 
   const hasSpecs = docPreset.category !== 'custom'
@@ -35,6 +33,9 @@ export function CropEditor({ image, docPreset, onCropUpdate }: CropEditorProps) 
           description: 'Browser senza Face Detection o volto non rilevato. Regola manualmente il crop.',
         })
       }
+    } catch (error) {
+      console.error(error)
+      toast.error('Errore durante l\'allineamento automatico')
     } finally {
       setIsAutoAligning(false)
     }
@@ -91,7 +92,7 @@ export function CropEditor({ image, docPreset, onCropUpdate }: CropEditorProps) 
       </div>
 
       {/* Canvas area */}
-      <div className="flex-1 flex items-center justify-center rounded-xl overflow-hidden bg-[var(--app-field)] min-h-0">
+      <div className="relative flex-1 flex items-center justify-center rounded-xl overflow-hidden bg-[var(--app-field)] min-h-0">
         <canvas
           ref={canvasRef}
           width={520}
@@ -99,6 +100,13 @@ export function CropEditor({ image, docPreset, onCropUpdate }: CropEditorProps) 
           className="cursor-grab active:cursor-grabbing"
           style={{ maxWidth: '100%', maxHeight: '100%', display: 'block' }}
         />
+        {isAutoAligning && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/18 backdrop-blur-[1px]">
+            <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 text-xs text-[var(--app-text)] shadow-sm">
+              Analisi volto in corso...
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Hint */}

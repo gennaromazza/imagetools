@@ -9,6 +9,10 @@ export declare function isRawFile(name: string): boolean;
 export declare function isBrowserDecodable(name: string): boolean;
 /** In-memory store: assetId → File.  Used for on-demand preview generation. */
 export declare const fileStore: Map<string, File>;
+export interface OnDemandPreviewOptions {
+    maxDimension?: number;
+}
+export declare function getCachedOnDemandPreviewUrl(assetId: string, options?: OnDemandPreviewOptions): string | null;
 export declare function buildSourceFileKey(file: File, relativePath: string): string;
 export declare function buildSourceFileKeyFromStats(relativePath: string, size: number, lastModified: number): string;
 export declare function buildAssetId(relativePath: string): string;
@@ -58,7 +62,8 @@ export declare function writeSidecarXmp(assetId: string, xml: string): Promise<b
  * Returns the URL — caller is responsible for revoking when done.
  * Extracted asynchronously to support resolving embedded JPEG previews from RAWs.
  */
-export declare function createOnDemandPreviewAsync(assetId: string, priority?: number): Promise<string | null>;
+export declare function createOnDemandPreviewAsync(assetId: string, priority?: number, options?: OnDemandPreviewOptions): Promise<string | null>;
+export declare function warmOnDemandPreviewCache(assetId: string, _priority?: number, options?: OnDemandPreviewOptions): Promise<boolean>;
 export interface AssetDiskChange {
     id: string;
     sourceFileKey: string;
@@ -93,6 +98,8 @@ export declare function extractSubfolders(assets: ImageAsset[]): {
 type FileOpResult = "ok" | "cancelled" | "error" | "no-file" | "unsupported";
 /** Returns the relative virtual path for an asset (e.g. "Folder/sub/IMG_001.CR3") */
 export declare function getAssetRelativePath(assetId: string): string | null;
+export declare function getAssetAbsolutePath(assetId: string): string | null;
+export declare function getAssetAbsolutePaths(assetIds: string[]): string[];
 /**
  * Copy one or more assets to a user-chosen destination folder (FSAA).
  * Opens ONE directory picker for all files.

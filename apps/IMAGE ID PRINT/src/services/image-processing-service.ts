@@ -49,9 +49,17 @@ export interface AiProcessingOptions {
   refillIntensity: number
 }
 
+export interface AiRefinePayload {
+  editableCanvas: HTMLCanvasElement
+  restoreCanvas: HTMLCanvasElement
+  applyWhiteBackground: boolean
+  edgeSoftness: number
+}
+
 export interface AiProcessingResult {
   canvas: HTMLCanvasElement
   warnings: string[]
+  refinePayload: AiRefinePayload | null
 }
 
 export function defaultAiOptions(): AiProcessingOptions {
@@ -111,8 +119,6 @@ export function suggestAiActions(
   dpi: number,
 ): string[] {
   const suggestions: string[] = []
-
-  // Always relevant for document photos
   suggestions.push('Rimuovi sfondo per uno sfondo bianco uniforme')
 
   if (!source) return suggestions
@@ -140,8 +146,8 @@ export async function processCanvasWithAi(
   options: AiProcessingOptions,
   preset?: DocumentPreset,
 ): Promise<AiProcessingResult> {
-  let working = cloneCanvas(sourceCanvas)
-  const originalForRebuild = cloneCanvas(sourceCanvas)
+  let subjectCanvas = cloneCanvas(sourceCanvas)
+  let restoreCanvas = cloneCanvas(sourceCanvas)
   const warnings: string[] = []
 
   if (options.removeBackground) {
@@ -152,18 +158,15 @@ export async function processCanvasWithAi(
       )
     } else {
       try {
-        // Resize to max 1500px before sending — rembg doesn't need full resolution
-        // and PNG at 5000+ px easily exceeds the server upload limit.
-        const originalW = working.width
-        const originalH = working.height
-        const scaled = resizeCanvasToMax(working, 1500)
+        const originalW = subjectCanvas.width
+        const originalH = subjectCanvas.height
+        const scaled = resizeCanvasToMax(subjectCanvas, 1500)
         const blob = await canvasToBlob(scaled, 'image/jpeg', 0.9)
         const removedBlob = await removeBackgroundWithLocalService(blob, 20000, {
           backgroundRefine: options.backgroundRefine,
         })
         const removedImg = await blobToImage(removedBlob)
-        // Scale result back to original dimensions
-        working = scaleCanvas(imageToCanvas(removedImg), originalW, originalH)
+        subjectCanvas = scaleCanvas(imageToCanvas(removedImg), originalW, originalH)
       } catch (err) {
         warnings.push(
           `Rimozione sfondo fallita: ${err instanceof Error ? err.message : 'errore sconosciuto'}.`,
@@ -172,48 +175,57 @@ export async function processCanvasWithAi(
     }
   }
 
-  if (options.applyWhiteBackground) {
-    working = applyUniformWhiteBackground(working, options.edgeSoftness)
-  }
-
   const shouldAutoFit =
     !!preset
     && options.autoFitToDocument
-    && getDocumentRatioDiff(working, preset) >= options.autoFitRatioThreshold
+    && getDocumentRatioDiff(subjectCanvas, preset) >= options.autoFitRatioThreshold
 
   if (options.expandWhiteCanvas || shouldAutoFit) {
     if (preset) {
-      const detectedFace = await detectFaceWithSidecar(originalForRebuild)
-      working = fitAndCenterForDocument(working, preset, options.expandPaddingPx, {
-        backdropSource: originalForRebuild,
+      const detectedFace = await detectFaceWithSidecar(restoreCanvas)
+      const fitted = fitSubjectAndRestoreForDocument(subjectCanvas, restoreCanvas, preset, options.expandPaddingPx, {
         face: detectedFace,
       })
+      subjectCanvas = fitted.subjectCanvas
+      restoreCanvas = fitted.restoreCanvas
     } else {
-      working = expandCanvasWhite(working, options.expandPaddingPx, options.expandPaddingPx)
+      subjectCanvas = expandCanvasTransparent(subjectCanvas, options.expandPaddingPx, options.expandPaddingPx)
+      restoreCanvas = expandCanvasWhite(restoreCanvas, options.expandPaddingPx, options.expandPaddingPx)
     }
   }
 
   if (options.generativeRefillEdges) {
     try {
-      working = await tryGenerativeRefillEdges(working, options.refillIntensity)
+      subjectCanvas = await tryGenerativeRefillEdges(subjectCanvas, options.refillIntensity)
     } catch {
       warnings.push('Refill generativo non configurato: uso espansione bianca standard.')
     }
   }
 
   if (options.enhancePortrait) {
-    const faceForEnhancement = await detectFaceWithSidecar(working)
-    working = applyPortraitEnhancement(working, options, faceForEnhancement)
+    const faceForEnhancement = await detectFaceWithSidecar(restoreCanvas)
+    restoreCanvas = applyPortraitEnhancement(restoreCanvas, options, faceForEnhancement)
+    subjectCanvas = applyPortraitEnhancement(subjectCanvas, options, faceForEnhancement)
     if (!faceForEnhancement && (options.faceSlimming > 0.02 || options.noseRefinement > 0.02)) {
       warnings.push('Rimodellamento viso/naso limitato: volto non rilevato con sicurezza.')
     }
   }
 
   if (options.upscale2x) {
-    working = upscaleCanvas2x(working)
+    restoreCanvas = upscaleCanvas2x(restoreCanvas)
+    subjectCanvas = upscaleCanvas2x(subjectCanvas)
   }
 
-  return { canvas: working, warnings }
+  return {
+    canvas: composeAiOutputCanvas(subjectCanvas, options.applyWhiteBackground, options.edgeSoftness),
+    warnings,
+    refinePayload: {
+      editableCanvas: cloneCanvas(subjectCanvas),
+      restoreCanvas: cloneCanvas(restoreCanvas),
+      applyWhiteBackground: options.applyWhiteBackground,
+      edgeSoftness: options.edgeSoftness,
+    },
+  }
 }
 
 function cloneCanvas(source: HTMLCanvasElement): HTMLCanvasElement {
@@ -241,6 +253,16 @@ function applyUniformWhiteBackground(source: HTMLCanvasElement, _edgeSoftness: n
   ctx.fillRect(0, 0, out.width, out.height)
   ctx.drawImage(source, 0, 0)
   return out
+}
+
+export function composeAiOutputCanvas(
+  subjectCanvas: HTMLCanvasElement,
+  applyWhiteBackground: boolean,
+  edgeSoftness: number,
+): HTMLCanvasElement {
+  return applyWhiteBackground
+    ? applyUniformWhiteBackground(subjectCanvas, edgeSoftness)
+    : cloneCanvas(subjectCanvas)
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality = 1.0): Promise<Blob> {
@@ -273,20 +295,36 @@ function scaleCanvas(source: HTMLCanvasElement, w: number, h: number): HTMLCanva
   return out
 }
 
-function fitAndCenterForDocument(
+function expandCanvasTransparent(
   source: HTMLCanvasElement,
+  paddingX: number,
+  paddingY: number,
+): HTMLCanvasElement {
+  const out = document.createElement('canvas')
+  out.width = source.width + Math.max(0, Math.round(paddingX)) * 2
+  out.height = source.height + Math.max(0, Math.round(paddingY)) * 2
+  const ctx = out.getContext('2d')!
+  ctx.clearRect(0, 0, out.width, out.height)
+  ctx.drawImage(source, Math.max(0, Math.round(paddingX)), Math.max(0, Math.round(paddingY)))
+  return out
+}
+
+function fitSubjectAndRestoreForDocument(
+  subjectSource: HTMLCanvasElement,
+  restoreSource: HTMLCanvasElement,
   preset: DocumentPreset,
   paddingPx: number,
   options?: {
-    backdropSource?: HTMLCanvasElement
     face?: FaceBox | null
   },
-): HTMLCanvasElement {
+): {
+  subjectCanvas: HTMLCanvasElement
+  restoreCanvas: HTMLCanvasElement
+} {
   const targetRatio = preset.widthMm / preset.heightMm
-  const srcW = source.width
-  const srcH = source.height
+  const srcW = subjectSource.width
+  const srcH = subjectSource.height
 
-  // Preserve source while extending the short side to match document ratio.
   let outW = srcW
   let outH = srcH
   const srcRatio = srcW / srcH
@@ -296,40 +334,39 @@ function fitAndCenterForDocument(
     outW = Math.max(srcW, Math.ceil(srcH * targetRatio))
   }
 
-  // Optional breathing room around subject when we already need extension.
   const needsExpansion = outW !== srcW || outH !== srcH
   if (needsExpansion && paddingPx > 0) {
     outW += paddingPx * 2
     outH += paddingPx * 2
   }
 
-  const bounds = getOpaqueBounds(source)
+  const bounds = getOpaqueBounds(subjectSource)
   const face = options?.face
   const subjectCx = face ? face.x + face.width * 0.5 : (bounds ? (bounds.left + bounds.right) / 2 : srcW / 2)
   const subjectCy = face ? face.y + face.height * 0.43 : (bounds ? (bounds.top + bounds.bottom) / 2 : srcH / 2)
-
   const targetEyeY = outH * 0.38
 
   let offsetX = Math.round(outW / 2 - subjectCx)
   let offsetY = face
     ? Math.round(targetEyeY - subjectCy)
     : Math.round(outH / 2 - subjectCy)
+
   offsetX = clamp(offsetX, outW - srcW, 0)
   offsetY = clamp(offsetY, outH - srcH, 0)
 
-  const out = document.createElement('canvas')
-  out.width = outW
-  out.height = outH
-  const ctx = out.getContext('2d')!
+  const subjectCanvas = document.createElement('canvas')
+  subjectCanvas.width = outW
+  subjectCanvas.height = outH
+  subjectCanvas.getContext('2d')!.drawImage(subjectSource, offsetX, offsetY)
 
-  if (options?.backdropSource) {
-    drawExtendedBackdrop(ctx, options.backdropSource, outW, outH, offsetX, offsetY, srcW, srcH)
-  } else {
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, outW, outH)
-  }
-  ctx.drawImage(source, offsetX, offsetY)
-  return out
+  const restoreCanvas = document.createElement('canvas')
+  restoreCanvas.width = outW
+  restoreCanvas.height = outH
+  const restoreCtx = restoreCanvas.getContext('2d')!
+  drawExtendedBackdrop(restoreCtx, restoreSource, outW, outH, offsetX, offsetY, srcW, srcH)
+  restoreCtx.drawImage(restoreSource, offsetX, offsetY)
+
+  return { subjectCanvas, restoreCanvas }
 }
 
 function drawExtendedBackdrop(
@@ -345,10 +382,8 @@ function drawExtendedBackdrop(
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, outW, outH)
 
-  // Base backdrop in source area
   ctx.drawImage(backdrop, offsetX, offsetY, srcW, srcH)
 
-  // Stretch edge pixels to rebuild added areas for too narrow/wide sources.
   if (offsetX > 0) {
     ctx.drawImage(backdrop, 0, 0, 1, srcH, 0, offsetY, offsetX, srcH)
   }
@@ -365,7 +400,6 @@ function drawExtendedBackdrop(
     ctx.drawImage(backdrop, 0, srcH - 1, srcW, 1, offsetX, offsetY + srcH, srcW, bottomGap)
   }
 
-  // Fill corners with nearest corner color strips.
   if (offsetX > 0 && offsetY > 0) {
     ctx.drawImage(backdrop, 0, 0, 1, 1, 0, 0, offsetX, offsetY)
   }
@@ -522,7 +556,7 @@ function pinchHorizontal(
       const r2 = nx * nx + ny * ny
       if (r2 >= 1) continue
 
-      const local = (1 - r2)
+      const local = 1 - r2
       const factor = Math.max(0.55, 1 - strength * local)
       const sampleX = cx + (x - cx) / factor
       const sampleY = y

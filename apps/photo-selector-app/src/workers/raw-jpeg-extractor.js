@@ -32,6 +32,9 @@ export function locateEmbeddedJpegRange(buffer) {
     const rafCandidate = tryRafLocate(data);
     if (rafCandidate && rafCandidate.length > 10_000)
         candidates.push(rafCandidate);
+    const bmffCandidate = tryBmffLocate(data);
+    if (bmffCandidate && bmffCandidate.length > 10_000)
+        candidates.push(bmffCandidate);
     if (candidates.length === 0)
         return null;
     let best = candidates[0];
@@ -412,6 +415,38 @@ function tryRafExtract(data, buffer) {
  * Walk the top-level boxes. The JPEG preview is usually inside an `mdat`
  * box or inside `uuid` boxes. We scan each box's payload for JPEG SOI.
  */
+function tryBmffLocate(data) {
+    if (data.length < 8)
+        return null;
+    const b4 = data[4];
+    const b5 = data[5];
+    const b6 = data[6];
+    const b7 = data[7];
+    const isFtyp = b4 === 0x66 && b5 === 0x74 && b6 === 0x79 && b7 === 0x70;
+    if (!isFtyp)
+        return null;
+    let best = null;
+    let pos = 0;
+    const len = data.length;
+    while (pos + 8 <= len) {
+        const boxSize = readU32(data, pos, false);
+        const boxEnd = boxSize === 0 ? len : pos + boxSize;
+        if (boxSize < 8 || boxEnd > len)
+            break;
+        const type = String.fromCharCode(data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]);
+        if ((type === "mdat" || type === "uuid") && boxEnd - (pos + 8) > 10_000) {
+            const candidate = {
+                offset: pos + 8,
+                length: boxEnd - (pos + 8),
+            };
+            if (!best || candidate.length > best.length) {
+                best = candidate;
+            }
+        }
+        pos = boxEnd;
+    }
+    return best;
+}
 function tryBmffExtract(data, buffer) {
     if (data.length < 8)
         return null;

@@ -15,11 +15,15 @@ export interface ThumbnailCacheLookupEntry {
     sourceFileKey?: string;
 }
 export type ThumbnailCacheLookup = string | ThumbnailCacheLookupEntry;
+export interface ThumbnailCacheLoadOptions {
+    maxDimension?: number;
+    quality?: number;
+}
 /** Save a generated thumbnail blob for an asset. Fire-and-forget. */
 export declare function cacheThumbnail(id: string, blob: Blob, width: number, height: number): Promise<void>;
 export declare function cacheThumbnailBatch(items: CachedThumbnailWrite[]): Promise<void>;
 /** Retrieve cached thumbnails for a list of asset IDs. Returns a Map of found entries. */
-export declare function loadCachedThumbnails(entries: ThumbnailCacheLookup[]): Promise<Map<string, {
+export declare function loadCachedThumbnails(entries: ThumbnailCacheLookup[], options?: ThumbnailCacheLoadOptions): Promise<Map<string, {
     url: string;
     width: number;
     height: number;

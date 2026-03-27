@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Link, useNavigate } from "react-router";
-import { Clock, Copy, Download, FileImage, Folder, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { Clock, Copy, Download, Folder, Pencil, Plus, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { ServerStatus } from "../components/ServerStatus";
 import { useProject } from "../contexts/ProjectContext";
 import { loadRecentProjects, onRecentProjectsUpdated, removeRecentProjectAt } from "../lib/recentProjects";
 import { importProjectPackage, importTemplateLibraryPackage, exportTemplateLibraryPackage } from "../lib/portablePackages";
+import partyFrameLogo from "../../assets/party_frame_logo.png";
 import {
   clearSavedTemplatesLibrary,
   deleteSavedTemplate,
@@ -161,9 +162,11 @@ export default function Home() {
     <div className="h-screen bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col">
       <div className="h-16 bg-[var(--app-topbar)] border-b border-[var(--app-border)] flex items-center px-8 justify-between shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--brand-primary-soft)] text-[var(--brand-accent)]">
-            <FileImage className="w-6 h-6" />
-          </div>
+          <img
+            src={partyFrameLogo}
+            alt="Image Party Frame"
+            className="h-11 w-11 rounded-2xl object-cover shadow-[0_14px_24px_rgba(0,0,0,0.16)]"
+          />
           <div>
             <div className="font-semibold text-xl tracking-[-0.03em]">Image Party Frame</div>
             <div className="text-xs text-[var(--app-text-muted)]">Un tool by Image Studio</div>

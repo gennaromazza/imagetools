@@ -1,4 +1,8 @@
-import type { DesktopThumbnailCacheInfo } from "@photo-tools/desktop-contracts";
+import type {
+  DesktopCacheLocationRecommendation,
+  DesktopCacheMigrationResult,
+  DesktopThumbnailCacheInfo,
+} from "@photo-tools/desktop-contracts";
 
 function getDesktopApi() {
   if (typeof window === "undefined") {
@@ -70,6 +74,48 @@ export async function clearDesktopThumbnailCache(): Promise<boolean> {
 
   try {
     return await api.clearThumbnailCache();
+  } catch {
+    return false;
+  }
+}
+
+export async function getDesktopCacheLocationRecommendation(): Promise<DesktopCacheLocationRecommendation | null> {
+  const api = getDesktopApi();
+  if (!api?.getCacheLocationRecommendation) {
+    return null;
+  }
+
+  try {
+    return await api.getCacheLocationRecommendation();
+  } catch {
+    return null;
+  }
+}
+
+export async function migrateDesktopThumbnailCacheDirectory(
+  directoryPath: string,
+): Promise<DesktopCacheMigrationResult | null> {
+  const api = getDesktopApi();
+  if (!api?.migrateThumbnailCacheDirectory) {
+    return null;
+  }
+
+  try {
+    return await api.migrateThumbnailCacheDirectory(directoryPath);
+  } catch {
+    return null;
+  }
+}
+
+export async function dismissDesktopCacheLocationRecommendation(): Promise<boolean> {
+  const api = getDesktopApi();
+  if (!api?.dismissCacheLocationRecommendation) {
+    return false;
+  }
+
+  try {
+    await api.dismissCacheLocationRecommendation();
+    return true;
   } catch {
     return false;
   }

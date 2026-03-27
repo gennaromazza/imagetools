@@ -46,6 +46,7 @@ const fileHandleStore = new Map();
 const filePromiseStore = new Map();
 const assetPathStore = new Map();
 const assetAbsolutePathStore = new Map();
+const assetSourceFileKeyStore = new Map();
 const livePreviewStore = new Map();
 const sidecarHandleByAssetId = new Map();
 const sidecarHandleByStemPath = new Map();
@@ -64,6 +65,9 @@ function hasDesktopFileBridge() {
 }
 function hasDesktopPreviewBridge() {
     return typeof window !== "undefined" && typeof window.filexDesktop?.getPreview === "function";
+}
+function hasDesktopPreviewWarmBridge() {
+    return typeof window !== "undefined" && typeof window.filexDesktop?.warmPreview === "function";
 }
 function hasDesktopSidecarBridge() {
     return typeof window !== "undefined"
@@ -108,12 +112,25 @@ function revokeLivePreviewUrl(assetId) {
     }
 }
 function invalidateOnDemandPreview(assetId) {
-    const current = onDemandPreviewStore.get(assetId);
-    if (current) {
-        URL.revokeObjectURL(current);
-        onDemandPreviewStore.delete(assetId);
+    const keyPrefix = `${assetId}::`;
+    for (const [cacheKey, current] of onDemandPreviewStore.entries()) {
+        if (cacheKey === assetId || cacheKey.startsWith(keyPrefix)) {
+            URL.revokeObjectURL(current);
+            onDemandPreviewStore.delete(cacheKey);
+        }
     }
-    onDemandPreviewPromiseStore.delete(assetId);
+    for (const cacheKey of onDemandPreviewPromiseStore.keys()) {
+        if (cacheKey === assetId || cacheKey.startsWith(keyPrefix)) {
+            onDemandPreviewPromiseStore.delete(cacheKey);
+        }
+    }
+}
+function getOnDemandPreviewCacheKey(assetId, options = {}) {
+    const maxDimension = Math.max(0, Math.round(options.maxDimension ?? 0));
+    return `${assetId}::${maxDimension}`;
+}
+export function getCachedOnDemandPreviewUrl(assetId, options = {}) {
+    return onDemandPreviewStore.get(getOnDemandPreviewCacheKey(assetId, options)) ?? null;
 }
 async function readImageDimensions(file) {
     if (!isBrowserDecodable(file.name)) {
@@ -438,14 +455,21 @@ export function buildPlaceholderAssets(entries) {
     filePromiseStore.clear();
     assetPathStore.clear();
     assetAbsolutePathStore.clear();
+    assetSourceFileKeyStore.clear();
     sidecarHandleByAssetId.clear();
     fileStore.clear();
     return entries.map((entry) => {
         const id = buildAssetId(entry.relativePath);
+        const sourceFileKey = entry.file
+            ? buildSourceFileKey(entry.file, entry.relativePath)
+            : entry.size !== undefined && entry.lastModified !== undefined
+                ? buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
+                : buildPlaceholderSourceFileKey(entry.relativePath);
         if (entry.file) {
             fileStore.set(id, entry.file);
         }
         assetPathStore.set(id, entry.relativePath);
+        assetSourceFileKeyStore.set(id, sourceFileKey);
         if (entry.absolutePath) {
             assetAbsolutePathStore.set(id, entry.absolutePath);
         }
@@ -460,11 +484,7 @@ export function buildPlaceholderAssets(entries) {
             id,
             fileName: entry.name,
             path: entry.relativePath,
-            sourceFileKey: entry.file
-                ? buildSourceFileKey(entry.file, entry.relativePath)
-                : entry.size !== undefined && entry.lastModified !== undefined
-                    ? buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
-                    : buildPlaceholderSourceFileKey(entry.relativePath),
+            sourceFileKey,
             rating: 0,
             pickStatus: "unmarked",
             colorLabel: null,
@@ -589,11 +609,12 @@ export async function writeSidecarXmp(assetId, xml) {
  * Returns the URL — caller is responsible for revoking when done.
  * Extracted asynchronously to support resolving embedded JPEG previews from RAWs.
  */
-export async function createOnDemandPreviewAsync(assetId, priority = 0) {
-    const cached = onDemandPreviewStore.get(assetId);
+export async function createOnDemandPreviewAsync(assetId, priority = 0, options = {}) {
+    const cacheKey = getOnDemandPreviewCacheKey(assetId, options);
+    const cached = onDemandPreviewStore.get(cacheKey);
     if (cached)
         return cached;
-    const pending = onDemandPreviewPromiseStore.get(assetId);
+    const pending = onDemandPreviewPromiseStore.get(cacheKey);
     if (pending) {
         rawPreviewPipeline?.bumpPriority(assetId, priority);
         return pending;
@@ -603,7 +624,10 @@ export async function createOnDemandPreviewAsync(assetId, priority = 0) {
     const task = (async () => {
         if (absolutePath && hasDesktopPreviewBridge()) {
             try {
-                const preview = await window.filexDesktop.getPreview(absolutePath);
+                const preview = await window.filexDesktop.getPreview(absolutePath, {
+                    maxDimension: options.maxDimension,
+                    sourceFileKey: assetSourceFileKeyStore.get(assetId),
+                });
                 if (!preview) {
                     return null;
                 }
@@ -613,7 +637,7 @@ export async function createOnDemandPreviewAsync(assetId, priority = 0) {
                     URL.revokeObjectURL(url);
                     return null;
                 }
-                onDemandPreviewStore.set(assetId, url);
+                onDemandPreviewStore.set(cacheKey, url);
                 preloadImageUrls([url]);
                 return url;
             }
@@ -631,7 +655,7 @@ export async function createOnDemandPreviewAsync(assetId, priority = 0) {
                 URL.revokeObjectURL(url);
                 return null;
             }
-            onDemandPreviewStore.set(assetId, url);
+            onDemandPreviewStore.set(cacheKey, url);
             preloadImageUrls([url]);
             return url;
         }
@@ -648,7 +672,7 @@ export async function createOnDemandPreviewAsync(assetId, priority = 0) {
                 URL.revokeObjectURL(url);
                 return null;
             }
-            onDemandPreviewStore.set(assetId, url);
+            onDemandPreviewStore.set(cacheKey, url);
             preloadImageUrls([url]);
             return url;
         }
@@ -657,13 +681,29 @@ export async function createOnDemandPreviewAsync(assetId, priority = 0) {
             return null;
         }
     })();
-    onDemandPreviewPromiseStore.set(assetId, task);
+    onDemandPreviewPromiseStore.set(cacheKey, task);
     task.finally(() => {
-        if (onDemandPreviewPromiseStore.get(assetId) === task) {
-            onDemandPreviewPromiseStore.delete(assetId);
+        if (onDemandPreviewPromiseStore.get(cacheKey) === task) {
+            onDemandPreviewPromiseStore.delete(cacheKey);
         }
     });
     return task;
+}
+export async function warmOnDemandPreviewCache(assetId, _priority = 0, options = {}) {
+    const absolutePath = assetAbsolutePathStore.get(assetId);
+    if (absolutePath && hasDesktopPreviewWarmBridge()) {
+        try {
+            return await window.filexDesktop.warmPreview(absolutePath, {
+                maxDimension: options.maxDimension,
+                sourceFileKey: assetSourceFileKeyStore.get(assetId),
+            });
+        }
+        catch {
+            return false;
+        }
+    }
+    const url = await createOnDemandPreviewAsync(assetId, _priority, options);
+    return Boolean(url);
 }
 /**
  * Checks whether selected assets were modified on disk by external tools (e.g. Photoshop).
@@ -704,9 +744,11 @@ export async function detectChangedAssetsOnDisk(assetIds) {
             fileStore.set(assetId, latestFile);
             invalidateOnDemandPreview(assetId);
             const relativePath = assetPathStore.get(assetId) ?? latestFile.name;
+            const nextSourceFileKey = buildSourceFileKey(latestFile, relativePath);
+            assetSourceFileKeyStore.set(assetId, nextSourceFileKey);
             const next = {
                 id: assetId,
-                sourceFileKey: buildSourceFileKey(latestFile, relativePath),
+                sourceFileKey: nextSourceFileKey,
             };
             if (isBrowserDecodable(latestFile.name)) {
                 revokeLivePreviewUrl(assetId);
@@ -765,6 +807,19 @@ export function extractSubfolders(assets) {
 /** Returns the relative virtual path for an asset (e.g. "Folder/sub/IMG_001.CR3") */
 export function getAssetRelativePath(assetId) {
     return assetPathStore.get(assetId) ?? null;
+}
+export function getAssetAbsolutePath(assetId) {
+    return assetAbsolutePathStore.get(assetId) ?? null;
+}
+export function getAssetAbsolutePaths(assetIds) {
+    const uniquePaths = new Set();
+    for (const assetId of assetIds) {
+        const absolutePath = assetAbsolutePathStore.get(assetId);
+        if (absolutePath) {
+            uniquePaths.add(absolutePath);
+        }
+    }
+    return Array.from(uniquePaths);
 }
 /**
  * Copy one or more assets to a user-chosen destination folder (FSAA).

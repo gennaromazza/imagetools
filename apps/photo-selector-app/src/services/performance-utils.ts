@@ -88,10 +88,6 @@ export async function measureAsync<T>(label: string, run: () => Promise<T>): Pro
 }
 
 export function resetPerfByteReadStats(): void {
-  if (!PERF_ENABLED) {
-    return;
-  }
-
   byteReadStats = {
     totalBytes: 0,
     totalImages: 0,
@@ -103,7 +99,7 @@ export function resetPerfByteReadStats(): void {
 }
 
 export function recordBytesRead(kind: ByteReadKind, bytes: number): void {
-  if (!PERF_ENABLED || bytes <= 0) {
+  if (bytes <= 0) {
     return;
   }
 
@@ -126,10 +122,16 @@ export function recordBytesRead(kind: ByteReadKind, bytes: number): void {
     ? " [FLAG standard > 200KB]"
     : "";
 
-  console.log(
-    `[PERF] avg bytes-read per image                 : ${overallAverageKb.toFixed(1)}KB` +
-      ` (raw ${rawAverageKb.toFixed(1)}KB${rawFlag}, standard ${standardAverageKb.toFixed(1)}KB${standardFlag})`,
-  );
+  if (PERF_ENABLED) {
+    console.log(
+      `[PERF] avg bytes-read per image                 : ${overallAverageKb.toFixed(1)}KB` +
+        ` (raw ${rawAverageKb.toFixed(1)}KB${rawFlag}, standard ${standardAverageKb.toFixed(1)}KB${standardFlag})`,
+    );
+  }
+}
+
+export function getPerfByteReadStats(): ByteReadStats {
+  return { ...byteReadStats };
 }
 
 export function beginReactBatchMetric(updatedCount: number, totalCount: number): number | null {

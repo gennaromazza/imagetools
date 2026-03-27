@@ -18,6 +18,7 @@ export interface ImageAsset {
     rating?: number;
     pickStatus?: PickStatus;
     colorLabel?: ColorLabel | null;
+    customLabels?: string[];
     width: number;
     height: number;
     orientation: ImageOrientation;
