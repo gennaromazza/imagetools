@@ -36,11 +36,28 @@ interface PhotoCardProps {
 }
 
 type CardFeedback = {
-  kind: "star" | "pill" | "dot";
+  kind: "star" | "pill" | "dot" | "label";
   label: string;
   token: number;
   value?: number | ColorLabel | PickStatus | null;
+  labels?: string[];
 };
+
+function areLabelArraysEqual(left: string[] | undefined, right: string[] | undefined): boolean {
+  const safeLeft = left ?? [];
+  const safeRight = right ?? [];
+  if (safeLeft.length !== safeRight.length) {
+    return false;
+  }
+
+  for (let index = 0; index < safeLeft.length; index += 1) {
+    if (safeLeft[index] !== safeRight[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 export const PhotoCard = memo(
   function PhotoCard({
@@ -66,7 +83,7 @@ export const PhotoCard = memo(
     const customLabels = photo.customLabels ?? [];
     const raw = isRawFile(photo.fileName);
 
-    const prevClassRef = useRef({ rating, pickStatus, colorLabel });
+    const prevClassRef = useRef({ rating, pickStatus, colorLabel, customLabels });
     const cardRef = useRef<HTMLDivElement>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const feedbackTimeoutRef = useRef<number | null>(null);
@@ -104,9 +121,25 @@ export const PhotoCard = memo(
           token: feedbackTokenRef.current,
           value: colorLabel,
         };
+      } else if (!areLabelArraysEqual(prev.customLabels, customLabels)) {
+        const addedLabels = customLabels.filter((label) => !prev.customLabels.includes(label));
+        const removedLabels = prev.customLabels.filter((label) => !customLabels.includes(label));
+        const affectedLabels = addedLabels.length > 0 ? addedLabels : removedLabels;
+
+        feedbackTokenRef.current += 1;
+        nextFeedback = {
+          kind: "label",
+          label: addedLabels.length > 0
+            ? `Label: ${addedLabels.join(", ")}`
+            : removedLabels.length > 0
+              ? `Label rimossa: ${removedLabels.join(", ")}`
+              : "Label aggiornata",
+          token: feedbackTokenRef.current,
+          labels: affectedLabels,
+        };
       }
 
-      prevClassRef.current = { rating, pickStatus, colorLabel };
+      prevClassRef.current = { rating, pickStatus, colorLabel, customLabels };
 
       if (feedbackTimeoutRef.current !== null) {
         window.clearTimeout(feedbackTimeoutRef.current);
@@ -130,7 +163,7 @@ export const PhotoCard = memo(
         setFeedback((current) => (current?.token === nextFeedback?.token ? null : current));
         feedbackTimeoutRef.current = null;
       }, 950);
-    }, [colorLabel, pickStatus, rating]);
+    }, [colorLabel, customLabels, pickStatus, rating]);
 
     useEffect(() => {
       if (isSelected) {
@@ -328,7 +361,13 @@ export const PhotoCard = memo(
               {customLabels.slice(0, 2).map((label) => (
                 <span
                   key={label}
-                  className={`photo-card__label-chip photo-card__label-chip--${customLabelColors[label] ?? "sand"}`}
+                  className={[
+                    "photo-card__label-chip",
+                    `photo-card__label-chip--${customLabelColors[label] ?? "sand"}`,
+                    feedback?.kind === "label" && feedback.labels?.includes(label)
+                      ? "photo-card__label-chip--flash"
+                      : "",
+                  ].join(" ").trim()}
                   title={customLabelShortcuts[label] ? `${label} · tasto ${customLabelShortcuts[label]}` : label}
                 >
                   {customLabelShortcuts[label] ? `${label} · ${customLabelShortcuts[label]}` : label}
@@ -444,7 +483,10 @@ export const PhotoCard = memo(
     prev.photo.width === next.photo.width &&
     prev.photo.height === next.photo.height &&
     prev.photo.orientation === next.photo.orientation &&
+    areLabelArraysEqual(prev.photo.customLabels, next.photo.customLabels) &&
     getAssetRating(prev.photo) === getAssetRating(next.photo) &&
     getAssetPickStatus(prev.photo) === getAssetPickStatus(next.photo) &&
-    getAssetColorLabel(prev.photo) === getAssetColorLabel(next.photo)
+    getAssetColorLabel(prev.photo) === getAssetColorLabel(next.photo) &&
+    prev.customLabelColors === next.customLabelColors &&
+    prev.customLabelShortcuts === next.customLabelShortcuts
 );

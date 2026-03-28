@@ -1,6 +1,8 @@
 import type { ColorLabel } from "@photo-tools/shared-types";
+import type { DesktopPhotoSelectorPreferences } from "@photo-tools/desktop-contracts";
 import type { PhotoFilterState } from "./photo-classification";
 import { COLOR_LABEL_NAMES } from "./photo-classification";
+import { getDesktopPreferences, hasDesktopStateApi, saveDesktopPreferences as saveDesktopPreferencesNative } from "./desktop-store";
 
 const PREFERENCES_KEY = "photo-selector-preferences-v1";
 export type ThumbnailProfile = "ultra-fast" | "fast" | "balanced";
@@ -31,6 +33,9 @@ export interface PhotoSelectorPreferences {
   customLabelShortcuts: Record<string, CustomLabelShortcut | null>;
   thumbnailProfile: ThumbnailProfile;
   sortCacheEnabled: boolean;
+  cardSize: number;
+  rootFolderPathOverride: string;
+  preferredEditorPath: string;
 }
 
 export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
@@ -41,7 +46,12 @@ export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
   customLabelShortcuts: {},
   thumbnailProfile: "ultra-fast",
   sortCacheEnabled: true,
+  cardSize: 160,
+  rootFolderPathOverride: "",
+  preferredEditorPath: "",
 };
+
+let preferencesCache: PhotoSelectorPreferences = { ...DEFAULT_PHOTO_SELECTOR_PREFERENCES };
 
 export function normalizeCustomLabelName(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 48);
@@ -145,43 +155,93 @@ export function normalizeCustomLabelShortcuts(
 
 export function loadPhotoSelectorPreferences(): PhotoSelectorPreferences {
   if (typeof window === "undefined") {
-    return DEFAULT_PHOTO_SELECTOR_PREFERENCES;
+    return preferencesCache;
   }
 
+  if (hasDesktopStateApi()) {
+    return preferencesCache;
+  }
+
+  preferencesCache = parseStoredPreferences(readLocalPreferences());
+  return preferencesCache;
+}
+
+function readLocalPreferences(): Partial<PhotoSelectorPreferences> | null {
   try {
     const raw = window.localStorage.getItem(PREFERENCES_KEY);
     if (!raw) {
-      return DEFAULT_PHOTO_SELECTOR_PREFERENCES;
+      return null;
     }
-
-    const parsed = JSON.parse(raw) as Partial<PhotoSelectorPreferences>;
-    const customLabelsCatalog = normalizeCustomLabelsCatalog(parsed.customLabelsCatalog);
-    return {
-      colorNames: {
-        ...COLOR_LABEL_NAMES,
-        ...(parsed.colorNames ?? {}),
-      },
-      filterPresets: Array.isArray(parsed.filterPresets) ? parsed.filterPresets : [],
-      customLabelsCatalog,
-      customLabelColors: normalizeCustomLabelColors(
-        customLabelsCatalog,
-        (parsed.customLabelColors as Record<string, string> | undefined),
-      ),
-      customLabelShortcuts: normalizeCustomLabelShortcuts(
-        customLabelsCatalog,
-        parsed.customLabelShortcuts as Record<string, string | null> | undefined,
-      ),
-      thumbnailProfile:
-        parsed.thumbnailProfile === "balanced"
-          ? "balanced"
-          : parsed.thumbnailProfile === "fast"
-            ? "fast"
-            : "ultra-fast",
-      sortCacheEnabled: parsed.sortCacheEnabled !== false,
-    };
+    return JSON.parse(raw) as Partial<PhotoSelectorPreferences>;
   } catch {
-    return DEFAULT_PHOTO_SELECTOR_PREFERENCES;
+    return null;
   }
+}
+
+function parseStoredPreferences(
+  parsed: Partial<PhotoSelectorPreferences> | Partial<DesktopPhotoSelectorPreferences> | null,
+): PhotoSelectorPreferences {
+  const customLabelsCatalog = normalizeCustomLabelsCatalog(parsed?.customLabelsCatalog);
+  return {
+    colorNames: {
+      ...COLOR_LABEL_NAMES,
+      ...(parsed?.colorNames ?? {}),
+    },
+    filterPresets: Array.isArray(parsed?.filterPresets) ? parsed.filterPresets : [],
+    customLabelsCatalog,
+    customLabelColors: normalizeCustomLabelColors(
+      customLabelsCatalog,
+      parsed?.customLabelColors as Record<string, string> | undefined,
+    ),
+    customLabelShortcuts: normalizeCustomLabelShortcuts(
+      customLabelsCatalog,
+      parsed?.customLabelShortcuts as Record<string, string | null> | undefined,
+    ),
+    thumbnailProfile:
+      parsed?.thumbnailProfile === "balanced"
+        ? "balanced"
+        : parsed?.thumbnailProfile === "fast"
+          ? "fast"
+          : "ultra-fast",
+    sortCacheEnabled: parsed?.sortCacheEnabled !== false,
+    cardSize: Math.max(100, Math.min(320, Number(parsed?.cardSize ?? DEFAULT_PHOTO_SELECTOR_PREFERENCES.cardSize))),
+    rootFolderPathOverride: typeof parsed?.rootFolderPathOverride === "string"
+      ? parsed.rootFolderPathOverride
+      : "",
+    preferredEditorPath: typeof parsed?.preferredEditorPath === "string"
+      ? parsed.preferredEditorPath
+      : "",
+  };
+}
+
+function toDesktopPreferences(preferences: PhotoSelectorPreferences): DesktopPhotoSelectorPreferences {
+  return {
+    colorNames: preferences.colorNames,
+    filterPresets: preferences.filterPresets,
+    customLabelsCatalog: preferences.customLabelsCatalog,
+    customLabelColors: preferences.customLabelColors,
+    customLabelShortcuts: preferences.customLabelShortcuts,
+    thumbnailProfile: preferences.thumbnailProfile,
+    sortCacheEnabled: preferences.sortCacheEnabled,
+    cardSize: preferences.cardSize,
+    rootFolderPathOverride: preferences.rootFolderPathOverride,
+    preferredEditorPath: preferences.preferredEditorPath,
+  };
+}
+
+export async function hydratePhotoSelectorPreferences(): Promise<PhotoSelectorPreferences> {
+  if (typeof window === "undefined") {
+    return preferencesCache;
+  }
+
+  if (hasDesktopStateApi()) {
+    const nativePreferences = await getDesktopPreferences();
+    preferencesCache = parseStoredPreferences(nativePreferences);
+    return preferencesCache;
+  }
+
+  preferencesCache = parseStoredPreferences(readLocalPreferences());
+  return preferencesCache;
 }
 
 export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorPreferences>): void {
@@ -211,6 +271,9 @@ export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorP
             ? "ultra-fast"
             : current.thumbnailProfile,
     sortCacheEnabled: preferences.sortCacheEnabled ?? current.sortCacheEnabled,
+    cardSize: preferences.cardSize ?? current.cardSize,
+    rootFolderPathOverride: preferences.rootFolderPathOverride ?? current.rootFolderPathOverride,
+    preferredEditorPath: preferences.preferredEditorPath ?? current.preferredEditorPath,
   };
 
   next.customLabelColors = normalizeCustomLabelColors(
@@ -227,6 +290,13 @@ export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorP
       ...(preferences.customLabelShortcuts ?? {}),
     },
   );
+
+  preferencesCache = next;
+
+  if (hasDesktopStateApi()) {
+    void saveDesktopPreferencesNative(toDesktopPreferences(next));
+    return;
+  }
 
   window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next));
 }

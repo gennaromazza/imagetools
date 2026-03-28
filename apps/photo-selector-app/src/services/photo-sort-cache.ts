@@ -1,4 +1,5 @@
 import type { ImageAsset } from "@photo-tools/shared-types";
+import { getDesktopSortCache, hasDesktopStateApi, saveDesktopSortCache } from "./desktop-store";
 
 const SORT_CACHE_KEY = "photo-selector-sort-cache-v1";
 const SORT_CACHE_MAX_ENTRIES = 24;
@@ -13,23 +14,31 @@ interface SortCacheEntry {
   updatedAt: number;
 }
 
+let sortCacheEntries: SortCacheEntry[] = [];
+
 function loadEntries(): SortCacheEntry[] {
   if (typeof window === "undefined") {
-    return [];
+    return sortCacheEntries;
+  }
+
+  if (hasDesktopStateApi()) {
+    return sortCacheEntries;
   }
 
   try {
     const raw = window.localStorage.getItem(SORT_CACHE_KEY);
     if (!raw) {
-      return [];
+      sortCacheEntries = [];
+      return sortCacheEntries;
     }
 
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) {
-      return [];
+      sortCacheEntries = [];
+      return sortCacheEntries;
     }
 
-    return parsed.filter((entry): entry is SortCacheEntry => (
+    sortCacheEntries = parsed.filter((entry): entry is SortCacheEntry => (
       !!entry &&
       typeof entry.folderPath === "string" &&
       (entry.sortBy === "name" || entry.sortBy === "orientation" || entry.sortBy === "rating") &&
@@ -37,13 +46,20 @@ function loadEntries(): SortCacheEntry[] {
       Array.isArray(entry.orderedIds) &&
       typeof entry.updatedAt === "number"
     ));
+    return sortCacheEntries;
   } catch {
-    return [];
+    sortCacheEntries = [];
+    return sortCacheEntries;
   }
 }
 
 function saveEntries(entries: SortCacheEntry[]): void {
+  sortCacheEntries = entries;
   if (typeof window === "undefined") {
+    return;
+  }
+
+  if (hasDesktopStateApi()) {
     return;
   }
 
@@ -100,6 +116,29 @@ export function loadCachedPhotoSortOrder(
   return match ? [...match.orderedIds] : null;
 }
 
+export async function hydratePhotoSortCache(folderPath?: string): Promise<SortCacheEntry[]> {
+  if (typeof window === "undefined") {
+    return sortCacheEntries;
+  }
+
+  if (!hasDesktopStateApi()) {
+    return loadEntries();
+  }
+
+  const entries = await getDesktopSortCache(folderPath);
+  sortCacheEntries = Array.isArray(entries)
+    ? entries.filter((entry): entry is SortCacheEntry => (
+        !!entry &&
+        typeof entry.folderPath === "string" &&
+        (entry.sortBy === "name" || entry.sortBy === "orientation" || entry.sortBy === "rating") &&
+        typeof entry.signature === "string" &&
+        Array.isArray(entry.orderedIds) &&
+        typeof entry.updatedAt === "number"
+      ))
+    : [];
+  return sortCacheEntries;
+}
+
 export function saveCachedPhotoSortOrder(
   folderPath: string,
   sortBy: PhotoSortMode,
@@ -125,4 +164,8 @@ export function saveCachedPhotoSortOrder(
     .slice(0, SORT_CACHE_MAX_ENTRIES);
 
   saveEntries(entries);
+
+  if (hasDesktopStateApi()) {
+    void saveDesktopSortCache(nextEntry);
+  }
 }

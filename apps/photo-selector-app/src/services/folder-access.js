@@ -4,6 +4,7 @@
  */
 import { preloadImageUrls } from "./image-cache";
 import { RawPreviewPipeline } from "./raw-preview-pipeline";
+import { getDesktopRecentFolders, hasDesktopStateApi, removeDesktopRecentFolder, saveDesktopRecentFolder, } from "./desktop-store";
 // ── Supported formats ──────────────────────────────────────────────────
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const RAW_EXTENSIONS = new Set([
@@ -68,6 +69,10 @@ function hasDesktopPreviewBridge() {
 }
 function hasDesktopPreviewWarmBridge() {
     return typeof window !== "undefined" && typeof window.filexDesktop?.warmPreview === "function";
+}
+function hasDesktopQuickPreviewWarmBridge() {
+    return typeof window !== "undefined"
+        && typeof window.filexDesktop?.warmQuickPreviewFrames === "function";
 }
 function hasDesktopSidecarBridge() {
     return typeof window !== "undefined"
@@ -691,11 +696,26 @@ export async function createOnDemandPreviewAsync(assetId, priority = 0, options 
 }
 export async function warmOnDemandPreviewCache(assetId, _priority = 0, options = {}) {
     const absolutePath = assetAbsolutePathStore.get(assetId);
+    const sourceFileKey = assetSourceFileKeyStore.get(assetId);
+    if (absolutePath && hasDesktopQuickPreviewWarmBridge()) {
+        try {
+            const result = await window.filexDesktop.warmQuickPreviewFrames([{
+                    absolutePath,
+                    maxDimension: Math.max(0, Math.round(options.maxDimension ?? 0)),
+                    sourceFileKey,
+                    stage: "fit",
+                }]);
+            return result.warmedCount > 0;
+        }
+        catch {
+            return false;
+        }
+    }
     if (absolutePath && hasDesktopPreviewWarmBridge()) {
         try {
             return await window.filexDesktop.warmPreview(absolutePath, {
                 maxDimension: options.maxDimension,
-                sourceFileKey: assetSourceFileKeyStore.get(assetId),
+                sourceFileKey,
             });
         }
         catch {
@@ -964,25 +984,74 @@ export async function saveAssetAs(assetId) {
 // ── Recent folders ─────────────────────────────────────────────────────
 const RECENT_KEY = "photo-selector-recent-folders";
 const MAX_RECENT = 8;
+let recentFoldersCache = [];
 export function getRecentFolders() {
+    if (typeof window === "undefined") {
+        return recentFoldersCache;
+    }
+    if (hasDesktopStateApi()) {
+        return recentFoldersCache;
+    }
     try {
         const raw = localStorage.getItem(RECENT_KEY);
-        return raw ? JSON.parse(raw) : [];
+        recentFoldersCache = raw ? JSON.parse(raw) : [];
+        return recentFoldersCache;
     }
     catch {
-        return [];
+        recentFoldersCache = [];
+        return recentFoldersCache;
     }
 }
 export function addRecentFolder(name, imageCount, path) {
+    const nextFolder = { name, path, imageCount, openedAt: Date.now() };
+    if (hasDesktopStateApi()) {
+        recentFoldersCache = [nextFolder, ...recentFoldersCache.filter((folder) => folder.path !== path || folder.name !== name)]
+            .slice(0, MAX_RECENT);
+        void saveDesktopRecentFolder(nextFolder).then((recentFolders) => {
+            if (recentFolders) {
+                recentFoldersCache = recentFolders;
+            }
+        });
+        return;
+    }
     try {
         const recent = getRecentFolders().filter((f) => f.name !== name || f.path !== path);
-        recent.unshift({ name, path, imageCount, openedAt: Date.now() });
+        recent.unshift(nextFolder);
         if (recent.length > MAX_RECENT)
             recent.length = MAX_RECENT;
+        recentFoldersCache = recent;
         localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
     }
     catch {
         // ignore
     }
+}
+export async function hydrateRecentFolders() {
+    if (typeof window === "undefined") {
+        return recentFoldersCache;
+    }
+    if (hasDesktopStateApi()) {
+        const recentFolders = await getDesktopRecentFolders();
+        recentFoldersCache = recentFolders ?? [];
+        return recentFoldersCache;
+    }
+    return getRecentFolders();
+}
+export async function removeRecentFolder(folderPathOrName) {
+    if (typeof window === "undefined") {
+        return recentFoldersCache;
+    }
+    if (hasDesktopStateApi()) {
+        const recentFolders = await removeDesktopRecentFolder(folderPathOrName);
+        recentFoldersCache = recentFolders ?? [];
+        return recentFoldersCache;
+    }
+    const normalizedValue = folderPathOrName.trim().toLowerCase();
+    recentFoldersCache = getRecentFolders().filter((folder) => {
+        const folderPath = folder.path?.trim().toLowerCase() ?? "";
+        return folderPath !== normalizedValue && folder.name.trim().toLowerCase() !== normalizedValue;
+    });
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recentFoldersCache));
+    return recentFoldersCache;
 }
 //# sourceMappingURL=folder-access.js.map

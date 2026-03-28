@@ -24,6 +24,9 @@ export interface PhotoSelectorPreferences {
     customLabelShortcuts: Record<string, CustomLabelShortcut | null>;
     thumbnailProfile: ThumbnailProfile;
     sortCacheEnabled: boolean;
+    cardSize: number;
+    rootFolderPathOverride: string;
+    preferredEditorPath: string;
 }
 export declare const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences;
 export declare function normalizeCustomLabelName(value: string): string;
@@ -33,4 +36,5 @@ export declare function normalizeCustomLabelColors(catalog: string[], colors: Re
 export declare function normalizeCustomLabelShortcut(value: string | null | undefined): CustomLabelShortcut | null;
 export declare function normalizeCustomLabelShortcuts(catalog: string[], shortcuts: Record<string, string | null> | undefined): Record<string, CustomLabelShortcut | null>;
 export declare function loadPhotoSelectorPreferences(): PhotoSelectorPreferences;
+export declare function hydratePhotoSelectorPreferences(): Promise<PhotoSelectorPreferences>;
 export declare function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorPreferences>): void;

@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type {
   DesktopCacheLocationRecommendation,
+  DesktopDragOutCheck,
   DesktopEditorCandidate,
   DesktopThumbnailCacheInfo,
 } from "@photo-tools/desktop-contracts";
@@ -39,7 +40,7 @@ import {
   CUSTOM_LABEL_SHORTCUT_OPTIONS,
   DEFAULT_CUSTOM_LABEL_TONE,
   normalizeCustomLabelColors,
-  loadPhotoSelectorPreferences,
+  hydratePhotoSelectorPreferences,
   normalizeCustomLabelName,
   normalizeCustomLabelsCatalog,
   normalizeCustomLabelShortcut,
@@ -53,8 +54,10 @@ import {
 import {
   buildPhotoSortSignature,
   loadCachedPhotoSortOrder,
+  hydratePhotoSortCache,
   saveCachedPhotoSortOrder,
 } from "../services/photo-sort-cache";
+import { logDesktopEvent } from "../services/desktop-store";
 
 interface PhotoSelectorProps {
   photos: ImageAsset[];
@@ -119,7 +122,25 @@ const KNOWN_EDITOR_PRESET_PATHS = [
 ];
 
 function sanitizeEditorExecutablePath(value: string): string {
-  return value.trim().replace(/^"+|"+$/g, "").replace(/\//g, "\\");
+  const normalized = value.trim().replace(/^"+|"+$/g, "");
+  return /^[a-zA-Z]:/.test(normalized) ? normalized.replace(/\//g, "\\") : normalized;
+}
+
+function isValidDesktopEditorPath(value: string): boolean {
+  const normalized = sanitizeEditorExecutablePath(value);
+  if (!normalized) {
+    return false;
+  }
+
+  if (/^[a-zA-Z]:\\/.test(normalized)) {
+    return /\.(exe|bat|cmd)$/i.test(normalized);
+  }
+
+  if (normalized.startsWith("/")) {
+    return /\.app$/i.test(normalized) || /\/[^/]+$/.test(normalized);
+  }
+
+  return false;
 }
 
 function normalizeAssetCustomLabels(values: string[] | undefined): string[] {
@@ -293,35 +314,36 @@ export function PhotoSelector({
   const [isBatchToolsOpen, setIsBatchToolsOpen] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
-  const [cardSize, setCardSize] = useState<number>(() => {
-    const saved = localStorage.getItem("ps-card-size");
-    return saved ? Math.max(100, Math.min(320, Number(saved))) : 160;
-  });
-  const [rootFolderPathOverride, setRootFolderPathOverride] = useState<string>(
-    () => localStorage.getItem(ROOT_FOLDER_OVERRIDE_KEY) ?? localStorage.getItem(LEGACY_ROOT_FOLDER_KEY) ?? ""
-  );
-  const [preferredEditorPath, setPreferredEditorPath] = useState<string>(
-    () => localStorage.getItem("ps-preferred-editor-path") ?? ""
-  );
+  const [cardSize, setCardSize] = useState<number>(160);
+  const [rootFolderPathOverride, setRootFolderPathOverride] = useState<string>("");
+  const [preferredEditorPath, setPreferredEditorPath] = useState<string>("");
+  const [preferencesHydrated, setPreferencesHydrated] = useState(false);
+  const [sortCacheHydrationToken, setSortCacheHydrationToken] = useState(0);
+  const [desktopDragOutCheck, setDesktopDragOutCheck] = useState<DesktopDragOutCheck | null>(null);
   const [installedEditorCandidates, setInstalledEditorCandidates] = useState<DesktopEditorCandidate[]>([]);
   const [desktopThumbnailCachePathInput, setDesktopThumbnailCachePathInput] = useState("");
 
   const setPreferredEditorPathPersisted = useCallback((value: string) => {
     const normalized = sanitizeEditorExecutablePath(value);
     setPreferredEditorPath(normalized);
-    localStorage.setItem("ps-preferred-editor-path", normalized);
-  }, []);
+    if (preferencesHydrated) {
+      savePhotoSelectorPreferences({ preferredEditorPath: normalized });
+    }
+    void logDesktopEvent({
+      channel: "editor",
+      level: "info",
+      message: "Percorso editor aggiornato",
+      details: normalized || "vuoto",
+    });
+  }, [preferencesHydrated]);
   const setRootFolderPathOverridePersisted = useCallback((value: string) => {
     setRootFolderPathOverride(value);
-    const trimmed = value.trim();
-    if (trimmed) {
-      localStorage.setItem(ROOT_FOLDER_OVERRIDE_KEY, value);
-      localStorage.setItem(LEGACY_ROOT_FOLDER_KEY, value);
-    } else {
-      localStorage.removeItem(ROOT_FOLDER_OVERRIDE_KEY);
-      localStorage.removeItem(LEGACY_ROOT_FOLDER_KEY);
+    if (preferencesHydrated) {
+      savePhotoSelectorPreferences({
+        rootFolderPathOverride: value.trim() ? value : "",
+      });
     }
-  }, []);
+  }, [preferencesHydrated]);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [contextMenuState, setContextMenuState] = useState<{
     x: number;
@@ -334,6 +356,7 @@ export function PhotoSelector({
   const pendingPreviewRestoreIdRef = useRef<string | null>(null);
   const lastClickedIdRef = useRef<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const desktopDragImageRef = useRef<HTMLCanvasElement | null>(null);
   const scrollAnimationFrameRef = useRef<number | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
   const lastVisibleIdsSignatureRef = useRef<string>("");
@@ -413,15 +436,55 @@ export function PhotoSelector({
   }, []);
 
   useEffect(() => {
-    const preferences = loadPhotoSelectorPreferences();
-    setCustomColorNames(preferences.colorNames);
-    setFilterPresets(preferences.filterPresets);
-    setCustomLabelsCatalog(preferences.customLabelsCatalog);
-    setCustomLabelColors(preferences.customLabelColors);
-    setCustomLabelShortcuts(preferences.customLabelShortcuts);
-    setSelectedThumbnailProfile(preferences.thumbnailProfile);
-    setIsSortCacheEnabled(preferences.sortCacheEnabled);
+    let active = true;
+    void hydratePhotoSelectorPreferences().then((preferences) => {
+      if (!active) {
+        return;
+      }
+
+      setCustomColorNames(preferences.colorNames);
+      setFilterPresets(preferences.filterPresets);
+      setCustomLabelsCatalog(preferences.customLabelsCatalog);
+      setCustomLabelColors(preferences.customLabelColors);
+      setCustomLabelShortcuts(preferences.customLabelShortcuts);
+      setSelectedThumbnailProfile(preferences.thumbnailProfile);
+      setIsSortCacheEnabled(preferences.sortCacheEnabled);
+      setCardSize(preferences.cardSize);
+      setRootFolderPathOverride(preferences.rootFolderPathOverride);
+      setPreferredEditorPath(sanitizeEditorExecutablePath(preferences.preferredEditorPath));
+      setPreferencesHydrated(true);
+    }).catch(() => {
+      if (active) {
+        setPreferencesHydrated(true);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!sourceFolderPath || !isSortCacheEnabled) {
+      setSortCacheHydrationToken((current) => current + 1);
+      return;
+    }
+
+    void hydratePhotoSortCache(sourceFolderPath).then(() => {
+      if (active) {
+        setSortCacheHydrationToken((current) => current + 1);
+      }
+    }).catch(() => {
+      if (active) {
+        setSortCacheHydrationToken((current) => current + 1);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [isSortCacheEnabled, sourceFolderPath]);
 
   useEffect(() => {
     setSelectedThumbnailProfile(thumbnailProfile);
@@ -430,6 +493,16 @@ export function PhotoSelector({
   useEffect(() => {
     setIsSortCacheEnabled(sortCacheEnabled);
   }, [sortCacheEnabled]);
+
+  useEffect(() => {
+    if (!preferencesHydrated) {
+      return;
+    }
+
+    savePhotoSelectorPreferences({
+      cardSize,
+    });
+  }, [cardSize, preferencesHydrated]);
 
   const applyPhotoChanges = useCallback((
     id: string,
@@ -972,7 +1045,7 @@ export function PhotoSelector({
     }
 
     return orderedIds;
-  }, [isSortCacheEnabled, metadataPhotos, sortBy, sourceFolderPath]);
+  }, [isSortCacheEnabled, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
 
   const visiblePhotoIds = useMemo(() => {
     const lowerSearch = deferredSearchQuery.toLowerCase();
@@ -1091,13 +1164,14 @@ export function PhotoSelector({
   // Search in all photos so preview doesn't close when filters change
   const previewAsset = previewAssetId ? (assetById.get(previewAssetId) ?? null) : null;
   const previewPriorityIds = useMemo(() => {
-    if (!previewAssetId) {
+    const anchorId = previewAssetId ?? focusedPhotoId;
+    if (!anchorId) {
       return [];
     }
 
-    const currentIndex = visiblePhotoIndexById.get(previewAssetId);
+    const currentIndex = visiblePhotoIndexById.get(anchorId);
     if (currentIndex === undefined) {
-      return [previewAssetId];
+      return [anchorId];
     }
 
     const ids: string[] = [];
@@ -1116,7 +1190,34 @@ export function PhotoSelector({
     }
 
     return ids;
-  }, [previewAssetId, visiblePhotoIds, visiblePhotoIndexById]);
+  }, [focusedPhotoId, previewAssetId, visiblePhotoIds, visiblePhotoIndexById]);
+
+  const gridResetSignature = useMemo(
+    () => [
+      sourceFolderPath,
+      sortBy,
+      pickFilter,
+      ratingFilter,
+      colorFilter,
+      customLabelFilter,
+      folderFilter,
+      seriesFilter,
+      timeClusterFilter,
+      deferredSearchQuery,
+    ].join("||"),
+    [
+      colorFilter,
+      customLabelFilter,
+      deferredSearchQuery,
+      folderFilter,
+      pickFilter,
+      ratingFilter,
+      seriesFilter,
+      sortBy,
+      sourceFolderPath,
+      timeClusterFilter,
+    ],
+  );
 
   const openPreview = useCallback((photoId: string, startZoomed = false) => {
     setFocusedPhotoId(photoId);
@@ -1412,28 +1513,19 @@ export function PhotoSelector({
     setGridViewport((current) => ({ ...current, scrollTop: 0 }));
     onVisibleIdsChange?.(new Set());
     onPriorityIdsChange?.(hasActiveFilters ? new Set(visiblePhotoIds.slice(0, 240)) : new Set());
-    onPreviewPriorityIdsChange?.(new Set(previewPriorityIds));
+    onPreviewPriorityIdsChange?.(new Set());
   }, [
-    colorFilter,
-    customLabelFilter,
-    folderFilter,
+    gridResetSignature,
     hasActiveFilters,
     onPriorityIdsChange,
     onPreviewPriorityIdsChange,
     onVisibleIdsChange,
-    pickFilter,
-    previewPriorityIds,
-    ratingFilter,
-    deferredSearchQuery,
-    seriesFilter,
-    sortBy,
-    timeClusterFilter,
     visiblePhotoIds,
-    visiblePhotos.length,
   ]);
 
   function togglePhoto(id: string, event?: React.MouseEvent) {
     const nextSelection = new Set(selectedSet);
+    setFocusedPhotoId(id);
 
     // Shift+click range selection
     if (event?.shiftKey && lastClickedIdRef.current) {
@@ -1569,18 +1661,92 @@ export function PhotoSelector({
   }, [selectedIds, updateCustomLabelsForIds]);
 
   const selectedAbsolutePaths = useMemo(() => getAssetAbsolutePaths(selectedIds), [selectedIds]);
-  const canStartDesktopDragOut = selectedIds.length > 0
+  const selectedAbsolutePathsSignature = useMemo(
+    () => selectedAbsolutePaths.join("\n"),
+    [selectedAbsolutePaths],
+  );
+
+  useEffect(() => {
+    let active = true;
+    if (
+      typeof window === "undefined" ||
+      typeof window.filexDesktop?.canStartDragOut !== "function"
+    ) {
+      setDesktopDragOutCheck(null);
+      return;
+    }
+
+    if (selectedAbsolutePaths.length === 0) {
+      setDesktopDragOutCheck({
+        ok: false,
+        requestedCount: selectedIds.length,
+        validCount: 0,
+        allowedCount: 0,
+        reason: "empty-selection",
+        message: "Nessun file selezionato per il drag esterno.",
+      });
+      return;
+    }
+
+    void window.filexDesktop.canStartDragOut(selectedAbsolutePaths).then((result) => {
+      if (!active) {
+        return;
+      }
+
+      setDesktopDragOutCheck(result);
+    }).catch(() => {
+      if (!active) {
+        return;
+      }
+
+      setDesktopDragOutCheck({
+        ok: false,
+        requestedCount: selectedIds.length,
+        validCount: selectedAbsolutePaths.length,
+        allowedCount: 0,
+        reason: "invalid-paths",
+        message: "Impossibile validare il drag esterno in questa sessione.",
+      });
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedAbsolutePaths, selectedAbsolutePathsSignature, selectedIds.length]);
+
+  const canStartDesktopDragOut = Boolean(
+    desktopDragOutCheck?.ok
     && typeof window !== "undefined"
-    && typeof window.filexDesktop?.startDragOut === "function"
-    && selectedAbsolutePaths.length === selectedIds.length;
+    && typeof window.filexDesktop?.startDragOut === "function",
+  );
+  const desktopDragOutMessage = desktopDragOutCheck?.message
+    ?? "Drag esterno disponibile nella versione desktop con cartella aperta in modalita nativa.";
+
+  const applyDesktopDragImage = useCallback((event: DragEvent<HTMLElement>) => {
+    const dataTransfer = event.dataTransfer;
+    if (!dataTransfer || typeof document === "undefined") {
+      return;
+    }
+
+    if (!desktopDragImageRef.current) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1;
+      canvas.height = 1;
+      desktopDragImageRef.current = canvas;
+    }
+
+    dataTransfer.setDragImage(desktopDragImageRef.current, 0, 0);
+  }, []);
 
   const handleSelectionDragStart = useCallback((event: DragEvent<HTMLElement>) => {
     if (!canStartDesktopDragOut) {
       event.preventDefault();
+      pushTimelineEntry(desktopDragOutMessage);
       return;
     }
 
     event.dataTransfer.effectAllowed = "copy";
+    applyDesktopDragImage(event);
     event.dataTransfer.setData(
       "text/plain",
       selectedAbsolutePaths.length === 1
@@ -1588,7 +1754,7 @@ export function PhotoSelector({
         : `${selectedAbsolutePaths.length} file selezionati`
     );
     window.filexDesktop!.startDragOut(selectedAbsolutePaths);
-  }, [canStartDesktopDragOut, selectedAbsolutePaths]);
+  }, [applyDesktopDragImage, canStartDesktopDragOut, desktopDragOutMessage, pushTimelineEntry, selectedAbsolutePaths]);
 
   const handleCardExternalDragStart = useCallback((photoId: string, event: DragEvent<HTMLDivElement>) => {
     const draggingSelection = selectedSet.has(photoId);
@@ -1599,19 +1765,20 @@ export function PhotoSelector({
     if (
       targetPaths.length === 0
       || typeof window.filexDesktop?.startDragOut !== "function"
-      || (draggingSelection && targetPaths.length !== selectedIds.length)
+      || (draggingSelection && (!desktopDragOutCheck?.ok || targetPaths.length !== selectedIds.length))
     ) {
       event.preventDefault();
       return;
     }
 
     event.dataTransfer.effectAllowed = "copy";
+    applyDesktopDragImage(event);
     event.dataTransfer.setData(
       "text/plain",
       targetPaths.length === 1 ? targetPaths[0] : `${targetPaths.length} file selezionati`
     );
     window.filexDesktop.startDragOut(targetPaths);
-  }, [selectedIds, selectedSet]);
+  }, [applyDesktopDragImage, desktopDragOutCheck?.ok, selectedIds, selectedSet]);
 
   const clearSelection = useCallback(() => {
     onSelectionChange([]);
@@ -1831,10 +1998,6 @@ export function PhotoSelector({
   }, [visiblePhotos.length]);
 
   useEffect(() => {
-    localStorage.setItem("ps-card-size", String(cardSize));
-  }, [cardSize]);
-
-  useEffect(() => {
     if (
       typeof window === "undefined" ||
       typeof window.filexDesktop?.getInstalledEditorCandidates !== "function"
@@ -1850,8 +2013,7 @@ export function PhotoSelector({
 
       setInstalledEditorCandidates(candidates);
 
-      const storedEditorPath = localStorage.getItem("ps-preferred-editor-path") ?? "";
-      const currentPath = sanitizeEditorExecutablePath(preferredEditorPath || storedEditorPath);
+      const currentPath = sanitizeEditorExecutablePath(preferredEditorPath);
       if (currentPath && candidates.some((candidate) => sanitizeEditorExecutablePath(candidate.path) === currentPath)) {
         return;
       }
@@ -1929,10 +2091,8 @@ export function PhotoSelector({
   }, [pushTimelineEntry]);
 
   const handleOpenWithEditor = useCallback((ids: string[]) => {
-    const editorFromStorage = localStorage.getItem("ps-preferred-editor-path") ?? "";
-    const editor = sanitizeEditorExecutablePath(preferredEditorPath || editorFromStorage);
-    const hasAbsoluteEditorPath = /^[a-zA-Z]:\\/.test(editor) && /\.(exe|bat|cmd)$/i.test(editor);
-    if (!hasAbsoluteEditorPath) {
+    const editor = sanitizeEditorExecutablePath(preferredEditorPath);
+    if (!isValidDesktopEditorPath(editor)) {
       alert("Nessun editor associato valido. Imposta il percorso completo dell'editor (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).");
       return;
     }
@@ -1955,17 +2115,44 @@ export function PhotoSelector({
 
     if (
       typeof window !== "undefined" &&
-      typeof window.filexDesktop?.openWithEditor === "function"
+      typeof window.filexDesktop?.sendToEditor === "function"
     ) {
-      void window.filexDesktop.openWithEditor(editor, absolutePaths).then((result) => {
+      void window.filexDesktop.sendToEditor(editor, absolutePaths).then((result) => {
         if (!result?.ok) {
-          alert(result?.error ?? "Impossibile aprire l'editor esterno.");
+          const fallbackMessage = result?.status === "invalid-editor"
+            ? "Editor non trovato o percorso non valido."
+            : result?.status === "partial"
+              ? "Solo una parte della selezione ha percorsi validi per l'editor."
+              : result?.status === "timeout"
+                ? "L'editor non ha risposto in tempo."
+                : "Impossibile aprire l'editor esterno.";
+          alert(result?.error ?? fallbackMessage);
+          void logDesktopEvent({
+            channel: "editor",
+            level: "warn",
+            message: "Invio a editor non riuscito",
+            details: JSON.stringify({
+              requestedCount: result?.requestedCount ?? absolutePaths.length,
+              launchedCount: result?.launchedCount ?? 0,
+              status: result?.status ?? "launch-failed",
+            }),
+          });
           return;
         }
 
         pushTimelineEntry(
           `${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} aperta/e nell'editor`
         );
+        void logDesktopEvent({
+          channel: "editor",
+          level: "info",
+          message: "Invio a editor completato",
+          details: JSON.stringify({
+            requestedCount: result.requestedCount,
+            launchedCount: result.launchedCount,
+            status: result.status,
+          }),
+        });
       });
       return;
     }
@@ -2084,9 +2271,7 @@ export function PhotoSelector({
     if (!value) {
       return { kind: "empty" as const, text: "Non configurato" };
     }
-    const hasDir = /[\\/]/.test(value);
-    const isExecutable = /\.(exe|bat|cmd)$/i.test(value);
-    if (hasDir && isExecutable) {
+    if (isValidDesktopEditorPath(value)) {
       return { kind: "ok" as const, text: "Formato percorso OK" };
     }
     return { kind: "warn" as const, text: "Percorso incompleto o formato non valido" };
@@ -2956,7 +3141,7 @@ export function PhotoSelector({
       <PhotoQuickPreviewModal
         asset={previewAssetWithUrl}
         assets={visiblePhotos}
-        thumbnailProfile={thumbnailProfile}
+        thumbnailProfile={selectedThumbnailProfile}
         startZoomed={previewStartsZoomed}
         customLabelsCatalog={customLabelsCatalog}
         customLabelColors={customLabelColors}
@@ -3556,7 +3741,7 @@ export function PhotoSelector({
           y={contextMenuState.y}
           targetCount={contextMenuState.targetIds.length}
           colorLabelNames={customColorNames}
-          hasFileAccess={"showDirectoryPicker" in window}
+          hasFileAccess={Boolean(window.filexDesktop?.sendToEditor) || "showDirectoryPicker" in window}
           rootFolderPath={effectiveRootFolderPath || undefined}
           targetPath={contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined}
           onApplyRating={(rating) => {

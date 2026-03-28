@@ -2,7 +2,9 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { preloadImageUrls } from "../services/image-cache";
-import { createOnDemandPreviewAsync, getCachedOnDemandPreviewUrl, isRawFile, saveAssetAs, warmOnDemandPreviewCache, } from "../services/folder-access";
+import { getCachedDesktopQuickPreviewFrame, getDesktopQuickPreviewFrame, hasDesktopQuickPreviewApi, invalidateDesktopQuickPreviewFrame, peekDesktopQuickPreviewFrame, warmDesktopQuickPreviewFrames, } from "../services/desktop-quick-preview";
+import { createOnDemandPreviewAsync, getAssetAbsolutePath, getCachedOnDemandPreviewUrl, isRawFile, saveAssetAs, warmOnDemandPreviewCache, } from "../services/folder-access";
+import { getDesktopPerformanceSnapshot, logDesktopEvent, recordDesktopPerformanceSnapshot, } from "../services/desktop-store";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import { COLOR_LABEL_NAMES, COLOR_LABELS, DEFAULT_PHOTO_FILTERS, formatAssetStars, getAssetColorLabel, getAssetPickStatus, getAssetRating, getColorShortcutHint, matchesPhotoFilters, PICK_STATUS_LABELS, resolvePhotoClassificationShortcut } from "../services/photo-classification";
 const orientationLabels = {
@@ -15,6 +17,8 @@ const SIDEBAR_THUMB_ESTIMATED_SIZE = 196;
 const SIDEBAR_THUMB_OVERSCAN = 2;
 const DOCK_THUMB_ESTIMATED_SIZE = 81;
 const DOCK_THUMB_OVERSCAN = 4;
+const QUICK_PREVIEW_DESKTOP_FALLBACK_DELAY_MS = 80;
+const QUICK_PREVIEW_DETAIL_IDLE_DELAY_MS = 160;
 function getVirtualStripRange(totalCount, itemSize, overscan, viewport, anchorIndex) {
     if (totalCount <= 0) {
         return { start: 0, endExclusive: 0 };
@@ -41,6 +45,30 @@ function shouldLoadRawPreview(asset) {
     return Math.min(asset.width, asset.height) > 0 &&
         Math.min(asset.width, asset.height) < MIN_RAW_PREVIEW_DIMENSION;
 }
+function formatDesktopPreviewSourceLabel(stage, source, cacheHit, sourceOverride) {
+    const stageLabel = stage === "detail" ? "Detail" : "Fit";
+    const sourceLabel = sourceOverride ?? (source === "memory-cache"
+        ? "memory-cache"
+        : source === "disk-cache"
+            ? "disk-cache"
+            : source === "embedded-preview"
+                ? "embedded-preview"
+                : source === "native-provider"
+                    ? "native-provider"
+                    : "source-file");
+    return `${stageLabel} | ${sourceLabel}${cacheHit ? " | hit" : ""}`;
+    return `${stageLabel} · ${sourceLabel}${cacheHit ? " · hit" : ""}`;
+}
+function createDesktopManagedPreviewState(assetId, stage, frame, sourceOverride) {
+    const cacheHit = sourceOverride ? true : frame.cacheHit;
+    return {
+        assetId,
+        url: frame.src,
+        token: frame.token,
+        sourceLabel: formatDesktopPreviewSourceLabel(stage, frame.source, cacheHit, sourceOverride),
+        cacheHit,
+    };
+}
 export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = "ultra-fast", startZoomed = false, usageByAssetId, pages = [], activePageId, customLabelsCatalog = [], customLabelColors = {}, customLabelShortcuts = {}, onClose, onSelectAsset, onAddToPage, onJumpToPage, onUpdateAsset }) {
     const stageRef = useRef(null);
     const sidebarStripRef = useRef(null);
@@ -48,24 +76,42 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     const assignFeedbackTimeoutRef = useRef(null);
     const classificationFeedbackTimeoutRef = useRef(null);
     const previewWarmupTimeoutRef = useRef(null);
+    const detailPreviewTimeoutRef = useRef(null);
+    const fallbackPreviewTimeoutRef = useRef(null);
     const pendingSelectionReasonRef = useRef(null);
     const previewPerfStartRef = useRef(null);
+    const detailPreviewPerfStartRef = useRef(null);
+    const mainPreviewRecoveryKeyRef = useRef(null);
+    const comparePreviewRecoveryKeyRef = useRef(null);
     const lastAssetIdRef = useRef(null);
+    const lastPerfSinkSignatureRef = useRef("");
+    const fallbackSignatureRef = useRef("");
+    const previewFrameMetricsRef = useRef({
+        requested: 0,
+        cacheHits: 0,
+        fallbackCount: 0,
+        sourceCounts: new Map(),
+    });
     const classificationFeedbackTokenRef = useRef(0);
     const [filterPickStatus, setFilterPickStatus] = useState(DEFAULT_PHOTO_FILTERS.pickStatus);
     const [filterRating, setFilterRating] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
     const [filterColorLabel, setFilterColorLabel] = useState(DEFAULT_PHOTO_FILTERS.colorLabel);
     const [filterCustomLabel, setFilterCustomLabel] = useState("all");
     const [assignFeedbackPageNumber, setAssignFeedbackPageNumber] = useState(null);
-    const [resolvedPreviewUrl, setResolvedPreviewUrl] = useState(null);
-    const [resolvedDetailPreviewUrl, setResolvedDetailPreviewUrl] = useState(null);
+    const [resolvedPreview, setResolvedPreview] = useState(null);
+    const [resolvedDetailPreview, setResolvedDetailPreview] = useState(null);
     const [compareMode, setCompareMode] = useState(false);
     const [compareAssetId, setCompareAssetId] = useState(null);
-    const [resolvedComparePreviewUrl, setResolvedComparePreviewUrl] = useState(null);
+    const [resolvedComparePreview, setResolvedComparePreview] = useState(null);
     const [classificationFeedback, setClassificationFeedback] = useState(null);
     const [quickPreviewPerf, setQuickPreviewPerf] = useState({
         openLatencyMs: null,
         navigationLatencyMs: null,
+        fitLatencyMs: null,
+        detailLatencyMs: null,
+        warmHitRate: null,
+        fallbackCount: 0,
+        sourceBreakdown: "n/d",
         lastRenderedSource: "n/d",
         lastRenderedAssetName: "",
     });
@@ -80,31 +126,55 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         scrollOffset: 0,
         viewportSize: 0,
     });
+    const [stageViewport, setStageViewport] = useState({
+        width: 0,
+        height: 0,
+        devicePixelRatio: 1,
+    });
     const panDragRef = useRef(null);
     const panAnimationFrameRef = useRef(null);
     const pendingPanOffsetRef = useRef(null);
     const usage = asset ? usageByAssetId?.get(asset.id) : undefined;
     const activePage = useMemo(() => pages.find((page) => page.id === activePageId) ?? null, [activePageId, pages]);
-    const fitPreviewMaxDimension = thumbnailProfile === "ultra-fast"
-        ? 1280
+    const desktopQuickPreviewEnabled = useMemo(() => hasDesktopQuickPreviewApi(), []);
+    const fitPreviewCap = thumbnailProfile === "ultra-fast"
+        ? 1600
         : thumbnailProfile === "fast"
-            ? 1600
-            : 2048;
-    const detailPreviewMaxDimension = thumbnailProfile === "ultra-fast"
-        ? 1920
+            ? 1920
+            : 2560;
+    const detailPreviewCap = thumbnailProfile === "ultra-fast"
+        ? 2800
         : thumbnailProfile === "fast"
-            ? 2600
-            : 3200;
-    const adjacentPreviewWarmupDelayMs = thumbnailProfile === "ultra-fast"
-        ? 520
-        : thumbnailProfile === "fast"
-            ? 260
-            : 140;
-    const adjacentStandardPreviewWarmupDelayMs = thumbnailProfile === "ultra-fast"
-        ? 40
-        : thumbnailProfile === "fast"
-            ? 90
-            : 140;
+            ? 3200
+            : 4096;
+    const stageBaseDimension = useMemo(() => {
+        const effectiveWidth = compareMode ? Math.max(0, stageViewport.width / 2) : stageViewport.width;
+        const basePixels = Math.ceil(Math.max(effectiveWidth, stageViewport.height) * Math.max(1, stageViewport.devicePixelRatio));
+        return basePixels > 0 ? basePixels : 0;
+    }, [compareMode, stageViewport.devicePixelRatio, stageViewport.height, stageViewport.width]);
+    const fitPreviewMaxDimension = useMemo(() => {
+        void stageBaseDimension;
+        return fitPreviewCap;
+    }, [fitPreviewCap, stageBaseDimension]);
+    const detailPreviewMaxDimension = useMemo(() => {
+        void stageBaseDimension;
+        void fitPreviewMaxDimension;
+        return detailPreviewCap;
+    }, [detailPreviewCap, fitPreviewMaxDimension, stageBaseDimension]);
+    const adjacentPreviewWarmupDelayMs = desktopQuickPreviewEnabled
+        ? 24
+        : thumbnailProfile === "ultra-fast"
+            ? 520
+            : thumbnailProfile === "fast"
+                ? 260
+                : 140;
+    const adjacentStandardPreviewWarmupDelayMs = desktopQuickPreviewEnabled
+        ? 24
+        : thumbnailProfile === "ultra-fast"
+            ? 40
+            : thumbnailProfile === "fast"
+                ? 90
+                : 140;
     const hasActiveFilters = filterPickStatus !== "all"
         || filterRating !== "any"
         || filterColorLabel !== "all"
@@ -141,6 +211,39 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     const compareAsset = compareAssetId
         ? navigationAssets.find((item) => item.id === compareAssetId && item.id !== asset?.id) ?? null
         : null;
+    const assetAbsolutePath = asset ? getAssetAbsolutePath(asset.id) : undefined;
+    const compareAssetAbsolutePath = compareAsset ? getAssetAbsolutePath(compareAsset.id) : undefined;
+    const canUseDesktopQuickPreview = Boolean(desktopQuickPreviewEnabled && assetAbsolutePath);
+    const canUseDesktopQuickPreviewForCompare = Boolean(desktopQuickPreviewEnabled && compareAssetAbsolutePath);
+    const syncPreviewFrameMetrics = useCallback(() => {
+        const metrics = previewFrameMetricsRef.current;
+        const sourceBreakdown = Array.from(metrics.sourceCounts.entries())
+            .sort((left, right) => right[1] - left[1])
+            .map(([source, count]) => `${source}:${count}`)
+            .join(" · ") || "n/d";
+        const warmHitRate = metrics.requested > 0
+            ? Math.round((metrics.cacheHits / metrics.requested) * 100)
+            : null;
+        setQuickPreviewPerf((current) => ({
+            ...current,
+            warmHitRate,
+            fallbackCount: metrics.fallbackCount,
+            sourceBreakdown,
+        }));
+    }, []);
+    const recordPreviewFrameMetric = useCallback((sourceLabel, cacheHit) => {
+        const metrics = previewFrameMetricsRef.current;
+        metrics.requested += 1;
+        if (cacheHit) {
+            metrics.cacheHits += 1;
+        }
+        metrics.sourceCounts.set(sourceLabel, (metrics.sourceCounts.get(sourceLabel) ?? 0) + 1);
+        syncPreviewFrameMetrics();
+    }, [syncPreviewFrameMetrics]);
+    const recordPreviewFallbackUsage = useCallback(() => {
+        previewFrameMetricsRef.current.fallbackCount += 1;
+        syncPreviewFrameMetrics();
+    }, [syncPreviewFrameMetrics]);
     const handleNavigate = useCallback((direction) => {
         if (currentIndex < 0) {
             return;
@@ -152,6 +255,8 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         }
     }, [currentIndex, navigationAssets, selectAssetFromPreview]);
     const announceClassificationFeedback = useCallback((changes) => {
+        let tone;
+        let labels;
         let label = null;
         let kind = null;
         if (changes.rating !== undefined) {
@@ -173,7 +278,9 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         const nextFeedback = {
             kind,
             label,
-            token: classificationFeedbackTokenRef.current
+            token: classificationFeedbackTokenRef.current,
+            tone,
+            labels,
         };
         setClassificationFeedback(nextFeedback);
         if (classificationFeedbackTimeoutRef.current !== null) {
@@ -184,6 +291,24 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
             classificationFeedbackTimeoutRef.current = null;
         }, 1200);
     }, []);
+    const announceCustomLabelFeedback = useCallback((label, nextIsActive) => {
+        classificationFeedbackTokenRef.current += 1;
+        const nextFeedback = {
+            kind: "label",
+            label: nextIsActive ? `Etichetta assegnata: ${label}` : `Etichetta rimossa: ${label}`,
+            token: classificationFeedbackTokenRef.current,
+            tone: customLabelColors[label] ?? "sand",
+            labels: [label],
+        };
+        setClassificationFeedback(nextFeedback);
+        if (classificationFeedbackTimeoutRef.current !== null) {
+            window.clearTimeout(classificationFeedbackTimeoutRef.current);
+        }
+        classificationFeedbackTimeoutRef.current = window.setTimeout(() => {
+            setClassificationFeedback((current) => current?.token === nextFeedback.token ? null : current);
+            classificationFeedbackTimeoutRef.current = null;
+        }, 1450);
+    }, [customLabelColors]);
     const updateRating = useCallback((rating) => {
         if (asset && onUpdateAsset) {
             const changes = { rating };
@@ -236,8 +361,38 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     const sidebarBottomSpacerHeight = Math.max(0, (navigationAssets.length - sidebarVirtualRange.endExclusive) * SIDEBAR_THUMB_ESTIMATED_SIZE);
     const dockLeftSpacerWidth = dockVirtualRange.start * DOCK_THUMB_ESTIMATED_SIZE;
     const dockRightSpacerWidth = Math.max(0, (navigationAssets.length - dockVirtualRange.endExclusive) * DOCK_THUMB_ESTIMATED_SIZE);
+    useEffect(() => {
+        const element = stageRef.current;
+        if (!element) {
+            return;
+        }
+        const sync = () => {
+            setStageViewport({
+                width: element.clientWidth,
+                height: element.clientHeight,
+                devicePixelRatio: typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
+                    ? window.devicePixelRatio
+                    : 1,
+            });
+        };
+        sync();
+        const resizeObserver = new ResizeObserver(sync);
+        resizeObserver.observe(element);
+        if (typeof window !== "undefined") {
+            window.addEventListener("resize", sync);
+        }
+        return () => {
+            resizeObserver.disconnect();
+            if (typeof window !== "undefined") {
+                window.removeEventListener("resize", sync);
+            }
+        };
+    }, [asset?.id, compareMode]);
     // Preload only prev/current/next thumbnails or lightweight previews.
     useEffect(() => {
+        if (desktopQuickPreviewEnabled) {
+            return;
+        }
         if (currentIndex < 0)
             return;
         const toPreload = [];
@@ -251,8 +406,11 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
             }
         }
         preloadImageUrls(toPreload);
-    }, [asset, currentIndex, getQuickPreviewThumbUrl, nextAsset, previousAsset]);
+    }, [asset, currentIndex, desktopQuickPreviewEnabled, getQuickPreviewThumbUrl, nextAsset, previousAsset]);
     useEffect(() => {
+        if (desktopQuickPreviewEnabled) {
+            return;
+        }
         if (currentIndex < 0) {
             return;
         }
@@ -275,6 +433,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         adjacentStandardPreviewWarmupDelayMs,
         asset,
         currentIndex,
+        desktopQuickPreviewEnabled,
         fitPreviewMaxDimension,
         nextAsset,
         previousAsset,
@@ -302,7 +461,88 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
             .filter((entry) => Boolean(entry[1]));
         return new Map(entries.map(([label, shortcut]) => [shortcut, label]));
     }, [customLabelShortcuts]);
-    const activePreviewAssetNeedsManagedPreview = Boolean(asset && (!asset.previewUrl || !asset.sourceUrl || shouldLoadRawPreview(asset)));
+    const activePreviewAssetNeedsManagedPreview = Boolean(asset && (canUseDesktopQuickPreview
+        || !asset.previewUrl
+        || !asset.sourceUrl
+        || shouldLoadRawPreview(asset)));
+    const desktopFitPreviewRequest = useMemo(() => {
+        if (!asset || !canUseDesktopQuickPreview || !assetAbsolutePath || !activePreviewAssetNeedsManagedPreview) {
+            return null;
+        }
+        return {
+            absolutePath: assetAbsolutePath,
+            maxDimension: fitPreviewMaxDimension,
+            sourceFileKey: asset.sourceFileKey,
+            stage: "fit",
+        };
+    }, [
+        activePreviewAssetNeedsManagedPreview,
+        asset,
+        assetAbsolutePath,
+        canUseDesktopQuickPreview,
+        fitPreviewMaxDimension,
+    ]);
+    const desktopDetailPreviewRequest = useMemo(() => {
+        if (!asset
+            || !canUseDesktopQuickPreview
+            || !assetAbsolutePath
+            || !activePreviewAssetNeedsManagedPreview
+            || compareMode
+            || zoomLevel <= 1.05) {
+            return null;
+        }
+        return {
+            absolutePath: assetAbsolutePath,
+            maxDimension: detailPreviewMaxDimension,
+            sourceFileKey: asset.sourceFileKey,
+            stage: "detail",
+        };
+    }, [
+        activePreviewAssetNeedsManagedPreview,
+        asset,
+        assetAbsolutePath,
+        canUseDesktopQuickPreview,
+        compareMode,
+        detailPreviewMaxDimension,
+        zoomLevel,
+    ]);
+    const desktopComparePreviewRequest = useMemo(() => {
+        if (!compareAsset || !canUseDesktopQuickPreviewForCompare || !compareAssetAbsolutePath) {
+            return null;
+        }
+        return {
+            absolutePath: compareAssetAbsolutePath,
+            maxDimension: fitPreviewMaxDimension,
+            sourceFileKey: compareAsset.sourceFileKey,
+            stage: "fit",
+        };
+    }, [
+        canUseDesktopQuickPreviewForCompare,
+        compareAsset,
+        compareAssetAbsolutePath,
+        fitPreviewMaxDimension,
+    ]);
+    const immediateFitPreview = useMemo(() => {
+        if (!asset || !desktopFitPreviewRequest) {
+            return null;
+        }
+        const frame = peekDesktopQuickPreviewFrame(desktopFitPreviewRequest);
+        return frame ? createDesktopManagedPreviewState(asset.id, "fit", frame, "renderer-cache") : null;
+    }, [asset, desktopFitPreviewRequest]);
+    const immediateDetailPreview = useMemo(() => {
+        if (!asset || !desktopDetailPreviewRequest) {
+            return null;
+        }
+        const frame = peekDesktopQuickPreviewFrame(desktopDetailPreviewRequest);
+        return frame ? createDesktopManagedPreviewState(asset.id, "detail", frame, "renderer-cache") : null;
+    }, [asset, desktopDetailPreviewRequest]);
+    const immediateComparePreview = useMemo(() => {
+        if (!compareAsset || !desktopComparePreviewRequest) {
+            return null;
+        }
+        const frame = peekDesktopQuickPreviewFrame(desktopComparePreviewRequest);
+        return frame ? createDesktopManagedPreviewState(compareAsset.id, "fit", frame, "renderer-cache") : null;
+    }, [compareAsset, desktopComparePreviewRequest]);
     useEffect(() => {
         if (previewWarmupTimeoutRef.current !== null) {
             window.clearTimeout(previewWarmupTimeoutRef.current);
@@ -310,6 +550,35 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         }
         if (currentIndex < 0) {
             return;
+        }
+        if (desktopQuickPreviewEnabled) {
+            const warmCandidates = navigationAssets
+                .slice(Math.max(0, currentIndex - 3), Math.min(navigationAssets.length, currentIndex + 4))
+                .map((candidate) => {
+                const absolutePath = getAssetAbsolutePath(candidate.id);
+                if (!absolutePath) {
+                    return null;
+                }
+                return {
+                    absolutePath,
+                    maxDimension: fitPreviewMaxDimension,
+                    sourceFileKey: candidate.sourceFileKey,
+                    stage: "fit",
+                };
+            })
+                .filter((candidate) => candidate !== null);
+            if (warmCandidates.length > 0) {
+                previewWarmupTimeoutRef.current = window.setTimeout(() => {
+                    previewWarmupTimeoutRef.current = null;
+                    void warmDesktopQuickPreviewFrames(warmCandidates);
+                }, adjacentPreviewWarmupDelayMs);
+            }
+            return () => {
+                if (previewWarmupTimeoutRef.current !== null) {
+                    window.clearTimeout(previewWarmupTimeoutRef.current);
+                    previewWarmupTimeoutRef.current = null;
+                }
+            };
         }
         const adjacentManagedWarmups = [previousAsset, nextAsset].filter((candidate) => {
             if (!candidate) {
@@ -334,11 +603,25 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                 previewWarmupTimeoutRef.current = null;
             }
         };
-    }, [adjacentPreviewWarmupDelayMs, currentIndex, fitPreviewMaxDimension, nextAsset, previousAsset]);
+    }, [
+        adjacentPreviewWarmupDelayMs,
+        currentIndex,
+        desktopQuickPreviewEnabled,
+        fitPreviewMaxDimension,
+        navigationAssets,
+        nextAsset,
+        previousAsset,
+    ]);
     useEffect(() => {
         return () => {
             if (previewWarmupTimeoutRef.current !== null) {
                 window.clearTimeout(previewWarmupTimeoutRef.current);
+            }
+            if (detailPreviewTimeoutRef.current !== null) {
+                window.clearTimeout(detailPreviewTimeoutRef.current);
+            }
+            if (fallbackPreviewTimeoutRef.current !== null) {
+                window.clearTimeout(fallbackPreviewTimeoutRef.current);
             }
             if (assignFeedbackTimeoutRef.current !== null) {
                 window.clearTimeout(assignFeedbackTimeoutRef.current);
@@ -360,68 +643,279 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     }, [asset?.id]);
     useEffect(() => {
         if (!asset) {
-            setResolvedPreviewUrl(null);
-            setResolvedDetailPreviewUrl(null);
+            setResolvedPreview(null);
+            setResolvedDetailPreview(null);
             return;
         }
-        setResolvedDetailPreviewUrl(null);
+        setResolvedDetailPreview(null);
+        detailPreviewPerfStartRef.current = null;
         if (!activePreviewAssetNeedsManagedPreview) {
-            setResolvedPreviewUrl(null);
+            setResolvedPreview(null);
             return;
         }
         let active = true;
-        const cachedPreviewUrl = getCachedOnDemandPreviewUrl(asset.id, {
-            maxDimension: fitPreviewMaxDimension,
-        });
-        setResolvedPreviewUrl(cachedPreviewUrl);
-        createOnDemandPreviewAsync(asset.id, 0, {
-            maxDimension: fitPreviewMaxDimension,
-        })
-            .then((url) => {
-            if (active && url) {
-                setResolvedPreviewUrl(url);
+        if (desktopFitPreviewRequest) {
+            const cachedFrame = getCachedDesktopQuickPreviewFrame(desktopFitPreviewRequest);
+            if (cachedFrame) {
+                const cachedState = createDesktopManagedPreviewState(asset.id, "fit", cachedFrame, "renderer-cache");
+                const measurement = previewPerfStartRef.current;
+                const elapsed = measurement && measurement.assetId === asset.id
+                    ? Math.max(0, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - measurement.startedAt))
+                    : null;
+                setResolvedPreview(cachedState);
+                recordPreviewFrameMetric(cachedState.sourceLabel, true);
+                setQuickPreviewPerf((current) => ({
+                    ...current,
+                    fitLatencyMs: elapsed ?? current.fitLatencyMs,
+                    openLatencyMs: elapsed !== null && measurement?.reason === "open" ? elapsed : current.openLatencyMs,
+                    navigationLatencyMs: elapsed !== null && measurement?.reason === "navigate" ? elapsed : current.navigationLatencyMs,
+                    lastRenderedSource: cachedState.sourceLabel,
+                    lastRenderedAssetName: asset.fileName,
+                }));
+                previewPerfStartRef.current = null;
+                return () => {
+                    active = false;
+                };
             }
-        })
-            .catch(() => {
-            if (active) {
-                setResolvedPreviewUrl(null);
-            }
-        });
+            void getDesktopQuickPreviewFrame(desktopFitPreviewRequest)
+                .then((frame) => {
+                if (!frame) {
+                    if (active) {
+                        setResolvedPreview(null);
+                    }
+                    return;
+                }
+                if (!active) {
+                    return;
+                }
+                const sourceLabel = formatDesktopPreviewSourceLabel("fit", frame.source, frame.cacheHit);
+                const measurement = previewPerfStartRef.current;
+                setResolvedPreview({
+                    assetId: asset.id,
+                    url: frame.src,
+                    token: frame.token,
+                    sourceLabel,
+                    cacheHit: frame.cacheHit,
+                });
+                recordPreviewFrameMetric(sourceLabel, frame.cacheHit);
+                void logDesktopEvent({
+                    channel: "preview",
+                    level: "info",
+                    message: measurement?.reason === "navigate" ? "preview_navigation_ready" : "preview_fit_ready",
+                    details: JSON.stringify({
+                        assetId: asset.id,
+                        fileName: asset.fileName,
+                        source: frame.source,
+                        cacheHit: frame.cacheHit,
+                        maxDimension: desktopFitPreviewRequest.maxDimension,
+                    }),
+                });
+                if (measurement && measurement.assetId === asset.id) {
+                    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+                    const elapsed = Math.max(0, Math.round(now - measurement.startedAt));
+                    setQuickPreviewPerf((current) => ({
+                        ...current,
+                        fitLatencyMs: elapsed,
+                        openLatencyMs: measurement.reason === "open" ? elapsed : current.openLatencyMs,
+                        navigationLatencyMs: measurement.reason === "navigate" ? elapsed : current.navigationLatencyMs,
+                        lastRenderedSource: sourceLabel,
+                        lastRenderedAssetName: asset.fileName,
+                    }));
+                    previewPerfStartRef.current = null;
+                }
+            })
+                .catch(() => {
+                if (active) {
+                    setResolvedPreview(null);
+                }
+            });
+        }
+        else {
+            const cachedPreviewUrl = getCachedOnDemandPreviewUrl(asset.id, {
+                maxDimension: fitPreviewMaxDimension,
+            });
+            setResolvedPreview(cachedPreviewUrl
+                ? {
+                    assetId: asset.id,
+                    url: cachedPreviewUrl,
+                    token: null,
+                    sourceLabel: "Fit · renderer-cache",
+                    cacheHit: true,
+                }
+                : null);
+            createOnDemandPreviewAsync(asset.id, 0, {
+                maxDimension: fitPreviewMaxDimension,
+            })
+                .then((url) => {
+                if (active && url) {
+                    setResolvedPreview({
+                        assetId: asset.id,
+                        url,
+                        token: null,
+                        sourceLabel: "Fit · renderer-preview",
+                        cacheHit: Boolean(cachedPreviewUrl),
+                    });
+                }
+            })
+                .catch(() => {
+                if (active) {
+                    setResolvedPreview(null);
+                }
+            });
+        }
         return () => {
             active = false;
         };
-    }, [activePreviewAssetNeedsManagedPreview, asset, fitPreviewMaxDimension]);
+    }, [
+        activePreviewAssetNeedsManagedPreview,
+        asset,
+        desktopFitPreviewRequest,
+        fitPreviewMaxDimension,
+        recordPreviewFrameMetric,
+    ]);
     useEffect(() => {
         if (!asset || compareMode || zoomLevel <= 1.05 || !activePreviewAssetNeedsManagedPreview) {
-            setResolvedDetailPreviewUrl(null);
+            setResolvedDetailPreview(null);
+            if (detailPreviewTimeoutRef.current !== null) {
+                window.clearTimeout(detailPreviewTimeoutRef.current);
+                detailPreviewTimeoutRef.current = null;
+            }
             return;
         }
         let active = true;
-        const cachedDetailPreviewUrl = getCachedOnDemandPreviewUrl(asset.id, {
-            maxDimension: detailPreviewMaxDimension,
-        });
-        setResolvedDetailPreviewUrl(cachedDetailPreviewUrl);
-        createOnDemandPreviewAsync(asset.id, 0, {
-            maxDimension: detailPreviewMaxDimension,
-        })
-            .then((url) => {
-            if (active && url) {
-                setResolvedDetailPreviewUrl(url);
+        if (desktopDetailPreviewRequest) {
+            const cachedFrame = getCachedDesktopQuickPreviewFrame(desktopDetailPreviewRequest);
+            if (cachedFrame) {
+                const cachedState = createDesktopManagedPreviewState(asset.id, "detail", cachedFrame, "renderer-cache");
+                setResolvedDetailPreview(cachedState);
+                recordPreviewFrameMetric(cachedState.sourceLabel, true);
+                setQuickPreviewPerf((current) => ({
+                    ...current,
+                    detailLatencyMs: 0,
+                    lastRenderedSource: cachedState.sourceLabel,
+                    lastRenderedAssetName: asset.fileName,
+                }));
+                detailPreviewPerfStartRef.current = null;
+                return () => {
+                    active = false;
+                    if (detailPreviewTimeoutRef.current !== null) {
+                        window.clearTimeout(detailPreviewTimeoutRef.current);
+                        detailPreviewTimeoutRef.current = null;
+                    }
+                };
             }
-        })
-            .catch(() => {
-            if (active) {
-                setResolvedDetailPreviewUrl(null);
-            }
-        });
+            detailPreviewPerfStartRef.current = null;
+            detailPreviewTimeoutRef.current = window.setTimeout(() => {
+                detailPreviewTimeoutRef.current = null;
+                detailPreviewPerfStartRef.current = {
+                    assetId: asset.id,
+                    startedAt: typeof performance !== "undefined" ? performance.now() : Date.now(),
+                };
+                void getDesktopQuickPreviewFrame(desktopDetailPreviewRequest)
+                    .then((frame) => {
+                    if (!frame) {
+                        if (active) {
+                            setResolvedDetailPreview(null);
+                        }
+                        return;
+                    }
+                    if (!active) {
+                        return;
+                    }
+                    const sourceLabel = formatDesktopPreviewSourceLabel("detail", frame.source, frame.cacheHit);
+                    setResolvedDetailPreview({
+                        assetId: asset.id,
+                        url: frame.src,
+                        token: frame.token,
+                        sourceLabel,
+                        cacheHit: frame.cacheHit,
+                    });
+                    recordPreviewFrameMetric(sourceLabel, frame.cacheHit);
+                    void logDesktopEvent({
+                        channel: "preview",
+                        level: "info",
+                        message: "preview_detail_ready",
+                        details: JSON.stringify({
+                            assetId: asset.id,
+                            fileName: asset.fileName,
+                            source: frame.source,
+                            cacheHit: frame.cacheHit,
+                            maxDimension: desktopDetailPreviewRequest.maxDimension,
+                        }),
+                    });
+                    const detailMeasurement = detailPreviewPerfStartRef.current;
+                    if (detailMeasurement && detailMeasurement.assetId === asset.id) {
+                        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+                        const elapsed = Math.max(0, Math.round(now - detailMeasurement.startedAt));
+                        setQuickPreviewPerf((current) => ({
+                            ...current,
+                            detailLatencyMs: elapsed,
+                            lastRenderedSource: sourceLabel,
+                            lastRenderedAssetName: asset.fileName,
+                        }));
+                        detailPreviewPerfStartRef.current = null;
+                    }
+                })
+                    .catch(() => {
+                    if (active) {
+                        setResolvedDetailPreview(null);
+                    }
+                });
+            }, QUICK_PREVIEW_DETAIL_IDLE_DELAY_MS);
+        }
+        else {
+            const cachedDetailPreviewUrl = getCachedOnDemandPreviewUrl(asset.id, {
+                maxDimension: detailPreviewMaxDimension,
+            });
+            setResolvedDetailPreview(cachedDetailPreviewUrl
+                ? {
+                    assetId: asset.id,
+                    url: cachedDetailPreviewUrl,
+                    token: null,
+                    sourceLabel: "Detail · renderer-cache",
+                    cacheHit: true,
+                }
+                : null);
+            createOnDemandPreviewAsync(asset.id, 0, {
+                maxDimension: detailPreviewMaxDimension,
+            })
+                .then((url) => {
+                if (active && url) {
+                    setResolvedDetailPreview({
+                        assetId: asset.id,
+                        url,
+                        token: null,
+                        sourceLabel: "Detail · renderer-preview",
+                        cacheHit: Boolean(cachedDetailPreviewUrl),
+                    });
+                }
+            })
+                .catch(() => {
+                if (active) {
+                    setResolvedDetailPreview(null);
+                }
+            });
+        }
         return () => {
             active = false;
+            if (detailPreviewTimeoutRef.current !== null) {
+                window.clearTimeout(detailPreviewTimeoutRef.current);
+                detailPreviewTimeoutRef.current = null;
+            }
         };
-    }, [activePreviewAssetNeedsManagedPreview, asset, compareMode, detailPreviewMaxDimension, zoomLevel]);
+    }, [
+        activePreviewAssetNeedsManagedPreview,
+        asset,
+        compareMode,
+        desktopDetailPreviewRequest,
+        detailPreviewMaxDimension,
+        recordPreviewFrameMetric,
+        zoomLevel,
+    ]);
     useEffect(() => {
         if (!compareMode) {
             setCompareAssetId(null);
-            setResolvedComparePreviewUrl(null);
+            setResolvedComparePreview(null);
             return;
         }
         const fallbackCompareId = nextAsset?.id ?? previousAsset?.id ?? null;
@@ -435,41 +929,102 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     }, [asset?.id, compareAssetId, compareMode, nextAsset?.id, previousAsset?.id]);
     useEffect(() => {
         if (!compareAsset) {
-            setResolvedComparePreviewUrl(null);
+            setResolvedComparePreview(null);
             return;
         }
-        if (!shouldLoadRawPreview(compareAsset)) {
-            setResolvedComparePreviewUrl(null);
+        if (!canUseDesktopQuickPreviewForCompare && !shouldLoadRawPreview(compareAsset)) {
+            setResolvedComparePreview(null);
             return;
         }
         let active = true;
-        setResolvedComparePreviewUrl(null);
-        const cachedComparePreviewUrl = getCachedOnDemandPreviewUrl(compareAsset.id, {
-            maxDimension: fitPreviewMaxDimension,
-        });
-        setResolvedComparePreviewUrl(cachedComparePreviewUrl);
-        createOnDemandPreviewAsync(compareAsset.id, 1, {
-            maxDimension: fitPreviewMaxDimension,
-        })
-            .then((url) => {
-            if (active && url) {
-                setResolvedComparePreviewUrl(url);
+        setResolvedComparePreview(immediateComparePreview);
+        if (desktopComparePreviewRequest) {
+            const cachedFrame = getCachedDesktopQuickPreviewFrame(desktopComparePreviewRequest);
+            if (cachedFrame) {
+                const cachedState = createDesktopManagedPreviewState(compareAsset.id, "fit", cachedFrame, "renderer-cache");
+                setResolvedComparePreview(cachedState);
+                recordPreviewFrameMetric(cachedState.sourceLabel, true);
+                return () => {
+                    active = false;
+                };
             }
-        })
-            .catch(() => {
-            if (active) {
-                setResolvedComparePreviewUrl(null);
-            }
-        });
+            void getDesktopQuickPreviewFrame(desktopComparePreviewRequest)
+                .then((frame) => {
+                if (!frame) {
+                    if (active) {
+                        setResolvedComparePreview(null);
+                    }
+                    return;
+                }
+                if (!active) {
+                    return;
+                }
+                const sourceLabel = formatDesktopPreviewSourceLabel("fit", frame.source, frame.cacheHit);
+                setResolvedComparePreview({
+                    assetId: compareAsset.id,
+                    url: frame.src,
+                    token: frame.token,
+                    sourceLabel,
+                    cacheHit: frame.cacheHit,
+                });
+                recordPreviewFrameMetric(sourceLabel, frame.cacheHit);
+            })
+                .catch(() => {
+                if (active) {
+                    setResolvedComparePreview(null);
+                }
+            });
+        }
+        else {
+            const cachedComparePreviewUrl = getCachedOnDemandPreviewUrl(compareAsset.id, {
+                maxDimension: fitPreviewMaxDimension,
+            });
+            setResolvedComparePreview(cachedComparePreviewUrl
+                ? {
+                    assetId: compareAsset.id,
+                    url: cachedComparePreviewUrl,
+                    token: null,
+                    sourceLabel: "Fit · renderer-cache",
+                    cacheHit: true,
+                }
+                : null);
+            createOnDemandPreviewAsync(compareAsset.id, 1, {
+                maxDimension: fitPreviewMaxDimension,
+            })
+                .then((url) => {
+                if (active && url) {
+                    setResolvedComparePreview({
+                        assetId: compareAsset.id,
+                        url,
+                        token: null,
+                        sourceLabel: "Fit · renderer-preview",
+                        cacheHit: Boolean(cachedComparePreviewUrl),
+                    });
+                }
+            })
+                .catch(() => {
+                if (active) {
+                    setResolvedComparePreview(null);
+                }
+            });
+        }
         return () => {
             active = false;
         };
-    }, [compareAsset, fitPreviewMaxDimension]);
+    }, [
+        compareAsset,
+        desktopComparePreviewRequest,
+        fitPreviewMaxDimension,
+        immediateComparePreview,
+        recordPreviewFrameMetric,
+    ]);
     useEffect(() => {
         const now = typeof performance !== "undefined" ? performance.now() : Date.now();
         if (!asset) {
             lastAssetIdRef.current = null;
             previewPerfStartRef.current = null;
+            detailPreviewPerfStartRef.current = null;
+            fallbackSignatureRef.current = "";
             return;
         }
         const previousAssetId = lastAssetIdRef.current;
@@ -483,9 +1038,22 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
             startedAt: now,
             reason,
         };
+        detailPreviewPerfStartRef.current = null;
+        fallbackSignatureRef.current = "";
         pendingSelectionReasonRef.current = null;
         lastAssetIdRef.current = asset.id;
-    }, [asset?.id]);
+        void logDesktopEvent({
+            channel: "preview",
+            level: "info",
+            message: reason === "navigate" ? "preview_navigation_requested" : "preview_open_requested",
+            details: JSON.stringify({
+                assetId: asset.id,
+                fileName: asset.fileName,
+                fitPreviewMaxDimension,
+                detailPreviewMaxDimension,
+            }),
+        });
+    }, [asset?.fileName, asset?.id, detailPreviewMaxDimension, fitPreviewMaxDimension]);
     useEffect(() => {
         const element = sidebarStripRef.current;
         if (!element) {
@@ -748,29 +1316,195 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     const currentCustomLabels = asset?.customLabels ?? [];
     const currentAssetId = asset?.id ?? null;
     const currentAssetFileName = asset?.fileName ?? "";
-    const previewUrl = resolvedDetailPreviewUrl ?? resolvedPreviewUrl ?? asset?.previewUrl ?? asset?.sourceUrl ?? null;
-    const comparePreviewUrl = compareAsset
-        ? resolvedComparePreviewUrl ?? compareAsset.previewUrl ?? compareAsset.sourceUrl
+    const fallbackPreviewUrl = asset ? getQuickPreviewThumbUrl(asset) : null;
+    const activeResolvedPreview = resolvedPreview && resolvedPreview.assetId === currentAssetId
+        ? resolvedPreview
         : null;
-    const previewSourceLabel = resolvedDetailPreviewUrl
-        ? "Detail"
-        : resolvedPreviewUrl
-            ? "Fit"
-            : asset?.previewUrl
-                ? "Embedded"
-                : asset?.sourceUrl
-                    ? "Source"
-                    : "Fallback";
+    const activeResolvedDetailPreview = resolvedDetailPreview && resolvedDetailPreview.assetId === currentAssetId
+        ? resolvedDetailPreview
+        : null;
+    const activeResolvedComparePreview = resolvedComparePreview && resolvedComparePreview.assetId === compareAsset?.id
+        ? resolvedComparePreview
+        : null;
+    const managedPreviewUrl = activeResolvedDetailPreview?.url
+        ?? immediateDetailPreview?.url
+        ?? activeResolvedPreview?.url
+        ?? immediateFitPreview?.url
+        ?? null;
+    const previewUrl = managedPreviewUrl
+        ?? (!canUseDesktopQuickPreview ? asset?.previewUrl ?? asset?.sourceUrl ?? null : null);
+    const displayPreviewUrl = previewUrl ?? (canUseDesktopQuickPreview ? fallbackPreviewUrl : null);
+    const previewIsFallback = !previewUrl && Boolean(canUseDesktopQuickPreview && fallbackPreviewUrl);
+    const compareFallbackPreviewUrl = compareAsset ? getQuickPreviewThumbUrl(compareAsset) : null;
+    const comparePreviewUrl = compareAsset
+        ? activeResolvedComparePreview?.url
+            ?? immediateComparePreview?.url
+            ?? (!canUseDesktopQuickPreviewForCompare ? compareAsset.previewUrl ?? compareAsset.sourceUrl ?? null : null)
+        : null;
+    const displayComparePreviewUrl = comparePreviewUrl ?? (canUseDesktopQuickPreviewForCompare ? compareFallbackPreviewUrl : null);
+    const comparePreviewIsFallback = !comparePreviewUrl && Boolean(canUseDesktopQuickPreviewForCompare && compareFallbackPreviewUrl);
+    const previewSourceLabel = activeResolvedDetailPreview
+        ? activeResolvedDetailPreview.sourceLabel
+        : immediateDetailPreview
+            ? immediateDetailPreview.sourceLabel
+            : activeResolvedPreview
+                ? activeResolvedPreview.sourceLabel
+                : immediateFitPreview
+                    ? immediateFitPreview.sourceLabel
+                    : previewIsFallback
+                        ? "Fallback"
+                        : asset?.previewUrl
+                            ? "Embedded"
+                            : asset?.sourceUrl
+                                ? "Source"
+                                : "Fallback";
+    const currentManagedPreviewState = activeResolvedDetailPreview
+        ?? immediateDetailPreview
+        ?? activeResolvedPreview
+        ?? immediateFitPreview
+        ?? null;
+    const handleMainPreviewError = useCallback(() => {
+        if (!asset || !canUseDesktopQuickPreview || !displayPreviewUrl?.startsWith("filex-preview://")) {
+            return;
+        }
+        const request = (activeResolvedDetailPreview || immediateDetailPreview)
+            ? desktopDetailPreviewRequest
+            : desktopFitPreviewRequest;
+        const stage = request?.stage ?? "fit";
+        if (!request) {
+            return;
+        }
+        const recoveryKey = `${asset.id}:${request.stage}:${request.maxDimension}:${request.sourceFileKey ?? ""}`;
+        if (mainPreviewRecoveryKeyRef.current === recoveryKey) {
+            return;
+        }
+        mainPreviewRecoveryKeyRef.current = recoveryKey;
+        setQuickPreviewPerf((current) => ({
+            ...current,
+            lastRenderedSource: `${currentManagedPreviewState?.sourceLabel ?? previewSourceLabel} | recovering`,
+            lastRenderedAssetName: asset.fileName,
+        }));
+        void (async () => {
+            await invalidateDesktopQuickPreviewFrame(request);
+            const frame = await getDesktopQuickPreviewFrame(request);
+            if (!frame) {
+                if (stage === "detail") {
+                    setResolvedDetailPreview(null);
+                }
+                else {
+                    setResolvedPreview(null);
+                }
+                return;
+            }
+            const nextState = createDesktopManagedPreviewState(asset.id, stage, frame);
+            if (stage === "detail") {
+                setResolvedDetailPreview(nextState);
+            }
+            else {
+                setResolvedPreview(nextState);
+            }
+            recordPreviewFrameMetric(nextState.sourceLabel, frame.cacheHit);
+            setQuickPreviewPerf((current) => ({
+                ...current,
+                lastRenderedSource: `${nextState.sourceLabel} | recovered`,
+                lastRenderedAssetName: asset.fileName,
+            }));
+            void logDesktopEvent({
+                channel: "preview",
+                level: "warn",
+                message: "preview_frame_recovered",
+                details: JSON.stringify({
+                    assetId: asset.id,
+                    fileName: asset.fileName,
+                    stage,
+                    source: frame.source,
+                    cacheHit: frame.cacheHit,
+                }),
+            });
+        })()
+            .catch(() => {
+            if (stage === "detail") {
+                setResolvedDetailPreview(null);
+            }
+            else {
+                setResolvedPreview(null);
+            }
+        })
+            .finally(() => {
+            if (mainPreviewRecoveryKeyRef.current === recoveryKey) {
+                mainPreviewRecoveryKeyRef.current = null;
+            }
+        });
+    }, [
+        activeResolvedDetailPreview,
+        asset,
+        canUseDesktopQuickPreview,
+        currentManagedPreviewState?.sourceLabel,
+        desktopDetailPreviewRequest,
+        desktopFitPreviewRequest,
+        displayPreviewUrl,
+        immediateDetailPreview,
+        previewSourceLabel,
+        recordPreviewFrameMetric,
+    ]);
+    const handleComparePreviewError = useCallback(() => {
+        if (!compareAsset || !canUseDesktopQuickPreviewForCompare || !displayComparePreviewUrl?.startsWith("filex-preview://") || !desktopComparePreviewRequest) {
+            return;
+        }
+        const recoveryKey = `${compareAsset.id}:${desktopComparePreviewRequest.maxDimension}:${desktopComparePreviewRequest.sourceFileKey ?? ""}`;
+        if (comparePreviewRecoveryKeyRef.current === recoveryKey) {
+            return;
+        }
+        comparePreviewRecoveryKeyRef.current = recoveryKey;
+        void (async () => {
+            await invalidateDesktopQuickPreviewFrame(desktopComparePreviewRequest);
+            const frame = await getDesktopQuickPreviewFrame(desktopComparePreviewRequest);
+            if (!frame) {
+                setResolvedComparePreview(null);
+                return;
+            }
+            const nextState = createDesktopManagedPreviewState(compareAsset.id, "fit", frame);
+            setResolvedComparePreview(nextState);
+            recordPreviewFrameMetric(nextState.sourceLabel, frame.cacheHit);
+            void logDesktopEvent({
+                channel: "preview",
+                level: "warn",
+                message: "compare_preview_frame_recovered",
+                details: JSON.stringify({
+                    assetId: compareAsset.id,
+                    fileName: compareAsset.fileName,
+                    source: frame.source,
+                    cacheHit: frame.cacheHit,
+                }),
+            });
+        })()
+            .catch(() => {
+            setResolvedComparePreview(null);
+        })
+            .finally(() => {
+            if (comparePreviewRecoveryKeyRef.current === recoveryKey) {
+                comparePreviewRecoveryKeyRef.current = null;
+            }
+        });
+    }, [
+        canUseDesktopQuickPreviewForCompare,
+        compareAsset,
+        desktopComparePreviewRequest,
+        displayComparePreviewUrl,
+        recordPreviewFrameMetric,
+    ]);
     function toggleCustomLabel(label) {
         if (!asset || !onUpdateAsset) {
             return;
         }
+        const nextIsActive = !currentCustomLabels.includes(label);
         const nextCustomLabels = currentCustomLabels.includes(label)
             ? currentCustomLabels.filter((currentLabel) => currentLabel !== label)
             : [...currentCustomLabels, label];
         onUpdateAsset(asset.id, {
             customLabels: nextCustomLabels,
         });
+        announceCustomLabelFeedback(label, nextIsActive);
     }
     const handleSidebarStripScroll = useCallback((event) => {
         setSidebarViewport({
@@ -785,6 +1519,15 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         });
     }, []);
     const handleMainPreviewLoad = useCallback((event) => {
+        if (canUseDesktopQuickPreview) {
+            const renderedSource = event.currentTarget.currentSrc || event.currentTarget.src || previewSourceLabel;
+            setQuickPreviewPerf((current) => ({
+                ...current,
+                lastRenderedSource: `${previewSourceLabel} · ${renderedSource ? "ready" : "n/d"}`,
+                lastRenderedAssetName: currentAssetFileName,
+            }));
+            return;
+        }
         const measurement = previewPerfStartRef.current;
         if (!measurement || measurement.assetId !== currentAssetId) {
             return;
@@ -793,15 +1536,54 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         const elapsed = Math.max(0, Math.round(now - measurement.startedAt));
         const renderedSource = event.currentTarget.currentSrc || event.currentTarget.src || previewSourceLabel;
         setQuickPreviewPerf((current) => ({
+            ...current,
             openLatencyMs: measurement.reason === "open" ? elapsed : current.openLatencyMs,
             navigationLatencyMs: measurement.reason === "navigate" ? elapsed : current.navigationLatencyMs,
             lastRenderedSource: `${previewSourceLabel} · ${renderedSource ? "ready" : "n/d"}`,
             lastRenderedAssetName: currentAssetFileName,
         }));
         previewPerfStartRef.current = null;
-    }, [currentAssetFileName, currentAssetId, previewSourceLabel]);
+    }, [canUseDesktopQuickPreview, currentAssetFileName, currentAssetId, previewSourceLabel]);
     useEffect(() => {
-        if (previewUrl) {
+        if (!previewIsFallback || !currentAssetId) {
+            return;
+        }
+        if (fallbackPreviewTimeoutRef.current !== null) {
+            window.clearTimeout(fallbackPreviewTimeoutRef.current);
+            fallbackPreviewTimeoutRef.current = null;
+        }
+        fallbackPreviewTimeoutRef.current = window.setTimeout(() => {
+            fallbackPreviewTimeoutRef.current = null;
+            const signature = `${currentAssetId}:${currentAssetFileName}`;
+            if (fallbackSignatureRef.current === signature) {
+                return;
+            }
+            fallbackSignatureRef.current = signature;
+            recordPreviewFallbackUsage();
+            setQuickPreviewPerf((current) => ({
+                ...current,
+                lastRenderedSource: "Fallback",
+                lastRenderedAssetName: currentAssetFileName,
+            }));
+            void logDesktopEvent({
+                channel: "preview",
+                level: "info",
+                message: "preview_fallback_used",
+                details: JSON.stringify({
+                    assetId: currentAssetId,
+                    fileName: currentAssetFileName,
+                }),
+            });
+        }, QUICK_PREVIEW_DESKTOP_FALLBACK_DELAY_MS);
+        return () => {
+            if (fallbackPreviewTimeoutRef.current !== null) {
+                window.clearTimeout(fallbackPreviewTimeoutRef.current);
+                fallbackPreviewTimeoutRef.current = null;
+            }
+        };
+    }, [currentAssetFileName, currentAssetId, previewIsFallback, recordPreviewFallbackUsage]);
+    useEffect(() => {
+        if (previewUrl || canUseDesktopQuickPreview) {
             return;
         }
         const measurement = previewPerfStartRef.current;
@@ -811,13 +1593,83 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         const now = typeof performance !== "undefined" ? performance.now() : Date.now();
         const elapsed = Math.max(0, Math.round(now - measurement.startedAt));
         setQuickPreviewPerf((current) => ({
+            ...current,
             openLatencyMs: measurement.reason === "open" ? elapsed : current.openLatencyMs,
             navigationLatencyMs: measurement.reason === "navigate" ? elapsed : current.navigationLatencyMs,
             lastRenderedSource: "Placeholder",
             lastRenderedAssetName: currentAssetFileName,
         }));
         previewPerfStartRef.current = null;
-    }, [currentAssetFileName, currentAssetId, previewUrl]);
+    }, [canUseDesktopQuickPreview, currentAssetFileName, currentAssetId, previewUrl]);
+    useEffect(() => {
+        if (!asset) {
+            lastPerfSinkSignatureRef.current = "";
+            return;
+        }
+        if (quickPreviewPerf.openLatencyMs === null && quickPreviewPerf.navigationLatencyMs === null) {
+            return;
+        }
+        const signature = [
+            asset.id,
+            quickPreviewPerf.openLatencyMs ?? "n",
+            quickPreviewPerf.navigationLatencyMs ?? "n",
+            quickPreviewPerf.lastRenderedSource,
+        ].join(":");
+        if (signature === lastPerfSinkSignatureRef.current) {
+            return;
+        }
+        lastPerfSinkSignatureRef.current = signature;
+        const timestamp = Date.now();
+        void getDesktopPerformanceSnapshot()
+            .then((current) => recordDesktopPerformanceSnapshot({
+            folderOpenToFirstThumbnailMs: current?.folderOpenToFirstThumbnailMs ?? null,
+            folderOpenToGridCompleteMs: current?.folderOpenToGridCompleteMs ?? null,
+            previewOpenLatencyMs: quickPreviewPerf.openLatencyMs ?? current?.previewOpenLatencyMs ?? null,
+            previewNavigationLatencyMs: quickPreviewPerf.navigationLatencyMs ?? current?.previewNavigationLatencyMs ?? null,
+            previewFitLatencyMs: quickPreviewPerf.fitLatencyMs ?? current?.previewFitLatencyMs ?? null,
+            previewDetailLatencyMs: quickPreviewPerf.detailLatencyMs ?? current?.previewDetailLatencyMs ?? null,
+            previewWarmHitRate: quickPreviewPerf.warmHitRate ?? current?.previewWarmHitRate ?? null,
+            previewFallbackCount: quickPreviewPerf.fallbackCount,
+            previewSourceBreakdown: quickPreviewPerf.sourceBreakdown,
+            xmpSyncLatencyMs: current?.xmpSyncLatencyMs ?? null,
+            bytesRead: current?.bytesRead ?? 0,
+            rawBytesRead: current?.rawBytesRead ?? 0,
+            standardBytesRead: current?.standardBytesRead ?? 0,
+            thumbnailProfile,
+            sortCacheEnabled: current?.sortCacheEnabled,
+            lastUpdatedAt: timestamp,
+        }))
+            .catch(() => null);
+        void logDesktopEvent({
+            channel: "preview",
+            level: "info",
+            message: "Quick preview render completato",
+            details: JSON.stringify({
+                assetId: asset.id,
+                fileName: asset.fileName,
+                openLatencyMs: quickPreviewPerf.openLatencyMs,
+                navigationLatencyMs: quickPreviewPerf.navigationLatencyMs,
+                fitLatencyMs: quickPreviewPerf.fitLatencyMs,
+                detailLatencyMs: quickPreviewPerf.detailLatencyMs,
+                warmHitRate: quickPreviewPerf.warmHitRate,
+                fallbackCount: quickPreviewPerf.fallbackCount,
+                source: quickPreviewPerf.lastRenderedSource,
+                sourceBreakdown: quickPreviewPerf.sourceBreakdown,
+            }),
+            timestamp,
+        });
+    }, [
+        asset,
+        quickPreviewPerf.detailLatencyMs,
+        quickPreviewPerf.fallbackCount,
+        quickPreviewPerf.fitLatencyMs,
+        quickPreviewPerf.lastRenderedSource,
+        quickPreviewPerf.navigationLatencyMs,
+        quickPreviewPerf.openLatencyMs,
+        quickPreviewPerf.sourceBreakdown,
+        quickPreviewPerf.warmHitRate,
+        thumbnailProfile,
+    ]);
     if (!asset) {
         return null;
     }
@@ -838,7 +1690,13 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                                         : "quick-preview__thumb", "aria-current": isActive ? "true" : undefined, onClick: () => selectAssetFromPreview(item.id, "jump"), children: itemPreview ? (_jsx("img", { src: itemPreview, alt: item.fileName, className: "quick-preview__thumb-image", loading: "lazy", decoding: "async" })) : (item.fileName) }, item.id));
                             }), sidebarBottomSpacerHeight > 0 ? (_jsx("div", { className: "quick-preview__virtual-spacer", style: { height: sidebarBottomSpacerHeight }, "aria-hidden": "true" })) : null] })) : hasActiveFilters ? (_jsx("div", { className: "quick-preview__empty-filter", children: "Nessuna foto corrisponde ai filtri attivi." })) : null] })) : null, _jsxs("div", { className: "quick-preview__main", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "quick-preview__chrome", children: [_jsxs("div", { className: "quick-preview__title", children: [_jsx("strong", { children: asset.fileName }), _jsxs("span", { children: [asset.width, " x ", asset.height, " | ", orientationLabels[asset.orientation], asset.width > 0 && asset.height > 0
                                                 ? ` | ${((asset.width * asset.height) / 1_000_000).toFixed(1)} MP`
-                                                : "", usage ? ` | Foglio ${usage.pageNumber}` : " | Non ancora usata nel layout"] }), asset.xmpHasEdits ? (_jsxs("span", { className: "quick-preview__xmp-badge", title: "Metadati XMP rilevati", children: ["XMP Edit: ", asset.xmpEditInfo ?? "Sviluppo rilevato"] })) : null] }), _jsxs("div", { className: "quick-preview__actions", children: [_jsx("span", { className: "quick-preview__stars", children: formatAssetStars(asset) }), classificationFeedback ? (_jsx("span", { className: `quick-preview__feedback quick-preview__feedback--${classificationFeedback.kind}`, "aria-live": "polite", children: classificationFeedback.label }, classificationFeedback.token)) : null, _jsx(PhotoClassificationHelpButton, { title: "Scorciatoie preview foto" }), _jsx("span", { className: "quick-preview__perf-badge", title: "Benchmark locale della quick preview", children: `Open ${quickPreviewPerf.openLatencyMs ?? "n/d"} ms · Nav ${quickPreviewPerf.navigationLatencyMs ?? "n/d"} ms · ${quickPreviewPerf.lastRenderedSource}` }), _jsx("button", { type: "button", className: compareMode
+                                                : "", usage ? ` | Foglio ${usage.pageNumber}` : " | Non ancora usata nel layout"] }), asset.xmpHasEdits ? (_jsxs("span", { className: "quick-preview__xmp-badge", title: "Metadati XMP rilevati", children: ["XMP Edit: ", asset.xmpEditInfo ?? "Sviluppo rilevato"] })) : null] }), _jsxs("div", { className: "quick-preview__actions", children: [_jsx("span", { className: "quick-preview__stars", children: formatAssetStars(asset) }), classificationFeedback ? (_jsx("span", { className: [
+                                            "quick-preview__feedback",
+                                            `quick-preview__feedback--${classificationFeedback.kind}`,
+                                            classificationFeedback.kind === "label" && classificationFeedback.tone
+                                                ? `quick-preview__feedback--${classificationFeedback.tone}`
+                                                : "",
+                                        ].join(" ").trim(), "aria-live": "polite", children: classificationFeedback.label }, classificationFeedback.token)) : null, _jsx(PhotoClassificationHelpButton, { title: "Scorciatoie preview foto" }), _jsx("span", { className: "quick-preview__perf-badge", title: `Benchmark locale della quick preview | ${quickPreviewPerf.sourceBreakdown}`, children: `Fit ${quickPreviewPerf.fitLatencyMs ?? "n/d"} ms · Detail ${quickPreviewPerf.detailLatencyMs ?? "n/d"} ms · Hit ${quickPreviewPerf.warmHitRate ?? "n/d"}% · ${quickPreviewPerf.lastRenderedSource}` }), _jsx("button", { type: "button", className: compareMode
                                             ? "ghost-button quick-preview__action quick-preview__action--active"
                                             : "ghost-button quick-preview__action", onClick: () => setCompareMode((current) => !current), disabled: !nextAsset && !previousAsset, children: compareMode ? "Chiudi confronto" : "Confronta" }), _jsx("button", { type: "button", className: "ghost-button quick-preview__action", onClick: toggleZoom, children: zoomLevel > 1.05 ? "Adatta" : "Zoom 220%" }), _jsx("button", { type: "button", className: "ghost-button quick-preview__action", onClick: toggleNativeFullscreen, children: "Fullscreen" }), _jsx("button", { type: "button", className: "ghost-button quick-preview__action", onClick: () => void saveAssetAs(asset.id), title: "Salva una copia del file in una posizione a scelta per aprirlo in un editor esterno (Photoshop, Lightroom, ecc.)", children: "Salva copia" }), _jsx("button", { type: "button", className: "ghost-button quick-preview__action", onClick: onClose, children: "Chiudi" })] })] }), _jsxs("div", { className: "quick-preview__meta-bar", children: [_jsxs("div", { className: "quick-preview__meta-group", children: [_jsx("span", { className: "quick-preview__meta-label", children: "Stelle" }), _jsxs("div", { className: "quick-preview__stars-editor", children: [[1, 2, 3, 4, 5].map((value) => (_jsx("button", { type: "button", className: value <= rating
                                                     ? "quick-preview__star quick-preview__star--active"
@@ -852,9 +1710,14 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                                             const tone = customLabelColors[label] ?? "sand";
                                             const isActive = currentCustomLabels.includes(label);
                                             const shortcut = customLabelShortcuts[label] ?? null;
-                                            return (_jsx("button", { type: "button", className: isActive
-                                                    ? `quick-preview__custom-label quick-preview__custom-label--${tone} quick-preview__custom-label--active`
-                                                    : `quick-preview__custom-label quick-preview__custom-label--${tone}`, onClick: () => toggleCustomLabel(label), title: shortcut ? `${label} · scorciatoia ${shortcut}` : label, children: shortcut ? `${label} · ${shortcut}` : label }, label));
+                                            const isFeedbackTarget = classificationFeedback?.kind === "label"
+                                                && classificationFeedback.labels?.includes(label);
+                                            return (_jsx("button", { type: "button", className: [
+                                                    "quick-preview__custom-label",
+                                                    `quick-preview__custom-label--${tone}`,
+                                                    isActive ? "quick-preview__custom-label--active" : "",
+                                                    isFeedbackTarget ? "quick-preview__custom-label--flash" : "",
+                                                ].join(" ").trim(), onClick: () => toggleCustomLabel(label), title: shortcut ? `${label} · scorciatoia ${shortcut}` : label, children: shortcut ? `${label} · ${shortcut}` : label }, label));
                                         }) })] })) : null] }), _jsxs("div", { className: compareMode && compareAsset
                             ? "quick-preview__stage quick-preview__stage--compare"
                             : zoomLevel > 1.05
@@ -911,13 +1774,19 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                         }, onLostPointerCapture: () => {
                             panDragRef.current = null;
                             setIsPanning(false);
-                        }, children: [previousAsset ? (_jsx("button", { type: "button", className: "quick-preview__nav quick-preview__nav--prev", onClick: () => handleNavigate("previous"), children: "<" })) : null, compareMode && compareAsset ? (_jsxs("div", { className: "quick-preview__compare-grid", children: [_jsxs("div", { className: "quick-preview__compare-panel", children: [_jsx("span", { className: "quick-preview__compare-label", children: "Corrente" }), previewUrl ? (_jsx("img", { src: previewUrl, alt: asset.fileName, className: "quick-preview__image quick-preview__image--compare", draggable: false, onDoubleClick: toggleNativeFullscreen })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsxs("div", { className: "quick-preview__placeholder-copy", children: [_jsx("strong", { children: "Anteprima in caricamento" }), _jsx("span", { children: asset.fileName })] }) }))] }), _jsxs("div", { className: "quick-preview__compare-panel", children: [_jsx("span", { className: "quick-preview__compare-label", children: compareAsset.fileName }), comparePreviewUrl ? (_jsx("img", { src: comparePreviewUrl, alt: compareAsset.fileName, className: "quick-preview__image quick-preview__image--compare", draggable: false, onDoubleClick: toggleNativeFullscreen })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsxs("div", { className: "quick-preview__placeholder-copy", children: [_jsx("strong", { children: "Anteprima in caricamento" }), _jsx("span", { children: compareAsset.fileName })] }) }))] })] })) : previewUrl ? (_jsx("img", { src: previewUrl, alt: asset.fileName, className: zoomLevel > 1.05
+                        }, children: [previousAsset ? (_jsx("button", { type: "button", className: "quick-preview__nav quick-preview__nav--prev", onClick: () => handleNavigate("previous"), children: "<" })) : null, compareMode && compareAsset ? (_jsxs("div", { className: "quick-preview__compare-grid", children: [_jsxs("div", { className: "quick-preview__compare-panel", children: [_jsx("span", { className: "quick-preview__compare-label", children: "Corrente" }), displayPreviewUrl ? (_jsx("img", { src: displayPreviewUrl, alt: asset.fileName, className: "quick-preview__image quick-preview__image--compare", draggable: false, decoding: "sync", onError: handleMainPreviewError, onDoubleClick: toggleNativeFullscreen })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsx("span", { className: "quick-preview__loading-badge", children: "Preparazione preview" }) })), previewIsFallback ? (_jsx("span", { className: "quick-preview__loading-badge quick-preview__loading-badge--overlay", children: "Fit preview in arrivo" })) : null] }), _jsxs("div", { className: "quick-preview__compare-panel", children: [_jsx("span", { className: "quick-preview__compare-label", children: compareAsset.fileName }), displayComparePreviewUrl ? (_jsx("img", { src: displayComparePreviewUrl, alt: compareAsset.fileName, className: "quick-preview__image quick-preview__image--compare", draggable: false, decoding: "sync", onError: handleComparePreviewError, onDoubleClick: toggleNativeFullscreen })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsx("span", { className: "quick-preview__loading-badge", children: "Preparazione preview" }) })), comparePreviewIsFallback ? (_jsx("span", { className: "quick-preview__loading-badge quick-preview__loading-badge--overlay", children: "Fit preview in arrivo" })) : null] })] })) : displayPreviewUrl ? (_jsx("img", { src: displayPreviewUrl, alt: asset.fileName, className: zoomLevel > 1.05
                                     ? isPanning
                                         ? "quick-preview__image quick-preview__image--zoomed quick-preview__image--panning"
                                         : "quick-preview__image quick-preview__image--zoomed"
-                                    : "quick-preview__image", draggable: false, decoding: "sync", onLoad: handleMainPreviewLoad, onDoubleClick: toggleNativeFullscreen, style: {
+                                    : "quick-preview__image", draggable: false, decoding: "sync", onLoad: handleMainPreviewLoad, onError: handleMainPreviewError, onDoubleClick: toggleNativeFullscreen, style: {
                                     transform: `translate3d(${panOffset.x}px, ${panOffset.y}px, 0) scale(${zoomLevel})`,
-                                } })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsxs("div", { className: "quick-preview__placeholder-copy", children: [_jsx("strong", { children: "Anteprima in caricamento" }), _jsx("span", { children: asset.fileName })] }) })), nextAsset ? (_jsx("button", { type: "button", className: "quick-preview__nav quick-preview__nav--next", onClick: () => handleNavigate("next"), children: ">" })) : null] }), navigationAssets.length > 1 ? (_jsxs("div", { className: "quick-preview__dock", children: [_jsxs("div", { className: "quick-preview__dock-copy", children: [_jsxs("strong", { children: ["Foto ", currentIndex + 1, " di ", navigationAssets.length] }), _jsxs("span", { children: [previousAsset ? `Prec: ${previousAsset.fileName}` : "Inizio serie", " \u00B7", " ", nextAsset ? `Succ: ${nextAsset.fileName}` : "Fine serie"] })] }), _jsxs("div", { ref: dockStripRef, className: "quick-preview__dock-strip", onScroll: handleDockStripScroll, children: [dockLeftSpacerWidth > 0 ? (_jsx("div", { className: "quick-preview__dock-spacer", style: { width: dockLeftSpacerWidth }, "aria-hidden": "true" })) : null, dockStripItems.map((item) => {
+                                } })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsx("span", { className: "quick-preview__loading-badge", children: "Preparazione preview" }) })), previewIsFallback && !compareMode ? (_jsx("span", { className: "quick-preview__loading-badge quick-preview__loading-badge--overlay", children: "Fit preview in arrivo" })) : null, classificationFeedback ? (_jsx("span", { className: [
+                                    "quick-preview__classification-overlay",
+                                    `quick-preview__classification-overlay--${classificationFeedback.kind}`,
+                                    classificationFeedback.kind === "label" && classificationFeedback.tone
+                                        ? `quick-preview__classification-overlay--${classificationFeedback.tone}`
+                                        : "",
+                                ].join(" ").trim(), "aria-live": "polite", children: classificationFeedback.label }, `overlay-${classificationFeedback.token}`)) : null, nextAsset ? (_jsx("button", { type: "button", className: "quick-preview__nav quick-preview__nav--next", onClick: () => handleNavigate("next"), children: ">" })) : null] }), navigationAssets.length > 1 ? (_jsxs("div", { className: "quick-preview__dock", children: [_jsxs("div", { className: "quick-preview__dock-copy", children: [_jsxs("strong", { children: ["Foto ", currentIndex + 1, " di ", navigationAssets.length] }), _jsxs("span", { children: [previousAsset ? `Prec: ${previousAsset.fileName}` : "Inizio serie", " \u00B7", " ", nextAsset ? `Succ: ${nextAsset.fileName}` : "Fine serie"] })] }), _jsxs("div", { ref: dockStripRef, className: "quick-preview__dock-strip", onScroll: handleDockStripScroll, children: [dockLeftSpacerWidth > 0 ? (_jsx("div", { className: "quick-preview__dock-spacer", style: { width: dockLeftSpacerWidth }, "aria-hidden": "true" })) : null, dockStripItems.map((item) => {
                                         const itemPreview = getQuickPreviewThumbUrl(item);
                                         const isActive = item.id === asset.id;
                                         return (_jsx("button", { type: "button", className: isActive

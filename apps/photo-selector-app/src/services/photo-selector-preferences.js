@@ -1,4 +1,5 @@
 import { COLOR_LABEL_NAMES } from "./photo-classification";
+import { getDesktopPreferences, hasDesktopStateApi, saveDesktopPreferences as saveDesktopPreferencesNative } from "./desktop-store";
 const PREFERENCES_KEY = "photo-selector-preferences-v1";
 export const DEFAULT_CUSTOM_LABEL_TONE = "sand";
 export const CUSTOM_LABEL_SHORTCUT_OPTIONS = [
@@ -12,7 +13,11 @@ export const DEFAULT_PHOTO_SELECTOR_PREFERENCES = {
     customLabelShortcuts: {},
     thumbnailProfile: "ultra-fast",
     sortCacheEnabled: true,
+    cardSize: 160,
+    rootFolderPathOverride: "",
+    preferredEditorPath: "",
 };
+let preferencesCache = { ...DEFAULT_PHOTO_SELECTOR_PREFERENCES };
 export function normalizeCustomLabelName(value) {
     return value.replace(/\s+/g, " ").trim().slice(0, 48);
 }
@@ -91,35 +96,77 @@ export function normalizeCustomLabelShortcuts(catalog, shortcuts) {
 }
 export function loadPhotoSelectorPreferences() {
     if (typeof window === "undefined") {
-        return DEFAULT_PHOTO_SELECTOR_PREFERENCES;
+        return preferencesCache;
     }
+    if (hasDesktopStateApi()) {
+        return preferencesCache;
+    }
+    preferencesCache = parseStoredPreferences(readLocalPreferences());
+    return preferencesCache;
+}
+function readLocalPreferences() {
     try {
         const raw = window.localStorage.getItem(PREFERENCES_KEY);
         if (!raw) {
-            return DEFAULT_PHOTO_SELECTOR_PREFERENCES;
+            return null;
         }
-        const parsed = JSON.parse(raw);
-        const customLabelsCatalog = normalizeCustomLabelsCatalog(parsed.customLabelsCatalog);
-        return {
-            colorNames: {
-                ...COLOR_LABEL_NAMES,
-                ...(parsed.colorNames ?? {}),
-            },
-            filterPresets: Array.isArray(parsed.filterPresets) ? parsed.filterPresets : [],
-            customLabelsCatalog,
-            customLabelColors: normalizeCustomLabelColors(customLabelsCatalog, parsed.customLabelColors),
-            customLabelShortcuts: normalizeCustomLabelShortcuts(customLabelsCatalog, parsed.customLabelShortcuts),
-            thumbnailProfile: parsed.thumbnailProfile === "balanced"
-                ? "balanced"
-                : parsed.thumbnailProfile === "fast"
-                    ? "fast"
-                    : "ultra-fast",
-            sortCacheEnabled: parsed.sortCacheEnabled !== false,
-        };
+        return JSON.parse(raw);
     }
     catch {
-        return DEFAULT_PHOTO_SELECTOR_PREFERENCES;
+        return null;
     }
+}
+function parseStoredPreferences(parsed) {
+    const customLabelsCatalog = normalizeCustomLabelsCatalog(parsed?.customLabelsCatalog);
+    return {
+        colorNames: {
+            ...COLOR_LABEL_NAMES,
+            ...(parsed?.colorNames ?? {}),
+        },
+        filterPresets: Array.isArray(parsed?.filterPresets) ? parsed.filterPresets : [],
+        customLabelsCatalog,
+        customLabelColors: normalizeCustomLabelColors(customLabelsCatalog, parsed?.customLabelColors),
+        customLabelShortcuts: normalizeCustomLabelShortcuts(customLabelsCatalog, parsed?.customLabelShortcuts),
+        thumbnailProfile: parsed?.thumbnailProfile === "balanced"
+            ? "balanced"
+            : parsed?.thumbnailProfile === "fast"
+                ? "fast"
+                : "ultra-fast",
+        sortCacheEnabled: parsed?.sortCacheEnabled !== false,
+        cardSize: Math.max(100, Math.min(320, Number(parsed?.cardSize ?? DEFAULT_PHOTO_SELECTOR_PREFERENCES.cardSize))),
+        rootFolderPathOverride: typeof parsed?.rootFolderPathOverride === "string"
+            ? parsed.rootFolderPathOverride
+            : "",
+        preferredEditorPath: typeof parsed?.preferredEditorPath === "string"
+            ? parsed.preferredEditorPath
+            : "",
+    };
+}
+function toDesktopPreferences(preferences) {
+    return {
+        colorNames: preferences.colorNames,
+        filterPresets: preferences.filterPresets,
+        customLabelsCatalog: preferences.customLabelsCatalog,
+        customLabelColors: preferences.customLabelColors,
+        customLabelShortcuts: preferences.customLabelShortcuts,
+        thumbnailProfile: preferences.thumbnailProfile,
+        sortCacheEnabled: preferences.sortCacheEnabled,
+        cardSize: preferences.cardSize,
+        rootFolderPathOverride: preferences.rootFolderPathOverride,
+        preferredEditorPath: preferences.preferredEditorPath,
+    };
+}
+export async function hydratePhotoSelectorPreferences() {
+    if (typeof window === "undefined") {
+        return preferencesCache;
+    }
+    if (hasDesktopStateApi()) {
+        const nativePreferences = await getDesktopPreferences();
+        preferencesCache = parseStoredPreferences(nativePreferences);
+        return preferencesCache;
+    }
+    preferencesCache = parseStoredPreferences(readLocalPreferences());
+    return preferencesCache;
 }
 export function savePhotoSelectorPreferences(preferences) {
     if (typeof window === "undefined") {
@@ -144,6 +191,9 @@ export function savePhotoSelectorPreferences(preferences) {
                     ? "ultra-fast"
                     : current.thumbnailProfile,
         sortCacheEnabled: preferences.sortCacheEnabled ?? current.sortCacheEnabled,
+        cardSize: preferences.cardSize ?? current.cardSize,
+        rootFolderPathOverride: preferences.rootFolderPathOverride ?? current.rootFolderPathOverride,
+        preferredEditorPath: preferences.preferredEditorPath ?? current.preferredEditorPath,
     };
     next.customLabelColors = normalizeCustomLabelColors(next.customLabelsCatalog, {
         ...current.customLabelColors,
@@ -153,6 +203,11 @@ export function savePhotoSelectorPreferences(preferences) {
         ...current.customLabelShortcuts,
         ...(preferences.customLabelShortcuts ?? {}),
     });
+    preferencesCache = next;
+    if (hasDesktopStateApi()) {
+        void saveDesktopPreferencesNative(toDesktopPreferences(next));
+        return;
+    }
     window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next));
 }
 //# sourceMappingURL=photo-selector-preferences.js.map

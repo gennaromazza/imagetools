@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   fileListToEntries,
   getRecentFolders,
+  hydrateRecentFolders,
   hasNativeFolderAccess,
   openFolderNative,
+  removeRecentFolder,
   reopenRecentFolder,
   type FolderOpenResult,
   type RecentFolder,
@@ -11,6 +13,7 @@ import {
 
 interface FolderBrowserProps {
   onFolderOpened: (result: FolderOpenResult) => void | Promise<void>;
+  isBusy?: boolean;
 }
 
 function formatRelativeTime(timestamp: number): string {
@@ -25,10 +28,10 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString("it-IT");
 }
 
-export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
+export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [openingRecentFolder, setOpeningRecentFolder] = useState<string | null>(null);
-  const recentFolders = getRecentFolders();
+  const [recentFolders, setRecentFolders] = useState<RecentFolder[]>(() => getRecentFolders());
   const supportsNative = hasNativeFolderAccess();
 
   useEffect(() => {
@@ -37,7 +40,23 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
     fileInputRef.current.setAttribute("directory", "");
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    void hydrateRecentFolders().then((folders) => {
+      if (active) {
+        setRecentFolders(folders);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   async function handleBrowse() {
+    if (isBusy) {
+      return;
+    }
+
     if (supportsNative) {
       const result = await openFolderNative();
       if (result) {
@@ -55,7 +74,7 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
   }
 
   async function handleRecentFolderOpen(folder: RecentFolder) {
-    if (!supportsNative || openingRecentFolder) {
+    if (!supportsNative || openingRecentFolder || isBusy) {
       return;
     }
 
@@ -67,6 +86,8 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
         return;
       }
 
+      const nextRecentFolders = await removeRecentFolder(folder.path ?? folder.name);
+      setRecentFolders(nextRecentFolders);
       await handleBrowse();
     } finally {
       setOpeningRecentFolder(null);
@@ -83,8 +104,8 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
         </p>
 
         <div className="folder-browser__actions">
-          <button type="button" className="primary-button" onClick={handleBrowse}>
-            Sfoglia cartella...
+          <button type="button" className="primary-button" onClick={handleBrowse} disabled={isBusy}>
+            {isBusy ? "Apertura in corso..." : "Sfoglia cartella..."}
           </button>
         </div>
 
@@ -113,7 +134,7 @@ export function FolderBrowser({ onFolderOpened }: FolderBrowserProps) {
                     type="button"
                     className="folder-browser__recent-button"
                     onClick={() => void handleRecentFolderOpen(folder)}
-                    disabled={openingRecentFolder !== null}
+                    disabled={openingRecentFolder !== null || isBusy}
                   >
                     <div className="folder-browser__recent-icon">📂</div>
                     <div className="folder-browser__recent-info">

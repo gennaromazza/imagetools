@@ -1,8 +1,23 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { DesktopEditorCandidate, DesktopRuntimeInfo, DesktopThumbnailCacheLookupEntry } from "@photo-tools/desktop-contracts";
+import type {
+  DesktopDragOutCheck,
+  DesktopEditorCandidate,
+  DesktopFolderCatalogAssetState,
+  DesktopFolderCatalogState,
+  DesktopLogEvent,
+  DesktopPerformanceSnapshot,
+  DesktopPersistedState,
+  DesktopPhotoSelectorPreferences,
+  DesktopQuickPreviewRequest,
+  DesktopRecentFolder,
+  DesktopRuntimeInfo,
+  DesktopSendToEditorResult,
+  DesktopSortCacheEntry,
+  DesktopThumbnailCacheLookupEntry,
+} from "@photo-tools/desktop-contracts";
 import {
   openFolderDesktop,
   readFileFromDisk,
@@ -11,10 +26,15 @@ import {
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
 import {
+  getDesktopQuickPreviewFrame,
   getDesktopPreview,
   getDesktopThumbnail,
+  getQuickPreviewFrameContent,
+  QUICK_PREVIEW_PROTOCOL_SCHEME,
+  releaseDesktopQuickPreviewFrames,
   shutdownDesktopImageService,
   warmDesktopPreview,
+  warmDesktopQuickPreviewFrames,
 } from "./native-image-service.js";
 import {
   chooseThumbnailCacheDirectory,
@@ -27,12 +47,48 @@ import {
   resetThumbnailCacheDirectory,
   setThumbnailCacheDirectory,
 } from "./thumbnail-disk-cache.js";
+import {
+  getDesktopPreferences,
+  getDesktopSessionState,
+  getDesktopPerformanceSnapshot,
+  getFolderCatalogState,
+  getRecentFolders,
+  getSortCache,
+  logDesktopEvent,
+  recordDesktopPerformanceSnapshot,
+  removeRecentFolder,
+  saveDesktopPreferences,
+  saveDesktopSessionState,
+  saveFolderAssetStates,
+  saveFolderCatalogState,
+  saveRecentFolder,
+  saveSortCache,
+  shutdownDesktopStore,
+} from "./desktop-store.js";
 import { getDesktopToolOrDefault } from "./tool-manifest.js";
 
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
+const MAX_DESKTOP_DRAG_OUT_FILES = 25;
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
 const appUserModelId = `studio.filex.${requestedTool.id}`;
+let mainWindow: BrowserWindow | null = null;
+let isOpenFolderRequestRendererReady = false;
+let pendingOpenFolderPath: string | null = null;
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: QUICK_PREVIEW_PROTOCOL_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true,
+      bypassCSP: true,
+    },
+  },
+]);
 
 app.setName(requestedTool.productName);
 if (process.platform === "win32") {
@@ -65,7 +121,242 @@ function escapeHtml(value: string): string {
 function sanitizeDesktopPath(value: string): string {
   const trimmed = typeof value === "string" ? value.trim() : "";
   const withoutQuotes = trimmed.replace(/^"+|"+$/g, "");
-  return withoutQuotes.replace(/\//g, "\\");
+  return process.platform === "win32" ? withoutQuotes.replace(/\//g, "\\") : withoutQuotes;
+}
+
+function resolveValidDirectoryPath(candidatePath: string): string | null {
+  const normalizedPath = sanitizeDesktopPath(candidatePath);
+  if (!normalizedPath || !existsSync(normalizedPath)) {
+    return null;
+  }
+
+  try {
+    return statSync(normalizedPath).isDirectory() ? normalizedPath : null;
+  } catch {
+    return null;
+  }
+}
+
+function extractOpenFolderPathFromArgv(argv: string[]): string | null {
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    if (value === "--open-folder") {
+      const nextValue = argv[index + 1];
+      return typeof nextValue === "string" ? resolveValidDirectoryPath(nextValue) : null;
+    }
+
+    if (value.startsWith("--open-folder=")) {
+      return resolveValidDirectoryPath(value.slice("--open-folder=".length));
+    }
+  }
+
+  return null;
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+
+  mainWindow.focus();
+}
+
+function deliverOpenFolderRequest(folderPath: string): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingOpenFolderPath = folderPath;
+    return;
+  }
+
+  mainWindow.webContents.send("filex:open-folder-request", folderPath);
+  pendingOpenFolderPath = null;
+}
+
+function queueOpenFolderPath(folderPath: string | null): void {
+  if (!folderPath) {
+    return;
+  }
+
+  pendingOpenFolderPath = folderPath;
+  if (isOpenFolderRequestRendererReady) {
+    deliverOpenFolderRequest(folderPath);
+  }
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  pendingOpenFolderPath = extractOpenFolderPathFromArgv(process.argv);
+
+  app.on("second-instance", (_event, argv) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      queueOpenFolderPath(extractOpenFolderPathFromArgv(argv));
+      void createMainWindow();
+      return;
+    }
+
+    focusMainWindow();
+    queueOpenFolderPath(extractOpenFolderPathFromArgv(argv));
+  });
+}
+
+function normalizeExistingAbsolutePaths(absolutePaths: unknown): string[] {
+  if (!Array.isArray(absolutePaths)) {
+    return [];
+  }
+
+  const unique = new Set<string>();
+  for (const value of absolutePaths) {
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    const normalized = sanitizeDesktopPath(value);
+    if (!normalized || !existsSync(normalized)) {
+      continue;
+    }
+
+    unique.add(normalized);
+  }
+
+  return Array.from(unique);
+}
+
+function validateDesktopDragOut(absolutePaths: unknown): DesktopDragOutCheck {
+  const requestedCount = Array.isArray(absolutePaths) ? absolutePaths.length : 0;
+  const normalizedPaths = normalizeExistingAbsolutePaths(absolutePaths);
+  const validCount = normalizedPaths.length;
+
+  if (requestedCount <= 0) {
+    return {
+      ok: false,
+      requestedCount,
+      validCount,
+      allowedCount: 0,
+      reason: "empty-selection",
+      message: "Nessun file selezionato per il drag esterno.",
+    };
+  }
+
+  if (validCount === 0) {
+    return {
+      ok: false,
+      requestedCount,
+      validCount,
+      allowedCount: 0,
+      reason: "missing-paths",
+      message: "La selezione non ha percorsi assoluti validi per il drag esterno.",
+    };
+  }
+
+  if (validCount !== requestedCount) {
+    return {
+      ok: false,
+      requestedCount,
+      validCount,
+      allowedCount: Math.min(validCount, MAX_DESKTOP_DRAG_OUT_FILES),
+      reason: "invalid-paths",
+      message: "Alcuni file selezionati non hanno un percorso valido.",
+    };
+  }
+
+  if (validCount > MAX_DESKTOP_DRAG_OUT_FILES) {
+    return {
+      ok: false,
+      requestedCount,
+      validCount,
+      allowedCount: MAX_DESKTOP_DRAG_OUT_FILES,
+      reason: "too-many-files",
+      message: `Drag esterno limitato a ${MAX_DESKTOP_DRAG_OUT_FILES} file. Usa 'Apri con editor' per selezioni piu grandi.`,
+    };
+  }
+
+  return {
+    ok: true,
+    requestedCount,
+    validCount,
+    allowedCount: validCount,
+    reason: "ok",
+    message: validCount === 1
+      ? "1 file pronto per il drag esterno."
+      : `${validCount} file pronti per il drag esterno.`,
+  };
+}
+
+function launchEditorProcess(
+  editorPath: string,
+  absolutePaths: string[],
+): DesktopSendToEditorResult {
+  const normalizedEditorPath = sanitizeDesktopPath(editorPath);
+  const targetPaths = normalizeExistingAbsolutePaths(absolutePaths);
+
+  if (!normalizedEditorPath || !existsSync(normalizedEditorPath)) {
+    const installedEditors = getInstalledEditorCandidates();
+    const installedHint = installedEditors[0]
+      ? ` Editor rilevato: ${installedEditors[0].path}`
+      : "";
+    return {
+      ok: false,
+      status: "invalid-editor",
+      requestedCount: Array.isArray(absolutePaths) ? absolutePaths.length : 0,
+      launchedCount: 0,
+      error: `Editor non trovato o percorso non valido.${installedHint}`,
+    };
+  }
+
+  if (targetPaths.length === 0) {
+    return {
+      ok: false,
+      status: "partial",
+      requestedCount: Array.isArray(absolutePaths) ? absolutePaths.length : 0,
+      launchedCount: 0,
+      error: "Nessun file valido da aprire.",
+    };
+  }
+
+  try {
+    if (process.platform === "darwin") {
+      const child = spawn("open", ["-a", normalizedEditorPath, ...targetPaths], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+    } else {
+      const child = spawn(normalizedEditorPath, targetPaths, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+      });
+      child.unref();
+    }
+
+    return {
+      ok: true,
+      status: "ok",
+      requestedCount: Array.isArray(absolutePaths) ? absolutePaths.length : targetPaths.length,
+      launchedCount: targetPaths.length,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "launch-failed",
+      requestedCount: Array.isArray(absolutePaths) ? absolutePaths.length : targetPaths.length,
+      launchedCount: 0,
+      error: error instanceof Error ? error.message : "Impossibile aprire l'editor.",
+    };
+  }
 }
 
 function getInstalledEditorCandidates(): DesktopEditorCandidate[] {
@@ -108,6 +399,35 @@ function getInstalledEditorCandidates(): DesktopEditorCandidate[] {
   }
 
   return candidates;
+}
+
+function registerPreviewProtocol(): void {
+  protocol.handle(QUICK_PREVIEW_PROTOCOL_SCHEME, async (request) => {
+    try {
+      const url = new URL(request.url);
+      const token = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+      const content = getQuickPreviewFrameContent(token);
+      if (!content) {
+        return new Response("Not Found", { status: 404 });
+      }
+
+      return new Response(Buffer.from(content.bytes), {
+        status: 200,
+        headers: {
+          "content-type": content.mimeType,
+          "cache-control": "private, max-age=31536000, immutable",
+        },
+      });
+    } catch (error) {
+      logDesktopEvent({
+        channel: "preview",
+        level: "warn",
+        message: "Protocollo preview non riuscito",
+        details: error instanceof Error ? error.message : String(error),
+      });
+      return new Response("Bad Request", { status: 400 });
+    }
+  });
 }
 
 function buildMissingRendererHtml(entryPath: string): string {
@@ -182,12 +502,36 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle("filex:open-folder", () => openFolderDesktop());
   ipcMain.handle("filex:reopen-folder", (_event, rootPath: string) => reopenFolderDesktop(rootPath));
-  ipcMain.on("filex:start-drag-out", (event, absolutePaths: unknown) => {
-    const paths = Array.isArray(absolutePaths)
-      ? absolutePaths.filter((value): value is string => typeof value === "string" && value.length > 0 && existsSync(value))
-      : [];
+  ipcMain.handle("filex:consume-pending-open-folder-path", () => {
+    const folderPath = pendingOpenFolderPath;
+    pendingOpenFolderPath = null;
+    return folderPath;
+  });
+  ipcMain.handle("filex:mark-open-folder-request-ready", (event) => {
+    const windowForEvent = BrowserWindow.fromWebContents(event.sender);
+    if (!windowForEvent || windowForEvent !== mainWindow) {
+      return;
+    }
 
-    if (paths.length === 0) {
+    isOpenFolderRequestRendererReady = true;
+    if (pendingOpenFolderPath) {
+      deliverOpenFolderRequest(pendingOpenFolderPath);
+    }
+  });
+  ipcMain.handle("filex:can-start-drag-out", (_event, absolutePaths: unknown) =>
+    validateDesktopDragOut(absolutePaths),
+  );
+  ipcMain.on("filex:start-drag-out", (event, absolutePaths: unknown) => {
+    const dragCheck = validateDesktopDragOut(absolutePaths);
+    const paths = normalizeExistingAbsolutePaths(absolutePaths);
+
+    if (!dragCheck.ok || paths.length === 0) {
+      logDesktopEvent({
+        channel: "drag-out",
+        level: "warn",
+        message: "Drag esterno bloccato",
+        details: dragCheck.message,
+      });
       return;
     }
 
@@ -198,8 +542,20 @@ function registerIpcHandlers(): void {
 
     try {
       event.sender.startDrag(dragItem);
+      logDesktopEvent({
+        channel: "drag-out",
+        level: "info",
+        message: "Drag esterno avviato",
+        details: `${paths.length} file`,
+      });
     } catch (error) {
       console.error("FileX startDrag failed", error);
+      logDesktopEvent({
+        channel: "drag-out",
+        level: "error",
+        message: "startDrag fallito",
+        details: error instanceof Error ? error.message : String(error),
+      });
 
       if (paths.length > 1) {
         try {
@@ -207,9 +563,21 @@ function registerIpcHandlers(): void {
             file: paths[0],
             icon: iconPath,
           });
+          logDesktopEvent({
+            channel: "drag-out",
+            level: "warn",
+            message: "startDrag fallback singolo file usato",
+            details: paths[0],
+          });
           return;
         } catch (fallbackError) {
           console.error("FileX startDrag fallback failed", fallbackError);
+          logDesktopEvent({
+            channel: "drag-out",
+            level: "error",
+            message: "Fallback startDrag fallito",
+            details: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+          });
         }
       }
     }
@@ -267,50 +635,64 @@ function registerIpcHandlers(): void {
     (_event, absolutePath: string, options?: { maxDimension?: number; sourceFileKey?: string }) =>
       getDesktopPreview(absolutePath, options?.maxDimension, options?.sourceFileKey),
   );
+  ipcMain.handle("filex:get-quick-preview-frame", (_event, request: DesktopQuickPreviewRequest) =>
+    getDesktopQuickPreviewFrame(request),
+  );
   ipcMain.handle(
     "filex:warm-preview",
     (_event, absolutePath: string, options?: { maxDimension?: number; sourceFileKey?: string }) =>
       warmDesktopPreview(absolutePath, options?.maxDimension, options?.sourceFileKey),
   );
-  ipcMain.handle(
-    "filex:open-with-editor",
-    async (_event, editorPath: string, absolutePaths: string[]) => {
-      const normalizedEditorPath = sanitizeDesktopPath(editorPath);
-      const targetPaths = Array.isArray(absolutePaths)
-        ? absolutePaths.filter((value): value is string => {
-            const normalizedValue = sanitizeDesktopPath(value);
-            return normalizedValue.length > 0 && existsSync(normalizedValue);
-          }).map((value) => sanitizeDesktopPath(value))
-        : [];
-
-      if (!normalizedEditorPath || !existsSync(normalizedEditorPath)) {
-        const installedEditors = getInstalledEditorCandidates();
-        const installedHint = installedEditors[0]
-          ? ` Editor rilevato: ${installedEditors[0].path}`
-          : "";
-        return { ok: false, error: `Editor non trovato o percorso non valido.${installedHint}` };
-      }
-
-      if (targetPaths.length === 0) {
-        return { ok: false, error: "Nessun file valido da aprire." };
-      }
-
-      try {
-        const child = spawn(normalizedEditorPath, targetPaths, {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: false,
-        });
-        child.unref();
-        return { ok: true };
-      } catch (error) {
-        return {
-          ok: false,
-          error: error instanceof Error ? error.message : "Impossibile aprire l'editor.",
-        };
-      }
-    },
+  ipcMain.handle("filex:warm-quick-preview-frames", (_event, requests: DesktopQuickPreviewRequest[]) =>
+    warmDesktopQuickPreviewFrames(requests),
   );
+  ipcMain.handle("filex:release-quick-preview-frames", (_event, tokens: string[]) => {
+    releaseDesktopQuickPreviewFrames(Array.isArray(tokens) ? tokens : []);
+  });
+  ipcMain.handle("filex:send-to-editor", async (_event, editorPath: string, absolutePaths: string[]) => {
+    const result = launchEditorProcess(editorPath, absolutePaths);
+    logDesktopEvent({
+      channel: "editor",
+      level: result.ok ? "info" : "error",
+      message: result.ok ? "Invio a editor riuscito" : "Invio a editor fallito",
+      details: result.ok
+        ? `${result.launchedCount}/${result.requestedCount} file`
+        : result.error ?? `${result.launchedCount}/${result.requestedCount} file`,
+    });
+    return result;
+  });
+  ipcMain.handle("filex:open-with-editor", async (_event, editorPath: string, absolutePaths: string[]) =>
+    launchEditorProcess(editorPath, absolutePaths),
+  );
+  ipcMain.handle("filex:get-desktop-preferences", () => getDesktopPreferences());
+  ipcMain.handle("filex:save-desktop-preferences", (_event, preferences: DesktopPhotoSelectorPreferences) =>
+    saveDesktopPreferences(preferences),
+  );
+  ipcMain.handle("filex:get-desktop-session-state", () => getDesktopSessionState());
+  ipcMain.handle("filex:save-desktop-session-state", (_event, state: DesktopPersistedState) =>
+    saveDesktopSessionState(state),
+  );
+  ipcMain.handle("filex:get-recent-folders", () => getRecentFolders());
+  ipcMain.handle("filex:save-recent-folder", (_event, folder: DesktopRecentFolder) => saveRecentFolder(folder));
+  ipcMain.handle("filex:remove-recent-folder", (_event, folderPathOrName: string) =>
+    removeRecentFolder(folderPathOrName),
+  );
+  ipcMain.handle("filex:get-sort-cache", (_event, folderPath?: string) => getSortCache(folderPath));
+  ipcMain.handle("filex:save-sort-cache", (_event, entry: DesktopSortCacheEntry) => saveSortCache(entry));
+  ipcMain.handle("filex:get-folder-catalog-state", (_event, folderPath: string) => getFolderCatalogState(folderPath));
+  ipcMain.handle("filex:save-folder-catalog-state", (_event, state: DesktopFolderCatalogState) =>
+    saveFolderCatalogState(state),
+  );
+  ipcMain.handle(
+    "filex:save-folder-asset-states",
+    (_event, folderPath: string, assetStates: DesktopFolderCatalogAssetState[]) =>
+      saveFolderAssetStates(folderPath, assetStates),
+  );
+  ipcMain.handle("filex:get-desktop-performance-snapshot", () => getDesktopPerformanceSnapshot());
+  ipcMain.handle("filex:record-desktop-performance-snapshot", (_event, snapshot: DesktopPerformanceSnapshot) =>
+    recordDesktopPerformanceSnapshot(snapshot),
+  );
+  ipcMain.handle("filex:log-desktop-event", (_event, event: DesktopLogEvent) => logDesktopEvent(event));
   ipcMain.handle("filex:read-sidecar-xmp", (_event, absolutePath: string) =>
     readSidecarXmpFromAssetPath(absolutePath),
   );
@@ -335,7 +717,7 @@ async function loadRenderer(window: BrowserWindow): Promise<void> {
 }
 
 async function createMainWindow(): Promise<void> {
-  const mainWindow = new BrowserWindow({
+  const windowInstance = new BrowserWindow({
     title: requestedTool.productName,
     width: requestedTool.defaultWindowWidth,
     height: requestedTool.defaultWindowHeight,
@@ -352,38 +734,66 @@ async function createMainWindow(): Promise<void> {
     },
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow = windowInstance;
+  isOpenFolderRequestRendererReady = false;
+
+  windowInstance.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
   });
 
-  mainWindow.webContents.on("will-prevent-unload", (event) => {
+  windowInstance.webContents.on("will-prevent-unload", (event) => {
     event.preventDefault();
-    mainWindow.destroy();
+    windowInstance.destroy();
   });
 
-  await loadRenderer(mainWindow);
+  windowInstance.webContents.on("render-process-gone", (_event, details) => {
+    logDesktopEvent({
+      channel: "renderer",
+      level: "error",
+      message: "Renderer process terminato",
+      details: `${details.reason}${details.exitCode ? ` (code ${details.exitCode})` : ""}`,
+    });
+  });
 
-  mainWindow.setTitle(requestedTool.productName);
+  await loadRenderer(windowInstance);
+
+  windowInstance.setTitle(requestedTool.productName);
 
   if (!app.isPackaged) {
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    windowInstance.webContents.openDevTools({ mode: "detach" });
   }
+
+  windowInstance.on("closed", () => {
+    if (mainWindow) {
+      mainWindow = null;
+    }
+    isOpenFolderRequestRendererReady = false;
+  });
 }
 
-app.whenReady().then(async () => {
-  registerIpcHandlers();
-  await createMainWindow();
+if (hasSingleInstanceLock) {
+  app.whenReady().then(async () => {
+    registerPreviewProtocol();
+    registerIpcHandlers();
+    await createMainWindow();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      void createMainWindow();
-    }
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        void createMainWindow();
+      }
+    });
+  }).catch((error) => {
+    console.error("FileX Desktop failed to start", error);
+    logDesktopEvent({
+      channel: "app",
+      level: "error",
+      message: "Avvio shell fallito",
+      details: error instanceof Error ? error.message : String(error),
+    });
+    app.exit(1);
   });
-}).catch((error) => {
-  console.error("FileX Desktop failed to start", error);
-  app.exit(1);
-});
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -393,4 +803,5 @@ app.on("window-all-closed", () => {
 
 app.once("before-quit", () => {
   void shutdownDesktopImageService();
+  shutdownDesktopStore();
 });

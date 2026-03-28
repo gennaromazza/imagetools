@@ -139,7 +139,11 @@ export async function loadCachedThumbnails(
   const quality = options?.quality ?? DEFAULT_THUMBNAIL_CACHE_QUALITY;
 
   const desktopEntries = toDesktopLookupEntries(entries);
-  if (desktopEntries.length > 0 && canUseDesktopThumbnailCache()) {
+  if (canUseDesktopThumbnailCache()) {
+    if (desktopEntries.length === 0) {
+      return result;
+    }
+
     await measureAsync(`[PERF] desktop cache bulk-read (${desktopEntries.length})`, async () => {
       try {
         const cached = await window.filexDesktop!.getCachedThumbnails(

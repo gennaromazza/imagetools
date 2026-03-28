@@ -14,7 +14,7 @@ const toolBranding = [
   { toolId: "image-party-frame", sourceFile: "party_frame_logo.png" },
   { toolId: "image-id-print", sourceFile: "id_print_logo.png" },
   { toolId: "archivio-flow", sourceFile: "photo_Archivie.png" },
-  { toolId: "photo-selector-app", sourceFile: "photo_selector.png" },
+  { toolId: "photo-selector-app", sourceFile: "photo_selector_icon.png" },
 ];
 
 await mkdir(targetDir, { recursive: true });
@@ -94,7 +94,12 @@ $graphics.Clear([System.Drawing.Color]::Transparent)
 $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
 $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
 $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-$graphics.DrawImage($bitmap, 0, 0, 256, 256)
+$scale = [Math]::Min(256 / $bitmap.Width, 256 / $bitmap.Height)
+$drawWidth = [int][Math]::Round($bitmap.Width * $scale)
+$drawHeight = [int][Math]::Round($bitmap.Height * $scale)
+$offsetX = [int][Math]::Floor((256 - $drawWidth) / 2)
+$offsetY = [int][Math]::Floor((256 - $drawHeight) / 2)
+$graphics.DrawImage($bitmap, $offsetX, $offsetY, $drawWidth, $drawHeight)
 $icon = [System.Drawing.Icon]::FromHandle($resized.GetHicon())
 $fileStream = [System.IO.File]::Create($target)
 $icon.Save($fileStream)

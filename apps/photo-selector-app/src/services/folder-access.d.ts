@@ -127,4 +127,6 @@ export interface RecentFolder {
 }
 export declare function getRecentFolders(): RecentFolder[];
 export declare function addRecentFolder(name: string, imageCount: number, path?: string): void;
+export declare function hydrateRecentFolders(): Promise<RecentFolder[]>;
+export declare function removeRecentFolder(folderPathOrName: string): Promise<RecentFolder[]>;
 export {};

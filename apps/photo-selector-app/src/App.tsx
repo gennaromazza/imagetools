@@ -1,6 +1,10 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DesktopCacheLocationRecommendation,
+  DesktopFolderCatalogAssetState,
+  DesktopFolderCatalogState,
+  DesktopPerformanceSnapshot,
+  DesktopPersistedState,
   DesktopRuntimeInfo,
   DesktopThumbnailCacheInfo,
 } from "@photo-tools/desktop-contracts";
@@ -8,7 +12,12 @@ import type { ImageAsset, ImageOrientation } from "@photo-tools/shared-types";
 import {
   revokeImageAssetUrls,
 } from "./services/browser-image-assets";
-import { getDesktopRuntimeInfo } from "./services/desktop-runtime";
+import {
+  consumePendingDesktopOpenFolderPath,
+  getDesktopRuntimeInfo,
+  markDesktopOpenFolderRequestReady,
+  subscribeDesktopOpenFolderRequest,
+} from "./services/desktop-runtime";
 import {
   chooseDesktopThumbnailCacheDirectory,
   clearDesktopThumbnailCache,
@@ -24,6 +33,7 @@ import { clearImageCache } from "./services/image-cache";
 import {
   buildPlaceholderAssets,
   addRecentFolder,
+  getAssetAbsolutePath,
   buildSourceFileKey,
   buildSourceFileKeyFromStats,
   getFileForAsset,
@@ -42,6 +52,7 @@ import {
   type ThumbnailUpdate,
 } from "./services/thumbnail-pipeline";
 import { cacheThumbnailBatch, loadCachedThumbnails } from "./services/thumbnail-cache";
+import { clearDesktopQuickPreviewFrameCache } from "./services/desktop-quick-preview";
 import {
   beginReactBatchMetric,
   cancelReactBatchMetric,
@@ -53,8 +64,19 @@ import {
 } from "./services/performance-utils";
 import {
   loadPhotoSelectorPreferences,
+  hydratePhotoSelectorPreferences,
   type ThumbnailProfile,
 } from "./services/photo-selector-preferences";
+import {
+  getDesktopFolderCatalogState,
+  getDesktopSessionState,
+  hasDesktopStateApi,
+  logDesktopEvent,
+  recordDesktopPerformanceSnapshot,
+  saveDesktopFolderAssetStates,
+  saveDesktopFolderCatalogState,
+  saveDesktopSessionState,
+} from "./services/desktop-store";
 import { PreviewWarmupPipeline } from "./services/preview-warmup-pipeline";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { buildSelectionResult } from "./types/selection";
@@ -114,14 +136,14 @@ function getThumbnailPipelineOptions(profile: ThumbnailProfile): ThumbnailPipeli
 
 function getQuickPreviewFitMaxDimension(profile: ThumbnailProfile): number {
   if (profile === "ultra-fast") {
-    return 1280;
-  }
-
-  if (profile === "fast") {
     return 1600;
   }
 
-  return 2048;
+  if (profile === "fast") {
+    return 1920;
+  }
+
+  return 2560;
 }
 
 function afterNextPaint(run: () => void): void {
@@ -274,6 +296,9 @@ interface ImportProgressState {
 interface PerformanceSnapshot {
   folderOpenToFirstThumbnailMs: number | null;
   folderOpenToGridCompleteMs: number | null;
+  previewOpenLatencyMs: number | null;
+  previewNavigationLatencyMs: number | null;
+  xmpSyncLatencyMs: number | null;
   cachedThumbnailCount: number;
   totalThumbnailCount: number;
   bytesRead: number;
@@ -281,6 +306,7 @@ interface PerformanceSnapshot {
   standardBytesRead: number;
   thumbnailProfile: ThumbnailProfile;
   sortCacheEnabled: boolean;
+  lastUpdatedAt: number | null;
 }
 
 import logo from "./assets/photo_selector.png";
@@ -316,6 +342,9 @@ export function App() {
   const [performanceSnapshot, setPerformanceSnapshot] = useState<PerformanceSnapshot>({
     folderOpenToFirstThumbnailMs: null,
     folderOpenToGridCompleteMs: null,
+    previewOpenLatencyMs: null,
+    previewNavigationLatencyMs: null,
+    xmpSyncLatencyMs: null,
     cachedThumbnailCount: 0,
     totalThumbnailCount: 0,
     bytesRead: 0,
@@ -323,11 +352,14 @@ export function App() {
     standardBytesRead: 0,
     thumbnailProfile: initialPreferencesRef.current.thumbnailProfile,
     sortCacheEnabled: initialPreferencesRef.current.sortCacheEnabled,
+    lastUpdatedAt: null,
   });
 
   // ── UI state ─────────────────────────────────────────────────────────
   const [currentScreen, setCurrentScreen] = useState<Screen>("browse");
   const [isProjectSelectorOpen, setIsProjectSelectorOpen] = useState(false);
+  const [isFolderTransitionBusy, setIsFolderTransitionBusy] = useState(false);
+  const [folderTransitionLabel, setFolderTransitionLabel] = useState("");
   const [hasWritableFolderAccess, setHasWritableFolderAccess] = useState(false);
   const [isXmpBannerDismissed, setIsXmpBannerDismissed] = useState(false);
   const xmpSyncTimerRef = useRef<number | null>(null);
@@ -371,6 +403,7 @@ export function App() {
   const previewPriorityIdsRef = useRef(new Set<string>());
   const interactiveThumbnailIdsRef = useRef(new Set<string>());
   const folderLoadSessionRef = useRef(0);
+  const folderOpenRequestRef = useRef(0);
   const xmpImportStartTimerRef = useRef<number | null>(null);
   const backgroundThumbnailEnqueueTimerRef = useRef<number | null>(null);
   const backgroundCacheLookupTimerRef = useRef<number | null>(null);
@@ -381,44 +414,178 @@ export function App() {
 
   // ── Restore from IndexedDB on mount ──────────────────────────────────
   useEffect(() => {
-    const persisted = loadPersistedState();
-    if (!persisted) return;
+    let active = true;
 
-    setProjectName(persisted.projectName);
-    setSourceFolderPath(persisted.sourceFolderPath);
-    setHasWritableFolderAccess(false);
+    void (async () => {
+      const persisted = hasDesktopStateApi()
+        ? await getDesktopSessionState()
+        : loadPersistedState();
 
-    void loadImageAssets(PROJECT_ID).then((assetMap) => {
-      if (assetMap.size === 0) return;
-      const loaded = Array.from(assetMap.values());
-      setAllAssets(loaded);
-      bumpPhotoMetadataVersion();
-      const loadedIds = new Set(loaded.map((a) => a.id));
-      const validActiveIds = persisted.activeAssetIds.filter((id) => loadedIds.has(id));
-      setActiveAssetIds(validActiveIds.length > 0 ? validActiveIds : loaded.map((a) => a.id));
-      setCurrentScreen("selection");
-    }).catch(() => {
-      addToast("Errore nel caricamento dei dati salvati. Riseleziona la cartella.", "error");
-    });
+      if (!active || !persisted) {
+        return;
+      }
+
+      setProjectName(persisted.projectName);
+      setSourceFolderPath(persisted.sourceFolderPath);
+      setHasWritableFolderAccess(false);
+
+      try {
+        const assetMap = await loadImageAssets(PROJECT_ID);
+        if (!active || assetMap.size === 0) {
+          return;
+        }
+
+        const loaded = Array.from(assetMap.values());
+        setAllAssets(loaded);
+        bumpPhotoMetadataVersion();
+        const loadedIds = new Set(loaded.map((asset) => asset.id));
+        const validActiveIds = persisted.activeAssetIds.filter((id) => loadedIds.has(id));
+        setActiveAssetIds(validActiveIds.length > 0 ? validActiveIds : loaded.map((asset) => asset.id));
+        setCurrentScreen("selection");
+      } catch {
+        if (active) {
+          addToast("Errore nel caricamento dei dati salvati. Riseleziona la cartella.", "error");
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [addToast, bumpPhotoMetadataVersion]);
 
   // ── Persist state on change ──────────────────────────────────────────
   useEffect(() => {
-    savePersistedState({
+    const nextState: DesktopPersistedState = {
       projectName,
       sourceFolderPath,
       activeAssetIds,
       usesMockData: false,
-    });
+    };
+
+    if (hasDesktopStateApi()) {
+      void saveDesktopSessionState(nextState);
+      return;
+    }
+
+    savePersistedState(nextState);
   }, [projectName, sourceFolderPath, activeAssetIds]);
+
+  useEffect(() => {
+    let active = true;
+    void hydratePhotoSelectorPreferences().then((preferences) => {
+      if (!active) {
+        return;
+      }
+
+      setThumbnailProfile(preferences.thumbnailProfile);
+      setSortCacheEnabled(preferences.sortCacheEnabled);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     setPerformanceSnapshot((current) => ({
       ...current,
       thumbnailProfile,
       sortCacheEnabled,
+      lastUpdatedAt: Date.now(),
     }));
   }, [sortCacheEnabled, thumbnailProfile]);
+
+  useEffect(() => {
+    if (!hasDesktopStateApi()) {
+      return;
+    }
+
+    const nextSnapshot: DesktopPerformanceSnapshot = {
+      folderOpenToFirstThumbnailMs: performanceSnapshot.folderOpenToFirstThumbnailMs,
+      folderOpenToGridCompleteMs: performanceSnapshot.folderOpenToGridCompleteMs,
+      previewOpenLatencyMs: performanceSnapshot.previewOpenLatencyMs,
+      previewNavigationLatencyMs: performanceSnapshot.previewNavigationLatencyMs,
+      xmpSyncLatencyMs: performanceSnapshot.xmpSyncLatencyMs,
+      bytesRead: performanceSnapshot.bytesRead,
+      rawBytesRead: performanceSnapshot.rawBytesRead,
+      standardBytesRead: performanceSnapshot.standardBytesRead,
+      thumbnailProfile: performanceSnapshot.thumbnailProfile,
+      sortCacheEnabled: performanceSnapshot.sortCacheEnabled,
+      lastUpdatedAt: performanceSnapshot.lastUpdatedAt,
+    };
+
+    void recordDesktopPerformanceSnapshot(nextSnapshot);
+  }, [performanceSnapshot]);
+
+  useEffect(() => {
+    if (!hasDesktopStateApi()) {
+      return;
+    }
+
+    const onError = (event: ErrorEvent) => {
+      void logDesktopEvent({
+        channel: "renderer",
+        level: "error",
+        message: event.message || "Renderer error",
+        details: event.filename
+          ? `${event.filename}:${event.lineno}:${event.colno}`
+          : undefined,
+      });
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason instanceof Error
+        ? event.reason.message
+        : typeof event.reason === "string"
+          ? event.reason
+          : JSON.stringify(event.reason);
+      void logDesktopEvent({
+        channel: "renderer",
+        level: "error",
+        message: "Unhandled promise rejection",
+        details: reason,
+      });
+    };
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasDesktopStateApi() || !sourceFolderPath.trim() || allAssets.length === 0) {
+      return;
+    }
+
+    const timestamp = Date.now();
+    const folderName = sourceFolderPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? sourceFolderPath;
+    const catalogState: DesktopFolderCatalogState = {
+      folderPath: sourceFolderPath,
+      folderName,
+      imageCount: allAssets.length,
+      activeAssetIds,
+      lastOpenedAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const assetStates: DesktopFolderCatalogAssetState[] = allAssets.map((asset) => ({
+      assetId: asset.id,
+      fileName: asset.fileName,
+      relativePath: asset.path,
+      absolutePath: getAssetAbsolutePath(asset.id) ?? undefined,
+      sourceFileKey: asset.sourceFileKey,
+      rating: asset.rating ?? 0,
+      pickStatus: asset.pickStatus ?? "unmarked",
+      colorLabel: asset.colorLabel ?? null,
+      customLabels: asset.customLabels ?? [],
+      updatedAt: timestamp,
+    }));
+
+    void saveDesktopFolderCatalogState(catalogState);
+    void saveDesktopFolderAssetStates(sourceFolderPath, assetStates);
+  }, [activeAssetIds, allAssets, sourceFolderPath]);
 
   // ── Cleanup pipeline on unmount ──────────────────────────────────────
   useEffect(() => {
@@ -498,6 +665,7 @@ export function App() {
     }
 
     let hadFailures = false;
+    const syncStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
 
     while (true) {
       if (xmpSyncInFlightRef.current) {
@@ -572,9 +740,65 @@ export function App() {
           xmpSyncInFlightRef.current = null;
         }
       });
+      const syncFinishedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+      setPerformanceSnapshot((current) => ({
+        ...current,
+        xmpSyncLatencyMs: Math.max(0, Math.round(syncFinishedAt - syncStartedAt)),
+        lastUpdatedAt: Date.now(),
+      }));
       hadFailures = hadFailures || result.failed > 0;
     }
   }, [addToast, hasWritableFolderAccess, usesMockData]);
+
+  const suspendActiveFolderWork = useCallback(() => {
+    folderLoadSessionRef.current += 1;
+    pipelineRef.current?.destroy();
+    pipelineRef.current = null;
+
+    if (xmpImportStartTimerRef.current !== null) {
+      window.clearTimeout(xmpImportStartTimerRef.current);
+      xmpImportStartTimerRef.current = null;
+    }
+    if (backgroundThumbnailEnqueueTimerRef.current !== null) {
+      window.clearTimeout(backgroundThumbnailEnqueueTimerRef.current);
+      backgroundThumbnailEnqueueTimerRef.current = null;
+    }
+    if (backgroundCacheLookupTimerRef.current !== null) {
+      window.clearTimeout(backgroundCacheLookupTimerRef.current);
+      backgroundCacheLookupTimerRef.current = null;
+    }
+    if (rawPreviewWarmupTimerRef.current !== null) {
+      window.clearTimeout(rawPreviewWarmupTimerRef.current);
+      rawPreviewWarmupTimerRef.current = null;
+    }
+
+    previewWarmupPipelineRef.current?.destroy();
+    previewWarmupPipelineRef.current = null;
+
+    visibleThumbnailIdsRef.current = new Set();
+    prioritizedThumbnailIdsRef.current = new Set();
+    previewPriorityIdsRef.current = new Set();
+    interactiveThumbnailIdsRef.current = new Set();
+    settledThumbnailIdsRef.current = new Set();
+    thumbnailEntryByIdRef.current = new Map();
+    thumbnailTotalCountRef.current = 0;
+    hasLoggedFirstThumbnailRef.current = false;
+    hasLoggedGridCompleteRef.current = false;
+    clearDesktopQuickPreviewFrameCache();
+
+    setThumbnailProgress({ done: 0, total: 0 });
+    setImportProgress((current) => (
+      current.isOpen
+        ? {
+            ...current,
+            isOpen: false,
+            total: 0,
+            processed: 0,
+            currentFile: null,
+          }
+        : current
+    ));
+  }, []);
 
   // ── Warn before losing unsaved work ──────────────────────────────────
   useEffect(() => {
@@ -851,6 +1075,7 @@ export function App() {
       bytesRead: byteStats.totalBytes,
       rawBytesRead: byteStats.rawBytes,
       standardBytesRead: byteStats.standardBytes,
+      lastUpdatedAt: Date.now(),
     }));
     perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
     perfTime(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
@@ -873,6 +1098,7 @@ export function App() {
       bytesRead: byteStats.totalBytes,
       rawBytesRead: byteStats.rawBytes,
       standardBytesRead: byteStats.standardBytes,
+      lastUpdatedAt: Date.now(),
     }));
     perfTimeEnd(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
   }, []);
@@ -971,49 +1197,22 @@ export function App() {
   }
 
   const stopCurrentImport = useCallback(() => {
-    folderLoadSessionRef.current += 1;
-    pipelineRef.current?.destroy();
-    pipelineRef.current = null;
-
-    if (xmpImportStartTimerRef.current !== null) {
-      window.clearTimeout(xmpImportStartTimerRef.current);
-      xmpImportStartTimerRef.current = null;
-    }
+    suspendActiveFolderWork();
+    folderOpenRequestRef.current += 1;
+    setIsFolderTransitionBusy(false);
+    setFolderTransitionLabel("");
 
     if (xmpSyncTimerRef.current !== null) {
       window.clearTimeout(xmpSyncTimerRef.current);
       xmpSyncTimerRef.current = null;
     }
-    if (backgroundThumbnailEnqueueTimerRef.current !== null) {
-      window.clearTimeout(backgroundThumbnailEnqueueTimerRef.current);
-      backgroundThumbnailEnqueueTimerRef.current = null;
-    }
-    if (backgroundCacheLookupTimerRef.current !== null) {
-      window.clearTimeout(backgroundCacheLookupTimerRef.current);
-      backgroundCacheLookupTimerRef.current = null;
-    }
-    if (rawPreviewWarmupTimerRef.current !== null) {
-      window.clearTimeout(rawPreviewWarmupTimerRef.current);
-      rawPreviewWarmupTimerRef.current = null;
-    }
-    previewWarmupPipelineRef.current?.destroy();
-    previewWarmupPipelineRef.current = null;
 
     revokeImageAssetUrls(allAssetsRef.current);
     clearImageCache();
     assetNameByIdRef.current = new Map();
     assetIndexByIdRef.current = new Map();
-    thumbnailEntryByIdRef.current = new Map();
-    visibleThumbnailIdsRef.current = new Set();
-    prioritizedThumbnailIdsRef.current = new Set();
-    previewPriorityIdsRef.current = new Set();
-    interactiveThumbnailIdsRef.current = new Set();
-    settledThumbnailIdsRef.current = new Set();
-    thumbnailTotalCountRef.current = 0;
     pendingXmpSyncIdsRef.current.clear();
     xmpSnapshotRef.current.clear();
-    hasLoggedFirstThumbnailRef.current = false;
-    hasLoggedGridCompleteRef.current = false;
     cancelReactBatchMetric();
     perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
     perfTimeEnd(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
@@ -1052,14 +1251,18 @@ export function App() {
       ...current,
       folderOpenToFirstThumbnailMs: null,
       folderOpenToGridCompleteMs: null,
+      previewOpenLatencyMs: null,
+      previewNavigationLatencyMs: null,
+      xmpSyncLatencyMs: null,
       cachedThumbnailCount: 0,
       totalThumbnailCount: 0,
       bytesRead: 0,
       rawBytesRead: 0,
       standardBytesRead: 0,
+      lastUpdatedAt: Date.now(),
     }));
     undoRedo.reset();
-  }, [bumpPhotoMetadataVersion, undoRedo]);
+  }, [bumpPhotoMetadataVersion, suspendActiveFolderWork, undoRedo]);
 
   const handleCancelImport = useCallback(() => {
     stopCurrentImport();
@@ -1069,7 +1272,16 @@ export function App() {
   // ── Open folder (instant grid + streaming thumbnails) ────────────────
   const handleFolderOpened = useCallback(
     async ({ name: folderName, entries, rootPath, diagnostics }: FolderOpenResult) => {
-      await flushPendingXmpSync();
+      const openRequestId = folderOpenRequestRef.current + 1;
+      folderOpenRequestRef.current = openRequestId;
+      setIsFolderTransitionBusy(true);
+      setFolderTransitionLabel(rootPath ?? folderName);
+      suspendActiveFolderWork();
+
+      await flushPendingXmpSync().catch(() => false);
+      if (folderOpenRequestRef.current !== openRequestId) {
+        return;
+      }
 
       const thumbnailOptions = getThumbnailPipelineOptions(thumbnailProfile);
       const minimumRawCacheDimension =
@@ -1096,6 +1308,9 @@ export function App() {
       setPerformanceSnapshot({
         folderOpenToFirstThumbnailMs: null,
         folderOpenToGridCompleteMs: null,
+        previewOpenLatencyMs: null,
+        previewNavigationLatencyMs: null,
+        xmpSyncLatencyMs: null,
         cachedThumbnailCount: 0,
         totalThumbnailCount: entries.length,
         bytesRead: 0,
@@ -1103,6 +1318,7 @@ export function App() {
         standardBytesRead: 0,
         thumbnailProfile,
         sortCacheEnabled,
+        lastUpdatedAt: Date.now(),
       });
       perfTime(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
       perfTime(PERF_XMP_IMPORT);
@@ -1110,43 +1326,47 @@ export function App() {
       if (entries.length === 0) {
         perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
         perfTimeEnd(PERF_XMP_IMPORT);
+        setIsFolderTransitionBusy(false);
+        setFolderTransitionLabel("");
         addToast("Nessuna immagine supportata trovata nella cartella.", "warning");
         return;
       }
 
-      // 1. Destroy previous pipeline
-      pipelineRef.current?.destroy();
-      folderLoadSessionRef.current += 1;
+      // 1. Reset session for the new folder load
       const folderLoadSession = folderLoadSessionRef.current;
-      thumbnailEntryByIdRef.current = new Map();
-      visibleThumbnailIdsRef.current = new Set();
-      prioritizedThumbnailIdsRef.current = new Set();
-      previewPriorityIdsRef.current = new Set();
-      if (xmpImportStartTimerRef.current !== null) {
-        window.clearTimeout(xmpImportStartTimerRef.current);
-        xmpImportStartTimerRef.current = null;
-      }
-      if (backgroundThumbnailEnqueueTimerRef.current !== null) {
-        window.clearTimeout(backgroundThumbnailEnqueueTimerRef.current);
-        backgroundThumbnailEnqueueTimerRef.current = null;
-      }
-      if (backgroundCacheLookupTimerRef.current !== null) {
-        window.clearTimeout(backgroundCacheLookupTimerRef.current);
-        backgroundCacheLookupTimerRef.current = null;
-      }
-      if (rawPreviewWarmupTimerRef.current !== null) {
-        window.clearTimeout(rawPreviewWarmupTimerRef.current);
-        rawPreviewWarmupTimerRef.current = null;
-      }
-      previewWarmupPipelineRef.current?.destroy();
-      previewWarmupPipelineRef.current = null;
 
       // 2. Clean up previous blob URLs
       revokeImageAssetUrls(allAssets);
       clearImageCache();
 
       // 3. Create placeholder assets INSTANTLY (no file reading)
-      const assets = buildPlaceholderAssets(entries);
+      const placeholderAssets = buildPlaceholderAssets(entries);
+      const cachedCatalogState = hasDesktopStateApi() && rootPath
+        ? await getDesktopFolderCatalogState(rootPath).catch(() => null)
+        : null;
+      if (folderOpenRequestRef.current !== openRequestId) {
+        return;
+      }
+      const cachedStateByPath = new Map(
+        (cachedCatalogState?.assetStates ?? []).map((assetState) => [
+          assetState.relativePath.toLocaleLowerCase(),
+          assetState,
+        ]),
+      );
+      const assets = placeholderAssets.map((asset) => {
+        const cachedState = cachedStateByPath.get(asset.path.toLocaleLowerCase());
+        if (!cachedState) {
+          return asset;
+        }
+
+        return {
+          ...asset,
+          rating: cachedState.rating,
+          pickStatus: cachedState.pickStatus,
+          colorLabel: cachedState.colorLabel,
+          customLabels: cachedState.customLabels,
+        };
+      });
       const rawPreviewBootstrapIds = assets
         .filter((asset) => isRawFile(asset.fileName))
         .slice(0, RAW_PREVIEW_BOOTSTRAP_COUNT)
@@ -1157,11 +1377,15 @@ export function App() {
 
       setAllAssets(assets);
       bumpPhotoMetadataVersion();
-      setActiveAssetIds([]);
+      const seededActiveAssetIds = (cachedCatalogState?.activeAssetIds ?? [])
+        .filter((assetId) => assets.some((asset) => asset.id === assetId));
+      setActiveAssetIds(seededActiveAssetIds);
       setSourceFolderPath(rootPath ?? folderName);
       setHasWritableFolderAccess(writableAccess);
       setIsXmpBannerDismissed(false);
       setCurrentScreen("selection"); // instant — grid shows immediately
+      setIsFolderTransitionBusy(false);
+      setFolderTransitionLabel("");
       undoRedo.reset();
       pendingXmpSyncIdsRef.current.clear();
       setXmpSyncState({
@@ -1191,6 +1415,14 @@ export function App() {
         diagnostics: nextDiagnostics,
       });
       addToast(`${entries.length} foto trovate in "${folderName}".`, "info");
+      if (hasDesktopStateApi() && rootPath) {
+        void logDesktopEvent({
+          channel: "folder-open",
+          level: "info",
+          message: "Cartella aperta",
+          details: `${rootPath} (${entries.length} file)`,
+        });
+      }
 
       if (rawPreviewBootstrapIds.length > 0) {
         rawPreviewWarmupTimerRef.current = window.setTimeout(() => {
@@ -1336,6 +1568,7 @@ export function App() {
       setPerformanceSnapshot((current) => ({
         ...current,
         totalThumbnailCount: pipelineEntries.length,
+        lastUpdatedAt: Date.now(),
       }));
 
       if (pipelineEntries.length === 0) {
@@ -1453,6 +1686,7 @@ export function App() {
           setPerformanceSnapshot((current) => ({
             ...current,
             cachedThumbnailCount: current.cachedThumbnailCount + validCachedIds.size,
+            lastUpdatedAt: Date.now(),
           }));
 
           for (const assetId of validCachedIds) {
@@ -1582,6 +1816,7 @@ export function App() {
       handleThumbnailError,
       markFirstThumbnailVisible,
       markGridComplete,
+      suspendActiveFolderWork,
       syncThumbnailProgress,
       sortCacheEnabled,
       thumbnailProfile,
@@ -1592,6 +1827,41 @@ export function App() {
   // ── Load mock data ───────────────────────────────────────────────────
 
   // ── Photo metadata changes (with undo history) ───────────────────────
+  const handleDesktopRequestedFolderOpen = useCallback(async (folderPath: string) => {
+    if (
+      typeof window === "undefined"
+      || typeof window.filexDesktop === "undefined"
+      || typeof window.filexDesktop.reopenFolder !== "function"
+    ) {
+      return;
+    }
+
+    const normalizedPath = folderPath.trim();
+    if (!normalizedPath) {
+      return;
+    }
+
+    try {
+      const reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath);
+      if (!reopenedFolder) {
+        addToast("Non sono riuscito ad aprire la cartella richiesta da Esplora file.", "warning");
+        return;
+      }
+
+      await handleFolderOpened(reopenedFolder);
+    } catch (error) {
+      addToast("Apertura cartella dal menu contestuale non riuscita.", "error");
+      if (hasDesktopStateApi()) {
+        void logDesktopEvent({
+          channel: "folder-open",
+          level: "error",
+          message: "Apertura cartella dal menu contestuale fallita",
+          details: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }, [addToast, handleFolderOpened]);
+
   const handlePhotosChange = useCallback((photos: ImageAsset[]) => {
     const previousAssets = allAssetsRef.current;
     const changedIds: string[] = [];
@@ -1888,6 +2158,29 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = subscribeDesktopOpenFolderRequest((folderPath) => {
+      void handleDesktopRequestedFolderOpen(folderPath);
+    });
+    let cancelled = false;
+
+    void (async () => {
+      const pendingFolderPath = await consumePendingDesktopOpenFolderPath();
+      if (!cancelled && pendingFolderPath) {
+        await handleDesktopRequestedFolderOpen(pendingFolderPath);
+      }
+
+      if (!cancelled) {
+        await markDesktopOpenFolderRequestReady();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [handleDesktopRequestedFolderOpen]);
+
+  useEffect(() => {
     void refreshDesktopThumbnailCacheInfo();
     void refreshDesktopCacheLocationRecommendation();
   }, [refreshDesktopCacheLocationRecommendation, refreshDesktopThumbnailCacheInfo]);
@@ -2055,11 +2348,17 @@ export function App() {
                 </span>
               </button>
             ) : null}
+            {isFolderTransitionBusy ? (
+              <div className="app-header__sync-status app-header__sync-status--pending">
+                {`Cambio cartella${folderTransitionLabel ? `: ${folderTransitionLabel}` : "..."}`}
+              </div>
+            ) : null}
             {allAssets.length > 0 ? (
               <button
                 type="button"
                 className="ghost-button"
                 onClick={() => setCurrentScreen("browse")}
+                disabled={isFolderTransitionBusy}
               >
                 Apri cartella
               </button>
@@ -2101,7 +2400,7 @@ export function App() {
               message={hasNativeFolderAccess()
                 ? "La sessione e' stata riaperta senza il collegamento scrivibile alla cartella. Rating, pick e colori non verranno scritti nei sidecar finché non riapri la cartella."
                 : desktopRuntime
-                  ? `La shell desktop FileX e' attiva per ${desktopRuntime.toolName}, ma in questa prima integrazione il flusso cartella/XMP usa ancora il bridge browser. Il collegamento nativo e' il prossimo step.`
+                  ? `La shell desktop FileX e' attiva per ${desktopRuntime.toolName}, ma questa cartella non e' stata aperta con accesso scrivibile completo. Rating, pick e colori resteranno locali finche' non la riapri dal desktop picker.`
                   : "Questo browser usa l'import fallback e non puo' scrivere i sidecar XMP. Per un workflow automatico stile Bridge/Photo Mechanic riapri il tool in Edge o Chrome."}
               type="warning"
               action={sourceFolderPath
@@ -2153,6 +2452,7 @@ export function App() {
             <div className="app-section">
               <FolderBrowser
                 onFolderOpened={handleFolderOpened}
+                isBusy={isFolderTransitionBusy}
               />
             </div>
           ) : null}
@@ -2217,19 +2517,21 @@ export function App() {
             onApply={handleSelectorApply}
           />
         ) : null}
-        <ImportProgressModal
-          isOpen={importProgress.isOpen && !isImportPanelDismissed}
-          phase={importProgress.phase}
-          supported={importProgress.supported}
-          ignored={importProgress.ignored}
-          total={importProgress.total}
-          processed={importProgress.processed}
-          currentFile={importProgress.currentFile}
-          folderLabel={importProgress.folderLabel}
-          diagnostics={importProgress.diagnostics}
-          onDismiss={() => setIsImportPanelDismissed(true)}
-          onCancel={handleCancelImport}
-        />
+        {!desktopRuntime ? (
+          <ImportProgressModal
+            isOpen={importProgress.isOpen && !isImportPanelDismissed}
+            phase={importProgress.phase}
+            supported={importProgress.supported}
+            ignored={importProgress.ignored}
+            total={importProgress.total}
+            processed={importProgress.processed}
+            currentFile={importProgress.currentFile}
+            folderLabel={importProgress.folderLabel}
+            diagnostics={importProgress.diagnostics}
+            onDismiss={() => setIsImportPanelDismissed(true)}
+            onCancel={handleCancelImport}
+          />
+        ) : null}
       </div>
     </ErrorBoundary>
   );

@@ -17,10 +17,34 @@ function buildNsisIncludeContent(tool) {
     new Set([tool.productName, ...(tool.legacyUpgradeDisplayNames ?? [])].filter(Boolean)),
   );
   const shortcutIconPath = `$INSTDIR\\resources\\branding\\${tool.id}.ico`;
+  const shouldInstallExplorerContextMenu = tool.id === "photo-selector-app";
+  const explorerContextMenuLabel = escapeNsisString(`Apri con ${tool.productName}`);
+  const explorerContextMenuKey = "Software\\\\Classes\\\\Directory\\\\shell\\\\FileXPhotoSelectorOpen";
+  const explorerFolderContextMenuKey = "Software\\\\Classes\\\\Folder\\\\shell\\\\FileXPhotoSelectorOpen";
+  const explorerBackgroundContextMenuKey =
+    "Software\\\\Classes\\\\Directory\\\\Background\\\\shell\\\\FileXPhotoSelectorOpen";
 
   const pushLines = displayNames
     .map((displayName) => `  Push "${escapeNsisString(displayName)}"\n  Call uninstallByDisplayName`)
     .join("\n");
+  const contextMenuInstallLines = shouldInstallExplorerContextMenu
+    ? `  WriteRegStr HKCU "${explorerContextMenuKey}" "" "${explorerContextMenuLabel}"
+  WriteRegStr HKCU "${explorerContextMenuKey}" "Icon" "$appExe"
+  WriteRegStr HKCU "${explorerContextMenuKey}\\\\command" "" '"$appExe" --open-folder "%1"'
+  WriteRegStr HKCU "${explorerFolderContextMenuKey}" "" "${explorerContextMenuLabel}"
+  WriteRegStr HKCU "${explorerFolderContextMenuKey}" "Icon" "$appExe"
+  WriteRegStr HKCU "${explorerFolderContextMenuKey}\\\\command" "" '"$appExe" --open-folder "%1"'
+  WriteRegStr HKCU "${explorerBackgroundContextMenuKey}" "" "${explorerContextMenuLabel}"
+  WriteRegStr HKCU "${explorerBackgroundContextMenuKey}" "Icon" "$appExe"
+  WriteRegStr HKCU "${explorerBackgroundContextMenuKey}\\\\command" "" '"$appExe" --open-folder "%V"'
+`
+    : "  ; Nessun menu contestuale Explorer per questo tool.\n";
+  const contextMenuUninstallLines = shouldInstallExplorerContextMenu
+    ? `  DeleteRegKey HKCU "${explorerBackgroundContextMenuKey}"
+  DeleteRegKey HKCU "${explorerFolderContextMenuKey}"
+  DeleteRegKey HKCU "${explorerContextMenuKey}"
+`
+    : "  ; Nessun menu contestuale Explorer da rimuovere.\n";
 
   return `!ifndef BUILD_UNINSTALLER
 !macro customInit
@@ -114,9 +138,16 @@ FunctionEnd
     \${endIf}
   !endif
 
+${contextMenuInstallLines}
+
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
 
   customInstall_done:
+!macroend
+
+!macro customUnInstall
+${contextMenuUninstallLines}
+  System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
 !macroend
 !endif
 `;

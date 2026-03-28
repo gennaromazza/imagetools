@@ -5,6 +5,19 @@ import { preloadImageUrls } from "../services/image-cache";
 import { notePhotoCardRender } from "../services/performance-utils";
 import { COLOR_LABEL_NAMES, COLOR_LABELS, formatAssetStars, getAssetColorLabel, getAssetPickStatus, getAssetRating, getColorShortcutHint, PICK_STATUS_LABELS, resolvePhotoClassificationShortcut, } from "../services/photo-classification";
 import { isRawFile } from "../services/folder-access";
+function areLabelArraysEqual(left, right) {
+    const safeLeft = left ?? [];
+    const safeRight = right ?? [];
+    if (safeLeft.length !== safeRight.length) {
+        return false;
+    }
+    for (let index = 0; index < safeLeft.length; index += 1) {
+        if (safeLeft[index] !== safeRight[index]) {
+            return false;
+        }
+    }
+    return true;
+}
 export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, onExternalDragStart, canExternalDrag = false, customLabelColors = {}, customLabelShortcuts = {}, editable, }) {
     notePhotoCardRender(photo.id);
     const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
@@ -13,7 +26,7 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
     const colorLabel = getAssetColorLabel(photo);
     const customLabels = photo.customLabels ?? [];
     const raw = isRawFile(photo.fileName);
-    const prevClassRef = useRef({ rating, pickStatus, colorLabel });
+    const prevClassRef = useRef({ rating, pickStatus, colorLabel, customLabels });
     const cardRef = useRef(null);
     const wrapperRef = useRef(null);
     const feedbackTimeoutRef = useRef(null);
@@ -52,7 +65,23 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
                 value: colorLabel,
             };
         }
-        prevClassRef.current = { rating, pickStatus, colorLabel };
+        else if (!areLabelArraysEqual(prev.customLabels, customLabels)) {
+            const addedLabels = customLabels.filter((label) => !prev.customLabels.includes(label));
+            const removedLabels = prev.customLabels.filter((label) => !customLabels.includes(label));
+            const affectedLabels = addedLabels.length > 0 ? addedLabels : removedLabels;
+            feedbackTokenRef.current += 1;
+            nextFeedback = {
+                kind: "label",
+                label: addedLabels.length > 0
+                    ? `Label: ${addedLabels.join(", ")}`
+                    : removedLabels.length > 0
+                        ? `Label rimossa: ${removedLabels.join(", ")}`
+                        : "Label aggiornata",
+                token: feedbackTokenRef.current,
+                labels: affectedLabels,
+            };
+        }
+        prevClassRef.current = { rating, pickStatus, colorLabel, customLabels };
         if (feedbackTimeoutRef.current !== null) {
             window.clearTimeout(feedbackTimeoutRef.current);
             feedbackTimeoutRef.current = null;
@@ -71,7 +100,7 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
             setFeedback((current) => (current?.token === nextFeedback?.token ? null : current));
             feedbackTimeoutRef.current = null;
         }, 950);
-    }, [colorLabel, pickStatus, rating]);
+    }, [colorLabel, customLabels, pickStatus, rating]);
     useEffect(() => {
         if (isSelected) {
             setIsToolbarVisible(true);
@@ -163,7 +192,13 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
             }
         }, children: [_jsxs("div", { ref: wrapperRef, className: "photo-card__image-wrapper", children: [previewUrl ? (_jsx("img", { src: previewUrl, alt: photo.fileName, className: "photo-card__image", loading: "lazy", decoding: "async" })) : (_jsx("div", { className: `photo-card__image photo-card__image--placeholder${raw ? " photo-card__image--placeholder-raw" : ""}`, children: _jsx("span", { className: "photo-card__placeholder-icon", children: raw ? "📷" : orientationIcon }) })), _jsxs("div", { className: "photo-card__top-badges", children: [_jsx("span", { className: `asset-pick-badge asset-pick-badge--${pickStatus}`, children: PICK_STATUS_LABELS[pickStatus] }), colorLabel ? (_jsx("span", { className: `asset-color-dot asset-color-dot--${colorLabel}`, title: COLOR_LABEL_NAMES[colorLabel] })) : (_jsx("span", { className: "photo-card__empty-color", children: "Nessun colore" }))] }), _jsx("div", { className: "photo-card__select-badge", children: _jsx("div", { className: `photo-card__check ${isSelected ? "photo-card__check--active" : ""}`, children: isSelected ? "✓" : "" }) }), raw ? (_jsx("span", { className: "asset-pick-badge asset-raw-badge photo-card__raw-badge", children: "RAW" })) : null, _jsx("div", { className: feedback?.kind === "star"
                             ? "photo-card__stars photo-card__stars--feedback"
-                            : "photo-card__stars", children: rating > 0 ? formatAssetStars(photo) : "Senza stelle" }), feedback ? (_jsx("div", { className: `photo-card__feedback photo-card__feedback--${feedback.kind}`, children: feedback.label }, feedback.token)) : null] }), _jsxs("div", { className: "photo-card__info", children: [_jsx("div", { className: "photo-card__name", title: photo.fileName, children: photo.fileName }), _jsxs("div", { className: "photo-card__meta", children: [_jsx("span", { className: "photo-card__orientation-icon", title: photo.orientation, children: orientationIcon }), photo.width > 0 ? (_jsxs("span", { className: "photo-card__dimensions", children: [Math.round(photo.width), "\u00D7", Math.round(photo.height)] })) : null] }), customLabels.length > 0 ? (_jsxs("div", { className: "photo-card__labels", title: customLabels.join(", "), children: [customLabels.slice(0, 2).map((label) => (_jsx("span", { className: `photo-card__label-chip photo-card__label-chip--${customLabelColors[label] ?? "sand"}`, title: customLabelShortcuts[label] ? `${label} · tasto ${customLabelShortcuts[label]}` : label, children: customLabelShortcuts[label] ? `${label} · ${customLabelShortcuts[label]}` : label }, label))), customLabels.length > 2 ? (_jsxs("span", { className: "photo-card__label-chip photo-card__label-chip--more", children: ["+", customLabels.length - 2] })) : null] })) : null] }), editable && isToolbarVisible ? (_jsxs("div", { className: "photo-card__toolbar", onClick: (event) => event.stopPropagation(), children: [_jsx("div", { className: "photo-card__tiny-actions", children: [1, 2, 3, 4, 5].map((value) => (_jsx("button", { type: "button", className: [
+                            : "photo-card__stars", children: rating > 0 ? formatAssetStars(photo) : "Senza stelle" }), feedback ? (_jsx("div", { className: `photo-card__feedback photo-card__feedback--${feedback.kind}`, children: feedback.label }, feedback.token)) : null] }), _jsxs("div", { className: "photo-card__info", children: [_jsx("div", { className: "photo-card__name", title: photo.fileName, children: photo.fileName }), _jsxs("div", { className: "photo-card__meta", children: [_jsx("span", { className: "photo-card__orientation-icon", title: photo.orientation, children: orientationIcon }), photo.width > 0 ? (_jsxs("span", { className: "photo-card__dimensions", children: [Math.round(photo.width), "\u00D7", Math.round(photo.height)] })) : null] }), customLabels.length > 0 ? (_jsxs("div", { className: "photo-card__labels", title: customLabels.join(", "), children: [customLabels.slice(0, 2).map((label) => (_jsx("span", { className: [
+                                    "photo-card__label-chip",
+                                    `photo-card__label-chip--${customLabelColors[label] ?? "sand"}`,
+                                    feedback?.kind === "label" && feedback.labels?.includes(label)
+                                        ? "photo-card__label-chip--flash"
+                                        : "",
+                                ].join(" ").trim(), title: customLabelShortcuts[label] ? `${label} · tasto ${customLabelShortcuts[label]}` : label, children: customLabelShortcuts[label] ? `${label} · ${customLabelShortcuts[label]}` : label }, label))), customLabels.length > 2 ? (_jsxs("span", { className: "photo-card__label-chip photo-card__label-chip--more", children: ["+", customLabels.length - 2] })) : null] })) : null] }), editable && isToolbarVisible ? (_jsxs("div", { className: "photo-card__toolbar", onClick: (event) => event.stopPropagation(), children: [_jsx("div", { className: "photo-card__tiny-actions", children: [1, 2, 3, 4, 5].map((value) => (_jsx("button", { type: "button", className: [
                                 "photo-card__star",
                                 value <= rating ? "photo-card__star--active" : "",
                                 feedback?.kind === "star" && feedback.value === value
@@ -200,7 +235,10 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
     prev.photo.width === next.photo.width &&
     prev.photo.height === next.photo.height &&
     prev.photo.orientation === next.photo.orientation &&
+    areLabelArraysEqual(prev.photo.customLabels, next.photo.customLabels) &&
     getAssetRating(prev.photo) === getAssetRating(next.photo) &&
     getAssetPickStatus(prev.photo) === getAssetPickStatus(next.photo) &&
-    getAssetColorLabel(prev.photo) === getAssetColorLabel(next.photo));
+    getAssetColorLabel(prev.photo) === getAssetColorLabel(next.photo) &&
+    prev.customLabelColors === next.customLabelColors &&
+    prev.customLabelShortcuts === next.customLabelShortcuts);
 //# sourceMappingURL=PhotoCard.js.map

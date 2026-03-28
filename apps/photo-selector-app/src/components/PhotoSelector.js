@@ -8,8 +8,9 @@ import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
 import { CompareModal } from "./CompareModal";
 import { createOnDemandPreviewAsync, getCachedOnDemandPreviewUrl, getSubfolder, extractSubfolders, copyAssetsToFolder, moveAssetsToFolder, saveAssetAs, getAssetRelativePath, getAssetAbsolutePath, getAssetAbsolutePaths, detectChangedAssetsOnDisk, warmOnDemandPreviewCache, } from "../services/folder-access";
 import { COLOR_LABEL_NAMES, COLOR_LABELS, DEFAULT_PHOTO_FILTERS, getAssetColorLabel, getAssetPickStatus, getAssetRating, matchesPhotoFilters, } from "../services/photo-classification";
-import { CUSTOM_LABEL_SHORTCUT_OPTIONS, DEFAULT_CUSTOM_LABEL_TONE, normalizeCustomLabelColors, loadPhotoSelectorPreferences, normalizeCustomLabelName, normalizeCustomLabelsCatalog, normalizeCustomLabelShortcut, normalizeCustomLabelShortcuts, savePhotoSelectorPreferences, } from "../services/photo-selector-preferences";
-import { buildPhotoSortSignature, loadCachedPhotoSortOrder, saveCachedPhotoSortOrder, } from "../services/photo-sort-cache";
+import { CUSTOM_LABEL_SHORTCUT_OPTIONS, DEFAULT_CUSTOM_LABEL_TONE, normalizeCustomLabelColors, hydratePhotoSelectorPreferences, normalizeCustomLabelName, normalizeCustomLabelsCatalog, normalizeCustomLabelShortcut, normalizeCustomLabelShortcuts, savePhotoSelectorPreferences, } from "../services/photo-selector-preferences";
+import { buildPhotoSortSignature, loadCachedPhotoSortOrder, hydratePhotoSortCache, saveCachedPhotoSortOrder, } from "../services/photo-sort-cache";
+import { logDesktopEvent } from "../services/desktop-store";
 const CUSTOM_LABEL_TONES = ["sand", "rose", "green", "blue", "purple", "slate"];
 const GRID_GAP_PX = 12;
 const CARD_STAGE_HEIGHT_RATIO = 0.75;
@@ -25,7 +26,21 @@ const KNOWN_EDITOR_PRESET_PATHS = [
     "C:\\Program Files\\Adobe\\Adobe Photoshop 2023\\Photoshop.exe",
 ];
 function sanitizeEditorExecutablePath(value) {
-    return value.trim().replace(/^"+|"+$/g, "").replace(/\//g, "\\");
+    const normalized = value.trim().replace(/^"+|"+$/g, "");
+    return /^[a-zA-Z]:/.test(normalized) ? normalized.replace(/\//g, "\\") : normalized;
+}
+function isValidDesktopEditorPath(value) {
+    const normalized = sanitizeEditorExecutablePath(value);
+    if (!normalized) {
+        return false;
+    }
+    if (/^[a-zA-Z]:\\/.test(normalized)) {
+        return /\.(exe|bat|cmd)$/i.test(normalized);
+    }
+    if (normalized.startsWith("/")) {
+        return /\.app$/i.test(normalized) || /\/[^/]+$/.test(normalized);
+    }
+    return false;
 }
 function normalizeAssetCustomLabels(values) {
     return normalizeCustomLabelsCatalog(values);
@@ -144,31 +159,35 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     const [isBatchToolsOpen, setIsBatchToolsOpen] = useState(false);
     const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
     const [isCompareOpen, setIsCompareOpen] = useState(false);
-    const [cardSize, setCardSize] = useState(() => {
-        const saved = localStorage.getItem("ps-card-size");
-        return saved ? Math.max(100, Math.min(320, Number(saved))) : 160;
-    });
-    const [rootFolderPathOverride, setRootFolderPathOverride] = useState(() => localStorage.getItem(ROOT_FOLDER_OVERRIDE_KEY) ?? localStorage.getItem(LEGACY_ROOT_FOLDER_KEY) ?? "");
-    const [preferredEditorPath, setPreferredEditorPath] = useState(() => localStorage.getItem("ps-preferred-editor-path") ?? "");
+    const [cardSize, setCardSize] = useState(160);
+    const [rootFolderPathOverride, setRootFolderPathOverride] = useState("");
+    const [preferredEditorPath, setPreferredEditorPath] = useState("");
+    const [preferencesHydrated, setPreferencesHydrated] = useState(false);
+    const [sortCacheHydrationToken, setSortCacheHydrationToken] = useState(0);
+    const [desktopDragOutCheck, setDesktopDragOutCheck] = useState(null);
     const [installedEditorCandidates, setInstalledEditorCandidates] = useState([]);
     const [desktopThumbnailCachePathInput, setDesktopThumbnailCachePathInput] = useState("");
     const setPreferredEditorPathPersisted = useCallback((value) => {
         const normalized = sanitizeEditorExecutablePath(value);
         setPreferredEditorPath(normalized);
-        localStorage.setItem("ps-preferred-editor-path", normalized);
-    }, []);
+        if (preferencesHydrated) {
+            savePhotoSelectorPreferences({ preferredEditorPath: normalized });
+        }
+        void logDesktopEvent({
+            channel: "editor",
+            level: "info",
+            message: "Percorso editor aggiornato",
+            details: normalized || "vuoto",
+        });
+    }, [preferencesHydrated]);
     const setRootFolderPathOverridePersisted = useCallback((value) => {
         setRootFolderPathOverride(value);
-        const trimmed = value.trim();
-        if (trimmed) {
-            localStorage.setItem(ROOT_FOLDER_OVERRIDE_KEY, value);
-            localStorage.setItem(LEGACY_ROOT_FOLDER_KEY, value);
+        if (preferencesHydrated) {
+            savePhotoSelectorPreferences({
+                rootFolderPathOverride: value.trim() ? value : "",
+            });
         }
-        else {
-            localStorage.removeItem(ROOT_FOLDER_OVERRIDE_KEY);
-            localStorage.removeItem(LEGACY_ROOT_FOLDER_KEY);
-        }
-    }, []);
+    }, [preferencesHydrated]);
     const [previewAssetId, setPreviewAssetId] = useState(null);
     const [contextMenuState, setContextMenuState] = useState(null);
     const [focusedPhotoId, setFocusedPhotoId] = useState(null);
@@ -177,6 +196,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     const pendingPreviewRestoreIdRef = useRef(null);
     const lastClickedIdRef = useRef(null);
     const gridRef = useRef(null);
+    const desktopDragImageRef = useRef(null);
     const scrollAnimationFrameRef = useRef(null);
     const pendingScrollTopRef = useRef(null);
     const lastVisibleIdsSignatureRef = useRef("");
@@ -238,21 +258,64 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         ].slice(0, 5));
     }, []);
     useEffect(() => {
-        const preferences = loadPhotoSelectorPreferences();
-        setCustomColorNames(preferences.colorNames);
-        setFilterPresets(preferences.filterPresets);
-        setCustomLabelsCatalog(preferences.customLabelsCatalog);
-        setCustomLabelColors(preferences.customLabelColors);
-        setCustomLabelShortcuts(preferences.customLabelShortcuts);
-        setSelectedThumbnailProfile(preferences.thumbnailProfile);
-        setIsSortCacheEnabled(preferences.sortCacheEnabled);
+        let active = true;
+        void hydratePhotoSelectorPreferences().then((preferences) => {
+            if (!active) {
+                return;
+            }
+            setCustomColorNames(preferences.colorNames);
+            setFilterPresets(preferences.filterPresets);
+            setCustomLabelsCatalog(preferences.customLabelsCatalog);
+            setCustomLabelColors(preferences.customLabelColors);
+            setCustomLabelShortcuts(preferences.customLabelShortcuts);
+            setSelectedThumbnailProfile(preferences.thumbnailProfile);
+            setIsSortCacheEnabled(preferences.sortCacheEnabled);
+            setCardSize(preferences.cardSize);
+            setRootFolderPathOverride(preferences.rootFolderPathOverride);
+            setPreferredEditorPath(sanitizeEditorExecutablePath(preferences.preferredEditorPath));
+            setPreferencesHydrated(true);
+        }).catch(() => {
+            if (active) {
+                setPreferencesHydrated(true);
+            }
+        });
+        return () => {
+            active = false;
+        };
     }, []);
+    useEffect(() => {
+        let active = true;
+        if (!sourceFolderPath || !isSortCacheEnabled) {
+            setSortCacheHydrationToken((current) => current + 1);
+            return;
+        }
+        void hydratePhotoSortCache(sourceFolderPath).then(() => {
+            if (active) {
+                setSortCacheHydrationToken((current) => current + 1);
+            }
+        }).catch(() => {
+            if (active) {
+                setSortCacheHydrationToken((current) => current + 1);
+            }
+        });
+        return () => {
+            active = false;
+        };
+    }, [isSortCacheEnabled, sourceFolderPath]);
     useEffect(() => {
         setSelectedThumbnailProfile(thumbnailProfile);
     }, [thumbnailProfile]);
     useEffect(() => {
         setIsSortCacheEnabled(sortCacheEnabled);
     }, [sortCacheEnabled]);
+    useEffect(() => {
+        if (!preferencesHydrated) {
+            return;
+        }
+        savePhotoSelectorPreferences({
+            cardSize,
+        });
+    }, [cardSize, preferencesHydrated]);
     const applyPhotoChanges = useCallback((id, changes) => {
         if (!onPhotosChange)
             return;
@@ -639,7 +702,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             saveCachedPhotoSortOrder(sourceFolderPath, sortBy, signature, orderedIds);
         }
         return orderedIds;
-    }, [isSortCacheEnabled, metadataPhotos, sortBy, sourceFolderPath]);
+    }, [isSortCacheEnabled, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
     const visiblePhotoIds = useMemo(() => {
         const lowerSearch = deferredSearchQuery.toLowerCase();
         const filteredIds = [];
@@ -714,12 +777,13 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     // Search in all photos so preview doesn't close when filters change
     const previewAsset = previewAssetId ? (assetById.get(previewAssetId) ?? null) : null;
     const previewPriorityIds = useMemo(() => {
-        if (!previewAssetId) {
+        const anchorId = previewAssetId ?? focusedPhotoId;
+        if (!anchorId) {
             return [];
         }
-        const currentIndex = visiblePhotoIndexById.get(previewAssetId);
+        const currentIndex = visiblePhotoIndexById.get(anchorId);
         if (currentIndex === undefined) {
-            return [previewAssetId];
+            return [anchorId];
         }
         const ids = [];
         const previousId = visiblePhotoIds[currentIndex - 1];
@@ -735,7 +799,30 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             ids.push(nextId);
         }
         return ids;
-    }, [previewAssetId, visiblePhotoIds, visiblePhotoIndexById]);
+    }, [focusedPhotoId, previewAssetId, visiblePhotoIds, visiblePhotoIndexById]);
+    const gridResetSignature = useMemo(() => [
+        sourceFolderPath,
+        sortBy,
+        pickFilter,
+        ratingFilter,
+        colorFilter,
+        customLabelFilter,
+        folderFilter,
+        seriesFilter,
+        timeClusterFilter,
+        deferredSearchQuery,
+    ].join("||"), [
+        colorFilter,
+        customLabelFilter,
+        deferredSearchQuery,
+        folderFilter,
+        pickFilter,
+        ratingFilter,
+        seriesFilter,
+        sortBy,
+        sourceFolderPath,
+        timeClusterFilter,
+    ]);
     const openPreview = useCallback((photoId, startZoomed = false) => {
         setFocusedPhotoId(photoId);
         setPreviewStartsZoomed(startZoomed);
@@ -994,27 +1081,18 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         setGridViewport((current) => ({ ...current, scrollTop: 0 }));
         onVisibleIdsChange?.(new Set());
         onPriorityIdsChange?.(hasActiveFilters ? new Set(visiblePhotoIds.slice(0, 240)) : new Set());
-        onPreviewPriorityIdsChange?.(new Set(previewPriorityIds));
+        onPreviewPriorityIdsChange?.(new Set());
     }, [
-        colorFilter,
-        customLabelFilter,
-        folderFilter,
+        gridResetSignature,
         hasActiveFilters,
         onPriorityIdsChange,
         onPreviewPriorityIdsChange,
         onVisibleIdsChange,
-        pickFilter,
-        previewPriorityIds,
-        ratingFilter,
-        deferredSearchQuery,
-        seriesFilter,
-        sortBy,
-        timeClusterFilter,
         visiblePhotoIds,
-        visiblePhotos.length,
     ]);
     function togglePhoto(id, event) {
         const nextSelection = new Set(selectedSet);
+        setFocusedPhotoId(id);
         // Shift+click range selection
         if (event?.shiftKey && lastClickedIdRef.current) {
             const lastIdx = visiblePhotoIndexById.get(lastClickedIdRef.current) ?? -1;
@@ -1117,21 +1195,78 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         updateCustomLabelsForIds(selectedIds, () => [], `${selectedIds.length === 1 ? "1 foto" : `${selectedIds.length} foto`}: etichette personalizzate azzerate`);
     }, [selectedIds, updateCustomLabelsForIds]);
     const selectedAbsolutePaths = useMemo(() => getAssetAbsolutePaths(selectedIds), [selectedIds]);
-    const canStartDesktopDragOut = selectedIds.length > 0
+    const selectedAbsolutePathsSignature = useMemo(() => selectedAbsolutePaths.join("\n"), [selectedAbsolutePaths]);
+    useEffect(() => {
+        let active = true;
+        if (typeof window === "undefined" ||
+            typeof window.filexDesktop?.canStartDragOut !== "function") {
+            setDesktopDragOutCheck(null);
+            return;
+        }
+        if (selectedAbsolutePaths.length === 0) {
+            setDesktopDragOutCheck({
+                ok: false,
+                requestedCount: selectedIds.length,
+                validCount: 0,
+                allowedCount: 0,
+                reason: "empty-selection",
+                message: "Nessun file selezionato per il drag esterno.",
+            });
+            return;
+        }
+        void window.filexDesktop.canStartDragOut(selectedAbsolutePaths).then((result) => {
+            if (!active) {
+                return;
+            }
+            setDesktopDragOutCheck(result);
+        }).catch(() => {
+            if (!active) {
+                return;
+            }
+            setDesktopDragOutCheck({
+                ok: false,
+                requestedCount: selectedIds.length,
+                validCount: selectedAbsolutePaths.length,
+                allowedCount: 0,
+                reason: "invalid-paths",
+                message: "Impossibile validare il drag esterno in questa sessione.",
+            });
+        });
+        return () => {
+            active = false;
+        };
+    }, [selectedAbsolutePaths, selectedAbsolutePathsSignature, selectedIds.length]);
+    const canStartDesktopDragOut = Boolean(desktopDragOutCheck?.ok
         && typeof window !== "undefined"
-        && typeof window.filexDesktop?.startDragOut === "function"
-        && selectedAbsolutePaths.length === selectedIds.length;
+        && typeof window.filexDesktop?.startDragOut === "function");
+    const desktopDragOutMessage = desktopDragOutCheck?.message
+        ?? "Drag esterno disponibile nella versione desktop con cartella aperta in modalita nativa.";
+    const applyDesktopDragImage = useCallback((event) => {
+        const dataTransfer = event.dataTransfer;
+        if (!dataTransfer || typeof document === "undefined") {
+            return;
+        }
+        if (!desktopDragImageRef.current) {
+            const canvas = document.createElement("canvas");
+            canvas.width = 1;
+            canvas.height = 1;
+            desktopDragImageRef.current = canvas;
+        }
+        dataTransfer.setDragImage(desktopDragImageRef.current, 0, 0);
+    }, []);
     const handleSelectionDragStart = useCallback((event) => {
         if (!canStartDesktopDragOut) {
             event.preventDefault();
+            pushTimelineEntry(desktopDragOutMessage);
             return;
         }
         event.dataTransfer.effectAllowed = "copy";
+        applyDesktopDragImage(event);
         event.dataTransfer.setData("text/plain", selectedAbsolutePaths.length === 1
             ? selectedAbsolutePaths[0]
             : `${selectedAbsolutePaths.length} file selezionati`);
         window.filexDesktop.startDragOut(selectedAbsolutePaths);
-    }, [canStartDesktopDragOut, selectedAbsolutePaths]);
+    }, [applyDesktopDragImage, canStartDesktopDragOut, desktopDragOutMessage, pushTimelineEntry, selectedAbsolutePaths]);
     const handleCardExternalDragStart = useCallback((photoId, event) => {
         const draggingSelection = selectedSet.has(photoId);
         const targetPaths = draggingSelection
@@ -1139,14 +1274,15 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             : getAssetAbsolutePaths([photoId]);
         if (targetPaths.length === 0
             || typeof window.filexDesktop?.startDragOut !== "function"
-            || (draggingSelection && targetPaths.length !== selectedIds.length)) {
+            || (draggingSelection && (!desktopDragOutCheck?.ok || targetPaths.length !== selectedIds.length))) {
             event.preventDefault();
             return;
         }
         event.dataTransfer.effectAllowed = "copy";
+        applyDesktopDragImage(event);
         event.dataTransfer.setData("text/plain", targetPaths.length === 1 ? targetPaths[0] : `${targetPaths.length} file selezionati`);
         window.filexDesktop.startDragOut(targetPaths);
-    }, [selectedIds, selectedSet]);
+    }, [applyDesktopDragImage, desktopDragOutCheck?.ok, selectedIds, selectedSet]);
     const clearSelection = useCallback(() => {
         onSelectionChange([]);
         pushTimelineEntry("Selezione svuotata");
@@ -1334,9 +1470,6 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [visiblePhotos.length]);
     useEffect(() => {
-        localStorage.setItem("ps-card-size", String(cardSize));
-    }, [cardSize]);
-    useEffect(() => {
         if (typeof window === "undefined" ||
             typeof window.filexDesktop?.getInstalledEditorCandidates !== "function") {
             return;
@@ -1347,8 +1480,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                 return;
             }
             setInstalledEditorCandidates(candidates);
-            const storedEditorPath = localStorage.getItem("ps-preferred-editor-path") ?? "";
-            const currentPath = sanitizeEditorExecutablePath(preferredEditorPath || storedEditorPath);
+            const currentPath = sanitizeEditorExecutablePath(preferredEditorPath);
             if (currentPath && candidates.some((candidate) => sanitizeEditorExecutablePath(candidate.path) === currentPath)) {
                 return;
             }
@@ -1425,10 +1557,8 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         pushTimelineEntry(`Percorso copiato negli appunti`);
     }, [pushTimelineEntry]);
     const handleOpenWithEditor = useCallback((ids) => {
-        const editorFromStorage = localStorage.getItem("ps-preferred-editor-path") ?? "";
-        const editor = sanitizeEditorExecutablePath(preferredEditorPath || editorFromStorage);
-        const hasAbsoluteEditorPath = /^[a-zA-Z]:\\/.test(editor) && /\.(exe|bat|cmd)$/i.test(editor);
-        if (!hasAbsoluteEditorPath) {
+        const editor = sanitizeEditorExecutablePath(preferredEditorPath);
+        if (!isValidDesktopEditorPath(editor)) {
             alert("Nessun editor associato valido. Imposta il percorso completo dell'editor (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).");
             return;
         }
@@ -1447,13 +1577,40 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             return;
         }
         if (typeof window !== "undefined" &&
-            typeof window.filexDesktop?.openWithEditor === "function") {
-            void window.filexDesktop.openWithEditor(editor, absolutePaths).then((result) => {
+            typeof window.filexDesktop?.sendToEditor === "function") {
+            void window.filexDesktop.sendToEditor(editor, absolutePaths).then((result) => {
                 if (!result?.ok) {
-                    alert(result?.error ?? "Impossibile aprire l'editor esterno.");
+                    const fallbackMessage = result?.status === "invalid-editor"
+                        ? "Editor non trovato o percorso non valido."
+                        : result?.status === "partial"
+                            ? "Solo una parte della selezione ha percorsi validi per l'editor."
+                            : result?.status === "timeout"
+                                ? "L'editor non ha risposto in tempo."
+                                : "Impossibile aprire l'editor esterno.";
+                    alert(result?.error ?? fallbackMessage);
+                    void logDesktopEvent({
+                        channel: "editor",
+                        level: "warn",
+                        message: "Invio a editor non riuscito",
+                        details: JSON.stringify({
+                            requestedCount: result?.requestedCount ?? absolutePaths.length,
+                            launchedCount: result?.launchedCount ?? 0,
+                            status: result?.status ?? "launch-failed",
+                        }),
+                    });
                     return;
                 }
                 pushTimelineEntry(`${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} aperta/e nell'editor`);
+                void logDesktopEvent({
+                    channel: "editor",
+                    level: "info",
+                    message: "Invio a editor completato",
+                    details: JSON.stringify({
+                        requestedCount: result.requestedCount,
+                        launchedCount: result.launchedCount,
+                        status: result.status,
+                    }),
+                });
             });
             return;
         }
@@ -1558,9 +1715,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         if (!value) {
             return { kind: "empty", text: "Non configurato" };
         }
-        const hasDir = /[\\/]/.test(value);
-        const isExecutable = /\.(exe|bat|cmd)$/i.test(value);
-        if (hasDir && isExecutable) {
+        if (isValidDesktopEditorPath(value)) {
             return { kind: "ok", text: "Formato percorso OK" };
         }
         return { kind: "warn", text: "Percorso incompleto o formato non valido" };
@@ -1814,7 +1969,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                                                 setNewBatchCustomLabelName("");
                                                 setNewBatchCustomLabelTone(DEFAULT_CUSTOM_LABEL_TONE);
                                                 setNewBatchCustomLabelShortcut(null);
-                                            }, disabled: !newBatchCustomLabelName.trim(), children: "Aggiungi e assegna" })] })] })] }) })), _jsx(PhotoQuickPreviewModal, { asset: previewAssetWithUrl, assets: visiblePhotos, thumbnailProfile: thumbnailProfile, startZoomed: previewStartsZoomed, customLabelsCatalog: customLabelsCatalog, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, onClose: closePreview, onSelectAsset: handlePreviewAssetSelection, onUpdateAsset: (assetId, changes) => updatePhoto(assetId, changes) }), isSettingsPanelOpen && (_jsxs("aside", { className: "photo-selector__settings-flyout", "aria-label": "Impostazioni workspace", children: [_jsxs("div", { className: "photo-selector__settings-header", children: [_jsx("span", { children: "Impostazioni" }), _jsx("button", { type: "button", className: "icon-button", onClick: () => setIsSettingsPanelOpen(false), title: "Chiudi", children: "\u2715" })] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Nomi etichette colore" }), COLOR_LABELS.map((label) => (_jsxs("label", { className: "photo-selector__settings-color-row", children: [_jsx("span", { className: `asset-color-dot asset-color-dot--${label}` }), _jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: customColorNames[label], onChange: (e) => handleColorNameChange(label, e.target.value), placeholder: COLOR_LABEL_NAMES[label] })] }, label)))] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Etichette personalizzate" }), _jsx("p", { className: "photo-selector__settings-empty", children: "Crea etichette tipo \"Album sposi\", \"Trailer\", \"Dettagli sala\". Ora puoi scegliere subito colore e tasto rapido, assegnarle alla selezione e ritrovarle sia in UI sia nei sidecar XMP." }), _jsx("div", { className: "photo-selector__label-grid", children: customLabelsCatalog.map((label) => (_jsxs("div", { className: "photo-selector__label-editor", children: [_jsx("span", { className: `photo-selector__label-chip photo-selector__label-chip--${resolveCustomLabelTone(label)}`, children: "Tag" }), _jsx("input", { type: "text", defaultValue: label, onBlur: (event) => {
+                                            }, disabled: !newBatchCustomLabelName.trim(), children: "Aggiungi e assegna" })] })] })] }) })), _jsx(PhotoQuickPreviewModal, { asset: previewAssetWithUrl, assets: visiblePhotos, thumbnailProfile: selectedThumbnailProfile, startZoomed: previewStartsZoomed, customLabelsCatalog: customLabelsCatalog, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, onClose: closePreview, onSelectAsset: handlePreviewAssetSelection, onUpdateAsset: (assetId, changes) => updatePhoto(assetId, changes) }), isSettingsPanelOpen && (_jsxs("aside", { className: "photo-selector__settings-flyout", "aria-label": "Impostazioni workspace", children: [_jsxs("div", { className: "photo-selector__settings-header", children: [_jsx("span", { children: "Impostazioni" }), _jsx("button", { type: "button", className: "icon-button", onClick: () => setIsSettingsPanelOpen(false), title: "Chiudi", children: "\u2715" })] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Nomi etichette colore" }), COLOR_LABELS.map((label) => (_jsxs("label", { className: "photo-selector__settings-color-row", children: [_jsx("span", { className: `asset-color-dot asset-color-dot--${label}` }), _jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: customColorNames[label], onChange: (e) => handleColorNameChange(label, e.target.value), placeholder: COLOR_LABEL_NAMES[label] })] }, label)))] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Etichette personalizzate" }), _jsx("p", { className: "photo-selector__settings-empty", children: "Crea etichette tipo \"Album sposi\", \"Trailer\", \"Dettagli sala\". Ora puoi scegliere subito colore e tasto rapido, assegnarle alla selezione e ritrovarle sia in UI sia nei sidecar XMP." }), _jsx("div", { className: "photo-selector__label-grid", children: customLabelsCatalog.map((label) => (_jsxs("div", { className: "photo-selector__label-editor", children: [_jsx("span", { className: `photo-selector__label-chip photo-selector__label-chip--${resolveCustomLabelTone(label)}`, children: "Tag" }), _jsx("input", { type: "text", defaultValue: label, onBlur: (event) => {
                                                 const nextValue = normalizeCustomLabelName(event.target.value);
                                                 if (!nextValue) {
                                                     event.currentTarget.value = label;
@@ -1876,7 +2031,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                                             ? "Fast contact sheet"
                                             : "Bilanciato", ".", selectedThumbnailProfile !== thumbnailProfile ? " Aggiorno subito task attivi e quick preview; riaprire la cartella rigenera tutta la cache col nuovo profilo." : ""] }), performanceSnapshot ? (_jsxs(_Fragment, { children: [_jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Primo thumbnail: ", formatMilliseconds(performanceSnapshot.folderOpenToFirstThumbnailMs), " | Griglia completa: ", formatMilliseconds(performanceSnapshot.folderOpenToGridCompleteMs)] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Cache colpite: ", performanceSnapshot.cachedThumbnailCount, "/", performanceSnapshot.totalThumbnailCount, " | Letture disco: ", formatBytes(performanceSnapshot.bytesRead)] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["RAW: ", formatBytes(performanceSnapshot.rawBytesRead), " | Standard: ", formatBytes(performanceSnapshot.standardBytesRead)] })] })) : null] }), desktopThumbnailCacheInfo ? (_jsxs("div", { className: "photo-selector__settings-section", children: [_jsxs("h4", { className: "photo-selector__settings-section-title", children: ["Cache thumbnail desktop", _jsx("button", { type: "button", className: "photo-selector__settings-info-btn", title: "Spostiamo solo le cache pesanti gestite da Selezione Foto. AppData, Temp e cache Chromium di sistema restano nei percorsi di Windows.", children: "?" })] }), _jsx("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.1rem" }, children: "Spostiamo le cache pesanti gestite da Selezione Foto, non i percorsi di sistema di Windows." }), _jsxs("label", { className: "photo-selector__settings-color-row", children: [_jsx("span", { style: { fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }, children: "Percorso" }), _jsx("div", { className: "photo-selector__settings-input-with-button", children: _jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: desktopThumbnailCachePathInput, onChange: (e) => setDesktopThumbnailCachePathInput(e.target.value), placeholder: desktopThumbnailCacheInfo.defaultPath, spellCheck: false, disabled: isDesktopThumbnailCacheBusy }) })] }), _jsxs("div", { className: "photo-selector__settings-preset-row", children: [_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: handleApplyDesktopThumbnailCachePath, disabled: isDesktopThumbnailCacheBusy || !desktopThumbnailCachePathInput.trim(), children: "Applica" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onChooseDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy || !onChooseDesktopThumbnailCacheDirectory, children: "Sfoglia..." }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onResetDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy || !onResetDesktopThumbnailCacheDirectory, children: "Default" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onUseRecommendedDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy
                                             || !onUseRecommendedDesktopThumbnailCacheDirectory
-                                            || !canUseRecommendedCacheLocation, children: "Usa percorso consigliato" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onClearDesktopThumbnailCache?.(), disabled: isDesktopThumbnailCacheBusy || !onClearDesktopThumbnailCache, children: "Svuota cache" })] }), desktopThumbnailCacheStatus ? (_jsx("p", { className: `photo-selector__settings-path-status photo-selector__settings-path-status--${desktopThumbnailCacheStatus.kind}`, children: desktopThumbnailCacheStatus.text })) : null, desktopCacheRecommendationStatus ? (_jsx("p", { className: `photo-selector__settings-path-status photo-selector__settings-path-status--${desktopCacheRecommendationStatus.kind}`, children: desktopCacheRecommendationStatus.text })) : null, _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: [desktopThumbnailCacheInfo.entryCount, " anteprime, ", formatBytes(desktopThumbnailCacheInfo.totalBytes), " su disco."] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Percorso predefinito: ", desktopThumbnailCacheInfo.defaultPath] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Drive attuale: ", cacheLocationSummary.current] }), cacheLocationSummary.recommended ? (_jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Percorso consigliato: ", cacheLocationSummary.recommended] })) : null] })) : null, _jsxs("div", { className: "photo-selector__settings-section", children: [_jsxs("h4", { className: "photo-selector__settings-section-title", children: ["Preset filtri", _jsx("button", { type: "button", className: "photo-selector__settings-info-btn", title: "Un preset salva la combinazione attuale di filtri (stelle, stato, colore, cartella...) con un nome. Utile per richiamare in un click un insieme di filtri che usi spesso \u2014 es. 'Migliori Pick' = Pick + 4 stelle + verde.", children: "?" })] }), _jsxs("div", { className: "photo-selector__settings-preset-row", children: [_jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: newPresetName, onChange: (e) => setNewPresetName(e.target.value), placeholder: "Nome preset\u2026", onKeyDown: (e) => e.key === "Enter" && handleSavePreset() }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: handleSavePreset, disabled: !newPresetName.trim(), children: "Salva" })] }), filterPresets.length === 0 && (_jsx("p", { className: "photo-selector__settings-empty", children: "Nessun preset salvato." })), filterPresets.map((preset) => (_jsxs("div", { className: "photo-selector__settings-preset-item", children: [_jsx("button", { type: "button", className: "ghost-button ghost-button--small photo-selector__settings-preset-name", onClick: () => applyPreset(preset), children: preset.name }), _jsx("button", { type: "button", className: "icon-button icon-button--danger", onClick: () => removePreset(preset.id), title: "Elimina preset", children: "\u2715" })] }, preset.id)))] })] })), isDesktopCacheRecommendationModalOpen && desktopCacheLocationRecommendation?.recommendedPath ? (_jsx("div", { className: "modal-backdrop", role: "presentation", children: _jsxs("section", { className: "modal-panel photo-selector__cache-recommendation-modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "cache-recommendation-title", children: [_jsx("div", { className: "modal-panel__header", children: _jsxs("div", { children: [_jsx("strong", { id: "cache-recommendation-title", children: "Spazio disco e cache" }), _jsx("p", { children: "C: ha poco spazio libero. Possiamo spostare le cache pesanti gestite da Selezione Foto su un disco pi\u00F9 capiente." })] }) }), _jsxs("div", { className: "modal-panel__body", children: [_jsxs("div", { className: "photo-selector__cache-recommendation-grid", children: [_jsxs("div", { className: "photo-selector__cache-recommendation-card", children: [_jsx("span", { className: "photo-selector__cache-recommendation-label", children: "Percorso attuale" }), _jsx("strong", { children: desktopCacheLocationRecommendation.currentPath }), _jsx("p", { children: cacheLocationSummary.current })] }), _jsxs("div", { className: "photo-selector__cache-recommendation-card", children: [_jsx("span", { className: "photo-selector__cache-recommendation-label", children: "Percorso consigliato" }), _jsx("strong", { children: desktopCacheLocationRecommendation.recommendedPath }), _jsx("p", { children: cacheLocationSummary.recommended ?? "Disco consigliato non disponibile" })] })] }), _jsx("p", { className: "photo-selector__settings-empty", children: "Copiamo thumbnail e quick preview gi\u00E0 create, poi passiamo al nuovo percorso e liberiamo quello vecchio se tutto va bene." })] }), _jsxs("div", { className: "modal-panel__footer", children: [_jsx("button", { type: "button", className: "ghost-button", onClick: () => void onSnoozeDesktopCacheRecommendation?.(), disabled: isDesktopThumbnailCacheBusy || !onSnoozeDesktopCacheRecommendation, children: "Pi\u00F9 tardi" }), _jsxs("div", { className: "photo-selector__cache-recommendation-actions", children: [_jsx("button", { type: "button", className: "ghost-button", onClick: () => void onDismissDesktopCacheRecommendation?.(), disabled: isDesktopThumbnailCacheBusy || !onDismissDesktopCacheRecommendation, children: "Non mostrare pi\u00F9" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => void onUseRecommendedDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy || !onUseRecommendedDesktopThumbnailCacheDirectory, children: "Sposta ora" })] })] })] }) })) : null, contextMenuState && (_jsx("div", { className: "photo-selector__context-backdrop", onClick: () => setContextMenuState(null), onContextMenu: (e) => e.preventDefault() })), contextMenuState ? (_jsx(PhotoSelectionContextMenu, { x: contextMenuState.x, y: contextMenuState.y, targetCount: contextMenuState.targetIds.length, colorLabelNames: customColorNames, hasFileAccess: "showDirectoryPicker" in window, rootFolderPath: effectiveRootFolderPath || undefined, targetPath: contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined, onApplyRating: (rating) => {
+                                            || !canUseRecommendedCacheLocation, children: "Usa percorso consigliato" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onClearDesktopThumbnailCache?.(), disabled: isDesktopThumbnailCacheBusy || !onClearDesktopThumbnailCache, children: "Svuota cache" })] }), desktopThumbnailCacheStatus ? (_jsx("p", { className: `photo-selector__settings-path-status photo-selector__settings-path-status--${desktopThumbnailCacheStatus.kind}`, children: desktopThumbnailCacheStatus.text })) : null, desktopCacheRecommendationStatus ? (_jsx("p", { className: `photo-selector__settings-path-status photo-selector__settings-path-status--${desktopCacheRecommendationStatus.kind}`, children: desktopCacheRecommendationStatus.text })) : null, _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: [desktopThumbnailCacheInfo.entryCount, " anteprime, ", formatBytes(desktopThumbnailCacheInfo.totalBytes), " su disco."] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Percorso predefinito: ", desktopThumbnailCacheInfo.defaultPath] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Drive attuale: ", cacheLocationSummary.current] }), cacheLocationSummary.recommended ? (_jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Percorso consigliato: ", cacheLocationSummary.recommended] })) : null] })) : null, _jsxs("div", { className: "photo-selector__settings-section", children: [_jsxs("h4", { className: "photo-selector__settings-section-title", children: ["Preset filtri", _jsx("button", { type: "button", className: "photo-selector__settings-info-btn", title: "Un preset salva la combinazione attuale di filtri (stelle, stato, colore, cartella...) con un nome. Utile per richiamare in un click un insieme di filtri che usi spesso \u2014 es. 'Migliori Pick' = Pick + 4 stelle + verde.", children: "?" })] }), _jsxs("div", { className: "photo-selector__settings-preset-row", children: [_jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: newPresetName, onChange: (e) => setNewPresetName(e.target.value), placeholder: "Nome preset\u2026", onKeyDown: (e) => e.key === "Enter" && handleSavePreset() }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: handleSavePreset, disabled: !newPresetName.trim(), children: "Salva" })] }), filterPresets.length === 0 && (_jsx("p", { className: "photo-selector__settings-empty", children: "Nessun preset salvato." })), filterPresets.map((preset) => (_jsxs("div", { className: "photo-selector__settings-preset-item", children: [_jsx("button", { type: "button", className: "ghost-button ghost-button--small photo-selector__settings-preset-name", onClick: () => applyPreset(preset), children: preset.name }), _jsx("button", { type: "button", className: "icon-button icon-button--danger", onClick: () => removePreset(preset.id), title: "Elimina preset", children: "\u2715" })] }, preset.id)))] })] })), isDesktopCacheRecommendationModalOpen && desktopCacheLocationRecommendation?.recommendedPath ? (_jsx("div", { className: "modal-backdrop", role: "presentation", children: _jsxs("section", { className: "modal-panel photo-selector__cache-recommendation-modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "cache-recommendation-title", children: [_jsx("div", { className: "modal-panel__header", children: _jsxs("div", { children: [_jsx("strong", { id: "cache-recommendation-title", children: "Spazio disco e cache" }), _jsx("p", { children: "C: ha poco spazio libero. Possiamo spostare le cache pesanti gestite da Selezione Foto su un disco pi\u00F9 capiente." })] }) }), _jsxs("div", { className: "modal-panel__body", children: [_jsxs("div", { className: "photo-selector__cache-recommendation-grid", children: [_jsxs("div", { className: "photo-selector__cache-recommendation-card", children: [_jsx("span", { className: "photo-selector__cache-recommendation-label", children: "Percorso attuale" }), _jsx("strong", { children: desktopCacheLocationRecommendation.currentPath }), _jsx("p", { children: cacheLocationSummary.current })] }), _jsxs("div", { className: "photo-selector__cache-recommendation-card", children: [_jsx("span", { className: "photo-selector__cache-recommendation-label", children: "Percorso consigliato" }), _jsx("strong", { children: desktopCacheLocationRecommendation.recommendedPath }), _jsx("p", { children: cacheLocationSummary.recommended ?? "Disco consigliato non disponibile" })] })] }), _jsx("p", { className: "photo-selector__settings-empty", children: "Copiamo thumbnail e quick preview gi\u00E0 create, poi passiamo al nuovo percorso e liberiamo quello vecchio se tutto va bene." })] }), _jsxs("div", { className: "modal-panel__footer", children: [_jsx("button", { type: "button", className: "ghost-button", onClick: () => void onSnoozeDesktopCacheRecommendation?.(), disabled: isDesktopThumbnailCacheBusy || !onSnoozeDesktopCacheRecommendation, children: "Pi\u00F9 tardi" }), _jsxs("div", { className: "photo-selector__cache-recommendation-actions", children: [_jsx("button", { type: "button", className: "ghost-button", onClick: () => void onDismissDesktopCacheRecommendation?.(), disabled: isDesktopThumbnailCacheBusy || !onDismissDesktopCacheRecommendation, children: "Non mostrare pi\u00F9" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => void onUseRecommendedDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy || !onUseRecommendedDesktopThumbnailCacheDirectory, children: "Sposta ora" })] })] })] }) })) : null, contextMenuState && (_jsx("div", { className: "photo-selector__context-backdrop", onClick: () => setContextMenuState(null), onContextMenu: (e) => e.preventDefault() })), contextMenuState ? (_jsx(PhotoSelectionContextMenu, { x: contextMenuState.x, y: contextMenuState.y, targetCount: contextMenuState.targetIds.length, colorLabelNames: customColorNames, hasFileAccess: Boolean(window.filexDesktop?.sendToEditor) || "showDirectoryPicker" in window, rootFolderPath: effectiveRootFolderPath || undefined, targetPath: contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined, onApplyRating: (rating) => {
                     applyBatchChanges(contextMenuState.targetIds, { rating });
                     setContextMenuState(null);
                 }, onApplyPickStatus: (pickStatus) => {
