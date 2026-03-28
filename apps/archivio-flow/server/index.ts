@@ -6,7 +6,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import sharp from "sharp";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 const app = express();
 app.use(cors());
@@ -16,14 +16,38 @@ const PORT = parseInt(process.env.PORT ?? "3003", 10);
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 // Jobs registry — stored next to this server file
-const DATA_DIR = path.join(SERVER_DIR, "data");
+const LEGACY_DATA_DIR = path.join(SERVER_DIR, "data");
+const DATA_DIR = process.env.ARCHIVIO_FLOW_DATA_DIR?.trim()
+  ? path.resolve(process.env.ARCHIVIO_FLOW_DATA_DIR)
+  : LEGACY_DATA_DIR;
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
+function migrateLegacyDataIfNeeded(): void {
+  if (DATA_DIR === LEGACY_DATA_DIR) return;
+
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const legacyJobsPath = path.join(LEGACY_DATA_DIR, "jobs.json");
+    const legacySettingsPath = path.join(LEGACY_DATA_DIR, "settings.json");
+
+    if (!fs.existsSync(JOBS_FILE) && fs.existsSync(legacyJobsPath)) {
+      fs.copyFileSync(legacyJobsPath, JOBS_FILE);
+    }
+    if (!fs.existsSync(SETTINGS_FILE) && fs.existsSync(legacySettingsPath)) {
+      fs.copyFileSync(legacySettingsPath, SETTINGS_FILE);
+    }
+  } catch {
+    /* ignore migration issues and continue with empty storage */
+  }
+}
+
+migrateLegacyDataIfNeeded();
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-interface SdCard {
+export interface SdCard {
   deviceId: string;
   volumeName: string;
   totalSize: number;
@@ -31,7 +55,7 @@ interface SdCard {
   path: string;
 }
 
-interface Job {
+export interface Job {
   id: string;
   nomeLavoro: string;
   dataLavoro: string;
@@ -47,13 +71,13 @@ interface Job {
   hasLowQualityFiles?: boolean;
 }
 
-interface ArchiveHierarchyConfig {
+export interface ArchiveHierarchyConfig {
   yearLevel: number | null;
   categoryLevel: number | null;
   jobLevel: number;
 }
 
-interface ImportRequest {
+export interface ImportRequest {
   sdPath: string;
   nomeLavoro: string;
   dataLavoro: string;
@@ -75,7 +99,7 @@ interface FilterCriteria {
   mtimeTo?: string;
 }
 
-interface ImportProgressState {
+export interface ImportProgressState {
   active: boolean;
   phase: "idle" | "copying" | "compressing" | "done" | "error";
   startedAt: number | null;
@@ -99,7 +123,7 @@ interface ImportProgressState {
   error: string | null;
 }
 
-interface LowQualityProgressState {
+export interface LowQualityProgressState {
   active: boolean;
   jobId: string;
   jobName: string;
@@ -124,9 +148,12 @@ const COPY_CONCURRENCY_MAX = 6;
 const COPY_CONCURRENCY_MIN = 2;
 const JPG_CONCURRENCY = 2;
 const JOB_FILE_COUNT_CACHE_TTL_MS = 10 * 60 * 1000;
-const IMPORTABLE_EXT = new Set([
+const RAW_EXT = new Set([
   ".raf", ".cr2", ".cr3", ".arw", ".nef", ".dng", ".orf", ".rw2", ".pef", ".srw",
-  ".jpg", ".jpeg", ".xmp",
+]);
+const JPG_EXT = new Set([".jpg", ".jpeg"]);
+const COPY_EXCLUDED_BASENAMES = new Set([
+  ".import-manifest.json",
 ]);
 
 const jobFileCountCache = new Map<string, { count: number; expiresAt: number }>();
@@ -158,6 +185,7 @@ function createEmptyImportProgress(): ImportProgressState {
 }
 
 let importProgress: ImportProgressState = createEmptyImportProgress();
+let importCancelRequested = false;
 
 function createEmptyLowQualityProgress(): LowQualityProgressState {
   return {
@@ -338,8 +366,8 @@ function buildDestinationFileName(params: {
   return `${base}_${suffix}${ext}`;
 }
 
-function isImportableFile(filePath: string): boolean {
-  return IMPORTABLE_EXT.has(path.extname(filePath).toLowerCase());
+function isCopyableFile(filePath: string): boolean {
+  return !COPY_EXCLUDED_BASENAMES.has(path.basename(filePath).toLowerCase());
 }
 
 function parseFilterCriteria(criteria: FilterCriteria): {
@@ -527,7 +555,7 @@ async function safeCopyFileVerified(
   }
 }
 
-function loadJobs(): Job[] {
+export function loadJobs(): Job[] {
   try {
     if (fs.existsSync(JOBS_FILE)) {
       return JSON.parse(fs.readFileSync(JOBS_FILE, "utf-8")) as Job[];
@@ -566,7 +594,7 @@ function incrementJobFiles(jobId: string, incremento: number, contrattoLink?: st
   return updated;
 }
 
-function updateJobContractLink(jobId: string, contrattoLink: string | undefined): Job | null {
+export function updateJobContractLink(jobId: string, contrattoLink: string | undefined): Job | null {
   const jobs = loadJobs();
   const idx = jobs.findIndex((j) => j.id === jobId);
   if (idx < 0) return null;
@@ -580,7 +608,7 @@ function updateJobContractLink(jobId: string, contrattoLink: string | undefined)
   return updated;
 }
 
-function deleteJob(jobId: string): boolean {
+export function deleteJob(jobId: string): boolean {
   const jobs = loadJobs();
   const next = jobs.filter((job) => job.id !== jobId);
   if (next.length === jobs.length) return false;
@@ -600,7 +628,7 @@ function shouldPruneMissingJob(job: Job): boolean {
   return fs.existsSync(rootPath);
 }
 
-function cleanupMissingJobs(): Job[] {
+export function cleanupMissingJobs(): Job[] {
   const jobs = loadJobs();
   const next = jobs.filter((job) => !shouldPruneMissingJob(job));
   if (next.length !== jobs.length) {
@@ -696,13 +724,11 @@ function shouldSkipSourceFileForLowQuality(sourceRoot: string, sourceFile: strin
   return isLowQualityDirName(firstSegment) || isExportDirName(firstSegment);
 }
 
-async function collectJpgSourcesForLowQuality(jobFolderPath: string): Promise<{ sourceRoot: string; jpgFiles: string[] }> {
+export async function collectJpgSourcesForLowQuality(jobFolderPath: string): Promise<{ sourceRoot: string; jpgFiles: string[] }> {
   const candidateRoots = [
     path.join(jobFolderPath, "FOTO_SD"),
     jobFolderPath,
   ];
-  const JPG_EXT = new Set([".jpg", ".jpeg"]);
-
   for (const candidateRoot of candidateRoots) {
     if (!fs.existsSync(candidateRoot)) continue;
 
@@ -726,7 +752,7 @@ async function countImportableFilesInDirectory(rootPath: string, applyJobRootSki
 
   let count = 0;
   for await (const srcFile of walkFiles(rootPath)) {
-    if (!isImportableFile(srcFile)) continue;
+    if (!isCopyableFile(srcFile)) continue;
     if (applyJobRootSkips && shouldSkipSourceFileForLowQuality(rootPath, srcFile)) continue;
     count += 1;
   }
@@ -774,7 +800,7 @@ function withFolderStatus(job: Job): Job {
   };
 }
 
-async function hydrateArchiveListJob(job: Job): Promise<Job> {
+export async function hydrateArchiveListJob(job: Job): Promise<Job> {
   const jobWithStatus = withFolderStatus(job);
   if (!jobWithStatus.folderExists) return jobWithStatus;
 
@@ -876,7 +902,7 @@ function sanitizeHierarchyLevel(rawValue: unknown, fallback: number | null, min 
   return Math.min(max, Math.max(min, parsed));
 }
 
-function normalizeArchiveHierarchy(raw: Partial<ArchiveHierarchyConfig> | undefined): ArchiveHierarchyConfig {
+export function normalizeArchiveHierarchy(raw: Partial<ArchiveHierarchyConfig> | undefined): ArchiveHierarchyConfig {
   const normalized: ArchiveHierarchyConfig = {
     yearLevel: sanitizeHierarchyLevel(raw?.yearLevel, 1),
     categoryLevel: sanitizeHierarchyLevel(raw?.categoryLevel, 2),
@@ -1088,7 +1114,7 @@ function looksLikeJobFolder(dirPath: string): boolean {
   }
 }
 
-async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[], hierarchy: ArchiveHierarchyConfig): Promise<Job[]> {
+export async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[], hierarchy: ArchiveHierarchyConfig): Promise<Job[]> {
   const normalizedRoot = archiveRoot.trim();
   if (!normalizedRoot) return [];
 
@@ -1175,7 +1201,7 @@ async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[], hierar
   return discovered;
 }
 
-interface Settings {
+export interface Settings {
   archiveRoot: string;
   defaultDestinazione: string;
   defaultAutore: string;
@@ -1183,7 +1209,7 @@ interface Settings {
   archiveHierarchy: ArchiveHierarchyConfig;
 }
 
-function loadSettings(): Settings {
+export function loadSettings(): Settings {
   try {
     if (!fs.existsSync(SETTINGS_FILE) && fs.existsSync(`${SETTINGS_FILE}.tmp`)) {
       fs.renameSync(`${SETTINGS_FILE}.tmp`, SETTINGS_FILE);
@@ -1213,7 +1239,7 @@ function loadSettings(): Settings {
   };
 }
 
-function saveSettings(s: Settings): void {
+export function saveSettings(s: Settings): void {
   writeJsonAtomic(SETTINGS_FILE, s);
 }
 
@@ -1294,13 +1320,70 @@ function updateLowQualityProgress(patch: Partial<LowQualityProgressState>): void
   lowQualityProgress.estimatedRemainingSec = computeLowQualityEstimatedRemainingSec(lowQualityProgress);
 }
 
+interface MockInvocationResult {
+  statusCode: number;
+  body: unknown;
+  headers: Record<string, string>;
+}
+
+function createMockResponse(resolve: (result: MockInvocationResult) => void): Response {
+  let statusCode = 200;
+  const headers: Record<string, string> = {};
+  const response = {
+    status(code: number) {
+      statusCode = code;
+      return response;
+    },
+    json(body: unknown) {
+      resolve({ statusCode, body, headers });
+      return response;
+    },
+    send(body: unknown) {
+      resolve({ statusCode, body, headers });
+      return response;
+    },
+    setHeader(name: string, value: string) {
+      headers[name.toLowerCase()] = value;
+      return response;
+    },
+  } as unknown as Response;
+
+  return response;
+}
+
+async function invokeHandler(
+  handler: (req: Request, res: Response) => void | Promise<void>,
+  request: Partial<Pick<Request, "body" | "query" | "params">>,
+): Promise<MockInvocationResult> {
+  return await new Promise<MockInvocationResult>((resolve, reject) => {
+    const req = {
+      body: request.body ?? {},
+      query: request.query ?? {},
+      params: request.params ?? {},
+    } as Request;
+    const res = createMockResponse(resolve);
+
+    Promise.resolve(handler(req, res)).catch(reject);
+  });
+}
+
+export async function cancelImportService(): Promise<{ ok: boolean; active: boolean }> {
+  importCancelRequested = importProgress.active;
+  if (importProgress.active) {
+    updateImportProgress({
+      error: "Importazione in annullamento...",
+    });
+  }
+  return { ok: true, active: importProgress.active };
+}
+
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 /**
  * POST /api/browse-folder
  * Opens a native Windows folder browser dialog and returns the selected path.
  */
-app.post("/api/browse-folder", (req: Request, res: Response) => {
+const browseFolderHandler = (req: Request, res: Response) => {
   const scriptPath = path.join(os.tmpdir(), `archivio-browse-${Date.now()}.ps1`);
   const script = [
     "Add-Type -AssemblyName System.Windows.Forms",
@@ -1322,20 +1405,22 @@ app.post("/api/browse-folder", (req: Request, res: Response) => {
     try { fs.unlinkSync(scriptPath); } catch { /* ignore */ }
     res.status(500).json({ error: "Impossibile aprire il selettore cartelle" });
   }
-});
+};
+app.post("/api/browse-folder", browseFolderHandler);
 
 /**
  * GET /api/settings
  */
-app.get("/api/settings", (_req: Request, res: Response) => {
+const getSettingsHandler = (_req: Request, res: Response) => {
   res.json(loadSettings());
-});
+};
+app.get("/api/settings", getSettingsHandler);
 
 /**
  * GET /api/import-progress
  * Returns live import progress snapshot for UI polling.
  */
-app.get("/api/import-progress", (_req: Request, res: Response) => {
+const getImportProgressHandler = (_req: Request, res: Response) => {
   const copySkipped = Math.max(0, importProgress.skippedFiles - importProgress.manifestSkippedFiles);
   const completedScheduled = importProgress.copiedFiles + copySkipped;
   const knownTotal = Math.max(importProgress.plannedFiles, completedScheduled);
@@ -1349,13 +1434,14 @@ app.get("/api/import-progress", (_req: Request, res: Response) => {
     knownTotal,
     progressPct,
   });
-});
+};
+app.get("/api/import-progress", getImportProgressHandler);
 
 /**
  * GET /api/low-quality-progress
  * Returns progress snapshot for BASSA_QUALITA generation.
  */
-app.get("/api/low-quality-progress", (_req: Request, res: Response) => {
+const getLowQualityProgressHandler = (_req: Request, res: Response) => {
   const progressPct = lowQualityProgress.totalJpg > 0
     ? Math.min(100, Math.round((lowQualityProgress.processedJpg / lowQualityProgress.totalJpg) * 100))
     : 0;
@@ -1364,12 +1450,13 @@ app.get("/api/low-quality-progress", (_req: Request, res: Response) => {
     ...lowQualityProgress,
     progressPct,
   });
-});
+};
+app.get("/api/low-quality-progress", getLowQualityProgressHandler);
 
 /**
  * POST /api/settings
  */
-app.post("/api/settings", (req: Request, res: Response) => {
+const saveSettingsHandler = (req: Request, res: Response) => {
   const { archiveRoot, defaultDestinazione, defaultAutore, cartellePredefinite, archiveHierarchy } = req.body as Partial<Settings>;
   const current = loadSettings();
   const normalizedCartelle = Array.isArray(cartellePredefinite)
@@ -1388,14 +1475,15 @@ app.post("/api/settings", (req: Request, res: Response) => {
   };
   saveSettings(updated);
   res.json({ ok: true, settings: updated });
-});
+};
+app.post("/api/settings", saveSettingsHandler);
 
 /**
  * GET /api/sd-cards
  * Lists removable drives on Windows via PowerShell + WMI.
  * Returns empty array if none found or command unavailable.
  */
-app.get("/api/sd-cards", (_req: Request, res: Response) => {
+const getSdCardsHandler = (_req: Request, res: Response) => {
   const scriptPath = path.join(os.tmpdir(), `archivio-sd-cards-${Date.now()}.ps1`);
   try {
     const script = [
@@ -1433,13 +1521,14 @@ app.get("/api/sd-cards", (_req: Request, res: Response) => {
   } finally {
     try { fs.unlinkSync(scriptPath); } catch { /* ignore */ }
   }
-});
+};
+app.get("/api/sd-cards", getSdCardsHandler);
 
 /**
  * GET /api/sd-preview?path=E:\
  * Returns file counts for a given path (used to preview SD card contents).
  */
-app.get("/api/sd-preview", async (req: Request, res: Response) => {
+const getSdPreviewHandler = async (req: Request, res: Response) => {
   const sdPath = req.query["path"] as string | undefined;
   if (!sdPath) return void res.status(400).json({ error: "path mancante" });
 
@@ -1464,13 +1553,14 @@ app.get("/api/sd-preview", async (req: Request, res: Response) => {
   } catch {
     res.status(500).json({ error: "Impossibile leggere la SD" });
   }
-});
+};
+app.get("/api/sd-preview", getSdPreviewHandler);
 
 /**
  * POST /api/filter-preview
  * Lightweight preview for multi-job SD filtering.
  */
-app.post("/api/filter-preview", async (req: Request, res: Response) => {
+const getFilterPreviewHandler = async (req: Request, res: Response) => {
   const {
     sdPath,
     fileNameIncludes,
@@ -1506,9 +1596,6 @@ app.post("/api/filter-preview", async (req: Request, res: Response) => {
   }
 
   const sampleLimit = Math.max(1, Math.min(5000, Number(maxSamples) || 36));
-  const JPG_EXT = new Set([".jpg", ".jpeg"]);
-  const RAW_EXT = new Set([".raf", ".cr2", ".cr3", ".arw", ".nef", ".dng", ".orf", ".rw2", ".pef", ".srw"]);
-
   let scannedFiles = 0;
   let matchedFiles = 0;
   let matchedRawFiles = 0;
@@ -1520,7 +1607,7 @@ app.post("/api/filter-preview", async (req: Request, res: Response) => {
 
   for await (const srcFile of walkFiles(sdNorm)) {
     scannedFiles += 1;
-    if (!isImportableFile(srcFile)) continue;
+    if (!isCopyableFile(srcFile)) continue;
 
     const fileName = path.basename(srcFile);
     let sourceStat: fs.Stats;
@@ -1594,13 +1681,14 @@ app.post("/api/filter-preview", async (req: Request, res: Response) => {
     maxMtimeMs: maxMtimeMsValue,
     sampleFiles,
   });
-});
+};
+app.post("/api/filter-preview", getFilterPreviewHandler);
 
 /**
  * GET /api/preview-image
  * Returns a lightweight JPG thumbnail for preview cards.
  */
-app.get("/api/preview-image", async (req: Request, res: Response) => {
+const getPreviewImageHandler = async (req: Request, res: Response) => {
   const sdPath = req.query["sdPath"] as string | undefined;
   const filePath = req.query["filePath"] as string | undefined;
   if (!sdPath || !filePath) {
@@ -1636,15 +1724,17 @@ app.get("/api/preview-image", async (req: Request, res: Response) => {
   } catch {
     res.status(415).json({ error: "Impossibile generare anteprima" });
   }
-});
+};
+app.get("/api/preview-image", getPreviewImageHandler);
 
 /**
  * POST /api/import
  * Full import pipeline: create folders, copy files, (optionally) rename + compress.
  * Saves job to registry.
  */
-app.post("/api/import", async (req: Request, res: Response) => {
+const importHandler = async (req: Request, res: Response) => {
   const startedAt = Date.now();
+  importCancelRequested = false;
   const {
     sdPath,
     nomeLavoro,
@@ -1711,15 +1801,21 @@ app.post("/api/import", async (req: Request, res: Response) => {
 
   // ── Create folder structure ──────────────────────────────────────────────────
   const fotoSdDir = path.join(jobRoot, "FOTO_SD");
+  const autoreFolder = sanitizeFolderSegment(autore ?? "");
+  if (!autoreFolder) {
+    return void res.status(400).json({ error: "Nome autore non valido per creare la cartella" });
+  }
+  const autoreFotoDir = path.join(fotoSdDir, autoreFolder);
   const sottoCartellaPulita = sanitizeFolderSegment(sottoCartella ?? "");
   const targetFotoDir = sottoCartellaPulita
-    ? path.join(fotoSdDir, sottoCartellaPulita)
-    : fotoSdDir;
+    ? path.join(autoreFotoDir, sottoCartellaPulita)
+    : autoreFotoDir;
   const bassaQualitaDir = path.join(jobRoot, "BASSA_QUALITA");
   const exportDir = path.join(jobRoot, "EXPORT");
 
   try {
     fs.mkdirSync(fotoSdDir, { recursive: true });
+    fs.mkdirSync(autoreFotoDir, { recursive: true });
     fs.mkdirSync(targetFotoDir, { recursive: true });
     fs.mkdirSync(bassaQualitaDir, { recursive: true });
     fs.mkdirSync(exportDir, { recursive: true });
@@ -1738,7 +1834,7 @@ app.post("/api/import", async (req: Request, res: Response) => {
 
   const scanSampleStartedAt = Date.now();
   const sampled = await collectSampleFiles(sdNorm, 50).catch(() => [] as string[]);
-  const sampleFiles = sampled.filter((f) => isImportableFile(f)).slice(0, 30);
+  const sampleFiles = sampled.filter((f) => isCopyableFile(f)).slice(0, 30);
   const averageSize = await estimateAverageFileSize(sampleFiles);
   const initialCopyConcurrency = Math.max(
     COPY_CONCURRENCY_MIN,
@@ -1811,6 +1907,9 @@ app.post("/api/import", async (req: Request, res: Response) => {
     let taskPromise: Promise<void>;
     taskPromise = (async () => {
       try {
+        if (importCancelRequested) {
+          throw new Error("Importazione annullata");
+        }
         const result = await safeCopyFileVerified(task.srcFile, task.destPath, task.sourceSize);
         if (result === "copied") {
           copiedDestPaths.push(task.destPath);
@@ -1859,9 +1958,12 @@ app.post("/api/import", async (req: Request, res: Response) => {
 
   try {
     for await (const srcFile of walkFiles(sdNorm)) {
+      if (importCancelRequested) {
+        throw new Error("Importazione annullata");
+      }
       scannedFiles += 1;
       updateImportProgress({ scannedFiles });
-      if (!isImportableFile(srcFile)) {
+      if (!isCopyableFile(srcFile)) {
         continue;
       }
 
@@ -1929,16 +2031,24 @@ app.post("/api/import", async (req: Request, res: Response) => {
     }
 
     await Promise.all(inFlight);
+    if (importCancelRequested) {
+      throw new Error("Importazione annullata");
+    }
     queueManifestFlush(true);
     await manifestFlushChain;
   } catch (err) {
     updateImportProgress({
       active: false,
       phase: "error",
-      error: "Errore durante scansione/copia streaming",
+      error: String(err).includes("annullata") ? "Importazione annullata" : "Errore durante scansione/copia streaming",
       inFlight: 0,
     });
-    return void res.status(500).json({ error: "Errore durante scansione/copia streaming: " + String(err) });
+    importCancelRequested = false;
+    return void res.status(String(err).includes("annullata") ? 499 : 500).json({
+      error: String(err).includes("annullata")
+        ? "Importazione annullata"
+        : "Errore durante scansione/copia streaming: " + String(err),
+    });
   }
   const scanMs = Date.now() - scanStartedAt;
   const copyMs = Date.now() - copyStartedAt;
@@ -1948,10 +2058,12 @@ app.post("/api/import", async (req: Request, res: Response) => {
   const compressStartedAt = Date.now();
   if (generaJpg) {
     updateImportProgress({ phase: "compressing", inFlight: 0 });
-    const JPG_EXT = new Set([".jpg", ".jpeg"]);
     const jpgFiles = copiedDestPaths.filter((f) => JPG_EXT.has(path.extname(f).toLowerCase()));
     updateImportProgress({ jpgPlanned: jpgFiles.length, jpgDone: 0 });
     await runWithConcurrency(jpgFiles, JPG_CONCURRENCY, async (src) => {
+      if (importCancelRequested) {
+        return;
+      }
       const relativeFromFotoSd = path.relative(fotoSdDir, src);
       const destPath = path.join(bassaQualitaDir, relativeFromFotoSd);
       try {
@@ -1966,6 +2078,16 @@ app.post("/api/import", async (req: Request, res: Response) => {
         /* Skip unreadable files silently */
       }
     });
+    if (importCancelRequested) {
+      updateImportProgress({
+        active: false,
+        phase: "error",
+        inFlight: 0,
+        error: "Importazione annullata",
+      });
+      importCancelRequested = false;
+      return void res.status(499).json({ error: "Importazione annullata" });
+    }
   }
   const compressMs = Date.now() - compressStartedAt;
 
@@ -2029,13 +2151,15 @@ app.post("/api/import", async (req: Request, res: Response) => {
     copyConcurrency: copyController.getLimit(),
     error: null,
   });
-});
+  importCancelRequested = false;
+};
+app.post("/api/import", importHandler);
 
 /**
  * GET /api/jobs
  * Returns all saved jobs (newest first).
  */
-app.get("/api/jobs", async (_req: Request, res: Response) => {
+const listJobsHandler = async (_req: Request, res: Response) => {
   const settings = loadSettings();
   const registeredJobs = cleanupMissingJobs()
     .map((job) => withArchiveMetadata(job, settings.archiveRoot, settings.archiveHierarchy));
@@ -2049,13 +2173,14 @@ app.get("/api/jobs", async (_req: Request, res: Response) => {
   });
 
   res.json(hydratedJobs);
-});
+};
+app.get("/api/jobs", listJobsHandler);
 
 /**
  * DELETE /api/jobs/:id
  * Removes a job entry from the archive registry only.
  */
-app.delete("/api/jobs/:id", (req: Request, res: Response) => {
+const deleteJobHandler = (req: Request, res: Response) => {
   const paramId = req.params["id"];
   const jobId = typeof paramId === "string"
     ? paramId.trim()
@@ -2070,13 +2195,14 @@ app.delete("/api/jobs/:id", (req: Request, res: Response) => {
   }
 
   res.json({ ok: true });
-});
+};
+app.delete("/api/jobs/:id", deleteJobHandler);
 
 /**
  * POST /api/jobs/:id/contract-link
  * Updates (or clears) contract link for an existing job.
  */
-app.post("/api/jobs/:id/contract-link", (req: Request, res: Response) => {
+const updateJobContractLinkHandler = (req: Request, res: Response) => {
   const paramId = req.params["id"];
   const jobId = typeof paramId === "string"
     ? paramId.trim()
@@ -2099,13 +2225,14 @@ app.post("/api/jobs/:id/contract-link", (req: Request, res: Response) => {
   }
 
   res.json({ ok: true, job: updated });
-});
+};
+app.post("/api/jobs/:id/contract-link", updateJobContractLinkHandler);
 
 /**
  * POST /api/jobs/:id/generate-low-quality
  * Generates compressed JPG copies in BASSA_QUALITA for an existing job.
  */
-app.post("/api/jobs/:id/generate-low-quality", async (req: Request, res: Response) => {
+const generateLowQualityHandler = async (req: Request, res: Response) => {
   const paramId = req.params["id"];
   const jobId = typeof paramId === "string"
     ? paramId.trim()
@@ -2255,13 +2382,14 @@ app.post("/api/jobs/:id/generate-low-quality", async (req: Request, res: Respons
     outputDir: bassaQualitaDir,
     durationMs: Date.now() - startedAt,
   });
-});
+};
+app.post("/api/jobs/:id/generate-low-quality", generateLowQualityHandler);
 
 /**
  * POST /api/open-folder
  * Opens a folder in Windows Explorer. Path must exist.
  */
-app.post("/api/open-folder", (req: Request, res: Response) => {
+const openFolderHandler = (req: Request, res: Response) => {
   const { folderPath } = req.body as { folderPath?: string };
   if (!folderPath) return void res.status(400).json({ error: "folderPath mancante" });
 
@@ -2283,9 +2411,147 @@ app.post("/api/open-folder", (req: Request, res: Response) => {
     /* intentionally ignored */
   }
   res.json({ ok: true });
-});
+};
+app.post("/api/open-folder", openFolderHandler);
+
+function unwrapInvocationResult<T>(result: MockInvocationResult): T {
+  if (result.statusCode >= 400) {
+    const errorBody = result.body as { error?: string } | null;
+    throw new Error(errorBody?.error || `Archivio Flow request failed (${result.statusCode})`);
+  }
+  return result.body as T;
+}
+
+export async function browseFolderService(): Promise<{ path: string | null }> {
+  return unwrapInvocationResult(await invokeHandler(browseFolderHandler, {}));
+}
+
+export async function getSettingsService(): Promise<Settings> {
+  return unwrapInvocationResult(await invokeHandler(getSettingsHandler, {}));
+}
+
+export async function saveSettingsService(input: Partial<Settings>): Promise<{ ok: true; settings: Settings }> {
+  return unwrapInvocationResult(await invokeHandler(saveSettingsHandler, { body: input }));
+}
+
+export async function getImportProgressService(): Promise<ImportProgressState & {
+  completedScheduled: number;
+  knownTotal: number;
+  progressPct: number;
+}> {
+  return unwrapInvocationResult(await invokeHandler(getImportProgressHandler, {}));
+}
+
+export async function getLowQualityProgressService(): Promise<LowQualityProgressState & { progressPct: number }> {
+  return unwrapInvocationResult(await invokeHandler(getLowQualityProgressHandler, {}));
+}
+
+export async function getSdCardsService(): Promise<{ sdCards: SdCard[] }> {
+  return unwrapInvocationResult(await invokeHandler(getSdCardsHandler, {}));
+}
+
+export async function getSdPreviewService(sdPath: string): Promise<{ totalFiles: number; rawFiles: number; jpgFiles: number }> {
+  return unwrapInvocationResult(await invokeHandler(getSdPreviewHandler, { query: { path: sdPath } }));
+}
+
+export async function getFilterPreviewService(input: {
+  sdPath: string;
+  fileNameIncludes?: string;
+  mtimeFrom?: string;
+  mtimeTo?: string;
+  maxSamples?: number;
+}): Promise<{
+  ok: true;
+  scannedFiles: number;
+  matchedFiles: number;
+  matchedRawFiles: number;
+  matchedJpgFiles: number;
+  minMtimeMs: number | null;
+  maxMtimeMs: number | null;
+  sampleFiles: Array<{ filePath: string; fileName: string; mtimeMs: number; size: number; ext: string; isJpg: boolean }>;
+}> {
+  return unwrapInvocationResult(await invokeHandler(getFilterPreviewHandler, { body: input }));
+}
+
+export async function getPreviewImageService(sdPath: string, filePath: string): Promise<{ bytes: Buffer; mimeType: string }> {
+  const result = await invokeHandler(getPreviewImageHandler, {
+    query: { sdPath, filePath },
+  });
+  if (result.statusCode >= 400) {
+    const errorBody = result.body as { error?: string } | null;
+    throw new Error(errorBody?.error || `Preview generation failed (${result.statusCode})`);
+  }
+  return {
+    bytes: Buffer.isBuffer(result.body) ? result.body : Buffer.from(result.body as Uint8Array),
+    mimeType: result.headers["content-type"] || "image/jpeg",
+  };
+}
+
+export async function importService(input: ImportRequest): Promise<{
+  ok: true;
+  job: Job;
+  reusedExistingJob: boolean;
+  copiedFiles: number;
+  skippedFiles: number;
+  jpgGenerati: number;
+  cartellaFotoFinale: string;
+  performance: Record<string, number>;
+  errors: string[];
+}> {
+  importCancelRequested = false;
+  return unwrapInvocationResult(await invokeHandler(importHandler, { body: input }));
+}
+
+export async function listJobsService(): Promise<Job[]> {
+  return unwrapInvocationResult(await invokeHandler(listJobsHandler, {}));
+}
+
+export async function deleteJobService(jobId: string): Promise<{ ok: true }> {
+  return unwrapInvocationResult(await invokeHandler(deleteJobHandler, { params: { id: jobId } }));
+}
+
+export async function updateJobContractLinkService(
+  jobId: string,
+  contrattoLink: string,
+): Promise<{ ok: true; job: Job }> {
+  return unwrapInvocationResult(await invokeHandler(updateJobContractLinkHandler, {
+    params: { id: jobId },
+    body: { contrattoLink },
+  }));
+}
+
+export async function generateLowQualityService(
+  jobId: string,
+  overwrite: boolean,
+): Promise<{
+  ok: true;
+  jobId: string;
+  totalJpg: number;
+  generated: number;
+  skippedExisting: number;
+  errors: number;
+  overwrite: boolean;
+  preserveStructure: boolean;
+  outputDir: string;
+  durationMs: number;
+}> {
+  return unwrapInvocationResult(await invokeHandler(generateLowQualityHandler, {
+    params: { id: jobId },
+    body: { overwrite },
+  }));
+}
+
+export async function openFolderService(folderPath: string): Promise<{ ok: true }> {
+  return unwrapInvocationResult(await invokeHandler(openFolderHandler, { body: { folderPath } }));
+}
 
 // ── Start ──────────────────────────────────────────────────────────────────────
+const isDirectRun = process.argv[1]
+  ? pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+  : false;
+
+if (isDirectRun || process.env.ARCHIVIO_FLOW_HTTP_SERVER === "1") {
 app.listen(PORT, () => {
   console.log(`\n🗂️  Archivio Flow Server  →  http://localhost:${PORT}\n`);
 });
+}

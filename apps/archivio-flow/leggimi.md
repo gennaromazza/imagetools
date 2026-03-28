@@ -114,6 +114,7 @@ Creare automaticamente:
 
 
 FOTO_SD
+└─ AUTORE
 BASSA_QUALITA
 EXPORT
 
@@ -126,6 +127,8 @@ EXPORT
 - RAW + JPG
 - Nessuna selezione
 - Nessuna esclusione
+- Destinazione import: `FOTO_SD\Autore`
+- Se compili una sottocartella aggiuntiva: `FOTO_SD\Autore\SottoCartella`
 
 ---
 

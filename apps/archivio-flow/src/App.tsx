@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Job, ImportResult } from "./types";
+import { getArchivioJobs } from "./archivioDesktopApi";
 import { NuovoLavoroPanel } from "./components/NuovoLavoroPanel";
 import { ArchivioPanel } from "./components/ArchivioPanel";
 import archivioLogo from "./assets/photo_Archivie.png";
@@ -14,10 +15,9 @@ export default function App() {
   const refreshJobs = useCallback(async () => {
     setLoadingJobs(true);
     try {
-      const res = await fetch("/api/jobs");
-      if (res.ok) setJobs(await res.json());
+      setJobs(await getArchivioJobs());
     } catch {
-      /* server not reachable yet */
+      setJobs([]);
     } finally {
       setLoadingJobs(false);
     }

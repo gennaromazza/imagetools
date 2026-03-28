@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SdCard, SdPreview, ImportResult, Job, ImportProgressSnapshot } from "../types";
+import type { SdCard, SdPreview, ImportRequest, ImportResult, Job, ImportProgressSnapshot, FilterPreviewData } from "../types";
+import {
+  browseArchivioFolder,
+  cancelArchivioImport,
+  getArchivioFilterPreview,
+  getArchivioImportProgress,
+  getArchivioJobs,
+  getArchivioSdCards,
+  getArchivioSdPreview,
+  getArchivioSettings,
+  openArchivioFolder,
+  saveArchivioSettings,
+  startArchivioImport,
+} from "../archivioDesktopApi";
+import { DesktopPreviewImage } from "./DesktopPreviewImage";
 import { FilterRangePickerModal } from "./FilterRangePickerModal";
 
 interface Props {
   onImportDone: (result: ImportResult) => void;
   activeView?: "nuovo" | "impostazioni";
-}
-
-interface FilterPreviewData {
-  scannedFiles: number;
-  matchedFiles: number;
-  matchedRawFiles: number;
-  matchedJpgFiles: number;
-  minMtimeMs: number | null;
-  maxMtimeMs: number | null;
-  sampleFiles: Array<{ filePath: string; fileName: string; mtimeMs: number; size: number; ext: string; isJpg: boolean }>;
 }
 
 interface ArchiveHierarchySettings {
@@ -79,6 +83,15 @@ function buildFolderPreview(nomeLavoro: string, dataLavoro: string): string {
   return `${dataLavoro} - ${safeName} - ${dmy}`;
 }
 
+function buildSafeFolderSegment(value: string): string {
+  return value
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+    .replace(/[\\/]/g, "")
+    .replace(/\.+/g, ".")
+    .replace(/^\.+|\.+$/g, "");
+}
+
 function formatDurationSeconds(seconds: number): string {
   const sec = Math.max(0, Math.floor(seconds));
   const h = Math.floor(sec / 3600);
@@ -92,11 +105,7 @@ function formatDurationSeconds(seconds: number): string {
 async function openFolderInExplorer(folderPath: string) {
   if (!folderPath) return;
   try {
-    await fetch("/api/open-folder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderPath }),
-    });
+    await openArchivioFolder(folderPath);
   } catch {
     /* ignore */
   }
@@ -209,18 +218,19 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   } | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const [browsingField, setBrowsingField] = useState<"sd" | "dest" | "archive" | null>(null);
+  const refreshExistingJobs = useCallback(async () => {
+    try {
+      const data = await getArchivioJobs();
+      setJobsEsistenti(Array.isArray(data) ? data : []);
+    } catch {
+      setJobsEsistenti([]);
+    }
+  }, []);
 
   // ── Load settings on mount ───────────────────────────────────────────────────
   useEffect(() => {
-    fetch("/api/settings")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: {
-        archiveRoot?: string;
-        defaultDestinazione?: string;
-        defaultAutore?: string;
-        cartellePredefinite?: string[];
-        archiveHierarchy?: Partial<ArchiveHierarchySettings>;
-      } | null) => {
+    getArchivioSettings()
+      .then((data) => {
         const normalizedArchiveRoot = data?.archiveRoot?.trim() ?? "";
         const normalizedDefaultDestinazione = data?.defaultDestinazione?.trim() || normalizedArchiveRoot;
         const normalizedHierarchy = normalizeHierarchyConfig(data?.archiveHierarchy);
@@ -244,22 +254,15 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         setArchiveHierarchy(normalizedHierarchy);
         setSavedArchiveHierarchy(normalizedHierarchy);
       })
-      .catch(() => {/* server not ready */})
+      .catch(() => {/* runtime desktop non pronto */})
       .finally(() => {
         setSettingsLoaded(true);
       });
   }, []);
 
   useEffect(() => {
-    fetch("/api/jobs")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: Job[]) => {
-        setJobsEsistenti(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        setJobsEsistenti([]);
-      });
-  }, []);
+    void refreshExistingJobs();
+  }, [refreshExistingJobs]);
 
   useEffect(() => {
     if (!usaLavoroEsistente || !existingJobId) return;
@@ -271,17 +274,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const fetchSdCards = useCallback(async () => {
     setRefreshingSd(true);
     try {
-      const res = await fetch("/api/sd-cards");
-      if (res.ok) {
-        const data = await res.json();
-        const cards: SdCard[] = data.sdCards ?? [];
-        setSdCards(cards);
-        if (cards.length > 0 && !sdPath) {
-          setSdPath(cards[0]!.path);
-        }
+      const cards = await getArchivioSdCards();
+      setSdCards(cards);
+      if (cards.length > 0 && !sdPath) {
+        setSdPath(cards[0]!.path);
       }
     } catch {
-      /* server not ready yet */
+      /* ignore transient desktop runtime errors */
     } finally {
       setRefreshingSd(false);
     }
@@ -297,18 +296,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   async function handleBrowse(field: "sd" | "dest" | "archive") {
     setBrowsingField(field);
     try {
-      const res = await fetch("/api/browse-folder", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.path) {
-          if (field === "sd") setSdPath(data.path as string);
-          else if (field === "dest") setDestinazione(data.path as string);
-          else setArchiveRoot(data.path as string);
-        }
+      const selectedPath = await browseArchivioFolder();
+      if (selectedPath) {
+        if (field === "sd") setSdPath(selectedPath);
+        else if (field === "dest") setDestinazione(selectedPath);
+        else setArchiveRoot(selectedPath);
       }
     } catch {
       /* ignore */
@@ -323,18 +315,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     const normalizedArchiveRoot = archiveRoot.trim();
     const normalizedDefaultDestinazione = destinazione.trim() || normalizedArchiveRoot;
     try {
-      const res = await fetch("/api/settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          archiveRoot: normalizedArchiveRoot,
-          defaultDestinazione: normalizedDefaultDestinazione,
-          defaultAutore: autore.trim(),
-          cartellePredefinite,
-          archiveHierarchy,
-        }),
+      await saveArchivioSettings({
+        archiveRoot: normalizedArchiveRoot,
+        defaultDestinazione: normalizedDefaultDestinazione,
+        defaultAutore: autore.trim(),
+        cartellePredefinite,
+        archiveHierarchy,
       });
-      if (res.ok) {
         setSavedArchiveRoot(normalizedArchiveRoot);
         setSavedDestinazione(normalizedDefaultDestinazione);
         if (!destinazione.trim() && normalizedDefaultDestinazione) {
@@ -347,17 +334,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           type: "success",
           message: showSpinner ? "Impostazioni salvate." : "Impostazioni salvate automaticamente.",
         });
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        setSettingsFeedback({
-          type: "error",
-          message: errorData?.error ? `Salvataggio fallito: ${errorData.error}` : "Salvataggio fallito.",
-        });
-      }
-    } catch {
+    } catch (error) {
       setSettingsFeedback({
         type: "error",
-        message: "Impossibile salvare: server non raggiungibile.",
+        message: error instanceof Error ? `Salvataggio fallito: ${error.message}` : "Salvataggio fallito.",
       });
     } finally {
       if (showSpinner) setSavingSettings(false);
@@ -380,8 +360,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     }
     let alive = true;
     setLoadingSd(true);
-    fetch(`/api/sd-preview?path=${encodeURIComponent(sdPath)}`)
-      .then((r) => (r.ok ? r.json() : null))
+    getArchivioSdPreview(sdPath)
       .then((data: SdPreview | null) => {
         if (alive) setSdPreview(data);
       })
@@ -432,31 +411,21 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
 
     setImporting(true);
     try {
-      const res = await fetch("/api/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sdPath: sdPath.trim(),
-          nomeLavoro: nomeLavoro.trim(),
-          dataLavoro,
-          autore: autore.trim(),
-          contrattoLink: contrattoLink.trim(),
-          destinazione: effectiveDestinazione,
-          sottoCartella: sottoCartella.trim(),
-          existingJobId: usaLavoroEsistente ? existingJobId : undefined,
-          rinominaFile,
-          generaJpg,
-          fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
-          mtimeFrom: mtimeFromFilter.trim() || undefined,
-          mtimeTo: mtimeToFilter.trim() || undefined,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setImportError(data.error ?? "Errore durante l'importazione.");
-      } else {
+      const importResult = await startArchivioImport({
+        sdPath: sdPath.trim(),
+        nomeLavoro: nomeLavoro.trim(),
+        dataLavoro,
+        autore: autore.trim(),
+        contrattoLink: contrattoLink.trim(),
+        destinazione: effectiveDestinazione,
+        sottoCartella: sottoCartella.trim(),
+        existingJobId: usaLavoroEsistente ? existingJobId : undefined,
+        rinominaFile,
+        generaJpg,
+        fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
+        mtimeFrom: mtimeFromFilter.trim() || undefined,
+        mtimeTo: mtimeToFilter.trim() || undefined,
+      } satisfies ImportRequest);
         const fromMsDone = mtimeFromFilter.trim() ? Date.parse(mtimeFromFilter.trim()) : NaN;
         const toMsDone = mtimeToFilter.trim() ? Date.parse(mtimeToFilter.trim()) : NaN;
         if (hasMultipleJobsOnSd === true && Number.isFinite(fromMsDone) && Number.isFinite(toMsDone)) {
@@ -479,13 +448,26 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             ],
           }));
         }
-        setImportSuccess(data as ImportResult);
-        onImportDone(data as ImportResult);
-      }
-    } catch {
-      setImportError("Impossibile contattare il server. Assicurati che sia in esecuzione.");
+        setImportSuccess(importResult);
+        if (openFolderOnFinish) {
+          autoOpenedJobRef.current = importResult.job.id;
+          await openFolderInExplorer(importResult.cartellaFotoFinale || importResult.job.percorsoCartella);
+        }
+        await refreshExistingJobs();
+        onImportDone(importResult);
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Errore durante l'importazione.");
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleCancelRunningImport() {
+    try {
+      await cancelArchivioImport();
+      setImportError("Importazione annullata");
+    } catch (error) {
+      setImportError(error instanceof Error ? error.message : "Impossibile annullare l'importazione.");
     }
   }
 
@@ -516,9 +498,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const folderPreview = usaLavoroEsistente
     ? (selectedExistingJob?.nomeCartella ?? "—")
     : buildFolderPreview(nomeLavoro, dataLavoro);
-  const fotoDestPreview = sottoCartella.trim()
-    ? `FOTO_SD\\${sottoCartella.trim()}`
-    : "FOTO_SD";
+  const safeAutoreFolder = buildSafeFolderSegment(autore);
+  const safeSottoCartella = buildSafeFolderSegment(sottoCartella);
+  const fotoDestPreview = safeAutoreFolder
+    ? (safeSottoCartella
+      ? `FOTO_SD\\${safeAutoreFolder}\\${safeSottoCartella}`
+      : `FOTO_SD\\${safeAutoreFolder}`)
+    : "FOTO_SD\\(autore)";
   const canImport =
     !importing &&
     sdPath.trim() &&
@@ -589,27 +575,18 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     }
     setLoadingFilterPreview(true);
     try {
-      const res = await fetch("/api/filter-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sdPath: sdPath.trim(),
-          fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
-          mtimeFrom: mtimeFromFilter.trim() || undefined,
-          mtimeTo: mtimeToFilter.trim() || undefined,
-          maxSamples: 36,
-        }),
+      const data = await getArchivioFilterPreview({
+        sdPath: sdPath.trim(),
+        fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
+        mtimeFrom: mtimeFromFilter.trim() || undefined,
+        mtimeTo: mtimeToFilter.trim() || undefined,
+        maxSamples: 36,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setFilterPreviewError(data?.error ?? "Anteprima filtro non riuscita");
-        return;
-      }
       setFilterPreview(data as FilterPreviewData);
       setPreviewRangeStartMs(null);
       setPreviewRangeEndMs(null);
-    } catch {
-      setFilterPreviewError("Server non raggiungibile");
+    } catch (error) {
+      setFilterPreviewError(error instanceof Error ? error.message : "Anteprima filtro non riuscita");
     } finally {
       setLoadingFilterPreview(false);
     }
@@ -624,27 +601,17 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
 
     setLoadingVisualPicker(true);
     try {
-      const res = await fetch("/api/filter-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sdPath: sdPath.trim(),
-          fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
-          mtimeFrom: mtimeFromFilter.trim() || undefined,
-          mtimeTo: mtimeToFilter.trim() || undefined,
-          maxSamples: 5000,
-        }),
+      const previewData = await getArchivioFilterPreview({
+        sdPath: sdPath.trim(),
+        fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
+        mtimeFrom: mtimeFromFilter.trim() || undefined,
+        mtimeTo: mtimeToFilter.trim() || undefined,
+        maxSamples: 5000,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setVisualPickerError(data?.error ?? "Impossibile aprire il selettore visuale");
-        return;
-      }
-      const previewData = data as FilterPreviewData;
       setVisualPickerSamples(previewData.sampleFiles ?? []);
       setShowVisualRangePicker(true);
-    } catch {
-      setVisualPickerError("Server non raggiungibile");
+    } catch (error) {
+      setVisualPickerError(error instanceof Error ? error.message : "Impossibile aprire il selettore visuale");
     } finally {
       setLoadingVisualPicker(false);
     }
@@ -731,9 +698,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
 
     async function pollProgress() {
       try {
-        const res = await fetch("/api/import-progress");
-        if (!res.ok) return;
-        const data = await res.json() as ImportProgressSnapshot;
+        const data = await getArchivioImportProgress() as ImportProgressSnapshot;
         if (!alive) return;
         setImportProgress(data);
       } catch {
@@ -756,7 +721,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     if (!importSuccess || !openFolderOnFinish) return;
     if (autoOpenedJobRef.current === importSuccess.job.id) return;
     autoOpenedJobRef.current = importSuccess.job.id;
-    void openFolderInExplorer(importSuccess.job.percorsoCartella);
+    void openFolderInExplorer(importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella);
   }, [importSuccess, openFolderOnFinish]);
 
   useEffect(() => {
@@ -1328,11 +1293,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                               title="Clicca per impostare inizio/fine range"
                             >
                               {f.isJpg ? (
-                                <img
-                                  src={`/api/preview-image?sdPath=${encodeURIComponent(sdPath.trim())}&filePath=${encodeURIComponent(f.filePath)}`}
+                                <DesktopPreviewImage
+                                  sdPath={sdPath.trim()}
+                                  filePath={f.filePath}
                                   alt={f.fileName}
                                   style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 7, marginBottom: "0.35rem" }}
-                                  loading="lazy"
                                 />
                               ) : (
                                 <div
@@ -1490,7 +1455,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           )}
 
           <label className="field">
-            <span>Sottocartella in FOTO_SD (opzionale)</span>
+            <span>Sottocartella dentro autore (opzionale)</span>
             <input
               type="text"
               value={sottoCartella}
@@ -1670,6 +1635,15 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", wordBreak: "break-all" }}>
                 Destinazione: {importProgress?.targetFolder || effectiveDestinazione}
               </p>
+              <div className="button-row" style={{ marginTop: "0.5rem" }}>
+                <button
+                  className="ghost-button"
+                  onClick={() => { void handleCancelRunningImport(); }}
+                  style={{ padding: "0.5rem 0.8rem", fontSize: "0.84rem" }}
+                >
+                  Interrompi importazione
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1695,7 +1669,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             {importSuccess.errors.length > 0 && ` (${importSuccess.errors.length} errori)`}
           </p>
           <p style={{ margin: "0.4rem 0 0", fontSize: "0.88rem", color: "var(--text-muted)" }}>
-            {importSuccess.job.percorsoCartella}
+            {importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella}
           </p>
           {importSuccess.job.contrattoLink && (
             <p style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
@@ -1713,7 +1687,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             <button
               className="secondary-button"
               style={{ padding: "0.5rem 0.8rem", fontSize: "0.86rem" }}
-              onClick={() => { void openFolderInExplorer(importSuccess.job.percorsoCartella); }}
+              onClick={() => { void openFolderInExplorer(importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella); }}
             >
               📂 Apri cartella lavoro
             </button>
@@ -1727,7 +1701,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           <strong>Pronto per importare?</strong>
           <p>
             Tutti i file verranno copiati nella cartella{" "}
-            <code style={{ fontSize: "0.88rem" }}>FOTO_SD</code> del lavoro.
+            <code style={{ fontSize: "0.88rem" }}>{fotoDestPreview}</code> del lavoro.
           </p>
           <label className="check-row" style={{ marginTop: "0.45rem", cursor: "pointer" }}>
             <input

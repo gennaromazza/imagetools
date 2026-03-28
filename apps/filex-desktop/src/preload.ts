@@ -65,6 +65,24 @@ const api: FileXDesktopApi = {
   logDesktopEvent: (event) => ipcRenderer.invoke("filex:log-desktop-event", event),
   readSidecarXmp: (absolutePath) => ipcRenderer.invoke("filex:read-sidecar-xmp", absolutePath),
   writeSidecarXmp: (absolutePath, xml) => ipcRenderer.invoke("filex:write-sidecar-xmp", absolutePath, xml),
+  browseArchivioFolder: () => ipcRenderer.invoke("filex:browse-archivio-folder"),
+  getArchivioSettings: () => ipcRenderer.invoke("filex:get-archivio-settings"),
+  saveArchivioSettings: (settings) => ipcRenderer.invoke("filex:save-archivio-settings", settings),
+  getArchivioImportProgress: () => ipcRenderer.invoke("filex:get-archivio-import-progress"),
+  cancelArchivioImport: () => ipcRenderer.invoke("filex:cancel-archivio-import"),
+  getArchivioLowQualityProgress: () => ipcRenderer.invoke("filex:get-archivio-low-quality-progress"),
+  getArchivioSdCards: () => ipcRenderer.invoke("filex:get-archivio-sd-cards"),
+  getArchivioSdPreview: (sdPath) => ipcRenderer.invoke("filex:get-archivio-sd-preview", sdPath),
+  getArchivioFilterPreview: (input) => ipcRenderer.invoke("filex:get-archivio-filter-preview", input),
+  getArchivioPreviewImage: (sdPath, filePath) => ipcRenderer.invoke("filex:get-archivio-preview-image", sdPath, filePath),
+  startArchivioImport: (input) => ipcRenderer.invoke("filex:start-archivio-import", input),
+  listArchivioJobs: () => ipcRenderer.invoke("filex:list-archivio-jobs"),
+  deleteArchivioJob: (jobId) => ipcRenderer.invoke("filex:delete-archivio-job", jobId),
+  updateArchivioJobContractLink: (jobId, contrattoLink) =>
+    ipcRenderer.invoke("filex:update-archivio-job-contract-link", jobId, contrattoLink),
+  generateArchivioLowQuality: (jobId, overwrite) =>
+    ipcRenderer.invoke("filex:generate-archivio-low-quality", jobId, overwrite),
+  openArchivioFolder: (folderPath) => ipcRenderer.invoke("filex:open-archivio-folder", folderPath),
 };
 
 contextBridge.exposeInMainWorld("filexDesktop", api);

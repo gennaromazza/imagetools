@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { List as VirtualList, type RowComponentProps } from "react-window";
 import type { Job, LowQualityProgressSnapshot } from "../types";
+import {
+  deleteArchivioJob,
+  generateArchivioLowQuality,
+  getArchivioLowQualityProgress,
+  openArchivioFolder,
+  updateArchivioJobContractLink,
+} from "../archivioDesktopApi";
 
 interface Props {
   jobs: Job[];
@@ -29,15 +36,7 @@ function formatDurationSeconds(seconds: number): string {
 }
 
 async function openFolder(path: string) {
-  try {
-    await fetch("/api/open-folder", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ folderPath: path }),
-    });
-  } catch {
-    /* ignore */
-  }
+  await openArchivioFolder(path);
 }
 
 function openContractLink(link: string) {
@@ -254,37 +253,16 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     setSavingContract(jobId);
     setContractFeedback(null);
     try {
-      const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/contract-link`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contrattoLink: editingContractLink }),
-      });
-      const raw = await res.text();
-      let data: { error?: string } = {};
-      try {
-        data = raw ? JSON.parse(raw) as { error?: string } : {};
-      } catch {
-        data = {};
-      }
-      if (!res.ok) {
-        if (res.status === 404) {
-          setContractFeedback({
-            type: "error",
-            text: "Endpoint non trovato (404). Riavvia il server Archivio Flow e riprova.",
-          });
-          return;
-        }
-        setContractFeedback({ type: "error", text: data?.error ?? `Salvataggio link non riuscito (HTTP ${res.status})` });
-        return;
-      }
+      await updateArchivioJobContractLink(jobId, editingContractLink);
       setContractFeedback({ type: "success", text: "Link contratto aggiornato" });
       setRowFeedback(jobId, "Link contratto aggiornato", "success");
       setEditingJobId(null);
       setEditingContractLink("");
       onRefresh();
-    } catch {
-      setContractFeedback({ type: "error", text: "Server non raggiungibile" });
-      setRowFeedback(jobId, "Server non raggiungibile", "error");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Salvataggio link non riuscito";
+      setContractFeedback({ type: "error", text: message });
+      setRowFeedback(jobId, message, "error");
     } finally {
       setSavingContract(null);
     }
@@ -300,27 +278,16 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     setLowQualityProgress(null);
     setLowQualityFeedback(null);
     try {
-      const res = await fetch(`/api/jobs/${encodeURIComponent(job.id)}/generate-low-quality`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ overwrite }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setLowQualityFeedback({
-          type: "error",
-          text: data?.error ?? "Generazione BASSA_QUALITA non riuscita",
-        });
-        return;
-      }
+      const data = await generateArchivioLowQuality(job.id, overwrite);
       setLowQualityFeedback({
         type: "success",
         text: `${overwrite ? "Rigenerazione" : "Generazione"} BASSA_QUALITA completata: generati ${data.generated ?? 0}, già presenti ${data.skippedExisting ?? 0}, errori ${data.errors ?? 0}`,
       });
       setRowFeedback(job.id, overwrite ? "Rigenerazione BQ completata" : "Generazione BQ completata", "success");
-    } catch {
-      setLowQualityFeedback({ type: "error", text: "Server non raggiungibile" });
-      setRowFeedback(job.id, "Server non raggiungibile", "error");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Generazione BASSA_QUALITA non riuscita";
+      setLowQualityFeedback({ type: "error", text: message });
+      setRowFeedback(job.id, message, "error");
     } finally {
       setGeneratingLowQualityFor(null);
       setRegeneratingLowQualityFor(null);
@@ -334,9 +301,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
 
     async function pollProgress() {
       try {
-        const res = await fetch("/api/low-quality-progress");
-        if (!res.ok) return;
-        const data = await res.json() as LowQualityProgressSnapshot;
+        const data = await getArchivioLowQualityProgress() as LowQualityProgressSnapshot;
         if (!alive) return;
         setLowQualityProgress(data);
       } catch {
@@ -359,18 +324,11 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     setDeletingJobId(job.id);
     setArchiveFeedback(null);
     try {
-      const res = await fetch(`/api/jobs/${encodeURIComponent(job.id)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setArchiveFeedback({ type: "error", text: data?.error ?? "Rimozione archivio non riuscita" });
-        return;
-      }
+      await deleteArchivioJob(job.id);
       setArchiveFeedback({ type: "success", text: "Voce rimossa dall'archivio" });
       onRefresh();
-    } catch {
-      setArchiveFeedback({ type: "error", text: "Server non raggiungibile" });
+    } catch (error) {
+      setArchiveFeedback({ type: "error", text: error instanceof Error ? error.message : "Rimozione archivio non riuscita" });
     } finally {
       setDeletingJobId(null);
     }

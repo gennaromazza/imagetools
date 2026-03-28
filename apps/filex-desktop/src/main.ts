@@ -1,7 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type {
   DesktopDragOutCheck,
   DesktopEditorCandidate,
@@ -76,6 +77,7 @@ let mainWindow: BrowserWindow | null = null;
 let isOpenFolderRequestRendererReady = false;
 let pendingOpenFolderPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
+let archivioFlowModulePromise: Promise<any> | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -136,6 +138,89 @@ function resolveValidDirectoryPath(candidatePath: string): string | null {
   } catch {
     return null;
   }
+}
+
+function getArchivioFlowDataDir(): string {
+  return join(app.getPath("userData"), "archivio-flow");
+}
+
+async function loadArchivioFlowModule(): Promise<any> {
+  if (archivioFlowModulePromise) {
+    return archivioFlowModulePromise;
+  }
+
+  archivioFlowModulePromise = (async () => {
+    try {
+      process.env.ARCHIVIO_FLOW_DATA_DIR = getArchivioFlowDataDir();
+      const modulePath = resolve(app.getAppPath(), "dist-electron", "archivio-flow-server", "index.js");
+      return await import(pathToFileURL(modulePath).href);
+    } catch (error) {
+      archivioFlowModulePromise = null;
+      throw error;
+    }
+  })();
+
+  return await archivioFlowModulePromise;
+}
+
+async function browseArchivioFolderDesktop(): Promise<string | null> {
+  const result = await dialog.showOpenDialog({
+    title: "Seleziona una cartella",
+    properties: ["openDirectory", "createDirectory"],
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return sanitizeDesktopPath(result.filePaths[0]);
+}
+
+async function getArchivioSdCardsDesktop(): Promise<Array<{
+  deviceId: string;
+  volumeName: string;
+  totalSize: number;
+  freeSpace: number;
+  path: string;
+}>> {
+  if (process.platform === "darwin") {
+    const volumesRoot = "/Volumes";
+    if (!existsSync(volumesRoot)) {
+      return [];
+    }
+
+    return readdirSync(volumesRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => {
+        const volumePath = join(volumesRoot, entry.name);
+        let totalSize = 0;
+        let freeSpace = 0;
+
+        try {
+          const output = execSync(`df -k "${volumePath.replace(/"/g, '\\"')}" | tail -1`, {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+          }).trim();
+          const columns = output.split(/\s+/);
+          totalSize = (Number(columns[1]) || 0) * 1024;
+          freeSpace = (Number(columns[3]) || 0) * 1024;
+        } catch {
+          /* ignore */
+        }
+
+        return {
+          deviceId: entry.name,
+          volumeName: entry.name,
+          totalSize,
+          freeSpace,
+          path: volumePath,
+        };
+      });
+  }
+
+  const archivio = await loadArchivioFlowModule();
+  const result = await archivio.getSdCardsService();
+  return result.sdCards;
 }
 
 function extractOpenFolderPathFromArgv(argv: string[]): string | null {
@@ -724,6 +809,82 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:write-sidecar-xmp", (_event, absolutePath: string, xml: string) =>
     writeSidecarXmpForAssetPath(absolutePath, xml),
   );
+  ipcMain.handle("filex:browse-archivio-folder", () => browseArchivioFolderDesktop());
+  ipcMain.handle("filex:get-archivio-settings", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.getSettingsService();
+  });
+  ipcMain.handle("filex:save-archivio-settings", async (_event, settings: unknown) => {
+    const archivio = await loadArchivioFlowModule();
+    const result = await archivio.saveSettingsService((settings ?? {}) as Record<string, unknown>);
+    return result.settings;
+  });
+  ipcMain.handle("filex:get-archivio-import-progress", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.getImportProgressService();
+  });
+  ipcMain.handle("filex:cancel-archivio-import", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.cancelImportService();
+  });
+  ipcMain.handle("filex:get-archivio-low-quality-progress", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.getLowQualityProgressService();
+  });
+  ipcMain.handle("filex:get-archivio-sd-cards", async () => await getArchivioSdCardsDesktop());
+  ipcMain.handle("filex:get-archivio-sd-preview", async (_event, sdPath: string) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.getSdPreviewService(sdPath);
+  });
+  ipcMain.handle("filex:get-archivio-filter-preview", async (_event, input: Record<string, unknown>) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.getFilterPreviewService(input);
+  });
+  ipcMain.handle("filex:get-archivio-preview-image", async (_event, sdPath: string, filePath: string) => {
+    const archivio = await loadArchivioFlowModule();
+    const preview = await archivio.getPreviewImageService(sdPath, filePath);
+    return {
+      bytes: new Uint8Array(preview.bytes),
+      mimeType: preview.mimeType,
+      width: 0,
+      height: 0,
+    };
+  });
+  ipcMain.handle("filex:start-archivio-import", async (_event, input: Record<string, unknown>) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.importService(input);
+  });
+  ipcMain.handle("filex:list-archivio-jobs", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.listJobsService();
+  });
+  ipcMain.handle("filex:delete-archivio-job", async (_event, jobId: string) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.deleteJobService(jobId);
+  });
+  ipcMain.handle("filex:update-archivio-job-contract-link", async (_event, jobId: string, contrattoLink: string) => {
+    const archivio = await loadArchivioFlowModule();
+    const result = await archivio.updateJobContractLinkService(jobId, contrattoLink);
+    return result.job;
+  });
+  ipcMain.handle("filex:generate-archivio-low-quality", async (_event, jobId: string, overwrite: boolean) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.generateLowQualityService(jobId, overwrite);
+  });
+  ipcMain.handle("filex:open-archivio-folder", async (_event, folderPath: string) => {
+    const normalizedPath = sanitizeDesktopPath(folderPath);
+    if (!normalizedPath || !existsSync(normalizedPath)) {
+      throw new Error("Cartella non trovata");
+    }
+    if (!statSync(normalizedPath).isDirectory()) {
+      throw new Error("Il percorso selezionato non e' una cartella");
+    }
+    const shellError = await shell.openPath(normalizedPath);
+    if (shellError) {
+      throw new Error(shellError);
+    }
+    return { ok: true };
+  });
 }
 
 async function loadRenderer(window: BrowserWindow): Promise<void> {

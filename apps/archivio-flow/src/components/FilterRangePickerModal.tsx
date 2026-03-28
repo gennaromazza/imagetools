@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DesktopPreviewImage } from "./DesktopPreviewImage";
 
 export interface PreviewSampleFile {
   filePath: string;
@@ -303,11 +304,10 @@ export function FilterRangePickerModal({
                     </div>
                   )}
                   {f.isJpg ? (
-                    <img
-                      src={`/api/preview-image?sdPath=${encodeURIComponent(sdPath)}&filePath=${encodeURIComponent(f.filePath)}`}
+                    <DesktopPreviewImage
+                      sdPath={sdPath}
+                      filePath={f.filePath}
                       alt={f.fileName}
-                      loading="lazy"
-                      draggable={false}
                       style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 7, marginBottom: "0.35rem" }}
                     />
                   ) : (

@@ -292,6 +292,137 @@ export interface DesktopQuickPreviewWarmResult {
   failedCount: number;
 }
 
+export interface ArchivioArchiveHierarchyConfig {
+  yearLevel: number | null;
+  categoryLevel: number | null;
+  jobLevel: number;
+}
+
+export interface ArchivioSdCard {
+  deviceId: string;
+  volumeName: string;
+  totalSize: number;
+  freeSpace: number;
+  path: string;
+}
+
+export interface ArchivioSdPreview {
+  totalFiles: number;
+  rawFiles: number;
+  jpgFiles: number;
+}
+
+export interface ArchivioJob {
+  id: string;
+  nomeLavoro: string;
+  dataLavoro: string;
+  autore: string;
+  annoArchivio?: string;
+  categoriaArchivio?: string;
+  contrattoLink?: string;
+  percorsoCartella: string;
+  nomeCartella: string;
+  dataCreazione: string;
+  numeroFile: number;
+  folderExists?: boolean;
+  hasLowQualityFiles?: boolean;
+}
+
+export interface ArchivioSettings {
+  archiveRoot: string;
+  defaultDestinazione: string;
+  defaultAutore: string;
+  cartellePredefinite: string[];
+  archiveHierarchy: ArchivioArchiveHierarchyConfig;
+}
+
+export interface ArchivioImportRequest {
+  sdPath: string;
+  nomeLavoro: string;
+  dataLavoro: string;
+  autore: string;
+  destinazione: string;
+  sottoCartella: string;
+  contrattoLink?: string;
+  existingJobId?: string;
+  rinominaFile: boolean;
+  generaJpg: boolean;
+  fileNameIncludes?: string;
+  mtimeFrom?: string;
+  mtimeTo?: string;
+}
+
+export interface ArchivioImportResult {
+  ok: boolean;
+  job: ArchivioJob;
+  reusedExistingJob?: boolean;
+  copiedFiles: number;
+  skippedFiles: number;
+  jpgGenerati: number;
+  cartellaFotoFinale: string;
+  errors: string[];
+}
+
+export interface ArchivioImportProgressSnapshot {
+  active: boolean;
+  phase: "idle" | "copying" | "compressing" | "done" | "error";
+  scannedFiles: number;
+  plannedFiles: number;
+  copiedFiles: number;
+  skippedFiles: number;
+  manifestSkippedFiles: number;
+  inFlight: number;
+  copyConcurrency: number;
+  initialCopyConcurrency: number;
+  elapsedMs: number;
+  estimatedRemainingSec: number | null;
+  targetFolder: string;
+  jpgEnabled: boolean;
+  jpgPlanned: number;
+  jpgDone: number;
+  error: string | null;
+  completedScheduled: number;
+  knownTotal: number;
+  progressPct: number;
+}
+
+export interface ArchivioLowQualityProgressSnapshot {
+  active: boolean;
+  jobId: string;
+  jobName: string;
+  phase: "idle" | "scanning" | "compressing" | "done" | "error";
+  totalJpg: number;
+  processedJpg: number;
+  generated: number;
+  skippedExisting: number;
+  errors: number;
+  overwrite: boolean;
+  elapsedMs: number;
+  estimatedRemainingSec: number | null;
+  outputDir: string;
+  sourceRoot: string;
+  error: string | null;
+  progressPct: number;
+}
+
+export interface ArchivioFilterPreviewData {
+  ok: true;
+  scannedFiles: number;
+  matchedFiles: number;
+  matchedRawFiles: number;
+  matchedJpgFiles: number;
+  minMtimeMs: number | null;
+  maxMtimeMs: number | null;
+  sampleFiles: Array<{
+    filePath: string;
+    fileName: string;
+    mtimeMs: number;
+    size: number;
+    ext: string;
+    isJpg: boolean;
+  }>;
+}
+
 export interface FileXDesktopApi {
   getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
   openFolder: () => Promise<DesktopFolderOpenResult | null>;
@@ -368,4 +499,37 @@ export interface FileXDesktopApi {
   logDesktopEvent: (event: DesktopLogEvent) => Promise<void>;
   readSidecarXmp: (absolutePath: string) => Promise<string | null>;
   writeSidecarXmp: (absolutePath: string, xml: string) => Promise<boolean>;
+  browseArchivioFolder: () => Promise<string | null>;
+  getArchivioSettings: () => Promise<ArchivioSettings>;
+  saveArchivioSettings: (settings: Partial<ArchivioSettings>) => Promise<ArchivioSettings>;
+  getArchivioImportProgress: () => Promise<ArchivioImportProgressSnapshot>;
+  cancelArchivioImport: () => Promise<{ ok: boolean; active: boolean }>;
+  getArchivioLowQualityProgress: () => Promise<ArchivioLowQualityProgressSnapshot>;
+  getArchivioSdCards: () => Promise<ArchivioSdCard[]>;
+  getArchivioSdPreview: (sdPath: string) => Promise<ArchivioSdPreview>;
+  getArchivioFilterPreview: (input: {
+    sdPath: string;
+    fileNameIncludes?: string;
+    mtimeFrom?: string;
+    mtimeTo?: string;
+    maxSamples?: number;
+  }) => Promise<ArchivioFilterPreviewData>;
+  getArchivioPreviewImage: (sdPath: string, filePath: string) => Promise<DesktopRenderedImage | null>;
+  startArchivioImport: (input: ArchivioImportRequest) => Promise<ArchivioImportResult>;
+  listArchivioJobs: () => Promise<ArchivioJob[]>;
+  deleteArchivioJob: (jobId: string) => Promise<{ ok: boolean }>;
+  updateArchivioJobContractLink: (jobId: string, contrattoLink: string) => Promise<ArchivioJob>;
+  generateArchivioLowQuality: (jobId: string, overwrite: boolean) => Promise<{
+    ok: boolean;
+    jobId: string;
+    totalJpg: number;
+    generated: number;
+    skippedExisting: number;
+    errors: number;
+    overwrite: boolean;
+    preserveStructure: boolean;
+    outputDir: string;
+    durationMs: number;
+  }>;
+  openArchivioFolder: (folderPath: string) => Promise<{ ok: boolean }>;
 }
