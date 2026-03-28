@@ -131,7 +131,7 @@ function formatVolumeSummary(recommendation) {
         : null;
     return { current, recommended };
 }
-export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onUndo, onRedo, canUndo = false, canRedo = false, thumbnailProfile = "ultra-fast", sortCacheEnabled = true, performanceSnapshot = null, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo = null, desktopCacheLocationRecommendation = null, isDesktopThumbnailCacheBusy = false, isDesktopCacheRecommendationModalOpen = false, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, }) {
+export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onBackgroundPreviewOrderChange, onUndo, onRedo, canUndo = false, canRedo = false, thumbnailProfile = "ultra-fast", sortCacheEnabled = true, performanceSnapshot = null, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo = null, desktopCacheLocationRecommendation = null, isDesktopThumbnailCacheBusy = false, isDesktopCacheRecommendationModalOpen = false, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, }) {
     const [sortBy, setSortBy] = useState("name");
     const [pickFilter, setPickFilter] = useState(DEFAULT_PHOTO_FILTERS.pickStatus);
     const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
@@ -200,6 +200,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     const scrollAnimationFrameRef = useRef(null);
     const pendingScrollTopRef = useRef(null);
     const lastVisibleIdsSignatureRef = useRef("");
+    const lastBackgroundPreviewOrderSignatureRef = useRef("");
     const dragOriginRef = useRef(null);
     const [dragRect, setDragRect] = useState(null);
     const [gridViewport, setGridViewport] = useState({ width: 0, height: 720, scrollTop: 0 });
@@ -894,6 +895,18 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }
         onPreviewPriorityIdsChange(new Set(previewPriorityIds));
     }, [onPreviewPriorityIdsChange, previewPriorityIds]);
+    useEffect(() => {
+        if (!onBackgroundPreviewOrderChange) {
+            return;
+        }
+        const orderedIds = visiblePhotoIds.slice(0, 360);
+        const signature = orderedIds.join("|");
+        if (signature === lastBackgroundPreviewOrderSignatureRef.current) {
+            return;
+        }
+        lastBackgroundPreviewOrderSignatureRef.current = signature;
+        onBackgroundPreviewOrderChange(orderedIds);
+    }, [onBackgroundPreviewOrderChange, visiblePhotoIds]);
     const scrollPhotoIntoView = useCallback((photoId, behavior = "smooth") => {
         const grid = gridRef.current;
         const itemIndex = visiblePhotoIndexById.get(photoId);

@@ -40,6 +40,10 @@ const RAW_PREVIEW_BOOTSTRAP_COUNT = 192;
 const RAW_PREVIEW_FILTER_WARM_COUNT = 72;
 const RAW_PREVIEW_WARMUP_START_DELAY_MS = 180;
 const QUICK_PREVIEW_PRIORITY_WARM_COUNT = 3;
+const BACKGROUND_FIT_PREVIEW_WARM_START_DELAY_MS = 900;
+const BACKGROUND_FIT_PREVIEW_WARM_BATCH_INTERVAL_MS = 520;
+const BACKGROUND_FIT_PREVIEW_WARM_BATCH_SIZE = 10;
+const BACKGROUND_FIT_PREVIEW_WARM_MAX_COUNT = 240;
 const PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE = "[PERF] folder-open → first-thumbnail-visible";
 const PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE = "[PERF] first-thumbnail → grid-complete";
 const PERF_XMP_IMPORT = "[PERF] xmp-import start → xmp-import complete";
@@ -249,6 +253,9 @@ export function App() {
     const backgroundThumbnailEnqueueTimerRef = useRef(null);
     const backgroundCacheLookupTimerRef = useRef(null);
     const rawPreviewWarmupTimerRef = useRef(null);
+    const backgroundFitPreviewWarmupTimerRef = useRef(null);
+    const backgroundFitPreviewCursorRef = useRef(0);
+    const backgroundFitPreviewOrderedIdsRef = useRef([]);
     const hasLoggedFirstThumbnailRef = useRef(false);
     const hasLoggedGridCompleteRef = useRef(false);
     const folderOpenStartedAtRef = useRef(null);
@@ -563,8 +570,14 @@ export function App() {
             window.clearTimeout(rawPreviewWarmupTimerRef.current);
             rawPreviewWarmupTimerRef.current = null;
         }
+        if (backgroundFitPreviewWarmupTimerRef.current !== null) {
+            window.clearTimeout(backgroundFitPreviewWarmupTimerRef.current);
+            backgroundFitPreviewWarmupTimerRef.current = null;
+        }
         previewWarmupPipelineRef.current?.destroy();
         previewWarmupPipelineRef.current = null;
+        backgroundFitPreviewCursorRef.current = 0;
+        backgroundFitPreviewOrderedIdsRef.current = [];
         visibleThumbnailIdsRef.current = new Set();
         prioritizedThumbnailIdsRef.current = new Set();
         previewPriorityIdsRef.current = new Set();
@@ -755,6 +768,45 @@ export function App() {
             ensurePreviewWarmupPipeline().enqueue(items, priority);
         }
     }, [ensurePreviewWarmupPipeline, thumbnailProfile]);
+    const scheduleBackgroundFitPreviewWarmup = useCallback((delayMs = BACKGROUND_FIT_PREVIEW_WARM_START_DELAY_MS) => {
+        if (backgroundFitPreviewWarmupTimerRef.current !== null) {
+            window.clearTimeout(backgroundFitPreviewWarmupTimerRef.current);
+        }
+        const orderedIds = backgroundFitPreviewOrderedIdsRef.current;
+        const maxCount = Math.min(orderedIds.length, BACKGROUND_FIT_PREVIEW_WARM_MAX_COUNT);
+        if (maxCount === 0 || backgroundFitPreviewCursorRef.current >= maxCount) {
+            backgroundFitPreviewWarmupTimerRef.current = null;
+            return;
+        }
+        backgroundFitPreviewWarmupTimerRef.current = window.setTimeout(() => {
+            backgroundFitPreviewWarmupTimerRef.current = null;
+            const refreshedOrderedIds = backgroundFitPreviewOrderedIdsRef.current;
+            const refreshedMaxCount = Math.min(refreshedOrderedIds.length, BACKGROUND_FIT_PREVIEW_WARM_MAX_COUNT);
+            if (refreshedMaxCount === 0 || backgroundFitPreviewCursorRef.current >= refreshedMaxCount) {
+                return;
+            }
+            const batchStart = backgroundFitPreviewCursorRef.current;
+            const batchEnd = Math.min(refreshedMaxCount, batchStart + BACKGROUND_FIT_PREVIEW_WARM_BATCH_SIZE);
+            const batchIds = refreshedOrderedIds.slice(batchStart, batchEnd);
+            if (batchIds.length === 0) {
+                backgroundFitPreviewCursorRef.current = batchEnd;
+                return;
+            }
+            enqueueQuickPreviewWarmupForIds(batchIds, 3, batchIds.length);
+            backgroundFitPreviewCursorRef.current = batchEnd;
+            if (batchEnd < refreshedMaxCount) {
+                scheduleBackgroundFitPreviewWarmup(BACKGROUND_FIT_PREVIEW_WARM_BATCH_INTERVAL_MS);
+            }
+        }, delayMs);
+    }, [enqueueQuickPreviewWarmupForIds]);
+    const handleBackgroundPreviewOrderChange = useCallback((orderedIds) => {
+        if (typeof window === "undefined" || typeof window.filexDesktop === "undefined") {
+            return;
+        }
+        backgroundFitPreviewOrderedIdsRef.current = orderedIds.slice(0, BACKGROUND_FIT_PREVIEW_WARM_MAX_COUNT);
+        backgroundFitPreviewCursorRef.current = 0;
+        scheduleBackgroundFitPreviewWarmup();
+    }, [scheduleBackgroundFitPreviewWarmup]);
     useEffect(() => {
         const pipeline = pipelineRef.current;
         if (!pipeline || allAssetsRef.current.length === 0) {
@@ -1445,12 +1497,32 @@ export function App() {
             return;
         }
         try {
-            const reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath);
+            let reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath);
+            if (!reopenedFolder) {
+                await new Promise((resolve) => window.setTimeout(resolve, 180));
+                reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath);
+            }
             if (!reopenedFolder) {
                 addToast("Non sono riuscito ad aprire la cartella richiesta da Esplora file.", "warning");
+                if (hasDesktopStateApi()) {
+                    void logDesktopEvent({
+                        channel: "folder-open",
+                        level: "warn",
+                        message: "Cartella da menu contestuale non risolta",
+                        details: normalizedPath,
+                    });
+                }
                 return;
             }
             await handleFolderOpened(reopenedFolder);
+            if (hasDesktopStateApi()) {
+                void logDesktopEvent({
+                    channel: "folder-open",
+                    level: "info",
+                    message: "Cartella aperta dal menu contestuale",
+                    details: normalizedPath,
+                });
+            }
         }
         catch (error) {
             addToast("Apertura cartella dal menu contestuale non riuscita.", "error");
@@ -1829,6 +1901,6 @@ export function App() {
                                     label: "Vai a Sfoglia",
                                     onClick: () => setCurrentScreen("browse"),
                                 }
-                                : undefined, onDismiss: () => setIsXmpBannerDismissed(true) })) : null, folderDiagnostics ? (_jsxs("div", { className: "folder-diagnostics-panel", role: "status", "aria-live": "polite", children: [_jsxs("div", { className: "folder-diagnostics-panel__header", children: [_jsxs("div", { children: [_jsx("strong", { children: "Diagnostica cartella" }), _jsx("span", { children: formatFolderDiagnosticsSource(folderDiagnostics.source) })] }), _jsxs("div", { className: "folder-diagnostics-panel__badge", children: [folderDiagnostics.topLevelSupportedCount, " top-level"] })] }), _jsxs("div", { className: "folder-diagnostics-panel__grid", children: [_jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Path selezionato" }), _jsx("strong", { title: folderDiagnostics.selectedPath, children: folderDiagnostics.selectedPath })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Top-level caricati" }), _jsx("strong", { children: folderDiagnostics.topLevelSupportedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Annidati scartati" }), _jsx("strong", { children: folderDiagnostics.nestedSupportedDiscardedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Totale supportate viste" }), _jsx("strong", { children: folderDiagnostics.totalSupportedSeen })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Sottocartelle viste" }), _jsx("strong", { children: folderDiagnostics.nestedDirectoriesSeen ?? 0 })] })] })] })) : null, currentScreen === "browse" ? (_jsx("div", { className: "app-section", children: _jsx(FolderBrowser, { onFolderOpened: handleFolderOpened, isBusy: isFolderTransitionBusy }) })) : null, currentScreen === "selection" ? (_jsx("div", { className: "app-section app-section--full", children: _jsx(PhotoSelector, { photos: allAssets, metadataVersion: photoMetadataVersion, sourceFolderPath: sourceFolderPath, selectedIds: activeAssetIds, onSelectionChange: handleSelectionChange, onPhotosChange: handlePhotosChange, onVisibleIdsChange: handleVisibleIdsChange, onPriorityIdsChange: handlePriorityIdsChange, onPreviewPriorityIdsChange: handlePreviewPriorityIdsChange, onUndo: undoRedo.undo, onRedo: undoRedo.redo, canUndo: undoRedo.canUndo, canRedo: undoRedo.canRedo, thumbnailProfile: thumbnailProfile, sortCacheEnabled: sortCacheEnabled, performanceSnapshot: performanceSnapshot, onThumbnailProfileChange: setThumbnailProfile, onSortCacheEnabledChange: setSortCacheEnabled, desktopThumbnailCacheInfo: desktopThumbnailCacheInfo, desktopCacheLocationRecommendation: desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy: isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen: isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory: handleChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory: handleSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory: handleUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory: handleResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache: handleClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation: handleSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation: handleDismissDesktopCacheRecommendation }) })) : null, currentScreen === "review" ? (_jsx("div", { className: "app-section", children: _jsx(SelectionSummary, { allAssets: allAssets, activeAssetIds: activeAssetIds, projectName: projectName, onExportSelection: handleExportSelection, onBackToSelection: () => setCurrentScreen("selection"), onOpenProjectSelector: () => setIsProjectSelectorOpen(true) }) })) : null] }), isProjectSelectorOpen ? (_jsx(ProjectPhotoSelectorModal, { assets: allAssets, activeAssetIds: activeAssetIds, usageByAssetId: emptyUsageMap, onClose: () => setIsProjectSelectorOpen(false), onApply: handleSelectorApply })) : null, !desktopRuntime ? (_jsx(ImportProgressModal, { isOpen: importProgress.isOpen && !isImportPanelDismissed, phase: importProgress.phase, supported: importProgress.supported, ignored: importProgress.ignored, total: importProgress.total, processed: importProgress.processed, currentFile: importProgress.currentFile, folderLabel: importProgress.folderLabel, diagnostics: importProgress.diagnostics, onDismiss: () => setIsImportPanelDismissed(true), onCancel: handleCancelImport })) : null] }) }));
+                                : undefined, onDismiss: () => setIsXmpBannerDismissed(true) })) : null, folderDiagnostics ? (_jsxs("div", { className: "folder-diagnostics-panel", role: "status", "aria-live": "polite", children: [_jsxs("div", { className: "folder-diagnostics-panel__header", children: [_jsxs("div", { children: [_jsx("strong", { children: "Diagnostica cartella" }), _jsx("span", { children: formatFolderDiagnosticsSource(folderDiagnostics.source) })] }), _jsxs("div", { className: "folder-diagnostics-panel__badge", children: [folderDiagnostics.topLevelSupportedCount, " top-level"] })] }), _jsxs("div", { className: "folder-diagnostics-panel__grid", children: [_jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Path selezionato" }), _jsx("strong", { title: folderDiagnostics.selectedPath, children: folderDiagnostics.selectedPath })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Top-level caricati" }), _jsx("strong", { children: folderDiagnostics.topLevelSupportedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Annidati scartati" }), _jsx("strong", { children: folderDiagnostics.nestedSupportedDiscardedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Totale supportate viste" }), _jsx("strong", { children: folderDiagnostics.totalSupportedSeen })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Sottocartelle viste" }), _jsx("strong", { children: folderDiagnostics.nestedDirectoriesSeen ?? 0 })] })] })] })) : null, currentScreen === "browse" ? (_jsx("div", { className: "app-section", children: _jsx(FolderBrowser, { onFolderOpened: handleFolderOpened, isBusy: isFolderTransitionBusy }) })) : null, currentScreen === "selection" ? (_jsx("div", { className: "app-section app-section--full", children: _jsx(PhotoSelector, { photos: allAssets, metadataVersion: photoMetadataVersion, sourceFolderPath: sourceFolderPath, selectedIds: activeAssetIds, onSelectionChange: handleSelectionChange, onPhotosChange: handlePhotosChange, onVisibleIdsChange: handleVisibleIdsChange, onPriorityIdsChange: handlePriorityIdsChange, onPreviewPriorityIdsChange: handlePreviewPriorityIdsChange, onBackgroundPreviewOrderChange: handleBackgroundPreviewOrderChange, onUndo: undoRedo.undo, onRedo: undoRedo.redo, canUndo: undoRedo.canUndo, canRedo: undoRedo.canRedo, thumbnailProfile: thumbnailProfile, sortCacheEnabled: sortCacheEnabled, performanceSnapshot: performanceSnapshot, onThumbnailProfileChange: setThumbnailProfile, onSortCacheEnabledChange: setSortCacheEnabled, desktopThumbnailCacheInfo: desktopThumbnailCacheInfo, desktopCacheLocationRecommendation: desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy: isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen: isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory: handleChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory: handleSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory: handleUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory: handleResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache: handleClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation: handleSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation: handleDismissDesktopCacheRecommendation }) })) : null, currentScreen === "review" ? (_jsx("div", { className: "app-section", children: _jsx(SelectionSummary, { allAssets: allAssets, activeAssetIds: activeAssetIds, projectName: projectName, onExportSelection: handleExportSelection, onBackToSelection: () => setCurrentScreen("selection"), onOpenProjectSelector: () => setIsProjectSelectorOpen(true) }) })) : null] }), isProjectSelectorOpen ? (_jsx(ProjectPhotoSelectorModal, { assets: allAssets, activeAssetIds: activeAssetIds, usageByAssetId: emptyUsageMap, onClose: () => setIsProjectSelectorOpen(false), onApply: handleSelectorApply })) : null, !desktopRuntime ? (_jsx(ImportProgressModal, { isOpen: importProgress.isOpen && !isImportPanelDismissed, phase: importProgress.phase, supported: importProgress.supported, ignored: importProgress.ignored, total: importProgress.total, processed: importProgress.processed, currentFile: importProgress.currentFile, folderLabel: importProgress.folderLabel, diagnostics: importProgress.diagnostics, onDismiss: () => setIsImportPanelDismissed(true), onCancel: handleCancelImport })) : null] }) }));
 }
 //# sourceMappingURL=App.js.map

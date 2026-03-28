@@ -69,6 +69,7 @@ interface PhotoSelectorProps {
   onVisibleIdsChange?: (visibleIds: Set<string>) => void;
   onPriorityIdsChange?: (priorityIds: Set<string>) => void;
   onPreviewPriorityIdsChange?: (priorityIds: Set<string>) => void;
+  onBackgroundPreviewOrderChange?: (orderedIds: string[]) => void;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -266,6 +267,7 @@ export function PhotoSelector({
   onVisibleIdsChange,
   onPriorityIdsChange,
   onPreviewPriorityIdsChange,
+  onBackgroundPreviewOrderChange,
   onUndo,
   onRedo,
   canUndo = false,
@@ -360,6 +362,7 @@ export function PhotoSelector({
   const scrollAnimationFrameRef = useRef<number | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
   const lastVisibleIdsSignatureRef = useRef<string>("");
+  const lastBackgroundPreviewOrderSignatureRef = useRef<string>("");
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [gridViewport, setGridViewport] = useState({ width: 0, height: 720, scrollTop: 0 });
@@ -1306,6 +1309,21 @@ export function PhotoSelector({
 
     onPreviewPriorityIdsChange(new Set(previewPriorityIds));
   }, [onPreviewPriorityIdsChange, previewPriorityIds]);
+
+  useEffect(() => {
+    if (!onBackgroundPreviewOrderChange) {
+      return;
+    }
+
+    const orderedIds = visiblePhotoIds.slice(0, 360);
+    const signature = orderedIds.join("|");
+    if (signature === lastBackgroundPreviewOrderSignatureRef.current) {
+      return;
+    }
+
+    lastBackgroundPreviewOrderSignatureRef.current = signature;
+    onBackgroundPreviewOrderChange(orderedIds);
+  }, [onBackgroundPreviewOrderChange, visiblePhotoIds]);
 
   const scrollPhotoIntoView = useCallback((photoId: string, behavior: ScrollBehavior = "smooth") => {
     const grid = gridRef.current;

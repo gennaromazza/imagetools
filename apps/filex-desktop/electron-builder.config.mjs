@@ -21,6 +21,7 @@ function buildNsisIncludeContent(tool) {
   const explorerContextMenuLabel = escapeNsisString(`Apri con ${tool.productName}`);
   const explorerContextMenuKey = "Software\\\\Classes\\\\Directory\\\\shell\\\\FileXPhotoSelectorOpen";
   const explorerFolderContextMenuKey = "Software\\\\Classes\\\\Folder\\\\shell\\\\FileXPhotoSelectorOpen";
+  const explorerDriveContextMenuKey = "Software\\\\Classes\\\\Drive\\\\shell\\\\FileXPhotoSelectorOpen";
   const explorerBackgroundContextMenuKey =
     "Software\\\\Classes\\\\Directory\\\\Background\\\\shell\\\\FileXPhotoSelectorOpen";
 
@@ -34,6 +35,9 @@ function buildNsisIncludeContent(tool) {
   WriteRegStr HKCU "${explorerFolderContextMenuKey}" "" "${explorerContextMenuLabel}"
   WriteRegStr HKCU "${explorerFolderContextMenuKey}" "Icon" "$appExe"
   WriteRegStr HKCU "${explorerFolderContextMenuKey}\\\\command" "" '"$appExe" --open-folder "%1"'
+  WriteRegStr HKCU "${explorerDriveContextMenuKey}" "" "${explorerContextMenuLabel}"
+  WriteRegStr HKCU "${explorerDriveContextMenuKey}" "Icon" "$appExe"
+  WriteRegStr HKCU "${explorerDriveContextMenuKey}\\\\command" "" '"$appExe" --open-folder "%1"'
   WriteRegStr HKCU "${explorerBackgroundContextMenuKey}" "" "${explorerContextMenuLabel}"
   WriteRegStr HKCU "${explorerBackgroundContextMenuKey}" "Icon" "$appExe"
   WriteRegStr HKCU "${explorerBackgroundContextMenuKey}\\\\command" "" '"$appExe" --open-folder "%V"'
@@ -41,6 +45,7 @@ function buildNsisIncludeContent(tool) {
     : "  ; Nessun menu contestuale Explorer per questo tool.\n";
   const contextMenuUninstallLines = shouldInstallExplorerContextMenu
     ? `  DeleteRegKey HKCU "${explorerBackgroundContextMenuKey}"
+  DeleteRegKey HKCU "${explorerDriveContextMenuKey}"
   DeleteRegKey HKCU "${explorerFolderContextMenuKey}"
   DeleteRegKey HKCU "${explorerContextMenuKey}"
 `

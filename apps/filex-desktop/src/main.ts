@@ -75,6 +75,7 @@ const appUserModelId = `studio.filex.${requestedTool.id}`;
 let mainWindow: BrowserWindow | null = null;
 let isOpenFolderRequestRendererReady = false;
 let pendingOpenFolderPath: string | null = null;
+let mainWindowCreationPromise: Promise<void> | null = null;
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -154,6 +155,17 @@ function extractOpenFolderPathFromArgv(argv: string[]): string | null {
     }
   }
 
+  for (const value of argv.slice(1)) {
+    if (typeof value !== "string" || value.startsWith("--")) {
+      continue;
+    }
+
+    const directoryPath = resolveValidDirectoryPath(value);
+    if (directoryPath) {
+      return directoryPath;
+    }
+  }
+
   return null;
 }
 
@@ -180,6 +192,12 @@ function deliverOpenFolderRequest(folderPath: string): void {
   }
 
   mainWindow.webContents.send("filex:open-folder-request", folderPath);
+  logDesktopEvent({
+    channel: "folder-open",
+    level: "info",
+    message: "Richiesta apertura cartella inviata al renderer",
+    details: folderPath,
+  });
   pendingOpenFolderPath = null;
 }
 
@@ -189,6 +207,12 @@ function queueOpenFolderPath(folderPath: string | null): void {
   }
 
   pendingOpenFolderPath = folderPath;
+  logDesktopEvent({
+    channel: "folder-open",
+    level: "info",
+    message: "Richiesta apertura cartella accodata",
+    details: folderPath,
+  });
   if (isOpenFolderRequestRendererReady) {
     deliverOpenFolderRequest(folderPath);
   }
@@ -201,14 +225,15 @@ if (!hasSingleInstanceLock) {
   pendingOpenFolderPath = extractOpenFolderPathFromArgv(process.argv);
 
   app.on("second-instance", (_event, argv) => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
-      queueOpenFolderPath(extractOpenFolderPathFromArgv(argv));
-      void createMainWindow();
-      return;
-    }
-
-    focusMainWindow();
     queueOpenFolderPath(extractOpenFolderPathFromArgv(argv));
+    void ensureMainWindow();
+    focusMainWindow();
+  });
+
+  app.on("browser-window-focus", () => {
+    if (pendingOpenFolderPath && isOpenFolderRequestRendererReady) {
+      deliverOpenFolderRequest(pendingOpenFolderPath);
+    }
   });
 }
 
@@ -716,6 +741,22 @@ async function loadRenderer(window: BrowserWindow): Promise<void> {
   await window.loadFile(entryPath);
 }
 
+async function ensureMainWindow(): Promise<void> {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return;
+  }
+
+  if (mainWindowCreationPromise) {
+    await mainWindowCreationPromise;
+    return;
+  }
+
+  mainWindowCreationPromise = createMainWindow().finally(() => {
+    mainWindowCreationPromise = null;
+  });
+  await mainWindowCreationPromise;
+}
+
 async function createMainWindow(): Promise<void> {
   const windowInstance = new BrowserWindow({
     title: requestedTool.productName,
@@ -770,17 +811,21 @@ async function createMainWindow(): Promise<void> {
     }
     isOpenFolderRequestRendererReady = false;
   });
+
+  if (pendingOpenFolderPath) {
+    focusMainWindow();
+  }
 }
 
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     registerPreviewProtocol();
     registerIpcHandlers();
-    await createMainWindow();
+    await ensureMainWindow();
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
-        void createMainWindow();
+        void ensureMainWindow();
       }
     });
   }).catch((error) => {
