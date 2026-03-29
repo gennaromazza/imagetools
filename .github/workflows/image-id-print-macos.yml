@@ -47,9 +47,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci --include=optional
-          npm install --no-save @img/sharp-darwin-${{ matrix.arch }}@0.34.5 @img/sharp-libvips-darwin-${{ matrix.arch }}@1.2.4
           npm install --no-save @rollup/rollup-darwin-${{ matrix.arch }}
-          npm rebuild sharp --include=optional
 
       - name: Build macOS package
         shell: bash

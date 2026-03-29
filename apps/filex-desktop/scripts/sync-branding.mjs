@@ -2,7 +2,6 @@ import { mkdir, readFile, writeFile, copyFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
-import sharp from "sharp";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
@@ -154,14 +153,31 @@ async function maybeGenerateIcns(sourcePath, icnsTargetPath) {
 }
 
 async function renderSquarePng(sourcePath, outputPath, size) {
-  await sharp(sourcePath)
-    .resize(size, size, {
-      fit: "contain",
-      background: { r: 0, g: 0, b: 0, alpha: 0 },
-      withoutEnlargement: false,
-    })
-    .png()
-    .toFile(outputPath);
+  const tempPath = `${outputPath}.tmp.png`;
+  await rm(tempPath, { force: true });
+
+  try {
+    await runCommand("sips", [
+      "-s",
+      "format",
+      "png",
+      "-Z",
+      String(size),
+      sourcePath,
+      "--out",
+      tempPath,
+    ]);
+    await runCommand("sips", [
+      tempPath,
+      "--padToHeightWidth",
+      String(size),
+      String(size),
+      "--out",
+      outputPath,
+    ]);
+  } finally {
+    await rm(tempPath, { force: true });
+  }
 }
 
 function runCommand(command, args) {
