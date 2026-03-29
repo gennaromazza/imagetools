@@ -48,13 +48,40 @@ jobs:
         run: npm ci
 
       - name: Build macOS package
-        run: npm --workspace @photo-tools/filex-desktop run ${{ matrix.npm_script }}
+        shell: bash
+        run: |
+          set -o pipefail
+          npm --workspace @photo-tools/filex-desktop run ${{ matrix.npm_script }} 2>&1 | tee build-macos.log
+
+      - name: Report build failure
+        if: failure()
+        shell: bash
+        run: |
+          tail -n 120 build-macos.log > build-macos-tail.log || true
+          python - <<'PY'
+          from pathlib import Path
+          tail = Path("build-macos-tail.log")
+          text = tail.read_text(encoding="utf-8", errors="replace") if tail.exists() else "No build log captured."
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error file=.github/workflows/image-id-print-macos.yml,line=1,title=macOS build failure::{text}")
+          PY
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: image-id-print-macos-${{ matrix.arch }}
           path: |
             apps/filex-desktop/release/image-id-print/*.dmg
             apps/filex-desktop/release/image-id-print/*.zip
           if-no-files-found: error
+
+      - name: Upload macOS logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-id-print-macos-logs-${{ matrix.arch }}
+          path: |
+            build-macos.log
+            build-macos-tail.log
+          if-no-files-found: ignore
