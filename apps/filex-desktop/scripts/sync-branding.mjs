@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, copyFile, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import sharp from "sharp";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
@@ -144,12 +145,23 @@ async function maybeGenerateIcns(sourcePath, icnsTargetPath) {
   for (const size of iconSizes) {
     const singleName = `icon_${size}x${size}.png`;
     const retinaName = `icon_${size}x${size}@2x.png`;
-    await runCommand("sips", ["-z", String(size), String(size), sourcePath, "--out", join(iconsetDir, singleName)]);
-    await runCommand("sips", ["-z", String(size * 2), String(size * 2), sourcePath, "--out", join(iconsetDir, retinaName)]);
+    await renderSquarePng(sourcePath, join(iconsetDir, singleName), size);
+    await renderSquarePng(sourcePath, join(iconsetDir, retinaName), size * 2);
   }
 
   await runCommand("iconutil", ["-c", "icns", iconsetDir, "-o", icnsTargetPath]);
   await rm(iconsetDir, { recursive: true, force: true });
+}
+
+async function renderSquarePng(sourcePath, outputPath, size) {
+  await sharp(sourcePath)
+    .resize(size, size, {
+      fit: "contain",
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+      withoutEnlargement: false,
+    })
+    .png()
+    .toFile(outputPath);
 }
 
 function runCommand(command, args) {
