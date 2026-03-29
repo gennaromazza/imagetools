@@ -16,10 +16,18 @@ const toolBranding = [
   { toolId: "archivio-flow", sourceFile: "photo_Archivie.png" },
   { toolId: "photo-selector-app", sourceFile: "photo_selector_icon.png" },
 ];
+const requestedToolId = process.env.FILEX_TOOL?.trim();
+const brandingTargets = requestedToolId
+  ? toolBranding.filter((tool) => tool.toolId === requestedToolId)
+  : toolBranding;
+
+if (requestedToolId && brandingTargets.length === 0) {
+  throw new Error(`Unknown FILEX_TOOL for branding sync: ${requestedToolId}`);
+}
 
 await mkdir(targetDir, { recursive: true });
 
-for (const tool of toolBranding) {
+for (const tool of brandingTargets) {
   const sourcePath = join(sourceDir, tool.sourceFile);
   const pngTargetPath = join(targetDir, `${tool.toolId}.png`);
   const icoTargetPath = join(targetDir, `${tool.toolId}.ico`);
@@ -182,14 +190,30 @@ async function renderSquarePng(sourcePath, outputPath, size) {
 
 function runCommand(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: "inherit" });
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) {
         resolve();
         return;
       }
-      reject(new Error(`${command} exited with code ${code ?? "unknown"}`));
+      const details = [stdout.trim(), stderr.trim()].filter(Boolean).join("\n");
+      reject(
+        new Error(
+          `${command} ${args.join(" ")} exited with code ${code ?? "unknown"}${
+            details ? `\n${details}` : ""
+          }`,
+        ),
+      );
     });
   });
 }
