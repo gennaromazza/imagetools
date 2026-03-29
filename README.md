@@ -1,6 +1,6 @@
-# FileX Suite (ex ImageTools)
+# FileX Suite
 
-Repository principale della suite **FileX** (ex ImageTools): strumenti professionali per workflow fotografici, progettati per lavorare insieme come un ecosistema modulare.
+Repository principale della suite **FileX**: strumenti fotografici modulari per impaginazione, selezione, archivio e stampa documento.
 
 ## Struttura
 
@@ -8,41 +8,50 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 - `packages/`: moduli condivisi
 - `docs/`: documentazione di suite e dei singoli tool
 
-## Tool Principali (Marzo 2026)
+## Tool principali
 
-- `apps/auto-layout-app` — Impaginazione automatica multifoto
-- `apps/image-party-frame` — Batch framing, crop live, export eventi
-- `apps/IMAGE ID PRINT` — Foto documento pronte per la stampa (AI/sidecar)
-- `apps/archivio-flow` — Import, archiviazione e organizzazione lavori da SD
-- `apps/photo-selector-app` — Selezione e classificazione foto avanzata
+- `apps/auto-layout-app`: impaginazione automatica multifoto
+- `apps/image-party-frame`: batch framing, crop live, export eventi
+- `apps/IMAGE ID PRINT`: foto documento pronte per la stampa
+- `apps/archivio-flow`: import e archiviazione lavori da SD
+- `apps/photo-selector-app`: selezione e classificazione foto avanzata
+- `apps/filex-desktop`: shell desktop Electron condivisa
 
-## Launcher Windows
+## Stato desktop
 
-- `avvia-progetto.bat`: schermata di scelta tool (da estendere per includere tutti i tool FileX)
-- `avvia-auto-layout.bat`: avvia direttamente Auto Layout
-- `avvia-image-party-frame.bat`: avvia direttamente Image Party Frame
-- `avvia-image-id-print.bat`: avvia Image ID Print (con AI sidecar)
-- `avvia-archivio-flow.bat`: avvia Archivio Flow
-- `avvia-photo-selector.bat`: avvia Photo Selector
+La suite sta migrando da tool browser-first a software desktop installabile.
 
-## Visione Suite FileX
+Stato rilevante a marzo 2026:
 
-L’obiettivo è una suite integrata, con:
-- UI e UX coerenti
-- tecnologie allineate (React, Vite, TypeScript, Node)
-- launcher e documentazione unificati
-- moduli condivisi per storage, preset, tipi, orchestrazione
+- esiste una shell Electron comune in `apps/filex-desktop`
+- `Image ID Print` e' integrato nella shell come desktop app dedicata
+- il packaging Windows per `Image ID Print` produce un installer `NSIS`
+- il runtime AI di `Image ID Print` viene staged nelle risorse dell'app
+- il build macOS e' configurato, ma gli artefatti finali devono essere generati da host o CI macOS
+- ogni tool desktop scrive i propri artefatti in `apps/filex-desktop/release/<tool-id>`
 
-## Roadmap Unificazione
+## Comandi utili
 
-1. Allineamento documentazione e naming (FileX branding)
-2. Aggiornamento launcher principale per includere tutti i tool
-3. Uniformazione stack tecnologico (React 18/19, dipendenze, pattern UI)
-4. Refactor moduli condivisi e servizi
-5. Packaging desktop e distribuzione facilitata
+- build frontend `Image ID Print`:
+  - `npm --workspace @photo-tools/image-id-print run build`
+- build shell desktop + app `Image ID Print`:
+  - `npm --workspace @photo-tools/filex-desktop run build:image-id-print`
+- installer Windows `Image ID Print`:
+  - `npm --workspace @photo-tools/filex-desktop run dist:image-id-print:win`
+- build macOS `Image ID Print` da host macOS:
+  - `npm --workspace @photo-tools/filex-desktop run dist:image-id-print:mac`
+
+## Branding
+
+Per `Image ID Print`, il branding desktop visibile e':
+
+- `Image ID Print`
+- `by ImageStudio di Gennaro Mazzacane`
 
 ## Documentazione
 
-- `docs/00-overview.md`, `docs/01-tech-stack.md`, `docs/02-ui-system.md`: documenti di suite
-- `docs/03-desktop-windows-migration.md`: piano di migrazione desktop Windows condiviso per tutta la suite
-- `docs/tools/`: documenti specifici dei singoli tool
+- `docs/00-overview.md`
+- `docs/01-tech-stack.md`
+- `docs/02-ui-system.md`
+- `docs/03-desktop-windows-migration.md`
+- `docs/tools/image-id-print.md`

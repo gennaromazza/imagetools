@@ -1,16 +1,11 @@
-const BASE_URL = (
-  (import.meta as unknown as { env?: { VITE_REMBG_ENDPOINT?: string } }).env?.VITE_REMBG_ENDPOINT
-  ?? 'http://localhost:7010/remove-background'
-).replace(/\/remove-background$/, '')
-
-const REMBG_ENDPOINT = `${BASE_URL}/remove-background`
-const HEALTH_ENDPOINT = `${BASE_URL}/health`
+import { getRembgEndpoint } from '../lib/desktop-runtime'
 
 export interface BackgroundRemovalOptions {
   backgroundRefine?: number
 }
 
 export async function isRembgAvailable(timeoutMs = 3000): Promise<boolean> {
+  const HEALTH_ENDPOINT = getRembgEndpoint('/health')
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   try {
@@ -28,6 +23,7 @@ export async function removeBackgroundWithLocalService(
   timeoutMs = 20000,
   options: BackgroundRemovalOptions = {},
 ): Promise<Blob> {
+  const REMBG_ENDPOINT = getRembgEndpoint('/remove-background')
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
 

@@ -117,19 +117,19 @@ export function PreviewSheet({ layout, croppedCanvas }: PreviewSheetProps) {
           <div className="flex items-center justify-between text-xs">
             <span className="text-[var(--app-text-subtle)]">Griglia</span>
             <span className="text-[var(--app-text-muted)]">
-              {layout.cols} × {layout.rows}
+              {layout.cols} x {layout.rows}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-[var(--app-text-subtle)]">Orientamento</span>
             <span className="text-[var(--app-text-muted)]">
               {layout.sheetWidthPx >= layout.sheetHeightPx ? 'Orizzontale' : 'Verticale'}
-              {layout.photoRotated && ' · foto ruotata'}
+              {layout.photoRotated && ' - foto ruotata'}
             </span>
           </div>
           {copies === 0 && (
             <p className="text-xs text-[var(--danger)] pt-1">
-              ⚠ Nessuna copia possibile — prova un foglio più grande o una foto più piccola.
+              Attenzione: nessuna copia possibile - prova un foglio piu' grande o una foto piu' piccola.
             </p>
           )}
         </div>

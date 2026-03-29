@@ -18,8 +18,8 @@
 
 ## Artefatti generati
 
-- [x] `apps/filex-desktop/release/Archivio-Flow-0.1.0-x64-setup.exe`
-- [x] `apps/filex-desktop/release/Archivio-Flow-0.1.0-ia32-setup.exe`
+- [x] `apps/filex-desktop/release/archivio-flow/Archivio-Flow-0.1.0-x64-setup.exe`
+- [x] `apps/filex-desktop/release/archivio-flow/Archivio-Flow-0.1.0-ia32-setup.exe`
 
 ## Verifiche tecniche
 

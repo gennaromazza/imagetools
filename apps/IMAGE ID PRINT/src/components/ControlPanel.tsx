@@ -13,6 +13,7 @@ import type {
 } from '../types'
 import { DOCUMENT_PRESETS } from '../presets/document-presets'
 import { SHEET_PRESETS } from '../presets/sheet-presets'
+import type { ImageIdPrintAiDesktopState } from '../lib/desktop-runtime'
 
 interface ControlPanelProps {
   imageFile: File | null
@@ -27,6 +28,7 @@ interface ControlPanelProps {
   aiOptions: AiProcessingOptions
   aiWarnings: string[]
   aiSuggestions: string[]
+  aiServiceState: ImageIdPrintAiDesktopState | null
   isAiProcessing: boolean
   isExporting: boolean
   onImageReplace: (file: File, img: HTMLImageElement) => void
@@ -43,9 +45,9 @@ interface ControlPanelProps {
 }
 
 const DPI_OPTIONS: { value: DpiValue; label: string; hint: string }[] = [
-  { value: 150, label: '150 DPI', hint: 'Bassa qualità' },
+  { value: 150, label: '150 DPI', hint: "Bassa qualita'" },
   { value: 300, label: '300 DPI', hint: 'Standard stampa' },
-  { value: 600, label: '600 DPI', hint: 'Alta qualità' },
+  { value: 600, label: '600 DPI', hint: "Alta qualita'" },
 ]
 
 const FORMAT_OPTIONS: { value: ExportFormat; label: string }[] = [
@@ -87,6 +89,7 @@ export function ControlPanel({
   aiOptions,
   aiWarnings,
   aiSuggestions,
+  aiServiceState,
   isAiProcessing,
   isExporting,
   onImageReplace,
@@ -167,7 +170,14 @@ export function ControlPanel({
       .filter((p) => (selectedCountry === 'ALL' ? true : p.countryCode === selectedCountry))
       .filter((p) => {
         if (!q) return true
-        return p.name.toLowerCase().includes(q) || p.countryName.toLowerCase().includes(q)
+        const sizeLabel = `${p.widthMm}x${p.heightMm}`
+        const reverseSizeLabel = `${p.heightMm}x${p.widthMm}`
+        return (
+          p.name.toLowerCase().includes(q)
+          || p.countryName.toLowerCase().includes(q)
+          || sizeLabel.includes(q)
+          || reverseSizeLabel.includes(q)
+        )
       })
       .sort((a, b) => {
         if (a.countryCode === 'IT' && b.countryCode !== 'IT') return -1
@@ -210,7 +220,27 @@ export function ControlPanel({
         <h1 className="text-base font-semibold text-[var(--app-text)] leading-tight">
           Image ID Print
         </h1>
-        <p className="text-xs text-[var(--app-text-subtle)] mt-0.5">Foto per documenti</p>
+        <p className="text-xs text-[var(--app-text-subtle)] mt-0.5">Foto per documenti by ImageStudio di Gennaro Mazzacane</p>
+        {aiServiceState?.enabled && (
+          <p className="text-[11px] text-[var(--app-text-subtle)] mt-1">
+            AI desktop:
+            {' '}
+            <span className="text-[var(--app-text)]">
+              {aiServiceState.status === 'ready'
+                ? 'pronta'
+                : aiServiceState.status === 'starting'
+                  ? 'inizializzazione...'
+                  : aiServiceState.status === 'error'
+                    ? 'errore'
+                    : 'non disponibile'}
+            </span>
+          </p>
+        )}
+        {aiServiceState?.enabled && aiServiceState.detail && (
+          <p className="text-[11px] text-[var(--app-text-subtle)] mt-1 leading-snug">
+            {aiServiceState.detail}
+          </p>
+        )}
       </div>
 
       <Divider />
@@ -433,7 +463,7 @@ export function ControlPanel({
         {aiSuggestions.length > 0 && (
           <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-field)] p-2 mt-2">
             {aiSuggestions.map((s, i) => (
-              <p key={i} className="text-[10px] text-[var(--app-text-subtle)]">• {s}</p>
+              <p key={i} className="text-[10px] text-[var(--app-text-subtle)]">- {s}</p>
             ))}
           </div>
         )}
@@ -441,7 +471,7 @@ export function ControlPanel({
         {aiWarnings.length > 0 && (
           <div className="rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] p-2 mt-2">
             {aiWarnings.map((w, i) => (
-              <p key={i} className="text-[10px] text-[var(--danger)]">• {w}</p>
+              <p key={i} className="text-[10px] text-[var(--danger)]">- {w}</p>
             ))}
           </div>
         )}
@@ -524,7 +554,7 @@ export function ControlPanel({
             >
               <div className="font-medium">{preset.name}</div>
               <div className="text-[10px] text-[var(--app-text-subtle)]">
-                {preset.countryName} · {preset.widthMm}x{preset.heightMm} mm
+                {preset.countryName} - {preset.widthMm}x{preset.heightMm} mm
               </div>
             </button>
           ))}
@@ -544,7 +574,12 @@ export function ControlPanel({
               onChange={(v) => {
                 const updated = { ...customDocSize, widthMm: v }
                 onCustomDocSizeChange(updated)
-                onDocPresetChange({ ...docPreset, widthMm: v, heightMm: updated.heightMm })
+                onDocPresetChange({
+                  ...docPreset,
+                  widthMm: v,
+                  heightMm: updated.heightMm,
+                  aspectRatio: v / updated.heightMm,
+                })
               }}
             />
             <NumberInput
@@ -555,7 +590,12 @@ export function ControlPanel({
               onChange={(v) => {
                 const updated = { ...customDocSize, heightMm: v }
                 onCustomDocSizeChange(updated)
-                onDocPresetChange({ ...docPreset, widthMm: updated.widthMm, heightMm: v })
+                onDocPresetChange({
+                  ...docPreset,
+                  widthMm: updated.widthMm,
+                  heightMm: v,
+                  aspectRatio: updated.widthMm / v,
+                })
               }}
             />
           </div>
@@ -580,7 +620,7 @@ export function ControlPanel({
             >
               <span className="font-medium">{preset.label}</span>
               <span className="ml-2 text-[var(--app-text-subtle)]">
-                {preset.widthMm}×{preset.heightMm} mm
+                {preset.widthMm}x{preset.heightMm} mm
               </span>
             </button>
           ))}
@@ -590,7 +630,7 @@ export function ControlPanel({
       <Divider />
 
       {/* ── DPI ── */}
-      <CollapsibleSection label="Qualità stampa">
+      <CollapsibleSection label="Qualita' stampa">
         <div className="flex gap-1.5">
           {DPI_OPTIONS.map((opt) => (
             <button

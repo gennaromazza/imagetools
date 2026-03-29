@@ -1,4 +1,5 @@
 from io import BytesIO
+import os
 import numpy as np
 import cv2
 from flask import Flask, jsonify, request, send_file
@@ -163,4 +164,5 @@ def detect_face():
 
 if __name__ == "__main__":
     # Keep host/port aligned with frontend default endpoint.
-    app.run(host="127.0.0.1", port=7010, debug=False)
+    port = int(os.environ.get("IMAGE_ID_PRINT_AI_PORT", "7010"))
+    app.run(host="127.0.0.1", port=port, debug=False)

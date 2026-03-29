@@ -1,15 +1,9 @@
 import type { DocumentPreset } from '../types'
+import { getAiUnavailableMessage, getRembgEndpoint, hasDesktopBridge } from '../lib/desktop-runtime'
 import { isRembgAvailable, removeBackgroundWithLocalService } from './background-removal-service'
 import { expandCanvasWhite } from './canvas-expand-service'
 import { tryGenerativeRefillEdges } from './generative-refill-service'
 import { upscaleCanvas2x } from './upscale-service'
-
-const REMBG_BASE_URL = (
-  (import.meta as unknown as { env?: { VITE_REMBG_ENDPOINT?: string } }).env?.VITE_REMBG_ENDPOINT
-  ?? 'http://localhost:7010/remove-background'
-).replace(/\/remove-background$/, '')
-
-const FACE_DETECT_ENDPOINT = `${REMBG_BASE_URL}/detect-face`
 
 interface FaceBox {
   x: number
@@ -153,9 +147,7 @@ export async function processCanvasWithAi(
   if (options.removeBackground) {
     const available = await isRembgAvailable()
     if (!available) {
-      warnings.push(
-        'Server rembg non in esecuzione. Avvia avvia-image-id-print.bat per attivarlo automaticamente.',
-      )
+      warnings.push(getAiUnavailableMessage(hasDesktopBridge()))
     } else {
       try {
         const originalW = subjectCanvas.width
@@ -244,13 +236,26 @@ function imageToCanvas(img: HTMLImageElement): HTMLCanvasElement {
   return canvas
 }
 
-function applyUniformWhiteBackground(source: HTMLCanvasElement, _edgeSoftness: number): HTMLCanvasElement {
+function applyUniformWhiteBackground(source: HTMLCanvasElement, edgeSoftness: number): HTMLCanvasElement {
   const out = document.createElement('canvas')
   out.width = source.width
   out.height = source.height
   const ctx = out.getContext('2d')!
   ctx.fillStyle = '#ffffff'
   ctx.fillRect(0, 0, out.width, out.height)
+
+  if (edgeSoftness > 0.01) {
+    const feathered = document.createElement('canvas')
+    feathered.width = source.width
+    feathered.height = source.height
+    const featherCtx = feathered.getContext('2d')!
+    const blurRadius = Math.max(0.6, Math.min(6, edgeSoftness * 6))
+    featherCtx.filter = `blur(${blurRadius.toFixed(2)}px)`
+    featherCtx.drawImage(source, 0, 0)
+    featherCtx.filter = 'none'
+    ctx.drawImage(feathered, 0, 0)
+  }
+
   ctx.drawImage(source, 0, 0)
   return out
 }
@@ -416,6 +421,7 @@ function drawExtendedBackdrop(
 
 async function detectFaceWithSidecar(source: HTMLCanvasElement): Promise<FaceBox | null> {
   try {
+    const FACE_DETECT_ENDPOINT = getRembgEndpoint('/detect-face')
     const send = resizeCanvasToMax(source, 1800)
     const blob = await canvasToBlob(send, 'image/jpeg', 0.9)
     const formData = new FormData()

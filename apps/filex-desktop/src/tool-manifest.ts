@@ -1,9 +1,13 @@
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { DesktopToolId } from "@photo-tools/desktop-contracts";
 
 export interface DesktopToolDescriptor {
   id: DesktopToolId;
   displayName: string;
   productName: string;
+  signatureLine?: string;
   executableName: string;
   legacyUpgradeDisplayNames?: string[];
   workspacePackageName: string;
@@ -52,6 +56,7 @@ export const desktopToolManifest = {
     id: "image-id-print",
     displayName: "Image ID Print",
     productName: "Image ID Print",
+    signatureLine: "by ImageStudio di Gennaro Mazzacane",
     executableName: "Image-ID-Print",
     legacyUpgradeDisplayNames: ["Image ID Print"],
     workspacePackageName: "@photo-tools/image-id-print",
@@ -105,9 +110,30 @@ export function isDesktopToolId(value: string): value is DesktopToolId {
   return value in desktopToolManifest;
 }
 
+function readPackagedToolId(): DesktopToolId | undefined {
+  try {
+    const currentFile = fileURLToPath(import.meta.url);
+    const currentDir = dirname(currentFile);
+    const packageJsonPath = resolve(currentDir, "..", "package.json");
+    if (!existsSync(packageJsonPath)) {
+      return undefined;
+    }
+
+    const payload = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+      filexTool?: string;
+    };
+    return payload.filexTool && isDesktopToolId(payload.filexTool)
+      ? payload.filexTool
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function getDesktopToolOrDefault(value: string | undefined): DesktopToolDescriptor {
-  if (value && isDesktopToolId(value)) {
-    return desktopToolManifest[value];
+  const explicitTool = value && isDesktopToolId(value) ? value : readPackagedToolId();
+  if (explicitTool) {
+    return desktopToolManifest[explicitTool];
   }
 
   return desktopToolManifest["photo-selector-app"];

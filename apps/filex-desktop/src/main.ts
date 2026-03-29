@@ -66,6 +66,11 @@ import {
   saveSortCache,
   shutdownDesktopStore,
 } from "./desktop-store.js";
+import {
+  ensureImageIdPrintAiService,
+  getImageIdPrintAiServiceState,
+  shutdownImageIdPrintAiService,
+} from "./image-id-print-ai-service.js";
 import { getDesktopToolOrDefault } from "./tool-manifest.js";
 
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
@@ -542,12 +547,15 @@ function registerPreviewProtocol(): void {
 
 function buildMissingRendererHtml(entryPath: string): string {
   const buildCommand = `npm --workspace ${requestedTool.workspacePackageName} run build`;
+  const brandedTitle = requestedTool.signatureLine
+    ? `${requestedTool.productName} ${requestedTool.signatureLine}`
+    : requestedTool.productName;
 
   return `<!doctype html>
 <html lang="it">
   <head>
     <meta charset="utf-8" />
-    <title>FileX Desktop</title>
+    <title>${escapeHtml(brandedTitle)}</title>
     <style>
       body {
         margin: 0;
@@ -609,6 +617,11 @@ function registerIpcHandlers(): void {
     };
 
     return payload;
+  });
+  ipcMain.handle("filex:get-image-id-print-ai-service-state", () => getImageIdPrintAiServiceState());
+  ipcMain.handle("filex:ensure-image-id-print-ai-service", async () => {
+    await ensureImageIdPrintAiService();
+    return getImageIdPrintAiServiceState();
   });
   ipcMain.handle("filex:open-folder", () => openFolderDesktop());
   ipcMain.handle("filex:reopen-folder", (_event, rootPath: string) => reopenFolderDesktop(rootPath));
@@ -920,7 +933,9 @@ async function ensureMainWindow(): Promise<void> {
 
 async function createMainWindow(): Promise<void> {
   const windowInstance = new BrowserWindow({
-    title: requestedTool.productName,
+    title: requestedTool.signatureLine
+      ? `${requestedTool.productName} - ${requestedTool.signatureLine}`
+      : requestedTool.productName,
     width: requestedTool.defaultWindowWidth,
     height: requestedTool.defaultWindowHeight,
     minWidth: requestedTool.minWindowWidth,
@@ -960,7 +975,11 @@ async function createMainWindow(): Promise<void> {
 
   await loadRenderer(windowInstance);
 
-  windowInstance.setTitle(requestedTool.productName);
+  windowInstance.setTitle(
+    requestedTool.signatureLine
+      ? `${requestedTool.productName} - ${requestedTool.signatureLine}`
+      : requestedTool.productName,
+  );
 
   if (!app.isPackaged) {
     windowInstance.webContents.openDevTools({ mode: "detach" });
@@ -982,6 +1001,15 @@ if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     registerPreviewProtocol();
     registerIpcHandlers();
+    await ensureImageIdPrintAiService().catch((error) => {
+      console.error("Image ID Print AI service failed to start", error);
+      logDesktopEvent({
+        channel: "image-id-print-ai",
+        level: "error",
+        message: "Avvio motore AI fallito",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    });
     await ensureMainWindow();
 
     app.on("activate", () => {
@@ -1008,6 +1036,7 @@ app.on("window-all-closed", () => {
 });
 
 app.once("before-quit", () => {
+  shutdownImageIdPrintAiService();
   void shutdownDesktopImageService();
   shutdownDesktopStore();
 });

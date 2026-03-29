@@ -7,6 +7,13 @@ import { calculateLayout } from './engines/layout-engine'
 import { exportSheet, renderSheetCanvas } from './engines/export-engine'
 import { mmToPx } from './lib/utils'
 import {
+  ensureImageIdPrintAiDesktopState,
+  getDesktopRuntimeInfo,
+  getImageIdPrintAiDesktopState,
+  type DesktopRuntimeInfoLike,
+  type ImageIdPrintAiDesktopState,
+} from './lib/desktop-runtime'
+import {
   composeAiOutputCanvas,
   defaultAiOptions,
   inferAiOptionsForSource,
@@ -40,6 +47,8 @@ export default function App() {
   const [isAiProcessing, setIsAiProcessing] = useState(false)
   const [aiWarnings, setAiWarnings] = useState<string[]>([])
   const [isExporting, setIsExporting] = useState(false)
+  const [desktopRuntimeInfo, setDesktopRuntimeInfo] = useState<DesktopRuntimeInfoLike | null>(null)
+  const [aiServiceState, setAiServiceState] = useState<ImageIdPrintAiDesktopState | null>(null)
   const [leftPanelWidth, setLeftPanelWidth] = useState<number>(() => {
     const raw = window.localStorage.getItem('image-id-print:left-panel-width')
     const parsed = raw ? Number(raw) : 312
@@ -51,10 +60,51 @@ export default function App() {
   const [autoAiPending, setAutoAiPending] = useState(false)
   const aiPreviewCanvasRef = useRef<HTMLCanvasElement>(null)
   const isResizingLeftRef = useRef(false)
+  const aiRunIdRef = useRef(0)
 
   useEffect(() => {
     window.localStorage.setItem('image-id-print:left-panel-width', String(leftPanelWidth))
   }, [leftPanelWidth])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const loadDesktopState = async () => {
+      const runtimeInfo = await getDesktopRuntimeInfo()
+      if (cancelled) return
+      setDesktopRuntimeInfo(runtimeInfo)
+
+      if (runtimeInfo?.toolId !== 'image-id-print') {
+        setAiServiceState(null)
+        return
+      }
+
+      const ensuredState = await ensureImageIdPrintAiDesktopState()
+      if (!cancelled && ensuredState) {
+        setAiServiceState(ensuredState)
+      }
+
+      const initialState = await getImageIdPrintAiDesktopState()
+      if (!cancelled) {
+        setAiServiceState(initialState)
+      }
+    }
+
+    void loadDesktopState()
+
+    const timer = window.setInterval(() => {
+      void getImageIdPrintAiDesktopState().then((state) => {
+        if (!cancelled) {
+          setAiServiceState(state)
+        }
+      })
+    }, 2500)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -133,14 +183,17 @@ export default function App() {
   }, [docPreset, sheetPreset, dpi])
 
   const resolutionWarning = useMemo<string | null>(() => {
-    if (!imageElement) return null
+    const source = croppedCanvas ?? imageElement
+    if (!source) return null
+    const width = source instanceof HTMLCanvasElement ? source.width : source.naturalWidth
+    const height = source instanceof HTMLCanvasElement ? source.height : source.naturalHeight
     const reqW = mmToPx(docPreset.widthMm, dpi)
     const reqH = mmToPx(docPreset.heightMm, dpi)
-    if (imageElement.naturalWidth < reqW || imageElement.naturalHeight < reqH) {
+    if (width < reqW || height < reqH) {
       return `Risoluzione insufficiente per stampa ottimale a ${dpi} DPI. Risultato potrebbe apparire sfocato.`
     }
     return null
-  }, [imageElement, docPreset, dpi])
+  }, [croppedCanvas, imageElement, docPreset, dpi])
 
   const aiSuggestions = useMemo(() => {
     return suggestAiActions(croppedCanvas ?? imageElement, docPreset, dpi)
@@ -149,6 +202,8 @@ export default function App() {
   // ─── Handlers ───────────────────────────────────────────────────────────────
 
   const handleImageLoaded = useCallback((file: File, img: HTMLImageElement) => {
+    aiRunIdRef.current += 1
+    setIsAiProcessing(false)
     setImageFile(file)
     setImageElement(img)
     setCroppedCanvas(null)
@@ -161,15 +216,28 @@ export default function App() {
   }, [docPreset, dpi])
 
   const handleCropUpdate = useCallback((canvas: HTMLCanvasElement) => {
+    aiRunIdRef.current += 1
+    setIsAiProcessing(false)
     setCroppedCanvas(canvas)
     setAiCanvas(null)
     setAiRefinePayload(null)
+    setAiWarnings([])
     setCenterPreviewMode('original')
   }, [])
 
   const handleDocPresetChange = useCallback((preset: DocumentPreset) => {
+    const nextPreset = preset.id === 'custom'
+      ? {
+          ...preset,
+          widthMm: customDocSize.widthMm,
+          heightMm: customDocSize.heightMm,
+          aspectRatio: customDocSize.widthMm / customDocSize.heightMm,
+        }
+      : preset
     const hadAiResult = !!aiCanvas
-    setDocPreset(preset)
+    aiRunIdRef.current += 1
+    setIsAiProcessing(false)
+    setDocPreset(nextPreset)
     // AI output is bound to the previous crop/preset. Invalidate it so
     // the user immediately sees the new document framing.
     setAiCanvas(null)
@@ -181,7 +249,7 @@ export default function App() {
         description: 'Risultato AI precedente azzerato. Riapplica AI sul nuovo formato.',
       })
     }
-  }, [aiCanvas])
+  }, [aiCanvas, customDocSize])
 
   const runAiPipeline = useCallback(async (mode: 'manual' | 'auto'): Promise<boolean> => {
     if (!croppedCanvas) {
@@ -189,9 +257,22 @@ export default function App() {
       return false
     }
 
-    const anyEnabled = Object.entries(aiOptions).some(
-      ([, v]) => typeof v === 'boolean' && v === true,
-    )
+    const anyEnabled =
+      aiOptions.removeBackground
+      || aiOptions.applyWhiteBackground
+      || aiOptions.autoFitToDocument
+      || aiOptions.expandWhiteCanvas
+      || aiOptions.generativeRefillEdges
+      || aiOptions.upscale2x
+      || aiOptions.enhancePortrait
+      || aiOptions.backgroundRefine > 0
+      || aiOptions.toneWarmth > 0
+      || aiOptions.skinSmoothing > 0
+      || aiOptions.blemishReduction > 0
+      || aiOptions.feminineSoftening
+      || aiOptions.faceSlimming > 0
+      || aiOptions.noseRefinement > 0
+      || (aiOptions.applyWhiteBackground && aiOptions.edgeSoftness > 0)
     if (!anyEnabled) {
       if (mode === 'manual') {
         toast.warning('Nessuna opzione AI attiva', { description: 'Attiva almeno un\u2019opzione prima di applicare.' })
@@ -199,9 +280,13 @@ export default function App() {
       return false
     }
 
+    const currentRunId = ++aiRunIdRef.current
     setIsAiProcessing(true)
     try {
       const result = await processCanvasWithAi(croppedCanvas, aiOptions, docPreset)
+      if (currentRunId !== aiRunIdRef.current) {
+        return false
+      }
       setAiCanvas(result.canvas)
       setAiRefinePayload(result.refinePayload)
       setAiWarnings(result.warnings)
@@ -217,21 +302,48 @@ export default function App() {
       return true
     } catch (err) {
       console.error(err)
+      if (currentRunId !== aiRunIdRef.current) {
+        return false
+      }
       if (mode === 'manual') {
         toast.error('Errore durante elaborazione AI')
       }
       return false
     } finally {
-      setIsAiProcessing(false)
+      if (currentRunId === aiRunIdRef.current) {
+        setIsAiProcessing(false)
+      }
     }
   }, [croppedCanvas, aiOptions, docPreset])
 
   const handleApplyAi = useCallback(async () => {
+    const requiresLocalAi =
+      aiOptions.removeBackground
+      || aiOptions.enhancePortrait
+      || aiOptions.autoFitToDocument
+
+    if (desktopRuntimeInfo?.toolId === 'image-id-print' && aiServiceState?.enabled && requiresLocalAi) {
+      if (aiServiceState.status === 'starting') {
+        toast.message('Motore AI desktop in avvio', {
+          description: aiServiceState.detail || 'Attendi qualche secondo e riprova.',
+        })
+        return
+      }
+      if (aiServiceState.status === 'error') {
+        toast.error('Motore AI desktop non disponibile', {
+          description: aiServiceState.detail || 'Riavvia l’app o reinstalla il runtime AI.',
+        })
+        return
+      }
+    }
+
     await runAiPipeline('manual')
-  }, [runAiPipeline])
+  }, [aiOptions, aiServiceState, desktopRuntimeInfo, runAiPipeline])
 
   useEffect(() => {
+    const isDesktopImageIdPrint = desktopRuntimeInfo?.toolId === 'image-id-print'
     if (!autoAiPending || !croppedCanvas || isAiProcessing) return
+    if (isDesktopImageIdPrint && aiServiceState?.enabled && aiServiceState.status !== 'ready') return
     let cancelled = false
 
     // Consume the one-shot flag immediately to avoid re-trigger loops
@@ -250,9 +362,11 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [autoAiPending, croppedCanvas, isAiProcessing, runAiPipeline])
+  }, [autoAiPending, croppedCanvas, isAiProcessing, runAiPipeline, desktopRuntimeInfo, aiServiceState])
 
   const handleResetAi = useCallback(() => {
+    aiRunIdRef.current += 1
+    setIsAiProcessing(false)
     setAiCanvas(null)
     setAiRefinePayload(null)
     setAiWarnings([])
@@ -285,8 +399,8 @@ export default function App() {
     setIsExporting(true)
     try {
       await exportSheet(sourceForExport, layout, exportFormat, docPreset, sheetPreset, dpi)
-      toast.success(`Esportazione completata — ${layout.total} copie`, {
-        description: `${docPreset.widthMm}×${docPreset.heightMm} mm · ${sheetPreset.label} · ${dpi} DPI`,
+      toast.success(`Esportazione completata - ${layout.total} copie`, {
+        description: `${docPreset.widthMm}x${docPreset.heightMm} mm - ${sheetPreset.label} - ${dpi} DPI`,
       })
     } catch (err) {
       console.error(err)
@@ -305,7 +419,7 @@ export default function App() {
       return
     }
 
-    const printLayout = calculateLayout(docPreset, sheetPreset, 300)
+    const printLayout = calculateLayout(docPreset, sheetPreset, dpi)
     if (!printLayout || printLayout.total === 0) {
       toast.warning('Nessuna copia stampabile', {
         description: 'Controlla formato documento e foglio prima di inviare alla stampante.',
@@ -330,7 +444,7 @@ export default function App() {
       console.error(err)
       toast.error('Errore durante la stampa')
     }
-  }, [aiCanvas, croppedCanvas, docPreset, isAiProcessing, isExporting, sheetPreset])
+  }, [aiCanvas, croppedCanvas, docPreset, dpi, isAiProcessing, isExporting, sheetPreset])
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -362,8 +476,27 @@ export default function App() {
           className="text-xs text-[var(--app-text-subtle)] hidden sm:inline"
           style={{ borderLeft: '1px solid var(--app-border)', paddingLeft: '12px', marginLeft: '4px' }}
         >
-          Foto per documenti pronte per la stampa
+          Foto per documenti pronte per la stampa by ImageStudio di Gennaro Mazzacane
         </span>
+        {desktopRuntimeInfo?.toolId === 'image-id-print' && aiServiceState && (
+          <span
+            className="text-[11px] px-2 py-1 rounded-full border hidden md:inline-flex"
+            style={{
+              borderColor: aiServiceState.status === 'ready' ? 'rgba(92, 184, 92, 0.55)' : 'var(--app-border)',
+              color: aiServiceState.status === 'ready' ? '#bfe0bf' : 'var(--app-text-subtle)',
+              background: aiServiceState.status === 'ready' ? 'rgba(92,184,92,0.12)' : 'var(--app-field)',
+            }}
+            title={aiServiceState.detail}
+          >
+            {aiServiceState.status === 'ready'
+              ? 'AI desktop pronta'
+              : aiServiceState.status === 'starting'
+                ? 'Avvio AI locale...'
+                : aiServiceState.status === 'error'
+                  ? 'AI desktop in errore'
+                  : 'AI desktop non pronta'}
+          </span>
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />
@@ -371,7 +504,7 @@ export default function App() {
         {/* Resolution info */}
         {imageElement && (
           <span className="text-xs text-[var(--app-text-subtle)]">
-            {imageElement.naturalWidth} × {imageElement.naturalHeight} px
+            {imageElement.naturalWidth} x {imageElement.naturalHeight} px
           </span>
         )}
       </header>
@@ -401,6 +534,7 @@ export default function App() {
             aiOptions={aiOptions}
             aiWarnings={aiWarnings}
             aiSuggestions={aiSuggestions}
+            aiServiceState={aiServiceState}
             isAiProcessing={isAiProcessing}
             isExporting={isExporting}
             onImageReplace={handleImageLoaded}

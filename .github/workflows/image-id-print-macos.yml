@@ -1,0 +1,60 @@
+name: image-id-print-macos
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "codex/**"
+    paths:
+      - "apps/IMAGE ID PRINT/**"
+      - "apps/filex-desktop/**"
+      - "packages/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/image-id-print-macos.yml"
+
+jobs:
+  build-macos:
+    name: image-id-print-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            arch: x64
+            npm_script: dist:image-id-print:mac:x64
+          - os: macos-14
+            arch: arm64
+            npm_script: dist:image-id-print:mac:arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS package
+        run: npm --workspace @photo-tools/filex-desktop run ${{ matrix.npm_script }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-id-print-macos-${{ matrix.arch }}
+          path: |
+            apps/filex-desktop/release/image-id-print/*.dmg
+            apps/filex-desktop/release/image-id-print/*.zip
+          if-no-files-found: error

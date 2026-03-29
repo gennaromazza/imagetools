@@ -7,6 +7,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
 const iconBasePath = join(__dirname, "build", "branding", requestedTool.id);
 const nsisIncludePath = join(__dirname, "build", "generated-installer-hooks.nsh");
+const stagedImageIdPrintRuntimePath = join(__dirname, "build", "generated", "image-id-print-runtime");
+const releaseOutputPath = join("release", requestedTool.id);
 
 function escapeNsisString(value) {
   return value.replace(/\$/g, "$$").replace(/"/g, '$\\"');
@@ -165,6 +167,12 @@ export default {
   appId: `studio.filex.${requestedTool.id}`,
   productName: requestedTool.productName,
   executableName: requestedTool.executableName,
+  extraMetadata: {
+    filexTool: requestedTool.id,
+  },
+  copyright: requestedTool.signatureLine
+    ? `${requestedTool.productName} ${requestedTool.signatureLine}`
+    : requestedTool.productName,
   asar: true,
   asarUnpack: [
     "**/node_modules/exiftool-vendored.exe/**",
@@ -173,7 +181,7 @@ export default {
   npmRebuild: false,
   buildDependenciesFromSource: false,
   directories: {
-    output: "release",
+    output: releaseOutputPath,
   },
   files: [
     "dist-electron/**/*",
@@ -193,6 +201,15 @@ export default {
       from: `${iconBasePath}.ico`,
       to: `branding/${requestedTool.id}.ico`,
     },
+    ...(requestedTool.id === "image-id-print"
+      ? [
+          {
+            from: stagedImageIdPrintRuntimePath,
+            to: "image-id-print-runtime",
+            filter: ["**/*"],
+          },
+        ]
+      : []),
   ],
   win: {
     icon: `${iconBasePath}.ico`,
@@ -208,16 +225,7 @@ export default {
   mac: {
     icon: `${iconBasePath}.icns`,
     category: "public.app-category.photography",
-    target: [
-      {
-        target: "dmg",
-        arch: ["universal"],
-      },
-      {
-        target: "zip",
-        arch: ["universal"],
-      },
-    ],
+    target: ["dmg", "zip"],
     artifactName: `${requestedTool.executableName}-\${version}-\${arch}.\${ext}`,
   },
   nsis: {
@@ -231,6 +239,8 @@ export default {
     include: nsisIncludePath,
   },
   dmg: {
-    title: `${requestedTool.productName} Installer`,
+    title: requestedTool.signatureLine
+      ? `${requestedTool.productName} Installer - ${requestedTool.signatureLine}`
+      : `${requestedTool.productName} Installer`,
   },
 };

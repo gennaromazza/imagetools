@@ -2,8 +2,10 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { IpcRendererEvent } from "electron";
 import type { FileXDesktopApi } from "@photo-tools/desktop-contracts";
 
-const api: FileXDesktopApi = {
+const api = {
   getRuntimeInfo: () => ipcRenderer.invoke("filex:get-runtime-info"),
+  getImageIdPrintAiServiceState: () => ipcRenderer.invoke("filex:get-image-id-print-ai-service-state"),
+  ensureImageIdPrintAiService: () => ipcRenderer.invoke("filex:ensure-image-id-print-ai-service"),
   openFolder: () => ipcRenderer.invoke("filex:open-folder"),
   reopenFolder: (rootPath) => ipcRenderer.invoke("filex:reopen-folder", rootPath),
   consumePendingOpenFolderPath: () => ipcRenderer.invoke("filex:consume-pending-open-folder-path"),
@@ -83,6 +85,9 @@ const api: FileXDesktopApi = {
   generateArchivioLowQuality: (jobId, overwrite) =>
     ipcRenderer.invoke("filex:generate-archivio-low-quality", jobId, overwrite),
   openArchivioFolder: (folderPath) => ipcRenderer.invoke("filex:open-archivio-folder", folderPath),
+} satisfies FileXDesktopApi & {
+  getImageIdPrintAiServiceState: () => Promise<unknown>;
+  ensureImageIdPrintAiService: () => Promise<unknown>;
 };
 
 contextBridge.exposeInMainWorld("filexDesktop", api);

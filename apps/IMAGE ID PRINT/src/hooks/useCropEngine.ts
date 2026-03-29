@@ -1,12 +1,6 @@
 import { useRef, useEffect } from 'react'
+import { getRembgEndpoint } from '../lib/desktop-runtime'
 import type { DocumentPreset } from '../types'
-
-const REMBG_BASE_URL = (
-  (import.meta as unknown as { env?: { VITE_REMBG_ENDPOINT?: string } }).env?.VITE_REMBG_ENDPOINT
-  ?? 'http://localhost:7010/remove-background'
-).replace(/\/remove-background$/, '')
-
-const FACE_DETECT_ENDPOINT = `${REMBG_BASE_URL}/detect-face`
 
 export interface UseCropEngineReturn {
   canvasRef: React.RefObject<HTMLCanvasElement>
@@ -364,6 +358,7 @@ export function useCropEngine(
 
   const detectFaceWithSidecar = async (img: HTMLImageElement): Promise<FaceBox | null> => {
     try {
+      const FACE_DETECT_ENDPOINT = getRembgEndpoint('/detect-face')
       const send = resizeImageForDetection(img, 1800)
       const blob = await canvasToBlob(send, 'image/jpeg', 0.9)
       const formData = new FormData()

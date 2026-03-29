@@ -4,7 +4,6 @@ const DNP_MEDIA = [
   { widthMm: 150, heightMm: 230, label: '15x23 cm (6x9")' },
 ]
 
-const BLEED_MM = 1
 const IFRAME_CLEANUP_DELAY_MS = 2000
 
 export function checkDnpCompatibility(widthMm: number, heightMm: number) {
@@ -21,8 +20,8 @@ export async function printForDnpRx1(
   sheetHeightMm: number,
 ): Promise<void> {
   const dataUrl = canvas.toDataURL('image/jpeg', 0.97)
-  const pageWidthMm = sheetWidthMm + BLEED_MM * 2
-  const pageHeightMm = sheetHeightMm + BLEED_MM * 2
+  const pageWidthMm = sheetWidthMm
+  const pageHeightMm = sheetHeightMm
 
   const iframe = document.createElement('iframe')
   iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:0'
@@ -76,7 +75,8 @@ export async function printForDnpRx1(
   img.alt = 'DNP RX1 print sheet'
   body.appendChild(img)
 
-  await new Promise<void>((resolve, reject) => {
+  try {
+    await new Promise<void>((resolve, reject) => {
     const triggerPrint = () => {
       try {
         frameWindow.focus()
@@ -94,11 +94,15 @@ export async function printForDnpRx1(
     if (img.complete && img.naturalWidth > 0) {
       triggerPrint()
     }
-  })
+    })
 
-  window.setTimeout(() => {
+    window.setTimeout(() => {
+      cleanupIframe(iframe)
+    }, IFRAME_CLEANUP_DELAY_MS)
+  } catch (error) {
     cleanupIframe(iframe)
-  }, IFRAME_CLEANUP_DELAY_MS)
+    throw error
+  }
 }
 
 function cleanupIframe(iframe: HTMLIFrameElement) {
