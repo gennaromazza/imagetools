@@ -47,6 +47,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm ci --include=optional
+          npm install --no-save --include=optional --os=darwin --cpu=${{ matrix.arch }} sharp
           npm rebuild sharp --include=optional
 
       - name: Build macOS package
