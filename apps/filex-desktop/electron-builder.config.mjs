@@ -7,6 +7,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
 const iconBasePath = join(__dirname, "build", "branding", requestedTool.id);
 const nsisIncludePath = join(__dirname, "build", "generated-installer-hooks.nsh");
+const releaseChannel = process.env.FILEX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
+const shouldCodeSign = process.env.FILEX_CODE_SIGNING === "1";
 
 function escapeNsisString(value) {
   return value.replace(/\$/g, "$$").replace(/"/g, '$\\"');
@@ -193,17 +195,22 @@ export default {
       from: `${iconBasePath}.ico`,
       to: `branding/${requestedTool.id}.ico`,
     },
+    {
+      from: "release-manifests",
+      to: "release-manifests",
+      filter: ["**/*.json"],
+    },
   ],
   win: {
     icon: `${iconBasePath}.ico`,
-    signAndEditExecutable: false,
+    signAndEditExecutable: shouldCodeSign,
     target: [
       {
         target: "nsis",
         arch: ["x64"],
       },
     ],
-    artifactName: `${requestedTool.executableName}-\${version}-\${arch}-setup.\${ext}`,
+    artifactName: `${requestedTool.executableName}-\${version}-${releaseChannel}-\${arch}-setup.\${ext}`,
   },
   mac: {
     icon: `${iconBasePath}.icns`,
@@ -218,7 +225,7 @@ export default {
         arch: ["universal"],
       },
     ],
-    artifactName: `${requestedTool.executableName}-\${version}-\${arch}.\${ext}`,
+    artifactName: `${requestedTool.executableName}-\${version}-${releaseChannel}-\${arch}.\${ext}`,
   },
   nsis: {
     oneClick: false,
@@ -233,4 +240,12 @@ export default {
   dmg: {
     title: `${requestedTool.productName} Installer`,
   },
+  publish: [
+    {
+      provider: "github",
+      owner: "gennaromazza",
+      repo: "imagetools",
+      releaseType: releaseChannel === "beta" ? "prerelease" : "release",
+    },
+  ],
 };

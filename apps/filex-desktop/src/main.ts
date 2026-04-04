@@ -4,6 +4,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
+  DesktopAiSidecarStatus,
   DesktopDragOutCheck,
   DesktopEditorCandidate,
   DesktopFolderCatalogAssetState,
@@ -11,12 +12,15 @@ import type {
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
+  DesktopReleaseChannel,
   DesktopPhotoSelectorPreferences,
   DesktopQuickPreviewRequest,
   DesktopRecentFolder,
   DesktopRuntimeInfo,
   DesktopSendToEditorResult,
   DesktopSortCacheEntry,
+  DesktopToolId,
+  DesktopToolInstallState,
   DesktopThumbnailCacheLookupEntry,
 } from "@photo-tools/desktop-contracts";
 import {
@@ -66,6 +70,13 @@ import {
   saveSortCache,
   shutdownDesktopStore,
 } from "./desktop-store.js";
+import {
+  applyToolUpdate,
+  checkToolUpdate,
+  downloadToolUpdate,
+  listAvailableTools,
+  openInstalledTool,
+} from "./updater.js";
 import { getDesktopToolOrDefault } from "./tool-manifest.js";
 
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
@@ -78,6 +89,44 @@ let isOpenFolderRequestRendererReady = false;
 let pendingOpenFolderPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
 let archivioFlowModulePromise: Promise<any> | null = null;
+
+function resolveReleaseChannel(): DesktopReleaseChannel {
+  return process.env.FILEX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
+}
+
+function getImageIdPrintAiStatus(): DesktopAiSidecarStatus {
+  const sidecarRoot = join(app.getPath("userData"), "image-id-print-ai");
+  const serverScriptPath = join(sidecarRoot, "rembg_server.py");
+  const requirementsPath = join(sidecarRoot, "requirements.txt");
+  const pythonCandidates = ["python", "py"];
+  let pythonFound = false;
+  for (const command of pythonCandidates) {
+    try {
+      execSync(`${command} --version`, { stdio: ["ignore", "ignore", "ignore"] });
+      pythonFound = true;
+      break;
+    } catch {
+      // continue
+    }
+  }
+
+  const hasScript = existsSync(serverScriptPath);
+  const installed = hasScript && existsSync(requirementsPath);
+  let health: DesktopAiSidecarStatus["health"] = "ok";
+  if (!hasScript) {
+    health = "missing-script";
+  } else if (!pythonFound) {
+    health = "missing-runtime";
+  }
+
+  return {
+    installed,
+    pythonFound,
+    serverScriptPath: hasScript ? serverScriptPath : null,
+    requirementsPath: existsSync(requirementsPath) ? requirementsPath : null,
+    health,
+  };
+}
 
 protocol.registerSchemesAsPrivileged([
   {
@@ -540,6 +589,44 @@ function registerPreviewProtocol(): void {
   });
 }
 
+function logAnonymousCrash(scope: string, error: unknown): void {
+  const message = error instanceof Error ? error.name : typeof error;
+  const details = error instanceof Error
+    ? `${error.name}: ${error.message}`.slice(0, 500)
+    : String(error).slice(0, 500);
+  logDesktopEvent({
+    channel: "crash",
+    level: "error",
+    message: `Crash anonimo (${scope})`,
+    details: `${message} | ${details}`,
+  });
+}
+
+function registerCrashTelemetryHandlers(): void {
+  process.on("uncaughtException", (error) => {
+    logAnonymousCrash("main-uncaughtException", error);
+  });
+  process.on("unhandledRejection", (reason) => {
+    logAnonymousCrash("main-unhandledRejection", reason);
+  });
+  app.on("render-process-gone", (_event, _webContents, details) => {
+    logDesktopEvent({
+      channel: "crash",
+      level: "error",
+      message: "Crash anonimo renderer",
+      details: `${details.reason}${details.exitCode ? `:${details.exitCode}` : ""}`,
+    });
+  });
+  app.on("child-process-gone", (_event, details) => {
+    logDesktopEvent({
+      channel: "crash",
+      level: "error",
+      message: "Crash anonimo child process",
+      details: `${details.type}:${details.reason}${details.exitCode ? `:${details.exitCode}` : ""}`,
+    });
+  });
+}
+
 function buildMissingRendererHtml(entryPath: string): string {
   const buildCommand = `npm --workspace ${requestedTool.workspacePackageName} run build`;
 
@@ -598,7 +685,18 @@ function buildMissingRendererHtml(entryPath: string): string {
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.handle("filex:get-runtime-info", () => {
+  ipcMain.handle("filex:get-runtime-info", async () => {
+    let installedTools: DesktopToolInstallState[] = [];
+    try {
+      installedTools = await listAvailableTools(resolveReleaseChannel());
+    } catch (error) {
+      logDesktopEvent({
+        channel: "update",
+        level: "warn",
+        message: "Impossibile leggere manifest release",
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
     const payload: DesktopRuntimeInfo = {
       shell: "electron",
       platform: process.platform,
@@ -606,10 +704,41 @@ function registerIpcHandlers(): void {
       appVersion: app.getVersion(),
       toolId: requestedTool.id,
       toolName: requestedTool.displayName,
+      releaseChannel: resolveReleaseChannel(),
+      aiSidecarInstalled: getImageIdPrintAiStatus().installed,
+      installedTools,
     };
 
     return payload;
   });
+  ipcMain.handle("filex:list-available-tools", async (_event, channel?: DesktopReleaseChannel) =>
+    listAvailableTools(channel ?? resolveReleaseChannel()).catch((error) => {
+      logDesktopEvent({
+        channel: "update",
+        level: "warn",
+        message: "list-available-tools fallback",
+        details: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }),
+  );
+  ipcMain.handle(
+    "filex:check-tool-update",
+    async (
+      _event,
+      toolId: DesktopToolId,
+      currentVersion?: string | null,
+      channel?: DesktopReleaseChannel,
+    ) => checkToolUpdate(toolId, currentVersion, channel ?? resolveReleaseChannel()),
+  );
+  ipcMain.handle(
+    "filex:download-tool-update",
+    async (_event, toolId: DesktopToolId, channel?: DesktopReleaseChannel) =>
+      downloadToolUpdate(toolId, channel ?? resolveReleaseChannel()),
+  );
+  ipcMain.handle("filex:apply-tool-update", async (_event, jobId: string) => applyToolUpdate(jobId));
+  ipcMain.handle("filex:open-installed-tool", async (_event, toolId: DesktopToolId) => openInstalledTool(toolId));
+  ipcMain.handle("filex:get-image-id-print-ai-status", () => getImageIdPrintAiStatus());
   ipcMain.handle("filex:open-folder", () => openFolderDesktop());
   ipcMain.handle("filex:reopen-folder", (_event, rootPath: string) => reopenFolderDesktop(rootPath));
   ipcMain.handle("filex:consume-pending-open-folder-path", () => {
@@ -981,6 +1110,7 @@ async function createMainWindow(): Promise<void> {
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     registerPreviewProtocol();
+    registerCrashTelemetryHandlers();
     registerIpcHandlers();
     await ensureMainWindow();
 

@@ -10,6 +10,7 @@ const sourceDir = join(repoRoot, "ICONE E LOGHI");
 const targetDir = join(desktopRoot, "build", "branding");
 
 const toolBranding = [
+  { toolId: "suite-launcher", sourceFile: "LOGO_Image_tool.png" },
   { toolId: "auto-layout-app", sourceFile: "auto_layout_logo.png" },
   { toolId: "image-party-frame", sourceFile: "party_frame_logo.png" },
   { toolId: "image-id-print", sourceFile: "id_print_logo.png" },

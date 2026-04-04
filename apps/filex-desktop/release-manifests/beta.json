@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-04-04T10:47:51.296Z",
+  "generatedBy": "generate-release-manifest.mjs",
+  "channels": [
+    "stable",
+    "beta"
+  ],
+  "releases": [],
+  "payloadSha256": "171c845969dbed65f069eee5b9b26d7f83adb556c12599471e3bf5df60e3a5dc"
+}

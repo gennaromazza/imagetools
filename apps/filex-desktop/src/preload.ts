@@ -4,6 +4,13 @@ import type { FileXDesktopApi } from "@photo-tools/desktop-contracts";
 
 const api: FileXDesktopApi = {
   getRuntimeInfo: () => ipcRenderer.invoke("filex:get-runtime-info"),
+  listAvailableTools: (channel) => ipcRenderer.invoke("filex:list-available-tools", channel),
+  checkToolUpdate: (toolId, currentVersion, channel) =>
+    ipcRenderer.invoke("filex:check-tool-update", toolId, currentVersion, channel),
+  downloadToolUpdate: (toolId, channel) => ipcRenderer.invoke("filex:download-tool-update", toolId, channel),
+  applyToolUpdate: (jobId) => ipcRenderer.invoke("filex:apply-tool-update", jobId),
+  openInstalledTool: (toolId) => ipcRenderer.invoke("filex:open-installed-tool", toolId),
+  getImageIdPrintAiStatus: () => ipcRenderer.invoke("filex:get-image-id-print-ai-status"),
   openFolder: () => ipcRenderer.invoke("filex:open-folder"),
   reopenFolder: (rootPath) => ipcRenderer.invoke("filex:reopen-folder", rootPath),
   consumePendingOpenFolderPath: () => ipcRenderer.invoke("filex:consume-pending-open-folder-path"),

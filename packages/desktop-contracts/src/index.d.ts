@@ -1,9 +1,12 @@
 export type DesktopToolId =
+  | "suite-launcher"
   | "auto-layout-app"
   | "image-party-frame"
   | "image-id-print"
   | "archivio-flow"
   | "photo-selector-app";
+
+export type DesktopReleaseChannel = "stable" | "beta";
 
 export type DesktopThumbnailProfile = "ultra-fast" | "fast" | "balanced";
 export type DesktopPhotoSortMode = "name" | "orientation" | "rating";
@@ -18,6 +21,86 @@ export interface DesktopRuntimeInfo {
   appVersion: string;
   toolId: DesktopToolId;
   toolName: string;
+  releaseChannel: DesktopReleaseChannel;
+  aiSidecarInstalled: boolean;
+  installedTools: DesktopToolInstallState[];
+}
+
+export type DesktopToolInstallStatus = "installed" | "not-installed" | "update-available";
+
+export interface DesktopToolInstallState {
+  toolId: DesktopToolId;
+  toolName: string;
+  productName: string;
+  installed: boolean;
+  executablePath: string | null;
+  installedVersion: string | null;
+  latestVersion: string | null;
+  status: DesktopToolInstallStatus;
+}
+
+export interface DesktopToolReleaseEntry {
+  toolId: DesktopToolId;
+  version: string;
+  channel: DesktopReleaseChannel;
+  installerUrl: string;
+  installerSha256: string;
+  minLauncherVersion: string;
+  publishedAt: string;
+}
+
+export interface DesktopReleaseManifest {
+  schemaVersion: 1;
+  generatedAt: string;
+  generatedBy: string;
+  payloadSha256?: string;
+  payloadSignature?: string;
+  signatureAlgorithm?: "hmac-sha256";
+  channels: DesktopReleaseChannel[];
+  releases: DesktopToolReleaseEntry[];
+}
+
+export interface DesktopToolUpdateCheckResult {
+  toolId: DesktopToolId;
+  channel: DesktopReleaseChannel;
+  currentVersion: string | null;
+  available: boolean;
+  release: DesktopToolReleaseEntry | null;
+  reason?: "up-to-date" | "new-version" | "not-installed" | "not-found";
+}
+
+export type DesktopToolUpdateJobStatus =
+  | "queued"
+  | "downloading"
+  | "downloaded"
+  | "verifying"
+  | "ready-to-apply"
+  | "applying"
+  | "completed"
+  | "failed";
+
+export interface DesktopToolUpdateJob {
+  id: string;
+  toolId: DesktopToolId;
+  channel: DesktopReleaseChannel;
+  status: DesktopToolUpdateJobStatus;
+  installerPath: string | null;
+  releaseVersion: string | null;
+  downloadedBytes: number;
+  totalBytes: number | null;
+  checksumVerified: boolean;
+  retries: number;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DesktopAiSidecarStatus {
+  installed: boolean;
+  pythonFound: boolean;
+  serverScriptPath: string | null;
+  requirementsPath: string | null;
+  health: "unknown" | "ok" | "missing-runtime" | "missing-script";
 }
 
 export interface DesktopFolderEntry {
@@ -425,6 +508,19 @@ export interface ArchivioFilterPreviewData {
 
 export interface FileXDesktopApi {
   getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
+  listAvailableTools: (channel?: DesktopReleaseChannel) => Promise<DesktopToolInstallState[]>;
+  checkToolUpdate: (
+    toolId: DesktopToolId,
+    currentVersion?: string | null,
+    channel?: DesktopReleaseChannel,
+  ) => Promise<DesktopToolUpdateCheckResult>;
+  downloadToolUpdate: (
+    toolId: DesktopToolId,
+    channel?: DesktopReleaseChannel,
+  ) => Promise<DesktopToolUpdateJob>;
+  applyToolUpdate: (jobId: string) => Promise<DesktopToolUpdateJob>;
+  openInstalledTool: (toolId: DesktopToolId) => Promise<{ ok: boolean; message: string }>;
+  getImageIdPrintAiStatus: () => Promise<DesktopAiSidecarStatus>;
   openFolder: () => Promise<DesktopFolderOpenResult | null>;
   reopenFolder: (rootPath: string) => Promise<DesktopFolderOpenResult | null>;
   consumePendingOpenFolderPath: () => Promise<string | null>;

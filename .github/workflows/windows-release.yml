@@ -1,0 +1,61 @@
+name: FileX Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
+      version:
+        description: Version tag (es. v0.2.0)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    env:
+      FILEX_RELEASE_CHANNEL: ${{ inputs.channel }}
+      FILEX_CODE_SIGNING: "1"
+      CSC_LINK: ${{ secrets.FILEX_WINDOWS_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.FILEX_WINDOWS_CSC_KEY_PASSWORD }}
+      FILEX_MANIFEST_HMAC_KEY: ${{ secrets.FILEX_MANIFEST_HMAC_KEY }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all Windows installers
+        run: npm run dist:filex-desktop:all-tools:win
+
+      - name: Generate release manifest
+        run: |
+          cd apps/filex-desktop
+          node ./scripts/generate-release-manifest.mjs --channel=${{ inputs.channel }} --base-url=https://github.com/${{ github.repository }}/releases/download/${{ inputs.version }}
+          node ./scripts/validate-release-manifest.mjs --channel=${{ inputs.channel }}
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          prerelease: ${{ inputs.channel == 'beta' }}
+          files: |
+            apps/filex-desktop/release/*.exe
+            apps/filex-desktop/release-manifests/${{ inputs.channel }}.json

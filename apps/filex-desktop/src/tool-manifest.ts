@@ -1,4 +1,4 @@
-import type { DesktopToolId } from "@photo-tools/desktop-contracts";
+import type { DesktopReleaseChannel, DesktopToolId } from "@photo-tools/desktop-contracts";
 
 export interface DesktopToolDescriptor {
   id: DesktopToolId;
@@ -15,9 +15,31 @@ export interface DesktopToolDescriptor {
   minWindowWidth: number;
   minWindowHeight: number;
   devUrl?: string;
+  releaseChannelDefault: DesktopReleaseChannel;
+  releaseManifestKey: string;
+  aiSidecarOptional?: boolean;
+  suiteVisible: boolean;
 }
 
 export const desktopToolManifest = {
+  "suite-launcher": {
+    id: "suite-launcher",
+    displayName: "FileX Suite",
+    productName: "FileX Suite",
+    executableName: "FileX-Suite",
+    legacyUpgradeDisplayNames: ["FileX Suite", "FileX Desktop Suite"],
+    workspacePackageName: "@photo-tools/filex-desktop",
+    workspaceDistDirRelativeToShell: "suite-launcher-dist",
+    packagedDistDir: "apps/filex-desktop/suite-launcher-dist",
+    brandAssetName: "LOGO_Image_tool",
+    defaultWindowWidth: 1480,
+    defaultWindowHeight: 920,
+    minWindowWidth: 1180,
+    minWindowHeight: 760,
+    releaseChannelDefault: "stable",
+    releaseManifestKey: "suite-launcher",
+    suiteVisible: false,
+  },
   "auto-layout-app": {
     id: "auto-layout-app",
     displayName: "Auto Layout",
@@ -32,6 +54,9 @@ export const desktopToolManifest = {
     defaultWindowHeight: 1000,
     minWindowWidth: 1280,
     minWindowHeight: 820,
+    releaseChannelDefault: "stable",
+    releaseManifestKey: "auto-layout-app",
+    suiteVisible: true,
   },
   "image-party-frame": {
     id: "image-party-frame",
@@ -47,6 +72,9 @@ export const desktopToolManifest = {
     defaultWindowHeight: 1000,
     minWindowWidth: 1280,
     minWindowHeight: 820,
+    releaseChannelDefault: "stable",
+    releaseManifestKey: "image-party-frame",
+    suiteVisible: true,
   },
   "image-id-print": {
     id: "image-id-print",
@@ -62,6 +90,10 @@ export const desktopToolManifest = {
     defaultWindowHeight: 960,
     minWindowWidth: 1120,
     minWindowHeight: 760,
+    releaseChannelDefault: "stable",
+    releaseManifestKey: "image-id-print",
+    aiSidecarOptional: true,
+    suiteVisible: true,
   },
   "archivio-flow": {
     id: "archivio-flow",
@@ -77,6 +109,9 @@ export const desktopToolManifest = {
     defaultWindowHeight: 980,
     minWindowWidth: 1220,
     minWindowHeight: 800,
+    releaseChannelDefault: "stable",
+    releaseManifestKey: "archivio-flow",
+    suiteVisible: true,
   },
   "photo-selector-app": {
     id: "photo-selector-app",
@@ -98,8 +133,15 @@ export const desktopToolManifest = {
     minWindowWidth: 1280,
     minWindowHeight: 820,
     devUrl: "http://127.0.0.1:4175",
+    releaseChannelDefault: "stable",
+    releaseManifestKey: "photo-selector-app",
+    suiteVisible: true,
   },
 } satisfies Record<DesktopToolId, DesktopToolDescriptor>;
+
+export function getSuiteManagedTools(): DesktopToolDescriptor[] {
+  return Object.values(desktopToolManifest).filter((tool) => tool.suiteVisible);
+}
 
 export function isDesktopToolId(value: string): value is DesktopToolId {
   return value in desktopToolManifest;

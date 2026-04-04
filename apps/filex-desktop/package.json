@@ -8,7 +8,9 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "sync:branding": "node ./scripts/sync-branding.mjs",
+    "build:suite-launcher": "node ./scripts/build-suite-launcher.mjs",
     "build:shell": "npm run sync:branding && tsc -p tsconfig.json",
+    "build:suite": "npm run build:shell && npm run build:suite-launcher",
     "build:auto-layout": "npm run build:shell && npm --workspace @photo-tools/auto-layout-app run build",
     "build:image-party-frame": "npm run build:shell && npm --workspace @photo-tools/image-party-frame-app run build",
     "build:image-id-print": "npm run build:shell && npm --workspace @photo-tools/image-id-print run build",
@@ -19,7 +21,9 @@
     "start:image-id-print": "npm run build:image-id-print && cross-env FILEX_TOOL=image-id-print electron .",
     "start:archivio-flow": "npm run build:archivio-flow && cross-env FILEX_TOOL=archivio-flow electron .",
     "start:photo-selector": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron .",
+    "start:suite": "npm run build:suite && cross-env FILEX_TOOL=suite-launcher electron .",
     "dev:photo-selector": "npm run build:shell && concurrently -k \"npm --workspace @photo-tools/photo-selector-app run dev -- --host 127.0.0.1 --port 4175\" \"wait-on tcp:127.0.0.1:4175 && cross-env FILEX_TOOL=photo-selector-app FILEX_RENDERER_MODE=dev FILEX_RENDERER_URL=http://127.0.0.1:4175 electron .\"",
+    "dist:suite:win": "npm run build:suite && cross-env FILEX_TOOL=suite-launcher electron-builder --config electron-builder.config.mjs --win nsis --x64",
     "dist:auto-layout:win": "npm run build:auto-layout && cross-env FILEX_TOOL=auto-layout-app electron-builder --config electron-builder.config.mjs --win nsis",
     "dist:auto-layout:mac": "npm run build:auto-layout && cross-env FILEX_TOOL=auto-layout-app electron-builder --config electron-builder.config.mjs --mac dmg zip",
     "dist:image-party-frame:win": "npm run build:image-party-frame && cross-env FILEX_TOOL=image-party-frame electron-builder --config electron-builder.config.mjs --win nsis",
@@ -33,7 +37,12 @@
     "dist:photo-selector:win": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --win nsis --x64 --ia32",
     "dist:photo-selector:win64": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --win nsis --x64",
     "dist:photo-selector:win32": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --win nsis --ia32",
-    "dist:photo-selector:mac": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --mac dmg zip"
+    "dist:photo-selector:mac": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --mac dmg zip",
+    "dist:all-tools:win": "npm run dist:auto-layout:win && npm run dist:image-party-frame:win && npm run dist:image-id-print:win && npm run dist:archivio-flow:win64 && npm run dist:photo-selector:win64 && npm run dist:suite:win",
+    "manifest:generate:stable": "node ./scripts/generate-release-manifest.mjs --channel=stable --base-url=https://github.com/gennaromazza/imagetools/releases/latest/download",
+    "manifest:generate:beta": "node ./scripts/generate-release-manifest.mjs --channel=beta --base-url=https://github.com/gennaromazza/imagetools/releases/latest/download",
+    "manifest:validate:stable": "node ./scripts/validate-release-manifest.mjs --channel=stable",
+    "manifest:validate:beta": "node ./scripts/validate-release-manifest.mjs --channel=beta"
   },
   "dependencies": {
     "@photo-tools/desktop-contracts": "0.1.0",
