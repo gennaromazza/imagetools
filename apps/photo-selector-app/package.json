@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@photo-tools/shared-types": "0.1.0",
+    "@tanstack/react-virtual": "^3.13.23",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
