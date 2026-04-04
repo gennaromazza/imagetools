@@ -17,3 +17,5 @@ apps/archivio-flow/server/data/settings.json
 # Local Python environments
 .venv/
 **/.venv/
+.vscode/extensions.json
+install.sh
