@@ -45,4 +45,5 @@ L’obiettivo è una suite integrata, con:
 
 - `docs/00-overview.md`, `docs/01-tech-stack.md`, `docs/02-ui-system.md`: documenti di suite
 - `docs/03-desktop-windows-migration.md`: piano di migrazione desktop Windows condiviso per tutta la suite
+- `docs/GIT_WORKFLOW.md`: policy Git operativa (branch, sync, conflitti, recovery)
 - `docs/tools/`: documenti specifici dei singoli tool
