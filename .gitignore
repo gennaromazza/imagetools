@@ -11,6 +11,8 @@ apps/filex-desktop/release/
 apps/image-party-frame/exports/
 apps/image-party-frame/uploads/
 apps/image-party-frame/temp-test.png
+apps/archivio-flow/server/data/jobs.json
+apps/archivio-flow/server/data/settings.json
 
 # Local Python environments
 .venv/
