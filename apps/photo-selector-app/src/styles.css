@@ -1286,6 +1286,10 @@ img {
   transform: translateY(-2px);
 }
 
+.photo-card--scroll-lite:hover {
+  transform: none;
+}
+
 .photo-card[draggable="true"] {
   cursor: grab;
 }
@@ -1309,6 +1313,11 @@ img {
 .photo-card:hover .photo-card__image-wrapper {
   border-color: rgba(160, 130, 80, 0.4);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.photo-card--scroll-lite:hover .photo-card__image-wrapper {
+  border-color: transparent;
+  box-shadow: none;
 }
 
 .photo-card--selected .photo-card__image-wrapper {
@@ -1379,6 +1388,15 @@ img {
   opacity: 1;
 }
 
+.photo-card--scroll-lite:hover .photo-card__select-badge {
+  opacity: 0;
+}
+
+.photo-card--scroll-lite.photo-card--selected .photo-card__select-badge,
+.photo-card--scroll-lite.photo-card--selected:hover .photo-card__select-badge {
+  opacity: 1;
+}
+
 .photo-card__check {
   width: 22px;
   height: 22px;
@@ -1397,6 +1415,11 @@ img {
 .photo-card:hover .photo-card__check {
   border-color: rgba(255, 255, 255, 0.7);
   background: rgba(0, 0, 0, 0.45);
+}
+
+.photo-card--scroll-lite:hover .photo-card__check {
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .photo-card__check--active {
@@ -1583,6 +1606,11 @@ img {
 .photo-card:focus-within .photo-card__toolbar {
   opacity: 1;
   pointer-events: auto;
+}
+
+.photo-card--scroll-lite:hover .photo-card__toolbar {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .photo-card__tiny-actions {
@@ -1955,6 +1983,20 @@ img {
   padding-right: 0.25rem;
 }
 
+.modal-photo-grid__virtual-spacer {
+  grid-column: 1 / -1;
+  pointer-events: none;
+}
+
+.modal-photo-grid__empty {
+  grid-column: 1 / -1;
+  display: grid;
+  place-items: center;
+  min-height: 200px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
 /* ── 12. Modal photo card ─────────────────────────────────────────────── */
 
 .modal-photo-card {
@@ -1973,6 +2015,19 @@ img {
 .modal-photo-card:hover,
 .modal-photo-card--active {
   transform: translateY(-1px);
+  border-color: var(--line-strong);
+  background: rgba(184, 154, 99, 0.1);
+}
+
+.modal-photo-card--scroll-lite:hover {
+  transform: none;
+  border-color: var(--line);
+  background: rgba(43, 49, 45, 0.92);
+}
+
+.modal-photo-card--scroll-lite.modal-photo-card--active,
+.modal-photo-card--scroll-lite.modal-photo-card--active:hover {
+  transform: none;
   border-color: var(--line-strong);
   background: rgba(184, 154, 99, 0.1);
 }

@@ -1,9 +1,9 @@
 import { app, nativeImage } from "electron";
 import { randomUUID } from "node:crypto";
-import { open } from "node:fs/promises";
+import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
-import { availableParallelism } from "node:os";
-import { basename, extname } from "node:path";
+import { availableParallelism, totalmem } from "node:os";
+import { basename, extname, join } from "node:path";
 import type {
   DesktopQuickPreviewFrame,
   DesktopQuickPreviewRequest,
@@ -39,16 +39,33 @@ const RAW_HEADER_READ_BYTES = 512 * 1024;
 const RAW_PREFIX_SCAN_BYTES = 6 * 1024 * 1024;
 const RAW_FAST_PREVIEW_MAX_BYTES = 12 * 1024 * 1024;
 const MIN_EMBEDDED_JPEG_BYTES = 10_000;
-const PREVIEW_SOURCE_CACHE_MAX_ENTRIES = 24;
-const PREVIEW_SOURCE_CACHE_MAX_BYTES = 96 * 1024 * 1024;
-const RENDERED_PREVIEW_CACHE_MAX_ENTRIES = 48;
-const RENDERED_PREVIEW_CACHE_MAX_BYTES = 160 * 1024 * 1024;
+const MB = 1024 * 1024;
+const SYSTEM_MEMORY_BYTES = Math.max(2 * 1024 * MB, totalmem());
+const AUTO_CACHE_BUDGET_BYTES = clampNumber(Math.round(SYSTEM_MEMORY_BYTES * 0.08), 192 * MB, 1536 * MB);
+const PREVIEW_SOURCE_CACHE_MAX_BYTES = clampNumber(Math.round(AUTO_CACHE_BUDGET_BYTES * 0.15), 64 * MB, 384 * MB);
+const PREVIEW_SOURCE_CACHE_MAX_ENTRIES = clampNumber(
+  Math.floor(PREVIEW_SOURCE_CACHE_MAX_BYTES / (5 * MB)),
+  12,
+  128,
+);
+const RENDERED_PREVIEW_CACHE_MAX_BYTES = clampNumber(Math.round(AUTO_CACHE_BUDGET_BYTES * 0.3), 96 * MB, 768 * MB);
+const RENDERED_PREVIEW_CACHE_MAX_ENTRIES = clampNumber(
+  Math.floor(RENDERED_PREVIEW_CACHE_MAX_BYTES / (3 * MB)),
+  24,
+  192,
+);
 const QUICK_PREVIEW_FRAME_MAX_ENTRIES = 128;
-const THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = 512;
-const THUMBNAIL_MEMORY_CACHE_MAX_BYTES = 256 * 1024 * 1024;
+const THUMBNAIL_MEMORY_CACHE_MAX_BYTES = clampNumber(Math.round(AUTO_CACHE_BUDGET_BYTES * 0.55), 128 * MB, 1024 * MB);
+const THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = clampNumber(
+  Math.floor(THUMBNAIL_MEMORY_CACHE_MAX_BYTES / (320 * 1024)),
+  256,
+  2048,
+);
 const THUMBNAIL_BATCH_WINDOW_MS = 8;
 const THUMBNAIL_BATCH_MAX_ITEMS = 128;
 const RAW_EMBEDDED_RANGE_CACHE_MAX_ENTRIES = 20_000;
+const RAW_EMBEDDED_RANGE_CACHE_FILE_NAME = "raw-embedded-range-cache-v1.json";
+const RAW_EMBEDDED_RANGE_CACHE_PERSIST_DEBOUNCE_MS = 2_000;
 const THUMBNAIL_PERF_LOG_INTERVAL = 200;
 const PERF_ENABLED = !app.isPackaged;
 const RAW_EXIFTOOL_MAX_PROCS = Math.max(2, Math.min(8, Math.ceil(availableParallelism() / 2)));
@@ -56,6 +73,30 @@ const RAW_EXIFTOOL_TAGS = ["PreviewImage", "JpgFromRaw", "ThumbnailImage"] as co
 const JPG_FROM_RAW_FIRST_EXTENSIONS = new Set([".nef", ".nrw", ".rw2"]);
 const STANDARD_DECODE_CONCURRENCY = Math.max(1, Math.min(availableParallelism(), 8));
 const RAW_DECODE_CONCURRENCY = Math.max(2, Math.min(Math.max(2, Math.floor(availableParallelism() / 2)), 4));
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+export function getDesktopImageCacheLimits(): {
+  rawRenderCacheHit: number;
+  effectiveThumbnailRamMaxEntries: number;
+  effectiveThumbnailRamMaxBytes: number;
+  effectiveRenderedPreviewMaxEntries: number;
+  effectiveRenderedPreviewMaxBytes: number;
+  effectivePreviewSourceMaxEntries: number;
+  effectivePreviewSourceMaxBytes: number;
+} {
+  return {
+    rawRenderCacheHit: thumbnailPerfMetrics.rawRenderCacheHit,
+    effectiveThumbnailRamMaxEntries: THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES,
+    effectiveThumbnailRamMaxBytes: THUMBNAIL_MEMORY_CACHE_MAX_BYTES,
+    effectiveRenderedPreviewMaxEntries: RENDERED_PREVIEW_CACHE_MAX_ENTRIES,
+    effectiveRenderedPreviewMaxBytes: RENDERED_PREVIEW_CACHE_MAX_BYTES,
+    effectivePreviewSourceMaxEntries: PREVIEW_SOURCE_CACHE_MAX_ENTRIES,
+    effectivePreviewSourceMaxBytes: PREVIEW_SOURCE_CACHE_MAX_BYTES,
+  };
+}
 
 const byteReadStats = {
   totalBytes: 0,
@@ -160,6 +201,9 @@ let renderedPreviewCacheTotalBytes = 0;
 const thumbnailMemoryCache = new Map<string, DesktopRenderedImage>();
 let thumbnailMemoryCacheTotalBytes = 0;
 const rawEmbeddedRangeCache = new Map<string, CachedEmbeddedJpegRange>();
+let rawEmbeddedRangeCacheLoaded = false;
+let rawEmbeddedRangeCachePersistTimer: ReturnType<typeof setTimeout> | null = null;
+let rawEmbeddedRangeCachePersistInFlight: Promise<void> | null = null;
 const quickPreviewFrameStore = new Map<string, QuickPreviewFrameEntry>();
 const quickPreviewFrameTokenByCacheKey = new Map<string, string>();
 const thumbnailBatchQueue = new Map<string, BatchedThumbnailRequest>();
@@ -172,6 +216,7 @@ const thumbnailPerfMetrics = {
   cacheHitRam: 0,
   cacheHitDisk: 0,
   rawOffsetHit: 0,
+  rawRenderCacheHit: 0,
 };
 const rawPreviewExifTool = new ExifTool({
   maxProcs: RAW_EXIFTOOL_MAX_PROCS,
@@ -222,7 +267,8 @@ function logThumbnailPerfMetricsMaybe(): void {
       ` | ram-hit ${thumbnailPerfMetrics.cacheHitRam}` +
       ` | disk-hit ${thumbnailPerfMetrics.cacheHitDisk}` +
       ` | single-flight-hit ${thumbnailPerfMetrics.singleFlightHit}` +
-      ` | raw-offset-hit ${thumbnailPerfMetrics.rawOffsetHit}`,
+      ` | raw-offset-hit ${thumbnailPerfMetrics.rawOffsetHit}` +
+      ` | raw-render-cache-hit ${thumbnailPerfMetrics.rawRenderCacheHit}`,
     );
   }
 }
@@ -232,7 +278,9 @@ function recordThumbnailRequest(): void {
   logThumbnailPerfMetricsMaybe();
 }
 
-function recordThumbnailMetric(key: "singleFlightHit" | "cacheHitRam" | "cacheHitDisk" | "rawOffsetHit"): void {
+function recordThumbnailMetric(
+  key: "singleFlightHit" | "cacheHitRam" | "cacheHitDisk" | "rawOffsetHit" | "rawRenderCacheHit",
+): void {
   thumbnailPerfMetrics[key] += 1;
   logThumbnailPerfMetricsMaybe();
 }
@@ -257,6 +305,97 @@ function buildThumbnailDedupeKey(
 ): string {
   const normalizedQuality = Math.max(1, Math.min(100, Math.round(quality * 100)));
   return `${sourceFileKey ?? absolutePath}::${Math.max(0, Math.round(maxDimension))}::${normalizedQuality}`;
+}
+
+function getRawEmbeddedRangeCacheFilePath(): string {
+  return join(app.getPath("userData"), RAW_EMBEDDED_RANGE_CACHE_FILE_NAME);
+}
+
+async function ensureRawEmbeddedRangeCacheLoaded(): Promise<void> {
+  if (rawEmbeddedRangeCacheLoaded) {
+    return;
+  }
+
+  rawEmbeddedRangeCacheLoaded = true;
+  try {
+    const raw = await readFile(getRawEmbeddedRangeCacheFilePath(), "utf8");
+    const parsed = JSON.parse(raw) as Array<{ key?: string; offset?: number; length?: number }>;
+    if (!Array.isArray(parsed)) {
+      return;
+    }
+
+    for (const entry of parsed) {
+      if (!entry || typeof entry.key !== "string") {
+        continue;
+      }
+      const offsetRaw = entry.offset;
+      const lengthRaw = entry.length;
+      if (typeof offsetRaw !== "number" || !Number.isFinite(offsetRaw)) {
+        continue;
+      }
+      if (typeof lengthRaw !== "number" || !Number.isFinite(lengthRaw)) {
+        continue;
+      }
+      const offset = Math.max(0, Math.floor(offsetRaw));
+      const length = Math.max(0, Math.floor(lengthRaw));
+      if (length <= 0) {
+        continue;
+      }
+
+      rawEmbeddedRangeCache.set(entry.key, { offset, length });
+      if (rawEmbeddedRangeCache.size > RAW_EMBEDDED_RANGE_CACHE_MAX_ENTRIES) {
+        const oldest = rawEmbeddedRangeCache.keys().next().value as string | undefined;
+        if (oldest) {
+          rawEmbeddedRangeCache.delete(oldest);
+        }
+      }
+    }
+  } catch {
+    // Best-effort cache hydration; ignore malformed or missing files.
+  }
+}
+
+async function persistRawEmbeddedRangeCache(): Promise<void> {
+  if (!rawEmbeddedRangeCacheLoaded) {
+    return;
+  }
+  if (rawEmbeddedRangeCachePersistInFlight) {
+    await rawEmbeddedRangeCachePersistInFlight;
+    return;
+  }
+
+  rawEmbeddedRangeCachePersistInFlight = (async () => {
+    try {
+      const entries = Array.from(rawEmbeddedRangeCache.entries()).map(([key, value]) => ({
+        key,
+        offset: value.offset,
+        length: value.length,
+      }));
+      await mkdir(app.getPath("userData"), { recursive: true });
+      await writeFile(
+        getRawEmbeddedRangeCacheFilePath(),
+        JSON.stringify(entries),
+        "utf8",
+      );
+    } catch {
+      // Persistence is best-effort and should never block rendering.
+    } finally {
+      rawEmbeddedRangeCachePersistInFlight = null;
+    }
+  })();
+
+  await rawEmbeddedRangeCachePersistInFlight;
+}
+
+function schedulePersistRawEmbeddedRangeCache(): void {
+  if (!rawEmbeddedRangeCacheLoaded || rawEmbeddedRangeCachePersistTimer !== null) {
+    return;
+  }
+
+  rawEmbeddedRangeCachePersistTimer = setTimeout(() => {
+    rawEmbeddedRangeCachePersistTimer = null;
+    void persistRawEmbeddedRangeCache();
+  }, RAW_EMBEDDED_RANGE_CACHE_PERSIST_DEBOUNCE_MS);
 }
 
 function touchRawEmbeddedRangeCacheEntry(
@@ -296,6 +435,7 @@ function setCachedRawEmbeddedRange(cacheKey: string | undefined, entry: CachedEm
 
     rawEmbeddedRangeCache.delete(oldest);
   }
+  schedulePersistRawEmbeddedRangeCache();
 }
 
 function deleteCachedRawEmbeddedRange(cacheKey: string | undefined): void {
@@ -304,6 +444,7 @@ function deleteCachedRawEmbeddedRange(cacheKey: string | undefined): void {
   }
 
   rawEmbeddedRangeCache.delete(cacheKey);
+  schedulePersistRawEmbeddedRangeCache();
 }
 
 function runDecodeTask<T>(isRaw: boolean, task: () => Promise<T> | T): Promise<T> {
@@ -696,6 +837,8 @@ async function resolvePreviewBuffer(
   const allowFullRead = options.allowFullRead !== false;
   const sourceCacheKey = getPreviewSourceCacheKey(absolutePath, sourceFileKey);
 
+  await ensureRawEmbeddedRangeCacheLoaded();
+
   const cached = getCachedPreviewSource(sourceCacheKey);
   if (cached) {
     return cached;
@@ -875,6 +1018,9 @@ async function getDesktopPreviewInternal(
   const rawPath = isRawPath(absolutePath);
   const cachedRendered = getCachedRenderedPreview(cacheKey);
   if (cachedRendered) {
+    if (rawPath) {
+      recordThumbnailMetric("rawRenderCacheHit");
+    }
     return {
       rendered: cachedRendered,
       source: "memory-cache",
@@ -891,6 +1037,9 @@ async function getDesktopPreviewInternal(
   const task = (async (): Promise<DesktopPreviewRenderResult | null> => {
     const cachedDiskPreview = await getCachedPreviewFromDisk(absolutePath, sourceFileKey, maxDimension);
     if (cachedDiskPreview) {
+      if (rawPath) {
+        recordThumbnailMetric("rawRenderCacheHit");
+      }
       return {
         rendered: cacheRenderedPreview(cacheKey, cachedDiskPreview),
         source: "disk-cache",
@@ -1362,6 +1511,11 @@ export async function shutdownDesktopImageService(): Promise<void> {
     clearTimeout(thumbnailBatchTimer);
     thumbnailBatchTimer = null;
   }
+  if (rawEmbeddedRangeCachePersistTimer !== null) {
+    clearTimeout(rawEmbeddedRangeCachePersistTimer);
+    rawEmbeddedRangeCachePersistTimer = null;
+  }
+  await persistRawEmbeddedRangeCache().catch(() => {});
 
   previewSourcePromiseCache.clear();
   previewSourceCache.clear();

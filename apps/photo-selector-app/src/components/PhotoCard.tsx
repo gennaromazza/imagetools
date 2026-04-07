@@ -32,6 +32,7 @@ interface PhotoCardProps {
   canExternalDrag?: boolean;
   customLabelColors?: Record<string, CustomLabelTone>;
   customLabelShortcuts?: Record<string, CustomLabelShortcut | null>;
+  disableNonEssentialUi?: boolean;
   editable: boolean;
 }
 
@@ -72,6 +73,7 @@ export const PhotoCard = memo(
     canExternalDrag = false,
     customLabelColors = {},
     customLabelShortcuts = {},
+    disableNonEssentialUi = false,
     editable,
   }: PhotoCardProps) {
     notePhotoCardRender(photo.id);
@@ -96,6 +98,16 @@ export const PhotoCard = memo(
     useEffect(() => {
       const prev = prevClassRef.current;
       let nextFeedback: CardFeedback | null = null;
+
+      if (disableNonEssentialUi) {
+        prevClassRef.current = { rating, pickStatus, colorLabel, customLabels };
+        if (feedbackTimeoutRef.current !== null) {
+          window.clearTimeout(feedbackTimeoutRef.current);
+          feedbackTimeoutRef.current = null;
+        }
+        setFeedback((current) => (current ? null : current));
+        return;
+      }
 
       if (prev.rating !== rating) {
         feedbackTokenRef.current += 1;
@@ -163,13 +175,28 @@ export const PhotoCard = memo(
         setFeedback((current) => (current?.token === nextFeedback?.token ? null : current));
         feedbackTimeoutRef.current = null;
       }, 950);
-    }, [colorLabel, customLabels, pickStatus, rating]);
+    }, [colorLabel, customLabels, disableNonEssentialUi, pickStatus, rating]);
 
     useEffect(() => {
       if (isSelected) {
         setIsToolbarVisible(true);
       }
     }, [isSelected]);
+
+    useEffect(() => {
+      if (!disableNonEssentialUi) {
+        return;
+      }
+
+      if (hoverTimerRef.current !== null) {
+        clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = null;
+      }
+      setHoverPos(null);
+      if (!isSelected) {
+        setIsToolbarVisible(false);
+      }
+    }, [disableNonEssentialUi, isSelected]);
 
     useEffect(() => {
       return () => {
@@ -186,7 +213,7 @@ export const PhotoCard = memo(
       photo.orientation === "vertical" ? "↕" : photo.orientation === "square" ? "◻" : "↔";
     return (
       <div
-        className={`photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}`}
+        className={`photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}${disableNonEssentialUi ? " photo-card--scroll-lite" : ""}`}
         role="option"
         tabIndex={0}
         aria-selected={isSelected}
@@ -208,6 +235,9 @@ export const PhotoCard = memo(
           onFocus(photo.id);
         }}
         onMouseEnter={() => {
+          if (disableNonEssentialUi) {
+            return;
+          }
           setIsToolbarVisible(true);
           if (photo.previewUrl) preloadImageUrls([photo.previewUrl]);
           const imgSrc = photo.previewUrl ?? photo.thumbnailUrl ?? null;
@@ -454,7 +484,7 @@ export const PhotoCard = memo(
             </div>
           </div>
         ) : null}
-        {hoverPos !== null &&
+        {!disableNonEssentialUi && hoverPos !== null &&
           createPortal(
             <div
               className="photo-card__hover-preview"
@@ -475,6 +505,7 @@ export const PhotoCard = memo(
   (prev, next) =>
     prev.isSelected === next.isSelected &&
     prev.editable === next.editable &&
+    prev.disableNonEssentialUi === next.disableNonEssentialUi &&
     prev.photo.id === next.photo.id &&
     prev.photo.fileName === next.photo.fileName &&
     prev.photo.thumbnailUrl === next.photo.thumbnailUrl &&

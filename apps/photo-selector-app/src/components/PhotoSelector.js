@@ -1,5 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
 import { PhotoSearchBar } from "./PhotoSearchBar";
@@ -16,7 +17,9 @@ const GRID_GAP_PX = 12;
 const CARD_STAGE_HEIGHT_RATIO = 0.75;
 const QUICK_PREVIEW_FIT_MAX_DIMENSION = 2048;
 const CARD_CHROME_HEIGHT_PX = 64;
-const VIRTUAL_OVERSCAN_ROWS = 4;
+const VIRTUAL_OVERSCAN_ROWS_IDLE = 4;
+const VIRTUAL_OVERSCAN_ROWS_FAST = 10;
+const FAST_SCROLL_COOLDOWN_MS = 120;
 const ROOT_FOLDER_OVERRIDE_KEY = "ps-root-folder-path-override";
 const LEGACY_ROOT_FOLDER_KEY = "ps-root-folder-path";
 const KNOWN_EDITOR_PRESET_PATHS = [
@@ -131,7 +134,7 @@ function formatVolumeSummary(recommendation) {
         : null;
     return { current, recommended };
 }
-export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onBackgroundPreviewOrderChange, onUndo, onRedo, canUndo = false, canRedo = false, thumbnailProfile = "ultra-fast", sortCacheEnabled = true, performanceSnapshot = null, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo = null, desktopCacheLocationRecommendation = null, isDesktopThumbnailCacheBusy = false, isDesktopCacheRecommendationModalOpen = false, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, }) {
+export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onBackgroundPreviewOrderChange, onScrollLiteActiveMsChange, onUndo, onRedo, canUndo = false, canRedo = false, thumbnailProfile = "ultra-fast", sortCacheEnabled = true, performanceSnapshot = null, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo = null, desktopCacheLocationRecommendation = null, isDesktopThumbnailCacheBusy = false, isDesktopCacheRecommendationModalOpen = false, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, }) {
     const [sortBy, setSortBy] = useState("name");
     const [pickFilter, setPickFilter] = useState(DEFAULT_PHOTO_FILTERS.pickStatus);
     const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
@@ -197,13 +200,15 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     const lastClickedIdRef = useRef(null);
     const gridRef = useRef(null);
     const desktopDragImageRef = useRef(null);
-    const scrollAnimationFrameRef = useRef(null);
-    const pendingScrollTopRef = useRef(null);
+    const fastScrollCooldownTimerRef = useRef(null);
+    const fastScrollStartedAtRef = useRef(null);
+    const accumulatedFastScrollMsRef = useRef(0);
     const lastVisibleIdsSignatureRef = useRef("");
     const lastBackgroundPreviewOrderSignatureRef = useRef("");
     const dragOriginRef = useRef(null);
     const [dragRect, setDragRect] = useState(null);
-    const [gridViewport, setGridViewport] = useState({ width: 0, height: 720, scrollTop: 0 });
+    const [gridViewport, setGridViewport] = useState({ width: 0, height: 720 });
+    const [isFastScrollActive, setIsFastScrollActive] = useState(false);
     const deferredSearchQuery = useDeferredValue(searchQuery);
     const effectiveRootFolderPath = useMemo(() => rootFolderPathOverride.trim() || sourceFolderPath.trim(), [rootFolderPathOverride, sourceFolderPath]);
     const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -750,9 +755,13 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         sortedPhotoIds,
         timeClusterFilter,
     ]);
-    const visiblePhotos = useMemo(() => visiblePhotoIds
-        .map((photoId) => assetById.get(photoId))
-        .filter((photo) => !!photo), [assetById, visiblePhotoIds]);
+    const getVisiblePhotoAtIndex = useCallback((index) => {
+        const id = visiblePhotoIds[index];
+        if (!id) {
+            return null;
+        }
+        return assetById.get(id) ?? null;
+    }, [assetById, visiblePhotoIds]);
     const visiblePhotoIndexById = useMemo(() => new Map(visiblePhotoIds.map((photoId, index) => [photoId, index])), [visiblePhotoIds]);
     const visiblePhotoIdSet = useMemo(() => new Set(visiblePhotoIds), [visiblePhotoIds]);
     const gridColumnCount = useMemo(() => {
@@ -765,16 +774,36 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     }, [cardSize, gridColumnCount, gridViewport.width]);
     const cardStageHeight = useMemo(() => Math.max(96, Math.round(gridColumnWidth * CARD_STAGE_HEIGHT_RATIO)), [gridColumnWidth]);
     const gridRowHeight = useMemo(() => cardStageHeight + CARD_CHROME_HEIGHT_PX + GRID_GAP_PX, [cardStageHeight]);
-    const totalVirtualRows = useMemo(() => Math.max(1, Math.ceil(visiblePhotos.length / gridColumnCount)), [gridColumnCount, visiblePhotos.length]);
-    const visibleRowStart = useMemo(() => Math.max(0, Math.floor(gridViewport.scrollTop / Math.max(1, gridRowHeight))), [gridRowHeight, gridViewport.scrollTop]);
-    const visibleRowEnd = useMemo(() => Math.min(totalVirtualRows, Math.ceil((gridViewport.scrollTop + gridViewport.height) / Math.max(1, gridRowHeight))), [gridRowHeight, gridViewport.height, gridViewport.scrollTop, totalVirtualRows]);
-    const virtualRowStart = Math.max(0, visibleRowStart - VIRTUAL_OVERSCAN_ROWS);
-    const virtualRowEnd = Math.min(totalVirtualRows, visibleRowEnd + VIRTUAL_OVERSCAN_ROWS);
-    const virtualStartIndex = virtualRowStart * gridColumnCount;
-    const virtualEndIndex = Math.min(visiblePhotos.length, virtualRowEnd * gridColumnCount);
-    const topSpacerHeight = virtualRowStart * gridRowHeight;
-    const bottomSpacerHeight = Math.max(0, (totalVirtualRows - virtualRowEnd) * gridRowHeight);
-    const renderedPhotos = useMemo(() => visiblePhotos.slice(virtualStartIndex, virtualEndIndex), [virtualEndIndex, virtualStartIndex, visiblePhotos]);
+    const totalVirtualRows = useMemo(() => Math.max(1, Math.ceil(visiblePhotoIds.length / gridColumnCount)), [gridColumnCount, visiblePhotoIds.length]);
+    const rowVirtualizer = useVirtualizer({
+        count: totalVirtualRows,
+        getScrollElement: () => gridRef.current,
+        estimateSize: () => gridRowHeight,
+        overscan: isFastScrollActive ? VIRTUAL_OVERSCAN_ROWS_FAST : VIRTUAL_OVERSCAN_ROWS_IDLE,
+    });
+    const virtualRows = rowVirtualizer.getVirtualItems();
+    const renderedPhotoIds = useMemo(() => {
+        const ids = [];
+        for (const row of virtualRows) {
+            const rowStart = row.index * gridColumnCount;
+            const rowEnd = Math.min(visiblePhotoIds.length, rowStart + gridColumnCount);
+            for (let index = rowStart; index < rowEnd; index += 1) {
+                const id = visiblePhotoIds[index];
+                if (id) {
+                    ids.push(id);
+                }
+            }
+        }
+        return ids;
+    }, [gridColumnCount, virtualRows, visiblePhotoIds]);
+    const renderedPhotos = useMemo(() => renderedPhotoIds
+        .map((photoId) => assetById.get(photoId))
+        .filter((photo) => Boolean(photo)), [assetById, renderedPhotoIds]);
+    const topSpacerHeight = virtualRows[0]?.start ?? 0;
+    const bottomSpacerHeight = Math.max(0, rowVirtualizer.getTotalSize() - (virtualRows[virtualRows.length - 1]?.end ?? 0));
+    useEffect(() => {
+        rowVirtualizer.measure();
+    }, [gridColumnCount, gridRowHeight, rowVirtualizer, totalVirtualRows]);
     // Search in all photos so preview doesn't close when filters change
     const previewAsset = previewAssetId ? (assetById.get(previewAssetId) ?? null) : null;
     const previewPriorityIds = useMemo(() => {
@@ -834,16 +863,44 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         setPreviewAssetId(null);
         setPreviewStartsZoomed(false);
     }, [previewAssetId]);
+    const flushFastScrollAccumulatedMs = useCallback((emitUpdate = true) => {
+        if (fastScrollStartedAtRef.current !== null) {
+            const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+            accumulatedFastScrollMsRef.current += Math.max(0, now - fastScrollStartedAtRef.current);
+            fastScrollStartedAtRef.current = null;
+        }
+        if (emitUpdate) {
+            onScrollLiteActiveMsChange?.(accumulatedFastScrollMsRef.current);
+        }
+    }, [onScrollLiteActiveMsChange]);
+    const handleGridScroll = useCallback(() => {
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        if (fastScrollStartedAtRef.current === null) {
+            fastScrollStartedAtRef.current = now;
+        }
+        setIsFastScrollActive(true);
+        if (fastScrollCooldownTimerRef.current !== null) {
+            window.clearTimeout(fastScrollCooldownTimerRef.current);
+        }
+        fastScrollCooldownTimerRef.current = window.setTimeout(() => {
+            fastScrollCooldownTimerRef.current = null;
+            setIsFastScrollActive(false);
+            flushFastScrollAccumulatedMs(true);
+        }, FAST_SCROLL_COOLDOWN_MS);
+    }, [flushFastScrollAccumulatedMs]);
     useEffect(() => {
         const grid = gridRef.current;
         if (!grid) {
             return;
         }
         const syncGridViewport = () => {
-            setGridViewport({
-                width: grid.clientWidth,
-                height: grid.clientHeight,
-                scrollTop: grid.scrollTop,
+            setGridViewport((current) => {
+                const width = grid.clientWidth;
+                const height = grid.clientHeight;
+                if (current.width === width && current.height === height) {
+                    return current;
+                }
+                return { width, height };
             });
         };
         syncGridViewport();
@@ -857,23 +914,25 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     }, []);
     useEffect(() => {
         return () => {
-            if (scrollAnimationFrameRef.current !== null) {
-                window.cancelAnimationFrame(scrollAnimationFrameRef.current);
+            if (fastScrollCooldownTimerRef.current !== null) {
+                window.clearTimeout(fastScrollCooldownTimerRef.current);
+                fastScrollCooldownTimerRef.current = null;
             }
+            flushFastScrollAccumulatedMs(true);
         };
-    }, []);
+    }, [flushFastScrollAccumulatedMs]);
     useEffect(() => {
         if (!onVisibleIdsChange) {
             return;
         }
-        const ids = renderedPhotos.map((photo) => photo.id);
+        const ids = renderedPhotoIds;
         const signature = ids.join("|");
         if (signature === lastVisibleIdsSignatureRef.current) {
             return;
         }
         lastVisibleIdsSignatureRef.current = signature;
         onVisibleIdsChange(new Set(ids));
-    }, [onVisibleIdsChange, renderedPhotos]);
+    }, [onVisibleIdsChange, renderedPhotoIds]);
     useEffect(() => {
         if (!onPriorityIdsChange) {
             return;
@@ -1023,7 +1082,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         if (!arrowKeys.includes(event.key))
             return;
         event.preventDefault();
-        if (visiblePhotos.length === 0)
+        if (visiblePhotoIds.length === 0)
             return;
         const currentIndex = focusedPhotoId
             ? (visiblePhotoIndexById.get(focusedPhotoId) ?? -1)
@@ -1041,24 +1100,27 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             nextIndex = 0;
         }
         else if (event.key === "ArrowRight") {
-            nextIndex = Math.min(visiblePhotos.length - 1, currentIndex + 1);
+            nextIndex = Math.min(visiblePhotoIds.length - 1, currentIndex + 1);
         }
         else if (event.key === "ArrowLeft") {
             nextIndex = Math.max(0, currentIndex - 1);
         }
         else if (event.key === "ArrowDown") {
-            nextIndex = Math.min(visiblePhotos.length - 1, currentIndex + cols);
+            nextIndex = Math.min(visiblePhotoIds.length - 1, currentIndex + cols);
         }
         else {
             nextIndex = Math.max(0, currentIndex - cols);
         }
         if (nextIndex !== currentIndex || currentIndex < 0) {
-            const next = visiblePhotos[nextIndex];
-            setFocusedPhotoId(next.id);
-            scrollPhotoIntoView(next.id);
+            const nextId = visiblePhotoIds[nextIndex];
+            if (!nextId) {
+                return;
+            }
+            setFocusedPhotoId(nextId);
+            scrollPhotoIntoView(nextId);
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
-                    const el = grid?.querySelector(`[data-preview-asset-id="${next.id}"]`);
+                    const el = grid?.querySelector(`[data-preview-asset-id="${nextId}"]`);
                     if (el) {
                         el.focus();
                     }
@@ -1079,7 +1141,6 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         toggleCustomLabelForIds,
         visiblePhotoIds,
         visiblePhotoIndexById,
-        visiblePhotos,
         customLabelByShortcut,
     ]);
     useEffect(() => {
@@ -1091,7 +1152,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         if (grid) {
             grid.scrollTo({ top: 0 });
         }
-        setGridViewport((current) => ({ ...current, scrollTop: 0 }));
+        rowVirtualizer.scrollToOffset(0, { align: "start" });
         onVisibleIdsChange?.(new Set());
         onPriorityIdsChange?.(hasActiveFilters ? new Set(visiblePhotoIds.slice(0, 240)) : new Set());
         onPreviewPriorityIdsChange?.(new Set());
@@ -1101,6 +1162,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         onPriorityIdsChange,
         onPreviewPriorityIdsChange,
         onVisibleIdsChange,
+        rowVirtualizer,
         visiblePhotoIds,
     ]);
     function togglePhoto(id, event) {
@@ -1113,7 +1175,10 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             if (lastIdx >= 0 && curIdx >= 0) {
                 const [from, to] = lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
                 for (let i = from; i <= to; i++) {
-                    nextSelection.add(visiblePhotos[i].id);
+                    const rangeId = visiblePhotoIds[i];
+                    if (rangeId) {
+                        nextSelection.add(rangeId);
+                    }
                 }
                 lastClickedIdRef.current = id;
                 onSelectionChange(Array.from(nextSelection));
@@ -1132,7 +1197,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     function toggleAll(selectAll) {
         if (selectAll) {
             const idsToSelect = hasActiveFilters
-                ? visiblePhotos.map((p) => p.id)
+                ? visiblePhotoIds
                 : photos.map((p) => p.id);
             onSelectionChange(idsToSelect);
             pushTimelineEntry(hasActiveFilters
@@ -1301,16 +1366,15 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         pushTimelineEntry("Selezione svuotata");
     }, [onSelectionChange, pushTimelineEntry]);
     const invertVisibleSelection = useCallback(() => {
-        const visibleIdSet = new Set(visiblePhotos.map((photo) => photo.id));
-        const nextSelection = new Set(selectedIds.filter((id) => !visibleIdSet.has(id)));
-        for (const photo of visiblePhotos) {
-            if (!selectedSet.has(photo.id)) {
-                nextSelection.add(photo.id);
+        const nextSelection = new Set(selectedIds.filter((id) => !visiblePhotoIdSet.has(id)));
+        for (const photoId of visiblePhotoIds) {
+            if (!selectedSet.has(photoId)) {
+                nextSelection.add(photoId);
             }
         }
         onSelectionChange(Array.from(nextSelection));
         pushTimelineEntry("Selezione visibile invertita");
-    }, [onSelectionChange, pushTimelineEntry, selectedIds, selectedSet, visiblePhotos]);
+    }, [onSelectionChange, pushTimelineEntry, selectedIds, selectedSet, visiblePhotoIdSet, visiblePhotoIds]);
     // ── Stable callbacks for PhotoCard (identity doesn't matter due to custom memo) ──
     const handleFocus = useCallback((id) => {
         setFocusedPhotoId(id);
@@ -1383,15 +1447,17 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     }, [previewAsset]);
     // Keep preview warmup light here. The modal performs the heavier adjacent warmup.
     useEffect(() => {
-        if (!previewAssetId || visiblePhotos.length === 0)
+        if (!previewAssetId || visiblePhotoIds.length === 0)
             return;
         const currentIndex = visiblePhotoIndexById.get(previewAssetId) ?? -1;
         if (currentIndex < 0)
             return;
         const idsToWarm = [];
         for (let delta = 1; delta <= 1; delta++) {
-            const prev = visiblePhotos[currentIndex - delta];
-            const next = visiblePhotos[currentIndex + delta];
+            const prevId = visiblePhotoIds[currentIndex - delta];
+            const nextId = visiblePhotoIds[currentIndex + delta];
+            const prev = prevId ? assetById.get(prevId) ?? null : null;
+            const next = nextId ? assetById.get(nextId) ?? null : null;
             if (prev && (!prev.previewUrl || !prev.sourceUrl))
                 idsToWarm.push(prev.id);
             if (next && (!next.previewUrl || !next.sourceUrl))
@@ -1402,7 +1468,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         void Promise.all(idsToWarm.map((id, index) => warmOnDemandPreviewCache(id, index < 4 ? 1 : 2, {
             maxDimension: QUICK_PREVIEW_FIT_MAX_DIMENSION,
         }).catch(() => null)));
-    }, [previewAssetId, visiblePhotoIndexById, visiblePhotos]);
+    }, [assetById, previewAssetId, visiblePhotoIds, visiblePhotoIndexById]);
     const previewAssetWithUrl = useMemo(() => {
         if (!previewAsset)
             return null;
@@ -1419,6 +1485,14 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }
         return previewAsset; // Until async finishes, use what we have (thumbnailUrl usually)
     }, [previewAsset, asyncPreviewUrl]);
+    const visiblePreviewAssets = useMemo(() => {
+        if (!previewAssetId) {
+            return [];
+        }
+        return visiblePhotoIds
+            .map((photoId) => assetById.get(photoId))
+            .filter((photo) => Boolean(photo));
+    }, [assetById, previewAssetId, visiblePhotoIds]);
     const allSelected = photos.length > 0 && selectedIds.length === photos.length;
     const someSelected = selectedIds.length > 0 && selectedIds.length < photos.length;
     const visibleSelectedCount = useMemo(() => visiblePhotoIds.filter((photoId) => selectedSet.has(photoId)).length, [selectedSet, visiblePhotoIds]);
@@ -1438,16 +1512,16 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         return { ratingCounts, pickCounts, colorCounts };
     }, [metadataPhotos]);
     function selectVisible() {
-        onSelectionChange(visiblePhotos.map((photo) => photo.id));
-        pushTimelineEntry(`Selezionate ${visiblePhotos.length} foto visibili`);
+        onSelectionChange(visiblePhotoIds);
+        pushTimelineEntry(`Selezionate ${visiblePhotoIds.length} foto visibili`);
     }
     function addVisibleToSelection() {
         const nextSelection = new Set(selectedIds);
-        for (const photo of visiblePhotos) {
-            nextSelection.add(photo.id);
+        for (const photoId of visiblePhotoIds) {
+            nextSelection.add(photoId);
         }
         onSelectionChange(Array.from(nextSelection));
-        pushTimelineEntry(`Aggiunte ${visiblePhotos.length} foto visibili alla selezione`);
+        pushTimelineEntry(`Aggiunte ${visiblePhotoIds.length} foto visibili alla selezione`);
     }
     function removeVisibleFromSelection() {
         onSelectionChange(selectedIds.filter((id) => !visiblePhotoIdSet.has(id)));
@@ -1470,7 +1544,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     }
     const scrolledInitialRef = useRef(false);
     useEffect(() => {
-        if (scrolledInitialRef.current || selectedIds.length === 0 || visiblePhotos.length === 0)
+        if (scrolledInitialRef.current || selectedIds.length === 0 || visiblePhotoIds.length === 0)
             return;
         scrolledInitialRef.current = true;
         const firstId = selectedIds.find((id) => visiblePhotoIdSet.has(id));
@@ -1481,7 +1555,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }, 200);
         return () => clearTimeout(timer);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [visiblePhotos.length]);
+    }, [visiblePhotoIds.length]);
     useEffect(() => {
         if (typeof window === "undefined" ||
             typeof window.filexDesktop?.getInstalledEditorCandidates !== "function") {
@@ -1831,7 +1905,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }
         void onSetDesktopThumbnailCacheDirectory(nextPath);
     }, [desktopThumbnailCachePathInput, onSetDesktopThumbnailCacheDirectory]);
-    return (_jsxs("div", { className: "photo-selector", children: [_jsxs("div", { className: "photo-selector__filter-bar", children: [hasActiveFilters && (_jsx("div", { className: "selector-filters__reset", children: _jsxs("button", { type: "button", className: "ghost-button ghost-button--small", onClick: resetFilters, title: `${activeFilterCount} filtro/i attivo/i`, children: ["\u2715 Azzera", activeFilterCount > 0 && (_jsx("span", { className: "photo-selector__filter-count-badge", children: activeFilterCount }))] }) })), subfolders.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Cartella" }), _jsxs("select", { className: folderFilter !== "all" ? "field__select--active" : undefined, value: folderFilter, onChange: (event) => setFolderFilter(event.target.value), children: [_jsxs("option", { value: "all", children: ["Tutte (", photos.length, ")"] }), subfolders.map(({ folder, count }) => (_jsxs("option", { value: folder, children: [folder === "" ? "Root" : folder, " (", count, ")"] }, folder)))] })] })), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stato" }), _jsxs("select", { className: pickFilter !== "all" ? "field__select--active" : undefined, value: pickFilter, onChange: (event) => setPickFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutti" }), _jsx("option", { value: "picked", children: "Pick" }), _jsx("option", { value: "rejected", children: "Scartate" }), _jsx("option", { value: "unmarked", children: "Neutre" })] })] }), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stelle" }), _jsxs("select", { className: ratingFilter !== "any" ? "field__select--active" : undefined, value: ratingFilter, onChange: (event) => setRatingFilter(event.target.value), children: [_jsx("option", { value: "any", children: "Tutte" }), _jsxs("optgroup", { label: "Minimo", children: [_jsx("option", { value: "1+", children: "\u2605 1+" }), _jsx("option", { value: "2+", children: "\u2605\u2605 2+" }), _jsx("option", { value: "3+", children: "\u2605\u2605\u2605 3+" }), _jsx("option", { value: "4+", children: "\u2605\u2605\u2605\u2605 4+" })] }), _jsxs("optgroup", { label: "Esattamente", children: [_jsx("option", { value: "0", children: "Senza stelle" }), _jsx("option", { value: "1", children: "\u2605 1" }), _jsx("option", { value: "2", children: "\u2605\u2605 2" }), _jsx("option", { value: "3", children: "\u2605\u2605\u2605 3" }), _jsx("option", { value: "4", children: "\u2605\u2605\u2605\u2605 4" }), _jsx("option", { value: "5", children: "\u2605\u2605\u2605\u2605\u2605 5" })] })] })] }), _jsxs("div", { className: "field photo-selector__color-filter", children: [_jsx("span", { children: "Colore" }), _jsxs("div", { className: "photo-selector__color-filter-dots", children: [_jsx("button", { type: "button", className: `photo-selector__color-all-btn${colorFilter === "all" ? " photo-selector__color-all-btn--active" : ""}`, onClick: () => setColorFilter("all"), title: "Tutti i colori", children: "\u2715" }), COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: `asset-color-dot asset-color-dot--${value}${colorFilter === value ? " asset-color-dot--selected" : ""}`, onClick: () => setColorFilter(colorFilter === value ? "all" : value), title: customColorNames[value] }, value)))] })] }), customLabelFilterOptions.length > 0 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Label custom" }), _jsxs("select", { className: customLabelFilter !== "all" ? "field__select--active" : undefined, value: customLabelFilter, onChange: (event) => setCustomLabelFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), customLabelFilterOptions.map(({ label, count }) => (_jsxs("option", { value: label, children: [label, " (", count, ")"] }, label)))] })] })), seriesGroups.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Serie" }), _jsxs("select", { className: seriesFilter !== "all" ? "field__select--active" : undefined, value: seriesFilter, onChange: (event) => setSeriesFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), seriesGroups.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), timeClusters.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Fascia oraria" }), _jsxs("select", { className: timeClusterFilter !== "all" ? "field__select--active" : undefined, value: timeClusterFilter, onChange: (event) => setTimeClusterFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), timeClusters.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), filterPresets.length > 0 && (_jsxs("div", { className: "photo-selector__preset-chips", children: [_jsx("span", { className: "photo-selector__filter-bar-label", children: "Preset" }), filterPresets.map((preset) => (_jsx("button", { className: "photo-selector__preset-apply", onClick: () => applyPreset(preset), children: preset.name }, preset.id)))] }))] }), _jsxs("div", { className: "photo-selector__controls", children: [_jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("div", { className: "photo-selector__undo-group", children: [_jsx("button", { type: "button", className: "icon-button", onClick: handleUndoClick, disabled: !canUndo, title: "Annulla", children: "\u21A9" }), _jsx("button", { type: "button", className: "icon-button", onClick: handleRedoClick, disabled: !canRedo, title: "Ripeti", children: "\u21AA" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: `checkbox-button photo-selector__toolbar-control ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`, onClick: () => toggleAll(!allSelected), children: allSelected ? "Deseleziona tutto" : "Seleziona tutto" }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: selectVisible, title: "Seleziona le foto visibili", children: "Visibili" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: activatePickedOnly, title: "Seleziona solo le foto Pick", children: "Solo pick" }), selectedIds.length >= 2 && selectedIds.length <= 4 && (_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => setIsCompareOpen(true), title: `Confronta ${selectedIds.length} foto selezionate`, children: "Confronta" }))] }), _jsx("div", { className: "photo-selector__action-inline photo-selector__toolbar-search", children: _jsx(PhotoSearchBar, { value: searchQuery, onChange: setSearchQuery, resultCount: visiblePhotos.length, totalCount: photos.length }) }), _jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("label", { className: "photo-selector__zoom-label", title: "Dimensione card", children: [_jsx("span", { children: "\uD83D\uDD0E" }), _jsx("input", { type: "range", className: "photo-selector__zoom-slider", min: 100, max: 320, step: 10, value: cardSize, onChange: (e) => setCardSize(Number(e.target.value)), "aria-label": "Dimensione card" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsxs("select", { className: "photo-selector__sort photo-selector__toolbar-control", value: sortBy, onChange: (event) => setSortBy(event.target.value), children: [_jsx("option", { value: "name", children: "AZ \u2191 Nome" }), _jsx("option", { value: "orientation", children: "Orientamento" }), _jsx("option", { value: "rating", children: "Valutazione" })] }), _jsx("button", { type: "button", className: `icon-button${isSettingsPanelOpen ? " icon-button--active" : ""}`, onClick: () => setIsSettingsPanelOpen((v) => !v), title: "Impostazioni workspace", children: "\u2699" }), _jsx(PhotoClassificationHelpButton, {})] })] }), photos.length > 0 && (_jsxs("div", { className: "photo-selector__quick-stats", children: [[1, 2, 3, 4, 5].map((r) => {
+    return (_jsxs("div", { className: "photo-selector", children: [_jsxs("div", { className: "photo-selector__filter-bar", children: [hasActiveFilters && (_jsx("div", { className: "selector-filters__reset", children: _jsxs("button", { type: "button", className: "ghost-button ghost-button--small", onClick: resetFilters, title: `${activeFilterCount} filtro/i attivo/i`, children: ["\u2715 Azzera", activeFilterCount > 0 && (_jsx("span", { className: "photo-selector__filter-count-badge", children: activeFilterCount }))] }) })), subfolders.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Cartella" }), _jsxs("select", { className: folderFilter !== "all" ? "field__select--active" : undefined, value: folderFilter, onChange: (event) => setFolderFilter(event.target.value), children: [_jsxs("option", { value: "all", children: ["Tutte (", photos.length, ")"] }), subfolders.map(({ folder, count }) => (_jsxs("option", { value: folder, children: [folder === "" ? "Root" : folder, " (", count, ")"] }, folder)))] })] })), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stato" }), _jsxs("select", { className: pickFilter !== "all" ? "field__select--active" : undefined, value: pickFilter, onChange: (event) => setPickFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutti" }), _jsx("option", { value: "picked", children: "Pick" }), _jsx("option", { value: "rejected", children: "Scartate" }), _jsx("option", { value: "unmarked", children: "Neutre" })] })] }), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stelle" }), _jsxs("select", { className: ratingFilter !== "any" ? "field__select--active" : undefined, value: ratingFilter, onChange: (event) => setRatingFilter(event.target.value), children: [_jsx("option", { value: "any", children: "Tutte" }), _jsxs("optgroup", { label: "Minimo", children: [_jsx("option", { value: "1+", children: "\u2605 1+" }), _jsx("option", { value: "2+", children: "\u2605\u2605 2+" }), _jsx("option", { value: "3+", children: "\u2605\u2605\u2605 3+" }), _jsx("option", { value: "4+", children: "\u2605\u2605\u2605\u2605 4+" })] }), _jsxs("optgroup", { label: "Esattamente", children: [_jsx("option", { value: "0", children: "Senza stelle" }), _jsx("option", { value: "1", children: "\u2605 1" }), _jsx("option", { value: "2", children: "\u2605\u2605 2" }), _jsx("option", { value: "3", children: "\u2605\u2605\u2605 3" }), _jsx("option", { value: "4", children: "\u2605\u2605\u2605\u2605 4" }), _jsx("option", { value: "5", children: "\u2605\u2605\u2605\u2605\u2605 5" })] })] })] }), _jsxs("div", { className: "field photo-selector__color-filter", children: [_jsx("span", { children: "Colore" }), _jsxs("div", { className: "photo-selector__color-filter-dots", children: [_jsx("button", { type: "button", className: `photo-selector__color-all-btn${colorFilter === "all" ? " photo-selector__color-all-btn--active" : ""}`, onClick: () => setColorFilter("all"), title: "Tutti i colori", children: "\u2715" }), COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: `asset-color-dot asset-color-dot--${value}${colorFilter === value ? " asset-color-dot--selected" : ""}`, onClick: () => setColorFilter(colorFilter === value ? "all" : value), title: customColorNames[value] }, value)))] })] }), customLabelFilterOptions.length > 0 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Label custom" }), _jsxs("select", { className: customLabelFilter !== "all" ? "field__select--active" : undefined, value: customLabelFilter, onChange: (event) => setCustomLabelFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), customLabelFilterOptions.map(({ label, count }) => (_jsxs("option", { value: label, children: [label, " (", count, ")"] }, label)))] })] })), seriesGroups.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Serie" }), _jsxs("select", { className: seriesFilter !== "all" ? "field__select--active" : undefined, value: seriesFilter, onChange: (event) => setSeriesFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), seriesGroups.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), timeClusters.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Fascia oraria" }), _jsxs("select", { className: timeClusterFilter !== "all" ? "field__select--active" : undefined, value: timeClusterFilter, onChange: (event) => setTimeClusterFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), timeClusters.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), filterPresets.length > 0 && (_jsxs("div", { className: "photo-selector__preset-chips", children: [_jsx("span", { className: "photo-selector__filter-bar-label", children: "Preset" }), filterPresets.map((preset) => (_jsx("button", { className: "photo-selector__preset-apply", onClick: () => applyPreset(preset), children: preset.name }, preset.id)))] }))] }), _jsxs("div", { className: "photo-selector__controls", children: [_jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("div", { className: "photo-selector__undo-group", children: [_jsx("button", { type: "button", className: "icon-button", onClick: handleUndoClick, disabled: !canUndo, title: "Annulla", children: "\u21A9" }), _jsx("button", { type: "button", className: "icon-button", onClick: handleRedoClick, disabled: !canRedo, title: "Ripeti", children: "\u21AA" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: `checkbox-button photo-selector__toolbar-control ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`, onClick: () => toggleAll(!allSelected), children: allSelected ? "Deseleziona tutto" : "Seleziona tutto" }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: selectVisible, title: "Seleziona le foto visibili", children: "Visibili" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: activatePickedOnly, title: "Seleziona solo le foto Pick", children: "Solo pick" }), selectedIds.length >= 2 && selectedIds.length <= 4 && (_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => setIsCompareOpen(true), title: `Confronta ${selectedIds.length} foto selezionate`, children: "Confronta" }))] }), _jsx("div", { className: "photo-selector__action-inline photo-selector__toolbar-search", children: _jsx(PhotoSearchBar, { value: searchQuery, onChange: setSearchQuery, resultCount: visiblePhotoIds.length, totalCount: photos.length }) }), _jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("label", { className: "photo-selector__zoom-label", title: "Dimensione card", children: [_jsx("span", { children: "\uD83D\uDD0E" }), _jsx("input", { type: "range", className: "photo-selector__zoom-slider", min: 100, max: 320, step: 10, value: cardSize, onChange: (e) => setCardSize(Number(e.target.value)), "aria-label": "Dimensione card" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsxs("select", { className: "photo-selector__sort photo-selector__toolbar-control", value: sortBy, onChange: (event) => setSortBy(event.target.value), children: [_jsx("option", { value: "name", children: "AZ \u2191 Nome" }), _jsx("option", { value: "orientation", children: "Orientamento" }), _jsx("option", { value: "rating", children: "Valutazione" })] }), _jsx("button", { type: "button", className: `icon-button${isSettingsPanelOpen ? " icon-button--active" : ""}`, onClick: () => setIsSettingsPanelOpen((v) => !v), title: "Impostazioni workspace", children: "\u2699" }), _jsx(PhotoClassificationHelpButton, {})] })] }), photos.length > 0 && (_jsxs("div", { className: "photo-selector__quick-stats", children: [[1, 2, 3, 4, 5].map((r) => {
                         const count = photoStats.ratingCounts.get(r) ?? 0;
                         if (count === 0)
                             return null;
@@ -1920,34 +1994,17 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                         onSelectionChange(Array.from(base));
                         pushTimelineEntry(`Selezionate ${newIds.length} foto con lasso`);
                     }
-                }, onScroll: (event) => {
-                    const target = event.currentTarget;
-                    pendingScrollTopRef.current = target.scrollTop;
-                    if (scrollAnimationFrameRef.current !== null) {
-                        return;
-                    }
-                    scrollAnimationFrameRef.current = window.requestAnimationFrame(() => {
-                        scrollAnimationFrameRef.current = null;
-                        const nextScrollTop = pendingScrollTopRef.current;
-                        pendingScrollTopRef.current = null;
-                        if (nextScrollTop === null) {
-                            return;
-                        }
-                        setGridViewport((current) => (current.scrollTop === nextScrollTop
-                            ? current
-                            : { ...current, scrollTop: nextScrollTop }));
-                    });
-                }, children: [visiblePhotos.length === 0 ? (_jsx("div", { className: "photo-selector__empty", children: _jsx("p", { children: "Nessuna foto trovata." }) })) : (_jsxs(_Fragment, { children: [topSpacerHeight > 0 ? (_jsx("div", { className: "photo-selector__virtual-spacer", style: { height: topSpacerHeight }, "aria-hidden": "true" })) : null, renderedPhotos.map((photo) => (_jsx(PhotoCard, { photo: photo, isSelected: selectedSet.has(photo.id), onToggle: togglePhoto, onUpdatePhoto: handleUpdatePhoto, onFocus: handleFocus, onPreview: handlePreview, onContextMenu: handleContextMenu, onExternalDragStart: handleCardExternalDragStart, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, canExternalDrag: typeof window !== "undefined"
+                }, onScroll: handleGridScroll, children: [visiblePhotoIds.length === 0 ? (_jsx("div", { className: "photo-selector__empty", children: _jsx("p", { children: "Nessuna foto trovata." }) })) : (_jsxs(_Fragment, { children: [topSpacerHeight > 0 ? (_jsx("div", { className: "photo-selector__virtual-spacer", style: { height: topSpacerHeight }, "aria-hidden": "true" })) : null, renderedPhotos.map((photo) => (_jsx(PhotoCard, { photo: photo, isSelected: selectedSet.has(photo.id), onToggle: togglePhoto, onUpdatePhoto: handleUpdatePhoto, onFocus: handleFocus, onPreview: handlePreview, onContextMenu: handleContextMenu, onExternalDragStart: handleCardExternalDragStart, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, canExternalDrag: typeof window !== "undefined"
                                     && typeof window.filexDesktop?.startDragOut === "function"
                                     && (selectedSet.has(photo.id)
                                         ? canStartDesktopDragOut
-                                        : Boolean(getAssetAbsolutePath(photo.id))), editable: !!onPhotosChange }, photo.id))), bottomSpacerHeight > 0 ? (_jsx("div", { className: "photo-selector__virtual-spacer", style: { height: bottomSpacerHeight }, "aria-hidden": "true" })) : null] })), dragRect && (_jsx("div", { className: "photo-selector__drag-rect", style: {
+                                        : Boolean(getAssetAbsolutePath(photo.id))), disableNonEssentialUi: isFastScrollActive, editable: !!onPhotosChange }, photo.id))), bottomSpacerHeight > 0 ? (_jsx("div", { className: "photo-selector__virtual-spacer", style: { height: bottomSpacerHeight }, "aria-hidden": "true" })) : null] })), dragRect && (_jsx("div", { className: "photo-selector__drag-rect", style: {
                             position: "fixed",
                             left: dragRect.left,
                             top: dragRect.top,
                             width: dragRect.width,
                             height: dragRect.height,
-                        } }))] }), _jsxs("footer", { className: "photo-selector__bottom-bar", children: [_jsxs("div", { className: "photo-selector__stats", children: [_jsxs("span", { className: "photo-selector__count", children: [photos.length, " elementi \u2014 ", selectedIds.length, " selezionati", hasActiveFilters ? ` (${visiblePhotos.length} filtrati)` : ""] }), selectionStats && (_jsxs("div", { className: "photo-selector__stat-chips", children: [selectionStats.picked > 0 && (_jsxs("span", { className: "photo-selector__stat-chip photo-selector__stat-chip--pick", children: ["Pick ", selectionStats.picked] })), selectionStats.rejected > 0 && (_jsxs("span", { className: "photo-selector__stat-chip photo-selector__stat-chip--reject", children: ["Scart. ", selectionStats.rejected] })), selectionStats.highRating > 0 && (_jsxs("span", { className: "photo-selector__stat-chip photo-selector__stat-chip--star", children: ["\u26053+ ", selectionStats.highRating] }))] }))] }), timelineEntries.length > 0 && (canUndo ? (_jsxs("button", { type: "button", className: "photo-selector__timeline-status photo-selector__timeline-undo-btn", onClick: handleUndoClick, title: "Clicca per annullare", children: ["\u21A9 ", timelineEntries[0].label] })) : (_jsx("div", { className: "photo-selector__timeline-status", children: timelineEntries[0].label }))), _jsxs("div", { className: "photo-selector__footer-actions", children: [selectedIds.length > 0 && (_jsxs("button", { type: "button", className: `ghost-button ghost-button--small${canStartDesktopDragOut ? " photo-selector__dragout-button" : ""}`, draggable: canStartDesktopDragOut, onDragStart: handleSelectionDragStart, title: canStartDesktopDragOut
+                        } }))] }), _jsxs("footer", { className: "photo-selector__bottom-bar", children: [_jsxs("div", { className: "photo-selector__stats", children: [_jsxs("span", { className: "photo-selector__count", children: [photos.length, " elementi \u2014 ", selectedIds.length, " selezionati", hasActiveFilters ? ` (${visiblePhotoIds.length} filtrati)` : ""] }), selectionStats && (_jsxs("div", { className: "photo-selector__stat-chips", children: [selectionStats.picked > 0 && (_jsxs("span", { className: "photo-selector__stat-chip photo-selector__stat-chip--pick", children: ["Pick ", selectionStats.picked] })), selectionStats.rejected > 0 && (_jsxs("span", { className: "photo-selector__stat-chip photo-selector__stat-chip--reject", children: ["Scart. ", selectionStats.rejected] })), selectionStats.highRating > 0 && (_jsxs("span", { className: "photo-selector__stat-chip photo-selector__stat-chip--star", children: ["\u26053+ ", selectionStats.highRating] }))] }))] }), timelineEntries.length > 0 && (canUndo ? (_jsxs("button", { type: "button", className: "photo-selector__timeline-status photo-selector__timeline-undo-btn", onClick: handleUndoClick, title: "Clicca per annullare", children: ["\u21A9 ", timelineEntries[0].label] })) : (_jsx("div", { className: "photo-selector__timeline-status", children: timelineEntries[0].label }))), _jsxs("div", { className: "photo-selector__footer-actions", children: [selectedIds.length > 0 && (_jsxs("button", { type: "button", className: `ghost-button ghost-button--small${canStartDesktopDragOut ? " photo-selector__dragout-button" : ""}`, draggable: canStartDesktopDragOut, onDragStart: handleSelectionDragStart, title: canStartDesktopDragOut
                                     ? "Trascina la selezione direttamente dentro Auto Layout, Photoshop o un'altra app desktop."
                                     : "Drag esterno disponibile nella versione desktop con cartella aperta in modalità nativa.", disabled: !canStartDesktopDragOut, children: ["Trascina fuori (", selectedIds.length, ")"] })), selectedIds.length > 0 && (_jsx("button", { className: "ghost-button ghost-button--small", onClick: () => setIsBatchToolsOpen(!isBatchToolsOpen), children: isBatchToolsOpen ? "Chiudi Batch" : "Apri Batch" }))] })] }), isBatchToolsOpen && selectedIds.length > 0 && (_jsx("section", { className: "photo-selector__selection-bar photo-selector__batch-panel", children: _jsxs("div", { className: "photo-selector__selection-tools", children: [_jsxs("div", { className: "photo-selector__selection-group", "aria-label": "Valutazione", children: [_jsx("span", { className: "photo-selector__selection-label", children: "Stelle" }), _jsxs("div", { className: "photo-selector__selection-stars", children: [[1, 2, 3, 4, 5].map((value) => (_jsx("button", { type: "button", className: "photo-selector__batch-star", onClick: () => applyBatchChanges(selectedIds, { rating: value }), children: Array.from({ length: value }, () => "★").join("") }, value))), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => applyBatchChanges(selectedIds, { rating: 0 }), children: "Azzera" })] })] }), _jsxs("div", { className: "photo-selector__selection-group", "aria-label": "Stato", children: [_jsx("span", { className: "photo-selector__selection-label", children: "Stato" }), _jsxs("div", { className: "photo-selector__selection-pills", children: [["picked", "rejected", "unmarked"].map((value) => (_jsx("button", { type: "button", className: "photo-selector__batch-pill", onClick: () => applyBatchChanges(selectedIds, { pickStatus: value }), children: value === "picked" ? "Pick" : value === "rejected" ? "Scartata" : "Neutra" }, value))), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: excludeRejected, title: "Rimuovi dalla selezione le foto scartate", children: "\u2212 Escludi scartate" })] })] }), _jsxs("div", { className: "photo-selector__selection-group", "aria-label": "Etichette colore", children: [_jsx("span", { className: "photo-selector__selection-label", children: "Etichette" }), _jsxs("div", { className: "photo-selector__selection-colors", children: [_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => applyBatchChanges(selectedIds, { colorLabel: null }), children: "Nessuna" }), COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: `asset-color-dot asset-color-dot--${value}`, onClick: () => applyBatchChanges(selectedIds, { colorLabel: value }) }, value)))] })] }), _jsxs("div", { className: "photo-selector__selection-group", "aria-label": "Etichette personalizzate", children: [_jsx("span", { className: "photo-selector__selection-label", children: "Label custom" }), _jsxs("div", { className: "photo-selector__selection-pills photo-selector__selection-pills--wrap", children: [_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: handleClearBatchCustomLabels, children: "Azzera" }), customLabelsCatalog.map((label) => {
                                             const activeCount = selectedCustomLabelCounts.get(label) ?? 0;
@@ -1982,7 +2039,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                                                 setNewBatchCustomLabelName("");
                                                 setNewBatchCustomLabelTone(DEFAULT_CUSTOM_LABEL_TONE);
                                                 setNewBatchCustomLabelShortcut(null);
-                                            }, disabled: !newBatchCustomLabelName.trim(), children: "Aggiungi e assegna" })] })] })] }) })), _jsx(PhotoQuickPreviewModal, { asset: previewAssetWithUrl, assets: visiblePhotos, thumbnailProfile: selectedThumbnailProfile, startZoomed: previewStartsZoomed, customLabelsCatalog: customLabelsCatalog, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, onClose: closePreview, onSelectAsset: handlePreviewAssetSelection, onUpdateAsset: (assetId, changes) => updatePhoto(assetId, changes) }), isSettingsPanelOpen && (_jsxs("aside", { className: "photo-selector__settings-flyout", "aria-label": "Impostazioni workspace", children: [_jsxs("div", { className: "photo-selector__settings-header", children: [_jsx("span", { children: "Impostazioni" }), _jsx("button", { type: "button", className: "icon-button", onClick: () => setIsSettingsPanelOpen(false), title: "Chiudi", children: "\u2715" })] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Nomi etichette colore" }), COLOR_LABELS.map((label) => (_jsxs("label", { className: "photo-selector__settings-color-row", children: [_jsx("span", { className: `asset-color-dot asset-color-dot--${label}` }), _jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: customColorNames[label], onChange: (e) => handleColorNameChange(label, e.target.value), placeholder: COLOR_LABEL_NAMES[label] })] }, label)))] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Etichette personalizzate" }), _jsx("p", { className: "photo-selector__settings-empty", children: "Crea etichette tipo \"Album sposi\", \"Trailer\", \"Dettagli sala\". Ora puoi scegliere subito colore e tasto rapido, assegnarle alla selezione e ritrovarle sia in UI sia nei sidecar XMP." }), _jsx("div", { className: "photo-selector__label-grid", children: customLabelsCatalog.map((label) => (_jsxs("div", { className: "photo-selector__label-editor", children: [_jsx("span", { className: `photo-selector__label-chip photo-selector__label-chip--${resolveCustomLabelTone(label)}`, children: "Tag" }), _jsx("input", { type: "text", defaultValue: label, onBlur: (event) => {
+                                            }, disabled: !newBatchCustomLabelName.trim(), children: "Aggiungi e assegna" })] })] })] }) })), _jsx(PhotoQuickPreviewModal, { asset: previewAssetWithUrl, assets: visiblePreviewAssets, thumbnailProfile: selectedThumbnailProfile, startZoomed: previewStartsZoomed, customLabelsCatalog: customLabelsCatalog, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, onClose: closePreview, onSelectAsset: handlePreviewAssetSelection, onUpdateAsset: (assetId, changes) => updatePhoto(assetId, changes) }), isSettingsPanelOpen && (_jsxs("aside", { className: "photo-selector__settings-flyout", "aria-label": "Impostazioni workspace", children: [_jsxs("div", { className: "photo-selector__settings-header", children: [_jsx("span", { children: "Impostazioni" }), _jsx("button", { type: "button", className: "icon-button", onClick: () => setIsSettingsPanelOpen(false), title: "Chiudi", children: "\u2715" })] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Nomi etichette colore" }), COLOR_LABELS.map((label) => (_jsxs("label", { className: "photo-selector__settings-color-row", children: [_jsx("span", { className: `asset-color-dot asset-color-dot--${label}` }), _jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: customColorNames[label], onChange: (e) => handleColorNameChange(label, e.target.value), placeholder: COLOR_LABEL_NAMES[label] })] }, label)))] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Etichette personalizzate" }), _jsx("p", { className: "photo-selector__settings-empty", children: "Crea etichette tipo \"Album sposi\", \"Trailer\", \"Dettagli sala\". Ora puoi scegliere subito colore e tasto rapido, assegnarle alla selezione e ritrovarle sia in UI sia nei sidecar XMP." }), _jsx("div", { className: "photo-selector__label-grid", children: customLabelsCatalog.map((label) => (_jsxs("div", { className: "photo-selector__label-editor", children: [_jsx("span", { className: `photo-selector__label-chip photo-selector__label-chip--${resolveCustomLabelTone(label)}`, children: "Tag" }), _jsx("input", { type: "text", defaultValue: label, onBlur: (event) => {
                                                 const nextValue = normalizeCustomLabelName(event.target.value);
                                                 if (!nextValue) {
                                                     event.currentTarget.value = label;
@@ -2044,7 +2101,15 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                                             ? "Fast contact sheet"
                                             : "Bilanciato", ".", selectedThumbnailProfile !== thumbnailProfile ? " Aggiorno subito task attivi e quick preview; riaprire la cartella rigenera tutta la cache col nuovo profilo." : ""] }), performanceSnapshot ? (_jsxs(_Fragment, { children: [_jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Primo thumbnail: ", formatMilliseconds(performanceSnapshot.folderOpenToFirstThumbnailMs), " | Griglia completa: ", formatMilliseconds(performanceSnapshot.folderOpenToGridCompleteMs)] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Cache colpite: ", performanceSnapshot.cachedThumbnailCount, "/", performanceSnapshot.totalThumbnailCount, " | Letture disco: ", formatBytes(performanceSnapshot.bytesRead)] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["RAW: ", formatBytes(performanceSnapshot.rawBytesRead), " | Standard: ", formatBytes(performanceSnapshot.standardBytesRead)] })] })) : null] }), desktopThumbnailCacheInfo ? (_jsxs("div", { className: "photo-selector__settings-section", children: [_jsxs("h4", { className: "photo-selector__settings-section-title", children: ["Cache thumbnail desktop", _jsx("button", { type: "button", className: "photo-selector__settings-info-btn", title: "Spostiamo solo le cache pesanti gestite da Selezione Foto. AppData, Temp e cache Chromium di sistema restano nei percorsi di Windows.", children: "?" })] }), _jsx("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.1rem" }, children: "Spostiamo le cache pesanti gestite da Selezione Foto, non i percorsi di sistema di Windows." }), _jsxs("label", { className: "photo-selector__settings-color-row", children: [_jsx("span", { style: { fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }, children: "Percorso" }), _jsx("div", { className: "photo-selector__settings-input-with-button", children: _jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: desktopThumbnailCachePathInput, onChange: (e) => setDesktopThumbnailCachePathInput(e.target.value), placeholder: desktopThumbnailCacheInfo.defaultPath, spellCheck: false, disabled: isDesktopThumbnailCacheBusy }) })] }), _jsxs("div", { className: "photo-selector__settings-preset-row", children: [_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: handleApplyDesktopThumbnailCachePath, disabled: isDesktopThumbnailCacheBusy || !desktopThumbnailCachePathInput.trim(), children: "Applica" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onChooseDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy || !onChooseDesktopThumbnailCacheDirectory, children: "Sfoglia..." }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onResetDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy || !onResetDesktopThumbnailCacheDirectory, children: "Default" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onUseRecommendedDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy
                                             || !onUseRecommendedDesktopThumbnailCacheDirectory
-                                            || !canUseRecommendedCacheLocation, children: "Usa percorso consigliato" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onClearDesktopThumbnailCache?.(), disabled: isDesktopThumbnailCacheBusy || !onClearDesktopThumbnailCache, children: "Svuota cache" })] }), desktopThumbnailCacheStatus ? (_jsx("p", { className: `photo-selector__settings-path-status photo-selector__settings-path-status--${desktopThumbnailCacheStatus.kind}`, children: desktopThumbnailCacheStatus.text })) : null, desktopCacheRecommendationStatus ? (_jsx("p", { className: `photo-selector__settings-path-status photo-selector__settings-path-status--${desktopCacheRecommendationStatus.kind}`, children: desktopCacheRecommendationStatus.text })) : null, _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: [desktopThumbnailCacheInfo.entryCount, " anteprime, ", formatBytes(desktopThumbnailCacheInfo.totalBytes), " su disco."] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Percorso predefinito: ", desktopThumbnailCacheInfo.defaultPath] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Drive attuale: ", cacheLocationSummary.current] }), cacheLocationSummary.recommended ? (_jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Percorso consigliato: ", cacheLocationSummary.recommended] })) : null] })) : null, _jsxs("div", { className: "photo-selector__settings-section", children: [_jsxs("h4", { className: "photo-selector__settings-section-title", children: ["Preset filtri", _jsx("button", { type: "button", className: "photo-selector__settings-info-btn", title: "Un preset salva la combinazione attuale di filtri (stelle, stato, colore, cartella...) con un nome. Utile per richiamare in un click un insieme di filtri che usi spesso \u2014 es. 'Migliori Pick' = Pick + 4 stelle + verde.", children: "?" })] }), _jsxs("div", { className: "photo-selector__settings-preset-row", children: [_jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: newPresetName, onChange: (e) => setNewPresetName(e.target.value), placeholder: "Nome preset\u2026", onKeyDown: (e) => e.key === "Enter" && handleSavePreset() }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: handleSavePreset, disabled: !newPresetName.trim(), children: "Salva" })] }), filterPresets.length === 0 && (_jsx("p", { className: "photo-selector__settings-empty", children: "Nessun preset salvato." })), filterPresets.map((preset) => (_jsxs("div", { className: "photo-selector__settings-preset-item", children: [_jsx("button", { type: "button", className: "ghost-button ghost-button--small photo-selector__settings-preset-name", onClick: () => applyPreset(preset), children: preset.name }), _jsx("button", { type: "button", className: "icon-button icon-button--danger", onClick: () => removePreset(preset.id), title: "Elimina preset", children: "\u2715" })] }, preset.id)))] })] })), isDesktopCacheRecommendationModalOpen && desktopCacheLocationRecommendation?.recommendedPath ? (_jsx("div", { className: "modal-backdrop", role: "presentation", children: _jsxs("section", { className: "modal-panel photo-selector__cache-recommendation-modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "cache-recommendation-title", children: [_jsx("div", { className: "modal-panel__header", children: _jsxs("div", { children: [_jsx("strong", { id: "cache-recommendation-title", children: "Spazio disco e cache" }), _jsx("p", { children: "C: ha poco spazio libero. Possiamo spostare le cache pesanti gestite da Selezione Foto su un disco pi\u00F9 capiente." })] }) }), _jsxs("div", { className: "modal-panel__body", children: [_jsxs("div", { className: "photo-selector__cache-recommendation-grid", children: [_jsxs("div", { className: "photo-selector__cache-recommendation-card", children: [_jsx("span", { className: "photo-selector__cache-recommendation-label", children: "Percorso attuale" }), _jsx("strong", { children: desktopCacheLocationRecommendation.currentPath }), _jsx("p", { children: cacheLocationSummary.current })] }), _jsxs("div", { className: "photo-selector__cache-recommendation-card", children: [_jsx("span", { className: "photo-selector__cache-recommendation-label", children: "Percorso consigliato" }), _jsx("strong", { children: desktopCacheLocationRecommendation.recommendedPath }), _jsx("p", { children: cacheLocationSummary.recommended ?? "Disco consigliato non disponibile" })] })] }), _jsx("p", { className: "photo-selector__settings-empty", children: "Copiamo thumbnail e quick preview gi\u00E0 create, poi passiamo al nuovo percorso e liberiamo quello vecchio se tutto va bene." })] }), _jsxs("div", { className: "modal-panel__footer", children: [_jsx("button", { type: "button", className: "ghost-button", onClick: () => void onSnoozeDesktopCacheRecommendation?.(), disabled: isDesktopThumbnailCacheBusy || !onSnoozeDesktopCacheRecommendation, children: "Pi\u00F9 tardi" }), _jsxs("div", { className: "photo-selector__cache-recommendation-actions", children: [_jsx("button", { type: "button", className: "ghost-button", onClick: () => void onDismissDesktopCacheRecommendation?.(), disabled: isDesktopThumbnailCacheBusy || !onDismissDesktopCacheRecommendation, children: "Non mostrare pi\u00F9" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => void onUseRecommendedDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy || !onUseRecommendedDesktopThumbnailCacheDirectory, children: "Sposta ora" })] })] })] }) })) : null, contextMenuState && (_jsx("div", { className: "photo-selector__context-backdrop", onClick: () => setContextMenuState(null), onContextMenu: (e) => e.preventDefault() })), contextMenuState ? (_jsx(PhotoSelectionContextMenu, { x: contextMenuState.x, y: contextMenuState.y, targetCount: contextMenuState.targetIds.length, colorLabelNames: customColorNames, hasFileAccess: Boolean(window.filexDesktop?.sendToEditor) || "showDirectoryPicker" in window, rootFolderPath: effectiveRootFolderPath || undefined, targetPath: contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined, onApplyRating: (rating) => {
+                                            || !canUseRecommendedCacheLocation, children: "Usa percorso consigliato" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => void onClearDesktopThumbnailCache?.(), disabled: isDesktopThumbnailCacheBusy || !onClearDesktopThumbnailCache, children: "Svuota cache" })] }), desktopThumbnailCacheStatus ? (_jsx("p", { className: `photo-selector__settings-path-status photo-selector__settings-path-status--${desktopThumbnailCacheStatus.kind}`, children: desktopThumbnailCacheStatus.text })) : null, desktopCacheRecommendationStatus ? (_jsx("p", { className: `photo-selector__settings-path-status photo-selector__settings-path-status--${desktopCacheRecommendationStatus.kind}`, children: desktopCacheRecommendationStatus.text })) : null, _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: [desktopThumbnailCacheInfo.entryCount, " anteprime, ", formatBytes(desktopThumbnailCacheInfo.totalBytes), " su disco."] }), typeof desktopThumbnailCacheInfo.rawRenderCacheHit === "number" ? (_jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["RAW render cache hit (sessione): ", desktopThumbnailCacheInfo.rawRenderCacheHit] })) : null, (desktopThumbnailCacheInfo.effectiveThumbnailRamMaxBytes
+                                || desktopThumbnailCacheInfo.effectiveRenderedPreviewMaxBytes
+                                || desktopThumbnailCacheInfo.effectivePreviewSourceMaxBytes) ? (_jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Limiti auto cache RAM:", desktopThumbnailCacheInfo.effectiveThumbnailRamMaxBytes
+                                        ? ` Thumb ${desktopThumbnailCacheInfo.effectiveThumbnailRamMaxEntries ?? "?"} / ${formatBytes(desktopThumbnailCacheInfo.effectiveThumbnailRamMaxBytes)}`
+                                        : "", desktopThumbnailCacheInfo.effectiveRenderedPreviewMaxBytes
+                                        ? ` · Render ${desktopThumbnailCacheInfo.effectiveRenderedPreviewMaxEntries ?? "?"} / ${formatBytes(desktopThumbnailCacheInfo.effectiveRenderedPreviewMaxBytes)}`
+                                        : "", desktopThumbnailCacheInfo.effectivePreviewSourceMaxBytes
+                                        ? ` · Source ${desktopThumbnailCacheInfo.effectivePreviewSourceMaxEntries ?? "?"} / ${formatBytes(desktopThumbnailCacheInfo.effectivePreviewSourceMaxBytes)}`
+                                        : ""] })) : null, _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Percorso predefinito: ", desktopThumbnailCacheInfo.defaultPath] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Drive attuale: ", cacheLocationSummary.current] }), cacheLocationSummary.recommended ? (_jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Percorso consigliato: ", cacheLocationSummary.recommended] })) : null] })) : null, _jsxs("div", { className: "photo-selector__settings-section", children: [_jsxs("h4", { className: "photo-selector__settings-section-title", children: ["Preset filtri", _jsx("button", { type: "button", className: "photo-selector__settings-info-btn", title: "Un preset salva la combinazione attuale di filtri (stelle, stato, colore, cartella...) con un nome. Utile per richiamare in un click un insieme di filtri che usi spesso \u2014 es. 'Migliori Pick' = Pick + 4 stelle + verde.", children: "?" })] }), _jsxs("div", { className: "photo-selector__settings-preset-row", children: [_jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: newPresetName, onChange: (e) => setNewPresetName(e.target.value), placeholder: "Nome preset\u2026", onKeyDown: (e) => e.key === "Enter" && handleSavePreset() }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: handleSavePreset, disabled: !newPresetName.trim(), children: "Salva" })] }), filterPresets.length === 0 && (_jsx("p", { className: "photo-selector__settings-empty", children: "Nessun preset salvato." })), filterPresets.map((preset) => (_jsxs("div", { className: "photo-selector__settings-preset-item", children: [_jsx("button", { type: "button", className: "ghost-button ghost-button--small photo-selector__settings-preset-name", onClick: () => applyPreset(preset), children: preset.name }), _jsx("button", { type: "button", className: "icon-button icon-button--danger", onClick: () => removePreset(preset.id), title: "Elimina preset", children: "\u2715" })] }, preset.id)))] })] })), isDesktopCacheRecommendationModalOpen && desktopCacheLocationRecommendation?.recommendedPath ? (_jsx("div", { className: "modal-backdrop", role: "presentation", children: _jsxs("section", { className: "modal-panel photo-selector__cache-recommendation-modal", role: "dialog", "aria-modal": "true", "aria-labelledby": "cache-recommendation-title", children: [_jsx("div", { className: "modal-panel__header", children: _jsxs("div", { children: [_jsx("strong", { id: "cache-recommendation-title", children: "Spazio disco e cache" }), _jsx("p", { children: "C: ha poco spazio libero. Possiamo spostare le cache pesanti gestite da Selezione Foto su un disco pi\u00F9 capiente." })] }) }), _jsxs("div", { className: "modal-panel__body", children: [_jsxs("div", { className: "photo-selector__cache-recommendation-grid", children: [_jsxs("div", { className: "photo-selector__cache-recommendation-card", children: [_jsx("span", { className: "photo-selector__cache-recommendation-label", children: "Percorso attuale" }), _jsx("strong", { children: desktopCacheLocationRecommendation.currentPath }), _jsx("p", { children: cacheLocationSummary.current })] }), _jsxs("div", { className: "photo-selector__cache-recommendation-card", children: [_jsx("span", { className: "photo-selector__cache-recommendation-label", children: "Percorso consigliato" }), _jsx("strong", { children: desktopCacheLocationRecommendation.recommendedPath }), _jsx("p", { children: cacheLocationSummary.recommended ?? "Disco consigliato non disponibile" })] })] }), _jsx("p", { className: "photo-selector__settings-empty", children: "Copiamo thumbnail e quick preview gi\u00E0 create, poi passiamo al nuovo percorso e liberiamo quello vecchio se tutto va bene." })] }), _jsxs("div", { className: "modal-panel__footer", children: [_jsx("button", { type: "button", className: "ghost-button", onClick: () => void onSnoozeDesktopCacheRecommendation?.(), disabled: isDesktopThumbnailCacheBusy || !onSnoozeDesktopCacheRecommendation, children: "Pi\u00F9 tardi" }), _jsxs("div", { className: "photo-selector__cache-recommendation-actions", children: [_jsx("button", { type: "button", className: "ghost-button", onClick: () => void onDismissDesktopCacheRecommendation?.(), disabled: isDesktopThumbnailCacheBusy || !onDismissDesktopCacheRecommendation, children: "Non mostrare pi\u00F9" }), _jsx("button", { type: "button", className: "secondary-button", onClick: () => void onUseRecommendedDesktopThumbnailCacheDirectory?.(), disabled: isDesktopThumbnailCacheBusy || !onUseRecommendedDesktopThumbnailCacheDirectory, children: "Sposta ora" })] })] })] }) })) : null, contextMenuState && (_jsx("div", { className: "photo-selector__context-backdrop", onClick: () => setContextMenuState(null), onContextMenu: (e) => e.preventDefault() })), contextMenuState ? (_jsx(PhotoSelectionContextMenu, { x: contextMenuState.x, y: contextMenuState.y, targetCount: contextMenuState.targetIds.length, colorLabelNames: customColorNames, hasFileAccess: Boolean(window.filexDesktop?.sendToEditor) || "showDirectoryPicker" in window, rootFolderPath: effectiveRootFolderPath || undefined, targetPath: contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined, onApplyRating: (rating) => {
                     applyBatchChanges(contextMenuState.targetIds, { rating });
                     setContextMenuState(null);
                 }, onApplyPickStatus: (pickStatus) => {

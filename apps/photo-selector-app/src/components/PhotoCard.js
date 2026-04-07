@@ -18,7 +18,7 @@ function areLabelArraysEqual(left, right) {
     }
     return true;
 }
-export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, onExternalDragStart, canExternalDrag = false, customLabelColors = {}, customLabelShortcuts = {}, editable, }) {
+export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, onExternalDragStart, canExternalDrag = false, customLabelColors = {}, customLabelShortcuts = {}, disableNonEssentialUi = false, editable, }) {
     notePhotoCardRender(photo.id);
     const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
     const rating = getAssetRating(photo);
@@ -38,6 +38,15 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
     useEffect(() => {
         const prev = prevClassRef.current;
         let nextFeedback = null;
+        if (disableNonEssentialUi) {
+            prevClassRef.current = { rating, pickStatus, colorLabel, customLabels };
+            if (feedbackTimeoutRef.current !== null) {
+                window.clearTimeout(feedbackTimeoutRef.current);
+                feedbackTimeoutRef.current = null;
+            }
+            setFeedback((current) => (current ? null : current));
+            return;
+        }
         if (prev.rating !== rating) {
             feedbackTokenRef.current += 1;
             nextFeedback = {
@@ -100,12 +109,25 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
             setFeedback((current) => (current?.token === nextFeedback?.token ? null : current));
             feedbackTimeoutRef.current = null;
         }, 950);
-    }, [colorLabel, customLabels, pickStatus, rating]);
+    }, [colorLabel, customLabels, disableNonEssentialUi, pickStatus, rating]);
     useEffect(() => {
         if (isSelected) {
             setIsToolbarVisible(true);
         }
     }, [isSelected]);
+    useEffect(() => {
+        if (!disableNonEssentialUi) {
+            return;
+        }
+        if (hoverTimerRef.current !== null) {
+            clearTimeout(hoverTimerRef.current);
+            hoverTimerRef.current = null;
+        }
+        setHoverPos(null);
+        if (!isSelected) {
+            setIsToolbarVisible(false);
+        }
+    }, [disableNonEssentialUi, isSelected]);
     useEffect(() => {
         return () => {
             if (feedbackTimeoutRef.current !== null) {
@@ -117,7 +139,7 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
         };
     }, []);
     const orientationIcon = photo.orientation === "vertical" ? "↕" : photo.orientation === "square" ? "◻" : "↔";
-    return (_jsxs("div", { className: `photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}`, role: "option", tabIndex: 0, "aria-selected": isSelected, "aria-label": `${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`, "aria-keyshortcuts": "Enter Space 1 2 3 4 5 P X U", ref: cardRef, "data-preview-asset-id": photo.id, draggable: canExternalDrag, onClick: (event) => onToggle(photo.id, event), onDragStart: (event) => {
+    return (_jsxs("div", { className: `photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}${disableNonEssentialUi ? " photo-card--scroll-lite" : ""}`, role: "option", tabIndex: 0, "aria-selected": isSelected, "aria-label": `${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`, "aria-keyshortcuts": "Enter Space 1 2 3 4 5 P X U", ref: cardRef, "data-preview-asset-id": photo.id, draggable: canExternalDrag, onClick: (event) => onToggle(photo.id, event), onDragStart: (event) => {
             if (!canExternalDrag || !onExternalDragStart) {
                 event.preventDefault();
                 return;
@@ -127,6 +149,9 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
             setIsToolbarVisible(true);
             onFocus(photo.id);
         }, onMouseEnter: () => {
+            if (disableNonEssentialUi) {
+                return;
+            }
             setIsToolbarVisible(true);
             if (photo.previewUrl)
                 preloadImageUrls([photo.previewUrl]);
@@ -223,10 +248,11 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
                                     : "",
                             ].join(" "), onClick: () => onUpdatePhoto(photo.id, {
                                 colorLabel: colorLabel === value ? null : value,
-                            }), title: `${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}` }, value))) })] })) : null, hoverPos !== null &&
+                            }), title: `${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}` }, value))) })] })) : null, !disableNonEssentialUi && hoverPos !== null &&
                 createPortal(_jsxs("div", { className: "photo-card__hover-preview", style: { top: hoverPos.top, left: hoverPos.left }, children: [_jsx("img", { src: hoverPos.imgSrc, alt: photo.fileName, className: "photo-card__hover-img" }), _jsx("div", { className: "photo-card__hover-name", children: photo.fileName })] }), document.body)] }));
 }, (prev, next) => prev.isSelected === next.isSelected &&
     prev.editable === next.editable &&
+    prev.disableNonEssentialUi === next.disableNonEssentialUi &&
     prev.photo.id === next.photo.id &&
     prev.photo.fileName === next.photo.fileName &&
     prev.photo.thumbnailUrl === next.photo.thumbnailUrl &&

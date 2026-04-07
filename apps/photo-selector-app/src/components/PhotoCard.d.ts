@@ -13,6 +13,7 @@ interface PhotoCardProps {
     canExternalDrag?: boolean;
     customLabelColors?: Record<string, CustomLabelTone>;
     customLabelShortcuts?: Record<string, CustomLabelShortcut | null>;
+    disableNonEssentialUi?: boolean;
     editable: boolean;
 }
 export declare const PhotoCard: import("react").NamedExoticComponent<PhotoCardProps>;

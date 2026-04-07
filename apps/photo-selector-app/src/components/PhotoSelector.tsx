@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   DesktopCacheLocationRecommendation,
   DesktopDragOutCheck,
@@ -70,6 +71,7 @@ interface PhotoSelectorProps {
   onPriorityIdsChange?: (priorityIds: Set<string>) => void;
   onPreviewPriorityIdsChange?: (priorityIds: Set<string>) => void;
   onBackgroundPreviewOrderChange?: (orderedIds: string[]) => void;
+  onScrollLiteActiveMsChange?: (activeMs: number) => void;
   onUndo?: () => void;
   onRedo?: () => void;
   canUndo?: boolean;
@@ -112,7 +114,9 @@ const GRID_GAP_PX = 12;
 const CARD_STAGE_HEIGHT_RATIO = 0.75;
 const QUICK_PREVIEW_FIT_MAX_DIMENSION = 2048;
 const CARD_CHROME_HEIGHT_PX = 64;
-const VIRTUAL_OVERSCAN_ROWS = 4;
+const VIRTUAL_OVERSCAN_ROWS_IDLE = 4;
+const VIRTUAL_OVERSCAN_ROWS_FAST = 10;
+const FAST_SCROLL_COOLDOWN_MS = 120;
 const ROOT_FOLDER_OVERRIDE_KEY = "ps-root-folder-path-override";
 const LEGACY_ROOT_FOLDER_KEY = "ps-root-folder-path";
 const KNOWN_EDITOR_PRESET_PATHS = [
@@ -268,6 +272,7 @@ export function PhotoSelector({
   onPriorityIdsChange,
   onPreviewPriorityIdsChange,
   onBackgroundPreviewOrderChange,
+  onScrollLiteActiveMsChange,
   onUndo,
   onRedo,
   canUndo = false,
@@ -359,13 +364,15 @@ export function PhotoSelector({
   const lastClickedIdRef = useRef<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const desktopDragImageRef = useRef<HTMLCanvasElement | null>(null);
-  const scrollAnimationFrameRef = useRef<number | null>(null);
-  const pendingScrollTopRef = useRef<number | null>(null);
+  const fastScrollCooldownTimerRef = useRef<number | null>(null);
+  const fastScrollStartedAtRef = useRef<number | null>(null);
+  const accumulatedFastScrollMsRef = useRef(0);
   const lastVisibleIdsSignatureRef = useRef<string>("");
   const lastBackgroundPreviewOrderSignatureRef = useRef<string>("");
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
-  const [gridViewport, setGridViewport] = useState({ width: 0, height: 720, scrollTop: 0 });
+  const [gridViewport, setGridViewport] = useState({ width: 0, height: 720 });
+  const [isFastScrollActive, setIsFastScrollActive] = useState(false);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const effectiveRootFolderPath = useMemo(
     () => rootFolderPathOverride.trim() || sourceFolderPath.trim(),
@@ -1107,12 +1114,13 @@ export function PhotoSelector({
     timeClusterFilter,
   ]);
 
-  const visiblePhotos = useMemo(
-    () => visiblePhotoIds
-      .map((photoId) => assetById.get(photoId))
-      .filter((photo): photo is ImageAsset => !!photo),
-    [assetById, visiblePhotoIds],
-  );
+  const getVisiblePhotoAtIndex = useCallback((index: number): ImageAsset | null => {
+    const id = visiblePhotoIds[index];
+    if (!id) {
+      return null;
+    }
+    return assetById.get(id) ?? null;
+  }, [assetById, visiblePhotoIds]);
   const visiblePhotoIndexById = useMemo(
     () => new Map(visiblePhotoIds.map((photoId, index) => [photoId, index])),
     [visiblePhotoIds],
@@ -1138,31 +1146,45 @@ export function PhotoSelector({
     [cardStageHeight],
   );
   const totalVirtualRows = useMemo(
-    () => Math.max(1, Math.ceil(visiblePhotos.length / gridColumnCount)),
-    [gridColumnCount, visiblePhotos.length],
+    () => Math.max(1, Math.ceil(visiblePhotoIds.length / gridColumnCount)),
+    [gridColumnCount, visiblePhotoIds.length],
   );
-  const visibleRowStart = useMemo(
-    () => Math.max(0, Math.floor(gridViewport.scrollTop / Math.max(1, gridRowHeight))),
-    [gridRowHeight, gridViewport.scrollTop],
-  );
-  const visibleRowEnd = useMemo(
-    () => Math.min(
-      totalVirtualRows,
-      Math.ceil((gridViewport.scrollTop + gridViewport.height) / Math.max(1, gridRowHeight)),
-    ),
-    [gridRowHeight, gridViewport.height, gridViewport.scrollTop, totalVirtualRows],
-  );
-  const virtualRowStart = Math.max(0, visibleRowStart - VIRTUAL_OVERSCAN_ROWS);
-  const virtualRowEnd = Math.min(totalVirtualRows, visibleRowEnd + VIRTUAL_OVERSCAN_ROWS);
-  const virtualStartIndex = virtualRowStart * gridColumnCount;
-  const virtualEndIndex = Math.min(visiblePhotos.length, virtualRowEnd * gridColumnCount);
-  const topSpacerHeight = virtualRowStart * gridRowHeight;
-  const bottomSpacerHeight = Math.max(0, (totalVirtualRows - virtualRowEnd) * gridRowHeight);
-
+  const rowVirtualizer = useVirtualizer({
+    count: totalVirtualRows,
+    getScrollElement: () => gridRef.current,
+    estimateSize: () => gridRowHeight,
+    overscan: isFastScrollActive ? VIRTUAL_OVERSCAN_ROWS_FAST : VIRTUAL_OVERSCAN_ROWS_IDLE,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
+  const renderedPhotoIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const row of virtualRows) {
+      const rowStart = row.index * gridColumnCount;
+      const rowEnd = Math.min(visiblePhotoIds.length, rowStart + gridColumnCount);
+      for (let index = rowStart; index < rowEnd; index += 1) {
+        const id = visiblePhotoIds[index];
+        if (id) {
+          ids.push(id);
+        }
+      }
+    }
+    return ids;
+  }, [gridColumnCount, virtualRows, visiblePhotoIds]);
   const renderedPhotos = useMemo(
-    () => visiblePhotos.slice(virtualStartIndex, virtualEndIndex),
-    [virtualEndIndex, virtualStartIndex, visiblePhotos],
+    () => renderedPhotoIds
+      .map((photoId) => assetById.get(photoId))
+      .filter((photo): photo is ImageAsset => Boolean(photo)),
+    [assetById, renderedPhotoIds],
   );
+  const topSpacerHeight = virtualRows[0]?.start ?? 0;
+  const bottomSpacerHeight = Math.max(
+    0,
+    rowVirtualizer.getTotalSize() - (virtualRows[virtualRows.length - 1]?.end ?? 0),
+  );
+
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [gridColumnCount, gridRowHeight, rowVirtualizer, totalVirtualRows]);
 
   // Search in all photos so preview doesn't close when filters change
   const previewAsset = previewAssetId ? (assetById.get(previewAssetId) ?? null) : null;
@@ -1234,6 +1256,35 @@ export function PhotoSelector({
     setPreviewStartsZoomed(false);
   }, [previewAssetId]);
 
+  const flushFastScrollAccumulatedMs = useCallback((emitUpdate = true) => {
+    if (fastScrollStartedAtRef.current !== null) {
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      accumulatedFastScrollMsRef.current += Math.max(0, now - fastScrollStartedAtRef.current);
+      fastScrollStartedAtRef.current = null;
+    }
+    if (emitUpdate) {
+      onScrollLiteActiveMsChange?.(accumulatedFastScrollMsRef.current);
+    }
+  }, [onScrollLiteActiveMsChange]);
+
+  const handleGridScroll = useCallback(() => {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (fastScrollStartedAtRef.current === null) {
+      fastScrollStartedAtRef.current = now;
+    }
+    setIsFastScrollActive(true);
+
+    if (fastScrollCooldownTimerRef.current !== null) {
+      window.clearTimeout(fastScrollCooldownTimerRef.current);
+    }
+
+    fastScrollCooldownTimerRef.current = window.setTimeout(() => {
+      fastScrollCooldownTimerRef.current = null;
+      setIsFastScrollActive(false);
+      flushFastScrollAccumulatedMs(true);
+    }, FAST_SCROLL_COOLDOWN_MS);
+  }, [flushFastScrollAccumulatedMs]);
+
   useEffect(() => {
     const grid = gridRef.current;
     if (!grid) {
@@ -1241,10 +1292,13 @@ export function PhotoSelector({
     }
 
     const syncGridViewport = () => {
-      setGridViewport({
-        width: grid.clientWidth,
-        height: grid.clientHeight,
-        scrollTop: grid.scrollTop,
+      setGridViewport((current) => {
+        const width = grid.clientWidth;
+        const height = grid.clientHeight;
+        if (current.width === width && current.height === height) {
+          return current;
+        }
+        return { width, height };
       });
     };
 
@@ -1261,18 +1315,20 @@ export function PhotoSelector({
 
   useEffect(() => {
     return () => {
-      if (scrollAnimationFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollAnimationFrameRef.current);
+      if (fastScrollCooldownTimerRef.current !== null) {
+        window.clearTimeout(fastScrollCooldownTimerRef.current);
+        fastScrollCooldownTimerRef.current = null;
       }
+      flushFastScrollAccumulatedMs(true);
     };
-  }, []);
+  }, [flushFastScrollAccumulatedMs]);
 
   useEffect(() => {
     if (!onVisibleIdsChange) {
       return;
     }
 
-    const ids = renderedPhotos.map((photo) => photo.id);
+    const ids = renderedPhotoIds;
     const signature = ids.join("|");
     if (signature === lastVisibleIdsSignatureRef.current) {
       return;
@@ -1280,7 +1336,7 @@ export function PhotoSelector({
 
     lastVisibleIdsSignatureRef.current = signature;
     onVisibleIdsChange(new Set(ids));
-  }, [onVisibleIdsChange, renderedPhotos]);
+  }, [onVisibleIdsChange, renderedPhotoIds]);
 
   useEffect(() => {
     if (!onPriorityIdsChange) {
@@ -1457,7 +1513,7 @@ export function PhotoSelector({
       if (!arrowKeys.includes(event.key)) return;
 
       event.preventDefault();
-      if (visiblePhotos.length === 0) return;
+      if (visiblePhotoIds.length === 0) return;
 
       const currentIndex = focusedPhotoId
         ? (visiblePhotoIndexById.get(focusedPhotoId) ?? -1)
@@ -1476,22 +1532,25 @@ export function PhotoSelector({
       if (currentIndex < 0) {
         nextIndex = 0;
       } else if (event.key === "ArrowRight") {
-        nextIndex = Math.min(visiblePhotos.length - 1, currentIndex + 1);
+        nextIndex = Math.min(visiblePhotoIds.length - 1, currentIndex + 1);
       } else if (event.key === "ArrowLeft") {
         nextIndex = Math.max(0, currentIndex - 1);
       } else if (event.key === "ArrowDown") {
-        nextIndex = Math.min(visiblePhotos.length - 1, currentIndex + cols);
+        nextIndex = Math.min(visiblePhotoIds.length - 1, currentIndex + cols);
       } else {
         nextIndex = Math.max(0, currentIndex - cols);
       }
 
       if (nextIndex !== currentIndex || currentIndex < 0) {
-        const next = visiblePhotos[nextIndex];
-        setFocusedPhotoId(next.id);
-        scrollPhotoIntoView(next.id);
+        const nextId = visiblePhotoIds[nextIndex];
+        if (!nextId) {
+          return;
+        }
+        setFocusedPhotoId(nextId);
+        scrollPhotoIntoView(nextId);
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${next.id}"]`);
+            const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${nextId}"]`);
             if (el) {
               el.focus();
             }
@@ -1513,7 +1572,6 @@ export function PhotoSelector({
       toggleCustomLabelForIds,
       visiblePhotoIds,
       visiblePhotoIndexById,
-      visiblePhotos,
       customLabelByShortcut,
     ]
   );
@@ -1528,7 +1586,7 @@ export function PhotoSelector({
     if (grid) {
       grid.scrollTo({ top: 0 });
     }
-    setGridViewport((current) => ({ ...current, scrollTop: 0 }));
+    rowVirtualizer.scrollToOffset(0, { align: "start" });
     onVisibleIdsChange?.(new Set());
     onPriorityIdsChange?.(hasActiveFilters ? new Set(visiblePhotoIds.slice(0, 240)) : new Set());
     onPreviewPriorityIdsChange?.(new Set());
@@ -1538,6 +1596,7 @@ export function PhotoSelector({
     onPriorityIdsChange,
     onPreviewPriorityIdsChange,
     onVisibleIdsChange,
+    rowVirtualizer,
     visiblePhotoIds,
   ]);
 
@@ -1552,7 +1611,10 @@ export function PhotoSelector({
       if (lastIdx >= 0 && curIdx >= 0) {
         const [from, to] = lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
         for (let i = from; i <= to; i++) {
-          nextSelection.add(visiblePhotos[i].id);
+          const rangeId = visiblePhotoIds[i];
+          if (rangeId) {
+            nextSelection.add(rangeId);
+          }
         }
         lastClickedIdRef.current = id;
         onSelectionChange(Array.from(nextSelection));
@@ -1573,7 +1635,7 @@ export function PhotoSelector({
   function toggleAll(selectAll: boolean) {
     if (selectAll) {
       const idsToSelect = hasActiveFilters
-        ? visiblePhotos.map((p) => p.id)
+        ? visiblePhotoIds
         : photos.map((p) => p.id);
       onSelectionChange(idsToSelect);
       pushTimelineEntry(
@@ -1804,16 +1866,15 @@ export function PhotoSelector({
   }, [onSelectionChange, pushTimelineEntry]);
 
   const invertVisibleSelection = useCallback(() => {
-    const visibleIdSet = new Set(visiblePhotos.map((photo) => photo.id));
-    const nextSelection = new Set(selectedIds.filter((id) => !visibleIdSet.has(id)));
-    for (const photo of visiblePhotos) {
-      if (!selectedSet.has(photo.id)) {
-        nextSelection.add(photo.id);
+    const nextSelection = new Set(selectedIds.filter((id) => !visiblePhotoIdSet.has(id)));
+    for (const photoId of visiblePhotoIds) {
+      if (!selectedSet.has(photoId)) {
+        nextSelection.add(photoId);
       }
     }
     onSelectionChange(Array.from(nextSelection));
     pushTimelineEntry("Selezione visibile invertita");
-  }, [onSelectionChange, pushTimelineEntry, selectedIds, selectedSet, visiblePhotos]);
+  }, [onSelectionChange, pushTimelineEntry, selectedIds, selectedSet, visiblePhotoIdSet, visiblePhotoIds]);
 
   // ── Stable callbacks for PhotoCard (identity doesn't matter due to custom memo) ──
   const handleFocus = useCallback((id: string) => {
@@ -1900,15 +1961,17 @@ export function PhotoSelector({
 
   // Keep preview warmup light here. The modal performs the heavier adjacent warmup.
   useEffect(() => {
-    if (!previewAssetId || visiblePhotos.length === 0) return;
+    if (!previewAssetId || visiblePhotoIds.length === 0) return;
 
     const currentIndex = visiblePhotoIndexById.get(previewAssetId) ?? -1;
     if (currentIndex < 0) return;
 
     const idsToWarm: string[] = [];
     for (let delta = 1; delta <= 1; delta++) {
-      const prev = visiblePhotos[currentIndex - delta];
-      const next = visiblePhotos[currentIndex + delta];
+      const prevId = visiblePhotoIds[currentIndex - delta];
+      const nextId = visiblePhotoIds[currentIndex + delta];
+      const prev = prevId ? assetById.get(prevId) ?? null : null;
+      const next = nextId ? assetById.get(nextId) ?? null : null;
       if (prev && (!prev.previewUrl || !prev.sourceUrl)) idsToWarm.push(prev.id);
       if (next && (!next.previewUrl || !next.sourceUrl)) idsToWarm.push(next.id);
     }
@@ -1921,7 +1984,7 @@ export function PhotoSelector({
         }).catch(() => null)
       )
     );
-  }, [previewAssetId, visiblePhotoIndexById, visiblePhotos]);
+  }, [assetById, previewAssetId, visiblePhotoIds, visiblePhotoIndexById]);
 
   const previewAssetWithUrl = useMemo(() => {
     if (!previewAsset) return null;
@@ -1942,6 +2005,16 @@ export function PhotoSelector({
 
     return previewAsset; // Until async finishes, use what we have (thumbnailUrl usually)
   }, [previewAsset, asyncPreviewUrl]);
+
+  const visiblePreviewAssets = useMemo(() => {
+    if (!previewAssetId) {
+      return [] as ImageAsset[];
+    }
+
+    return visiblePhotoIds
+      .map((photoId) => assetById.get(photoId))
+      .filter((photo): photo is ImageAsset => Boolean(photo));
+  }, [assetById, previewAssetId, visiblePhotoIds]);
 
   const allSelected = photos.length > 0 && selectedIds.length === photos.length;
   const someSelected = selectedIds.length > 0 && selectedIds.length < photos.length;
@@ -1966,17 +2039,17 @@ export function PhotoSelector({
   }, [metadataPhotos]);
 
   function selectVisible() {
-    onSelectionChange(visiblePhotos.map((photo) => photo.id));
-    pushTimelineEntry(`Selezionate ${visiblePhotos.length} foto visibili`);
+    onSelectionChange(visiblePhotoIds);
+    pushTimelineEntry(`Selezionate ${visiblePhotoIds.length} foto visibili`);
   }
 
   function addVisibleToSelection() {
     const nextSelection = new Set(selectedIds);
-    for (const photo of visiblePhotos) {
-      nextSelection.add(photo.id);
+    for (const photoId of visiblePhotoIds) {
+      nextSelection.add(photoId);
     }
     onSelectionChange(Array.from(nextSelection));
-    pushTimelineEntry(`Aggiunte ${visiblePhotos.length} foto visibili alla selezione`);
+    pushTimelineEntry(`Aggiunte ${visiblePhotoIds.length} foto visibili alla selezione`);
   }
 
   function removeVisibleFromSelection() {
@@ -2004,7 +2077,7 @@ export function PhotoSelector({
 
   const scrolledInitialRef = useRef(false);
   useEffect(() => {
-    if (scrolledInitialRef.current || selectedIds.length === 0 || visiblePhotos.length === 0) return;
+    if (scrolledInitialRef.current || selectedIds.length === 0 || visiblePhotoIds.length === 0) return;
     scrolledInitialRef.current = true;
     const firstId = selectedIds.find((id) => visiblePhotoIdSet.has(id));
     if (!firstId) return;
@@ -2013,7 +2086,7 @@ export function PhotoSelector({
     }, 200);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visiblePhotos.length]);
+  }, [visiblePhotoIds.length]);
 
   useEffect(() => {
     if (
@@ -2651,7 +2724,7 @@ export function PhotoSelector({
           <PhotoSearchBar
             value={searchQuery}
             onChange={setSearchQuery}
-            resultCount={visiblePhotos.length}
+            resultCount={visiblePhotoIds.length}
             totalCount={photos.length}
           />
         </div>
@@ -2827,30 +2900,9 @@ export function PhotoSelector({
             pushTimelineEntry(`Selezionate ${newIds.length} foto con lasso`);
           }
         }}
-        onScroll={(event) => {
-          const target = event.currentTarget;
-          pendingScrollTopRef.current = target.scrollTop;
-          if (scrollAnimationFrameRef.current !== null) {
-            return;
-          }
-
-          scrollAnimationFrameRef.current = window.requestAnimationFrame(() => {
-            scrollAnimationFrameRef.current = null;
-            const nextScrollTop = pendingScrollTopRef.current;
-            pendingScrollTopRef.current = null;
-            if (nextScrollTop === null) {
-              return;
-            }
-
-            setGridViewport((current) => (
-              current.scrollTop === nextScrollTop
-                ? current
-                : { ...current, scrollTop: nextScrollTop }
-            ));
-          });
-        }}
+        onScroll={handleGridScroll}
       >
-        {visiblePhotos.length === 0 ? (
+        {visiblePhotoIds.length === 0 ? (
           <div className="photo-selector__empty">
             <p>Nessuna foto trovata.</p>
           </div>
@@ -2883,6 +2935,7 @@ export function PhotoSelector({
                       ? canStartDesktopDragOut
                       : Boolean(getAssetAbsolutePath(photo.id))
                   )}
+                disableNonEssentialUi={isFastScrollActive}
                 editable={!!onPhotosChange}
               />
             ))}
@@ -2914,7 +2967,7 @@ export function PhotoSelector({
         <div className="photo-selector__stats">
           <span className="photo-selector__count">
             {photos.length} elementi — {selectedIds.length} selezionati
-            {hasActiveFilters ? ` (${visiblePhotos.length} filtrati)` : ""}
+            {hasActiveFilters ? ` (${visiblePhotoIds.length} filtrati)` : ""}
           </span>
           {selectionStats && (
             <div className="photo-selector__stat-chips">
@@ -3158,7 +3211,7 @@ export function PhotoSelector({
 
       <PhotoQuickPreviewModal
         asset={previewAssetWithUrl}
-        assets={visiblePhotos}
+        assets={visiblePreviewAssets}
         thumbnailProfile={selectedThumbnailProfile}
         startZoomed={previewStartsZoomed}
         customLabelsCatalog={customLabelsCatalog}
@@ -3610,6 +3663,27 @@ export function PhotoSelector({
               <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
                 {desktopThumbnailCacheInfo.entryCount} anteprime, {formatBytes(desktopThumbnailCacheInfo.totalBytes)} su disco.
               </p>
+              {typeof desktopThumbnailCacheInfo.rawRenderCacheHit === "number" ? (
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  RAW render cache hit (sessione): {desktopThumbnailCacheInfo.rawRenderCacheHit}
+                </p>
+              ) : null}
+              {(desktopThumbnailCacheInfo.effectiveThumbnailRamMaxBytes
+                || desktopThumbnailCacheInfo.effectiveRenderedPreviewMaxBytes
+                || desktopThumbnailCacheInfo.effectivePreviewSourceMaxBytes) ? (
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  Limiti auto cache RAM:
+                  {desktopThumbnailCacheInfo.effectiveThumbnailRamMaxBytes
+                    ? ` Thumb ${desktopThumbnailCacheInfo.effectiveThumbnailRamMaxEntries ?? "?"} / ${formatBytes(desktopThumbnailCacheInfo.effectiveThumbnailRamMaxBytes)}`
+                    : ""}
+                  {desktopThumbnailCacheInfo.effectiveRenderedPreviewMaxBytes
+                    ? ` · Render ${desktopThumbnailCacheInfo.effectiveRenderedPreviewMaxEntries ?? "?"} / ${formatBytes(desktopThumbnailCacheInfo.effectiveRenderedPreviewMaxBytes)}`
+                    : ""}
+                  {desktopThumbnailCacheInfo.effectivePreviewSourceMaxBytes
+                    ? ` · Source ${desktopThumbnailCacheInfo.effectivePreviewSourceMaxEntries ?? "?"} / ${formatBytes(desktopThumbnailCacheInfo.effectivePreviewSourceMaxBytes)}`
+                    : ""}
+                </p>
+              ) : null}
               <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
                 Percorso predefinito: {desktopThumbnailCacheInfo.defaultPath}
               </p>

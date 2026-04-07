@@ -172,6 +172,13 @@ export interface DesktopThumbnailCacheInfo {
   usesCustomPath: boolean;
   entryCount: number;
   totalBytes: number;
+  rawRenderCacheHit?: number;
+  effectiveThumbnailRamMaxEntries?: number;
+  effectiveThumbnailRamMaxBytes?: number;
+  effectiveRenderedPreviewMaxEntries?: number;
+  effectiveRenderedPreviewMaxBytes?: number;
+  effectivePreviewSourceMaxEntries?: number;
+  effectivePreviewSourceMaxBytes?: number;
 }
 
 export interface DesktopStorageVolumeInfo {
@@ -298,6 +305,11 @@ export interface DesktopPerformanceSnapshot {
   standardBytesRead: number;
   thumbnailProfile?: DesktopThumbnailProfile;
   sortCacheEnabled?: boolean;
+  reactCommitCount?: number;
+  hotPatchApplied?: number;
+  deferredPatchApplied?: number;
+  scrollLiteActiveMs?: number;
+  rawRenderCacheHit?: number;
   lastUpdatedAt: number | null;
 }
 

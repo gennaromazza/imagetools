@@ -10,7 +10,7 @@ import { parseXmpState, upsertXmpState } from "./services/xmp-sidecar";
 import { ThumbnailPipeline, } from "./services/thumbnail-pipeline";
 import { cacheThumbnailBatch, loadCachedThumbnails } from "./services/thumbnail-cache";
 import { clearDesktopQuickPreviewFrameCache } from "./services/desktop-quick-preview";
-import { beginReactBatchMetric, cancelReactBatchMetric, finishReactBatchMetric, getPerfByteReadStats, perfTime, perfTimeEnd, resetPerfByteReadStats, } from "./services/performance-utils";
+import { beginReactBatchMetric, cancelReactBatchMetric, finishReactBatchMetric, getPerfByteReadStats, perfLog, perfTime, perfTimeEnd, resetPerfByteReadStats, } from "./services/performance-utils";
 import { loadPhotoSelectorPreferences, hydratePhotoSelectorPreferences, } from "./services/photo-selector-preferences";
 import { getDesktopFolderCatalogState, getDesktopSessionState, hasDesktopStateApi, logDesktopEvent, recordDesktopPerformanceSnapshot, saveDesktopFolderAssetStates, saveDesktopFolderCatalogState, saveDesktopSessionState, } from "./services/desktop-store";
 import { PreviewWarmupPipeline } from "./services/preview-warmup-pipeline";
@@ -44,6 +44,8 @@ const BACKGROUND_FIT_PREVIEW_WARM_START_DELAY_MS = 900;
 const BACKGROUND_FIT_PREVIEW_WARM_BATCH_INTERVAL_MS = 520;
 const BACKGROUND_FIT_PREVIEW_WARM_BATCH_SIZE = 10;
 const BACKGROUND_FIT_PREVIEW_WARM_MAX_COUNT = 240;
+const THUMBNAIL_PATCH_FLUSH_MAX_ITEMS = 64;
+const THUMBNAIL_PATCH_FLUSH_MIN_INTERVAL_MS = 32;
 const PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE = "[PERF] folder-open → first-thumbnail-visible";
 const PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE = "[PERF] first-thumbnail → grid-complete";
 const PERF_XMP_IMPORT = "[PERF] xmp-import start → xmp-import complete";
@@ -99,6 +101,13 @@ async function mapWithConcurrency(items, concurrency, worker) {
     }
     await Promise.all(Array.from({ length: Math.min(safeConcurrency, items.length) }, () => run()));
     return results;
+}
+function createThumbnailPipelineMetrics() {
+    return {
+        reactCommitCount: 0,
+        hotPatchApplied: 0,
+        deferredPatchApplied: 0,
+    };
 }
 function loadPersistedState() {
     try {
@@ -200,6 +209,11 @@ export function App() {
         standardBytesRead: 0,
         thumbnailProfile: initialPreferencesRef.current.thumbnailProfile,
         sortCacheEnabled: initialPreferencesRef.current.sortCacheEnabled,
+        reactCommitCount: 0,
+        hotPatchApplied: 0,
+        deferredPatchApplied: 0,
+        scrollLiteActiveMs: 0,
+        rawRenderCacheHit: 0,
         lastUpdatedAt: null,
     });
     // ── UI state ─────────────────────────────────────────────────────────
@@ -259,6 +273,14 @@ export function App() {
     const hasLoggedFirstThumbnailRef = useRef(false);
     const hasLoggedGridCompleteRef = useRef(false);
     const folderOpenStartedAtRef = useRef(null);
+    const thumbnailPatchStoreRef = useRef(new Map());
+    const thumbnailPatchDeferredQueueRef = useRef([]);
+    const thumbnailPatchDeferredSetRef = useRef(new Set());
+    const thumbnailPatchFlushRafRef = useRef(null);
+    const thumbnailPatchFlushTimerRef = useRef(null);
+    const thumbnailPatchLastFlushAtRef = useRef(0);
+    const thumbnailPipelineMetricsRef = useRef(createThumbnailPipelineMetrics());
+    const scrollLiteActiveMsRef = useRef(0);
     // ── Restore from IndexedDB on mount ──────────────────────────────────
     useEffect(() => {
         let active = true;
@@ -345,6 +367,11 @@ export function App() {
             standardBytesRead: performanceSnapshot.standardBytesRead,
             thumbnailProfile: performanceSnapshot.thumbnailProfile,
             sortCacheEnabled: performanceSnapshot.sortCacheEnabled,
+            reactCommitCount: performanceSnapshot.reactCommitCount,
+            hotPatchApplied: performanceSnapshot.hotPatchApplied,
+            deferredPatchApplied: performanceSnapshot.deferredPatchApplied,
+            scrollLiteActiveMs: performanceSnapshot.scrollLiteActiveMs,
+            rawRenderCacheHit: performanceSnapshot.rawRenderCacheHit,
             lastUpdatedAt: performanceSnapshot.lastUpdatedAt,
         };
         void recordDesktopPerformanceSnapshot(nextSnapshot);
@@ -428,6 +455,17 @@ export function App() {
             if (rawPreviewWarmupTimerRef.current !== null) {
                 window.clearTimeout(rawPreviewWarmupTimerRef.current);
             }
+            if (thumbnailPatchFlushRafRef.current !== null) {
+                window.cancelAnimationFrame(thumbnailPatchFlushRafRef.current);
+                thumbnailPatchFlushRafRef.current = null;
+            }
+            if (thumbnailPatchFlushTimerRef.current !== null) {
+                window.clearTimeout(thumbnailPatchFlushTimerRef.current);
+                thumbnailPatchFlushTimerRef.current = null;
+            }
+            thumbnailPatchStoreRef.current.clear();
+            thumbnailPatchDeferredQueueRef.current = [];
+            thumbnailPatchDeferredSetRef.current.clear();
             pipelineRef.current?.destroy();
             prioritizedThumbnailIdsRef.current = new Set();
             previewPriorityIdsRef.current = new Set();
@@ -574,6 +612,14 @@ export function App() {
             window.clearTimeout(backgroundFitPreviewWarmupTimerRef.current);
             backgroundFitPreviewWarmupTimerRef.current = null;
         }
+        if (thumbnailPatchFlushRafRef.current !== null) {
+            window.cancelAnimationFrame(thumbnailPatchFlushRafRef.current);
+            thumbnailPatchFlushRafRef.current = null;
+        }
+        if (thumbnailPatchFlushTimerRef.current !== null) {
+            window.clearTimeout(thumbnailPatchFlushTimerRef.current);
+            thumbnailPatchFlushTimerRef.current = null;
+        }
         previewWarmupPipelineRef.current?.destroy();
         previewWarmupPipelineRef.current = null;
         backgroundFitPreviewCursorRef.current = 0;
@@ -585,10 +631,25 @@ export function App() {
         settledThumbnailIdsRef.current = new Set();
         thumbnailEntryByIdRef.current = new Map();
         thumbnailTotalCountRef.current = 0;
+        thumbnailPatchStoreRef.current.clear();
+        thumbnailPatchDeferredQueueRef.current = [];
+        thumbnailPatchDeferredSetRef.current.clear();
+        thumbnailPatchLastFlushAtRef.current = 0;
+        thumbnailPipelineMetricsRef.current = createThumbnailPipelineMetrics();
+        scrollLiteActiveMsRef.current = 0;
         hasLoggedFirstThumbnailRef.current = false;
         hasLoggedGridCompleteRef.current = false;
         clearDesktopQuickPreviewFrameCache();
         setThumbnailProgress({ done: 0, total: 0 });
+        setPerformanceSnapshot((current) => ({
+            ...current,
+            reactCommitCount: 0,
+            hotPatchApplied: 0,
+            deferredPatchApplied: 0,
+            scrollLiteActiveMs: 0,
+            rawRenderCacheHit: 0,
+            lastUpdatedAt: Date.now(),
+        }));
         setImportProgress((current) => (current.isOpen
             ? {
                 ...current,
@@ -667,6 +728,228 @@ export function App() {
             markGridComplete();
         });
     }
+    const updateThumbnailPipelineMetrics = useCallback((updater) => {
+        const nextMetrics = updater(thumbnailPipelineMetricsRef.current);
+        thumbnailPipelineMetricsRef.current = nextMetrics;
+        setPerformanceSnapshot((current) => ({
+            ...current,
+            reactCommitCount: nextMetrics.reactCommitCount,
+            hotPatchApplied: nextMetrics.hotPatchApplied,
+            deferredPatchApplied: nextMetrics.deferredPatchApplied,
+            scrollLiteActiveMs: Math.round(scrollLiteActiveMsRef.current),
+            lastUpdatedAt: Date.now(),
+        }));
+    }, []);
+    const resetThumbnailPatchPipeline = useCallback(() => {
+        if (thumbnailPatchFlushRafRef.current !== null) {
+            window.cancelAnimationFrame(thumbnailPatchFlushRafRef.current);
+            thumbnailPatchFlushRafRef.current = null;
+        }
+        if (thumbnailPatchFlushTimerRef.current !== null) {
+            window.clearTimeout(thumbnailPatchFlushTimerRef.current);
+            thumbnailPatchFlushTimerRef.current = null;
+        }
+        thumbnailPatchStoreRef.current.clear();
+        thumbnailPatchDeferredQueueRef.current = [];
+        thumbnailPatchDeferredSetRef.current.clear();
+        thumbnailPatchLastFlushAtRef.current = 0;
+        thumbnailPipelineMetricsRef.current = createThumbnailPipelineMetrics();
+        scrollLiteActiveMsRef.current = 0;
+        setPerformanceSnapshot((current) => ({
+            ...current,
+            reactCommitCount: 0,
+            hotPatchApplied: 0,
+            deferredPatchApplied: 0,
+            scrollLiteActiveMs: 0,
+            rawRenderCacheHit: 0,
+            lastUpdatedAt: Date.now(),
+        }));
+    }, []);
+    const isHotThumbnailId = useCallback((id) => (visibleThumbnailIdsRef.current.has(id)
+        || previewPriorityIdsRef.current.has(id)
+        || prioritizedThumbnailIdsRef.current.has(id)), []);
+    const markFirstThumbnailVisible = useCallback(() => {
+        if (hasLoggedFirstThumbnailRef.current) {
+            return;
+        }
+        hasLoggedFirstThumbnailRef.current = true;
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const elapsedMs = folderOpenStartedAtRef.current !== null
+            ? Math.max(0, Math.round(now - folderOpenStartedAtRef.current))
+            : null;
+        const byteStats = getPerfByteReadStats();
+        setPerformanceSnapshot((current) => ({
+            ...current,
+            folderOpenToFirstThumbnailMs: elapsedMs,
+            bytesRead: byteStats.totalBytes,
+            rawBytesRead: byteStats.rawBytes,
+            standardBytesRead: byteStats.standardBytes,
+            lastUpdatedAt: Date.now(),
+        }));
+        perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+        perfTime(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
+    }, []);
+    const applyThumbnailPatches = useCallback((ids, source) => {
+        const seen = new Set();
+        const applicableIds = [];
+        const assetsSnapshot = allAssetsRef.current;
+        for (const id of ids) {
+            if (seen.has(id)) {
+                continue;
+            }
+            seen.add(id);
+            const patch = thumbnailPatchStoreRef.current.get(id);
+            const index = assetIndexByIdRef.current.get(id);
+            const asset = index === undefined ? null : assetsSnapshot[index] ?? null;
+            if (!patch || !asset) {
+                continue;
+            }
+            const patchSourceFileKey = patch.sourceFileKey ?? asset.sourceFileKey;
+            if (asset.thumbnailUrl === patch.thumbnailUrl
+                && asset.width === patch.width
+                && asset.height === patch.height
+                && asset.orientation === patch.orientation
+                && asset.aspectRatio === patch.aspectRatio
+                && asset.sourceFileKey === patchSourceFileKey) {
+                thumbnailPatchStoreRef.current.delete(id);
+                continue;
+            }
+            applicableIds.push(id);
+        }
+        if (applicableIds.length === 0) {
+            return 0;
+        }
+        const applicableIdSet = new Set(applicableIds);
+        const renderMetricToken = beginReactBatchMetric(applicableIds.length, assetsSnapshot.length);
+        startTransition(() => {
+            setAllAssets((prev) => {
+                if (prev.length === 0) {
+                    return prev;
+                }
+                const next = prev.slice();
+                let changed = false;
+                for (const id of applicableIds) {
+                    const patch = thumbnailPatchStoreRef.current.get(id);
+                    const index = assetIndexByIdRef.current.get(id);
+                    if (!patch || index === undefined) {
+                        continue;
+                    }
+                    const asset = next[index];
+                    if (!asset) {
+                        continue;
+                    }
+                    next[index] = {
+                        ...asset,
+                        ...patch,
+                        sourceFileKey: patch.sourceFileKey ?? asset.sourceFileKey,
+                    };
+                    changed = true;
+                    thumbnailPatchStoreRef.current.delete(id);
+                }
+                return changed ? next : prev;
+            });
+        });
+        updateThumbnailPipelineMetrics((current) => ({
+            reactCommitCount: current.reactCommitCount + 1,
+            hotPatchApplied: current.hotPatchApplied + (source === "hot" ? applicableIds.length : 0),
+            deferredPatchApplied: current.deferredPatchApplied + (source === "deferred" ? applicableIds.length : 0),
+        }));
+        for (const id of applicableIdSet) {
+            thumbnailPatchDeferredSetRef.current.delete(id);
+        }
+        afterNextPaint(() => {
+            finishReactBatchMetric(renderMetricToken);
+            if (applicableIds.length > 0) {
+                markFirstThumbnailVisible();
+            }
+            perfLog(`[PERF] thumbnail patch commit (${source})           : applied ${applicableIds.length}` +
+                ` | queue ${thumbnailPatchDeferredQueueRef.current.length}` +
+                ` | store ${thumbnailPatchStoreRef.current.size}`);
+        });
+        return applicableIds.length;
+    }, [markFirstThumbnailVisible, updateThumbnailPipelineMetrics]);
+    const flushDeferredThumbnailPatchQueue = useCallback(() => {
+        if (thumbnailPatchFlushRafRef.current !== null) {
+            thumbnailPatchFlushRafRef.current = null;
+        }
+        if (thumbnailPatchFlushTimerRef.current !== null) {
+            window.clearTimeout(thumbnailPatchFlushTimerRef.current);
+            thumbnailPatchFlushTimerRef.current = null;
+        }
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const elapsed = now - thumbnailPatchLastFlushAtRef.current;
+        if (elapsed < THUMBNAIL_PATCH_FLUSH_MIN_INTERVAL_MS) {
+            const waitMs = Math.max(0, THUMBNAIL_PATCH_FLUSH_MIN_INTERVAL_MS - elapsed);
+            thumbnailPatchFlushTimerRef.current = window.setTimeout(() => {
+                thumbnailPatchFlushTimerRef.current = null;
+                thumbnailPatchFlushRafRef.current = window.requestAnimationFrame(() => {
+                    flushDeferredThumbnailPatchQueue();
+                });
+            }, waitMs);
+            return;
+        }
+        const queue = thumbnailPatchDeferredQueueRef.current;
+        const deferredIds = [];
+        while (queue.length > 0 && deferredIds.length < THUMBNAIL_PATCH_FLUSH_MAX_ITEMS) {
+            const nextId = queue.shift();
+            if (!nextId) {
+                continue;
+            }
+            if (!thumbnailPatchDeferredSetRef.current.has(nextId)) {
+                continue;
+            }
+            if (isHotThumbnailId(nextId)) {
+                continue;
+            }
+            thumbnailPatchDeferredSetRef.current.delete(nextId);
+            if (!thumbnailPatchStoreRef.current.has(nextId)) {
+                continue;
+            }
+            deferredIds.push(nextId);
+        }
+        thumbnailPatchLastFlushAtRef.current = now;
+        if (deferredIds.length > 0) {
+            applyThumbnailPatches(deferredIds, "deferred");
+        }
+        if (queue.length > 0 && thumbnailPatchFlushRafRef.current === null) {
+            thumbnailPatchFlushRafRef.current = window.requestAnimationFrame(() => {
+                flushDeferredThumbnailPatchQueue();
+            });
+        }
+    }, [applyThumbnailPatches, isHotThumbnailId]);
+    const scheduleDeferredThumbnailPatchFlush = useCallback(() => {
+        if (thumbnailPatchFlushRafRef.current !== null || thumbnailPatchFlushTimerRef.current !== null) {
+            return;
+        }
+        thumbnailPatchFlushRafRef.current = window.requestAnimationFrame(() => {
+            flushDeferredThumbnailPatchQueue();
+        });
+    }, [flushDeferredThumbnailPatchQueue]);
+    const flushHotThumbnailPatches = useCallback((limit = THUMBNAIL_PATCH_FLUSH_MAX_ITEMS) => {
+        if (thumbnailPatchStoreRef.current.size === 0) {
+            return;
+        }
+        const ids = [];
+        const seen = new Set();
+        const collect = (sourceIds) => {
+            for (const id of sourceIds) {
+                if (ids.length >= limit) {
+                    return;
+                }
+                if (seen.has(id) || !thumbnailPatchStoreRef.current.has(id)) {
+                    continue;
+                }
+                seen.add(id);
+                ids.push(id);
+            }
+        };
+        collect(visibleThumbnailIdsRef.current);
+        collect(previewPriorityIdsRef.current);
+        collect(prioritizedThumbnailIdsRef.current);
+        if (ids.length > 0) {
+            applyThumbnailPatches(ids, "hot");
+        }
+    }, [applyThumbnailPatches]);
     const enqueueVisibleThumbnailEntries = useCallback((ids, priority = 0) => {
         const pipeline = pipelineRef.current;
         if (!pipeline) {
@@ -839,27 +1122,6 @@ export function App() {
         invalidateThumbnailEntries,
         thumbnailProfile,
     ]);
-    const markFirstThumbnailVisible = useCallback(() => {
-        if (hasLoggedFirstThumbnailRef.current) {
-            return;
-        }
-        hasLoggedFirstThumbnailRef.current = true;
-        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-        const elapsedMs = folderOpenStartedAtRef.current !== null
-            ? Math.max(0, Math.round(now - folderOpenStartedAtRef.current))
-            : null;
-        const byteStats = getPerfByteReadStats();
-        setPerformanceSnapshot((current) => ({
-            ...current,
-            folderOpenToFirstThumbnailMs: elapsedMs,
-            bytesRead: byteStats.totalBytes,
-            rawBytesRead: byteStats.rawBytes,
-            standardBytesRead: byteStats.standardBytes,
-            lastUpdatedAt: Date.now(),
-        }));
-        perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
-        perfTime(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
-    }, []);
     const markGridComplete = useCallback(() => {
         if (!hasLoggedFirstThumbnailRef.current || hasLoggedGridCompleteRef.current) {
             return;
@@ -882,60 +1144,56 @@ export function App() {
     }, []);
     // ── Thumbnail batch handler (called by pipeline every ~120 ms) ──────
     const handleThumbnailBatch = useCallback((batch) => {
-        const renderMetricToken = beginReactBatchMetric(batch.length, allAssetsRef.current.length);
-        startTransition(() => {
-            setAllAssets((prev) => {
-                if (prev.length === 0) {
-                    return prev;
-                }
-                const next = prev.slice();
-                let changed = false;
-                for (const update of batch) {
-                    const index = assetIndexByIdRef.current.get(update.id);
-                    if (index === undefined) {
-                        continue;
-                    }
-                    const asset = next[index];
-                    if (!asset) {
-                        continue;
-                    }
-                    next[index] = {
-                        ...asset,
-                        thumbnailUrl: update.url,
-                        width: update.width,
-                        height: update.height,
-                        orientation: detectOrientation(update.width, update.height),
-                        aspectRatio: update.width / update.height,
-                        sourceFileKey: update.sourceFileKey ?? asset.sourceFileKey,
-                    };
-                    changed = true;
-                }
-                return changed ? next : prev;
+        if (batch.length === 0) {
+            return;
+        }
+        const hotIds = [];
+        for (const update of batch) {
+            thumbnailPatchStoreRef.current.set(update.id, {
+                thumbnailUrl: update.url,
+                width: update.width,
+                height: update.height,
+                orientation: detectOrientation(update.width, update.height),
+                aspectRatio: update.width / update.height,
+                sourceFileKey: update.sourceFileKey,
             });
-        });
+            if (isHotThumbnailId(update.id)) {
+                hotIds.push(update.id);
+            }
+            else if (!thumbnailPatchDeferredSetRef.current.has(update.id)) {
+                thumbnailPatchDeferredSetRef.current.add(update.id);
+                thumbnailPatchDeferredQueueRef.current.push(update.id);
+            }
+        }
+        applyThumbnailPatches(hotIds, "hot");
+        flushHotThumbnailPatches(Math.max(16, Math.ceil(THUMBNAIL_PATCH_FLUSH_MAX_ITEMS / 2)));
+        scheduleDeferredThumbnailPatchFlush();
         for (const item of batch) {
             settledThumbnailIdsRef.current.add(item.id);
         }
         syncThumbnailProgress(batch[batch.length - 1]?.id ?? null);
         checkAllThumbnailsSettled();
-        afterNextPaint(() => {
-            finishReactBatchMetric(renderMetricToken);
-            if (batch.length > 0) {
-                markFirstThumbnailVisible();
-            }
-        });
         void cacheThumbnailBatch(batch.map((item) => ({
             id: item.id,
             blob: item.blob,
             width: item.width,
             height: item.height,
         })));
-    }, [checkAllThumbnailsSettled, markFirstThumbnailVisible, syncThumbnailProgress]);
+    }, [
+        applyThumbnailPatches,
+        checkAllThumbnailsSettled,
+        flushHotThumbnailPatches,
+        isHotThumbnailId,
+        scheduleDeferredThumbnailPatchFlush,
+        syncThumbnailProgress,
+    ]);
     // Error handler for failed thumbnail generations (e.g. RAW files)
     const lastErrorToastRef = useRef(0);
     const handleThumbnailError = useCallback((failedCount, failedId) => {
         if (failedId) {
             settledThumbnailIdsRef.current.add(failedId);
+            thumbnailPatchStoreRef.current.delete(failedId);
+            thumbnailPatchDeferredSetRef.current.delete(failedId);
         }
         syncThumbnailProgress(failedId);
         checkAllThumbnailsSettled();
@@ -956,6 +1214,7 @@ export function App() {
     }
     const stopCurrentImport = useCallback(() => {
         suspendActiveFolderWork();
+        resetThumbnailPatchPipeline();
         folderOpenRequestRef.current += 1;
         setIsFolderTransitionBusy(false);
         setFolderTransitionLabel("");
@@ -1014,10 +1273,15 @@ export function App() {
             bytesRead: 0,
             rawBytesRead: 0,
             standardBytesRead: 0,
+            reactCommitCount: 0,
+            hotPatchApplied: 0,
+            deferredPatchApplied: 0,
+            scrollLiteActiveMs: 0,
+            rawRenderCacheHit: 0,
             lastUpdatedAt: Date.now(),
         }));
         undoRedo.reset();
-    }, [bumpPhotoMetadataVersion, suspendActiveFolderWork, undoRedo]);
+    }, [bumpPhotoMetadataVersion, resetThumbnailPatchPipeline, suspendActiveFolderWork, undoRedo]);
     const handleCancelImport = useCallback(() => {
         stopCurrentImport();
         addToast("Caricamento annullato. Torniamo alla scelta cartella.", "info");
@@ -1067,6 +1331,11 @@ export function App() {
             standardBytesRead: 0,
             thumbnailProfile,
             sortCacheEnabled,
+            reactCommitCount: 0,
+            hotPatchApplied: 0,
+            deferredPatchApplied: 0,
+            scrollLiteActiveMs: 0,
+            rawRenderCacheHit: 0,
             lastUpdatedAt: Date.now(),
         });
         perfTime(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
@@ -1572,6 +1841,20 @@ export function App() {
         const info = await getDesktopThumbnailCacheInfo();
         setDesktopThumbnailCacheInfo(info);
     }, []);
+    useEffect(() => {
+        const nextRawRenderCacheHit = desktopThumbnailCacheInfo?.rawRenderCacheHit;
+        if (typeof nextRawRenderCacheHit !== "number" || !Number.isFinite(nextRawRenderCacheHit)) {
+            return;
+        }
+        const normalizedValue = Math.max(0, Math.round(nextRawRenderCacheHit));
+        setPerformanceSnapshot((current) => (current.rawRenderCacheHit === normalizedValue
+            ? current
+            : {
+                ...current,
+                rawRenderCacheHit: normalizedValue,
+                lastUpdatedAt: Date.now(),
+            }));
+    }, [desktopThumbnailCacheInfo?.rawRenderCacheHit]);
     const refreshDesktopCacheLocationRecommendation = useCallback(async () => {
         const recommendation = await getDesktopCacheLocationRecommendation();
         setDesktopCacheLocationRecommendation(recommendation);
@@ -1747,7 +2030,8 @@ export function App() {
         visibleThumbnailIdsRef.current = ids;
         enqueueVisibleThumbnailEntries(ids, 0);
         pipelineRef.current?.updateViewport(ids, mergeSets(prioritizedThumbnailIdsRef.current, previewPriorityIdsRef.current));
-    }, [enqueueVisibleThumbnailEntries]);
+        flushHotThumbnailPatches();
+    }, [enqueueVisibleThumbnailEntries, flushHotThumbnailPatches]);
     const handlePriorityIdsChange = useCallback((ids) => {
         if (areSetsEqual(prioritizedThumbnailIdsRef.current, ids)) {
             return;
@@ -1756,7 +2040,8 @@ export function App() {
         enqueuePriorityThumbnailEntries(ids, 1);
         enqueuePreviewWarmupForIds(ids, 0, RAW_PREVIEW_FILTER_WARM_COUNT);
         pipelineRef.current?.updateViewport(visibleThumbnailIdsRef.current, mergeSets(ids, previewPriorityIdsRef.current));
-    }, [enqueuePreviewWarmupForIds, enqueuePriorityThumbnailEntries]);
+        flushHotThumbnailPatches();
+    }, [enqueuePreviewWarmupForIds, enqueuePriorityThumbnailEntries, flushHotThumbnailPatches]);
     const handlePreviewPriorityIdsChange = useCallback((ids) => {
         if (areSetsEqual(previewPriorityIdsRef.current, ids)) {
             return;
@@ -1765,7 +2050,20 @@ export function App() {
         enqueuePriorityThumbnailEntries(ids, 0);
         enqueueQuickPreviewWarmupForIds(ids, 0, QUICK_PREVIEW_PRIORITY_WARM_COUNT);
         pipelineRef.current?.updateViewport(visibleThumbnailIdsRef.current, mergeSets(prioritizedThumbnailIdsRef.current, ids));
-    }, [enqueuePriorityThumbnailEntries, enqueueQuickPreviewWarmupForIds]);
+        flushHotThumbnailPatches();
+    }, [enqueuePriorityThumbnailEntries, enqueueQuickPreviewWarmupForIds, flushHotThumbnailPatches]);
+    const handleScrollLiteActiveMsChange = useCallback((activeMs) => {
+        const roundedValue = Math.max(0, Math.round(activeMs));
+        if (roundedValue === Math.round(scrollLiteActiveMsRef.current)) {
+            return;
+        }
+        scrollLiteActiveMsRef.current = roundedValue;
+        setPerformanceSnapshot((current) => ({
+            ...current,
+            scrollLiteActiveMs: roundedValue,
+            lastUpdatedAt: Date.now(),
+        }));
+    }, []);
     useEffect(() => {
         let cancelled = false;
         void getDesktopRuntimeInfo().then((runtimeInfo) => {
@@ -1901,6 +2199,6 @@ export function App() {
                                     label: "Vai a Sfoglia",
                                     onClick: () => setCurrentScreen("browse"),
                                 }
-                                : undefined, onDismiss: () => setIsXmpBannerDismissed(true) })) : null, folderDiagnostics ? (_jsxs("div", { className: "folder-diagnostics-panel", role: "status", "aria-live": "polite", children: [_jsxs("div", { className: "folder-diagnostics-panel__header", children: [_jsxs("div", { children: [_jsx("strong", { children: "Diagnostica cartella" }), _jsx("span", { children: formatFolderDiagnosticsSource(folderDiagnostics.source) })] }), _jsxs("div", { className: "folder-diagnostics-panel__badge", children: [folderDiagnostics.topLevelSupportedCount, " top-level"] })] }), _jsxs("div", { className: "folder-diagnostics-panel__grid", children: [_jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Path selezionato" }), _jsx("strong", { title: folderDiagnostics.selectedPath, children: folderDiagnostics.selectedPath })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Top-level caricati" }), _jsx("strong", { children: folderDiagnostics.topLevelSupportedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Annidati scartati" }), _jsx("strong", { children: folderDiagnostics.nestedSupportedDiscardedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Totale supportate viste" }), _jsx("strong", { children: folderDiagnostics.totalSupportedSeen })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Sottocartelle viste" }), _jsx("strong", { children: folderDiagnostics.nestedDirectoriesSeen ?? 0 })] })] })] })) : null, currentScreen === "browse" ? (_jsx("div", { className: "app-section", children: _jsx(FolderBrowser, { onFolderOpened: handleFolderOpened, isBusy: isFolderTransitionBusy }) })) : null, currentScreen === "selection" ? (_jsx("div", { className: "app-section app-section--full", children: _jsx(PhotoSelector, { photos: allAssets, metadataVersion: photoMetadataVersion, sourceFolderPath: sourceFolderPath, selectedIds: activeAssetIds, onSelectionChange: handleSelectionChange, onPhotosChange: handlePhotosChange, onVisibleIdsChange: handleVisibleIdsChange, onPriorityIdsChange: handlePriorityIdsChange, onPreviewPriorityIdsChange: handlePreviewPriorityIdsChange, onBackgroundPreviewOrderChange: handleBackgroundPreviewOrderChange, onUndo: undoRedo.undo, onRedo: undoRedo.redo, canUndo: undoRedo.canUndo, canRedo: undoRedo.canRedo, thumbnailProfile: thumbnailProfile, sortCacheEnabled: sortCacheEnabled, performanceSnapshot: performanceSnapshot, onThumbnailProfileChange: setThumbnailProfile, onSortCacheEnabledChange: setSortCacheEnabled, desktopThumbnailCacheInfo: desktopThumbnailCacheInfo, desktopCacheLocationRecommendation: desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy: isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen: isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory: handleChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory: handleSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory: handleUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory: handleResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache: handleClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation: handleSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation: handleDismissDesktopCacheRecommendation }) })) : null, currentScreen === "review" ? (_jsx("div", { className: "app-section", children: _jsx(SelectionSummary, { allAssets: allAssets, activeAssetIds: activeAssetIds, projectName: projectName, onExportSelection: handleExportSelection, onBackToSelection: () => setCurrentScreen("selection"), onOpenProjectSelector: () => setIsProjectSelectorOpen(true) }) })) : null] }), isProjectSelectorOpen ? (_jsx(ProjectPhotoSelectorModal, { assets: allAssets, activeAssetIds: activeAssetIds, usageByAssetId: emptyUsageMap, onClose: () => setIsProjectSelectorOpen(false), onApply: handleSelectorApply })) : null, !desktopRuntime ? (_jsx(ImportProgressModal, { isOpen: importProgress.isOpen && !isImportPanelDismissed, phase: importProgress.phase, supported: importProgress.supported, ignored: importProgress.ignored, total: importProgress.total, processed: importProgress.processed, currentFile: importProgress.currentFile, folderLabel: importProgress.folderLabel, diagnostics: importProgress.diagnostics, onDismiss: () => setIsImportPanelDismissed(true), onCancel: handleCancelImport })) : null] }) }));
+                                : undefined, onDismiss: () => setIsXmpBannerDismissed(true) })) : null, folderDiagnostics ? (_jsxs("div", { className: "folder-diagnostics-panel", role: "status", "aria-live": "polite", children: [_jsxs("div", { className: "folder-diagnostics-panel__header", children: [_jsxs("div", { children: [_jsx("strong", { children: "Diagnostica cartella" }), _jsx("span", { children: formatFolderDiagnosticsSource(folderDiagnostics.source) })] }), _jsxs("div", { className: "folder-diagnostics-panel__badge", children: [folderDiagnostics.topLevelSupportedCount, " top-level"] })] }), _jsxs("div", { className: "folder-diagnostics-panel__grid", children: [_jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Path selezionato" }), _jsx("strong", { title: folderDiagnostics.selectedPath, children: folderDiagnostics.selectedPath })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Top-level caricati" }), _jsx("strong", { children: folderDiagnostics.topLevelSupportedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Annidati scartati" }), _jsx("strong", { children: folderDiagnostics.nestedSupportedDiscardedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Totale supportate viste" }), _jsx("strong", { children: folderDiagnostics.totalSupportedSeen })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Sottocartelle viste" }), _jsx("strong", { children: folderDiagnostics.nestedDirectoriesSeen ?? 0 })] })] })] })) : null, currentScreen === "browse" ? (_jsx("div", { className: "app-section", children: _jsx(FolderBrowser, { onFolderOpened: handleFolderOpened, isBusy: isFolderTransitionBusy }) })) : null, currentScreen === "selection" ? (_jsx("div", { className: "app-section app-section--full", children: _jsx(PhotoSelector, { photos: allAssets, metadataVersion: photoMetadataVersion, sourceFolderPath: sourceFolderPath, selectedIds: activeAssetIds, onSelectionChange: handleSelectionChange, onPhotosChange: handlePhotosChange, onVisibleIdsChange: handleVisibleIdsChange, onPriorityIdsChange: handlePriorityIdsChange, onPreviewPriorityIdsChange: handlePreviewPriorityIdsChange, onBackgroundPreviewOrderChange: handleBackgroundPreviewOrderChange, onScrollLiteActiveMsChange: handleScrollLiteActiveMsChange, onUndo: undoRedo.undo, onRedo: undoRedo.redo, canUndo: undoRedo.canUndo, canRedo: undoRedo.canRedo, thumbnailProfile: thumbnailProfile, sortCacheEnabled: sortCacheEnabled, performanceSnapshot: performanceSnapshot, onThumbnailProfileChange: setThumbnailProfile, onSortCacheEnabledChange: setSortCacheEnabled, desktopThumbnailCacheInfo: desktopThumbnailCacheInfo, desktopCacheLocationRecommendation: desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy: isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen: isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory: handleChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory: handleSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory: handleUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory: handleResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache: handleClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation: handleSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation: handleDismissDesktopCacheRecommendation }) })) : null, currentScreen === "review" ? (_jsx("div", { className: "app-section", children: _jsx(SelectionSummary, { allAssets: allAssets, activeAssetIds: activeAssetIds, projectName: projectName, onExportSelection: handleExportSelection, onBackToSelection: () => setCurrentScreen("selection"), onOpenProjectSelector: () => setIsProjectSelectorOpen(true) }) })) : null] }), isProjectSelectorOpen ? (_jsx(ProjectPhotoSelectorModal, { assets: allAssets, activeAssetIds: activeAssetIds, usageByAssetId: emptyUsageMap, onClose: () => setIsProjectSelectorOpen(false), onApply: handleSelectorApply })) : null, !desktopRuntime ? (_jsx(ImportProgressModal, { isOpen: importProgress.isOpen && !isImportPanelDismissed, phase: importProgress.phase, supported: importProgress.supported, ignored: importProgress.ignored, total: importProgress.total, processed: importProgress.processed, currentFile: importProgress.currentFile, folderLabel: importProgress.folderLabel, diagnostics: importProgress.diagnostics, onDismiss: () => setIsImportPanelDismissed(true), onCancel: handleCancelImport })) : null] }) }));
 }
 //# sourceMappingURL=App.js.map

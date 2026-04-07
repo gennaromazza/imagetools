@@ -58,6 +58,7 @@ import {
   cancelReactBatchMetric,
   finishReactBatchMetric,
   getPerfByteReadStats,
+  perfLog,
   perfTime,
   perfTimeEnd,
   resetPerfByteReadStats,
@@ -110,6 +111,8 @@ const BACKGROUND_FIT_PREVIEW_WARM_START_DELAY_MS = 900;
 const BACKGROUND_FIT_PREVIEW_WARM_BATCH_INTERVAL_MS = 520;
 const BACKGROUND_FIT_PREVIEW_WARM_BATCH_SIZE = 10;
 const BACKGROUND_FIT_PREVIEW_WARM_MAX_COUNT = 240;
+const THUMBNAIL_PATCH_FLUSH_MAX_ITEMS = 64;
+const THUMBNAIL_PATCH_FLUSH_MIN_INTERVAL_MS = 32;
 const PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE = "[PERF] folder-open → first-thumbnail-visible";
 const PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE = "[PERF] first-thumbnail → grid-complete";
 const PERF_XMP_IMPORT = "[PERF] xmp-import start → xmp-import complete";
@@ -192,6 +195,25 @@ type ThumbnailPipelineEntry = {
   sourceFileKey?: string;
   createSourceFileKey?: (file: File) => string;
 };
+
+type ThumbnailAssetPatch = Pick<
+  ImageAsset,
+  "thumbnailUrl" | "width" | "height" | "orientation" | "aspectRatio" | "sourceFileKey"
+>;
+
+type ThumbnailPipelineMetrics = {
+  reactCommitCount: number;
+  hotPatchApplied: number;
+  deferredPatchApplied: number;
+};
+
+function createThumbnailPipelineMetrics(): ThumbnailPipelineMetrics {
+  return {
+    reactCommitCount: 0,
+    hotPatchApplied: 0,
+    deferredPatchApplied: 0,
+  };
+}
 
 interface PersistedState {
   projectName: string;
@@ -310,6 +332,11 @@ interface PerformanceSnapshot {
   standardBytesRead: number;
   thumbnailProfile: ThumbnailProfile;
   sortCacheEnabled: boolean;
+  reactCommitCount: number;
+  hotPatchApplied: number;
+  deferredPatchApplied: number;
+  scrollLiteActiveMs: number;
+  rawRenderCacheHit: number;
   lastUpdatedAt: number | null;
 }
 
@@ -356,6 +383,11 @@ export function App() {
     standardBytesRead: 0,
     thumbnailProfile: initialPreferencesRef.current.thumbnailProfile,
     sortCacheEnabled: initialPreferencesRef.current.sortCacheEnabled,
+    reactCommitCount: 0,
+    hotPatchApplied: 0,
+    deferredPatchApplied: 0,
+    scrollLiteActiveMs: 0,
+    rawRenderCacheHit: 0,
     lastUpdatedAt: null,
   });
 
@@ -418,6 +450,14 @@ export function App() {
   const hasLoggedFirstThumbnailRef = useRef(false);
   const hasLoggedGridCompleteRef = useRef(false);
   const folderOpenStartedAtRef = useRef<number | null>(null);
+  const thumbnailPatchStoreRef = useRef(new Map<string, ThumbnailAssetPatch>());
+  const thumbnailPatchDeferredQueueRef = useRef<string[]>([]);
+  const thumbnailPatchDeferredSetRef = useRef(new Set<string>());
+  const thumbnailPatchFlushRafRef = useRef<number | null>(null);
+  const thumbnailPatchFlushTimerRef = useRef<number | null>(null);
+  const thumbnailPatchLastFlushAtRef = useRef(0);
+  const thumbnailPipelineMetricsRef = useRef<ThumbnailPipelineMetrics>(createThumbnailPipelineMetrics());
+  const scrollLiteActiveMsRef = useRef(0);
 
   // ── Restore from IndexedDB on mount ──────────────────────────────────
   useEffect(() => {
@@ -519,6 +559,11 @@ export function App() {
       standardBytesRead: performanceSnapshot.standardBytesRead,
       thumbnailProfile: performanceSnapshot.thumbnailProfile,
       sortCacheEnabled: performanceSnapshot.sortCacheEnabled,
+      reactCommitCount: performanceSnapshot.reactCommitCount,
+      hotPatchApplied: performanceSnapshot.hotPatchApplied,
+      deferredPatchApplied: performanceSnapshot.deferredPatchApplied,
+      scrollLiteActiveMs: performanceSnapshot.scrollLiteActiveMs,
+      rawRenderCacheHit: performanceSnapshot.rawRenderCacheHit,
       lastUpdatedAt: performanceSnapshot.lastUpdatedAt,
     };
 
@@ -610,6 +655,17 @@ export function App() {
       if (rawPreviewWarmupTimerRef.current !== null) {
         window.clearTimeout(rawPreviewWarmupTimerRef.current);
       }
+      if (thumbnailPatchFlushRafRef.current !== null) {
+        window.cancelAnimationFrame(thumbnailPatchFlushRafRef.current);
+        thumbnailPatchFlushRafRef.current = null;
+      }
+      if (thumbnailPatchFlushTimerRef.current !== null) {
+        window.clearTimeout(thumbnailPatchFlushTimerRef.current);
+        thumbnailPatchFlushTimerRef.current = null;
+      }
+      thumbnailPatchStoreRef.current.clear();
+      thumbnailPatchDeferredQueueRef.current = [];
+      thumbnailPatchDeferredSetRef.current.clear();
       pipelineRef.current?.destroy();
       prioritizedThumbnailIdsRef.current = new Set();
       previewPriorityIdsRef.current = new Set();
@@ -782,6 +838,14 @@ export function App() {
       window.clearTimeout(backgroundFitPreviewWarmupTimerRef.current);
       backgroundFitPreviewWarmupTimerRef.current = null;
     }
+    if (thumbnailPatchFlushRafRef.current !== null) {
+      window.cancelAnimationFrame(thumbnailPatchFlushRafRef.current);
+      thumbnailPatchFlushRafRef.current = null;
+    }
+    if (thumbnailPatchFlushTimerRef.current !== null) {
+      window.clearTimeout(thumbnailPatchFlushTimerRef.current);
+      thumbnailPatchFlushTimerRef.current = null;
+    }
 
     previewWarmupPipelineRef.current?.destroy();
     previewWarmupPipelineRef.current = null;
@@ -795,11 +859,26 @@ export function App() {
     settledThumbnailIdsRef.current = new Set();
     thumbnailEntryByIdRef.current = new Map();
     thumbnailTotalCountRef.current = 0;
+    thumbnailPatchStoreRef.current.clear();
+    thumbnailPatchDeferredQueueRef.current = [];
+    thumbnailPatchDeferredSetRef.current.clear();
+    thumbnailPatchLastFlushAtRef.current = 0;
+    thumbnailPipelineMetricsRef.current = createThumbnailPipelineMetrics();
+    scrollLiteActiveMsRef.current = 0;
     hasLoggedFirstThumbnailRef.current = false;
     hasLoggedGridCompleteRef.current = false;
     clearDesktopQuickPreviewFrameCache();
 
     setThumbnailProgress({ done: 0, total: 0 });
+    setPerformanceSnapshot((current) => ({
+      ...current,
+      reactCommitCount: 0,
+      hotPatchApplied: 0,
+      deferredPatchApplied: 0,
+      scrollLiteActiveMs: 0,
+      rawRenderCacheHit: 0,
+      lastUpdatedAt: Date.now(),
+    }));
     setImportProgress((current) => (
       current.isOpen
         ? {
@@ -894,6 +973,270 @@ export function App() {
       markGridComplete();
     });
   }
+
+  const updateThumbnailPipelineMetrics = useCallback((
+    updater: (current: ThumbnailPipelineMetrics) => ThumbnailPipelineMetrics,
+  ) => {
+    const nextMetrics = updater(thumbnailPipelineMetricsRef.current);
+    thumbnailPipelineMetricsRef.current = nextMetrics;
+    setPerformanceSnapshot((current) => ({
+      ...current,
+      reactCommitCount: nextMetrics.reactCommitCount,
+      hotPatchApplied: nextMetrics.hotPatchApplied,
+      deferredPatchApplied: nextMetrics.deferredPatchApplied,
+      scrollLiteActiveMs: Math.round(scrollLiteActiveMsRef.current),
+      lastUpdatedAt: Date.now(),
+    }));
+  }, []);
+
+  const resetThumbnailPatchPipeline = useCallback(() => {
+    if (thumbnailPatchFlushRafRef.current !== null) {
+      window.cancelAnimationFrame(thumbnailPatchFlushRafRef.current);
+      thumbnailPatchFlushRafRef.current = null;
+    }
+    if (thumbnailPatchFlushTimerRef.current !== null) {
+      window.clearTimeout(thumbnailPatchFlushTimerRef.current);
+      thumbnailPatchFlushTimerRef.current = null;
+    }
+    thumbnailPatchStoreRef.current.clear();
+    thumbnailPatchDeferredQueueRef.current = [];
+    thumbnailPatchDeferredSetRef.current.clear();
+    thumbnailPatchLastFlushAtRef.current = 0;
+    thumbnailPipelineMetricsRef.current = createThumbnailPipelineMetrics();
+    scrollLiteActiveMsRef.current = 0;
+    setPerformanceSnapshot((current) => ({
+      ...current,
+      reactCommitCount: 0,
+      hotPatchApplied: 0,
+      deferredPatchApplied: 0,
+      scrollLiteActiveMs: 0,
+      rawRenderCacheHit: 0,
+      lastUpdatedAt: Date.now(),
+    }));
+  }, []);
+
+  const isHotThumbnailId = useCallback((id: string): boolean => (
+    visibleThumbnailIdsRef.current.has(id)
+    || previewPriorityIdsRef.current.has(id)
+    || prioritizedThumbnailIdsRef.current.has(id)
+  ), []);
+
+  const markFirstThumbnailVisible = useCallback(() => {
+    if (hasLoggedFirstThumbnailRef.current) {
+      return;
+    }
+
+    hasLoggedFirstThumbnailRef.current = true;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const elapsedMs = folderOpenStartedAtRef.current !== null
+      ? Math.max(0, Math.round(now - folderOpenStartedAtRef.current))
+      : null;
+    const byteStats = getPerfByteReadStats();
+    setPerformanceSnapshot((current) => ({
+      ...current,
+      folderOpenToFirstThumbnailMs: elapsedMs,
+      bytesRead: byteStats.totalBytes,
+      rawBytesRead: byteStats.rawBytes,
+      standardBytesRead: byteStats.standardBytes,
+      lastUpdatedAt: Date.now(),
+    }));
+    perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+    perfTime(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
+  }, []);
+
+  const applyThumbnailPatches = useCallback((
+    ids: Iterable<string>,
+    source: "hot" | "deferred",
+  ): number => {
+    const seen = new Set<string>();
+    const applicableIds: string[] = [];
+    const assetsSnapshot = allAssetsRef.current;
+
+    for (const id of ids) {
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+
+      const patch = thumbnailPatchStoreRef.current.get(id);
+      const index = assetIndexByIdRef.current.get(id);
+      const asset = index === undefined ? null : assetsSnapshot[index] ?? null;
+      if (!patch || !asset) {
+        continue;
+      }
+
+      const patchSourceFileKey = patch.sourceFileKey ?? asset.sourceFileKey;
+      if (
+        asset.thumbnailUrl === patch.thumbnailUrl
+        && asset.width === patch.width
+        && asset.height === patch.height
+        && asset.orientation === patch.orientation
+        && asset.aspectRatio === patch.aspectRatio
+        && asset.sourceFileKey === patchSourceFileKey
+      ) {
+        thumbnailPatchStoreRef.current.delete(id);
+        continue;
+      }
+
+      applicableIds.push(id);
+    }
+
+    if (applicableIds.length === 0) {
+      return 0;
+    }
+
+    const applicableIdSet = new Set(applicableIds);
+    const renderMetricToken = beginReactBatchMetric(applicableIds.length, assetsSnapshot.length);
+
+    startTransition(() => {
+      setAllAssets((prev) => {
+        if (prev.length === 0) {
+          return prev;
+        }
+
+        const next = prev.slice();
+        let changed = false;
+        for (const id of applicableIds) {
+          const patch = thumbnailPatchStoreRef.current.get(id);
+          const index = assetIndexByIdRef.current.get(id);
+          if (!patch || index === undefined) {
+            continue;
+          }
+          const asset = next[index];
+          if (!asset) {
+            continue;
+          }
+
+          next[index] = {
+            ...asset,
+            ...patch,
+            sourceFileKey: patch.sourceFileKey ?? asset.sourceFileKey,
+          };
+          changed = true;
+          thumbnailPatchStoreRef.current.delete(id);
+        }
+
+        return changed ? next : prev;
+      });
+    });
+
+    updateThumbnailPipelineMetrics((current) => ({
+      reactCommitCount: current.reactCommitCount + 1,
+      hotPatchApplied: current.hotPatchApplied + (source === "hot" ? applicableIds.length : 0),
+      deferredPatchApplied: current.deferredPatchApplied + (source === "deferred" ? applicableIds.length : 0),
+    }));
+
+    for (const id of applicableIdSet) {
+      thumbnailPatchDeferredSetRef.current.delete(id);
+    }
+
+    afterNextPaint(() => {
+      finishReactBatchMetric(renderMetricToken);
+      if (applicableIds.length > 0) {
+        markFirstThumbnailVisible();
+      }
+      perfLog(
+        `[PERF] thumbnail patch commit (${source})           : applied ${applicableIds.length}` +
+          ` | queue ${thumbnailPatchDeferredQueueRef.current.length}` +
+          ` | store ${thumbnailPatchStoreRef.current.size}`,
+      );
+    });
+
+    return applicableIds.length;
+  }, [markFirstThumbnailVisible, updateThumbnailPipelineMetrics]);
+
+  const flushDeferredThumbnailPatchQueue = useCallback(() => {
+    if (thumbnailPatchFlushRafRef.current !== null) {
+      thumbnailPatchFlushRafRef.current = null;
+    }
+    if (thumbnailPatchFlushTimerRef.current !== null) {
+      window.clearTimeout(thumbnailPatchFlushTimerRef.current);
+      thumbnailPatchFlushTimerRef.current = null;
+    }
+
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const elapsed = now - thumbnailPatchLastFlushAtRef.current;
+    if (elapsed < THUMBNAIL_PATCH_FLUSH_MIN_INTERVAL_MS) {
+      const waitMs = Math.max(0, THUMBNAIL_PATCH_FLUSH_MIN_INTERVAL_MS - elapsed);
+      thumbnailPatchFlushTimerRef.current = window.setTimeout(() => {
+        thumbnailPatchFlushTimerRef.current = null;
+        thumbnailPatchFlushRafRef.current = window.requestAnimationFrame(() => {
+          flushDeferredThumbnailPatchQueue();
+        });
+      }, waitMs);
+      return;
+    }
+
+    const queue = thumbnailPatchDeferredQueueRef.current;
+    const deferredIds: string[] = [];
+    while (queue.length > 0 && deferredIds.length < THUMBNAIL_PATCH_FLUSH_MAX_ITEMS) {
+      const nextId = queue.shift();
+      if (!nextId) {
+        continue;
+      }
+      if (!thumbnailPatchDeferredSetRef.current.has(nextId)) {
+        continue;
+      }
+      if (isHotThumbnailId(nextId)) {
+        continue;
+      }
+      thumbnailPatchDeferredSetRef.current.delete(nextId);
+      if (!thumbnailPatchStoreRef.current.has(nextId)) {
+        continue;
+      }
+      deferredIds.push(nextId);
+    }
+
+    thumbnailPatchLastFlushAtRef.current = now;
+    if (deferredIds.length > 0) {
+      applyThumbnailPatches(deferredIds, "deferred");
+    }
+
+    if (queue.length > 0 && thumbnailPatchFlushRafRef.current === null) {
+      thumbnailPatchFlushRafRef.current = window.requestAnimationFrame(() => {
+        flushDeferredThumbnailPatchQueue();
+      });
+    }
+  }, [applyThumbnailPatches, isHotThumbnailId]);
+
+  const scheduleDeferredThumbnailPatchFlush = useCallback(() => {
+    if (thumbnailPatchFlushRafRef.current !== null || thumbnailPatchFlushTimerRef.current !== null) {
+      return;
+    }
+
+    thumbnailPatchFlushRafRef.current = window.requestAnimationFrame(() => {
+      flushDeferredThumbnailPatchQueue();
+    });
+  }, [flushDeferredThumbnailPatchQueue]);
+
+  const flushHotThumbnailPatches = useCallback((limit = THUMBNAIL_PATCH_FLUSH_MAX_ITEMS) => {
+    if (thumbnailPatchStoreRef.current.size === 0) {
+      return;
+    }
+
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    const collect = (sourceIds: Set<string>) => {
+      for (const id of sourceIds) {
+        if (ids.length >= limit) {
+          return;
+        }
+        if (seen.has(id) || !thumbnailPatchStoreRef.current.has(id)) {
+          continue;
+        }
+        seen.add(id);
+        ids.push(id);
+      }
+    };
+
+    collect(visibleThumbnailIdsRef.current);
+    collect(previewPriorityIdsRef.current);
+    collect(prioritizedThumbnailIdsRef.current);
+
+    if (ids.length > 0) {
+      applyThumbnailPatches(ids, "hot");
+    }
+  }, [applyThumbnailPatches]);
 
   const enqueueVisibleThumbnailEntries = useCallback((ids: Iterable<string>, priority = 0) => {
     const pipeline = pipelineRef.current;
@@ -1123,29 +1466,6 @@ export function App() {
     thumbnailProfile,
   ]);
 
-  const markFirstThumbnailVisible = useCallback(() => {
-    if (hasLoggedFirstThumbnailRef.current) {
-      return;
-    }
-
-    hasLoggedFirstThumbnailRef.current = true;
-    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const elapsedMs = folderOpenStartedAtRef.current !== null
-      ? Math.max(0, Math.round(now - folderOpenStartedAtRef.current))
-      : null;
-    const byteStats = getPerfByteReadStats();
-    setPerformanceSnapshot((current) => ({
-      ...current,
-      folderOpenToFirstThumbnailMs: elapsedMs,
-      bytesRead: byteStats.totalBytes,
-      rawBytesRead: byteStats.rawBytes,
-      standardBytesRead: byteStats.standardBytes,
-      lastUpdatedAt: Date.now(),
-    }));
-    perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
-    perfTime(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
-  }, []);
-
   const markGridComplete = useCallback(() => {
     if (!hasLoggedFirstThumbnailRef.current || hasLoggedGridCompleteRef.current) {
       return;
@@ -1170,55 +1490,38 @@ export function App() {
 
   // ── Thumbnail batch handler (called by pipeline every ~120 ms) ──────
   const handleThumbnailBatch = useCallback((batch: ThumbnailUpdate[]) => {
-    const renderMetricToken = beginReactBatchMetric(batch.length, allAssetsRef.current.length);
-    startTransition(() => {
-      setAllAssets((prev) => {
-        if (prev.length === 0) {
-          return prev;
-        }
+    if (batch.length === 0) {
+      return;
+    }
 
-        const next = prev.slice();
-        let changed = false;
-
-        for (const update of batch) {
-          const index = assetIndexByIdRef.current.get(update.id);
-          if (index === undefined) {
-            continue;
-          }
-
-          const asset = next[index];
-          if (!asset) {
-            continue;
-          }
-
-          next[index] = {
-            ...asset,
-            thumbnailUrl: update.url,
-            width: update.width,
-            height: update.height,
-            orientation: detectOrientation(update.width, update.height),
-            aspectRatio: update.width / update.height,
-            sourceFileKey: update.sourceFileKey ?? asset.sourceFileKey,
-          };
-          changed = true;
-        }
-
-        return changed ? next : prev;
+    const hotIds: string[] = [];
+    for (const update of batch) {
+      thumbnailPatchStoreRef.current.set(update.id, {
+        thumbnailUrl: update.url,
+        width: update.width,
+        height: update.height,
+        orientation: detectOrientation(update.width, update.height),
+        aspectRatio: update.width / update.height,
+        sourceFileKey: update.sourceFileKey,
       });
-    });
+
+      if (isHotThumbnailId(update.id)) {
+        hotIds.push(update.id);
+      } else if (!thumbnailPatchDeferredSetRef.current.has(update.id)) {
+        thumbnailPatchDeferredSetRef.current.add(update.id);
+        thumbnailPatchDeferredQueueRef.current.push(update.id);
+      }
+    }
+
+    applyThumbnailPatches(hotIds, "hot");
+    flushHotThumbnailPatches(Math.max(16, Math.ceil(THUMBNAIL_PATCH_FLUSH_MAX_ITEMS / 2)));
+    scheduleDeferredThumbnailPatchFlush();
 
     for (const item of batch) {
       settledThumbnailIdsRef.current.add(item.id);
     }
     syncThumbnailProgress(batch[batch.length - 1]?.id ?? null);
     checkAllThumbnailsSettled();
-
-    afterNextPaint(() => {
-      finishReactBatchMetric(renderMetricToken);
-      if (batch.length > 0) {
-        markFirstThumbnailVisible();
-      }
-    });
 
     void cacheThumbnailBatch(
       batch.map((item) => ({
@@ -1228,13 +1531,22 @@ export function App() {
         height: item.height,
       })),
     );
-  }, [checkAllThumbnailsSettled, markFirstThumbnailVisible, syncThumbnailProgress]);
+  }, [
+    applyThumbnailPatches,
+    checkAllThumbnailsSettled,
+    flushHotThumbnailPatches,
+    isHotThumbnailId,
+    scheduleDeferredThumbnailPatchFlush,
+    syncThumbnailProgress,
+  ]);
 
   // Error handler for failed thumbnail generations (e.g. RAW files)
   const lastErrorToastRef = useRef(0);
   const handleThumbnailError = useCallback((failedCount: number, failedId: string) => {
     if (failedId) {
       settledThumbnailIdsRef.current.add(failedId);
+      thumbnailPatchStoreRef.current.delete(failedId);
+      thumbnailPatchDeferredSetRef.current.delete(failedId);
     }
     syncThumbnailProgress(failedId);
     checkAllThumbnailsSettled();
@@ -1263,6 +1575,7 @@ export function App() {
 
   const stopCurrentImport = useCallback(() => {
     suspendActiveFolderWork();
+    resetThumbnailPatchPipeline();
     folderOpenRequestRef.current += 1;
     setIsFolderTransitionBusy(false);
     setFolderTransitionLabel("");
@@ -1324,10 +1637,15 @@ export function App() {
       bytesRead: 0,
       rawBytesRead: 0,
       standardBytesRead: 0,
+      reactCommitCount: 0,
+      hotPatchApplied: 0,
+      deferredPatchApplied: 0,
+      scrollLiteActiveMs: 0,
+      rawRenderCacheHit: 0,
       lastUpdatedAt: Date.now(),
     }));
     undoRedo.reset();
-  }, [bumpPhotoMetadataVersion, suspendActiveFolderWork, undoRedo]);
+  }, [bumpPhotoMetadataVersion, resetThumbnailPatchPipeline, suspendActiveFolderWork, undoRedo]);
 
   const handleCancelImport = useCallback(() => {
     stopCurrentImport();
@@ -1383,6 +1701,11 @@ export function App() {
         standardBytesRead: 0,
         thumbnailProfile,
         sortCacheEnabled,
+        reactCommitCount: 0,
+        hotPatchApplied: 0,
+        deferredPatchApplied: 0,
+        scrollLiteActiveMs: 0,
+        rawRenderCacheHit: 0,
         lastUpdatedAt: Date.now(),
       });
       perfTime(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
@@ -1992,6 +2315,24 @@ export function App() {
     setDesktopThumbnailCacheInfo(info);
   }, []);
 
+  useEffect(() => {
+    const nextRawRenderCacheHit = desktopThumbnailCacheInfo?.rawRenderCacheHit;
+    if (typeof nextRawRenderCacheHit !== "number" || !Number.isFinite(nextRawRenderCacheHit)) {
+      return;
+    }
+
+    const normalizedValue = Math.max(0, Math.round(nextRawRenderCacheHit));
+    setPerformanceSnapshot((current) => (
+      current.rawRenderCacheHit === normalizedValue
+        ? current
+        : {
+            ...current,
+            rawRenderCacheHit: normalizedValue,
+            lastUpdatedAt: Date.now(),
+          }
+    ));
+  }, [desktopThumbnailCacheInfo?.rawRenderCacheHit]);
+
   const refreshDesktopCacheLocationRecommendation = useCallback(async () => {
     const recommendation = await getDesktopCacheLocationRecommendation();
     setDesktopCacheLocationRecommendation(recommendation);
@@ -2199,7 +2540,8 @@ export function App() {
       ids,
       mergeSets(prioritizedThumbnailIdsRef.current, previewPriorityIdsRef.current),
     );
-  }, [enqueueVisibleThumbnailEntries]);
+    flushHotThumbnailPatches();
+  }, [enqueueVisibleThumbnailEntries, flushHotThumbnailPatches]);
 
   const handlePriorityIdsChange = useCallback((ids: Set<string>) => {
     if (areSetsEqual(prioritizedThumbnailIdsRef.current, ids)) {
@@ -2213,7 +2555,8 @@ export function App() {
       visibleThumbnailIdsRef.current,
       mergeSets(ids, previewPriorityIdsRef.current),
     );
-  }, [enqueuePreviewWarmupForIds, enqueuePriorityThumbnailEntries]);
+    flushHotThumbnailPatches();
+  }, [enqueuePreviewWarmupForIds, enqueuePriorityThumbnailEntries, flushHotThumbnailPatches]);
 
   const handlePreviewPriorityIdsChange = useCallback((ids: Set<string>) => {
     if (areSetsEqual(previewPriorityIdsRef.current, ids)) {
@@ -2227,7 +2570,22 @@ export function App() {
       visibleThumbnailIdsRef.current,
       mergeSets(prioritizedThumbnailIdsRef.current, ids),
     );
-  }, [enqueuePriorityThumbnailEntries, enqueueQuickPreviewWarmupForIds]);
+    flushHotThumbnailPatches();
+  }, [enqueuePriorityThumbnailEntries, enqueueQuickPreviewWarmupForIds, flushHotThumbnailPatches]);
+
+  const handleScrollLiteActiveMsChange = useCallback((activeMs: number) => {
+    const roundedValue = Math.max(0, Math.round(activeMs));
+    if (roundedValue === Math.round(scrollLiteActiveMsRef.current)) {
+      return;
+    }
+
+    scrollLiteActiveMsRef.current = roundedValue;
+    setPerformanceSnapshot((current) => ({
+      ...current,
+      scrollLiteActiveMs: roundedValue,
+      lastUpdatedAt: Date.now(),
+    }));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2556,6 +2914,7 @@ export function App() {
                 onPriorityIdsChange={handlePriorityIdsChange}
                 onPreviewPriorityIdsChange={handlePreviewPriorityIdsChange}
                 onBackgroundPreviewOrderChange={handleBackgroundPreviewOrderChange}
+                onScrollLiteActiveMsChange={handleScrollLiteActiveMsChange}
                 onUndo={undoRedo.undo}
                 onRedo={undoRedo.redo}
                 canUndo={undoRedo.canUndo}

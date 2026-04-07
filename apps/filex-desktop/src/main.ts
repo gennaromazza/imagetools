@@ -31,6 +31,7 @@ import {
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
 import {
+  getDesktopImageCacheLimits,
   getDesktopQuickPreviewFrame,
   getDesktopPreview,
   getDesktopThumbnail,
@@ -853,7 +854,13 @@ function registerIpcHandlers(): void {
     (_event, entries: DesktopThumbnailCacheLookupEntry[], maxDimension: number, quality: number) =>
       getCachedThumbnailsFromDisk(entries, maxDimension, quality),
   );
-  ipcMain.handle("filex:get-thumbnail-cache-info", () => getThumbnailCacheInfo());
+  ipcMain.handle("filex:get-thumbnail-cache-info", async () => {
+    const info = await getThumbnailCacheInfo();
+    return {
+      ...info,
+      ...getDesktopImageCacheLimits(),
+    };
+  });
   ipcMain.handle("filex:choose-thumbnail-cache-directory", () => chooseThumbnailCacheDirectory());
   ipcMain.handle("filex:set-thumbnail-cache-directory", (_event, directoryPath: string) =>
     setThumbnailCacheDirectory(directoryPath),
