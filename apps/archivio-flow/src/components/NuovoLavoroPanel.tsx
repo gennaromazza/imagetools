@@ -64,6 +64,21 @@ interface ImportedRangeRecord {
   label: string;
   importedAtIso: string;
 }
+type ImportValidationField =
+  | "sdPath"
+  | "hasMultipleJobsOnSd"
+  | "filters"
+  | "rangeOverlap"
+  | "nomeLavoro"
+  | "existingJobId"
+  | "dataLavoro"
+  | "autore"
+  | "destinazione";
+
+interface ImportValidationIssue {
+  field: ImportValidationField;
+  message: string;
+}
 
 function formatBytes(bytes: number): string {
   if (bytes <= 0) return "—";
@@ -194,6 +209,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<ImportResult | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgressSnapshot | null>(null);
+  const [importValidationIssues, setImportValidationIssues] = useState<ImportValidationIssue[]>([]);
+  const [invalidImportFields, setInvalidImportFields] = useState<Partial<Record<ImportValidationField, true>>>({});
   const [openFolderOnFinish, setOpenFolderOnFinish] = useState(true);
   const [desktopNotifyOnFinish, setDesktopNotifyOnFinish] = useState(true);
   const [soundNotifyOnFinish, setSoundNotifyOnFinish] = useState(true);
@@ -218,6 +235,101 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   } | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const [browsingField, setBrowsingField] = useState<"sd" | "dest" | "archive" | null>(null);
+
+  function setImportValidationState(issues: ImportValidationIssue[]) {
+    setImportValidationIssues(issues);
+    const nextInvalid: Partial<Record<ImportValidationField, true>> = {};
+    for (const issue of issues) {
+      nextInvalid[issue.field] = true;
+    }
+    setInvalidImportFields(nextInvalid);
+  }
+
+  function clearImportValidationField(field: ImportValidationField) {
+    setInvalidImportFields((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    setImportValidationIssues((prev) => prev.filter((issue) => issue.field !== field));
+  }
+
+  function getInvalidInputStyle(field: ImportValidationField) {
+    if (!invalidImportFields[field]) return undefined;
+    return {
+      borderColor: "var(--danger)",
+      boxShadow: "0 0 0 1px rgba(212, 163, 156, 0.35)",
+    } as const;
+  }
+
+  function collectImportValidationIssues(effectiveDestinazione: string): ImportValidationIssue[] {
+    const issues: ImportValidationIssue[] = [];
+    if (!sdPath.trim()) {
+      issues.push({ field: "sdPath", message: "Seleziona o inserisci il percorso della SD card." });
+    }
+    if (hasMultipleJobsOnSd === null) {
+      issues.push({ field: "hasMultipleJobsOnSd", message: "Indica se la SD contiene uno o piu lavori." });
+    }
+
+    const hasFilter = Boolean(
+      fileNameIncludesFilter.trim() || mtimeFromFilter.trim() || mtimeToFilter.trim(),
+    );
+    if (hasMultipleJobsOnSd === true && !hasFilter) {
+      issues.push({
+        field: "filters",
+        message: "Per SD con piu lavori imposta almeno un filtro (nome file o intervallo data/ora).",
+      });
+    }
+
+    const rawFrom = mtimeFromFilter.trim();
+    const rawTo = mtimeToFilter.trim();
+    const fromMs = rawFrom ? Date.parse(rawFrom) : NaN;
+    const toMs = rawTo ? Date.parse(rawTo) : NaN;
+
+    if (rawFrom && !Number.isFinite(fromMs)) {
+      issues.push({ field: "filters", message: "Data/ora inizio non valida." });
+    }
+    if (rawTo && !Number.isFinite(toMs)) {
+      issues.push({ field: "filters", message: "Data/ora fine non valida." });
+    }
+    if (Number.isFinite(fromMs) && Number.isFinite(toMs) && fromMs > toMs) {
+      issues.push({ field: "filters", message: "Intervallo data/ora non valido: inizio dopo fine." });
+    }
+
+    if (hasMultipleJobsOnSd === true && Number.isFinite(fromMs) && Number.isFinite(toMs)) {
+      const sdKey = sdPath.trim();
+      const currentRanges = importedRangesBySd[sdKey] ?? [];
+      const selStart = Math.min(fromMs, toMs);
+      const selEnd = Math.max(fromMs, toMs);
+      const hasOverlap = currentRanges.some((r) => !(selEnd < r.startMs || selStart > r.endMs));
+      if (hasOverlap && !allowRangeOverlap) {
+        issues.push({
+          field: "rangeOverlap",
+          message: "Il range selezionato si sovrappone a un range gia importato su questa SD.",
+        });
+      }
+    }
+
+    if (!usaLavoroEsistente && !nomeLavoro.trim()) {
+      issues.push({ field: "nomeLavoro", message: "Inserisci il nome del lavoro." });
+    }
+    if (usaLavoroEsistente && !existingJobId) {
+      issues.push({ field: "existingJobId", message: "Seleziona un lavoro esistente." });
+    }
+    if (!dataLavoro) {
+      issues.push({ field: "dataLavoro", message: "Inserisci la data del lavoro." });
+    }
+    if (!autore.trim()) {
+      issues.push({ field: "autore", message: "Inserisci il nome dell'autore." });
+    }
+    if (!usaLavoroEsistente && !effectiveDestinazione) {
+      issues.push({ field: "destinazione", message: "Inserisci la cartella di destinazione." });
+    }
+
+    return issues;
+  }
+
   const refreshExistingJobs = useCallback(async () => {
     try {
       const data = await getArchivioJobs();
@@ -298,8 +410,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     try {
       const selectedPath = await browseArchivioFolder();
       if (selectedPath) {
-        if (field === "sd") setSdPath(selectedPath);
-        else if (field === "dest") setDestinazione(selectedPath);
+        if (field === "sd") {
+          setSdPath(selectedPath);
+          clearImportValidationField("sdPath");
+        } else if (field === "dest") {
+          setDestinazione(selectedPath);
+          clearImportValidationField("destinazione");
+        }
         else setArchiveRoot(selectedPath);
       }
     } catch {
@@ -374,40 +491,21 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     setImportSuccess(null);
     setImportProgress(null);
 
-    if (!sdPath.trim()) return setImportError("Seleziona o inserisci il percorso della SD card.");
-    if (hasMultipleJobsOnSd === null) return setImportError("Rispondi prima: ci sono più lavori in questa SD?");
-    if (
-      hasMultipleJobsOnSd === true &&
-      !fileNameIncludesFilter.trim() &&
-      !mtimeFromFilter.trim() &&
-      !mtimeToFilter.trim()
-    ) {
-      return setImportError("Per SD con più lavori imposta almeno un filtro (nome file o intervallo data/ora).");
+    const validationIssues = collectImportValidationIssues(effectiveDestinazione);
+    if (validationIssues.length > 0) {
+      setImportValidationState(validationIssues);
+      setImportError(
+        validationIssues.length === 1
+          ? validationIssues[0]!.message
+          : `Compila i campi obbligatori: ${validationIssues.length} punti da sistemare.`,
+      );
+      return;
     }
+    setImportValidationState([]);
     if (hasMultipleJobsOnSd === true && !forceProceed) {
       setShowMultiJobConfirm(true);
       return;
     }
-
-    const fromMs = mtimeFromFilter.trim() ? Date.parse(mtimeFromFilter.trim()) : NaN;
-    const toMs = mtimeToFilter.trim() ? Date.parse(mtimeToFilter.trim()) : NaN;
-    const hasFrom = Number.isFinite(fromMs);
-    const hasTo = Number.isFinite(toMs);
-    if (hasMultipleJobsOnSd === true && hasFrom && hasTo) {
-      const sdKey = sdPath.trim();
-      const currentRanges = importedRangesBySd[sdKey] ?? [];
-      const selStart = Math.min(fromMs, toMs);
-      const selEnd = Math.max(fromMs, toMs);
-      const hasOverlap = currentRanges.some((r) => !(selEnd < r.startMs || selStart > r.endMs));
-      if (hasOverlap && !allowRangeOverlap) {
-        return setImportError("Il range selezionato si sovrappone a un range già importato su questa SD. Modifica il range o abilita la sovrapposizione.");
-      }
-    }
-
-    if (!usaLavoroEsistente && !nomeLavoro.trim()) return setImportError("Inserisci il nome del lavoro.");
-    if (usaLavoroEsistente && !existingJobId) return setImportError("Seleziona un lavoro esistente.");
-    if (!autore.trim()) return setImportError("Inserisci il nome dell'autore.");
-    if (!usaLavoroEsistente && !effectiveDestinazione) return setImportError("Inserisci la cartella di destinazione.");
 
     setImporting(true);
     try {
@@ -456,7 +554,15 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         await refreshExistingJobs();
         onImportDone(importResult);
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : "Errore durante l'importazione.");
+      const message = error instanceof Error ? error.message : "Errore durante l'importazione.";
+      if (/lavoro esistente non trovato/i.test(message)) {
+        setImportValidationState([{
+          field: "existingJobId",
+          message: "Il lavoro selezionato non e disponibile: aggiorna la lista e selezionalo di nuovo.",
+        }]);
+        await refreshExistingJobs();
+      }
+      setImportError(message);
     } finally {
       setImporting(false);
     }
@@ -505,15 +611,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
       ? `FOTO_SD\\${safeAutoreFolder}\\${safeSottoCartella}`
       : `FOTO_SD\\${safeAutoreFolder}`)
     : "FOTO_SD\\(autore)";
-  const canImport =
-    !importing &&
-    sdPath.trim() &&
-    hasMultipleJobsOnSd !== null &&
-    (hasMultipleJobsOnSd === false || Boolean(
-      fileNameIncludesFilter.trim() || mtimeFromFilter.trim() || mtimeToFilter.trim()
-    )) &&
-    autore.trim() &&
-    (usaLavoroEsistente ? Boolean(existingJobId) : Boolean(nomeLavoro.trim() && effectiveDestinazione));
+  const blockingImportIssues = collectImportValidationIssues(effectiveDestinazione);
+  const canImport = !importing && blockingImportIssues.length === 0;
   const settingsChanged =
     archiveRoot.trim() !== savedArchiveRoot ||
     destinazione.trim() !== savedDestinazione ||
@@ -1031,7 +1130,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                   key={card.deviceId}
                   className={sdPath === card.path ? "stat-card stat-card--highlight" : "stat-card"}
                   style={{ cursor: "pointer", textAlign: "left" }}
-                  onClick={() => setSdPath(card.path)}
+                  onClick={() => {
+                    setSdPath(card.path);
+                    clearImportValidationField("sdPath");
+                  }}
                 >
                   <span>{card.volumeName || "SD Card"}</span>
                   <strong>{card.deviceId}</strong>
@@ -1055,9 +1157,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
               <input
                 type="text"
                 value={sdPath}
-                onChange={(e) => setSdPath(e.target.value)}
+                onChange={(e) => {
+                  setSdPath(e.target.value);
+                  clearImportValidationField("sdPath");
+                }}
                 placeholder="E:\\ oppure seleziona con Sfoglia"
-                style={{ flex: 1 }}
+                style={{ flex: 1, ...getInvalidInputStyle("sdPath") }}
               />
               <button
                 className="secondary-button"
@@ -1088,21 +1193,38 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           )}
 
           {sdPath.trim() && (
-            <div className="message-box" style={{ background: "rgba(255,255,255,0.04)", borderColor: "var(--line)" }}>
+            <div
+              className="message-box"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                borderColor:
+                  (invalidImportFields.hasMultipleJobsOnSd || invalidImportFields.filters || invalidImportFields.rangeOverlap)
+                    ? "rgba(212, 163, 156, 0.45)"
+                    : "var(--line)",
+              }}
+            >
               <p style={{ marginBottom: "0.55rem" }}>
                 <strong>Domanda rapida:</strong> ci sono piu lavori in questa SD?
               </p>
               <div className="button-row">
                 <button
                   className={hasMultipleJobsOnSd === false ? "secondary-button" : "ghost-button"}
-                  onClick={() => setHasMultipleJobsOnSd(false)}
+                  onClick={() => {
+                    setHasMultipleJobsOnSd(false);
+                    clearImportValidationField("hasMultipleJobsOnSd");
+                    clearImportValidationField("filters");
+                    clearImportValidationField("rangeOverlap");
+                  }}
                   style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}
                 >
                   No, un solo lavoro
                 </button>
                 <button
                   className={hasMultipleJobsOnSd === true ? "secondary-button" : "ghost-button"}
-                  onClick={() => setHasMultipleJobsOnSd(true)}
+                  onClick={() => {
+                    setHasMultipleJobsOnSd(true);
+                    clearImportValidationField("hasMultipleJobsOnSd");
+                  }}
                   style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}
                 >
                   Sì, piu lavori
@@ -1120,8 +1242,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                     <input
                       type="text"
                       value={fileNameIncludesFilter}
-                      onChange={(e) => setFileNameIncludesFilter(e.target.value)}
+                      onChange={(e) => {
+                        setFileNameIncludesFilter(e.target.value);
+                        clearImportValidationField("filters");
+                        clearImportValidationField("rangeOverlap");
+                      }}
                       placeholder="es. DSCF oppure IMG_"
+                      style={getInvalidInputStyle("filters")}
                     />
                   </label>
 
@@ -1131,7 +1258,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                       <input
                         type="datetime-local"
                         value={mtimeFromFilter}
-                        onChange={(e) => setMtimeFromFilter(e.target.value)}
+                        onChange={(e) => {
+                          setMtimeFromFilter(e.target.value);
+                          clearImportValidationField("filters");
+                          clearImportValidationField("rangeOverlap");
+                        }}
+                        style={getInvalidInputStyle("filters")}
                       />
                     </label>
                     <label className="field">
@@ -1139,7 +1271,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                       <input
                         type="datetime-local"
                         value={mtimeToFilter}
-                        onChange={(e) => setMtimeToFilter(e.target.value)}
+                        onChange={(e) => {
+                          setMtimeToFilter(e.target.value);
+                          clearImportValidationField("filters");
+                          clearImportValidationField("rangeOverlap");
+                        }}
+                        style={getInvalidInputStyle("filters")}
                       />
                     </label>
                   </div>
@@ -1148,7 +1285,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                     <input
                       type="checkbox"
                       checked={allowRangeOverlap}
-                      onChange={(e) => setAllowRangeOverlap(e.target.checked)}
+                      onChange={(e) => {
+                        setAllowRangeOverlap(e.target.checked);
+                        if (e.target.checked) clearImportValidationField("rangeOverlap");
+                      }}
                       style={{ width: 16, height: 16, cursor: "pointer" }}
                     />
                     <span>Consenti sovrapposizione con range già importati</span>
@@ -1344,9 +1484,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
               checked={usaLavoroEsistente}
               onChange={(e) => {
                 setUsaLavoroEsistente(e.target.checked);
+                setImportValidationState([]);
                 if (!e.target.checked) {
                   setExistingJobId("");
                   setExistingJobSearch("");
+                  clearImportValidationField("nomeLavoro");
+                } else {
+                  clearImportValidationField("existingJobId");
                 }
               }}
               style={{ width: 16, height: 16, cursor: "pointer" }}
@@ -1368,7 +1512,14 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
 
               <label className="field">
                 <span>Seleziona lavoro esistente</span>
-                <select value={existingJobId} onChange={(e) => setExistingJobId(e.target.value)}>
+                <select
+                  value={existingJobId}
+                  onChange={(e) => {
+                    setExistingJobId(e.target.value);
+                    clearImportValidationField("existingJobId");
+                  }}
+                  style={getInvalidInputStyle("existingJobId")}
+                >
                   <option value="">-- seleziona --</option>
                   {existingJobsForSelect.map((job) => (
                     <option key={job.id} value={job.id}>
@@ -1390,9 +1541,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
               <input
                 type="text"
                 value={nomeLavoro}
-                onChange={(e) => setNomeLavoro(e.target.value)}
+                onChange={(e) => {
+                  setNomeLavoro(e.target.value);
+                  clearImportValidationField("nomeLavoro");
+                }}
                 placeholder="es. Maria Rossi Shooting"
                 disabled={usaLavoroEsistente}
+                style={getInvalidInputStyle("nomeLavoro")}
               />
             </label>
 
@@ -1401,7 +1556,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
               <input
                 type="date"
                 value={dataLavoro}
-                onChange={(e) => setDataLavoro(e.target.value)}
+                onChange={(e) => {
+                  setDataLavoro(e.target.value);
+                  clearImportValidationField("dataLavoro");
+                }}
+                style={getInvalidInputStyle("dataLavoro")}
               />
             </label>
           </div>
@@ -1411,8 +1570,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             <input
               type="text"
               value={autore}
-              onChange={(e) => setAutore(e.target.value)}
+              onChange={(e) => {
+                setAutore(e.target.value);
+                clearImportValidationField("autore");
+              }}
               placeholder="es. Gennaro"
+              style={getInvalidInputStyle("autore")}
             />
           </label>
 
@@ -1432,9 +1595,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
               <input
                 type="text"
                 value={destinazione}
-                onChange={(e) => setDestinazione(e.target.value)}
+                onChange={(e) => {
+                  setDestinazione(e.target.value);
+                  clearImportValidationField("destinazione");
+                }}
                 placeholder="C:\\Foto\\Lavori"
-                style={{ flex: 1 }}
+                style={{ flex: 1, ...getInvalidInputStyle("destinazione") }}
                 disabled={usaLavoroEsistente}
               />
               <button
@@ -1655,6 +1821,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           style={{ borderColor: "rgba(212, 163, 156, 0.4)", background: "rgba(212, 163, 156, 0.08)" }}
         >
           <p style={{ color: "var(--danger)" }}>⚠ {importError}</p>
+          {importValidationIssues.length > 0 && (
+            <ul className="import-validation-list">
+              {importValidationIssues.map((issue, idx) => (
+                <li key={`${issue.field}-${idx}`}>{issue.message}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
@@ -1703,6 +1876,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             Tutti i file verranno copiati nella cartella{" "}
             <code style={{ fontSize: "0.88rem" }}>{fotoDestPreview}</code> del lavoro.
           </p>
+          {!canImport && !importing && (
+            <p style={{ marginTop: "0.45rem", color: "var(--danger)", fontSize: "0.85rem" }}>
+              Mancano campi obbligatori. Premi IMPORTA per vedere esattamente cosa completare.
+            </p>
+          )}
           <label className="check-row" style={{ marginTop: "0.45rem", cursor: "pointer" }}>
             <input
               type="checkbox"
@@ -1736,7 +1914,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             className="primary-button"
             style={{ width: "100%" }}
             onClick={() => { void handleImport(false); }}
-            disabled={!canImport}
+            disabled={importing}
           >
             {importing ? "Importazione in corso…" : "▶ IMPORTA"}
           </button>

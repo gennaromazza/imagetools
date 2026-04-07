@@ -566,6 +566,32 @@ export function loadJobs(): Job[] {
   return [];
 }
 
+function normalizeJobLookupId(rawValue: string): string {
+  return rawValue.trim().toLowerCase();
+}
+
+function findJobByLookupId(jobs: Job[], requestedJobId: string): Job | null {
+  const normalizedRequestedId = normalizeJobLookupId(requestedJobId);
+  if (!normalizedRequestedId) return null;
+
+  const directMatch = jobs.find((job) => normalizeJobLookupId(job.id) === normalizedRequestedId);
+  if (directMatch) return directMatch;
+
+  if (!normalizedRequestedId.startsWith("fs:")) return null;
+
+  const requestedPath = normalizedRequestedId.slice(3);
+  if (!requestedPath) return null;
+
+  const byPathMatch = jobs.find((job) => {
+    try {
+      return path.resolve(job.percorsoCartella).toLowerCase() === requestedPath;
+    } catch {
+      return false;
+    }
+  });
+  return byPathMatch ?? null;
+}
+
 function writeJsonAtomic(filePath: string, value: unknown): void {
   const tempPath = `${filePath}.tmp`;
   const payload = JSON.stringify(value, null, 2);
@@ -1760,6 +1786,7 @@ const importHandler = async (req: Request, res: Response) => {
     mtimeFrom,
     mtimeTo,
   } = req.body as ImportRequest;
+  const requestedExistingJobId = typeof existingJobId === "string" ? existingJobId.trim() : "";
   const settings = loadSettings();
   const effectiveDestinazione = destinazione?.trim() || settings.defaultDestinazione.trim() || settings.archiveRoot.trim();
 
@@ -1767,7 +1794,7 @@ const importHandler = async (req: Request, res: Response) => {
   if (!sdPath || !dataLavoro || !autore?.trim()) {
     return void res.status(400).json({ error: "Campi obbligatori mancanti" });
   }
-  if (!existingJobId && (!nomeLavoro?.trim() || !effectiveDestinazione)) {
+  if (!requestedExistingJobId && (!nomeLavoro?.trim() || !effectiveDestinazione)) {
     return void res.status(400).json({ error: "Per nuovo lavoro servono nome lavoro e destinazione" });
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dataLavoro)) {
@@ -1778,7 +1805,7 @@ const importHandler = async (req: Request, res: Response) => {
   let destNorm = "";
   try {
     sdNorm = resolveAndValidate(sdPath);
-    if (!existingJobId) {
+    if (!requestedExistingJobId) {
       destNorm = resolveAndValidate(effectiveDestinazione);
     }
   } catch (e) {
@@ -1789,13 +1816,24 @@ const importHandler = async (req: Request, res: Response) => {
     return void res.status(400).json({ error: "Percorso SD non trovato: " + sdNorm });
   }
 
-  const jobsSnapshot = loadJobs();
-  const existingJob = existingJobId
-    ? jobsSnapshot.find((j) => j.id === existingJobId)
+  const registeredJobsSnapshot = cleanupMissingJobs();
+  let existingJob = requestedExistingJobId
+    ? findJobByLookupId(registeredJobsSnapshot, requestedExistingJobId)
     : null;
 
-  if (existingJobId && !existingJob) {
-    return void res.status(404).json({ error: "Lavoro esistente non trovato" });
+  if (!existingJob && requestedExistingJobId.startsWith("fs:")) {
+    const discoveredJobs = await discoverArchiveJobs(
+      settings.archiveRoot,
+      registeredJobsSnapshot,
+      settings.archiveHierarchy,
+    );
+    existingJob = findJobByLookupId(discoveredJobs, requestedExistingJobId);
+  }
+
+  if (requestedExistingJobId && !existingJob) {
+    return void res.status(404).json({
+      error: "Lavoro esistente non trovato. Aggiorna la lista e seleziona di nuovo il lavoro.",
+    });
   }
 
   const folderName = existingJob
@@ -2104,11 +2142,30 @@ const importHandler = async (req: Request, res: Response) => {
   // ── Save job ─────────────────────────────────────────────────────────────────
   let job: Job;
   if (existingJob) {
-    job = incrementJobFiles(existingJob.id, copiedCount, safeContrattoLink) ?? {
-      ...existingJob,
-      numeroFile: (existingJob.numeroFile ?? 0) + copiedCount,
-      contrattoLink: safeContrattoLink ?? existingJob.contrattoLink,
-    };
+    const updatedExisting = incrementJobFiles(existingJob.id, copiedCount, safeContrattoLink);
+    if (updatedExisting) {
+      job = updatedExisting;
+    } else {
+      const fallbackExisting: Job = {
+        ...existingJob,
+        numeroFile: (existingJob.numeroFile ?? 0) + copiedCount,
+        contrattoLink: safeContrattoLink ?? existingJob.contrattoLink,
+      };
+      if (existingJob.id.startsWith("fs:")) {
+        const normalizedAutore = sanitizeName(autore.trim());
+        job = {
+          ...fallbackExisting,
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          autore: fallbackExisting.autore === "Archivio" && normalizedAutore
+            ? normalizedAutore
+            : fallbackExisting.autore,
+          dataCreazione: fallbackExisting.dataCreazione || new Date().toISOString(),
+        };
+        appendJob(job);
+      } else {
+        job = fallbackExisting;
+      }
+    }
   } else {
     job = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
