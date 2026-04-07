@@ -50,9 +50,44 @@ const LOW_SPACE_FREE_RATIO_THRESHOLD = 0.1;
 const RECOMMENDED_TARGET_FREE_BYTES_THRESHOLD = 50 * 1024 * 1024 * 1024;
 const RECOMMENDED_FREE_SPACE_MULTIPLIER = 3;
 const POWERSHELL_MAX_BUFFER_BYTES = 1024 * 1024;
+const CACHE_WRITE_CONCURRENCY = 2;
 const execFileAsync = promisify(execFile);
 
 let settingsCache: DesktopShellSettings | null = null;
+let activeCacheDirectoryPromise: Promise<{
+  currentPath: string;
+  defaultPath: string;
+  usesCustomPath: boolean;
+}> | null = null;
+
+class AsyncSemaphore {
+  private active = 0;
+  private queue: Array<() => void> = [];
+  private readonly concurrency: number;
+
+  constructor(concurrency: number) {
+    this.concurrency = Math.max(1, concurrency);
+  }
+
+  async run<T>(task: () => Promise<T> | T): Promise<T> {
+    if (this.active >= this.concurrency) {
+      await new Promise<void>((resolve) => {
+        this.queue.push(resolve);
+      });
+    }
+
+    this.active += 1;
+    try {
+      return await task();
+    } finally {
+      this.active = Math.max(0, this.active - 1);
+      const next = this.queue.shift();
+      next?.();
+    }
+  }
+}
+
+const cacheWriteSemaphore = new AsyncSemaphore(CACHE_WRITE_CONCURRENCY);
 
 function getSettingsFilePath(): string {
   return join(app.getPath("userData"), SETTINGS_FILE_NAME);
@@ -143,7 +178,11 @@ async function ensureDirectory(directoryPath: string): Promise<string> {
   return normalizedPath;
 }
 
-async function getActiveCacheDirectory(): Promise<{
+function invalidateActiveCacheDirectory(): void {
+  activeCacheDirectoryPromise = null;
+}
+
+async function resolveActiveCacheDirectory(): Promise<{
   currentPath: string;
   defaultPath: string;
   usesCustomPath: boolean;
@@ -172,6 +211,21 @@ async function getActiveCacheDirectory(): Promise<{
       usesCustomPath: false,
     };
   }
+}
+
+async function getActiveCacheDirectory(): Promise<{
+  currentPath: string;
+  defaultPath: string;
+  usesCustomPath: boolean;
+}> {
+  if (!activeCacheDirectoryPromise) {
+    activeCacheDirectoryPromise = resolveActiveCacheDirectory().catch((error) => {
+      activeCacheDirectoryPromise = null;
+      throw error;
+    });
+  }
+
+  return activeCacheDirectoryPromise;
 }
 
 function buildCacheKey(
@@ -550,6 +604,7 @@ export async function setThumbnailCacheDirectory(directoryPath: string): Promise
     ...(await loadSettings()),
     thumbnailCacheDirectory: normalizedPath,
   });
+  invalidateActiveCacheDirectory();
   return getThumbnailCacheInfo();
 }
 
@@ -606,6 +661,7 @@ export async function migrateThumbnailCacheDirectory(
       ...(await loadSettings()),
       thumbnailCacheDirectory: normalizedTargetPath,
     });
+    invalidateActiveCacheDirectory();
 
     let removedSourceEntries = 0;
     let cleanupError: string | undefined;
@@ -652,6 +708,7 @@ export async function resetThumbnailCacheDirectory(): Promise<DesktopThumbnailCa
   const settings = await loadSettings();
   delete settings.thumbnailCacheDirectory;
   await saveSettings(settings);
+  invalidateActiveCacheDirectory();
   return getThumbnailCacheInfo();
 }
 
@@ -698,11 +755,13 @@ export async function storeThumbnailInDiskCache(
   rendered: DesktopRenderedImage,
 ): Promise<void> {
   try {
-    const { currentPath } = await getActiveCacheDirectory();
-    await writeFile(
-      getCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension, quality),
-      encodeThumbnailFile(rendered),
-    );
+    await cacheWriteSemaphore.run(async () => {
+      const { currentPath } = await getActiveCacheDirectory();
+      await writeFile(
+        getCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension, quality),
+        encodeThumbnailFile(rendered),
+      );
+    });
   } catch {
     // The disk cache is best-effort and should never block thumbnail delivery.
   }
@@ -749,11 +808,13 @@ export async function storePreviewInDiskCache(
   }
 
   try {
-    const { currentPath } = await getActiveCacheDirectory();
-    await writeFile(
-      getPreviewCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension),
-      encodeThumbnailFile(rendered),
-    );
+    await cacheWriteSemaphore.run(async () => {
+      const { currentPath } = await getActiveCacheDirectory();
+      await writeFile(
+        getPreviewCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension),
+        encodeThumbnailFile(rendered),
+      );
+    });
   } catch {
     // The disk cache is best-effort and should never block preview delivery.
   }

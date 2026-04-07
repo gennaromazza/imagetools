@@ -44,10 +44,18 @@ const PREVIEW_SOURCE_CACHE_MAX_BYTES = 96 * 1024 * 1024;
 const RENDERED_PREVIEW_CACHE_MAX_ENTRIES = 48;
 const RENDERED_PREVIEW_CACHE_MAX_BYTES = 160 * 1024 * 1024;
 const QUICK_PREVIEW_FRAME_MAX_ENTRIES = 128;
+const THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = 512;
+const THUMBNAIL_MEMORY_CACHE_MAX_BYTES = 256 * 1024 * 1024;
+const THUMBNAIL_BATCH_WINDOW_MS = 8;
+const THUMBNAIL_BATCH_MAX_ITEMS = 128;
+const RAW_EMBEDDED_RANGE_CACHE_MAX_ENTRIES = 20_000;
+const THUMBNAIL_PERF_LOG_INTERVAL = 200;
 const PERF_ENABLED = !app.isPackaged;
 const RAW_EXIFTOOL_MAX_PROCS = Math.max(2, Math.min(8, Math.ceil(availableParallelism() / 2)));
 const RAW_EXIFTOOL_TAGS = ["PreviewImage", "JpgFromRaw", "ThumbnailImage"] as const;
 const JPG_FROM_RAW_FIRST_EXTENSIONS = new Set([".nef", ".nrw", ".rw2"]);
+const STANDARD_DECODE_CONCURRENCY = Math.max(1, Math.min(availableParallelism(), 8));
+const RAW_DECODE_CONCURRENCY = Math.max(2, Math.min(Math.max(2, Math.floor(availableParallelism() / 2)), 4));
 
 const byteReadStats = {
   totalBytes: 0,
@@ -123,21 +131,184 @@ interface QuickPreviewFrameEntry {
   createdAt: number;
 }
 
+interface CachedEmbeddedJpegRange {
+  offset: number;
+  length: number;
+}
+
+interface BatchedThumbnailRequest {
+  dedupeKey: string;
+  absolutePath: string;
+  maxDimension: number;
+  quality: number;
+  sourceFileKey?: string;
+  resolvers: Array<(value: DesktopRenderedImage | null) => void>;
+}
+
+interface ResolvePreviewBufferOptions {
+  sourceFileKey?: string;
+  allowExifTool?: boolean;
+  allowFullRead?: boolean;
+}
+
 const previewSourceCache = new Map<string, ResolvedPreviewSource>();
 const previewSourcePromiseCache = new Map<string, Promise<ResolvedPreviewSourceResult | null>>();
 let previewSourceCacheTotalBytes = 0;
 const renderedPreviewCache = new Map<string, DesktopRenderedImage>();
 const renderedPreviewPromiseCache = new Map<string, Promise<DesktopPreviewRenderResult | null>>();
 let renderedPreviewCacheTotalBytes = 0;
+const thumbnailMemoryCache = new Map<string, DesktopRenderedImage>();
+let thumbnailMemoryCacheTotalBytes = 0;
+const rawEmbeddedRangeCache = new Map<string, CachedEmbeddedJpegRange>();
 const quickPreviewFrameStore = new Map<string, QuickPreviewFrameEntry>();
 const quickPreviewFrameTokenByCacheKey = new Map<string, string>();
+const thumbnailBatchQueue = new Map<string, BatchedThumbnailRequest>();
+const thumbnailBatchOrder: string[] = [];
+const inFlightThumbnailSingleFlight = new Map<string, Promise<DesktopRenderedImage | null>>();
+let thumbnailBatchTimer: ReturnType<typeof setTimeout> | null = null;
+const thumbnailPerfMetrics = {
+  requested: 0,
+  singleFlightHit: 0,
+  cacheHitRam: 0,
+  cacheHitDisk: 0,
+  rawOffsetHit: 0,
+};
 const rawPreviewExifTool = new ExifTool({
   maxProcs: RAW_EXIFTOOL_MAX_PROCS,
   spawnTimeoutMillis: 60_000,
   taskTimeoutMillis: 60_000,
 });
 
+class AsyncSemaphore {
+  private active = 0;
+  private queue: Array<() => void> = [];
+  private readonly concurrency: number;
+
+  constructor(concurrency: number) {
+    this.concurrency = Math.max(1, concurrency);
+  }
+
+  async run<T>(task: () => Promise<T> | T): Promise<T> {
+    if (this.active >= this.concurrency) {
+      await new Promise<void>((resolve) => {
+        this.queue.push(resolve);
+      });
+    }
+
+    this.active += 1;
+    try {
+      return await task();
+    } finally {
+      this.active = Math.max(0, this.active - 1);
+      const next = this.queue.shift();
+      next?.();
+    }
+  }
+}
+
+const standardDecodeSemaphore = new AsyncSemaphore(STANDARD_DECODE_CONCURRENCY);
+const rawDecodeSemaphore = new AsyncSemaphore(RAW_DECODE_CONCURRENCY);
+
 export const QUICK_PREVIEW_PROTOCOL_SCHEME = "filex-preview";
+
+function logThumbnailPerfMetricsMaybe(): void {
+  if (!PERF_ENABLED) {
+    return;
+  }
+
+  if (thumbnailPerfMetrics.requested > 0 && thumbnailPerfMetrics.requested % THUMBNAIL_PERF_LOG_INTERVAL === 0) {
+    console.log(
+      `[PERF] thumbnail metrics                        : req ${thumbnailPerfMetrics.requested}` +
+      ` | ram-hit ${thumbnailPerfMetrics.cacheHitRam}` +
+      ` | disk-hit ${thumbnailPerfMetrics.cacheHitDisk}` +
+      ` | single-flight-hit ${thumbnailPerfMetrics.singleFlightHit}` +
+      ` | raw-offset-hit ${thumbnailPerfMetrics.rawOffsetHit}`,
+    );
+  }
+}
+
+function recordThumbnailRequest(): void {
+  thumbnailPerfMetrics.requested += 1;
+  logThumbnailPerfMetricsMaybe();
+}
+
+function recordThumbnailMetric(key: "singleFlightHit" | "cacheHitRam" | "cacheHitDisk" | "rawOffsetHit"): void {
+  thumbnailPerfMetrics[key] += 1;
+  logThumbnailPerfMetricsMaybe();
+}
+
+function getPreviewSourceCacheKey(absolutePath: string, sourceFileKey?: string): string {
+  return sourceFileKey || absolutePath;
+}
+
+function getRenderedPreviewCacheKey(
+  absolutePath: string,
+  maxDimension: number,
+  sourceFileKey?: string,
+): string {
+  return `${getPreviewSourceCacheKey(absolutePath, sourceFileKey)}::${Math.max(0, Math.round(maxDimension))}`;
+}
+
+function buildThumbnailDedupeKey(
+  absolutePath: string,
+  maxDimension: number,
+  quality: number,
+  sourceFileKey?: string,
+): string {
+  const normalizedQuality = Math.max(1, Math.min(100, Math.round(quality * 100)));
+  return `${sourceFileKey ?? absolutePath}::${Math.max(0, Math.round(maxDimension))}::${normalizedQuality}`;
+}
+
+function touchRawEmbeddedRangeCacheEntry(
+  cacheKey: string,
+  entry: CachedEmbeddedJpegRange,
+): CachedEmbeddedJpegRange {
+  rawEmbeddedRangeCache.delete(cacheKey);
+  rawEmbeddedRangeCache.set(cacheKey, entry);
+  return entry;
+}
+
+function getCachedRawEmbeddedRange(cacheKey: string | undefined): CachedEmbeddedJpegRange | null {
+  if (!cacheKey) {
+    return null;
+  }
+
+  const cached = rawEmbeddedRangeCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  return touchRawEmbeddedRangeCacheEntry(cacheKey, cached);
+}
+
+function setCachedRawEmbeddedRange(cacheKey: string | undefined, entry: CachedEmbeddedJpegRange): void {
+  if (!cacheKey) {
+    return;
+  }
+
+  rawEmbeddedRangeCache.delete(cacheKey);
+  rawEmbeddedRangeCache.set(cacheKey, entry);
+  while (rawEmbeddedRangeCache.size > RAW_EMBEDDED_RANGE_CACHE_MAX_ENTRIES) {
+    const oldest = rawEmbeddedRangeCache.keys().next().value as string | undefined;
+    if (!oldest) {
+      break;
+    }
+
+    rawEmbeddedRangeCache.delete(oldest);
+  }
+}
+
+function deleteCachedRawEmbeddedRange(cacheKey: string | undefined): void {
+  if (!cacheKey) {
+    return;
+  }
+
+  rawEmbeddedRangeCache.delete(cacheKey);
+}
+
+function runDecodeTask<T>(isRaw: boolean, task: () => Promise<T> | T): Promise<T> {
+  return (isRaw ? rawDecodeSemaphore : standardDecodeSemaphore).run(task);
+}
 
 function touchPreviewSourceCacheEntry(
   cacheKey: string,
@@ -192,6 +363,53 @@ function getCachedRenderedPreview(cacheKey: string): DesktopRenderedImage | null
   }
 
   return touchRenderedPreviewCacheEntry(cacheKey, cached);
+}
+
+function touchThumbnailMemoryCacheEntry(
+  cacheKey: string,
+  entry: DesktopRenderedImage,
+): DesktopRenderedImage {
+  thumbnailMemoryCache.delete(cacheKey);
+  thumbnailMemoryCache.set(cacheKey, entry);
+  return entry;
+}
+
+function getCachedThumbnailFromMemory(cacheKey: string): DesktopRenderedImage | null {
+  const cached = thumbnailMemoryCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  recordThumbnailMetric("cacheHitRam");
+  return touchThumbnailMemoryCacheEntry(cacheKey, cached);
+}
+
+function trimThumbnailMemoryCache(): void {
+  while (
+    thumbnailMemoryCache.size > THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES ||
+    thumbnailMemoryCacheTotalBytes > THUMBNAIL_MEMORY_CACHE_MAX_BYTES
+  ) {
+    const oldest = thumbnailMemoryCache.entries().next().value as [string, DesktopRenderedImage] | undefined;
+    if (!oldest) {
+      break;
+    }
+
+    thumbnailMemoryCache.delete(oldest[0]);
+    thumbnailMemoryCacheTotalBytes = Math.max(0, thumbnailMemoryCacheTotalBytes - oldest[1].bytes.byteLength);
+  }
+}
+
+function cacheThumbnailInMemory(cacheKey: string, rendered: DesktopRenderedImage): DesktopRenderedImage {
+  const existing = thumbnailMemoryCache.get(cacheKey);
+  if (existing) {
+    thumbnailMemoryCacheTotalBytes = Math.max(0, thumbnailMemoryCacheTotalBytes - existing.bytes.byteLength);
+  }
+
+  thumbnailMemoryCache.delete(cacheKey);
+  thumbnailMemoryCache.set(cacheKey, rendered);
+  thumbnailMemoryCacheTotalBytes += rendered.bytes.byteLength;
+  trimThumbnailMemoryCache();
+  return rendered;
 }
 
 function trimRenderedPreviewCache(): void {
@@ -301,10 +519,6 @@ function getMimeTypeForBuffer(buffer: Buffer): string {
   return "image/jpeg";
 }
 
-function getRenderedPreviewCacheKey(absolutePath: string, maxDimension: number): string {
-  return `${absolutePath}::${Math.max(0, Math.round(maxDimension))}`;
-}
-
 async function readFileSlice(
   handle: FileHandle,
   offset: number,
@@ -343,7 +557,33 @@ function toArrayBufferView(buffer: Buffer): ArrayBuffer {
 async function tryReadEmbeddedPreviewBuffer(
   handle: FileHandle,
   fileSize: number,
+  sourceCacheKey?: string,
 ): Promise<Buffer | null> {
+  const cachedRange = getCachedRawEmbeddedRange(sourceCacheKey);
+  if (cachedRange) {
+    const cachedEnd = cachedRange.offset + cachedRange.length;
+    const cachedRangeLooksValid =
+      cachedRange.offset >= 0
+      && cachedRange.length >= MIN_EMBEDDED_JPEG_BYTES
+      && cachedRange.length <= RAW_FAST_PREVIEW_MAX_BYTES
+      && cachedEnd <= fileSize;
+
+    if (cachedRangeLooksValid) {
+      const cachedPreviewBuffer = await readFileSlice(handle, cachedRange.offset, cachedRange.length);
+      recordDesktopBytesRead("raw", cachedPreviewBuffer.byteLength);
+      if (
+        cachedPreviewBuffer.byteLength >= MIN_EMBEDDED_JPEG_BYTES
+        && cachedPreviewBuffer[0] === 0xff
+        && cachedPreviewBuffer[1] === 0xd8
+      ) {
+        recordThumbnailMetric("rawOffsetHit");
+        return cachedPreviewBuffer;
+      }
+    }
+
+    deleteCachedRawEmbeddedRange(sourceCacheKey);
+  }
+
   const headerLength = Math.min(fileSize, RAW_HEADER_READ_BYTES);
   if (headerLength < 12) {
     return null;
@@ -361,6 +601,11 @@ async function tryReadEmbeddedPreviewBuffer(
   ) {
     return null;
   }
+
+  setCachedRawEmbeddedRange(sourceCacheKey, {
+    offset: candidate.offset,
+    length: candidate.length,
+  });
 
   const previewBuffer = await readFileSlice(handle, candidate.offset, candidate.length);
   recordDesktopBytesRead("raw", previewBuffer.byteLength);
@@ -382,6 +627,14 @@ function resolvePreviewSourceFromBuffer(
     width: decoded.width,
     height: decoded.height,
   };
+}
+
+function resolvePreviewSourceFromBufferWithBudget(
+  buffer: Buffer,
+  mimeType: string,
+  isRaw: boolean,
+): Promise<ResolvedPreviewSource | null> {
+  return runDecodeTask(isRaw, () => resolvePreviewSourceFromBuffer(buffer, mimeType));
 }
 
 async function tryExtractEmbeddedPreviewFromPrefix(
@@ -418,9 +671,10 @@ async function tryExtractEmbeddedPreviewWithExifTool(
         continue;
       }
 
-      const resolved = resolvePreviewSourceFromBuffer(
+      const resolved = await resolvePreviewSourceFromBufferWithBudget(
         previewBuffer,
         getMimeTypeForBuffer(previewBuffer),
+        true,
       );
       if (resolved) {
         return resolved;
@@ -433,13 +687,21 @@ async function tryExtractEmbeddedPreviewWithExifTool(
   return null;
 }
 
-async function resolvePreviewBuffer(absolutePath: string): Promise<ResolvedPreviewSourceResult | null> {
-  const cached = getCachedPreviewSource(absolutePath);
+async function resolvePreviewBuffer(
+  absolutePath: string,
+  options: ResolvePreviewBufferOptions = {},
+): Promise<ResolvedPreviewSourceResult | null> {
+  const sourceFileKey = options.sourceFileKey;
+  const allowExifTool = options.allowExifTool !== false;
+  const allowFullRead = options.allowFullRead !== false;
+  const sourceCacheKey = getPreviewSourceCacheKey(absolutePath, sourceFileKey);
+
+  const cached = getCachedPreviewSource(sourceCacheKey);
   if (cached) {
     return cached;
   }
 
-  const pending = previewSourcePromiseCache.get(absolutePath);
+  const pending = previewSourcePromiseCache.get(sourceCacheKey);
   if (pending) {
     return pending;
   }
@@ -452,13 +714,14 @@ async function resolvePreviewBuffer(absolutePath: string): Promise<ResolvedPrevi
       if (isBrowserDecodablePath(absolutePath)) {
         const fileBuffer = await handle.readFile();
         recordDesktopBytesRead("standard", fileBuffer.byteLength);
-        const resolved = resolvePreviewSourceFromBuffer(
+        const resolved = await resolvePreviewSourceFromBufferWithBudget(
           fileBuffer,
           getMimeTypeForPath(absolutePath),
+          false,
         );
         return resolved
           ? {
-              source: cachePreviewSource(absolutePath, resolved),
+              source: cachePreviewSource(sourceCacheKey, resolved),
               origin: "source-file",
               cacheHit: false,
             }
@@ -466,37 +729,51 @@ async function resolvePreviewBuffer(absolutePath: string): Promise<ResolvedPrevi
       }
 
       const stats = await handle.stat();
-      const fastPreviewBuffer = await tryReadEmbeddedPreviewBuffer(handle, stats.size);
+      const fastPreviewBuffer = await tryReadEmbeddedPreviewBuffer(handle, stats.size, sourceCacheKey);
       if (fastPreviewBuffer) {
-        const resolved = resolvePreviewSourceFromBuffer(fastPreviewBuffer, "image/jpeg");
+        const resolved = await resolvePreviewSourceFromBufferWithBudget(
+          fastPreviewBuffer,
+          "image/jpeg",
+          true,
+        );
         if (resolved) {
           return {
-            source: cachePreviewSource(absolutePath, resolved),
+            source: cachePreviewSource(sourceCacheKey, resolved),
             origin: "embedded-preview",
             cacheHit: false,
           };
         }
       }
 
-      const exifToolPreview = await tryExtractEmbeddedPreviewWithExifTool(absolutePath);
-      if (exifToolPreview) {
-        return {
-          source: cachePreviewSource(absolutePath, exifToolPreview),
-          origin: "embedded-preview",
-          cacheHit: false,
-        };
+      if (allowExifTool) {
+        const exifToolPreview = await tryExtractEmbeddedPreviewWithExifTool(absolutePath);
+        if (exifToolPreview) {
+          return {
+            source: cachePreviewSource(sourceCacheKey, exifToolPreview),
+            origin: "embedded-preview",
+            cacheHit: false,
+          };
+        }
       }
 
       const prefixPreviewBuffer = await tryExtractEmbeddedPreviewFromPrefix(handle, stats.size);
       if (prefixPreviewBuffer) {
-        const resolved = resolvePreviewSourceFromBuffer(prefixPreviewBuffer, "image/jpeg");
+        const resolved = await resolvePreviewSourceFromBufferWithBudget(
+          prefixPreviewBuffer,
+          "image/jpeg",
+          true,
+        );
         if (resolved) {
           return {
-            source: cachePreviewSource(absolutePath, resolved),
+            source: cachePreviewSource(sourceCacheKey, resolved),
             origin: "embedded-preview",
             cacheHit: false,
           };
         }
+      }
+
+      if (!allowFullRead) {
+        return null;
       }
 
       const fileBuffer = await handle.readFile();
@@ -508,10 +785,14 @@ async function resolvePreviewBuffer(absolutePath: string): Promise<ResolvedPrevi
         return null;
       }
 
-      const resolved = resolvePreviewSourceFromBuffer(Buffer.from(jpegBuffer), "image/jpeg");
+      const resolved = await resolvePreviewSourceFromBufferWithBudget(
+        Buffer.from(jpegBuffer),
+        "image/jpeg",
+        true,
+      );
       return resolved
         ? {
-            source: cachePreviewSource(absolutePath, resolved),
+            source: cachePreviewSource(sourceCacheKey, resolved),
             origin: "embedded-preview",
             cacheHit: false,
           }
@@ -519,12 +800,12 @@ async function resolvePreviewBuffer(absolutePath: string): Promise<ResolvedPrevi
     } catch {
       return null;
     } finally {
-      previewSourcePromiseCache.delete(absolutePath);
+      previewSourcePromiseCache.delete(sourceCacheKey);
       await handle?.close().catch(() => {});
     }
   })();
 
-  previewSourcePromiseCache.set(absolutePath, task);
+  previewSourcePromiseCache.set(sourceCacheKey, task);
   return task;
 }
 
@@ -590,7 +871,8 @@ async function getDesktopPreviewInternal(
   maxDimension = 0,
   sourceFileKey?: string,
 ): Promise<DesktopPreviewRenderResult | null> {
-  const cacheKey = getRenderedPreviewCacheKey(absolutePath, maxDimension);
+  const cacheKey = getRenderedPreviewCacheKey(absolutePath, maxDimension, sourceFileKey);
+  const rawPath = isRawPath(absolutePath);
   const cachedRendered = getCachedRenderedPreview(cacheKey);
   if (cachedRendered) {
     return {
@@ -617,8 +899,8 @@ async function getDesktopPreviewInternal(
       };
     }
 
-    if (!isRawPath(absolutePath)) {
-      const nativePreview = await renderNativePreviewFromPath(absolutePath, maxDimension);
+    if (!rawPath) {
+      const nativePreview = await runDecodeTask(false, () => renderNativePreviewFromPath(absolutePath, maxDimension));
       if (nativePreview) {
         const rendered = cacheRenderedPreview(cacheKey, nativePreview);
         void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
@@ -631,9 +913,9 @@ async function getDesktopPreviewInternal(
       }
     }
 
-    const source = await resolvePreviewBuffer(absolutePath);
-    if (!source && isRawPath(absolutePath)) {
-      const nativePreview = await renderNativePreviewFromPath(absolutePath, maxDimension);
+    const source = await resolvePreviewBuffer(absolutePath, { sourceFileKey });
+    if (!source && rawPath) {
+      const nativePreview = await runDecodeTask(true, () => renderNativePreviewFromPath(absolutePath, maxDimension));
       if (nativePreview) {
         const rendered = cacheRenderedPreview(cacheKey, nativePreview);
         void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
@@ -666,33 +948,35 @@ async function getDesktopPreviewInternal(
       };
     }
 
-    const decoded = decodeImage(source.source.buffer);
-    if (!decoded) {
-      return null;
-    }
+    return runDecodeTask(rawPath, async () => {
+      const decoded = decodeImage(source.source.buffer);
+      if (!decoded) {
+        return null;
+      }
 
-    const scale = Math.min(1, maxDimension / Math.max(decoded.width, decoded.height));
-    const targetWidth = Math.max(1, Math.round(decoded.width * scale));
-    const targetHeight = Math.max(1, Math.round(decoded.height * scale));
-    const resized = decoded.decoded.resize({
-      width: targetWidth,
-      height: targetHeight,
-      quality: "good",
+      const scale = Math.min(1, maxDimension / Math.max(decoded.width, decoded.height));
+      const targetWidth = Math.max(1, Math.round(decoded.width * scale));
+      const targetHeight = Math.max(1, Math.round(decoded.height * scale));
+      const resized = decoded.decoded.resize({
+        width: targetWidth,
+        height: targetHeight,
+        quality: "good",
+      });
+      const previewBuffer = resized.toJPEG(90);
+      const rendered = cacheRenderedPreview(cacheKey, {
+        bytes: toOwnedUint8Array(previewBuffer),
+        mimeType: "image/jpeg",
+        width: targetWidth,
+        height: targetHeight,
+      });
+      void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
+      return {
+        rendered,
+        source: source.origin,
+        cacheHit: source.cacheHit,
+        cacheKey,
+      };
     });
-    const previewBuffer = resized.toJPEG(90);
-    const rendered = cacheRenderedPreview(cacheKey, {
-      bytes: toOwnedUint8Array(previewBuffer),
-      mimeType: "image/jpeg",
-      width: targetWidth,
-      height: targetHeight,
-    });
-    void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
-    return {
-      rendered,
-      source: source.origin,
-      cacheHit: source.cacheHit,
-      cacheKey,
-    };
   })().finally(() => {
     renderedPreviewPromiseCache.delete(cacheKey);
   });
@@ -837,48 +1121,11 @@ export function releaseDesktopQuickPreviewFrames(tokens: string[]): void {
   }
 }
 
-export async function getDesktopThumbnail(
-  absolutePath: string,
+function renderThumbnailFromResolvedSource(
+  source: ResolvedPreviewSourceResult,
   maxDimension: number,
   quality: number,
-  sourceFileKey?: string,
-): Promise<DesktopRenderedImage | null> {
-  const cached = await getCachedThumbnailsFromDisk(
-    [{ id: absolutePath, absolutePath, sourceFileKey }],
-    maxDimension,
-    quality,
-  );
-  const cachedHit = cached[0];
-  if (cachedHit) {
-    return {
-      bytes: cachedHit.bytes,
-      mimeType: cachedHit.mimeType,
-      width: cachedHit.width,
-      height: cachedHit.height,
-    };
-  }
-
-  if (!isRawPath(absolutePath)) {
-    const nativeRendered = await renderNativePreviewFromPath(absolutePath, maxDimension);
-    if (nativeRendered) {
-      void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, nativeRendered);
-      return nativeRendered;
-    }
-  }
-
-  const source = await resolvePreviewBuffer(absolutePath);
-  if (!source && isRawPath(absolutePath)) {
-    const nativeRendered = await renderNativePreviewFromPath(absolutePath, maxDimension);
-    if (nativeRendered) {
-      void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, nativeRendered);
-      return nativeRendered;
-    }
-  }
-
-  if (!source) {
-    return null;
-  }
-
+): DesktopRenderedImage | null {
   const decoded = decodeImage(source.source.buffer);
   if (!decoded) {
     return null;
@@ -894,14 +1141,216 @@ export async function getDesktopThumbnail(
   });
   const jpegQuality = Math.max(1, Math.min(100, Math.round(quality * 100)));
   const thumbnailBuffer = resized.toJPEG(jpegQuality);
-  const rendered: DesktopRenderedImage = {
+  return {
     bytes: toOwnedUint8Array(thumbnailBuffer),
     mimeType: "image/jpeg",
     width: source.source.width,
     height: source.source.height,
   };
-  void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, rendered);
-  return rendered;
+}
+
+async function computeDesktopThumbnail(
+  absolutePath: string,
+  maxDimension: number,
+  quality: number,
+  sourceFileKey?: string,
+): Promise<DesktopRenderedImage | null> {
+  const dedupeKey = buildThumbnailDedupeKey(absolutePath, maxDimension, quality, sourceFileKey);
+  const memoryCached = getCachedThumbnailFromMemory(dedupeKey);
+  if (memoryCached) {
+    return memoryCached;
+  }
+
+  const cached = await getCachedThumbnailsFromDisk(
+    [{ id: absolutePath, absolutePath, sourceFileKey }],
+    maxDimension,
+    quality,
+  );
+  const cachedHit = cached[0];
+  if (cachedHit) {
+    recordThumbnailMetric("cacheHitDisk");
+    return cacheThumbnailInMemory(dedupeKey, {
+      bytes: cachedHit.bytes,
+      mimeType: cachedHit.mimeType,
+      width: cachedHit.width,
+      height: cachedHit.height,
+    });
+  }
+
+  const rawPath = isRawPath(absolutePath);
+
+  if (!rawPath) {
+    const nativeRendered = await runDecodeTask(false, () => renderNativePreviewFromPath(absolutePath, maxDimension));
+    if (nativeRendered) {
+      const rendered = cacheThumbnailInMemory(dedupeKey, nativeRendered);
+      void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, rendered);
+      return rendered;
+    }
+
+    const source = await resolvePreviewBuffer(absolutePath, {
+      sourceFileKey,
+      allowExifTool: false,
+    });
+    if (!source) {
+      return null;
+    }
+
+    const rendered = await runDecodeTask(false, () => renderThumbnailFromResolvedSource(source, maxDimension, quality));
+    if (!rendered) {
+      return null;
+    }
+
+    const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
+    void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
+    return cachedRendered;
+  }
+
+  let source = await resolvePreviewBuffer(absolutePath, {
+    sourceFileKey,
+    allowExifTool: false,
+    allowFullRead: false,
+  });
+
+  if (!source) {
+    const nativeRendered = await runDecodeTask(true, () => renderNativePreviewFromPath(absolutePath, maxDimension));
+    if (nativeRendered) {
+      const rendered = cacheThumbnailInMemory(dedupeKey, nativeRendered);
+      void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, rendered);
+      return rendered;
+    }
+  }
+
+  if (!source) {
+    source = await resolvePreviewBuffer(absolutePath, {
+      sourceFileKey,
+      allowExifTool: false,
+      allowFullRead: true,
+    });
+  }
+
+  if (!source) {
+    return null;
+  }
+
+  const rendered = await runDecodeTask(true, () => renderThumbnailFromResolvedSource(source, maxDimension, quality));
+  if (!rendered) {
+    return null;
+  }
+
+  const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
+  void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
+  return cachedRendered;
+}
+
+function dispatchBatchedThumbnailRequest(request: BatchedThumbnailRequest): void {
+  const existingInFlight = inFlightThumbnailSingleFlight.get(request.dedupeKey);
+  if (existingInFlight) {
+    recordThumbnailMetric("singleFlightHit");
+    existingInFlight.then((value) => {
+      for (const resolve of request.resolvers) {
+        resolve(value);
+      }
+    });
+    return;
+  }
+
+  const task = computeDesktopThumbnail(
+    request.absolutePath,
+    request.maxDimension,
+    request.quality,
+    request.sourceFileKey,
+  )
+    .catch(() => null)
+    .finally(() => {
+      inFlightThumbnailSingleFlight.delete(request.dedupeKey);
+    });
+
+  inFlightThumbnailSingleFlight.set(request.dedupeKey, task);
+
+  task.then((value) => {
+    for (const resolve of request.resolvers) {
+      resolve(value);
+    }
+  });
+}
+
+function scheduleThumbnailBatchFlush(): void {
+  if (thumbnailBatchTimer !== null) {
+    return;
+  }
+
+  thumbnailBatchTimer = setTimeout(() => {
+    thumbnailBatchTimer = null;
+    flushThumbnailBatch();
+  }, THUMBNAIL_BATCH_WINDOW_MS);
+}
+
+function flushThumbnailBatch(): void {
+  const keys = thumbnailBatchOrder.splice(0, THUMBNAIL_BATCH_MAX_ITEMS);
+  for (const key of keys) {
+    const request = thumbnailBatchQueue.get(key);
+    if (!request) {
+      continue;
+    }
+
+    thumbnailBatchQueue.delete(key);
+    dispatchBatchedThumbnailRequest(request);
+  }
+
+  if (thumbnailBatchOrder.length > 0) {
+    scheduleThumbnailBatchFlush();
+  }
+}
+
+export function getDesktopThumbnail(
+  absolutePath: string,
+  maxDimension: number,
+  quality: number,
+  sourceFileKey?: string,
+): Promise<DesktopRenderedImage | null> {
+  recordThumbnailRequest();
+
+  const dedupeKey = buildThumbnailDedupeKey(absolutePath, maxDimension, quality, sourceFileKey);
+  const cachedInMemory = getCachedThumbnailFromMemory(dedupeKey);
+  if (cachedInMemory) {
+    return Promise.resolve(cachedInMemory);
+  }
+
+  const existingInFlight = inFlightThumbnailSingleFlight.get(dedupeKey);
+  if (existingInFlight) {
+    recordThumbnailMetric("singleFlightHit");
+    return existingInFlight;
+  }
+
+  return new Promise<DesktopRenderedImage | null>((resolve) => {
+    const pending = thumbnailBatchQueue.get(dedupeKey);
+    if (pending) {
+      recordThumbnailMetric("singleFlightHit");
+      pending.resolvers.push(resolve);
+      return;
+    }
+
+    thumbnailBatchQueue.set(dedupeKey, {
+      dedupeKey,
+      absolutePath,
+      maxDimension,
+      quality,
+      sourceFileKey,
+      resolvers: [resolve],
+    });
+    thumbnailBatchOrder.push(dedupeKey);
+
+    if (thumbnailBatchOrder.length >= THUMBNAIL_BATCH_MAX_ITEMS) {
+      if (thumbnailBatchTimer !== null) {
+        clearTimeout(thumbnailBatchTimer);
+        thumbnailBatchTimer = null;
+      }
+      queueMicrotask(() => flushThumbnailBatch());
+      return;
+    }
+
+    scheduleThumbnailBatchFlush();
+  });
 }
 
 export function getDesktopDisplayName(absolutePath: string): string {
@@ -909,8 +1358,23 @@ export function getDesktopDisplayName(absolutePath: string): string {
 }
 
 export async function shutdownDesktopImageService(): Promise<void> {
+  if (thumbnailBatchTimer !== null) {
+    clearTimeout(thumbnailBatchTimer);
+    thumbnailBatchTimer = null;
+  }
+
   previewSourcePromiseCache.clear();
+  previewSourceCache.clear();
+  previewSourceCacheTotalBytes = 0;
   renderedPreviewPromiseCache.clear();
+  renderedPreviewCache.clear();
+  renderedPreviewCacheTotalBytes = 0;
+  thumbnailMemoryCache.clear();
+  thumbnailMemoryCacheTotalBytes = 0;
+  rawEmbeddedRangeCache.clear();
+  thumbnailBatchQueue.clear();
+  thumbnailBatchOrder.splice(0, thumbnailBatchOrder.length);
+  inFlightThumbnailSingleFlight.clear();
   quickPreviewFrameStore.clear();
   quickPreviewFrameTokenByCacheKey.clear();
   await rawPreviewExifTool.end().catch(() => {});
