@@ -154,3 +154,30 @@ export function getDesktopToolOrDefault(value: string | undefined): DesktopToolD
 
   return desktopToolManifest["photo-selector-app"];
 }
+
+function normalizeRuntimeToken(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+export function findDesktopToolByRuntimeToken(value: string | undefined): DesktopToolDescriptor | null {
+  if (!value) return null;
+  const token = normalizeRuntimeToken(value);
+  if (!token) return null;
+
+  for (const descriptor of Object.values(desktopToolManifest)) {
+    if (normalizeRuntimeToken(descriptor.id) === token) {
+      return descriptor;
+    }
+    if (normalizeRuntimeToken(descriptor.executableName) === token) {
+      return descriptor;
+    }
+    if (normalizeRuntimeToken(descriptor.productName) === token) {
+      return descriptor;
+    }
+    if (normalizeRuntimeToken(descriptor.displayName) === token) {
+      return descriptor;
+    }
+  }
+
+  return null;
+}

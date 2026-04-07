@@ -22,6 +22,7 @@ if not exist "node_modules" (
 )
 
 echo Avvio Archivio Flow...
+set "ARCHIVIO_FLOW_DATA_DIR=%~dp0apps\archivio-flow\server\data"
 call npm run dev:all:archivio-flow
 
 if errorlevel 1 (

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   DesktopAiSidecarStatus,
@@ -77,9 +77,30 @@ import {
   listAvailableTools,
   openInstalledTool,
 } from "./updater.js";
-import { getDesktopToolOrDefault } from "./tool-manifest.js";
+import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault } from "./tool-manifest.js";
 
-const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
+function resolveRequestedTool() {
+  const fromEnv = getDesktopToolOrDefault(process.env.FILEX_TOOL);
+  if (process.env.FILEX_TOOL) {
+    return fromEnv;
+  }
+
+  const executableBaseName = basename(process.execPath, parse(process.execPath).ext);
+  const fromExecutable = findDesktopToolByRuntimeToken(executableBaseName);
+  if (fromExecutable) {
+    return fromExecutable;
+  }
+
+  const appName = app.getName();
+  const fromAppName = findDesktopToolByRuntimeToken(appName);
+  if (fromAppName) {
+    return fromAppName;
+  }
+
+  return fromEnv;
+}
+
+const requestedTool = resolveRequestedTool();
 const MAX_DESKTOP_DRAG_OUT_FILES = 25;
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";

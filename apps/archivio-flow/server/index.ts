@@ -1438,6 +1438,16 @@ const getImportProgressHandler = (_req: Request, res: Response) => {
 app.get("/api/import-progress", getImportProgressHandler);
 
 /**
+ * POST /api/import-cancel
+ * Requests cancellation for the active import operation.
+ */
+const cancelImportHandler = async (_req: Request, res: Response) => {
+  const result = await cancelImportService();
+  res.json(result);
+};
+app.post("/api/import-cancel", cancelImportHandler);
+
+/**
  * GET /api/low-quality-progress
  * Returns progress snapshot for BASSA_QUALITA generation.
  */
