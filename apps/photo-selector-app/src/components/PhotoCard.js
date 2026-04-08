@@ -18,7 +18,7 @@ function areLabelArraysEqual(left, right) {
     }
     return true;
 }
-export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, onExternalDragStart, canExternalDrag = false, customLabelColors = {}, customLabelShortcuts = {}, disableNonEssentialUi = false, editable, }) {
+export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, onExternalDragStart, canExternalDrag = false, customLabelColors = {}, customLabelShortcuts = {}, disableNonEssentialUi = false, batchPulseToken = 0, batchPulseKind = null, editable, }) {
     notePhotoCardRender(photo.id);
     const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
     const rating = getAssetRating(photo);
@@ -32,6 +32,9 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
     const feedbackTimeoutRef = useRef(null);
     const feedbackTokenRef = useRef(0);
     const [feedback, setFeedback] = useState(null);
+    const batchPulseTimeoutRef = useRef(null);
+    const lastBatchPulseTokenRef = useRef(0);
+    const [activeBatchPulseKind, setActiveBatchPulseKind] = useState(null);
     const hoverTimerRef = useRef(null);
     const [hoverPos, setHoverPos] = useState(null);
     const [isToolbarVisible, setIsToolbarVisible] = useState(isSelected);
@@ -111,6 +114,29 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
         }, 950);
     }, [colorLabel, customLabels, disableNonEssentialUi, pickStatus, rating]);
     useEffect(() => {
+        if (!batchPulseToken || batchPulseToken === lastBatchPulseTokenRef.current) {
+            return;
+        }
+        lastBatchPulseTokenRef.current = batchPulseToken;
+        setActiveBatchPulseKind(batchPulseKind);
+        if (wrapperRef.current) {
+            const el = wrapperRef.current;
+            el.classList.remove("photo-card__image-wrapper--batch-pulse");
+            el.classList.remove("photo-card__image-wrapper--batch-pulse-lite");
+            void el.offsetWidth;
+            el.classList.add(disableNonEssentialUi
+                ? "photo-card__image-wrapper--batch-pulse-lite"
+                : "photo-card__image-wrapper--batch-pulse");
+        }
+        if (batchPulseTimeoutRef.current !== null) {
+            window.clearTimeout(batchPulseTimeoutRef.current);
+        }
+        batchPulseTimeoutRef.current = window.setTimeout(() => {
+            setActiveBatchPulseKind((current) => (current === batchPulseKind ? null : current));
+            batchPulseTimeoutRef.current = null;
+        }, 1200);
+    }, [batchPulseKind, batchPulseToken, disableNonEssentialUi]);
+    useEffect(() => {
         if (isSelected) {
             setIsToolbarVisible(true);
         }
@@ -132,6 +158,9 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
         return () => {
             if (feedbackTimeoutRef.current !== null) {
                 window.clearTimeout(feedbackTimeoutRef.current);
+            }
+            if (batchPulseTimeoutRef.current !== null) {
+                window.clearTimeout(batchPulseTimeoutRef.current);
             }
             if (hoverTimerRef.current !== null) {
                 clearTimeout(hoverTimerRef.current);
@@ -223,6 +252,9 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
                                     feedback?.kind === "label" && feedback.labels?.includes(label)
                                         ? "photo-card__label-chip--flash"
                                         : "",
+                                    activeBatchPulseKind === "label"
+                                        ? "photo-card__label-chip--batch-pulse"
+                                        : "",
                                 ].join(" ").trim(), title: customLabelShortcuts[label] ? `${label} · tasto ${customLabelShortcuts[label]}` : label, children: customLabelShortcuts[label] ? `${label} · ${customLabelShortcuts[label]}` : label }, label))), customLabels.length > 2 ? (_jsxs("span", { className: "photo-card__label-chip photo-card__label-chip--more", children: ["+", customLabels.length - 2] })) : null] })) : null] }), editable && isToolbarVisible ? (_jsxs("div", { className: "photo-card__toolbar", onClick: (event) => event.stopPropagation(), children: [_jsx("div", { className: "photo-card__tiny-actions", children: [1, 2, 3, 4, 5].map((value) => (_jsx("button", { type: "button", className: [
                                 "photo-card__star",
                                 value <= rating ? "photo-card__star--active" : "",
@@ -253,6 +285,8 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
 }, (prev, next) => prev.isSelected === next.isSelected &&
     prev.editable === next.editable &&
     prev.disableNonEssentialUi === next.disableNonEssentialUi &&
+    prev.batchPulseToken === next.batchPulseToken &&
+    prev.batchPulseKind === next.batchPulseKind &&
     prev.photo.id === next.photo.id &&
     prev.photo.fileName === next.photo.fileName &&
     prev.photo.thumbnailUrl === next.photo.thumbnailUrl &&

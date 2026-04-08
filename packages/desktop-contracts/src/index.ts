@@ -9,7 +9,7 @@ export type DesktopToolId =
 export type DesktopReleaseChannel = "stable" | "beta";
 
 export type DesktopThumbnailProfile = "ultra-fast" | "fast" | "balanced";
-export type DesktopPhotoSortMode = "name" | "orientation" | "rating";
+export type DesktopPhotoSortMode = "name" | "orientation" | "rating" | "createdAt";
 export type DesktopCustomLabelTone = "sand" | "rose" | "green" | "blue" | "purple" | "slate";
 export type DesktopColorLabel = "red" | "yellow" | "green" | "blue" | "purple";
 export type DesktopPickStatus = "picked" | "rejected" | "unmarked";
@@ -109,6 +109,7 @@ export interface DesktopFolderEntry {
   absolutePath: string;
   size: number;
   lastModified: number;
+  createdAt: number;
 }
 
 export interface DesktopFolderOpenDiagnostics {

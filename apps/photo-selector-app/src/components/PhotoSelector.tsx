@@ -76,6 +76,7 @@ interface PhotoSelectorProps {
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  isThumbnailLoading?: boolean;
   thumbnailProfile?: ThumbnailProfile;
   sortCacheEnabled?: boolean;
   performanceSnapshot?: {
@@ -104,10 +105,11 @@ interface PhotoSelectorProps {
   onDismissDesktopCacheRecommendation?: () => void | Promise<void>;
 }
 
-type SortMode = "name" | "orientation" | "rating";
+type SortMode = "name" | "orientation" | "rating" | "createdAt";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
 type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>;
+type BatchPulseKind = "dot" | "label";
 const CUSTOM_LABEL_TONES: CustomLabelTone[] = ["sand", "rose", "green", "blue", "purple", "slate"];
 
 const GRID_GAP_PX = 12;
@@ -168,6 +170,34 @@ function areStringArraysEqual(left: string[] | undefined, right: string[] | unde
   return true;
 }
 
+function areOrderedIdsEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function resolvePhotoCreatedAt(photo: ImageAsset): number {
+  if (typeof photo.createdAt === "number" && Number.isFinite(photo.createdAt) && photo.createdAt > 0) {
+    return Math.round(photo.createdAt);
+  }
+
+  const timestampRaw = photo.sourceFileKey?.split("::").at(-1);
+  const parsedTimestamp = timestampRaw ? Number(timestampRaw) : NaN;
+  if (Number.isFinite(parsedTimestamp) && parsedTimestamp > 0) {
+    return Math.round(parsedTimestamp);
+  }
+
+  return 0;
+}
+
 function describeMetadataChanges(
   changes: PhotoMetadataChanges,
   targetCount: number
@@ -199,8 +229,7 @@ function getSeriesKey(photo: ImageAsset): string {
 }
 
 function getTimeClusterKey(photo: ImageAsset): string {
-  const timestampRaw = photo.sourceFileKey?.split("::").at(-1);
-  const timestamp = timestampRaw ? Number(timestampRaw) : NaN;
+  const timestamp = resolvePhotoCreatedAt(photo);
   if (!Number.isFinite(timestamp) || timestamp <= 0) {
     return "orario-non-disponibile";
   }
@@ -277,6 +306,7 @@ export function PhotoSelector({
   onRedo,
   canUndo = false,
   canRedo = false,
+  isThumbnailLoading = false,
   thumbnailProfile = "ultra-fast",
   sortCacheEnabled = true,
   performanceSnapshot = null,
@@ -367,12 +397,22 @@ export function PhotoSelector({
   const fastScrollCooldownTimerRef = useRef<number | null>(null);
   const fastScrollStartedAtRef = useRef<number | null>(null);
   const accumulatedFastScrollMsRef = useRef(0);
-  const lastVisibleIdsSignatureRef = useRef<string>("");
+  const lastVisibleIdsRef = useRef<string[]>([]);
+  const pendingVisibleIdsRef = useRef<string[] | null>(null);
+  const visibleIdsDispatchRafRef = useRef<number | null>(null);
   const lastBackgroundPreviewOrderSignatureRef = useRef<string>("");
+  const frozenDynamicSortOrderRef = useRef<{ sortBy: SortMode; signature: string; ids: string[] } | null>(null);
+  const batchPulseTokenRef = useRef(0);
+  const batchPulseClearTimerRef = useRef<number | null>(null);
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [gridViewport, setGridViewport] = useState({ width: 0, height: 720 });
   const [isFastScrollActive, setIsFastScrollActive] = useState(false);
+  const [batchPulseState, setBatchPulseState] = useState<{
+    token: number;
+    kind: BatchPulseKind;
+    ids: Set<string>;
+  } | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const effectiveRootFolderPath = useMemo(
     () => rootFolderPathOverride.trim() || sourceFolderPath.trim(),
@@ -390,6 +430,20 @@ export function PhotoSelector({
   useEffect(() => {
     photosRef.current = photos;
   }, [photos]);
+
+  useEffect(() => {
+    return () => {
+      if (batchPulseClearTimerRef.current !== null) {
+        window.clearTimeout(batchPulseClearTimerRef.current);
+        batchPulseClearTimerRef.current = null;
+      }
+      if (visibleIdsDispatchRafRef.current !== null) {
+        window.cancelAnimationFrame(visibleIdsDispatchRafRef.current);
+        visibleIdsDispatchRafRef.current = null;
+      }
+      pendingVisibleIdsRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     setDesktopThumbnailCachePathInput(desktopThumbnailCacheInfo?.currentPath ?? "");
@@ -443,6 +497,36 @@ export function PhotoSelector({
       { id: `timeline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label },
       ...current,
     ].slice(0, 5));
+  }, []);
+
+  const triggerBatchPulse = useCallback((targetIds: string[], kind: BatchPulseKind) => {
+    if (targetIds.length === 0) {
+      return;
+    }
+
+    const uniqueIds = Array.from(new Set(targetIds));
+    if (uniqueIds.length === 0) {
+      return;
+    }
+
+    batchPulseTokenRef.current += 1;
+    const token = batchPulseTokenRef.current;
+    setBatchPulseState({
+      token,
+      kind,
+      ids: new Set(uniqueIds),
+    });
+
+    if (batchPulseClearTimerRef.current !== null) {
+      window.clearTimeout(batchPulseClearTimerRef.current);
+    }
+
+    batchPulseClearTimerRef.current = window.setTimeout(() => {
+      setBatchPulseState((current) => (
+        current?.token === token ? null : current
+      ));
+      batchPulseClearTimerRef.current = null;
+    }, 1200);
   }, []);
 
   useEffect(() => {
@@ -748,6 +832,7 @@ export function PhotoSelector({
 
     const idSet = new Set(targetIds);
     let changed = false;
+    const changedIds: string[] = [];
     const nextPhotos = photos.map((photo) => {
       if (!idSet.has(photo.id)) {
         return photo;
@@ -760,6 +845,7 @@ export function PhotoSelector({
       }
 
       changed = true;
+      changedIds.push(photo.id);
       return {
         ...photo,
         customLabels: nextLabels,
@@ -769,8 +855,9 @@ export function PhotoSelector({
     if (changed) {
       onPhotosChange(nextPhotos);
       pushTimelineEntry(timelineLabel);
+      triggerBatchPulse(changedIds, "label");
     }
-  }, [onPhotosChange, photos, pushTimelineEntry]);
+  }, [onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
 
   const assignCustomLabelToSelection = useCallback((label: string) => {
     if (selectedIds.length === 0) {
@@ -1015,8 +1102,21 @@ export function PhotoSelector({
   }, [customLabelsCatalog, metadataPhotos]);
 
   const sortedPhotoIds = useMemo(() => {
+    const isDynamicSort = sortBy === "orientation" || sortBy === "rating";
     const signature = buildPhotoSortSignature(metadataPhotos, sortBy);
     const knownIds = new Set(metadataPhotos.map((photo) => photo.id));
+
+    if (isDynamicSort && isThumbnailLoading) {
+      const frozen = frozenDynamicSortOrderRef.current;
+      if (
+        frozen &&
+        frozen.sortBy === sortBy &&
+        frozen.ids.length === metadataPhotos.length &&
+        frozen.ids.every((photoId) => knownIds.has(photoId))
+      ) {
+        return frozen.ids;
+      }
+    }
 
     if (sourceFolderPath && isSortCacheEnabled) {
       const cachedIds = loadCachedPhotoSortOrder(sourceFolderPath, sortBy, signature);
@@ -1025,6 +1125,15 @@ export function PhotoSelector({
         cachedIds.length === metadataPhotos.length &&
         cachedIds.every((photoId) => knownIds.has(photoId))
       ) {
+        if (isDynamicSort && isThumbnailLoading) {
+          frozenDynamicSortOrderRef.current = {
+            sortBy,
+            signature,
+            ids: cachedIds,
+          };
+        } else if (!isThumbnailLoading && frozenDynamicSortOrderRef.current?.sortBy === sortBy) {
+          frozenDynamicSortOrderRef.current = null;
+        }
         return cachedIds;
       }
     }
@@ -1046,16 +1155,33 @@ export function PhotoSelector({
           );
         }
 
+        if (sortBy === "createdAt") {
+          return (
+            resolvePhotoCreatedAt(right) - resolvePhotoCreatedAt(left) ||
+            left.fileName.localeCompare(right.fileName)
+          );
+        }
+
         return left.fileName.localeCompare(right.fileName);
       })
       .map((photo) => photo.id);
+
+    if (isDynamicSort && isThumbnailLoading) {
+      frozenDynamicSortOrderRef.current = {
+        sortBy,
+        signature,
+        ids: orderedIds,
+      };
+    } else if (!isThumbnailLoading && frozenDynamicSortOrderRef.current?.sortBy === sortBy) {
+      frozenDynamicSortOrderRef.current = null;
+    }
 
     if (sourceFolderPath && isSortCacheEnabled) {
       saveCachedPhotoSortOrder(sourceFolderPath, sortBy, signature, orderedIds);
     }
 
     return orderedIds;
-  }, [isSortCacheEnabled, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
+  }, [isSortCacheEnabled, isThumbnailLoading, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
 
   const visiblePhotoIds = useMemo(() => {
     const lowerSearch = deferredSearchQuery.toLowerCase();
@@ -1329,13 +1455,30 @@ export function PhotoSelector({
     }
 
     const ids = renderedPhotoIds;
-    const signature = ids.join("|");
-    if (signature === lastVisibleIdsSignatureRef.current) {
+    if (areOrderedIdsEqual(lastVisibleIdsRef.current, ids)) {
       return;
     }
 
-    lastVisibleIdsSignatureRef.current = signature;
-    onVisibleIdsChange(new Set(ids));
+    pendingVisibleIdsRef.current = ids;
+    if (visibleIdsDispatchRafRef.current !== null) {
+      return;
+    }
+
+    visibleIdsDispatchRafRef.current = window.requestAnimationFrame(() => {
+      visibleIdsDispatchRafRef.current = null;
+      const pendingIds = pendingVisibleIdsRef.current;
+      if (!pendingIds || !onVisibleIdsChange) {
+        return;
+      }
+
+      pendingVisibleIdsRef.current = null;
+      if (areOrderedIdsEqual(lastVisibleIdsRef.current, pendingIds)) {
+        return;
+      }
+
+      lastVisibleIdsRef.current = pendingIds.slice();
+      onVisibleIdsChange(new Set(pendingIds));
+    });
   }, [onVisibleIdsChange, renderedPhotoIds]);
 
   useEffect(() => {
@@ -1587,6 +1730,12 @@ export function PhotoSelector({
       grid.scrollTo({ top: 0 });
     }
     rowVirtualizer.scrollToOffset(0, { align: "start" });
+    lastVisibleIdsRef.current = [];
+    pendingVisibleIdsRef.current = null;
+    if (visibleIdsDispatchRafRef.current !== null) {
+      window.cancelAnimationFrame(visibleIdsDispatchRafRef.current);
+      visibleIdsDispatchRafRef.current = null;
+    }
     onVisibleIdsChange?.(new Set());
     onPriorityIdsChange?.(hasActiveFilters ? new Set(visiblePhotoIds.slice(0, 240)) : new Set());
     onPreviewPriorityIdsChange?.(new Set());
@@ -1666,6 +1815,7 @@ export function PhotoSelector({
 
     const idSet = new Set(targetIds);
     let changed = false;
+    const changedIds: string[] = [];
     const nextPhotos = photos.map((photo) => {
       if (!idSet.has(photo.id)) {
         return photo;
@@ -1689,6 +1839,7 @@ export function PhotoSelector({
       }
 
       changed = true;
+      changedIds.push(photo.id);
       return {
         ...photo,
         ...changes,
@@ -1699,8 +1850,14 @@ export function PhotoSelector({
     if (changed) {
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, targetIds.length));
+      if (changes.colorLabel !== undefined) {
+        triggerBatchPulse(changedIds, "dot");
+      }
+      if (changes.customLabels !== undefined) {
+        triggerBatchPulse(changedIds, "label");
+      }
     }
-  }, [onPhotosChange, photos, pushTimelineEntry]);
+  }, [onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
 
   const selectedCustomLabelCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -2750,6 +2907,7 @@ export function PhotoSelector({
             onChange={(event) => setSortBy(event.target.value as SortMode)}
           >
             <option value="name">AZ ↑ Nome</option>
+            <option value="createdAt">Data creazione ↓</option>
             <option value="orientation">Orientamento</option>
             <option value="rating">Valutazione</option>
           </select>
@@ -2936,6 +3094,8 @@ export function PhotoSelector({
                       : Boolean(getAssetAbsolutePath(photo.id))
                   )}
                 disableNonEssentialUi={isFastScrollActive}
+                batchPulseToken={batchPulseState?.ids.has(photo.id) ? batchPulseState.token : 0}
+                batchPulseKind={batchPulseState?.ids.has(photo.id) ? batchPulseState.kind : null}
                 editable={!!onPhotosChange}
               />
             ))}

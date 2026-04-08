@@ -59,6 +59,17 @@ function sidecarPathForAsset(absolutePath: string): string {
   return join(assetDir, `${assetName}.xmp`);
 }
 
+function resolveCreatedAtMs(birthtimeMs: number, modifiedMs: number): number {
+  const normalizedBirthtime = Math.round(birthtimeMs);
+  if (Number.isFinite(normalizedBirthtime) && normalizedBirthtime > 0) {
+    return normalizedBirthtime;
+  }
+  const normalizedModified = Math.round(modifiedMs);
+  return Number.isFinite(normalizedModified) && normalizedModified > 0
+    ? normalizedModified
+    : 0;
+}
+
 async function countNestedSupportedFiles(rootPath: string): Promise<{
   nestedSupportedDiscardedCount: number;
   nestedDirectoriesSeen: number;
@@ -134,6 +145,7 @@ async function scanFolderByPath(rootPath: string): Promise<DesktopFolderOpenResu
       absolutePath,
       size: fileStats.size,
       lastModified: Math.round(fileStats.mtimeMs),
+      createdAt: resolveCreatedAtMs(fileStats.birthtimeMs, fileStats.mtimeMs),
     });
   }
 

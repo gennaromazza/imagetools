@@ -14,6 +14,8 @@ interface PhotoCardProps {
     customLabelColors?: Record<string, CustomLabelTone>;
     customLabelShortcuts?: Record<string, CustomLabelShortcut | null>;
     disableNonEssentialUi?: boolean;
+    batchPulseToken?: number;
+    batchPulseKind?: "dot" | "label" | null;
     editable: boolean;
 }
 export declare const PhotoCard: import("react").NamedExoticComponent<PhotoCardProps>;

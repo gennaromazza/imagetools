@@ -350,6 +350,7 @@ export async function openFolderNative() {
             absolutePath: entry.absolutePath,
             size: entry.size,
             lastModified: entry.lastModified,
+            createdAt: entry.createdAt,
         }));
         const entries = keepTopLevelEntries(mappedEntries);
         const diagnostics = buildFolderDiagnostics("desktop-native", result.diagnostics?.selectedPath ?? result.rootPath, entries.length, result.diagnostics?.nestedSupportedDiscardedCount ?? Math.max(0, mappedEntries.length - entries.length), result.diagnostics?.nestedDirectoriesSeen ?? 0);
@@ -385,6 +386,7 @@ export async function reopenRecentFolder(folder) {
             absolutePath: entry.absolutePath,
             size: entry.size,
             lastModified: entry.lastModified,
+            createdAt: entry.createdAt,
         }));
         const entries = keepTopLevelEntries(mappedEntries);
         const diagnostics = buildFolderDiagnostics("desktop-native", result.diagnostics?.selectedPath ?? result.rootPath, entries.length, result.diagnostics?.nestedSupportedDiscardedCount ?? Math.max(0, mappedEntries.length - entries.length), result.diagnostics?.nestedDirectoriesSeen ?? 0);
@@ -470,6 +472,7 @@ export function buildPlaceholderAssets(entries) {
             : entry.size !== undefined && entry.lastModified !== undefined
                 ? buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
                 : buildPlaceholderSourceFileKey(entry.relativePath);
+        const resolvedCreatedAt = entry.file?.lastModified ?? entry.createdAt ?? entry.lastModified ?? 0;
         if (entry.file) {
             fileStore.set(id, entry.file);
         }
@@ -490,6 +493,7 @@ export function buildPlaceholderAssets(entries) {
             fileName: entry.name,
             path: entry.relativePath,
             sourceFileKey,
+            createdAt: resolvedCreatedAt > 0 ? resolvedCreatedAt : undefined,
             rating: 0,
             pickStatus: "unmarked",
             colorLabel: null,

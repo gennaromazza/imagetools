@@ -257,6 +257,7 @@ export interface FolderEntry {
   absolutePath?: string;
   size?: number;
   lastModified?: number;
+  createdAt?: number;
 }
 
 export interface FolderOpenResult {
@@ -483,6 +484,7 @@ export async function openFolderNative(): Promise<FolderOpenResult | null> {
       absolutePath: entry.absolutePath,
       size: entry.size,
       lastModified: entry.lastModified,
+      createdAt: entry.createdAt,
     }));
     const entries = keepTopLevelEntries(mappedEntries);
     const diagnostics = buildFolderDiagnostics(
@@ -532,6 +534,7 @@ export async function reopenRecentFolder(folder: RecentFolder): Promise<FolderOp
       absolutePath: entry.absolutePath,
       size: entry.size,
       lastModified: entry.lastModified,
+      createdAt: entry.createdAt,
     }));
     const entries = keepTopLevelEntries(mappedEntries);
     const diagnostics = buildFolderDiagnostics(
@@ -646,6 +649,7 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
       : entry.size !== undefined && entry.lastModified !== undefined
         ? buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
         : buildPlaceholderSourceFileKey(entry.relativePath);
+    const resolvedCreatedAt = entry.file?.lastModified ?? entry.createdAt ?? entry.lastModified ?? 0;
     if (entry.file) {
       fileStore.set(id, entry.file);
     }
@@ -668,6 +672,7 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
       fileName: entry.name,
       path: entry.relativePath,
       sourceFileKey,
+      createdAt: resolvedCreatedAt > 0 ? resolvedCreatedAt : undefined,
       rating: 0,
       pickStatus: "unmarked" as const,
       colorLabel: null,

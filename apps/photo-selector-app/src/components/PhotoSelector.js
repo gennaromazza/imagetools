@@ -61,6 +61,28 @@ function areStringArraysEqual(left, right) {
     }
     return true;
 }
+function areOrderedIdsEqual(left, right) {
+    if (left.length !== right.length) {
+        return false;
+    }
+    for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+function resolvePhotoCreatedAt(photo) {
+    if (typeof photo.createdAt === "number" && Number.isFinite(photo.createdAt) && photo.createdAt > 0) {
+        return Math.round(photo.createdAt);
+    }
+    const timestampRaw = photo.sourceFileKey?.split("::").at(-1);
+    const parsedTimestamp = timestampRaw ? Number(timestampRaw) : NaN;
+    if (Number.isFinite(parsedTimestamp) && parsedTimestamp > 0) {
+        return Math.round(parsedTimestamp);
+    }
+    return 0;
+}
 function describeMetadataChanges(changes, targetCount) {
     const subject = targetCount === 1 ? "1 foto" : `${targetCount} foto`;
     if (changes.rating !== undefined) {
@@ -87,8 +109,7 @@ function getSeriesKey(photo) {
     return normalized || stem;
 }
 function getTimeClusterKey(photo) {
-    const timestampRaw = photo.sourceFileKey?.split("::").at(-1);
-    const timestamp = timestampRaw ? Number(timestampRaw) : NaN;
+    const timestamp = resolvePhotoCreatedAt(photo);
     if (!Number.isFinite(timestamp) || timestamp <= 0) {
         return "orario-non-disponibile";
     }
@@ -134,7 +155,7 @@ function formatVolumeSummary(recommendation) {
         : null;
     return { current, recommended };
 }
-export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onBackgroundPreviewOrderChange, onScrollLiteActiveMsChange, onUndo, onRedo, canUndo = false, canRedo = false, thumbnailProfile = "ultra-fast", sortCacheEnabled = true, performanceSnapshot = null, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo = null, desktopCacheLocationRecommendation = null, isDesktopThumbnailCacheBusy = false, isDesktopCacheRecommendationModalOpen = false, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, }) {
+export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onBackgroundPreviewOrderChange, onScrollLiteActiveMsChange, onUndo, onRedo, canUndo = false, canRedo = false, isThumbnailLoading = false, thumbnailProfile = "ultra-fast", sortCacheEnabled = true, performanceSnapshot = null, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo = null, desktopCacheLocationRecommendation = null, isDesktopThumbnailCacheBusy = false, isDesktopCacheRecommendationModalOpen = false, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, }) {
     const [sortBy, setSortBy] = useState("name");
     const [pickFilter, setPickFilter] = useState(DEFAULT_PHOTO_FILTERS.pickStatus);
     const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
@@ -203,12 +224,18 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     const fastScrollCooldownTimerRef = useRef(null);
     const fastScrollStartedAtRef = useRef(null);
     const accumulatedFastScrollMsRef = useRef(0);
-    const lastVisibleIdsSignatureRef = useRef("");
+    const lastVisibleIdsRef = useRef([]);
+    const pendingVisibleIdsRef = useRef(null);
+    const visibleIdsDispatchRafRef = useRef(null);
     const lastBackgroundPreviewOrderSignatureRef = useRef("");
+    const frozenDynamicSortOrderRef = useRef(null);
+    const batchPulseTokenRef = useRef(0);
+    const batchPulseClearTimerRef = useRef(null);
     const dragOriginRef = useRef(null);
     const [dragRect, setDragRect] = useState(null);
     const [gridViewport, setGridViewport] = useState({ width: 0, height: 720 });
     const [isFastScrollActive, setIsFastScrollActive] = useState(false);
+    const [batchPulseState, setBatchPulseState] = useState(null);
     const deferredSearchQuery = useDeferredValue(searchQuery);
     const effectiveRootFolderPath = useMemo(() => rootFolderPathOverride.trim() || sourceFolderPath.trim(), [rootFolderPathOverride, sourceFolderPath]);
     const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -219,6 +246,19 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     useEffect(() => {
         photosRef.current = photos;
     }, [photos]);
+    useEffect(() => {
+        return () => {
+            if (batchPulseClearTimerRef.current !== null) {
+                window.clearTimeout(batchPulseClearTimerRef.current);
+                batchPulseClearTimerRef.current = null;
+            }
+            if (visibleIdsDispatchRafRef.current !== null) {
+                window.cancelAnimationFrame(visibleIdsDispatchRafRef.current);
+                visibleIdsDispatchRafRef.current = null;
+            }
+            pendingVisibleIdsRef.current = null;
+        };
+    }, []);
     useEffect(() => {
         setDesktopThumbnailCachePathInput(desktopThumbnailCacheInfo?.currentPath ?? "");
     }, [desktopThumbnailCacheInfo?.currentPath]);
@@ -262,6 +302,29 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             { id: `timeline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, label },
             ...current,
         ].slice(0, 5));
+    }, []);
+    const triggerBatchPulse = useCallback((targetIds, kind) => {
+        if (targetIds.length === 0) {
+            return;
+        }
+        const uniqueIds = Array.from(new Set(targetIds));
+        if (uniqueIds.length === 0) {
+            return;
+        }
+        batchPulseTokenRef.current += 1;
+        const token = batchPulseTokenRef.current;
+        setBatchPulseState({
+            token,
+            kind,
+            ids: new Set(uniqueIds),
+        });
+        if (batchPulseClearTimerRef.current !== null) {
+            window.clearTimeout(batchPulseClearTimerRef.current);
+        }
+        batchPulseClearTimerRef.current = window.setTimeout(() => {
+            setBatchPulseState((current) => (current?.token === token ? null : current));
+            batchPulseClearTimerRef.current = null;
+        }, 1200);
     }, []);
     useEffect(() => {
         let active = true;
@@ -500,6 +563,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }
         const idSet = new Set(targetIds);
         let changed = false;
+        const changedIds = [];
         const nextPhotos = photos.map((photo) => {
             if (!idSet.has(photo.id)) {
                 return photo;
@@ -510,6 +574,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                 return photo;
             }
             changed = true;
+            changedIds.push(photo.id);
             return {
                 ...photo,
                 customLabels: nextLabels,
@@ -518,8 +583,9 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         if (changed) {
             onPhotosChange(nextPhotos);
             pushTimelineEntry(timelineLabel);
+            triggerBatchPulse(changedIds, "label");
         }
-    }, [onPhotosChange, photos, pushTimelineEntry]);
+    }, [onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
     const assignCustomLabelToSelection = useCallback((label) => {
         if (selectedIds.length === 0) {
             return;
@@ -680,13 +746,33 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             .filter(({ count }) => count > 0);
     }, [customLabelsCatalog, metadataPhotos]);
     const sortedPhotoIds = useMemo(() => {
+        const isDynamicSort = sortBy === "orientation" || sortBy === "rating";
         const signature = buildPhotoSortSignature(metadataPhotos, sortBy);
         const knownIds = new Set(metadataPhotos.map((photo) => photo.id));
+        if (isDynamicSort && isThumbnailLoading) {
+            const frozen = frozenDynamicSortOrderRef.current;
+            if (frozen &&
+                frozen.sortBy === sortBy &&
+                frozen.ids.length === metadataPhotos.length &&
+                frozen.ids.every((photoId) => knownIds.has(photoId))) {
+                return frozen.ids;
+            }
+        }
         if (sourceFolderPath && isSortCacheEnabled) {
             const cachedIds = loadCachedPhotoSortOrder(sourceFolderPath, sortBy, signature);
             if (cachedIds &&
                 cachedIds.length === metadataPhotos.length &&
                 cachedIds.every((photoId) => knownIds.has(photoId))) {
+                if (isDynamicSort && isThumbnailLoading) {
+                    frozenDynamicSortOrderRef.current = {
+                        sortBy,
+                        signature,
+                        ids: cachedIds,
+                    };
+                }
+                else if (!isThumbnailLoading && frozenDynamicSortOrderRef.current?.sortBy === sortBy) {
+                    frozenDynamicSortOrderRef.current = null;
+                }
                 return cachedIds;
             }
         }
@@ -701,14 +787,28 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                 return (left.orientation.localeCompare(right.orientation) ||
                     left.fileName.localeCompare(right.fileName));
             }
+            if (sortBy === "createdAt") {
+                return (resolvePhotoCreatedAt(right) - resolvePhotoCreatedAt(left) ||
+                    left.fileName.localeCompare(right.fileName));
+            }
             return left.fileName.localeCompare(right.fileName);
         })
             .map((photo) => photo.id);
+        if (isDynamicSort && isThumbnailLoading) {
+            frozenDynamicSortOrderRef.current = {
+                sortBy,
+                signature,
+                ids: orderedIds,
+            };
+        }
+        else if (!isThumbnailLoading && frozenDynamicSortOrderRef.current?.sortBy === sortBy) {
+            frozenDynamicSortOrderRef.current = null;
+        }
         if (sourceFolderPath && isSortCacheEnabled) {
             saveCachedPhotoSortOrder(sourceFolderPath, sortBy, signature, orderedIds);
         }
         return orderedIds;
-    }, [isSortCacheEnabled, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
+    }, [isSortCacheEnabled, isThumbnailLoading, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
     const visiblePhotoIds = useMemo(() => {
         const lowerSearch = deferredSearchQuery.toLowerCase();
         const filteredIds = [];
@@ -926,12 +1026,26 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             return;
         }
         const ids = renderedPhotoIds;
-        const signature = ids.join("|");
-        if (signature === lastVisibleIdsSignatureRef.current) {
+        if (areOrderedIdsEqual(lastVisibleIdsRef.current, ids)) {
             return;
         }
-        lastVisibleIdsSignatureRef.current = signature;
-        onVisibleIdsChange(new Set(ids));
+        pendingVisibleIdsRef.current = ids;
+        if (visibleIdsDispatchRafRef.current !== null) {
+            return;
+        }
+        visibleIdsDispatchRafRef.current = window.requestAnimationFrame(() => {
+            visibleIdsDispatchRafRef.current = null;
+            const pendingIds = pendingVisibleIdsRef.current;
+            if (!pendingIds || !onVisibleIdsChange) {
+                return;
+            }
+            pendingVisibleIdsRef.current = null;
+            if (areOrderedIdsEqual(lastVisibleIdsRef.current, pendingIds)) {
+                return;
+            }
+            lastVisibleIdsRef.current = pendingIds.slice();
+            onVisibleIdsChange(new Set(pendingIds));
+        });
     }, [onVisibleIdsChange, renderedPhotoIds]);
     useEffect(() => {
         if (!onPriorityIdsChange) {
@@ -1153,6 +1267,12 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             grid.scrollTo({ top: 0 });
         }
         rowVirtualizer.scrollToOffset(0, { align: "start" });
+        lastVisibleIdsRef.current = [];
+        pendingVisibleIdsRef.current = null;
+        if (visibleIdsDispatchRafRef.current !== null) {
+            window.cancelAnimationFrame(visibleIdsDispatchRafRef.current);
+            visibleIdsDispatchRafRef.current = null;
+        }
         onVisibleIdsChange?.(new Set());
         onPriorityIdsChange?.(hasActiveFilters ? new Set(visiblePhotoIds.slice(0, 240)) : new Set());
         onPreviewPriorityIdsChange?.(new Set());
@@ -1218,6 +1338,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }
         const idSet = new Set(targetIds);
         let changed = false;
+        const changedIds = [];
         const nextPhotos = photos.map((photo) => {
             if (!idSet.has(photo.id)) {
                 return photo;
@@ -1236,6 +1357,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                 return photo;
             }
             changed = true;
+            changedIds.push(photo.id);
             return {
                 ...photo,
                 ...changes,
@@ -1245,8 +1367,14 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         if (changed) {
             onPhotosChange(nextPhotos);
             pushTimelineEntry(describeMetadataChanges(changes, targetIds.length));
+            if (changes.colorLabel !== undefined) {
+                triggerBatchPulse(changedIds, "dot");
+            }
+            if (changes.customLabels !== undefined) {
+                triggerBatchPulse(changedIds, "label");
+            }
         }
-    }, [onPhotosChange, photos, pushTimelineEntry]);
+    }, [onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
     const selectedCustomLabelCounts = useMemo(() => {
         const counts = new Map();
         for (const selectedId of selectedIds) {
@@ -1905,7 +2033,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }
         void onSetDesktopThumbnailCacheDirectory(nextPath);
     }, [desktopThumbnailCachePathInput, onSetDesktopThumbnailCacheDirectory]);
-    return (_jsxs("div", { className: "photo-selector", children: [_jsxs("div", { className: "photo-selector__filter-bar", children: [hasActiveFilters && (_jsx("div", { className: "selector-filters__reset", children: _jsxs("button", { type: "button", className: "ghost-button ghost-button--small", onClick: resetFilters, title: `${activeFilterCount} filtro/i attivo/i`, children: ["\u2715 Azzera", activeFilterCount > 0 && (_jsx("span", { className: "photo-selector__filter-count-badge", children: activeFilterCount }))] }) })), subfolders.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Cartella" }), _jsxs("select", { className: folderFilter !== "all" ? "field__select--active" : undefined, value: folderFilter, onChange: (event) => setFolderFilter(event.target.value), children: [_jsxs("option", { value: "all", children: ["Tutte (", photos.length, ")"] }), subfolders.map(({ folder, count }) => (_jsxs("option", { value: folder, children: [folder === "" ? "Root" : folder, " (", count, ")"] }, folder)))] })] })), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stato" }), _jsxs("select", { className: pickFilter !== "all" ? "field__select--active" : undefined, value: pickFilter, onChange: (event) => setPickFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutti" }), _jsx("option", { value: "picked", children: "Pick" }), _jsx("option", { value: "rejected", children: "Scartate" }), _jsx("option", { value: "unmarked", children: "Neutre" })] })] }), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stelle" }), _jsxs("select", { className: ratingFilter !== "any" ? "field__select--active" : undefined, value: ratingFilter, onChange: (event) => setRatingFilter(event.target.value), children: [_jsx("option", { value: "any", children: "Tutte" }), _jsxs("optgroup", { label: "Minimo", children: [_jsx("option", { value: "1+", children: "\u2605 1+" }), _jsx("option", { value: "2+", children: "\u2605\u2605 2+" }), _jsx("option", { value: "3+", children: "\u2605\u2605\u2605 3+" }), _jsx("option", { value: "4+", children: "\u2605\u2605\u2605\u2605 4+" })] }), _jsxs("optgroup", { label: "Esattamente", children: [_jsx("option", { value: "0", children: "Senza stelle" }), _jsx("option", { value: "1", children: "\u2605 1" }), _jsx("option", { value: "2", children: "\u2605\u2605 2" }), _jsx("option", { value: "3", children: "\u2605\u2605\u2605 3" }), _jsx("option", { value: "4", children: "\u2605\u2605\u2605\u2605 4" }), _jsx("option", { value: "5", children: "\u2605\u2605\u2605\u2605\u2605 5" })] })] })] }), _jsxs("div", { className: "field photo-selector__color-filter", children: [_jsx("span", { children: "Colore" }), _jsxs("div", { className: "photo-selector__color-filter-dots", children: [_jsx("button", { type: "button", className: `photo-selector__color-all-btn${colorFilter === "all" ? " photo-selector__color-all-btn--active" : ""}`, onClick: () => setColorFilter("all"), title: "Tutti i colori", children: "\u2715" }), COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: `asset-color-dot asset-color-dot--${value}${colorFilter === value ? " asset-color-dot--selected" : ""}`, onClick: () => setColorFilter(colorFilter === value ? "all" : value), title: customColorNames[value] }, value)))] })] }), customLabelFilterOptions.length > 0 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Label custom" }), _jsxs("select", { className: customLabelFilter !== "all" ? "field__select--active" : undefined, value: customLabelFilter, onChange: (event) => setCustomLabelFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), customLabelFilterOptions.map(({ label, count }) => (_jsxs("option", { value: label, children: [label, " (", count, ")"] }, label)))] })] })), seriesGroups.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Serie" }), _jsxs("select", { className: seriesFilter !== "all" ? "field__select--active" : undefined, value: seriesFilter, onChange: (event) => setSeriesFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), seriesGroups.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), timeClusters.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Fascia oraria" }), _jsxs("select", { className: timeClusterFilter !== "all" ? "field__select--active" : undefined, value: timeClusterFilter, onChange: (event) => setTimeClusterFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), timeClusters.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), filterPresets.length > 0 && (_jsxs("div", { className: "photo-selector__preset-chips", children: [_jsx("span", { className: "photo-selector__filter-bar-label", children: "Preset" }), filterPresets.map((preset) => (_jsx("button", { className: "photo-selector__preset-apply", onClick: () => applyPreset(preset), children: preset.name }, preset.id)))] }))] }), _jsxs("div", { className: "photo-selector__controls", children: [_jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("div", { className: "photo-selector__undo-group", children: [_jsx("button", { type: "button", className: "icon-button", onClick: handleUndoClick, disabled: !canUndo, title: "Annulla", children: "\u21A9" }), _jsx("button", { type: "button", className: "icon-button", onClick: handleRedoClick, disabled: !canRedo, title: "Ripeti", children: "\u21AA" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: `checkbox-button photo-selector__toolbar-control ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`, onClick: () => toggleAll(!allSelected), children: allSelected ? "Deseleziona tutto" : "Seleziona tutto" }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: selectVisible, title: "Seleziona le foto visibili", children: "Visibili" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: activatePickedOnly, title: "Seleziona solo le foto Pick", children: "Solo pick" }), selectedIds.length >= 2 && selectedIds.length <= 4 && (_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => setIsCompareOpen(true), title: `Confronta ${selectedIds.length} foto selezionate`, children: "Confronta" }))] }), _jsx("div", { className: "photo-selector__action-inline photo-selector__toolbar-search", children: _jsx(PhotoSearchBar, { value: searchQuery, onChange: setSearchQuery, resultCount: visiblePhotoIds.length, totalCount: photos.length }) }), _jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("label", { className: "photo-selector__zoom-label", title: "Dimensione card", children: [_jsx("span", { children: "\uD83D\uDD0E" }), _jsx("input", { type: "range", className: "photo-selector__zoom-slider", min: 100, max: 320, step: 10, value: cardSize, onChange: (e) => setCardSize(Number(e.target.value)), "aria-label": "Dimensione card" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsxs("select", { className: "photo-selector__sort photo-selector__toolbar-control", value: sortBy, onChange: (event) => setSortBy(event.target.value), children: [_jsx("option", { value: "name", children: "AZ \u2191 Nome" }), _jsx("option", { value: "orientation", children: "Orientamento" }), _jsx("option", { value: "rating", children: "Valutazione" })] }), _jsx("button", { type: "button", className: `icon-button${isSettingsPanelOpen ? " icon-button--active" : ""}`, onClick: () => setIsSettingsPanelOpen((v) => !v), title: "Impostazioni workspace", children: "\u2699" }), _jsx(PhotoClassificationHelpButton, {})] })] }), photos.length > 0 && (_jsxs("div", { className: "photo-selector__quick-stats", children: [[1, 2, 3, 4, 5].map((r) => {
+    return (_jsxs("div", { className: "photo-selector", children: [_jsxs("div", { className: "photo-selector__filter-bar", children: [hasActiveFilters && (_jsx("div", { className: "selector-filters__reset", children: _jsxs("button", { type: "button", className: "ghost-button ghost-button--small", onClick: resetFilters, title: `${activeFilterCount} filtro/i attivo/i`, children: ["\u2715 Azzera", activeFilterCount > 0 && (_jsx("span", { className: "photo-selector__filter-count-badge", children: activeFilterCount }))] }) })), subfolders.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Cartella" }), _jsxs("select", { className: folderFilter !== "all" ? "field__select--active" : undefined, value: folderFilter, onChange: (event) => setFolderFilter(event.target.value), children: [_jsxs("option", { value: "all", children: ["Tutte (", photos.length, ")"] }), subfolders.map(({ folder, count }) => (_jsxs("option", { value: folder, children: [folder === "" ? "Root" : folder, " (", count, ")"] }, folder)))] })] })), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stato" }), _jsxs("select", { className: pickFilter !== "all" ? "field__select--active" : undefined, value: pickFilter, onChange: (event) => setPickFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutti" }), _jsx("option", { value: "picked", children: "Pick" }), _jsx("option", { value: "rejected", children: "Scartate" }), _jsx("option", { value: "unmarked", children: "Neutre" })] })] }), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stelle" }), _jsxs("select", { className: ratingFilter !== "any" ? "field__select--active" : undefined, value: ratingFilter, onChange: (event) => setRatingFilter(event.target.value), children: [_jsx("option", { value: "any", children: "Tutte" }), _jsxs("optgroup", { label: "Minimo", children: [_jsx("option", { value: "1+", children: "\u2605 1+" }), _jsx("option", { value: "2+", children: "\u2605\u2605 2+" }), _jsx("option", { value: "3+", children: "\u2605\u2605\u2605 3+" }), _jsx("option", { value: "4+", children: "\u2605\u2605\u2605\u2605 4+" })] }), _jsxs("optgroup", { label: "Esattamente", children: [_jsx("option", { value: "0", children: "Senza stelle" }), _jsx("option", { value: "1", children: "\u2605 1" }), _jsx("option", { value: "2", children: "\u2605\u2605 2" }), _jsx("option", { value: "3", children: "\u2605\u2605\u2605 3" }), _jsx("option", { value: "4", children: "\u2605\u2605\u2605\u2605 4" }), _jsx("option", { value: "5", children: "\u2605\u2605\u2605\u2605\u2605 5" })] })] })] }), _jsxs("div", { className: "field photo-selector__color-filter", children: [_jsx("span", { children: "Colore" }), _jsxs("div", { className: "photo-selector__color-filter-dots", children: [_jsx("button", { type: "button", className: `photo-selector__color-all-btn${colorFilter === "all" ? " photo-selector__color-all-btn--active" : ""}`, onClick: () => setColorFilter("all"), title: "Tutti i colori", children: "\u2715" }), COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: `asset-color-dot asset-color-dot--${value}${colorFilter === value ? " asset-color-dot--selected" : ""}`, onClick: () => setColorFilter(colorFilter === value ? "all" : value), title: customColorNames[value] }, value)))] })] }), customLabelFilterOptions.length > 0 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Label custom" }), _jsxs("select", { className: customLabelFilter !== "all" ? "field__select--active" : undefined, value: customLabelFilter, onChange: (event) => setCustomLabelFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), customLabelFilterOptions.map(({ label, count }) => (_jsxs("option", { value: label, children: [label, " (", count, ")"] }, label)))] })] })), seriesGroups.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Serie" }), _jsxs("select", { className: seriesFilter !== "all" ? "field__select--active" : undefined, value: seriesFilter, onChange: (event) => setSeriesFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), seriesGroups.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), timeClusters.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Fascia oraria" }), _jsxs("select", { className: timeClusterFilter !== "all" ? "field__select--active" : undefined, value: timeClusterFilter, onChange: (event) => setTimeClusterFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), timeClusters.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), filterPresets.length > 0 && (_jsxs("div", { className: "photo-selector__preset-chips", children: [_jsx("span", { className: "photo-selector__filter-bar-label", children: "Preset" }), filterPresets.map((preset) => (_jsx("button", { className: "photo-selector__preset-apply", onClick: () => applyPreset(preset), children: preset.name }, preset.id)))] }))] }), _jsxs("div", { className: "photo-selector__controls", children: [_jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("div", { className: "photo-selector__undo-group", children: [_jsx("button", { type: "button", className: "icon-button", onClick: handleUndoClick, disabled: !canUndo, title: "Annulla", children: "\u21A9" }), _jsx("button", { type: "button", className: "icon-button", onClick: handleRedoClick, disabled: !canRedo, title: "Ripeti", children: "\u21AA" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: `checkbox-button photo-selector__toolbar-control ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`, onClick: () => toggleAll(!allSelected), children: allSelected ? "Deseleziona tutto" : "Seleziona tutto" }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: selectVisible, title: "Seleziona le foto visibili", children: "Visibili" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: activatePickedOnly, title: "Seleziona solo le foto Pick", children: "Solo pick" }), selectedIds.length >= 2 && selectedIds.length <= 4 && (_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => setIsCompareOpen(true), title: `Confronta ${selectedIds.length} foto selezionate`, children: "Confronta" }))] }), _jsx("div", { className: "photo-selector__action-inline photo-selector__toolbar-search", children: _jsx(PhotoSearchBar, { value: searchQuery, onChange: setSearchQuery, resultCount: visiblePhotoIds.length, totalCount: photos.length }) }), _jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("label", { className: "photo-selector__zoom-label", title: "Dimensione card", children: [_jsx("span", { children: "\uD83D\uDD0E" }), _jsx("input", { type: "range", className: "photo-selector__zoom-slider", min: 100, max: 320, step: 10, value: cardSize, onChange: (e) => setCardSize(Number(e.target.value)), "aria-label": "Dimensione card" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsxs("select", { className: "photo-selector__sort photo-selector__toolbar-control", value: sortBy, onChange: (event) => setSortBy(event.target.value), children: [_jsx("option", { value: "name", children: "AZ \u2191 Nome" }), _jsx("option", { value: "createdAt", children: "Data creazione \u2193" }), _jsx("option", { value: "orientation", children: "Orientamento" }), _jsx("option", { value: "rating", children: "Valutazione" })] }), _jsx("button", { type: "button", className: `icon-button${isSettingsPanelOpen ? " icon-button--active" : ""}`, onClick: () => setIsSettingsPanelOpen((v) => !v), title: "Impostazioni workspace", children: "\u2699" }), _jsx(PhotoClassificationHelpButton, {})] })] }), photos.length > 0 && (_jsxs("div", { className: "photo-selector__quick-stats", children: [[1, 2, 3, 4, 5].map((r) => {
                         const count = photoStats.ratingCounts.get(r) ?? 0;
                         if (count === 0)
                             return null;
@@ -1998,7 +2126,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                                     && typeof window.filexDesktop?.startDragOut === "function"
                                     && (selectedSet.has(photo.id)
                                         ? canStartDesktopDragOut
-                                        : Boolean(getAssetAbsolutePath(photo.id))), disableNonEssentialUi: isFastScrollActive, editable: !!onPhotosChange }, photo.id))), bottomSpacerHeight > 0 ? (_jsx("div", { className: "photo-selector__virtual-spacer", style: { height: bottomSpacerHeight }, "aria-hidden": "true" })) : null] })), dragRect && (_jsx("div", { className: "photo-selector__drag-rect", style: {
+                                        : Boolean(getAssetAbsolutePath(photo.id))), disableNonEssentialUi: isFastScrollActive, batchPulseToken: batchPulseState?.ids.has(photo.id) ? batchPulseState.token : 0, batchPulseKind: batchPulseState?.ids.has(photo.id) ? batchPulseState.kind : null, editable: !!onPhotosChange }, photo.id))), bottomSpacerHeight > 0 ? (_jsx("div", { className: "photo-selector__virtual-spacer", style: { height: bottomSpacerHeight }, "aria-hidden": "true" })) : null] })), dragRect && (_jsx("div", { className: "photo-selector__drag-rect", style: {
                             position: "fixed",
                             left: dragRect.left,
                             top: dragRect.top,

@@ -13,6 +13,7 @@ export interface ImageAsset {
     fileName: string;
     path: string;
     sourceFileKey?: string;
+    createdAt?: number;
     xmpHasEdits?: boolean;
     xmpEditInfo?: string;
     rating?: number;

@@ -4,7 +4,7 @@ import { getDesktopSortCache, hasDesktopStateApi, saveDesktopSortCache } from ".
 const SORT_CACHE_KEY = "photo-selector-sort-cache-v1";
 const SORT_CACHE_MAX_ENTRIES = 24;
 
-export type PhotoSortMode = "name" | "orientation" | "rating";
+export type PhotoSortMode = "name" | "orientation" | "rating" | "createdAt";
 
 interface SortCacheEntry {
   folderPath: string;
@@ -15,6 +15,24 @@ interface SortCacheEntry {
 }
 
 let sortCacheEntries: SortCacheEntry[] = [];
+
+function isSupportedSortMode(value: unknown): value is PhotoSortMode {
+  return value === "name" || value === "orientation" || value === "rating" || value === "createdAt";
+}
+
+function getSortTimestamp(asset: ImageAsset): number {
+  if (typeof asset.createdAt === "number" && Number.isFinite(asset.createdAt) && asset.createdAt > 0) {
+    return Math.round(asset.createdAt);
+  }
+
+  const timestampRaw = asset.sourceFileKey?.split("::").at(-1);
+  const parsedTimestamp = timestampRaw ? Number(timestampRaw) : NaN;
+  if (Number.isFinite(parsedTimestamp) && parsedTimestamp > 0) {
+    return Math.round(parsedTimestamp);
+  }
+
+  return 0;
+}
 
 function loadEntries(): SortCacheEntry[] {
   if (typeof window === "undefined") {
@@ -41,7 +59,7 @@ function loadEntries(): SortCacheEntry[] {
     sortCacheEntries = parsed.filter((entry): entry is SortCacheEntry => (
       !!entry &&
       typeof entry.folderPath === "string" &&
-      (entry.sortBy === "name" || entry.sortBy === "orientation" || entry.sortBy === "rating") &&
+      isSupportedSortMode(entry.sortBy) &&
       typeof entry.signature === "string" &&
       Array.isArray(entry.orderedIds) &&
       typeof entry.updatedAt === "number"
@@ -90,6 +108,8 @@ export function buildPhotoSortSignature(
       hash = appendHash(hash, String(photo.rating ?? 0));
     } else if (sortBy === "orientation") {
       hash = appendHash(hash, photo.orientation ?? "");
+    } else if (sortBy === "createdAt") {
+      hash = appendHash(hash, String(getSortTimestamp(photo)));
     } else {
       hash = appendHash(hash, photo.sourceFileKey ?? photo.path);
     }
@@ -130,7 +150,7 @@ export async function hydratePhotoSortCache(folderPath?: string): Promise<SortCa
     ? entries.filter((entry): entry is SortCacheEntry => (
         !!entry &&
         typeof entry.folderPath === "string" &&
-        (entry.sortBy === "name" || entry.sortBy === "orientation" || entry.sortBy === "rating") &&
+        isSupportedSortMode(entry.sortBy) &&
         typeof entry.signature === "string" &&
         Array.isArray(entry.orderedIds) &&
         typeof entry.updatedAt === "number"

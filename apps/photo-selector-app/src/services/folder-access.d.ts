@@ -24,6 +24,7 @@ export interface FolderEntry {
     absolutePath?: string;
     size?: number;
     lastModified?: number;
+    createdAt?: number;
 }
 export interface FolderOpenResult {
     name: string;

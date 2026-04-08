@@ -158,6 +158,10 @@ function shouldLoadRawPreview(asset: ImageAsset): boolean {
     Math.min(asset.width, asset.height) < MIN_RAW_PREVIEW_DIMENSION;
 }
 
+function getPreviewColorClass(colorLabel: ColorLabel | null): string {
+  return colorLabel ? `quick-preview__stage--color-${colorLabel}` : "quick-preview__stage--color-none";
+}
+
 function formatDesktopPreviewSourceLabel(
   stage: "fit" | "detail",
   source: DesktopQuickPreviewSource,
@@ -2130,6 +2134,9 @@ export function PhotoQuickPreviewModal({
   const rating = getAssetRating(asset);
   const pickStatus = getAssetPickStatus(asset);
   const colorLabel = getAssetColorLabel(asset);
+  const compareColorLabel = compareAsset ? getAssetColorLabel(compareAsset) : null;
+  const stageColorClass = getPreviewColorClass(colorLabel);
+  const comparePanelColorClass = getPreviewColorClass(compareColorLabel);
 
   const previewContent = (
     <div
@@ -2490,15 +2497,17 @@ export function PhotoQuickPreviewModal({
         </div>
 
         <div
-          className={
+          className={[
+            "quick-preview__stage",
+            stageColorClass,
             compareMode && compareAsset
-              ? "quick-preview__stage quick-preview__stage--compare"
+              ? "quick-preview__stage--compare"
               : zoomLevel > 1.05
                 ? isPanning
-                  ? "quick-preview__stage quick-preview__stage--zoomed quick-preview__stage--panning"
-                  : "quick-preview__stage quick-preview__stage--zoomed"
-                : "quick-preview__stage"
-          }
+                  ? "quick-preview__stage--zoomed quick-preview__stage--panning"
+                  : "quick-preview__stage--zoomed"
+                : "",
+          ].join(" ").trim()}
           ref={stageRef}
           onWheel={(event) => {
             if (compareMode) {
@@ -2569,7 +2578,7 @@ export function PhotoQuickPreviewModal({
 
           {compareMode && compareAsset ? (
             <div className="quick-preview__compare-grid">
-              <div className="quick-preview__compare-panel">
+              <div className={`quick-preview__compare-panel ${stageColorClass}`}>
                 <span className="quick-preview__compare-label">Corrente</span>
                 {displayPreviewUrl ? (
                   <img
@@ -2592,7 +2601,7 @@ export function PhotoQuickPreviewModal({
                   </span>
                 ) : null}
               </div>
-              <div className="quick-preview__compare-panel">
+              <div className={`quick-preview__compare-panel ${comparePanelColorClass}`}>
                 <span className="quick-preview__compare-label">{compareAsset.fileName}</span>
                 {displayComparePreviewUrl ? (
                   <img

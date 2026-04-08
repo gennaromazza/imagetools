@@ -2,6 +2,20 @@ import { getDesktopSortCache, hasDesktopStateApi, saveDesktopSortCache } from ".
 const SORT_CACHE_KEY = "photo-selector-sort-cache-v1";
 const SORT_CACHE_MAX_ENTRIES = 24;
 let sortCacheEntries = [];
+function isSupportedSortMode(value) {
+    return value === "name" || value === "orientation" || value === "rating" || value === "createdAt";
+}
+function getSortTimestamp(asset) {
+    if (typeof asset.createdAt === "number" && Number.isFinite(asset.createdAt) && asset.createdAt > 0) {
+        return Math.round(asset.createdAt);
+    }
+    const timestampRaw = asset.sourceFileKey?.split("::").at(-1);
+    const parsedTimestamp = timestampRaw ? Number(timestampRaw) : NaN;
+    if (Number.isFinite(parsedTimestamp) && parsedTimestamp > 0) {
+        return Math.round(parsedTimestamp);
+    }
+    return 0;
+}
 function loadEntries() {
     if (typeof window === "undefined") {
         return sortCacheEntries;
@@ -22,7 +36,7 @@ function loadEntries() {
         }
         sortCacheEntries = parsed.filter((entry) => (!!entry &&
             typeof entry.folderPath === "string" &&
-            (entry.sortBy === "name" || entry.sortBy === "orientation" || entry.sortBy === "rating") &&
+            isSupportedSortMode(entry.sortBy) &&
             typeof entry.signature === "string" &&
             Array.isArray(entry.orderedIds) &&
             typeof entry.updatedAt === "number"));
@@ -63,6 +77,9 @@ export function buildPhotoSortSignature(photos, sortBy) {
         else if (sortBy === "orientation") {
             hash = appendHash(hash, photo.orientation ?? "");
         }
+        else if (sortBy === "createdAt") {
+            hash = appendHash(hash, String(getSortTimestamp(photo)));
+        }
         else {
             hash = appendHash(hash, photo.sourceFileKey ?? photo.path);
         }
@@ -89,7 +106,7 @@ export async function hydratePhotoSortCache(folderPath) {
     sortCacheEntries = Array.isArray(entries)
         ? entries.filter((entry) => (!!entry &&
             typeof entry.folderPath === "string" &&
-            (entry.sortBy === "name" || entry.sortBy === "orientation" || entry.sortBy === "rating") &&
+            isSupportedSortMode(entry.sortBy) &&
             typeof entry.signature === "string" &&
             Array.isArray(entry.orderedIds) &&
             typeof entry.updatedAt === "number"))

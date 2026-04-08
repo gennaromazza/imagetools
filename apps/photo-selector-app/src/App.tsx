@@ -2919,6 +2919,7 @@ export function App() {
                 onRedo={undoRedo.redo}
                 canUndo={undoRedo.canUndo}
                 canRedo={undoRedo.canRedo}
+                isThumbnailLoading={isGeneratingThumbnails}
                 thumbnailProfile={thumbnailProfile}
                 sortCacheEnabled={sortCacheEnabled}
                 performanceSnapshot={performanceSnapshot}

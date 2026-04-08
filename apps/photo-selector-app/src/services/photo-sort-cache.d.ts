@@ -1,5 +1,5 @@
 import type { ImageAsset } from "@photo-tools/shared-types";
-export type PhotoSortMode = "name" | "orientation" | "rating";
+export type PhotoSortMode = "name" | "orientation" | "rating" | "createdAt";
 interface SortCacheEntry {
     folderPath: string;
     sortBy: PhotoSortMode;
