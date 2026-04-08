@@ -1276,18 +1276,10 @@ img {
   flex-direction: column;
   gap: 0.5rem;
   cursor: pointer;
-  transition: transform 120ms ease-out;
+  transition: box-shadow 120ms ease-out;
   border-radius: 8px;
   overflow: visible;
   position: relative;
-}
-
-.photo-card:hover {
-  transform: translateY(-2px);
-}
-
-.photo-card--scroll-lite:hover {
-  transform: none;
 }
 
 .photo-card[draggable="true"] {
@@ -1307,7 +1299,7 @@ img {
   border: 3px solid transparent;
   border-radius: 6px;
   overflow: hidden;
-  transition: border-color 120ms ease-out, box-shadow 120ms ease-out, transform 120ms ease-out;
+  transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
 }
 
 .photo-card:hover .photo-card__image-wrapper {
@@ -2314,12 +2306,12 @@ img {
 
 .quick-preview__sidebar {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto;
   gap: 0.75rem;
   padding: 1rem;
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(12, 12, 10, 0.6);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .quick-preview__sidebar-filters {

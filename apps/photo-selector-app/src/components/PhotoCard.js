@@ -1,6 +1,5 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { memo, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { preloadImageUrls } from "../services/image-cache";
 import { notePhotoCardRender } from "../services/performance-utils";
 import { COLOR_LABEL_NAMES, COLOR_LABELS, formatAssetStars, getAssetColorLabel, getAssetPickStatus, getAssetRating, getColorShortcutHint, PICK_STATUS_LABELS, resolvePhotoClassificationShortcut, } from "../services/photo-classification";
@@ -35,8 +34,6 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
     const batchPulseTimeoutRef = useRef(null);
     const lastBatchPulseTokenRef = useRef(0);
     const [activeBatchPulseKind, setActiveBatchPulseKind] = useState(null);
-    const hoverTimerRef = useRef(null);
-    const [hoverPos, setHoverPos] = useState(null);
     const [isToolbarVisible, setIsToolbarVisible] = useState(isSelected);
     useEffect(() => {
         const prev = prevClassRef.current;
@@ -145,11 +142,6 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
         if (!disableNonEssentialUi) {
             return;
         }
-        if (hoverTimerRef.current !== null) {
-            clearTimeout(hoverTimerRef.current);
-            hoverTimerRef.current = null;
-        }
-        setHoverPos(null);
         if (!isSelected) {
             setIsToolbarVisible(false);
         }
@@ -161,9 +153,6 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
             }
             if (batchPulseTimeoutRef.current !== null) {
                 window.clearTimeout(batchPulseTimeoutRef.current);
-            }
-            if (hoverTimerRef.current !== null) {
-                clearTimeout(hoverTimerRef.current);
             }
         };
     }, []);
@@ -184,30 +173,10 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
             setIsToolbarVisible(true);
             if (photo.previewUrl)
                 preloadImageUrls([photo.previewUrl]);
-            const imgSrc = photo.previewUrl ?? photo.thumbnailUrl ?? null;
-            if (!imgSrc)
-                return;
-            hoverTimerRef.current = setTimeout(() => {
-                if (!cardRef.current)
-                    return;
-                const rect = cardRef.current.getBoundingClientRect();
-                const spaceRight = window.innerWidth - rect.right;
-                setHoverPos({
-                    top: Math.max(8, rect.top),
-                    left: spaceRight >= 220 ? rect.right + 8 : rect.left - 228,
-                    right: spaceRight >= 220 ? -1 : rect.right,
-                    imgSrc,
-                });
-            }, 550);
         }, onMouseLeave: () => {
-            if (hoverTimerRef.current !== null) {
-                clearTimeout(hoverTimerRef.current);
-                hoverTimerRef.current = null;
-            }
             if (!isSelected) {
                 setIsToolbarVisible(false);
             }
-            setHoverPos(null);
         }, onBlur: (event) => {
             const nextTarget = event.relatedTarget;
             if (cardRef.current?.contains(nextTarget)) {
@@ -280,8 +249,7 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
                                     : "",
                             ].join(" "), onClick: () => onUpdatePhoto(photo.id, {
                                 colorLabel: colorLabel === value ? null : value,
-                            }), title: `${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}` }, value))) })] })) : null, !disableNonEssentialUi && hoverPos !== null &&
-                createPortal(_jsxs("div", { className: "photo-card__hover-preview", style: { top: hoverPos.top, left: hoverPos.left }, children: [_jsx("img", { src: hoverPos.imgSrc, alt: photo.fileName, className: "photo-card__hover-img" }), _jsx("div", { className: "photo-card__hover-name", children: photo.fileName })] }), document.body)] }));
+                            }), title: `${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}` }, value))) })] })) : null] }));
 }, (prev, next) => prev.isSelected === next.isSelected &&
     prev.editable === next.editable &&
     prev.disableNonEssentialUi === next.disableNonEssentialUi &&

@@ -113,8 +113,6 @@ const orientationLabels: Record<ImageAsset["orientation"], string> = {
 };
 
 const MIN_RAW_PREVIEW_DIMENSION = 900;
-const SIDEBAR_THUMB_ESTIMATED_SIZE = 196;
-const SIDEBAR_THUMB_OVERSCAN = 2;
 const DOCK_THUMB_ESTIMATED_SIZE = 81;
 const DOCK_THUMB_OVERSCAN = 4;
 const QUICK_PREVIEW_DESKTOP_FALLBACK_DELAY_MS = 80;
@@ -218,8 +216,9 @@ export function PhotoQuickPreviewModal({
   onUpdateAsset
 }: PhotoQuickPreviewModalProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const sidebarStripRef = useRef<HTMLDivElement | null>(null);
   const dockStripRef = useRef<HTMLDivElement | null>(null);
+  const dockScrollRafRef = useRef<number | null>(null);
+  const pendingDockViewportRef = useRef<VirtualStripViewport | null>(null);
   const assignFeedbackTimeoutRef = useRef<number | null>(null);
   const classificationFeedbackTimeoutRef = useRef<number | null>(null);
   const previewWarmupTimeoutRef = useRef<number | null>(null);
@@ -277,10 +276,6 @@ export function PhotoQuickPreviewModal({
   const [zoomLevel, setZoomLevel] = useState(startZoomed ? 2.2 : 1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
-  const [sidebarViewport, setSidebarViewport] = useState<VirtualStripViewport>({
-    scrollOffset: 0,
-    viewportSize: 0,
-  });
   const [dockViewport, setDockViewport] = useState<VirtualStripViewport>({
     scrollOffset: 0,
     viewportSize: 0,
@@ -591,16 +586,6 @@ export function PhotoQuickPreviewModal({
     return item.thumbnailUrl ?? item.previewUrl ?? null;
   }, []);
 
-  const sidebarVirtualRange = useMemo(
-    () => getVirtualStripRange(
-      navigationAssets.length,
-      SIDEBAR_THUMB_ESTIMATED_SIZE,
-      SIDEBAR_THUMB_OVERSCAN,
-      sidebarViewport,
-      currentIndex,
-    ),
-    [currentIndex, navigationAssets.length, sidebarViewport],
-  );
   const dockVirtualRange = useMemo(
     () => getVirtualStripRange(
       navigationAssets.length,
@@ -612,20 +597,11 @@ export function PhotoQuickPreviewModal({
     [currentIndex, dockViewport, navigationAssets.length],
   );
 
-  const sidebarStripItems = useMemo(
-    () => navigationAssets.slice(sidebarVirtualRange.start, sidebarVirtualRange.endExclusive),
-    [navigationAssets, sidebarVirtualRange.endExclusive, sidebarVirtualRange.start],
-  );
   const dockStripItems = useMemo(
     () => navigationAssets.slice(dockVirtualRange.start, dockVirtualRange.endExclusive),
     [dockVirtualRange.endExclusive, dockVirtualRange.start, navigationAssets],
   );
 
-  const sidebarTopSpacerHeight = sidebarVirtualRange.start * SIDEBAR_THUMB_ESTIMATED_SIZE;
-  const sidebarBottomSpacerHeight = Math.max(
-    0,
-    (navigationAssets.length - sidebarVirtualRange.endExclusive) * SIDEBAR_THUMB_ESTIMATED_SIZE,
-  );
   const dockLeftSpacerWidth = dockVirtualRange.start * DOCK_THUMB_ESTIMATED_SIZE;
   const dockRightSpacerWidth = Math.max(
     0,
@@ -963,6 +939,11 @@ export function PhotoQuickPreviewModal({
       if (panAnimationFrameRef.current !== null) {
         window.cancelAnimationFrame(panAnimationFrameRef.current);
       }
+      if (dockScrollRafRef.current !== null) {
+        window.cancelAnimationFrame(dockScrollRafRef.current);
+        dockScrollRafRef.current = null;
+      }
+      pendingDockViewportRef.current = null;
     };
   }, []);
 
@@ -1428,25 +1409,6 @@ export function PhotoQuickPreviewModal({
   }, [asset?.fileName, asset?.id, detailPreviewMaxDimension, fitPreviewMaxDimension]);
 
   useEffect(() => {
-    const element = sidebarStripRef.current;
-    if (!element) {
-      return;
-    }
-
-    const sync = () => {
-      setSidebarViewport({
-        scrollOffset: element.scrollTop,
-        viewportSize: element.clientHeight,
-      });
-    };
-
-    sync();
-    const resizeObserver = new ResizeObserver(sync);
-    resizeObserver.observe(element);
-    return () => resizeObserver.disconnect();
-  }, []);
-
-  useEffect(() => {
     const element = dockStripRef.current;
     if (!element) {
       return;
@@ -1466,27 +1428,6 @@ export function PhotoQuickPreviewModal({
   }, []);
 
   useEffect(() => {
-    const sidebar = sidebarStripRef.current;
-    if (!sidebar || currentIndex < 0) {
-      return;
-    }
-
-    const itemStart = currentIndex * SIDEBAR_THUMB_ESTIMATED_SIZE;
-    const itemEnd = itemStart + SIDEBAR_THUMB_ESTIMATED_SIZE;
-    const viewportStart = sidebar.scrollTop;
-    const viewportEnd = viewportStart + sidebar.clientHeight;
-
-    if (itemStart < viewportStart) {
-      sidebar.scrollTo({ top: Math.max(0, itemStart - 12), behavior: "smooth" });
-    } else if (itemEnd > viewportEnd) {
-      sidebar.scrollTo({
-        top: Math.max(0, itemEnd - sidebar.clientHeight + 12),
-        behavior: "smooth",
-      });
-    }
-  }, [currentIndex]);
-
-  useEffect(() => {
     const dock = dockStripRef.current;
     if (!dock || currentIndex < 0) {
       return;
@@ -1497,12 +1438,16 @@ export function PhotoQuickPreviewModal({
     const viewportStart = dock.scrollLeft;
     const viewportEnd = viewportStart + dock.clientWidth;
 
+    if (itemStart >= viewportStart && itemEnd <= viewportEnd) {
+      return;
+    }
+
     if (itemStart < viewportStart) {
-      dock.scrollTo({ left: Math.max(0, itemStart - 24), behavior: "smooth" });
+      dock.scrollTo({ left: Math.max(0, itemStart - 24), behavior: "auto" });
     } else if (itemEnd > viewportEnd) {
       dock.scrollTo({
         left: Math.max(0, itemEnd - dock.clientWidth + 24),
-        behavior: "smooth",
+        behavior: "auto",
       });
     }
   }, [currentIndex]);
@@ -1941,17 +1886,30 @@ export function PhotoQuickPreviewModal({
     announceCustomLabelFeedback(label, nextIsActive);
   }
 
-  const handleSidebarStripScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
-    setSidebarViewport({
-      scrollOffset: event.currentTarget.scrollTop,
-      viewportSize: event.currentTarget.clientHeight,
-    });
-  }, []);
-
   const handleDockStripScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
-    setDockViewport({
+    pendingDockViewportRef.current = {
       scrollOffset: event.currentTarget.scrollLeft,
       viewportSize: event.currentTarget.clientWidth,
+    };
+
+    if (dockScrollRafRef.current !== null) {
+      return;
+    }
+
+    dockScrollRafRef.current = window.requestAnimationFrame(() => {
+      dockScrollRafRef.current = null;
+      const pendingDockViewport = pendingDockViewportRef.current;
+      if (!pendingDockViewport) {
+        return;
+      }
+
+      pendingDockViewportRef.current = null;
+      setDockViewport((currentViewport) => (
+        currentViewport.scrollOffset === pendingDockViewport.scrollOffset
+        && currentViewport.viewportSize === pendingDockViewport.viewportSize
+          ? currentViewport
+          : pendingDockViewport
+      ));
     });
   }, []);
 
@@ -2243,58 +2201,7 @@ export function PhotoQuickPreviewModal({
             </div>
           </div>
 
-          {navigationAssets.length > 0 ? (
-            <div
-              ref={sidebarStripRef}
-              className="quick-preview__strip"
-              onScroll={handleSidebarStripScroll}
-            >
-              {sidebarTopSpacerHeight > 0 ? (
-                <div
-                  className="quick-preview__virtual-spacer"
-                  style={{ height: sidebarTopSpacerHeight }}
-                  aria-hidden="true"
-                />
-              ) : null}
-              {sidebarStripItems.map((item) => {
-                const itemPreview = getQuickPreviewThumbUrl(item);
-                const isActive = item.id === asset.id;
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={
-                      isActive
-                        ? "quick-preview__thumb quick-preview__thumb--active"
-                        : "quick-preview__thumb"
-                    }
-                    aria-current={isActive ? "true" : undefined}
-                    onClick={() => selectAssetFromPreview(item.id, "jump")}
-                  >
-                    {itemPreview ? (
-                      <img
-                        src={itemPreview}
-                        alt={item.fileName}
-                        className="quick-preview__thumb-image"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      item.fileName
-                    )}
-                  </button>
-                );
-              })}
-              {sidebarBottomSpacerHeight > 0 ? (
-                <div
-                  className="quick-preview__virtual-spacer"
-                  style={{ height: sidebarBottomSpacerHeight }}
-                  aria-hidden="true"
-                />
-              ) : null}
-            </div>
-          ) : hasActiveFilters ? (
+          {hasActiveFilters && navigationAssets.length === 0 ? (
             <div className="quick-preview__empty-filter">
               Nessuna foto corrisponde ai filtri attivi.
             </div>

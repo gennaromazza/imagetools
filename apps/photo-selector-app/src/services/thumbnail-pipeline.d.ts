@@ -41,6 +41,8 @@ export declare class ThumbnailPipeline {
     private quality;
     private minimumPreviewShortSide;
     private desktopTaskLimit;
+    private desktopBackgroundTaskLimit;
+    private desktopForegroundReserve;
     constructor(onBatch: BatchCallback, onError?: ErrorCallback, options?: ThumbnailPipelineOptions);
     enqueue(items: Array<Omit<QueueItem, "priority">>, priority?: number): void;
     updateViewport(visibleIds: Set<string>, prioritizedIds?: Set<string>): void;
@@ -51,6 +53,8 @@ export declare class ThumbnailPipeline {
     invalidate(ids: Iterable<string>): void;
     destroy(): void;
     private sortQueue;
+    private hasForegroundQueued;
+    private countActiveDesktopBackgroundTasks;
     private schedule;
     private dispatchDesktop;
     private dispatch;

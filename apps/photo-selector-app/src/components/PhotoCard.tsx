@@ -1,5 +1,4 @@
 import { memo, useEffect, useRef, useState, type DragEvent } from "react";
-import { createPortal } from "react-dom";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { preloadImageUrls } from "../services/image-cache";
 import { notePhotoCardRender } from "../services/performance-utils";
@@ -98,8 +97,6 @@ export const PhotoCard = memo(
     const batchPulseTimeoutRef = useRef<number | null>(null);
     const lastBatchPulseTokenRef = useRef(0);
     const [activeBatchPulseKind, setActiveBatchPulseKind] = useState<"dot" | "label" | null>(null);
-    const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [hoverPos, setHoverPos] = useState<{ top: number; left: number; right: number; imgSrc: string } | null>(null);
     const [isToolbarVisible, setIsToolbarVisible] = useState(isSelected);
 
     useEffect(() => {
@@ -227,11 +224,6 @@ export const PhotoCard = memo(
         return;
       }
 
-      if (hoverTimerRef.current !== null) {
-        clearTimeout(hoverTimerRef.current);
-        hoverTimerRef.current = null;
-      }
-      setHoverPos(null);
       if (!isSelected) {
         setIsToolbarVisible(false);
       }
@@ -244,9 +236,6 @@ export const PhotoCard = memo(
         }
         if (batchPulseTimeoutRef.current !== null) {
           window.clearTimeout(batchPulseTimeoutRef.current);
-        }
-        if (hoverTimerRef.current !== null) {
-          clearTimeout(hoverTimerRef.current);
         }
       };
     }, []);
@@ -282,29 +271,11 @@ export const PhotoCard = memo(
           }
           setIsToolbarVisible(true);
           if (photo.previewUrl) preloadImageUrls([photo.previewUrl]);
-          const imgSrc = photo.previewUrl ?? photo.thumbnailUrl ?? null;
-          if (!imgSrc) return;
-          hoverTimerRef.current = setTimeout(() => {
-            if (!cardRef.current) return;
-            const rect = cardRef.current.getBoundingClientRect();
-            const spaceRight = window.innerWidth - rect.right;
-            setHoverPos({
-              top: Math.max(8, rect.top),
-              left: spaceRight >= 220 ? rect.right + 8 : rect.left - 228,
-              right: spaceRight >= 220 ? -1 : rect.right,
-              imgSrc,
-            });
-          }, 550);
         }}
         onMouseLeave={() => {
-          if (hoverTimerRef.current !== null) {
-            clearTimeout(hoverTimerRef.current);
-            hoverTimerRef.current = null;
-          }
           if (!isSelected) {
             setIsToolbarVisible(false);
           }
-          setHoverPos(null);
         }}
         onBlur={(event) => {
           const nextTarget = event.relatedTarget;
@@ -529,21 +500,6 @@ export const PhotoCard = memo(
             </div>
           </div>
         ) : null}
-        {!disableNonEssentialUi && hoverPos !== null &&
-          createPortal(
-            <div
-              className="photo-card__hover-preview"
-              style={{ top: hoverPos.top, left: hoverPos.left }}
-            >
-              <img
-                src={hoverPos.imgSrc}
-                alt={photo.fileName}
-                className="photo-card__hover-img"
-              />
-              <div className="photo-card__hover-name">{photo.fileName}</div>
-            </div>,
-            document.body
-          )}
       </div>
     );
   },

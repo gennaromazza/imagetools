@@ -5,6 +5,10 @@ const EARLY_BATCH_INTERVAL_MS = 16;
 const STEADY_BATCH_INTERVAL_MS = 72;
 const EARLY_BATCH_COUNT = 48;
 const MAX_PENDING_BATCH_SIZE = 10;
+const DESKTOP_BACKGROUND_LIMIT_MIN = 2;
+const DESKTOP_BACKGROUND_LIMIT_MAX = 4;
+const DESKTOP_FOREGROUND_RESERVE_MIN = 2;
+const DESKTOP_FOREGROUND_RESERVE_MAX = 6;
 const RAW_PREVIEW_SCAN_BYTES = 512 * 1024;
 const DEFAULT_MIN_EMBEDDED_PREVIEW_SHORT_SIDE = 800;
 const RAW_EXTENSIONS = new Set([
@@ -80,6 +84,8 @@ export class ThumbnailPipeline {
     quality;
     minimumPreviewShortSide;
     desktopTaskLimit;
+    desktopBackgroundTaskLimit;
+    desktopForegroundReserve;
     constructor(onBatch, onError, options) {
         this.onBatch = onBatch;
         this.onError = onError ?? null;
@@ -89,8 +95,12 @@ export class ThumbnailPipeline {
         const cores = navigator.hardwareConcurrency || 4;
         const poolSize = Math.max(2, Math.min(6, Math.max(2, cores - 1)));
         this.desktopTaskLimit = Math.max(4, Math.min(12, cores));
+        this.desktopBackgroundTaskLimit = Math.max(DESKTOP_BACKGROUND_LIMIT_MIN, Math.min(DESKTOP_BACKGROUND_LIMIT_MAX, Math.floor(this.desktopTaskLimit * 0.45)));
+        this.desktopForegroundReserve = Math.max(DESKTOP_FOREGROUND_RESERVE_MIN, Math.min(DESKTOP_FOREGROUND_RESERVE_MAX, Math.floor(this.desktopTaskLimit * 0.35)));
         perfLog(`[PERF] thumbnail worker pool size            : ${poolSize}`);
         perfLog(`[PERF] desktop thumbnail task limit          : ${this.desktopTaskLimit}`);
+        perfLog(`[PERF] desktop background task limit       : ${this.desktopBackgroundTaskLimit}`);
+        perfLog(`[PERF] desktop foreground reserve slots    : ${this.desktopForegroundReserve}`);
         for (let i = 0; i < poolSize; i += 1) {
             const worker = new Worker(new URL("../workers/thumbnail-worker.ts", import.meta.url), { type: "module" });
             worker.onmessage = (ev) => this.handleWorkerResult(worker, ev.data);
@@ -189,21 +199,50 @@ export class ThumbnailPipeline {
     sortQueue() {
         this.queue.sort((left, right) => left.priority - right.priority);
     }
+    hasForegroundQueued() {
+        for (const item of this.queue) {
+            if (item.priority <= 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+    countActiveDesktopBackgroundTasks() {
+        let count = 0;
+        for (const task of this.activeDesktopTasks.values()) {
+            if (task.item.priority > 1) {
+                count += 1;
+            }
+        }
+        return count;
+    }
     schedule() {
         if (this.destroyed) {
             return;
         }
         while (this.queue.length > 0) {
             const worker = this.workers.find((candidate) => !this.busyWorkers.has(candidate));
-            const canDispatchDesktopTask = typeof window !== "undefined" &&
-                typeof window.filexDesktop?.getThumbnail === "function" &&
-                this.activeDesktopTasks.size < this.desktopTaskLimit;
+            const canUseDesktopBridge = typeof window !== "undefined" &&
+                typeof window.filexDesktop?.getThumbnail === "function";
+            const canDispatchDesktopTask = canUseDesktopBridge && this.activeDesktopTasks.size < this.desktopTaskLimit;
+            const foregroundQueued = this.hasForegroundQueued();
+            const activeDesktopBackgroundTasks = this.countActiveDesktopBackgroundTasks();
+            const availableDesktopSlots = Math.max(0, this.desktopTaskLimit - this.activeDesktopTasks.size);
             let nextIndex = -1;
             let dispatchMode = null;
             for (let index = 0; index < this.queue.length; index += 1) {
                 const candidate = this.queue[index];
-                const canUseDesktopPath = Boolean(candidate.absolutePath && typeof window !== "undefined" && typeof window.filexDesktop?.getThumbnail === "function");
+                const canUseDesktopPath = Boolean(candidate.absolutePath && canUseDesktopBridge);
                 if (canUseDesktopPath && canDispatchDesktopTask) {
+                    const isBackgroundTask = candidate.priority > 1;
+                    if (isBackgroundTask && foregroundQueued) {
+                        if (activeDesktopBackgroundTasks >= this.desktopBackgroundTaskLimit) {
+                            continue;
+                        }
+                        if (availableDesktopSlots <= this.desktopForegroundReserve) {
+                            continue;
+                        }
+                    }
                     nextIndex = index;
                     dispatchMode = "desktop";
                     break;

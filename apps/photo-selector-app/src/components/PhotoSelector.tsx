@@ -118,6 +118,11 @@ const QUICK_PREVIEW_FIT_MAX_DIMENSION = 2048;
 const CARD_CHROME_HEIGHT_PX = 64;
 const VIRTUAL_OVERSCAN_ROWS_IDLE = 4;
 const VIRTUAL_OVERSCAN_ROWS_FAST = 10;
+const PRIORITY_PREFETCH_ROWS_BEFORE_IDLE = 2;
+const PRIORITY_PREFETCH_ROWS_AFTER_IDLE = 6;
+const PRIORITY_PREFETCH_ROWS_BEFORE_FAST = 2;
+const PRIORITY_PREFETCH_ROWS_AFTER_FAST = 14;
+const PRIORITY_PREFETCH_MAX_IDS = 360;
 const FAST_SCROLL_COOLDOWN_MS = 120;
 const ROOT_FOLDER_OVERRIDE_KEY = "ps-root-folder-path-override";
 const LEGACY_ROOT_FOLDER_KEY = "ps-root-folder-path";
@@ -1296,6 +1301,44 @@ export function PhotoSelector({
     }
     return ids;
   }, [gridColumnCount, virtualRows, visiblePhotoIds]);
+  const viewportPriorityIds = useMemo(() => {
+    if (visiblePhotoIds.length === 0) {
+      return [] as string[];
+    }
+
+    const prefetchBefore = isFastScrollActive
+      ? PRIORITY_PREFETCH_ROWS_BEFORE_FAST
+      : PRIORITY_PREFETCH_ROWS_BEFORE_IDLE;
+    const prefetchAfter = isFastScrollActive
+      ? PRIORITY_PREFETCH_ROWS_AFTER_FAST
+      : PRIORITY_PREFETCH_ROWS_AFTER_IDLE;
+
+    if (virtualRows.length === 0) {
+      const fallbackCount = Math.min(
+        visiblePhotoIds.length,
+        Math.max(gridColumnCount * (prefetchBefore + prefetchAfter + 2), gridColumnCount * 6),
+      );
+      return visiblePhotoIds.slice(0, Math.min(PRIORITY_PREFETCH_MAX_IDS, fallbackCount));
+    }
+
+    const firstVisibleRow = virtualRows[0]?.index ?? 0;
+    const lastVisibleRow = virtualRows[virtualRows.length - 1]?.index ?? firstVisibleRow;
+    const rowStart = Math.max(0, firstVisibleRow - prefetchBefore);
+    const rowEndExclusive = Math.min(totalVirtualRows, lastVisibleRow + 1 + prefetchAfter);
+    const startIndex = rowStart * gridColumnCount;
+    const endIndex = Math.min(visiblePhotoIds.length, rowEndExclusive * gridColumnCount);
+
+    if (endIndex <= startIndex) {
+      return [] as string[];
+    }
+
+    const ids = visiblePhotoIds.slice(startIndex, endIndex);
+    if (ids.length <= PRIORITY_PREFETCH_MAX_IDS) {
+      return ids;
+    }
+
+    return ids.slice(0, PRIORITY_PREFETCH_MAX_IDS);
+  }, [gridColumnCount, isFastScrollActive, totalVirtualRows, virtualRows, visiblePhotoIds]);
   const renderedPhotos = useMemo(
     () => renderedPhotoIds
       .map((photoId) => assetById.get(photoId))
@@ -1486,11 +1529,14 @@ export function PhotoSelector({
       return;
     }
 
-    const ids = new Set<string>();
+    const ids = new Set<string>(viewportPriorityIds);
 
-    if (hasActiveFilters) {
-      for (const id of visiblePhotoIds.slice(0, 240)) {
+    if (hasActiveFilters && ids.size < PRIORITY_PREFETCH_MAX_IDS) {
+      for (const id of visiblePhotoIds.slice(0, PRIORITY_PREFETCH_MAX_IDS)) {
         ids.add(id);
+        if (ids.size >= PRIORITY_PREFETCH_MAX_IDS) {
+          break;
+        }
       }
     }
 
@@ -1499,7 +1545,7 @@ export function PhotoSelector({
     }
 
     onPriorityIdsChange(ids);
-  }, [hasActiveFilters, onPriorityIdsChange, previewPriorityIds, visiblePhotoIds]);
+  }, [hasActiveFilters, onPriorityIdsChange, previewPriorityIds, viewportPriorityIds, visiblePhotoIds]);
 
   useEffect(() => {
     if (!onPreviewPriorityIdsChange) {

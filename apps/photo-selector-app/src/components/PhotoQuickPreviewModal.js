@@ -13,8 +13,6 @@ const orientationLabels = {
     square: "Quadrata"
 };
 const MIN_RAW_PREVIEW_DIMENSION = 900;
-const SIDEBAR_THUMB_ESTIMATED_SIZE = 196;
-const SIDEBAR_THUMB_OVERSCAN = 2;
 const DOCK_THUMB_ESTIMATED_SIZE = 81;
 const DOCK_THUMB_OVERSCAN = 4;
 const QUICK_PREVIEW_DESKTOP_FALLBACK_DELAY_MS = 80;
@@ -74,8 +72,9 @@ function createDesktopManagedPreviewState(assetId, stage, frame, sourceOverride)
 }
 export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = "ultra-fast", startZoomed = false, usageByAssetId, pages = [], activePageId, customLabelsCatalog = [], customLabelColors = {}, customLabelShortcuts = {}, onClose, onSelectAsset, onAddToPage, onJumpToPage, onUpdateAsset }) {
     const stageRef = useRef(null);
-    const sidebarStripRef = useRef(null);
     const dockStripRef = useRef(null);
+    const dockScrollRafRef = useRef(null);
+    const pendingDockViewportRef = useRef(null);
     const assignFeedbackTimeoutRef = useRef(null);
     const classificationFeedbackTimeoutRef = useRef(null);
     const previewWarmupTimeoutRef = useRef(null);
@@ -121,10 +120,6 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     const [zoomLevel, setZoomLevel] = useState(startZoomed ? 2.2 : 1);
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
-    const [sidebarViewport, setSidebarViewport] = useState({
-        scrollOffset: 0,
-        viewportSize: 0,
-    });
     const [dockViewport, setDockViewport] = useState({
         scrollOffset: 0,
         viewportSize: 0,
@@ -356,12 +351,8 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     const getQuickPreviewThumbUrl = useCallback((item) => {
         return item.thumbnailUrl ?? item.previewUrl ?? null;
     }, []);
-    const sidebarVirtualRange = useMemo(() => getVirtualStripRange(navigationAssets.length, SIDEBAR_THUMB_ESTIMATED_SIZE, SIDEBAR_THUMB_OVERSCAN, sidebarViewport, currentIndex), [currentIndex, navigationAssets.length, sidebarViewport]);
     const dockVirtualRange = useMemo(() => getVirtualStripRange(navigationAssets.length, DOCK_THUMB_ESTIMATED_SIZE, DOCK_THUMB_OVERSCAN, dockViewport, currentIndex), [currentIndex, dockViewport, navigationAssets.length]);
-    const sidebarStripItems = useMemo(() => navigationAssets.slice(sidebarVirtualRange.start, sidebarVirtualRange.endExclusive), [navigationAssets, sidebarVirtualRange.endExclusive, sidebarVirtualRange.start]);
     const dockStripItems = useMemo(() => navigationAssets.slice(dockVirtualRange.start, dockVirtualRange.endExclusive), [dockVirtualRange.endExclusive, dockVirtualRange.start, navigationAssets]);
-    const sidebarTopSpacerHeight = sidebarVirtualRange.start * SIDEBAR_THUMB_ESTIMATED_SIZE;
-    const sidebarBottomSpacerHeight = Math.max(0, (navigationAssets.length - sidebarVirtualRange.endExclusive) * SIDEBAR_THUMB_ESTIMATED_SIZE);
     const dockLeftSpacerWidth = dockVirtualRange.start * DOCK_THUMB_ESTIMATED_SIZE;
     const dockRightSpacerWidth = Math.max(0, (navigationAssets.length - dockVirtualRange.endExclusive) * DOCK_THUMB_ESTIMATED_SIZE);
     useEffect(() => {
@@ -635,6 +626,11 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
             if (panAnimationFrameRef.current !== null) {
                 window.cancelAnimationFrame(panAnimationFrameRef.current);
             }
+            if (dockScrollRafRef.current !== null) {
+                window.cancelAnimationFrame(dockScrollRafRef.current);
+                dockScrollRafRef.current = null;
+            }
+            pendingDockViewportRef.current = null;
         };
     }, []);
     useEffect(() => {
@@ -1058,22 +1054,6 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         });
     }, [asset?.fileName, asset?.id, detailPreviewMaxDimension, fitPreviewMaxDimension]);
     useEffect(() => {
-        const element = sidebarStripRef.current;
-        if (!element) {
-            return;
-        }
-        const sync = () => {
-            setSidebarViewport({
-                scrollOffset: element.scrollTop,
-                viewportSize: element.clientHeight,
-            });
-        };
-        sync();
-        const resizeObserver = new ResizeObserver(sync);
-        resizeObserver.observe(element);
-        return () => resizeObserver.disconnect();
-    }, []);
-    useEffect(() => {
         const element = dockStripRef.current;
         if (!element) {
             return;
@@ -1090,25 +1070,6 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         return () => resizeObserver.disconnect();
     }, []);
     useEffect(() => {
-        const sidebar = sidebarStripRef.current;
-        if (!sidebar || currentIndex < 0) {
-            return;
-        }
-        const itemStart = currentIndex * SIDEBAR_THUMB_ESTIMATED_SIZE;
-        const itemEnd = itemStart + SIDEBAR_THUMB_ESTIMATED_SIZE;
-        const viewportStart = sidebar.scrollTop;
-        const viewportEnd = viewportStart + sidebar.clientHeight;
-        if (itemStart < viewportStart) {
-            sidebar.scrollTo({ top: Math.max(0, itemStart - 12), behavior: "smooth" });
-        }
-        else if (itemEnd > viewportEnd) {
-            sidebar.scrollTo({
-                top: Math.max(0, itemEnd - sidebar.clientHeight + 12),
-                behavior: "smooth",
-            });
-        }
-    }, [currentIndex]);
-    useEffect(() => {
         const dock = dockStripRef.current;
         if (!dock || currentIndex < 0) {
             return;
@@ -1117,13 +1078,16 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         const itemEnd = itemStart + DOCK_THUMB_ESTIMATED_SIZE;
         const viewportStart = dock.scrollLeft;
         const viewportEnd = viewportStart + dock.clientWidth;
+        if (itemStart >= viewportStart && itemEnd <= viewportEnd) {
+            return;
+        }
         if (itemStart < viewportStart) {
-            dock.scrollTo({ left: Math.max(0, itemStart - 24), behavior: "smooth" });
+            dock.scrollTo({ left: Math.max(0, itemStart - 24), behavior: "auto" });
         }
         else if (itemEnd > viewportEnd) {
             dock.scrollTo({
                 left: Math.max(0, itemEnd - dock.clientWidth + 24),
-                behavior: "smooth",
+                behavior: "auto",
             });
         }
     }, [currentIndex]);
@@ -1509,16 +1473,25 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         });
         announceCustomLabelFeedback(label, nextIsActive);
     }
-    const handleSidebarStripScroll = useCallback((event) => {
-        setSidebarViewport({
-            scrollOffset: event.currentTarget.scrollTop,
-            viewportSize: event.currentTarget.clientHeight,
-        });
-    }, []);
     const handleDockStripScroll = useCallback((event) => {
-        setDockViewport({
+        pendingDockViewportRef.current = {
             scrollOffset: event.currentTarget.scrollLeft,
             viewportSize: event.currentTarget.clientWidth,
+        };
+        if (dockScrollRafRef.current !== null) {
+            return;
+        }
+        dockScrollRafRef.current = window.requestAnimationFrame(() => {
+            dockScrollRafRef.current = null;
+            const pendingDockViewport = pendingDockViewportRef.current;
+            if (!pendingDockViewport) {
+                return;
+            }
+            pendingDockViewportRef.current = null;
+            setDockViewport((currentViewport) => (currentViewport.scrollOffset === pendingDockViewport.scrollOffset
+                && currentViewport.viewportSize === pendingDockViewport.viewportSize
+                ? currentViewport
+                : pendingDockViewport));
         });
     }, []);
     const handleMainPreviewLoad = useCallback((event) => {
@@ -1688,13 +1661,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                                             ? "quick-preview__color-chip quick-preview__color-chip--clear quick-preview__color-chip--selected"
                                             : "quick-preview__color-chip quick-preview__color-chip--clear", onClick: () => setFilterColorLabel("all"), children: "Tutti" }), COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: filterColorLabel === value
                                             ? `quick-preview__color-chip quick-preview__color-chip--${value} quick-preview__color-chip--selected`
-                                            : `quick-preview__color-chip quick-preview__color-chip--${value}`, onClick: () => setFilterColorLabel(value), title: COLOR_LABEL_NAMES[value] }, value)))] })] }), navigationAssets.length > 0 ? (_jsxs("div", { ref: sidebarStripRef, className: "quick-preview__strip", onScroll: handleSidebarStripScroll, children: [sidebarTopSpacerHeight > 0 ? (_jsx("div", { className: "quick-preview__virtual-spacer", style: { height: sidebarTopSpacerHeight }, "aria-hidden": "true" })) : null, sidebarStripItems.map((item) => {
-                                const itemPreview = getQuickPreviewThumbUrl(item);
-                                const isActive = item.id === asset.id;
-                                return (_jsx("button", { type: "button", className: isActive
-                                        ? "quick-preview__thumb quick-preview__thumb--active"
-                                        : "quick-preview__thumb", "aria-current": isActive ? "true" : undefined, onClick: () => selectAssetFromPreview(item.id, "jump"), children: itemPreview ? (_jsx("img", { src: itemPreview, alt: item.fileName, className: "quick-preview__thumb-image", loading: "lazy", decoding: "async" })) : (item.fileName) }, item.id));
-                            }), sidebarBottomSpacerHeight > 0 ? (_jsx("div", { className: "quick-preview__virtual-spacer", style: { height: sidebarBottomSpacerHeight }, "aria-hidden": "true" })) : null] })) : hasActiveFilters ? (_jsx("div", { className: "quick-preview__empty-filter", children: "Nessuna foto corrisponde ai filtri attivi." })) : null] })) : null, _jsxs("div", { className: "quick-preview__main", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "quick-preview__chrome", children: [_jsxs("div", { className: "quick-preview__title", children: [_jsx("strong", { children: asset.fileName }), _jsxs("span", { children: [asset.width, " x ", asset.height, " | ", orientationLabels[asset.orientation], asset.width > 0 && asset.height > 0
+                                            : `quick-preview__color-chip quick-preview__color-chip--${value}`, onClick: () => setFilterColorLabel(value), title: COLOR_LABEL_NAMES[value] }, value)))] })] }), hasActiveFilters && navigationAssets.length === 0 ? (_jsx("div", { className: "quick-preview__empty-filter", children: "Nessuna foto corrisponde ai filtri attivi." })) : null] })) : null, _jsxs("div", { className: "quick-preview__main", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "quick-preview__chrome", children: [_jsxs("div", { className: "quick-preview__title", children: [_jsx("strong", { children: asset.fileName }), _jsxs("span", { children: [asset.width, " x ", asset.height, " | ", orientationLabels[asset.orientation], asset.width > 0 && asset.height > 0
                                                 ? ` | ${((asset.width * asset.height) / 1_000_000).toFixed(1)} MP`
                                                 : "", usage ? ` | Foglio ${usage.pageNumber}` : " | Non ancora usata nel layout"] }), asset.xmpHasEdits ? (_jsxs("span", { className: "quick-preview__xmp-badge", title: "Metadati XMP rilevati", children: ["XMP Edit: ", asset.xmpEditInfo ?? "Sviluppo rilevato"] })) : null] }), _jsxs("div", { className: "quick-preview__actions", children: [_jsx("span", { className: "quick-preview__stars", children: formatAssetStars(asset) }), classificationFeedback ? (_jsx("span", { className: [
                                             "quick-preview__feedback",
