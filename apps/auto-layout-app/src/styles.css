@@ -2162,6 +2162,15 @@ img {
   color: rgba(255, 245, 232, 0.82);
 }
 
+.layout-studio__drag-dock-dropzone--idle {
+  opacity: 0.84;
+}
+
+.layout-studio__drag-dock-dropzone--active {
+  opacity: 1;
+  border-style: dashed;
+}
+
 .layout-studio__transfer-tray {
   position: sticky;
   top: 1rem;

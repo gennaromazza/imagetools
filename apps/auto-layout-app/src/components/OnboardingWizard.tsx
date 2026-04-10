@@ -68,6 +68,33 @@ export function OnboardingWizard({
     wasOpenRef.current = isOpen;
   }, [currentRequest, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const validIds = new Set(currentRequest.assets.map((asset) => asset.id));
+
+    setSelectedPhotoIds((current) => {
+      if (current.length === 0) {
+        return current;
+      }
+
+      const filtered = current.filter((id) => validIds.has(id));
+      const hadInvalidEntries = filtered.length !== current.length;
+
+      if (!hadInvalidEntries) {
+        return current;
+      }
+
+      if (filtered.length > 0) {
+        return filtered;
+      }
+
+      return currentRequest.assets.map((asset) => asset.id);
+    });
+  }, [currentRequest.assets, isOpen]);
+
   if (!isOpen) return null;
 
   const wizardSteps: WizardStep[] =
@@ -98,6 +125,9 @@ export function OnboardingWizard({
     if (!selectedPreset) return;
 
     const selectedAssets = currentRequest.assets.filter((asset) => selectedPhotoIds.includes(asset.id));
+    if (selectedAssets.length === 0) {
+      return;
+    }
 
     const updatedRequest: AutoLayoutRequest = {
       ...currentRequest,
@@ -581,7 +611,7 @@ export function OnboardingWizard({
                 type="button"
                 className="primary-button"
                 onClick={handleCompleteWizard}
-                disabled={isLoading}
+                disabled={isLoading || selectedPhotoIds.length === 0}
               >
                 Accedi allo studio
               </button>

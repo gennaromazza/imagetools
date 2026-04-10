@@ -358,7 +358,7 @@ function PhotoRibbonContent({
                   .join(" ")}
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", asset.id);
-                  setTimeout(() => onDragAssetStart(asset.id), 0);
+                  onDragAssetStart(asset.id);
                 }}
                 onDragEnd={onDragEnd}
                 onContextMenu={(event) => {

@@ -1561,6 +1561,7 @@ export function LayoutPreviewBoard({
                       key={page.id}
                       type="button"
                       role="tab"
+                      data-testid="studio-page-tab"
                       aria-selected={isActive}
                       className={[
                         "layout-studio__tab",
@@ -1591,6 +1592,7 @@ export function LayoutPreviewBoard({
                         dragState
                           ? (event) => {
                               event.preventDefault();
+                              event.stopPropagation();
                               stopAutoScroll();
                               clearDragPageJump();
                               handleJumpToPage(page);
@@ -1886,7 +1888,7 @@ export function LayoutPreviewBoard({
                               onDragStart={(event) => {
                                 event.dataTransfer.effectAllowed = "move";
                                 event.dataTransfer.setData("text/plain", imageId);
-                                setTimeout(() => onDragAssetStart(imageId), 0);
+                                onDragAssetStart(imageId);
                               }}
                               onDragEnd={onDragEnd}
                             >
@@ -1952,6 +1954,7 @@ export function LayoutPreviewBoard({
           <div
             ref={canvasRef}
             className="layout-studio__canvas layout-studio__canvas--vertical"
+            data-testid="studio-canvas"
             onDragOver={(event) => {
               handleCanvasDragOver(event);
               if (dragState) {
@@ -1976,32 +1979,50 @@ export function LayoutPreviewBoard({
               }
             }}
           >
-            <div className="layout-studio__drag-dock">
+            <div className="layout-studio__drag-dock" data-testid="studio-drag-dock">
               <button
                 type="button"
                 className="secondary-button layout-studio__drag-dock-button"
+                data-testid="new-page-button"
                 onClick={onCreatePageFromUnused}
                 disabled={!isManualWorkflow && result.unassignedAssets.length === 0}
               >
                 {isManualWorkflow ? "Nuovo foglio vuoto" : "Nuovo foglio"}
               </button>
-              {dragState ? (
-                <div
-                  className="layout-studio__drag-dock-dropzone"
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onCreatePageWithImage(dragState.imageId);
-                  }}
-                >
-                  <strong>+ Nuovo foglio</strong>
-                  <span>Rilascia qui per creare un foglio con la foto trascinata.</span>
-                </div>
-              ) : null}
+              <div
+                className={[
+                  "layout-studio__drag-dock-dropzone",
+                  dragState
+                    ? "layout-studio__drag-dock-dropzone--active"
+                    : "layout-studio__drag-dock-dropzone--idle"
+                ].join(" ")}
+                data-testid="new-page-dropzone"
+                aria-disabled={!dragState}
+                onDragOver={(event) => {
+                  if (!dragState) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(event) => {
+                  if (!dragState) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onCreatePageWithImage(dragState.imageId);
+                }}
+              >
+                <strong>+ Nuovo foglio</strong>
+                <span>
+                  {dragState
+                    ? "Rilascia qui per creare un foglio con la foto trascinata."
+                    : "Trascina una foto qui per creare un nuovo foglio."}
+                </span>
+              </div>
             </div>
 
             <div

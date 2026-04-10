@@ -491,12 +491,10 @@ export const SheetSurface = memo(function SheetSurface({
                     event.stopPropagation();
                     event.dataTransfer.effectAllowed = "move";
                     event.dataTransfer.setData("text/plain", assignment.imageId);
-                      setTimeout(() => {
-                        onStartSlotDrag(page.id, slot.id, assignment.imageId);
-                        setStableDragIntentLabel(
-                          "Trascina la foto su uno slot (vuoto = sposta, pieno = scambia) oppure parcheggiala per spostarla su un altro foglio."
-                        );
-                      }, 0);
+                    onStartSlotDrag(page.id, slot.id, assignment.imageId);
+                    setStableDragIntentLabel(
+                      "Trascina la foto su uno slot (vuoto = sposta, pieno = scambia) oppure parcheggiala per spostarla su un altro foglio."
+                    );
                   }}
                   onDragEnd={(event) => {
                     event.stopPropagation();
