@@ -62,6 +62,12 @@ import { mockWeddingAssets } from "./mock/wedding-selection";
 import { exportSheets, type ExportProgressUpdate } from "./sheet-renderer";
 import { saveImageAssets, loadImageAssets, deleteProjectImages, hasProjectImages } from "./image-storage";
 import { createPersistentProjectSnapshot, loadStoredProjects, saveStoredProjects } from "./project-storage";
+import { importProject } from "./project-export";
+import {
+  consumePendingDesktopOpenProjectPath,
+  markDesktopOpenProjectRequestReady,
+  subscribeDesktopOpenProjectRequest,
+} from "./services/desktop-runtime";
 
 type AppScreen = "dashboard" | "setup" | "studio";
 type StudioPanel = "page" | "slot" | "output" | "warnings" | "stats" | "activity";
@@ -781,17 +787,26 @@ function AppContent() {
     saveProject({ ...project, name: newName, updatedAt: Date.now() });
   };
 
-  const importImportedProject = (importedProject: Project) => {
+  const importImportedProject = (importedProject: Project, options?: { openAfterImport?: boolean }) => {
     // Ensure the imported project has a unique ID
     const newProjectId = `project-${Date.now()}`;
     const catalogAssets = getProjectCatalogAssets(importedProject);
+    const activeRequest = importedProject.result?.request ?? importedProject.request;
+    const resolvedResult =
+      importedProject.result ??
+      (activeRequest.workflowMode === "manual"
+        ? buildManualLayoutPlan(activeRequest, Math.max(1, activeRequest.desiredSheetCount ?? 1))
+        : createAutoLayoutPlan(activeRequest));
     const newProject: Project = {
       ...importedProject,
       id: newProjectId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      request: activeRequest,
+      result: resolvedResult,
       catalogAssets,
-      assetCount: catalogAssets.length
+      assetCount: catalogAssets.length,
+      pageCount: resolvedResult.pages.length,
     };
 
     // Save imported images to IndexedDB
@@ -803,7 +818,67 @@ function AppContent() {
 
     saveProject(newProject);
     pushActivity(`Progetto "${newProject.name}" importato con successo.`);
+
+    if (options?.openAfterImport) {
+      resetStudioHistory();
+      setCurrentProjectId(newProjectId);
+      setAllAssets(catalogAssets);
+      setActiveAssetIds(activeRequest.assets.map((asset) => asset.id));
+      setRequest(activeRequest);
+      setResult(resolvedResult);
+      setUsesMockData(false);
+      setCurrentSessionFiles(new Map());
+      setCurrentScreen("studio");
+    }
   };
+
+  useEffect(() => {
+    let alive = true;
+
+    const handleProjectPath = async (projectPath: string | null) => {
+      if (!alive || !projectPath || typeof window === "undefined" || typeof window.filexDesktop?.readFile !== "function") {
+        return;
+      }
+
+      try {
+        const payload = await window.filexDesktop.readFile(projectPath);
+        if (!payload) {
+          throw new Error("File progetto non leggibile.");
+        }
+
+        const fileContent = payload.bytes.slice().buffer;
+        const imported = await importProject(fileContent);
+        if (!alive) {
+          return;
+        }
+
+        importImportedProject(imported.project, { openAfterImport: true });
+        toast.addToast(`Progetto importato da ${payload.name}.`, "success", 5000);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Impossibile importare il progetto ricevuto da Photo Selector.";
+        if (!alive) {
+          return;
+        }
+        toast.addToast(message, "error", 7000);
+        pushActivity(message);
+      }
+    };
+
+    const unsubscribe = subscribeDesktopOpenProjectRequest((projectPath) => {
+      void handleProjectPath(projectPath);
+    });
+
+    void (async () => {
+      await markDesktopOpenProjectRequestReady();
+      const pendingPath = await consumePendingDesktopOpenProjectPath();
+      await handleProjectPath(pendingPath);
+    })();
+
+    return () => {
+      alive = false;
+      unsubscribe();
+    };
+  }, [importImportedProject, pushActivity, toast]);
 
   const handleCreateProjectFromWizard = async (wizardRequest: AutoLayoutRequest, wizardProjectName: string) => {
     const projectId = currentProjectId || `project-${Date.now()}`;
@@ -1609,6 +1684,11 @@ function AppContent() {
   }
 
   function handleRemovePage(pageId: string) {
+    if (result.pages.length <= 1) {
+      toast.addToast("Non puoi eliminare l'ultimo foglio del progetto.", "warning", 3200);
+      return;
+    }
+
     const pageToDelete = result.pages.find((p) => p.id === pageId);
     if (!pageToDelete) return;
     
@@ -1622,6 +1702,11 @@ function AppContent() {
   function confirmRemovePage() {
     const pageId = confirmState.pageId;
     if (!pageId) return;
+    if (result.pages.length <= 1) {
+      toast.addToast("Non puoi eliminare l'ultimo foglio del progetto.", "warning", 3200);
+      setConfirmState({ isOpen: false, pageId: null, pageNumber: null });
+      return;
+    }
 
     const nextResult = removePage(result, { pageId });
     const changed = commitStudioChange({

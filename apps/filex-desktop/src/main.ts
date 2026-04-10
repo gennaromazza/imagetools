@@ -25,6 +25,7 @@ import type {
   DesktopThumbnailCacheLookupEntry,
 } from "@photo-tools/desktop-contracts";
 import {
+  createAutoLayoutHandoffFileDesktop,
   copyFilesToFolderDesktop,
   moveFilesToFolderDesktop,
   openFolderDesktop,
@@ -116,6 +117,8 @@ const appUserModelId = `studio.filex.${requestedTool.id}`;
 let mainWindow: BrowserWindow | null = null;
 let isOpenFolderRequestRendererReady = false;
 let pendingOpenFolderPath: string | null = null;
+let isOpenProjectRequestRendererReady = false;
+let pendingOpenProjectPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
 let archivioFlowModulePromise: Promise<any> | null = null;
 
@@ -213,6 +216,19 @@ function resolveValidDirectoryPath(candidatePath: string): string | null {
 
   try {
     return statSync(normalizedPath).isDirectory() ? normalizedPath : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveValidFilePath(candidatePath: string): string | null {
+  const normalizedPath = sanitizeDesktopPath(candidatePath);
+  if (!normalizedPath || !existsSync(normalizedPath)) {
+    return null;
+  }
+
+  try {
+    return statSync(normalizedPath).isFile() ? normalizedPath : null;
   } catch {
     return null;
   }
@@ -332,6 +348,26 @@ function extractOpenFolderPathFromArgv(argv: string[]): string | null {
   return null;
 }
 
+function extractOpenProjectPathFromArgv(argv: string[]): string | null {
+  for (let index = 0; index < argv.length; index += 1) {
+    const value = argv[index];
+    if (typeof value !== "string") {
+      continue;
+    }
+
+    if (value === "--open-project") {
+      const nextValue = argv[index + 1];
+      return typeof nextValue === "string" ? resolveValidFilePath(nextValue) : null;
+    }
+
+    if (value.startsWith("--open-project=")) {
+      return resolveValidFilePath(value.slice("--open-project=".length));
+    }
+  }
+
+  return null;
+}
+
 function focusMainWindow(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
@@ -364,6 +400,16 @@ function deliverOpenFolderRequest(folderPath: string): void {
   pendingOpenFolderPath = null;
 }
 
+function deliverOpenProjectRequest(projectPath: string): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    pendingOpenProjectPath = projectPath;
+    return;
+  }
+
+  mainWindow.webContents.send("filex:open-project-request", projectPath);
+  pendingOpenProjectPath = null;
+}
+
 function queueOpenFolderPath(folderPath: string | null): void {
   if (!folderPath) {
     return;
@@ -381,14 +427,27 @@ function queueOpenFolderPath(folderPath: string | null): void {
   }
 }
 
+function queueOpenProjectPath(projectPath: string | null): void {
+  if (!projectPath) {
+    return;
+  }
+
+  pendingOpenProjectPath = projectPath;
+  if (isOpenProjectRequestRendererReady) {
+    deliverOpenProjectRequest(projectPath);
+  }
+}
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   pendingOpenFolderPath = extractOpenFolderPathFromArgv(process.argv);
+  pendingOpenProjectPath = extractOpenProjectPathFromArgv(process.argv);
 
   app.on("second-instance", (_event, argv) => {
     queueOpenFolderPath(extractOpenFolderPathFromArgv(argv));
+    queueOpenProjectPath(extractOpenProjectPathFromArgv(argv));
     void ensureMainWindow();
     focusMainWindow();
   });
@@ -396,6 +455,9 @@ if (!hasSingleInstanceLock) {
   app.on("browser-window-focus", () => {
     if (pendingOpenFolderPath && isOpenFolderRequestRendererReady) {
       deliverOpenFolderRequest(pendingOpenFolderPath);
+    }
+    if (pendingOpenProjectPath && isOpenProjectRequestRendererReady) {
+      deliverOpenProjectRequest(pendingOpenProjectPath);
     }
   });
 }
@@ -776,6 +838,28 @@ function registerIpcHandlers(): void {
     isOpenFolderRequestRendererReady = true;
     if (pendingOpenFolderPath) {
       deliverOpenFolderRequest(pendingOpenFolderPath);
+    }
+  });
+  ipcMain.handle("filex:create-auto-layout-handoff-file", (_event, payload: { fileName?: string; content?: string }) =>
+    createAutoLayoutHandoffFileDesktop(
+      payload?.fileName ?? "photo-selector-handoff.imagetool",
+      payload?.content ?? "",
+    ),
+  );
+  ipcMain.handle("filex:consume-pending-open-project-path", () => {
+    const projectPath = pendingOpenProjectPath;
+    pendingOpenProjectPath = null;
+    return projectPath;
+  });
+  ipcMain.handle("filex:mark-open-project-request-ready", (event) => {
+    const windowForEvent = BrowserWindow.fromWebContents(event.sender);
+    if (!windowForEvent || windowForEvent !== mainWindow) {
+      return;
+    }
+
+    isOpenProjectRequestRendererReady = true;
+    if (pendingOpenProjectPath) {
+      deliverOpenProjectRequest(pendingOpenProjectPath);
     }
   });
   ipcMain.handle("filex:can-start-drag-out", (_event, absolutePaths: unknown) =>

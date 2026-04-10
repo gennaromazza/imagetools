@@ -257,6 +257,11 @@ export interface DesktopPersistedState {
   usesMockData?: boolean;
 }
 
+export interface DesktopAutoLayoutHandoffFile {
+  fileName: string;
+  content: string;
+}
+
 export interface DesktopRecentFolder {
   name: string;
   path?: string;
@@ -571,6 +576,10 @@ export interface FileXDesktopApi {
   consumePendingOpenFolderPath: () => Promise<string | null>;
   markOpenFolderRequestReady: () => Promise<void>;
   onOpenFolderRequest: (listener: (folderPath: string) => void) => () => void;
+  createAutoLayoutHandoffFile: (payload: DesktopAutoLayoutHandoffFile) => Promise<string | null>;
+  consumePendingOpenProjectPath: () => Promise<string | null>;
+  markOpenProjectRequestReady: () => Promise<void>;
+  onOpenProjectRequest: (listener: (projectPath: string) => void) => () => void;
   canStartDragOut: (absolutePaths: string[]) => Promise<DesktopDragOutCheck>;
   startDragOut: (absolutePaths: string[]) => void;
   readFile: (absolutePath: string) => Promise<DesktopFilePayload | null>;

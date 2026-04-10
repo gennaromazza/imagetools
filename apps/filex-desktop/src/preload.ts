@@ -24,6 +24,18 @@ const api: FileXDesktopApi = {
       ipcRenderer.removeListener("filex:open-folder-request", wrappedListener);
     };
   },
+  createAutoLayoutHandoffFile: (payload) => ipcRenderer.invoke("filex:create-auto-layout-handoff-file", payload),
+  consumePendingOpenProjectPath: () => ipcRenderer.invoke("filex:consume-pending-open-project-path"),
+  markOpenProjectRequestReady: () => ipcRenderer.invoke("filex:mark-open-project-request-ready"),
+  onOpenProjectRequest: (listener) => {
+    const wrappedListener = (_event: IpcRendererEvent, projectPath: string) => {
+      listener(projectPath);
+    };
+    ipcRenderer.on("filex:open-project-request", wrappedListener);
+    return () => {
+      ipcRenderer.removeListener("filex:open-project-request", wrappedListener);
+    };
+  },
   canStartDragOut: (absolutePaths) => ipcRenderer.invoke("filex:can-start-drag-out", absolutePaths),
   startDragOut: (absolutePaths) => ipcRenderer.send("filex:start-drag-out", absolutePaths),
   readFile: (absolutePath) => ipcRenderer.invoke("filex:read-file", absolutePath),

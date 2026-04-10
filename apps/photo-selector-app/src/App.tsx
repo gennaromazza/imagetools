@@ -79,6 +79,7 @@ import {
   saveDesktopSessionState,
 } from "./services/desktop-store";
 import { PreviewWarmupPipeline } from "./services/preview-warmup-pipeline";
+import { launchAutoLayoutFromSelection } from "./services/desktop-auto-layout-handoff";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { buildSelectionResult } from "./types/selection";
 import { useToast } from "./components/ToastProvider";
@@ -2463,6 +2464,17 @@ export function App() {
     );
   }, [activeAssetIds, addToast, allAssets, projectName]);
 
+  const handleOpenInAutoLayout = useCallback(async () => {
+    const result = await launchAutoLayoutFromSelection({
+      projectName,
+      sourceFolderPath,
+      allAssets,
+      activeAssetIds,
+    });
+
+    addToast(result.message, result.ok ? "success" : "error");
+  }, [activeAssetIds, addToast, allAssets, projectName, sourceFolderPath]);
+
   // ── Viewport tracking for pipeline priority ──────────────────────────
   const handleVisibleIdsChange = useCallback((ids: Set<string>) => {
     if (areSetsEqual(visibleThumbnailIdsRef.current, ids)) {
@@ -2748,6 +2760,15 @@ export function App() {
                 onClick={() => setIsProjectSelectorOpen(true)}
               >
                 Selezione progetto
+              </button>
+            ) : null}
+            {activeAssetIds.length > 0 ? (
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void handleOpenInAutoLayout()}
+              >
+                Impagina
               </button>
             ) : null}
             {!usesMockData && allAssets.length > 0 ? (

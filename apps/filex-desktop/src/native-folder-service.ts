@@ -1,5 +1,5 @@
-import { dialog } from "electron";
-import { copyFile, lstat, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { app, dialog } from "electron";
+import { copyFile, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import type {
   DesktopCopyFilesResult,
@@ -61,6 +61,11 @@ function sidecarPathForAsset(absolutePath: string): string {
   const assetDir = dirname(absolutePath);
   const assetName = basename(absolutePath, extname(absolutePath));
   return join(assetDir, `${assetName}.xmp`);
+}
+
+function sanitizeTempFileName(fileName: string): string {
+  const normalized = fileName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-");
+  return normalized || `handoff-${Date.now()}.imagetool`;
 }
 
 function resolveCreatedAtMs(birthtimeMs: number, modifiedMs: number): number {
@@ -208,6 +213,23 @@ export async function readFileFromDisk(absolutePath: string): Promise<DesktopFil
       size: stats.size,
       lastModified: Math.round(stats.mtimeMs),
     };
+  } catch {
+    return null;
+  }
+}
+
+export async function createAutoLayoutHandoffFileDesktop(
+  fileName: string,
+  content: string,
+): Promise<string | null> {
+  const normalizedName = sanitizeTempFileName(fileName.endsWith(".imagetool") ? fileName : `${fileName}.imagetool`);
+  const handoffDir = join(app.getPath("temp"), "filex-handoffs");
+  const absolutePath = join(handoffDir, `${Date.now()}-${normalizedName}`);
+
+  try {
+    await mkdir(handoffDir, { recursive: true });
+    await writeFile(absolutePath, content, "utf8");
+    return absolutePath;
   } catch {
     return null;
   }
