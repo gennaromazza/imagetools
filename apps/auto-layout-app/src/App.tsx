@@ -234,6 +234,27 @@ function resolveEmptyPageTemplate(
   return singlePhotoTemplates[0] ?? templates[0] ?? null;
 }
 
+function buildNextPageId(pages: GeneratedPageLayout[]): string {
+  const usedIds = new Set(pages.map((page) => page.id));
+  let maxSuffix = 0;
+
+  for (const page of pages) {
+    const match = /^page-(\d+)$/.exec(page.id);
+    if (!match) {
+      continue;
+    }
+
+    maxSuffix = Math.max(maxSuffix, Number(match[1]));
+  }
+
+  let nextSuffix = Math.max(1, maxSuffix + 1);
+  while (usedIds.has(`page-${nextSuffix}`)) {
+    nextSuffix += 1;
+  }
+
+  return `page-${nextSuffix}`;
+}
+
 function appendEmptyPage(
   current: AutoLayoutResult,
   options: { preferredTemplateId?: string; preferredSheetSpec?: GeneratedPageLayout["sheetSpec"] } = {}
@@ -244,10 +265,11 @@ function appendEmptyPage(
   }
 
   const highestPageNumber = current.pages.reduce((highest, page) => Math.max(highest, page.pageNumber), 0);
+  const nextPageId = buildNextPageId(current.pages);
   const nextPages = [
     ...current.pages,
     {
-      id: `page-${highestPageNumber + 1}`,
+      id: nextPageId,
       pageNumber: highestPageNumber + 1,
       sheetSpec: options.preferredSheetSpec ? { ...options.preferredSheetSpec } : { ...current.request.sheet },
       templateId: template.id,
@@ -1163,11 +1185,16 @@ function AppContent() {
     return true;
   }
 
-  function applyPlanningRequest(nextRequest: AutoLayoutRequest) {
+  function applyPlanningRequest(
+    nextRequest: AutoLayoutRequest,
+    options: { keepCurrentSheetSpec?: boolean } = {}
+  ) {
     const nextSelectedRequest = buildRequestWithSelection(nextRequest, allAssets, activeAssetIds);
     const nextResult =
       nextSelectedRequest.workflowMode === "manual"
-        ? syncManualResultWithRequest(result, nextSelectedRequest)
+        ? syncManualResultWithRequest(result, nextSelectedRequest, {
+            keepCurrentSheetSpec: options.keepCurrentSheetSpec ?? true
+          })
         : createAutoLayoutPlan(nextSelectedRequest);
 
     resetStudioHistory();
@@ -1181,12 +1208,15 @@ function AppContent() {
   function applyPlanningRequestWithAssets(
     nextRequest: AutoLayoutRequest,
     sourceAssets: typeof allAssets,
-    selectedIds: string[]
+    selectedIds: string[],
+    options: { keepCurrentSheetSpec?: boolean } = {}
   ) {
     const nextSelectedRequest = buildRequestWithSelection(nextRequest, sourceAssets, selectedIds);
     const nextResult =
       nextSelectedRequest.workflowMode === "manual"
-        ? syncManualResultWithRequest(result, nextSelectedRequest, { keepCurrentSheetSpec: true })
+        ? syncManualResultWithRequest(result, nextSelectedRequest, {
+            keepCurrentSheetSpec: options.keepCurrentSheetSpec ?? true
+          })
         : createAutoLayoutPlan(nextSelectedRequest);
 
     resetStudioHistory();
@@ -1236,30 +1266,36 @@ function AppContent() {
       return;
     }
 
-    applyPlanningRequest({
-      ...request,
-      sheet: {
-        ...request.sheet,
-        presetId: preset.id,
-        label: preset.label,
-        widthCm: preset.widthCm,
-        heightCm: preset.heightCm
-      }
-    });
+    applyPlanningRequest(
+      {
+        ...request,
+        sheet: {
+          ...request.sheet,
+          presetId: preset.id,
+          label: preset.label,
+          widthCm: preset.widthCm,
+          heightCm: preset.heightCm
+        }
+      },
+      { keepCurrentSheetSpec: false }
+    );
   }
 
   function handleSheetFieldChange(field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi", value: number) {
     const isDimensionField = field === "widthCm" || field === "heightCm";
 
-    applyPlanningRequest({
-      ...request,
-      sheet: {
-        ...request.sheet,
-        [field]: value,
-        presetId: isDimensionField ? "custom" : request.sheet.presetId,
-        label: isDimensionField ? "Personalizzato" : request.sheet.label
-      }
-    });
+    applyPlanningRequest(
+      {
+        ...request,
+        sheet: {
+          ...request.sheet,
+          [field]: value,
+          presetId: isDimensionField ? "custom" : request.sheet.presetId,
+          label: isDimensionField ? "Personalizzato" : request.sheet.label
+        }
+      },
+      { keepCurrentSheetSpec: false }
+    );
   }
 
   function handleFitModeChange(value: FitMode) {

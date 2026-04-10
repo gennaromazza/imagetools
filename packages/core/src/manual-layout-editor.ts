@@ -26,6 +26,27 @@ function clonePages(result: AutoLayoutResult): GeneratedPageLayout[] {
   );
 }
 
+function buildNextPageId(pages: GeneratedPageLayout[]): string {
+  const usedIds = new Set(pages.map((page) => page.id));
+  let maxSuffix = 0;
+
+  for (const page of pages) {
+    const match = /^page-(\d+)$/.exec(page.id);
+    if (!match) {
+      continue;
+    }
+
+    maxSuffix = Math.max(maxSuffix, Number(match[1]));
+  }
+
+  let nextSuffix = Math.max(1, maxSuffix + 1);
+  while (usedIds.has(`page-${nextSuffix}`)) {
+    nextSuffix += 1;
+  }
+
+  return `page-${nextSuffix}`;
+}
+
 function findTemplate(templates: LayoutTemplate[], templateId: string): LayoutTemplate {
   const template = templates.find((item) => item.id === templateId);
 
@@ -870,34 +891,31 @@ export function createPage(
   const assignments = assignImagesToTemplate(assets, template, result.request.fitMode, result.request.cropStrategy, result.request.sheet).map((assignment) =>
     withPreservedAssignmentState(assignment)
   );
-  const highestPageNumber = result.pages.reduce((highest, page) => Math.max(highest, page.pageNumber), 0);
-  const nextPageId = `page-${highestPageNumber + 1}`;
-  const pages = [
-    ...clonePages(result),
-    {
-      id: nextPageId,
-      pageNumber: highestPageNumber + 1,
-      sheetSpec: result.request.sheet,
-      templateId: template.id,
-      templateLabel: template.label,
-      slotDefinitions: template.slots,
-      assignments,
-      imageIds: assignments.map((assignment) => assignment.imageId),
-      warnings: (() => {
-        if (assignments.length >= assets.length) return [];
-        const unassignedCount = assets.length - assignments.length;
-        const slotCount = template.slots.length;
-        return [
-          `${unassignedCount} ${unassignedCount === 1 ? "foto" : "foto"} non ${unassignedCount === 1 ? "è stata" : "sono state"} inserite. ` +
-          `Template ha ${assignments.length}/${slotCount} slot utilizzati. Prova un layout più grande o aggiungine un altro.`
-        ];
-      })()
-    }
-  ];
+  const pages = clonePages(result);
+  const highestPageNumber = pages.reduce((highest, page) => Math.max(highest, page.pageNumber), 0);
+  const nextPageId = buildNextPageId(pages);
+  pages.push({
+    id: nextPageId,
+    pageNumber: highestPageNumber + 1,
+    sheetSpec: result.request.sheet,
+    templateId: template.id,
+    templateLabel: template.label,
+    slotDefinitions: template.slots,
+    assignments,
+    imageIds: assignments.map((assignment) => assignment.imageId),
+    warnings: (() => {
+      if (assignments.length >= assets.length) return [];
+      const unassignedCount = assets.length - assignments.length;
+      const slotCount = template.slots.length;
+      return [
+        `${unassignedCount} ${unassignedCount === 1 ? "foto" : "foto"} non ${unassignedCount === 1 ? "è stata" : "sono state"} inserite. ` +
+        `Template ha ${assignments.length}/${slotCount} slot utilizzati. Prova un layout più grande o aggiungine un altro.`
+      ];
+    })()
+  });
 
   return finalize(result, pages);
 }
-
 export function removePage(
   result: AutoLayoutResult,
   request: RemovePageRequest

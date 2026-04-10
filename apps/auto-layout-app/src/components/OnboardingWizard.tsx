@@ -28,6 +28,7 @@ export function OnboardingWizard({
   onLoadMockData
 }: OnboardingWizardProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const wasOpenRef = useRef(false);
   const [step, setStep] = useState<WizardStep>("welcome");
   const [projectName, setProjectName] = useState(`Progetto ${new Date().toLocaleDateString("it-IT")}`);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
@@ -50,21 +51,21 @@ export function OnboardingWizard({
   }, []);
 
   useEffect(() => {
-    if (!isOpen) {
-      return;
+    if (isOpen && !wasOpenRef.current) {
+      setStep("welcome");
+      setWorkflowMode(currentRequest.workflowMode ?? "auto");
+      setSelectedPresetId(currentRequest.sheet.presetId);
+      setPlanningMode(currentRequest.planningMode === "maxPhotosPerSheet" ? "foto" : "fogli");
+      setPlannedValue(
+        currentRequest.planningMode === "maxPhotosPerSheet"
+          ? currentRequest.maxPhotosPerSheet ?? 2
+          : currentRequest.desiredSheetCount ?? 5
+      );
+      setManualInitialSheetCount(Math.max(1, currentRequest.desiredSheetCount ?? 3));
+      setSelectedPhotoIds(currentRequest.assets.map((asset) => asset.id));
     }
 
-    setStep("welcome");
-    setWorkflowMode(currentRequest.workflowMode ?? "auto");
-    setSelectedPresetId(currentRequest.sheet.presetId);
-    setPlanningMode(currentRequest.planningMode === "maxPhotosPerSheet" ? "foto" : "fogli");
-    setPlannedValue(
-      currentRequest.planningMode === "maxPhotosPerSheet"
-        ? currentRequest.maxPhotosPerSheet ?? 2
-        : currentRequest.desiredSheetCount ?? 5
-    );
-    setManualInitialSheetCount(Math.max(1, currentRequest.desiredSheetCount ?? 3));
-    setSelectedPhotoIds(currentRequest.assets.map((asset) => asset.id));
+    wasOpenRef.current = isOpen;
   }, [currentRequest, isOpen]);
 
   if (!isOpen) return null;
