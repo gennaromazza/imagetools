@@ -4,7 +4,6 @@ import type { PhotoFilterState } from "./photo-classification";
 import { COLOR_LABEL_NAMES } from "./photo-classification";
 import { getDesktopPreferences, hasDesktopStateApi, saveDesktopPreferences as saveDesktopPreferencesNative } from "./desktop-store";
 
-const PREFERENCES_KEY = "photo-selector-preferences-v1";
 export type ThumbnailProfile = "ultra-fast" | "fast" | "balanced";
 export type CustomLabelTone = "sand" | "rose" | "green" | "blue" | "purple" | "slate";
 export const DEFAULT_CUSTOM_LABEL_TONE: CustomLabelTone = "sand";
@@ -154,28 +153,7 @@ export function normalizeCustomLabelShortcuts(
 }
 
 export function loadPhotoSelectorPreferences(): PhotoSelectorPreferences {
-  if (typeof window === "undefined") {
-    return preferencesCache;
-  }
-
-  if (hasDesktopStateApi()) {
-    return preferencesCache;
-  }
-
-  preferencesCache = parseStoredPreferences(readLocalPreferences());
   return preferencesCache;
-}
-
-function readLocalPreferences(): Partial<PhotoSelectorPreferences> | null {
-  try {
-    const raw = window.localStorage.getItem(PREFERENCES_KEY);
-    if (!raw) {
-      return null;
-    }
-    return JSON.parse(raw) as Partial<PhotoSelectorPreferences>;
-  } catch {
-    return null;
-  }
 }
 
 function parseStoredPreferences(
@@ -234,13 +212,8 @@ export async function hydratePhotoSelectorPreferences(): Promise<PhotoSelectorPr
     return preferencesCache;
   }
 
-  if (hasDesktopStateApi()) {
-    const nativePreferences = await getDesktopPreferences();
-    preferencesCache = parseStoredPreferences(nativePreferences);
-    return preferencesCache;
-  }
-
-  preferencesCache = parseStoredPreferences(readLocalPreferences());
+  const nativePreferences = await getDesktopPreferences();
+  preferencesCache = parseStoredPreferences(nativePreferences);
   return preferencesCache;
 }
 
@@ -295,8 +268,5 @@ export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorP
 
   if (hasDesktopStateApi()) {
     void saveDesktopPreferencesNative(toDesktopPreferences(next));
-    return;
   }
-
-  window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next));
 }

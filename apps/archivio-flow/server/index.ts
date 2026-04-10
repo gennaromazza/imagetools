@@ -22,6 +22,7 @@ const DATA_DIR = process.env.ARCHIVIO_FLOW_DATA_DIR?.trim()
   : LEGACY_DATA_DIR;
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+const FILE_COUNT_CACHE_FILE = path.join(DATA_DIR, "file-count-cache.json");
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 function migrateLegacyDataIfNeeded(): void {
@@ -147,7 +148,7 @@ export interface LowQualityProgressState {
 const COPY_CONCURRENCY_MAX = 6;
 const COPY_CONCURRENCY_MIN = 2;
 const JPG_CONCURRENCY = 2;
-const JOB_FILE_COUNT_CACHE_TTL_MS = 10 * 60 * 1000;
+const JOB_FILE_COUNT_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const RAW_EXT = new Set([
   ".raf", ".cr2", ".cr3", ".arw", ".nef", ".dng", ".orf", ".rw2", ".pef", ".srw",
 ]);
@@ -157,6 +158,60 @@ const COPY_EXCLUDED_BASENAMES = new Set([
 ]);
 
 const jobFileCountCache = new Map<string, { count: number; expiresAt: number }>();
+
+// ── Jobs list cache ───────────────────────────────────────────────────────────
+// Avoids re-scanning the archive tree and re-hydrating every job on each page
+// load. Returns the cached list immediately; a background refresh fires when
+// the cached data is older than JOBS_LIST_CACHE_FRESH_MS.
+const JOBS_LIST_CACHE_FRESH_MS = 30_000;   // serve from cache up to 30 s
+const JOBS_LIST_CACHE_STALE_MS = 5 * 60_000; // max age before forced refresh
+
+interface JobsListCache {
+  jobs: Job[];
+  cachedAt: number;
+  refreshing: boolean;
+}
+
+let jobsListCache: JobsListCache | null = null;
+
+function invalidateJobsListCache(): void {
+  jobsListCache = null;
+}
+
+function loadPersistedFileCountCache(): void {
+  try {
+    if (fs.existsSync(FILE_COUNT_CACHE_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(FILE_COUNT_CACHE_FILE, "utf-8")) as Record<string, { count: number; expiresAt: number }>;
+      const now = Date.now();
+      for (const [key, value] of Object.entries(raw)) {
+        if (typeof value?.count === "number" && typeof value?.expiresAt === "number" && value.expiresAt > now) {
+          jobFileCountCache.set(key, value);
+        }
+      }
+    }
+  } catch {
+    /* ignore errors, start with empty cache */
+  }
+}
+
+function saveFileCountCacheToDisk(): void {
+  try {
+    const now = Date.now();
+    const obj: Record<string, { count: number; expiresAt: number }> = {};
+    for (const [key, value] of jobFileCountCache) {
+      if (value.expiresAt > now) {
+        obj[key] = value;
+      }
+    }
+    const tempPath = `${FILE_COUNT_CACHE_FILE}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(obj, null, 2), "utf-8");
+    fs.renameSync(tempPath, FILE_COUNT_CACHE_FILE);
+  } catch {
+    /* ignore disk write errors */
+  }
+}
+
+loadPersistedFileCountCache();
 
 function createEmptyImportProgress(): ImportProgressState {
   return {
@@ -816,6 +871,7 @@ function writeCachedJobFileCount(jobFolderPath: string, count: number): void {
     count,
     expiresAt: Date.now() + JOB_FILE_COUNT_CACHE_TTL_MS,
   });
+  saveFileCountCacheToDisk();
 }
 
 function withFolderStatus(job: Job): Job {
@@ -1510,6 +1566,7 @@ const saveSettingsHandler = (req: Request, res: Response) => {
     archiveHierarchy: normalizedHierarchy,
   };
   saveSettings(updated);
+  invalidateJobsListCache();
   res.json({ ok: true, settings: updated });
 };
 app.post("/api/settings", saveSettingsHandler);
@@ -2219,14 +2276,11 @@ const importHandler = async (req: Request, res: Response) => {
     error: null,
   });
   importCancelRequested = false;
+  invalidateJobsListCache();
 };
 app.post("/api/import", importHandler);
 
-/**
- * GET /api/jobs
- * Returns all saved jobs (newest first).
- */
-const listJobsHandler = async (_req: Request, res: Response) => {
+async function buildJobsList(): Promise<Job[]> {
   const settings = loadSettings();
   const registeredJobs = cleanupMissingJobs()
     .map((job) => withArchiveMetadata(job, settings.archiveRoot, settings.archiveHierarchy));
@@ -2239,7 +2293,42 @@ const listJobsHandler = async (_req: Request, res: Response) => {
     hydratedJobs[index] = await hydrateArchiveListJob(job);
   });
 
-  res.json(hydratedJobs);
+  return hydratedJobs;
+}
+
+/**
+ * GET /api/jobs
+ * Returns all saved jobs (newest first).
+ * Cached in memory: fresh for 30 s, stale-while-revalidate up to 5 min.
+ */
+const listJobsHandler = async (_req: Request, res: Response) => {
+  const now = Date.now();
+
+  // Serve from cache if fresh enough
+  if (jobsListCache && (now - jobsListCache.cachedAt) < JOBS_LIST_CACHE_FRESH_MS) {
+    return void res.json(jobsListCache.jobs);
+  }
+
+  // Stale-while-revalidate: return stale data immediately, refresh in background
+  if (jobsListCache && (now - jobsListCache.cachedAt) < JOBS_LIST_CACHE_STALE_MS && !jobsListCache.refreshing) {
+    jobsListCache.refreshing = true;
+    const staleJobs = jobsListCache.jobs;
+    buildJobsList().then((jobs) => {
+      jobsListCache = { jobs, cachedAt: Date.now(), refreshing: false };
+    }).catch(() => {
+      if (jobsListCache) jobsListCache.refreshing = false;
+    });
+    return void res.json(staleJobs);
+  }
+
+  // No usable cache — build and cache
+  try {
+    const jobs = await buildJobsList();
+    jobsListCache = { jobs, cachedAt: Date.now(), refreshing: false };
+    res.json(jobs);
+  } catch (err) {
+    res.status(500).json({ error: "Impossibile caricare la lista lavori" });
+  }
 };
 app.get("/api/jobs", listJobsHandler);
 
@@ -2261,6 +2350,7 @@ const deleteJobHandler = (req: Request, res: Response) => {
     return void res.status(404).json({ error: "Lavoro non trovato" });
   }
 
+  invalidateJobsListCache();
   res.json({ ok: true });
 };
 app.delete("/api/jobs/:id", deleteJobHandler);
@@ -2291,13 +2381,53 @@ const updateJobContractLinkHandler = (req: Request, res: Response) => {
     return void res.status(404).json({ error: "Lavoro non trovato" });
   }
 
+  invalidateJobsListCache();
   res.json({ ok: true, job: updated });
 };
 app.post("/api/jobs/:id/contract-link", updateJobContractLinkHandler);
 
 /**
+ * GET /api/jobs/:id/subfolders
+ * Returns the immediate subfolders of the job folder (excluding BASSA_QUALITA and EXPORT).
+ */
+const listJobSubfoldersHandler = async (req: Request, res: Response) => {
+  const paramId = req.params["id"];
+  const jobId = typeof paramId === "string"
+    ? paramId.trim()
+    : Array.isArray(paramId)
+      ? (paramId[0] ?? "").trim()
+      : "";
+  if (!jobId) return void res.status(400).json({ error: "id lavoro mancante" });
+
+  const registeredJobs = loadJobs();
+  let job = registeredJobs.find((j) => j.id === jobId);
+  if (!job && jobId.startsWith("fs:")) {
+    const settings = loadSettings();
+    const discoveredJobs = await discoverArchiveJobs(settings.archiveRoot, registeredJobs, settings.archiveHierarchy);
+    job = discoveredJobs.find((j) => j.id === jobId);
+  }
+  if (!job) return void res.status(404).json({ error: "Lavoro non trovato" });
+
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(job.percorsoCartella, { withFileTypes: true });
+  } catch {
+    return void res.status(500).json({ error: "Impossibile leggere la cartella del lavoro" });
+  }
+
+  const subfolders = entries
+    .filter((e) => e.isDirectory() && !isLowQualityDirName(e.name) && !isExportDirName(e.name))
+    .map((e) => e.name)
+    .sort((a, b) => a.localeCompare(b, "it"));
+
+  res.json({ subfolders });
+};
+app.get("/api/jobs/:id/subfolders", listJobSubfoldersHandler);
+
+/**
  * POST /api/jobs/:id/generate-low-quality
  * Generates compressed JPG copies in BASSA_QUALITA for an existing job.
+ * Optional body param `sourceSubfolder` restricts the source to a specific subfolder.
  */
 const generateLowQualityHandler = async (req: Request, res: Response) => {
   const paramId = req.params["id"];
@@ -2309,6 +2439,7 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
   if (!jobId) return void res.status(400).json({ error: "id lavoro mancante" });
 
   const overwrite = Boolean(req.body?.overwrite);
+  const rawSourceSubfolder = typeof req.body?.sourceSubfolder === "string" ? req.body.sourceSubfolder.trim() : "";
 
   if (lowQualityProgress.active && lowQualityProgress.jobId !== jobId) {
     return void res.status(409).json({
@@ -2336,6 +2467,25 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
 
   if (!job) return void res.status(404).json({ error: "Lavoro non trovato" });
 
+  // Validate sourceSubfolder if provided: must be a direct child, not a system dir
+  let resolvedSourceRoot: string | null = null;
+  if (rawSourceSubfolder) {
+    const candidate = path.join(job.percorsoCartella, rawSourceSubfolder);
+    const resolvedCandidate = path.resolve(candidate);
+    const resolvedJobFolder = path.resolve(job.percorsoCartella);
+    const rel = path.relative(resolvedJobFolder, resolvedCandidate);
+    if (rel.includes("..") || path.isAbsolute(rel) || rel.includes(path.sep)) {
+      return void res.status(400).json({ error: "Sottocartella non valida" });
+    }
+    if (isLowQualityDirName(rawSourceSubfolder) || isExportDirName(rawSourceSubfolder)) {
+      return void res.status(400).json({ error: "Impossibile usare questa cartella come sorgente" });
+    }
+    if (!fs.existsSync(resolvedCandidate)) {
+      return void res.status(404).json({ error: `Cartella sorgente non trovata: ${rawSourceSubfolder}` });
+    }
+    resolvedSourceRoot = resolvedCandidate;
+  }
+
   updateLowQualityProgress({
     jobName: job.nomeLavoro,
     outputDir: path.join(job.percorsoCartella, "BASSA_QUALITA"),
@@ -2351,18 +2501,36 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
   let skippedExisting = 0;
   let errors = 0;
 
-  const { sourceRoot, jpgFiles } = await collectJpgSourcesForLowQuality(job.percorsoCartella);
+  // Collect JPG sources: specific subfolder or full job (default behaviour)
+  let sourceRoot: string;
+  let jpgFiles: string[];
+  if (resolvedSourceRoot) {
+    sourceRoot = resolvedSourceRoot;
+    jpgFiles = [];
+    for await (const srcFile of walkFiles(resolvedSourceRoot)) {
+      if (JPG_EXT.has(path.extname(srcFile).toLowerCase())) {
+        jpgFiles.push(srcFile);
+      }
+    }
+  } else {
+    ({ sourceRoot, jpgFiles } = await collectJpgSourcesForLowQuality(job.percorsoCartella));
+  }
+
   updateLowQualityProgress({ sourceRoot });
   if (jpgFiles.length === 0) {
     updateLowQualityProgress({
       active: false,
       phase: "error",
-      error: "Nessun JPG trovato nella cartella lavoro per generare BASSA_QUALITA",
+      error: rawSourceSubfolder
+        ? `Nessun JPG trovato in "${rawSourceSubfolder}"`
+        : "Nessun JPG trovato nella cartella lavoro per generare BASSA_QUALITA",
       totalJpg: 0,
       processedJpg: 0,
     });
     return void res.status(404).json({
-      error: "Nessun JPG trovato nella cartella lavoro per generare BASSA_QUALITA",
+      error: rawSourceSubfolder
+        ? `Nessun JPG trovato in "${rawSourceSubfolder}"`
+        : "Nessun JPG trovato nella cartella lavoro per generare BASSA_QUALITA",
     });
   }
   totalJpg = jpgFiles.length;
@@ -2445,6 +2613,7 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
     skippedExisting,
     errors,
     overwrite,
+    sourceSubfolder: rawSourceSubfolder || null,
     preserveStructure: true,
     outputDir: bassaQualitaDir,
     durationMs: Date.now() - startedAt,
@@ -2577,6 +2746,10 @@ export async function deleteJobService(jobId: string): Promise<{ ok: true }> {
   return unwrapInvocationResult(await invokeHandler(deleteJobHandler, { params: { id: jobId } }));
 }
 
+export async function listJobSubfoldersService(jobId: string): Promise<{ subfolders: string[] }> {
+  return unwrapInvocationResult(await invokeHandler(listJobSubfoldersHandler, { params: { id: jobId } }));
+}
+
 export async function updateJobContractLinkService(
   jobId: string,
   contrattoLink: string,
@@ -2590,6 +2763,7 @@ export async function updateJobContractLinkService(
 export async function generateLowQualityService(
   jobId: string,
   overwrite: boolean,
+  sourceSubfolder?: string,
 ): Promise<{
   ok: true;
   jobId: string;
@@ -2598,13 +2772,14 @@ export async function generateLowQualityService(
   skippedExisting: number;
   errors: number;
   overwrite: boolean;
+  sourceSubfolder: string | null;
   preserveStructure: boolean;
   outputDir: string;
   durationMs: number;
 }> {
   return unwrapInvocationResult(await invokeHandler(generateLowQualityHandler, {
     params: { id: jobId },
-    body: { overwrite },
+    body: { overwrite, sourceSubfolder },
   }));
 }
 

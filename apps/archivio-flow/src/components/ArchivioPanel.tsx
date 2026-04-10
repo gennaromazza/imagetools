@@ -4,7 +4,9 @@ import type { Job, LowQualityProgressSnapshot } from "../types";
 import {
   deleteArchivioJob,
   generateArchivioLowQuality,
+  getArchivioJobSubfolders,
   getArchivioLowQualityProgress,
+  openJobInPhotoSelector,
   openArchivioFolder,
   updateArchivioJobContractLink,
 } from "../archivioDesktopApi";
@@ -137,6 +139,12 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
   const [activeLowQualityJobId, setActiveLowQualityJobId] = useState<string | null>(null);
   const [lowQualityProgress, setLowQualityProgress] = useState<LowQualityProgressSnapshot | null>(null);
+
+  // Subfolder selection modal state
+  const [bqModalJob, setBqModalJob] = useState<{ job: Job; overwrite: boolean } | null>(null);
+  const [bqModalSubfolders, setBqModalSubfolders] = useState<string[]>([]);
+  const [bqModalLoading, setBqModalLoading] = useState(false);
+  const [bqModalSelected, setBqModalSelected] = useState<string>("__all__");
   const [rowFeedbackByJob, setRowFeedbackByJob] = useState<Record<string, { text: string; tone: RowFeedbackTone }>>({});
   const [contractFeedback, setContractFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [lowQualityFeedback, setLowQualityFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -234,6 +242,20 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     }
   }
 
+  async function handleOpenInPhotoSelector(job: Job) {
+    if (job.folderExists === false) {
+      setRowFeedback(job.id, "Cartella non disponibile", "error");
+      return;
+    }
+    try {
+      await openJobInPhotoSelector(job.percorsoCartella);
+      setRowFeedback(job.id, "Apro in Photo Selector", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Impossibile aprire Photo Selector";
+      setRowFeedback(job.id, message, "error");
+    }
+  }
+
   function handleOpenContract(job: Job) {
     if (!job.contrattoLink) {
       setRowFeedback(job.id, "Nessun contratto da aprire", "info");
@@ -268,7 +290,27 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     }
   }
 
-  async function generateLowQuality(job: Job, overwrite: boolean) {
+  async function openBqModal(job: Job, overwrite: boolean) {
+    setBqModalJob({ job, overwrite });
+    setBqModalSelected("__all__");
+    setBqModalSubfolders([]);
+    setBqModalLoading(true);
+    try {
+      const { subfolders } = await getArchivioJobSubfolders(job.id);
+      setBqModalSubfolders(subfolders);
+    } catch {
+      setBqModalSubfolders([]);
+    } finally {
+      setBqModalLoading(false);
+    }
+  }
+
+  async function confirmBqModal() {
+    if (!bqModalJob) return;
+    const { job, overwrite } = bqModalJob;
+    const sourceSubfolder = bqModalSelected === "__all__" ? undefined : bqModalSelected;
+    setBqModalJob(null);
+
     if (overwrite) {
       setRegeneratingLowQualityFor(job.id);
     } else {
@@ -278,10 +320,11 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     setLowQualityProgress(null);
     setLowQualityFeedback(null);
     try {
-      const data = await generateArchivioLowQuality(job.id, overwrite);
+      const data = await generateArchivioLowQuality(job.id, overwrite, sourceSubfolder);
+      const folderLabel = sourceSubfolder ? ` da "${sourceSubfolder}"` : "";
       setLowQualityFeedback({
         type: "success",
-        text: `${overwrite ? "Rigenerazione" : "Generazione"} BASSA_QUALITA completata: generati ${data.generated ?? 0}, già presenti ${data.skippedExisting ?? 0}, errori ${data.errors ?? 0}`,
+        text: `${overwrite ? "Rigenerazione" : "Generazione"} BASSA_QUALITA${folderLabel} completata: generati ${data.generated ?? 0}, già presenti ${data.skippedExisting ?? 0}, errori ${data.errors ?? 0}`,
       });
       setRowFeedback(job.id, overwrite ? "Rigenerazione BQ completata" : "Generazione BQ completata", "success");
     } catch (error) {
@@ -452,6 +495,15 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
             Apri
           </button>
           <button
+            className="secondary-button"
+            style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
+            onClick={() => void handleOpenInPhotoSelector(job)}
+            title="Apri questa cartella in Photo Selector"
+            disabled={job.folderExists === false}
+          >
+            Seleziona
+          </button>
+          <button
             className="ghost-button"
             style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
             onClick={() => void handleCopyPath(job)}
@@ -510,7 +562,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
               <button
                 className="ghost-button"
                 style={{ padding: "0.5rem 0.7rem", fontSize: "0.84rem", textAlign: "left", justifyContent: "flex-start" }}
-                onClick={() => generateLowQuality(job, false)}
+                onClick={() => openBqModal(job, false)}
                 disabled={generatingLowQualityFor === job.id}
                 title={hasLowQuality ? "Aggiorna BQ (genera mancanti)" : "Genera JPG in BASSA_QUALITA"}
               >
@@ -520,7 +572,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
                 <button
                   className="secondary-button"
                   style={{ padding: "0.5rem 0.7rem", fontSize: "0.84rem", textAlign: "left", justifyContent: "flex-start" }}
-                  onClick={() => generateLowQuality(job, true)}
+                  onClick={() => openBqModal(job, true)}
                   disabled={regeneratingLowQualityFor === job.id}
                   title="Rigenera JPG in BASSA_QUALITA sovrascrivendo i file esistenti"
                 >
@@ -816,6 +868,125 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
           <p style={{ color: lowQualityFeedback.type === "success" ? "var(--success)" : "var(--danger)" }}>
             {lowQualityFeedback.text}
           </p>
+        </div>
+      )}
+
+      {/* Subfolder selection modal */}
+      {bqModalJob && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 10, 9, 0.72)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 80,
+            padding: "1rem",
+          }}
+        >
+          <div
+            className="panel-section"
+            style={{
+              width: "min(520px, 100%)",
+              padding: "1.1rem",
+              borderColor: "var(--line-strong)",
+              background: "rgba(27, 33, 30, 0.98)",
+            }}
+          >
+            <div className="stack" style={{ gap: "0.85rem" }}>
+              <div>
+                <strong style={{ fontSize: "1rem" }}>
+                  {bqModalJob.overwrite ? "Rigenera" : "Genera"} BASSA_QUALITA
+                </strong>
+                <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.86rem" }}>
+                  {bqModalJob.job.nomeLavoro}
+                </p>
+              </div>
+
+              <div>
+                <p style={{ margin: "0 0 0.5rem", fontSize: "0.87rem" }}>Cartella sorgente:</p>
+                {bqModalLoading ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.86rem" }}>Caricamento cartelle…</p>
+                ) : (
+                  <div className="stack" style={{ gap: "0.35rem" }}>
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        padding: "0.45rem 0.6rem",
+                        borderRadius: 8,
+                        border: `1px solid ${bqModalSelected === "__all__" ? "var(--line-strong)" : "var(--line)"}`,
+                        background: bqModalSelected === "__all__" ? "rgba(255,255,255,0.06)" : "transparent",
+                        cursor: "pointer",
+                        fontSize: "0.87rem",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="bq-subfolder"
+                        value="__all__"
+                        checked={bqModalSelected === "__all__"}
+                        onChange={() => setBqModalSelected("__all__")}
+                        style={{ accentColor: "var(--accent)" }}
+                      />
+                      Tutte le cartelle
+                    </label>
+                    {bqModalSubfolders.map((folder) => (
+                      <label
+                        key={folder}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "0.5rem",
+                          padding: "0.45rem 0.6rem",
+                          borderRadius: 8,
+                          border: `1px solid ${bqModalSelected === folder ? "var(--line-strong)" : "var(--line)"}`,
+                          background: bqModalSelected === folder ? "rgba(255,255,255,0.06)" : "transparent",
+                          cursor: "pointer",
+                          fontSize: "0.87rem",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="bq-subfolder"
+                          value={folder}
+                          checked={bqModalSelected === folder}
+                          onChange={() => setBqModalSelected(folder)}
+                          style={{ accentColor: "var(--accent)" }}
+                        />
+                        {folder}
+                      </label>
+                    ))}
+                    {bqModalSubfolders.length === 0 && (
+                      <p style={{ color: "var(--text-muted)", fontSize: "0.84rem", margin: 0 }}>
+                        Nessuna sottocartella trovata — verrà elaborata la cartella del lavoro.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="button-row" style={{ justifyContent: "flex-end" }}>
+                <button
+                  className="ghost-button"
+                  style={{ padding: "0.5rem 0.9rem", fontSize: "0.86rem" }}
+                  onClick={() => setBqModalJob(null)}
+                >
+                  Annulla
+                </button>
+                <button
+                  className="secondary-button"
+                  style={{ padding: "0.5rem 0.9rem", fontSize: "0.86rem" }}
+                  disabled={bqModalLoading}
+                  onClick={() => void confirmBqModal()}
+                >
+                  {bqModalJob.overwrite ? "Rigenera" : "Genera"}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

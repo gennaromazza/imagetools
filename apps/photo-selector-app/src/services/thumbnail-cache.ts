@@ -1,25 +1,5 @@
-/**
- * IndexedDB-backed thumbnail cache.
- * Stores generated thumbnails keyed by asset ID so they survive page reloads.
- * Lightweight — only stores the blob + dimensions, not the full asset.
- */
-
 import type { DesktopThumbnailCacheLookupEntry } from "@photo-tools/desktop-contracts";
 import { measureAsync } from "./performance-utils";
-
-const DB_NAME = "imagetool-thumb-cache";
-const DB_VERSION = 1;
-const STORE_NAME = "thumbnails";
-const DEFAULT_THUMBNAIL_CACHE_MAX_DIMENSION = 320;
-const DEFAULT_THUMBNAIL_CACHE_QUALITY = 0.72;
-
-interface CachedThumb {
-  id: string;
-  blob: Blob;
-  width: number;
-  height: number;
-  cachedAt: number;
-}
 
 export interface CachedThumbnailWrite {
   id: string;
@@ -41,14 +21,11 @@ export interface ThumbnailCacheLoadOptions {
   quality?: number;
 }
 
-let dbPromise: Promise<IDBDatabase> | null = null;
+const DEFAULT_THUMBNAIL_CACHE_MAX_DIMENSION = 320;
+const DEFAULT_THUMBNAIL_CACHE_QUALITY = 0.72;
 
 function canUseDesktopThumbnailCache(): boolean {
   return typeof window !== "undefined" && typeof window.filexDesktop?.getCachedThumbnails === "function";
-}
-
-function toLookupIds(entries: ThumbnailCacheLookup[]): string[] {
-  return entries.map((entry) => (typeof entry === "string" ? entry : entry.id));
 }
 
 function toDesktopLookupEntries(entries: ThumbnailCacheLookup[]): DesktopThumbnailCacheLookupEntry[] {
@@ -63,135 +40,53 @@ function toDesktopLookupEntries(entries: ThumbnailCacheLookup[]): DesktopThumbna
   ));
 }
 
-function getDB(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-
-  dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onerror = () => reject(req.error);
-    req.onsuccess = () => resolve(req.result);
-    req.onupgradeneeded = (e) => {
-      const db = (e.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: "id" });
-      }
-    };
-  });
-
-  return dbPromise;
+function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const owned = new Uint8Array(bytes.byteLength);
+  owned.set(bytes);
+  return owned.buffer;
 }
 
-/** Save a generated thumbnail blob for an asset. Fire-and-forget. */
 export async function cacheThumbnail(
-  id: string,
-  blob: Blob,
-  width: number,
-  height: number,
+  _id: string,
+  _blob: Blob,
+  _width: number,
+  _height: number,
 ): Promise<void> {
-  await cacheThumbnailBatch([{ id, blob, width, height }]);
+  // Desktop-only mode: persistent thumbnail cache is owned by FileX native layer.
 }
 
-export async function cacheThumbnailBatch(items: CachedThumbnailWrite[]): Promise<void> {
-  if (items.length === 0) {
-    return;
-  }
-
-  if (canUseDesktopThumbnailCache()) {
-    return;
-  }
-
-  await measureAsync(`[PERF] indexeddb batch-write (${items.length})`, async () => {
-    try {
-      const db = await getDB();
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const cachedAt = Date.now();
-
-      for (const item of items) {
-        store.put({
-          id: item.id,
-          blob: item.blob,
-          width: item.width,
-          height: item.height,
-          cachedAt,
-        } satisfies CachedThumb);
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      });
-    } catch {
-      // Non-critical — silently skip
-    }
-  });
+export async function cacheThumbnailBatch(_items: CachedThumbnailWrite[]): Promise<void> {
+  // Desktop-only mode: persistent thumbnail cache is owned by FileX native layer.
 }
 
-/** Retrieve cached thumbnails for a list of asset IDs. Returns a Map of found entries. */
 export async function loadCachedThumbnails(
   entries: ThumbnailCacheLookup[],
   options?: ThumbnailCacheLoadOptions,
 ): Promise<Map<string, { url: string; width: number; height: number }>> {
   const result = new Map<string, { url: string; width: number; height: number }>();
   if (entries.length === 0) return result;
+  if (!canUseDesktopThumbnailCache()) return result;
+
   const maxDimension = options?.maxDimension ?? DEFAULT_THUMBNAIL_CACHE_MAX_DIMENSION;
   const quality = options?.quality ?? DEFAULT_THUMBNAIL_CACHE_QUALITY;
-
   const desktopEntries = toDesktopLookupEntries(entries);
-  if (canUseDesktopThumbnailCache()) {
-    if (desktopEntries.length === 0) {
-      return result;
-    }
-
-    await measureAsync(`[PERF] desktop cache bulk-read (${desktopEntries.length})`, async () => {
-      try {
-        const cached = await window.filexDesktop!.getCachedThumbnails(
-          desktopEntries,
-          maxDimension,
-          quality,
-        );
-
-        for (const hit of cached) {
-          const ownedBytes = new Uint8Array(hit.bytes.byteLength);
-          ownedBytes.set(hit.bytes);
-          result.set(hit.id, {
-            url: URL.createObjectURL(new Blob([ownedBytes], { type: hit.mimeType })),
-            width: hit.width,
-            height: hit.height,
-          });
-        }
-      } catch {
-        // Non-critical
-      }
-    });
+  if (desktopEntries.length === 0) {
     return result;
   }
 
-  const ids = toLookupIds(entries);
-
-  await measureAsync(`[PERF] indexeddb bulk-read (${ids.length})`, async () => {
+  await measureAsync(`[PERF] desktop cache bulk-read (${desktopEntries.length})`, async () => {
     try {
-      const db = await getDB();
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const records = await Promise.all(
-        ids.map((id) => new Promise<CachedThumb | null>((resolve, reject) => {
-          const req = store.get(id);
-          req.onsuccess = () => resolve((req.result as CachedThumb | undefined) ?? null);
-          req.onerror = () => reject(req.error);
-        })),
+      const cached = await window.filexDesktop!.getCachedThumbnails(
+        desktopEntries,
+        maxDimension,
+        quality,
       );
 
-      for (const data of records) {
-        if (!data?.blob) {
-          continue;
-        }
-
-        result.set(data.id, {
-          url: URL.createObjectURL(data.blob),
-          width: data.width,
-          height: data.height,
+      for (const hit of cached) {
+        result.set(hit.id, {
+          url: URL.createObjectURL(new Blob([toOwnedArrayBuffer(hit.bytes)], { type: hit.mimeType })),
+          width: hit.width,
+          height: hit.height,
         });
       }
     } catch {
@@ -202,22 +97,14 @@ export async function loadCachedThumbnails(
   return result;
 }
 
-/** Clear the entire thumbnail cache (e.g. on folder change). */
 export async function clearThumbnailCache(): Promise<void> {
-  if (typeof window !== "undefined" && typeof window.filexDesktop?.clearThumbnailCache === "function") {
-    try {
-      await window.filexDesktop.clearThumbnailCache();
-      return;
-    } catch {
-      // Ignore native failures and continue to the browser fallback.
-    }
+  if (!canUseDesktopThumbnailCache() || typeof window.filexDesktop?.clearThumbnailCache !== "function") {
+    return;
   }
 
   try {
-    const db = await getDB();
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).clear();
+    await window.filexDesktop.clearThumbnailCache();
   } catch {
-    // ignore
+    // Ignore cache clear failures.
   }
 }

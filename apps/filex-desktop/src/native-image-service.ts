@@ -12,7 +12,20 @@ import type {
   DesktopRenderedImage,
 } from "@photo-tools/desktop-contracts";
 import { ExifTool } from "exiftool-vendored";
-import { extractEmbeddedJpeg, locateEmbeddedJpegRange } from "./raw-jpeg-extractor.js";
+import { extractEmbeddedJpeg, locateEmbeddedJpegRange, locateJpegExifThumbnailRange } from "./raw-jpeg-extractor.js";
+
+// sharp is a native module — load lazily so the app still starts if binaries
+// are missing (dev environment without native rebuild).
+let _sharpModule: typeof import("sharp") | null | undefined = undefined;
+async function getSharp(): Promise<typeof import("sharp") | null> {
+  if (_sharpModule !== undefined) return _sharpModule;
+  try {
+    _sharpModule = (await import("sharp")).default as unknown as typeof import("sharp");
+  } catch {
+    _sharpModule = null;
+  }
+  return _sharpModule;
+}
 import {
   getCachedPreviewFromDisk,
   getCachedThumbnailsFromDisk,
@@ -41,31 +54,66 @@ const RAW_FAST_PREVIEW_MAX_BYTES = 12 * 1024 * 1024;
 const MIN_EMBEDDED_JPEG_BYTES = 10_000;
 const MB = 1024 * 1024;
 const SYSTEM_MEMORY_BYTES = Math.max(2 * 1024 * MB, totalmem());
-const AUTO_CACHE_BUDGET_BYTES = clampNumber(Math.round(SYSTEM_MEMORY_BYTES * 0.08), 192 * MB, 1536 * MB);
-const PREVIEW_SOURCE_CACHE_MAX_BYTES = clampNumber(Math.round(AUTO_CACHE_BUDGET_BYTES * 0.15), 64 * MB, 384 * MB);
-const PREVIEW_SOURCE_CACHE_MAX_ENTRIES = clampNumber(
-  Math.floor(PREVIEW_SOURCE_CACHE_MAX_BYTES / (5 * MB)),
-  12,
-  128,
-);
-const RENDERED_PREVIEW_CACHE_MAX_BYTES = clampNumber(Math.round(AUTO_CACHE_BUDGET_BYTES * 0.3), 96 * MB, 768 * MB);
-const RENDERED_PREVIEW_CACHE_MAX_ENTRIES = clampNumber(
-  Math.floor(RENDERED_PREVIEW_CACHE_MAX_BYTES / (3 * MB)),
-  24,
-  192,
-);
-const QUICK_PREVIEW_FRAME_MAX_ENTRIES = 128;
-const THUMBNAIL_MEMORY_CACHE_MAX_BYTES = clampNumber(Math.round(AUTO_CACHE_BUDGET_BYTES * 0.55), 128 * MB, 1024 * MB);
-const THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = clampNumber(
-  Math.floor(THUMBNAIL_MEMORY_CACHE_MAX_BYTES / (320 * 1024)),
-  256,
-  2048,
-);
+
+// RAM budget preset fractions
+const RAM_BUDGET_FRACTIONS: Record<string, number> = {
+  conservative: 0.06,
+  default: 0.12,
+  performance: 0.20,
+  maximum: 0.28,
+};
+
+function computeCacheLimits(budgetFraction: number): {
+  autoCacheBudgetBytes: number;
+  previewSourceCacheMaxBytes: number;
+  previewSourceCacheMaxEntries: number;
+  renderedPreviewCacheMaxBytes: number;
+  renderedPreviewCacheMaxEntries: number;
+  thumbnailMemoryCacheMaxBytes: number;
+  thumbnailMemoryCacheMaxEntries: number;
+} {
+  const autoCacheBudgetBytes = clampNumber(
+    Math.round(SYSTEM_MEMORY_BYTES * budgetFraction),
+    256 * MB,
+    Math.round(SYSTEM_MEMORY_BYTES * 0.60), // never exceed 60% of system RAM
+  );
+  const previewSourceCacheMaxBytes = clampNumber(Math.round(autoCacheBudgetBytes * 0.15), 64 * MB, 2048 * MB);
+  const previewSourceCacheMaxEntries = clampNumber(Math.floor(previewSourceCacheMaxBytes / (5 * MB)), 12, 2048);
+  const renderedPreviewCacheMaxBytes = clampNumber(Math.round(autoCacheBudgetBytes * 0.3), 96 * MB, 8192 * MB);
+  const renderedPreviewCacheMaxEntries = clampNumber(Math.floor(renderedPreviewCacheMaxBytes / (3 * MB)), 24, 4096);
+  const thumbnailMemoryCacheMaxBytes = clampNumber(Math.round(autoCacheBudgetBytes * 0.55), 128 * MB, 16384 * MB);
+  const thumbnailMemoryCacheMaxEntries = clampNumber(Math.floor(thumbnailMemoryCacheMaxBytes / (320 * 1024)), 256, 32768);
+  return {
+    autoCacheBudgetBytes,
+    previewSourceCacheMaxBytes,
+    previewSourceCacheMaxEntries,
+    renderedPreviewCacheMaxBytes,
+    renderedPreviewCacheMaxEntries,
+    thumbnailMemoryCacheMaxBytes,
+    thumbnailMemoryCacheMaxEntries,
+  };
+}
+
+// Mutable cache limit variables — reconfigured at startup via configureDesktopImageService()
+let _limits = computeCacheLimits(RAM_BUDGET_FRACTIONS.default);
+let PREVIEW_SOURCE_CACHE_MAX_BYTES = _limits.previewSourceCacheMaxBytes;
+let PREVIEW_SOURCE_CACHE_MAX_ENTRIES = _limits.previewSourceCacheMaxEntries;
+let RENDERED_PREVIEW_CACHE_MAX_BYTES = _limits.renderedPreviewCacheMaxBytes;
+let RENDERED_PREVIEW_CACHE_MAX_ENTRIES = _limits.renderedPreviewCacheMaxEntries;
+let THUMBNAIL_MEMORY_CACHE_MAX_BYTES = _limits.thumbnailMemoryCacheMaxBytes;
+let THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = _limits.thumbnailMemoryCacheMaxEntries;
+let _activeBudgetBytes = _limits.autoCacheBudgetBytes;
 const THUMBNAIL_BATCH_WINDOW_MS = 8;
 const THUMBNAIL_BATCH_MAX_ITEMS = 128;
+const QUICK_PREVIEW_FRAME_MAX_ENTRIES = 128;
 const RAW_EMBEDDED_RANGE_CACHE_MAX_ENTRIES = 20_000;
 const RAW_EMBEDDED_RANGE_CACHE_FILE_NAME = "raw-embedded-range-cache-v1.json";
 const RAW_EMBEDDED_RANGE_CACHE_PERSIST_DEBOUNCE_MS = 2_000;
+const JPEG_EXIF_RANGE_CACHE_MAX_ENTRIES = 20_000;
+const JPEG_EXIF_RANGE_CACHE_FILE_NAME = "jpeg-exif-range-cache-v1.json";
+const JPEG_EXIF_RANGE_CACHE_PERSIST_DEBOUNCE_MS = 2_000;
+const JPEG_EXIF_HEADER_READ_BYTES = 65_536; // APP1 Exif is always within first 64 KB
+const JPEG_EXIF_SENTINEL_OFFSET = -1; // marks "checked, no usable thumbnail"
 const THUMBNAIL_PERF_LOG_INTERVAL = 200;
 const PERF_ENABLED = !app.isPackaged;
 const RAW_EXIFTOOL_MAX_PROCS = Math.max(2, Math.min(8, Math.ceil(availableParallelism() / 2)));
@@ -86,6 +134,8 @@ export function getDesktopImageCacheLimits(): {
   effectiveRenderedPreviewMaxBytes: number;
   effectivePreviewSourceMaxEntries: number;
   effectivePreviewSourceMaxBytes: number;
+  systemTotalMemoryBytes: number;
+  ramBudgetBytes: number;
 } {
   return {
     rawRenderCacheHit: thumbnailPerfMetrics.rawRenderCacheHit,
@@ -95,7 +145,27 @@ export function getDesktopImageCacheLimits(): {
     effectiveRenderedPreviewMaxBytes: RENDERED_PREVIEW_CACHE_MAX_BYTES,
     effectivePreviewSourceMaxEntries: PREVIEW_SOURCE_CACHE_MAX_ENTRIES,
     effectivePreviewSourceMaxBytes: PREVIEW_SOURCE_CACHE_MAX_BYTES,
+    systemTotalMemoryBytes: SYSTEM_MEMORY_BYTES,
+    ramBudgetBytes: _activeBudgetBytes,
   };
+}
+
+/**
+ * Configure the RAM cache budget. Must be called before any thumbnail operations.
+ * Accepts a preset name ("conservative" | "default" | "performance" | "maximum").
+ * The limits are applied immediately; existing cached data is NOT evicted (the new
+ * lower/upper bounds take effect on the next trim cycle).
+ */
+export function configureDesktopImageService(preset: string): void {
+  const fraction = RAM_BUDGET_FRACTIONS[preset] ?? RAM_BUDGET_FRACTIONS.default;
+  const limits = computeCacheLimits(fraction);
+  PREVIEW_SOURCE_CACHE_MAX_BYTES = limits.previewSourceCacheMaxBytes;
+  PREVIEW_SOURCE_CACHE_MAX_ENTRIES = limits.previewSourceCacheMaxEntries;
+  RENDERED_PREVIEW_CACHE_MAX_BYTES = limits.renderedPreviewCacheMaxBytes;
+  RENDERED_PREVIEW_CACHE_MAX_ENTRIES = limits.renderedPreviewCacheMaxEntries;
+  THUMBNAIL_MEMORY_CACHE_MAX_BYTES = limits.thumbnailMemoryCacheMaxBytes;
+  THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = limits.thumbnailMemoryCacheMaxEntries;
+  _activeBudgetBytes = limits.autoCacheBudgetBytes;
 }
 
 const byteReadStats = {
@@ -204,6 +274,10 @@ const rawEmbeddedRangeCache = new Map<string, CachedEmbeddedJpegRange>();
 let rawEmbeddedRangeCacheLoaded = false;
 let rawEmbeddedRangeCachePersistTimer: ReturnType<typeof setTimeout> | null = null;
 let rawEmbeddedRangeCachePersistInFlight: Promise<void> | null = null;
+const jpegExifRangeCache = new Map<string, CachedEmbeddedJpegRange>();
+let jpegExifRangeCacheLoaded = false;
+let jpegExifRangeCachePersistTimer: ReturnType<typeof setTimeout> | null = null;
+let jpegExifRangeCachePersistInFlight: Promise<void> | null = null;
 const quickPreviewFrameStore = new Map<string, QuickPreviewFrameEntry>();
 const quickPreviewFrameTokenByCacheKey = new Map<string, string>();
 const thumbnailBatchQueue = new Map<string, BatchedThumbnailRequest>();
@@ -311,6 +385,10 @@ function getRawEmbeddedRangeCacheFilePath(): string {
   return join(app.getPath("userData"), RAW_EMBEDDED_RANGE_CACHE_FILE_NAME);
 }
 
+function getJpegExifRangeCacheFilePath(): string {
+  return join(app.getPath("userData"), JPEG_EXIF_RANGE_CACHE_FILE_NAME);
+}
+
 async function ensureRawEmbeddedRangeCacheLoaded(): Promise<void> {
   if (rawEmbeddedRangeCacheLoaded) {
     return;
@@ -398,6 +476,125 @@ function schedulePersistRawEmbeddedRangeCache(): void {
   }, RAW_EMBEDDED_RANGE_CACHE_PERSIST_DEBOUNCE_MS);
 }
 
+// ── JPEG EXIF range cache (IFD1 thumbnail offsets for standard JPG files) ─
+
+async function ensureJpegExifRangeCacheLoaded(): Promise<void> {
+  if (jpegExifRangeCacheLoaded) {
+    return;
+  }
+
+  jpegExifRangeCacheLoaded = true;
+  try {
+    const raw = await readFile(getJpegExifRangeCacheFilePath(), "utf8");
+    const parsed = JSON.parse(raw) as Array<{ key?: string; offset?: number; length?: number }>;
+    if (!Array.isArray(parsed)) {
+      return;
+    }
+
+    for (const entry of parsed) {
+      if (!entry || typeof entry.key !== "string") {
+        continue;
+      }
+      const offsetRaw = entry.offset;
+      const lengthRaw = entry.length;
+      if (typeof offsetRaw !== "number" || !Number.isFinite(offsetRaw)) {
+        continue;
+      }
+      if (typeof lengthRaw !== "number" || !Number.isFinite(lengthRaw)) {
+        continue;
+      }
+      const offset = Math.floor(offsetRaw); // may be JPEG_EXIF_SENTINEL_OFFSET (-1)
+      const length = Math.max(0, Math.floor(lengthRaw));
+
+      jpegExifRangeCache.set(entry.key, { offset, length });
+      if (jpegExifRangeCache.size > JPEG_EXIF_RANGE_CACHE_MAX_ENTRIES) {
+        const oldest = jpegExifRangeCache.keys().next().value as string | undefined;
+        if (oldest) {
+          jpegExifRangeCache.delete(oldest);
+        }
+      }
+    }
+  } catch {
+    // Best-effort cache hydration; ignore malformed or missing files.
+  }
+}
+
+async function persistJpegExifRangeCache(): Promise<void> {
+  if (!jpegExifRangeCacheLoaded) {
+    return;
+  }
+  if (jpegExifRangeCachePersistInFlight) {
+    await jpegExifRangeCachePersistInFlight;
+    return;
+  }
+
+  jpegExifRangeCachePersistInFlight = (async () => {
+    try {
+      const entries = Array.from(jpegExifRangeCache.entries()).map(([key, value]) => ({
+        key,
+        offset: value.offset,
+        length: value.length,
+      }));
+      await mkdir(app.getPath("userData"), { recursive: true });
+      await writeFile(
+        getJpegExifRangeCacheFilePath(),
+        JSON.stringify(entries),
+        "utf8",
+      );
+    } catch {
+      // Persistence is best-effort and should never block rendering.
+    } finally {
+      jpegExifRangeCachePersistInFlight = null;
+    }
+  })();
+
+  await jpegExifRangeCachePersistInFlight;
+}
+
+function schedulePersistJpegExifRangeCache(): void {
+  if (!jpegExifRangeCacheLoaded || jpegExifRangeCachePersistTimer !== null) {
+    return;
+  }
+
+  jpegExifRangeCachePersistTimer = setTimeout(() => {
+    jpegExifRangeCachePersistTimer = null;
+    void persistJpegExifRangeCache();
+  }, JPEG_EXIF_RANGE_CACHE_PERSIST_DEBOUNCE_MS);
+}
+
+function getCachedJpegExifRange(cacheKey: string | undefined): CachedEmbeddedJpegRange | null {
+  if (!cacheKey) {
+    return null;
+  }
+
+  const cached = jpegExifRangeCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  // Touch (LRU)
+  jpegExifRangeCache.delete(cacheKey);
+  jpegExifRangeCache.set(cacheKey, cached);
+  return cached;
+}
+
+function setCachedJpegExifRange(cacheKey: string | undefined, entry: CachedEmbeddedJpegRange): void {
+  if (!cacheKey) {
+    return;
+  }
+
+  jpegExifRangeCache.delete(cacheKey);
+  jpegExifRangeCache.set(cacheKey, entry);
+  while (jpegExifRangeCache.size > JPEG_EXIF_RANGE_CACHE_MAX_ENTRIES) {
+    const oldest = jpegExifRangeCache.keys().next().value as string | undefined;
+    if (!oldest) {
+      break;
+    }
+    jpegExifRangeCache.delete(oldest);
+  }
+  schedulePersistJpegExifRangeCache();
+}
+
 function touchRawEmbeddedRangeCacheEntry(
   cacheKey: string,
   entry: CachedEmbeddedJpegRange,
@@ -449,6 +646,125 @@ function deleteCachedRawEmbeddedRange(cacheKey: string | undefined): void {
 
 function runDecodeTask<T>(isRaw: boolean, task: () => Promise<T> | T): Promise<T> {
   return (isRaw ? rawDecodeSemaphore : standardDecodeSemaphore).run(task);
+}
+
+/**
+ * Fast-path for standard JPG files: read only the EXIF IFD1 thumbnail (typically
+ * 50–500 KB depending on the exporting application), instead of loading the full
+ * source file (8–25 MB). Falls back to null if:
+ *   - No IFD1 thumbnail is found in the EXIF header
+ *   - The thumbnail short-side is smaller than maxDimension (would require upscaling)
+ *   - The sentinel entry in cache says this file has already been checked and has no
+ *     usable thumbnail
+ */
+async function tryReadJpegExifThumbnail(
+  handle: FileHandle,
+  fileSize: number,
+  sourceCacheKey: string | undefined,
+  maxDimension: number,
+): Promise<Buffer | null> {
+  await ensureJpegExifRangeCacheLoaded();
+
+  const cached = getCachedJpegExifRange(sourceCacheKey);
+
+  if (cached) {
+    // Sentinel: already checked this file, no usable EXIF thumbnail
+    if (cached.offset === JPEG_EXIF_SENTINEL_OFFSET) {
+      return null;
+    }
+
+    const cachedEnd = cached.offset + cached.length;
+    const rangeValid =
+      cached.offset >= 0 &&
+      cached.length >= 1000 &&
+      cached.length <= JPEG_EXIF_HEADER_READ_BYTES &&
+      cachedEnd <= fileSize;
+
+    if (rangeValid) {
+      const thumbnailBuffer = await readFileSlice(handle, cached.offset, cached.length);
+      recordDesktopBytesRead("standard", thumbnailBuffer.byteLength);
+
+      if (thumbnailBuffer.byteLength >= 1000 && thumbnailBuffer[0] === 0xff && thumbnailBuffer[1] === 0xd8) {
+        // Validate that the embedded thumbnail is large enough to downscale (not upscale)
+        const decoded = decodeImage(thumbnailBuffer);
+        if (decoded) {
+          const shortSide = Math.min(decoded.width, decoded.height);
+          if (shortSide >= maxDimension) {
+            return thumbnailBuffer;
+          }
+        }
+      }
+
+      // Range in cache is stale or too small — remove and fall through to re-probe
+      setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
+      return null;
+    }
+
+    // Stale cache entry (file changed size) — delete and re-probe
+    setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
+  }
+
+  // Cache miss: read the header and locate the EXIF IFD1 thumbnail range
+  const headerLength = Math.min(fileSize, JPEG_EXIF_HEADER_READ_BYTES);
+  if (headerLength < 20) {
+    setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
+    return null;
+  }
+
+  const headerBuffer = await readFileSlice(handle, 0, headerLength);
+  recordDesktopBytesRead("standard", headerBuffer.byteLength);
+
+  const range = locateJpegExifThumbnailRange(
+    headerBuffer.buffer.slice(
+      headerBuffer.byteOffset,
+      headerBuffer.byteOffset + headerBuffer.byteLength,
+    ) as ArrayBuffer,
+  );
+
+  if (
+    !range ||
+    range.offset < 0 ||
+    range.length < 1000 ||
+    range.length > JPEG_EXIF_HEADER_READ_BYTES ||
+    range.offset + range.length > fileSize
+  ) {
+    setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
+    return null;
+  }
+
+  setCachedJpegExifRange(sourceCacheKey, { offset: range.offset, length: range.length });
+
+  // The thumbnail may be fully contained within the header we already read
+  if (range.offset + range.length <= headerBuffer.byteLength) {
+    const thumbnailBuffer = Buffer.from(
+      headerBuffer.buffer,
+      headerBuffer.byteOffset + range.offset,
+      range.length,
+    );
+    const decoded = decodeImage(thumbnailBuffer);
+    if (decoded && Math.min(decoded.width, decoded.height) >= maxDimension) {
+      return thumbnailBuffer;
+    }
+    setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
+    return null;
+  }
+
+  // Thumbnail range goes beyond the header — read the slice directly
+  const thumbnailBuffer = await readFileSlice(handle, range.offset, range.length);
+  recordDesktopBytesRead("standard", thumbnailBuffer.byteLength);
+
+  if (thumbnailBuffer.byteLength < 1000 || thumbnailBuffer[0] !== 0xff || thumbnailBuffer[1] !== 0xd8) {
+    setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
+    return null;
+  }
+
+  const decoded = decodeImage(thumbnailBuffer);
+  if (!decoded || Math.min(decoded.width, decoded.height) < maxDimension) {
+    setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
+    return null;
+  }
+
+  return thumbnailBuffer;
 }
 
 function touchPreviewSourceCacheEntry(
@@ -974,6 +1290,30 @@ async function renderNativePreviewFromPath(
     return null;
   }
 
+  // Fast-path: use sharp (libjpeg-turbo, multi-threaded) — 2-4× faster than
+  // Windows Shell for cold in-camera JPEGs.
+  const sharpMod = await getSharp();
+  if (sharpMod) {
+    try {
+      const { data, info } = await sharpMod(absolutePath)
+        .rotate() // honour EXIF orientation
+        .resize(maxDimension, maxDimension, { fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 90 })
+        .toBuffer({ resolveWithObject: true });
+      if (info.width > 0 && info.height > 0) {
+        return {
+          bytes: new Uint8Array(data),
+          mimeType: "image/jpeg",
+          width: info.width,
+          height: info.height,
+        };
+      }
+    } catch {
+      // fall through to nativeImage
+    }
+  }
+
+  // Fallback: Windows Shell thumbnail (slower on cold reads)
   try {
     const thumbnail = await nativeImage.createThumbnailFromPath(absolutePath, {
       width: maxDimension,
@@ -1329,29 +1669,74 @@ async function computeDesktopThumbnail(
   const rawPath = isRawPath(absolutePath);
 
   if (!rawPath) {
-    const nativeRendered = await runDecodeTask(false, () => renderNativePreviewFromPath(absolutePath, maxDimension));
-    if (nativeRendered) {
-      const rendered = cacheThumbnailInMemory(dedupeKey, nativeRendered);
-      void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, rendered);
-      return rendered;
+    // Fast-path: try to read the EXIF IFD1 thumbnail (50–500 KB partial read) before
+    // falling back to nativeImage.createThumbnailFromPath (which may read the entire
+    // file if the Windows Shell thumbnail cache is cold).
+    let exifFastPathSucceeded = false;
+    let handle: FileHandle | null = null;
+    try {
+      handle = await open(absolutePath, "r");
+      const stats = await handle.stat();
+      const sourceCacheKey = getPreviewSourceCacheKey(absolutePath, sourceFileKey);
+      const exifThumbnailBuffer = await tryReadJpegExifThumbnail(handle, stats.size, sourceCacheKey, maxDimension);
+      if (exifThumbnailBuffer) {
+        const source: ResolvedPreviewSourceResult = {
+          source: {
+            buffer: exifThumbnailBuffer,
+            mimeType: getMimeTypeForBuffer(exifThumbnailBuffer),
+            width: 0, // will be ignored — renderThumbnailFromResolvedSource decodes inline
+            height: 0,
+          },
+          origin: "embedded-preview",
+          cacheHit: false,
+        };
+        // Decode dimensions properly before rendering
+        const decoded = decodeImage(exifThumbnailBuffer);
+        if (decoded) {
+          source.source.width = decoded.width;
+          source.source.height = decoded.height;
+          const rendered = await runDecodeTask(false, () => renderThumbnailFromResolvedSource(source, maxDimension, quality));
+          if (rendered) {
+            const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
+            void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
+            exifFastPathSucceeded = true;
+            return cachedRendered;
+          }
+        }
+      }
+    } catch {
+      // Fast-path is best-effort; fall through to standard path below
+    } finally {
+      await handle?.close().catch(() => {});
     }
 
-    const source = await resolvePreviewBuffer(absolutePath, {
-      sourceFileKey,
-      allowExifTool: false,
-    });
-    if (!source) {
-      return null;
+    if (!exifFastPathSucceeded) {
+      const nativeRendered = await runDecodeTask(false, () => renderNativePreviewFromPath(absolutePath, maxDimension));
+      if (nativeRendered) {
+        const rendered = cacheThumbnailInMemory(dedupeKey, nativeRendered);
+        void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, rendered);
+        return rendered;
+      }
+
+      const source = await resolvePreviewBuffer(absolutePath, {
+        sourceFileKey,
+        allowExifTool: false,
+      });
+      if (!source) {
+        return null;
+      }
+
+      const rendered = await runDecodeTask(false, () => renderThumbnailFromResolvedSource(source, maxDimension, quality));
+      if (!rendered) {
+        return null;
+      }
+
+      const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
+      void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
+      return cachedRendered;
     }
 
-    const rendered = await runDecodeTask(false, () => renderThumbnailFromResolvedSource(source, maxDimension, quality));
-    if (!rendered) {
-      return null;
-    }
-
-    const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
-    void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
-    return cachedRendered;
+    return null; // unreachable but satisfies TypeScript
   }
 
   let source = await resolvePreviewBuffer(absolutePath, {
@@ -1515,7 +1900,12 @@ export async function shutdownDesktopImageService(): Promise<void> {
     clearTimeout(rawEmbeddedRangeCachePersistTimer);
     rawEmbeddedRangeCachePersistTimer = null;
   }
+  if (jpegExifRangeCachePersistTimer !== null) {
+    clearTimeout(jpegExifRangeCachePersistTimer);
+    jpegExifRangeCachePersistTimer = null;
+  }
   await persistRawEmbeddedRangeCache().catch(() => {});
+  await persistJpegExifRangeCache().catch(() => {});
 
   previewSourcePromiseCache.clear();
   previewSourceCache.clear();
@@ -1526,6 +1916,7 @@ export async function shutdownDesktopImageService(): Promise<void> {
   thumbnailMemoryCache.clear();
   thumbnailMemoryCacheTotalBytes = 0;
   rawEmbeddedRangeCache.clear();
+  jpegExifRangeCache.clear();
   thumbnailBatchQueue.clear();
   thumbnailBatchOrder.splice(0, thumbnailBatchOrder.length);
   inFlightThumbnailSingleFlight.clear();

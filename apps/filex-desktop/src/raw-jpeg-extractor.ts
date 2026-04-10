@@ -59,6 +59,97 @@ export function locateEmbeddedJpegRange(buffer: ArrayBuffer): EmbeddedJpegRange 
 }
 
 /**
+ * Locate the EXIF IFD1 thumbnail range inside a standard JPEG file (in-camera JPG,
+ * Lightroom export, Capture One export, etc.).
+ *
+ * Only the first ~64 KB of the file needs to be passed — the EXIF APP1 segment
+ * is always within that window for any conforming JPEG.
+ *
+ * Returns file-absolute { offset, length } of the embedded JPEG thumbnail,
+ * or null if the file has no usable IFD1 thumbnail.
+ */
+export function locateJpegExifThumbnailRange(buffer: ArrayBuffer): EmbeddedJpegRange | null {
+  const data = new Uint8Array(buffer);
+
+  // Must start with JPEG SOI (FF D8)
+  if (data.length < 4 || data[0] !== JPEG_SOI_0 || data[1] !== JPEG_SOI_1) {
+    return null;
+  }
+
+  // Scan APP segments to find APP1 with "Exif\0\0" header
+  let pos = 2;
+  while (pos < data.length - 4) {
+    if (data[pos] !== 0xff) {
+      break; // Malformed JPEG
+    }
+
+    const marker = data[pos + 1];
+
+    // SOI / EOI / restart markers have no length field
+    if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) {
+      pos += 2;
+      continue;
+    }
+
+    if (pos + 3 >= data.length) {
+      break;
+    }
+
+    const segLen = (data[pos + 2] << 8) | data[pos + 3]; // includes the 2 length bytes
+    if (segLen < 2) {
+      break;
+    }
+
+    // APP1 marker = FF E1
+    if (marker === 0xe1 && segLen >= 8) {
+      // Check for "Exif\0\0" at offset +4 (after FF E1 + 2-byte length)
+      const exifStart = pos + 4;
+      if (
+        exifStart + 6 <= data.length &&
+        data[exifStart] === 0x45 &&     // E
+        data[exifStart + 1] === 0x78 && // x
+        data[exifStart + 2] === 0x69 && // i
+        data[exifStart + 3] === 0x66 && // f
+        data[exifStart + 4] === 0x00 && // \0
+        data[exifStart + 5] === 0x00    // \0
+      ) {
+        // TIFF header starts 10 bytes after the APP1 marker (FF E1 + 2-byte len + "Exif\0\0")
+        const tiffAbsoluteOffset = pos + 10;
+        const app1End = pos + 2 + segLen; // exclusive end of APP1 in file
+        const tiffBoundedEnd = Math.min(app1End, data.length);
+
+        if (tiffAbsoluteOffset >= tiffBoundedEnd) {
+          break;
+        }
+
+        // Pass a subarray that looks like its own TIFF file from offset 0
+        const tiffSlice = data.subarray(tiffAbsoluteOffset, tiffBoundedEnd);
+        const range = tryTiffLocate(tiffSlice);
+
+        if (!range || range.offset < 0 || range.length < 1000) {
+          return null; // No IFD1 thumbnail or too small to be useful
+        }
+
+        // Translate from tiffSlice-relative to file-absolute
+        return {
+          offset: tiffAbsoluteOffset + range.offset,
+          length: range.length,
+        };
+      }
+    }
+
+    // Skip past non-matching APP segment (or any other segment before SOS)
+    if (marker === 0xda) {
+      break; // Start Of Scan — no more metadata segments
+    }
+
+    pos += 2 + segLen;
+  }
+
+  return null;
+}
+
+/**
  * Extract the largest embedded JPEG preview from a RAW file.
  * Returns the JPEG as an ArrayBuffer, or null if none found.
  */

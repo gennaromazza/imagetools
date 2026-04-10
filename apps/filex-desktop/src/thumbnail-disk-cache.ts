@@ -18,6 +18,7 @@ import type {
   DesktopCachedThumbnail,
   DesktopCacheLocationRecommendation,
   DesktopCacheMigrationResult,
+  DesktopRamBudgetPreset,
   DesktopRenderedImage,
   DesktopStorageVolumeInfo,
   DesktopThumbnailCacheInfo,
@@ -29,6 +30,7 @@ interface DesktopShellSettings {
   cacheLocationRecommendationDismissed?: boolean;
   cacheLocationRecommendationDismissedAt?: string;
   cacheLocationRecommendationLastPromptedAt?: string;
+  ramBudgetPreset?: DesktopRamBudgetPreset;
 }
 
 interface WindowsLogicalDiskRow {
@@ -509,6 +511,7 @@ async function markRecommendationPrompted(): Promise<void> {
 export async function getThumbnailCacheInfo(): Promise<DesktopThumbnailCacheInfo> {
   const directoryInfo = await getActiveCacheDirectory();
   const summary = await summarizeCacheDirectory(directoryInfo.currentPath);
+  const settings = await loadSettings();
 
   return {
     currentPath: directoryInfo.currentPath,
@@ -516,7 +519,47 @@ export async function getThumbnailCacheInfo(): Promise<DesktopThumbnailCacheInfo
     usesCustomPath: directoryInfo.usesCustomPath,
     entryCount: summary.entryCount,
     totalBytes: summary.totalBytes,
+    ramBudgetPreset: settings.ramBudgetPreset ?? "default",
   };
+}
+
+export async function getRamBudgetInfo(
+  systemTotalMemoryBytes: number,
+  ramBudgetBytes: number,
+  effectiveLimits: {
+    effectiveThumbnailRamMaxEntries: number;
+    effectiveThumbnailRamMaxBytes: number;
+    effectiveRenderedPreviewMaxEntries: number;
+    effectiveRenderedPreviewMaxBytes: number;
+    effectivePreviewSourceMaxEntries: number;
+    effectivePreviewSourceMaxBytes: number;
+  },
+): Promise<DesktopThumbnailCacheInfo> {
+  const directoryInfo = await getActiveCacheDirectory();
+  const summary = await summarizeCacheDirectory(directoryInfo.currentPath);
+  const settings = await loadSettings();
+
+  return {
+    currentPath: directoryInfo.currentPath,
+    defaultPath: directoryInfo.defaultPath,
+    usesCustomPath: directoryInfo.usesCustomPath,
+    entryCount: summary.entryCount,
+    totalBytes: summary.totalBytes,
+    ramBudgetPreset: settings.ramBudgetPreset ?? "default",
+    systemTotalMemoryBytes,
+    ramBudgetBytes,
+    ...effectiveLimits,
+  };
+}
+
+export async function saveRamBudgetPreset(preset: DesktopRamBudgetPreset): Promise<void> {
+  const settings = await loadSettings();
+  await saveSettings({ ...settings, ramBudgetPreset: preset });
+}
+
+export async function loadRamBudgetPreset(): Promise<DesktopRamBudgetPreset> {
+  const settings = await loadSettings();
+  return settings.ramBudgetPreset ?? "default";
 }
 
 export async function getCacheLocationRecommendation(): Promise<DesktopCacheLocationRecommendation> {

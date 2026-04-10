@@ -1,16 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useEffect } from "react";
 function formatDiagnosticsSource(source) {
-    switch (source) {
-        case "desktop-native":
-            return "Desktop Windows";
-        case "browser-native":
-            return "Browser picker";
-        case "file-input":
-            return "Fallback input";
-        default:
-            return source;
-    }
+    return source === "desktop-native" ? "Desktop Windows" : source;
 }
 export function ImportProgressModal({ isOpen, phase, supported, ignored, total, processed, currentFile, folderLabel, diagnostics, onDismiss, onCancel, }) {
     useEffect(() => {

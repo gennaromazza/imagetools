@@ -2,10 +2,9 @@ import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { revokeImageAssetUrls, } from "./services/browser-image-assets";
 import { consumePendingDesktopOpenFolderPath, getDesktopRuntimeInfo, markDesktopOpenFolderRequestReady, subscribeDesktopOpenFolderRequest, } from "./services/desktop-runtime";
-import { chooseDesktopThumbnailCacheDirectory, clearDesktopThumbnailCache, dismissDesktopCacheLocationRecommendation, getDesktopCacheLocationRecommendation, getDesktopThumbnailCacheInfo, migrateDesktopThumbnailCacheDirectory, resetDesktopThumbnailCacheDirectory, setDesktopThumbnailCacheDirectory, } from "./services/desktop-thumbnail-cache";
-import { loadImageAssets } from "./services/image-storage";
+import { chooseDesktopThumbnailCacheDirectory, clearDesktopThumbnailCache, dismissDesktopCacheLocationRecommendation, getDesktopCacheLocationRecommendation, getDesktopThumbnailCacheInfo, migrateDesktopThumbnailCacheDirectory, resetDesktopThumbnailCacheDirectory, setDesktopRamBudgetPreset, setDesktopThumbnailCacheDirectory, } from "./services/desktop-thumbnail-cache";
 import { clearImageCache } from "./services/image-cache";
-import { buildPlaceholderAssets, addRecentFolder, getAssetAbsolutePath, buildSourceFileKey, buildSourceFileKeyFromStats, getFileForAsset, hasNativeFolderAccess, isRawFile, readSidecarXmp, warmOnDemandPreviewCache, writeSidecarXmp, } from "./services/folder-access";
+import { buildPlaceholderAssets, addRecentFolder, getAssetAbsolutePath, buildSourceFileKeyFromStats, isRawFile, readSidecarXmp, warmOnDemandPreviewCache, writeSidecarXmp, } from "./services/folder-access";
 import { parseXmpState, upsertXmpState } from "./services/xmp-sidecar";
 import { ThumbnailPipeline, } from "./services/thumbnail-pipeline";
 import { cacheThumbnailBatch, loadCachedThumbnails } from "./services/thumbnail-cache";
@@ -28,7 +27,6 @@ import { SelectionSummary } from "./components/SelectionSummary";
 // Constants
 // ═══════════════════════════════════════════════════════════════════════════
 const PROJECT_ID = "photo-selector-default";
-const STORAGE_KEY = "photo-selector-state";
 const THUMBNAIL_BOOTSTRAP_COUNT = 64;
 const XMP_IMPORT_CONCURRENCY = 16;
 const XMP_IMPORT_START_DELAY_MS = 0;
@@ -109,25 +107,6 @@ function createThumbnailPipelineMetrics() {
         deferredPatchApplied: 0,
     };
 }
-function loadPersistedState() {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw)
-            return null;
-        return JSON.parse(raw);
-    }
-    catch {
-        return null;
-    }
-}
-function savePersistedState(state) {
-    try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }
-    catch {
-        // Ignore storage errors
-    }
-}
 function detectOrientation(w, h) {
     if (w === h)
         return "square";
@@ -143,16 +122,7 @@ function formatSyncTimestamp(timestamp) {
     });
 }
 function formatFolderDiagnosticsSource(source) {
-    switch (source) {
-        case "desktop-native":
-            return "Desktop Windows";
-        case "browser-native":
-            return "Browser picker";
-        case "file-input":
-            return "Fallback input";
-        default:
-            return source;
-    }
+    return source === "desktop-native" ? "Desktop Windows" : source;
 }
 function areSetsEqual(left, right) {
     if (left.size !== right.size) {
@@ -285,38 +255,18 @@ export function App() {
     useEffect(() => {
         let active = true;
         void (async () => {
-            const persisted = hasDesktopStateApi()
-                ? await getDesktopSessionState()
-                : loadPersistedState();
+            const persisted = await getDesktopSessionState();
             if (!active || !persisted) {
                 return;
             }
             setProjectName(persisted.projectName);
             setSourceFolderPath(persisted.sourceFolderPath);
             setHasWritableFolderAccess(false);
-            try {
-                const assetMap = await loadImageAssets(PROJECT_ID);
-                if (!active || assetMap.size === 0) {
-                    return;
-                }
-                const loaded = Array.from(assetMap.values());
-                setAllAssets(loaded);
-                bumpPhotoMetadataVersion();
-                const loadedIds = new Set(loaded.map((asset) => asset.id));
-                const validActiveIds = persisted.activeAssetIds.filter((id) => loadedIds.has(id));
-                setActiveAssetIds(validActiveIds.length > 0 ? validActiveIds : loaded.map((asset) => asset.id));
-                setCurrentScreen("selection");
-            }
-            catch {
-                if (active) {
-                    addToast("Errore nel caricamento dei dati salvati. Riseleziona la cartella.", "error");
-                }
-            }
         })();
         return () => {
             active = false;
         };
-    }, [addToast, bumpPhotoMetadataVersion]);
+    }, []);
     // ── Persist state on change ──────────────────────────────────────────
     useEffect(() => {
         const nextState = {
@@ -325,11 +275,7 @@ export function App() {
             activeAssetIds,
             usesMockData: false,
         };
-        if (hasDesktopStateApi()) {
-            void saveDesktopSessionState(nextState);
-            return;
-        }
-        savePersistedState(nextState);
+        void saveDesktopSessionState(nextState);
     }, [projectName, sourceFolderPath, activeAssetIds]);
     useEffect(() => {
         let active = true;
@@ -662,9 +608,6 @@ export function App() {
     }, []);
     // ── Warn before losing unsaved work ──────────────────────────────────
     useEffect(() => {
-        if (typeof window !== "undefined" && typeof window.filexDesktop !== "undefined") {
-            return;
-        }
         const handler = (e) => {
             if (allAssets.length > 0) {
                 e.preventDefault();
@@ -1305,7 +1248,7 @@ export function App() {
                 : 280;
         folderOpenStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : Date.now();
         const nextDiagnostics = diagnostics ?? {
-            source: "file-input",
+            source: "desktop-native",
             selectedPath: rootPath ?? folderName,
             topLevelSupportedCount: entries.length,
             nestedSupportedDiscardedCount: 0,
@@ -1384,7 +1327,7 @@ export function App() {
             .map((asset) => asset.id);
         assetNameByIdRef.current = new Map(assets.map((asset) => [asset.id, asset.fileName]));
         assetIndexByIdRef.current = new Map(assets.map((asset, index) => [asset.id, index]));
-        const writableAccess = entries.some((entry) => !!entry.fileHandle || !!entry.absolutePath);
+        const writableAccess = entries.some((entry) => !!entry.absolutePath);
         setAllAssets(assets);
         bumpPhotoMetadataVersion();
         const seededActiveAssetIds = (cachedCatalogState?.activeAssetIds ?? [])
@@ -1528,17 +1471,8 @@ export function App() {
             }
             pipelineEntries.push({
                 id,
-                file: entry.file,
-                loadFile: entry.file ? undefined : () => getFileForAsset(id),
                 absolutePath: entry.absolutePath,
-                sourceFileKey: entry.file
-                    ? buildSourceFileKey(entry.file, entry.relativePath)
-                    : entry.size !== undefined && entry.lastModified !== undefined
-                        ? buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
-                        : undefined,
-                createSourceFileKey: entry.file || !entry.absolutePath
-                    ? (file) => buildSourceFileKey(file, entry.relativePath)
-                    : undefined,
+                sourceFileKey: buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified),
             });
         }
         thumbnailEntryByIdRef.current = new Map(pipelineEntries.map((entry) => [entry.id, entry]));
@@ -1981,6 +1915,12 @@ export function App() {
             setIsDesktopThumbnailCacheBusy(false);
         }
     }, [addToast, refreshDesktopCacheLocationRecommendation]);
+    const handleRamBudgetPresetChange = useCallback(async (preset) => {
+        const info = await setDesktopRamBudgetPreset(preset);
+        if (info) {
+            setDesktopThumbnailCacheInfo(info);
+        }
+    }, []);
     const handleSelectorApply = useCallback((nextIds, nextAssets) => {
         const previousAssets = allAssetsRef.current;
         const changedIds = new Set();
@@ -2190,15 +2130,13 @@ export function App() {
                         ? "XMP non disponibili"
                         : "XMP pronti";
     // ── Render ───────────────────────────────────────────────────────────
-    return (_jsx(ErrorBoundary, { children: _jsxs("div", { className: "photo-selector-app", children: [_jsxs("header", { className: "app-header", children: [_jsx("img", { src: logo, alt: "Logo", style: { height: 40, marginRight: 16 } }), _jsxs("div", { className: "app-header__brand", children: [_jsx("h1", { className: "app-header__title", children: "Selezione Foto" }), _jsx("span", { className: "app-header__subtitle", children: "Photo Tools Suite" })] }), _jsxs("nav", { className: "app-header__nav", children: [_jsx("button", { type: "button", className: currentScreen === "browse" ? "app-header__tab app-header__tab--active" : "app-header__tab", onClick: () => setCurrentScreen("browse"), children: "Sfoglia" }), _jsxs("button", { type: "button", className: currentScreen === "selection" ? "app-header__tab app-header__tab--active" : "app-header__tab", onClick: () => setCurrentScreen("selection"), disabled: allAssets.length === 0, children: ["Selezione (", activeAssetIds.length, ")"] }), _jsx("button", { type: "button", className: currentScreen === "review" ? "app-header__tab app-header__tab--active" : "app-header__tab", onClick: () => setCurrentScreen("review"), disabled: activeAssetIds.length === 0, children: "Riepilogo" })] }), _jsxs("div", { className: "app-header__actions", children: [isGeneratingThumbnails ? (_jsxs("button", { type: "button", className: "app-header__pipeline-status app-header__pipeline-status--button", onClick: () => setIsImportPanelDismissed(false), title: "Mostra stato caricamento", children: [_jsx("div", { className: "pipeline-progress", children: _jsx("div", { className: "pipeline-progress__fill", style: { width: `${Math.round((thumbnailProgress.done / Math.max(1, thumbnailProgress.total)) * 100)}%` } }) }), _jsxs("span", { className: "pipeline-progress__label", children: [thumbnailProgress.done, "/", thumbnailProgress.total] })] })) : null, isFolderTransitionBusy ? (_jsx("div", { className: "app-header__sync-status app-header__sync-status--pending", children: `Cambio cartella${folderTransitionLabel ? `: ${folderTransitionLabel}` : "..."}` })) : null, allAssets.length > 0 ? (_jsx("button", { type: "button", className: "ghost-button", onClick: () => setCurrentScreen("browse"), disabled: isFolderTransitionBusy, children: "Apri cartella" })) : null, allAssets.length > 0 ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => setIsProjectSelectorOpen(true), children: "Selezione progetto" })) : null, !usesMockData && allAssets.length > 0 ? (_jsx("div", { className: `app-header__sync-status app-header__sync-status--${xmpSyncState.phase}`, children: xmpSyncLabel })) : null, allAssets.length > 0 ? (_jsx("div", { className: "app-header__folder-pill", children: sourceFolderPath || "Cartella attiva" })) : null, _jsx("label", { className: "field app-header__project-name", children: _jsx("input", { type: "text", value: projectName, onChange: (e) => setProjectName(e.target.value), placeholder: "Nome progetto" }) })] })] }), _jsxs("main", { className: "app-main", children: [shouldShowXmpBanner ? (_jsx(DismissibleBanner, { title: "Sincronizzazione XMP non attiva", message: hasNativeFolderAccess()
-                                ? "La sessione e' stata riaperta senza il collegamento scrivibile alla cartella. Rating, pick e colori non verranno scritti nei sidecar finché non riapri la cartella."
-                                : desktopRuntime
-                                    ? `La shell desktop FileX e' attiva per ${desktopRuntime.toolName}, ma questa cartella non e' stata aperta con accesso scrivibile completo. Rating, pick e colori resteranno locali finche' non la riapri dal desktop picker.`
-                                    : "Questo browser usa l'import fallback e non puo' scrivere i sidecar XMP. Per un workflow automatico stile Bridge/Photo Mechanic riapri il tool in Edge o Chrome.", type: "warning", action: sourceFolderPath
+    return (_jsx(ErrorBoundary, { children: _jsxs("div", { className: "photo-selector-app", children: [_jsxs("header", { className: "app-header", children: [_jsx("img", { src: logo, alt: "Logo", style: { height: 40, marginRight: 16 } }), _jsxs("div", { className: "app-header__brand", children: [_jsx("h1", { className: "app-header__title", children: "Selezione Foto" }), _jsx("span", { className: "app-header__subtitle", children: "Photo Tools Suite" })] }), _jsxs("nav", { className: "app-header__nav", children: [_jsx("button", { type: "button", className: currentScreen === "browse" ? "app-header__tab app-header__tab--active" : "app-header__tab", onClick: () => setCurrentScreen("browse"), children: "Sfoglia" }), _jsxs("button", { type: "button", className: currentScreen === "selection" ? "app-header__tab app-header__tab--active" : "app-header__tab", onClick: () => setCurrentScreen("selection"), disabled: allAssets.length === 0, children: ["Selezione (", activeAssetIds.length, ")"] }), _jsx("button", { type: "button", className: currentScreen === "review" ? "app-header__tab app-header__tab--active" : "app-header__tab", onClick: () => setCurrentScreen("review"), disabled: activeAssetIds.length === 0, children: "Riepilogo" })] }), _jsxs("div", { className: "app-header__actions", children: [isGeneratingThumbnails ? (_jsxs("button", { type: "button", className: "app-header__pipeline-status app-header__pipeline-status--button", onClick: () => setIsImportPanelDismissed(false), title: "Mostra stato caricamento", children: [_jsx("div", { className: "pipeline-progress", children: _jsx("div", { className: "pipeline-progress__fill", style: { width: `${Math.round((thumbnailProgress.done / Math.max(1, thumbnailProgress.total)) * 100)}%` } }) }), _jsxs("span", { className: "pipeline-progress__label", children: [thumbnailProgress.done, "/", thumbnailProgress.total] })] })) : null, isFolderTransitionBusy ? (_jsx("div", { className: "app-header__sync-status app-header__sync-status--pending", children: `Cambio cartella${folderTransitionLabel ? `: ${folderTransitionLabel}` : "..."}` })) : null, allAssets.length > 0 ? (_jsx("button", { type: "button", className: "ghost-button", onClick: () => setCurrentScreen("browse"), disabled: isFolderTransitionBusy, children: "Apri cartella" })) : null, allAssets.length > 0 ? (_jsx("button", { type: "button", className: "secondary-button", onClick: () => setIsProjectSelectorOpen(true), children: "Selezione progetto" })) : null, !usesMockData && allAssets.length > 0 ? (_jsx("div", { className: `app-header__sync-status app-header__sync-status--${xmpSyncState.phase}`, children: xmpSyncLabel })) : null, allAssets.length > 0 ? (_jsx("div", { className: "app-header__folder-pill", children: sourceFolderPath || "Cartella attiva" })) : null, _jsx("label", { className: "field app-header__project-name", children: _jsx("input", { type: "text", value: projectName, onChange: (e) => setProjectName(e.target.value), placeholder: "Nome progetto" }) })] })] }), _jsxs("main", { className: "app-main", children: [shouldShowXmpBanner ? (_jsx(DismissibleBanner, { title: "Sincronizzazione XMP non attiva", message: desktopRuntime
+                                ? `La shell desktop FileX e' attiva per ${desktopRuntime.toolName}, ma questa cartella non e' stata aperta con accesso scrivibile completo. Rating, pick e colori resteranno locali finche' non la riapri dal picker desktop.`
+                                : "La cartella corrente non e' stata aperta con accesso scrivibile completo. Rating, pick e colori resteranno locali finche' non la riapri dal picker desktop.", type: "warning", action: sourceFolderPath
                                 ? {
                                     label: "Vai a Sfoglia",
                                     onClick: () => setCurrentScreen("browse"),
                                 }
-                                : undefined, onDismiss: () => setIsXmpBannerDismissed(true) })) : null, folderDiagnostics ? (_jsxs("div", { className: "folder-diagnostics-panel", role: "status", "aria-live": "polite", children: [_jsxs("div", { className: "folder-diagnostics-panel__header", children: [_jsxs("div", { children: [_jsx("strong", { children: "Diagnostica cartella" }), _jsx("span", { children: formatFolderDiagnosticsSource(folderDiagnostics.source) })] }), _jsxs("div", { className: "folder-diagnostics-panel__badge", children: [folderDiagnostics.topLevelSupportedCount, " top-level"] })] }), _jsxs("div", { className: "folder-diagnostics-panel__grid", children: [_jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Path selezionato" }), _jsx("strong", { title: folderDiagnostics.selectedPath, children: folderDiagnostics.selectedPath })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Top-level caricati" }), _jsx("strong", { children: folderDiagnostics.topLevelSupportedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Annidati scartati" }), _jsx("strong", { children: folderDiagnostics.nestedSupportedDiscardedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Totale supportate viste" }), _jsx("strong", { children: folderDiagnostics.totalSupportedSeen })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Sottocartelle viste" }), _jsx("strong", { children: folderDiagnostics.nestedDirectoriesSeen ?? 0 })] })] })] })) : null, currentScreen === "browse" ? (_jsx("div", { className: "app-section", children: _jsx(FolderBrowser, { onFolderOpened: handleFolderOpened, isBusy: isFolderTransitionBusy }) })) : null, currentScreen === "selection" ? (_jsx("div", { className: "app-section app-section--full", children: _jsx(PhotoSelector, { photos: allAssets, metadataVersion: photoMetadataVersion, sourceFolderPath: sourceFolderPath, selectedIds: activeAssetIds, onSelectionChange: handleSelectionChange, onPhotosChange: handlePhotosChange, onVisibleIdsChange: handleVisibleIdsChange, onPriorityIdsChange: handlePriorityIdsChange, onPreviewPriorityIdsChange: handlePreviewPriorityIdsChange, onBackgroundPreviewOrderChange: handleBackgroundPreviewOrderChange, onScrollLiteActiveMsChange: handleScrollLiteActiveMsChange, onUndo: undoRedo.undo, onRedo: undoRedo.redo, canUndo: undoRedo.canUndo, canRedo: undoRedo.canRedo, isThumbnailLoading: isGeneratingThumbnails, thumbnailProfile: thumbnailProfile, sortCacheEnabled: sortCacheEnabled, performanceSnapshot: performanceSnapshot, onThumbnailProfileChange: setThumbnailProfile, onSortCacheEnabledChange: setSortCacheEnabled, desktopThumbnailCacheInfo: desktopThumbnailCacheInfo, desktopCacheLocationRecommendation: desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy: isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen: isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory: handleChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory: handleSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory: handleUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory: handleResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache: handleClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation: handleSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation: handleDismissDesktopCacheRecommendation }) })) : null, currentScreen === "review" ? (_jsx("div", { className: "app-section", children: _jsx(SelectionSummary, { allAssets: allAssets, activeAssetIds: activeAssetIds, projectName: projectName, onExportSelection: handleExportSelection, onBackToSelection: () => setCurrentScreen("selection"), onOpenProjectSelector: () => setIsProjectSelectorOpen(true) }) })) : null] }), isProjectSelectorOpen ? (_jsx(ProjectPhotoSelectorModal, { assets: allAssets, activeAssetIds: activeAssetIds, usageByAssetId: emptyUsageMap, onClose: () => setIsProjectSelectorOpen(false), onApply: handleSelectorApply })) : null, !desktopRuntime ? (_jsx(ImportProgressModal, { isOpen: importProgress.isOpen && !isImportPanelDismissed, phase: importProgress.phase, supported: importProgress.supported, ignored: importProgress.ignored, total: importProgress.total, processed: importProgress.processed, currentFile: importProgress.currentFile, folderLabel: importProgress.folderLabel, diagnostics: importProgress.diagnostics, onDismiss: () => setIsImportPanelDismissed(true), onCancel: handleCancelImport })) : null] }) }));
+                                : undefined, onDismiss: () => setIsXmpBannerDismissed(true) })) : null, folderDiagnostics ? (_jsxs("div", { className: "folder-diagnostics-panel", role: "status", "aria-live": "polite", children: [_jsxs("div", { className: "folder-diagnostics-panel__header", children: [_jsxs("div", { children: [_jsx("strong", { children: "Diagnostica cartella" }), _jsx("span", { children: formatFolderDiagnosticsSource(folderDiagnostics.source) })] }), _jsxs("div", { className: "folder-diagnostics-panel__badge", children: [folderDiagnostics.topLevelSupportedCount, " top-level"] })] }), _jsxs("div", { className: "folder-diagnostics-panel__grid", children: [_jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Path selezionato" }), _jsx("strong", { title: folderDiagnostics.selectedPath, children: folderDiagnostics.selectedPath })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Top-level caricati" }), _jsx("strong", { children: folderDiagnostics.topLevelSupportedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Annidati scartati" }), _jsx("strong", { children: folderDiagnostics.nestedSupportedDiscardedCount })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Totale supportate viste" }), _jsx("strong", { children: folderDiagnostics.totalSupportedSeen })] }), _jsxs("div", { className: "folder-diagnostics-panel__item", children: [_jsx("span", { children: "Sottocartelle viste" }), _jsx("strong", { children: folderDiagnostics.nestedDirectoriesSeen ?? 0 })] })] })] })) : null, currentScreen === "browse" ? (_jsx("div", { className: "app-section", children: _jsx(FolderBrowser, { onFolderOpened: handleFolderOpened, isBusy: isFolderTransitionBusy }) })) : null, currentScreen === "selection" ? (_jsx("div", { className: "app-section app-section--full", children: _jsx(PhotoSelector, { photos: allAssets, metadataVersion: photoMetadataVersion, sourceFolderPath: sourceFolderPath, selectedIds: activeAssetIds, onSelectionChange: handleSelectionChange, onPhotosChange: handlePhotosChange, onVisibleIdsChange: handleVisibleIdsChange, onPriorityIdsChange: handlePriorityIdsChange, onPreviewPriorityIdsChange: handlePreviewPriorityIdsChange, onBackgroundPreviewOrderChange: handleBackgroundPreviewOrderChange, onScrollLiteActiveMsChange: handleScrollLiteActiveMsChange, onUndo: undoRedo.undo, onRedo: undoRedo.redo, canUndo: undoRedo.canUndo, canRedo: undoRedo.canRedo, isThumbnailLoading: isGeneratingThumbnails, thumbnailProfile: thumbnailProfile, sortCacheEnabled: sortCacheEnabled, performanceSnapshot: performanceSnapshot, onThumbnailProfileChange: setThumbnailProfile, onSortCacheEnabledChange: setSortCacheEnabled, desktopThumbnailCacheInfo: desktopThumbnailCacheInfo, desktopCacheLocationRecommendation: desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy: isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen: isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory: handleChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory: handleSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory: handleUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory: handleResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache: handleClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation: handleSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation: handleDismissDesktopCacheRecommendation, onRamBudgetPresetChange: handleRamBudgetPresetChange }) })) : null, currentScreen === "review" ? (_jsx("div", { className: "app-section", children: _jsx(SelectionSummary, { allAssets: allAssets, activeAssetIds: activeAssetIds, projectName: projectName, onExportSelection: handleExportSelection, onBackToSelection: () => setCurrentScreen("selection"), onOpenProjectSelector: () => setIsProjectSelectorOpen(true) }) })) : null] }), isProjectSelectorOpen ? (_jsx(ProjectPhotoSelectorModal, { assets: allAssets, activeAssetIds: activeAssetIds, usageByAssetId: emptyUsageMap, onClose: () => setIsProjectSelectorOpen(false), onApply: handleSelectorApply })) : null, _jsx(ImportProgressModal, { isOpen: importProgress.isOpen && !isImportPanelDismissed, phase: importProgress.phase, supported: importProgress.supported, ignored: importProgress.ignored, total: importProgress.total, processed: importProgress.processed, currentFile: importProgress.currentFile, folderLabel: importProgress.folderLabel, diagnostics: importProgress.diagnostics, onDismiss: () => setIsImportPanelDismissed(true), onCancel: handleCancelImport })] }) }));
 }
 //# sourceMappingURL=App.js.map

@@ -1,5 +1,4 @@
 import { getDesktopSortCache, hasDesktopStateApi, saveDesktopSortCache } from "./desktop-store";
-const SORT_CACHE_KEY = "photo-selector-sort-cache-v1";
 const SORT_CACHE_MAX_ENTRIES = 24;
 let sortCacheEntries = [];
 function isSupportedSortMode(value) {
@@ -20,42 +19,13 @@ function loadEntries() {
     if (typeof window === "undefined") {
         return sortCacheEntries;
     }
-    if (hasDesktopStateApi()) {
-        return sortCacheEntries;
-    }
-    try {
-        const raw = window.localStorage.getItem(SORT_CACHE_KEY);
-        if (!raw) {
-            sortCacheEntries = [];
-            return sortCacheEntries;
-        }
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed)) {
-            sortCacheEntries = [];
-            return sortCacheEntries;
-        }
-        sortCacheEntries = parsed.filter((entry) => (!!entry &&
-            typeof entry.folderPath === "string" &&
-            isSupportedSortMode(entry.sortBy) &&
-            typeof entry.signature === "string" &&
-            Array.isArray(entry.orderedIds) &&
-            typeof entry.updatedAt === "number"));
-        return sortCacheEntries;
-    }
-    catch {
+    if (!hasDesktopStateApi()) {
         sortCacheEntries = [];
-        return sortCacheEntries;
     }
+    return sortCacheEntries;
 }
 function saveEntries(entries) {
     sortCacheEntries = entries;
-    if (typeof window === "undefined") {
-        return;
-    }
-    if (hasDesktopStateApi()) {
-        return;
-    }
-    window.localStorage.setItem(SORT_CACHE_KEY, JSON.stringify(entries));
 }
 function appendHash(hash, value) {
     let next = hash;
@@ -100,7 +70,8 @@ export async function hydratePhotoSortCache(folderPath) {
         return sortCacheEntries;
     }
     if (!hasDesktopStateApi()) {
-        return loadEntries();
+        sortCacheEntries = [];
+        return sortCacheEntries;
     }
     const entries = await getDesktopSortCache(folderPath);
     sortCacheEntries = Array.isArray(entries)

@@ -1,5 +1,3 @@
-import { useEffect, useRef } from "react";
-
 interface InputPanelProps {
   sourceFolderPath: string;
   loadedImages: number;
@@ -11,7 +9,6 @@ interface InputPanelProps {
   isImporting: boolean;
   usesMockData: boolean;
   onSourceFolderChange: (value: string) => void;
-  onFolderSelected: (files: FileList | null) => void;
   onLoadMockData: () => void;
   onOpenSelector: () => void;
 }
@@ -27,32 +24,20 @@ export function InputPanel({
   isImporting,
   usesMockData,
   onSourceFolderChange,
-  onFolderSelected,
   onLoadMockData,
   onOpenSelector
 }: InputPanelProps) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  useEffect(() => {
-    if (!fileInputRef.current) {
-      return;
-    }
-
-    fileInputRef.current.setAttribute("webkitdirectory", "");
-    fileInputRef.current.setAttribute("directory", "");
-  }, []);
-
   return (
     <div className="stack">
       <div className="button-row">
         <button
           type="button"
           className="secondary-button"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={onOpenSelector}
           disabled={isImporting}
-          aria-label="Carica una cartella con immagini dal computer"
+          aria-label="Apri il selettore foto da FileX Desktop"
         >
-          {isImporting ? "Importazione cartella..." : "Carica cartella immagini"}
+          {isImporting ? "Apertura selettore..." : "Apri selettore foto"}
         </button>
 
         {!usesMockData ? (
@@ -65,15 +50,6 @@ export function InputPanel({
           Seleziona foto progetto
         </button>
       </div>
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".jpg,.jpeg,.png"
-        multiple
-        className="hidden-file-input"
-        onChange={(event) => onFolderSelected(event.target.files)}
-      />
 
       <label className="field">
         <span>Cartella sorgente</span>

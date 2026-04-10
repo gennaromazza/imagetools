@@ -269,7 +269,6 @@ export const PhotoCard = memo(
           if (disableNonEssentialUi) {
             return;
           }
-          setIsToolbarVisible(true);
           if (photo.previewUrl) preloadImageUrls([photo.previewUrl]);
         }}
         onMouseLeave={() => {

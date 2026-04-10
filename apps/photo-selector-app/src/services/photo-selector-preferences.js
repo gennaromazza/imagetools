@@ -1,6 +1,5 @@
 import { COLOR_LABEL_NAMES } from "./photo-classification";
 import { getDesktopPreferences, hasDesktopStateApi, saveDesktopPreferences as saveDesktopPreferencesNative } from "./desktop-store";
-const PREFERENCES_KEY = "photo-selector-preferences-v1";
 export const DEFAULT_CUSTOM_LABEL_TONE = "sand";
 export const CUSTOM_LABEL_SHORTCUT_OPTIONS = [
     "A", "S", "D", "G", "H", "J", "K", "L", "Q", "W", "E", "R", "T", "Y",
@@ -95,26 +94,7 @@ export function normalizeCustomLabelShortcuts(catalog, shortcuts) {
     return normalized;
 }
 export function loadPhotoSelectorPreferences() {
-    if (typeof window === "undefined") {
-        return preferencesCache;
-    }
-    if (hasDesktopStateApi()) {
-        return preferencesCache;
-    }
-    preferencesCache = parseStoredPreferences(readLocalPreferences());
     return preferencesCache;
-}
-function readLocalPreferences() {
-    try {
-        const raw = window.localStorage.getItem(PREFERENCES_KEY);
-        if (!raw) {
-            return null;
-        }
-        return JSON.parse(raw);
-    }
-    catch {
-        return null;
-    }
 }
 function parseStoredPreferences(parsed) {
     const customLabelsCatalog = normalizeCustomLabelsCatalog(parsed?.customLabelsCatalog);
@@ -160,12 +140,8 @@ export async function hydratePhotoSelectorPreferences() {
     if (typeof window === "undefined") {
         return preferencesCache;
     }
-    if (hasDesktopStateApi()) {
-        const nativePreferences = await getDesktopPreferences();
-        preferencesCache = parseStoredPreferences(nativePreferences);
-        return preferencesCache;
-    }
-    preferencesCache = parseStoredPreferences(readLocalPreferences());
+    const nativePreferences = await getDesktopPreferences();
+    preferencesCache = parseStoredPreferences(nativePreferences);
     return preferencesCache;
 }
 export function savePhotoSelectorPreferences(preferences) {
@@ -206,8 +182,6 @@ export function savePhotoSelectorPreferences(preferences) {
     preferencesCache = next;
     if (hasDesktopStateApi()) {
         void saveDesktopPreferencesNative(toDesktopPreferences(next));
-        return;
     }
-    window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next));
 }
 //# sourceMappingURL=photo-selector-preferences.js.map

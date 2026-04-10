@@ -441,10 +441,6 @@ img {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.hidden-file-input {
-  display: none;
-}
-
 .helper-copy {
   margin: 0;
   color: var(--text-muted);
@@ -1207,6 +1203,13 @@ img {
   background: rgba(142, 178, 142, 0.2);
 }
 
+.photo-selector__dragout-feedback {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  opacity: 0.9;
+  max-width: min(420px, 50vw);
+}
+
 /* ── Batch panel ── */
 .photo-selector__batch-panel {
   position: fixed;
@@ -1594,8 +1597,14 @@ img {
   transition: opacity 120ms ease;
 }
 
-.photo-card:hover .photo-card__toolbar,
+.photo-card--selected .photo-card__toolbar,
 .photo-card:focus-within .photo-card__toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.photo-card--scroll-lite.photo-card--selected .photo-card__toolbar,
+.photo-card--scroll-lite:focus-within .photo-card__toolbar {
   opacity: 1;
   pointer-events: auto;
 }
@@ -3613,11 +3622,12 @@ img {
   color: #fff !important;
 }
 
-/* Browser-level virtualization: skip layout/paint for off-screen cards */
+/* Browser-level virtualization disabled for grid cards:
+   with row virtualization this caused scrollbar thumb jitter. */
 .photo-card {
-  content-visibility: auto;
-  contain-intrinsic-size: 160px 240px;
-  contain: layout paint style;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+  contain: none;
 }
 
 .selector-shortcuts {

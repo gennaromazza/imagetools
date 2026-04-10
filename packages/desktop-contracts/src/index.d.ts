@@ -9,6 +9,7 @@ export type DesktopToolId =
 export type DesktopReleaseChannel = "stable" | "beta";
 
 export type DesktopThumbnailProfile = "ultra-fast" | "fast" | "balanced";
+export type DesktopRamBudgetPreset = "conservative" | "default" | "performance" | "maximum";
 export type DesktopPhotoSortMode = "name" | "orientation" | "rating" | "createdAt";
 export type DesktopCustomLabelTone = "sand" | "rose" | "green" | "blue" | "purple" | "slate";
 export type DesktopColorLabel = "red" | "yellow" | "green" | "blue" | "purple";
@@ -180,6 +181,9 @@ export interface DesktopThumbnailCacheInfo {
   effectiveRenderedPreviewMaxBytes?: number;
   effectivePreviewSourceMaxEntries?: number;
   effectivePreviewSourceMaxBytes?: number;
+  systemTotalMemoryBytes?: number;
+  ramBudgetPreset?: DesktopRamBudgetPreset;
+  ramBudgetBytes?: number;
 }
 
 export interface DesktopStorageVolumeInfo {
@@ -327,6 +331,30 @@ export interface DesktopSendToEditorResult {
   requestedCount: number;
   launchedCount: number;
   error?: string;
+}
+
+export type DesktopNativeFileOpStatus = "ok" | "cancelled" | "error" | "partial" | "no-file";
+
+export interface DesktopCopyFilesResult {
+  status: DesktopNativeFileOpStatus;
+  requestedCount: number;
+  copiedCount: number;
+  copiedPaths: string[];
+  destinationDirectory: string | null;
+}
+
+export interface DesktopMoveFilesResult {
+  status: DesktopNativeFileOpStatus;
+  requestedCount: number;
+  movedCount: number;
+  movedPaths: string[];
+  destinationDirectory: string | null;
+}
+
+export interface DesktopSaveFileAsResult {
+  status: DesktopNativeFileOpStatus;
+  sourcePath: string;
+  destinationPath: string | null;
 }
 
 export type DesktopDragOutReason =
@@ -532,7 +560,10 @@ export interface FileXDesktopApi {
     channel?: DesktopReleaseChannel,
   ) => Promise<DesktopToolUpdateJob>;
   applyToolUpdate: (jobId: string) => Promise<DesktopToolUpdateJob>;
-  openInstalledTool: (toolId: DesktopToolId) => Promise<{ ok: boolean; message: string }>;
+  openInstalledTool: (
+    toolId: DesktopToolId,
+    launchArgs?: string[],
+  ) => Promise<{ ok: boolean; message: string }>;
   getImageIdPrintAiStatus: () => Promise<DesktopAiSidecarStatus>;
   openFolder: () => Promise<DesktopFolderOpenResult | null>;
   reopenFolder: (rootPath: string) => Promise<DesktopFolderOpenResult | null>;
@@ -586,6 +617,9 @@ export interface FileXDesktopApi {
     editorPath: string,
     absolutePaths: string[],
   ) => Promise<DesktopSendToEditorResult>;
+  copyFilesToFolder: (absolutePaths: string[]) => Promise<DesktopCopyFilesResult>;
+  moveFilesToFolder: (absolutePaths: string[]) => Promise<DesktopMoveFilesResult>;
+  saveFileAs: (absolutePath: string) => Promise<DesktopSaveFileAsResult>;
   getDesktopPreferences: () => Promise<DesktopPhotoSelectorPreferences>;
   saveDesktopPreferences: (
     preferences: DesktopPhotoSelectorPreferences,
@@ -628,7 +662,8 @@ export interface FileXDesktopApi {
   listArchivioJobs: () => Promise<ArchivioJob[]>;
   deleteArchivioJob: (jobId: string) => Promise<{ ok: boolean }>;
   updateArchivioJobContractLink: (jobId: string, contrattoLink: string) => Promise<ArchivioJob>;
-  generateArchivioLowQuality: (jobId: string, overwrite: boolean) => Promise<{
+  listArchivioJobSubfolders: (jobId: string) => Promise<{ subfolders: string[] }>;
+  generateArchivioLowQuality: (jobId: string, overwrite: boolean, sourceSubfolder?: string) => Promise<{
     ok: boolean;
     jobId: string;
     totalJpg: number;
@@ -636,9 +671,12 @@ export interface FileXDesktopApi {
     skippedExisting: number;
     errors: number;
     overwrite: boolean;
+    sourceSubfolder: string | null;
     preserveStructure: boolean;
     outputDir: string;
     durationMs: number;
   }>;
   openArchivioFolder: (folderPath: string) => Promise<{ ok: boolean }>;
+  getRamBudgetInfo: () => Promise<DesktopThumbnailCacheInfo>;
+  setRamBudgetPreset: (preset: DesktopRamBudgetPreset) => Promise<DesktopThumbnailCacheInfo>;
 }

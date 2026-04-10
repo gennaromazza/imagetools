@@ -1,9 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-  fileListToEntries,
   getRecentFolders,
   hydrateRecentFolders,
-  hasNativeFolderAccess,
   openFolderNative,
   removeRecentFolder,
   reopenRecentFolder,
@@ -29,16 +27,8 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserProps) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [openingRecentFolder, setOpeningRecentFolder] = useState<string | null>(null);
   const [recentFolders, setRecentFolders] = useState<RecentFolder[]>(() => getRecentFolders());
-  const supportsNative = hasNativeFolderAccess();
-
-  useEffect(() => {
-    if (!fileInputRef.current) return;
-    fileInputRef.current.setAttribute("webkitdirectory", "");
-    fileInputRef.current.setAttribute("directory", "");
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -57,24 +47,14 @@ export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserP
       return;
     }
 
-    if (supportsNative) {
-      const result = await openFolderNative();
-      if (result) {
-        await onFolderOpened(result);
-      }
-    } else {
-      fileInputRef.current?.click();
+    const result = await openFolderNative();
+    if (result) {
+      await onFolderOpened(result);
     }
   }
 
-  function handleFallbackInput(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const result = fileListToEntries(files);
-    void onFolderOpened(result);
-  }
-
   async function handleRecentFolderOpen(folder: RecentFolder) {
-    if (!supportsNative || openingRecentFolder || isBusy) {
+    if (openingRecentFolder || isBusy) {
       return;
     }
 
@@ -97,7 +77,7 @@ export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserP
   return (
     <div className="folder-browser">
       <div className="folder-browser__hero">
-        <div className="folder-browser__icon">📁</div>
+        <div className="folder-browser__icon">??</div>
         <h2 className="folder-browser__title">Apri una cartella</h2>
         <p className="folder-browser__subtitle">
           Seleziona una cartella con le foto per iniziare la selezione.
@@ -117,7 +97,7 @@ export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserP
                 <span key={fmt} className="folder-browser__format-tag">
                   {fmt}
                 </span>
-              )
+              ),
             )}
           </div>
         </div>
@@ -129,48 +109,27 @@ export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserP
           <ul className="folder-browser__recent-list">
             {recentFolders.map((folder) => (
               <li key={folder.name} className="folder-browser__recent-item">
-                {supportsNative ? (
-                  <button
-                    type="button"
-                    className="folder-browser__recent-button"
-                    onClick={() => void handleRecentFolderOpen(folder)}
-                    disabled={openingRecentFolder !== null || isBusy}
-                  >
-                    <div className="folder-browser__recent-icon">📂</div>
-                    <div className="folder-browser__recent-info">
-                      <span className="folder-browser__recent-name">{folder.name}</span>
-                      <span className="folder-browser__recent-meta">
-                        {openingRecentFolder === folder.name
-                          ? "Riapertura in corso..."
-                          : `${folder.imageCount} foto · ${formatRelativeTime(folder.openedAt)}`}
-                      </span>
-                    </div>
-                  </button>
-                ) : (
-                  <>
-                    <div className="folder-browser__recent-icon">📂</div>
-                    <div className="folder-browser__recent-info">
-                      <span className="folder-browser__recent-name">{folder.name}</span>
-                      <span className="folder-browser__recent-meta">
-                        {folder.imageCount} foto · {formatRelativeTime(folder.openedAt)}
-                      </span>
-                    </div>
-                  </>
-                )}
+                <button
+                  type="button"
+                  className="folder-browser__recent-button"
+                  onClick={() => void handleRecentFolderOpen(folder)}
+                  disabled={openingRecentFolder !== null || isBusy}
+                >
+                  <div className="folder-browser__recent-icon">??</div>
+                  <div className="folder-browser__recent-info">
+                    <span className="folder-browser__recent-name">{folder.name}</span>
+                    <span className="folder-browser__recent-meta">
+                      {openingRecentFolder === folder.name
+                        ? "Riapertura in corso..."
+                        : `${folder.imageCount} foto � ${formatRelativeTime(folder.openedAt)}`}
+                    </span>
+                  </div>
+                </button>
               </li>
             ))}
           </ul>
         </div>
       ) : null}
-
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".jpg,.jpeg,.png,.webp,.cr2,.cr3,.crw,.nef,.nrw,.arw,.srf,.sr2,.raf,.dng,.rw2,.orf,.pef,.srw,.3fr,.x3f,.gpr"
-        multiple
-        className="hidden-file-input"
-        onChange={(ev) => handleFallbackInput(ev.target.files)}
-      />
     </div>
   );
 }

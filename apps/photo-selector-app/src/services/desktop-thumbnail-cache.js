@@ -101,4 +101,28 @@ export async function dismissDesktopCacheLocationRecommendation() {
         return false;
     }
 }
+export async function getDesktopRamBudgetInfo() {
+    const api = getDesktopApi();
+    if (!api?.getRamBudgetInfo) {
+        return null;
+    }
+    try {
+        return await api.getRamBudgetInfo();
+    }
+    catch {
+        return null;
+    }
+}
+export async function setDesktopRamBudgetPreset(preset) {
+    const api = getDesktopApi();
+    if (!api?.setRamBudgetPreset) {
+        return null;
+    }
+    try {
+        return await api.setRamBudgetPreset(preset);
+    }
+    catch {
+        return null;
+    }
+}
 //# sourceMappingURL=desktop-thumbnail-cache.js.map

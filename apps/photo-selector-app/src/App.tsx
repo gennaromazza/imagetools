@@ -5,6 +5,7 @@ import type {
   DesktopFolderCatalogState,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
+  DesktopRamBudgetPreset,
   DesktopRuntimeInfo,
   DesktopThumbnailCacheInfo,
 } from "@photo-tools/desktop-contracts";
@@ -23,21 +24,19 @@ import {
   clearDesktopThumbnailCache,
   dismissDesktopCacheLocationRecommendation,
   getDesktopCacheLocationRecommendation,
+  getDesktopRamBudgetInfo,
   getDesktopThumbnailCacheInfo,
   migrateDesktopThumbnailCacheDirectory,
   resetDesktopThumbnailCacheDirectory,
+  setDesktopRamBudgetPreset,
   setDesktopThumbnailCacheDirectory,
 } from "./services/desktop-thumbnail-cache";
-import { loadImageAssets } from "./services/image-storage";
 import { clearImageCache } from "./services/image-cache";
 import {
   buildPlaceholderAssets,
   addRecentFolder,
   getAssetAbsolutePath,
-  buildSourceFileKey,
   buildSourceFileKeyFromStats,
-  getFileForAsset,
-  hasNativeFolderAccess,
   isRawFile,
   readSidecarXmp,
   warmOnDemandPreviewCache,
@@ -95,7 +94,6 @@ import { SelectionSummary } from "./components/SelectionSummary";
 // ═══════════════════════════════════════════════════════════════════════════
 
 const PROJECT_ID = "photo-selector-default";
-const STORAGE_KEY = "photo-selector-state";
 const THUMBNAIL_BOOTSTRAP_COUNT = 64;
 const XMP_IMPORT_CONCURRENCY = 16;
 const XMP_IMPORT_START_DELAY_MS = 0;
@@ -189,11 +187,8 @@ async function mapWithConcurrency<T, R>(
 
 type ThumbnailPipelineEntry = {
   id: string;
-  file?: File;
-  loadFile?: () => Promise<File | null>;
   absolutePath?: string;
   sourceFileKey?: string;
-  createSourceFileKey?: (file: File) => string;
 };
 
 type ThumbnailAssetPatch = Pick<
@@ -215,31 +210,6 @@ function createThumbnailPipelineMetrics(): ThumbnailPipelineMetrics {
   };
 }
 
-interface PersistedState {
-  projectName: string;
-  sourceFolderPath: string;
-  activeAssetIds: string[];
-  usesMockData?: boolean;
-}
-
-function loadPersistedState(): PersistedState | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw) as PersistedState;
-  } catch {
-    return null;
-  }
-}
-
-function savePersistedState(state: PersistedState): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // Ignore storage errors
-  }
-}
-
 function detectOrientation(w: number, h: number): ImageOrientation {
   if (w === h) return "square";
   return h > w ? "vertical" : "horizontal";
@@ -257,16 +227,7 @@ function formatSyncTimestamp(timestamp: number | null): string {
 }
 
 function formatFolderDiagnosticsSource(source: FolderOpenDiagnostics["source"]): string {
-  switch (source) {
-    case "desktop-native":
-      return "Desktop Windows";
-    case "browser-native":
-      return "Browser picker";
-    case "file-input":
-      return "Fallback input";
-    default:
-      return source;
-  }
+  return source === "desktop-native" ? "Desktop Windows" : source;
 }
 
 function areSetsEqual<T>(left: Set<T>, right: Set<T>): boolean {
@@ -464,9 +425,7 @@ export function App() {
     let active = true;
 
     void (async () => {
-      const persisted = hasDesktopStateApi()
-        ? await getDesktopSessionState()
-        : loadPersistedState();
+      const persisted = await getDesktopSessionState();
 
       if (!active || !persisted) {
         return;
@@ -476,30 +435,12 @@ export function App() {
       setSourceFolderPath(persisted.sourceFolderPath);
       setHasWritableFolderAccess(false);
 
-      try {
-        const assetMap = await loadImageAssets(PROJECT_ID);
-        if (!active || assetMap.size === 0) {
-          return;
-        }
-
-        const loaded = Array.from(assetMap.values());
-        setAllAssets(loaded);
-        bumpPhotoMetadataVersion();
-        const loadedIds = new Set(loaded.map((asset) => asset.id));
-        const validActiveIds = persisted.activeAssetIds.filter((id) => loadedIds.has(id));
-        setActiveAssetIds(validActiveIds.length > 0 ? validActiveIds : loaded.map((asset) => asset.id));
-        setCurrentScreen("selection");
-      } catch {
-        if (active) {
-          addToast("Errore nel caricamento dei dati salvati. Riseleziona la cartella.", "error");
-        }
-      }
     })();
 
     return () => {
       active = false;
     };
-  }, [addToast, bumpPhotoMetadataVersion]);
+  }, []);
 
   // ── Persist state on change ──────────────────────────────────────────
   useEffect(() => {
@@ -510,12 +451,7 @@ export function App() {
       usesMockData: false,
     };
 
-    if (hasDesktopStateApi()) {
-      void saveDesktopSessionState(nextState);
-      return;
-    }
-
-    savePersistedState(nextState);
+    void saveDesktopSessionState(nextState);
   }, [projectName, sourceFolderPath, activeAssetIds]);
 
   useEffect(() => {
@@ -894,10 +830,6 @@ export function App() {
 
   // ── Warn before losing unsaved work ──────────────────────────────────
   useEffect(() => {
-    if (typeof window !== "undefined" && typeof window.filexDesktop !== "undefined") {
-      return;
-    }
-
     const handler = (e: BeforeUnloadEvent) => {
       if (allAssets.length > 0) {
         e.preventDefault();
@@ -1675,7 +1607,7 @@ export function App() {
             : 280;
       folderOpenStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : Date.now();
       const nextDiagnostics = diagnostics ?? {
-        source: "file-input",
+        source: "desktop-native",
         selectedPath: rootPath ?? folderName,
         topLevelSupportedCount: entries.length,
         nestedSupportedDiscardedCount: 0,
@@ -1761,7 +1693,7 @@ export function App() {
         .map((asset) => asset.id);
       assetNameByIdRef.current = new Map(assets.map((asset) => [asset.id, asset.fileName]));
       assetIndexByIdRef.current = new Map(assets.map((asset, index) => [asset.id, index]));
-      const writableAccess = entries.some((entry) => !!entry.fileHandle || !!entry.absolutePath);
+      const writableAccess = entries.some((entry) => !!entry.absolutePath);
 
       setAllAssets(assets);
       bumpPhotoMetadataVersion();
@@ -1935,18 +1867,12 @@ export function App() {
 
         pipelineEntries.push({
           id,
-          file: entry.file,
-          loadFile: entry.file ? undefined : () => getFileForAsset(id),
           absolutePath: entry.absolutePath,
-          sourceFileKey:
-            entry.file
-              ? buildSourceFileKey(entry.file, entry.relativePath)
-              : entry.size !== undefined && entry.lastModified !== undefined
-                ? buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
-                : undefined,
-          createSourceFileKey: entry.file || !entry.absolutePath
-            ? (file: File) => buildSourceFileKey(file, entry.relativePath)
-            : undefined,
+          sourceFileKey: buildSourceFileKeyFromStats(
+            entry.relativePath,
+            entry.size,
+            entry.lastModified,
+          ),
         });
       }
 
@@ -2470,6 +2396,13 @@ export function App() {
     }
   }, [addToast, refreshDesktopCacheLocationRecommendation]);
 
+  const handleRamBudgetPresetChange = useCallback(async (preset: DesktopRamBudgetPreset) => {
+    const info = await setDesktopRamBudgetPreset(preset);
+    if (info) {
+      setDesktopThumbnailCacheInfo(info);
+    }
+  }, []);
+
   const handleSelectorApply = useCallback(
     (nextIds: string[], nextAssets: ImageAsset[]) => {
       const previousAssets = allAssetsRef.current;
@@ -2841,11 +2774,9 @@ export function App() {
           {shouldShowXmpBanner ? (
             <DismissibleBanner
               title="Sincronizzazione XMP non attiva"
-              message={hasNativeFolderAccess()
-                ? "La sessione e' stata riaperta senza il collegamento scrivibile alla cartella. Rating, pick e colori non verranno scritti nei sidecar finché non riapri la cartella."
-                : desktopRuntime
-                  ? `La shell desktop FileX e' attiva per ${desktopRuntime.toolName}, ma questa cartella non e' stata aperta con accesso scrivibile completo. Rating, pick e colori resteranno locali finche' non la riapri dal desktop picker.`
-                  : "Questo browser usa l'import fallback e non puo' scrivere i sidecar XMP. Per un workflow automatico stile Bridge/Photo Mechanic riapri il tool in Edge o Chrome."}
+              message={desktopRuntime
+                ? `La shell desktop FileX e' attiva per ${desktopRuntime.toolName}, ma questa cartella non e' stata aperta con accesso scrivibile completo. Rating, pick e colori resteranno locali finche' non la riapri dal picker desktop.`
+                : "La cartella corrente non e' stata aperta con accesso scrivibile completo. Rating, pick e colori resteranno locali finche' non la riapri dal picker desktop."}
               type="warning"
               action={sourceFolderPath
                 ? {
@@ -2936,6 +2867,7 @@ export function App() {
                 onClearDesktopThumbnailCache={handleClearDesktopThumbnailCache}
                 onSnoozeDesktopCacheRecommendation={handleSnoozeDesktopCacheRecommendation}
                 onDismissDesktopCacheRecommendation={handleDismissDesktopCacheRecommendation}
+                onRamBudgetPresetChange={handleRamBudgetPresetChange}
               />
             </div>
           ) : null}
@@ -2964,22 +2896,21 @@ export function App() {
             onApply={handleSelectorApply}
           />
         ) : null}
-        {!desktopRuntime ? (
-          <ImportProgressModal
-            isOpen={importProgress.isOpen && !isImportPanelDismissed}
-            phase={importProgress.phase}
-            supported={importProgress.supported}
-            ignored={importProgress.ignored}
-            total={importProgress.total}
-            processed={importProgress.processed}
-            currentFile={importProgress.currentFile}
-            folderLabel={importProgress.folderLabel}
-            diagnostics={importProgress.diagnostics}
-            onDismiss={() => setIsImportPanelDismissed(true)}
-            onCancel={handleCancelImport}
-          />
-        ) : null}
+        <ImportProgressModal
+          isOpen={importProgress.isOpen && !isImportPanelDismissed}
+          phase={importProgress.phase}
+          supported={importProgress.supported}
+          ignored={importProgress.ignored}
+          total={importProgress.total}
+          processed={importProgress.processed}
+          currentFile={importProgress.currentFile}
+          folderLabel={importProgress.folderLabel}
+          diagnostics={importProgress.diagnostics}
+          onDismiss={() => setIsImportPanelDismissed(true)}
+          onCancel={handleCancelImport}
+        />
       </div>
     </ErrorBoundary>
   );
 }
+

@@ -1,11 +1,15 @@
 import { dialog } from "electron";
-import { lstat, readFile, readdir, writeFile } from "node:fs/promises";
+import { copyFile, lstat, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import type {
+  DesktopCopyFilesResult,
   DesktopFilePayload,
   DesktopFolderEntry,
   DesktopFolderOpenDiagnostics,
   DesktopFolderOpenResult,
+  DesktopMoveFilesResult,
+  DesktopNativeFileOpStatus,
+  DesktopSaveFileAsResult,
 } from "@photo-tools/desktop-contracts";
 
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
@@ -226,5 +230,196 @@ export async function writeSidecarXmpForAssetPath(
     return true;
   } catch {
     return false;
+  }
+}
+
+async function resolveExistingFiles(paths: string[]): Promise<string[]> {
+  const existing = new Set<string>();
+  for (const rawPath of paths) {
+    if (typeof rawPath !== "string") {
+      continue;
+    }
+
+    const absolutePath = rawPath.trim();
+    if (!absolutePath || existing.has(absolutePath)) {
+      continue;
+    }
+
+    try {
+      const stats = await lstat(absolutePath);
+      if (stats.isFile()) {
+        existing.add(absolutePath);
+      }
+    } catch {
+      // Ignore non-existing paths.
+    }
+  }
+
+  return Array.from(existing);
+}
+
+function resolveFileOpStatus(
+  completedCount: number,
+  requestedCount: number,
+  hasError: boolean,
+): DesktopNativeFileOpStatus {
+  if (requestedCount === 0) {
+    return "no-file";
+  }
+
+  if (completedCount === 0) {
+    return hasError ? "error" : "no-file";
+  }
+
+  return hasError || completedCount < requestedCount ? "partial" : "ok";
+}
+
+export async function copyFilesToFolderDesktop(absolutePaths: string[]): Promise<DesktopCopyFilesResult> {
+  const requestedCount = Array.isArray(absolutePaths) ? absolutePaths.length : 0;
+  const sourcePaths = await resolveExistingFiles(Array.isArray(absolutePaths) ? absolutePaths : []);
+  if (sourcePaths.length === 0) {
+    return {
+      status: "no-file",
+      requestedCount,
+      copiedCount: 0,
+      copiedPaths: [],
+      destinationDirectory: null,
+    };
+  }
+
+  const selection = await dialog.showOpenDialog({
+    title: "Seleziona cartella di destinazione",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (selection.canceled || selection.filePaths.length === 0) {
+    return {
+      status: "cancelled",
+      requestedCount,
+      copiedCount: 0,
+      copiedPaths: [],
+      destinationDirectory: null,
+    };
+  }
+
+  const destinationDirectory = selection.filePaths[0];
+  const copiedPaths: string[] = [];
+  let hasError = sourcePaths.length !== requestedCount;
+
+  for (const sourcePath of sourcePaths) {
+    try {
+      await copyFile(sourcePath, join(destinationDirectory, basename(sourcePath)));
+      copiedPaths.push(sourcePath);
+    } catch {
+      hasError = true;
+    }
+  }
+
+  return {
+    status: resolveFileOpStatus(copiedPaths.length, requestedCount, hasError),
+    requestedCount,
+    copiedCount: copiedPaths.length,
+    copiedPaths,
+    destinationDirectory,
+  };
+}
+
+async function moveFileToDestination(sourcePath: string, destinationPath: string): Promise<void> {
+  try {
+    await rename(sourcePath, destinationPath);
+    return;
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || (error as NodeJS.ErrnoException).code !== "EXDEV") {
+      throw error;
+    }
+  }
+
+  await copyFile(sourcePath, destinationPath);
+  await unlink(sourcePath);
+}
+
+export async function moveFilesToFolderDesktop(absolutePaths: string[]): Promise<DesktopMoveFilesResult> {
+  const requestedCount = Array.isArray(absolutePaths) ? absolutePaths.length : 0;
+  const sourcePaths = await resolveExistingFiles(Array.isArray(absolutePaths) ? absolutePaths : []);
+  if (sourcePaths.length === 0) {
+    return {
+      status: "no-file",
+      requestedCount,
+      movedCount: 0,
+      movedPaths: [],
+      destinationDirectory: null,
+    };
+  }
+
+  const selection = await dialog.showOpenDialog({
+    title: "Seleziona cartella di destinazione",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (selection.canceled || selection.filePaths.length === 0) {
+    return {
+      status: "cancelled",
+      requestedCount,
+      movedCount: 0,
+      movedPaths: [],
+      destinationDirectory: null,
+    };
+  }
+
+  const destinationDirectory = selection.filePaths[0];
+  const movedPaths: string[] = [];
+  let hasError = sourcePaths.length !== requestedCount;
+
+  for (const sourcePath of sourcePaths) {
+    try {
+      await moveFileToDestination(sourcePath, join(destinationDirectory, basename(sourcePath)));
+      movedPaths.push(sourcePath);
+    } catch {
+      hasError = true;
+    }
+  }
+
+  return {
+    status: resolveFileOpStatus(movedPaths.length, requestedCount, hasError),
+    requestedCount,
+    movedCount: movedPaths.length,
+    movedPaths,
+    destinationDirectory,
+  };
+}
+
+export async function saveFileAsDesktop(absolutePath: string): Promise<DesktopSaveFileAsResult> {
+  const [sourcePath] = await resolveExistingFiles([absolutePath]);
+  if (!sourcePath) {
+    return {
+      status: "no-file",
+      sourcePath: absolutePath,
+      destinationPath: null,
+    };
+  }
+
+  const selection = await dialog.showSaveDialog({
+    title: "Salva copia come",
+    defaultPath: basename(sourcePath),
+  });
+  if (selection.canceled || !selection.filePath) {
+    return {
+      status: "cancelled",
+      sourcePath,
+      destinationPath: null,
+    };
+  }
+
+  try {
+    await copyFile(sourcePath, selection.filePath);
+    return {
+      status: "ok",
+      sourcePath,
+      destinationPath: selection.filePath,
+    };
+  } catch {
+    return {
+      status: "error",
+      sourcePath,
+      destinationPath: selection.filePath,
+    };
   }
 }

@@ -168,6 +168,14 @@ export async function openArchivioFolder(folderPath: string): Promise<void> {
   await apiPost<{ ok: true }>("/api/open-folder", { folderPath });
 }
 
+export async function openJobInPhotoSelector(folderPath: string): Promise<void> {
+  const desktopApi = requireDesktopApi();
+  const result = await desktopApi.openInstalledTool("photo-selector-app", ["--open-folder", folderPath]);
+  if (!result?.ok) {
+    throw new Error(result?.message || "Impossibile aprire Photo Selector");
+  }
+}
+
 export async function updateArchivioJobContractLink(jobId: string, contrattoLink: string): Promise<Job> {
   const desktopApi = getDesktopApi();
   if (desktopApi) {
@@ -177,10 +185,10 @@ export async function updateArchivioJobContractLink(jobId: string, contrattoLink
   return response.job;
 }
 
-export async function generateArchivioLowQuality(jobId: string, overwrite: boolean) {
+export async function generateArchivioLowQuality(jobId: string, overwrite: boolean, sourceSubfolder?: string) {
   const desktopApi = getDesktopApi();
   if (desktopApi) {
-    return await desktopApi.generateArchivioLowQuality(jobId, overwrite);
+    return await desktopApi.generateArchivioLowQuality(jobId, overwrite, sourceSubfolder);
   }
   return await apiPost<{
     ok: true;
@@ -190,10 +198,19 @@ export async function generateArchivioLowQuality(jobId: string, overwrite: boole
     skippedExisting: number;
     errors: number;
     overwrite: boolean;
+    sourceSubfolder: string | null;
     preserveStructure: boolean;
     outputDir: string;
     durationMs: number;
-  }>(`/api/jobs/${encodeURIComponent(jobId)}/generate-low-quality`, { overwrite });
+  }>(`/api/jobs/${encodeURIComponent(jobId)}/generate-low-quality`, { overwrite, sourceSubfolder });
+}
+
+export async function getArchivioJobSubfolders(jobId: string): Promise<{ subfolders: string[] }> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) {
+    return await desktopApi.listArchivioJobSubfolders(jobId);
+  }
+  return await apiGet<{ subfolders: string[] }>(`/api/jobs/${encodeURIComponent(jobId)}/subfolders`);
 }
 
 export async function deleteArchivioJob(jobId: string) {

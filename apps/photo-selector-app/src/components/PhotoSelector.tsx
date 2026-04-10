@@ -4,6 +4,7 @@ import type {
   DesktopCacheLocationRecommendation,
   DesktopDragOutCheck,
   DesktopEditorCandidate,
+  DesktopRamBudgetPreset,
   DesktopThumbnailCacheInfo,
 } from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
@@ -103,6 +104,7 @@ interface PhotoSelectorProps {
   onClearDesktopThumbnailCache?: () => void | Promise<void>;
   onSnoozeDesktopCacheRecommendation?: () => void | Promise<void>;
   onDismissDesktopCacheRecommendation?: () => void | Promise<void>;
+  onRamBudgetPresetChange?: (preset: DesktopRamBudgetPreset) => void | Promise<void>;
 }
 
 type SortMode = "name" | "orientation" | "rating" | "createdAt";
@@ -328,6 +330,7 @@ export function PhotoSelector({
   onClearDesktopThumbnailCache,
   onSnoozeDesktopCacheRecommendation,
   onDismissDesktopCacheRecommendation,
+  onRamBudgetPresetChange,
 }: PhotoSelectorProps) {
   const [sortBy, setSortBy] = useState<SortMode>("name");
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
@@ -398,7 +401,6 @@ export function PhotoSelector({
   const pendingPreviewRestoreIdRef = useRef<string | null>(null);
   const lastClickedIdRef = useRef<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const desktopDragImageRef = useRef<HTMLCanvasElement | null>(null);
   const fastScrollCooldownTimerRef = useRef<number | null>(null);
   const fastScrollStartedAtRef = useRef<number | null>(null);
   const accumulatedFastScrollMsRef = useRef(0);
@@ -2003,23 +2005,10 @@ export function PhotoSelector({
     && typeof window.filexDesktop?.startDragOut === "function",
   );
   const desktopDragOutMessage = desktopDragOutCheck?.message
-    ?? "Drag esterno disponibile nella versione desktop con cartella aperta in modalita nativa.";
-
-  const applyDesktopDragImage = useCallback((event: DragEvent<HTMLElement>) => {
-    const dataTransfer = event.dataTransfer;
-    if (!dataTransfer || typeof document === "undefined") {
-      return;
-    }
-
-    if (!desktopDragImageRef.current) {
-      const canvas = document.createElement("canvas");
-      canvas.width = 1;
-      canvas.height = 1;
-      desktopDragImageRef.current = canvas;
-    }
-
-    dataTransfer.setDragImage(desktopDragImageRef.current, 0, 0);
-  }, []);
+    ?? "Drag esterno non disponibile in questa sessione desktop.";
+  const desktopDragOutDisabledMessage = selectedIds.length === 0
+    ? "Seleziona almeno una foto per il drag esterno."
+    : desktopDragOutMessage;
 
   const handleSelectionDragStart = useCallback((event: DragEvent<HTMLElement>) => {
     if (!canStartDesktopDragOut) {
@@ -2028,16 +2017,10 @@ export function PhotoSelector({
       return;
     }
 
-    event.dataTransfer.effectAllowed = "copy";
-    applyDesktopDragImage(event);
-    event.dataTransfer.setData(
-      "text/plain",
-      selectedAbsolutePaths.length === 1
-        ? selectedAbsolutePaths[0]
-        : `${selectedAbsolutePaths.length} file selezionati`
-    );
+    // Important: prevent HTML drag so Electron native drag-out is the only active channel.
+    event.preventDefault();
     window.filexDesktop!.startDragOut(selectedAbsolutePaths);
-  }, [applyDesktopDragImage, canStartDesktopDragOut, desktopDragOutMessage, pushTimelineEntry, selectedAbsolutePaths]);
+  }, [canStartDesktopDragOut, desktopDragOutMessage, pushTimelineEntry, selectedAbsolutePaths]);
 
   const handleCardExternalDragStart = useCallback((photoId: string, event: DragEvent<HTMLDivElement>) => {
     const draggingSelection = selectedSet.has(photoId);
@@ -2054,14 +2037,10 @@ export function PhotoSelector({
       return;
     }
 
-    event.dataTransfer.effectAllowed = "copy";
-    applyDesktopDragImage(event);
-    event.dataTransfer.setData(
-      "text/plain",
-      targetPaths.length === 1 ? targetPaths[0] : `${targetPaths.length} file selezionati`
-    );
+    // Important: prevent HTML drag so Electron native drag-out is the only active channel.
+    event.preventDefault();
     window.filexDesktop.startDragOut(targetPaths);
-  }, [applyDesktopDragImage, desktopDragOutCheck?.ok, selectedIds, selectedSet]);
+  }, [desktopDragOutCheck?.ok, selectedIds, selectedSet]);
 
   const clearSelection = useCallback(() => {
     onSelectionChange([]);
@@ -2343,24 +2322,21 @@ export function PhotoSelector({
   const handleCopyFiles = useCallback(async (ids: string[]) => {
     const result = await copyAssetsToFolder(ids);
     if (result === "ok") pushTimelineEntry(`${ids.length === 1 ? "1 file" : `${ids.length} file`} copiato/i in cartella`);
-    else if (result === "unsupported") alert("Operazione non supportata da questo browser. Usa Chrome/Edge con accesso cartella nativo.");
+    else if (result === "partial") alert("Copia parziale: alcuni file non sono stati copiati.");
     else if (result === "error") alert("Errore durante la copia. Alcuni file potrebbero non essere stati copiati.");
   }, [pushTimelineEntry]);
 
   const handleMoveFiles = useCallback(async (ids: string[]) => {
     const { result, movedIds } = await moveAssetsToFolder(ids);
     if (result === "cancelled") return;
-    if (result === "unsupported") {
-      alert("Spostamento non supportato in questa modalita/browser. Per spostare fisicamente i file apri la cartella con accesso nativo (Chrome/Edge). ");
-      return;
-    }
     if (movedIds.length > 0 && onPhotosChange) {
       const movedSet = new Set(movedIds);
       onPhotosChange(photos.filter((p) => !movedSet.has(p.id)));
       onSelectionChange(selectedIds.filter((id) => !movedSet.has(id)));
       pushTimelineEntry(`${movedIds.length === 1 ? "1 file" : `${movedIds.length} file`} spostato/i in cartella`);
     }
-    if (result === "error") alert("Spostamento parziale/non riuscito: alcuni file non sono stati mossi. Le foto restano in griglia se la rimozione dal percorso originale non e riuscita.");
+    if (result === "partial") alert("Spostamento parziale: alcuni file non sono stati mossi.");
+    if (result === "error") alert("Spostamento non riuscito.");
   }, [onPhotosChange, onSelectionChange, photos, pushTimelineEntry, selectedIds]);
 
   const handleSaveAs = useCallback(async (ids: string[]) => {
@@ -2671,7 +2647,7 @@ export function PhotoSelector({
 
       if (sep < 0) {
         alert(
-          "Selezionato file: " + selected.name + "\n\nIl browser non puo leggere il percorso assoluto. Usa uno dei preset Photoshop qui sotto o incolla il percorso completo (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe)."
+          "Selezionato file: " + selected.name + "\n\nIl percorso assoluto non e' stato rilevato automaticamente. Usa uno dei preset Photoshop o incolla il percorso completo (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe)."
         );
       }
 
@@ -3214,19 +3190,22 @@ export function PhotoSelector({
         )}
 
         <div className="photo-selector__footer-actions">
-          {selectedIds.length > 0 && (
-            <button
+          <button
               type="button"
               className={`ghost-button ghost-button--small${canStartDesktopDragOut ? " photo-selector__dragout-button" : ""}`}
               draggable={canStartDesktopDragOut}
               onDragStart={handleSelectionDragStart}
               title={canStartDesktopDragOut
                 ? "Trascina la selezione direttamente dentro Auto Layout, Photoshop o un'altra app desktop."
-                : "Drag esterno disponibile nella versione desktop con cartella aperta in modalità nativa."}
+                : desktopDragOutDisabledMessage}
               disabled={!canStartDesktopDragOut}
             >
               Trascina fuori ({selectedIds.length})
             </button>
+          {!canStartDesktopDragOut && (
+            <span className="photo-selector__dragout-feedback" role="status" aria-live="polite">
+              {desktopDragOutDisabledMessage}
+            </span>
           )}
           {selectedIds.length > 0 && (
             <button 
@@ -3775,6 +3754,42 @@ export function PhotoSelector({
                 </p>
               </>
             ) : null}
+            {desktopThumbnailCacheInfo?.systemTotalMemoryBytes != null && onRamBudgetPresetChange ? (
+              <>
+                <label className="photo-selector__settings-color-row" style={{ alignItems: "center", marginTop: "0.6rem" }}>
+                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Budget RAM</span>
+                </label>
+                <div className="photo-selector__settings-preset-row" style={{ flexWrap: "wrap", gap: "0.3rem" }}>
+                  {(
+                    [
+                      { preset: "conservative" as DesktopRamBudgetPreset, label: "Conservativo", fraction: 0.06 },
+                      { preset: "default" as DesktopRamBudgetPreset, label: "Default", fraction: 0.12 },
+                      { preset: "performance" as DesktopRamBudgetPreset, label: "Performance", fraction: 0.20 },
+                      { preset: "maximum" as DesktopRamBudgetPreset, label: "Massimo", fraction: 0.28 },
+                    ] as const
+                  ).map(({ preset, label, fraction }) => {
+                    const gb = ((desktopThumbnailCacheInfo.systemTotalMemoryBytes! * fraction) / (1024 ** 3)).toFixed(1);
+                    const isActive = desktopThumbnailCacheInfo.ramBudgetPreset === preset;
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={`ghost-button ghost-button--small${isActive ? " ghost-button--active" : ""}`}
+                        onClick={() => void onRamBudgetPresetChange(preset)}
+                        title={`${label}: ${gb} GB (${Math.round(fraction * 100)}% RAM)`}
+                      >
+                        {label} ({gb} GB)
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  {desktopThumbnailCacheInfo.ramBudgetPreset
+                    ? `Preset attivo: ${desktopThumbnailCacheInfo.ramBudgetPreset} · ${((desktopThumbnailCacheInfo.ramBudgetBytes ?? 0) / (1024 ** 3)).toFixed(1)} GB. Effettivo al prossimo avvio.`
+                    : "Seleziona un preset per configurare il budget RAM della cache."}
+                </p>
+              </>
+            ) : null}
           </div>
 
           {desktopThumbnailCacheInfo ? (
@@ -4039,7 +4054,7 @@ export function PhotoSelector({
           y={contextMenuState.y}
           targetCount={contextMenuState.targetIds.length}
           colorLabelNames={customColorNames}
-          hasFileAccess={Boolean(window.filexDesktop?.sendToEditor) || "showDirectoryPicker" in window}
+          hasFileAccess={Boolean(window.filexDesktop?.sendToEditor)}
           rootFolderPath={effectiveRootFolderPath || undefined}
           targetPath={contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined}
           onApplyRating={(rating) => {

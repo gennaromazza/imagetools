@@ -171,6 +171,8 @@ export default {
   asarUnpack: [
     "**/node_modules/exiftool-vendored.exe/**",
     "**/node_modules/exiftool-vendored.pl/**",
+    "**/node_modules/sharp/**",
+    "**/node_modules/@img/**",
   ],
   npmRebuild: false,
   buildDependenciesFromSource: false,

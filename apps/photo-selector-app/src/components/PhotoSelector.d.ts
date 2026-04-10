@@ -1,4 +1,4 @@
-import type { DesktopCacheLocationRecommendation, DesktopThumbnailCacheInfo } from "@photo-tools/desktop-contracts";
+import type { DesktopCacheLocationRecommendation, DesktopRamBudgetPreset, DesktopThumbnailCacheInfo } from "@photo-tools/desktop-contracts";
 import type { ImageAsset } from "@photo-tools/shared-types";
 import { type ThumbnailProfile } from "../services/photo-selector-preferences";
 interface PhotoSelectorProps {
@@ -44,6 +44,7 @@ interface PhotoSelectorProps {
     onClearDesktopThumbnailCache?: () => void | Promise<void>;
     onSnoozeDesktopCacheRecommendation?: () => void | Promise<void>;
     onDismissDesktopCacheRecommendation?: () => void | Promise<void>;
+    onRamBudgetPresetChange?: (preset: DesktopRamBudgetPreset) => void | Promise<void>;
 }
-export declare function PhotoSelector({ photos, metadataVersion, sourceFolderPath, selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onBackgroundPreviewOrderChange, onScrollLiteActiveMsChange, onUndo, onRedo, canUndo, canRedo, isThumbnailLoading, thumbnailProfile, sortCacheEnabled, performanceSnapshot, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo, desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, }: PhotoSelectorProps): import("react/jsx-runtime").JSX.Element;
+export declare function PhotoSelector({ photos, metadataVersion, sourceFolderPath, selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onBackgroundPreviewOrderChange, onScrollLiteActiveMsChange, onUndo, onRedo, canUndo, canRedo, isThumbnailLoading, thumbnailProfile, sortCacheEnabled, performanceSnapshot, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo, desktopCacheLocationRecommendation, isDesktopThumbnailCacheBusy, isDesktopCacheRecommendationModalOpen, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, onRamBudgetPresetChange, }: PhotoSelectorProps): import("react/jsx-runtime").JSX.Element;
 export {};

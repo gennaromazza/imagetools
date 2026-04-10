@@ -16,16 +16,7 @@ interface ImportProgressModalProps {
 }
 
 function formatDiagnosticsSource(source: FolderOpenDiagnostics["source"]): string {
-  switch (source) {
-    case "desktop-native":
-      return "Desktop Windows";
-    case "browser-native":
-      return "Browser picker";
-    case "file-input":
-      return "Fallback input";
-    default:
-      return source;
-  }
+  return source === "desktop-native" ? "Desktop Windows" : source;
 }
 
 export function ImportProgressModal({

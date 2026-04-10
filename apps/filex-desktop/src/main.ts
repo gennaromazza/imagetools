@@ -12,6 +12,7 @@ import type {
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
+  DesktopRamBudgetPreset,
   DesktopReleaseChannel,
   DesktopPhotoSelectorPreferences,
   DesktopQuickPreviewRequest,
@@ -24,13 +25,17 @@ import type {
   DesktopThumbnailCacheLookupEntry,
 } from "@photo-tools/desktop-contracts";
 import {
+  copyFilesToFolderDesktop,
+  moveFilesToFolderDesktop,
   openFolderDesktop,
   readFileFromDisk,
   readSidecarXmpFromAssetPath,
   reopenFolderDesktop,
+  saveFileAsDesktop,
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
 import {
+  configureDesktopImageService,
   getDesktopImageCacheLimits,
   getDesktopQuickPreviewFrame,
   getDesktopPreview,
@@ -48,9 +53,12 @@ import {
   dismissCacheLocationRecommendation,
   getCachedThumbnailsFromDisk,
   getCacheLocationRecommendation,
+  getRamBudgetInfo,
   getThumbnailCacheInfo,
+  loadRamBudgetPreset,
   migrateThumbnailCacheDirectory,
   resetThumbnailCacheDirectory,
+  saveRamBudgetPreset,
   setThumbnailCacheDirectory,
 } from "./thumbnail-disk-cache.js";
 import {
@@ -102,7 +110,6 @@ function resolveRequestedTool() {
 }
 
 const requestedTool = resolveRequestedTool();
-const MAX_DESKTOP_DRAG_OUT_FILES = 25;
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
 const appUserModelId = `studio.filex.${requestedTool.id}`;
@@ -447,20 +454,9 @@ function validateDesktopDragOut(absolutePaths: unknown): DesktopDragOutCheck {
       ok: false,
       requestedCount,
       validCount,
-      allowedCount: Math.min(validCount, MAX_DESKTOP_DRAG_OUT_FILES),
+      allowedCount: validCount,
       reason: "invalid-paths",
       message: "Alcuni file selezionati non hanno un percorso valido.",
-    };
-  }
-
-  if (validCount > MAX_DESKTOP_DRAG_OUT_FILES) {
-    return {
-      ok: false,
-      requestedCount,
-      validCount,
-      allowedCount: MAX_DESKTOP_DRAG_OUT_FILES,
-      reason: "too-many-files",
-      message: `Drag esterno limitato a ${MAX_DESKTOP_DRAG_OUT_FILES} file. Usa 'Apri con editor' per selezioni piu grandi.`,
     };
   }
 
@@ -759,7 +755,10 @@ function registerIpcHandlers(): void {
       downloadToolUpdate(toolId, channel ?? resolveReleaseChannel()),
   );
   ipcMain.handle("filex:apply-tool-update", async (_event, jobId: string) => applyToolUpdate(jobId));
-  ipcMain.handle("filex:open-installed-tool", async (_event, toolId: DesktopToolId) => openInstalledTool(toolId));
+  ipcMain.handle(
+    "filex:open-installed-tool",
+    async (_event, toolId: DesktopToolId, launchArgs?: string[]) => openInstalledTool(toolId, launchArgs),
+  );
   ipcMain.handle("filex:get-image-id-print-ai-status", () => getImageIdPrintAiStatus());
   ipcMain.handle("filex:open-folder", () => openFolderDesktop());
   ipcMain.handle("filex:reopen-folder", (_event, rootPath: string) => reopenFolderDesktop(rootPath));
@@ -867,6 +866,30 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("filex:reset-thumbnail-cache-directory", () => resetThumbnailCacheDirectory());
   ipcMain.handle("filex:clear-thumbnail-cache", () => clearThumbnailCacheDirectory());
+  ipcMain.handle("filex:get-ram-budget-info", async () => {
+    const limits = getDesktopImageCacheLimits();
+    return getRamBudgetInfo(limits.systemTotalMemoryBytes, limits.ramBudgetBytes, {
+      effectiveThumbnailRamMaxEntries: limits.effectiveThumbnailRamMaxEntries,
+      effectiveThumbnailRamMaxBytes: limits.effectiveThumbnailRamMaxBytes,
+      effectiveRenderedPreviewMaxEntries: limits.effectiveRenderedPreviewMaxEntries,
+      effectiveRenderedPreviewMaxBytes: limits.effectiveRenderedPreviewMaxBytes,
+      effectivePreviewSourceMaxEntries: limits.effectivePreviewSourceMaxEntries,
+      effectivePreviewSourceMaxBytes: limits.effectivePreviewSourceMaxBytes,
+    });
+  });
+  ipcMain.handle("filex:set-ram-budget-preset", async (_event, preset: DesktopRamBudgetPreset) => {
+    configureDesktopImageService(preset);
+    await saveRamBudgetPreset(preset);
+    const limits = getDesktopImageCacheLimits();
+    return getRamBudgetInfo(limits.systemTotalMemoryBytes, limits.ramBudgetBytes, {
+      effectiveThumbnailRamMaxEntries: limits.effectiveThumbnailRamMaxEntries,
+      effectiveThumbnailRamMaxBytes: limits.effectiveThumbnailRamMaxBytes,
+      effectiveRenderedPreviewMaxEntries: limits.effectiveRenderedPreviewMaxEntries,
+      effectiveRenderedPreviewMaxBytes: limits.effectiveRenderedPreviewMaxBytes,
+      effectivePreviewSourceMaxEntries: limits.effectivePreviewSourceMaxEntries,
+      effectivePreviewSourceMaxBytes: limits.effectivePreviewSourceMaxBytes,
+    });
+  });
   ipcMain.handle("filex:get-cache-location-recommendation", () => getCacheLocationRecommendation());
   ipcMain.handle("filex:migrate-thumbnail-cache-directory", (_event, directoryPath: string) =>
     migrateThumbnailCacheDirectory(directoryPath),
@@ -930,6 +953,15 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle("filex:open-with-editor", async (_event, editorPath: string, absolutePaths: string[]) =>
     launchEditorProcess(editorPath, absolutePaths),
+  );
+  ipcMain.handle("filex:copy-files-to-folder", async (_event, absolutePaths: string[]) =>
+    copyFilesToFolderDesktop(absolutePaths),
+  );
+  ipcMain.handle("filex:move-files-to-folder", async (_event, absolutePaths: string[]) =>
+    moveFilesToFolderDesktop(absolutePaths),
+  );
+  ipcMain.handle("filex:save-file-as", async (_event, absolutePath: string) =>
+    saveFileAsDesktop(absolutePath),
   );
   ipcMain.handle("filex:get-desktop-preferences", () => getDesktopPreferences());
   ipcMain.handle("filex:save-desktop-preferences", (_event, preferences: DesktopPhotoSelectorPreferences) =>
@@ -1024,9 +1056,13 @@ function registerIpcHandlers(): void {
     const result = await archivio.updateJobContractLinkService(jobId, contrattoLink);
     return result.job;
   });
-  ipcMain.handle("filex:generate-archivio-low-quality", async (_event, jobId: string, overwrite: boolean) => {
+  ipcMain.handle("filex:list-archivio-job-subfolders", async (_event, jobId: string) => {
     const archivio = await loadArchivioFlowModule();
-    return await archivio.generateLowQualityService(jobId, overwrite);
+    return await archivio.listJobSubfoldersService(jobId);
+  });
+  ipcMain.handle("filex:generate-archivio-low-quality", async (_event, jobId: string, overwrite: boolean, sourceSubfolder?: string) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.generateLowQualityService(jobId, overwrite, sourceSubfolder);
   });
   ipcMain.handle("filex:open-archivio-folder", async (_event, folderPath: string) => {
     const normalizedPath = sanitizeDesktopPath(folderPath);
@@ -1137,6 +1173,11 @@ async function createMainWindow(): Promise<void> {
 
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
+    // Apply the persisted RAM budget before registering IPC handlers so that
+    // the cache limits are already in effect when the first thumbnail request arrives.
+    const savedPreset = await loadRamBudgetPreset();
+    configureDesktopImageService(savedPreset);
+
     registerPreviewProtocol();
     registerCrashTelemetryHandlers();
     registerIpcHandlers();

@@ -9,7 +9,7 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:check-tool-update", toolId, currentVersion, channel),
   downloadToolUpdate: (toolId, channel) => ipcRenderer.invoke("filex:download-tool-update", toolId, channel),
   applyToolUpdate: (jobId) => ipcRenderer.invoke("filex:apply-tool-update", jobId),
-  openInstalledTool: (toolId) => ipcRenderer.invoke("filex:open-installed-tool", toolId),
+  openInstalledTool: (toolId, launchArgs) => ipcRenderer.invoke("filex:open-installed-tool", toolId, launchArgs),
   getImageIdPrintAiStatus: () => ipcRenderer.invoke("filex:get-image-id-print-ai-status"),
   openFolder: () => ipcRenderer.invoke("filex:open-folder"),
   reopenFolder: (rootPath) => ipcRenderer.invoke("filex:reopen-folder", rootPath),
@@ -37,6 +37,8 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:set-thumbnail-cache-directory", directoryPath),
   resetThumbnailCacheDirectory: () => ipcRenderer.invoke("filex:reset-thumbnail-cache-directory"),
   clearThumbnailCache: () => ipcRenderer.invoke("filex:clear-thumbnail-cache"),
+  getRamBudgetInfo: () => ipcRenderer.invoke("filex:get-ram-budget-info"),
+  setRamBudgetPreset: (preset) => ipcRenderer.invoke("filex:set-ram-budget-preset", preset),
   getCacheLocationRecommendation: () => ipcRenderer.invoke("filex:get-cache-location-recommendation"),
   migrateThumbnailCacheDirectory: (directoryPath) =>
     ipcRenderer.invoke("filex:migrate-thumbnail-cache-directory", directoryPath),
@@ -53,6 +55,12 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:send-to-editor", editorPath, absolutePaths),
   openWithEditor: (editorPath, absolutePaths) =>
     ipcRenderer.invoke("filex:open-with-editor", editorPath, absolutePaths),
+  copyFilesToFolder: (absolutePaths) =>
+    ipcRenderer.invoke("filex:copy-files-to-folder", absolutePaths),
+  moveFilesToFolder: (absolutePaths) =>
+    ipcRenderer.invoke("filex:move-files-to-folder", absolutePaths),
+  saveFileAs: (absolutePath) =>
+    ipcRenderer.invoke("filex:save-file-as", absolutePath),
   getDesktopPreferences: () => ipcRenderer.invoke("filex:get-desktop-preferences"),
   saveDesktopPreferences: (preferences) => ipcRenderer.invoke("filex:save-desktop-preferences", preferences),
   getDesktopSessionState: () => ipcRenderer.invoke("filex:get-desktop-session-state"),
@@ -87,8 +95,10 @@ const api: FileXDesktopApi = {
   deleteArchivioJob: (jobId) => ipcRenderer.invoke("filex:delete-archivio-job", jobId),
   updateArchivioJobContractLink: (jobId, contrattoLink) =>
     ipcRenderer.invoke("filex:update-archivio-job-contract-link", jobId, contrattoLink),
-  generateArchivioLowQuality: (jobId, overwrite) =>
-    ipcRenderer.invoke("filex:generate-archivio-low-quality", jobId, overwrite),
+  listArchivioJobSubfolders: (jobId) =>
+    ipcRenderer.invoke("filex:list-archivio-job-subfolders", jobId),
+  generateArchivioLowQuality: (jobId, overwrite, sourceSubfolder) =>
+    ipcRenderer.invoke("filex:generate-archivio-low-quality", jobId, overwrite, sourceSubfolder),
   openArchivioFolder: (folderPath) => ipcRenderer.invoke("filex:open-archivio-folder", folderPath),
 };
 

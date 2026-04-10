@@ -21,15 +21,11 @@ interface QueueItem {
     sourceFileKey?: string;
     createSourceFileKey?: (file: File) => string;
     priority: number;
-    forceFullFile?: boolean;
 }
 export declare class ThumbnailPipeline {
-    private workers;
-    private busyWorkers;
-    private activeDesktopTasks;
     private queue;
     private queuedItems;
-    private processing;
+    private activeDesktopTasks;
     private completed;
     private failedIds;
     private pendingBatch;
@@ -39,10 +35,7 @@ export declare class ThumbnailPipeline {
     private onError;
     private maxDimension;
     private quality;
-    private minimumPreviewShortSide;
     private desktopTaskLimit;
-    private desktopBackgroundTaskLimit;
-    private desktopForegroundReserve;
     constructor(onBatch: BatchCallback, onError?: ErrorCallback, options?: ThumbnailPipelineOptions);
     enqueue(items: Array<Omit<QueueItem, "priority">>, priority?: number): void;
     updateViewport(visibleIds: Set<string>, prioritizedIds?: Set<string>): void;
@@ -53,14 +46,8 @@ export declare class ThumbnailPipeline {
     invalidate(ids: Iterable<string>): void;
     destroy(): void;
     private sortQueue;
-    private hasForegroundQueued;
-    private countActiveDesktopBackgroundTasks;
     private schedule;
     private dispatchDesktop;
-    private dispatch;
-    private handleWorkerResult;
-    private handleWorkerCrash;
-    private releaseWorker;
     private releaseDesktopTask;
     private markCompleted;
     private markFailed;

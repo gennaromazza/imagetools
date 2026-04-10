@@ -1,4 +1,5 @@
 import { app, shell } from "electron";
+import { spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
 import { unlink, readFile } from "node:fs/promises";
@@ -499,11 +500,36 @@ export function getUpdateJob(jobId: string): DesktopToolUpdateJob | null {
   return updateJobs.get(jobId) ?? null;
 }
 
-export function openInstalledTool(toolId: DesktopToolId): Promise<{ ok: boolean; message: string }> {
+export function openInstalledTool(
+  toolId: DesktopToolId,
+  launchArgs?: string[],
+): Promise<{ ok: boolean; message: string }> {
   const installed = detectInstalledExecutable(toolId);
   if (!installed.path) {
     return Promise.resolve({ ok: false, message: "Tool non installato" });
   }
+
+  const safeArgs = Array.isArray(launchArgs)
+    ? launchArgs.filter((value) => typeof value === "string" && value.trim().length > 0)
+    : [];
+
+  if (safeArgs.length > 0) {
+    try {
+      const child = spawn(installed.path, safeArgs, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+      });
+      child.unref();
+      return Promise.resolve({ ok: true, message: "Tool avviato" });
+    } catch (error) {
+      return Promise.resolve({
+        ok: false,
+        message: error instanceof Error ? error.message : "Impossibile avviare il tool",
+      });
+    }
+  }
+
   return shell.openPath(installed.path).then((result) => {
     if (result) {
       return { ok: false, message: result };
