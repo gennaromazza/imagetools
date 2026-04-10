@@ -1069,10 +1069,32 @@ async function tryReadEmbeddedPreviewBuffer(
   return previewBuffer.byteLength >= MIN_EMBEDDED_JPEG_BYTES ? previewBuffer : null;
 }
 
-function resolvePreviewSourceFromBuffer(
+async function resolvePreviewSourceFromBuffer(
   buffer: Buffer,
   mimeType: string,
-): ResolvedPreviewSource | null {
+): Promise<ResolvedPreviewSource | null> {
+  if (mimeType === "image/jpeg") {
+    const sharpMod = await getSharp();
+    if (sharpMod) {
+      try {
+        const { data, info } = await sharpMod(buffer, { failOn: "none" })
+          .rotate()
+          .jpeg({ quality: 90 })
+          .toBuffer({ resolveWithObject: true });
+        if ((info.width ?? 0) > 0 && (info.height ?? 0) > 0) {
+          return {
+            buffer: Buffer.from(data),
+            mimeType: "image/jpeg",
+            width: info.width,
+            height: info.height,
+          };
+        }
+      } catch {
+        // Fall back to nativeImage decode below.
+      }
+    }
+  }
+
   const decoded = decodeImage(buffer);
   if (!decoded) {
     return null;
