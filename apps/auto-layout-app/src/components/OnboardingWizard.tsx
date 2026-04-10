@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SHEET_PRESETS } from "@photo-tools/presets";
-import type { AutoLayoutRequest, ImageAsset } from "@photo-tools/shared-types";
+import type { AutoLayoutRequest, ImageAsset, WorkflowMode } from "@photo-tools/shared-types";
 import { DismissibleBanner } from "./DismissibleBanner";
 import { PhotoSelector } from "./PhotoSelector";
 
@@ -15,7 +15,7 @@ interface OnboardingWizardProps {
   onLoadMockData?: () => void;
 }
 
-type WizardStep = "welcome" | "projectName" | "images" | "select" | "template" | "planning" | "preview";
+type WizardStep = "welcome" | "projectName" | "mode" | "images" | "select" | "template" | "planning" | "preview";
 
 export function OnboardingWizard({
   isOpen,
@@ -31,9 +31,13 @@ export function OnboardingWizard({
   const [step, setStep] = useState<WizardStep>("welcome");
   const [projectName, setProjectName] = useState(`Progetto ${new Date().toLocaleDateString("it-IT")}`);
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
+  const [workflowMode, setWorkflowMode] = useState<WorkflowMode>(currentRequest.workflowMode ?? "auto");
   const [selectedPresetId, setSelectedPresetId] = useState(currentRequest.sheet.presetId);
   const [planningMode, setPlanningMode] = useState<"fogli" | "foto">("fogli");
   const [plannedValue, setPlannedValue] = useState(currentRequest.desiredSheetCount ?? 5);
+  const [manualInitialSheetCount, setManualInitialSheetCount] = useState(
+    Math.max(1, currentRequest.desiredSheetCount ?? 3)
+  );
   const [dismissedWelcomeBanner, setDismissedWelcomeBanner] = useState(false);
 
   useEffect(() => {
@@ -45,9 +49,30 @@ export function OnboardingWizard({
     fileInputRef.current.setAttribute("directory", "");
   }, []);
 
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    setStep("welcome");
+    setWorkflowMode(currentRequest.workflowMode ?? "auto");
+    setSelectedPresetId(currentRequest.sheet.presetId);
+    setPlanningMode(currentRequest.planningMode === "maxPhotosPerSheet" ? "foto" : "fogli");
+    setPlannedValue(
+      currentRequest.planningMode === "maxPhotosPerSheet"
+        ? currentRequest.maxPhotosPerSheet ?? 2
+        : currentRequest.desiredSheetCount ?? 5
+    );
+    setManualInitialSheetCount(Math.max(1, currentRequest.desiredSheetCount ?? 3));
+    setSelectedPhotoIds(currentRequest.assets.map((asset) => asset.id));
+  }, [currentRequest, isOpen]);
+
   if (!isOpen) return null;
 
-  const wizardSteps: WizardStep[] = ["welcome", "projectName", "images", "select", "template", "planning", "preview"];
+  const wizardSteps: WizardStep[] =
+    workflowMode === "manual"
+      ? ["welcome", "projectName", "mode", "images", "select", "template", "preview"]
+      : ["welcome", "projectName", "mode", "images", "select", "template", "planning", "preview"];
 
   const handleNext = () => {
     const currentIndex = wizardSteps.indexOf(step);
@@ -76,6 +101,7 @@ export function OnboardingWizard({
     const updatedRequest: AutoLayoutRequest = {
       ...currentRequest,
       assets: selectedAssets,
+      workflowMode,
       sheet: {
         ...currentRequest.sheet,
         presetId: selectedPreset.id,
@@ -83,9 +109,24 @@ export function OnboardingWizard({
         widthCm: selectedPreset.widthCm,
         heightCm: selectedPreset.heightCm
       },
-      planningMode: planningMode === "fogli" ? "desiredSheetCount" : "maxPhotosPerSheet",
-      desiredSheetCount: planningMode === "fogli" ? plannedValue : undefined,
-      maxPhotosPerSheet: planningMode === "foto" ? plannedValue : undefined
+      planningMode:
+        workflowMode === "manual"
+          ? "desiredSheetCount"
+          : planningMode === "fogli"
+            ? "desiredSheetCount"
+            : "maxPhotosPerSheet",
+      desiredSheetCount:
+        workflowMode === "manual"
+          ? Math.max(1, Math.floor(manualInitialSheetCount))
+          : planningMode === "fogli"
+            ? plannedValue
+            : undefined,
+      maxPhotosPerSheet:
+        workflowMode === "manual"
+          ? currentRequest.maxPhotosPerSheet
+          : planningMode === "foto"
+            ? plannedValue
+            : undefined
     };
 
     onComplete(updatedRequest, projectName);
@@ -101,7 +142,7 @@ export function OnboardingWizard({
             <div className="wizard-step__content">
               <h1 className="wizard-heading">Benvenuto in Auto Layout</h1>
               <p className="wizard-description">
-                Ti guidero attraverso 6 step per preparare il tuo progetto di impaginazione.
+                Ti guidero passo-passo per preparare il tuo progetto di impaginazione.
               </p>
 
               {!dismissedWelcomeBanner && (
@@ -187,6 +228,72 @@ export function OnboardingWizard({
                 onClick={handleNext}
                 disabled={isLoading || !projectName.trim()}
               >
+                Continua
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === "mode" && (
+          <div className="wizard-step">
+            <div className="wizard-step__content">
+              <h2 className="wizard-heading">Scegli il flusso di lavoro</h2>
+              <p className="wizard-description">
+                Decidi se partire da una distribuzione automatica o da un progetto a fogli manuali.
+              </p>
+
+              <div className="planning-options">
+                <label className={`planning-option ${workflowMode === "auto" ? "planning-option--selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="workflow-mode"
+                    value="auto"
+                    checked={workflowMode === "auto"}
+                    onChange={() => setWorkflowMode("auto")}
+                  />
+                  <div className="planning-option__content">
+                    <div className="planning-option__title">Auto (da foto)</div>
+                    <p className="planning-option__description">
+                      L'app distribuisce automaticamente le foto nei fogli in base alle regole di planning.
+                    </p>
+                  </div>
+                </label>
+
+                <label className={`planning-option ${workflowMode === "manual" ? "planning-option--selected" : ""}`}>
+                  <input
+                    type="radio"
+                    name="workflow-mode"
+                    value="manual"
+                    checked={workflowMode === "manual"}
+                    onChange={() => setWorkflowMode("manual")}
+                  />
+                  <div className="planning-option__content">
+                    <div className="planning-option__title">Impaginazione libera</div>
+                    <p className="planning-option__description">
+                      Crei e gestisci i fogli manualmente, senza ribilanciamento automatico del numero fogli.
+                    </p>
+                    <label className="field">
+                      <span>Numero fogli iniziali</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={manualInitialSheetCount}
+                        onChange={(event) =>
+                          setManualInitialSheetCount(Math.max(1, Number(event.target.value) || 1))
+                        }
+                        disabled={workflowMode !== "manual"}
+                      />
+                    </label>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="wizard-actions">
+              <button type="button" className="ghost-button" onClick={handlePrevious} disabled={isLoading}>
+                Indietro
+              </button>
+              <button type="button" className="primary-button" onClick={handleNext} disabled={isLoading}>
                 Continua
               </button>
             </div>
@@ -441,9 +548,19 @@ export function OnboardingWizard({
                   </span>
                 </div>
                 <div className="summary-item">
+                  <span className="summary-item__label">Workflow:</span>
+                  <span className="summary-item__value">
+                    {workflowMode === "manual" ? "Impaginazione libera" : "Auto (da foto)"}
+                  </span>
+                </div>
+                <div className="summary-item">
                   <span className="summary-item__label">Criterio di layout:</span>
                   <span className="summary-item__value">
-                    {planningMode === "fogli" ? `${plannedValue} fogli desiderati` : `${plannedValue} foto per foglio`}
+                    {workflowMode === "manual"
+                      ? `${manualInitialSheetCount} fogli iniziali manuali`
+                      : planningMode === "fogli"
+                        ? `${plannedValue} fogli desiderati`
+                        : `${plannedValue} foto per foglio`}
                   </span>
                 </div>
               </div>
@@ -472,21 +589,34 @@ export function OnboardingWizard({
         )}
 
         <div className="wizard-progress">
-          {wizardSteps.map((wizardStep, index) => (
-            <button
-              key={wizardStep}
-              type="button"
-              className={`progress-dot ${step === wizardStep ? "progress-dot--active" : ""} ${
-                wizardSteps.indexOf(step) >= index ? "progress-dot--completed" : ""
-              }`}
-              onClick={() => {
-                if (wizardSteps.indexOf(step) >= index) {
-                  setStep(wizardStep);
-                }
-              }}
-              title={["Benvenuto", "Nome progetto", "Foto", "Selezione", "Formato", "Layout", "Anteprima"][index]}
-            />
-          ))}
+          {(() => {
+            const progressLabels: Record<WizardStep, string> = {
+              welcome: "Benvenuto",
+              projectName: "Nome progetto",
+              mode: "Workflow",
+              images: "Foto",
+              select: "Selezione",
+              template: "Formato",
+              planning: "Layout",
+              preview: "Anteprima"
+            };
+
+            return wizardSteps.map((wizardStep, index) => (
+              <button
+                key={wizardStep}
+                type="button"
+                className={`progress-dot ${step === wizardStep ? "progress-dot--active" : ""} ${
+                  wizardSteps.indexOf(step) >= index ? "progress-dot--completed" : ""
+                }`}
+                onClick={() => {
+                  if (wizardSteps.indexOf(step) >= index) {
+                    setStep(wizardStep);
+                  }
+                }}
+                title={progressLabels[wizardStep]}
+              />
+            ));
+          })()}
         </div>
       </div>
     </div>

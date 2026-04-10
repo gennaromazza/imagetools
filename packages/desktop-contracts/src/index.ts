@@ -592,6 +592,7 @@ export interface FileXDesktopApi {
   clearThumbnailCache: () => Promise<boolean>;
   getRamBudgetInfo: () => Promise<DesktopThumbnailCacheInfo>;
   setRamBudgetPreset: (preset: DesktopRamBudgetPreset) => Promise<DesktopThumbnailCacheInfo>;
+  relaunch: () => Promise<void>;
   getCacheLocationRecommendation: () => Promise<DesktopCacheLocationRecommendation>;
   migrateThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopCacheMigrationResult>;
   dismissCacheLocationRecommendation: () => Promise<void>;

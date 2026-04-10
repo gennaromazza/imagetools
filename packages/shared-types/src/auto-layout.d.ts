@@ -6,6 +6,7 @@ export type FitMode = "fit" | "fill" | "crop";
 export type CropStrategy = "balanced" | "portraitSafe" | "landscapeSafe";
 export type OutputFormat = "jpg" | "png" | "tif";
 export type PlanningMode = "desiredSheetCount" | "maxPhotosPerSheet";
+export type WorkflowMode = "auto" | "manual";
 export type TemplateStyle = "hero" | "paired" | "balanced-grid" | "editorial" | "collage";
 export type TemplateAffinity = "portrait-heavy" | "landscape-heavy" | "mixed" | "any";
 export interface ImageAsset {
@@ -101,6 +102,7 @@ export interface AutoLayoutRequest {
     jobName: string;
     sourceFolderPath: string;
     assets: ImageAsset[];
+    workflowMode: WorkflowMode;
     sheet: SheetSpec;
     fitMode: FitMode;
     cropStrategy: CropStrategy;

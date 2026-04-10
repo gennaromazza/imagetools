@@ -679,4 +679,5 @@ export interface FileXDesktopApi {
   openArchivioFolder: (folderPath: string) => Promise<{ ok: boolean }>;
   getRamBudgetInfo: () => Promise<DesktopThumbnailCacheInfo>;
   setRamBudgetPreset: (preset: DesktopRamBudgetPreset) => Promise<DesktopThumbnailCacheInfo>;
+  relaunch: () => Promise<void>;
 }

@@ -149,3 +149,10 @@ export async function setDesktopRamBudgetPreset(
     return null;
   }
 }
+
+export function relaunchDesktopApp(): void {
+  const api = getDesktopApi();
+  if (api?.relaunch) {
+    void api.relaunch();
+  }
+}

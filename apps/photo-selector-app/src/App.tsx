@@ -27,6 +27,7 @@ import {
   getDesktopRamBudgetInfo,
   getDesktopThumbnailCacheInfo,
   migrateDesktopThumbnailCacheDirectory,
+  relaunchDesktopApp,
   resetDesktopThumbnailCacheDirectory,
   setDesktopRamBudgetPreset,
   setDesktopThumbnailCacheDirectory,
@@ -2868,7 +2869,8 @@ export function App() {
                 onSnoozeDesktopCacheRecommendation={handleSnoozeDesktopCacheRecommendation}
                 onDismissDesktopCacheRecommendation={handleDismissDesktopCacheRecommendation}
                 onRamBudgetPresetChange={handleRamBudgetPresetChange}
-              />
+                  onRelaunch={relaunchDesktopApp}
+                />
             </div>
           ) : null}
 

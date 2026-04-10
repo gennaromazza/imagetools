@@ -27,6 +27,8 @@ export function SettingsPanel({
   onMaxPhotosPerSheetChange,
   onAllowTemplateVariationChange
 }: SettingsPanelProps) {
+  const isManualWorkflow = request.workflowMode === "manual";
+
   return (
     <div className="stack">
       <div className="inline-grid inline-grid--3">
@@ -131,53 +133,61 @@ export function SettingsPanel({
         </div>
       </div>
 
-      <div className="field">
-        <span>Modalita pianificazione</span>
-        <div className="segmented-control">
-          {(["desiredSheetCount", "maxPhotosPerSheet"] as PlanningMode[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={request.planningMode === mode ? "segment segment--active" : "segment"}
-              onClick={() => onPlanningModeChange(mode)}
-            >
-              {mode === "desiredSheetCount" ? "Fogli desiderati" : "Foto per foglio"}
-            </button>
-          ))}
-        </div>
-      </div>
+      {!isManualWorkflow ? (
+        <>
+          <div className="field">
+            <span>Modalita pianificazione</span>
+            <div className="segmented-control">
+              {(["desiredSheetCount", "maxPhotosPerSheet"] as PlanningMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={request.planningMode === mode ? "segment segment--active" : "segment"}
+                  onClick={() => onPlanningModeChange(mode)}
+                >
+                  {mode === "desiredSheetCount" ? "Fogli desiderati" : "Foto per foglio"}
+                </button>
+              ))}
+            </div>
+          </div>
 
-      {request.planningMode === "desiredSheetCount" ? (
-        <label className="field">
-          <span>Fogli desiderati</span>
-          <input
-            type="number"
-            min="1"
-            value={request.desiredSheetCount ?? 1}
-            onChange={(event) => onDesiredSheetCountChange(Number(event.target.value))}
-          />
-        </label>
-      ) : (
-        <label className="field">
-          <span>Numero massimo di foto per foglio</span>
+          {request.planningMode === "desiredSheetCount" ? (
+            <label className="field">
+              <span>Fogli desiderati</span>
+              <input
+                type="number"
+                min="1"
+                value={request.desiredSheetCount ?? 1}
+                onChange={(event) => onDesiredSheetCountChange(Number(event.target.value))}
+              />
+            </label>
+          ) : (
+            <label className="field">
+              <span>Numero massimo di foto per foglio</span>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={request.maxPhotosPerSheet ?? 2}
+                onChange={(event) => onMaxPhotosPerSheetChange(Number(event.target.value))}
+              />
+            </label>
+          )}
+
+          <label className="check-row">
             <input
-              type="number"
-              min="1"
-              max="20"
-              value={request.maxPhotosPerSheet ?? 2}
-              onChange={(event) => onMaxPhotosPerSheetChange(Number(event.target.value))}
+              type="checkbox"
+              checked={request.allowTemplateVariation}
+              onChange={(event) => onAllowTemplateVariationChange(event.target.checked)}
             />
-        </label>
+            <span>Permetti varianti template automatiche tra i fogli</span>
+          </label>
+        </>
+      ) : (
+        <p className="helper-copy">
+          Modalita manuale attiva: i fogli restano sotto controllo utente. Nessun ribilanciamento automatico del numero fogli.
+        </p>
       )}
-
-      <label className="check-row">
-        <input
-          type="checkbox"
-          checked={request.allowTemplateVariation}
-          onChange={(event) => onAllowTemplateVariationChange(event.target.checked)}
-        />
-        <span>Permetti varianti template automatiche tra i fogli</span>
-      </label>
     </div>
   );
 }

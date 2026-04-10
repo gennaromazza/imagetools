@@ -31,6 +31,7 @@ export const DEFAULT_SHEET_SPEC: SheetSpec = {
 export const DEFAULT_AUTO_LAYOUT_REQUEST: Omit<AutoLayoutRequest, "assets"> = {
   jobName: "wedding-service-layout",
   sourceFolderPath: "C:/jobs/wedding-2026/selected",
+  workflowMode: "auto",
   sheet: DEFAULT_SHEET_SPEC,
   fitMode: "fit",
   cropStrategy: "balanced",

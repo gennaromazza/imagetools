@@ -216,6 +216,84 @@ function syncResultWithSelection(
   return buildAutoLayoutResult(nextRequest, current.pages, current.availableTemplates);
 }
 
+function resolveEmptyPageTemplate(
+  templates: AutoLayoutResult["availableTemplates"],
+  preferredTemplateId?: string
+) {
+  if (preferredTemplateId) {
+    const preferredTemplate = templates.find((template) => template.id === preferredTemplateId);
+    if (preferredTemplate) {
+      return preferredTemplate;
+    }
+  }
+
+  const singlePhotoTemplates = templates
+    .filter((template) => template.minPhotos <= 1 && template.maxPhotos >= 1)
+    .sort((left, right) => left.maxPhotos - right.maxPhotos);
+
+  return singlePhotoTemplates[0] ?? templates[0] ?? null;
+}
+
+function appendEmptyPage(
+  current: AutoLayoutResult,
+  options: { preferredTemplateId?: string; preferredSheetSpec?: GeneratedPageLayout["sheetSpec"] } = {}
+): AutoLayoutResult {
+  const template = resolveEmptyPageTemplate(current.availableTemplates, options.preferredTemplateId);
+  if (!template) {
+    return current;
+  }
+
+  const highestPageNumber = current.pages.reduce((highest, page) => Math.max(highest, page.pageNumber), 0);
+  const nextPages = [
+    ...current.pages,
+    {
+      id: `page-${highestPageNumber + 1}`,
+      pageNumber: highestPageNumber + 1,
+      sheetSpec: options.preferredSheetSpec ? { ...options.preferredSheetSpec } : { ...current.request.sheet },
+      templateId: template.id,
+      templateLabel: template.label,
+      slotDefinitions: template.slots,
+      assignments: [],
+      imageIds: [],
+      warnings: []
+    }
+  ];
+
+  return buildAutoLayoutResult(current.request, nextPages, current.availableTemplates);
+}
+
+function buildManualLayoutPlan(request: AutoLayoutRequest, initialSheetCount: number): AutoLayoutResult {
+  const seedResult = createAutoLayoutPlan({
+    ...request,
+    assets: []
+  });
+
+  let manualResult = buildAutoLayoutResult(request, [], seedResult.availableTemplates);
+  const safeCount = Math.max(1, Math.floor(initialSheetCount));
+
+  for (let index = 0; index < safeCount; index += 1) {
+    manualResult = appendEmptyPage(manualResult);
+  }
+
+  return manualResult;
+}
+
+function syncManualResultWithRequest(
+  current: AutoLayoutResult,
+  nextRequest: AutoLayoutRequest,
+  options: { keepCurrentSheetSpec?: boolean } = {}
+): AutoLayoutResult {
+  const selectedAssetIds = new Set(nextRequest.assets.map((asset) => asset.id));
+  const nextPages = current.pages.map((page) => ({
+    ...page,
+    sheetSpec: options.keepCurrentSheetSpec ? page.sheetSpec : { ...nextRequest.sheet },
+    assignments: page.assignments.filter((assignment) => selectedAssetIds.has(assignment.imageId)),
+    imageIds: page.imageIds.filter((imageId) => selectedAssetIds.has(imageId))
+  }));
+
+  return buildAutoLayoutResult(nextRequest, nextPages, current.availableTemplates);
+}
+
 function getProjectActiveAssets(project: Project) {
   return project.result?.request.assets ?? project.request.assets;
 }
@@ -521,7 +599,12 @@ function AppContent() {
     resetStudioHistory();
     setCurrentProjectId(projectId);
     setRequest(activeRequest);
-    setResult(project.result ?? createAutoLayoutPlan(project.request));
+    setResult(
+      project.result ??
+        (activeRequest.workflowMode === "manual"
+          ? buildManualLayoutPlan(activeRequest, Math.max(1, activeRequest.desiredSheetCount ?? 1))
+          : createAutoLayoutPlan(activeRequest))
+    );
     setActiveAssetIds(activeRequest.assets.map((asset) => asset.id));
     setAllAssets(catalogAssets);
     setUsesMockData(false);
@@ -702,7 +785,10 @@ function AppContent() {
 
   const handleCreateProjectFromWizard = async (wizardRequest: AutoLayoutRequest, wizardProjectName: string) => {
     const projectId = currentProjectId || `project-${Date.now()}`;
-    const plannedResult = createAutoLayoutPlan(wizardRequest);
+    const plannedResult =
+      wizardRequest.workflowMode === "manual"
+        ? buildManualLayoutPlan(wizardRequest, Math.max(1, wizardRequest.desiredSheetCount ?? 1))
+        : createAutoLayoutPlan(wizardRequest);
     const catalogAssets = allAssets;
     const project: Project = {
       id: projectId,
@@ -845,6 +931,7 @@ function AppContent() {
   const supportsDirectoryPicker = typeof window !== "undefined" && "showDirectoryPicker" in window;
   const canOpenSavedFolder = false;
   const usedImagesCount = result.summary.totalImages - result.unassignedAssets.length;
+  const isManualWorkflow = request.workflowMode === "manual";
   const canOpenStudio = result.pages.length > 0 && request.assets.length > 0;
   const handleSelectPage = useCallback((pageId: string, slotId?: string) => {
     setSelectedPageId(pageId);
@@ -970,7 +1057,10 @@ function AppContent() {
           pageId: selectedPage.id,
           slotId: selectedSlot.id
         });
-        const nextResult = rebalancePagesForAssignedImages(clearedResult, [selectedPage.id]);
+        const nextResult =
+          request.workflowMode === "manual"
+            ? clearedResult
+            : rebalancePagesForAssignedImages(clearedResult, [selectedPage.id]);
         const nextPage = nextResult.pages.find((page) => page.id === selectedPage.id);
 
         if (nextResult !== result) {
@@ -997,6 +1087,7 @@ function AppContent() {
     toggleQuickPreview,
     undo,
     redo,
+    request.workflowMode,
     showOnboardingWizard,
     isProjectSelectorOpen
   ]);
@@ -1074,11 +1165,15 @@ function AppContent() {
 
   function applyPlanningRequest(nextRequest: AutoLayoutRequest) {
     const nextSelectedRequest = buildRequestWithSelection(nextRequest, allAssets, activeAssetIds);
+    const nextResult =
+      nextSelectedRequest.workflowMode === "manual"
+        ? syncManualResultWithRequest(result, nextSelectedRequest)
+        : createAutoLayoutPlan(nextSelectedRequest);
 
     resetStudioHistory();
     startPlanningTransition(() => {
       setRequest(nextSelectedRequest);
-      setResult(createAutoLayoutPlan(nextSelectedRequest));
+      setResult(nextResult);
       setExportMessage(null);
     });
   }
@@ -1089,11 +1184,15 @@ function AppContent() {
     selectedIds: string[]
   ) {
     const nextSelectedRequest = buildRequestWithSelection(nextRequest, sourceAssets, selectedIds);
+    const nextResult =
+      nextSelectedRequest.workflowMode === "manual"
+        ? syncManualResultWithRequest(result, nextSelectedRequest, { keepCurrentSheetSpec: true })
+        : createAutoLayoutPlan(nextSelectedRequest);
 
     resetStudioHistory();
     startPlanningTransition(() => {
       setRequest(nextSelectedRequest);
-      setResult(createAutoLayoutPlan(nextSelectedRequest));
+      setResult(nextResult);
       setExportMessage(null);
     });
   }
@@ -1268,7 +1367,12 @@ function AppContent() {
           targetSlotId: slotId
         })
       : placeImageInSlot(baseResult, { imageId, targetPageId: pageId, targetSlotId: slotId });
-    if (!isSamePageReposition && previousUsage?.pageId && previousUsage.pageId !== pageId) {
+    if (
+      request.workflowMode !== "manual" &&
+      !isSamePageReposition &&
+      previousUsage?.pageId &&
+      previousUsage.pageId !== pageId
+    ) {
       nextResult = rebalancePagesForAssignedImages(nextResult, [previousUsage.pageId]);
     }
     const nextPlacement = findImagePlacement(nextResult, imageId);
@@ -1285,7 +1389,9 @@ function AppContent() {
             ? `Foto scambiate manualmente nel foglio ${previousUsage?.pageNumber ?? pageId}.`
             : `Foto riposizionata manualmente nel foglio ${previousUsage?.pageNumber ?? pageId}.`
         : previousUsage && previousUsage.pageId !== pageId
-          ? `Foto spostata dal foglio ${previousUsage.pageNumber} al foglio ${nextPlacement?.pageNumber ?? pageId} con riassetto automatico.`
+          ? request.workflowMode === "manual"
+            ? `Foto spostata dal foglio ${previousUsage.pageNumber} al foglio ${nextPlacement?.pageNumber ?? pageId}.`
+            : `Foto spostata dal foglio ${previousUsage.pageNumber} al foglio ${nextPlacement?.pageNumber ?? pageId} con riassetto automatico.`
           : imageAlreadyActive
             ? `Foto assegnata manualmente al foglio ${pageId} con aggiornamento layout.`
             : `Foto attivata dal catalogo e assegnata al foglio ${pageId}.`
@@ -1354,7 +1460,7 @@ function AppContent() {
     const baseResult = imageAlreadyActive ? result : syncResultWithSelection(result, nextRequest);
     let nextResult = addImageToPage(baseResult, { pageId, imageId });
 
-    if (previousUsage?.pageId && previousUsage.pageId !== pageId) {
+    if (request.workflowMode !== "manual" && previousUsage?.pageId && previousUsage.pageId !== pageId) {
       nextResult = rebalancePagesForAssignedImages(nextResult, [previousUsage.pageId]);
     }
 
@@ -1373,7 +1479,9 @@ function AppContent() {
         previousUsage?.pageId === pageId
           ? `Foglio ${pageId} riorganizzato automaticamente attorno alla foto selezionata.`
           : previousUsage && previousUsage.pageId !== pageId
-          ? `Foto aggiunta al foglio ${nextPlacement?.pageNumber ?? pageId} e layout riadattato automaticamente.`
+          ? request.workflowMode === "manual"
+            ? `Foto aggiunta al foglio ${nextPlacement?.pageNumber ?? pageId}.`
+            : `Foto aggiunta al foglio ${nextPlacement?.pageNumber ?? pageId} e layout riadattato automaticamente.`
           : imageAlreadyActive
             ? `Foglio ${pageId} espanso con una nuova foto e layout aggiornato.`
             : `Foto attivata dal catalogo e aggiunta al foglio ${pageId}.`
@@ -1495,10 +1603,19 @@ function AppContent() {
   }
 
   function handleCreatePageFromUnused() {
-    const nextResult = createPage(result);
+    const nextResult =
+      request.workflowMode === "manual"
+        ? appendEmptyPage(result, {
+            preferredTemplateId: selectedPage?.templateId,
+            preferredSheetSpec: selectedPage?.sheetSpec
+          })
+        : createPage(result);
     commitStudioChange({
       result: nextResult,
-      activity: "Nuovo foglio creato a partire dalle foto non usate."
+      activity:
+        request.workflowMode === "manual"
+          ? "Nuovo foglio vuoto creato manualmente."
+          : "Nuovo foglio creato a partire dalle foto non usate."
     });
   }
 
@@ -1525,7 +1642,9 @@ function AppContent() {
         pageId: previousUsage.pageId,
         slotId: previousUsage.slotId
       });
-      baseResult = rebalancePagesForAssignedImages(baseResult, [previousUsage.pageId]);
+      if (request.workflowMode !== "manual") {
+        baseResult = rebalancePagesForAssignedImages(baseResult, [previousUsage.pageId]);
+      }
     }
 
     const nextResult = createPage(baseResult, { imageIds: [imageId] });
@@ -1538,7 +1657,9 @@ function AppContent() {
       selectedPageId: newPage?.id ?? selectedPageId,
       selectedSlotKey: newPage?.slotDefinitions[0] ? `${newPage.id}:${newPage.slotDefinitions[0].id}` : selectedSlotKey,
       activity: previousUsage
-        ? `Foto spostata in un nuovo foglio creato automaticamente.`
+        ? request.workflowMode === "manual"
+          ? "Foto spostata in un nuovo foglio."
+          : "Foto spostata in un nuovo foglio creato automaticamente."
         : `Nuovo foglio creato con la foto trascinata.`
     });
 
@@ -1563,7 +1684,10 @@ function AppContent() {
       pageId: usage.pageId,
       slotId: usage.slotId
     });
-    const nextResult = rebalancePagesForAssignedImages(clearedResult, [usage.pageId]);
+    const nextResult =
+      request.workflowMode === "manual"
+        ? clearedResult
+        : rebalancePagesForAssignedImages(clearedResult, [usage.pageId]);
     const nextPage = nextResult.pages.find((page) => page.id === usage.pageId);
 
     commitStudioChange({
@@ -1581,7 +1705,10 @@ function AppContent() {
       pageId,
       slotId
     });
-    const nextResult = rebalancePagesForAssignedImages(clearedResult, [pageId]);
+    const nextResult =
+      request.workflowMode === "manual"
+        ? clearedResult
+        : rebalancePagesForAssignedImages(clearedResult, [pageId]);
     const nextPage = nextResult.pages.find((page) => page.id === pageId);
 
     commitStudioChange({
@@ -1974,7 +2101,9 @@ function AppContent() {
       <>
         <header className="workspace__header">
           <div>
-            <span className="workspace__eyebrow">Impaginazione Automatica</span>
+            <span className="workspace__eyebrow">
+              {isManualWorkflow ? "Impaginazione Libera" : "Impaginazione Automatica"}
+            </span>
             <h2>Il tuo progetto è pronto</h2>
             <p>
               Rivisa le impostazioni. Se tutto è ok, entra nello studio per modificare i layout a pieno schermo.
@@ -2052,17 +2181,21 @@ function AppContent() {
           {/* Card 3: Modalità layout */}
           <div className="setup-card">
             <div className="setup-card__header">
-              <h3 className="setup-card__title">⚙️ Distribuzione foto</h3>
+              <h3 className="setup-card__title">
+                {isManualWorkflow ? "Modalita progetto" : "⚙️ Distribuzione foto"}
+              </h3>
             </div>
             <div className="setup-card__content">
               <div className="setup-card__stat">
-                <span className="setup-card__stat-value">{result.pages.length}</span>
-                <span className="setup-card__stat-label">fogli previsti</span>
+                <span className="setup-card__stat-value">{isManualWorkflow ? "Manuale" : result.pages.length}</span>
+                <span className="setup-card__stat-label">{isManualWorkflow ? "workflow" : "fogli previsti"}</span>
               </div>
               <p className="setup-card__description">
-                {request.planningMode === "desiredSheetCount"
-                  ? `${request.desiredSheetCount} fogli desiderati`
-                  : `${request.maxPhotosPerSheet} foto per foglio`}
+                {isManualWorkflow
+                  ? `${result.pages.length} fogli iniziali controllati manualmente`
+                  : request.planningMode === "desiredSheetCount"
+                    ? `${request.desiredSheetCount} fogli desiderati`
+                    : `${request.maxPhotosPerSheet} foto per foglio`}
               </p>
             </div>
             <div className="setup-card__actions">
@@ -2338,11 +2471,15 @@ function AppContent() {
                   <button
                     type="button"
                     className="secondary-button studio-side__button"
-                    disabled={result.unassignedAssets.length === 0}
+                    disabled={!isManualWorkflow && result.unassignedAssets.length === 0}
                     onClick={handleCreatePageFromUnused}
-                    aria-label="Aggiungi un nuovo foglio dalle foto non usate"
+                    aria-label={
+                      isManualWorkflow
+                        ? "Aggiungi un nuovo foglio vuoto"
+                        : "Aggiungi un nuovo foglio dalle foto non usate"
+                    }
                   >
-                    Aggiungi nuovo foglio
+                    {isManualWorkflow ? "Aggiungi foglio vuoto" : "Aggiungi nuovo foglio"}
                   </button>
                   <button
                     type="button"

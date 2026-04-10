@@ -9,3 +9,4 @@ export declare function migrateDesktopThumbnailCacheDirectory(directoryPath: str
 export declare function dismissDesktopCacheLocationRecommendation(): Promise<boolean>;
 export declare function getDesktopRamBudgetInfo(): Promise<DesktopThumbnailCacheInfo | null>;
 export declare function setDesktopRamBudgetPreset(preset: DesktopRamBudgetPreset): Promise<DesktopThumbnailCacheInfo | null>;
+export declare function relaunchDesktopApp(): void;

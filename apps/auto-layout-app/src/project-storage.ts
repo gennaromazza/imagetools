@@ -166,6 +166,10 @@ function normalizeRequest(rawRequest: unknown, fallbackAssets: ImageAsset[]): Au
     jobName: toStringValue(request.jobName, DEFAULT_PROJECT_REQUEST.jobName),
     sourceFolderPath: toStringValue(request.sourceFolderPath, DEFAULT_PROJECT_REQUEST.sourceFolderPath),
     assets,
+    workflowMode:
+      request.workflowMode === "auto" || request.workflowMode === "manual"
+        ? request.workflowMode
+        : DEFAULT_PROJECT_REQUEST.workflowMode,
     fitMode:
       request.fitMode === "fit" || request.fitMode === "fill" || request.fitMode === "crop"
         ? request.fitMode
@@ -235,13 +239,49 @@ function mergeTemplatesById(
   return merged;
 }
 
+function resolveEmptyPageTemplate(templates: AutoLayoutResult["availableTemplates"]) {
+  const singlePhotoTemplates = templates
+    .filter((template) => template.minPhotos <= 1 && template.maxPhotos >= 1)
+    .sort((left, right) => left.maxPhotos - right.maxPhotos);
+
+  return singlePhotoTemplates[0] ?? templates[0] ?? null;
+}
+
+function buildManualFallbackPlan(request: AutoLayoutRequest): AutoLayoutResult {
+  const seedPlan = createAutoLayoutPlan({
+    ...request,
+    assets: []
+  });
+  const template = resolveEmptyPageTemplate(seedPlan.availableTemplates);
+  const sheetCount = Math.max(1, Math.floor(request.desiredSheetCount ?? 1));
+
+  if (!template) {
+    return buildAutoLayoutResult(request, [], seedPlan.availableTemplates);
+  }
+
+  const pages = Array.from({ length: sheetCount }, (_, index) => ({
+    id: `page-${index + 1}`,
+    pageNumber: index + 1,
+    sheetSpec: { ...request.sheet },
+    templateId: template.id,
+    templateLabel: template.label,
+    slotDefinitions: template.slots,
+    assignments: [],
+    imageIds: [],
+    warnings: []
+  }));
+
+  return buildAutoLayoutResult(request, pages, seedPlan.availableTemplates);
+}
+
 function normalizeResult(rawResult: unknown, fallbackRequest: AutoLayoutRequest): AutoLayoutResult | undefined {
   if (!isRecord(rawResult)) {
     return undefined;
   }
 
   const request = normalizeRequest(rawResult.request, fallbackRequest.assets);
-  const fallbackPlan = createAutoLayoutPlan(request);
+  const fallbackPlan =
+    request.workflowMode === "manual" ? buildManualFallbackPlan(request) : createAutoLayoutPlan(request);
 
   if (!Array.isArray(rawResult.pages)) {
     return fallbackPlan;

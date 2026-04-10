@@ -890,6 +890,10 @@ function registerIpcHandlers(): void {
       effectivePreviewSourceMaxBytes: limits.effectivePreviewSourceMaxBytes,
     });
   });
+  ipcMain.handle("filex:relaunch", () => {
+    app.relaunch();
+    app.quit();
+  });
   ipcMain.handle("filex:get-cache-location-recommendation", () => getCacheLocationRecommendation());
   ipcMain.handle("filex:migrate-thumbnail-cache-directory", (_event, directoryPath: string) =>
     migrateThumbnailCacheDirectory(directoryPath),

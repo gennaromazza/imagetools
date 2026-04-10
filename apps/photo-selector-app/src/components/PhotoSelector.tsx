@@ -105,6 +105,7 @@ interface PhotoSelectorProps {
   onSnoozeDesktopCacheRecommendation?: () => void | Promise<void>;
   onDismissDesktopCacheRecommendation?: () => void | Promise<void>;
   onRamBudgetPresetChange?: (preset: DesktopRamBudgetPreset) => void | Promise<void>;
+  onRelaunch?: () => void;
 }
 
 type SortMode = "name" | "orientation" | "rating" | "createdAt";
@@ -297,6 +298,96 @@ function formatVolumeSummary(
   return { current, recommended };
 }
 
+const RAM_PRESET_OPTIONS = [
+  { preset: "conservative" as DesktopRamBudgetPreset, label: "Conservativo", fraction: 0.06 },
+  { preset: "default" as DesktopRamBudgetPreset, label: "Default", fraction: 0.12 },
+  { preset: "performance" as DesktopRamBudgetPreset, label: "Performance", fraction: 0.20 },
+  { preset: "maximum" as DesktopRamBudgetPreset, label: "Massimo", fraction: 0.28 },
+] as const;
+
+function RamBudgetSection({
+  systemTotalMemoryBytes,
+  activePreset,
+  activeRamBudgetBytes,
+  onPresetChange,
+  onRelaunch,
+}: {
+  systemTotalMemoryBytes: number;
+  activePreset: DesktopRamBudgetPreset | null;
+  activeRamBudgetBytes: number | null;
+  onPresetChange: (preset: DesktopRamBudgetPreset) => void | Promise<void>;
+  onRelaunch?: () => void;
+}) {
+  const [pendingPreset, setPendingPreset] = useState<DesktopRamBudgetPreset | null>(null);
+  const [applying, setApplying] = useState(false);
+
+  const displayPreset = pendingPreset ?? activePreset;
+  const hasPendingChange = pendingPreset !== null && pendingPreset !== activePreset;
+
+  async function handleApply() {
+    if (!pendingPreset || applying) return;
+    setApplying(true);
+    await onPresetChange(pendingPreset);
+    setPendingPreset(null);
+    setApplying(false);
+    onRelaunch?.();
+  }
+
+  return (
+    <>
+      <label className="photo-selector__settings-color-row" style={{ alignItems: "center", marginTop: "0.6rem" }}>
+        <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Budget RAM</span>
+      </label>
+      <div className="photo-selector__settings-preset-row" style={{ flexWrap: "wrap", gap: "0.3rem" }}>
+        {RAM_PRESET_OPTIONS.map(({ preset, label, fraction }) => {
+          const gb = ((systemTotalMemoryBytes * fraction) / (1024 ** 3)).toFixed(1);
+          const isSelected = displayPreset === preset;
+          const isActive = activePreset === preset;
+          return (
+            <button
+              key={preset}
+              type="button"
+              className={`ghost-button ghost-button--small${isSelected ? " ghost-button--active" : ""}`}
+              onClick={() => setPendingPreset(preset)}
+              title={`${label}: ${gb} GB (${Math.round(fraction * 100)}% RAM)${isActive ? " — preset corrente" : ""}`}
+              style={isActive && !isSelected ? { opacity: 0.55 } : undefined}
+            >
+              {label} ({gb} GB)
+            </button>
+          );
+        })}
+      </div>
+      {hasPendingChange ? (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.35rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ fontSize: "0.8rem", padding: "0.4rem 0.8rem" }}
+            onClick={() => void handleApply()}
+            disabled={applying}
+          >
+            {applying ? "Salvo…" : "Applica e riavvia"}
+          </button>
+          <button
+            type="button"
+            className="ghost-button ghost-button--small"
+            onClick={() => setPendingPreset(null)}
+            disabled={applying}
+          >
+            Annulla
+          </button>
+        </div>
+      ) : (
+        <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+          {activePreset
+            ? `Preset attivo: ${activePreset} · ${((activeRamBudgetBytes ?? 0) / (1024 ** 3)).toFixed(1)} GB`
+            : "Seleziona un preset per configurare il budget RAM della cache."}
+        </p>
+      )}
+    </>
+  );
+}
+
 export function PhotoSelector({
   photos,
   metadataVersion,
@@ -331,6 +422,7 @@ export function PhotoSelector({
   onSnoozeDesktopCacheRecommendation,
   onDismissDesktopCacheRecommendation,
   onRamBudgetPresetChange,
+  onRelaunch,
 }: PhotoSelectorProps) {
   const [sortBy, setSortBy] = useState<SortMode>("name");
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
@@ -3755,40 +3847,13 @@ export function PhotoSelector({
               </>
             ) : null}
             {desktopThumbnailCacheInfo?.systemTotalMemoryBytes != null && onRamBudgetPresetChange ? (
-              <>
-                <label className="photo-selector__settings-color-row" style={{ alignItems: "center", marginTop: "0.6rem" }}>
-                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Budget RAM</span>
-                </label>
-                <div className="photo-selector__settings-preset-row" style={{ flexWrap: "wrap", gap: "0.3rem" }}>
-                  {(
-                    [
-                      { preset: "conservative" as DesktopRamBudgetPreset, label: "Conservativo", fraction: 0.06 },
-                      { preset: "default" as DesktopRamBudgetPreset, label: "Default", fraction: 0.12 },
-                      { preset: "performance" as DesktopRamBudgetPreset, label: "Performance", fraction: 0.20 },
-                      { preset: "maximum" as DesktopRamBudgetPreset, label: "Massimo", fraction: 0.28 },
-                    ] as const
-                  ).map(({ preset, label, fraction }) => {
-                    const gb = ((desktopThumbnailCacheInfo.systemTotalMemoryBytes! * fraction) / (1024 ** 3)).toFixed(1);
-                    const isActive = desktopThumbnailCacheInfo.ramBudgetPreset === preset;
-                    return (
-                      <button
-                        key={preset}
-                        type="button"
-                        className={`ghost-button ghost-button--small${isActive ? " ghost-button--active" : ""}`}
-                        onClick={() => void onRamBudgetPresetChange(preset)}
-                        title={`${label}: ${gb} GB (${Math.round(fraction * 100)}% RAM)`}
-                      >
-                        {label} ({gb} GB)
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
-                  {desktopThumbnailCacheInfo.ramBudgetPreset
-                    ? `Preset attivo: ${desktopThumbnailCacheInfo.ramBudgetPreset} · ${((desktopThumbnailCacheInfo.ramBudgetBytes ?? 0) / (1024 ** 3)).toFixed(1)} GB. Effettivo al prossimo avvio.`
-                    : "Seleziona un preset per configurare il budget RAM della cache."}
-                </p>
-              </>
+              <RamBudgetSection
+                systemTotalMemoryBytes={desktopThumbnailCacheInfo.systemTotalMemoryBytes}
+                activePreset={desktopThumbnailCacheInfo.ramBudgetPreset ?? null}
+                activeRamBudgetBytes={desktopThumbnailCacheInfo.ramBudgetBytes ?? null}
+                onPresetChange={onRamBudgetPresetChange}
+                onRelaunch={onRelaunch}
+              />
             ) : null}
           </div>
 

@@ -125,4 +125,10 @@ export async function setDesktopRamBudgetPreset(preset) {
         return null;
     }
 }
+export function relaunchDesktopApp() {
+    const api = getDesktopApi();
+    if (api?.relaunch) {
+        void api.relaunch();
+    }
+}
 //# sourceMappingURL=desktop-thumbnail-cache.js.map

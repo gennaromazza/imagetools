@@ -671,6 +671,7 @@ export function LayoutPreviewBoard({
   isInspectorCollapsed,
   setIsInspectorCollapsed
 }: LayoutPreviewBoardProps) {
+  const isManualWorkflow = result.request.workflowMode === "manual";
   const [isTemplateChooserOpen, setIsTemplateChooserOpen] = useState(false);
   const [templateApplyScope, setTemplateApplyScope] = useState<"single" | "visible">("single");
   const [templatePreviewId, setTemplatePreviewId] = useState<string | null>(null);
@@ -1951,10 +1952,58 @@ export function LayoutPreviewBoard({
           <div
             ref={canvasRef}
             className="layout-studio__canvas layout-studio__canvas--vertical"
-            onDragOver={handleCanvasDragOver}
+            onDragOver={(event) => {
+              handleCanvasDragOver(event);
+              if (dragState) {
+                event.preventDefault();
+              }
+            }}
             onDragEnd={stopAutoScroll}
-            onDrop={stopAutoScroll}
+            onDrop={(event) => {
+              stopAutoScroll();
+              if (!dragState) {
+                return;
+              }
+
+              const target = event.target as HTMLElement | null;
+              const droppedInsidePage = Boolean(target?.closest(".layout-studio__page-card"));
+              const droppedInsideTransferTray = Boolean(target?.closest(".transfer-tray"));
+              const droppedInsideDock = Boolean(target?.closest(".layout-studio__drag-dock"));
+
+              if (!droppedInsidePage && !droppedInsideTransferTray && !droppedInsideDock) {
+                event.preventDefault();
+                onCreatePageWithImage(dragState.imageId);
+              }
+            }}
           >
+            <div className="layout-studio__drag-dock">
+              <button
+                type="button"
+                className="secondary-button layout-studio__drag-dock-button"
+                onClick={onCreatePageFromUnused}
+                disabled={!isManualWorkflow && result.unassignedAssets.length === 0}
+              >
+                {isManualWorkflow ? "Nuovo foglio vuoto" : "Nuovo foglio"}
+              </button>
+              {dragState ? (
+                <div
+                  className="layout-studio__drag-dock-dropzone"
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onCreatePageWithImage(dragState.imageId);
+                  }}
+                >
+                  <strong>+ Nuovo foglio</strong>
+                  <span>Rilascia qui per creare un foglio con la foto trascinata.</span>
+                </div>
+              ) : null}
+            </div>
+
             <div
               className="layout-studio__canvas-zoom"
               style={{ transform: `scale(${zoom})`, transformOrigin: "center top" }}
