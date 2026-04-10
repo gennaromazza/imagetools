@@ -194,20 +194,21 @@ function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
     }
   }
 
-  const localPrograms = process.env.LOCALAPPDATA
-    ? join(process.env.LOCALAPPDATA, "Programs", descriptor.productName, `${descriptor.executableName}.exe`)
-    : "";
-  if (localPrograms) candidates.add(localPrograms);
+  // Check both productName ("Selezione Foto") and executableName ("Selezione-Foto") as folder names,
+  // because electron-builder NSIS may use either depending on install mode and user choice.
+  const folderNames = Array.from(new Set([descriptor.productName, descriptor.executableName]));
 
-  const programFiles = process.env.ProgramFiles
-    ? join(process.env.ProgramFiles, descriptor.productName, `${descriptor.executableName}.exe`)
-    : "";
-  if (programFiles) candidates.add(programFiles);
-
-  const programFilesX86 = process.env["ProgramFiles(x86)"]
-    ? join(process.env["ProgramFiles(x86)"], descriptor.productName, `${descriptor.executableName}.exe`)
-    : "";
-  if (programFilesX86) candidates.add(programFilesX86);
+  for (const folderName of folderNames) {
+    if (process.env.LOCALAPPDATA) {
+      candidates.add(join(process.env.LOCALAPPDATA, "Programs", folderName, `${descriptor.executableName}.exe`));
+    }
+    if (process.env.ProgramFiles) {
+      candidates.add(join(process.env.ProgramFiles, folderName, `${descriptor.executableName}.exe`));
+    }
+    if (process.env["ProgramFiles(x86)"]) {
+      candidates.add(join(process.env["ProgramFiles(x86)"], folderName, `${descriptor.executableName}.exe`));
+    }
+  }
 
   return Array.from(candidates);
 }
