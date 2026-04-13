@@ -5,7 +5,7 @@ interface SettingsPanelProps {
   request: AutoLayoutRequest;
   onSheetPresetChange: (presetId: string) => void;
   onSheetFieldChange: (
-    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi",
+    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "bleedCm",
     value: number
   ) => void;
   onFitModeChange: (value: FitMode) => void;
@@ -93,6 +93,19 @@ export function SettingsPanel({
             step="50"
             value={request.sheet.dpi}
             onChange={(event) => onSheetFieldChange("dpi", Number(event.target.value))}
+          />
+        </label>
+      </div>
+
+      <div className="inline-grid inline-grid--3">
+        <label className="field">
+          <span>Bleed (cm)</span>
+          <input
+            type="number"
+            min="0"
+            step="0.1"
+            value={request.sheet.bleedCm ?? 0}
+            onChange={(event) => onSheetFieldChange("bleedCm", Number(event.target.value))}
           />
         </label>
       </div>

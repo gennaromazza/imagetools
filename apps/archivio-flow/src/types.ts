@@ -5,6 +5,7 @@ import type {
   ArchivioImportRequest,
   ArchivioImportResult,
   ArchivioJob,
+  ArchivioSelectionCandidate,
   ArchivioLowQualityProgressSnapshot,
   ArchivioSdCard,
   ArchivioSdPreview,
@@ -21,3 +22,4 @@ export type LowQualityProgressSnapshot = ArchivioLowQualityProgressSnapshot;
 export type ArchiveHierarchySettings = ArchivioArchiveHierarchyConfig;
 export type ArchivioFlowSettings = ArchivioSettings;
 export type FilterPreviewData = ArchivioFilterPreviewData;
+export type SelectionCandidate = ArchivioSelectionCandidate;

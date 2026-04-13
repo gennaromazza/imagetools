@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { List as VirtualList, type RowComponentProps } from "react-window";
-import type { Job, LowQualityProgressSnapshot } from "../types";
+import type { Job, LowQualityProgressSnapshot, SelectionCandidate } from "../types";
 import {
   deleteArchivioJob,
+  getArchivioJobSelectionCandidates,
   generateArchivioLowQuality,
   getArchivioJobSubfolders,
   getArchivioLowQualityProgress,
@@ -145,6 +146,11 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
   const [bqModalSubfolders, setBqModalSubfolders] = useState<string[]>([]);
   const [bqModalLoading, setBqModalLoading] = useState(false);
   const [bqModalSelected, setBqModalSelected] = useState<string>("__all__");
+  const [selectionModalJob, setSelectionModalJob] = useState<Job | null>(null);
+  const [selectionModalCandidates, setSelectionModalCandidates] = useState<SelectionCandidate[]>([]);
+  const [selectionModalSelectedPath, setSelectionModalSelectedPath] = useState("");
+  const [selectionModalOpening, setSelectionModalOpening] = useState(false);
+  const [openingSelectionJobId, setOpeningSelectionJobId] = useState<string | null>(null);
   const [rowFeedbackByJob, setRowFeedbackByJob] = useState<Record<string, { text: string; tone: RowFeedbackTone }>>({});
   const [contractFeedback, setContractFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [lowQualityFeedback, setLowQualityFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -247,12 +253,69 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
       setRowFeedback(job.id, "Cartella non disponibile", "error");
       return;
     }
+    const fallbackPath = (job.percorsoSelezione ?? "").trim() || job.percorsoCartella;
+    setOpeningSelectionJobId(job.id);
     try {
-      await openJobInPhotoSelector(job.percorsoCartella);
+      const selectionData = await getArchivioJobSelectionCandidates(job.id);
+      const candidates = selectionData.candidates.filter((candidate) => candidate.path.trim().length > 0);
+      if (candidates.length > 1) {
+        const preferredPath = (selectionData.preferredPath ?? "").trim();
+        const selectedPath = candidates.some((candidate) => candidate.path === preferredPath)
+          ? preferredPath
+          : candidates[0]!.path;
+        setSelectionModalJob(job);
+        setSelectionModalCandidates(candidates);
+        setSelectionModalSelectedPath(selectedPath);
+        return;
+      }
+
+      const targetSelectionPath = candidates[0]?.path?.trim()
+        || (selectionData.preferredPath ?? "").trim()
+        || fallbackPath;
+      await openJobInPhotoSelector(targetSelectionPath);
       setRowFeedback(job.id, "Apro in Photo Selector", "success");
     } catch (error) {
+      try {
+        await openJobInPhotoSelector(fallbackPath);
+        setRowFeedback(job.id, "Apro in Photo Selector", "success");
+      } catch {
+        const message = error instanceof Error ? error.message : "Impossibile aprire Photo Selector";
+        setRowFeedback(job.id, message, "error");
+      }
+    } finally {
+      setOpeningSelectionJobId((current) => (current === job.id ? null : current));
+    }
+  }
+
+  function closeSelectionModal() {
+    if (selectionModalOpening) return;
+    setSelectionModalJob(null);
+    setSelectionModalCandidates([]);
+    setSelectionModalSelectedPath("");
+  }
+
+  async function confirmSelectionModal() {
+    if (!selectionModalJob) return;
+    const targetPath = selectionModalSelectedPath.trim();
+    if (!targetPath) {
+      setRowFeedback(selectionModalJob.id, "Seleziona una cartella", "info");
+      return;
+    }
+
+    setSelectionModalOpening(true);
+    setOpeningSelectionJobId(selectionModalJob.id);
+    try {
+      await openJobInPhotoSelector(targetPath);
+      setRowFeedback(selectionModalJob.id, "Apro in Photo Selector", "success");
+      setSelectionModalJob(null);
+      setSelectionModalCandidates([]);
+      setSelectionModalSelectedPath("");
+    } catch (error) {
       const message = error instanceof Error ? error.message : "Impossibile aprire Photo Selector";
-      setRowFeedback(job.id, message, "error");
+      setRowFeedback(selectionModalJob.id, message, "error");
+    } finally {
+      setSelectionModalOpening(false);
+      setOpeningSelectionJobId((current) => (current === selectionModalJob.id ? null : current));
     }
   }
 
@@ -499,9 +562,9 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
             style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
             onClick={() => void handleOpenInPhotoSelector(job)}
             title="Apri questa cartella in Photo Selector"
-            disabled={job.folderExists === false}
+            disabled={job.folderExists === false || openingSelectionJobId === job.id}
           >
-            Seleziona
+            {openingSelectionJobId === job.id ? "Apro..." : "Seleziona"}
           </button>
           <button
             className="ghost-button"
@@ -868,6 +931,97 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
           <p style={{ color: lowQualityFeedback.type === "success" ? "var(--success)" : "var(--danger)" }}>
             {lowQualityFeedback.text}
           </p>
+        </div>
+      )}
+
+      {selectionModalJob && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 10, 9, 0.72)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 85,
+            padding: "1rem",
+          }}
+        >
+          <div
+            className="panel-section"
+            style={{
+              width: "min(760px, 100%)",
+              padding: "1.1rem",
+              borderColor: "var(--line-strong)",
+              background: "rgba(27, 33, 30, 0.98)",
+            }}
+          >
+            <div className="stack" style={{ gap: "0.85rem" }}>
+              <div>
+                <strong style={{ fontSize: "1rem" }}>Scegli cartella per Photo Selector</strong>
+                <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.86rem" }}>
+                  {selectionModalJob.nomeLavoro}
+                </p>
+              </div>
+
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.86rem" }}>
+                Ho trovato piu cartelle valide. Seleziona quella da aprire.
+              </p>
+
+              <div className="stack" style={{ gap: "0.35rem", maxHeight: "42vh", overflowY: "auto", paddingRight: "0.2rem" }}>
+                {selectionModalCandidates.map((candidate) => (
+                  <label
+                    key={candidate.path}
+                    style={{
+                      display: "grid",
+                      gap: "0.28rem",
+                      padding: "0.55rem 0.62rem",
+                      borderRadius: 8,
+                      border: `1px solid ${selectionModalSelectedPath === candidate.path ? "var(--line-strong)" : "var(--line)"}`,
+                      background: selectionModalSelectedPath === candidate.path ? "rgba(255,255,255,0.06)" : "transparent",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <input
+                        type="radio"
+                        name="selection-folder"
+                        value={candidate.path}
+                        checked={selectionModalSelectedPath === candidate.path}
+                        onChange={() => setSelectionModalSelectedPath(candidate.path)}
+                        style={{ accentColor: "var(--accent)" }}
+                      />
+                      <strong style={{ fontSize: "0.87rem" }}>{candidate.label}</strong>
+                    </div>
+                    <span style={{ color: "var(--text-muted)", fontSize: "0.79rem" }}>
+                      {candidate.fileCount} file supportati
+                    </span>
+                    <span style={{ color: "var(--text-muted)", fontFamily: "monospace", fontSize: "0.75rem", wordBreak: "break-all" }}>
+                      {candidate.path}
+                    </span>
+                  </label>
+                ))}
+              </div>
+
+              <div className="button-row" style={{ justifyContent: "flex-end" }}>
+                <button
+                  className="ghost-button"
+                  style={{ padding: "0.5rem 0.9rem", fontSize: "0.86rem" }}
+                  onClick={closeSelectionModal}
+                  disabled={selectionModalOpening}
+                >
+                  Annulla
+                </button>
+                <button
+                  className="secondary-button"
+                  style={{ padding: "0.5rem 0.9rem", fontSize: "0.86rem" }}
+                  disabled={selectionModalOpening || !selectionModalSelectedPath.trim()}
+                  onClick={() => { void confirmSelectionModal(); }}
+                >
+                  {selectionModalOpening ? "Apro..." : "Apri selezione"}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

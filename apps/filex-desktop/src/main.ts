@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
+import { writeFile as writeFileAsync } from "node:fs/promises";
 import { basename, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
@@ -66,6 +67,7 @@ import {
   getDesktopPreferences,
   getDesktopSessionState,
   getDesktopPerformanceSnapshot,
+  getAutoLayoutProjects,
   getFolderCatalogState,
   getRecentFolders,
   getSortCache,
@@ -73,6 +75,7 @@ import {
   recordDesktopPerformanceSnapshot,
   removeRecentFolder,
   saveDesktopPreferences,
+  saveAutoLayoutProjects,
   saveDesktopSessionState,
   saveFolderAssetStates,
   saveFolderCatalogState,
@@ -232,6 +235,19 @@ function resolveValidFilePath(candidatePath: string): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeUint8Array(payload: unknown): Uint8Array {
+  if (payload instanceof Uint8Array) {
+    return payload;
+  }
+  if (payload instanceof ArrayBuffer) {
+    return new Uint8Array(payload);
+  }
+  if (Array.isArray(payload)) {
+    return new Uint8Array(payload);
+  }
+  return new Uint8Array();
 }
 
 function getArchivioFlowDataDir(): string {
@@ -1059,6 +1075,51 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:save-desktop-session-state", (_event, state: DesktopPersistedState) =>
     saveDesktopSessionState(state),
   );
+  ipcMain.handle("filex:get-auto-layout-projects", () => getAutoLayoutProjects());
+  ipcMain.handle("filex:save-auto-layout-projects", (_event, projects: unknown[]) => {
+    saveAutoLayoutProjects(Array.isArray(projects) ? projects : []);
+  });
+  ipcMain.handle("filex:choose-output-folder", async () => {
+    const result = await dialog.showOpenDialog({
+      title: "Seleziona cartella output",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return sanitizeDesktopPath(result.filePaths[0]);
+  });
+  ipcMain.handle("filex:save-new-file-as", async (_event, suggestedName: string, bytes: Uint8Array) => {
+    const normalizedSuggestedName =
+      typeof suggestedName === "string" && suggestedName.trim().length > 0
+        ? suggestedName.trim()
+        : `export-${Date.now()}.bin`;
+    const saveResult = await dialog.showSaveDialog({
+      title: "Salva file",
+      defaultPath: join(app.getPath("documents"), normalizedSuggestedName),
+    });
+    if (saveResult.canceled || !saveResult.filePath) {
+      return null;
+    }
+
+    const absolutePath = sanitizeDesktopPath(saveResult.filePath);
+    const payload = normalizeUint8Array(bytes);
+    await writeFileAsync(absolutePath, payload);
+    return absolutePath;
+  });
+  ipcMain.handle("filex:write-file", async (_event, absolutePath: string, bytes: Uint8Array) => {
+    const normalizedPath = sanitizeDesktopPath(absolutePath);
+    if (!normalizedPath) {
+      return false;
+    }
+
+    try {
+      await writeFileAsync(normalizedPath, normalizeUint8Array(bytes));
+      return true;
+    } catch {
+      return false;
+    }
+  });
   ipcMain.handle("filex:get-recent-folders", () => getRecentFolders());
   ipcMain.handle("filex:save-recent-folder", (_event, folder: DesktopRecentFolder) => saveRecentFolder(folder));
   ipcMain.handle("filex:remove-recent-folder", (_event, folderPathOrName: string) =>
@@ -1147,6 +1208,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:list-archivio-job-subfolders", async (_event, jobId: string) => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.listJobSubfoldersService(jobId);
+  });
+  ipcMain.handle("filex:list-archivio-job-selection-candidates", async (_event, jobId: string) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.listJobSelectionCandidatesService(jobId);
   });
   ipcMain.handle("filex:generate-archivio-low-quality", async (_event, jobId: string, overwrite: boolean, sourceSubfolder?: string) => {
     const archivio = await loadArchivioFlowModule();

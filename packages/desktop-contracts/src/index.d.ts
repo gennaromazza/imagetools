@@ -441,19 +441,26 @@ export interface ArchivioSdPreview {
 }
 
 export interface ArchivioJob {
-  id: string;
-  nomeLavoro: string;
-  dataLavoro: string;
-  autore: string;
-  annoArchivio?: string;
-  categoriaArchivio?: string;
-  contrattoLink?: string;
-  percorsoCartella: string;
-  nomeCartella: string;
-  dataCreazione: string;
-  numeroFile: number;
-  folderExists?: boolean;
-  hasLowQualityFiles?: boolean;
+    id: string;
+    nomeLavoro: string;
+    dataLavoro: string;
+    autore: string;
+    annoArchivio?: string;
+    categoriaArchivio?: string;
+    contrattoLink?: string;
+    percorsoCartella: string;
+    percorsoSelezione?: string;
+    nomeCartella: string;
+    dataCreazione: string;
+    numeroFile: number;
+    folderExists?: boolean;
+    hasLowQualityFiles?: boolean;
+}
+export interface ArchivioSelectionCandidate {
+    path: string;
+    label: string;
+    fileCount: number;
+    depth: number;
 }
 
 export interface ArchivioSettings {
@@ -634,6 +641,11 @@ export interface FileXDesktopApi {
   ) => Promise<DesktopPhotoSelectorPreferences>;
   getDesktopSessionState: () => Promise<DesktopPersistedState | null>;
   saveDesktopSessionState: (state: DesktopPersistedState) => Promise<void>;
+  getAutoLayoutProjects: () => Promise<unknown[]>;
+  saveAutoLayoutProjects: (projects: unknown[]) => Promise<void>;
+  chooseOutputFolder: () => Promise<string | null>;
+  saveNewFileAs: (suggestedName: string, bytes: Uint8Array) => Promise<string | null>;
+  writeFile: (absolutePath: string, bytes: Uint8Array) => Promise<boolean>;
   getRecentFolders: () => Promise<DesktopRecentFolder[]>;
   saveRecentFolder: (folder: DesktopRecentFolder) => Promise<DesktopRecentFolder[]>;
   removeRecentFolder: (folderPathOrName: string) => Promise<DesktopRecentFolder[]>;
@@ -671,6 +683,10 @@ export interface FileXDesktopApi {
   deleteArchivioJob: (jobId: string) => Promise<{ ok: boolean }>;
   updateArchivioJobContractLink: (jobId: string, contrattoLink: string) => Promise<ArchivioJob>;
   listArchivioJobSubfolders: (jobId: string) => Promise<{ subfolders: string[] }>;
+  listArchivioJobSelectionCandidates: (jobId: string) => Promise<{
+    candidates: ArchivioSelectionCandidate[];
+    preferredPath: string | null;
+  }>;
   generateArchivioLowQuality: (jobId: string, overwrite: boolean, sourceSubfolder?: string) => Promise<{
     ok: boolean;
     jobId: string;

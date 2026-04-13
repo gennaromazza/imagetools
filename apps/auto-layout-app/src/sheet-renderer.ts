@@ -11,6 +11,7 @@ import { measureAsync } from "./performance-utils";
 
 interface ExportOptions {
   directoryHandle?: FileSystemDirectoryHandle | null;
+  outputDirectoryPath?: string | null;
   onProgress?: (update: ExportProgressUpdate) => void;
 }
 
@@ -28,7 +29,7 @@ export interface ExportProgressUpdate {
   stage: "rendering" | "saving" | "completed";
 }
 
-function cmToPx(cm: number, dpi: number): number {
+export function cmToPx(cm: number, dpi: number): number {
   return Math.round((cm / 2.54) * dpi);
 }
 
@@ -44,19 +45,21 @@ function resolveEffectiveFormat(format: OutputFormat): "jpg" | "png" {
   return format === "png" ? "png" : "jpg";
 }
 
-function getRenderedSlotRect(
+export function getRenderedSlotRect(
   page: GeneratedPageLayout,
   slot: GeneratedPageLayout["slotDefinitions"][number],
-  canvasWidth: number,
-  canvasHeight: number,
+  trimX: number,
+  trimY: number,
+  trimWidth: number,
+  trimHeight: number,
   dpi: number
 ): { x: number; y: number; width: number; height: number } {
   const marginPx = cmToPx(page.sheetSpec.marginCm, dpi);
-  const innerWidth = canvasWidth - marginPx * 2;
-  const innerHeight = canvasHeight - marginPx * 2;
+  const innerWidth = trimWidth - marginPx * 2;
+  const innerHeight = trimHeight - marginPx * 2;
 
-  let x = marginPx + slot.x * innerWidth;
-  let y = marginPx + slot.y * innerHeight;
+  let x = trimX + marginPx + slot.x * innerWidth;
+  let y = trimY + marginPx + slot.y * innerHeight;
   let width = slot.width * innerWidth;
   let height = slot.height * innerHeight;
 
@@ -69,6 +72,54 @@ function getRenderedSlotRect(
   }
 
   return { x, y, width, height };
+}
+
+function drawCropMarks(
+  ctx: CanvasRenderingContext2D,
+  trimX: number,
+  trimY: number,
+  trimWidth: number,
+  trimHeight: number,
+  bleedPx: number
+) {
+  if (bleedPx <= 0) {
+    return;
+  }
+
+  const markLength = Math.max(6, Math.min(bleedPx * 0.8, 24));
+  const markInset = Math.max(2, Math.min(bleedPx * 0.3, 10));
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(20, 16, 12, 0.9)";
+  ctx.lineWidth = 1;
+
+  // Top-left
+  ctx.beginPath();
+  ctx.moveTo(trimX - markInset - markLength, trimY);
+  ctx.lineTo(trimX - markInset, trimY);
+  ctx.moveTo(trimX, trimY - markInset - markLength);
+  ctx.lineTo(trimX, trimY - markInset);
+
+  // Top-right
+  ctx.moveTo(trimX + trimWidth + markInset, trimY);
+  ctx.lineTo(trimX + trimWidth + markInset + markLength, trimY);
+  ctx.moveTo(trimX + trimWidth, trimY - markInset - markLength);
+  ctx.lineTo(trimX + trimWidth, trimY - markInset);
+
+  // Bottom-left
+  ctx.moveTo(trimX - markInset - markLength, trimY + trimHeight);
+  ctx.lineTo(trimX - markInset, trimY + trimHeight);
+  ctx.moveTo(trimX, trimY + trimHeight + markInset);
+  ctx.lineTo(trimX, trimY + trimHeight + markInset + markLength);
+
+  // Bottom-right
+  ctx.moveTo(trimX + trimWidth + markInset, trimY + trimHeight);
+  ctx.lineTo(trimX + trimWidth + markInset + markLength, trimY + trimHeight);
+  ctx.moveTo(trimX + trimWidth, trimY + trimHeight + markInset);
+  ctx.lineTo(trimX + trimWidth, trimY + trimHeight + markInset + markLength);
+
+  ctx.stroke();
+  ctx.restore();
 }
 
 function buildFileName(result: AutoLayoutResult, page: GeneratedPageLayout, effectiveFormat: "jpg" | "png"): string {
@@ -155,16 +206,20 @@ export async function renderSheetPage(
   assetsById: Map<string, ImageAsset>,
   dpi = page.sheetSpec.dpi
 ): Promise<HTMLCanvasElement> {
+  const bleedCm = Math.max(0, page.sheetSpec.bleedCm ?? 0);
+  const bleedPx = cmToPx(bleedCm, dpi);
+  const trimWidth = cmToPx(page.sheetSpec.widthCm, dpi);
+  const trimHeight = cmToPx(page.sheetSpec.heightCm, dpi);
   const canvas = document.createElement("canvas");
-  canvas.width = cmToPx(page.sheetSpec.widthCm, dpi);
-  canvas.height = cmToPx(page.sheetSpec.heightCm, dpi);
+  canvas.width = trimWidth + bleedPx * 2;
+  canvas.height = trimHeight + bleedPx * 2;
 
   const ctx = canvas.getContext("2d");
   if (!ctx) {
-    throw new Error("Canvas 2D non disponibile nel browser corrente.");
+    throw new Error("Canvas 2D non disponibile nel runtime corrente.");
   }
-
-  const marginPx = cmToPx(page.sheetSpec.marginCm, dpi);
+  const trimX = bleedPx;
+  const trimY = bleedPx;
 
   ctx.fillStyle = page.sheetSpec.backgroundColor || "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -185,8 +240,10 @@ export async function renderSheetPage(
     const { x: slotX, y: slotY, width: slotWidth, height: slotHeight } = getRenderedSlotRect(
       page,
       slot,
-      canvas.width,
-      canvas.height,
+      trimX,
+      trimY,
+      trimWidth,
+      trimHeight,
       dpi
     );
     const assignment = page.assignments.find((item) => item.slotId === slot.id);
@@ -202,6 +259,14 @@ export async function renderSheetPage(
     ctx.lineWidth = Math.max(1, Math.round(canvas.width / 1200));
     ctx.strokeRect(slotX, slotY, slotWidth, slotHeight);
   }
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(255, 134, 92, 0.92)";
+  ctx.lineWidth = Math.max(1, Math.round(canvas.width / 1500));
+  ctx.strokeRect(trimX, trimY, trimWidth, trimHeight);
+  ctx.restore();
+
+  drawCropMarks(ctx, trimX, trimY, trimWidth, trimHeight, bleedPx);
 
   return canvas;
 }
@@ -230,6 +295,23 @@ function triggerDownload(blob: Blob, fileName: string): void {
   link.download = fileName;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+}
+
+async function writeToDesktopFile(absolutePath: string, blob: Blob): Promise<void> {
+  if (typeof window === "undefined" || typeof window.filexDesktop?.writeFile !== "function") {
+    throw new Error("Scrittura desktop non disponibile.");
+  }
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const ok = await window.filexDesktop.writeFile(absolutePath, bytes);
+  if (!ok) {
+    throw new Error(`Impossibile salvare il file su disco: ${absolutePath}`);
+  }
+}
+
+function joinOutputPath(directoryPath: string, fileName: string): string {
+  const separator = directoryPath.includes("\\") ? "\\" : "/";
+  return directoryPath.endsWith(separator) ? `${directoryPath}${fileName}` : `${directoryPath}${separator}${fileName}`;
 }
 
 async function writeToDirectory(
@@ -272,7 +354,10 @@ export async function exportSheets(
       });
       const blob = await canvasToBlob(canvas, effectiveFormat, result.request.output.quality);
 
-      if (options.directoryHandle) {
+      if (options.outputDirectoryPath && typeof window.filexDesktop?.writeFile === "function") {
+        const absolutePath = joinOutputPath(options.outputDirectoryPath, fileName);
+        await writeToDesktopFile(absolutePath, blob);
+      } else if (options.directoryHandle) {
         await writeToDirectory(options.directoryHandle, fileName, blob);
       } else {
         triggerDownload(blob, fileName);
@@ -291,7 +376,7 @@ export async function exportSheets(
     return {
       exportedFiles,
       effectiveFormat,
-      savedToDirectory: Boolean(options.directoryHandle)
+      savedToDirectory: Boolean(options.directoryHandle || options.outputDirectoryPath)
     };
   });
 }

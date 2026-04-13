@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, createHashRouter } from "react-router";
 import Home from "./pages/Home";
 import NewProject from "./pages/NewProject";
 import TemplateValidation from "./pages/TemplateValidation";
@@ -8,7 +8,7 @@ import ExportSettings from "./pages/ExportSettings";
 import ExportProgress from "./pages/ExportProgress";
 import CustomTemplateBuilder from "./pages/CustomTemplateBuilder";
 
-export const router = createBrowserRouter([
+const routeConfig = [
   {
     path: "/",
     Component: Home,
@@ -41,4 +41,10 @@ export const router = createBrowserRouter([
     path: "/custom-template",
     Component: CustomTemplateBuilder,
   },
-]);
+];
+
+const isFileProtocol = typeof window !== "undefined" && window.location.protocol === "file:";
+
+export const router = isFileProtocol
+  ? createHashRouter(routeConfig)
+  : createBrowserRouter(routeConfig);

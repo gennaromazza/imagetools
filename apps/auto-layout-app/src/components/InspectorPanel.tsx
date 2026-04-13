@@ -149,7 +149,7 @@ interface InspectorSheetSectionProps {
   onPageSheetPresetChange: (pageId: string, presetId: string) => void;
   onPageSheetFieldChange: (
     pageId: string,
-    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm",
+    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm" | "bleedCm",
     value: number
   ) => void;
 }
@@ -246,6 +246,19 @@ export function InspectorSheetSection({
         />
       </div>
 
+      <div className="inline-grid inline-grid--3">
+        <CommitOnBlurNumberField
+          label="Bleed"
+          className="inspector-field"
+          min="0"
+          step="0.1"
+          unit="cm"
+          allowZero
+          value={activePage.sheetSpec.bleedCm ?? 0}
+          onCommit={(value) => onPageSheetFieldChange(activePage.id, "bleedCm", value)}
+        />
+      </div>
+
       <div className="inspector-section__quick-actions">
         <button
           type="button"
@@ -299,7 +312,7 @@ export function InspectorSheetSection({
 
       <div className="inspector-sheet-settings__ratio">
         Aspect ratio {aspectRatio} · margine {activePage.sheetSpec.marginCm.toFixed(1)} cm · gap{" "}
-        {activePage.sheetSpec.gapCm.toFixed(1)} cm
+        {activePage.sheetSpec.gapCm.toFixed(1)} cm � bleed {(activePage.sheetSpec.bleedCm ?? 0).toFixed(1)} cm
       </div>
     </div>
   );
@@ -720,3 +733,4 @@ export function InspectorPanel() {
     </aside>
   );
 }
+

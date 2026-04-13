@@ -1,5 +1,5 @@
 import { createPortal } from "react-dom";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { preloadImageUrls } from "../image-cache";
 import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
@@ -38,6 +38,13 @@ type PickFilter = "all" | PickStatus;
 type UsageFilter = "all" | "used" | "unused";
 type ColorFilter = "all" | ColorLabel;
 
+const MODAL_GRID_GAP_PX = 12;
+const MODAL_CARD_MIN_WIDTH_PX = 170;
+const MODAL_CARD_ESTIMATED_EXTRA_HEIGHT_PX = 118;
+const MODAL_VIRTUAL_OVERSCAN_ROWS_IDLE = 4;
+const MODAL_VIRTUAL_OVERSCAN_ROWS_FAST = 10;
+const MODAL_FAST_SCROLL_COOLDOWN_MS = 120;
+
 export function ProjectPhotoSelectorModal({
   assets,
   activeAssetIds,
@@ -63,6 +70,12 @@ export function ProjectPhotoSelectorModal({
   } | null>(null);
   const [focusedAssetId, setFocusedAssetId] = useState<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const fastScrollCooldownTimerRef = useRef<number | null>(null);
+  const fastScrollStartedAtRef = useRef<number | null>(null);
+  const [gridViewport, setGridViewport] = useState({ width: 0, height: 720 });
+  const [gridScrollTop, setGridScrollTop] = useState(0);
+  const [isFastScrollActive, setIsFastScrollActive] = useState(false);
+  const [modalCardHeight, setModalCardHeight] = useState(0);
   const deferredAssets = useDeferredValue(localAssets);
   const selectionSet = useMemo(() => new Set(localSelection), [localSelection]);
 
@@ -122,9 +135,55 @@ export function ProjectPhotoSelectorModal({
     return filtered;
   }, [colorFilter, deferredAssets, ratingFilter, pickFilter, sortBy, usageByAssetId, usageFilter]);
 
+  const localAssetById = useMemo(
+    () => new Map(localAssets.map((asset) => [asset.id, asset])),
+    [localAssets]
+  );
+  const visibleAssetIndexById = useMemo(
+    () => new Map(visibleAssets.map((asset, index) => [asset.id, index])),
+    [visibleAssets]
+  );
+
   const previewAsset = previewAssetId
-    ? localAssets.find((asset) => asset.id === previewAssetId) ?? null
+    ? localAssetById.get(previewAssetId) ?? null
     : null;
+
+  const gridColumnCount = useMemo(() => {
+    const width = gridViewport.width || MODAL_CARD_MIN_WIDTH_PX;
+    return Math.max(
+      1,
+      Math.floor((width + MODAL_GRID_GAP_PX) / (MODAL_CARD_MIN_WIDTH_PX + MODAL_GRID_GAP_PX))
+    );
+  }, [gridViewport.width]);
+
+  const gridColumnWidth = useMemo(() => {
+    const width = gridViewport.width || MODAL_CARD_MIN_WIDTH_PX;
+    return Math.max(
+      MODAL_CARD_MIN_WIDTH_PX,
+      Math.floor((width - MODAL_GRID_GAP_PX * Math.max(0, gridColumnCount - 1)) / gridColumnCount)
+    );
+  }, [gridColumnCount, gridViewport.width]);
+
+  const estimatedCardHeight = useMemo(
+    () => Math.round(gridColumnWidth * 0.75) + MODAL_CARD_ESTIMATED_EXTRA_HEIGHT_PX,
+    [gridColumnWidth]
+  );
+
+  const effectiveCardHeight = modalCardHeight > 0 ? modalCardHeight : estimatedCardHeight;
+  const gridRowHeight = Math.max(1, effectiveCardHeight + MODAL_GRID_GAP_PX);
+  const totalVirtualRows = Math.max(1, Math.ceil(visibleAssets.length / gridColumnCount));
+  const viewportRows = Math.max(1, Math.ceil((gridViewport.height || 720) / gridRowHeight));
+  const overscanRows = isFastScrollActive ? MODAL_VIRTUAL_OVERSCAN_ROWS_FAST : MODAL_VIRTUAL_OVERSCAN_ROWS_IDLE;
+  const startRow = Math.max(0, Math.floor(gridScrollTop / gridRowHeight) - overscanRows);
+  const endRow = Math.min(
+    totalVirtualRows,
+    startRow + viewportRows + overscanRows * 2
+  );
+  const topSpacerHeight = startRow * gridRowHeight;
+  const bottomSpacerHeight = Math.max(0, (totalVirtualRows - endRow) * gridRowHeight);
+  const startAssetIndex = startRow * gridColumnCount;
+  const endAssetIndex = Math.min(visibleAssets.length, endRow * gridColumnCount);
+  const renderedAssets = visibleAssets.slice(startAssetIndex, endAssetIndex);
 
   useEffect(() => {
     if (!contextMenuState) {
@@ -141,6 +200,97 @@ export function ProjectPhotoSelectorModal({
       window.removeEventListener("scroll", closeMenu, true);
     };
   }, [contextMenuState]);
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (!grid) {
+      return;
+    }
+
+    const syncViewport = () => {
+      setGridViewport((current) => {
+        const next = {
+          width: grid.clientWidth,
+          height: grid.clientHeight
+        };
+        if (current.width === next.width && current.height === next.height) {
+          return current;
+        }
+        return next;
+      });
+    };
+
+    syncViewport();
+    const resizeObserver = new ResizeObserver(syncViewport);
+    resizeObserver.observe(grid);
+
+    return () => {
+      resizeObserver.disconnect();
+      if (fastScrollCooldownTimerRef.current !== null) {
+        window.clearTimeout(fastScrollCooldownTimerRef.current);
+        fastScrollCooldownTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const flushFastScrollMode = useCallback(() => {
+    if (fastScrollStartedAtRef.current !== null) {
+      fastScrollStartedAtRef.current = null;
+    }
+    setIsFastScrollActive(false);
+  }, []);
+
+  const handleGridScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    setGridScrollTop(event.currentTarget.scrollTop);
+    if (fastScrollStartedAtRef.current === null) {
+      fastScrollStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : Date.now();
+    }
+    setIsFastScrollActive(true);
+
+    if (fastScrollCooldownTimerRef.current !== null) {
+      window.clearTimeout(fastScrollCooldownTimerRef.current);
+    }
+    fastScrollCooldownTimerRef.current = window.setTimeout(() => {
+      fastScrollCooldownTimerRef.current = null;
+      flushFastScrollMode();
+    }, MODAL_FAST_SCROLL_COOLDOWN_MS);
+  }, [flushFastScrollMode]);
+
+  useEffect(() => {
+    return () => {
+      if (fastScrollCooldownTimerRef.current !== null) {
+        window.clearTimeout(fastScrollCooldownTimerRef.current);
+        fastScrollCooldownTimerRef.current = null;
+      }
+      flushFastScrollMode();
+    };
+  }, [flushFastScrollMode]);
+
+  useEffect(() => {
+    const grid = gridRef.current;
+    if (grid) {
+      grid.scrollTo({ top: 0 });
+    }
+    setGridScrollTop(0);
+    flushFastScrollMode();
+  }, [flushFastScrollMode, sortBy, pickFilter, usageFilter, colorFilter, ratingFilter]);
+
+  useEffect(() => {
+    if (!focusedAssetId || !gridRef.current) {
+      return;
+    }
+
+    const button = gridRef.current.querySelector<HTMLElement>(
+      `[data-preview-asset-id="${focusedAssetId}"]`
+    );
+    if (!button) {
+      return;
+    }
+
+    if (document.activeElement !== button) {
+      button.focus();
+    }
+  }, [focusedAssetId, renderedAssets]);
 
   function toggleAsset(imageId: string) {
     setLocalSelection((current) =>
@@ -245,18 +395,9 @@ export function ProjectPhotoSelectorModal({
       }
 
       const currentIndex = focusedAssetId
-        ? visibleAssets.findIndex((a) => a.id === focusedAssetId)
+        ? (visibleAssetIndexById.get(focusedAssetId) ?? -1)
         : -1;
-
-      // Detect column count from actual DOM dimensions
-      const grid = gridRef.current;
-      let cols = 4;
-      if (grid) {
-        const firstCard = grid.querySelector<HTMLElement>(".modal-photo-card");
-        if (firstCard && firstCard.offsetWidth > 0) {
-          cols = Math.max(1, Math.floor(grid.clientWidth / firstCard.offsetWidth));
-        }
-      }
+      const cols = Math.max(1, gridColumnCount);
 
       let nextIndex: number;
       if (currentIndex < 0) {
@@ -275,19 +416,42 @@ export function ProjectPhotoSelectorModal({
       if (nextIndex !== currentIndex || currentIndex < 0) {
         const nextAsset = visibleAssets[nextIndex];
         setFocusedAssetId(nextAsset.id);
-        const button = grid?.querySelector<HTMLElement>(
-          `[data-preview-asset-id="${nextAsset.id}"]`
-        );
-        if (button) {
-          button.focus();
-          button.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        const grid = gridRef.current;
+        if (grid) {
+          const targetRow = Math.floor(nextIndex / cols);
+          const targetTop = targetRow * gridRowHeight;
+          const targetBottom = targetTop + gridRowHeight;
+          const viewportTop = grid.scrollTop;
+          const viewportBottom = viewportTop + grid.clientHeight;
+
+          if (targetTop < viewportTop) {
+            grid.scrollTo({ top: targetTop, behavior: "smooth" });
+          } else if (targetBottom > viewportBottom) {
+            grid.scrollTo({ top: Math.max(0, targetBottom - grid.clientHeight), behavior: "smooth" });
+          }
         }
+
+        window.requestAnimationFrame(() => {
+          const button = gridRef.current?.querySelector<HTMLElement>(
+            `[data-preview-asset-id="${nextAsset.id}"]`
+          );
+          button?.focus();
+        });
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [contextMenuState, focusedAssetId, onClose, previewAssetId, visibleAssets]);
+  }, [
+    contextMenuState,
+    focusedAssetId,
+    gridColumnCount,
+    gridRowHeight,
+    onClose,
+    previewAssetId,
+    visibleAssetIndexById,
+    visibleAssets
+  ]);
 
   const modalContent = (
     <>
@@ -449,8 +613,23 @@ export function ProjectPhotoSelectorModal({
             </label>
           </div>
 
-          <div ref={gridRef} className="modal-photo-grid modal-photo-grid--selector">
-            {visibleAssets.map((asset) => {
+          <div
+            ref={gridRef}
+            className="modal-photo-grid modal-photo-grid--selector"
+            onScroll={handleGridScroll}
+          >
+            {visibleAssets.length === 0 ? (
+              <div className="modal-photo-grid__empty">Nessuna foto trovata con i filtri attivi.</div>
+            ) : null}
+            {topSpacerHeight > 0 ? (
+              <div
+                className="modal-photo-grid__virtual-spacer"
+                aria-hidden="true"
+                style={{ height: `${topSpacerHeight}px` }}
+              />
+            ) : null}
+
+            {renderedAssets.map((asset, renderedIndex) => {
               const isSelected = selectionSet.has(asset.id);
               const previewUrl = asset.thumbnailUrl ?? asset.previewUrl ?? asset.sourceUrl;
               const usage = usageByAssetId.get(asset.id);
@@ -462,12 +641,27 @@ export function ProjectPhotoSelectorModal({
                 <button
                   key={asset.id}
                   type="button"
+                  ref={renderedIndex === 0 ? (node) => {
+                    if (!node) {
+                      return;
+                    }
+                    const nextHeight = node.getBoundingClientRect().height;
+                    if (nextHeight > 0) {
+                      setModalCardHeight((current) => (
+                        Math.abs(current - nextHeight) < 1 ? current : nextHeight
+                      ));
+                    }
+                  } : undefined}
                   data-preview-asset-id={asset.id}
-                  className={isSelected ? "modal-photo-card modal-photo-card--active" : "modal-photo-card"}
+                  className={[
+                    "modal-photo-card",
+                    isSelected ? "modal-photo-card--active" : "",
+                    isFastScrollActive ? "modal-photo-card--scroll-lite" : "",
+                  ].filter(Boolean).join(" ")}
                   onClick={() => toggleAsset(asset.id)}
                   onFocus={() => setFocusedAssetId(asset.id)}
                   onMouseEnter={() => {
-                    if (asset.previewUrl) preloadImageUrls([asset.previewUrl]);
+                    if (!isFastScrollActive && asset.previewUrl) preloadImageUrls([asset.previewUrl]);
                   }}
                   onDoubleClick={() => setPreviewAssetId(asset.id)}
                   onContextMenu={(event) => {
@@ -547,7 +741,7 @@ export function ProjectPhotoSelectorModal({
                           }}
                           title={`${value} stella${value > 1 ? "e" : ""} | tasto ${value}`}
                         >
-                          *
+                          ★
                         </button>
                       ))}
                     </div>
@@ -576,6 +770,14 @@ export function ProjectPhotoSelectorModal({
                 </button>
               );
             })}
+
+            {bottomSpacerHeight > 0 ? (
+              <div
+                className="modal-photo-grid__virtual-spacer"
+                aria-hidden="true"
+                style={{ height: `${bottomSpacerHeight}px` }}
+              />
+            ) : null}
           </div>
 
           <div className="modal-panel__footer">
@@ -612,7 +814,7 @@ export function ProjectPhotoSelectorModal({
           x={contextMenuState.x}
           y={contextMenuState.y}
           selectedColor={
-            localAssets.find((asset) => asset.id === contextMenuState.assetId)?.colorLabel ?? null
+            localAssetById.get(contextMenuState.assetId)?.colorLabel ?? null
           }
           title="Etichetta colore"
           onSelect={(colorLabel) => {

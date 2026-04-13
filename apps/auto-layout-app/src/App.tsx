@@ -29,7 +29,7 @@ import type {
 import { AUTO_LAYOUT_SECTIONS, TOOL_NAVIGATION } from "@photo-tools/ui-schema";
 import { InputPanel } from "./components/InputPanel";
 import { LayoutPreviewBoard } from "./components/LayoutPreviewBoard";
-import { OutputPanel } from "./components/OutputPanel";
+import { OutputPanel, type OutputProfile } from "./components/OutputPanel";
 import { PanelSection } from "./components/PanelSection";
 import { ProjectPhotoSelectorModal } from "./components/ProjectPhotoSelectorModal";
 import { ResultPanel } from "./components/ResultPanel";
@@ -57,9 +57,10 @@ import {
   loadImageAssetsFromFiles,
   revokeImageAssetUrls,
   type ImageImportProgressUpdate
-} from "./browser-image-assets";
+} from "./desktop-image-assets";
 import { mockWeddingAssets } from "./mock/wedding-selection";
 import { exportSheets, type ExportProgressUpdate } from "./sheet-renderer";
+import { exportSheetsAsPsd, type PsdExportProgressUpdate } from "./psd-exporter";
 import { saveImageAssets, loadImageAssets, deleteProjectImages, hasProjectImages } from "./image-storage";
 import { createPersistentProjectSnapshot, loadStoredProjects, saveStoredProjects } from "./project-storage";
 import { importProject } from "./project-export";
@@ -112,7 +113,7 @@ interface SlotPhotoEditorTarget {
   slotId: string;
 }
 
-type BrowserFile = File & {
+type DesktopFile = File & {
   webkitRelativePath: string;
 };
 
@@ -381,7 +382,7 @@ function findImagePlacement(
 function AppContent() {
   const toast = useToast();
   const [currentScreen, setCurrentScreen] = useState<AppScreen>("dashboard");
-  const [projects, setProjects] = useState<Project[]>(() => loadStoredProjects());
+  const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [allAssets, setAllAssets] = useState(() => mockWeddingAssets);
   const [activeAssetIds, setActiveAssetIds] = useState<string[]>(() => mockWeddingAssets.map((asset) => asset.id));
@@ -399,8 +400,10 @@ function AppContent() {
   );
   const [usesMockData, setUsesMockData] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPsd, setIsExportingPsd] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [outputDirectoryHandle, setOutputDirectoryHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [outputDirectoryPath, setOutputDirectoryPath] = useState<string | null>(null);
   const [studioPanel, setStudioPanel] = useState<StudioPanel>("page");
   const [isProjectSelectorOpen, setIsProjectSelectorOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState>({ isOpen: false, pageId: null, pageNumber: null });
@@ -580,6 +583,26 @@ function AppContent() {
     }
   }, [allAssets, currentProjectId, usesMockData]);
 
+  useEffect(() => {
+    let isAlive = true;
+
+    void (async () => {
+      try {
+        const storedProjects = await loadStoredProjects();
+        if (!isAlive) {
+          return;
+        }
+        setProjects(storedProjects);
+      } catch (error) {
+        console.error("Impossibile caricare i progetti salvati:", error);
+      }
+    })();
+
+    return () => {
+      isAlive = false;
+    };
+  }, []);
+
   // Project Management
   const saveProject = (project: Project) => {
     const snapshot = createPersistentProjectSnapshot(project);
@@ -589,11 +612,9 @@ function AppContent() {
         ? prev.map((p) => (p.id === snapshot.id ? snapshot : p))
         : [...prev, snapshot];
 
-      try {
-        saveStoredProjects(updated);
-      } catch (error) {
+      void saveStoredProjects(updated).catch((error) => {
         console.error("Errore nel salvataggio locale dei progetti:", error);
-      }
+      });
 
       return updated;
     });
@@ -651,7 +672,7 @@ function AppContent() {
 
     (async () => {
       try {
-        const hasImages = await hasProjectImages(currentProjectId);
+        const hasImages = await hasProjectImages(currentProjectId, allAssets, request.sourceFolderPath);
         if (!hasImages) {
           const message =
             "Le immagini salvate in locale non sono disponibili per questo progetto. Reimporta la cartella foto o il file progetto .imagetool.";
@@ -660,7 +681,9 @@ function AppContent() {
           return;
         }
 
-        const assetMap = await loadImageAssets(currentProjectId);
+        const assetMap = await loadImageAssets(currentProjectId, allAssets, {
+          sourceFolderPath: request.sourceFolderPath
+        });
         if (!isMounted) return;
 
         const replacedAssets = allAssets.filter((asset) => assetMap.has(asset.id));
@@ -758,11 +781,9 @@ function AppContent() {
     setProjects((prev) => {
       const updated = prev.filter((p) => p.id !== projectId);
 
-      try {
-        saveStoredProjects(updated);
-      } catch (error) {
+      void saveStoredProjects(updated).catch((error) => {
         console.error("Errore nel salvataggio locale dei progetti:", error);
-      }
+      });
 
       return updated;
     });
@@ -811,7 +832,7 @@ function AppContent() {
 
     // Save imported images to IndexedDB
     if (catalogAssets.length > 0) {
-      saveImageAssets(newProjectId, [], catalogAssets).catch((error) => {
+      saveImageAssets(newProjectId, [], catalogAssets, activeRequest.sourceFolderPath).catch((error) => {
         console.error("Errore nel salvataggio delle immagini importate:", error);
       });
     }
@@ -904,7 +925,7 @@ function AppContent() {
     if (currentSessionFiles.size > 0 && !usesMockData) {
       try {
         const filesToSave = Array.from(currentSessionFiles.values());
-        await saveImageAssets(projectId, filesToSave, catalogAssets);
+        await saveImageAssets(projectId, filesToSave, catalogAssets, wizardRequest.sourceFolderPath);
       } catch (error) {
         console.error("Errore nel salvataggio delle immagini:", error);
         // Continue even if image storage fails - project can still be used
@@ -1025,7 +1046,9 @@ function AppContent() {
   const quickPreviewAsset = quickPreviewAssetId
     ? allAssetsById.get(quickPreviewAssetId) ?? assetsById.get(quickPreviewAssetId) ?? null
     : null;
-  const supportsDirectoryPicker = typeof window !== "undefined" && "showDirectoryPicker" in window;
+  const supportsDirectoryPicker =
+    typeof window !== "undefined" &&
+    (typeof window.filexDesktop?.chooseOutputFolder === "function" || "showDirectoryPicker" in window);
   const canOpenSavedFolder = false;
   const usedImagesCount = result.summary.totalImages - result.unassignedAssets.length;
   const isManualWorkflow = request.workflowMode === "manual";
@@ -1334,6 +1357,37 @@ function AppContent() {
     setResult((current) => syncResultRequest(current, nextRequest));
   }
 
+  function handleApplyOutputProfile(profile: OutputProfile) {
+    const nextRequest = {
+      ...request,
+      sheet: {
+        ...request.sheet,
+        dpi: profile.dpi
+      },
+      output: {
+        ...request.output,
+        format: profile.format,
+        quality: profile.quality,
+        fileNamePattern: profile.fileNamePattern
+      }
+    };
+
+    const nextResult = result.pages.reduce(
+      (currentResult, page) =>
+        updatePageSheetSpec(currentResult, {
+          pageId: page.id,
+          changes: { dpi: profile.dpi }
+        }),
+      syncResultRequest(result, nextRequest)
+    );
+
+    commitStudioChange({
+      request: nextRequest,
+      result: nextResult,
+      activity: `Preset export applicato: ${profile.name}.`
+    });
+  }
+
   function handleSheetPresetChange(presetId: string) {
     const preset = SHEET_PRESETS.find((item) => item.id === presetId);
 
@@ -1356,7 +1410,7 @@ function AppContent() {
     );
   }
 
-  function handleSheetFieldChange(field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi", value: number) {
+  function handleSheetFieldChange(field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "bleedCm", value: number) {
     const isDimensionField = field === "widthCm" || field === "heightCm";
 
     applyPlanningRequest(
@@ -1402,6 +1456,11 @@ function AppContent() {
   }
 
   function handleDrop(move: LayoutMove) {
+    if (move.sourcePageId === move.targetPageId && move.sourceSlotId === move.targetSlotId) {
+      setDragState(null);
+      return;
+    }
+
     const draggedImageId =
       result.pages.find((page) => page.id === move.sourcePageId)?.assignments.find((assignment) => assignment.slotId === move.sourceSlotId)?.imageId ??
       dragState?.imageId ??
@@ -1413,13 +1472,10 @@ function AppContent() {
       move.sourceSlotId !== move.targetSlotId &&
       Boolean(targetAssignment) &&
       Boolean(draggedImageId);
-    const nextResult = moveImageBetweenSlots(result, move);
-
-    // FIX: Do not rigorously rebalance pages after manual slot-to-slot move,
-    // as it destroys the explicit slot assignment choice.
-    // if (move.sourcePageId !== move.targetPageId) {
-    //   nextResult = rebalancePagesForAssignedImages(nextResult, [move.sourcePageId, move.targetPageId]);
-    // }
+    let nextResult = moveImageBetweenSlots(result, move);
+    if (move.sourcePageId !== move.targetPageId) {
+      nextResult = rebalancePagesForAssignedImages(nextResult, [move.sourcePageId, move.targetPageId]);
+    }
 
     const nextPlacement = draggedImageId ? findImagePlacement(nextResult, draggedImageId) : null;
     const changed = commitStudioChange({
@@ -1441,7 +1497,12 @@ function AppContent() {
     }
   }
 
-  function handleAssetDropped(pageId: string, slotId: string, imageId: string) {
+  function handleAssetDropped(
+    pageId: string,
+    slotId: string,
+    imageId: string,
+    source: "default" | "keyboard-enter" = "default",
+  ) {
     if (lockedAssetIds.has(imageId)) {
       toast.addToast(
         "La foto e bloccata nello slot corrente. Sblocca lo slot prima di spostarla o sostituirla.",
@@ -1478,12 +1539,7 @@ function AppContent() {
           targetSlotId: slotId
         })
       : placeImageInSlot(baseResult, { imageId, targetPageId: pageId, targetSlotId: slotId });
-    if (
-      request.workflowMode !== "manual" &&
-      !isSamePageReposition &&
-      previousUsage?.pageId &&
-      previousUsage.pageId !== pageId
-    ) {
+    if (!isSamePageReposition && previousUsage?.pageId && previousUsage.pageId !== pageId) {
       nextResult = rebalancePagesForAssignedImages(nextResult, [previousUsage.pageId]);
     }
     const nextPlacement = findImagePlacement(nextResult, imageId);
@@ -1500,9 +1556,7 @@ function AppContent() {
             ? `Foto scambiate manualmente nel foglio ${previousUsage?.pageNumber ?? pageId}.`
             : `Foto riposizionata manualmente nel foglio ${previousUsage?.pageNumber ?? pageId}.`
         : previousUsage && previousUsage.pageId !== pageId
-          ? request.workflowMode === "manual"
-            ? `Foto spostata dal foglio ${previousUsage.pageNumber} al foglio ${nextPlacement?.pageNumber ?? pageId}.`
-            : `Foto spostata dal foglio ${previousUsage.pageNumber} al foglio ${nextPlacement?.pageNumber ?? pageId} con riassetto automatico.`
+          ? `Foto spostata dal foglio ${previousUsage.pageNumber} al foglio ${nextPlacement?.pageNumber ?? pageId} con riassetto automatico.`
           : imageAlreadyActive
             ? `Foto assegnata manualmente al foglio ${pageId} con aggiornamento layout.`
             : `Foto attivata dal catalogo e assegnata al foglio ${pageId}.`
@@ -1514,6 +1568,13 @@ function AppContent() {
         stageImage(replacedImageId);
       }
       markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
+      if (source === "keyboard-enter") {
+        toast.addToast(
+          `Foto inserita nel foglio ${nextPlacement.pageNumber}, slot ${nextPlacement.slotId}.`,
+          "success",
+          2200
+        );
+      }
 
       const nextTargetPage = nextResult.pages.find((page) => page.id === pageId);
       const targetTemplateChanged =
@@ -1547,7 +1608,11 @@ function AppContent() {
     }
   }
 
-  function handleAddImageToPage(pageId: string, imageId: string) {
+  function handleAddImageToPage(
+    pageId: string,
+    imageId: string,
+    source: "default" | "keyboard-enter" = "default",
+  ) {
     if (lockedAssetIds.has(imageId)) {
       toast.addToast(
         "La foto e bloccata nello slot corrente. Sblocca lo slot prima di spostarla su un altro foglio.",
@@ -1571,7 +1636,7 @@ function AppContent() {
     const baseResult = imageAlreadyActive ? result : syncResultWithSelection(result, nextRequest);
     let nextResult = addImageToPage(baseResult, { pageId, imageId });
 
-    if (request.workflowMode !== "manual" && previousUsage?.pageId && previousUsage.pageId !== pageId) {
+    if (previousUsage?.pageId && previousUsage.pageId !== pageId) {
       nextResult = rebalancePagesForAssignedImages(nextResult, [previousUsage.pageId]);
     }
 
@@ -1589,10 +1654,8 @@ function AppContent() {
       activity:
         previousUsage?.pageId === pageId
           ? `Foglio ${pageId} riorganizzato automaticamente attorno alla foto selezionata.`
-          : previousUsage && previousUsage.pageId !== pageId
-          ? request.workflowMode === "manual"
-            ? `Foto aggiunta al foglio ${nextPlacement?.pageNumber ?? pageId}.`
-            : `Foto aggiunta al foglio ${nextPlacement?.pageNumber ?? pageId} e layout riadattato automaticamente.`
+        : previousUsage && previousUsage.pageId !== pageId
+          ? `Foto aggiunta al foglio ${nextPlacement?.pageNumber ?? pageId} e layout riadattato automaticamente.`
           : imageAlreadyActive
             ? `Foglio ${pageId} espanso con una nuova foto e layout aggiornato.`
             : `Foto attivata dal catalogo e aggiunta al foglio ${pageId}.`
@@ -1601,6 +1664,9 @@ function AppContent() {
     if (changed && nextPlacement) {
       consumeStagedImage(imageId);
       markRecentlyAddedPlacement(nextPlacement.pageId, nextPlacement.slotId);
+      if (source === "keyboard-enter") {
+        toast.addToast(`Foto inviata al foglio ${nextPlacement.pageNumber}.`, "success", 2200);
+      }
 
       const nextTargetPage = nextResult.pages.find((page) => page.id === pageId);
       const targetTemplateChanged =
@@ -1763,9 +1829,7 @@ function AppContent() {
         pageId: previousUsage.pageId,
         slotId: previousUsage.slotId
       });
-      if (request.workflowMode !== "manual") {
-        baseResult = rebalancePagesForAssignedImages(baseResult, [previousUsage.pageId]);
-      }
+      baseResult = rebalancePagesForAssignedImages(baseResult, [previousUsage.pageId]);
     }
 
     const nextResult = createPage(baseResult, { imageIds: [imageId] });
@@ -1778,9 +1842,7 @@ function AppContent() {
       selectedPageId: newPage?.id ?? selectedPageId,
       selectedSlotKey: newPage?.slotDefinitions[0] ? `${newPage.id}:${newPage.slotDefinitions[0].id}` : selectedSlotKey,
       activity: previousUsage
-        ? request.workflowMode === "manual"
-          ? "Foto spostata in un nuovo foglio."
-          : "Foto spostata in un nuovo foglio creato automaticamente."
+        ? "Foto spostata in un nuovo foglio creato automaticamente."
         : `Nuovo foglio creato con la foto trascinata.`
     });
 
@@ -1805,10 +1867,7 @@ function AppContent() {
       pageId: usage.pageId,
       slotId: usage.slotId
     });
-    const nextResult =
-      request.workflowMode === "manual"
-        ? clearedResult
-        : rebalancePagesForAssignedImages(clearedResult, [usage.pageId]);
+    const nextResult = rebalancePagesForAssignedImages(clearedResult, [usage.pageId]);
     const nextPage = nextResult.pages.find((page) => page.id === usage.pageId);
 
     commitStudioChange({
@@ -1865,10 +1924,13 @@ function AppContent() {
 
   function handlePageSheetFieldChange(
     pageId: string,
-    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm",
+    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm" | "bleedCm",
     value: number
   ) {
-    if (!Number.isFinite(value) || (value <= 0 && field !== "marginCm" && field !== "gapCm" && field !== "photoBorderWidthCm")) {
+    if (
+      !Number.isFinite(value) ||
+      (value <= 0 && field !== "marginCm" && field !== "gapCm" && field !== "photoBorderWidthCm" && field !== "bleedCm")
+    ) {
       return;
     }
 
@@ -1925,21 +1987,34 @@ function AppContent() {
   }
 
   async function handlePickOutputFolder() {
-    if (!supportsDirectoryPicker) {
-      return;
-    }
-
-    const picker = window as Window & {
-      showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
-    };
-
     try {
+      if (typeof window.filexDesktop?.chooseOutputFolder === "function") {
+        const folderPath = await window.filexDesktop.chooseOutputFolder();
+        if (!folderPath) {
+          return;
+        }
+
+        setOutputDirectoryHandle(null);
+        setOutputDirectoryPath(folderPath);
+        updateOutput("folderPath", folderPath);
+        pushActivity(`Cartella reale di output selezionata: ${folderPath}.`);
+        return;
+      }
+
+      if (!supportsDirectoryPicker) {
+        return;
+      }
+
+      const picker = window as Window & {
+        showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>;
+      };
       const directoryHandle = await picker.showDirectoryPicker?.();
       if (!directoryHandle) {
         return;
       }
 
       setOutputDirectoryHandle(directoryHandle);
+      setOutputDirectoryPath(null);
       updateOutput("folderPath", directoryHandle.name);
       pushActivity(`Cartella reale di output selezionata: ${directoryHandle.name}.`);
     } catch (error) {
@@ -1954,9 +2029,10 @@ function AppContent() {
       return;
     }
 
-    const destinationLabel = outputDirectoryHandle
-      ? `Salvataggio diretto nella cartella ${request.output.folderPath}`
-      : "Download multiplo gestito dal browser";
+    const destinationLabel =
+      outputDirectoryPath || outputDirectoryHandle
+        ? `Salvataggio diretto nella cartella ${request.output.folderPath}`
+        : "Salvataggio file gestito dall'app Windows";
 
     setIsExporting(true);
     setExportMessage(null);
@@ -1975,6 +2051,7 @@ function AppContent() {
     try {
       const exportResult = await exportSheets(result, {
         directoryHandle: outputDirectoryHandle,
+        outputDirectoryPath,
         onProgress: (update: ExportProgressUpdate) => {
           setExportProgressState((current) => ({
             ...current,
@@ -1993,11 +2070,11 @@ function AppContent() {
       });
       const formatNote =
         request.output.format === "tif"
-          ? " Il browser non genera TIFF nativi, quindi i fogli sono stati salvati in JPG."
+          ? " Il motore di esportazione non genera TIFF nativi, quindi i fogli sono stati salvati in JPG."
           : "";
       const destination = exportResult.savedToDirectory
         ? `nella cartella ${request.output.folderPath}`
-        : "tramite download del browser";
+        : "tramite salvataggio locale";
       const message = `${exportResult.exportedFiles.length} fogli esportati ${destination}.${formatNote}`;
       setExportMessage(message);
       setExportProgressState((current) => ({
@@ -2024,6 +2101,80 @@ function AppContent() {
       pushActivity(message);
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  async function handleExportPsd() {
+    if (result.pages.length === 0) {
+      setExportMessage("Non ci sono fogli da esportare.");
+      return;
+    }
+
+    setIsExportingPsd(true);
+    setExportMessage(null);
+    setExportProgressState({
+      isOpen: true,
+      status: "running",
+      total: result.pages.length,
+      completed: 0,
+      currentFile: null,
+      currentPageNumber: null,
+      exportedFiles: [],
+      destinationLabel: outputDirectoryPath
+        ? `Salvataggio PSD nella cartella ${request.output.folderPath}`
+        : "Salvataggio PSD gestito dall'app Windows",
+      errorMessage: null
+    });
+
+    try {
+      const exportResult = await exportSheetsAsPsd(result, {
+        outputDirectoryPath,
+        onProgress: (update: PsdExportProgressUpdate) => {
+          setExportProgressState((current) => ({
+            ...current,
+            isOpen: true,
+            status: "running",
+            total: update.total,
+            completed: update.stage === "completed" ? update.completed : current.completed,
+            currentFile: update.fileName,
+            currentPageNumber: update.pageNumber,
+            exportedFiles:
+              update.stage === "completed" && !current.exportedFiles.includes(update.fileName)
+                ? [...current.exportedFiles, update.fileName]
+                : current.exportedFiles
+          }));
+        }
+      });
+
+      const destination = exportResult.savedToDirectory
+        ? `nella cartella ${request.output.folderPath}`
+        : "tramite salvataggio locale";
+      const message = `${exportResult.exportedFiles.length} file PSD esportati ${destination}. Apri in Photoshop e fai doppio click su ogni layer foto per Camera Raw.`;
+      setExportMessage(message);
+      setExportProgressState((current) => ({
+        ...current,
+        isOpen: true,
+        status: "completed",
+        total: exportResult.exportedFiles.length,
+        completed: exportResult.exportedFiles.length,
+        currentFile: exportResult.exportedFiles[exportResult.exportedFiles.length - 1] ?? current.currentFile,
+        currentPageNumber: null,
+        exportedFiles: exportResult.exportedFiles,
+        errorMessage: null
+      }));
+      pushActivity(message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Errore durante l'esportazione PSD.";
+      setExportMessage(message);
+      setExportProgressState((current) => ({
+        ...current,
+        isOpen: true,
+        status: "error",
+        errorMessage: message
+      }));
+      pushActivity(message);
+    } finally {
+      setIsExportingPsd(false);
     }
   }
 
@@ -2074,8 +2225,8 @@ function AppContent() {
       // Track files for saving to IndexedDB later
       const fileMap = new Map<string, File>();
       files.forEach((file) => {
-        const browserFile = file as BrowserFile;
-        fileMap.set(browserFile.webkitRelativePath || file.name, file);
+        const desktopFile = file as DesktopFile;
+        fileMap.set(desktopFile.webkitRelativePath || file.name, file);
       });
       setCurrentSessionFiles(fileMap);
 
@@ -2634,8 +2785,11 @@ function AppContent() {
                 exportMessage={exportMessage}
                 supportsDirectoryPicker={supportsDirectoryPicker}
                 onOutputChange={updateOutput}
+                onApplyOutputProfile={handleApplyOutputProfile}
                 onPickOutputFolder={handlePickOutputFolder}
                 onGenerate={handleGenerate}
+                onExportPsd={handleExportPsd}
+                isExportingPsd={isExportingPsd}
               />
             ) : null}
 
@@ -2713,7 +2867,7 @@ function AppContent() {
           }
           onOpenFolder={() => {
             setExportMessage(
-              "Apri cartella sarà disponibile nella versione desktop exe. Nel browser i file vengono salvati ma non si può aprire Esplora file automaticamente."
+              "Apri cartella non disponibile in questa build Windows. I file sono stati salvati ma non è possibile aprire Esplora file automaticamente."
             );
           }}
         />

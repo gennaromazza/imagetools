@@ -447,7 +447,7 @@ export function PhotoQuickPreviewModal({
       ) : null}
 
       <div className="quick-preview__main" onClick={(event) => event.stopPropagation()}>
-        <div className="quick-preview__chrome">
+        <div className="quick-preview__header">
           <div className="quick-preview__title">
             <strong>{asset.fileName}</strong>
             <span>

@@ -30,6 +30,10 @@ import { preloadImageUrls } from "../image-cache";
 import { PhotoReplaceModal } from "./PhotoReplaceModal";
 import { PhotoRibbon } from "./PhotoRibbon";
 import { getEffectiveSlotAspectRatio } from "../utils/slot-geometry";
+import {
+  getPageDropIntentLabel,
+  resolvePageDropIntent,
+} from "../utils/drag-intent";
 
 type AssetFilter = "all" | "unused" | "used";
 type PageSectionFilter = "all" | "opening" | "middle" | "finale";
@@ -56,6 +60,7 @@ interface ReplaceTarget {
 
 type ResizePane = "left";
 type PageHeaderPanel = "background" | "border";
+type CanvasViewMode = "single" | "spread";
 
 interface LayoutPreviewBoardProps {
   result: AutoLayoutResult;
@@ -78,8 +83,17 @@ interface LayoutPreviewBoardProps {
   onDragAssetStart: (imageId: string) => void;
   onDragEnd: () => void;
   onDrop: (move: LayoutMove) => void;
-  onAssetDropped: (pageId: string, slotId: string, imageId: string) => void;
-  onAddToPage: (pageId: string, imageId: string) => void;
+  onAssetDropped: (
+    pageId: string,
+    slotId: string,
+    imageId: string,
+    source?: "default" | "keyboard-enter",
+  ) => void;
+  onAddToPage: (
+    pageId: string,
+    imageId: string,
+    source?: "default" | "keyboard-enter",
+  ) => void;
   onDropToUnused: () => void;
   onClearSlot: (pageId: string, slotId: string) => void;
   onTemplateChange: (pageId: string, templateId: string) => void;
@@ -92,7 +106,7 @@ interface LayoutPreviewBoardProps {
   onPageSheetPresetChange: (pageId: string, presetId: string) => void;
   onPageSheetFieldChange: (
     pageId: string,
-    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm",
+    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm" | "bleedCm",
     value: number
   ) => void;
   onPageSheetStyleChange: (
@@ -362,6 +376,10 @@ function cmToPixels(cm: number, dpi: number): number {
 
 function buildRulerTicks(page: GeneratedPageLayout, axis: "horizontal" | "vertical"): Array<{ position: number; label?: string; major: boolean }> {
   const sizeCm = axis === "horizontal" ? page.sheetSpec.widthCm : page.sheetSpec.heightCm;
+  const bleedCm = Math.max(0, page.sheetSpec.bleedCm ?? 0);
+  const totalCm = Math.max(0.1, sizeCm + bleedCm * 2);
+  const trimStartRatio = bleedCm / totalCm;
+  const trimSpanRatio = sizeCm / totalCm;
   const sizePx = cmToPixels(sizeCm, page.sheetSpec.dpi);
   const unit = page.sheetSpec.rulerUnit ?? "cm";
   const majorStep = unit === "px" ? 100 : 1;
@@ -371,7 +389,7 @@ function buildRulerTicks(page: GeneratedPageLayout, axis: "horizontal" | "vertic
 
   for (let value = 0; value <= totalUnits + 0.001; value += minorStep) {
     const rounded = Number(value.toFixed(3));
-    const position = totalUnits <= 0 ? 0 : rounded / totalUnits;
+    const position = totalUnits <= 0 ? trimStartRatio : trimStartRatio + (rounded / totalUnits) * trimSpanRatio;
     const major = Math.abs((rounded / majorStep) - Math.round(rounded / majorStep)) < 0.001;
     ticks.push({
       position: Math.min(1, Math.max(0, position)),
@@ -388,8 +406,11 @@ function guideCmFromPointer(event: MouseEvent<HTMLDivElement>, page: GeneratedPa
   const ratio = axis === "horizontal"
     ? (event.clientX - rect.left) / Math.max(rect.width, 1)
     : (event.clientY - rect.top) / Math.max(rect.height, 1);
+  const bleedCm = Math.max(0, page.sheetSpec.bleedCm ?? 0);
   const maxCm = axis === "horizontal" ? page.sheetSpec.widthCm : page.sheetSpec.heightCm;
-  return Number((Math.min(1, Math.max(0, ratio)) * maxCm).toFixed(3));
+  const totalCm = Math.max(0.1, maxCm + bleedCm * 2);
+  const cmFromBleedSpace = Math.min(1, Math.max(0, ratio)) * totalCm - bleedCm;
+  return Number(Math.min(maxCm, Math.max(0, cmFromBleedSpace)).toFixed(3));
 }
 
 function renderGuideLines(page: GeneratedPageLayout) {
@@ -687,9 +708,14 @@ export function LayoutPreviewBoard({
   const [openPageHeaderPanel, setOpenPageHeaderPanel] = useState<{ pageId: string; panel: PageHeaderPanel } | null>(null);
   const [dragChipTargetPageId, setDragChipTargetPageId] = useState<string | null>(null);
   const [isTransferTrayOpen, setIsTransferTrayOpen] = useState(true);
+  const [canvasViewMode, setCanvasViewMode] = useState<CanvasViewMode>("single");
+  const [canvasPan, setCanvasPan] = useState({ x: 0, y: 0 });
+  const [isCanvasPanning, setIsCanvasPanning] = useState(false);
   const [trayPosition, setTrayPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const dragChipTargetPageIdRef = useRef<string | null>(null);
   const resizeStateRef = useRef<{ pane: ResizePane; startX: number; startWidth: number } | null>(null);
+  const canvasPanRef = useRef({ x: 0, y: 0 });
+  const canvasPanDragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const trayRef = useRef<HTMLDivElement | null>(null);
   const trayRailRef = useRef<HTMLDivElement | null>(null);
   const trayDragStateRef = useRef<{
@@ -909,6 +935,16 @@ export function LayoutPreviewBoard({
   const handleAssetFilterChange = useCallback((filter: AssetFilter) => {
     setAssetFilter(filter);
   }, []);
+
+  useEffect(() => {
+    canvasPanRef.current = canvasPan;
+  }, [canvasPan]);
+
+  useEffect(() => {
+    if (zoomMode === "fit" || zoom <= 1) {
+      setCanvasPan({ x: 0, y: 0 });
+    }
+  }, [zoom, zoomMode]);
 
   const handlePageSectionFilterChange = useCallback((filter: PageSectionFilter) => {
     setPageSectionFilter(filter);
@@ -1201,6 +1237,80 @@ export function LayoutPreviewBoard({
     },
     [dragState, runAutoScroll, stopAutoScroll]
   );
+
+  const stopCanvasPan = useCallback(() => {
+    canvasPanDragRef.current = null;
+    setIsCanvasPanning(false);
+    if (typeof document !== "undefined") {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+  }, []);
+
+  const handleCanvasPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || dragState || zoom <= 1) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          "button, input, select, textarea, label, a, .sheet-preview, .sheet-slot, .page-context-header, .layout-studio__unified-nav, .layout-studio__drag-dock, .transfer-tray"
+        )
+      ) {
+        return;
+      }
+
+      canvasPanDragRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: canvasPanRef.current.x,
+        originY: canvasPanRef.current.y
+      };
+      setIsCanvasPanning(true);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      if (typeof document !== "undefined") {
+        document.body.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+      }
+    },
+    [dragState, zoom]
+  );
+
+  const handleCanvasPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const panState = canvasPanDragRef.current;
+    if (!panState || panState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaX = event.clientX - panState.startX;
+    const deltaY = event.clientY - panState.startY;
+    setCanvasPan({
+      x: panState.originX + deltaX,
+      y: panState.originY + deltaY
+    });
+  }, []);
+
+  const handleCanvasPointerUp = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const panState = canvasPanDragRef.current;
+      if (!panState || panState.pointerId !== event.pointerId) {
+        return;
+      }
+
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      stopCanvasPan();
+    },
+    [stopCanvasPan]
+  );
+
+  useEffect(() => {
+    return () => {
+      stopCanvasPan();
+    };
+  }, [stopCanvasPan]);
 
   useEffect(() => {
     if (zoomMode !== "fit" || typeof window === "undefined") {
@@ -1505,12 +1615,19 @@ export function LayoutPreviewBoard({
             onDragAssetStart={onDragAssetStart}
             onDragEnd={onDragEnd}
             onAssetsMetadataChange={onAssetsMetadataChange}
-              onAssetDoubleClick={
-                selectedSlot
-                  ? (imageId) => onAssetDropped(activePage.id, selectedSlot.id, imageId)
-                  : undefined
+            onAssetDoubleClick={(imageId) => {
+              if (!activePage) {
+                return;
               }
-            />
+
+              if (selectedSlot) {
+                onAssetDropped(activePage.id, selectedSlot.id, imageId, "keyboard-enter");
+                return;
+              }
+
+              onAddToPage(activePage.id, imageId, "keyboard-enter");
+            }}
+          />
         </aside>
 
         <div
@@ -1541,6 +1658,23 @@ export function LayoutPreviewBoard({
               ))}
             </div>
 
+            <div className="segmented-control layout-studio__view-switch">
+              <button
+                type="button"
+                className={canvasViewMode === "single" ? "segment segment--active" : "segment"}
+                onClick={() => setCanvasViewMode("single")}
+              >
+                Singole
+              </button>
+              <button
+                type="button"
+                className={canvasViewMode === "spread" ? "segment segment--active" : "segment"}
+                onClick={() => setCanvasViewMode("spread")}
+              >
+                Spread
+              </button>
+            </div>
+
             <div className="layout-studio__unified-nav-controls">
               <button
                 type="button"
@@ -1555,6 +1689,8 @@ export function LayoutPreviewBoard({
                 {pagesForStudio.map((page) => {
                   const isActive = page.id === activePage.id;
                   const isDragTarget = dragChipTargetPageId === page.id;
+                  const pageDropIntent = resolvePageDropIntent(dragState, page.id);
+                  const pageDropLabel = getPageDropIntentLabel(pageDropIntent, page.pageNumber);
 
                   return (
                     <button
@@ -1600,8 +1736,13 @@ export function LayoutPreviewBoard({
                             }
                           : undefined
                       }
+                      title={
+                        dragState
+                          ? `${pageDropLabel}.`
+                          : `Vai al foglio ${page.pageNumber}`
+                      }
                     >
-                      {page.pageNumber}
+                      {dragState && isDragTarget ? pageDropLabel : `F.${page.pageNumber}`}
                     </button>
                   );
                 })}
@@ -1953,7 +2094,11 @@ export function LayoutPreviewBoard({
 
           <div
             ref={canvasRef}
-            className="layout-studio__canvas layout-studio__canvas--vertical"
+            className={[
+              "layout-studio__canvas",
+              "layout-studio__canvas--vertical",
+              isCanvasPanning ? "layout-studio__canvas--panning" : ""
+            ].filter(Boolean).join(" ")}
             data-testid="studio-canvas"
             onDragOver={(event) => {
               handleCanvasDragOver(event);
@@ -1978,6 +2123,10 @@ export function LayoutPreviewBoard({
                 onCreatePageWithImage(dragState.imageId);
               }
             }}
+            onPointerDown={handleCanvasPointerDown}
+            onPointerMove={handleCanvasPointerMove}
+            onPointerUp={handleCanvasPointerUp}
+            onPointerCancel={stopCanvasPan}
           >
             <div className="layout-studio__drag-dock" data-testid="studio-drag-dock">
               <button
@@ -2023,18 +2172,73 @@ export function LayoutPreviewBoard({
                     : "Trascina una foto qui per creare un nuovo foglio."}
                 </span>
               </div>
+              <div
+                className={[
+                  "layout-studio__drag-dock-dropzone",
+                  "layout-studio__drag-dock-dropzone--unused",
+                  dragState?.kind === "slot"
+                    ? "layout-studio__drag-dock-dropzone--active"
+                    : "layout-studio__drag-dock-dropzone--idle"
+                ].join(" ")}
+                data-testid="unused-dropzone"
+                aria-disabled={dragState?.kind !== "slot"}
+                onDragOver={(event) => {
+                  if (dragState?.kind !== "slot") {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                }}
+                onDrop={(event) => {
+                  if (dragState?.kind !== "slot") {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDropToUnused();
+                }}
+              >
+                <strong>Riporta tra non usate</strong>
+                <span>
+                  {dragState?.kind === "slot"
+                    ? "Rilascia qui per togliere la foto dal foglio corrente."
+                    : "Trascina una foto dal foglio qui per renderla non usata."}
+                </span>
+              </div>
             </div>
 
             <div
               className="layout-studio__canvas-zoom"
-              style={{ transform: `scale(${zoom})`, transformOrigin: "center top" }}
+              style={{
+                transform: `translate3d(${canvasPan.x}px, ${canvasPan.y}px, 0) scale(${zoom})`,
+                transformOrigin: "center top"
+              }}
             >
-              <div className="layout-studio__page-column">
+              <div
+                className={
+                  canvasViewMode === "spread"
+                    ? "layout-studio__page-column layout-studio__page-column--spread"
+                    : "layout-studio__page-column"
+                }
+              >
                 {pagesForStudio.map((page) => {
                   const isActive = page.id === activePage.id;
                   const showRebalancedBadge = recentlyRebalancedPageId === page.id;
                   const showAddedBadge = recentlyAddedPageId === page.id;
                   const pageCropGuidance = pageCropGuidanceByPageId.get(page.id) ?? null;
+                  const pageDropIntent = resolvePageDropIntent(dragState, page.id);
+                  const pageDropLabel = getPageDropIntentLabel(pageDropIntent, page.pageNumber);
+                  const pageHeaderDropzoneClassName = [
+                    "layout-studio__page-header-dropzone",
+                    dragState ? "layout-studio__page-header-dropzone--active" : "layout-studio__page-header-dropzone--idle",
+                    pageDropIntent === "rebalance-page"
+                      ? "layout-studio__page-header-dropzone--rebalance"
+                      : "layout-studio__page-header-dropzone--add",
+                  ]
+                    .filter(Boolean)
+                    .join(" ");
 
                   return (
                     <section
@@ -2077,6 +2281,30 @@ export function LayoutPreviewBoard({
                         </div>
 
                         <div className="page-context-header__layout-actions">
+                          <div
+                            className={pageHeaderDropzoneClassName}
+                            data-testid="page-header-dropzone"
+                            title={dragState ? `${pageDropLabel}.` : `Trascina qui per ${pageDropLabel.toLowerCase()}.`}
+                            onDragOver={
+                              dragState
+                                ? (event) => {
+                                    event.preventDefault();
+                                    event.dataTransfer.dropEffect = "move";
+                                  }
+                                : undefined
+                            }
+                            onDrop={
+                              dragState
+                                ? (event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onAddToPage(page.id, dragState.imageId);
+                                  }
+                                : undefined
+                            }
+                          >
+                            {dragState ? pageDropLabel : "Drop su foglio"}
+                          </div>
                           <select
                             className="page-context-header__template-select"
                             value={page.templateId}

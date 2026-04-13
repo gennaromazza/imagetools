@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -16,8 +16,10 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "msedge",
-      use: { ...devices["Desktop Edge"], channel: "msedge" }
+      name: "desktop-smoke",
+      use: {
+        viewport: { width: 1440, height: 900 }
+      }
     }
   ],
   webServer: {

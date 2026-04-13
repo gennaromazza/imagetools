@@ -109,6 +109,7 @@ interface PhotoSelectorProps {
 }
 
 type SortMode = "name" | "orientation" | "rating" | "createdAt";
+type CreatedAtSortDirection = "asc" | "desc";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
 type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>;
@@ -425,6 +426,7 @@ export function PhotoSelector({
   onRelaunch,
 }: PhotoSelectorProps) {
   const [sortBy, setSortBy] = useState<SortMode>("name");
+  const [createdAtSortDirection, setCreatedAtSortDirection] = useState<CreatedAtSortDirection>("desc");
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
@@ -1202,7 +1204,8 @@ export function PhotoSelector({
 
   const sortedPhotoIds = useMemo(() => {
     const isDynamicSort = sortBy === "orientation" || sortBy === "rating";
-    const signature = buildPhotoSortSignature(metadataPhotos, sortBy);
+    const sortCacheVariant = sortBy === "createdAt" ? `createdAt:${createdAtSortDirection}` : sortBy;
+    const signature = `${buildPhotoSortSignature(metadataPhotos, sortBy)}:${sortCacheVariant}`;
     const knownIds = new Set(metadataPhotos.map((photo) => photo.id));
 
     if (isDynamicSort && isThumbnailLoading) {
@@ -1255,8 +1258,9 @@ export function PhotoSelector({
         }
 
         if (sortBy === "createdAt") {
+          const createdAtDiff = resolvePhotoCreatedAt(left) - resolvePhotoCreatedAt(right);
           return (
-            resolvePhotoCreatedAt(right) - resolvePhotoCreatedAt(left) ||
+            (createdAtSortDirection === "asc" ? createdAtDiff : -createdAtDiff) ||
             left.fileName.localeCompare(right.fileName)
           );
         }
@@ -1280,7 +1284,7 @@ export function PhotoSelector({
     }
 
     return orderedIds;
-  }, [isSortCacheEnabled, isThumbnailLoading, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
+  }, [createdAtSortDirection, isSortCacheEnabled, isThumbnailLoading, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
 
   const visiblePhotoIds = useMemo(() => {
     const lowerSearch = deferredSearchQuery.toLowerCase();
@@ -1483,7 +1487,7 @@ export function PhotoSelector({
   const gridResetSignature = useMemo(
     () => [
       sourceFolderPath,
-      sortBy,
+      sortBy === "createdAt" ? `createdAt:${createdAtSortDirection}` : sortBy,
       pickFilter,
       ratingFilter,
       colorFilter,
@@ -1495,6 +1499,7 @@ export function PhotoSelector({
     ].join("||"),
     [
       colorFilter,
+      createdAtSortDirection,
       customLabelFilter,
       deferredSearchQuery,
       folderFilter,
@@ -3017,11 +3022,25 @@ export function PhotoSelector({
           <div className="photo-selector__toolbar-divider" />
           <select
             className="photo-selector__sort photo-selector__toolbar-control"
-            value={sortBy}
-            onChange={(event) => setSortBy(event.target.value as SortMode)}
+            value={sortBy === "createdAt" ? `createdAt:${createdAtSortDirection}` : sortBy}
+            onChange={(event) => {
+              const nextSort = event.target.value;
+              if (nextSort === "createdAt:asc") {
+                setSortBy("createdAt");
+                setCreatedAtSortDirection("asc");
+                return;
+              }
+              if (nextSort === "createdAt:desc") {
+                setSortBy("createdAt");
+                setCreatedAtSortDirection("desc");
+                return;
+              }
+              setSortBy(nextSort as SortMode);
+            }}
           >
             <option value="name">AZ ↑ Nome</option>
-            <option value="createdAt">Data creazione ↓</option>
+            <option value="createdAt:desc">Data creazione ↓</option>
+            <option value="createdAt:asc">Data creazione ↑</option>
             <option value="orientation">Orientamento</option>
             <option value="rating">Valutazione</option>
           </select>

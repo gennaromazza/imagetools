@@ -14,7 +14,7 @@
  * No slot-quick-toolbar. All per-slot controls (fitMode, zoom, offset) live in AssignmentInspector.
  */
 
-import { memo, useMemo, useRef, useState, useEffect, useCallback, type CSSProperties, type MouseEvent } from "react";
+import { memo, useMemo, useRef, useState, useEffect, useCallback, type CSSProperties, type DragEvent, type MouseEvent } from "react";
 import type {
   GeneratedPageLayout,
   ImageAsset,
@@ -22,6 +22,12 @@ import type {
   LayoutMove,
 } from "@photo-tools/shared-types";
 import { ImageSlotPreview } from "./ImageSlotPreview";
+import {
+  getSlotIntentClassName,
+  getSlotIntentLabel,
+  getSlotIntentSymbol,
+  resolveSlotDropIntent,
+} from "../utils/drag-intent";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared types
@@ -43,11 +49,12 @@ export function buildAssignmentsBySlotId(page: GeneratedPageLayout): Map<string,
 }
 
 export function getSheetPreviewStyle(page: GeneratedPageLayout): CSSProperties {
+  const bleedCm = Math.max(0, page.sheetSpec.bleedCm ?? 0);
+  const totalWidthCm = Math.max(0.1, page.sheetSpec.widthCm + bleedCm * 2);
+  const totalHeightCm = Math.max(0.1, page.sheetSpec.heightCm + bleedCm * 2);
   const backgroundImage = page.sheetSpec.backgroundImageUrl?.trim();
   return {
-    aspectRatio: String(
-      Math.max(page.sheetSpec.widthCm, 0.1) / Math.max(page.sheetSpec.heightCm, 0.1)
-    ),
+    aspectRatio: String(totalWidthCm / totalHeightCm),
     backgroundColor: page.sheetSpec.backgroundColor ?? "#ffffff",
     backgroundImage: backgroundImage ? `url("${backgroundImage}")` : undefined,
     backgroundSize: backgroundImage ? "cover" : undefined,
@@ -55,10 +62,33 @@ export function getSheetPreviewStyle(page: GeneratedPageLayout): CSSProperties {
   };
 }
 
+function getPrintGeometry(page: GeneratedPageLayout) {
+  const bleedCm = Math.max(0, page.sheetSpec.bleedCm ?? 0);
+  const widthCm = Math.max(page.sheetSpec.widthCm, 0.1);
+  const heightCm = Math.max(page.sheetSpec.heightCm, 0.1);
+  const totalWidthCm = Math.max(0.1, widthCm + bleedCm * 2);
+  const totalHeightCm = Math.max(0.1, heightCm + bleedCm * 2);
+  const trimLeft = bleedCm / totalWidthCm;
+  const trimTop = bleedCm / totalHeightCm;
+  const trimWidth = widthCm / totalWidthCm;
+  const trimHeight = heightCm / totalHeightCm;
+
+  return {
+    bleedCm,
+    trimLeft,
+    trimTop,
+    trimWidth,
+    trimHeight,
+    totalWidthCm,
+    totalHeightCm
+  };
+}
+
 export function getSlotDisplayRect(
   page: GeneratedPageLayout,
   slot: GeneratedPageLayout["slotDefinitions"][number]
 ): { left: number; top: number; width: number; height: number } {
+  const geometry = getPrintGeometry(page);
   const sheetWidth = Math.max(page.sheetSpec.widthCm, 0.1);
   const sheetHeight = Math.max(page.sheetSpec.heightCm, 0.1);
   const marginX = Math.min(0.3, Math.max(0, page.sheetSpec.marginCm / sheetWidth));
@@ -66,10 +96,10 @@ export function getSlotDisplayRect(
   const contentWidth = Math.max(0.1, 1 - marginX * 2);
   const contentHeight = Math.max(0.1, 1 - marginY * 2);
 
-  let left = marginX + slot.x * contentWidth;
-  let top = marginY + slot.y * contentHeight;
-  let width = slot.width * contentWidth;
-  let height = slot.height * contentHeight;
+  let left = geometry.trimLeft + (marginX + slot.x * contentWidth) * geometry.trimWidth;
+  let top = geometry.trimTop + (marginY + slot.y * contentHeight) * geometry.trimHeight;
+  let width = slot.width * contentWidth * geometry.trimWidth;
+  let height = slot.height * contentHeight * geometry.trimHeight;
 
   if (page.slotDefinitions.length > 1 && page.sheetSpec.gapCm > 0) {
     const insetX = Math.min((page.sheetSpec.gapCm / sheetWidth) / 2, width / 3);
@@ -86,6 +116,7 @@ export function getSlotDisplayRect(
 export function renderGuideLines(page: GeneratedPageLayout) {
   if (!page.sheetSpec.showRulers) return null;
 
+  const geometry = getPrintGeometry(page);
   const verticalGuides = normalizeGuides(page.sheetSpec.verticalGuidesCm, page.sheetSpec.widthCm);
   const horizontalGuides = normalizeGuides(page.sheetSpec.horizontalGuidesCm, page.sheetSpec.heightCm);
 
@@ -97,16 +128,70 @@ export function renderGuideLines(page: GeneratedPageLayout) {
         <span
           key={`v-${guideCm}`}
           className="sheet-guide sheet-guide--vertical"
-          style={{ left: `${(guideCm / Math.max(page.sheetSpec.widthCm, 0.1)) * 100}%` }}
+          style={{
+            left: `${(geometry.trimLeft + (guideCm / Math.max(page.sheetSpec.widthCm, 0.1)) * geometry.trimWidth) * 100}%`
+          }}
         />
       ))}
       {horizontalGuides.map((guideCm) => (
         <span
           key={`h-${guideCm}`}
           className="sheet-guide sheet-guide--horizontal"
-          style={{ top: `${(guideCm / Math.max(page.sheetSpec.heightCm, 0.1)) * 100}%` }}
+          style={{
+            top: `${(geometry.trimTop + (guideCm / Math.max(page.sheetSpec.heightCm, 0.1)) * geometry.trimHeight) * 100}%`
+          }}
         />
       ))}
+    </div>
+  );
+}
+
+function renderPrintGuides(page: GeneratedPageLayout) {
+  const geometry = getPrintGeometry(page);
+  const safeZoneCm = Math.max(0.3, Math.min(page.sheetSpec.marginCm || 0.3, 1.5));
+  const safeInsetX = (safeZoneCm / geometry.totalWidthCm) * 100;
+  const safeInsetY = (safeZoneCm / geometry.totalHeightCm) * 100;
+  const trimLeft = geometry.trimLeft * 100;
+  const trimTop = geometry.trimTop * 100;
+  const trimWidth = geometry.trimWidth * 100;
+  const trimHeight = geometry.trimHeight * 100;
+  const safeLeft = trimLeft + safeInsetX;
+  const safeTop = trimTop + safeInsetY;
+  const safeWidth = Math.max(0, trimWidth - safeInsetX * 2);
+  const safeHeight = Math.max(0, trimHeight - safeInsetY * 2);
+
+  return (
+    <div className="sheet-print-guides" aria-hidden="true">
+      <div
+        className="sheet-print-guides__trim"
+        style={{
+          left: `${trimLeft}%`,
+          top: `${trimTop}%`,
+          width: `${trimWidth}%`,
+          height: `${trimHeight}%`
+        }}
+      />
+      <div
+        className="sheet-print-guides__safe"
+        style={{
+          left: `${safeLeft}%`,
+          top: `${safeTop}%`,
+          width: `${safeWidth}%`,
+          height: `${safeHeight}%`
+        }}
+      />
+      {geometry.bleedCm > 0 ? (
+        <>
+          <span className="sheet-print-guides__crop sheet-print-guides__crop--tl-h" style={{ left: `${trimLeft}%`, top: `${trimTop}%` }} />
+          <span className="sheet-print-guides__crop sheet-print-guides__crop--tl-v" style={{ left: `${trimLeft}%`, top: `${trimTop}%` }} />
+          <span className="sheet-print-guides__crop sheet-print-guides__crop--tr-h" style={{ left: `${trimLeft + trimWidth}%`, top: `${trimTop}%` }} />
+          <span className="sheet-print-guides__crop sheet-print-guides__crop--tr-v" style={{ left: `${trimLeft + trimWidth}%`, top: `${trimTop}%` }} />
+          <span className="sheet-print-guides__crop sheet-print-guides__crop--bl-h" style={{ left: `${trimLeft}%`, top: `${trimTop + trimHeight}%` }} />
+          <span className="sheet-print-guides__crop sheet-print-guides__crop--bl-v" style={{ left: `${trimLeft}%`, top: `${trimTop + trimHeight}%` }} />
+          <span className="sheet-print-guides__crop sheet-print-guides__crop--br-h" style={{ left: `${trimLeft + trimWidth}%`, top: `${trimTop + trimHeight}%` }} />
+          <span className="sheet-print-guides__crop sheet-print-guides__crop--br-v" style={{ left: `${trimLeft + trimWidth}%`, top: `${trimTop + trimHeight}%` }} />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -315,6 +400,7 @@ export const SheetSurface = memo(function SheetSurface({
           : undefined
       }
     >
+      {renderPrintGuides(page)}
       {renderGuideLines(page)}
 
       {interactive && dragState && isCanvasAddTarget ? (
@@ -336,14 +422,52 @@ export const SheetSurface = memo(function SheetSurface({
           dragState.sourceSlotId === slot.id;
         const canReposition = Boolean(interactive && assignment);
         const canDragAssignment = Boolean(interactive && assignment && !assignment.locked);
-        const isDropTarget =
-          Boolean(dragState) &&
-          !isLocked &&
-          !(
-            dragState?.kind === "slot" &&
-            dragState.sourcePageId === page.id &&
-            dragState.sourceSlotId === slot.id
-          );
+        const slotDropIntent = resolveSlotDropIntent({
+          dragState,
+          targetHasAssignment: Boolean(assignment),
+          targetLocked: isLocked,
+          sourcePageId: page.id,
+          sourceSlotId: slot.id,
+        });
+        const isDropTarget = Boolean(dragState) && slotDropIntent !== "self";
+        const handleSlotDragOver = (event: DragEvent<HTMLElement>) => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = "move";
+          if (!dragState) return;
+          if (hoveredDropSlotId !== slot.id) {
+            setHoveredDropSlotId(slot.id);
+          }
+          setStableDragIntentLabel(getSlotIntentLabel(slotDropIntent));
+        };
+        const handleSlotDrop = (event: DragEvent<HTMLElement>) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!dragState) return;
+          setHoveredDropSlotId(null);
+          if (slotDropIntent === "self") {
+            setStableDragIntentLabel(null);
+            return;
+          }
+          if (slotDropIntent === "blocked") {
+            setStableDragIntentLabel(getSlotIntentLabel(slotDropIntent));
+            return;
+          }
+
+          if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
+            onDrop({
+              sourcePageId: dragState.sourcePageId,
+              sourceSlotId: dragState.sourceSlotId,
+              targetPageId: page.id,
+              targetSlotId: slot.id,
+            });
+            setStableDragIntentLabel(null);
+            return;
+          }
+
+          onAssetDropped(page.id, slot.id, dragState.imageId);
+          setStableDragIntentLabel(null);
+        };
 
         return (
           <div
@@ -373,63 +497,12 @@ export const SheetSurface = memo(function SheetSurface({
             onClick={interactive ? () => onSelectPage(page.id, slot.id) : undefined}
             onDragOver={
               interactive
-                ? (event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    if (!dragState) return;
-                    if (hoveredDropSlotId !== slot.id) {
-                      setHoveredDropSlotId(slot.id);
-                    }
-
-                    if (isLocked) {
-                      setStableDragIntentLabel("Slot bloccato: sbloccalo per sostituire o scambiare la foto.");
-                      return;
-                    }
-
-                    if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
-                      setStableDragIntentLabel(
-                        assignment
-                          ? "Rilascia per scambiare le due foto"
-                          : "Rilascia per spostare la foto in questo slot"
-                      );
-                      return;
-                    }
-
-                    setStableDragIntentLabel(
-                      assignment
-                        ? "Rilascia per sostituire la foto in questo slot"
-                        : "Rilascia per inserire la foto in questo slot"
-                    );
-                  }
+                ? handleSlotDragOver
                 : undefined
             }
             onDrop={
               interactive
-                ? (event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (!dragState) return;
-                    setHoveredDropSlotId(null);
-                    if (isLocked) {
-                      setStableDragIntentLabel("Slot bloccato: sbloccalo per sostituire o scambiare la foto.");
-                      return;
-                    }
-
-                    if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
-                      // Always precision: swap if both occupied, move if target is empty
-                      onDrop({
-                        sourcePageId: dragState.sourcePageId,
-                        sourceSlotId: dragState.sourceSlotId,
-                        targetPageId: page.id,
-                        targetSlotId: slot.id,
-                      });
-                      setStableDragIntentLabel(null);
-                      return;
-                    }
-
-                    onAssetDropped(page.id, slot.id, dragState.imageId);
-                    setStableDragIntentLabel(null);
-                  }
+                ? handleSlotDrop
                 : undefined
             }
             onDragLeave={
@@ -439,9 +512,7 @@ export const SheetSurface = memo(function SheetSurface({
                     if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                       setHoveredDropSlotId((current) => (current === slot.id ? null : current));
                     }
-                    setStableDragIntentLabel(
-                      "Scegli uno slot (vuoto = aggiungi, pieno = sostituisci/scambia) oppure parcheggia la foto per spostarla su un altro foglio."
-                    );
+                    setStableDragIntentLabel(getSlotIntentLabel(null));
                   }
                 : undefined
             }
@@ -450,19 +521,11 @@ export const SheetSurface = memo(function SheetSurface({
               <div
                 className={[
                   "sheet-slot__drop-indicator",
-                  assignment
-                    ? dragState.kind === "slot"
-                      ? "sheet-slot__drop-indicator--swap"
-                      : "sheet-slot__drop-indicator--replace"
-                    : "sheet-slot__drop-indicator--add"
+                  getSlotIntentClassName(slotDropIntent)
                 ].join(" ")}
                 aria-hidden="true"
               >
-                {assignment
-                  ? dragState.kind === "slot"
-                    ? "⇄"
-                    : "⟲"
-                  : "+"}
+                {getSlotIntentSymbol(slotDropIntent)}
               </div>
             ) : null}
 
@@ -484,6 +547,8 @@ export const SheetSurface = memo(function SheetSurface({
                   onClick={() => {
                     onSelectPage(page.id, slot.id);
                   }}
+                  onDragOver={interactive ? handleSlotDragOver : undefined}
+                  onDrop={interactive ? handleSlotDrop : undefined}
                   onDragStart={(event) => {
                     if (!assignment) { event.preventDefault(); return; }
                     if (assignment.locked) { event.preventDefault(); return; }

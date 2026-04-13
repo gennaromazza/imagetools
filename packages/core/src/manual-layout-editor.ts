@@ -390,6 +390,13 @@ export function moveImageBetweenSlots(
   result: AutoLayoutResult,
   move: LayoutMove
 ): AutoLayoutResult {
+  if (
+    move.sourcePageId === move.targetPageId &&
+    move.sourceSlotId === move.targetSlotId
+  ) {
+    return result;
+  }
+
   const pages = clonePages(result);
   const sourcePage = pages.find((page) => page.id === move.sourcePageId);
   const targetPage = pages.find((page) => page.id === move.targetPageId);
@@ -581,6 +588,13 @@ export function placeImageInSlot(
 
   const existingPlacement = findAssignment(pages, request.imageId);
   if (existingPlacement?.assignment.locked) {
+    return result;
+  }
+  if (
+    existingPlacement &&
+    existingPlacement.page.id === request.targetPageId &&
+    existingPlacement.assignment.slotId === request.targetSlotId
+  ) {
     return result;
   }
 

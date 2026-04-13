@@ -78,6 +78,13 @@ const api: FileXDesktopApi = {
   saveDesktopPreferences: (preferences) => ipcRenderer.invoke("filex:save-desktop-preferences", preferences),
   getDesktopSessionState: () => ipcRenderer.invoke("filex:get-desktop-session-state"),
   saveDesktopSessionState: (state) => ipcRenderer.invoke("filex:save-desktop-session-state", state),
+  getAutoLayoutProjects: () => ipcRenderer.invoke("filex:get-auto-layout-projects"),
+  saveAutoLayoutProjects: (projects: unknown[]) => ipcRenderer.invoke("filex:save-auto-layout-projects", projects),
+  chooseOutputFolder: () => ipcRenderer.invoke("filex:choose-output-folder"),
+  saveNewFileAs: (suggestedName: string, bytes: Uint8Array) =>
+    ipcRenderer.invoke("filex:save-new-file-as", suggestedName, bytes),
+  writeFile: (absolutePath: string, bytes: Uint8Array) =>
+    ipcRenderer.invoke("filex:write-file", absolutePath, bytes),
   getRecentFolders: () => ipcRenderer.invoke("filex:get-recent-folders"),
   saveRecentFolder: (folder) => ipcRenderer.invoke("filex:save-recent-folder", folder),
   removeRecentFolder: (folderPathOrName) => ipcRenderer.invoke("filex:remove-recent-folder", folderPathOrName),
@@ -110,6 +117,8 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:update-archivio-job-contract-link", jobId, contrattoLink),
   listArchivioJobSubfolders: (jobId) =>
     ipcRenderer.invoke("filex:list-archivio-job-subfolders", jobId),
+  listArchivioJobSelectionCandidates: (jobId) =>
+    ipcRenderer.invoke("filex:list-archivio-job-selection-candidates", jobId),
   generateArchivioLowQuality: (jobId, overwrite, sourceSubfolder) =>
     ipcRenderer.invoke("filex:generate-archivio-low-quality", jobId, overwrite, sourceSubfolder),
   openArchivioFolder: (folderPath) => ipcRenderer.invoke("filex:open-archivio-folder", folderPath),

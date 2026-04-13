@@ -15,7 +15,7 @@ interface PageSettingsPanelProps {
   onPageSheetPresetChange: (pageId: string, presetId: string) => void;
   onPageSheetFieldChange: (
     pageId: string,
-    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm",
+    field: "widthCm" | "heightCm" | "marginCm" | "gapCm" | "dpi" | "photoBorderWidthCm" | "bleedCm",
     value: number
   ) => void;
   onPageSheetStyleChange: (

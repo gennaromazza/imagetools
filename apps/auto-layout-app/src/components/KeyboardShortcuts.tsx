@@ -42,7 +42,7 @@ export function KeyboardShortcuts({
     const { ctrlKey, metaKey, shiftKey, key } = event;
     const cmdOrCtrl = ctrlKey || metaKey;
 
-    // Prevent default browser behavior for our shortcuts
+    // Prevent default application behavior conflicts for our shortcuts
     if (cmdOrCtrl) {
       switch (key.toLowerCase()) {
         case "z":

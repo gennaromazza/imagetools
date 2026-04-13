@@ -65,11 +65,19 @@ export interface Job {
   categoriaArchivio?: string;
   contrattoLink?: string;
   percorsoCartella: string;
+  percorsoSelezione?: string;
   nomeCartella: string;
   dataCreazione: string;
   numeroFile: number;
   folderExists?: boolean;
   hasLowQualityFiles?: boolean;
+}
+
+export interface JobSelectionCandidate {
+  path: string;
+  label: string;
+  fileCount: number;
+  depth: number;
 }
 
 export interface ArchiveHierarchyConfig {
@@ -153,6 +161,21 @@ const RAW_EXT = new Set([
   ".raf", ".cr2", ".cr3", ".arw", ".nef", ".dng", ".orf", ".rw2", ".pef", ".srw",
 ]);
 const JPG_EXT = new Set([".jpg", ".jpeg"]);
+const PHOTO_SELECTOR_STANDARD_EXT = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const PHOTO_SELECTOR_RAW_EXT = new Set([
+  ".cr2", ".cr3", ".crw",
+  ".nef", ".nrw",
+  ".arw", ".srf", ".sr2",
+  ".raf",
+  ".dng",
+  ".rw2",
+  ".orf",
+  ".pef",
+  ".srw",
+  ".3fr",
+  ".x3f",
+  ".gpr",
+]);
 const COPY_EXCLUDED_BASENAMES = new Set([
   ".import-manifest.json",
 ]);
@@ -660,7 +683,12 @@ function appendJob(job: Job): void {
   writeJsonAtomic(JOBS_FILE, jobs);
 }
 
-function incrementJobFiles(jobId: string, incremento: number, contrattoLink?: string): Job | null {
+function incrementJobFiles(
+  jobId: string,
+  incremento: number,
+  contrattoLink?: string,
+  percorsoSelezione?: string,
+): Job | null {
   const jobs = loadJobs();
   const idx = jobs.findIndex((j) => j.id === jobId);
   if (idx < 0) return null;
@@ -669,6 +697,7 @@ function incrementJobFiles(jobId: string, incremento: number, contrattoLink?: st
     ...current,
     numeroFile: (current.numeroFile ?? 0) + Math.max(0, incremento),
     contrattoLink: contrattoLink ?? current.contrattoLink,
+    percorsoSelezione: percorsoSelezione ?? current.percorsoSelezione,
   };
   jobs[idx] = updated;
   writeJsonAtomic(JOBS_FILE, jobs);
@@ -851,6 +880,212 @@ async function resolveJobFileCount(jobFolderPath: string): Promise<number> {
   return countImportableFilesInDirectory(jobFolderPath, true);
 }
 
+function isPhotoSelectorSupportedFile(fileName: string): boolean {
+  if (fileName.startsWith("._")) {
+    return false;
+  }
+  const ext = path.extname(fileName).toLowerCase();
+  return PHOTO_SELECTOR_STANDARD_EXT.has(ext) || PHOTO_SELECTOR_RAW_EXT.has(ext);
+}
+
+interface PhotoSelectorFolderCandidate {
+  folderPath: string;
+  fileCount: number;
+  depth: number;
+  modifiedAt: number;
+}
+
+interface RankedPhotoSelectorFolderCandidate extends PhotoSelectorFolderCandidate {
+  priority: number;
+}
+
+async function listPhotoSelectorFolderCandidates(
+  baseFolderPath: string,
+  maxDepth: number,
+): Promise<PhotoSelectorFolderCandidate[]> {
+  if (maxDepth < 0 || !fs.existsSync(baseFolderPath)) {
+    return [];
+  }
+
+  const queue: Array<{ folderPath: string; depth: number }> = [{ folderPath: baseFolderPath, depth: 0 }];
+  const seen = new Set<string>();
+  const candidates: PhotoSelectorFolderCandidate[] = [];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) {
+      continue;
+    }
+
+    let normalizedCurrent = current.folderPath;
+    try {
+      normalizedCurrent = resolveAndValidate(current.folderPath);
+    } catch {
+      continue;
+    }
+    const normalizedKey = normalizedCurrent.toLowerCase();
+    if (seen.has(normalizedKey)) {
+      continue;
+    }
+    seen.add(normalizedKey);
+
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(normalizedCurrent, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    let fileCount = 0;
+    const childDirectories: string[] = [];
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+      if (entry.isFile()) {
+        if (isPhotoSelectorSupportedFile(entry.name)) {
+          fileCount += 1;
+        }
+        continue;
+      }
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      if (isArchiveSystemDir(entry.name) || isLowQualityDirName(entry.name) || isExportDirName(entry.name)) {
+        continue;
+      }
+      childDirectories.push(path.join(normalizedCurrent, entry.name));
+    }
+
+    if (fileCount > 0) {
+      let modifiedAt = 0;
+      try {
+        const stats = await fs.promises.stat(normalizedCurrent);
+        modifiedAt = Math.round(stats.mtimeMs);
+      } catch {
+        modifiedAt = 0;
+      }
+      candidates.push({
+        folderPath: normalizedCurrent,
+        fileCount,
+        depth: current.depth,
+        modifiedAt,
+      });
+    }
+
+    if (current.depth >= maxDepth) {
+      continue;
+    }
+    for (const childDirectory of childDirectories) {
+      queue.push({
+        folderPath: childDirectory,
+        depth: current.depth + 1,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function buildPhotoSelectorRootCandidates(
+  job: Job,
+  jobRoot: string,
+): Array<{ rootPath: string; priority: number; maxDepth: number }> {
+  const fotoSdDir = path.join(jobRoot, "FOTO_SD");
+  const autoreFolder = sanitizeFolderSegment(job.autore ?? "");
+  const autoreDir = autoreFolder ? path.join(fotoSdDir, autoreFolder) : "";
+  const explicitSelectionPath = typeof job.percorsoSelezione === "string"
+    ? job.percorsoSelezione.trim()
+    : "";
+
+  const rootCandidates: Array<{ rootPath: string; priority: number; maxDepth: number }> = [];
+  if (explicitSelectionPath) {
+    try {
+      const normalizedSelectionPath = resolveAndValidate(explicitSelectionPath);
+      if (fs.existsSync(normalizedSelectionPath)) {
+        rootCandidates.push({ rootPath: normalizedSelectionPath, priority: -1, maxDepth: 0 });
+      }
+    } catch {
+      // Ignore invalid persisted path and continue with inferred candidates.
+    }
+  }
+  if (autoreDir && fs.existsSync(autoreDir)) {
+    rootCandidates.push({ rootPath: autoreDir, priority: 0, maxDepth: 2 });
+  }
+  if (fs.existsSync(fotoSdDir)) {
+    rootCandidates.push({ rootPath: fotoSdDir, priority: 1, maxDepth: 2 });
+  }
+  rootCandidates.push({ rootPath: jobRoot, priority: 2, maxDepth: 2 });
+  return rootCandidates;
+}
+
+async function collectJobPhotoSelectorCandidates(job: Job): Promise<RankedPhotoSelectorFolderCandidate[]> {
+  let jobRoot: string;
+  try {
+    jobRoot = resolveAndValidate(job.percorsoCartella);
+  } catch {
+    return [];
+  }
+  if (!fs.existsSync(jobRoot)) {
+    return [];
+  }
+
+  const rootCandidates = buildPhotoSelectorRootCandidates(job, jobRoot);
+  const rankedCandidates: RankedPhotoSelectorFolderCandidate[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const rootCandidate of rootCandidates) {
+    const candidates = await listPhotoSelectorFolderCandidates(rootCandidate.rootPath, rootCandidate.maxDepth);
+    for (const candidate of candidates) {
+      const candidateKey = candidate.folderPath.toLowerCase();
+      if (seenPaths.has(candidateKey)) {
+        continue;
+      }
+      seenPaths.add(candidateKey);
+      rankedCandidates.push({
+        ...candidate,
+        priority: rootCandidate.priority,
+      });
+    }
+  }
+
+  rankedCandidates.sort((left, right) =>
+    left.priority - right.priority
+    || right.depth - left.depth
+    || right.fileCount - left.fileCount
+    || right.modifiedAt - left.modifiedAt
+    || left.folderPath.localeCompare(right.folderPath, "it")
+  );
+
+  return rankedCandidates;
+}
+
+async function resolveJobPhotoSelectorFolder(job: Job): Promise<string> {
+  let jobRoot: string;
+  try {
+    jobRoot = resolveAndValidate(job.percorsoCartella);
+  } catch {
+    return job.percorsoCartella;
+  }
+  if (!fs.existsSync(jobRoot)) {
+    return job.percorsoCartella;
+  }
+
+  const rankedCandidates = await collectJobPhotoSelectorCandidates(job);
+  return rankedCandidates[0]?.folderPath ?? jobRoot;
+}
+
+function formatSelectionCandidateLabel(jobRoot: string, folderPath: string): string {
+  const relativeToJobRoot = path.relative(jobRoot, folderPath);
+  if (relativeToJobRoot.startsWith("..") || path.isAbsolute(relativeToJobRoot)) {
+    return path.basename(folderPath) || folderPath;
+  }
+  if (!relativeToJobRoot || relativeToJobRoot === ".") {
+    return "Cartella lavoro";
+  }
+  return relativeToJobRoot.split(path.sep).join(" / ");
+}
+
 function getJobFileCountCacheKey(jobFolderPath: string): string {
   return path.resolve(jobFolderPath).toLowerCase();
 }
@@ -886,26 +1121,34 @@ export async function hydrateArchiveListJob(job: Job): Promise<Job> {
   const jobWithStatus = withFolderStatus(job);
   if (!jobWithStatus.folderExists) return jobWithStatus;
 
-  const needsDynamicFileCount = jobWithStatus.id.startsWith("fs:") || (jobWithStatus.numeroFile ?? 0) <= 0;
-  if (!needsDynamicFileCount) return jobWithStatus;
+  const resolvedSelectionPath = await resolveJobPhotoSelectorFolder(jobWithStatus).catch(() => "");
+  const jobWithSelectionPath = resolvedSelectionPath
+    ? {
+        ...jobWithStatus,
+        percorsoSelezione: resolvedSelectionPath,
+      }
+    : jobWithStatus;
 
-  const cachedCount = readCachedJobFileCount(jobWithStatus.percorsoCartella);
+  const needsDynamicFileCount = jobWithSelectionPath.id.startsWith("fs:") || (jobWithSelectionPath.numeroFile ?? 0) <= 0;
+  if (!needsDynamicFileCount) return jobWithSelectionPath;
+
+  const cachedCount = readCachedJobFileCount(jobWithSelectionPath.percorsoCartella);
   if (cachedCount !== null) {
     return {
-      ...jobWithStatus,
+      ...jobWithSelectionPath,
       numeroFile: cachedCount,
     };
   }
 
   try {
-    const fileCount = await resolveJobFileCount(jobWithStatus.percorsoCartella);
-    writeCachedJobFileCount(jobWithStatus.percorsoCartella, fileCount);
+    const fileCount = await resolveJobFileCount(jobWithSelectionPath.percorsoCartella);
+    writeCachedJobFileCount(jobWithSelectionPath.percorsoCartella, fileCount);
     return {
-      ...jobWithStatus,
+      ...jobWithSelectionPath,
       numeroFile: fileCount,
     };
   } catch {
-    return jobWithStatus;
+    return jobWithSelectionPath;
   }
 }
 
@@ -2199,7 +2442,7 @@ const importHandler = async (req: Request, res: Response) => {
   // ── Save job ─────────────────────────────────────────────────────────────────
   let job: Job;
   if (existingJob) {
-    const updatedExisting = incrementJobFiles(existingJob.id, copiedCount, safeContrattoLink);
+    const updatedExisting = incrementJobFiles(existingJob.id, copiedCount, safeContrattoLink, targetFotoDir);
     if (updatedExisting) {
       job = updatedExisting;
     } else {
@@ -2207,6 +2450,7 @@ const importHandler = async (req: Request, res: Response) => {
         ...existingJob,
         numeroFile: (existingJob.numeroFile ?? 0) + copiedCount,
         contrattoLink: safeContrattoLink ?? existingJob.contrattoLink,
+        percorsoSelezione: targetFotoDir,
       };
       if (existingJob.id.startsWith("fs:")) {
         const normalizedAutore = sanitizeName(autore.trim());
@@ -2231,6 +2475,7 @@ const importHandler = async (req: Request, res: Response) => {
       autore: sanitizeName(autore.trim()),
       contrattoLink: safeContrattoLink,
       percorsoCartella: jobRoot,
+      percorsoSelezione: targetFotoDir,
       nomeCartella: folderName,
       dataCreazione: new Date().toISOString(),
       numeroFile: copiedCount,
@@ -2423,6 +2668,62 @@ const listJobSubfoldersHandler = async (req: Request, res: Response) => {
   res.json({ subfolders });
 };
 app.get("/api/jobs/:id/subfolders", listJobSubfoldersHandler);
+
+/**
+ * GET /api/jobs/:id/selection-candidates
+ * Returns ranked folder candidates for opening the job in Photo Selector.
+ */
+const listJobSelectionCandidatesHandler = async (req: Request, res: Response) => {
+  const paramId = req.params["id"];
+  const jobId = typeof paramId === "string"
+    ? paramId.trim()
+    : Array.isArray(paramId)
+      ? (paramId[0] ?? "").trim()
+      : "";
+  if (!jobId) return void res.status(400).json({ error: "id lavoro mancante" });
+
+  const registeredJobs = loadJobs();
+  let job = registeredJobs.find((j) => j.id === jobId);
+  if (!job && jobId.startsWith("fs:")) {
+    const settings = loadSettings();
+    const discoveredJobs = await discoverArchiveJobs(settings.archiveRoot, registeredJobs, settings.archiveHierarchy);
+    job = discoveredJobs.find((j) => j.id === jobId);
+  }
+  if (!job) return void res.status(404).json({ error: "Lavoro non trovato" });
+
+  let jobRoot: string;
+  try {
+    jobRoot = resolveAndValidate(job.percorsoCartella);
+  } catch {
+    return void res.status(400).json({ error: "Percorso lavoro non valido" });
+  }
+
+  const rankedCandidates = await collectJobPhotoSelectorCandidates(job);
+  const preferredPath = await resolveJobPhotoSelectorFolder(job).catch(() => null);
+  const candidates: JobSelectionCandidate[] = rankedCandidates
+    .slice(0, 25)
+    .map((candidate) => ({
+      path: candidate.folderPath,
+      label: formatSelectionCandidateLabel(jobRoot, candidate.folderPath),
+      fileCount: candidate.fileCount,
+      depth: candidate.depth,
+    }));
+
+  if (candidates.length === 0 && preferredPath) {
+    candidates.push({
+      path: preferredPath,
+      label: formatSelectionCandidateLabel(jobRoot, preferredPath),
+      fileCount: 0,
+      depth: 0,
+    });
+  }
+
+  res.json({
+    candidates,
+    preferredPath,
+  });
+};
+app.get("/api/jobs/:id/selection-candidates", listJobSelectionCandidatesHandler);
 
 /**
  * POST /api/jobs/:id/generate-low-quality
@@ -2748,6 +3049,13 @@ export async function deleteJobService(jobId: string): Promise<{ ok: true }> {
 
 export async function listJobSubfoldersService(jobId: string): Promise<{ subfolders: string[] }> {
   return unwrapInvocationResult(await invokeHandler(listJobSubfoldersHandler, { params: { id: jobId } }));
+}
+
+export async function listJobSelectionCandidatesService(jobId: string): Promise<{
+  candidates: JobSelectionCandidate[];
+  preferredPath: string | null;
+}> {
+  return unwrapInvocationResult(await invokeHandler(listJobSelectionCandidatesHandler, { params: { id: jobId } }));
 }
 
 export async function updateJobContractLinkService(

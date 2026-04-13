@@ -38,7 +38,7 @@
     "dist:photo-selector:win64": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --win nsis --x64",
     "dist:photo-selector:win32": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --win nsis --ia32",
     "dist:photo-selector:mac": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --mac dmg zip",
-    "dist:all-tools:win": "npm run dist:auto-layout:win && npm run dist:image-party-frame:win && npm run dist:image-id-print:win && npm run dist:archivio-flow:win64 && npm run dist:photo-selector:win64 && npm run dist:suite:win",
+    "dist:all-tools:win": "npm run dist:auto-layout:win && npm run dist:image-party-frame:win && npm run dist:image-id-print:win && npm run dist:archivio-flow:win64 && npm run dist:photo-selector:win64 && npm run dist:suite:win && node ./scripts/collect-installers.mjs && node ./scripts/clean-release.mjs",
     "manifest:generate:stable": "node ./scripts/generate-release-manifest.mjs --channel=stable --base-url=https://github.com/gennaromazza/imagetools/releases/latest/download",
     "manifest:generate:beta": "node ./scripts/generate-release-manifest.mjs --channel=beta --base-url=https://github.com/gennaromazza/imagetools/releases/latest/download",
     "manifest:validate:stable": "node ./scripts/validate-release-manifest.mjs --channel=stable",

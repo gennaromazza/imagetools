@@ -279,6 +279,14 @@ export function saveDesktopSessionState(state: DesktopPersistedState): void {
   writeKv("photo-selector-session", state);
 }
 
+export function getAutoLayoutProjects(): unknown[] {
+  return readKv<unknown[]>("auto-layout-projects", []);
+}
+
+export function saveAutoLayoutProjects(projects: unknown[]): void {
+  writeKv("auto-layout-projects", Array.isArray(projects) ? projects : []);
+}
+
 export function getRecentFolders(): DesktopRecentFolder[] {
   const db = getDatabase();
   const rows = db.prepare(`

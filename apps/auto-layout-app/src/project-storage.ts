@@ -331,7 +331,27 @@ export function normalizeProjectRecord(
   };
 }
 
-export function loadStoredProjects(): Project[] {
+function isDesktopRuntime(): boolean {
+  return typeof window !== "undefined" && typeof window.filexDesktop !== "undefined";
+}
+
+export async function loadStoredProjects(): Promise<Project[]> {
+  if (isDesktopRuntime()) {
+    try {
+      const parsed = await window.filexDesktop!.getAutoLayoutProjects();
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      return parsed
+        .map((project) => normalizeProjectRecord(project))
+        .filter((project): project is Project => project !== null);
+    } catch (error) {
+      console.error("Impossibile leggere i progetti desktop:", error);
+      return [];
+    }
+  }
+
   const saved = localStorage.getItem(PROJECTS_STORAGE_KEY);
   if (!saved) {
     return [];
@@ -354,7 +374,12 @@ export function loadStoredProjects(): Project[] {
   }
 }
 
-export function saveStoredProjects(projects: Project[]): void {
+export async function saveStoredProjects(projects: Project[]): Promise<void> {
+  if (isDesktopRuntime()) {
+    await window.filexDesktop!.saveAutoLayoutProjects(projects);
+    return;
+  }
+
   localStorage.setItem(PROJECTS_STORAGE_KEY, JSON.stringify(projects));
 }
 

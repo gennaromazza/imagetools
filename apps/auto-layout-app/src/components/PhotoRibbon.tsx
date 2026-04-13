@@ -373,6 +373,12 @@ function PhotoRibbonContent({
                   });
                 }}
                 onKeyDown={(event) => {
+                  if (event.key === "Enter" && onAssetDoubleClick) {
+                    event.preventDefault();
+                    onAssetDoubleClick(asset.id);
+                    return;
+                  }
+
                   const shortcutChanges = resolvePhotoClassificationShortcut({
                     key: event.key,
                     code: event.code,

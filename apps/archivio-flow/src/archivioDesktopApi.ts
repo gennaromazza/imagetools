@@ -6,6 +6,7 @@ import type {
   ImportProgressSnapshot,
   Job,
   LowQualityProgressSnapshot,
+  SelectionCandidate,
   SdCard,
   SdPreview,
 } from "./types";
@@ -211,6 +212,20 @@ export async function getArchivioJobSubfolders(jobId: string): Promise<{ subfold
     return await desktopApi.listArchivioJobSubfolders(jobId);
   }
   return await apiGet<{ subfolders: string[] }>(`/api/jobs/${encodeURIComponent(jobId)}/subfolders`);
+}
+
+export async function getArchivioJobSelectionCandidates(jobId: string): Promise<{
+  candidates: SelectionCandidate[];
+  preferredPath: string | null;
+}> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) {
+    return await desktopApi.listArchivioJobSelectionCandidates(jobId);
+  }
+  return await apiGet<{
+    candidates: SelectionCandidate[];
+    preferredPath: string | null;
+  }>(`/api/jobs/${encodeURIComponent(jobId)}/selection-candidates`);
 }
 
 export async function deleteArchivioJob(jobId: string) {

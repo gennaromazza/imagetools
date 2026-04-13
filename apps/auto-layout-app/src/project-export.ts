@@ -31,15 +31,46 @@ function getProjectCatalogAssets(project: Project): ImageAsset[] {
   return project.catalogAssets ?? getProjectActiveAssets(project);
 }
 
-async function imageAssetToExportFormat(asset: ImageAsset): Promise<ExportedProject["assets"][0]> {
-  const sourceUrl = asset.sourceUrl ?? asset.previewUrl ?? asset.thumbnailUrl;
+function isAbsolutePath(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("/") || path.startsWith("\\\\");
+}
 
+function resolveDesktopAssetPath(asset: ImageAsset): string | null {
+  const candidates = [asset.path, asset.sourceFileKey];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim().length > 0 && isAbsolutePath(candidate.trim())) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+async function readAssetBlob(asset: ImageAsset): Promise<Blob> {
+  const desktopPath = resolveDesktopAssetPath(asset);
+  if (desktopPath && typeof window !== "undefined" && typeof window.filexDesktop?.readFile === "function") {
+    const payload = await window.filexDesktop.readFile(desktopPath);
+    if (!payload) {
+      throw new Error(`Impossibile leggere ${asset.fileName} dal disco.`);
+    }
+    const bytes = new Uint8Array(payload.bytes.length);
+    bytes.set(payload.bytes);
+    return new Blob([bytes]);
+  }
+
+  const sourceUrl = asset.sourceUrl ?? asset.previewUrl ?? asset.thumbnailUrl;
   if (!sourceUrl) {
     throw new Error(`Impossibile esportare ${asset.fileName}: URL sorgente assente.`);
   }
 
   const response = await fetch(sourceUrl);
-  const blob = await response.blob();
+  if (!response.ok) {
+    throw new Error(`Impossibile esportare ${asset.fileName}: sorgente non leggibile.`);
+  }
+  return response.blob();
+}
+
+async function imageAssetToExportFormat(asset: ImageAsset): Promise<ExportedProject["assets"][0]> {
+  const blob = await readAssetBlob(asset);
   const base64String = await blobToDataUrl(blob);
 
   return {
@@ -148,7 +179,7 @@ async function readProjectPayload(fileContent: string | ArrayBuffer): Promise<st
 
   const DecompressionCtor = globalThis.DecompressionStream;
   if (typeof DecompressionCtor !== "function") {
-    throw new Error("Questo browser non supporta l'importazione di progetti compressi.");
+    throw new Error("Questa build Windows non supporta l'importazione di progetti compressi.");
   }
 
   const decompressedStream = new Blob([fileContent], { type: "application/gzip" })
@@ -207,7 +238,13 @@ export async function importProject(fileContent: string | ArrayBuffer): Promise<
   };
 }
 
-export function downloadFile(blob: Blob, fileName: string): void {
+export async function downloadFile(blob: Blob, fileName: string): Promise<void> {
+  if (typeof window !== "undefined" && typeof window.filexDesktop?.saveNewFileAs === "function") {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    await window.filexDesktop.saveNewFileAs(fileName, bytes);
+    return;
+  }
+
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

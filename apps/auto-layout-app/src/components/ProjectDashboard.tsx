@@ -58,7 +58,7 @@ export function ProjectDashboard({
     try {
       const blob = await exportProject(project);
       const fileName = `${project.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}_${Date.now()}.imagetool`;
-      downloadFile(blob, fileName);
+      await downloadFile(blob, fileName);
       toast.addToast(`Progetto "${project.name}" esportato con successo.`, "success");
     } catch (error) {
       toast.addToast(
