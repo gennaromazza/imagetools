@@ -20,6 +20,7 @@ export default function ExportSettings() {
   const [onlyApproved, setOnlyApproved] = useState(exportSettings.onlyApproved);
   const [embedColorProfile, setEmbedColorProfile] = useState(exportSettings.embedColorProfile);
   const [createSubfolder, setCreateSubfolder] = useState(exportSettings.createSubfolder);
+  const [overwrite, setOverwrite] = useState(exportSettings.overwrite);
   const [outputPath, setOutputPath] = useState(project.outputPath);
   const [pickingFolder, setPickingFolder] = useState(false);
 
@@ -37,6 +38,7 @@ export default function ExportSettings() {
       onlyApproved,
       embedColorProfile,
       createSubfolder,
+      overwrite,
     });
 
     navigate("/export-progress");
@@ -214,6 +216,15 @@ export default function ExportSettings() {
                       className="w-4 h-4 rounded border-[var(--app-border)] bg-[var(--app-field)]"
                     />
                     <span className="text-sm">Crea sottocartella per questa esportazione</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={overwrite}
+                      onChange={(e) => setOverwrite(e.target.checked)}
+                      className="w-4 h-4 rounded border-[var(--app-border)] bg-[var(--app-field)]"
+                    />
+                    <span className="text-sm">Sovrascrivi file con lo stesso nome</span>
                   </label>
                 </div>
               </div>

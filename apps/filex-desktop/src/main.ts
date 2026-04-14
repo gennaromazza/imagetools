@@ -1,6 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, shell } from "electron";
+import * as electron from "electron";
+import type { BrowserWindow as BrowserWindowInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { writeFile as writeFileAsync } from "node:fs/promises";
 import { basename, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -92,6 +93,30 @@ import {
 } from "./updater.js";
 import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault } from "./tool-manifest.js";
 
+const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = electron;
+
+const EARLY_BOOT_LOG_PATH = join(process.env.TEMP || process.cwd(), "filex-image-party-frame-early.log");
+
+function writeEarlyBootLog(message: string): void {
+  try {
+    appendFileSync(EARLY_BOOT_LOG_PATH, `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  } catch {
+    // ignore logging failures during earliest bootstrap
+  }
+}
+
+function writeBootLog(message: string): void {
+  try {
+    const logDir = join(app.getPath("userData"), "logs");
+    mkdirSync(logDir, { recursive: true });
+    appendFileSync(join(logDir, "boot.log"), `[${new Date().toISOString()}] ${message}\n`, "utf8");
+  } catch {
+    // ignore logging failures during bootstrap
+  }
+}
+
+writeEarlyBootLog(`Main module loaded for tool env=${process.env.FILEX_TOOL ?? ""} exec=${process.execPath}`);
+
 function resolveRequestedTool() {
   const fromEnv = getDesktopToolOrDefault(process.env.FILEX_TOOL);
   if (process.env.FILEX_TOOL) {
@@ -117,13 +142,14 @@ const requestedTool = resolveRequestedTool();
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
 const appUserModelId = `studio.filex.${requestedTool.id}`;
-let mainWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindowInstance | null = null;
 let isOpenFolderRequestRendererReady = false;
 let pendingOpenFolderPath: string | null = null;
 let isOpenProjectRequestRendererReady = false;
 let pendingOpenProjectPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
 let archivioFlowModulePromise: Promise<any> | null = null;
+let imagePartyFrameServerModulePromise: Promise<any> | null = null;
 
 function resolveReleaseChannel(): DesktopReleaseChannel {
   return process.env.FILEX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
@@ -254,6 +280,10 @@ function getArchivioFlowDataDir(): string {
   return join(app.getPath("userData"), "archivio-flow");
 }
 
+function getImagePartyFrameDataDir(): string {
+  return join(app.getPath("userData"), "image-party-frame");
+}
+
 async function loadArchivioFlowModule(): Promise<any> {
   if (archivioFlowModulePromise) {
     return archivioFlowModulePromise;
@@ -271,6 +301,31 @@ async function loadArchivioFlowModule(): Promise<any> {
   })();
 
   return await archivioFlowModulePromise;
+}
+
+async function ensureImagePartyFrameServer(): Promise<void> {
+  if (imagePartyFrameServerModulePromise) {
+    writeBootLog("Image Party Frame server reuse requested");
+    await imagePartyFrameServerModulePromise;
+    return;
+  }
+
+  imagePartyFrameServerModulePromise = (async () => {
+    try {
+      writeBootLog("Image Party Frame server bootstrap start");
+      process.env.IMAGE_PARTY_FRAME_DATA_DIR = getImagePartyFrameDataDir();
+      const modulePath = resolve(app.getAppPath(), "dist-electron", "image-party-frame-server", "server", "index.js");
+      writeBootLog(`Image Party Frame server import ${modulePath}`);
+      await import(pathToFileURL(modulePath).href);
+      writeBootLog("Image Party Frame server bootstrap completed");
+    } catch (error) {
+      imagePartyFrameServerModulePromise = null;
+      writeBootLog(`Image Party Frame server bootstrap failed: ${error instanceof Error ? error.stack || error.message : String(error)}`);
+      throw error;
+    }
+  })();
+
+  await imagePartyFrameServerModulePromise;
 }
 
 async function browseArchivioFolderDesktop(): Promise<string | null> {
@@ -456,8 +511,10 @@ function queueOpenProjectPath(projectPath: string | null): void {
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
+  writeEarlyBootLog("Single instance lock denied, quitting");
   app.quit();
 } else {
+  writeEarlyBootLog("Single instance lock acquired");
   pendingOpenFolderPath = extractOpenFolderPathFromArgv(process.argv);
   pendingOpenProjectPath = extractOpenProjectPathFromArgv(process.argv);
 
@@ -1233,19 +1290,23 @@ function registerIpcHandlers(): void {
   });
 }
 
-async function loadRenderer(window: BrowserWindow): Promise<void> {
+async function loadRenderer(window: BrowserWindowInstance): Promise<void> {
   if (shouldUseDevRenderer && process.env.FILEX_RENDERER_URL) {
+    writeBootLog(`Loading dev renderer ${process.env.FILEX_RENDERER_URL}`);
     await window.loadURL(process.env.FILEX_RENDERER_URL);
     return;
   }
 
   const entryPath = resolveRendererEntry();
+  writeBootLog(`Loading renderer entry ${entryPath}`);
   if (!existsSync(entryPath)) {
+    writeBootLog(`Renderer entry missing ${entryPath}`);
     await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(buildMissingRendererHtml(entryPath))}`);
     return;
   }
 
   await window.loadFile(entryPath);
+  writeBootLog("Renderer loadFile completed");
 }
 
 async function ensureMainWindow(): Promise<void> {
@@ -1265,6 +1326,7 @@ async function ensureMainWindow(): Promise<void> {
 }
 
 async function createMainWindow(): Promise<void> {
+  writeBootLog("Creating main window");
   const windowInstance = new BrowserWindow({
     title: requestedTool.productName,
     width: requestedTool.defaultWindowWidth,
@@ -1296,6 +1358,7 @@ async function createMainWindow(): Promise<void> {
   });
 
   windowInstance.webContents.on("render-process-gone", (_event, details) => {
+    writeBootLog(`Renderer process gone: ${details.reason}${details.exitCode ? ` (code ${details.exitCode})` : ""}`);
     logDesktopEvent({
       channel: "renderer",
       level: "error",
@@ -1307,12 +1370,14 @@ async function createMainWindow(): Promise<void> {
   await loadRenderer(windowInstance);
 
   windowInstance.setTitle(requestedTool.productName);
+  writeBootLog("Main window created");
 
   if (!app.isPackaged) {
     windowInstance.webContents.openDevTools({ mode: "detach" });
   }
 
   windowInstance.on("closed", () => {
+    writeBootLog("Main window closed");
     if (mainWindow) {
       mainWindow = null;
     }
@@ -1326,15 +1391,21 @@ async function createMainWindow(): Promise<void> {
 
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
+    writeBootLog(`App ready for tool ${requestedTool.id}`);
     // Apply the persisted RAM budget before registering IPC handlers so that
     // the cache limits are already in effect when the first thumbnail request arrives.
     const savedPreset = await loadRamBudgetPreset();
     configureDesktopImageService(savedPreset);
 
+    if (requestedTool.id === "image-party-frame") {
+      await ensureImagePartyFrameServer();
+    }
+
     registerPreviewProtocol();
     registerCrashTelemetryHandlers();
     registerIpcHandlers();
     await ensureMainWindow();
+    writeBootLog("Startup sequence completed");
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -1342,6 +1413,7 @@ if (hasSingleInstanceLock) {
       }
     });
   }).catch((error) => {
+    writeBootLog(`Startup sequence failed: ${error instanceof Error ? error.stack || error.message : String(error)}`);
     console.error("FileX Desktop failed to start", error);
     logDesktopEvent({
       channel: "app",

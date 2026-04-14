@@ -6,7 +6,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
-import { setImageFiles as storeImageFiles, useProject } from "../contexts/ProjectContext";
+import { normalizeProjectState, setImageFiles as storeImageFiles, useProject } from "../contexts/ProjectContext";
 import { useGetTemplates } from "../hooks/useApi";
 import { saveRecentProject } from "../lib/recentProjects";
 import {
@@ -47,6 +47,10 @@ async function readImageOrientation(file: File): Promise<"vertical" | "horizonta
   });
 }
 
+function isSupportedBrowserImageFile(file: File): boolean {
+  return /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name);
+}
+
 export default function NewProject() {
   const navigate = useNavigate();
   const { project, updateProjectBasics, setCustomTemplate, setImages } = useProject();
@@ -75,6 +79,7 @@ export default function NewProject() {
   const [showGuide, setShowGuide] = useState(false);
   const [libraryRefreshKey, setLibraryRefreshKey] = useState(0);
   const [draggedTemplateId, setDraggedTemplateId] = useState<string | null>(null);
+  const [loadingSourceFolder, setLoadingSourceFolder] = useState(false);
 
   useEffect(() => {
     fetchTemplates();
@@ -120,30 +125,22 @@ export default function NewProject() {
     setCustomTemplate(null);
   };
 
-  const handleSourceFolderClick = () => {
-    sourceInputRef.current?.click();
-  };
-
-  const handleSourceFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.currentTarget.files;
-    if (!files || files.length === 0) {
-      return;
-    }
-
-    const imageFilesArray = Array.from(files).filter((file) => /\.(jpg|jpeg|png|gif|webp)$/i.test(file.name));
-
-    if (imageFilesArray.length === 0) {
+  const applySelectedFiles = async (selectedFiles: File[], selectedSourcePath: string) => {
+    if (selectedFiles.length === 0) {
       setValidationErrors(["Nessuna immagine trovata nella cartella selezionata"]);
+      setSourceLoaded(false);
+      setImageCount({ total: 0, vertical: 0, horizontal: 0 });
+      setLocalImageFiles([]);
+      setImageOrientations([]);
       return;
     }
 
-    setLocalImageFiles(imageFilesArray);
-    const folderPath = files[0].webkitRelativePath?.split("/")[0] || "Cartella Selezionata";
-    setSourcePath(folderPath);
+    setLocalImageFiles(selectedFiles);
+    setSourcePath(selectedSourcePath);
     setSourceLoaded(true);
 
     const orientations = await Promise.all(
-      imageFilesArray.map(async (file) => {
+      selectedFiles.map(async (file) => {
         try {
           return await readImageOrientation(file);
         } catch (error) {
@@ -155,12 +152,65 @@ export default function NewProject() {
 
     const vertical = orientations.filter((orientation) => orientation === "vertical").length;
     setImageCount({
-      total: imageFilesArray.length,
+      total: selectedFiles.length,
       vertical,
       horizontal: orientations.length - vertical,
     });
     setImageOrientations(orientations);
     setValidationErrors([]);
+  };
+
+  const handleSourceFolderClick = async () => {
+    if (window.filexDesktop?.openFolder && window.filexDesktop.readFile) {
+      setLoadingSourceFolder(true);
+
+      try {
+        const result = await window.filexDesktop.openFolder();
+        if (!result) {
+          return;
+        }
+
+        const files: File[] = [];
+        for (const entry of result.entries) {
+          const payload = await window.filexDesktop.readFile(entry.absolutePath);
+          if (!payload) {
+            continue;
+          }
+
+          files.push(
+            new File([payload.bytes], payload.name, {
+              lastModified: payload.lastModified,
+            })
+          );
+        }
+
+        await applySelectedFiles(files, result.rootPath || result.name);
+        return;
+      } catch (error) {
+        console.error("Failed to load desktop folder", error);
+        setValidationErrors([
+          error instanceof Error
+            ? error.message
+            : "Impossibile leggere la cartella selezionata dal desktop.",
+        ]);
+        return;
+      } finally {
+        setLoadingSourceFolder(false);
+      }
+    }
+
+    sourceInputRef.current?.click();
+  };
+
+  const handleSourceFilesSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.currentTarget.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const imageFilesArray = Array.from(files).filter(isSupportedBrowserImageFile);
+    const folderPath = files[0].webkitRelativePath?.split("/")[0] || "Cartella Selezionata";
+    await applySelectedFiles(imageFilesArray, folderPath);
   };
 
   const handleContinue = () => {
@@ -199,22 +249,22 @@ export default function NewProject() {
     setImages(nextImages);
     setValidationErrors([]);
 
-    saveRecentProject(
-      {
-        ...project,
-        name: projectName,
-        template: resolvedTemplateId,
-        sourcePath,
-        outputPath: project.outputPath,
-        images: nextImages,
-        imageCount: {
-          total: nextImages.length,
-          vertical: nextImages.filter((image) => image.orientation === "vertical").length,
-          horizontal: nextImages.filter((image) => image.orientation === "horizontal").length,
-        },
+    const nextProjectSnapshot = normalizeProjectState({
+      ...project,
+      name: projectName,
+      template: resolvedTemplateId,
+      sourcePath,
+      outputPath: project.outputPath,
+      customTemplate: resolvedTemplateId === "custom" ? project.customTemplate : null,
+      images: nextImages,
+      imageCount: {
+        total: nextImages.length,
+        vertical: nextImages.filter((image) => image.orientation === "vertical").length,
+        horizontal: nextImages.filter((image) => image.orientation === "horizontal").length,
       },
-      selectedTemplate?.label
-    );
+    });
+
+    saveRecentProject(nextProjectSnapshot, selectedTemplate?.label);
 
     navigate("/template-validation");
   };
@@ -534,10 +584,11 @@ export default function NewProject() {
                   <Button
                     variant="outline"
                     className="border-[var(--brand-accent)] bg-[rgba(103,117,107,0.08)] text-[var(--brand-accent)] hover:bg-[rgba(103,117,107,0.15)] hover:border-[var(--brand-primary)] hover:text-[var(--app-text)] shrink-0"
-                    onClick={handleSourceFolderClick}
+                    onClick={() => void handleSourceFolderClick()}
+                    disabled={loadingSourceFolder}
                   >
                     <FolderOpen className="w-4 h-4" />
-                    Sfoglia
+                    {loadingSourceFolder ? "Carico..." : "Sfoglia"}
                   </Button>
                 </div>
                 {sourceLoaded && imageCount.total > 0 ? (

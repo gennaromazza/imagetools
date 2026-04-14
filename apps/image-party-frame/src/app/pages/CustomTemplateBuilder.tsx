@@ -44,6 +44,7 @@ type BackgroundFeedback = {
 };
 
 type DragState = {
+  pointerId: number;
   startX: number;
   startY: number;
   origin: Rect;
@@ -423,6 +424,7 @@ export default function CustomTemplateBuilder() {
 
   const beginDrag = (event: React.PointerEvent<HTMLDivElement>, mode: "move" | "resize") => {
     dragStateRef.current = {
+      pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
       origin: activeDraft.photoArea,
@@ -433,7 +435,7 @@ export default function CustomTemplateBuilder() {
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragStateRef.current;
-    if (!drag) {
+    if (!drag || drag.pointerId !== event.pointerId) {
       return;
     }
 
@@ -465,9 +467,11 @@ export default function CustomTemplateBuilder() {
   };
 
   const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (dragStateRef.current) {
+    if (dragStateRef.current?.pointerId === event.pointerId) {
       dragStateRef.current = null;
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
     }
   };
 

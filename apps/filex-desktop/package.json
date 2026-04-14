@@ -12,7 +12,7 @@
     "build:shell": "npm run sync:branding && tsc -p tsconfig.json",
     "build:suite": "npm run build:shell && npm run build:suite-launcher",
     "build:auto-layout": "npm run build:shell && npm --workspace @photo-tools/auto-layout-app run build",
-    "build:image-party-frame": "npm run build:shell && npm --workspace @photo-tools/image-party-frame-app run build",
+    "build:image-party-frame": "npm run build:shell && npm --workspace @photo-tools/image-party-frame-app run build && npm --workspace @photo-tools/image-party-frame-app run build:server && node ./scripts/copy-image-party-frame-server.mjs",
     "build:image-id-print": "npm run build:shell && npm --workspace @photo-tools/image-id-print run build",
     "build:archivio-flow": "npm run build:shell && npm --workspace @photo-tools/archivio-flow run build && npm --workspace @photo-tools/archivio-flow run build:server && node ./scripts/copy-archivio-server.mjs",
     "build:photo-selector": "npm run build:shell && npm --workspace @photo-tools/photo-selector-app run build",
@@ -48,7 +48,9 @@
     "@photo-tools/desktop-contracts": "0.1.0",
     "cors": "^2.8.5",
     "exiftool-vendored": "^35.15.1",
+    "dotenv": "^17.3.1",
     "express": "^5.0.0",
+    "multer": "^2.1.1",
     "sharp": "^0.34.0"
   },
   "devDependencies": {

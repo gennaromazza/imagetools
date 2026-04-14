@@ -1,6 +1,8 @@
-import { contextBridge, ipcRenderer } from "electron";
+import * as electron from "electron";
 import type { IpcRendererEvent } from "electron";
 import type { FileXDesktopApi } from "@photo-tools/desktop-contracts";
+
+const { contextBridge, ipcRenderer } = electron;
 
 const api: FileXDesktopApi = {
   getRuntimeInfo: () => ipcRenderer.invoke("filex:get-runtime-info"),

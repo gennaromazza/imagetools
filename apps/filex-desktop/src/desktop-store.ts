@@ -1,4 +1,4 @@
-import { app } from "electron";
+import * as electron from "electron";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -12,6 +12,8 @@ import type {
   DesktopRecentFolder,
   DesktopSortCacheEntry,
 } from "@photo-tools/desktop-contracts";
+
+const { app } = electron;
 
 const DB_FILE_NAME = "photo-selector-desktop.sqlite";
 const LOG_DIR_NAME = "logs";

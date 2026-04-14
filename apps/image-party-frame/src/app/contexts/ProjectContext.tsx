@@ -62,6 +62,11 @@ export const setCustomTemplateBackgroundFile = (
   customTemplateBackgroundFiles[orientation] = file;
 };
 
+export const clearCustomTemplateBackgroundFiles = (): void => {
+  customTemplateBackgroundFiles.vertical = null;
+  customTemplateBackgroundFiles.horizontal = null;
+};
+
 export interface CustomTemplate {
   id: "custom";
   libraryTemplateId?: string;
@@ -186,6 +191,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const [project, setProjectState] = useState<ProjectState>(defaultProject);
 
   const setProject = (nextProject: Partial<ProjectState>) => {
+    if (nextProject.template !== "custom" || !nextProject.customTemplate) {
+      clearCustomTemplateBackgroundFiles();
+    }
+
     setProjectState(normalizeProjectState(nextProject));
   };
 
@@ -195,6 +204,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
     sourcePath: string,
     outputPath: string
   ) => {
+    if (template !== "custom") {
+      clearCustomTemplateBackgroundFiles();
+    }
+
     setProjectState((prev) => ({
       ...prev,
       name,
@@ -228,6 +241,10 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   };
 
   const setCustomTemplate = (template: CustomTemplate | null) => {
+    if (!template) {
+      clearCustomTemplateBackgroundFiles();
+    }
+
     setProjectState((prev) => ({
       ...prev,
       customTemplate: template,

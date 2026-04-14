@@ -1,4 +1,4 @@
-import { app, dialog } from "electron";
+import * as electron from "electron";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
@@ -24,6 +24,8 @@ import type {
   DesktopThumbnailCacheInfo,
   DesktopThumbnailCacheLookupEntry,
 } from "@photo-tools/desktop-contracts";
+
+const { app, dialog } = electron;
 
 interface DesktopShellSettings {
   thumbnailCacheDirectory?: string;

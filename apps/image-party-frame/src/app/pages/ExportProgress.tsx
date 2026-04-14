@@ -73,6 +73,7 @@ export default function ExportProgress() {
           outputPath: project.outputPath,
           createSubfolder: exportSettings.createSubfolder,
           embedColorProfile: exportSettings.embedColorProfile,
+          overwrite: exportSettings.overwrite,
           customTemplate: project.customTemplate,
           customTemplateBackgroundFiles: getCustomTemplateBackgroundFiles(),
         });
@@ -123,6 +124,11 @@ export default function ExportProgress() {
   }, [apiProgress, totalFiles]);
 
   const handleOpenFolder = async () => {
+    if (!exportResult?.outputDir) {
+      setOpenFolderError("Nessuna cartella output disponibile per questa esportazione.");
+      return;
+    }
+
     setOpenFolderError(null);
     setOpeningFolder(true);
     const success = await openExportFolder(exportResult?.outputDir);
@@ -270,7 +276,7 @@ export default function ExportProgress() {
                     variant="outline"
                     className="flex-1 border-gray-600 hover:bg-[#2a2a2a]"
                     onClick={handleOpenFolder}
-                    disabled={openingFolder}
+                    disabled={openingFolder || !exportResult?.outputDir}
                   >
                     <FolderOpen className="w-4 h-4 mr-2" />
                     {openingFolder ? "Apro cartella..." : "Apri Cartella Output"}

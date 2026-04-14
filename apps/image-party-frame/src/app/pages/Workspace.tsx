@@ -22,6 +22,7 @@ import { useProcessImage } from "../hooks/useApi";
 import { createCompressedPreviewUrl } from "../utils/imagePreview";
 import { getCustomTemplateVariant, getProjectTemplateGeometry } from "../lib/templateGeometry";
 import { exportCurrentProjectPackage } from "../lib/portablePackages";
+import { resolveApiAssetUrl } from "../lib/apiUrls";
 
 type PreviewEntry = {
   url: string;
@@ -227,6 +228,7 @@ export default function Workspace() {
   }
 
   const currentPreview = imagePreviews.get(currentImage.id);
+  const processedImageUrl = resolveApiAssetUrl(processedImages.get(currentImage.id));
   const visibleIndex = filteredImages.findIndex((img) => img.id === currentImage.id);
   const templateGeometry = getProjectTemplateGeometry(project.template, currentImage.orientation, project.customTemplate);
   const customTemplateVariant = getCustomTemplateVariant(project.customTemplate, currentImage.orientation);
@@ -391,7 +393,7 @@ export default function Workspace() {
   };
 
   const handleReset = () => {
-    updateImageCrop(currentImage.id, { x: 0, y: 0, zoom: 100 });
+    updateCurrentCrop({ x: 0, y: 0, zoom: 100 });
   };
 
   const selectRelativeImage = (direction: 1 | -1) => {
@@ -813,16 +815,16 @@ export default function Workspace() {
                   className="w-full max-w-[560px] mx-auto relative shadow-[0_28px_72px_rgba(0,0,0,0.22)] rounded-[28px] bg-[var(--brand-accent)]"
                   style={{ aspectRatio: frameAspectRatio }}
                 >
-                {processedImages.has(currentImage.id) ? (
+                {processedImageUrl ? (
                   <img
-                    src={`http://localhost:3001${processedImages.get(currentImage.id)}`}
+                    src={processedImageUrl}
                     alt="Processed"
                     className="absolute inset-0 h-full w-full rounded-[28px] object-contain pointer-events-none"
                     loading="eager"
                   />
                 ) : null}
 
-                {project.template === "custom" && !processedImages.has(currentImage.id) ? (
+                {project.template === "custom" && !processedImageUrl ? (
                   customBackgroundPreviewUrl ? (
                     <img
                       src={customBackgroundPreviewUrl}
@@ -869,7 +871,7 @@ export default function Workspace() {
                   onKeyDown={handleViewportKeyDown}
                   className={`absolute overflow-hidden ${project.template === "custom" ? "rounded-[18px] ring-2 ring-[rgba(212,193,170,0.85)] shadow-[0_0_0_9999px_rgba(0,0,0,0.18)]" : "rounded-[10px] bg-[var(--app-field)]"} outline-none ${
                     isDraggingImage ? "cursor-grabbing" : "cursor-grab"
-                  } ${processedImages.has(currentImage.id) ? "opacity-0" : "opacity-100"}`}
+                  } ${processedImageUrl ? "opacity-0" : "opacity-100"}`}
                   style={photoViewportStyle}
                 >
                   {currentPreview && imageStyle ? (

@@ -1,4 +1,5 @@
 import {
+  clearCustomTemplateBackgroundFiles,
   getCustomTemplateBackgroundFiles,
   normalizeProjectState,
   setCustomTemplateBackgroundFile,
@@ -112,6 +113,8 @@ export async function exportCurrentProjectPackage(project: ProjectState): Promis
 export async function importProjectPackage(file: File): Promise<ProjectState> {
   const payload = await readJsonFile<PortableProjectPackage>(file);
   const normalizedProject = normalizeProjectState(payload.project);
+
+  clearCustomTemplateBackgroundFiles();
 
   if (payload.customTemplateAssets && normalizedProject.customTemplate) {
     for (const orientation of ["vertical", "horizontal"] as const) {

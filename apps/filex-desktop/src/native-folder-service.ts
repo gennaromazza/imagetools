@@ -1,4 +1,4 @@
-import { app, dialog } from "electron";
+import * as electron from "electron";
 import { copyFile, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import type {
@@ -11,6 +11,8 @@ import type {
   DesktopNativeFileOpStatus,
   DesktopSaveFileAsResult,
 } from "@photo-tools/desktop-contracts";
+
+const { app, dialog } = electron;
 
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const RAW_EXTENSIONS = new Set([

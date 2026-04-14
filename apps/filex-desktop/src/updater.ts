@@ -1,4 +1,4 @@
-import { app, shell } from "electron";
+import * as electron from "electron";
 import { spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
@@ -16,6 +16,8 @@ import type {
   DesktopToolUpdateJob,
 } from "@photo-tools/desktop-contracts";
 import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
+
+const { app, shell } = electron;
 
 const ALLOWED_RELEASE_HOSTS = new Set([
   "github.com",

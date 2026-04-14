@@ -4,7 +4,7 @@ import { Clock, Copy, Download, Folder, Pencil, Plus, Trash2, Upload } from "luc
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { ServerStatus } from "../components/ServerStatus";
-import { useProject } from "../contexts/ProjectContext";
+import { getImageFile, useProject } from "../contexts/ProjectContext";
 import { loadRecentProjects, onRecentProjectsUpdated, removeRecentProjectAt } from "../lib/recentProjects";
 import { importProjectPackage, importTemplateLibraryPackage, exportTemplateLibraryPackage } from "../lib/portablePackages";
 import partyFrameLogo from "../../assets/party_frame_logo.png";
@@ -45,7 +45,17 @@ export default function Home() {
     }
 
     setProject(snapshot);
-    navigate("/workspace");
+    const hasAllSourceFiles = snapshot.images.every((image) => Boolean(getImageFile(image.id)));
+
+    if (hasAllSourceFiles) {
+      navigate("/workspace");
+      return;
+    }
+
+    toast.warning("File sorgente da ricollegare", {
+      description: "Il progetto e stato riaperto, ma le immagini originali non sono disponibili in questa sessione. Riparti da Nuovo Progetto per ricaricare la cartella.",
+    });
+    navigate("/new-project");
   };
 
   const handleDeleteRecentProject = (projectIndex: number) => {

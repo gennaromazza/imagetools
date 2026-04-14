@@ -119,7 +119,9 @@ export function buildTemplateLibrary(
     return orderedItems;
   }
 
-  const draftExistsInLibrary = savedTemplates.some((record) => record.name.trim() === currentCustomTemplate.name.trim());
+  const draftExistsInLibrary =
+    typeof currentCustomTemplate.libraryTemplateId === "string" &&
+    savedTemplates.some((record) => record.id === currentCustomTemplate.libraryTemplateId);
   if (draftExistsInLibrary) {
     return orderedItems;
   }

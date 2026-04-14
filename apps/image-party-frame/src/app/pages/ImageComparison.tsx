@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { getImageFile, useProject } from "../contexts/ProjectContext";
 import { createCompressedPreviewUrl } from "../utils/imagePreview";
 import { getCustomTemplateVariant, getProjectTemplateGeometry } from "../lib/templateGeometry";
+import { resolveApiAssetUrl } from "../lib/apiUrls";
 
 type ComparisonLocationState = {
   imageId?: string;
@@ -16,6 +17,7 @@ export default function ImageComparison() {
   const { project } = useProject();
   const state = (location.state as ComparisonLocationState | null) ?? null;
   const [originalPreviewUrl, setOriginalPreviewUrl] = useState<string | null>(null);
+  const [originalDimensions, setOriginalDimensions] = useState<{ width: number; height: number } | null>(null);
 
   const selectedImage =
     project.images.find((image) => image.id === state?.imageId) ??
@@ -34,15 +36,32 @@ export default function ImageComparison() {
       const file = getImageFile(selectedImage.id);
       if (!file) {
         setOriginalPreviewUrl(null);
+        setOriginalDimensions(null);
         return;
       }
 
       const previewUrl = await createCompressedPreviewUrl(file, { maxDimension: 2200, quality: 0.84 });
+      const imageUrl = URL.createObjectURL(file);
+      const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const image = new Image();
+        image.decoding = "async";
+        image.onload = () => {
+          URL.revokeObjectURL(imageUrl);
+          resolve({ width: image.naturalWidth, height: image.naturalHeight });
+        };
+        image.onerror = () => {
+          URL.revokeObjectURL(imageUrl);
+          reject(new Error(`Unable to read image dimensions for ${file.name}`));
+        };
+        image.src = imageUrl;
+      });
+
       if (cancelled) {
         URL.revokeObjectURL(previewUrl);
         return;
       }
 
+      setOriginalDimensions(dimensions);
       setOriginalPreviewUrl((current) => {
         if (current?.startsWith("blob:")) {
           URL.revokeObjectURL(current);
@@ -86,9 +105,37 @@ export default function ImageComparison() {
       variant,
       photoViewportStyle,
       crop: selectedImage.crop,
-      processedImageUrl: state?.processedImageUrl ? `http://localhost:3001${state.processedImageUrl}` : null,
+      processedImageUrl: resolveApiAssetUrl(state?.processedImageUrl),
     };
   }, [project.customTemplate, project.template, selectedImage, state?.processedImageUrl]);
+
+  const getPreviewMetrics = (width: number, height: number, zoom: number) => {
+    const viewportWidth = comparisonData ? (comparisonData.geometry.photoAreaWidth - (comparisonData.geometry.borderSizePx ?? 0) * 2) : 0;
+    const viewportHeight = comparisonData ? (comparisonData.geometry.photoAreaHeight - (comparisonData.geometry.borderSizePx ?? 0) * 2) : 0;
+
+    if (viewportWidth <= 0 || viewportHeight <= 0 || width <= 0 || height <= 0) {
+      return null;
+    }
+
+    const fitScale = Math.max(viewportWidth / width, viewportHeight / height);
+    const scale = fitScale * (zoom / 100);
+    const renderedWidth = width * scale;
+    const renderedHeight = height * scale;
+
+    return {
+      renderedWidth,
+      renderedHeight,
+    };
+  };
+
+  const previewMetrics =
+    comparisonData && originalPreviewUrl && originalDimensions
+      ? getPreviewMetrics(
+          originalDimensions.width,
+          originalDimensions.height,
+          comparisonData.crop.zoom
+        )
+      : null;
 
   if (!selectedImage || !comparisonData) {
     return (
@@ -195,10 +242,16 @@ export default function ImageComparison() {
                             <img
                               src={originalPreviewUrl}
                               alt={selectedImage.path}
-                              className="absolute inset-0 h-full w-full object-cover"
+                              className="absolute max-w-none"
                               style={{
-                                transform: `translate(${comparisonData.crop.x}px, ${comparisonData.crop.y}px) scale(${comparisonData.crop.zoom / 100})`,
-                                transformOrigin: "center",
+                                width: previewMetrics ? `${previewMetrics.renderedWidth}px` : "100%",
+                                height: previewMetrics ? `${previewMetrics.renderedHeight}px` : "100%",
+                                left: previewMetrics
+                                  ? `calc(50% - ${previewMetrics.renderedWidth / 2}px + ${comparisonData.crop.x}px)`
+                                  : `${comparisonData.crop.x}px`,
+                                top: previewMetrics
+                                  ? `calc(50% - ${previewMetrics.renderedHeight / 2}px + ${comparisonData.crop.y}px)`
+                                  : `${comparisonData.crop.y}px`,
                               }}
                             />
                           ) : null}

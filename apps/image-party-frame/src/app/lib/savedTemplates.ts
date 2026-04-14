@@ -1,5 +1,5 @@
 import type { CustomTemplate } from "../contexts/ProjectContext";
-import { setCustomTemplateBackgroundFile } from "../contexts/ProjectContext";
+import { clearCustomTemplateBackgroundFiles, setCustomTemplateBackgroundFile } from "../contexts/ProjectContext";
 
 export type SavedTemplateRecord = {
   id: string;
@@ -230,9 +230,25 @@ export async function saveTemplateToLibrary(
     record.template.variants[orientation].backgroundAssetKey = assetKey;
   }
 
-  const existing = safeLocalStorageGet().filter((item) => item.name !== cleanedName);
+  const existing = safeLocalStorageGet();
   const next = [record, ...existing].slice(0, 20);
   safeLocalStorageSet(next);
+
+  const retainedIds = new Set(next.map((item) => item.id));
+  const trimmedRecords = existing.filter((item) => !retainedIds.has(item.id));
+  if (trimmedRecords.length > 0) {
+    const survivingAssetKeys = new Set(next.flatMap((item) => collectRecordAssetKeys(item)));
+    const removableAssetKeys = trimmedRecords
+      .flatMap((item) => collectRecordAssetKeys(item))
+      .filter((assetKey) => !survivingAssetKeys.has(assetKey));
+
+    for (const assetKey of removableAssetKeys) {
+      void deleteAssetBlob(assetKey).catch((error) => {
+        console.warn(`Failed to cleanup trimmed template asset ${assetKey}`, error);
+      });
+    }
+  }
+
   return record;
 }
 
@@ -334,6 +350,8 @@ export async function attachTemplateBackgroundAsset(
 }
 
 export async function hydrateSavedTemplate(record: SavedTemplateRecord): Promise<CustomTemplate> {
+  clearCustomTemplateBackgroundFiles();
+
   const nextTemplate: CustomTemplate = {
     ...record.template,
     libraryTemplateId: record.id,

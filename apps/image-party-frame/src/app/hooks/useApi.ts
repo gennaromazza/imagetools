@@ -1,7 +1,6 @@
 import { useState, useCallback } from "react";
 import { CustomTemplate } from "../contexts/ProjectContext";
-
-const API_URL = "http://localhost:3001/api";
+import { API_URL } from "../lib/apiUrls";
 
 // Type definitions
 export interface Template {
@@ -47,6 +46,7 @@ export interface BatchExportRequestOptions {
   outputPath?: string;
   createSubfolder?: boolean;
   embedColorProfile?: boolean;
+  overwrite?: boolean;
   customTemplate?: CustomTemplate | null;
   customTemplateBackgroundFiles?: Partial<Record<"vertical" | "horizontal", File | null>>;
 }
@@ -126,13 +126,17 @@ export const useProcessImage = () => {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-        const response = await fetch(`${API_URL}/process-image`, {
-          method: "POST",
-          body: formData,
-          signal: controller.signal,
-        });
+        let response: Response;
+        try {
+          response = await fetch(`${API_URL}/process-image`, {
+            method: "POST",
+            body: formData,
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+        }
 
-        clearTimeout(timeoutId);
         setProgress(70);
 
         if (!response.ok) {
@@ -209,6 +213,7 @@ export const useBatchExport = () => {
         formData.append("outputPath", options.outputPath ?? "");
         formData.append("createSubfolder", String(options.createSubfolder ?? true));
         formData.append("embedColorProfile", String(options.embedColorProfile ?? false));
+        formData.append("overwrite", String(options.overwrite ?? false));
         if (templateId === "custom" && options.customTemplate) {
           formData.append("customTemplate", JSON.stringify(options.customTemplate));
           const verticalFile = options.customTemplateBackgroundFiles?.vertical;
@@ -270,6 +275,10 @@ export async function openExportFolder(folderPath?: string): Promise<boolean> {
 
 export async function pickExportFolder(initialPath?: string): Promise<string | null> {
   try {
+    if (window.filexDesktop?.chooseOutputFolder) {
+      return await window.filexDesktop.chooseOutputFolder();
+    }
+
     const response = await fetch(`${API_URL}/pick-folder`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

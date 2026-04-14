@@ -1,4 +1,4 @@
-import { app, nativeImage } from "electron";
+import * as electron from "electron";
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
@@ -13,6 +13,8 @@ import type {
 } from "@photo-tools/desktop-contracts";
 import { ExifTool } from "exiftool-vendored";
 import { extractEmbeddedJpeg, locateEmbeddedJpegRange, locateJpegExifThumbnailRange } from "./raw-jpeg-extractor.js";
+
+const { app, nativeImage } = electron;
 
 // sharp is a native module — load lazily so the app still starts if binaries
 // are missing (dev environment without native rebuild).

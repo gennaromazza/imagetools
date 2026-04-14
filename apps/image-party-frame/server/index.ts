@@ -13,10 +13,13 @@ dotenv.config({ path: path.join(process.cwd(), "server/.env") });
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
+const dataDir = process.env.IMAGE_PARTY_FRAME_DATA_DIR
+  ? path.resolve(process.env.IMAGE_PARTY_FRAME_DATA_DIR)
+  : path.join(__dirname, "..");
 
-const uploadDir = path.join(__dirname, "../uploads");
-const exportDir = path.join(__dirname, "../exports");
-[uploadDir, exportDir].forEach((dir) => {
+const uploadDir = path.join(dataDir, "uploads");
+const exportDir = path.join(dataDir, "exports");
+[dataDir, uploadDir, exportDir].forEach((dir) => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -113,6 +116,23 @@ interface ExportResult {
   failed: Array<{ id: string; error: string }>;
   totalTime: number;
   outputDir: string;
+}
+
+function ensureAvailableOutputPath(filePath: string, overwrite: boolean): string {
+  if (overwrite || !fs.existsSync(filePath)) {
+    return filePath;
+  }
+
+  const parsed = path.parse(filePath);
+  let counter = 1;
+  let candidate = filePath;
+
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(parsed.dir, `${parsed.name}_${String(counter).padStart(2, "0")}${parsed.ext}`);
+    counter += 1;
+  }
+
+  return candidate;
 }
 
 const templates: Record<string, TemplateConfig> = {
@@ -511,10 +531,12 @@ app.post(
     };
 
     try {
-      const { templateId, positionX, positionY, zoom, orientation, customTemplate: rawCustomTemplate } =
+      const { templateId, positionX, positionY, zoom, quality, format, orientation, customTemplate: rawCustomTemplate } =
         req.body as ProcessImageRequest;
       const customTemplate = parseCustomTemplate(rawCustomTemplate);
       const requestedOrientation = orientation === "vertical" ? "vertical" : "horizontal";
+      const outputFormat = resolveFormat(format);
+      const outputQuality = clampQuality(quality, 82);
       const baseTemplate =
         templateId === "custom" && customTemplate
           ? toTemplateConfig(customTemplate, requestedOrientation, {
@@ -534,7 +556,7 @@ app.post(
         return;
       }
 
-      const outputFilename = `processed_${Date.now()}.jpg`;
+      const outputFilename = `processed_${Date.now()}.${outputFormat === "png" ? "png" : "jpg"}`;
       const outputPath = path.join(exportDir, outputFilename);
       const finalImage = await renderFramedImage({
         imagePath: uploadedFile.path,
@@ -543,8 +565,8 @@ app.post(
         positionX: parseNumber(positionX, 0),
         positionY: parseNumber(positionY, 0),
         zoom: parseNumber(zoom, 100),
-        quality: 82,
-        format: "jpeg",
+        quality: outputQuality,
+        format: outputFormat,
       });
 
       res.json({
@@ -588,6 +610,7 @@ app.post(
         outputPath,
         createSubfolder,
         embedColorProfile,
+        overwrite,
         items: rawItems,
       } = req.body as {
         templateId: string;
@@ -599,6 +622,7 @@ app.post(
         outputPath?: string;
         createSubfolder?: string;
         embedColorProfile?: string;
+        overwrite?: string;
         items?: string;
         customTemplate?: string;
       };
@@ -609,6 +633,7 @@ app.post(
       const exportQuality = clampQuality(quality, 100);
       const items = rawItems ? (JSON.parse(String(rawItems)) as BatchExportItem[]) : [];
       const finalOutputDir = resolveOutputDir(outputPath, projectName, createSubfolder !== "false");
+      const shouldOverwrite = String(overwrite) === "true";
 
       if (templateId === "custom" ? !customTemplate : !baseTemplate) {
         res.status(400).json({ error: "Invalid template" });
@@ -652,7 +677,7 @@ app.post(
             index,
             format: exportFormat,
           });
-          const outputPath = path.join(finalOutputDir, outputFilename);
+          const outputPath = ensureAvailableOutputPath(path.join(finalOutputDir, outputFilename), shouldOverwrite);
           const result = await renderFramedImage({
             imagePath: file.path,
             template,
@@ -670,7 +695,7 @@ app.post(
 
           results.success.push({
             id: item.id,
-            filename: outputFilename,
+            filename: path.basename(outputPath),
             size: result.size,
           });
         } catch (error) {
