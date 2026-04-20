@@ -129,6 +129,7 @@ export interface ImportProgressState {
   jpgEnabled: boolean;
   jpgPlanned: number;
   jpgDone: number;
+  currentFileName: string | null;
   error: string | null;
 }
 
@@ -258,6 +259,7 @@ function createEmptyImportProgress(): ImportProgressState {
     jpgEnabled: false,
     jpgPlanned: 0,
     jpgDone: 0,
+    currentFileName: null,
     error: null,
   };
 }
@@ -1121,34 +1123,26 @@ export async function hydrateArchiveListJob(job: Job): Promise<Job> {
   const jobWithStatus = withFolderStatus(job);
   if (!jobWithStatus.folderExists) return jobWithStatus;
 
-  const resolvedSelectionPath = await resolveJobPhotoSelectorFolder(jobWithStatus).catch(() => "");
-  const jobWithSelectionPath = resolvedSelectionPath
-    ? {
-        ...jobWithStatus,
-        percorsoSelezione: resolvedSelectionPath,
-      }
-    : jobWithStatus;
+  const needsDynamicFileCount = jobWithStatus.id.startsWith("fs:") || (jobWithStatus.numeroFile ?? 0) <= 0;
+  if (!needsDynamicFileCount) return jobWithStatus;
 
-  const needsDynamicFileCount = jobWithSelectionPath.id.startsWith("fs:") || (jobWithSelectionPath.numeroFile ?? 0) <= 0;
-  if (!needsDynamicFileCount) return jobWithSelectionPath;
-
-  const cachedCount = readCachedJobFileCount(jobWithSelectionPath.percorsoCartella);
+  const cachedCount = readCachedJobFileCount(jobWithStatus.percorsoCartella);
   if (cachedCount !== null) {
     return {
-      ...jobWithSelectionPath,
+      ...jobWithStatus,
       numeroFile: cachedCount,
     };
   }
 
   try {
-    const fileCount = await resolveJobFileCount(jobWithSelectionPath.percorsoCartella);
-    writeCachedJobFileCount(jobWithSelectionPath.percorsoCartella, fileCount);
+    const fileCount = await resolveJobFileCount(jobWithStatus.percorsoCartella);
+    writeCachedJobFileCount(jobWithStatus.percorsoCartella, fileCount);
     return {
-      ...jobWithSelectionPath,
+      ...jobWithStatus,
       numeroFile: fileCount,
     };
   } catch {
-    return jobWithSelectionPath;
+    return jobWithStatus;
   }
 }
 
@@ -1594,6 +1588,89 @@ function computeEstimatedRemainingSec(snapshot: ImportProgressState): number | n
   return Math.ceil(remaining / filesPerSec);
 }
 
+function getImportPhaseLabel(snapshot: ImportProgressState): string {
+  if (snapshot.phase === "idle") return "In attesa";
+  if (snapshot.phase === "done") return "Completato";
+  if (snapshot.phase === "error") return snapshot.error?.includes("annullata") ? "Import annullato" : "Errore import";
+  if (snapshot.phase === "compressing") {
+    return snapshot.jpgDone > 0 ? "Compressione JPG" : "Preparazione JPG BQ";
+  }
+  if (snapshot.scannedFiles <= 0 || snapshot.plannedFiles <= 0) return "Scansione file";
+  return "Copia in corso";
+}
+
+function buildImportProgressSnapshot(snapshot: ImportProgressState): ImportProgressState & {
+  completedScheduled: number;
+  knownTotal: number;
+  progressPct: number;
+  totalWorkItems: number;
+  completedWorkItems: number;
+  remainingWorkItems: number;
+  overallProgressPct: number;
+  currentPhaseLabel: string;
+  currentSpeedFilesPerSec: number | null;
+  currentSpeedBytesPerSec: number | null;
+} {
+  const copySkipped = Math.max(0, snapshot.skippedFiles - snapshot.manifestSkippedFiles);
+  const completedScheduled = snapshot.copiedFiles + copySkipped;
+  const knownTotal = Math.max(snapshot.plannedFiles, completedScheduled);
+  const progressPct = knownTotal > 0
+    ? Math.min(100, Math.round((completedScheduled / knownTotal) * 100))
+    : 0;
+
+  const includeJpgWork = snapshot.phase === "compressing" || snapshot.phase === "done";
+  const totalWorkItems = Math.max(
+    knownTotal + (includeJpgWork ? Math.max(0, snapshot.jpgPlanned) : 0),
+    includeJpgWork ? completedScheduled + snapshot.jpgDone : completedScheduled,
+  );
+  const completedWorkItems = Math.max(
+    0,
+    completedScheduled + (includeJpgWork ? snapshot.jpgDone : 0),
+  );
+  const remainingWorkItems = Math.max(0, totalWorkItems - completedWorkItems);
+
+  let overallProgressPct = totalWorkItems > 0
+    ? Math.round((completedWorkItems / totalWorkItems) * 100)
+    : 0;
+  if (snapshot.phase !== "done" && snapshot.phase !== "idle" && overallProgressPct >= 100) {
+    overallProgressPct = 99;
+  }
+  if ((snapshot.active || snapshot.phase === "copying" || snapshot.phase === "compressing") && totalWorkItems > 0) {
+    overallProgressPct = Math.max(1, overallProgressPct);
+  }
+
+  let currentSpeedFilesPerSec: number | null = null;
+  let currentSpeedBytesPerSec: number | null = null;
+  if (snapshot.phase === "compressing") {
+    const phaseElapsedSec = snapshot.phaseStartedAt ? (Date.now() - snapshot.phaseStartedAt) / 1000 : 0;
+    if (phaseElapsedSec >= 0.5 && snapshot.jpgDone > 0) {
+      currentSpeedFilesPerSec = snapshot.jpgDone / phaseElapsedSec;
+    }
+  } else if (snapshot.startedAt) {
+    const elapsedSec = (Date.now() - snapshot.startedAt) / 1000;
+    if (elapsedSec >= 0.5 && completedScheduled > 0) {
+      currentSpeedFilesPerSec = completedScheduled / elapsedSec;
+    }
+    if (elapsedSec >= 0.5 && snapshot.bytesCopied > 0) {
+      currentSpeedBytesPerSec = snapshot.bytesCopied / elapsedSec;
+    }
+  }
+
+  return {
+    ...snapshot,
+    completedScheduled,
+    knownTotal,
+    progressPct,
+    totalWorkItems,
+    completedWorkItems,
+    remainingWorkItems,
+    overallProgressPct,
+    currentPhaseLabel: getImportPhaseLabel(snapshot),
+    currentSpeedFilesPerSec,
+    currentSpeedBytesPerSec,
+  };
+}
+
 function updateImportProgress(patch: Partial<ImportProgressState>): void {
   const nextPhase = patch.phase;
   const phaseChanged = Boolean(nextPhase && nextPhase !== importProgress.phase);
@@ -1746,19 +1823,7 @@ app.get("/api/settings", getSettingsHandler);
  * Returns live import progress snapshot for UI polling.
  */
 const getImportProgressHandler = (_req: Request, res: Response) => {
-  const copySkipped = Math.max(0, importProgress.skippedFiles - importProgress.manifestSkippedFiles);
-  const completedScheduled = importProgress.copiedFiles + copySkipped;
-  const knownTotal = Math.max(importProgress.plannedFiles, completedScheduled);
-  const progressPct = knownTotal > 0
-    ? Math.min(100, Math.round((completedScheduled / knownTotal) * 100))
-    : 0;
-
-  res.json({
-    ...importProgress,
-    completedScheduled,
-    knownTotal,
-    progressPct,
-  });
+  res.json(buildImportProgressSnapshot(importProgress));
 };
 app.get("/api/import-progress", getImportProgressHandler);
 
@@ -2218,6 +2283,7 @@ const importHandler = async (req: Request, res: Response) => {
     jpgEnabled: generaJpg,
     initialCopyConcurrency,
     copyConcurrency: copyController.getLimit(),
+    currentFileName: null,
   });
 
   async function maybeFlushManifest(force = false): Promise<void> {
@@ -2316,6 +2382,7 @@ const importHandler = async (req: Request, res: Response) => {
       }
 
       const originalName = path.basename(srcFile);
+      updateImportProgress({ currentFileName: originalName });
       const sourceRelativePath = path.relative(sdNorm, srcFile).replace(/\\/g, "/");
 
       let sourceStat: fs.Stats;
@@ -2405,13 +2472,14 @@ const importHandler = async (req: Request, res: Response) => {
   let jpgGenerati = 0;
   const compressStartedAt = Date.now();
   if (generaJpg) {
-    updateImportProgress({ phase: "compressing", inFlight: 0 });
+    updateImportProgress({ phase: "compressing", inFlight: 0, currentFileName: null });
     const jpgFiles = copiedDestPaths.filter((f) => JPG_EXT.has(path.extname(f).toLowerCase()));
     updateImportProgress({ jpgPlanned: jpgFiles.length, jpgDone: 0 });
     await runWithConcurrency(jpgFiles, JPG_CONCURRENCY, async (src) => {
       if (importCancelRequested) {
         return;
       }
+      updateImportProgress({ currentFileName: path.basename(src) });
       const relativeFromFotoSd = path.relative(fotoSdDir, src);
       const destPath = path.join(bassaQualitaDir, relativeFromFotoSd);
       try {
@@ -2518,6 +2586,7 @@ const importHandler = async (req: Request, res: Response) => {
     scannedFiles,
     manifestSkippedFiles,
     copyConcurrency: copyController.getLimit(),
+    currentFileName: null,
     error: null,
   });
   importCancelRequested = false;
@@ -2541,6 +2610,36 @@ async function buildJobsList(): Promise<Job[]> {
   return hydratedJobs;
 }
 
+async function buildRegisteredJobsList(): Promise<Job[]> {
+  const settings = loadSettings();
+  const registeredJobs = cleanupMissingJobs()
+    .map((job) => withArchiveMetadata(job, settings.archiveRoot, settings.archiveHierarchy));
+  const hydratedJobs = new Array<Job>(registeredJobs.length);
+
+  await runWithConcurrency(registeredJobs, 6, async (job, index) => {
+    hydratedJobs[index] = await hydrateArchiveListJob(job);
+  });
+
+  return hydratedJobs
+    .filter((job): job is Job => Boolean(job))
+    .sort((a, b) => new Date(b.dataCreazione).getTime() - new Date(a.dataCreazione).getTime());
+}
+
+function refreshJobsListCacheInBackground(): void {
+  if (jobsListCache?.refreshing) return;
+  if (jobsListCache) {
+    jobsListCache.refreshing = true;
+  } else {
+    jobsListCache = { jobs: [], cachedAt: 0, refreshing: true };
+  }
+
+  buildJobsList().then((jobs) => {
+    jobsListCache = { jobs, cachedAt: Date.now(), refreshing: false };
+  }).catch(() => {
+    if (jobsListCache) jobsListCache.refreshing = false;
+  });
+}
+
 /**
  * GET /api/jobs
  * Returns all saved jobs (newest first).
@@ -2556,20 +2655,16 @@ const listJobsHandler = async (_req: Request, res: Response) => {
 
   // Stale-while-revalidate: return stale data immediately, refresh in background
   if (jobsListCache && (now - jobsListCache.cachedAt) < JOBS_LIST_CACHE_STALE_MS && !jobsListCache.refreshing) {
-    jobsListCache.refreshing = true;
     const staleJobs = jobsListCache.jobs;
-    buildJobsList().then((jobs) => {
-      jobsListCache = { jobs, cachedAt: Date.now(), refreshing: false };
-    }).catch(() => {
-      if (jobsListCache) jobsListCache.refreshing = false;
-    });
+    refreshJobsListCacheInBackground();
     return void res.json(staleJobs);
   }
 
   // No usable cache — build and cache
   try {
-    const jobs = await buildJobsList();
+    const jobs = await buildRegisteredJobsList();
     jobsListCache = { jobs, cachedAt: Date.now(), refreshing: false };
+    refreshJobsListCacheInBackground();
     res.json(jobs);
   } catch (err) {
     res.status(500).json({ error: "Impossibile caricare la lista lavori" });
@@ -2975,6 +3070,13 @@ export async function getImportProgressService(): Promise<ImportProgressState & 
   completedScheduled: number;
   knownTotal: number;
   progressPct: number;
+  totalWorkItems: number;
+  completedWorkItems: number;
+  remainingWorkItems: number;
+  overallProgressPct: number;
+  currentPhaseLabel: string;
+  currentSpeedFilesPerSec: number | null;
+  currentSpeedBytesPerSec: number | null;
 }> {
   return unwrapInvocationResult(await invokeHandler(getImportProgressHandler, {}));
 }

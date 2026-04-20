@@ -117,6 +117,21 @@ function formatDurationSeconds(seconds: number): string {
   return `${s}s`;
 }
 
+function formatItemsPerSecond(value: number | null | undefined): string {
+  if (value === null || value === undefined || value <= 0) return "calcolo...";
+  if (value >= 10) return `${value.toFixed(0)} file/s`;
+  if (value >= 1) return `${value.toFixed(1)} file/s`;
+  return `${value.toFixed(2)} file/s`;
+}
+
+function formatTransferRate(bytesPerSec: number | null | undefined): string {
+  if (bytesPerSec === null || bytesPerSec === undefined || bytesPerSec <= 0) return "calcolo...";
+  if (bytesPerSec >= 1024 * 1024 * 1024) return `${(bytesPerSec / (1024 * 1024 * 1024)).toFixed(2)} GB/s`;
+  if (bytesPerSec >= 1024 * 1024) return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+  if (bytesPerSec >= 1024) return `${(bytesPerSec / 1024).toFixed(0)} KB/s`;
+  return `${bytesPerSec.toFixed(0)} B/s`;
+}
+
 async function openFolderInExplorer(folderPath: string) {
   if (!folderPath) return;
   try {
@@ -844,12 +859,17 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const copyStepDone = progressPhase === "compressing" || progressPhase === "done";
   const bqStepVisible = Boolean(importProgress?.jpgEnabled ?? generaJpg);
   const bqStepDone = !bqStepVisible || progressPhase === "done";
-  const copyProgressPct = copyStepDone ? 100 : Math.max(3, importProgress?.progressPct ?? 3);
+  const copyProgressPct = (importProgress?.plannedFiles ?? 0) > 0
+    ? Math.min(100, Math.round(((importProgress?.completedScheduled ?? 0) / Math.max(importProgress?.plannedFiles ?? 1, 1)) * 100))
+    : (copyStepDone ? 100 : Math.max(3, importProgress?.progressPct ?? 3));
   const bqProgressPct = bqStepVisible
     ? (importProgress?.jpgPlanned ?? 0) > 0
       ? Math.min(100, Math.round(((importProgress?.jpgDone ?? 0) / Math.max(importProgress?.jpgPlanned ?? 1, 1)) * 100))
       : (progressPhase === "done" ? 100 : 0)
     : 100;
+  const overallProgressPct = importProgress?.overallProgressPct ?? Math.max(3, importProgress?.progressPct ?? 3);
+  const progressPhaseLabel = importProgress?.currentPhaseLabel
+    ?? (progressPhase === "compressing" ? "Compressione JPG" : "Copia in corso");
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
@@ -1725,10 +1745,31 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             <div className="stack" style={{ gap: "0.8rem" }}>
               <strong style={{ fontSize: "1.02rem" }}>Stato import in corso</strong>
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>
-                {progressPhase === "compressing"
-                  ? "Fase 2/2: esportazione BASSA_QUALITA"
-                  : "Fase 1/2: copia file in FOTO_SD"}
+                {progressPhaseLabel}
               </p>
+
+              <div style={{ display: "grid", gap: "0.35rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem" }}>
+                  <span>Avanzamento totale</span>
+                  <strong>{overallProgressPct}%</strong>
+                </div>
+                <div style={{ width: "100%", height: 12, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${Math.max(3, overallProgressPct)}%`,
+                      height: "100%",
+                      background: "linear-gradient(90deg, #b89a63, #9ac69a)",
+                      transition: "width 220ms ease",
+                    }}
+                  />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                  <span>
+                    {(importProgress?.completedWorkItems ?? 0)}/{Math.max(importProgress?.totalWorkItems ?? 0, 0)} operazioni completate
+                  </span>
+                  <span>Restano {importProgress?.remainingWorkItems ?? 0}</span>
+                </div>
+              </div>
 
               <div style={{ display: "grid", gap: "0.55rem" }}>
                 <div style={{ display: "grid", gap: "0.35rem" }}>
@@ -1774,15 +1815,15 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
 
               <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
                 <div className="stat-card">
-                  <span>File elaborati</span>
+                  <span>File totali</span>
                   <strong style={{ fontSize: "1.05rem" }}>
-                    {(importProgress?.completedScheduled ?? 0)}/{Math.max(importProgress?.knownTotal ?? 1, 1)}
+                    {(importProgress?.completedScheduled ?? 0)}/{Math.max(importProgress?.plannedFiles ?? 0, 0)}
                   </strong>
                 </div>
                 <div className="stat-card">
-                  <span>JPG BQ</span>
+                  <span>Velocita</span>
                   <strong style={{ fontSize: "1.05rem" }}>
-                    {importProgress?.jpgDone ?? 0}/{Math.max(importProgress?.jpgPlanned ?? 0, 0)}
+                    {formatItemsPerSecond(importProgress?.currentSpeedFilesPerSec)}
                   </strong>
                 </div>
                 <div className="stat-card">
@@ -1797,6 +1838,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
 
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
                 Trascorso {formatDurationSeconds((importProgress?.elapsedMs ?? 0) / 1000)} · Copiati {importProgress?.copiedFiles ?? 0} · Saltati {importProgress?.skippedFiles ?? 0}
+              </p>
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
+                Velocita trasferimento {formatTransferRate(importProgress?.currentSpeedBytesPerSec)} | File corrente {(importProgress?.currentFileName ?? "").trim() || "calcolo file corrente..."} | JPG BQ {importProgress?.jpgDone ?? 0}/{Math.max(importProgress?.jpgPlanned ?? 0, 0)}
               </p>
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", wordBreak: "break-all" }}>
                 Destinazione: {importProgress?.targetFolder || effectiveDestinazione}

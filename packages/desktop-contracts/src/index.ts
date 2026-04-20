@@ -522,6 +522,14 @@ export interface ArchivioImportProgressSnapshot {
   completedScheduled: number;
   knownTotal: number;
   progressPct: number;
+  totalWorkItems: number;
+  completedWorkItems: number;
+  remainingWorkItems: number;
+  overallProgressPct: number;
+  currentPhaseLabel: string;
+  currentFileName: string | null;
+  currentSpeedFilesPerSec: number | null;
+  currentSpeedBytesPerSec: number | null;
 }
 
 export interface ArchivioLowQualityProgressSnapshot {

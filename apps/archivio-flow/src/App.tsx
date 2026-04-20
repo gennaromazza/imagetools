@@ -71,7 +71,7 @@ export default function App() {
 
           <button
             className={screen === "archivio" ? "workflow-step workflow-step--active" : "workflow-step"}
-            onClick={() => { setScreen("archivio"); refreshJobs(); }}
+            onClick={() => setScreen("archivio")}
           >
             <span>2</span>
             <strong>Archivio lavori</strong>
