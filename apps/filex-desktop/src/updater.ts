@@ -196,7 +196,7 @@ function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
     }
   }
 
-  // Check both productName ("Selezione Foto") and executableName ("Selezione-Foto") as folder names,
+  // Check both productName ("Image Select Pro") and executableName ("Image-Select-Pro") as folder names,
   // because electron-builder NSIS may use either depending on install mode and user choice.
   const folderNames = Array.from(new Set([descriptor.productName, descriptor.executableName]));
 

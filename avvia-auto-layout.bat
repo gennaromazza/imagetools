@@ -2,7 +2,7 @@
 setlocal
 
 cd /d "%~dp0"
-title IMAGETOOLS - Auto Layout App
+title ImageAlbumMaker
 
 where npm >nul 2>nul
 if errorlevel 1 (
@@ -21,7 +21,7 @@ if not exist "node_modules" (
   )
 )
 
-echo Avvio Auto Layout App...
+echo Avvio ImageAlbumMaker...
 call npm run dev:auto-layout
 
 if errorlevel 1 (

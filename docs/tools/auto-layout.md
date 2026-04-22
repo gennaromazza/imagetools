@@ -30,6 +30,26 @@ Il tool e' gia' utilizzabile end-to-end in ambiente browser e include:
 6. revisione nello studio layout
 7. esportazione fogli o esportazione del progetto
 
+## Audit UX/UI disponibile
+
+Per la valutazione end-to-end dell'esperienza desktop e del flusso di impaginazione dalla creazione progetto all'export, consultare `UI_EXPERIENCE_AUDIT.md` nella root del repository.
+
+L'audit copre:
+
+- dashboard progetti
+- wizard onboarding
+- setup progetto
+- studio layout
+- controllo qualita'
+- export
+
+Include inoltre:
+
+- mappa del flusso A->Z
+- finding prioritizzati
+- backlog di miglioramento
+- guidance di redesign del flusso
+
 ## Architettura del tool
 
 ```mermaid

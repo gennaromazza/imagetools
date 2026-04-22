@@ -1326,6 +1326,12 @@ img {
 .photo-card--color-green:not(.photo-card--selected) .photo-card__image-wrapper  { border-color: rgba(111, 159, 104, 0.85); }
 .photo-card--color-blue:not(.photo-card--selected) .photo-card__image-wrapper   { border-color: rgba(95, 137, 200, 0.85); }
 .photo-card--color-purple:not(.photo-card--selected) .photo-card__image-wrapper { border-color: rgba(139, 111, 199, 0.85); }
+.photo-card--custom-tone-sand:not(.photo-card--selected) .photo-card__image-wrapper   { border-color: rgba(184, 154, 99, 0.82); }
+.photo-card--custom-tone-rose:not(.photo-card--selected) .photo-card__image-wrapper   { border-color: rgba(194, 104, 122, 0.82); }
+.photo-card--custom-tone-green:not(.photo-card--selected) .photo-card__image-wrapper  { border-color: rgba(89, 163, 115, 0.82); }
+.photo-card--custom-tone-blue:not(.photo-card--selected) .photo-card__image-wrapper   { border-color: rgba(80, 136, 209, 0.82); }
+.photo-card--custom-tone-purple:not(.photo-card--selected) .photo-card__image-wrapper { border-color: rgba(148, 108, 199, 0.82); }
+.photo-card--custom-tone-slate:not(.photo-card--selected) .photo-card__image-wrapper  { border-color: rgba(115, 132, 147, 0.82); }
 
 .photo-card__image {
   width: 100%;
@@ -1536,10 +1542,30 @@ img {
 
 .photo-card__meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.4rem;
   font-size: 0.7rem;
   color: rgba(139, 134, 128, 0.8);
   align-items: center;
+}
+
+.photo-card__group-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.12rem 0.42rem;
+  border-radius: 999px;
+  background: rgba(132, 147, 168, 0.14);
+  border: 1px solid rgba(132, 147, 168, 0.24);
+  color: rgba(221, 231, 244, 0.84);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.photo-card__group-badge--leader {
+  background: rgba(184, 154, 99, 0.16);
+  border-color: rgba(184, 154, 99, 0.32);
+  color: #f5e4c8;
 }
 
 .photo-card__orientation-icon {
@@ -2705,11 +2731,17 @@ img {
 }
 
 .quick-preview__stage--color-none { border-color: rgba(255, 255, 255, 0.16); }
-.quick-preview__stage--color-red { border-color: rgba(185, 101, 88, 0.82); }
-.quick-preview__stage--color-yellow { border-color: rgba(215, 185, 95, 0.82); }
-.quick-preview__stage--color-green { border-color: rgba(111, 159, 104, 0.82); }
-.quick-preview__stage--color-blue { border-color: rgba(95, 137, 200, 0.82); }
-.quick-preview__stage--color-purple { border-color: rgba(139, 111, 199, 0.82); }
+.quick-preview__stage--color-red { border-color: rgba(185, 101, 88, 0.96); box-shadow: 0 0 0 1px rgba(185, 101, 88, 0.45), 0 0 0 4px rgba(185, 101, 88, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--color-yellow { border-color: rgba(215, 185, 95, 0.96); box-shadow: 0 0 0 1px rgba(215, 185, 95, 0.45), 0 0 0 4px rgba(215, 185, 95, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--color-green { border-color: rgba(111, 159, 104, 0.96); box-shadow: 0 0 0 1px rgba(111, 159, 104, 0.45), 0 0 0 4px rgba(111, 159, 104, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--color-blue { border-color: rgba(95, 137, 200, 0.96); box-shadow: 0 0 0 1px rgba(95, 137, 200, 0.45), 0 0 0 4px rgba(95, 137, 200, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--color-purple { border-color: rgba(139, 111, 199, 0.96); box-shadow: 0 0 0 1px rgba(139, 111, 199, 0.45), 0 0 0 4px rgba(139, 111, 199, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--tone-sand { border-color: rgba(198, 156, 112, 0.96); box-shadow: 0 0 0 1px rgba(198, 156, 112, 0.45), 0 0 0 4px rgba(198, 156, 112, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--tone-rose { border-color: rgba(185, 115, 125, 0.96); box-shadow: 0 0 0 1px rgba(185, 115, 125, 0.45), 0 0 0 4px rgba(185, 115, 125, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--tone-green { border-color: rgba(89, 163, 115, 0.96); box-shadow: 0 0 0 1px rgba(89, 163, 115, 0.45), 0 0 0 4px rgba(89, 163, 115, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--tone-blue { border-color: rgba(89, 143, 202, 0.96); box-shadow: 0 0 0 1px rgba(89, 143, 202, 0.45), 0 0 0 4px rgba(89, 143, 202, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--tone-purple { border-color: rgba(139, 111, 199, 0.96); box-shadow: 0 0 0 1px rgba(139, 111, 199, 0.45), 0 0 0 4px rgba(139, 111, 199, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
+.quick-preview__stage--tone-slate { border-color: rgba(116, 132, 153, 0.96); box-shadow: 0 0 0 1px rgba(116, 132, 153, 0.45), 0 0 0 4px rgba(116, 132, 153, 0.16), 0 14px 34px rgba(0, 0, 0, 0.28); }
 
 .quick-preview__stage--zoomed {
   cursor: grab;
@@ -2767,6 +2799,7 @@ img {
 }
 
 .quick-preview__dock-thumb {
+  position: relative;
   width: 72px;
   height: 72px;
   flex-shrink: 0;
@@ -2796,6 +2829,23 @@ img {
   color: rgba(255, 255, 255, 0.62);
   font-size: 0.68rem;
   line-height: 1.2;
+}
+
+.quick-preview__dock-group-badge {
+  position: absolute;
+  left: 6px;
+  top: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(146, 198, 255, 0.65);
+  background: rgba(19, 39, 68, 0.76);
+  color: #d7ebff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 .quick-preview__image {
@@ -2836,11 +2886,17 @@ img {
 }
 
 .quick-preview__compare-panel.quick-preview__stage--color-none { border-color: rgba(255, 255, 255, 0.16); }
-.quick-preview__compare-panel.quick-preview__stage--color-red { border-color: rgba(185, 101, 88, 0.82); }
-.quick-preview__compare-panel.quick-preview__stage--color-yellow { border-color: rgba(215, 185, 95, 0.82); }
-.quick-preview__compare-panel.quick-preview__stage--color-green { border-color: rgba(111, 159, 104, 0.82); }
-.quick-preview__compare-panel.quick-preview__stage--color-blue { border-color: rgba(95, 137, 200, 0.82); }
-.quick-preview__compare-panel.quick-preview__stage--color-purple { border-color: rgba(139, 111, 199, 0.82); }
+.quick-preview__compare-panel.quick-preview__stage--color-red { border-color: rgba(185, 101, 88, 0.96); box-shadow: 0 0 0 1px rgba(185, 101, 88, 0.45), 0 0 0 4px rgba(185, 101, 88, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--color-yellow { border-color: rgba(215, 185, 95, 0.96); box-shadow: 0 0 0 1px rgba(215, 185, 95, 0.45), 0 0 0 4px rgba(215, 185, 95, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--color-green { border-color: rgba(111, 159, 104, 0.96); box-shadow: 0 0 0 1px rgba(111, 159, 104, 0.45), 0 0 0 4px rgba(111, 159, 104, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--color-blue { border-color: rgba(95, 137, 200, 0.96); box-shadow: 0 0 0 1px rgba(95, 137, 200, 0.45), 0 0 0 4px rgba(95, 137, 200, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--color-purple { border-color: rgba(139, 111, 199, 0.96); box-shadow: 0 0 0 1px rgba(139, 111, 199, 0.45), 0 0 0 4px rgba(139, 111, 199, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--tone-sand { border-color: rgba(198, 156, 112, 0.96); box-shadow: 0 0 0 1px rgba(198, 156, 112, 0.45), 0 0 0 4px rgba(198, 156, 112, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--tone-rose { border-color: rgba(185, 115, 125, 0.96); box-shadow: 0 0 0 1px rgba(185, 115, 125, 0.45), 0 0 0 4px rgba(185, 115, 125, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--tone-green { border-color: rgba(89, 163, 115, 0.96); box-shadow: 0 0 0 1px rgba(89, 163, 115, 0.45), 0 0 0 4px rgba(89, 163, 115, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--tone-blue { border-color: rgba(89, 143, 202, 0.96); box-shadow: 0 0 0 1px rgba(89, 143, 202, 0.45), 0 0 0 4px rgba(89, 143, 202, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--tone-purple { border-color: rgba(139, 111, 199, 0.96); box-shadow: 0 0 0 1px rgba(139, 111, 199, 0.45), 0 0 0 4px rgba(139, 111, 199, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
+.quick-preview__compare-panel.quick-preview__stage--tone-slate { border-color: rgba(116, 132, 153, 0.96); box-shadow: 0 0 0 1px rgba(116, 132, 153, 0.45), 0 0 0 4px rgba(116, 132, 153, 0.16), 0 12px 26px rgba(0, 0, 0, 0.26); }
 
 .quick-preview__compare-label {
   position: absolute;

@@ -4,7 +4,7 @@
 
 Commit: `01e61e7` - `feat: improve desktop workflows and suite branding`
 
-### Photo Selector
+### Image Select Pro
 - migliorata in modo sostanziale la velocita' di browsing su griglie grandi e quick preview
 - aggiunte pipeline piu' native per RAW, thumbnail e preview con cache piu' aggressive
 - resa piu' coerente la navigazione tra griglia e preview `Space`
@@ -24,5 +24,5 @@ Commit: `01e61e7` - `feat: improve desktop workflows and suite branding`
 - rafforzata la cache desktop thumbnail/preview e la gestione dei percorsi
 
 ### Auto Layout e integrazioni
-- preparata integrazione piu' stretta con `Photo Selector` tramite etichette custom e metadati condivisi
+- preparata integrazione piu' stretta con `Image Select Pro` tramite etichette custom e metadati condivisi
 - aggiornati storage/export per supportare meglio il flusso di selezione reale

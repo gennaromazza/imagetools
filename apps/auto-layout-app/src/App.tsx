@@ -36,7 +36,7 @@ import { ResultPanel } from "./components/ResultPanel";
 import { HistoryProvider, useHistory } from "./components/HistoryProvider";
 import { ZoomControls } from "./components/ZoomControls";
 import { ContextMenu } from "./components/ContextMenu";
-import { WarningsPanel } from "./components/WarningsPanel";
+import { WarningsPanel, getPageWarnings } from "./components/WarningsPanel";
 import { KeyboardShortcuts } from "./components/KeyboardShortcuts";
 import { QuickStats } from "./components/QuickStats";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -278,6 +278,7 @@ function appendEmptyPage(
     {
       id: nextPageId,
       pageNumber: highestPageNumber + 1,
+      pageSide: "single" as const,
       sheetSpec: options.preferredSheetSpec ? { ...options.preferredSheetSpec } : { ...current.request.sheet },
       templateId: template.id,
       templateLabel: template.label,
@@ -291,20 +292,13 @@ function appendEmptyPage(
   return buildAutoLayoutResult(current.request, nextPages, current.availableTemplates);
 }
 
-function buildManualLayoutPlan(request: AutoLayoutRequest, initialSheetCount: number): AutoLayoutResult {
+function buildManualLayoutPlan(request: AutoLayoutRequest): AutoLayoutResult {
   const seedResult = createAutoLayoutPlan({
     ...request,
     assets: []
   });
 
-  let manualResult = buildAutoLayoutResult(request, [], seedResult.availableTemplates);
-  const safeCount = Math.max(1, Math.floor(initialSheetCount));
-
-  for (let index = 0; index < safeCount; index += 1) {
-    manualResult = appendEmptyPage(manualResult);
-  }
-
-  return manualResult;
+  return appendEmptyPage(buildAutoLayoutResult(request, [], seedResult.availableTemplates));
 }
 
 function syncManualResultWithRequest(
@@ -377,6 +371,92 @@ function findImagePlacement(
   }
 
   return null;
+}
+
+interface ProjectReadinessState {
+  tone: "ok" | "warning" | "critical" | "progress";
+  label: string;
+  detail: string;
+  nextStep: string;
+}
+
+function buildProjectReadiness(params: {
+  isPlanningPending: boolean;
+  pageCount: number;
+  assetCount: number;
+  usedImagesCount: number;
+  unassignedCount: number;
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+}): ProjectReadinessState {
+  const {
+    isPlanningPending,
+    pageCount,
+    assetCount,
+    usedImagesCount,
+    unassignedCount,
+    errorCount,
+    warningCount,
+    infoCount
+  } = params;
+
+  if (isPlanningPending) {
+    return {
+      tone: "progress",
+      label: "Ricalcolo in corso",
+      detail: "Sto aggiornando il layout con le ultime impostazioni.",
+      nextStep: "Attendi il nuovo riepilogo prima di esportare."
+    };
+  }
+
+  if (assetCount === 0 || pageCount === 0) {
+    return {
+      tone: "critical",
+      label: "Setup incompleto",
+      detail: "Servono foto attive e almeno un foglio per continuare.",
+      nextStep: "Completa il setup prima di entrare nello studio."
+    };
+  }
+
+  if (errorCount > 0) {
+    return {
+      tone: "critical",
+      label: "Correzioni necessarie",
+      detail: `${errorCount} problemi bloccanti da risolvere${unassignedCount > 0 ? ` e ${unassignedCount} foto ancora libere` : ""}.`,
+      nextStep: "Apri Avvisi e correggi i fogli segnalati prima dell'export."
+    };
+  }
+
+  if (warningCount > 0 || unassignedCount > 0) {
+    const warningParts = [
+      warningCount > 0 ? `${warningCount} avvisi` : null,
+      unassignedCount > 0 ? `${unassignedCount} foto libere` : null
+    ].filter(Boolean);
+
+    return {
+      tone: "warning",
+      label: "Da rivedere",
+      detail: `${warningParts.join(" e ")} richiedono un controllo finale.`,
+      nextStep: "Controlla warning e foto non assegnate, poi passa all'output."
+    };
+  }
+
+  if (infoCount > 0) {
+    return {
+      tone: "warning",
+      label: "Quasi pronto",
+      detail: `${infoCount} note informative ancora presenti, ma il progetto e gia utilizzabile.`,
+      nextStep: "Fai una revisione veloce e poi esporta."
+    };
+  }
+
+  return {
+    tone: "ok",
+    label: "Pronto per export",
+    detail: `${pageCount} fogli pronti e ${usedImagesCount} foto gia assegnate.`,
+    nextStep: "Puoi continuare a rifinire oppure passare direttamente all'output."
+  };
 }
 
 function AppContent() {
@@ -651,7 +731,7 @@ function AppContent() {
     setResult(
       project.result ??
         (activeRequest.workflowMode === "manual"
-          ? buildManualLayoutPlan(activeRequest, Math.max(1, activeRequest.desiredSheetCount ?? 1))
+          ? buildManualLayoutPlan(activeRequest)
           : createAutoLayoutPlan(activeRequest))
     );
     setActiveAssetIds(activeRequest.assets.map((asset) => asset.id));
@@ -816,7 +896,7 @@ function AppContent() {
     const resolvedResult =
       importedProject.result ??
       (activeRequest.workflowMode === "manual"
-        ? buildManualLayoutPlan(activeRequest, Math.max(1, activeRequest.desiredSheetCount ?? 1))
+        ? buildManualLayoutPlan(activeRequest)
         : createAutoLayoutPlan(activeRequest));
     const newProject: Project = {
       ...importedProject,
@@ -905,7 +985,7 @@ function AppContent() {
     const projectId = currentProjectId || `project-${Date.now()}`;
     const plannedResult =
       wizardRequest.workflowMode === "manual"
-        ? buildManualLayoutPlan(wizardRequest, Math.max(1, wizardRequest.desiredSheetCount ?? 1))
+        ? buildManualLayoutPlan(wizardRequest)
         : createAutoLayoutPlan(wizardRequest);
     const catalogAssets = allAssets;
     const project: Project = {
@@ -1051,6 +1131,46 @@ function AppContent() {
     (typeof window.filexDesktop?.chooseOutputFolder === "function" || "showDirectoryPicker" in window);
   const canOpenSavedFolder = false;
   const usedImagesCount = result.summary.totalImages - result.unassignedAssets.length;
+  const pageWarnings = useMemo(() => getPageWarnings(result.pages), [result.pages]);
+  const warningSummary = useMemo(() => {
+    const errorCount = pageWarnings.filter((warning) => warning.severity === "error").length;
+    const warningCount = pageWarnings.filter((warning) => warning.severity === "warning").length;
+    const infoCount = pageWarnings.filter((warning) => warning.severity === "info").length;
+
+    return {
+      total: pageWarnings.length,
+      errorCount,
+      warningCount,
+      infoCount
+    };
+  }, [pageWarnings]);
+  const projectReadiness = useMemo(
+    () =>
+      buildProjectReadiness({
+        isPlanningPending,
+        pageCount: result.pages.length,
+        assetCount: request.assets.length,
+        usedImagesCount,
+        unassignedCount: result.unassignedAssets.length,
+        errorCount: warningSummary.errorCount,
+        warningCount: warningSummary.warningCount,
+        infoCount: warningSummary.infoCount
+      }),
+    [
+      isPlanningPending,
+      result.pages.length,
+      request.assets.length,
+      usedImagesCount,
+      result.unassignedAssets.length,
+      warningSummary.errorCount,
+      warningSummary.warningCount,
+      warningSummary.infoCount
+    ]
+  );
+  const selectedPageWarnings = useMemo(
+    () => (selectedPage ? pageWarnings.filter((warning) => warning.pageId === selectedPage.id) : []),
+    [pageWarnings, selectedPage]
+  );
   const isManualWorkflow = request.workflowMode === "manual";
   const canOpenStudio = result.pages.length > 0 && request.assets.length > 0;
   const handleSelectPage = useCallback((pageId: string, slotId?: string) => {
@@ -1708,6 +1828,27 @@ function AppContent() {
         4500
       );
     }
+  }
+
+  function handleMoveSlotImageToPage(sourcePageId: string, sourceSlotId: string, targetPageId: string) {
+    const sourcePage = result.pages.find((page) => page.id === sourcePageId);
+    const sourceAssignment = sourcePage?.assignments.find((assignment) => assignment.slotId === sourceSlotId);
+
+    if (!sourceAssignment) {
+      setDragState(null);
+      return;
+    }
+
+    if (sourceAssignment.locked) {
+      toast.addToast(
+        "La foto e bloccata nello slot corrente. Sblocca lo slot prima di spostarla su un altro foglio.",
+        "warning",
+        4200
+      );
+      return;
+    }
+
+    handleAddImageToPage(targetPageId, sourceAssignment.imageId);
   }
 
   function handleTemplateChange(pageId: string, templateId: string) {
@@ -2464,7 +2605,7 @@ function AppContent() {
               </div>
               <p className="setup-card__description">
                 {isManualWorkflow
-                  ? `${result.pages.length} fogli iniziali controllati manualmente`
+                  ? "Le foto restano libere finche non le trascini tu nei fogli."
                   : request.planningMode === "desiredSheetCount"
                     ? `${request.desiredSheetCount} fogli desiderati`
                     : `${request.maxPhotosPerSheet} foto per foglio`}
@@ -2570,12 +2711,388 @@ function AppContent() {
     );
   }
 
+  function renderSetupScreenV2() {
+    return (
+      <>
+        <header className="workspace__header">
+          <div>
+            <span className="workspace__eyebrow">
+              {isManualWorkflow ? "Impaginazione libera" : "Impaginazione automatica"}
+            </span>
+            <h2>Checkpoint prima dello studio</h2>
+            <p>
+              Rivedi solo gli elementi essenziali. Le impostazioni avanzate restano disponibili anche dopo,
+              quindi qui l'obiettivo e entrare nello studio con un progetto chiaro e leggibile.
+            </p>
+          </div>
+          <div className="workspace__header-actions">
+            <div className={`setup-readiness setup-readiness--${projectReadiness.tone}`}>
+              <strong>{projectReadiness.label}</strong>
+              <span>{projectReadiness.detail}</span>
+            </div>
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                persistCurrentProject();
+                setCurrentScreen("dashboard");
+              }}
+              aria-label="Torna alla lista dei progetti"
+            >
+              Torna ai progetti
+            </button>
+          </div>
+        </header>
+
+        {renderStepSwitcher()}
+
+        <div className="setup-review-strip">
+          <div className="setup-review-chip">
+            <span>Foto attive</span>
+            <strong>{activeAssetIds.length} / {allAssets.length}</strong>
+            <small>Gia selezionate per il layout</small>
+          </div>
+          <div className="setup-review-chip">
+            <span>Formato</span>
+            <strong>{request.sheet.label}</strong>
+            <small>{request.sheet.widthCm} x {request.sheet.heightCm} cm</small>
+          </div>
+          <div className={`setup-review-chip setup-review-chip--${projectReadiness.tone}`}>
+            <span>Stato progetto</span>
+            <strong>{projectReadiness.label}</strong>
+            <small>{projectReadiness.nextStep}</small>
+          </div>
+        </div>
+
+        <div className="setup-cards-grid">
+          <div className="setup-card">
+            <div className="setup-card__header">
+              <h3 className="setup-card__title">Selezione foto</h3>
+            </div>
+            <div className="setup-card__content">
+              <div className="setup-card__stat">
+                <span className="setup-card__stat-value">{activeAssetIds.length}</span>
+                <span className="setup-card__stat-label">foto attive</span>
+              </div>
+              <p className="setup-card__description">
+                {allAssets.length === activeAssetIds.length
+                  ? "Tutta la libreria caricata e attiva nel progetto."
+                  : `${allAssets.length - activeAssetIds.length} foto restano fuori dal layout attivo.`}
+              </p>
+            </div>
+            <div className="setup-card__actions">
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => setIsProjectSelectorOpen(true)}
+                aria-label="Cambia selezione foto"
+              >
+                Cambia selezione
+              </button>
+            </div>
+          </div>
+
+          <div className="setup-card">
+            <div className="setup-card__header">
+              <h3 className="setup-card__title">Formato foglio</h3>
+            </div>
+            <div className="setup-card__content">
+              <div className="setup-card__stat">
+                <span className="setup-card__stat-value">{request.sheet.label}</span>
+              </div>
+              <p className="setup-card__description">
+                {request.sheet.widthCm} x {request.sheet.heightCm} cm a {request.sheet.dpi} DPI
+              </p>
+            </div>
+            <div className="setup-card__actions">
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                aria-label="Cambia formato foglio"
+              >
+                Cambia formato
+              </button>
+            </div>
+          </div>
+
+          <div className={`setup-card setup-card--status setup-card--${projectReadiness.tone}`}>
+            <div className="setup-card__header">
+              <h3 className="setup-card__title">Stato layout</h3>
+            </div>
+            <div className="setup-card__content">
+              <div className="setup-card__stat">
+                <span className="setup-card__stat-value">{projectReadiness.label}</span>
+                <span className="setup-card__stat-label">
+                  {isManualWorkflow ? `${result.pages.length} fogli manuali` : `${result.pages.length} fogli previsti`}
+                </span>
+              </div>
+              <p className="setup-card__description">{projectReadiness.nextStep}</p>
+            </div>
+            <div className="setup-card__actions">
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                aria-label="Apri le impostazioni avanzate del layout"
+              >
+                {showAdvancedSettings ? "Chiudi avanzate" : "Apri avanzate"}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {showAdvancedSettings && (
+          <details className="collapsible-section" open>
+            <summary className="collapsible-section__header">
+              <span>Impostazioni avanzate opzionali</span>
+              <span className="collapsible-section__toggle" />
+            </summary>
+            <div className="setup-advanced-panel">
+              <div className="workspace-grid">
+                <div className="workspace-grid__main">
+                  <PanelSection title="Sorgente foto" description="Gestisci cartelle e asset">
+                    <InputPanel
+                      sourceFolderPath={request.sourceFolderPath}
+                      loadedImages={allAssets.length}
+                      activeImages={activeAssetIds.length}
+                      totalImages={result.summary.totalImages}
+                      verticalCount={result.summary.verticalCount}
+                      horizontalCount={result.summary.horizontalCount}
+                      squareCount={result.summary.squareCount}
+                      isImporting={isImporting}
+                      usesMockData={usesMockData}
+                      onSourceFolderChange={(value) =>
+                        applyPlanningRequest({ ...request, sourceFolderPath: value })
+                      }
+                      onFolderSelected={handleFolderSelected}
+                      onLoadMockData={handleLoadMockData}
+                      onOpenSelector={() => setIsProjectSelectorOpen(true)}
+                    />
+                  </PanelSection>
+
+                  <PanelSection title="Configurazione foglio" description="Personalizzazioni avanzate">
+                    <SettingsPanel
+                      request={request}
+                      onSheetPresetChange={handleSheetPresetChange}
+                      onSheetFieldChange={handleSheetFieldChange}
+                      onFitModeChange={handleFitModeChange}
+                      onCropStrategyChange={handleCropStrategyChange}
+                      onPlanningModeChange={handlePlanningModeChange}
+                      onDesiredSheetCountChange={handleDesiredSheetCountChange}
+                      onMaxPhotosPerSheetChange={handleMaxPhotosPerSheetChange}
+                      onAllowTemplateVariationChange={handleAllowTemplateVariationChange}
+                    />
+                  </PanelSection>
+                </div>
+
+                <div className="workspace-grid__side">
+                  <PanelSection title={sections.result.title} description={sections.result.description}>
+                    {isPlanningPending ? (
+                      <div className="planning-skeleton" aria-live="polite">
+                        <strong>Ricalcolo del layout in corso</strong>
+                        <span>Sto aggiornando fogli, assegnazioni e riepilogo con le ultime impostazioni.</span>
+                        <div className="planning-skeleton__lines" aria-hidden="true">
+                          <span className="planning-skeleton__line planning-skeleton__line--strong" />
+                          <span className="planning-skeleton__line" />
+                          <span className="planning-skeleton__line" />
+                        </div>
+                      </div>
+                    ) : (
+                      <ResultPanel result={result} />
+                    )}
+                  </PanelSection>
+                </div>
+              </div>
+            </div>
+          </details>
+        )}
+
+        <div className="setup-footer">
+          <div className="setup-footer__left">
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={createNewProject}
+              aria-label="Crea un nuovo progetto da zero"
+            >
+              + Nuovo progetto
+            </button>
+          </div>
+          <button
+            type="button"
+            className="primary-button setup-footer__action"
+            disabled={!canOpenStudio}
+            onClick={() => {
+              persistCurrentProject();
+              setCurrentScreen("studio");
+            }}
+            aria-label="Accedi allo studio layout per la modifica a schermo intero"
+          >
+            Entra nello studio
+          </button>
+          {!canOpenStudio ? (
+            <p className="setup-footer__help">Carica almeno una foto per continuare</p>
+          ) : (
+            <p className="setup-footer__help">{projectReadiness.nextStep}</p>
+          )}
+        </div>
+      </>
+    );
+  }
+
   function renderStudioScreen() {
+    const canCreatePageFromUnused = isManualWorkflow || result.unassignedAssets.length > 0;
+    const selectedPageSummary = selectedPage
+      ? `${selectedPage.templateLabel} / ${selectedPage.assignments.length}/${selectedPage.slotDefinitions.length} slot occupati${
+          selectedPageWarnings.length > 0 ? ` / ${selectedPageWarnings.length} avvisi` : ""
+        }`
+      : "Seleziona un foglio nel canvas per vedere template, occupazione e stato.";
+    const studioTabs: Array<{
+      value: StudioPanel;
+      label: string;
+      badge?: string | null;
+      badgeTone?: "neutral" | "warning" | "critical";
+    }> = [
+      { value: "page", label: "Foglio" },
+      { value: "output", label: "Output" },
+      {
+        value: "warnings",
+        label: "Avvisi",
+        badge: warningSummary.total > 0 ? String(warningSummary.total) : null,
+        badgeTone: warningSummary.errorCount > 0 ? "critical" : warningSummary.total > 0 ? "warning" : "neutral"
+      },
+      { value: "stats", label: "Statistiche" },
+      {
+        value: "activity",
+        label: "Storico",
+        badge: activityLog.length > 0 ? String(activityLog.length) : null,
+        badgeTone: "neutral"
+      }
+    ];
+    const panelMeta =
+      studioPanel === "warnings"
+        ? {
+            eyebrow: "Revisione",
+            title: "Avvisi e controlli finali",
+            description:
+              warningSummary.total > 0
+                ? "Apri i fogli segnalati, risolvi le criticita e rientra nello studio operativo."
+                : "Nessuna segnalazione aperta. Il progetto e sotto controllo.",
+            meta: warningSummary.total > 0 ? `${warningSummary.total} segnalazioni` : "Nessun avviso",
+            tone: warningSummary.errorCount > 0 ? "critical" : warningSummary.total > 0 ? "warning" : "ok"
+          }
+        : studioPanel === "output"
+          ? {
+              eyebrow: "Consegna",
+              title: "Output finale",
+              description:
+                "Configura destinazione, preset e formato finale. Qui l'obiettivo e esportare senza dubbi su nome file e cartella.",
+              meta: `${result.pages.length} fogli / ${request.output.format.toUpperCase()}`,
+              tone: projectReadiness.tone
+            }
+          : studioPanel === "stats"
+            ? {
+                eyebrow: "Stato progetto",
+                title: "Copertura e qualita del layout",
+                description:
+                  "Leggi il riepilogo sintetico di fogli, segnalazioni e foto ancora libere per capire cosa manca davvero.",
+                meta: `${usedImagesCount}/${allAssets.length} foto usate`,
+                tone:
+                  warningSummary.errorCount > 0
+                    ? "critical"
+                    : warningSummary.total > 0 || result.unassignedAssets.length > 0
+                      ? "warning"
+                      : "ok"
+              }
+            : studioPanel === "activity"
+              ? {
+                  eyebrow: "Cronologia",
+                  title: "Storico modifiche",
+                  description:
+                    "Le ultime operazioni restano visibili qui, utile per ripercorrere ribilanciamenti, aggiunte e correzioni manuali.",
+                  meta: `${activityLog.length} eventi`,
+                  tone: "progress"
+                }
+              : {
+                  eyebrow: "Operativita",
+                  title: "Foglio attivo e azioni rapide",
+                  description:
+                    "Controlla il contesto del foglio selezionato e usa scorciatoie chiare per rivedere avvisi, foto libere ed export.",
+                  meta: selectedPage ? `Foglio ${selectedPage.pageNumber}` : "Seleziona un foglio",
+                  tone: projectReadiness.tone
+                };
+    const pageTaskCards = [
+      {
+        key: "review",
+        tone:
+          warningSummary.errorCount > 0 ? "critical" : warningSummary.total > 0 ? "warning" : "ok",
+        eyebrow: "Revisione",
+        title:
+          warningSummary.errorCount > 0
+            ? `${warningSummary.errorCount} correzioni bloccanti`
+            : warningSummary.total > 0
+              ? `${warningSummary.total} elementi da rivedere`
+              : "Avvisi sotto controllo",
+        description:
+          warningSummary.total > 0
+            ? "Apri Avvisi, entra nei fogli segnalati e chiudi i punti ancora aperti."
+            : "Non ci sono segnalazioni attive. Puoi restare sul foglio o passare allo step finale.",
+        actionLabel: warningSummary.total > 0 ? "Apri avvisi" : "Apri statistiche",
+        action: () => setStudioPanel(warningSummary.total > 0 ? "warnings" : "stats")
+      },
+      {
+        key: "distribution",
+        tone: result.unassignedAssets.length > 0 ? "warning" : isManualWorkflow ? "progress" : "ok",
+        eyebrow: "Distribuzione",
+        title:
+          result.unassignedAssets.length > 0
+            ? `${result.unassignedAssets.length} foto ancora libere`
+            : isManualWorkflow
+              ? "Aggiungi un foglio di lavoro"
+              : "Distribuzione completata",
+        description:
+          result.unassignedAssets.length > 0
+            ? "Crea un nuovo foglio dalle foto libere oppure trascinale negli slot vuoti direttamente dal ribbon."
+            : isManualWorkflow
+              ? "Nel flusso manuale puoi aprire un nuovo foglio vuoto quando vuoi continuare la composizione."
+              : "Tutte le foto attive risultano gia assegnate a un foglio del progetto.",
+        actionLabel:
+          canCreatePageFromUnused
+            ? isManualWorkflow
+              ? "Aggiungi foglio"
+              : "Crea foglio"
+            : "Apri output",
+        action: () => {
+          if (canCreatePageFromUnused) {
+            handleCreatePageFromUnused();
+            return;
+          }
+
+          setStudioPanel("output");
+        }
+      },
+      {
+        key: "export",
+        tone: projectReadiness.tone,
+        eyebrow: "Consegna",
+        title: projectReadiness.label,
+        description: projectReadiness.nextStep,
+        actionLabel: "Apri output",
+        action: () => setStudioPanel("output")
+      }
+    ] as const;
+
     return (
       <StudioProvider value={currentStudioContextValue}>
         <header className="global-topbar">
           <div className="global-topbar__stats">
-            {result.pages.length} fogli · {usedImagesCount} usate · {result.unassignedAssets.length} libere
+            <span>{result.pages.length} fogli</span>
+            <span>{usedImagesCount} usate</span>
+            <span>{result.unassignedAssets.length} libere</span>
+            <span className={`global-topbar__status global-topbar__status--${projectReadiness.tone}`}>
+              {projectReadiness.label}
+            </span>
           </div>
 
           <div className="global-topbar__center">
@@ -2643,6 +3160,11 @@ function AppContent() {
           </div>
         </header>
 
+        <div className={`studio-status-strip studio-status-strip--${projectReadiness.tone}`}>
+          <strong>{projectReadiness.label}</strong>
+          <span>{projectReadiness.detail}</span>
+        </div>
+
         <div className={`studio-shell__content ${isFullscreen ? 'studio-shell__content--fullscreen' : ''}`}>
           <div className="studio-shell__board">
             <LayoutPreviewBoard
@@ -2668,6 +3190,7 @@ function AppContent() {
               onDrop={handleDrop}
               onAssetDropped={handleAssetDropped}
               onAddToPage={handleAddImageToPage}
+              onMoveSlotImageToPage={handleMoveSlotImageToPage}
               onOpenPhotoWindow={handleOpenPhotoWindow}
               onDropToUnused={handleDropToUnused}
               onClearSlot={handleClearSlot}
@@ -2697,13 +3220,7 @@ function AppContent() {
 
         <section className="studio-dock">
           <div className="studio-dock__tabs">
-            {([
-              ["page", "Foglio"],
-              ["output", "Output"],
-              ["warnings", "Avvisi"],
-              ["stats", "Statistiche"],
-              ["activity", "Attivita"]
-            ] as [StudioPanel, string][]).map(([value, label]) => (
+            {studioTabs.map(({ value, label, badge, badgeTone = "neutral" }) => (
               <button
                 key={value}
                 type="button"
@@ -2712,30 +3229,79 @@ function AppContent() {
                 aria-label={`${label} ${studioPanel === value ? "tab attivo" : "tab"}`}
                 aria-selected={studioPanel === value}
               >
-                {label}
+                <span className="studio-dock__tab-label">{label}</span>
+                {badge ? (
+                  <span className={`studio-dock__tab-badge studio-dock__tab-badge--${badgeTone}`}>{badge}</span>
+                ) : null}
               </button>
             ))}
           </div>
 
           <div className="studio-dock__panel">
+            <div className="studio-dock__panel-header">
+              <div>
+                <span className="studio-dock__panel-eyebrow">{panelMeta.eyebrow}</span>
+                <strong className="studio-dock__panel-title">{panelMeta.title}</strong>
+                <p className="studio-dock__panel-description">{panelMeta.description}</p>
+              </div>
+              <span className={`studio-dock__panel-meta studio-dock__panel-meta--${panelMeta.tone}`}>
+                {panelMeta.meta}
+              </span>
+            </div>
+
+            <div className="studio-dock__panel-body">
             {studioPanel === "page" ? (
               <div className="studio-dock__grid">
-                <div className="studio-summary-grid">
-                  <div className="stat-card stat-card--highlight">
-                    <span>Fogli</span>
-                    <strong>{result.pages.length}</strong>
+                <div className="studio-page-overview">
+                  <div className={`studio-review-banner studio-review-banner--${projectReadiness.tone}`}>
+                    <strong>{projectReadiness.label}</strong>
+                    <span>{projectReadiness.detail}</span>
+                    <small>{projectReadiness.nextStep}</small>
                   </div>
-                  <div className="stat-card">
-                    <span>Usate</span>
-                    <strong>{usedImagesCount}</strong>
+
+                  <div className="studio-summary-grid">
+                    <div className="stat-card stat-card--highlight">
+                      <span>Fogli</span>
+                      <strong>{result.pages.length}</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>Usate</span>
+                      <strong>{usedImagesCount}</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>Libere</span>
+                      <strong>{result.unassignedAssets.length}</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>DPI</span>
+                      <strong>{request.sheet.dpi}</strong>
+                    </div>
                   </div>
-                  <div className="stat-card">
-                    <span>Libere</span>
-                    <strong>{result.unassignedAssets.length}</strong>
+
+                  <div className="studio-selected-sheet">
+                    <span>Foglio attivo</span>
+                    <strong>{selectedPage ? `Foglio ${selectedPage.pageNumber}` : "Nessun foglio selezionato"}</strong>
+                    <small>{selectedPageSummary}</small>
                   </div>
-                  <div className="stat-card">
-                    <span>DPI</span>
-                    <strong>{request.sheet.dpi}</strong>
+
+                  <div className="studio-task-grid">
+                    {pageTaskCards.map((card) => (
+                      <article
+                        key={card.key}
+                        className={`studio-task-card studio-task-card--${card.tone}`}
+                      >
+                        <span className="studio-task-card__eyebrow">{card.eyebrow}</span>
+                        <strong>{card.title}</strong>
+                        <p>{card.description}</p>
+                        <button
+                          type="button"
+                          className="ghost-button studio-task-card__action"
+                          onClick={card.action}
+                        >
+                          {card.actionLabel}
+                        </button>
+                      </article>
+                    ))}
                   </div>
                 </div>
 
@@ -2743,7 +3309,7 @@ function AppContent() {
                   <button
                     type="button"
                     className="secondary-button studio-side__button"
-                    disabled={!isManualWorkflow && result.unassignedAssets.length === 0}
+                    disabled={!canCreatePageFromUnused}
                     onClick={handleCreatePageFromUnused}
                     aria-label={
                       isManualWorkflow
@@ -2781,6 +3347,12 @@ function AppContent() {
             {studioPanel === "output" ? (
               <OutputPanel
                 request={request}
+                pageCount={result.pages.length}
+                unassignedCount={result.unassignedAssets.length}
+                warningCount={warningSummary.total}
+                readinessTone={projectReadiness.tone}
+                readinessLabel={projectReadiness.label}
+                readinessDetail={projectReadiness.detail}
                 isExporting={isExporting}
                 exportMessage={exportMessage}
                 supportsDirectoryPicker={supportsDirectoryPicker}
@@ -2794,17 +3366,29 @@ function AppContent() {
             ) : null}
 
             {studioPanel === "activity" ? (
-              <ul className="activity-log">
-                {activityLog.map((entry, index) => (
-                  <li key={`${entry}-${index}`}>{entry}</li>
-                ))}
-              </ul>
+              activityLog.length > 0 ? (
+                <ul className="activity-log">
+                  {activityLog.map((entry, index) => (
+                    <li key={`${entry}-${index}`}>{entry}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="message-box">
+                  Nessuna modifica registrata in questa sessione. Le azioni principali compariranno qui man mano che
+                  lavori sui fogli.
+                </div>
+              )
             ) : null}
 
             {studioPanel === "warnings" ? (
               <WarningsPanel
                 pages={result.pages}
-                onSelectPage={setSelectedPageId}
+                onSelectPage={(pageId) => {
+                  const page = result.pages.find((item) => item.id === pageId);
+                  setSelectedPageId(pageId);
+                  setSelectedSlotKey(page?.slotDefinitions[0] ? `${page.id}:${page.slotDefinitions[0].id}` : null);
+                  setStudioPanel("page");
+                }}
               />
             ) : null}
 
@@ -2815,6 +3399,7 @@ function AppContent() {
                 usedImagesCount={usedImagesCount}
               />
             ) : null}
+            </div>
           </div>
         </section>
 
@@ -2867,7 +3452,7 @@ function AppContent() {
           }
           onOpenFolder={() => {
             setExportMessage(
-              "Apri cartella non disponibile in questa build Windows. I file sono stati salvati ma non è possibile aprire Esplora file automaticamente."
+              "Apri cartella non disponibile in questa build Windows. I file sono stati salvati ma non e possibile aprire Esplora file automaticamente."
             );
           }}
         />
@@ -2981,7 +3566,7 @@ function AppContent() {
             onImportProject={importImportedProject}
           />
         ) : currentScreen === "setup" ? (
-          renderSetupScreen()
+          renderSetupScreenV2()
         ) : (
           renderStudioScreen()
         )}
@@ -2989,7 +3574,11 @@ function AppContent() {
 
       <OnboardingWizard
         isOpen={showOnboardingWizard}
-        isLoading={isPlanningPending}
+        isLoading={isPlanningPending || isImporting}
+        loadingPhase={importProgressState.phase}
+        loadingProcessed={importProgressState.processed}
+        loadingTotal={importProgressState.total}
+        loadingCurrentFile={importProgressState.currentFile}
         onClose={() => setShowOnboardingWizard(false)}
         onComplete={handleWizardComplete}
         currentRequest={request}

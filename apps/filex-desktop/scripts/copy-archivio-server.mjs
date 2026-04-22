@@ -3,8 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const sourceDir = join(__dirname, "..", "..", "archivio-flow", "server", "dist");
-const targetDir = join(__dirname, "..", "dist-electron", "archivio-flow-server");
+const sourceDir = join(__dirname, "..", "..", "archivio-flow", ".output", "server");
+const targetDir = join(__dirname, "..", ".output", "electron", "archivio-flow-server");
 
 rmSync(targetDir, { recursive: true, force: true });
 

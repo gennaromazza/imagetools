@@ -1,6 +1,6 @@
 /**
  * collect-installers.mjs
- * Copia gli installer reali (>50 MB) dalla cartella release/ in release/_distribuzione/
+ * Copia gli installer reali (>50 MB) dalla cartella .output/releases/ in .output/installers/
  * Viene eseguito automaticamente dopo dist:all-tools:win
  */
 
@@ -10,12 +10,13 @@ import { fileURLToPath } from "url";
 import { dirname } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const releaseDir = join(__dirname, "..", "release");
-const distDir = join(releaseDir, "_distribuzione");
+const outputRoot = join(__dirname, "..", ".output");
+const releaseDir = join(outputRoot, "releases");
+const distDir = join(outputRoot, "installers");
 
 const MIN_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
 
-// Svuota e ricrea la cartella _distribuzione
+// Svuota e ricrea la cartella installers
 if (existsSync(distDir)) {
   rmSync(distDir, { recursive: true, force: true });
 }
@@ -26,7 +27,7 @@ const files = readdirSync(releaseDir).filter(
 );
 
 if (files.length === 0) {
-  console.error("ATTENZIONE: nessun installer trovato in release/");
+  console.error("ATTENZIONE: nessun installer trovato in .output/releases/");
   process.exit(1);
 }
 

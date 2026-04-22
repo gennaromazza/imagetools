@@ -10,9 +10,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "outDir": "./dist",
+    "outDir": "./.output/server",
     "rootDir": "."
   },
   "include": ["server/**/*"],
-  "exclude": ["node_modules", "src", "dist"]
+  "exclude": ["node_modules", "src", ".output", "dist"]
 }

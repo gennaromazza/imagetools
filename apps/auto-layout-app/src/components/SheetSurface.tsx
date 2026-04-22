@@ -223,6 +223,7 @@ interface SheetSurfaceProps {
   onDrop: (move: LayoutMove) => void;
   onAssetDropped: (pageId: string, slotId: string, imageId: string) => void;
   onAddToPage: (pageId: string, imageId: string) => void;
+  onMoveSlotImageToPage: (sourcePageId: string, sourceSlotId: string, targetPageId: string) => void;
   onClearSlot: (pageId: string, slotId: string) => void;
   onOpenPhotoWindow: (pageId: string, slotId: string) => void;
   onContextMenu?: (event: MouseEvent, page: GeneratedPageLayout) => void;
@@ -264,6 +265,7 @@ export const SheetSurface = memo(function SheetSurface({
   onDrop,
   onAssetDropped,
   onAddToPage,
+  onMoveSlotImageToPage,
   onClearSlot,
   onOpenPhotoWindow,
   onContextMenu,
@@ -373,7 +375,11 @@ export const SheetSurface = memo(function SheetSurface({
               const target = event.target as HTMLElement | null;
               const overSlot = Boolean(target?.closest(".sheet-slot"));
               if (dragState && !overSlot) {
-                onAddToPage(page.id, dragState.imageId);
+                if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
+                  onMoveSlotImageToPage(dragState.sourcePageId, dragState.sourceSlotId, page.id);
+                } else {
+                  onAddToPage(page.id, dragState.imageId);
+                }
               }
               setStableDragIntentLabel(null);
               setHoveredDropSlotId(null);
@@ -386,6 +392,7 @@ export const SheetSurface = memo(function SheetSurface({
           ? (event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
                 setStableDragIntentLabel(null);
+                setHoveredDropSlotId(null);
                 setIsCanvasAddTarget(false);
               }
             }
@@ -420,7 +427,7 @@ export const SheetSurface = memo(function SheetSurface({
           dragState?.kind === "slot" &&
           dragState.sourcePageId === page.id &&
           dragState.sourceSlotId === slot.id;
-        const canReposition = Boolean(interactive && assignment);
+        const canReposition = Boolean(interactive && assignment && !assignment.locked);
         const canDragAssignment = Boolean(interactive && assignment && !assignment.locked);
         const slotDropIntent = resolveSlotDropIntent({
           dragState,
@@ -566,7 +573,7 @@ export const SheetSurface = memo(function SheetSurface({
                     onDragEnd();
                   }}
                   onWheel={(event) => {
-                    if (!assignment || !interactive || !event.altKey) return;
+                    if (!assignment || !interactive || !event.altKey || assignment.locked) return;
                     event.preventDefault();
                     const nextZoom = Math.max(0.7, Math.min(2.2, assignment.zoom + (event.deltaY > 0 ? -0.08 : 0.08)));
                     onUpdateSlotAssignment(page.id, slot.id, { zoom: nextZoom });
@@ -582,7 +589,15 @@ export const SheetSurface = memo(function SheetSurface({
                       onSelectPage(page.id, slot.id);
                     }
 
-                    if (!assignment || !canReposition || event.button !== 0) return;
+                    if (
+                      !assignment ||
+                      !canReposition ||
+                      event.button !== 0 ||
+                      canDragAssignment ||
+                      event.altKey
+                    ) {
+                      return;
+                    }
 
                     // Start pan capture for non-DnD repositioning
                     const rect = event.currentTarget.getBoundingClientRect();
@@ -632,11 +647,16 @@ export const SheetSurface = memo(function SheetSurface({
                   onPointerUp={(event) => {
                     if (!panStateRef.current || panStateRef.current.pointerId !== event.pointerId) return;
                     flushPanUpdate();
+                    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    }
                     panStateRef.current = null;
-                    event.currentTarget.releasePointerCapture(event.pointerId);
                   }}
-                  onPointerCancel={() => {
+                  onPointerCancel={(event) => {
                     flushPanUpdate();
+                    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+                      event.currentTarget.releasePointerCapture(event.pointerId);
+                    }
                     panStateRef.current = null;
                   }}
                 >
@@ -647,6 +667,13 @@ export const SheetSurface = memo(function SheetSurface({
                     slot={slot}
                     sheetSpec={page.sheetSpec}
                     slotCount={page.slotDefinitions.length}
+                    emptyState={
+                      isDropTarget && hoveredDropSlotId === slot.id
+                        ? "drag-target"
+                        : isSelected
+                          ? "selected"
+                          : "default"
+                    }
                   />
                 </button>
 
@@ -676,6 +703,7 @@ export const SheetSurface = memo(function SheetSurface({
                   slot={slot}
                   sheetSpec={page.sheetSpec}
                   slotCount={page.slotDefinitions.length}
+                  emptyState="default"
                 />
               </div>
             )}

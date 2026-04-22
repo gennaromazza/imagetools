@@ -1,4 +1,16 @@
-import type { ImageAsset, LayoutTemplate, SheetSpec } from "@photo-tools/shared-types";
+import type {
+  ImageAsset,
+  LayoutTemplate,
+  PageSide,
+  SheetSpec,
+  TemplateVariantRole
+} from "@photo-tools/shared-types";
+
+export interface SelectTemplateOptions {
+  pageSide?: PageSide;
+  spreadTemplate?: LayoutTemplate | null;
+  recentTemplates?: LayoutTemplate[];
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -30,6 +42,110 @@ function isDenseGeneratedGrid(template: LayoutTemplate): boolean {
   return /^grid-\d+-balanced$/.test(template.id) && template.maxPhotos >= 5;
 }
 
+function getExpectedRolesForSide(pageSide: PageSide): TemplateVariantRole[] {
+  if (pageSide === "left") {
+    return ["mirror-left", "companion-left", "base"];
+  }
+
+  if (pageSide === "right") {
+    return ["mirror-right", "companion-right", "base"];
+  }
+
+  return ["base"];
+}
+
+function getSideCompatibilityScore(template: LayoutTemplate, pageSide: PageSide): number {
+  if (pageSide === "single") {
+    return template.supportsPageSide ? 8 : 12;
+  }
+
+  if (!template.supportsPageSide) {
+    return -4;
+  }
+
+  const [preferredRole, secondaryRole, fallbackRole] = getExpectedRolesForSide(pageSide);
+  const role = template.variantRole ?? "base";
+
+  if (role === preferredRole) {
+    return 26;
+  }
+
+  if (role === secondaryRole) {
+    return 22;
+  }
+
+  if (role === fallbackRole) {
+    return 10;
+  }
+
+  return -18;
+}
+
+function areSpreadRolesComplementary(
+  leftRole: TemplateVariantRole,
+  rightRole: TemplateVariantRole
+): boolean {
+  return (
+    (leftRole === "mirror-left" && rightRole === "mirror-right") ||
+    (leftRole === "companion-left" && rightRole === "companion-right")
+  );
+}
+
+function getSpreadPairScore(template: LayoutTemplate, spreadTemplate: LayoutTemplate | null | undefined): number {
+  if (!spreadTemplate) {
+    return 0;
+  }
+
+  if (!template.variantGroupId || !spreadTemplate.variantGroupId) {
+    return template.id === spreadTemplate.id ? -10 : 0;
+  }
+
+  if (template.variantGroupId !== spreadTemplate.variantGroupId) {
+    return -6;
+  }
+
+  const currentRole = template.variantRole ?? "base";
+  const partnerRole = spreadTemplate.variantRole ?? "base";
+
+  if (areSpreadRolesComplementary(partnerRole, currentRole)) {
+    return 34;
+  }
+
+  if (currentRole === "base" || partnerRole === "base") {
+    return 14;
+  }
+
+  if (currentRole === partnerRole) {
+    return -18;
+  }
+
+  return 8;
+}
+
+function getRecentReusePenalty(template: LayoutTemplate, recentTemplates: LayoutTemplate[] | undefined): number {
+  if (!recentTemplates || recentTemplates.length === 0) {
+    return 0;
+  }
+
+  return recentTemplates.reduce((penalty, recentTemplate, index) => {
+    const weight = Math.max(1, recentTemplates.length - index);
+
+    if (recentTemplate.id === template.id) {
+      return penalty + 16 * weight;
+    }
+
+    if (
+      recentTemplate.variantGroupId &&
+      template.variantGroupId &&
+      recentTemplate.variantGroupId === template.variantGroupId
+    ) {
+      return penalty + 8 * weight;
+    }
+
+    return penalty;
+  }, 0);
+}
+
 function getDominantOrientation(assets: ImageAsset[]): "portrait-heavy" | "landscape-heavy" | "mixed" {
   const verticalCount = assets.filter((asset) => asset.orientation === "vertical").length;
   const horizontalCount = assets.filter((asset) => asset.orientation === "horizontal").length;
@@ -49,7 +165,8 @@ function scoreTemplate(
   template: LayoutTemplate,
   assets: ImageAsset[],
   sheet: SheetSpec,
-  templates: LayoutTemplate[]
+  templates: LayoutTemplate[],
+  options: SelectTemplateOptions
 ): number {
   if (assets.length < template.minPhotos || assets.length > template.maxPhotos) {
     return Number.NEGATIVE_INFINITY;
@@ -136,19 +253,33 @@ function scoreTemplate(
       !isDenseGeneratedGrid(candidate)
   );
   const denseGridPenalty = isDenseGeneratedGrid(template) && hasEditorialAlternative ? 22 : 0;
+  const sideCompatibilityScore = options.pageSide ? getSideCompatibilityScore(template, options.pageSide) : 0;
+  const spreadPairScore = getSpreadPairScore(template, options.spreadTemplate);
+  const recentReusePenalty = getRecentReusePenalty(template, options.recentTemplates);
 
-  return exactFitBonus + affinityBonus + sheetBonus + orientationBonus + aspectBonus - cropPenalty - denseGridPenalty;
+  return (
+    exactFitBonus +
+    affinityBonus +
+    sheetBonus +
+    orientationBonus +
+    aspectBonus +
+    sideCompatibilityScore +
+    spreadPairScore -
+    cropPenalty -
+    denseGridPenalty -
+    recentReusePenalty
+  );
 }
 
 export function selectBestTemplate(
   assets: ImageAsset[],
   templates: LayoutTemplate[],
-  sheet: SheetSpec
+  sheet: SheetSpec,
+  options: SelectTemplateOptions = {}
 ): LayoutTemplate {
   const scoredTemplates = templates
-    .map((template) => ({ template, score: scoreTemplate(template, assets, sheet, templates) }))
+    .map((template) => ({ template, score: scoreTemplate(template, assets, sheet, templates, options) }))
     .sort((left, right) => right.score - left.score);
 
   return scoredTemplates[0].template;
 }
-

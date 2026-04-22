@@ -73,6 +73,43 @@ function finalize(result: AutoLayoutResult, pages: GeneratedPageLayout[]): AutoL
   return buildAutoLayoutResult(result.request, normalizePages(pages), result.availableTemplates);
 }
 
+function getPageSpreadPartner(page: GeneratedPageLayout, pages: GeneratedPageLayout[]): GeneratedPageLayout | null {
+  if (!page.spreadId || page.pageSide === "single") {
+    return null;
+  }
+
+  return pages.find(
+    (candidate) =>
+      candidate.id !== page.id &&
+      candidate.spreadId === page.spreadId &&
+      candidate.pageSide !== page.pageSide
+  ) ?? null;
+}
+
+function buildTemplateSelectionOptions(
+  page: GeneratedPageLayout,
+  pages: GeneratedPageLayout[],
+  templates: LayoutTemplate[]
+) {
+  const pageIndex = pages.findIndex((candidate) => candidate.id === page.id);
+  const spreadPartner = getPageSpreadPartner(page, pages);
+  const spreadTemplate = spreadPartner
+    ? templates.find((template) => template.id === spreadPartner.templateId) ?? null
+    : null;
+  const recentTemplates = pageIndex <= 0
+    ? []
+    : pages
+        .slice(Math.max(0, pageIndex - 2), pageIndex)
+        .map((candidate) => templates.find((template) => template.id === candidate.templateId))
+        .filter((template): template is LayoutTemplate => Boolean(template));
+
+  return {
+    pageSide: page.pageSide,
+    spreadTemplate,
+    recentTemplates
+  };
+}
+
 function findAssignment(
   pages: GeneratedPageLayout[],
   imageId: string
@@ -533,7 +570,12 @@ export function rebalancePagesForAssignedImages(
       continue;
     }
 
-    const nextTemplate = selectBestTemplate(assets, result.availableTemplates, page.sheetSpec);
+    const nextTemplate = selectBestTemplate(
+      assets,
+      result.availableTemplates,
+      page.sheetSpec,
+      buildTemplateSelectionOptions(page, pages, result.availableTemplates)
+    );
     const assetById = new Map(assets.map((asset) => [asset.id, asset]));
     const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy, page.sheetSpec).map((assignment) =>
       normalizeManualCropForSlot(
@@ -678,7 +720,12 @@ export function addImageToPage(
     return result;
   }
 
-  const nextTemplate = selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
+  const nextTemplate = selectBestTemplate(
+    assets,
+    compatibleTemplates,
+    targetPage.sheetSpec,
+    buildTemplateSelectionOptions(targetPage, pages, compatibleTemplates)
+  );
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy, targetPage.sheetSpec).map((assignment) =>
     normalizeManualCropForSlot(
@@ -749,8 +796,18 @@ export function rearrangePageImages(
   const alternativeTemplates = compatibleTemplates.filter((template) => template.id !== targetPage.templateId);
   const nextTemplate =
     alternativeTemplates.length > 0
-      ? selectBestTemplate(assets, alternativeTemplates, targetPage.sheetSpec)
-      : selectBestTemplate(assets, compatibleTemplates, targetPage.sheetSpec);
+      ? selectBestTemplate(
+          assets,
+          alternativeTemplates,
+          targetPage.sheetSpec,
+          buildTemplateSelectionOptions(targetPage, pages, alternativeTemplates)
+        )
+      : selectBestTemplate(
+          assets,
+          compatibleTemplates,
+          targetPage.sheetSpec,
+          buildTemplateSelectionOptions(targetPage, pages, compatibleTemplates)
+        );
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const assignments = assignImagesToTemplate(assets, nextTemplate, result.request.fitMode, result.request.cropStrategy, targetPage.sheetSpec).map((assignment) =>
     normalizeManualCropForSlot(
@@ -899,18 +956,21 @@ export function createPage(
     return result;
   }
 
+  const pages = clonePages(result);
   const template = request.templateId
     ? findTemplate(result.availableTemplates, request.templateId)
-    : selectBestTemplate(assets, result.availableTemplates, result.request.sheet);
+    : selectBestTemplate(assets, result.availableTemplates, result.request.sheet, {
+        pageSide: pages.length === 0 ? "single" : pages.length % 2 === 0 ? "left" : "right"
+      });
   const assignments = assignImagesToTemplate(assets, template, result.request.fitMode, result.request.cropStrategy, result.request.sheet).map((assignment) =>
     withPreservedAssignmentState(assignment)
   );
-  const pages = clonePages(result);
   const highestPageNumber = pages.reduce((highest, page) => Math.max(highest, page.pageNumber), 0);
   const nextPageId = buildNextPageId(pages);
   pages.push({
     id: nextPageId,
     pageNumber: highestPageNumber + 1,
+    pageSide: "single" as const,
     sheetSpec: result.request.sheet,
     templateId: template.id,
     templateLabel: template.label,

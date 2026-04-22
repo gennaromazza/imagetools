@@ -61,7 +61,7 @@ export function AssignmentInspector({
     return (
       <div className="stack">
         <p className="helper-copy">
-          {pageLabel ? `${pageLabel}, slot ${slot.id}` : `Slot ${slot.id}`} e' vuoto. Trascina una foto
+          {pageLabel ? `${pageLabel}, slot ${slot.id}` : `Slot ${slot.id}`} e vuoto. Trascina una foto
           nella spread per riempirlo.
         </p>
       </div>

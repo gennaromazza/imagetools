@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import type { GeneratedPageLayout, ImageAsset, LayoutAssignment, LayoutSlot } from "@photo-tools/shared-types";
 import { AssignmentInspector } from "./AssignmentInspector";
@@ -47,6 +47,15 @@ export function SlotPhotoEditorModal({
         return;
       }
 
+      const target = event.target as HTMLElement | null;
+      const isTextEntry =
+        target instanceof HTMLElement &&
+        (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+
+      if (isTextEntry) {
+        return;
+      }
+
       event.preventDefault();
       onClose();
     };
@@ -60,8 +69,9 @@ export function SlotPhotoEditorModal({
   }
 
   const previewUrl = asset.previewUrl ?? asset.thumbnailUrl ?? asset.sourceUrl;
-  const slotAspect = getEffectiveSlotAspectRatio(slot, sheetSpec, slotCount);
-  const slotPreviewStyle = {
+  const rawSlotAspect = getEffectiveSlotAspectRatio(slot, sheetSpec, slotCount);
+  const slotAspect = Number.isFinite(rawSlotAspect) && rawSlotAspect > 0 ? rawSlotAspect : 1;
+  const slotPreviewStyle: CSSProperties = {
     ["--slot-border-width" as string]: `${Math.max(0, (sheetSpec.photoBorderWidthCm ?? 0) * 8)}px`,
     ["--slot-border-color" as string]: sheetSpec.photoBorderColor ?? "#ffffff",
     backgroundColor: sheetSpec.backgroundColor ?? "#ffffff",
@@ -77,7 +87,7 @@ export function SlotPhotoEditorModal({
           <div>
             <strong>{asset.fileName}</strong>
             <p>
-              {pageLabel} | slot {slot.id} | {asset.width} x {asset.height}
+              {pageLabel} | slot {slot.id} | {asset.width ?? "?"} x {asset.height ?? "?"}
             </p>
           </div>
           <button type="button" className="ghost-button" onClick={onClose}>
@@ -119,7 +129,7 @@ export function SlotPhotoEditorModal({
                 {previewUrl ? (
                   <img
                     src={previewUrl}
-                    alt={asset.fileName}
+                    alt={asset.fileName || "Anteprima foto"}
                     className="slot-photo-editor__image"
                     draggable={false}
                   />

@@ -23,6 +23,18 @@ interface ExportedProject {
   }>;
 }
 
+function normalizeImageOrientation(value: unknown): ImageOrientation {
+  return value === "vertical" || value === "horizontal" || value === "square" ? value : "horizontal";
+}
+
+function normalizeDimension(value: unknown): number {
+  return Number.isFinite(value) ? Number(value) : 0;
+}
+
+function normalizeAspectRatio(value: unknown): number {
+  return Number.isFinite(value) && Number(value) > 0 ? Number(value) : 1;
+}
+
 function getProjectActiveAssets(project: Project): ImageAsset[] {
   return project.result?.request.assets ?? project.request.assets;
 }
@@ -62,11 +74,15 @@ async function readAssetBlob(asset: ImageAsset): Promise<Blob> {
     throw new Error(`Impossibile esportare ${asset.fileName}: URL sorgente assente.`);
   }
 
-  const response = await fetch(sourceUrl);
-  if (!response.ok) {
-    throw new Error(`Impossibile esportare ${asset.fileName}: sorgente non leggibile.`);
+  try {
+    const response = await fetch(sourceUrl);
+    if (!response.ok) {
+      throw new Error("Source response not ok");
+    }
+    return response.blob();
+  } catch {
+    throw new Error(`Impossibile esportare ${asset.fileName}: sorgente non leggibile o non piu disponibile.`);
   }
-  return response.blob();
 }
 
 async function imageAssetToExportFormat(asset: ImageAsset): Promise<ExportedProject["assets"][0]> {
@@ -82,10 +98,10 @@ async function imageAssetToExportFormat(asset: ImageAsset): Promise<ExportedProj
     pickStatus: asset.pickStatus ?? "unmarked",
     colorLabel: asset.colorLabel ?? null,
     customLabels: asset.customLabels ?? [],
-    width: asset.width,
-    height: asset.height,
-    orientation: asset.orientation,
-    aspectRatio: asset.aspectRatio,
+    width: normalizeDimension(asset.width),
+    height: normalizeDimension(asset.height),
+    orientation: normalizeImageOrientation(asset.orientation),
+    aspectRatio: normalizeAspectRatio(asset.aspectRatio),
     sourceBlob: base64String
   };
 }
@@ -103,10 +119,10 @@ function exportedAssetToImageAsset(exported: ExportedProject["assets"][0]): Imag
     pickStatus: exported.pickStatus ?? "unmarked",
     colorLabel: exported.colorLabel ?? null,
     customLabels: exported.customLabels ?? [],
-    width: exported.width,
-    height: exported.height,
-    orientation: exported.orientation,
-    aspectRatio: exported.aspectRatio,
+    width: normalizeDimension(exported.width),
+    height: normalizeDimension(exported.height),
+    orientation: normalizeImageOrientation(exported.orientation),
+    aspectRatio: normalizeAspectRatio(exported.aspectRatio),
     sourceUrl,
     thumbnailUrl: sourceUrl,
     previewUrl: sourceUrl
@@ -140,14 +156,18 @@ function dataUrlToBlob(dataUrl: string): Blob {
 
   const mimeMatch = header.match(/^data:(.*?);base64$/);
   const mimeType = mimeMatch?.[1] || "application/octet-stream";
-  const binaryString = atob(payload);
-  const bytes = new Uint8Array(binaryString.length);
+  try {
+    const binaryString = atob(payload);
+    const bytes = new Uint8Array(binaryString.length);
 
-  for (let index = 0; index < binaryString.length; index += 1) {
-    bytes[index] = binaryString.charCodeAt(index);
+    for (let index = 0; index < binaryString.length; index += 1) {
+      bytes[index] = binaryString.charCodeAt(index);
+    }
+
+    return new Blob([bytes], { type: mimeType });
+  } catch {
+    throw new Error("Asset codificato in modo non valido nel file progetto.");
   }
-
-  return new Blob([bytes], { type: mimeType });
 }
 
 async function compressJsonPayload(jsonString: string): Promise<Blob> {
@@ -191,7 +211,11 @@ async function readProjectPayload(fileContent: string | ArrayBuffer): Promise<st
 
 export async function exportProject(project: Project): Promise<Blob> {
   const assets = getProjectCatalogAssets(project);
-  const exportedAssets = await Promise.all(assets.map((asset) => imageAssetToExportFormat(asset)));
+  const exportedAssets: ExportedProject["assets"] = [];
+
+  for (const asset of assets) {
+    exportedAssets.push(await imageAssetToExportFormat(asset));
+  }
 
   const exported: ExportedProject = {
     version: "1.1.0",
@@ -215,6 +239,10 @@ export async function importProject(fileContent: string | ArrayBuffer): Promise<
     exported = JSON.parse(payload);
   } catch {
     throw new Error("Il file del progetto non e valido. Assicurati che sia un file .imagetool.");
+  }
+
+  if (exported.version !== "1.0.0" && exported.version !== "1.1.0") {
+    throw new Error("Versione del file progetto non supportata.");
   }
 
   if (!exported.project || !Array.isArray(exported.assets)) {
@@ -245,12 +273,19 @@ export async function downloadFile(blob: Blob, fileName: string): Promise<void> 
     return;
   }
 
+  if (typeof document === "undefined") {
+    throw new Error("Download non disponibile in questo ambiente.");
+  }
+
   const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = fileName;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 }

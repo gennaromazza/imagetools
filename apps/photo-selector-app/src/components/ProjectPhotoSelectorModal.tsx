@@ -10,11 +10,13 @@ import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
   DEFAULT_PHOTO_FILTERS,
+  type FileTypeFilter,
   formatAssetStars,
   getAssetColorLabel,
   getAssetPickStatus,
   getAssetRating,
   getColorShortcutHint,
+  matchesFileTypeFilter,
   matchesPhotoFilters,
   PICK_STATUS_LABELS,
   resolvePhotoClassificationShortcut
@@ -61,6 +63,7 @@ export function ProjectPhotoSelectorModal({
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [usageFilter, setUsageFilter] = useState<UsageFilter>("all");
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
+  const [fileTypeFilter, setFileTypeFilter] = useState<FileTypeFilter>("all");
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
   const [contextMenuState, setContextMenuState] = useState<{
@@ -83,12 +86,13 @@ export function ProjectPhotoSelectorModal({
 
   // Derived state
   const hasActiveFilters =
-    pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all" || usageFilter !== "all";
+    pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all" || fileTypeFilter !== "all" || usageFilter !== "all";
 
   function resetFilters() {
     setPickFilter("all");
     setRatingFilter("any");
     setColorFilter("all");
+    setFileTypeFilter("all");
     setUsageFilter("all");
   }
 
@@ -101,6 +105,10 @@ export function ProjectPhotoSelectorModal({
           colorLabel: colorFilter
         })
       ) {
+        return false;
+      }
+
+      if (!matchesFileTypeFilter(asset, fileTypeFilter)) {
         return false;
       }
 
@@ -135,7 +143,7 @@ export function ProjectPhotoSelectorModal({
     });
 
     return filtered;
-  }, [colorFilter, deferredAssets, ratingFilter, pickFilter, sortBy, usageByAssetId, usageFilter]);
+  }, [colorFilter, deferredAssets, fileTypeFilter, ratingFilter, pickFilter, sortBy, usageByAssetId, usageFilter]);
 
   const localAssetById = useMemo(
     () => new Map(localAssets.map((asset) => [asset.id, asset])),
@@ -585,6 +593,18 @@ export function ProjectPhotoSelectorModal({
                 </button>
               </div>
             ) : null}
+
+            <label className="field">
+              <span>Formato</span>
+              <select
+                className={fileTypeFilter !== "all" ? "field__select field__select--active" : undefined}
+                value={fileTypeFilter}
+                onChange={(event) => setFileTypeFilter(event.target.value as FileTypeFilter)}>
+                <option value="all">Tutti</option>
+                <option value="raw">Solo RAW</option>
+                <option value="jpeg">Solo JPG</option>
+              </select>
+            </label>
 
             <label className="field">
               <span>Stato</span>

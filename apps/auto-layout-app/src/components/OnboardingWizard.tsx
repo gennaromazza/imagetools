@@ -7,6 +7,10 @@ import { PhotoSelector } from "./PhotoSelector";
 interface OnboardingWizardProps {
   isOpen: boolean;
   isLoading: boolean;
+  loadingPhase?: "reading" | "preparing";
+  loadingProcessed?: number;
+  loadingTotal?: number;
+  loadingCurrentFile?: string | null;
   onClose: () => void;
   onComplete: (request: AutoLayoutRequest, projectName: string) => void;
   currentRequest: AutoLayoutRequest;
@@ -20,6 +24,10 @@ type WizardStep = "welcome" | "projectName" | "mode" | "images" | "select" | "te
 export function OnboardingWizard({
   isOpen,
   isLoading,
+  loadingPhase = "reading",
+  loadingProcessed = 0,
+  loadingTotal = 0,
+  loadingCurrentFile = null,
   onClose,
   onComplete,
   currentRequest,
@@ -36,9 +44,6 @@ export function OnboardingWizard({
   const [selectedPresetId, setSelectedPresetId] = useState(currentRequest.sheet.presetId);
   const [planningMode, setPlanningMode] = useState<"fogli" | "foto">("fogli");
   const [plannedValue, setPlannedValue] = useState(currentRequest.desiredSheetCount ?? 5);
-  const [manualInitialSheetCount, setManualInitialSheetCount] = useState(
-    Math.max(1, currentRequest.desiredSheetCount ?? 3)
-  );
   const [dismissedWelcomeBanner, setDismissedWelcomeBanner] = useState(false);
 
   useEffect(() => {
@@ -61,7 +66,6 @@ export function OnboardingWizard({
           ? currentRequest.maxPhotosPerSheet ?? 2
           : currentRequest.desiredSheetCount ?? 5
       );
-      setManualInitialSheetCount(Math.max(1, currentRequest.desiredSheetCount ?? 3));
       setSelectedPhotoIds(currentRequest.assets.map((asset) => asset.id));
     }
 
@@ -87,11 +91,7 @@ export function OnboardingWizard({
         return current;
       }
 
-      if (filtered.length > 0) {
-        return filtered;
-      }
-
-      return currentRequest.assets.map((asset) => asset.id);
+      return filtered;
     });
   }, [currentRequest.assets, isOpen]);
 
@@ -106,7 +106,7 @@ export function OnboardingWizard({
     const currentIndex = wizardSteps.indexOf(step);
     if (currentIndex < wizardSteps.length - 1) {
       const nextStep = wizardSteps[currentIndex + 1];
-      if (nextStep === "select" && selectedPhotoIds.length === 0) {
+      if (nextStep === "select" && workflowMode !== "manual" && selectedPhotoIds.length === 0) {
         setSelectedPhotoIds(currentRequest.assets.map((asset) => asset.id));
       }
       setStep(nextStep);
@@ -146,12 +146,7 @@ export function OnboardingWizard({
           : planningMode === "fogli"
             ? "desiredSheetCount"
             : "maxPhotosPerSheet",
-      desiredSheetCount:
-        workflowMode === "manual"
-          ? Math.max(1, Math.floor(manualInitialSheetCount))
-          : planningMode === "fogli"
-            ? plannedValue
-            : undefined,
+      desiredSheetCount: planningMode === "fogli" ? plannedValue : undefined,
       maxPhotosPerSheet:
         workflowMode === "manual"
           ? currentRequest.maxPhotosPerSheet
@@ -171,7 +166,7 @@ export function OnboardingWizard({
         {step === "welcome" && (
           <div className="wizard-step">
             <div className="wizard-step__content">
-              <h1 className="wizard-heading">Benvenuto in Auto Layout</h1>
+              <h1 className="wizard-heading">Benvenuto in ImageAlbumMaker</h1>
               <p className="wizard-description">
                 Ti guidero passo-passo per preparare il tuo progetto di impaginazione.
               </p>
@@ -301,20 +296,8 @@ export function OnboardingWizard({
                   <div className="planning-option__content">
                     <div className="planning-option__title">Impaginazione libera</div>
                     <p className="planning-option__description">
-                      Crei e gestisci i fogli manualmente, senza ribilanciamento automatico del numero fogli.
+                      Carichi le foto e scegli tu cosa impaginare, senza distribuzione automatica nei fogli.
                     </p>
-                    <label className="field">
-                      <span>Numero fogli iniziali</span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={manualInitialSheetCount}
-                        onChange={(event) =>
-                          setManualInitialSheetCount(Math.max(1, Number(event.target.value) || 1))
-                        }
-                        disabled={workflowMode !== "manual"}
-                      />
-                    </label>
                   </div>
                 </label>
               </div>
@@ -341,16 +324,37 @@ export function OnboardingWizard({
 
               <div className="wizard-info-box wizard-info-box--info">
                 <p>
-                  <strong>Tip:</strong> usa una cartella che contenga solo le immagini del progetto. Auto Layout rileva JPG, PNG e WEBP.
+                  <strong>Tip:</strong> usa una cartella che contenga solo le immagini del progetto. ImageAlbumMaker rileva JPG, PNG e WEBP.
                 </p>
               </div>
 
               <div className="wizard-image-status">
                 <span className="status-badge">
-                  <span className="status-badge__label">Foto caricate:</span>
+                  <span className="status-badge__label">
+                    {isLoading ? "Caricamento foto:" : "Foto caricate:"}
+                  </span>
                   <span className="status-badge__value">{currentRequest.assets.length}</span>
                 </span>
               </div>
+
+              {isLoading ? (
+                <div className="wizard-loading-state" role="status" aria-live="polite">
+                  <div className="wizard-loading-state__spinner" aria-hidden="true" />
+                  <div className="wizard-loading-state__copy">
+                    <strong>
+                      {loadingPhase === "reading"
+                        ? "Sto leggendo la cartella selezionata..."
+                        : `Sto preparando ${loadingProcessed} di ${Math.max(loadingTotal, 1)} foto...`}
+                    </strong>
+                    <span>
+                      {loadingCurrentFile ??
+                        (loadingPhase === "reading"
+                          ? "Controllo i file supportati prima di mostrare la selezione."
+                          : "Creo anteprime e metadati delle immagini.")}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="wizard-loading-actions">
                 <button
@@ -588,7 +592,7 @@ export function OnboardingWizard({
                   <span className="summary-item__label">Criterio di layout:</span>
                   <span className="summary-item__value">
                     {workflowMode === "manual"
-                      ? `${manualInitialSheetCount} fogli iniziali manuali`
+                      ? "Selezione e composizione manuale delle foto"
                       : planningMode === "fogli"
                         ? `${plannedValue} fogli desiderati`
                         : `${plannedValue} foto per foglio`}

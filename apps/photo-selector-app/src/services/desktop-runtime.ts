@@ -24,6 +24,18 @@ export async function consumePendingDesktopOpenFolderPath(): Promise<string | nu
   }
 }
 
+export async function acknowledgeDesktopOpenFolderRequest(folderPath?: string | null): Promise<void> {
+  if (typeof window === "undefined" || typeof window.filexDesktop === "undefined") {
+    return;
+  }
+
+  try {
+    await window.filexDesktop.acknowledgeOpenFolderRequest(folderPath ?? null);
+  } catch {
+    // Ignore desktop bridge errors
+  }
+}
+
 export async function markDesktopOpenFolderRequestReady(): Promise<void> {
   if (typeof window === "undefined" || typeof window.filexDesktop === "undefined") {
     return;

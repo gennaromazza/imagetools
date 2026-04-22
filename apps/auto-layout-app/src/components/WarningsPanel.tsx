@@ -1,7 +1,7 @@
 import { memo } from "react";
 import type { GeneratedPageLayout } from "@photo-tools/shared-types";
 
-interface PageWarning {
+export interface PageWarning {
   pageId: string;
   pageNumber: number;
   type: "empty" | "overloaded" | "underloaded" | "template_mismatch";
@@ -14,47 +14,43 @@ interface WarningsPanelProps {
   onSelectPage: (pageId: string) => void;
 }
 
-function getPageWarnings(pages: GeneratedPageLayout[]): PageWarning[] {
+export function getPageWarnings(pages: GeneratedPageLayout[]): PageWarning[] {
   const warnings: PageWarning[] = [];
 
-  pages.forEach(page => {
-    // Check for empty pages
+  pages.forEach((page) => {
     if (page.assignments.length === 0) {
       warnings.push({
         pageId: page.id,
         pageNumber: page.pageNumber,
         type: "empty",
-        message: "Questa pagina è vuota",
+        message: "Questo foglio e vuoto.",
         severity: "warning"
       });
     }
 
-    // Check for overloaded pages (more photos than slots)
     if (page.assignments.length > page.slotDefinitions.length) {
       warnings.push({
         pageId: page.id,
         pageNumber: page.pageNumber,
         type: "overloaded",
-        message: `${page.assignments.length - page.slotDefinitions.length} foto in più rispetto agli slot disponibili`,
+        message: `${page.assignments.length - page.slotDefinitions.length} foto in piu rispetto agli slot disponibili.`,
         severity: "error"
       });
     }
 
-    // Check for underloaded pages (too few photos)
     const utilization = page.assignments.length / page.slotDefinitions.length;
     if (utilization < 0.5 && page.assignments.length > 0) {
       warnings.push({
         pageId: page.id,
         pageNumber: page.pageNumber,
         type: "underloaded",
-        message: `Solo ${Math.round(utilization * 100)}% degli slot utilizzati`,
+        message: `Solo il ${Math.round(utilization * 100)}% degli slot e utilizzato.`,
         severity: "info"
       });
     }
 
-    // Check for template issues
     if (page.warnings && page.warnings.length > 0) {
-      page.warnings.forEach(warning => {
+      page.warnings.forEach((warning) => {
         warnings.push({
           pageId: page.id,
           pageNumber: page.pageNumber,
@@ -76,25 +72,25 @@ function WarningsPanelContent({ pages, onSelectPage }: WarningsPanelProps) {
     return (
       <div className="warnings-panel warnings-panel--empty">
         <div className="warnings-panel__empty">
-          <span>✅</span>
+          <span aria-hidden="true">OK</span>
           <p>Tutto a posto! Nessun problema rilevato.</p>
         </div>
       </div>
     );
   }
 
-  const errorCount = warnings.filter(w => w.severity === "error").length;
-  const warningCount = warnings.filter(w => w.severity === "warning").length;
-  const infoCount = warnings.filter(w => w.severity === "info").length;
+  const errorCount = warnings.filter((warning) => warning.severity === "error").length;
+  const warningCount = warnings.filter((warning) => warning.severity === "warning").length;
+  const infoCount = warnings.filter((warning) => warning.severity === "info").length;
 
   return (
     <div className="warnings-panel">
       <div className="warnings-panel__header">
         <h4>Problemi rilevati</h4>
         <div className="warnings-panel__stats">
-          {errorCount > 0 && <span className="warning-stat warning-stat--error">🔴 {errorCount}</span>}
-          {warningCount > 0 && <span className="warning-stat warning-stat--warning">🟡 {warningCount}</span>}
-          {infoCount > 0 && <span className="warning-stat warning-stat--info">🔵 {infoCount}</span>}
+          {errorCount > 0 ? <span className="warning-stat warning-stat--error">Errori {errorCount}</span> : null}
+          {warningCount > 0 ? <span className="warning-stat warning-stat--warning">Avvisi {warningCount}</span> : null}
+          {infoCount > 0 ? <span className="warning-stat warning-stat--info">Info {infoCount}</span> : null}
         </div>
       </div>
 
@@ -107,9 +103,7 @@ function WarningsPanelContent({ pages, onSelectPage }: WarningsPanelProps) {
             onClick={() => onSelectPage(warning.pageId)}
           >
             <div className="warning-item__icon">
-              {warning.severity === "error" && "🔴"}
-              {warning.severity === "warning" && "🟡"}
-              {warning.severity === "info" && "🔵"}
+              {warning.severity === "error" ? "!" : warning.severity === "warning" ? "~" : "i"}
             </div>
             <div className="warning-item__content">
               <strong>Foglio {warning.pageNumber}</strong>

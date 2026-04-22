@@ -253,15 +253,15 @@ function buildManualFallbackPlan(request: AutoLayoutRequest): AutoLayoutResult {
     assets: []
   });
   const template = resolveEmptyPageTemplate(seedPlan.availableTemplates);
-  const sheetCount = Math.max(1, Math.floor(request.desiredSheetCount ?? 1));
 
   if (!template) {
     return buildAutoLayoutResult(request, [], seedPlan.availableTemplates);
   }
 
-  const pages = Array.from({ length: sheetCount }, (_, index) => ({
-    id: `page-${index + 1}`,
-    pageNumber: index + 1,
+  const pages = [{
+    id: "page-1",
+    pageNumber: 1,
+    pageSide: "single" as const,
     sheetSpec: { ...request.sheet },
     templateId: template.id,
     templateLabel: template.label,
@@ -269,7 +269,7 @@ function buildManualFallbackPlan(request: AutoLayoutRequest): AutoLayoutResult {
     assignments: [],
     imageIds: [],
     warnings: []
-  }));
+  }];
 
   return buildAutoLayoutResult(request, pages, seedPlan.availableTemplates);
 }

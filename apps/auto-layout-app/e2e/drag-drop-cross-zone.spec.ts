@@ -5,7 +5,7 @@ async function completeManualWizard(page: Page) {
 
   await page.getByRole("button", { name: /nuovo progetto|primo progetto/i }).first().click();
   await expect(wizard).toBeVisible();
-  await expect(wizard.getByRole("heading", { name: /Benvenuto in Auto Layout/i })).toBeVisible();
+  await expect(wizard.getByRole("heading", { name: /Benvenuto in ImageAlbumMaker/i })).toBeVisible();
 
   await wizard.getByRole("button", { name: "Inizia" }).click();
   await expect(wizard.getByRole("heading", { name: /Dai un nome al progetto/i })).toBeVisible();
@@ -13,7 +13,6 @@ async function completeManualWizard(page: Page) {
 
   await expect(wizard.getByRole("heading", { name: /Scegli il flusso di lavoro/i })).toBeVisible();
   await wizard.getByRole("radio", { name: /Impaginazione libera/i }).check();
-  await wizard.getByRole("spinbutton", { name: "Numero fogli iniziali" }).fill("1");
   await wizard.getByRole("button", { name: "Continua" }).click();
 
   await expect(wizard.getByRole("heading", { name: /Carica le foto/i })).toBeVisible();
@@ -22,6 +21,7 @@ async function completeManualWizard(page: Page) {
   await wizard.getByRole("button", { name: "Continua" }).click();
 
   await expect(wizard.getByRole("heading", { name: /Seleziona le foto da impaginare/i })).toBeVisible();
+  await wizard.getByRole("button", { name: "Seleziona tutte" }).click();
   await wizard.getByRole("button", { name: "Continua" }).click();
   await expect(wizard.getByRole("heading", { name: /Scegli il formato foglio/i })).toBeVisible();
   await wizard.getByRole("button", { name: "Continua" }).click();
@@ -87,6 +87,13 @@ async function createEmptySecondPage(page: Page) {
   await page.getByTestId("new-page-button").click();
   await expect(page.getByTestId("studio-page-tab")).toHaveCount(2);
   await expect(pageCards(page)).toHaveCount(2);
+}
+
+async function placeFirstRibbonPhotoIntoFirstPage(page: Page) {
+  const firstPageCard = pageCards(page).first();
+  const emptySlot = await findSlotByFillState(firstPageCard, false);
+  await ribbonPhotos(page).first().dragTo(emptySlot.locator(".slot-asset"));
+  await expect.poll(async () => getSlotImageId(emptySlot)).not.toBeNull();
 }
 
 test.beforeEach(async ({ context }) => {
@@ -174,30 +181,50 @@ test.fixme("slot -> slot vuoto cross-foglio (move)", async ({ page }) => {
   await expect.poll(async () => getSlotImageId(pageOneFilledSlot)).toBeNull();
 });
 
-test("drop su target pagina (tab + header dropzone)", async ({ page }) => {
+test("slot -> target pagina (tab + header dropzone) sposta senza duplicare", async ({ page }) => {
   await page.goto("/");
   await completeManualWizard(page);
+  await placeFirstRibbonPhotoIntoFirstPage(page);
   await createEmptySecondPage(page);
 
   const tabs = page.getByTestId("studio-page-tab");
   const cards = pageCards(page);
+  const pageOneCard = cards.nth(0);
   const pageTwoCard = cards.nth(1);
+  const pageOneFilledSlot = await findSlotByFillState(pageOneCard, true);
+  const movedImageId = await getSlotImageId(pageOneFilledSlot);
 
-  const photoForTab = ribbonPhotos(page).nth(0);
-  const photoForTabId = await photoForTab.getAttribute("data-preview-asset-id");
-  await photoForTab.dragTo(tabs.nth(1));
-  await expect.poll(async () => pageContainsImage(pageTwoCard, photoForTabId)).toBe(true);
+  expect(movedImageId).not.toBeNull();
+  await pageOneFilledSlot.locator(".slot-asset").dragTo(tabs.nth(1));
+  await expect.poll(async () => pageContainsImage(pageTwoCard, movedImageId)).toBe(true);
+  await expect.poll(async () => pageContainsImage(pageOneCard, movedImageId)).toBe(false);
 
   await page.getByTestId("new-page-button").click();
   await expect(tabs).toHaveCount(3);
   await expect(cards).toHaveCount(3);
   const pageThreeCard = cards.nth(2);
-  const photoForHeader = ribbonPhotos(page).nth(2);
+  const pageTwoFilledSlot = await findSlotByImageId(pageTwoCard, movedImageId ?? "");
   const headerDropzone = pageThreeCard.getByTestId("page-header-dropzone");
   await expect(headerDropzone).toBeVisible();
   await expect(headerDropzone).toContainText("Drop su foglio");
-  await photoForHeader.dragTo(headerDropzone);
-  await expect(headerDropzone).toBeVisible();
+  await pageTwoFilledSlot.locator(".slot-asset").dragTo(headerDropzone);
+  await expect.poll(async () => pageContainsImage(pageThreeCard, movedImageId)).toBe(true);
+  await expect.poll(async () => pageContainsImage(pageTwoCard, movedImageId)).toBe(false);
+});
+
+test("slot locked disabilita drag e clear", async ({ page }) => {
+  await page.goto("/");
+  await completeManualWizard(page);
+  await placeFirstRibbonPhotoIntoFirstPage(page);
+
+  const firstPageCard = pageCards(page).first();
+  const filledSlot = await findSlotByFillState(firstPageCard, true);
+
+  await filledSlot.click();
+  await page.getByRole("checkbox", { name: /blocca questo slot/i }).check();
+
+  await expect(filledSlot.locator(".slot-asset")).toHaveAttribute("draggable", "false");
+  await expect(filledSlot.locator(".slot-clear-badge")).toBeDisabled();
 });
 
 test("crea fogli da drag&drop cross-zona: dropzone + canvas vuoto", async ({ page }) => {

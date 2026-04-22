@@ -30,7 +30,7 @@ export function Stepper({ currentStep, canProceed }: StepperProps) {
               className={`stepper__step ${
                 currentStep === step.id
                   ? "stepper__step--current"
-                  : index < steps.findIndex((s) => s.id === currentStep)
+                  : index < steps.findIndex((item) => item.id === currentStep)
                     ? "stepper__step--completed"
                     : "stepper__step--pending"
               }`}
@@ -52,7 +52,7 @@ export function Stepper({ currentStep, canProceed }: StepperProps) {
 
       {!canProceed && currentStep === "setup" ? (
         <div className="stepper__hint" role="status" aria-live="polite">
-          💡 {steps[0].required} per procedere allo studio
+          Completa il setup minimo: {steps[0].required.toLowerCase()} per entrare nello studio.
         </div>
       ) : null}
     </div>

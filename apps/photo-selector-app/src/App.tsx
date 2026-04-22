@@ -14,6 +14,7 @@ import {
   revokeImageAssetUrls,
 } from "./services/browser-image-assets";
 import {
+  acknowledgeDesktopOpenFolderRequest,
   consumePendingDesktopOpenFolderPath,
   getDesktopRuntimeInfo,
   markDesktopOpenFolderRequestReady,
@@ -310,7 +311,7 @@ export function App() {
   const initialPreferencesRef = useRef(loadPhotoSelectorPreferences());
 
   // ── Persisted state ──────────────────────────────────────────────────
-  const [projectName, setProjectName] = useState("Selezione foto");
+  const [projectName, setProjectName] = useState("Image Select Pro");
   const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntimeInfo | null>(null);
   const [sourceFolderPath, setSourceFolderPath] = useState("");
 
@@ -2158,10 +2159,19 @@ export function App() {
     }
 
     try {
-      let reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath);
-      if (!reopenedFolder) {
-        await new Promise((resolve) => window.setTimeout(resolve, 180));
+      let reopenedFolder = null;
+      const retryDelaysMs = [0, 180, 420, 900];
+
+      for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
+        const delayMs = retryDelaysMs[attempt];
+        if (delayMs > 0) {
+          await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+        }
+
         reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath);
+        if (reopenedFolder) {
+          break;
+        }
       }
 
       if (!reopenedFolder) {
@@ -2178,6 +2188,7 @@ export function App() {
       }
 
       await handleFolderOpened(reopenedFolder);
+      await acknowledgeDesktopOpenFolderRequest(normalizedPath);
       if (hasDesktopStateApi()) {
         void logDesktopEvent({
           channel: "folder-open",
@@ -2691,7 +2702,7 @@ export function App() {
         <header className="app-header">
           <img src={logo} alt="Logo" style={{ height: 40, marginRight: 16 }} />
           <div className="app-header__brand">
-            <h1 className="app-header__title">Selezione Foto</h1>
+            <h1 className="app-header__title">Image Select Pro</h1>
             <span className="app-header__subtitle">Photo Tools Suite</span>
           </div>
           <nav className="app-header__nav">
@@ -2936,4 +2947,3 @@ export function App() {
     </ErrorBoundary>
   );
 }
-

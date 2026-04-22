@@ -5,7 +5,7 @@
   "description": "FileX Suite desktop shell for Windows packaging and native bridge work.",
   "author": "FileX",
   "type": "module",
-  "main": "dist-electron/main.js",
+  "main": ".output/electron/main.js",
   "scripts": {
     "sync:branding": "node ./scripts/sync-branding.mjs",
     "build:suite-launcher": "node ./scripts/build-suite-launcher.mjs",

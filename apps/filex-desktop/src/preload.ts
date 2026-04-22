@@ -16,6 +16,8 @@ const api: FileXDesktopApi = {
   openFolder: () => ipcRenderer.invoke("filex:open-folder"),
   reopenFolder: (rootPath) => ipcRenderer.invoke("filex:reopen-folder", rootPath),
   consumePendingOpenFolderPath: () => ipcRenderer.invoke("filex:consume-pending-open-folder-path"),
+  acknowledgeOpenFolderRequest: (folderPath: string | null | undefined) =>
+    ipcRenderer.invoke("filex:acknowledge-open-folder-request", folderPath),
   markOpenFolderRequestReady: () => ipcRenderer.invoke("filex:mark-open-folder-request-ready"),
   onOpenFolderRequest: (listener) => {
     const wrappedListener = (_event: IpcRendererEvent, folderPath: string) => {

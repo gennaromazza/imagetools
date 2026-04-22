@@ -590,6 +590,7 @@ export interface FileXDesktopApi {
   openFolder: () => Promise<DesktopFolderOpenResult | null>;
   reopenFolder: (rootPath: string) => Promise<DesktopFolderOpenResult | null>;
   consumePendingOpenFolderPath: () => Promise<string | null>;
+  acknowledgeOpenFolderRequest: (folderPath?: string | null) => Promise<void>;
   markOpenFolderRequestReady: () => Promise<void>;
   onOpenFolderRequest: (listener: (folderPath: string) => void) => () => void;
   createAutoLayoutHandoffFile: (payload: DesktopAutoLayoutHandoffFile) => Promise<string | null>;

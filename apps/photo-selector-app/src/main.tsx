@@ -81,7 +81,7 @@ function DesktopOnlyBlockedScreen({ missingMethods }: { missingMethods: string[]
         <div className="modal-panel__header">
           <div>
             <h2>Aggiorna FileX Desktop</h2>
-            <p>Photo Selector e' disponibile solo nella shell desktop FileX.</p>
+            <p>Image Select Pro e' disponibile solo nella shell desktop FileX.</p>
           </div>
         </div>
         <div className="modal-panel__body" style={{ display: "grid", gap: "0.8rem" }}>

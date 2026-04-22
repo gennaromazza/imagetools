@@ -79,6 +79,18 @@ export function ProjectPhotoSelectorModal({
   const deferredAssets = useDeferredValue(localAssets);
   const selectionSet = useMemo(() => new Set(localSelection), [localSelection]);
 
+  useEffect(() => {
+    setLocalAssets(assets);
+  }, [assets]);
+
+  useEffect(() => {
+    setLocalSelection(activeAssetIds);
+  }, [activeAssetIds]);
+
+  useEffect(() => {
+    setQuickSelectCount(Math.min(activeAssetIds.length || assets.length, assets.length));
+  }, [activeAssetIds, assets.length]);
+
   // Derived state
   const hasActiveFilters =
     pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all" || usageFilter !== "all";
@@ -287,7 +299,7 @@ export function ProjectPhotoSelectorModal({
       return;
     }
 
-    if (document.activeElement !== button) {
+    if (typeof document !== "undefined" && document.activeElement !== button) {
       button.focus();
     }
   }, [focusedAssetId, renderedAssets]);
@@ -299,8 +311,9 @@ export function ProjectPhotoSelectorModal({
   }
 
   function applyQuickSelection() {
-    const nextIds = deferredAssets
-      .slice(0, Math.max(0, Math.min(quickSelectCount, deferredAssets.length)))
+    const quickSelectionSource = hasActiveFilters || sortBy !== "name" ? visibleAssets : localAssets;
+    const nextIds = quickSelectionSource
+      .slice(0, Math.max(0, Math.min(quickSelectCount, quickSelectionSource.length)))
       .map((asset) => asset.id);
     setLocalSelection(nextIds);
   }
@@ -384,7 +397,7 @@ export function ProjectPhotoSelectorModal({
 
       // Don't steal arrows from form controls
       const target = event.target as HTMLElement;
-      if (target.closest("select, input, textarea")) {
+      if (target.closest("select, input, textarea, button, a, [contenteditable='true']")) {
         return;
       }
 
@@ -431,12 +444,14 @@ export function ProjectPhotoSelectorModal({
           }
         }
 
-        window.requestAnimationFrame(() => {
-          const button = gridRef.current?.querySelector<HTMLElement>(
-            `[data-preview-asset-id="${nextAsset.id}"]`
-          );
-          button?.focus();
-        });
+        if (typeof window !== "undefined") {
+          window.requestAnimationFrame(() => {
+            const button = gridRef.current?.querySelector<HTMLElement>(
+              `[data-preview-asset-id="${nextAsset.id}"]`
+            );
+            button?.focus();
+          });
+        }
       }
     };
 
@@ -480,7 +495,7 @@ export function ProjectPhotoSelectorModal({
                 onClick={() => setLocalSelection(
                   hasActiveFilters
                     ? visibleAssets.map((asset) => asset.id)
-                    : deferredAssets.map((asset) => asset.id)
+                    : localAssets.map((asset) => asset.id)
                 )}
                 title={hasActiveFilters ? "Attiva solo le foto visibili con i filtri" : "Seleziona tutte le foto"}
               >
@@ -518,9 +533,12 @@ export function ProjectPhotoSelectorModal({
                 <input
                   type="number"
                   min="0"
-                  max={deferredAssets.length}
+                  max={Math.max(visibleAssets.length, localAssets.length)}
                   value={quickSelectCount}
-                  onChange={(event) => setQuickSelectCount(Number(event.target.value))}
+                  onChange={(event) => {
+                    const nextValue = Number(event.target.value);
+                    setQuickSelectCount(Number.isFinite(nextValue) ? nextValue : 0);
+                  }}
                 />
               </label>
               <button type="button" className="secondary-button" onClick={applyQuickSelection}>
@@ -638,9 +656,8 @@ export function ProjectPhotoSelectorModal({
               const colorLabel = getAssetColorLabel(asset);
 
               return (
-                <button
+                <div
                   key={asset.id}
-                  type="button"
                   ref={renderedIndex === 0 ? (node) => {
                     if (!node) {
                       return;
@@ -653,6 +670,9 @@ export function ProjectPhotoSelectorModal({
                     }
                   } : undefined}
                   data-preview-asset-id={asset.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSelected}
                   className={[
                     "modal-photo-card",
                     isSelected ? "modal-photo-card--active" : "",
@@ -673,6 +693,12 @@ export function ProjectPhotoSelectorModal({
                     });
                   }}
                   onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      toggleAsset(asset.id);
+                      return;
+                    }
+
                     if (event.key === " ") {
                       event.preventDefault();
                       setPreviewAssetId(asset.id);
@@ -739,6 +765,7 @@ export function ProjectPhotoSelectorModal({
                             event.stopPropagation();
                             updateAsset(asset.id, { rating: value });
                           }}
+                          onFocus={() => setFocusedAssetId(asset.id)}
                           title={`${value} stella${value > 1 ? "e" : ""} | tasto ${value}`}
                         >
                           ★
@@ -762,12 +789,13 @@ export function ProjectPhotoSelectorModal({
                               colorLabel: colorLabel === value ? null : value
                             });
                           }}
+                          onFocus={() => setFocusedAssetId(asset.id)}
                           title={`${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}`}
                         />
                       ))}
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
 
@@ -825,6 +853,10 @@ export function ProjectPhotoSelectorModal({
       ) : null}
     </>
   );
+
+  if (typeof document === "undefined") {
+    return null;
+  }
 
   return createPortal(
     <div className="modal-fullscreen-backdrop" onClick={onClose}>

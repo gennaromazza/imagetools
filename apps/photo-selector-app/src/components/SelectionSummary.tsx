@@ -154,7 +154,7 @@ export function SelectionSummary({
     <div className="stack">
       <div className="selection-summary__header">
         <h3 className="selection-summary__title">
-          {projectName || "Selezione foto"}
+          {projectName || "Image Select Pro"}
         </h3>
         <span className="selection-summary__subtitle">
           {stats.totalActive} foto selezionate su {stats.totalImported} caricate
