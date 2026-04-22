@@ -37,3 +37,7 @@ externalPort = 80
 deploymentTarget = "static"
 build = ["npm", "run", "build"]
 publicDir = "apps/auto-layout-app/dist"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000

@@ -93,7 +93,7 @@ import {
 } from "./updater.js";
 import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault } from "./tool-manifest.js";
 
-const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = electron;
+const { app, BrowserWindow, dialog, ipcMain, protocol, session, shell } = electron;
 
 const EARLY_BOOT_LOG_PATH = join(process.env.TEMP || process.cwd(), "filex-image-party-frame-early.log");
 
@@ -711,6 +711,62 @@ function getInstalledEditorCandidates(): DesktopEditorCandidate[] {
   }
 
   return candidates;
+}
+
+function enforceUtf8CharsetOnTextResponses(): void {
+  // Chromium può ricadere sulla codifica locale (Windows-1252 sui PC italiani)
+  // quando file:// e Vite servono asset di testo senza un parametro `charset`
+  // esplicito nella Content-Type. Questo causa mojibake sui caratteri non-ASCII
+  // dei bundle (es. `·`, `★`, `✓`) anche se i file sorgente sono UTF-8 corretti.
+  // Forziamo `charset=utf-8` su tutte le risposte di testo dei renderer.
+  const targetSession = session.defaultSession;
+  if (!targetSession) {
+    return;
+  }
+
+  targetSession.webRequest.onHeadersReceived((details, callback) => {
+    const headers = details.responseHeaders ?? {};
+    const contentTypeKey = Object.keys(headers).find(
+      (key) => key.toLowerCase() === "content-type",
+    );
+
+    if (!contentTypeKey) {
+      callback({ responseHeaders: headers });
+      return;
+    }
+
+    const rawValues = headers[contentTypeKey];
+    const values = Array.isArray(rawValues) ? rawValues : [rawValues];
+    const updated = values.map((value) => {
+      if (typeof value !== "string") {
+        return value;
+      }
+      const lower = value.toLowerCase();
+      if (lower.includes("charset=")) {
+        return value;
+      }
+      const isText =
+        lower.startsWith("text/") ||
+        lower.includes("javascript") ||
+        lower.includes("ecmascript") ||
+        lower.includes("json") ||
+        lower.includes("xml") ||
+        lower.includes("svg");
+      if (!isText) {
+        return value;
+      }
+      const trimmed = value.trim();
+      const separator = trimmed.endsWith(";") ? " " : "; ";
+      return `${trimmed}${separator}charset=utf-8`;
+    });
+
+    callback({
+      responseHeaders: {
+        ...headers,
+        [contentTypeKey]: updated as string[],
+      },
+    });
+  });
 }
 
 function registerPreviewProtocol(): void {
@@ -1459,6 +1515,7 @@ if (hasSingleInstanceLock) {
       await ensureImagePartyFrameServer();
     }
 
+    enforceUtf8CharsetOnTextResponses();
     registerPreviewProtocol();
     registerCrashTelemetryHandlers();
     registerIpcHandlers();
