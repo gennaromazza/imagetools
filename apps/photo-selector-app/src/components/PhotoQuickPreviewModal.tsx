@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type SyntheticEvent, type UIEvent } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type SyntheticEvent, type UIEvent } from "react";
 import { createPortal } from "react-dom";
 import type { DesktopQuickPreviewFrame, DesktopQuickPreviewSource } from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
@@ -170,8 +170,17 @@ function shouldLoadRawPreview(asset: ImageAsset): boolean {
     Math.min(asset.width, asset.height) < MIN_RAW_PREVIEW_DIMENSION;
 }
 
-function getPreviewColorClass(colorLabel: ColorLabel | null): string {
-  return colorLabel ? `quick-preview__stage--color-${colorLabel}` : "quick-preview__stage--color-none";
+function getPreviewColorClass(
+  colorLabel: ColorLabel | null,
+  customTone?: CustomLabelTone | null,
+): string {
+  if (colorLabel) {
+    return `quick-preview__stage--color-${colorLabel}`;
+  }
+  if (customTone) {
+    return `quick-preview__stage--custom-${customTone}`;
+  }
+  return "quick-preview__stage--color-none";
 }
 
 function formatDesktopPreviewSourceLabel(
@@ -192,8 +201,7 @@ function formatDesktopPreviewSourceLabel(
             ? "native-provider"
             : "source-file"
   );
-  return `${stageLabel} | ${sourceLabel}${cacheHit ? " | hit" : ""}`;
-  return `${stageLabel} Ã‚Â· ${sourceLabel}${cacheHit ? " Ã‚Â· hit" : ""}`;
+  return `${stageLabel} · ${sourceLabel}${cacheHit ? " · hit" : ""}`;
 }
 
 function createDesktopManagedPreviewState(
@@ -254,6 +262,7 @@ export function PhotoQuickPreviewModal({
   } | null>(null);
   const mainPreviewRecoveryKeyRef = useRef<string | null>(null);
   const comparePreviewRecoveryKeyRef = useRef<string | null>(null);
+  const preCompareZoomRef = useRef<number>(1);
   const lastAssetIdRef = useRef<string | null>(null);
   const lastPerfSinkSignatureRef = useRef<string>("");
   const fallbackSignatureRef = useRef<string>("");
@@ -338,12 +347,15 @@ export function PhotoQuickPreviewModal({
     return basePixels > 0 ? basePixels : 0;
   }, [compareMode, stageViewport.devicePixelRatio, stageViewport.height, stageViewport.width]);
   const fitPreviewMaxDimension = useMemo(() => {
-    void stageBaseDimension;
+    if (stageBaseDimension > 0) {
+      return Math.min(fitPreviewCap, stageBaseDimension);
+    }
     return fitPreviewCap;
   }, [fitPreviewCap, stageBaseDimension]);
   const detailPreviewMaxDimension = useMemo(() => {
-    void stageBaseDimension;
-    void fitPreviewMaxDimension;
+    if (stageBaseDimension > 0) {
+      return Math.min(detailPreviewCap, Math.max(stageBaseDimension, fitPreviewMaxDimension));
+    }
     return detailPreviewCap;
   }, [detailPreviewCap, fitPreviewMaxDimension, stageBaseDimension]);
   const adjacentPreviewWarmupDelayMs = desktopQuickPreviewEnabled
@@ -455,7 +467,7 @@ export function PhotoQuickPreviewModal({
     const sourceBreakdown = Array.from(metrics.sourceCounts.entries())
       .sort((left, right) => right[1] - left[1])
       .map(([source, count]) => `${source}:${count}`)
-      .join(" Ã‚Â· ") || "n/d";
+      .join(" Ãƒâ€šÃ‚Â· ") || "n/d";
     const warmHitRate = metrics.requested > 0
       ? Math.round((metrics.cacheHits / metrics.requested) * 100)
       : null;
@@ -501,14 +513,12 @@ export function PhotoQuickPreviewModal({
   const announceClassificationFeedback = useCallback((
     changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
   ) => {
-    let tone: CustomLabelTone | undefined;
-    let labels: string[] | undefined;
     let label: string | null = null;
     let kind: PreviewFeedback["kind"] | null = null;
 
     if (changes.rating !== undefined) {
       kind = "star";
-      label = changes.rating > 0 ? `Valutazione: ${"Ã¢Ëœâ€¦".repeat(changes.rating)}` : "Valutazione rimossa";
+      label = changes.rating > 0 ? `Valutazione: ${"ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦".repeat(changes.rating)}` : "Valutazione rimossa";
     } else if (changes.pickStatus !== undefined) {
       kind = "pill";
       label = `Stato: ${PICK_STATUS_LABELS[changes.pickStatus]}`;
@@ -526,8 +536,6 @@ export function PhotoQuickPreviewModal({
       kind,
       label,
       token: classificationFeedbackTokenRef.current,
-      tone,
-      labels,
     } satisfies PreviewFeedback;
 
     setClassificationFeedback(nextFeedback);
@@ -714,7 +722,7 @@ export function PhotoQuickPreviewModal({
         window.removeEventListener("resize", sync);
       }
     };
-  }, [asset?.id, compareMode]);
+  }, [compareMode]);
 
   // Preload only prev/current/next thumbnails or lightweight previews.
   useEffect(() => {
@@ -816,8 +824,7 @@ export function PhotoQuickPreviewModal({
   const activePreviewAssetNeedsManagedPreview = Boolean(
     asset && (
       canUseDesktopQuickPreview
-      || !asset.previewUrl
-      || !asset.sourceUrl
+      || (!asset.previewUrl && !asset.sourceUrl)
       || shouldLoadRawPreview(asset)
     )
   );
@@ -1144,7 +1151,7 @@ export function PhotoQuickPreviewModal({
             assetId: asset.id,
             url: cachedPreviewUrl,
             token: null,
-            sourceLabel: "Fit Ã‚Â· renderer-cache",
+            sourceLabel: "Fit Ãƒâ€šÃ‚Â· renderer-cache",
             cacheHit: true,
           }
         : null);
@@ -1158,7 +1165,7 @@ export function PhotoQuickPreviewModal({
               assetId: asset.id,
               url,
               token: null,
-              sourceLabel: "Fit Ã‚Â· renderer-preview",
+              sourceLabel: "Fit Ãƒâ€šÃ‚Â· renderer-preview",
               cacheHit: Boolean(cachedPreviewUrl),
             });
           }
@@ -1286,7 +1293,7 @@ export function PhotoQuickPreviewModal({
             assetId: asset.id,
             url: cachedDetailPreviewUrl,
             token: null,
-            sourceLabel: "Detail Ã‚Â· renderer-cache",
+            sourceLabel: "Detail Ãƒâ€šÃ‚Â· renderer-cache",
             cacheHit: true,
           }
         : null);
@@ -1300,7 +1307,7 @@ export function PhotoQuickPreviewModal({
               assetId: asset.id,
               url,
               token: null,
-              sourceLabel: "Detail Ã‚Â· renderer-preview",
+              sourceLabel: "Detail Ãƒâ€šÃ‚Â· renderer-preview",
               cacheHit: Boolean(cachedDetailPreviewUrl),
             });
           }
@@ -1409,7 +1416,7 @@ export function PhotoQuickPreviewModal({
             assetId: compareAsset.id,
             url: cachedComparePreviewUrl,
             token: null,
-            sourceLabel: "Fit Ã‚Â· renderer-cache",
+            sourceLabel: "Fit Ãƒâ€šÃ‚Â· renderer-cache",
             cacheHit: true,
           }
         : null);
@@ -1423,7 +1430,7 @@ export function PhotoQuickPreviewModal({
               assetId: compareAsset.id,
               url,
               token: null,
-              sourceLabel: "Fit Ã‚Â· renderer-preview",
+              sourceLabel: "Fit Ãƒâ€šÃ‚Â· renderer-preview",
               cacheHit: Boolean(cachedComparePreviewUrl),
             });
           }
@@ -1439,6 +1446,7 @@ export function PhotoQuickPreviewModal({
       active = false;
     };
   }, [
+    canUseDesktopQuickPreviewForCompare,
     compareAsset,
     desktopComparePreviewRequest,
     fitPreviewMaxDimension,
@@ -1611,20 +1619,53 @@ export function PhotoQuickPreviewModal({
   }, [clampPan, commitPanOffset, compareMode, panOffset.x, panOffset.y, zoomLevel]);
 
   useEffect(() => {
+    preCompareZoomRef.current = startZoomed ? 2.2 : 1;
+    setZoomLevel(startZoomed ? 2.2 : 1);
+    setPanOffset({ x: 0, y: 0 });
+    pendingPanOffsetRef.current = { x: 0, y: 0 };
+    setIsPanning(false);
+    panDragRef.current = null;
+  }, [asset?.id, startZoomed]);
+
+  useEffect(() => {
     if (compareMode) {
-      setZoomLevel(1);
+      setZoomLevel((current) => {
+        preCompareZoomRef.current = current;
+        return 1;
+      });
       setPanOffset({ x: 0, y: 0 });
       setIsPanning(false);
       panDragRef.current = null;
       return;
     }
 
-    setZoomLevel(startZoomed ? 2.2 : 1);
-    setPanOffset({ x: 0, y: 0 });
-    pendingPanOffsetRef.current = { x: 0, y: 0 };
+    const restoredZoom = preCompareZoomRef.current;
+    setZoomLevel(restoredZoom);
+    if (restoredZoom <= 1.05) {
+      setPanOffset({ x: 0, y: 0 });
+      pendingPanOffsetRef.current = { x: 0, y: 0 };
+    }
     setIsPanning(false);
     panDragRef.current = null;
-  }, [asset?.id, compareMode, startZoomed]);
+  }, [compareMode]);
+
+  const currentCustomLabels = asset?.customLabels ?? [];
+
+  const toggleCustomLabel = useCallback((label: string) => {
+    if (!asset || !onUpdateAsset) {
+      return;
+    }
+
+    const nextIsActive = !currentCustomLabels.includes(label);
+    const nextCustomLabels = currentCustomLabels.includes(label)
+      ? currentCustomLabels.filter((currentLabel) => currentLabel !== label)
+      : [...currentCustomLabels, label];
+
+    onUpdateAsset(asset.id, {
+      customLabels: nextCustomLabels,
+    });
+    announceCustomLabelFeedback(label, nextIsActive);
+  }, [announceCustomLabelFeedback, asset, currentCustomLabels, onUpdateAsset]);
 
   useEffect(() => {
     if (!asset) {
@@ -1756,7 +1797,6 @@ export function PhotoQuickPreviewModal({
     zoomLevel,
   ]);
 
-  const currentCustomLabels = asset?.customLabels ?? [];
   const currentAssetId = asset?.id ?? null;
   const currentAssetFileName = asset?.fileName ?? "";
   const fallbackPreviewUrl = asset ? getQuickPreviewThumbUrl(asset) : null;
@@ -1956,22 +1996,6 @@ export function PhotoQuickPreviewModal({
     recordPreviewFrameMetric,
   ]);
 
-  function toggleCustomLabel(label: string) {
-    if (!asset || !onUpdateAsset) {
-      return;
-    }
-
-    const nextIsActive = !currentCustomLabels.includes(label);
-    const nextCustomLabels = currentCustomLabels.includes(label)
-      ? currentCustomLabels.filter((currentLabel) => currentLabel !== label)
-      : [...currentCustomLabels, label];
-
-    onUpdateAsset(asset.id, {
-      customLabels: nextCustomLabels,
-    });
-    announceCustomLabelFeedback(label, nextIsActive);
-  }
-
   const handleDockStripScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     pendingDockViewportRef.current = {
       scrollOffset: event.currentTarget.scrollLeft,
@@ -2004,7 +2028,7 @@ export function PhotoQuickPreviewModal({
       const renderedSource = event.currentTarget.currentSrc || event.currentTarget.src || previewSourceLabel;
       setQuickPreviewPerf((current) => ({
         ...current,
-        lastRenderedSource: `${previewSourceLabel} Ã‚Â· ${renderedSource ? "ready" : "n/d"}`,
+        lastRenderedSource: `${previewSourceLabel} Ãƒâ€šÃ‚Â· ${renderedSource ? "ready" : "n/d"}`,
         lastRenderedAssetName: currentAssetFileName,
       }));
       return;
@@ -2023,7 +2047,7 @@ export function PhotoQuickPreviewModal({
       ...current,
       openLatencyMs: measurement.reason === "open" ? elapsed : current.openLatencyMs,
       navigationLatencyMs: measurement.reason === "navigate" ? elapsed : current.navigationLatencyMs,
-      lastRenderedSource: `${previewSourceLabel} Ã‚Â· ${renderedSource ? "ready" : "n/d"}`,
+      lastRenderedSource: `${previewSourceLabel} Ãƒâ€šÃ‚Â· ${renderedSource ? "ready" : "n/d"}`,
       lastRenderedAssetName: currentAssetFileName,
     }));
     previewPerfStartRef.current = null;
@@ -2179,8 +2203,16 @@ export function PhotoQuickPreviewModal({
   const pickStatus = getAssetPickStatus(asset);
   const colorLabel = getAssetColorLabel(asset);
   const compareColorLabel = compareAsset ? getAssetColorLabel(compareAsset) : null;
-  const stageColorClass = getPreviewColorClass(colorLabel);
-  const comparePanelColorClass = getPreviewColorClass(compareColorLabel);
+  const firstCustomTone: CustomLabelTone | null =
+    (asset?.customLabels && asset.customLabels.length > 0)
+      ? (customLabelColors[asset.customLabels[0]] ?? "sand")
+      : null;
+  const compareFirstCustomTone: CustomLabelTone | null =
+    (compareAsset?.customLabels && compareAsset.customLabels.length > 0)
+      ? (customLabelColors[compareAsset.customLabels[0]] ?? "sand")
+      : null;
+  const stageColorClass = getPreviewColorClass(colorLabel, firstCustomTone);
+  const comparePanelColorClass = getPreviewColorClass(compareColorLabel, compareFirstCustomTone);
 
   const previewContent = (
     <div
@@ -2225,18 +2257,18 @@ export function PhotoQuickPreviewModal({
                 >
                   <option value="any">Tutte</option>
                   <optgroup label="Minimo">
-                    <option value="1+">★ 1+</option>
-                    <option value="2+">★★ 2+</option>
-                    <option value="3+">★★★ 3+</option>
-                    <option value="4+">★★★★ 4+</option>
+                    <option value="1+">â˜… 1+</option>
+                    <option value="2+">â˜…â˜… 2+</option>
+                    <option value="3+">â˜…â˜…â˜… 3+</option>
+                    <option value="4+">â˜…â˜…â˜…â˜… 4+</option>
                   </optgroup>
                   <optgroup label="Esatto">
                     <option value="0">Senza stelle</option>
-                    <option value="1">★ Solo 1</option>
-                    <option value="2">★★ Solo 2</option>
-                    <option value="3">★★★ Solo 3</option>
-                    <option value="4">★★★★ Solo 4</option>
-                    <option value="5">★★★★★ Solo 5</option>
+                    <option value="1">â˜… Solo 1</option>
+                    <option value="2">â˜…â˜… Solo 2</option>
+                    <option value="3">â˜…â˜…â˜… Solo 3</option>
+                    <option value="4">â˜…â˜…â˜…â˜… Solo 4</option>
+                    <option value="5">â˜…â˜…â˜…â˜…â˜… Solo 5</option>
                   </optgroup>
                 </select>
               </label>
@@ -2340,7 +2372,7 @@ export function PhotoQuickPreviewModal({
               className="quick-preview__perf-badge"
               title={`Benchmark locale della quick preview | ${quickPreviewPerf.sourceBreakdown}`}
             >
-              {`Fit ${quickPreviewPerf.fitLatencyMs ?? "n/d"} ms Ã‚Â· Detail ${quickPreviewPerf.detailLatencyMs ?? "n/d"} ms Ã‚Â· Hit ${quickPreviewPerf.warmHitRate ?? "n/d"}% Ã‚Â· ${quickPreviewPerf.lastRenderedSource}`}
+              {`Fit ${quickPreviewPerf.fitLatencyMs ?? "n/d"} ms Ãƒâ€šÃ‚Â· Detail ${quickPreviewPerf.detailLatencyMs ?? "n/d"} ms Ãƒâ€šÃ‚Â· Hit ${quickPreviewPerf.warmHitRate ?? "n/d"}% Ãƒâ€šÃ‚Â· ${quickPreviewPerf.lastRenderedSource}`}
             </span>
             <button
               type="button"
@@ -2397,7 +2429,7 @@ export function PhotoQuickPreviewModal({
                   }
                   onClick={() => updateRating(value)}
                 >
-                  Ã¢Ëœâ€¦
+                  ÃƒÂ¢Ã‹Å“Ã¢â‚¬Â¦
                 </button>
               ))}
               <button
@@ -2482,9 +2514,9 @@ export function PhotoQuickPreviewModal({
                         isFeedbackTarget ? "quick-preview__custom-label--flash" : "",
                       ].join(" ").trim()}
                       onClick={() => toggleCustomLabel(label)}
-                      title={shortcut ? `${label} Ã‚Â· scorciatoia ${shortcut}` : label}
+                      title={shortcut ? `${label} Ãƒâ€šÃ‚Â· scorciatoia ${shortcut}` : label}
                     >
-                      {shortcut ? `${label} Ã‚Â· ${shortcut}` : label}
+                      {shortcut ? `${label} Ãƒâ€šÃ‚Â· ${shortcut}` : label}
                     </button>
                   );
                 })}
@@ -2689,7 +2721,7 @@ export function PhotoQuickPreviewModal({
                 Foto {currentIndex + 1} di {navigationAssets.length}
               </strong>
               <span>
-                {previousAsset ? `Prec: ${previousAsset.fileName}` : "Inizio serie"} Ã‚Â·{" "}
+                {previousAsset ? `Prec: ${previousAsset.fileName}` : "Inizio serie"} Ãƒâ€šÃ‚Â·{" "}
                 {nextAsset ? `Succ: ${nextAsset.fileName}` : "Fine serie"}
               </span>
             </div>
@@ -2723,7 +2755,7 @@ export function PhotoQuickPreviewModal({
                         ? "quick-preview__dock-thumb quick-preview__dock-thumb--active"
                         : "quick-preview__dock-thumb"
                     }
-                    aria-current={isActive ? "true" : undefined}
+                    aria-current={isActive ? true : undefined}
                     onClick={() => selectAssetFromPreview(item.id, "jump")}
                     title={item.fileName}
                     draggable={canExternalDrag && isActive}
@@ -2777,9 +2809,9 @@ export function PhotoQuickPreviewModal({
                 {activePage
                   ? activePageCanAccept
                     ? usage?.pageId === activePage.id
-                      ? "La foto ÃƒÂ¨ giÃƒÂ  in questo foglio. Premi Invio per riorganizzarlo."
+                      ? "La foto ÃƒÆ’Ã‚Â¨ giÃƒÆ’Ã‚Â  in questo foglio. Premi Invio per riorganizzarlo."
                       : "Premi Invio per aggiungere questa foto al foglio attivo."
-                    : "Il foglio attivo ÃƒÂ¨ pieno. Seleziona un altro foglio nello studio."
+                    : "Il foglio attivo ÃƒÆ’Ã‚Â¨ pieno. Seleziona un altro foglio nello studio."
                   : "Seleziona un foglio nello studio per usare l'aggiunta rapida."}
               </span>
               {showAssignSuccess ? (

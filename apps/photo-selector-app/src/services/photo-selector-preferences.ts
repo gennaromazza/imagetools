@@ -153,8 +153,42 @@ export function normalizeCustomLabelShortcuts(
   return normalized;
 }
 
+function clampCardSize(value: number | undefined): number {
+  return Math.max(
+    100,
+    Math.min(320, Number(value ?? DEFAULT_PHOTO_SELECTOR_PREFERENCES.cardSize)),
+  );
+}
+
+function isValidFilterPreset(value: unknown): value is PhotoFilterPreset {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<PhotoFilterPreset>;
+  return (
+    typeof candidate.id === "string"
+    && typeof candidate.name === "string"
+    && Boolean(candidate.filters)
+    && typeof candidate.filters === "object"
+  );
+}
+
+function clonePreferences(preferences: PhotoSelectorPreferences): PhotoSelectorPreferences {
+  return {
+    ...preferences,
+    colorNames: { ...preferences.colorNames },
+    filterPresets: preferences.filterPresets.map((preset) => ({
+      ...preset,
+      filters: { ...preset.filters },
+    })),
+    customLabelsCatalog: [...preferences.customLabelsCatalog],
+    customLabelColors: { ...preferences.customLabelColors },
+    customLabelShortcuts: { ...preferences.customLabelShortcuts },
+  };
+}
+
 export function loadPhotoSelectorPreferences(): PhotoSelectorPreferences {
-  return preferencesCache;
+  return clonePreferences(preferencesCache);
 }
 
 function parseStoredPreferences(
@@ -166,7 +200,9 @@ function parseStoredPreferences(
       ...COLOR_LABEL_NAMES,
       ...(parsed?.colorNames ?? {}),
     },
-    filterPresets: Array.isArray(parsed?.filterPresets) ? parsed.filterPresets : [],
+    filterPresets: Array.isArray(parsed?.filterPresets)
+      ? (parsed.filterPresets as unknown[]).filter(isValidFilterPreset)
+      : [],
     customLabelsCatalog,
     customLabelColors: normalizeCustomLabelColors(
       customLabelsCatalog,
@@ -183,7 +219,7 @@ function parseStoredPreferences(
           ? "fast"
           : "ultra-fast",
     sortCacheEnabled: parsed?.sortCacheEnabled !== false,
-    cardSize: Math.max(100, Math.min(320, Number(parsed?.cardSize ?? DEFAULT_PHOTO_SELECTOR_PREFERENCES.cardSize))),
+    cardSize: clampCardSize(parsed?.cardSize),
     rootFolderPathOverride: typeof parsed?.rootFolderPathOverride === "string"
       ? parsed.rootFolderPathOverride
       : "",
@@ -245,7 +281,7 @@ export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorP
             ? "ultra-fast"
             : current.thumbnailProfile,
     sortCacheEnabled: preferences.sortCacheEnabled ?? current.sortCacheEnabled,
-    cardSize: preferences.cardSize ?? current.cardSize,
+    cardSize: preferences.cardSize !== undefined ? clampCardSize(preferences.cardSize) : current.cardSize,
     rootFolderPathOverride: preferences.rootFolderPathOverride ?? current.rootFolderPathOverride,
     preferredEditorPath: preferences.preferredEditorPath ?? current.preferredEditorPath,
   };
