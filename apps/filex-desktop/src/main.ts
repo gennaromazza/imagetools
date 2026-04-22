@@ -93,7 +93,7 @@ import {
 } from "./updater.js";
 import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault } from "./tool-manifest.js";
 
-const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = electron;
+const { app, BrowserWindow, dialog, ipcMain, protocol, session, shell } = electron;
 
 const EARLY_BOOT_LOG_PATH = join(process.env.TEMP || process.cwd(), "filex-image-party-frame-early.log");
 
@@ -744,6 +744,62 @@ function getInstalledEditorCandidates(): DesktopEditorCandidate[] {
   }
 
   return candidates;
+}
+
+function enforceUtf8CharsetOnTextResponses(): void {
+  // Chromium può ricadere sulla codifica locale (Windows-1252 sui PC italiani)
+  // quando file:// e Vite servono asset di testo senza un parametro `charset`
+  // esplicito nella Content-Type. Questo causa mojibake sui caratteri non-ASCII
+  // dei bundle (es. `·`, `★`, `✓`) anche se i file sorgente sono UTF-8 corretti.
+  // Forziamo `charset=utf-8` su tutte le risposte di testo dei renderer.
+  const targetSession = session.defaultSession;
+  if (!targetSession) {
+    return;
+  }
+
+  targetSession.webRequest.onHeadersReceived((details, callback) => {
+    const headers = details.responseHeaders ?? {};
+    const contentTypeKey = Object.keys(headers).find(
+      (key) => key.toLowerCase() === "content-type",
+    );
+
+    if (!contentTypeKey) {
+      callback({ responseHeaders: headers });
+      return;
+    }
+
+    const rawValues = headers[contentTypeKey];
+    const values = Array.isArray(rawValues) ? rawValues : [rawValues];
+    const updated = values.map((value) => {
+      if (typeof value !== "string") {
+        return value;
+      }
+      const lower = value.toLowerCase();
+      if (lower.includes("charset=")) {
+        return value;
+      }
+      const isText =
+        lower.startsWith("text/") ||
+        lower.includes("javascript") ||
+        lower.includes("ecmascript") ||
+        lower.includes("json") ||
+        lower.includes("xml") ||
+        lower.includes("svg");
+      if (!isText) {
+        return value;
+      }
+      const trimmed = value.trim();
+      const separator = trimmed.endsWith(";") ? " " : "; ";
+      return `${trimmed}${separator}charset=utf-8`;
+    });
+
+    callback({
+      responseHeaders: {
+        ...headers,
+        [contentTypeKey]: updated as string[],
+      },
+    });
+  });
 }
 
 function registerPreviewProtocol(): void {
@@ -1438,6 +1494,64 @@ async function createMainWindow(): Promise<void> {
   }
 }
 
+// Safety net globale: cattura errori asincroni non gestiti dagli IPC handler
+// (es. fs.promises.* che rejectano dentro un .handle senza try/catch) e
+// converte la condizione "process Main crash" in "evento loggato + dialog".
+// Senza questi guard, una promise rejected in un handler chiude l'app intera.
+// In dev (NON packaged) lasciamo crashare per evidenziare i bug, attiviamo
+// il safety net solo in produzione.
+const isPackagedBuild = app.isPackaged;
+process.on("unhandledRejection", (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? reason.stack : undefined;
+  try {
+    writeBootLog(`Unhandled promise rejection: ${stack ?? message}`);
+  } catch {
+    // ignore boot-log failures
+  }
+  try {
+    logDesktopEvent({
+      channel: "app",
+      level: "error",
+      message: "Unhandled promise rejection",
+      details: stack ?? message,
+    });
+  } catch {
+    // logDesktopEvent può fallire se lo store non è ancora pronto
+  }
+  if (!isPackagedBuild) {
+    // In dev: rilancia in modo asincrono così Electron mostra l'overlay e
+    // possiamo fixare il bug invece di nasconderlo.
+    setImmediate(() => {
+      throw reason instanceof Error ? reason : new Error(String(reason));
+    });
+  }
+});
+
+process.on("uncaughtException", (error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  try {
+    writeBootLog(`Uncaught exception: ${stack ?? message}`);
+  } catch {
+    // ignore
+  }
+  try {
+    logDesktopEvent({
+      channel: "app",
+      level: "error",
+      message: "Uncaught exception",
+      details: stack ?? message,
+    });
+  } catch {
+    // ignore
+  }
+  if (!isPackagedBuild) {
+    // In dev: lascia crashare per non mascherare bug.
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+});
+
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     writeBootLog(`App ready for tool ${requestedTool.id}`);
@@ -1450,6 +1564,7 @@ if (hasSingleInstanceLock) {
       await ensureImagePartyFrameServer();
     }
 
+    enforceUtf8CharsetOnTextResponses();
     registerPreviewProtocol();
     registerCrashTelemetryHandlers();
     registerIpcHandlers();

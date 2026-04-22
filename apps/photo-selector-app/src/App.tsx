@@ -1042,6 +1042,21 @@ export function App() {
             continue;
           }
 
+          // Se l'asset aveva già una blob URL (es. da cache disco) e la pipeline
+          // produce una nuova URL diversa, revochiamo la vecchia per evitare
+          // che il browser tenga in memoria thumbnail orfani per tutta la sessione.
+          if (
+            asset.thumbnailUrl
+            && asset.thumbnailUrl !== patch.thumbnailUrl
+            && asset.thumbnailUrl.startsWith("blob:")
+          ) {
+            try {
+              URL.revokeObjectURL(asset.thumbnailUrl);
+            } catch {
+              // ignore: revokeObjectURL non lancia in pratica
+            }
+          }
+
           next[index] = {
             ...asset,
             ...patch,
@@ -1664,6 +1679,10 @@ export function App() {
 
       // 3. Create placeholder assets INSTANTLY (no file reading)
       const placeholderAssets = buildPlaceholderAssets(entries);
+      const groupedAssetCount = placeholderAssets.length;
+      setFolderDiagnostics((current) =>
+        current ? { ...current, groupedAssetCount } : current,
+      );
       const cachedCatalogState = hasDesktopStateApi() && rootPath
         ? await getDesktopFolderCatalogState(rootPath).catch(() => null)
         : null;
@@ -2838,9 +2857,15 @@ export function App() {
                   <strong title={folderDiagnostics.selectedPath}>{folderDiagnostics.selectedPath}</strong>
                 </div>
                 <div className="folder-diagnostics-panel__item">
-                  <span>Top-level caricati</span>
+                  <span>Top-level caricati (file fisici)</span>
                   <strong>{folderDiagnostics.topLevelSupportedCount}</strong>
                 </div>
+                {typeof folderDiagnostics.groupedAssetCount === "number" ? (
+                  <div className="folder-diagnostics-panel__item">
+                    <span>Scatti unici (gruppi)</span>
+                    <strong>{folderDiagnostics.groupedAssetCount}</strong>
+                  </div>
+                ) : null}
                 <div className="folder-diagnostics-panel__item">
                   <span>Annidati scartati</span>
                   <strong>{folderDiagnostics.nestedSupportedDiscardedCount}</strong>

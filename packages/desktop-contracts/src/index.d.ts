@@ -247,6 +247,7 @@ export interface DesktopPhotoSelectorPreferences {
   cardSize: number;
   rootFolderPathOverride: string;
   preferredEditorPath: string;
+  autoAdvanceOnAction: boolean;
 }
 
 export interface DesktopPersistedState {

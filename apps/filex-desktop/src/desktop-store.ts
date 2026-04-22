@@ -1,6 +1,6 @@
 import * as electron from "electron";
 import { DatabaseSync } from "node:sqlite";
-import { mkdirSync, appendFileSync } from "node:fs";
+import { mkdirSync, appendFileSync, renameSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
   DesktopFolderCatalogAssetState,
@@ -36,6 +36,7 @@ const DEFAULT_DESKTOP_PREFERENCES: DesktopPhotoSelectorPreferences = {
   customLabelShortcuts: {},
   thumbnailProfile: "ultra-fast",
   sortCacheEnabled: true,
+  autoAdvanceOnAction: true,
   cardSize: 160,
   rootFolderPathOverride: "",
   preferredEditorPath: "",
@@ -55,6 +56,80 @@ function ensureParentDirectory(filePath: string): void {
   mkdirSync(dirname(filePath), { recursive: true });
 }
 
+const MAX_CORRUPT_BACKUPS = 3;
+
+function pruneOldCorruptBackups(databasePath: string): void {
+  // Su disco rotto / crash ciclici si accumulerebbero file .corrupt-* infiniti.
+  // Manteniamo solo gli ultimi N per debug.
+  try {
+    const dir = dirname(databasePath);
+    const baseName = databasePath.substring(dir.length + 1);
+    const prefix = `${baseName}.corrupt-`;
+    const entries = readdirSync(dir)
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => ({ name, stamp: Number(name.substring(prefix.length)) || 0 }))
+      .sort((a, b) => b.stamp - a.stamp);
+    for (const stale of entries.slice(MAX_CORRUPT_BACKUPS)) {
+      try {
+        unlinkSync(join(dir, stale.name));
+      } catch {
+        // ignore: best-effort cleanup
+      }
+    }
+  } catch {
+    // ignore: directory non leggibile, non bloccante
+  }
+}
+
+function openDatabaseWithRecovery(databasePath: string): DatabaseSync {
+  // Apertura difensiva: se il file SQLite è corrotto (crash precedente, modifiche
+  // manuali, disco rotto) `new DatabaseSync` lancia. Senza recovery l'app non
+  // partirebbe più finché l'utente non cancella il file a mano.
+  // Strategia: rinomina il file corrotto a <db>.corrupt-<timestamp> e riprova
+  // con un DB vuoto. L'utente perde le preferenze ma l'app si avvia.
+  try {
+    return new DatabaseSync(databasePath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const stamp = Date.now();
+    const corruptPath = `${databasePath}.corrupt-${stamp}`;
+    let renamed = false;
+    try {
+      renameSync(databasePath, corruptPath);
+      renamed = true;
+    } catch (renameError) {
+      // Su Windows il file può essere lockato (antivirus, istanza zombie).
+      // Fallback: prova a cancellarlo (perdiamo la copia ma l'app parte).
+      try {
+        unlinkSync(databasePath);
+      } catch {
+        // Né rinominare né cancellare: rilancia l'errore originale del DB,
+        // l'utente vedrà il messaggio nei log e potrà rimuovere il file a mano.
+        const renameMsg = renameError instanceof Error ? renameError.message : String(renameError);
+        try {
+          appendFileSync(
+            getLogFilePath(),
+            `${new Date().toISOString()} [store] DB corrotto E rename/unlink falliti (${renameMsg}): ${message}\n`,
+          );
+        } catch {
+          // ignore
+        }
+        throw error instanceof Error ? error : new Error(message);
+      }
+    }
+    try {
+      appendFileSync(
+        getLogFilePath(),
+        `${new Date().toISOString()} [store] DB corrotto, ${renamed ? `rinominato in ${corruptPath}` : "cancellato"}: ${message}\n`,
+      );
+    } catch {
+      // log best-effort
+    }
+    pruneOldCorruptBackups(databasePath);
+    return new DatabaseSync(databasePath);
+  }
+}
+
 function getDatabase(): DatabaseSync {
   if (database) {
     return database;
@@ -62,7 +137,7 @@ function getDatabase(): DatabaseSync {
 
   const databasePath = getDatabasePath();
   ensureParentDirectory(databasePath);
-  const db = new DatabaseSync(databasePath);
+  const db = openDatabaseWithRecovery(databasePath);
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA synchronous = NORMAL;

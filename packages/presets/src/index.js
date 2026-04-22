@@ -15,6 +15,7 @@ export const DEFAULT_SHEET_SPEC = {
     dpi: 300,
     marginCm: 1,
     gapCm: 0.4,
+    bleedCm: 0.3,
     backgroundColor: "#ffffff",
     backgroundImageUrl: "",
     photoBorderColor: "#ffffff",

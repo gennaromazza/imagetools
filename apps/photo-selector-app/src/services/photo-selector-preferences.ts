@@ -36,6 +36,7 @@ export interface PhotoSelectorPreferences {
   cardSize: number;
   rootFolderPathOverride: string;
   preferredEditorPath: string;
+  autoAdvanceOnAction: boolean;
 }
 
 export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
@@ -49,6 +50,7 @@ export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
   cardSize: 160,
   rootFolderPathOverride: "",
   preferredEditorPath: "",
+  autoAdvanceOnAction: true,
 };
 
 let preferencesCache: PhotoSelectorPreferences = { ...DEFAULT_PHOTO_SELECTOR_PREFERENCES };
@@ -96,12 +98,19 @@ export function normalizeCustomLabelTone(value: string | undefined): CustomLabel
   }
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  // Object.entries lancia su null/undefined e si comporta in modo strano su
+  // array o tipi primitivi. Usato per blindare i valori letti dal DB nel caso
+  // di drift di schema o file di preferenze toccati a mano.
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function normalizeCustomLabelColors(
   catalog: string[],
   colors: Record<string, string> | undefined,
 ): Record<string, CustomLabelTone> {
   const normalized: Record<string, CustomLabelTone> = {};
-  if (!colors) {
+  if (!colors || !isPlainRecord(colors)) {
     for (const label of catalog) {
       normalized[label] = DEFAULT_CUSTOM_LABEL_TONE;
     }
@@ -136,7 +145,8 @@ export function normalizeCustomLabelShortcuts(
 ): Record<string, CustomLabelShortcut | null> {
   const normalized: Record<string, CustomLabelShortcut | null> = {};
   const usedShortcuts = new Set<CustomLabelShortcut>();
-  const shortcutEntries = Object.entries(shortcuts ?? {});
+  const safeShortcuts = isPlainRecord(shortcuts) ? shortcuts : {};
+  const shortcutEntries = Object.entries(safeShortcuts);
 
   for (const label of catalog) {
     const match = shortcutEntries.find(([key]) => key.toLocaleLowerCase() === label.toLocaleLowerCase());
@@ -226,6 +236,7 @@ function parseStoredPreferences(
     preferredEditorPath: typeof parsed?.preferredEditorPath === "string"
       ? parsed.preferredEditorPath
       : "",
+    autoAdvanceOnAction: parsed?.autoAdvanceOnAction !== false,
   };
 }
 
@@ -241,6 +252,7 @@ function toDesktopPreferences(preferences: PhotoSelectorPreferences): DesktopPho
     cardSize: preferences.cardSize,
     rootFolderPathOverride: preferences.rootFolderPathOverride,
     preferredEditorPath: preferences.preferredEditorPath,
+    autoAdvanceOnAction: preferences.autoAdvanceOnAction,
   };
 }
 
@@ -284,6 +296,10 @@ export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorP
     cardSize: preferences.cardSize !== undefined ? clampCardSize(preferences.cardSize) : current.cardSize,
     rootFolderPathOverride: preferences.rootFolderPathOverride ?? current.rootFolderPathOverride,
     preferredEditorPath: preferences.preferredEditorPath ?? current.preferredEditorPath,
+    autoAdvanceOnAction:
+      preferences.autoAdvanceOnAction !== undefined
+        ? preferences.autoAdvanceOnAction
+        : current.autoAdvanceOnAction,
   };
 
   next.customLabelColors = normalizeCustomLabelColors(

@@ -16,6 +16,19 @@ import {
 import { isRawFile } from "../services/folder-access";
 import type { CustomLabelShortcut, CustomLabelTone } from "../services/photo-selector-preferences";
 
+function formatFileSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  const decimals = value >= 100 || unit === 0 ? 0 : 1;
+  return `${value.toFixed(decimals)} ${units[unit]}`;
+}
+
 interface PhotoCardProps {
   photo: ImageAsset;
   isSelected: boolean;
@@ -26,6 +39,7 @@ interface PhotoCardProps {
     id: string,
     changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>
   ) => void;
+  onAfterShortcutClassification?: (id: string) => void;
   onFocus: (id: string) => void;
   onPreview: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
@@ -83,6 +97,7 @@ export const PhotoCard = memo(
     isGroupLeader = false,
     onToggle,
     onUpdatePhoto,
+    onAfterShortcutClassification,
     onFocus,
     onPreview,
     onContextMenu,
@@ -104,6 +119,7 @@ export const PhotoCard = memo(
     const colorLabel = getAssetColorLabel(photo);
     const customLabels = photo.customLabels ?? [];
     const raw = isRawFile(photo.fileName);
+    const isRawJpgGroup = photo.groupKind === "raw+jpg";
 
     const prevClassRef = useRef({ rating, pickStatus, colorLabel, customLabels });
     const cardRef = useRef<HTMLDivElement>(null);
@@ -366,6 +382,7 @@ export const PhotoCard = memo(
             if (changes) {
               event.preventDefault();
               onUpdatePhoto(photo.id, changes);
+              onAfterShortcutClassification?.(photo.id);
             }
           }
         }}
@@ -414,7 +431,14 @@ export const PhotoCard = memo(
             </div>
           </div>
 
-          {raw ? (
+          {isRawJpgGroup ? (
+            <span
+              className="asset-pick-badge asset-raw-badge photo-card__raw-badge"
+              title={`${photo.fileName} + ${photo.companionFileName ?? "RAW"}`}
+            >
+              RAW + JPG
+            </span>
+          ) : raw ? (
             <span className="asset-pick-badge asset-raw-badge photo-card__raw-badge">RAW</span>
           ) : null}
 
@@ -458,6 +482,16 @@ export const PhotoCard = memo(
               <span className="photo-card__dimensions">
                 {Math.round(photo.width)}×{Math.round(photo.height)}
               </span>
+            ) : null}
+            {isRawJpgGroup && (photo.size ?? 0) > 0 && (photo.companionSize ?? 0) > 0 ? (
+              <span
+                className="photo-card__dimensions"
+                title={`JPG ${formatFileSize(photo.size!)} · RAW ${formatFileSize(photo.companionSize!)}`}
+              >
+                {formatFileSize(photo.size!)} + {formatFileSize(photo.companionSize!)}
+              </span>
+            ) : (photo.size ?? 0) > 0 ? (
+              <span className="photo-card__dimensions">{formatFileSize(photo.size!)}</span>
             ) : null}
           </div>
           {customLabels.length > 0 ? (

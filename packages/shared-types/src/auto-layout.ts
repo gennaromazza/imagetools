@@ -51,6 +51,12 @@ export interface ImageAsset {
   thumbnailUrl?: string;
   previewUrl?: string;
   sourceUrl?: string;
+  size?: number;
+  groupKind?: "raw+jpg" | "raw" | "standard";
+  companionFileName?: string;
+  companionPath?: string;
+  companionSourceFileKey?: string;
+  companionSize?: number;
 }
 
 export interface SheetSpec {

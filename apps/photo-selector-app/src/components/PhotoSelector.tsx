@@ -27,6 +27,7 @@ import {
   getAssetAbsolutePaths,
   detectChangedAssetsOnDisk,
   warmOnDemandPreviewCache,
+  isRawFile,
 } from "../services/folder-access";
 import {
   COLOR_LABEL_NAMES,
@@ -120,6 +121,7 @@ type SortMode = "name" | "orientation" | "rating" | "createdAt";
 type CreatedAtSortDirection = "asc" | "desc";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
+type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg";
 type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>;
 type BatchPulseKind = "dot" | "label";
 type PreviewFeedbackKind = "star" | "pill" | "dot" | "label";
@@ -421,6 +423,18 @@ function RamBudgetSection({
   );
 }
 
+// Revoca una blob: URL precedente quando viene rimpiazzata da una nuova URL
+// diversa. Ignora valori falsy, URL identiche e URL non-blob (es. http:, file:).
+function revokeBlobUrlIfReplaced(previous: string | undefined, next: string | undefined): void {
+  if (!previous || !next || previous === next) return;
+  if (!previous.startsWith("blob:")) return;
+  try {
+    URL.revokeObjectURL(previous);
+  } catch {
+    // ignore: revokeObjectURL non lancia mai in pratica, ma siamo difensivi.
+  }
+}
+
 export function PhotoSelector({
   photos,
   metadataVersion,
@@ -464,6 +478,7 @@ export function PhotoSelector({
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
   const [fileTypeFilter, setFileTypeFilter] = useState<FileTypeFilter>("all");
+  const [formatFilter, setFormatFilter] = useState<FormatFilter>("all");
   const [customLabelFilter, setCustomLabelFilter] = useState<string>("all");
   const [folderFilter, setFolderFilter] = useState<string>("all");
   const [seriesFilter, setSeriesFilter] = useState<string>("all");
@@ -476,6 +491,7 @@ export function PhotoSelector({
   const [filterPresets, setFilterPresets] = useState<PhotoFilterPreset[]>([]);
   const [selectedThumbnailProfile, setSelectedThumbnailProfile] = useState<ThumbnailProfile>(thumbnailProfile);
   const [isSortCacheEnabled, setIsSortCacheEnabled] = useState<boolean>(sortCacheEnabled);
+  const [autoAdvanceOnAction, setAutoAdvanceOnAction] = useState<boolean>(true);
   const [newPresetName, setNewPresetName] = useState("");
   const [newCustomLabelName, setNewCustomLabelName] = useState("");
   const [newCustomLabelTone, setNewCustomLabelTone] = useState<CustomLabelTone>(DEFAULT_CUSTOM_LABEL_TONE);
@@ -595,14 +611,33 @@ export function PhotoSelector({
         ratingFilter !== "any",
         colorFilter !== "all",
         fileTypeFilter !== "all",
+        formatFilter !== "all",
+        formatFilter !== "all",
         customLabelFilter !== "all",
         folderFilter !== "all",
         seriesFilter !== "all",
         timeClusterFilter !== "all",
         searchQuery !== "",
       ].filter(Boolean).length,
-    [pickFilter, ratingFilter, colorFilter, fileTypeFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
+    [pickFilter, ratingFilter, colorFilter, fileTypeFilter, formatFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
   );
+
+  // Statistiche aggregate sull'intera cartella corrente: utili come "vital signs"
+  // sempre visibili in cima alla griglia, indipendentemente da selezione/filtri.
+  const folderStats = useMemo(() => {
+    const total = photos.length;
+    if (total === 0) return null;
+    let picked = 0;
+    let rejected = 0;
+    for (const p of photos) {
+      const status = getAssetPickStatus(p);
+      if (status === "picked") picked += 1;
+      else if (status === "rejected") rejected += 1;
+    }
+    const decided = picked + rejected;
+    const completionPct = Math.round((decided / total) * 100);
+    return { total, picked, rejected, completionPct };
+  }, [photos]);
 
   const selectionStats = useMemo(() => {
     if (selectedIds.length === 0) return null;
@@ -621,6 +656,8 @@ export function PhotoSelector({
     ratingFilter !== "any" ||
     colorFilter !== "all" ||
     fileTypeFilter !== "all" ||
+    formatFilter !== "all" ||
+    formatFilter !== "all" ||
     customLabelFilter !== "all" ||
     folderFilter !== "all" ||
     seriesFilter !== "all" ||
@@ -748,6 +785,7 @@ export function PhotoSelector({
       setCustomLabelShortcuts(preferences.customLabelShortcuts);
       setSelectedThumbnailProfile(preferences.thumbnailProfile);
       setIsSortCacheEnabled(preferences.sortCacheEnabled);
+      setAutoAdvanceOnAction(preferences.autoAdvanceOnAction);
       setCardSize(preferences.cardSize);
       setRootFolderPathOverride(preferences.rootFolderPathOverride);
       setPreferredEditorPath(sanitizeEditorExecutablePath(preferences.preferredEditorPath));
@@ -853,6 +891,7 @@ export function PhotoSelector({
 
   function resetFilters() {
     setPickFilter("all");
+    setFormatFilter("all");
     setRatingFilter("any");
     setColorFilter("all");
     setFileTypeFilter("all");
@@ -1032,6 +1071,16 @@ export function PhotoSelector({
     onSortCacheEnabledChange?.(nextEnabled);
     pushTimelineEntry(nextEnabled ? "Sort cache attivata" : "Sort cache disattivata");
   }, [onSortCacheEnabledChange, pushTimelineEntry]);
+
+  const handleAutoAdvanceChange = useCallback((nextEnabled: boolean) => {
+    setAutoAdvanceOnAction(nextEnabled);
+    savePhotoSelectorPreferences({ autoAdvanceOnAction: nextEnabled });
+    pushTimelineEntry(
+      nextEnabled
+        ? "Avanzamento automatico dopo classificazione: ON"
+        : "Avanzamento automatico dopo classificazione: OFF",
+    );
+  }, [pushTimelineEntry]);
 
   const updateCustomLabelsForIds = useCallback((
     targetIds: string[],
@@ -1433,6 +1482,23 @@ export function PhotoSelector({
       if (seriesFilter !== "all" && getSeriesKey(photo) !== seriesFilter) {
         continue;
       }
+      if (formatFilter !== "all") {
+        const kind = photo.groupKind ?? (isRawFile(photo.fileName) ? "raw" : "standard");
+        if (formatFilter === "raw+jpg" && kind !== "raw+jpg") {
+          continue;
+        }
+        if (formatFilter === "raw" && kind !== "raw") {
+          continue;
+        }
+        if (formatFilter === "jpg") {
+          // "JPG" matches plain JPG cards (no companion). Grouped cards are
+          // surfaced under the dedicated "RAW + JPG" option to match the
+          // labelling on the card badge.
+          if (kind !== "standard" || isRawFile(photo.fileName)) {
+            continue;
+          }
+        }
+      }
       if (timeClusterFilter !== "all" && getTimeClusterKey(photo) !== timeClusterFilter) {
         continue;
       }
@@ -1450,6 +1516,7 @@ export function PhotoSelector({
     deferredSearchQuery,
     fileTypeFilter,
     folderFilter,
+    formatFilter,
     metadataAssetById,
     pickFilter,
     ratingFilter,
@@ -1946,6 +2013,30 @@ export function PhotoSelector({
     }
   }, [contextMenuState]);
 
+  // Sposta il focus alla foto successiva (o alla precedente se in fondo).
+  // Usato dall'auto-advance dopo una classificazione tramite scorciatoia,
+  // per replicare il flusso "Photo Mechanic" — un tasto = una decisione + avanti.
+  const advanceFocusToNext = useCallback(
+    (currentId: string) => {
+      if (!autoAdvanceOnAction || visiblePhotoIds.length === 0) return;
+      const currentIndex = visiblePhotoIndexById.get(currentId);
+      if (currentIndex === undefined || currentIndex < 0) return;
+      const nextIndex = currentIndex < visiblePhotoIds.length - 1
+        ? currentIndex + 1
+        : currentIndex; // resta sull'ultima se non c'è successiva
+      const nextId = visiblePhotoIds[nextIndex];
+      if (!nextId || nextId === currentId) return;
+      setFocusedPhotoId(nextId);
+      scrollPhotoIntoView(nextId);
+      requestAnimationFrame(() => {
+        const grid = gridRef.current;
+        const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${nextId}"]`);
+        if (el) el.focus();
+      });
+    },
+    [autoAdvanceOnAction, scrollPhotoIntoView, visiblePhotoIds, visiblePhotoIndexById],
+  );
+
   // Consolidated keyboard handler: Escape chain + arrow navigation
   const handleWindowKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -1983,6 +2074,11 @@ export function PhotoSelector({
           if (targetIds.length > 0) {
             event.preventDefault();
             toggleCustomLabelForIds(targetIds, shortcutLabel);
+            // Auto-advance: dopo una custom label da scorciatoia, sposta il focus
+            // alla foto successiva (solo se la pref è attiva e c'è un focus singolo).
+            if (focusedPhotoId && targetIds.length === 1 && targetIds[0] === focusedPhotoId) {
+              advanceFocusToNext(focusedPhotoId);
+            }
             return;
           }
         }
@@ -2054,6 +2150,7 @@ export function PhotoSelector({
       }
     },
     [
+      advanceFocusToNext,
       contextMenuState,
       focusedPhotoId,
       hasActiveFilters,
@@ -2796,6 +2893,12 @@ export function PhotoSelector({
         const next = photosRef.current.map((asset) => {
           const change = byId.get(asset.id);
           if (!change) return asset;
+          // Quando una preview/thumbnail viene rimpiazzata da una nuova blob: URL,
+          // revochiamo la vecchia: altrimenti il browser tiene il blob in memoria
+          // per tutta la sessione (memory leak su cartelle modificate spesso).
+          revokeBlobUrlIfReplaced(asset.thumbnailUrl, change.thumbnailUrl);
+          revokeBlobUrlIfReplaced(asset.previewUrl, change.previewUrl);
+          revokeBlobUrlIfReplaced(asset.sourceUrl, change.sourceUrl);
           return {
             ...asset,
             sourceFileKey: change.sourceFileKey,
@@ -2969,6 +3072,20 @@ export function PhotoSelector({
     <div className="photo-selector">
       {/* ── FILTER BAR ── */}
       <div className="photo-selector__filter-bar">
+        {folderStats && (
+          <div
+            className="photo-selector__folder-stats"
+            title={`Totale ${folderStats.total} · Picked ${folderStats.picked} · Scartate ${folderStats.rejected} · Decise ${folderStats.completionPct}%`}
+          >
+            <span className="photo-selector__folder-stats-total">{folderStats.total} foto</span>
+            <span className="photo-selector__folder-stats-sep">·</span>
+            <span className="photo-selector__folder-stats-picked">{folderStats.picked} pick</span>
+            <span className="photo-selector__folder-stats-sep">·</span>
+            <span className="photo-selector__folder-stats-rejected">{folderStats.rejected} scart.</span>
+            <span className="photo-selector__folder-stats-sep">·</span>
+            <span className="photo-selector__folder-stats-progress">{folderStats.completionPct}% decise</span>
+          </div>
+        )}
         {hasActiveFilters && (
           <div className="selector-filters__reset">
             <button
@@ -3004,7 +3121,7 @@ export function PhotoSelector({
         )}
 
         <label className="field">
-          <span>Formato</span>
+          <span>Tipo file</span>
           <select
             className={fileTypeFilter !== "all" ? "field__select--active" : undefined}
             value={fileTypeFilter}
@@ -3027,6 +3144,20 @@ export function PhotoSelector({
             <option value="picked">Pick</option>
             <option value="rejected">Scartate</option>
             <option value="unmarked">Neutre</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Formato</span>
+          <select
+            className={formatFilter !== "all" ? "field__select--active" : undefined}
+            value={formatFilter}
+            onChange={(event) => setFormatFilter(event.target.value as FormatFilter)}
+          >
+            <option value="all">Tutti</option>
+            <option value="jpg">JPG</option>
+            <option value="raw">RAW</option>
+            <option value="raw+jpg">RAW + JPG</option>
           </select>
         </label>
 
@@ -3427,6 +3558,7 @@ export function PhotoSelector({
                 isGroupLeader={isGroupLeader}
                 onToggle={togglePhoto}
                 onUpdatePhoto={handleUpdatePhoto}
+                onAfterShortcutClassification={advanceFocusToNext}
                 onFocus={handleFocus}
                 onPreview={handlePreview}
                 onContextMenu={handleContextMenu}
@@ -3731,6 +3863,7 @@ export function PhotoSelector({
         externalFeedback={previewSyncFeedback}
         canExternalDrag={Boolean(previewAssetWithUrl ? getAssetAbsolutePath(previewAssetWithUrl.id) : null)}
         onExternalDragStart={handlePreviewExternalDragStart}
+        autoAdvanceOnAction={autoAdvanceOnAction}
         onClose={closePreview}
         onSelectAsset={handlePreviewAssetSelection}
         onUpdateAsset={(assetId, changes) => updatePhoto(assetId, changes, "modal")}
@@ -4058,6 +4191,18 @@ export function PhotoSelector({
                 type="checkbox"
                 checked={isSortCacheEnabled}
                 onChange={(event) => handleSortCacheEnabledChange(event.target.checked)}
+              />
+            </label>
+            <label
+              className="photo-selector__settings-color-row"
+              style={{ alignItems: "center" }}
+              title="Quando attivo, dopo una scorciatoia di rating/pick/colore/etichetta il focus si sposta sulla foto successiva (flusso Photo Mechanic)."
+            >
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Auto-advance</span>
+              <input
+                type="checkbox"
+                checked={autoAdvanceOnAction}
+                onChange={(event) => handleAutoAdvanceChange(event.target.checked)}
               />
             </label>
             <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
