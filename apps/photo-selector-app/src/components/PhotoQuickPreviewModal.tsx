@@ -118,6 +118,8 @@ const DOCK_THUMB_ESTIMATED_SIZE = 81;
 const DOCK_THUMB_OVERSCAN = 4;
 const QUICK_PREVIEW_DESKTOP_FALLBACK_DELAY_MS = 80;
 const QUICK_PREVIEW_DETAIL_IDLE_DELAY_MS = 160;
+const UI_SEPARATOR = " | ";
+const STAR_SYMBOL = "\u2605";
 
 function getVirtualStripRange(
   totalCount: number,
@@ -188,7 +190,7 @@ function formatDesktopPreviewSourceLabel(
             ? "native-provider"
             : "source-file"
   );
-  return `${stageLabel} · ${sourceLabel}${cacheHit ? " · hit" : ""}`;
+  return `${stageLabel}${UI_SEPARATOR}${sourceLabel}${cacheHit ? `${UI_SEPARATOR}hit` : ""}`;
 }
 
 function createDesktopManagedPreviewState(
@@ -425,7 +427,7 @@ export function PhotoQuickPreviewModal({
     const sourceBreakdown = Array.from(metrics.sourceCounts.entries())
       .sort((left, right) => right[1] - left[1])
       .map(([source, count]) => `${source}:${count}`)
-      .join(" · ") || "n/d";
+      .join(UI_SEPARATOR) || "n/d";
     const warmHitRate = metrics.requested > 0
       ? Math.round((metrics.cacheHits / metrics.requested) * 100)
       : null;
@@ -476,7 +478,7 @@ export function PhotoQuickPreviewModal({
 
     if (changes.rating !== undefined) {
       kind = "star";
-      label = changes.rating > 0 ? `Valutazione: ${"★".repeat(changes.rating)}` : "Valutazione rimossa";
+      label = changes.rating > 0 ? `Valutazione: ${STAR_SYMBOL.repeat(changes.rating)}` : "Valutazione rimossa";
     } else if (changes.pickStatus !== undefined) {
       kind = "pill";
       label = `Stato: ${PICK_STATUS_LABELS[changes.pickStatus]}`;
@@ -1075,7 +1077,7 @@ export function PhotoQuickPreviewModal({
             assetId: asset.id,
             url: cachedPreviewUrl,
             token: null,
-            sourceLabel: "Fit · renderer-cache",
+            sourceLabel: "Fit | renderer-cache",
             cacheHit: true,
           }
         : null);
@@ -1089,7 +1091,7 @@ export function PhotoQuickPreviewModal({
               assetId: asset.id,
               url,
               token: null,
-              sourceLabel: "Fit · renderer-preview",
+              sourceLabel: "Fit | renderer-preview",
               cacheHit: Boolean(cachedPreviewUrl),
             });
           }
@@ -1217,7 +1219,7 @@ export function PhotoQuickPreviewModal({
             assetId: asset.id,
             url: cachedDetailPreviewUrl,
             token: null,
-            sourceLabel: "Detail · renderer-cache",
+            sourceLabel: "Detail | renderer-cache",
             cacheHit: true,
           }
         : null);
@@ -1231,7 +1233,7 @@ export function PhotoQuickPreviewModal({
               assetId: asset.id,
               url,
               token: null,
-              sourceLabel: "Detail · renderer-preview",
+              sourceLabel: "Detail | renderer-preview",
               cacheHit: Boolean(cachedDetailPreviewUrl),
             });
           }
@@ -1340,7 +1342,7 @@ export function PhotoQuickPreviewModal({
             assetId: compareAsset.id,
             url: cachedComparePreviewUrl,
             token: null,
-            sourceLabel: "Fit · renderer-cache",
+            sourceLabel: "Fit | renderer-cache",
             cacheHit: true,
           }
         : null);
@@ -1354,7 +1356,7 @@ export function PhotoQuickPreviewModal({
               assetId: compareAsset.id,
               url,
               token: null,
-              sourceLabel: "Fit · renderer-preview",
+              sourceLabel: "Fit | renderer-preview",
               cacheHit: Boolean(cachedComparePreviewUrl),
             });
           }
@@ -1981,7 +1983,7 @@ export function PhotoQuickPreviewModal({
       const renderedSource = event.currentTarget.currentSrc || event.currentTarget.src || previewSourceLabel;
       setQuickPreviewPerf((current) => ({
         ...current,
-        lastRenderedSource: `${previewSourceLabel} · ${renderedSource ? "ready" : "n/d"}`,
+        lastRenderedSource: `${previewSourceLabel}${UI_SEPARATOR}${renderedSource ? "ready" : "n/d"}`,
         lastRenderedAssetName: currentAssetFileName,
       }));
       return;
@@ -2000,7 +2002,7 @@ export function PhotoQuickPreviewModal({
       ...current,
       openLatencyMs: measurement.reason === "open" ? elapsed : current.openLatencyMs,
       navigationLatencyMs: measurement.reason === "navigate" ? elapsed : current.navigationLatencyMs,
-      lastRenderedSource: `${previewSourceLabel} · ${renderedSource ? "ready" : "n/d"}`,
+      lastRenderedSource: `${previewSourceLabel}${UI_SEPARATOR}${renderedSource ? "ready" : "n/d"}`,
       lastRenderedAssetName: currentAssetFileName,
     }));
     previewPerfStartRef.current = null;
@@ -2210,18 +2212,18 @@ export function PhotoQuickPreviewModal({
                 >
                   <option value="any">Tutte</option>
                   <optgroup label="Minimo">
-                    <option value="1+">★ 1+</option>
-                    <option value="2+">★★ 2+</option>
-                    <option value="3+">★★★ 3+</option>
-                    <option value="4+">★★★★ 4+</option>
+                    <option value="1+">{`${STAR_SYMBOL} 1+`}</option>
+                    <option value="2+">{`${STAR_SYMBOL.repeat(2)} 2+`}</option>
+                    <option value="3+">{`${STAR_SYMBOL.repeat(3)} 3+`}</option>
+                    <option value="4+">{`${STAR_SYMBOL.repeat(4)} 4+`}</option>
                   </optgroup>
                   <optgroup label="Esatto">
                     <option value="0">Senza stelle</option>
-                    <option value="1">★ Solo 1</option>
-                    <option value="2">★★ Solo 2</option>
-                    <option value="3">★★★ Solo 3</option>
-                    <option value="4">★★★★ Solo 4</option>
-                    <option value="5">★★★★★ Solo 5</option>
+                    <option value="1">{`${STAR_SYMBOL} Solo 1`}</option>
+                    <option value="2">{`${STAR_SYMBOL.repeat(2)} Solo 2`}</option>
+                    <option value="3">{`${STAR_SYMBOL.repeat(3)} Solo 3`}</option>
+                    <option value="4">{`${STAR_SYMBOL.repeat(4)} Solo 4`}</option>
+                    <option value="5">{`${STAR_SYMBOL.repeat(5)} Solo 5`}</option>
                   </optgroup>
                 </select>
               </label>
@@ -2321,7 +2323,7 @@ export function PhotoQuickPreviewModal({
               className="quick-preview__perf-badge"
               title={`Benchmark locale della quick preview | ${quickPreviewPerf.sourceBreakdown}`}
             >
-              {`Fit ${quickPreviewPerf.fitLatencyMs ?? "n/d"} ms · Detail ${quickPreviewPerf.detailLatencyMs ?? "n/d"} ms · Hit ${quickPreviewPerf.warmHitRate ?? "n/d"}% · ${quickPreviewPerf.lastRenderedSource}`}
+              {`Fit ${quickPreviewPerf.fitLatencyMs ?? "n/d"} ms${UI_SEPARATOR}Detail ${quickPreviewPerf.detailLatencyMs ?? "n/d"} ms${UI_SEPARATOR}Hit ${quickPreviewPerf.warmHitRate ?? "n/d"}%${UI_SEPARATOR}${quickPreviewPerf.lastRenderedSource}`}
             </span>
             <button
               type="button"
@@ -2378,7 +2380,7 @@ export function PhotoQuickPreviewModal({
                   }
                   onClick={() => updateRating(value)}
                 >
-                  ★
+                  {STAR_SYMBOL}
                 </button>
               ))}
               <button
@@ -2463,9 +2465,9 @@ export function PhotoQuickPreviewModal({
                         isFeedbackTarget ? "quick-preview__custom-label--flash" : "",
                       ].join(" ").trim()}
                       onClick={() => toggleCustomLabel(label)}
-                      title={shortcut ? `${label} · scorciatoia ${shortcut}` : label}
+                      title={shortcut ? `${label}${UI_SEPARATOR}scorciatoia ${shortcut}` : label}
                     >
-                      {shortcut ? `${label} · ${shortcut}` : label}
+                      {shortcut ? `${label}${UI_SEPARATOR}${shortcut}` : label}
                     </button>
                   );
                 })}
@@ -2668,7 +2670,7 @@ export function PhotoQuickPreviewModal({
                 Foto {currentIndex + 1} di {navigationAssets.length}
               </strong>
               <span>
-                {previousAsset ? `Prec: ${previousAsset.fileName}` : "Inizio serie"} ·{" "}
+                {previousAsset ? `Prec: ${previousAsset.fileName}` : "Inizio serie"}{UI_SEPARATOR}
                 {nextAsset ? `Succ: ${nextAsset.fileName}` : "Fine serie"}
               </span>
             </div>

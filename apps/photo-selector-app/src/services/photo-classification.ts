@@ -68,7 +68,7 @@ export function getAssetColorLabel(asset: ImageAsset): ColorLabel | null {
 
 export function formatAssetStars(asset: ImageAsset): string {
   const rating = getAssetRating(asset);
-  return rating > 0 ? "★".repeat(rating) : "Nessuna stella";
+  return rating > 0 ? "\u2605".repeat(rating) : "Nessuna stella";
 }
 
 export function matchesPhotoFilters(asset: ImageAsset, filters: PhotoFilterState): boolean {
