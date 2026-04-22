@@ -122,7 +122,7 @@ export function matchesFileTypeFilter(asset: ImageAsset, fileTypeFilter: FileTyp
 
 export function formatAssetStars(asset: ImageAsset): string {
   const rating = getAssetRating(asset);
-  return rating > 0 ? "★".repeat(rating) : "Nessuna stella";
+  return rating > 0 ? "\u2605".repeat(rating) : "Nessuna stella";
 }
 
 export function matchesPhotoFilters(asset: ImageAsset, filters: PhotoFilterState): boolean {
