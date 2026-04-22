@@ -244,7 +244,7 @@ export const PhotoCard = memo(
       photo.orientation === "vertical" ? "↕" : photo.orientation === "square" ? "◻" : "↔";
     return (
       <div
-        className={`photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}${disableNonEssentialUi ? " photo-card--scroll-lite" : ""}`}
+        className={`photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : (customLabels.length > 0 ? `photo-card--custom-${customLabelColors[customLabels[0]] ?? "sand"}` : "")}${disableNonEssentialUi ? " photo-card--scroll-lite" : ""}`}
         role="option"
         tabIndex={0}
         aria-selected={isSelected}

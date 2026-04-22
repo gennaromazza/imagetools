@@ -156,8 +156,17 @@ function shouldLoadRawPreview(asset: ImageAsset): boolean {
     Math.min(asset.width, asset.height) < MIN_RAW_PREVIEW_DIMENSION;
 }
 
-function getPreviewColorClass(colorLabel: ColorLabel | null): string {
-  return colorLabel ? `quick-preview__stage--color-${colorLabel}` : "quick-preview__stage--color-none";
+function getPreviewColorClass(
+  colorLabel: ColorLabel | null,
+  customTone?: CustomLabelTone | null,
+): string {
+  if (colorLabel) {
+    return `quick-preview__stage--color-${colorLabel}`;
+  }
+  if (customTone) {
+    return `quick-preview__stage--custom-${customTone}`;
+  }
+  return "quick-preview__stage--color-none";
 }
 
 function formatDesktopPreviewSourceLabel(
@@ -2108,8 +2117,16 @@ export function PhotoQuickPreviewModal({
   const pickStatus = getAssetPickStatus(asset);
   const colorLabel = getAssetColorLabel(asset);
   const compareColorLabel = compareAsset ? getAssetColorLabel(compareAsset) : null;
-  const stageColorClass = getPreviewColorClass(colorLabel);
-  const comparePanelColorClass = getPreviewColorClass(compareColorLabel);
+  const firstCustomTone: CustomLabelTone | null =
+    (asset?.customLabels && asset.customLabels.length > 0)
+      ? (customLabelColors[asset.customLabels[0]] ?? "sand")
+      : null;
+  const compareFirstCustomTone: CustomLabelTone | null =
+    (compareAsset?.customLabels && compareAsset.customLabels.length > 0)
+      ? (customLabelColors[compareAsset.customLabels[0]] ?? "sand")
+      : null;
+  const stageColorClass = getPreviewColorClass(colorLabel, firstCustomTone);
+  const comparePanelColorClass = getPreviewColorClass(compareColorLabel, compareFirstCustomTone);
 
   const previewContent = (
     <div
