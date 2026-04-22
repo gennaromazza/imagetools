@@ -27,6 +27,7 @@ import {
   getAssetAbsolutePaths,
   detectChangedAssetsOnDisk,
   warmOnDemandPreviewCache,
+  isRawFile,
 } from "../services/folder-access";
 import {
   COLOR_LABEL_NAMES,
@@ -113,6 +114,7 @@ type SortMode = "name" | "orientation" | "rating" | "createdAt";
 type CreatedAtSortDirection = "asc" | "desc";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
+type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg";
 type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>;
 type BatchPulseKind = "dot" | "label";
 const CUSTOM_LABEL_TONES: CustomLabelTone[] = ["sand", "rose", "green", "blue", "purple", "slate"];
@@ -453,6 +455,7 @@ export function PhotoSelector({
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
+  const [formatFilter, setFormatFilter] = useState<FormatFilter>("all");
   const [customLabelFilter, setCustomLabelFilter] = useState<string>("all");
   const [folderFilter, setFolderFilter] = useState<string>("all");
   const [seriesFilter, setSeriesFilter] = useState<string>("all");
@@ -580,13 +583,14 @@ export function PhotoSelector({
         pickFilter !== "all",
         ratingFilter !== "any",
         colorFilter !== "all",
+        formatFilter !== "all",
         customLabelFilter !== "all",
         folderFilter !== "all",
         seriesFilter !== "all",
         timeClusterFilter !== "all",
         searchQuery !== "",
       ].filter(Boolean).length,
-    [pickFilter, ratingFilter, colorFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
+    [pickFilter, ratingFilter, colorFilter, formatFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
   );
 
   // Statistiche aggregate sull'intera cartella corrente: utili come "vital signs"
@@ -622,6 +626,7 @@ export function PhotoSelector({
     pickFilter !== "all" ||
     ratingFilter !== "any" ||
     colorFilter !== "all" ||
+    formatFilter !== "all" ||
     customLabelFilter !== "all" ||
     folderFilter !== "all" ||
     seriesFilter !== "all" ||
@@ -785,6 +790,7 @@ export function PhotoSelector({
 
   function resetFilters() {
     setPickFilter("all");
+    setFormatFilter("all");
     setRatingFilter("any");
     setColorFilter("all");
     setCustomLabelFilter("all");
@@ -1371,6 +1377,23 @@ export function PhotoSelector({
       if (seriesFilter !== "all" && getSeriesKey(photo) !== seriesFilter) {
         continue;
       }
+      if (formatFilter !== "all") {
+        const kind = photo.groupKind ?? (isRawFile(photo.fileName) ? "raw" : "standard");
+        if (formatFilter === "raw+jpg" && kind !== "raw+jpg") {
+          continue;
+        }
+        if (formatFilter === "raw" && kind !== "raw") {
+          continue;
+        }
+        if (formatFilter === "jpg") {
+          // "JPG" matches plain JPG cards (no companion). Grouped cards are
+          // surfaced under the dedicated "RAW + JPG" option to match the
+          // labelling on the card badge.
+          if (kind !== "standard" || isRawFile(photo.fileName)) {
+            continue;
+          }
+        }
+      }
       if (timeClusterFilter !== "all" && getTimeClusterKey(photo) !== timeClusterFilter) {
         continue;
       }
@@ -1387,6 +1410,7 @@ export function PhotoSelector({
     customLabelFilter,
     deferredSearchQuery,
     folderFilter,
+    formatFilter,
     metadataAssetById,
     pickFilter,
     ratingFilter,
@@ -2893,6 +2917,20 @@ export function PhotoSelector({
             <option value="picked">Pick</option>
             <option value="rejected">Scartate</option>
             <option value="unmarked">Neutre</option>
+          </select>
+        </label>
+
+        <label className="field">
+          <span>Formato</span>
+          <select
+            className={formatFilter !== "all" ? "field__select--active" : undefined}
+            value={formatFilter}
+            onChange={(event) => setFormatFilter(event.target.value as FormatFilter)}
+          >
+            <option value="all">Tutti</option>
+            <option value="jpg">JPG</option>
+            <option value="raw">RAW</option>
+            <option value="raw+jpg">RAW + JPG</option>
           </select>
         </label>
 

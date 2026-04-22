@@ -1,6 +1,12 @@
 import { DEFAULT_AUTO_LAYOUT_REQUEST } from "@photo-tools/presets";
 import type { ImageAsset } from "@photo-tools/shared-types";
-import { getAssetAbsolutePath, isRawFile } from "./folder-access";
+import {
+  getAssetAbsolutePath,
+  getAssetCompanionAbsolutePath,
+  getAssetCompanionFileName,
+  getAssetCompanionRelativePath,
+  isRawFile,
+} from "./folder-access";
 
 type ExportedProjectAsset = {
   id: string;
@@ -16,6 +22,10 @@ type ExportedProjectAsset = {
   orientation: ImageAsset["orientation"];
   aspectRatio: number;
   sourceBlob: string;
+  companionFileName?: string;
+  companionPath?: string;
+  companionAbsolutePath?: string;
+  companionSourceBlob?: string;
 };
 
 function getDesktopApi() {
@@ -57,6 +67,11 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 async function assetToExportFormat(asset: ImageAsset): Promise<ExportedProjectAsset> {
   const desktopApi = getDesktopApi();
   const absolutePath = getAssetAbsolutePath(asset.id);
+  const companionAbsolutePath = getAssetCompanionAbsolutePath(asset.id);
+  const companionFileName =
+    asset.companionFileName ?? getAssetCompanionFileName(asset.id) ?? undefined;
+  const companionPath =
+    asset.companionPath ?? getAssetCompanionRelativePath(asset.id) ?? undefined;
   let sourceBlob: string | null = null;
 
   if (desktopApi?.readFile && absolutePath && !isRawFile(asset.fileName)) {
@@ -76,6 +91,19 @@ async function assetToExportFormat(asset: ImageAsset): Promise<ExportedProjectAs
     sourceBlob = await blobToDataUrl(await response.blob());
   }
 
+  // For grouped RAW + JPG assets we ship the JPG as the primary blob (fast)
+  // but also include the RAW companion blob/path so downstream tools can
+  // export at full quality.
+  let companionSourceBlob: string | undefined;
+  if (desktopApi?.readFile && companionAbsolutePath && companionFileName) {
+    const payload = await desktopApi.readFile(companionAbsolutePath);
+    if (payload) {
+      companionSourceBlob = await blobToDataUrl(
+        new Blob([payload.bytes.slice()], { type: guessMimeType(companionFileName) }),
+      );
+    }
+  }
+
   return {
     id: asset.id,
     fileName: asset.fileName,
@@ -90,6 +118,10 @@ async function assetToExportFormat(asset: ImageAsset): Promise<ExportedProjectAs
     orientation: asset.orientation,
     aspectRatio: asset.aspectRatio,
     sourceBlob,
+    companionFileName,
+    companionPath,
+    companionAbsolutePath: companionAbsolutePath ?? undefined,
+    companionSourceBlob,
   };
 }
 

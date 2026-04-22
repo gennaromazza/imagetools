@@ -46,6 +46,10 @@ const filePromiseStore = new Map<string, Promise<File | null>>();
 const assetPathStore = new Map<string, string>();
 const assetAbsolutePathStore = new Map<string, string>();
 const assetSourceFileKeyStore = new Map<string, string>();
+const assetCompanionAbsolutePathStore = new Map<string, string>();
+const assetCompanionRelativePathStore = new Map<string, string>();
+const assetCompanionSourceFileKeyStore = new Map<string, string>();
+const assetCompanionFileNameStore = new Map<string, string>();
 const livePreviewStore = new Map<string, string>();
 const onDemandPreviewStore = new Map<string, string>();
 const onDemandPreviewPromiseStore = new Map<string, Promise<string | null>>();
@@ -203,6 +207,7 @@ export interface FolderOpenDiagnostics {
   nestedSupportedDiscardedCount: number;
   totalSupportedSeen: number;
   nestedDirectoriesSeen: number;
+  groupedAssetCount?: number;
 }
 
 function isTopLevelRelativePath(relativePath: string): boolean {
@@ -331,27 +336,54 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
   assetPathStore.clear();
   assetAbsolutePathStore.clear();
   assetSourceFileKeyStore.clear();
+  assetCompanionAbsolutePathStore.clear();
+  assetCompanionRelativePathStore.clear();
+  assetCompanionSourceFileKeyStore.clear();
+  assetCompanionFileNameStore.clear();
   fileStore.clear();
 
-  return entries.map((entry) => {
-    const id = buildAssetId(entry.relativePath);
-    const sourceFileKey = buildSourceFileKeyFromStats(entry.relativePath, entry.size, entry.lastModified)
-      || buildPlaceholderSourceFileKey(entry.relativePath);
+  const groups = groupEntriesByBaseName(entries);
 
-    assetPathStore.set(id, entry.relativePath);
-    assetAbsolutePathStore.set(id, entry.absolutePath);
+  return groups.map(({ primary, companion }) => {
+    const id = buildAssetId(primary.relativePath);
+    const sourceFileKey =
+      buildSourceFileKeyFromStats(primary.relativePath, primary.size, primary.lastModified)
+      || buildPlaceholderSourceFileKey(primary.relativePath);
+
+    assetPathStore.set(id, primary.relativePath);
+    assetAbsolutePathStore.set(id, primary.absolutePath);
     assetSourceFileKeyStore.set(id, sourceFileKey);
+
+    let companionFileName: string | undefined;
+    let companionPath: string | undefined;
+    let companionSourceFileKey: string | undefined;
+    let companionSize: number | undefined;
+    let groupKind: "raw+jpg" | "raw" | "standard" = isRawFile(primary.name) ? "raw" : "standard";
+
+    if (companion) {
+      companionFileName = companion.name;
+      companionPath = companion.relativePath;
+      companionSourceFileKey =
+        buildSourceFileKeyFromStats(companion.relativePath, companion.size, companion.lastModified)
+        || buildPlaceholderSourceFileKey(companion.relativePath);
+      companionSize = companion.size;
+      groupKind = "raw+jpg";
+      assetCompanionAbsolutePathStore.set(id, companion.absolutePath);
+      assetCompanionRelativePathStore.set(id, companion.relativePath);
+      assetCompanionSourceFileKeyStore.set(id, companionSourceFileKey);
+      assetCompanionFileNameStore.set(id, companion.name);
+    }
 
     return {
       id,
-      fileName: entry.name,
-      path: entry.relativePath,
+      fileName: primary.name,
+      path: primary.relativePath,
       sourceFileKey,
       rating: 0,
       pickStatus: "unmarked",
       colorLabel: null,
       customLabels: [],
-      createdAt: entry.createdAt,
+      createdAt: primary.createdAt,
       width: 0,
       height: 0,
       orientation: "horizontal" as const,
@@ -359,8 +391,137 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
       thumbnailUrl: undefined,
       previewUrl: undefined,
       sourceUrl: undefined,
+      size: primary.size,
+      groupKind,
+      companionFileName,
+      companionPath,
+      companionSourceFileKey,
+      companionSize,
     };
   });
+}
+
+function getEntryParentPath(relativePath: string): string {
+  const idx = relativePath.lastIndexOf("/");
+  return idx >= 0 ? relativePath.slice(0, idx) : "";
+}
+
+function getEntryBaseName(name: string): string {
+  const idx = name.lastIndexOf(".");
+  return (idx >= 0 ? name.slice(0, idx) : name).toLowerCase();
+}
+
+interface EntryGroup {
+  primary: FolderEntry;
+  companion?: FolderEntry;
+}
+
+function groupEntriesByBaseName(entries: FolderEntry[]): EntryGroup[] {
+  // Bucket by parent path + base name (case-insensitive). Within a bucket,
+  // a JPG/JPEG entry pairs with a RAW entry to form a single grouped asset
+  // (JPG as primary, RAW as companion). Any other entries pass through as
+  // singletons preserving original order.
+  type Bucket = { jpgs: FolderEntry[]; raws: FolderEntry[]; others: FolderEntry[] };
+  const bucketByKey = new Map<string, Bucket>();
+  const bucketKeyOrder: string[] = [];
+  const orderIndex = new Map<FolderEntry, number>();
+
+  entries.forEach((entry, index) => {
+    orderIndex.set(entry, index);
+    const parent = getEntryParentPath(entry.relativePath);
+    const base = getEntryBaseName(entry.name);
+    const key = `${parent.toLowerCase()}::${base}`;
+    let bucket = bucketByKey.get(key);
+    if (!bucket) {
+      bucket = { jpgs: [], raws: [], others: [] };
+      bucketByKey.set(key, bucket);
+      bucketKeyOrder.push(key);
+    }
+
+    const ext = extOf(entry.name);
+    if (ext === ".jpg" || ext === ".jpeg") {
+      bucket.jpgs.push(entry);
+    } else if (RAW_EXTENSIONS.has(ext)) {
+      bucket.raws.push(entry);
+    } else {
+      bucket.others.push(entry);
+    }
+  });
+
+  const groupsByPrimary = new Map<FolderEntry, EntryGroup>();
+
+  for (const key of bucketKeyOrder) {
+    const bucket = bucketByKey.get(key)!;
+    const usedRaws = new Set<FolderEntry>();
+    // Pair each JPG with the first unused RAW in the same bucket.
+    for (const jpg of bucket.jpgs) {
+      const companionRaw = bucket.raws.find((raw) => !usedRaws.has(raw));
+      if (companionRaw) {
+        usedRaws.add(companionRaw);
+        groupsByPrimary.set(jpg, { primary: jpg, companion: companionRaw });
+      } else {
+        groupsByPrimary.set(jpg, { primary: jpg });
+      }
+    }
+    for (const raw of bucket.raws) {
+      if (!usedRaws.has(raw)) {
+        groupsByPrimary.set(raw, { primary: raw });
+      }
+    }
+    for (const other of bucket.others) {
+      groupsByPrimary.set(other, { primary: other });
+    }
+  }
+
+  // Emit groups in original file order so existing sorts and prefetch logic
+  // remain stable for users who added a RAW companion mid-folder.
+  const ordered: EntryGroup[] = [];
+  const emitted = new Set<FolderEntry>();
+  for (const entry of entries) {
+    const group = groupsByPrimary.get(entry);
+    if (!group || group.primary !== entry || emitted.has(group.primary)) {
+      continue;
+    }
+    emitted.add(group.primary);
+    if (group.companion) {
+      emitted.add(group.companion);
+    }
+    ordered.push(group);
+  }
+
+  // Sanity-check: anything not yet emitted (companion before primary in iteration
+  // order, or unexpected duplicates) is appended as a standalone group.
+  for (const entry of entries) {
+    if (!emitted.has(entry)) {
+      const group = groupsByPrimary.get(entry);
+      if (group && group.primary === entry) {
+        emitted.add(entry);
+        if (group.companion) emitted.add(group.companion);
+        ordered.push(group);
+      }
+    }
+  }
+
+  ordered.sort((left, right) =>
+    (orderIndex.get(left.primary) ?? 0) - (orderIndex.get(right.primary) ?? 0));
+
+  return ordered;
+}
+
+export function getAssetCompanionAbsolutePath(assetId: string): string | null {
+  return assetCompanionAbsolutePathStore.get(assetId) ?? null;
+}
+
+export function getAssetCompanionRelativePath(assetId: string): string | null {
+  return assetCompanionRelativePathStore.get(assetId) ?? null;
+}
+
+export function getAssetCompanionFileName(assetId: string): string | null {
+  return assetCompanionFileNameStore.get(assetId) ?? null;
+}
+
+export function hasAssetCompanion(assetId: string): boolean {
+  return assetCompanionAbsolutePathStore.has(assetId);
 }
 
 export async function getFileForAsset(assetId: string): Promise<File | null> {
@@ -403,21 +564,51 @@ export async function getFileForAsset(assetId: string): Promise<File | null> {
 }
 
 export async function readSidecarXmp(assetId: string): Promise<string | null> {
-  const absolutePath = assetAbsolutePathStore.get(assetId);
-  if (!absolutePath || !hasDesktopSidecarBridge()) {
+  if (!hasDesktopSidecarBridge()) {
     return null;
   }
 
-  return window.filexDesktop!.readSidecarXmp(absolutePath);
+  const absolutePath = assetAbsolutePathStore.get(assetId);
+  if (absolutePath) {
+    const xml = await window.filexDesktop!.readSidecarXmp(absolutePath);
+    if (xml) {
+      return xml;
+    }
+  }
+
+  // Fall back to the companion sidecar (e.g. RAW xmp written by Camera Raw)
+  // when the primary JPG has no sidecar yet.
+  const companionAbsolutePath = assetCompanionAbsolutePathStore.get(assetId);
+  if (companionAbsolutePath) {
+    return window.filexDesktop!.readSidecarXmp(companionAbsolutePath);
+  }
+
+  return absolutePath ? null : null;
 }
 
 export async function writeSidecarXmp(assetId: string, xml: string): Promise<boolean> {
-  const absolutePath = assetAbsolutePathStore.get(assetId);
-  if (!absolutePath || !hasDesktopSidecarBridge()) {
+  if (!hasDesktopSidecarBridge()) {
     return false;
   }
 
-  return window.filexDesktop!.writeSidecarXmp(absolutePath, xml);
+  const absolutePath = assetAbsolutePathStore.get(assetId);
+  const companionAbsolutePath = assetCompanionAbsolutePathStore.get(assetId);
+
+  if (!absolutePath && !companionAbsolutePath) {
+    return false;
+  }
+
+  let allOk = true;
+  if (absolutePath) {
+    const ok = await window.filexDesktop!.writeSidecarXmp(absolutePath, xml);
+    if (!ok) allOk = false;
+  }
+  if (companionAbsolutePath) {
+    const ok = await window.filexDesktop!.writeSidecarXmp(companionAbsolutePath, xml);
+    if (!ok) allOk = false;
+  }
+
+  return allOk;
 }
 
 export async function createOnDemandPreviewAsync(
@@ -671,11 +862,17 @@ export function getAssetAbsolutePath(assetId: string): string | null {
 }
 
 export function getAssetAbsolutePaths(assetIds: string[]): string[] {
+  // Returns BOTH primary and companion absolute paths so file operations
+  // (copy/move/drag-out) act on RAW + JPG together for grouped assets.
   const uniquePaths = new Set<string>();
   for (const assetId of assetIds) {
     const absolutePath = assetAbsolutePathStore.get(assetId);
     if (absolutePath) {
       uniquePaths.add(absolutePath);
+    }
+    const companionAbsolutePath = assetCompanionAbsolutePathStore.get(assetId);
+    if (companionAbsolutePath) {
+      uniquePaths.add(companionAbsolutePath);
     }
   }
 
@@ -707,6 +904,10 @@ export async function moveAssetsToFolder(assetIds: string[]): Promise<{ result: 
     if (absolutePath && !idByAbsolutePath.has(absolutePath)) {
       idByAbsolutePath.set(absolutePath, assetId);
     }
+    const companionAbsolutePath = assetCompanionAbsolutePathStore.get(assetId);
+    if (companionAbsolutePath && !idByAbsolutePath.has(companionAbsolutePath)) {
+      idByAbsolutePath.set(companionAbsolutePath, assetId);
+    }
   }
 
   const absolutePaths = Array.from(idByAbsolutePath.keys());
@@ -724,6 +925,10 @@ export async function moveAssetsToFolder(assetIds: string[]): Promise<{ result: 
       assetPathStore.delete(assetId);
       assetAbsolutePathStore.delete(assetId);
       assetSourceFileKeyStore.delete(assetId);
+      assetCompanionAbsolutePathStore.delete(assetId);
+      assetCompanionRelativePathStore.delete(assetId);
+      assetCompanionSourceFileKeyStore.delete(assetId);
+      assetCompanionFileNameStore.delete(assetId);
       fileStore.delete(assetId);
       filePromiseStore.delete(assetId);
     }
