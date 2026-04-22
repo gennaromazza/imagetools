@@ -19,6 +19,7 @@ import {
   PICK_STATUS_LABELS,
   resolvePhotoClassificationShortcut
 } from "../services/photo-classification";
+import type { CustomLabelShortcut, CustomLabelTone } from "../services/photo-selector-preferences";
 
 interface UsageInfo {
   pageNumber: number;
@@ -30,6 +31,9 @@ interface ProjectPhotoSelectorModalProps {
   assets: ImageAsset[];
   activeAssetIds: string[];
   usageByAssetId: Map<string, UsageInfo>;
+  customLabelsCatalog?: string[];
+  customLabelColors?: Record<string, CustomLabelTone>;
+  customLabelShortcuts?: Record<string, CustomLabelShortcut | null>;
   onClose: () => void;
   onApply: (nextIds: string[], nextAssets: ImageAsset[]) => void;
 }
@@ -49,6 +53,9 @@ export function ProjectPhotoSelectorModal({
   assets,
   activeAssetIds,
   usageByAssetId,
+  customLabelsCatalog = [],
+  customLabelColors = {},
+  customLabelShortcuts = {},
   onClose,
   onApply
 }: ProjectPhotoSelectorModalProps) {
@@ -829,6 +836,9 @@ export function ProjectPhotoSelectorModal({
         asset={previewAsset}
         assets={visibleAssets}
         usageByAssetId={usageByAssetId}
+        customLabelsCatalog={customLabelsCatalog}
+        customLabelColors={customLabelColors}
+        customLabelShortcuts={customLabelShortcuts}
         onClose={() => setPreviewAssetId(null)}
         onSelectAsset={setPreviewAssetId}
         onUpdateAsset={updateAsset}

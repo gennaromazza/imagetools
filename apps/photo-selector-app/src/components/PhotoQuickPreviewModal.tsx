@@ -178,7 +178,6 @@ function formatDesktopPreviewSourceLabel(
             ? "native-provider"
             : "source-file"
   );
-  return `${stageLabel} | ${sourceLabel}${cacheHit ? " | hit" : ""}`;
   return `${stageLabel} · ${sourceLabel}${cacheHit ? " · hit" : ""}`;
 }
 
@@ -236,6 +235,7 @@ export function PhotoQuickPreviewModal({
   } | null>(null);
   const mainPreviewRecoveryKeyRef = useRef<string | null>(null);
   const comparePreviewRecoveryKeyRef = useRef<string | null>(null);
+  const preCompareZoomRef = useRef<number>(1);
   const lastAssetIdRef = useRef<string | null>(null);
   const lastPerfSinkSignatureRef = useRef<string>("");
   const fallbackSignatureRef = useRef<string>("");
@@ -320,12 +320,15 @@ export function PhotoQuickPreviewModal({
     return basePixels > 0 ? basePixels : 0;
   }, [compareMode, stageViewport.devicePixelRatio, stageViewport.height, stageViewport.width]);
   const fitPreviewMaxDimension = useMemo(() => {
-    void stageBaseDimension;
+    if (stageBaseDimension > 0) {
+      return Math.min(fitPreviewCap, stageBaseDimension);
+    }
     return fitPreviewCap;
   }, [fitPreviewCap, stageBaseDimension]);
   const detailPreviewMaxDimension = useMemo(() => {
-    void stageBaseDimension;
-    void fitPreviewMaxDimension;
+    if (stageBaseDimension > 0) {
+      return Math.min(detailPreviewCap, Math.max(stageBaseDimension, fitPreviewMaxDimension));
+    }
     return detailPreviewCap;
   }, [detailPreviewCap, fitPreviewMaxDimension, stageBaseDimension]);
   const adjacentPreviewWarmupDelayMs = desktopQuickPreviewEnabled
@@ -456,8 +459,6 @@ export function PhotoQuickPreviewModal({
   const announceClassificationFeedback = useCallback((
     changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
   ) => {
-    let tone: CustomLabelTone | undefined;
-    let labels: string[] | undefined;
     let label: string | null = null;
     let kind: PreviewFeedback["kind"] | null = null;
 
@@ -481,8 +482,6 @@ export function PhotoQuickPreviewModal({
       kind,
       label,
       token: classificationFeedbackTokenRef.current,
-      tone,
-      labels,
     } satisfies PreviewFeedback;
 
     setClassificationFeedback(nextFeedback);
@@ -638,7 +637,7 @@ export function PhotoQuickPreviewModal({
         window.removeEventListener("resize", sync);
       }
     };
-  }, [asset?.id, compareMode]);
+  }, [compareMode]);
 
   // Preload only prev/current/next thumbnails or lightweight previews.
   useEffect(() => {
@@ -737,8 +736,7 @@ export function PhotoQuickPreviewModal({
   const activePreviewAssetNeedsManagedPreview = Boolean(
     asset && (
       canUseDesktopQuickPreview
-      || !asset.previewUrl
-      || !asset.sourceUrl
+      || (!asset.previewUrl && !asset.sourceUrl)
       || shouldLoadRawPreview(asset)
     )
   );
@@ -1360,6 +1358,7 @@ export function PhotoQuickPreviewModal({
       active = false;
     };
   }, [
+    canUseDesktopQuickPreviewForCompare,
     compareAsset,
     desktopComparePreviewRequest,
     fitPreviewMaxDimension,
@@ -1532,20 +1531,53 @@ export function PhotoQuickPreviewModal({
   }, [clampPan, commitPanOffset, compareMode, panOffset.x, panOffset.y, zoomLevel]);
 
   useEffect(() => {
+    preCompareZoomRef.current = startZoomed ? 2.2 : 1;
+    setZoomLevel(startZoomed ? 2.2 : 1);
+    setPanOffset({ x: 0, y: 0 });
+    pendingPanOffsetRef.current = { x: 0, y: 0 };
+    setIsPanning(false);
+    panDragRef.current = null;
+  }, [asset?.id, startZoomed]);
+
+  useEffect(() => {
     if (compareMode) {
-      setZoomLevel(1);
+      setZoomLevel((current) => {
+        preCompareZoomRef.current = current;
+        return 1;
+      });
       setPanOffset({ x: 0, y: 0 });
       setIsPanning(false);
       panDragRef.current = null;
       return;
     }
 
-    setZoomLevel(startZoomed ? 2.2 : 1);
-    setPanOffset({ x: 0, y: 0 });
-    pendingPanOffsetRef.current = { x: 0, y: 0 };
+    const restoredZoom = preCompareZoomRef.current;
+    setZoomLevel(restoredZoom);
+    if (restoredZoom <= 1.05) {
+      setPanOffset({ x: 0, y: 0 });
+      pendingPanOffsetRef.current = { x: 0, y: 0 };
+    }
     setIsPanning(false);
     panDragRef.current = null;
-  }, [asset?.id, compareMode, startZoomed]);
+  }, [compareMode]);
+
+  const currentCustomLabels = asset?.customLabels ?? [];
+
+  const toggleCustomLabel = useCallback((label: string) => {
+    if (!asset || !onUpdateAsset) {
+      return;
+    }
+
+    const nextIsActive = !currentCustomLabels.includes(label);
+    const nextCustomLabels = currentCustomLabels.includes(label)
+      ? currentCustomLabels.filter((currentLabel) => currentLabel !== label)
+      : [...currentCustomLabels, label];
+
+    onUpdateAsset(asset.id, {
+      customLabels: nextCustomLabels,
+    });
+    announceCustomLabelFeedback(label, nextIsActive);
+  }, [announceCustomLabelFeedback, asset, currentCustomLabels, onUpdateAsset]);
 
   useEffect(() => {
     if (!asset) {
@@ -1677,7 +1709,6 @@ export function PhotoQuickPreviewModal({
     zoomLevel,
   ]);
 
-  const currentCustomLabels = asset?.customLabels ?? [];
   const currentAssetId = asset?.id ?? null;
   const currentAssetFileName = asset?.fileName ?? "";
   const fallbackPreviewUrl = asset ? getQuickPreviewThumbUrl(asset) : null;
@@ -1869,22 +1900,6 @@ export function PhotoQuickPreviewModal({
     displayComparePreviewUrl,
     recordPreviewFrameMetric,
   ]);
-
-  function toggleCustomLabel(label: string) {
-    if (!asset || !onUpdateAsset) {
-      return;
-    }
-
-    const nextIsActive = !currentCustomLabels.includes(label);
-    const nextCustomLabels = currentCustomLabels.includes(label)
-      ? currentCustomLabels.filter((currentLabel) => currentLabel !== label)
-      : [...currentCustomLabels, label];
-
-    onUpdateAsset(asset.id, {
-      customLabels: nextCustomLabels,
-    });
-    announceCustomLabelFeedback(label, nextIsActive);
-  }
 
   const handleDockStripScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     pendingDockViewportRef.current = {
@@ -2625,7 +2640,7 @@ export function PhotoQuickPreviewModal({
                         ? "quick-preview__dock-thumb quick-preview__dock-thumb--active"
                         : "quick-preview__dock-thumb"
                     }
-                    aria-current={isActive ? "true" : undefined}
+                    aria-current={isActive ? true : undefined}
                     onClick={() => selectAssetFromPreview(item.id, "jump")}
                     title={item.fileName}
                   >
