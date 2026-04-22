@@ -27,6 +27,7 @@ export interface PhotoSelectorPreferences {
     cardSize: number;
     rootFolderPathOverride: string;
     preferredEditorPath: string;
+    autoAdvanceOnAction: boolean;
 }
 export declare const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences;
 export declare function normalizeCustomLabelName(value: string): string;

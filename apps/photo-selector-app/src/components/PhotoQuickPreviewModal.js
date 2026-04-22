@@ -43,8 +43,14 @@ function shouldLoadRawPreview(asset) {
     return Math.min(asset.width, asset.height) > 0 &&
         Math.min(asset.width, asset.height) < MIN_RAW_PREVIEW_DIMENSION;
 }
-function getPreviewColorClass(colorLabel) {
-    return colorLabel ? `quick-preview__stage--color-${colorLabel}` : "quick-preview__stage--color-none";
+function getPreviewColorClass(colorLabel, customTone) {
+    if (colorLabel) {
+        return `quick-preview__stage--color-${colorLabel}`;
+    }
+    if (customTone) {
+        return `quick-preview__stage--custom-${customTone}`;
+    }
+    return "quick-preview__stage--color-none";
 }
 function formatDesktopPreviewSourceLabel(stage, source, cacheHit, sourceOverride) {
     const stageLabel = stage === "detail" ? "Detail" : "Fit";
@@ -57,7 +63,6 @@ function formatDesktopPreviewSourceLabel(stage, source, cacheHit, sourceOverride
                 : source === "native-provider"
                     ? "native-provider"
                     : "source-file");
-    return `${stageLabel} | ${sourceLabel}${cacheHit ? " | hit" : ""}`;
     return `${stageLabel} · ${sourceLabel}${cacheHit ? " · hit" : ""}`;
 }
 function createDesktopManagedPreviewState(assetId, stage, frame, sourceOverride) {
@@ -70,8 +75,9 @@ function createDesktopManagedPreviewState(assetId, stage, frame, sourceOverride)
         cacheHit,
     };
 }
-export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = "ultra-fast", startZoomed = false, usageByAssetId, pages = [], activePageId, customLabelsCatalog = [], customLabelColors = {}, customLabelShortcuts = {}, onClose, onSelectAsset, onAddToPage, onJumpToPage, onUpdateAsset }) {
+export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = "ultra-fast", startZoomed = false, usageByAssetId, pages = [], activePageId, customLabelsCatalog = [], customLabelColors = {}, customLabelShortcuts = {}, autoAdvanceOnAction = true, onClose, onSelectAsset, onAddToPage, onJumpToPage, onUpdateAsset }) {
     const stageRef = useRef(null);
+    const mainImageRef = useRef(null);
     const dockStripRef = useRef(null);
     const dockScrollRafRef = useRef(null);
     const pendingDockViewportRef = useRef(null);
@@ -85,6 +91,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     const detailPreviewPerfStartRef = useRef(null);
     const mainPreviewRecoveryKeyRef = useRef(null);
     const comparePreviewRecoveryKeyRef = useRef(null);
+    const preCompareZoomRef = useRef(1);
     const lastAssetIdRef = useRef(null);
     const lastPerfSinkSignatureRef = useRef("");
     const fallbackSignatureRef = useRef("");
@@ -151,12 +158,15 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         return basePixels > 0 ? basePixels : 0;
     }, [compareMode, stageViewport.devicePixelRatio, stageViewport.height, stageViewport.width]);
     const fitPreviewMaxDimension = useMemo(() => {
-        void stageBaseDimension;
+        if (stageBaseDimension > 0) {
+            return Math.min(fitPreviewCap, stageBaseDimension);
+        }
         return fitPreviewCap;
     }, [fitPreviewCap, stageBaseDimension]);
     const detailPreviewMaxDimension = useMemo(() => {
-        void stageBaseDimension;
-        void fitPreviewMaxDimension;
+        if (stageBaseDimension > 0) {
+            return Math.min(detailPreviewCap, Math.max(stageBaseDimension, fitPreviewMaxDimension));
+        }
         return detailPreviewCap;
     }, [detailPreviewCap, fitPreviewMaxDimension, stageBaseDimension]);
     const adjacentPreviewWarmupDelayMs = desktopQuickPreviewEnabled
@@ -253,8 +263,6 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         }
     }, [currentIndex, navigationAssets, selectAssetFromPreview]);
     const announceClassificationFeedback = useCallback((changes) => {
-        let tone;
-        let labels;
         let label = null;
         let kind = null;
         if (changes.rating !== undefined) {
@@ -277,8 +285,6 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
             kind,
             label,
             token: classificationFeedbackTokenRef.current,
-            tone,
-            labels,
         };
         setClassificationFeedback(nextFeedback);
         if (classificationFeedbackTimeoutRef.current !== null) {
@@ -381,7 +387,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                 window.removeEventListener("resize", sync);
             }
         };
-    }, [asset?.id, compareMode]);
+    }, [compareMode]);
     // Preload only prev/current/next thumbnails or lightweight previews.
     useEffect(() => {
         if (desktopQuickPreviewEnabled) {
@@ -456,8 +462,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         return new Map(entries.map(([label, shortcut]) => [shortcut, label]));
     }, [customLabelShortcuts]);
     const activePreviewAssetNeedsManagedPreview = Boolean(asset && (canUseDesktopQuickPreview
-        || !asset.previewUrl
-        || !asset.sourceUrl
+        || (!asset.previewUrl && !asset.sourceUrl)
         || shouldLoadRawPreview(asset)));
     const desktopFitPreviewRequest = useMemo(() => {
         if (!asset || !canUseDesktopQuickPreview || !assetAbsolutePath || !activePreviewAssetNeedsManagedPreview) {
@@ -1011,6 +1016,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
             active = false;
         };
     }, [
+        canUseDesktopQuickPreviewForCompare,
         compareAsset,
         desktopComparePreviewRequest,
         fitPreviewMaxDimension,
@@ -1135,18 +1141,48 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         });
     }, []);
     const applyZoom = useCallback((nextZoom) => {
-        const clampedZoom = Math.max(1, Math.min(4, Number(nextZoom.toFixed(2))));
+        // Cap massimo alzato a 12x per supportare zoom 1:1 pixel-perfect
+        // su RAW ad alta risoluzione (es. 6000px su viewport da 1500px = 4x).
+        const clampedZoom = Math.max(1, Math.min(12, Number(nextZoom.toFixed(2))));
         setZoomLevel(clampedZoom);
         const nextPanOffset = clampPan(panOffset.x, panOffset.y, clampedZoom);
         pendingPanOffsetRef.current = nextPanOffset;
         setPanOffset(nextPanOffset);
     }, [clampPan, panOffset.x, panOffset.y]);
+    const computeOneToOneZoom = useCallback(() => {
+        // Calcola lo zoom necessario per visualizzare l'immagine al 100% pixel:
+        // naturalWidth (pixel reali) / clientWidth (dimensione "fit" attuale).
+        // Quando zoomLevel è 1, clientWidth è la dimensione fit reale.
+        // Ritorna null se l'immagine non è ancora caricata, così il chiamante
+        // può evitare di "saltare" su uno zoom arbitrario.
+        const img = mainImageRef.current;
+        if (!img || !img.naturalWidth || !img.clientWidth) {
+            return null;
+        }
+        const ratio = img.naturalWidth / img.clientWidth;
+        if (!Number.isFinite(ratio) || ratio <= 1.05) {
+            return 1;
+        }
+        return Math.min(12, Number(ratio.toFixed(2)));
+    }, []);
     const toggleZoom = useCallback(() => {
-        const nextZoom = zoomLevel > 1.05 ? 1 : 2.2;
+        // Z alterna tra "fit" e "100% pixel-perfect" (focus check).
+        // Se l'immagine non è ancora caricata (naturalWidth=0), non fare nulla:
+        // un fallback arbitrario (es. 2.2x) darebbe un falso "100%" e disorienterebbe.
+        let nextZoom;
+        if (zoomLevel > 1.05) {
+            nextZoom = 1;
+        }
+        else {
+            const target = computeOneToOneZoom();
+            if (target === null)
+                return;
+            nextZoom = target;
+        }
         pendingPanOffsetRef.current = { x: 0, y: 0 };
         setPanOffset({ x: 0, y: 0 });
         applyZoom(nextZoom);
-    }, [applyZoom, zoomLevel]);
+    }, [applyZoom, computeOneToOneZoom, zoomLevel]);
     const panBy = useCallback((deltaX, deltaY) => {
         if (compareMode || zoomLevel <= 1.05) {
             return;
@@ -1155,19 +1191,47 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         commitPanOffset(nextPanOffset);
     }, [clampPan, commitPanOffset, compareMode, panOffset.x, panOffset.y, zoomLevel]);
     useEffect(() => {
-        if (compareMode) {
-            setZoomLevel(1);
-            setPanOffset({ x: 0, y: 0 });
-            setIsPanning(false);
-            panDragRef.current = null;
-            return;
-        }
+        preCompareZoomRef.current = startZoomed ? 2.2 : 1;
         setZoomLevel(startZoomed ? 2.2 : 1);
         setPanOffset({ x: 0, y: 0 });
         pendingPanOffsetRef.current = { x: 0, y: 0 };
         setIsPanning(false);
         panDragRef.current = null;
-    }, [asset?.id, compareMode, startZoomed]);
+    }, [asset?.id, startZoomed]);
+    useEffect(() => {
+        if (compareMode) {
+            setZoomLevel((current) => {
+                preCompareZoomRef.current = current;
+                return 1;
+            });
+            setPanOffset({ x: 0, y: 0 });
+            setIsPanning(false);
+            panDragRef.current = null;
+            return;
+        }
+        const restoredZoom = preCompareZoomRef.current;
+        setZoomLevel(restoredZoom);
+        if (restoredZoom <= 1.05) {
+            setPanOffset({ x: 0, y: 0 });
+            pendingPanOffsetRef.current = { x: 0, y: 0 };
+        }
+        setIsPanning(false);
+        panDragRef.current = null;
+    }, [compareMode]);
+    const currentCustomLabels = asset?.customLabels ?? [];
+    const toggleCustomLabel = useCallback((label) => {
+        if (!asset || !onUpdateAsset) {
+            return;
+        }
+        const nextIsActive = !currentCustomLabels.includes(label);
+        const nextCustomLabels = currentCustomLabels.includes(label)
+            ? currentCustomLabels.filter((currentLabel) => currentLabel !== label)
+            : [...currentCustomLabels, label];
+        onUpdateAsset(asset.id, {
+            customLabels: nextCustomLabels,
+        });
+        announceCustomLabelFeedback(label, nextIsActive);
+    }, [announceCustomLabelFeedback, asset, currentCustomLabels, onUpdateAsset]);
     useEffect(() => {
         if (!asset) {
             return;
@@ -1258,6 +1322,12 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                 event.preventDefault();
                 onUpdateAsset(asset.id, shortcutChanges);
                 announceClassificationFeedback(shortcutChanges);
+                if (autoAdvanceOnAction) {
+                    // Avanza alla foto successiva dopo la classificazione, lasciando
+                    // un tick per consentire al feedback visivo di partire.
+                    window.setTimeout(() => handleNavigate("next"), 0);
+                }
+                return;
             }
         };
         window.addEventListener("keydown", handleKeyDown);
@@ -1266,6 +1336,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         activePage,
         activePageCanAccept,
         asset,
+        autoAdvanceOnAction,
         compareMode,
         customLabelByShortcut,
         handleAssignToActivePage,
@@ -1280,7 +1351,6 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         toggleZoom,
         zoomLevel,
     ]);
-    const currentCustomLabels = asset?.customLabels ?? [];
     const currentAssetId = asset?.id ?? null;
     const currentAssetFileName = asset?.fileName ?? "";
     const fallbackPreviewUrl = asset ? getQuickPreviewThumbUrl(asset) : null;
@@ -1460,19 +1530,6 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
         displayComparePreviewUrl,
         recordPreviewFrameMetric,
     ]);
-    function toggleCustomLabel(label) {
-        if (!asset || !onUpdateAsset) {
-            return;
-        }
-        const nextIsActive = !currentCustomLabels.includes(label);
-        const nextCustomLabels = currentCustomLabels.includes(label)
-            ? currentCustomLabels.filter((currentLabel) => currentLabel !== label)
-            : [...currentCustomLabels, label];
-        onUpdateAsset(asset.id, {
-            customLabels: nextCustomLabels,
-        });
-        announceCustomLabelFeedback(label, nextIsActive);
-    }
     const handleDockStripScroll = useCallback((event) => {
         pendingDockViewportRef.current = {
             scrollOffset: event.currentTarget.scrollLeft,
@@ -1653,8 +1710,14 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
     const pickStatus = getAssetPickStatus(asset);
     const colorLabel = getAssetColorLabel(asset);
     const compareColorLabel = compareAsset ? getAssetColorLabel(compareAsset) : null;
-    const stageColorClass = getPreviewColorClass(colorLabel);
-    const comparePanelColorClass = getPreviewColorClass(compareColorLabel);
+    const firstCustomTone = (asset?.customLabels && asset.customLabels.length > 0)
+        ? (customLabelColors[asset.customLabels[0]] ?? "sand")
+        : null;
+    const compareFirstCustomTone = (compareAsset?.customLabels && compareAsset.customLabels.length > 0)
+        ? (customLabelColors[compareAsset.customLabels[0]] ?? "sand")
+        : null;
+    const stageColorClass = getPreviewColorClass(colorLabel, firstCustomTone);
+    const comparePanelColorClass = getPreviewColorClass(compareColorLabel, compareFirstCustomTone);
     const previewContent = (_jsxs("div", { className: "quick-preview", onClick: onClose, role: "dialog", "aria-modal": "true", "aria-label": "Anteprima foto a schermo intero", children: [assets.length > 1 ? (_jsxs("div", { className: "quick-preview__sidebar", onClick: (event) => event.stopPropagation(), children: [_jsxs("div", { className: "quick-preview__sidebar-filters", children: [_jsx("div", { className: "quick-preview__filter-summary", children: hasActiveFilters
                                     ? `${filteredAssets.length} di ${assets.length} foto`
                                     : `${assets.length} foto` }), _jsxs("div", { className: "quick-preview__filter-controls", children: [_jsxs("label", { className: "quick-preview__filter-field", children: [_jsx("span", { children: "Stato" }), _jsxs("select", { className: "quick-preview__filter-select", value: filterPickStatus, onChange: (event) => setFilterPickStatus(event.target.value), children: [_jsx("option", { value: "all", children: "Tutti" }), _jsx("option", { value: "picked", children: "Pick" }), _jsx("option", { value: "rejected", children: "Scartate" }), _jsx("option", { value: "unmarked", children: "Neutre" })] })] }), _jsxs("label", { className: "quick-preview__filter-field", children: [_jsx("span", { children: "Stelle" }), _jsxs("select", { className: "quick-preview__filter-select", value: filterRating, onChange: (event) => setFilterRating(event.target.value), children: [_jsx("option", { value: "any", children: "Tutte" }), _jsxs("optgroup", { label: "Minimo", children: [_jsx("option", { value: "1+", children: "\u2605 1+" }), _jsx("option", { value: "2+", children: "\u2605\u2605 2+" }), _jsx("option", { value: "3+", children: "\u2605\u2605\u2605 3+" }), _jsx("option", { value: "4+", children: "\u2605\u2605\u2605\u2605 4+" })] }), _jsxs("optgroup", { label: "Esatto", children: [_jsx("option", { value: "0", children: "Senza stelle" }), _jsx("option", { value: "1", children: "\u2605 Solo 1" }), _jsx("option", { value: "2", children: "\u2605\u2605 Solo 2" }), _jsx("option", { value: "3", children: "\u2605\u2605\u2605 Solo 3" }), _jsx("option", { value: "4", children: "\u2605\u2605\u2605\u2605 Solo 4" }), _jsx("option", { value: "5", children: "\u2605\u2605\u2605\u2605\u2605 Solo 5" })] })] })] }), availableCustomLabels.length > 0 ? (_jsxs("label", { className: "quick-preview__filter-field", children: [_jsx("span", { children: "Label custom" }), _jsxs("select", { className: "quick-preview__filter-select", value: filterCustomLabel, onChange: (event) => setFilterCustomLabel(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), availableCustomLabels.map((label) => (_jsx("option", { value: label, children: label }, `preview-label-${label}`)))] })] })) : null] }), _jsxs("div", { className: "quick-preview__filter-colors", children: [_jsx("button", { type: "button", className: filterColorLabel === "all"
@@ -1751,7 +1814,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                         }, onLostPointerCapture: () => {
                             panDragRef.current = null;
                             setIsPanning(false);
-                        }, children: [previousAsset ? (_jsx("button", { type: "button", className: "quick-preview__nav quick-preview__nav--prev", onClick: () => handleNavigate("previous"), children: "<" })) : null, compareMode && compareAsset ? (_jsxs("div", { className: "quick-preview__compare-grid", children: [_jsxs("div", { className: `quick-preview__compare-panel ${stageColorClass}`, children: [_jsx("span", { className: "quick-preview__compare-label", children: "Corrente" }), displayPreviewUrl ? (_jsx("img", { src: displayPreviewUrl, alt: asset.fileName, className: "quick-preview__image quick-preview__image--compare", draggable: false, decoding: "sync", onError: handleMainPreviewError, onDoubleClick: toggleNativeFullscreen })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsx("span", { className: "quick-preview__loading-badge", children: "Preparazione preview" }) })), previewIsFallback ? (_jsx("span", { className: "quick-preview__loading-badge quick-preview__loading-badge--overlay", children: "Fit preview in arrivo" })) : null] }), _jsxs("div", { className: `quick-preview__compare-panel ${comparePanelColorClass}`, children: [_jsx("span", { className: "quick-preview__compare-label", children: compareAsset.fileName }), displayComparePreviewUrl ? (_jsx("img", { src: displayComparePreviewUrl, alt: compareAsset.fileName, className: "quick-preview__image quick-preview__image--compare", draggable: false, decoding: "sync", onError: handleComparePreviewError, onDoubleClick: toggleNativeFullscreen })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsx("span", { className: "quick-preview__loading-badge", children: "Preparazione preview" }) })), comparePreviewIsFallback ? (_jsx("span", { className: "quick-preview__loading-badge quick-preview__loading-badge--overlay", children: "Fit preview in arrivo" })) : null] })] })) : displayPreviewUrl ? (_jsx("img", { src: displayPreviewUrl, alt: asset.fileName, className: zoomLevel > 1.05
+                        }, children: [previousAsset ? (_jsx("button", { type: "button", className: "quick-preview__nav quick-preview__nav--prev", onClick: () => handleNavigate("previous"), children: "<" })) : null, compareMode && compareAsset ? (_jsxs("div", { className: "quick-preview__compare-grid", children: [_jsxs("div", { className: `quick-preview__compare-panel ${stageColorClass}`, children: [_jsx("span", { className: "quick-preview__compare-label", children: "Corrente" }), displayPreviewUrl ? (_jsx("img", { src: displayPreviewUrl, alt: asset.fileName, className: "quick-preview__image quick-preview__image--compare", draggable: false, decoding: "sync", onError: handleMainPreviewError, onDoubleClick: toggleNativeFullscreen })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsx("span", { className: "quick-preview__loading-badge", children: "Preparazione preview" }) })), previewIsFallback ? (_jsx("span", { className: "quick-preview__loading-badge quick-preview__loading-badge--overlay", children: "Fit preview in arrivo" })) : null] }), _jsxs("div", { className: `quick-preview__compare-panel ${comparePanelColorClass}`, children: [_jsx("span", { className: "quick-preview__compare-label", children: compareAsset.fileName }), displayComparePreviewUrl ? (_jsx("img", { src: displayComparePreviewUrl, alt: compareAsset.fileName, className: "quick-preview__image quick-preview__image--compare", draggable: false, decoding: "sync", onError: handleComparePreviewError, onDoubleClick: toggleNativeFullscreen })) : (_jsx("div", { className: "quick-preview__placeholder", children: _jsx("span", { className: "quick-preview__loading-badge", children: "Preparazione preview" }) })), comparePreviewIsFallback ? (_jsx("span", { className: "quick-preview__loading-badge quick-preview__loading-badge--overlay", children: "Fit preview in arrivo" })) : null] })] })) : displayPreviewUrl ? (_jsx("img", { ref: mainImageRef, src: displayPreviewUrl, alt: asset.fileName, className: zoomLevel > 1.05
                                     ? isPanning
                                         ? "quick-preview__image quick-preview__image--zoomed quick-preview__image--panning"
                                         : "quick-preview__image quick-preview__image--zoomed"
@@ -1768,7 +1831,7 @@ export function PhotoQuickPreviewModal({ asset, assets = [], thumbnailProfile = 
                                         const isActive = item.id === asset.id;
                                         return (_jsx("button", { type: "button", className: isActive
                                                 ? "quick-preview__dock-thumb quick-preview__dock-thumb--active"
-                                                : "quick-preview__dock-thumb", "aria-current": isActive ? "true" : undefined, onClick: () => selectAssetFromPreview(item.id, "jump"), title: item.fileName, children: itemPreview ? (_jsx("img", { src: itemPreview, alt: item.fileName, className: "quick-preview__dock-image", loading: "lazy", decoding: "async" })) : (_jsx("span", { className: "quick-preview__dock-fallback", children: item.fileName })) }, `dock-${item.id}`));
+                                                : "quick-preview__dock-thumb", "aria-current": isActive ? true : undefined, onClick: () => selectAssetFromPreview(item.id, "jump"), title: item.fileName, children: itemPreview ? (_jsx("img", { src: itemPreview, alt: item.fileName, className: "quick-preview__dock-image", loading: "lazy", decoding: "async" })) : (_jsx("span", { className: "quick-preview__dock-fallback", children: item.fileName })) }, `dock-${item.id}`));
                                     }), dockRightSpacerWidth > 0 ? (_jsx("div", { className: "quick-preview__dock-spacer", style: { width: dockRightSpacerWidth }, "aria-hidden": "true" })) : null] })] })) : null, pages.length > 0 && onAddToPage ? (_jsxs("div", { className: showAssignSuccess
                             ? "quick-preview__assign-bar quick-preview__assign-bar--success"
                             : "quick-preview__assign-bar", children: [_jsxs("div", { className: "quick-preview__assign-copy", children: [_jsx("strong", { children: activePage

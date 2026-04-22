@@ -304,6 +304,9 @@ export async function createOnDemandPreviewAsync(assetId, _priority = 0, options
         return null;
     }
     const generation = previewGeneration;
+    // NOTA: il task è condiviso tra più caller via `onDemandPreviewPromiseStore`,
+    // quindi NON deve dipendere dal signal di un singolo caller. Il signal è
+    // applicato sopra (sentinel pre-task) e dopo (filtro lato caller).
     const task = (async () => {
         try {
             const preview = await window.filexDesktop.getPreview(absolutePath, {
@@ -311,6 +314,9 @@ export async function createOnDemandPreviewAsync(assetId, _priority = 0, options
                 sourceFileKey: assetSourceFileKeyStore.get(assetId),
             });
             if (!preview) {
+                return null;
+            }
+            if (generation !== previewGeneration) {
                 return null;
             }
             const blob = new Blob([toOwnedArrayBuffer(preview.bytes)], { type: preview.mimeType });
@@ -333,7 +339,14 @@ export async function createOnDemandPreviewAsync(assetId, _priority = 0, options
             onDemandPreviewPromiseStore.delete(cacheKey);
         }
     });
-    return task;
+    // Permette al singolo caller di "dimenticare" il risultato se il proprio
+    // signal è stato abortito, senza propagare l'abort agli altri sottoscrittori
+    // della stessa promise condivisa.
+    const signal = options.signal;
+    if (!signal) {
+        return task;
+    }
+    return task.then((value) => (signal.aborted ? null : value));
 }
 export async function warmOnDemandPreviewCache(assetId, priority = 0, options = {}) {
     const absolutePath = assetAbsolutePathStore.get(assetId);

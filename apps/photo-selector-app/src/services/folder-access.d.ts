@@ -4,6 +4,7 @@ export declare function isRawFile(name: string): boolean;
 export declare const fileStore: Map<string, File>;
 export interface OnDemandPreviewOptions {
     maxDimension?: number;
+    signal?: AbortSignal;
 }
 export declare function getCachedOnDemandPreviewUrl(assetId: string, options?: OnDemandPreviewOptions): string | null;
 export declare function buildSourceFileKey(file: File, relativePath: string): string;

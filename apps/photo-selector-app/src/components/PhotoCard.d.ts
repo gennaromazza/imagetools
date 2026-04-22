@@ -6,6 +6,7 @@ interface PhotoCardProps {
     isSelected: boolean;
     onToggle: (id: string, event?: React.MouseEvent) => void;
     onUpdatePhoto: (id: string, changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>) => void;
+    onAfterShortcutClassification?: (id: string) => void;
     onFocus: (id: string) => void;
     onPreview: (id: string) => void;
     onContextMenu: (id: string, x: number, y: number) => void;

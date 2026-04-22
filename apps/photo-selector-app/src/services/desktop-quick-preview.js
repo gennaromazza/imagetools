@@ -54,6 +54,13 @@ export async function getDesktopQuickPreviewFrame(request) {
         try {
             const frame = await api.getQuickPreviewFrame(request);
             if (frame) {
+                const previous = quickPreviewFrameCache.get(cacheKey);
+                if (previous && previous.token !== frame.token) {
+                    // Rilascia il token nativo del frame che stiamo per sovrascrivere
+                    // per evitare leak di handle nel processo desktop.
+                    void releaseDesktopQuickPreviewFrames([previous.token]);
+                }
+                quickPreviewFrameCache.delete(cacheKey);
                 quickPreviewFrameCache.set(cacheKey, frame);
                 trimQuickPreviewFrameCache();
             }

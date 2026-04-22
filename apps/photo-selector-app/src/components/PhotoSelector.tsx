@@ -399,6 +399,18 @@ function RamBudgetSection({
   );
 }
 
+// Revoca una blob: URL precedente quando viene rimpiazzata da una nuova URL
+// diversa. Ignora valori falsy, URL identiche e URL non-blob (es. http:, file:).
+function revokeBlobUrlIfReplaced(previous: string | undefined, next: string | undefined): void {
+  if (!previous || !next || previous === next) return;
+  if (!previous.startsWith("blob:")) return;
+  try {
+    URL.revokeObjectURL(previous);
+  } catch {
+    // ignore: revokeObjectURL non lancia mai in pratica, ma siamo difensivi.
+  }
+}
+
 export function PhotoSelector({
   photos,
   metadataVersion,
@@ -2643,6 +2655,12 @@ export function PhotoSelector({
         const next = photosRef.current.map((asset) => {
           const change = byId.get(asset.id);
           if (!change) return asset;
+          // Quando una preview/thumbnail viene rimpiazzata da una nuova blob: URL,
+          // revochiamo la vecchia: altrimenti il browser tiene il blob in memoria
+          // per tutta la sessione (memory leak su cartelle modificate spesso).
+          revokeBlobUrlIfReplaced(asset.thumbnailUrl, change.thumbnailUrl);
+          revokeBlobUrlIfReplaced(asset.previewUrl, change.previewUrl);
+          revokeBlobUrlIfReplaced(asset.sourceUrl, change.sourceUrl);
           return {
             ...asset,
             sourceFileKey: change.sourceFileKey,

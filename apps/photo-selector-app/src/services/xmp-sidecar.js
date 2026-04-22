@@ -138,6 +138,18 @@ export function parseXmpState(xml) {
                     }
                 }
             }
+            if (localName === "Rejected") {
+                const rv = value.trim().toLowerCase();
+                if (rv === "true" || rv === "1" || rv === "yes") {
+                    result.pickStatus = "rejected";
+                }
+            }
+            if (localName === "PreservedRating") {
+                const preserved = Number.parseInt(value, 10);
+                if (Number.isFinite(preserved) && preserved >= 0) {
+                    result.rating = clampRating(preserved);
+                }
+            }
             if (localName === "Label") {
                 const lv = value.trim().toLowerCase();
                 if (lv === "select" || lv === "picked")
@@ -193,8 +205,20 @@ export function upsertXmpState(existingXml, asset, selected) {
         doc = new DOMParser().parseFromString(fallbackXml, "application/xml");
     }
     const desc = getDescriptionElement(doc);
-    const ratingValue = asset.pickStatus === "rejected" ? -1 : clampRating(asset.rating ?? 0);
+    const numericRating = clampRating(asset.rating ?? 0);
+    const isRejected = asset.pickStatus === "rejected";
+    // Per compatibilità con Adobe (Bridge/Lightroom) usiamo xmp:Rating = -1 per "rejected",
+    // ma preserviamo il valore numerico in photosuite:PreservedRating per round-trip senza perdita.
+    const ratingValue = isRejected ? -1 : numericRating;
     desc.setAttributeNS(XMP_NS, "xmp:Rating", String(ratingValue));
+    if (isRejected && numericRating > 0) {
+        desc.setAttributeNS(PHOTOSUITE_NS, "photosuite:PreservedRating", String(numericRating));
+    }
+    else {
+        desc.removeAttribute("photosuite:PreservedRating");
+        desc.removeAttributeNS(PHOTOSUITE_NS, "PreservedRating");
+    }
+    desc.setAttributeNS(PHOTOSUITE_NS, "photosuite:Rejected", isRejected ? "True" : "False");
     const labelValue = toLabelValue(asset.pickStatus ?? "unmarked", asset.colorLabel ?? null);
     if (labelValue) {
         desc.setAttributeNS(XMP_NS, "xmp:Label", labelValue);

@@ -12,6 +12,7 @@ import { COLOR_LABEL_NAMES, COLOR_LABELS, DEFAULT_PHOTO_FILTERS, getAssetColorLa
 import { CUSTOM_LABEL_SHORTCUT_OPTIONS, DEFAULT_CUSTOM_LABEL_TONE, normalizeCustomLabelColors, hydratePhotoSelectorPreferences, normalizeCustomLabelName, normalizeCustomLabelsCatalog, normalizeCustomLabelShortcut, normalizeCustomLabelShortcuts, savePhotoSelectorPreferences, } from "../services/photo-selector-preferences";
 import { buildPhotoSortSignature, loadCachedPhotoSortOrder, hydratePhotoSortCache, saveCachedPhotoSortOrder, } from "../services/photo-sort-cache";
 import { logDesktopEvent } from "../services/desktop-store";
+import { useToast } from "./ToastProvider";
 const CUSTOM_LABEL_TONES = ["sand", "rose", "green", "blue", "purple", "slate"];
 const GRID_GAP_PX = 12;
 const CARD_STAGE_HEIGHT_RATIO = 0.75;
@@ -35,7 +36,11 @@ const KNOWN_EDITOR_PRESET_PATHS = [
 ];
 function sanitizeEditorExecutablePath(value) {
     const normalized = value.trim().replace(/^"+|"+$/g, "");
-    return /^[a-zA-Z]:/.test(normalized) ? normalized.replace(/\//g, "\\") : normalized;
+    // Windows local (C:\...) o UNC (\\server\share\...) → normalizza i separatori.
+    if (/^[a-zA-Z]:/.test(normalized) || /^\\\\/.test(normalized)) {
+        return normalized.replace(/\//g, "\\");
+    }
+    return normalized;
 }
 function isValidDesktopEditorPath(value) {
     const normalized = sanitizeEditorExecutablePath(value);
@@ -43,6 +48,10 @@ function isValidDesktopEditorPath(value) {
         return false;
     }
     if (/^[a-zA-Z]:\\/.test(normalized)) {
+        return /\.(exe|bat|cmd)$/i.test(normalized);
+    }
+    // UNC: \\server\share\...\file.exe
+    if (/^\\\\[^\\]+\\[^\\]+\\/.test(normalized)) {
         return /\.(exe|bat|cmd)$/i.test(normalized);
     }
     if (normalized.startsWith("/")) {
@@ -189,7 +198,22 @@ function RamBudgetSection({ systemTotalMemoryBytes, activePreset, activeRamBudge
                     ? `Preset attivo: ${activePreset} · ${((activeRamBudgetBytes ?? 0) / (1024 ** 3)).toFixed(1)} GB`
                     : "Seleziona un preset per configurare il budget RAM della cache." }))] }));
 }
+// Revoca una blob: URL precedente quando viene rimpiazzata da una nuova URL
+// diversa. Ignora valori falsy, URL identiche e URL non-blob (es. http:, file:).
+function revokeBlobUrlIfReplaced(previous, next) {
+    if (!previous || !next || previous === next)
+        return;
+    if (!previous.startsWith("blob:"))
+        return;
+    try {
+        URL.revokeObjectURL(previous);
+    }
+    catch {
+        // ignore: revokeObjectURL non lancia mai in pratica, ma siamo difensivi.
+    }
+}
 export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", selectedIds, onSelectionChange, onPhotosChange, onVisibleIdsChange, onPriorityIdsChange, onPreviewPriorityIdsChange, onBackgroundPreviewOrderChange, onScrollLiteActiveMsChange, onUndo, onRedo, canUndo = false, canRedo = false, isThumbnailLoading = false, thumbnailProfile = "ultra-fast", sortCacheEnabled = true, performanceSnapshot = null, onThumbnailProfileChange, onSortCacheEnabledChange, desktopThumbnailCacheInfo = null, desktopCacheLocationRecommendation = null, isDesktopThumbnailCacheBusy = false, isDesktopCacheRecommendationModalOpen = false, onChooseDesktopThumbnailCacheDirectory, onSetDesktopThumbnailCacheDirectory, onUseRecommendedDesktopThumbnailCacheDirectory, onResetDesktopThumbnailCacheDirectory, onClearDesktopThumbnailCache, onSnoozeDesktopCacheRecommendation, onDismissDesktopCacheRecommendation, onRamBudgetPresetChange, onRelaunch, }) {
+    const { addToast } = useToast();
     const [sortBy, setSortBy] = useState("name");
     const [createdAtSortDirection, setCreatedAtSortDirection] = useState("desc");
     const [pickFilter, setPickFilter] = useState(DEFAULT_PHOTO_FILTERS.pickStatus);
@@ -207,6 +231,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     const [filterPresets, setFilterPresets] = useState([]);
     const [selectedThumbnailProfile, setSelectedThumbnailProfile] = useState(thumbnailProfile);
     const [isSortCacheEnabled, setIsSortCacheEnabled] = useState(sortCacheEnabled);
+    const [autoAdvanceOnAction, setAutoAdvanceOnAction] = useState(true);
     const [newPresetName, setNewPresetName] = useState("");
     const [newCustomLabelName, setNewCustomLabelName] = useState("");
     const [newCustomLabelTone, setNewCustomLabelTone] = useState(DEFAULT_CUSTOM_LABEL_TONE);
@@ -306,6 +331,25 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         timeClusterFilter !== "all",
         searchQuery !== "",
     ].filter(Boolean).length, [pickFilter, ratingFilter, colorFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]);
+    // Statistiche aggregate sull'intera cartella corrente: utili come "vital signs"
+    // sempre visibili in cima alla griglia, indipendentemente da selezione/filtri.
+    const folderStats = useMemo(() => {
+        const total = photos.length;
+        if (total === 0)
+            return null;
+        let picked = 0;
+        let rejected = 0;
+        for (const p of photos) {
+            const status = getAssetPickStatus(p);
+            if (status === "picked")
+                picked += 1;
+            else if (status === "rejected")
+                rejected += 1;
+        }
+        const decided = picked + rejected;
+        const completionPct = Math.round((decided / total) * 100);
+        return { total, picked, rejected, completionPct };
+    }, [photos]);
     const selectionStats = useMemo(() => {
         if (selectedIds.length === 0)
             return null;
@@ -373,6 +417,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             setCustomLabelShortcuts(preferences.customLabelShortcuts);
             setSelectedThumbnailProfile(preferences.thumbnailProfile);
             setIsSortCacheEnabled(preferences.sortCacheEnabled);
+            setAutoAdvanceOnAction(preferences.autoAdvanceOnAction);
             setCardSize(preferences.cardSize);
             setRootFolderPathOverride(preferences.rootFolderPathOverride);
             setPreferredEditorPath(sanitizeEditorExecutablePath(preferences.preferredEditorPath));
@@ -591,6 +636,13 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         onSortCacheEnabledChange?.(nextEnabled);
         pushTimelineEntry(nextEnabled ? "Sort cache attivata" : "Sort cache disattivata");
     }, [onSortCacheEnabledChange, pushTimelineEntry]);
+    const handleAutoAdvanceChange = useCallback((nextEnabled) => {
+        setAutoAdvanceOnAction(nextEnabled);
+        savePhotoSelectorPreferences({ autoAdvanceOnAction: nextEnabled });
+        pushTimelineEntry(nextEnabled
+            ? "Avanzamento automatico dopo classificazione: ON"
+            : "Avanzamento automatico dopo classificazione: OFF");
+    }, [pushTimelineEntry]);
     const updateCustomLabelsForIds = useCallback((targetIds, updater, timelineLabel) => {
         if (!onPhotosChange || targetIds.length === 0) {
             return;
@@ -1209,6 +1261,30 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             setDragRect(null);
         }
     }, [contextMenuState]);
+    // Sposta il focus alla foto successiva (o alla precedente se in fondo).
+    // Usato dall'auto-advance dopo una classificazione tramite scorciatoia,
+    // per replicare il flusso "Photo Mechanic" — un tasto = una decisione + avanti.
+    const advanceFocusToNext = useCallback((currentId) => {
+        if (!autoAdvanceOnAction || visiblePhotoIds.length === 0)
+            return;
+        const currentIndex = visiblePhotoIndexById.get(currentId);
+        if (currentIndex === undefined || currentIndex < 0)
+            return;
+        const nextIndex = currentIndex < visiblePhotoIds.length - 1
+            ? currentIndex + 1
+            : currentIndex; // resta sull'ultima se non c'è successiva
+        const nextId = visiblePhotoIds[nextIndex];
+        if (!nextId || nextId === currentId)
+            return;
+        setFocusedPhotoId(nextId);
+        scrollPhotoIntoView(nextId);
+        requestAnimationFrame(() => {
+            const grid = gridRef.current;
+            const el = grid?.querySelector(`[data-preview-asset-id="${nextId}"]`);
+            if (el)
+                el.focus();
+        });
+    }, [autoAdvanceOnAction, scrollPhotoIntoView, visiblePhotoIds, visiblePhotoIndexById]);
     // Consolidated keyboard handler: Escape chain + arrow navigation
     const handleWindowKeyDown = useCallback((event) => {
         // Context menu open: only handle Escape
@@ -1244,6 +1320,11 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                 if (targetIds.length > 0) {
                     event.preventDefault();
                     toggleCustomLabelForIds(targetIds, shortcutLabel);
+                    // Auto-advance: dopo una custom label da scorciatoia, sposta il focus
+                    // alla foto successiva (solo se la pref è attiva e c'è un focus singolo).
+                    if (focusedPhotoId && targetIds.length === 1 && targetIds[0] === focusedPhotoId) {
+                        advanceFocusToNext(focusedPhotoId);
+                    }
                     return;
                 }
             }
@@ -1311,6 +1392,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             });
         }
     }, [
+        advanceFocusToNext,
         contextMenuState,
         focusedPhotoId,
         hasActiveFilters,
@@ -1471,17 +1553,22 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     }, [selectedIds, updateCustomLabelsForIds]);
     const selectedAbsolutePaths = useMemo(() => getAssetAbsolutePaths(selectedIds), [selectedIds]);
     const selectedAbsolutePathsSignature = useMemo(() => selectedAbsolutePaths.join("\n"), [selectedAbsolutePaths]);
+    const dragOutCheckSeqRef = useRef(0);
     useEffect(() => {
-        let active = true;
         if (typeof window === "undefined" ||
             typeof window.filexDesktop?.canStartDragOut !== "function") {
             setDesktopDragOutCheck(null);
             return;
         }
-        if (selectedAbsolutePaths.length === 0) {
+        // Snapshot stabile della selezione per questa esecuzione: evita race in cui
+        // il signature cambia mentre la promise è in volo.
+        const requestedCount = selectedIds.length;
+        const pathsSnapshot = selectedAbsolutePaths.slice();
+        if (pathsSnapshot.length === 0) {
+            dragOutCheckSeqRef.current += 1;
             setDesktopDragOutCheck({
                 ok: false,
-                requestedCount: selectedIds.length,
+                requestedCount,
                 validCount: 0,
                 allowedCount: 0,
                 reason: "empty-selection",
@@ -1489,28 +1576,33 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             });
             return;
         }
-        void window.filexDesktop.canStartDragOut(selectedAbsolutePaths).then((result) => {
-            if (!active) {
+        dragOutCheckSeqRef.current += 1;
+        const seq = dragOutCheckSeqRef.current;
+        void window.filexDesktop.canStartDragOut(pathsSnapshot).then((result) => {
+            if (seq !== dragOutCheckSeqRef.current) {
                 return;
             }
             setDesktopDragOutCheck(result);
         }).catch(() => {
-            if (!active) {
+            if (seq !== dragOutCheckSeqRef.current) {
                 return;
             }
             setDesktopDragOutCheck({
                 ok: false,
-                requestedCount: selectedIds.length,
-                validCount: selectedAbsolutePaths.length,
+                requestedCount,
+                validCount: pathsSnapshot.length,
                 allowedCount: 0,
                 reason: "invalid-paths",
                 message: "Impossibile validare il drag esterno in questa sessione.",
             });
         });
         return () => {
-            active = false;
+            // Invalidate this in-flight check so a late resolve cannot overwrite a
+            // newer state computed for a different selection.
+            dragOutCheckSeqRef.current += 1;
         };
-    }, [selectedAbsolutePaths, selectedAbsolutePathsSignature, selectedIds.length]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedAbsolutePathsSignature]);
     const canStartDesktopDragOut = Boolean(desktopDragOutCheck?.ok
         && typeof window !== "undefined"
         && typeof window.filexDesktop?.startDragOut === "function");
@@ -1598,7 +1690,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             previewUrlRef.current.sourceFileKey === previewAsset.sourceFileKey) {
             return;
         }
-        let active = true;
+        const abortController = new AbortController();
         const cachedPreviewUrl = getCachedOnDemandPreviewUrl(previewAsset.id, {
             maxDimension: QUICK_PREVIEW_FIT_MAX_DIMENSION,
         });
@@ -1616,8 +1708,9 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }
         createOnDemandPreviewAsync(previewAsset.id, 0, {
             maxDimension: QUICK_PREVIEW_FIT_MAX_DIMENSION,
+            signal: abortController.signal,
         }).then((url) => {
-            if (!active)
+            if (abortController.signal.aborted)
                 return;
             if (url) {
                 previewUrlRef.current = { id: previewAsset.id, url, sourceFileKey: previewAsset.sourceFileKey };
@@ -1625,7 +1718,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             }
         });
         return () => {
-            active = false;
+            abortController.abort();
         };
     }, [previewAsset]);
     // Keep preview warmup light here. The modal performs the heavier adjacent warmup.
@@ -1781,10 +1874,10 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         if (result === "ok")
             pushTimelineEntry(`${ids.length === 1 ? "1 file" : `${ids.length} file`} copiato/i in cartella`);
         else if (result === "partial")
-            alert("Copia parziale: alcuni file non sono stati copiati.");
+            addToast("Copia parziale: alcuni file non sono stati copiati.", "warning");
         else if (result === "error")
-            alert("Errore durante la copia. Alcuni file potrebbero non essere stati copiati.");
-    }, [pushTimelineEntry]);
+            addToast("Errore durante la copia. Alcuni file potrebbero non essere stati copiati.", "error");
+    }, [addToast, pushTimelineEntry]);
     const handleMoveFiles = useCallback(async (ids) => {
         const { result, movedIds } = await moveAssetsToFolder(ids);
         if (result === "cancelled")
@@ -1796,21 +1889,21 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
             pushTimelineEntry(`${movedIds.length === 1 ? "1 file" : `${movedIds.length} file`} spostato/i in cartella`);
         }
         if (result === "partial")
-            alert("Spostamento parziale: alcuni file non sono stati mossi.");
+            addToast("Spostamento parziale: alcuni file non sono stati mossi.", "warning");
         if (result === "error")
-            alert("Spostamento non riuscito.");
-    }, [onPhotosChange, onSelectionChange, photos, pushTimelineEntry, selectedIds]);
+            addToast("Spostamento non riuscito.", "error");
+    }, [addToast, onPhotosChange, onSelectionChange, photos, pushTimelineEntry, selectedIds]);
     const handleSaveAs = useCallback(async (ids) => {
         for (const id of ids) {
             const result = await saveAssetAs(id);
             if (result === "error") {
-                alert("Errore durante il salvataggio del file.");
+                addToast("Errore durante il salvataggio del file.", "error");
                 break;
             }
             if (result === "cancelled")
                 break;
         }
-    }, []);
+    }, [addToast]);
     const handleCopyPath = useCallback((ids, root) => {
         const absolutePaths = getAssetAbsolutePaths(ids);
         const paths = absolutePaths.length === ids.length
@@ -1827,7 +1920,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
     const handleOpenWithEditor = useCallback((ids) => {
         const editor = sanitizeEditorExecutablePath(preferredEditorPath);
         if (!isValidDesktopEditorPath(editor)) {
-            alert("Nessun editor associato valido. Imposta il percorso completo dell'editor (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).");
+            addToast("Nessun editor associato valido. Imposta il percorso completo dell'editor (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).", "error");
             return;
         }
         const directAbsolutePaths = getAssetAbsolutePaths(ids);
@@ -1841,87 +1934,51 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                 return `${root}/${relative}`.replace(/\//g, "\\");
             });
         if (absolutePaths.length === 0) {
-            alert("Nessun percorso disponibile per le foto selezionate.");
+            addToast("Nessun percorso disponibile per le foto selezionate.", "warning");
             return;
         }
-        if (typeof window !== "undefined" &&
-            typeof window.filexDesktop?.sendToEditor === "function") {
-            void window.filexDesktop.sendToEditor(editor, absolutePaths).then((result) => {
-                if (!result?.ok) {
-                    const fallbackMessage = result?.status === "invalid-editor"
-                        ? "Editor non trovato o percorso non valido."
-                        : result?.status === "partial"
-                            ? "Solo una parte della selezione ha percorsi validi per l'editor."
-                            : result?.status === "timeout"
-                                ? "L'editor non ha risposto in tempo."
-                                : "Impossibile aprire l'editor esterno.";
-                    alert(result?.error ?? fallbackMessage);
-                    void logDesktopEvent({
-                        channel: "editor",
-                        level: "warn",
-                        message: "Invio a editor non riuscito",
-                        details: JSON.stringify({
-                            requestedCount: result?.requestedCount ?? absolutePaths.length,
-                            launchedCount: result?.launchedCount ?? 0,
-                            status: result?.status ?? "launch-failed",
-                        }),
-                    });
-                    return;
-                }
-                pushTimelineEntry(`${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} aperta/e nell'editor`);
+        if (typeof window === "undefined" ||
+            typeof window.filexDesktop?.sendToEditor !== "function") {
+            // App desktop: il bridge nativo deve essere disponibile. Se non lo è,
+            // siamo in uno stato non supportato — niente più fallback BAT lato web.
+            addToast("Bridge desktop non disponibile: impossibile aprire l'editor esterno in questa sessione.", "error");
+            return;
+        }
+        void window.filexDesktop.sendToEditor(editor, absolutePaths).then((result) => {
+            if (!result?.ok) {
+                const fallbackMessage = result?.status === "invalid-editor"
+                    ? "Editor non trovato o percorso non valido."
+                    : result?.status === "partial"
+                        ? "Solo una parte della selezione ha percorsi validi per l'editor."
+                        : result?.status === "timeout"
+                            ? "L'editor non ha risposto in tempo."
+                            : "Impossibile aprire l'editor esterno.";
+                addToast(result?.error ?? fallbackMessage, "error");
                 void logDesktopEvent({
                     channel: "editor",
-                    level: "info",
-                    message: "Invio a editor completato",
+                    level: "warn",
+                    message: "Invio a editor non riuscito",
                     details: JSON.stringify({
-                        requestedCount: result.requestedCount,
-                        launchedCount: result.launchedCount,
-                        status: result.status,
+                        requestedCount: result?.requestedCount ?? absolutePaths.length,
+                        launchedCount: result?.launchedCount ?? 0,
+                        status: result?.status ?? "launch-failed",
                     }),
                 });
+                return;
+            }
+            pushTimelineEntry(`${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} aperta/e nell'editor`);
+            void logDesktopEvent({
+                channel: "editor",
+                level: "info",
+                message: "Invio a editor completato",
+                details: JSON.stringify({
+                    requestedCount: result.requestedCount,
+                    launchedCount: result.launchedCount,
+                    status: result.status,
+                }),
             });
-            return;
-        }
-        if (!effectiveRootFolderPath.trim()) {
-            alert("Imposta prima la Cartella radice in Impostazioni > Editor esterno.");
-            return;
-        }
-        const escapeForBatch = (value) => value.replace(/"/g, '""');
-        const lines = [
-            "@echo off",
-            "setlocal",
-            "",
-            "REM Script generato da Photo Tools - Apri con editor",
-        ];
-        lines.push(`set "EDITOR=${escapeForBatch(editor)}"`);
-        lines.push("if not exist \"%EDITOR%\" (");
-        lines.push("  echo Editor non trovato: %EDITOR%");
-        lines.push("  echo Controlla il percorso in Impostazioni > Editor esterno");
-        lines.push("  pause");
-        lines.push("  exit /b 1");
-        lines.push(")");
-        lines.push("");
-        for (const filePath of absolutePaths) {
-            lines.push(`start "" "%EDITOR%" "${escapeForBatch(filePath)}"`);
-        }
-        lines.push("");
-        lines.push("exit /b 0");
-        const content = lines.join("\r\n");
-        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-        const fileName = `open-with-editor-${stamp}.bat`;
-        const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 1500);
-        void navigator.clipboard.writeText(absolutePaths.join("\n"));
-        pushTimelineEntry(`${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} pronta/e per apri con editor (BAT scaricato)`);
-        alert(`Ho scaricato ${fileName}. Eseguilo per aprire ${absolutePaths.length} foto in editor.`);
-    }, [effectiveRootFolderPath, preferredEditorPath, pushTimelineEntry]);
+        });
+    }, [addToast, effectiveRootFolderPath, preferredEditorPath, pushTimelineEntry]);
     // Detect external edits (Photoshop overwrite) and refresh in-app previews automatically.
     useEffect(() => {
         if (!onPhotosChange)
@@ -1949,6 +2006,12 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                     const change = byId.get(asset.id);
                     if (!change)
                         return asset;
+                    // Quando una preview/thumbnail viene rimpiazzata da una nuova blob: URL,
+                    // revochiamo la vecchia: altrimenti il browser tiene il blob in memoria
+                    // per tutta la sessione (memory leak su cartelle modificate spesso).
+                    revokeBlobUrlIfReplaced(asset.thumbnailUrl, change.thumbnailUrl);
+                    revokeBlobUrlIfReplaced(asset.previewUrl, change.previewUrl);
+                    revokeBlobUrlIfReplaced(asset.sourceUrl, change.sourceUrl);
                     return {
                         ...asset,
                         sourceFileKey: change.sourceFileKey,
@@ -2070,7 +2133,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                 setPreferredEditorPathPersisted(nextPath);
             }
             if (sep < 0) {
-                alert("Selezionato file: " + selected.name + "\n\nIl percorso assoluto non e' stato rilevato automaticamente. Usa uno dei preset Photoshop o incolla il percorso completo (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).");
+                addToast(`Selezionato file: ${selected.name}. Il percorso assoluto non è stato rilevato automaticamente. Usa uno dei preset Photoshop o incolla il percorso completo (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).`, "warning", 8000);
             }
             if (input.parentNode) {
                 input.parentNode.removeChild(input);
@@ -2078,7 +2141,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         };
         document.body.appendChild(input);
         input.click();
-    }, [preferredEditorPath, setPreferredEditorPathPersisted]);
+    }, [addToast, preferredEditorPath, setPreferredEditorPathPersisted]);
     const handleApplyDesktopThumbnailCachePath = useCallback(() => {
         const nextPath = desktopThumbnailCachePathInput.trim();
         if (!nextPath || !onSetDesktopThumbnailCacheDirectory) {
@@ -2086,7 +2149,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
         }
         void onSetDesktopThumbnailCacheDirectory(nextPath);
     }, [desktopThumbnailCachePathInput, onSetDesktopThumbnailCacheDirectory]);
-    return (_jsxs("div", { className: "photo-selector", children: [_jsxs("div", { className: "photo-selector__filter-bar", children: [hasActiveFilters && (_jsx("div", { className: "selector-filters__reset", children: _jsxs("button", { type: "button", className: "ghost-button ghost-button--small", onClick: resetFilters, title: `${activeFilterCount} filtro/i attivo/i`, children: ["\u2715 Azzera", activeFilterCount > 0 && (_jsx("span", { className: "photo-selector__filter-count-badge", children: activeFilterCount }))] }) })), subfolders.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Cartella" }), _jsxs("select", { className: folderFilter !== "all" ? "field__select--active" : undefined, value: folderFilter, onChange: (event) => setFolderFilter(event.target.value), children: [_jsxs("option", { value: "all", children: ["Tutte (", photos.length, ")"] }), subfolders.map(({ folder, count }) => (_jsxs("option", { value: folder, children: [folder === "" ? "Root" : folder, " (", count, ")"] }, folder)))] })] })), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stato" }), _jsxs("select", { className: pickFilter !== "all" ? "field__select--active" : undefined, value: pickFilter, onChange: (event) => setPickFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutti" }), _jsx("option", { value: "picked", children: "Pick" }), _jsx("option", { value: "rejected", children: "Scartate" }), _jsx("option", { value: "unmarked", children: "Neutre" })] })] }), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stelle" }), _jsxs("select", { className: ratingFilter !== "any" ? "field__select--active" : undefined, value: ratingFilter, onChange: (event) => setRatingFilter(event.target.value), children: [_jsx("option", { value: "any", children: "Tutte" }), _jsxs("optgroup", { label: "Minimo", children: [_jsx("option", { value: "1+", children: "\u2605 1+" }), _jsx("option", { value: "2+", children: "\u2605\u2605 2+" }), _jsx("option", { value: "3+", children: "\u2605\u2605\u2605 3+" }), _jsx("option", { value: "4+", children: "\u2605\u2605\u2605\u2605 4+" })] }), _jsxs("optgroup", { label: "Esattamente", children: [_jsx("option", { value: "0", children: "Senza stelle" }), _jsx("option", { value: "1", children: "\u2605 1" }), _jsx("option", { value: "2", children: "\u2605\u2605 2" }), _jsx("option", { value: "3", children: "\u2605\u2605\u2605 3" }), _jsx("option", { value: "4", children: "\u2605\u2605\u2605\u2605 4" }), _jsx("option", { value: "5", children: "\u2605\u2605\u2605\u2605\u2605 5" })] })] })] }), _jsxs("div", { className: "field photo-selector__color-filter", children: [_jsx("span", { children: "Colore" }), _jsxs("div", { className: "photo-selector__color-filter-dots", children: [_jsx("button", { type: "button", className: `photo-selector__color-all-btn${colorFilter === "all" ? " photo-selector__color-all-btn--active" : ""}`, onClick: () => setColorFilter("all"), title: "Tutti i colori", children: "\u2715" }), COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: `asset-color-dot asset-color-dot--${value}${colorFilter === value ? " asset-color-dot--selected" : ""}`, onClick: () => setColorFilter(colorFilter === value ? "all" : value), title: customColorNames[value] }, value)))] })] }), customLabelFilterOptions.length > 0 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Label custom" }), _jsxs("select", { className: customLabelFilter !== "all" ? "field__select--active" : undefined, value: customLabelFilter, onChange: (event) => setCustomLabelFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), customLabelFilterOptions.map(({ label, count }) => (_jsxs("option", { value: label, children: [label, " (", count, ")"] }, label)))] })] })), seriesGroups.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Serie" }), _jsxs("select", { className: seriesFilter !== "all" ? "field__select--active" : undefined, value: seriesFilter, onChange: (event) => setSeriesFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), seriesGroups.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), timeClusters.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Fascia oraria" }), _jsxs("select", { className: timeClusterFilter !== "all" ? "field__select--active" : undefined, value: timeClusterFilter, onChange: (event) => setTimeClusterFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), timeClusters.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), filterPresets.length > 0 && (_jsxs("div", { className: "photo-selector__preset-chips", children: [_jsx("span", { className: "photo-selector__filter-bar-label", children: "Preset" }), filterPresets.map((preset) => (_jsx("button", { className: "photo-selector__preset-apply", onClick: () => applyPreset(preset), children: preset.name }, preset.id)))] }))] }), _jsxs("div", { className: "photo-selector__controls", children: [_jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("div", { className: "photo-selector__undo-group", children: [_jsx("button", { type: "button", className: "icon-button", onClick: handleUndoClick, disabled: !canUndo, title: "Annulla", children: "\u21A9" }), _jsx("button", { type: "button", className: "icon-button", onClick: handleRedoClick, disabled: !canRedo, title: "Ripeti", children: "\u21AA" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: `checkbox-button photo-selector__toolbar-control ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`, onClick: () => toggleAll(!allSelected), children: allSelected ? "Deseleziona tutto" : "Seleziona tutto" }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: selectVisible, title: "Seleziona le foto visibili", children: "Visibili" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: activatePickedOnly, title: "Seleziona solo le foto Pick", children: "Solo pick" }), selectedIds.length >= 2 && selectedIds.length <= 4 && (_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => setIsCompareOpen(true), title: `Confronta ${selectedIds.length} foto selezionate`, children: "Confronta" }))] }), _jsx("div", { className: "photo-selector__action-inline photo-selector__toolbar-search", children: _jsx(PhotoSearchBar, { value: searchQuery, onChange: setSearchQuery, resultCount: visiblePhotoIds.length, totalCount: photos.length }) }), _jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("label", { className: "photo-selector__zoom-label", title: "Dimensione card", children: [_jsx("span", { children: "\uD83D\uDD0E" }), _jsx("input", { type: "range", className: "photo-selector__zoom-slider", min: 100, max: 320, step: 10, value: cardSize, onChange: (e) => setCardSize(Number(e.target.value)), "aria-label": "Dimensione card" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsxs("select", { className: "photo-selector__sort photo-selector__toolbar-control", value: sortBy === "createdAt" ? `createdAt:${createdAtSortDirection}` : sortBy, onChange: (event) => {
+    return (_jsxs("div", { className: "photo-selector", children: [_jsxs("div", { className: "photo-selector__filter-bar", children: [folderStats && (_jsxs("div", { className: "photo-selector__folder-stats", title: `Totale ${folderStats.total} · Picked ${folderStats.picked} · Scartate ${folderStats.rejected} · Decise ${folderStats.completionPct}%`, children: [_jsxs("span", { className: "photo-selector__folder-stats-total", children: [folderStats.total, " foto"] }), _jsx("span", { className: "photo-selector__folder-stats-sep", children: "\u00B7" }), _jsxs("span", { className: "photo-selector__folder-stats-picked", children: [folderStats.picked, " pick"] }), _jsx("span", { className: "photo-selector__folder-stats-sep", children: "\u00B7" }), _jsxs("span", { className: "photo-selector__folder-stats-rejected", children: [folderStats.rejected, " scart."] }), _jsx("span", { className: "photo-selector__folder-stats-sep", children: "\u00B7" }), _jsxs("span", { className: "photo-selector__folder-stats-progress", children: [folderStats.completionPct, "% decise"] })] })), hasActiveFilters && (_jsx("div", { className: "selector-filters__reset", children: _jsxs("button", { type: "button", className: "ghost-button ghost-button--small", onClick: resetFilters, title: `${activeFilterCount} filtro/i attivo/i`, children: ["\u2715 Azzera", activeFilterCount > 0 && (_jsx("span", { className: "photo-selector__filter-count-badge", children: activeFilterCount }))] }) })), subfolders.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Cartella" }), _jsxs("select", { className: folderFilter !== "all" ? "field__select--active" : undefined, value: folderFilter, onChange: (event) => setFolderFilter(event.target.value), children: [_jsxs("option", { value: "all", children: ["Tutte (", photos.length, ")"] }), subfolders.map(({ folder, count }) => (_jsxs("option", { value: folder, children: [folder === "" ? "Root" : folder, " (", count, ")"] }, folder)))] })] })), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stato" }), _jsxs("select", { className: pickFilter !== "all" ? "field__select--active" : undefined, value: pickFilter, onChange: (event) => setPickFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutti" }), _jsx("option", { value: "picked", children: "Pick" }), _jsx("option", { value: "rejected", children: "Scartate" }), _jsx("option", { value: "unmarked", children: "Neutre" })] })] }), _jsxs("label", { className: "field", children: [_jsx("span", { children: "Stelle" }), _jsxs("select", { className: ratingFilter !== "any" ? "field__select--active" : undefined, value: ratingFilter, onChange: (event) => setRatingFilter(event.target.value), children: [_jsx("option", { value: "any", children: "Tutte" }), _jsxs("optgroup", { label: "Minimo", children: [_jsx("option", { value: "1+", children: "\u2605 1+" }), _jsx("option", { value: "2+", children: "\u2605\u2605 2+" }), _jsx("option", { value: "3+", children: "\u2605\u2605\u2605 3+" }), _jsx("option", { value: "4+", children: "\u2605\u2605\u2605\u2605 4+" })] }), _jsxs("optgroup", { label: "Esattamente", children: [_jsx("option", { value: "0", children: "Senza stelle" }), _jsx("option", { value: "1", children: "\u2605 1" }), _jsx("option", { value: "2", children: "\u2605\u2605 2" }), _jsx("option", { value: "3", children: "\u2605\u2605\u2605 3" }), _jsx("option", { value: "4", children: "\u2605\u2605\u2605\u2605 4" }), _jsx("option", { value: "5", children: "\u2605\u2605\u2605\u2605\u2605 5" })] })] })] }), _jsxs("div", { className: "field photo-selector__color-filter", children: [_jsx("span", { children: "Colore" }), _jsxs("div", { className: "photo-selector__color-filter-dots", children: [_jsx("button", { type: "button", className: `photo-selector__color-all-btn${colorFilter === "all" ? " photo-selector__color-all-btn--active" : ""}`, onClick: () => setColorFilter("all"), title: "Tutti i colori", children: "\u2715" }), COLOR_LABELS.map((value) => (_jsx("button", { type: "button", className: `asset-color-dot asset-color-dot--${value}${colorFilter === value ? " asset-color-dot--selected" : ""}`, onClick: () => setColorFilter(colorFilter === value ? "all" : value), title: customColorNames[value] }, value)))] })] }), customLabelFilterOptions.length > 0 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Label custom" }), _jsxs("select", { className: customLabelFilter !== "all" ? "field__select--active" : undefined, value: customLabelFilter, onChange: (event) => setCustomLabelFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), customLabelFilterOptions.map(({ label, count }) => (_jsxs("option", { value: label, children: [label, " (", count, ")"] }, label)))] })] })), seriesGroups.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Serie" }), _jsxs("select", { className: seriesFilter !== "all" ? "field__select--active" : undefined, value: seriesFilter, onChange: (event) => setSeriesFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), seriesGroups.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), timeClusters.length > 1 && (_jsxs("label", { className: "field", children: [_jsx("span", { children: "Fascia oraria" }), _jsxs("select", { className: timeClusterFilter !== "all" ? "field__select--active" : undefined, value: timeClusterFilter, onChange: (event) => setTimeClusterFilter(event.target.value), children: [_jsx("option", { value: "all", children: "Tutte" }), timeClusters.map(({ key, count }) => (_jsxs("option", { value: key, children: [key, " (", count, ")"] }, key)))] })] })), filterPresets.length > 0 && (_jsxs("div", { className: "photo-selector__preset-chips", children: [_jsx("span", { className: "photo-selector__filter-bar-label", children: "Preset" }), filterPresets.map((preset) => (_jsx("button", { className: "photo-selector__preset-apply", onClick: () => applyPreset(preset), children: preset.name }, preset.id)))] }))] }), _jsxs("div", { className: "photo-selector__controls", children: [_jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("div", { className: "photo-selector__undo-group", children: [_jsx("button", { type: "button", className: "icon-button", onClick: handleUndoClick, disabled: !canUndo, title: "Annulla", children: "\u21A9" }), _jsx("button", { type: "button", className: "icon-button", onClick: handleRedoClick, disabled: !canRedo, title: "Ripeti", children: "\u21AA" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: `checkbox-button photo-selector__toolbar-control ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`, onClick: () => toggleAll(!allSelected), children: allSelected ? "Deseleziona tutto" : "Seleziona tutto" }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: selectVisible, title: "Seleziona le foto visibili", children: "Visibili" }), _jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: activatePickedOnly, title: "Seleziona solo le foto Pick", children: "Solo pick" }), selectedIds.length >= 2 && selectedIds.length <= 4 && (_jsx("button", { type: "button", className: "ghost-button ghost-button--small", onClick: () => setIsCompareOpen(true), title: `Confronta ${selectedIds.length} foto selezionate`, children: "Confronta" }))] }), _jsx("div", { className: "photo-selector__action-inline photo-selector__toolbar-search", children: _jsx(PhotoSearchBar, { value: searchQuery, onChange: setSearchQuery, resultCount: visiblePhotoIds.length, totalCount: photos.length }) }), _jsxs("div", { className: "photo-selector__action-inline", children: [_jsxs("label", { className: "photo-selector__zoom-label", title: "Dimensione card", children: [_jsx("span", { children: "\uD83D\uDD0E" }), _jsx("input", { type: "range", className: "photo-selector__zoom-slider", min: 100, max: 320, step: 10, value: cardSize, onChange: (e) => setCardSize(Number(e.target.value)), "aria-label": "Dimensione card" })] }), _jsx("div", { className: "photo-selector__toolbar-divider" }), _jsxs("select", { className: "photo-selector__sort photo-selector__toolbar-control", value: sortBy === "createdAt" ? `createdAt:${createdAtSortDirection}` : sortBy, onChange: (event) => {
                                     const nextSort = event.target.value;
                                     if (nextSort === "createdAt:asc") {
                                         setSortBy("createdAt");
@@ -2188,7 +2251,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                         onSelectionChange(Array.from(base));
                         pushTimelineEntry(`Selezionate ${newIds.length} foto con lasso`);
                     }
-                }, onScroll: handleGridScroll, children: [visiblePhotoIds.length === 0 ? (_jsx("div", { className: "photo-selector__empty", children: _jsx("p", { children: "Nessuna foto trovata." }) })) : (_jsxs(_Fragment, { children: [topSpacerHeight > 0 ? (_jsx("div", { className: "photo-selector__virtual-spacer", style: { height: topSpacerHeight }, "aria-hidden": "true" })) : null, renderedPhotos.map((photo) => (_jsx(PhotoCard, { photo: photo, isSelected: selectedSet.has(photo.id), onToggle: togglePhoto, onUpdatePhoto: handleUpdatePhoto, onFocus: handleFocus, onPreview: handlePreview, onContextMenu: handleContextMenu, onExternalDragStart: handleCardExternalDragStart, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, canExternalDrag: typeof window !== "undefined"
+                }, onScroll: handleGridScroll, children: [visiblePhotoIds.length === 0 ? (_jsx("div", { className: "photo-selector__empty", children: _jsx("p", { children: "Nessuna foto trovata." }) })) : (_jsxs(_Fragment, { children: [topSpacerHeight > 0 ? (_jsx("div", { className: "photo-selector__virtual-spacer", style: { height: topSpacerHeight }, "aria-hidden": "true" })) : null, renderedPhotos.map((photo) => (_jsx(PhotoCard, { photo: photo, isSelected: selectedSet.has(photo.id), onToggle: togglePhoto, onUpdatePhoto: handleUpdatePhoto, onAfterShortcutClassification: advanceFocusToNext, onFocus: handleFocus, onPreview: handlePreview, onContextMenu: handleContextMenu, onExternalDragStart: handleCardExternalDragStart, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, canExternalDrag: typeof window !== "undefined"
                                     && typeof window.filexDesktop?.startDragOut === "function"
                                     && (selectedSet.has(photo.id)
                                         ? canStartDesktopDragOut
@@ -2233,7 +2296,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                                                 setNewBatchCustomLabelName("");
                                                 setNewBatchCustomLabelTone(DEFAULT_CUSTOM_LABEL_TONE);
                                                 setNewBatchCustomLabelShortcut(null);
-                                            }, disabled: !newBatchCustomLabelName.trim(), children: "Aggiungi e assegna" })] })] })] }) })), _jsx(PhotoQuickPreviewModal, { asset: previewAssetWithUrl, assets: visiblePreviewAssets, thumbnailProfile: selectedThumbnailProfile, startZoomed: previewStartsZoomed, customLabelsCatalog: customLabelsCatalog, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, onClose: closePreview, onSelectAsset: handlePreviewAssetSelection, onUpdateAsset: (assetId, changes) => updatePhoto(assetId, changes) }), isSettingsPanelOpen && (_jsxs("aside", { className: "photo-selector__settings-flyout", "aria-label": "Impostazioni workspace", children: [_jsxs("div", { className: "photo-selector__settings-header", children: [_jsx("span", { children: "Impostazioni" }), _jsx("button", { type: "button", className: "icon-button", onClick: () => setIsSettingsPanelOpen(false), title: "Chiudi", children: "\u2715" })] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Nomi etichette colore" }), COLOR_LABELS.map((label) => (_jsxs("label", { className: "photo-selector__settings-color-row", children: [_jsx("span", { className: `asset-color-dot asset-color-dot--${label}` }), _jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: customColorNames[label], onChange: (e) => handleColorNameChange(label, e.target.value), placeholder: COLOR_LABEL_NAMES[label] })] }, label)))] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Etichette personalizzate" }), _jsx("p", { className: "photo-selector__settings-empty", children: "Crea etichette tipo \"Album sposi\", \"Trailer\", \"Dettagli sala\". Ora puoi scegliere subito colore e tasto rapido, assegnarle alla selezione e ritrovarle sia in UI sia nei sidecar XMP." }), _jsx("div", { className: "photo-selector__label-grid", children: customLabelsCatalog.map((label) => (_jsxs("div", { className: "photo-selector__label-editor", children: [_jsx("span", { className: `photo-selector__label-chip photo-selector__label-chip--${resolveCustomLabelTone(label)}`, children: "Tag" }), _jsx("input", { type: "text", defaultValue: label, onBlur: (event) => {
+                                            }, disabled: !newBatchCustomLabelName.trim(), children: "Aggiungi e assegna" })] })] })] }) })), _jsx(PhotoQuickPreviewModal, { asset: previewAssetWithUrl, assets: visiblePreviewAssets, thumbnailProfile: selectedThumbnailProfile, startZoomed: previewStartsZoomed, customLabelsCatalog: customLabelsCatalog, customLabelColors: customLabelColors, customLabelShortcuts: customLabelShortcuts, autoAdvanceOnAction: autoAdvanceOnAction, onClose: closePreview, onSelectAsset: handlePreviewAssetSelection, onUpdateAsset: (assetId, changes) => updatePhoto(assetId, changes) }), isSettingsPanelOpen && (_jsxs("aside", { className: "photo-selector__settings-flyout", "aria-label": "Impostazioni workspace", children: [_jsxs("div", { className: "photo-selector__settings-header", children: [_jsx("span", { children: "Impostazioni" }), _jsx("button", { type: "button", className: "icon-button", onClick: () => setIsSettingsPanelOpen(false), title: "Chiudi", children: "\u2715" })] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Nomi etichette colore" }), COLOR_LABELS.map((label) => (_jsxs("label", { className: "photo-selector__settings-color-row", children: [_jsx("span", { className: `asset-color-dot asset-color-dot--${label}` }), _jsx("input", { type: "text", className: "photo-selector__settings-color-input", value: customColorNames[label], onChange: (e) => handleColorNameChange(label, e.target.value), placeholder: COLOR_LABEL_NAMES[label] })] }, label)))] }), _jsxs("div", { className: "photo-selector__settings-section", children: [_jsx("h4", { className: "photo-selector__settings-section-title", children: "Etichette personalizzate" }), _jsx("p", { className: "photo-selector__settings-empty", children: "Crea etichette tipo \"Album sposi\", \"Trailer\", \"Dettagli sala\". Ora puoi scegliere subito colore e tasto rapido, assegnarle alla selezione e ritrovarle sia in UI sia nei sidecar XMP." }), _jsx("div", { className: "photo-selector__label-grid", children: customLabelsCatalog.map((label) => (_jsxs("div", { className: "photo-selector__label-editor", children: [_jsx("span", { className: `photo-selector__label-chip photo-selector__label-chip--${resolveCustomLabelTone(label)}`, children: "Tag" }), _jsx("input", { type: "text", defaultValue: label, onBlur: (event) => {
                                                 const nextValue = normalizeCustomLabelName(event.target.value);
                                                 if (!nextValue) {
                                                     event.currentTarget.value = label;
@@ -2289,7 +2352,7 @@ export function PhotoSelector({ photos, metadataVersion, sourceFolderPath = "", 
                                             ? "balanced"
                                             : event.target.value === "fast"
                                                 ? "fast"
-                                                : "ultra-fast"), children: [_jsx("option", { value: "ultra-fast", children: "Ultra Fast" }), _jsx("option", { value: "balanced", children: "Bilanciato" }), _jsx("option", { value: "fast", children: "Fast contact sheet" })] })] }), _jsxs("label", { className: "photo-selector__settings-color-row", style: { alignItems: "center" }, children: [_jsx("span", { style: { fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }, children: "Sort cache" }), _jsx("input", { type: "checkbox", checked: isSortCacheEnabled, onChange: (event) => handleSortCacheEnabledChange(event.target.checked) })] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Profilo attivo: ", selectedThumbnailProfile === "ultra-fast"
+                                                : "ultra-fast"), children: [_jsx("option", { value: "ultra-fast", children: "Ultra Fast" }), _jsx("option", { value: "balanced", children: "Bilanciato" }), _jsx("option", { value: "fast", children: "Fast contact sheet" })] })] }), _jsxs("label", { className: "photo-selector__settings-color-row", style: { alignItems: "center" }, children: [_jsx("span", { style: { fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }, children: "Sort cache" }), _jsx("input", { type: "checkbox", checked: isSortCacheEnabled, onChange: (event) => handleSortCacheEnabledChange(event.target.checked) })] }), _jsxs("label", { className: "photo-selector__settings-color-row", style: { alignItems: "center" }, title: "Quando attivo, dopo una scorciatoia di rating/pick/colore/etichetta il focus si sposta sulla foto successiva (flusso Photo Mechanic).", children: [_jsx("span", { style: { fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }, children: "Auto-advance" }), _jsx("input", { type: "checkbox", checked: autoAdvanceOnAction, onChange: (event) => handleAutoAdvanceChange(event.target.checked) })] }), _jsxs("p", { className: "photo-selector__settings-empty", style: { marginTop: "0.3rem" }, children: ["Profilo attivo: ", selectedThumbnailProfile === "ultra-fast"
                                         ? "Ultra Fast"
                                         : selectedThumbnailProfile === "fast"
                                             ? "Fast contact sheet"

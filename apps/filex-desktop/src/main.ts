@@ -1389,6 +1389,64 @@ async function createMainWindow(): Promise<void> {
   }
 }
 
+// Safety net globale: cattura errori asincroni non gestiti dagli IPC handler
+// (es. fs.promises.* che rejectano dentro un .handle senza try/catch) e
+// converte la condizione "process Main crash" in "evento loggato + dialog".
+// Senza questi guard, una promise rejected in un handler chiude l'app intera.
+// In dev (NON packaged) lasciamo crashare per evidenziare i bug, attiviamo
+// il safety net solo in produzione.
+const isPackagedBuild = app.isPackaged;
+process.on("unhandledRejection", (reason) => {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  const stack = reason instanceof Error ? reason.stack : undefined;
+  try {
+    writeBootLog(`Unhandled promise rejection: ${stack ?? message}`);
+  } catch {
+    // ignore boot-log failures
+  }
+  try {
+    logDesktopEvent({
+      channel: "app",
+      level: "error",
+      message: "Unhandled promise rejection",
+      details: stack ?? message,
+    });
+  } catch {
+    // logDesktopEvent può fallire se lo store non è ancora pronto
+  }
+  if (!isPackagedBuild) {
+    // In dev: rilancia in modo asincrono così Electron mostra l'overlay e
+    // possiamo fixare il bug invece di nasconderlo.
+    setImmediate(() => {
+      throw reason instanceof Error ? reason : new Error(String(reason));
+    });
+  }
+});
+
+process.on("uncaughtException", (error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  try {
+    writeBootLog(`Uncaught exception: ${stack ?? message}`);
+  } catch {
+    // ignore
+  }
+  try {
+    logDesktopEvent({
+      channel: "app",
+      level: "error",
+      message: "Uncaught exception",
+      details: stack ?? message,
+    });
+  } catch {
+    // ignore
+  }
+  if (!isPackagedBuild) {
+    // In dev: lascia crashare per non mascherare bug.
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+});
+
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     writeBootLog(`App ready for tool ${requestedTool.id}`);

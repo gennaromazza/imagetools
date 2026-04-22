@@ -17,7 +17,7 @@ function areLabelArraysEqual(left, right) {
     }
     return true;
 }
-export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onFocus, onPreview, onContextMenu, onExternalDragStart, canExternalDrag = false, customLabelColors = {}, customLabelShortcuts = {}, disableNonEssentialUi = false, batchPulseToken = 0, batchPulseKind = null, editable, }) {
+export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, onUpdatePhoto, onAfterShortcutClassification, onFocus, onPreview, onContextMenu, onExternalDragStart, canExternalDrag = false, customLabelColors = {}, customLabelShortcuts = {}, disableNonEssentialUi = false, batchPulseToken = 0, batchPulseKind = null, editable, }) {
     notePhotoCardRender(photo.id);
     const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
     const rating = getAssetRating(photo);
@@ -157,7 +157,7 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
         };
     }, []);
     const orientationIcon = photo.orientation === "vertical" ? "↕" : photo.orientation === "square" ? "◻" : "↔";
-    return (_jsxs("div", { className: `photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : ""}${disableNonEssentialUi ? " photo-card--scroll-lite" : ""}`, role: "option", tabIndex: 0, "aria-selected": isSelected, "aria-label": `${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`, "aria-keyshortcuts": "Enter Space 1 2 3 4 5 P X U", ref: cardRef, "data-preview-asset-id": photo.id, draggable: canExternalDrag, onClick: (event) => onToggle(photo.id, event), onDragStart: (event) => {
+    return (_jsxs("div", { className: `photo-card ${isSelected ? "photo-card--selected" : ""} ${colorLabel ? `photo-card--color-${colorLabel}` : (customLabels.length > 0 ? `photo-card--custom-${customLabelColors[customLabels[0]] ?? "sand"}` : "")}${disableNonEssentialUi ? " photo-card--scroll-lite" : ""}`, role: "option", tabIndex: 0, "aria-selected": isSelected, "aria-label": `${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`, "aria-keyshortcuts": "Enter Space 1 2 3 4 5 P X U", ref: cardRef, "data-preview-asset-id": photo.id, draggable: canExternalDrag, onClick: (event) => onToggle(photo.id, event), onDragStart: (event) => {
             if (!canExternalDrag || !onExternalDragStart) {
                 event.preventDefault();
                 return;
@@ -210,6 +210,7 @@ export const PhotoCard = memo(function PhotoCard({ photo, isSelected, onToggle, 
                 if (changes) {
                     event.preventDefault();
                     onUpdatePhoto(photo.id, changes);
+                    onAfterShortcutClassification?.(photo.id);
                 }
             }
         }, children: [_jsxs("div", { ref: wrapperRef, className: "photo-card__image-wrapper", children: [previewUrl ? (_jsx("img", { src: previewUrl, alt: photo.fileName, className: "photo-card__image", loading: "lazy", decoding: "async" })) : (_jsx("div", { className: `photo-card__image photo-card__image--placeholder${raw ? " photo-card__image--placeholder-raw" : ""}`, children: _jsx("span", { className: "photo-card__placeholder-icon", children: raw ? "📷" : orientationIcon }) })), _jsxs("div", { className: "photo-card__top-badges", children: [_jsx("span", { className: `asset-pick-badge asset-pick-badge--${pickStatus}`, children: PICK_STATUS_LABELS[pickStatus] }), colorLabel ? (_jsx("span", { className: `asset-color-dot asset-color-dot--${colorLabel}`, title: COLOR_LABEL_NAMES[colorLabel] })) : (_jsx("span", { className: "photo-card__empty-color", children: "Nessun colore" }))] }), _jsx("div", { className: "photo-card__select-badge", children: _jsx("div", { className: `photo-card__check ${isSelected ? "photo-card__check--active" : ""}`, children: isSelected ? "✓" : "" }) }), raw ? (_jsx("span", { className: "asset-pick-badge asset-raw-badge photo-card__raw-badge", children: "RAW" })) : null, _jsx("div", { className: feedback?.kind === "star"

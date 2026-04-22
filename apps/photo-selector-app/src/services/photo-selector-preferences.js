@@ -15,6 +15,7 @@ export const DEFAULT_PHOTO_SELECTOR_PREFERENCES = {
     cardSize: 160,
     rootFolderPathOverride: "",
     preferredEditorPath: "",
+    autoAdvanceOnAction: true,
 };
 let preferencesCache = { ...DEFAULT_PHOTO_SELECTOR_PREFERENCES };
 export function normalizeCustomLabelName(value) {
@@ -53,9 +54,15 @@ export function normalizeCustomLabelTone(value) {
             return DEFAULT_CUSTOM_LABEL_TONE;
     }
 }
+function isPlainRecord(value) {
+    // Object.entries lancia su null/undefined e si comporta in modo strano su
+    // array o tipi primitivi. Usato per blindare i valori letti dal DB nel caso
+    // di drift di schema o file di preferenze toccati a mano.
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 export function normalizeCustomLabelColors(catalog, colors) {
     const normalized = {};
-    if (!colors) {
+    if (!colors || !isPlainRecord(colors)) {
         for (const label of catalog) {
             normalized[label] = DEFAULT_CUSTOM_LABEL_TONE;
         }
@@ -80,7 +87,8 @@ export function normalizeCustomLabelShortcut(value) {
 export function normalizeCustomLabelShortcuts(catalog, shortcuts) {
     const normalized = {};
     const usedShortcuts = new Set();
-    const shortcutEntries = Object.entries(shortcuts ?? {});
+    const safeShortcuts = isPlainRecord(shortcuts) ? shortcuts : {};
+    const shortcutEntries = Object.entries(safeShortcuts);
     for (const label of catalog) {
         const match = shortcutEntries.find(([key]) => key.toLocaleLowerCase() === label.toLocaleLowerCase());
         const nextShortcut = normalizeCustomLabelShortcut(match?.[1]);
@@ -93,8 +101,34 @@ export function normalizeCustomLabelShortcuts(catalog, shortcuts) {
     }
     return normalized;
 }
+function clampCardSize(value) {
+    return Math.max(100, Math.min(320, Number(value ?? DEFAULT_PHOTO_SELECTOR_PREFERENCES.cardSize)));
+}
+function isValidFilterPreset(value) {
+    if (!value || typeof value !== "object") {
+        return false;
+    }
+    const candidate = value;
+    return (typeof candidate.id === "string"
+        && typeof candidate.name === "string"
+        && Boolean(candidate.filters)
+        && typeof candidate.filters === "object");
+}
+function clonePreferences(preferences) {
+    return {
+        ...preferences,
+        colorNames: { ...preferences.colorNames },
+        filterPresets: preferences.filterPresets.map((preset) => ({
+            ...preset,
+            filters: { ...preset.filters },
+        })),
+        customLabelsCatalog: [...preferences.customLabelsCatalog],
+        customLabelColors: { ...preferences.customLabelColors },
+        customLabelShortcuts: { ...preferences.customLabelShortcuts },
+    };
+}
 export function loadPhotoSelectorPreferences() {
-    return preferencesCache;
+    return clonePreferences(preferencesCache);
 }
 function parseStoredPreferences(parsed) {
     const customLabelsCatalog = normalizeCustomLabelsCatalog(parsed?.customLabelsCatalog);
@@ -103,7 +137,9 @@ function parseStoredPreferences(parsed) {
             ...COLOR_LABEL_NAMES,
             ...(parsed?.colorNames ?? {}),
         },
-        filterPresets: Array.isArray(parsed?.filterPresets) ? parsed.filterPresets : [],
+        filterPresets: Array.isArray(parsed?.filterPresets)
+            ? parsed.filterPresets.filter(isValidFilterPreset)
+            : [],
         customLabelsCatalog,
         customLabelColors: normalizeCustomLabelColors(customLabelsCatalog, parsed?.customLabelColors),
         customLabelShortcuts: normalizeCustomLabelShortcuts(customLabelsCatalog, parsed?.customLabelShortcuts),
@@ -113,13 +149,14 @@ function parseStoredPreferences(parsed) {
                 ? "fast"
                 : "ultra-fast",
         sortCacheEnabled: parsed?.sortCacheEnabled !== false,
-        cardSize: Math.max(100, Math.min(320, Number(parsed?.cardSize ?? DEFAULT_PHOTO_SELECTOR_PREFERENCES.cardSize))),
+        cardSize: clampCardSize(parsed?.cardSize),
         rootFolderPathOverride: typeof parsed?.rootFolderPathOverride === "string"
             ? parsed.rootFolderPathOverride
             : "",
         preferredEditorPath: typeof parsed?.preferredEditorPath === "string"
             ? parsed.preferredEditorPath
             : "",
+        autoAdvanceOnAction: parsed?.autoAdvanceOnAction !== false,
     };
 }
 function toDesktopPreferences(preferences) {
@@ -134,6 +171,7 @@ function toDesktopPreferences(preferences) {
         cardSize: preferences.cardSize,
         rootFolderPathOverride: preferences.rootFolderPathOverride,
         preferredEditorPath: preferences.preferredEditorPath,
+        autoAdvanceOnAction: preferences.autoAdvanceOnAction,
     };
 }
 export async function hydratePhotoSelectorPreferences() {
@@ -167,9 +205,12 @@ export function savePhotoSelectorPreferences(preferences) {
                     ? "ultra-fast"
                     : current.thumbnailProfile,
         sortCacheEnabled: preferences.sortCacheEnabled ?? current.sortCacheEnabled,
-        cardSize: preferences.cardSize ?? current.cardSize,
+        cardSize: preferences.cardSize !== undefined ? clampCardSize(preferences.cardSize) : current.cardSize,
         rootFolderPathOverride: preferences.rootFolderPathOverride ?? current.rootFolderPathOverride,
         preferredEditorPath: preferences.preferredEditorPath ?? current.preferredEditorPath,
+        autoAdvanceOnAction: preferences.autoAdvanceOnAction !== undefined
+            ? preferences.autoAdvanceOnAction
+            : current.autoAdvanceOnAction,
     };
     next.customLabelColors = normalizeCustomLabelColors(next.customLabelsCatalog, {
         ...current.customLabelColors,

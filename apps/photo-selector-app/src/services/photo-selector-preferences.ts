@@ -97,12 +97,19 @@ export function normalizeCustomLabelTone(value: string | undefined): CustomLabel
   }
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  // Object.entries lancia su null/undefined e si comporta in modo strano su
+  // array o tipi primitivi. Usato per blindare i valori letti dal DB nel caso
+  // di drift di schema o file di preferenze toccati a mano.
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export function normalizeCustomLabelColors(
   catalog: string[],
   colors: Record<string, string> | undefined,
 ): Record<string, CustomLabelTone> {
   const normalized: Record<string, CustomLabelTone> = {};
-  if (!colors) {
+  if (!colors || !isPlainRecord(colors)) {
     for (const label of catalog) {
       normalized[label] = DEFAULT_CUSTOM_LABEL_TONE;
     }
@@ -137,7 +144,8 @@ export function normalizeCustomLabelShortcuts(
 ): Record<string, CustomLabelShortcut | null> {
   const normalized: Record<string, CustomLabelShortcut | null> = {};
   const usedShortcuts = new Set<CustomLabelShortcut>();
-  const shortcutEntries = Object.entries(shortcuts ?? {});
+  const safeShortcuts = isPlainRecord(shortcuts) ? shortcuts : {};
+  const shortcutEntries = Object.entries(safeShortcuts);
 
   for (const label of catalog) {
     const match = shortcutEntries.find(([key]) => key.toLocaleLowerCase() === label.toLocaleLowerCase());
