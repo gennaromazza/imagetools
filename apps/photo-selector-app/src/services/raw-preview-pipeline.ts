@@ -4,7 +4,7 @@ interface QueueItem {
   id: string;
   buffer: ArrayBuffer;
   priority: number;
-  resolve: (buffer: ArrayBuffer | null) => void;
+  resolvers: Array<(buffer: ArrayBuffer | null) => void>;
 }
 
 export class RawPreviewPipeline {
@@ -12,38 +12,52 @@ export class RawPreviewPipeline {
   private busyWorkers = new Set<Worker>();
   private queue: QueueItem[] = [];
   private currentJobByWorker = new Map<Worker, QueueItem>();
+  private readonly poolSize: number;
 
   constructor() {
     if (typeof Worker === "undefined") {
+      this.poolSize = 0;
       return;
     }
 
     const cores = navigator.hardwareConcurrency || 4;
-    const poolSize = Math.max(2, Math.min(cores - 1, 6));
+    this.poolSize = Math.max(2, Math.min(cores - 1, 6));
 
-    for (let index = 0; index < poolSize; index += 1) {
-      const worker = new Worker(
-        new URL("../workers/raw-preview-worker.ts", import.meta.url),
-        { type: "module" },
-      );
-
-      worker.onmessage = (event: MessageEvent<RawPreviewResult | RawPreviewError>) => {
-        this.handleWorkerMessage(worker, event.data);
-      };
-      worker.onerror = () => {
-        this.handleWorkerCrash(worker);
-      };
-
-      this.workers.push(worker);
+    for (let index = 0; index < this.poolSize; index += 1) {
+      this.spawnWorker();
     }
+  }
+
+  private spawnWorker(): Worker {
+    const worker = new Worker(
+      new URL("../workers/raw-preview-worker.ts", import.meta.url),
+      { type: "module" },
+    );
+
+    worker.onmessage = (event: MessageEvent<RawPreviewResult | RawPreviewError>) => {
+      this.handleWorkerMessage(worker, event.data);
+    };
+    worker.onerror = () => {
+      this.handleWorkerCrash(worker);
+    };
+
+    this.workers.push(worker);
+    return worker;
   }
 
   extract(id: string, buffer: ArrayBuffer, priority = 0): Promise<ArrayBuffer | null> {
     return new Promise<ArrayBuffer | null>((resolve) => {
-      const existing = this.queue.find((item) => item.id === id);
-      if (existing) {
-        existing.priority = Math.min(existing.priority, priority);
+      const queued = this.queue.find((item) => item.id === id);
+      if (queued) {
+        queued.priority = Math.min(queued.priority, priority);
+        queued.resolvers.push(resolve);
         this.sortQueue();
+        return;
+      }
+
+      const inFlight = this.findInFlightJob(id);
+      if (inFlight) {
+        inFlight.resolvers.push(resolve);
         return;
       }
 
@@ -51,7 +65,7 @@ export class RawPreviewPipeline {
         id,
         buffer,
         priority,
-        resolve,
+        resolvers: [resolve],
       });
       this.sortQueue();
       this.dispatch();
@@ -66,6 +80,15 @@ export class RawPreviewPipeline {
 
     queued.priority = Math.min(queued.priority, priority);
     this.sortQueue();
+  }
+
+  private findInFlightJob(id: string): QueueItem | null {
+    for (const job of this.currentJobByWorker.values()) {
+      if (job.id === id) {
+        return job;
+      }
+    }
+    return null;
   }
 
   private sortQueue(): void {
@@ -103,6 +126,16 @@ export class RawPreviewPipeline {
     return job;
   }
 
+  private resolveJob(job: QueueItem, value: ArrayBuffer | null): void {
+    for (const resolver of job.resolvers) {
+      try {
+        resolver(value);
+      } catch {
+        // Ignore resolver errors to avoid leaving siblings unresolved.
+      }
+    }
+  }
+
   private handleWorkerMessage(worker: Worker, data: RawPreviewResult | RawPreviewError): void {
     const job = this.releaseWorker(worker);
     if (!job) {
@@ -110,9 +143,9 @@ export class RawPreviewPipeline {
     }
 
     if ("error" in data) {
-      job.resolve(null);
+      this.resolveJob(job, null);
     } else {
-      job.resolve(data.jpegBuffer);
+      this.resolveJob(job, data.jpegBuffer);
     }
 
     this.dispatch();
@@ -121,8 +154,28 @@ export class RawPreviewPipeline {
   private handleWorkerCrash(worker: Worker): void {
     const job = this.releaseWorker(worker);
     if (job) {
-      job.resolve(null);
+      this.resolveJob(job, null);
     }
+
+    // Remove the crashed worker and try to spawn a replacement so the pool stays healthy.
+    const index = this.workers.indexOf(worker);
+    if (index >= 0) {
+      this.workers.splice(index, 1);
+    }
+    try {
+      worker.terminate();
+    } catch {
+      // Already dead.
+    }
+
+    if (typeof Worker !== "undefined" && this.workers.length < this.poolSize) {
+      try {
+        this.spawnWorker();
+      } catch {
+        // If spawning fails (e.g. resource exhaustion), continue with a smaller pool.
+      }
+    }
+
     this.dispatch();
   }
 }

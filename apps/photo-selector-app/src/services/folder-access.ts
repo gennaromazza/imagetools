@@ -131,6 +131,7 @@ function invalidateOnDemandPreview(assetId: string): void {
 
 export interface OnDemandPreviewOptions {
   maxDimension?: number;
+  signal?: AbortSignal;
 }
 
 function getOnDemandPreviewCacheKey(assetId: string, options: OnDemandPreviewOptions = {}): string {
@@ -439,6 +440,9 @@ export async function createOnDemandPreviewAsync(
   }
 
   const generation = previewGeneration;
+  // NOTA: il task è condiviso tra più caller via `onDemandPreviewPromiseStore`,
+  // quindi NON deve dipendere dal signal di un singolo caller. Il signal è
+  // applicato sopra (sentinel pre-task) e dopo (filtro lato caller).
   const task = (async () => {
     try {
       const preview = await window.filexDesktop!.getPreview(absolutePath, {
@@ -446,6 +450,9 @@ export async function createOnDemandPreviewAsync(
         sourceFileKey: assetSourceFileKeyStore.get(assetId),
       });
       if (!preview) {
+        return null;
+      }
+      if (generation !== previewGeneration) {
         return null;
       }
 
@@ -470,7 +477,15 @@ export async function createOnDemandPreviewAsync(
       onDemandPreviewPromiseStore.delete(cacheKey);
     }
   });
-  return task;
+
+  // Permette al singolo caller di "dimenticare" il risultato se il proprio
+  // signal è stato abortito, senza propagare l'abort agli altri sottoscrittori
+  // della stessa promise condivisa.
+  const signal = options.signal;
+  if (!signal) {
+    return task;
+  }
+  return task.then((value) => (signal.aborted ? null : value));
 }
 
 export async function warmOnDemandPreviewCache(

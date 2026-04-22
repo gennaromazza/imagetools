@@ -60,6 +60,7 @@ import {
   saveCachedPhotoSortOrder,
 } from "../services/photo-sort-cache";
 import { logDesktopEvent } from "../services/desktop-store";
+import { useToast } from "./ToastProvider";
 
 interface PhotoSelectorProps {
   photos: ImageAsset[];
@@ -139,7 +140,11 @@ const KNOWN_EDITOR_PRESET_PATHS = [
 
 function sanitizeEditorExecutablePath(value: string): string {
   const normalized = value.trim().replace(/^"+|"+$/g, "");
-  return /^[a-zA-Z]:/.test(normalized) ? normalized.replace(/\//g, "\\") : normalized;
+  // Windows local (C:\...) o UNC (\\server\share\...) → normalizza i separatori.
+  if (/^[a-zA-Z]:/.test(normalized) || /^\\\\/.test(normalized)) {
+    return normalized.replace(/\//g, "\\");
+  }
+  return normalized;
 }
 
 function isValidDesktopEditorPath(value: string): boolean {
@@ -149,6 +154,11 @@ function isValidDesktopEditorPath(value: string): boolean {
   }
 
   if (/^[a-zA-Z]:\\/.test(normalized)) {
+    return /\.(exe|bat|cmd)$/i.test(normalized);
+  }
+
+  // UNC: \\server\share\...\file.exe
+  if (/^\\\\[^\\]+\\[^\\]+\\/.test(normalized)) {
     return /\.(exe|bat|cmd)$/i.test(normalized);
   }
 
@@ -425,6 +435,7 @@ export function PhotoSelector({
   onRamBudgetPresetChange,
   onRelaunch,
 }: PhotoSelectorProps) {
+  const { addToast } = useToast();
   const [sortBy, setSortBy] = useState<SortMode>("name");
   const [createdAtSortDirection, setCreatedAtSortDirection] = useState<CreatedAtSortDirection>("desc");
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
@@ -2047,9 +2058,9 @@ export function PhotoSelector({
     () => selectedAbsolutePaths.join("\n"),
     [selectedAbsolutePaths],
   );
+  const dragOutCheckSeqRef = useRef(0);
 
   useEffect(() => {
-    let active = true;
     if (
       typeof window === "undefined" ||
       typeof window.filexDesktop?.canStartDragOut !== "function"
@@ -2058,10 +2069,16 @@ export function PhotoSelector({
       return;
     }
 
-    if (selectedAbsolutePaths.length === 0) {
+    // Snapshot stabile della selezione per questa esecuzione: evita race in cui
+    // il signature cambia mentre la promise è in volo.
+    const requestedCount = selectedIds.length;
+    const pathsSnapshot = selectedAbsolutePaths.slice();
+
+    if (pathsSnapshot.length === 0) {
+      dragOutCheckSeqRef.current += 1;
       setDesktopDragOutCheck({
         ok: false,
-        requestedCount: selectedIds.length,
+        requestedCount,
         validCount: 0,
         allowedCount: 0,
         reason: "empty-selection",
@@ -2070,21 +2087,24 @@ export function PhotoSelector({
       return;
     }
 
-    void window.filexDesktop.canStartDragOut(selectedAbsolutePaths).then((result) => {
-      if (!active) {
+    dragOutCheckSeqRef.current += 1;
+    const seq = dragOutCheckSeqRef.current;
+
+    void window.filexDesktop.canStartDragOut(pathsSnapshot).then((result) => {
+      if (seq !== dragOutCheckSeqRef.current) {
         return;
       }
 
       setDesktopDragOutCheck(result);
     }).catch(() => {
-      if (!active) {
+      if (seq !== dragOutCheckSeqRef.current) {
         return;
       }
 
       setDesktopDragOutCheck({
         ok: false,
-        requestedCount: selectedIds.length,
-        validCount: selectedAbsolutePaths.length,
+        requestedCount,
+        validCount: pathsSnapshot.length,
         allowedCount: 0,
         reason: "invalid-paths",
         message: "Impossibile validare il drag esterno in questa sessione.",
@@ -2092,9 +2112,12 @@ export function PhotoSelector({
     });
 
     return () => {
-      active = false;
+      // Invalidate this in-flight check so a late resolve cannot overwrite a
+      // newer state computed for a different selection.
+      dragOutCheckSeqRef.current += 1;
     };
-  }, [selectedAbsolutePaths, selectedAbsolutePathsSignature, selectedIds.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAbsolutePathsSignature]);
 
   const canStartDesktopDragOut = Boolean(
     desktopDragOutCheck?.ok
@@ -2204,7 +2227,7 @@ export function PhotoSelector({
       return;
     }
 
-    let active = true;
+    const abortController = new AbortController();
     const cachedPreviewUrl = getCachedOnDemandPreviewUrl(previewAsset.id, {
       maxDimension: QUICK_PREVIEW_FIT_MAX_DIMENSION,
     });
@@ -2225,8 +2248,9 @@ export function PhotoSelector({
 
     createOnDemandPreviewAsync(previewAsset.id, 0, {
       maxDimension: QUICK_PREVIEW_FIT_MAX_DIMENSION,
+      signal: abortController.signal,
     }).then((url) => {
-      if (!active) return;
+      if (abortController.signal.aborted) return;
       if (url) {
         previewUrlRef.current = { id: previewAsset.id, url, sourceFileKey: previewAsset.sourceFileKey };
         setAsyncPreviewUrl(url);
@@ -2234,7 +2258,7 @@ export function PhotoSelector({
     });
 
     return () => {
-      active = false;
+      abortController.abort();
     };
   }, [previewAsset]);
 
@@ -2419,9 +2443,9 @@ export function PhotoSelector({
   const handleCopyFiles = useCallback(async (ids: string[]) => {
     const result = await copyAssetsToFolder(ids);
     if (result === "ok") pushTimelineEntry(`${ids.length === 1 ? "1 file" : `${ids.length} file`} copiato/i in cartella`);
-    else if (result === "partial") alert("Copia parziale: alcuni file non sono stati copiati.");
-    else if (result === "error") alert("Errore durante la copia. Alcuni file potrebbero non essere stati copiati.");
-  }, [pushTimelineEntry]);
+    else if (result === "partial") addToast("Copia parziale: alcuni file non sono stati copiati.", "warning");
+    else if (result === "error") addToast("Errore durante la copia. Alcuni file potrebbero non essere stati copiati.", "error");
+  }, [addToast, pushTimelineEntry]);
 
   const handleMoveFiles = useCallback(async (ids: string[]) => {
     const { result, movedIds } = await moveAssetsToFolder(ids);
@@ -2432,17 +2456,17 @@ export function PhotoSelector({
       onSelectionChange(selectedIds.filter((id) => !movedSet.has(id)));
       pushTimelineEntry(`${movedIds.length === 1 ? "1 file" : `${movedIds.length} file`} spostato/i in cartella`);
     }
-    if (result === "partial") alert("Spostamento parziale: alcuni file non sono stati mossi.");
-    if (result === "error") alert("Spostamento non riuscito.");
-  }, [onPhotosChange, onSelectionChange, photos, pushTimelineEntry, selectedIds]);
+    if (result === "partial") addToast("Spostamento parziale: alcuni file non sono stati mossi.", "warning");
+    if (result === "error") addToast("Spostamento non riuscito.", "error");
+  }, [addToast, onPhotosChange, onSelectionChange, photos, pushTimelineEntry, selectedIds]);
 
   const handleSaveAs = useCallback(async (ids: string[]) => {
     for (const id of ids) {
       const result = await saveAssetAs(id);
-      if (result === "error") { alert("Errore durante il salvataggio del file."); break; }
+      if (result === "error") { addToast("Errore durante il salvataggio del file.", "error"); break; }
       if (result === "cancelled") break;
     }
-  }, []);
+  }, [addToast]);
 
   const handleCopyPath = useCallback((ids: string[], root: string) => {
     const absolutePaths = getAssetAbsolutePaths(ids);
@@ -2460,7 +2484,10 @@ export function PhotoSelector({
   const handleOpenWithEditor = useCallback((ids: string[]) => {
     const editor = sanitizeEditorExecutablePath(preferredEditorPath);
     if (!isValidDesktopEditorPath(editor)) {
-      alert("Nessun editor associato valido. Imposta il percorso completo dell'editor (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).");
+      addToast(
+        "Nessun editor associato valido. Imposta il percorso completo dell'editor (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).",
+        "error",
+      );
       return;
     }
 
@@ -2476,103 +2503,61 @@ export function PhotoSelector({
         });
 
     if (absolutePaths.length === 0) {
-      alert("Nessun percorso disponibile per le foto selezionate.");
+      addToast("Nessun percorso disponibile per le foto selezionate.", "warning");
       return;
     }
 
     if (
-      typeof window !== "undefined" &&
-      typeof window.filexDesktop?.sendToEditor === "function"
+      typeof window === "undefined" ||
+      typeof window.filexDesktop?.sendToEditor !== "function"
     ) {
-      void window.filexDesktop.sendToEditor(editor, absolutePaths).then((result) => {
-        if (!result?.ok) {
-          const fallbackMessage = result?.status === "invalid-editor"
-            ? "Editor non trovato o percorso non valido."
-            : result?.status === "partial"
-              ? "Solo una parte della selezione ha percorsi validi per l'editor."
-              : result?.status === "timeout"
-                ? "L'editor non ha risposto in tempo."
-                : "Impossibile aprire l'editor esterno.";
-          alert(result?.error ?? fallbackMessage);
-          void logDesktopEvent({
-            channel: "editor",
-            level: "warn",
-            message: "Invio a editor non riuscito",
-            details: JSON.stringify({
-              requestedCount: result?.requestedCount ?? absolutePaths.length,
-              launchedCount: result?.launchedCount ?? 0,
-              status: result?.status ?? "launch-failed",
-            }),
-          });
-          return;
-        }
+      // App desktop: il bridge nativo deve essere disponibile. Se non lo è,
+      // siamo in uno stato non supportato — niente più fallback BAT lato web.
+      addToast(
+        "Bridge desktop non disponibile: impossibile aprire l'editor esterno in questa sessione.",
+        "error",
+      );
+      return;
+    }
 
-        pushTimelineEntry(
-          `${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} aperta/e nell'editor`
-        );
+    void window.filexDesktop.sendToEditor(editor, absolutePaths).then((result) => {
+      if (!result?.ok) {
+        const fallbackMessage = result?.status === "invalid-editor"
+          ? "Editor non trovato o percorso non valido."
+          : result?.status === "partial"
+            ? "Solo una parte della selezione ha percorsi validi per l'editor."
+            : result?.status === "timeout"
+              ? "L'editor non ha risposto in tempo."
+              : "Impossibile aprire l'editor esterno.";
+        addToast(result?.error ?? fallbackMessage, "error");
         void logDesktopEvent({
           channel: "editor",
-          level: "info",
-          message: "Invio a editor completato",
+          level: "warn",
+          message: "Invio a editor non riuscito",
           details: JSON.stringify({
-            requestedCount: result.requestedCount,
-            launchedCount: result.launchedCount,
-            status: result.status,
+            requestedCount: result?.requestedCount ?? absolutePaths.length,
+            launchedCount: result?.launchedCount ?? 0,
+            status: result?.status ?? "launch-failed",
           }),
         });
+        return;
+      }
+
+      pushTimelineEntry(
+        `${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} aperta/e nell'editor`
+      );
+      void logDesktopEvent({
+        channel: "editor",
+        level: "info",
+        message: "Invio a editor completato",
+        details: JSON.stringify({
+          requestedCount: result.requestedCount,
+          launchedCount: result.launchedCount,
+          status: result.status,
+        }),
       });
-      return;
-    }
-
-    if (!effectiveRootFolderPath.trim()) {
-      alert("Imposta prima la Cartella radice in Impostazioni > Editor esterno.");
-      return;
-    }
-
-    const escapeForBatch = (value: string) => value.replace(/"/g, '""');
-    const lines: string[] = [
-      "@echo off",
-      "setlocal",
-      "",
-      "REM Script generato da Photo Tools - Apri con editor",
-    ];
-
-    lines.push(`set "EDITOR=${escapeForBatch(editor)}"`);
-    lines.push("if not exist \"%EDITOR%\" (");
-    lines.push("  echo Editor non trovato: %EDITOR%");
-    lines.push("  echo Controlla il percorso in Impostazioni > Editor esterno");
-    lines.push("  pause");
-    lines.push("  exit /b 1");
-    lines.push(")");
-    lines.push("");
-    for (const filePath of absolutePaths) {
-      lines.push(`start "" "%EDITOR%" "${escapeForBatch(filePath)}"`);
-    }
-
-    lines.push("");
-    lines.push("exit /b 0");
-
-    const content = lines.join("\r\n");
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const fileName = `open-with-editor-${stamp}.bat`;
-    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-
-    void navigator.clipboard.writeText(absolutePaths.join("\n"));
-    pushTimelineEntry(
-      `${absolutePaths.length === 1 ? "1 foto" : `${absolutePaths.length} foto`} pronta/e per apri con editor (BAT scaricato)`
-    );
-    alert(
-      `Ho scaricato ${fileName}. Eseguilo per aprire ${absolutePaths.length} foto in editor.`
-    );
-  }, [effectiveRootFolderPath, preferredEditorPath, pushTimelineEntry]);
+    });
+  }, [addToast, effectiveRootFolderPath, preferredEditorPath, pushTimelineEntry]);
 
   // Detect external edits (Photoshop overwrite) and refresh in-app previews automatically.
   useEffect(() => {
@@ -2743,8 +2728,10 @@ export function PhotoSelector({
       }
 
       if (sep < 0) {
-        alert(
-          "Selezionato file: " + selected.name + "\n\nIl percorso assoluto non e' stato rilevato automaticamente. Usa uno dei preset Photoshop o incolla il percorso completo (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe)."
+        addToast(
+          `Selezionato file: ${selected.name}. Il percorso assoluto non è stato rilevato automaticamente. Usa uno dei preset Photoshop o incolla il percorso completo (es. C:\\Program Files\\Adobe\\...\\Photoshop.exe).`,
+          "warning",
+          8000,
         );
       }
 
@@ -2755,7 +2742,7 @@ export function PhotoSelector({
 
     document.body.appendChild(input);
     input.click();
-  }, [preferredEditorPath, setPreferredEditorPathPersisted]);
+  }, [addToast, preferredEditorPath, setPreferredEditorPathPersisted]);
 
   const handleApplyDesktopThumbnailCachePath = useCallback(() => {
     const nextPath = desktopThumbnailCachePathInput.trim();

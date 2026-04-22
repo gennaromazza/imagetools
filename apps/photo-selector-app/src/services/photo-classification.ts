@@ -84,9 +84,13 @@ export function matchesPhotoFilters(asset: ImageAsset, filters: PhotoFilterState
   if (rf !== "any") {
     const rating = getAssetRating(asset);
     if (rf.endsWith("+")) {
-      if (rating < Number(rf.slice(0, -1))) return false;
+      const threshold = Number(rf.slice(0, -1));
+      if (!Number.isFinite(threshold)) return true;
+      if (rating < threshold) return false;
     } else {
-      if (rating !== Number(rf)) return false;
+      const exact = Number(rf);
+      if (!Number.isFinite(exact)) return true;
+      if (rating !== exact) return false;
     }
   }
 
@@ -130,23 +134,23 @@ export function resolvePhotoClassificationShortcut(
     return { pickStatus: "unmarked" };
   }
 
-  if (usesModifier && (input.code === "Digit0" || normalizedKey === "0")) {
+  if (usesModifier && (input.code === "Digit0" || input.code === "Numpad0" || normalizedKey === "0")) {
     return { colorLabel: null };
   }
 
-  if (usesModifier && input.code === "Digit6") {
+  if (usesModifier && (input.code === "Digit6" || input.code === "Numpad6")) {
     return { colorLabel: "red" };
   }
 
-  if (usesModifier && input.code === "Digit7") {
+  if (usesModifier && (input.code === "Digit7" || input.code === "Numpad7")) {
     return { colorLabel: "yellow" };
   }
 
-  if (usesModifier && input.code === "Digit8") {
+  if (usesModifier && (input.code === "Digit8" || input.code === "Numpad8")) {
     return { colorLabel: "green" };
   }
 
-  if (usesModifier && input.code === "Digit9") {
+  if (usesModifier && (input.code === "Digit9" || input.code === "Numpad9")) {
     return { colorLabel: "blue" };
   }
 

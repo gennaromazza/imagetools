@@ -1285,6 +1285,13 @@ img {
   position: relative;
 }
 
+/* Durante uno scroll/hover veloce disabilitiamo le transizioni a cascata
+   per evitare l'effetto "ondulazione" sulle card sotto il puntatore. */
+.photo-card--scroll-lite,
+.photo-card--scroll-lite .photo-card__image-wrapper {
+  transition: none !important;
+}
+
 .photo-card[draggable="true"] {
   cursor: grab;
 }
@@ -1303,6 +1310,21 @@ img {
   border-radius: 6px;
   overflow: hidden;
   transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+  /* Paint isolation: contain repaints (image decode, badge updates, flash
+     animations) within the card so neighbouring cards never re-render in
+     response. Combined with translateZ(0) the wrapper is promoted to its
+     own GPU layer, eliminating the diffuse "shimmer" perceived on dense
+     grids with many photos. The wrapper has a fixed height, so containing
+     layout/paint is safe (no impact on virtualizer row math). */
+  contain: layout paint;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.photo-card__image {
+  /* Hint the compositor so image swaps (placeholder → thumbnail) don't
+     trigger a full-page repaint. */
+  will-change: opacity;
 }
 
 .photo-card:hover .photo-card__image-wrapper {
@@ -1361,7 +1383,9 @@ img {
 .photo-card__image--placeholder-raw {
   background:
     linear-gradient(135deg, rgba(40, 48, 58, 0.7), rgba(50, 58, 68, 0.9));
-  animation: raw-pulse 2s ease-in-out infinite;
+  /* Pulse molto più lento e con escursione di opacità minima per evitare
+     l'effetto "schermo che respira" quando ci sono tante RAW in attesa. */
+  animation: raw-pulse 4.5s ease-in-out infinite;
 }
 
 .photo-card__image--placeholder-raw .photo-card__placeholder-icon {
@@ -1371,7 +1395,13 @@ img {
 
 @keyframes raw-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.75; }
+  50% { opacity: 0.94; }
+}
+
+/* In scroll-lite mode (durante uno scroll attivo) congeliamo del tutto
+   l'animazione di pulse per togliere ogni fonte di micro-movimento. */
+.photo-card--scroll-lite .photo-card__image--placeholder-raw {
+  animation: none;
 }
 
 /* ── Selection checkbox (top-right, small) ──────────────────────────── */
