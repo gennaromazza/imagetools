@@ -1041,6 +1041,21 @@ export function App() {
             continue;
           }
 
+          // Se l'asset aveva già una blob URL (es. da cache disco) e la pipeline
+          // produce una nuova URL diversa, revochiamo la vecchia per evitare
+          // che il browser tenga in memoria thumbnail orfani per tutta la sessione.
+          if (
+            asset.thumbnailUrl
+            && asset.thumbnailUrl !== patch.thumbnailUrl
+            && asset.thumbnailUrl.startsWith("blob:")
+          ) {
+            try {
+              URL.revokeObjectURL(asset.thumbnailUrl);
+            } catch {
+              // ignore: revokeObjectURL non lancia in pratica
+            }
+          }
+
           next[index] = {
             ...asset,
             ...patch,
