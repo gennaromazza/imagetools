@@ -61,6 +61,7 @@ interface PhotoQuickPreviewModalProps {
   customLabelsCatalog?: string[];
   customLabelColors?: Record<string, CustomLabelTone>;
   customLabelShortcuts?: Record<string, CustomLabelShortcut | null>;
+  autoAdvanceOnAction?: boolean;
   onClose: () => void;
   onSelectAsset?: (assetId: string) => void;
   onAddToPage?: (pageId: string, assetId: string) => void;
@@ -217,6 +218,7 @@ export function PhotoQuickPreviewModal({
   customLabelsCatalog = [],
   customLabelColors = {},
   customLabelShortcuts = {},
+  autoAdvanceOnAction = true,
   onClose,
   onSelectAsset,
   onAddToPage,
@@ -224,6 +226,7 @@ export function PhotoQuickPreviewModal({
   onUpdateAsset
 }: PhotoQuickPreviewModalProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const mainImageRef = useRef<HTMLImageElement | null>(null);
   const dockStripRef = useRef<HTMLDivElement | null>(null);
   const dockScrollRafRef = useRef<number | null>(null);
   const pendingDockViewportRef = useRef<VirtualStripViewport | null>(null);
@@ -1513,19 +1516,48 @@ export function PhotoQuickPreviewModal({
   }, []);
 
   const applyZoom = useCallback((nextZoom: number) => {
-    const clampedZoom = Math.max(1, Math.min(4, Number(nextZoom.toFixed(2))));
+    // Cap massimo alzato a 12x per supportare zoom 1:1 pixel-perfect
+    // su RAW ad alta risoluzione (es. 6000px su viewport da 1500px = 4x).
+    const clampedZoom = Math.max(1, Math.min(12, Number(nextZoom.toFixed(2))));
     setZoomLevel(clampedZoom);
     const nextPanOffset = clampPan(panOffset.x, panOffset.y, clampedZoom);
     pendingPanOffsetRef.current = nextPanOffset;
     setPanOffset(nextPanOffset);
   }, [clampPan, panOffset.x, panOffset.y]);
 
+  const computeOneToOneZoom = useCallback((): number | null => {
+    // Calcola lo zoom necessario per visualizzare l'immagine al 100% pixel:
+    // naturalWidth (pixel reali) / clientWidth (dimensione "fit" attuale).
+    // Quando zoomLevel è 1, clientWidth è la dimensione fit reale.
+    // Ritorna null se l'immagine non è ancora caricata, così il chiamante
+    // può evitare di "saltare" su uno zoom arbitrario.
+    const img = mainImageRef.current;
+    if (!img || !img.naturalWidth || !img.clientWidth) {
+      return null;
+    }
+    const ratio = img.naturalWidth / img.clientWidth;
+    if (!Number.isFinite(ratio) || ratio <= 1.05) {
+      return 1;
+    }
+    return Math.min(12, Number(ratio.toFixed(2)));
+  }, []);
+
   const toggleZoom = useCallback(() => {
-    const nextZoom = zoomLevel > 1.05 ? 1 : 2.2;
+    // Z alterna tra "fit" e "100% pixel-perfect" (focus check).
+    // Se l'immagine non è ancora caricata (naturalWidth=0), non fare nulla:
+    // un fallback arbitrario (es. 2.2x) darebbe un falso "100%" e disorienterebbe.
+    let nextZoom: number;
+    if (zoomLevel > 1.05) {
+      nextZoom = 1;
+    } else {
+      const target = computeOneToOneZoom();
+      if (target === null) return;
+      nextZoom = target;
+    }
     pendingPanOffsetRef.current = { x: 0, y: 0 };
     setPanOffset({ x: 0, y: 0 });
     applyZoom(nextZoom);
-  }, [applyZoom, zoomLevel]);
+  }, [applyZoom, computeOneToOneZoom, zoomLevel]);
 
   const panBy = useCallback((deltaX: number, deltaY: number) => {
     if (compareMode || zoomLevel <= 1.05) {
@@ -1694,6 +1726,12 @@ export function PhotoQuickPreviewModal({
         event.preventDefault();
         onUpdateAsset(asset.id, shortcutChanges);
         announceClassificationFeedback(shortcutChanges);
+        if (autoAdvanceOnAction) {
+          // Avanza alla foto successiva dopo la classificazione, lasciando
+          // un tick per consentire al feedback visivo di partire.
+          window.setTimeout(() => handleNavigate("next"), 0);
+        }
+        return;
       }
     };
 
@@ -1703,6 +1741,7 @@ export function PhotoQuickPreviewModal({
     activePage,
     activePageCanAccept,
     asset,
+    autoAdvanceOnAction,
     compareMode,
     customLabelByShortcut,
     handleAssignToActivePage,
@@ -2566,6 +2605,7 @@ export function PhotoQuickPreviewModal({
             </div>
           ) : displayPreviewUrl ? (
             <img
+              ref={mainImageRef}
               src={displayPreviewUrl}
               alt={asset.fileName}
               className={

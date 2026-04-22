@@ -35,6 +35,7 @@ export interface PhotoSelectorPreferences {
   cardSize: number;
   rootFolderPathOverride: string;
   preferredEditorPath: string;
+  autoAdvanceOnAction: boolean;
 }
 
 export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
@@ -48,6 +49,7 @@ export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
   cardSize: 160,
   rootFolderPathOverride: "",
   preferredEditorPath: "",
+  autoAdvanceOnAction: true,
 };
 
 let preferencesCache: PhotoSelectorPreferences = { ...DEFAULT_PHOTO_SELECTOR_PREFERENCES };
@@ -225,6 +227,7 @@ function parseStoredPreferences(
     preferredEditorPath: typeof parsed?.preferredEditorPath === "string"
       ? parsed.preferredEditorPath
       : "",
+    autoAdvanceOnAction: parsed?.autoAdvanceOnAction !== false,
   };
 }
 
@@ -240,6 +243,7 @@ function toDesktopPreferences(preferences: PhotoSelectorPreferences): DesktopPho
     cardSize: preferences.cardSize,
     rootFolderPathOverride: preferences.rootFolderPathOverride,
     preferredEditorPath: preferences.preferredEditorPath,
+    autoAdvanceOnAction: preferences.autoAdvanceOnAction,
   };
 }
 
@@ -283,6 +287,10 @@ export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorP
     cardSize: preferences.cardSize !== undefined ? clampCardSize(preferences.cardSize) : current.cardSize,
     rootFolderPathOverride: preferences.rootFolderPathOverride ?? current.rootFolderPathOverride,
     preferredEditorPath: preferences.preferredEditorPath ?? current.preferredEditorPath,
+    autoAdvanceOnAction:
+      preferences.autoAdvanceOnAction !== undefined
+        ? preferences.autoAdvanceOnAction
+        : current.autoAdvanceOnAction,
   };
 
   next.customLabelColors = normalizeCustomLabelColors(

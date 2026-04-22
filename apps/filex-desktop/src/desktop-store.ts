@@ -36,6 +36,7 @@ const DEFAULT_DESKTOP_PREFERENCES: DesktopPhotoSelectorPreferences = {
   customLabelShortcuts: {},
   thumbnailProfile: "ultra-fast",
   sortCacheEnabled: true,
+  autoAdvanceOnAction: true,
   cardSize: 160,
   rootFolderPathOverride: "",
   preferredEditorPath: "",

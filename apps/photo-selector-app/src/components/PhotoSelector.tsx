@@ -453,6 +453,7 @@ export function PhotoSelector({
   const [filterPresets, setFilterPresets] = useState<PhotoFilterPreset[]>([]);
   const [selectedThumbnailProfile, setSelectedThumbnailProfile] = useState<ThumbnailProfile>(thumbnailProfile);
   const [isSortCacheEnabled, setIsSortCacheEnabled] = useState<boolean>(sortCacheEnabled);
+  const [autoAdvanceOnAction, setAutoAdvanceOnAction] = useState<boolean>(true);
   const [newPresetName, setNewPresetName] = useState("");
   const [newCustomLabelName, setNewCustomLabelName] = useState("");
   const [newCustomLabelTone, setNewCustomLabelTone] = useState<CustomLabelTone>(DEFAULT_CUSTOM_LABEL_TONE);
@@ -576,6 +577,23 @@ export function PhotoSelector({
     [pickFilter, ratingFilter, colorFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
   );
 
+  // Statistiche aggregate sull'intera cartella corrente: utili come "vital signs"
+  // sempre visibili in cima alla griglia, indipendentemente da selezione/filtri.
+  const folderStats = useMemo(() => {
+    const total = photos.length;
+    if (total === 0) return null;
+    let picked = 0;
+    let rejected = 0;
+    for (const p of photos) {
+      const status = getAssetPickStatus(p);
+      if (status === "picked") picked += 1;
+      else if (status === "rejected") rejected += 1;
+    }
+    const decided = picked + rejected;
+    const completionPct = Math.round((decided / total) * 100);
+    return { total, picked, rejected, completionPct };
+  }, [photos]);
+
   const selectionStats = useMemo(() => {
     if (selectedIds.length === 0) return null;
     const sel = selectedIds
@@ -655,6 +673,7 @@ export function PhotoSelector({
       setCustomLabelShortcuts(preferences.customLabelShortcuts);
       setSelectedThumbnailProfile(preferences.thumbnailProfile);
       setIsSortCacheEnabled(preferences.sortCacheEnabled);
+      setAutoAdvanceOnAction(preferences.autoAdvanceOnAction);
       setCardSize(preferences.cardSize);
       setRootFolderPathOverride(preferences.rootFolderPathOverride);
       setPreferredEditorPath(sanitizeEditorExecutablePath(preferences.preferredEditorPath));
@@ -932,6 +951,16 @@ export function PhotoSelector({
     onSortCacheEnabledChange?.(nextEnabled);
     pushTimelineEntry(nextEnabled ? "Sort cache attivata" : "Sort cache disattivata");
   }, [onSortCacheEnabledChange, pushTimelineEntry]);
+
+  const handleAutoAdvanceChange = useCallback((nextEnabled: boolean) => {
+    setAutoAdvanceOnAction(nextEnabled);
+    savePhotoSelectorPreferences({ autoAdvanceOnAction: nextEnabled });
+    pushTimelineEntry(
+      nextEnabled
+        ? "Avanzamento automatico dopo classificazione: ON"
+        : "Avanzamento automatico dopo classificazione: OFF",
+    );
+  }, [pushTimelineEntry]);
 
   const updateCustomLabelsForIds = useCallback((
     targetIds: string[],
@@ -1750,6 +1779,30 @@ export function PhotoSelector({
     }
   }, [contextMenuState]);
 
+  // Sposta il focus alla foto successiva (o alla precedente se in fondo).
+  // Usato dall'auto-advance dopo una classificazione tramite scorciatoia,
+  // per replicare il flusso "Photo Mechanic" — un tasto = una decisione + avanti.
+  const advanceFocusToNext = useCallback(
+    (currentId: string) => {
+      if (!autoAdvanceOnAction || visiblePhotoIds.length === 0) return;
+      const currentIndex = visiblePhotoIndexById.get(currentId);
+      if (currentIndex === undefined || currentIndex < 0) return;
+      const nextIndex = currentIndex < visiblePhotoIds.length - 1
+        ? currentIndex + 1
+        : currentIndex; // resta sull'ultima se non c'è successiva
+      const nextId = visiblePhotoIds[nextIndex];
+      if (!nextId || nextId === currentId) return;
+      setFocusedPhotoId(nextId);
+      scrollPhotoIntoView(nextId);
+      requestAnimationFrame(() => {
+        const grid = gridRef.current;
+        const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${nextId}"]`);
+        if (el) el.focus();
+      });
+    },
+    [autoAdvanceOnAction, scrollPhotoIntoView, visiblePhotoIds, visiblePhotoIndexById],
+  );
+
   // Consolidated keyboard handler: Escape chain + arrow navigation
   const handleWindowKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -1787,6 +1840,11 @@ export function PhotoSelector({
           if (targetIds.length > 0) {
             event.preventDefault();
             toggleCustomLabelForIds(targetIds, shortcutLabel);
+            // Auto-advance: dopo una custom label da scorciatoia, sposta il focus
+            // alla foto successiva (solo se la pref è attiva e c'è un focus singolo).
+            if (focusedPhotoId && targetIds.length === 1 && targetIds[0] === focusedPhotoId) {
+              advanceFocusToNext(focusedPhotoId);
+            }
             return;
           }
         }
@@ -1858,6 +1916,7 @@ export function PhotoSelector({
       }
     },
     [
+      advanceFocusToNext,
       contextMenuState,
       focusedPhotoId,
       hasActiveFilters,
@@ -2757,6 +2816,20 @@ export function PhotoSelector({
     <div className="photo-selector">
       {/* ── FILTER BAR ── */}
       <div className="photo-selector__filter-bar">
+        {folderStats && (
+          <div
+            className="photo-selector__folder-stats"
+            title={`Totale ${folderStats.total} · Picked ${folderStats.picked} · Scartate ${folderStats.rejected} · Decise ${folderStats.completionPct}%`}
+          >
+            <span className="photo-selector__folder-stats-total">{folderStats.total} foto</span>
+            <span className="photo-selector__folder-stats-sep">·</span>
+            <span className="photo-selector__folder-stats-picked">{folderStats.picked} pick</span>
+            <span className="photo-selector__folder-stats-sep">·</span>
+            <span className="photo-selector__folder-stats-rejected">{folderStats.rejected} scart.</span>
+            <span className="photo-selector__folder-stats-sep">·</span>
+            <span className="photo-selector__folder-stats-progress">{folderStats.completionPct}% decise</span>
+          </div>
+        )}
         {hasActiveFilters && (
           <div className="selector-filters__reset">
             <button
@@ -3200,6 +3273,7 @@ export function PhotoSelector({
                 isSelected={selectedSet.has(photo.id)}
                 onToggle={togglePhoto}
                 onUpdatePhoto={handleUpdatePhoto}
+                onAfterShortcutClassification={advanceFocusToNext}
                 onFocus={handleFocus}
                 onPreview={handlePreview}
                 onContextMenu={handleContextMenu}
@@ -3500,6 +3574,7 @@ export function PhotoSelector({
         customLabelsCatalog={customLabelsCatalog}
         customLabelColors={customLabelColors}
         customLabelShortcuts={customLabelShortcuts}
+        autoAdvanceOnAction={autoAdvanceOnAction}
         onClose={closePreview}
         onSelectAsset={handlePreviewAssetSelection}
         onUpdateAsset={(assetId, changes) => updatePhoto(assetId, changes)}
@@ -3827,6 +3902,18 @@ export function PhotoSelector({
                 type="checkbox"
                 checked={isSortCacheEnabled}
                 onChange={(event) => handleSortCacheEnabledChange(event.target.checked)}
+              />
+            </label>
+            <label
+              className="photo-selector__settings-color-row"
+              style={{ alignItems: "center" }}
+              title="Quando attivo, dopo una scorciatoia di rating/pick/colore/etichetta il focus si sposta sulla foto successiva (flusso Photo Mechanic)."
+            >
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Auto-advance</span>
+              <input
+                type="checkbox"
+                checked={autoAdvanceOnAction}
+                onChange={(event) => handleAutoAdvanceChange(event.target.checked)}
               />
             </label>
             <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>

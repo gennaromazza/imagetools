@@ -248,6 +248,7 @@ export interface DesktopPhotoSelectorPreferences {
   rootFolderPathOverride: string;
   preferredEditorPath: string;
   ramBudgetPreset: DesktopRamBudgetPreset;
+  autoAdvanceOnAction: boolean;
 }
 
 export interface DesktopPersistedState {
