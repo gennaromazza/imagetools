@@ -1,14 +1,16 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getDesktopToolOrDefault } from "./dist-electron/tool-manifest.js";
+import { getDesktopToolOrDefault } from "./.output/electron/tool-manifest.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
-const iconBasePath = join(__dirname, "build", "branding", requestedTool.id);
-const nsisIncludePath = join(__dirname, "build", "generated-installer-hooks.nsh");
+const outputRoot = join(__dirname, ".output");
+const iconBasePath = join(outputRoot, "branding", requestedTool.id);
+const nsisIncludePath = join(outputRoot, "generated-installer-hooks.nsh");
 const releaseChannel = process.env.FILEX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
 const shouldCodeSign = process.env.FILEX_CODE_SIGNING === "1";
+const outputDirectory = process.env.FILEX_OUTPUT_DIR || join(".output", "releases");
 
 function escapeNsisString(value) {
   return value.replace(/\$/g, "$$").replace(/"/g, '$\\"');
@@ -17,6 +19,11 @@ function escapeNsisString(value) {
 function buildNsisIncludeContent(tool) {
   const displayNames = Array.from(
     new Set([tool.productName, ...(tool.legacyUpgradeDisplayNames ?? [])].filter(Boolean)),
+  );
+  const processNames = Array.from(
+    new Set([tool.executableName, ...(tool.legacyExecutableNames ?? [])]
+      .filter(Boolean)
+      .map((name) => name.toLowerCase().endsWith(".exe") ? name : `${name}.exe`)),
   );
   const shortcutIconPath = `$INSTDIR\\resources\\branding\\${tool.id}.ico`;
   const shouldInstallExplorerContextMenu = tool.id === "photo-selector-app";
@@ -29,6 +36,9 @@ function buildNsisIncludeContent(tool) {
 
   const pushLines = displayNames
     .map((displayName) => `  Push "${escapeNsisString(displayName)}"\n  Call uninstallByDisplayName`)
+    .join("\n");
+  const processPushLines = processNames
+    .map((processName) => `  Push "${escapeNsisString(processName)}"\n  Call terminateProcessByName`)
     .join("\n");
   const contextMenuInstallLines = shouldInstallExplorerContextMenu
     ? `  WriteRegStr HKCU "${explorerContextMenuKey}" "" "${explorerContextMenuLabel}"
@@ -55,8 +65,20 @@ function buildNsisIncludeContent(tool) {
 
   return `!ifndef BUILD_UNINSTALLER
 !macro customInit
+  Call terminateLegacyProcesses
+  Sleep 300
   Call uninstallLegacyVersions
 !macroend
+
+Function terminateLegacyProcesses
+${processPushLines || "  ; No legacy process names configured."}
+FunctionEnd
+
+Function terminateProcessByName
+  Exch $0
+  ExecWait 'taskkill /IM "$0" /F /T'
+  Pop $0
+FunctionEnd
 
 Function uninstallLegacyVersions
 ${pushLines || "  ; No legacy display names configured."}
@@ -160,7 +182,7 @@ ${contextMenuUninstallLines}
 `;
 }
 
-mkdirSync(join(__dirname, "build"), { recursive: true });
+mkdirSync(outputRoot, { recursive: true });
 writeFileSync(nsisIncludePath, buildNsisIncludeContent(requestedTool), "utf8");
 
 export default {
@@ -177,10 +199,11 @@ export default {
   npmRebuild: false,
   buildDependenciesFromSource: false,
   directories: {
-    output: "release",
+    app: __dirname,
+    output: outputDirectory,
   },
   files: [
-    "dist-electron/**/*",
+    ".output/electron/**/*",
     "package.json",
   ],
   extraResources: [

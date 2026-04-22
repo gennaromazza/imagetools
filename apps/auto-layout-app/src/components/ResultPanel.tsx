@@ -23,7 +23,7 @@ export function ResultPanel({ result }: ResultPanelProps) {
           <strong>{result.summary.residualImages}</strong>
         </div>
         <div className="stat-card">
-          <span>Gia' impaginate</span>
+          <span>Gia impaginate</span>
           <strong>{usedImages}</strong>
         </div>
       </div>

@@ -3,7 +3,7 @@ import type { BrowserWindow as BrowserWindowInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { writeFile as writeFileAsync } from "node:fs/promises";
-import { basename, join, parse, resolve } from "node:path";
+import { basename, dirname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   DesktopAiSidecarStatus,
@@ -209,11 +209,12 @@ if (process.platform === "win32") {
 }
 
 function resolveWindowIcon(): string {
+  const extension = process.platform === "win32" ? "ico" : "png";
   if (app.isPackaged) {
-    return join(process.resourcesPath, "branding", `${requestedTool.id}.png`);
+    return join(process.resourcesPath, "branding", `${requestedTool.id}.${extension}`);
   }
 
-  return resolve(app.getAppPath(), "build", "branding", `${requestedTool.id}.png`);
+  return resolve(app.getAppPath(), ".output", "branding", `${requestedTool.id}.${extension}`);
 }
 
 function resolveRendererEntry(): string {
@@ -263,6 +264,39 @@ function resolveValidFilePath(candidatePath: string): string | null {
   }
 }
 
+function isInternalLaunchDirectory(candidatePath: string): boolean {
+  const normalizedCandidate = sanitizeDesktopPath(candidatePath).toLowerCase();
+  if (!normalizedCandidate) {
+    return true;
+  }
+
+  const internalRoots = new Set(
+    [
+      dirname(process.execPath),
+      process.cwd(),
+      app.getAppPath(),
+      process.resourcesPath,
+    ]
+      .map((value) => sanitizeDesktopPath(value).toLowerCase())
+      .filter(Boolean),
+  );
+
+  return internalRoots.has(normalizedCandidate);
+}
+
+function resolveWorkingDirectoryOpenFolderPath(workingDirectory?: string | null): string | null {
+  if (typeof workingDirectory !== "string" || !workingDirectory.trim()) {
+    return null;
+  }
+
+  const directoryPath = resolveValidDirectoryPath(workingDirectory);
+  if (!directoryPath || isInternalLaunchDirectory(directoryPath)) {
+    return null;
+  }
+
+  return directoryPath;
+}
+
 function normalizeUint8Array(payload: unknown): Uint8Array {
   if (payload instanceof Uint8Array) {
     return payload;
@@ -292,7 +326,7 @@ async function loadArchivioFlowModule(): Promise<any> {
   archivioFlowModulePromise = (async () => {
     try {
       process.env.ARCHIVIO_FLOW_DATA_DIR = getArchivioFlowDataDir();
-      const modulePath = resolve(app.getAppPath(), "dist-electron", "archivio-flow-server", "index.js");
+      const modulePath = resolve(app.getAppPath(), ".output", "electron", "archivio-flow-server", "index.js");
       return await import(pathToFileURL(modulePath).href);
     } catch (error) {
       archivioFlowModulePromise = null;
@@ -314,7 +348,7 @@ async function ensureImagePartyFrameServer(): Promise<void> {
     try {
       writeBootLog("Image Party Frame server bootstrap start");
       process.env.IMAGE_PARTY_FRAME_DATA_DIR = getImagePartyFrameDataDir();
-      const modulePath = resolve(app.getAppPath(), "dist-electron", "image-party-frame-server", "server", "index.js");
+      const modulePath = resolve(app.getAppPath(), ".output", "electron", "image-party-frame-server", "server", "index.js");
       writeBootLog(`Image Party Frame server import ${modulePath}`);
       await import(pathToFileURL(modulePath).href);
       writeBootLog("Image Party Frame server bootstrap completed");
@@ -388,7 +422,7 @@ async function getArchivioSdCardsDesktop(): Promise<Array<{
   return result.sdCards;
 }
 
-function extractOpenFolderPathFromArgv(argv: string[]): string | null {
+function extractOpenFolderPathFromArgv(argv: string[], workingDirectory?: string | null): string | null {
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (typeof value !== "string") {
@@ -416,7 +450,7 @@ function extractOpenFolderPathFromArgv(argv: string[]): string | null {
     }
   }
 
-  return null;
+  return resolveWorkingDirectoryOpenFolderPath(workingDirectory);
 }
 
 function extractOpenProjectPathFromArgv(argv: string[]): string | null {
@@ -468,7 +502,6 @@ function deliverOpenFolderRequest(folderPath: string): void {
     message: "Richiesta apertura cartella inviata al renderer",
     details: folderPath,
   });
-  pendingOpenFolderPath = null;
 }
 
 function deliverOpenProjectRequest(projectPath: string): void {
@@ -515,11 +548,11 @@ if (!hasSingleInstanceLock) {
   app.quit();
 } else {
   writeEarlyBootLog("Single instance lock acquired");
-  pendingOpenFolderPath = extractOpenFolderPathFromArgv(process.argv);
+  pendingOpenFolderPath = extractOpenFolderPathFromArgv(process.argv, process.cwd());
   pendingOpenProjectPath = extractOpenProjectPathFromArgv(process.argv);
 
-  app.on("second-instance", (_event, argv) => {
-    queueOpenFolderPath(extractOpenFolderPathFromArgv(argv));
+  app.on("second-instance", (_event, argv, workingDirectory) => {
+    queueOpenFolderPath(extractOpenFolderPathFromArgv(argv, workingDirectory));
     queueOpenProjectPath(extractOpenProjectPathFromArgv(argv));
     void ensureMainWindow();
     focusMainWindow();
@@ -954,9 +987,25 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:open-folder", () => openFolderDesktop());
   ipcMain.handle("filex:reopen-folder", (_event, rootPath: string) => reopenFolderDesktop(rootPath));
   ipcMain.handle("filex:consume-pending-open-folder-path", () => {
-    const folderPath = pendingOpenFolderPath;
-    pendingOpenFolderPath = null;
-    return folderPath;
+    return pendingOpenFolderPath;
+  });
+  ipcMain.handle("filex:acknowledge-open-folder-request", (_event, folderPath?: string | null) => {
+    const normalizedFolderPath = typeof folderPath === "string" ? sanitizeDesktopPath(folderPath) : "";
+    const normalizedPendingPath = pendingOpenFolderPath ? sanitizeDesktopPath(pendingOpenFolderPath) : "";
+
+    if (!pendingOpenFolderPath) {
+      return;
+    }
+
+    if (!normalizedFolderPath || normalizedFolderPath === normalizedPendingPath) {
+      logDesktopEvent({
+        channel: "folder-open",
+        level: "info",
+        message: "Richiesta apertura cartella confermata dal renderer",
+        details: pendingOpenFolderPath,
+      });
+      pendingOpenFolderPath = null;
+    }
   });
   ipcMain.handle("filex:mark-open-folder-request-ready", (event) => {
     const windowForEvent = BrowserWindow.fromWebContents(event.sender);
@@ -1393,7 +1442,7 @@ async function createMainWindow(): Promise<void> {
     backgroundColor: "#181d1a",
     icon: resolveWindowIcon(),
     webPreferences: {
-      preload: join(app.getAppPath(), "dist-electron", "preload.js"),
+      preload: join(app.getAppPath(), ".output", "electron", "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,

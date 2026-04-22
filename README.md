@@ -14,7 +14,7 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 - `apps/image-party-frame` — Batch framing, crop live, export eventi
 - `apps/IMAGE ID PRINT` — Foto documento pronte per la stampa (AI/sidecar)
 - `apps/archivio-flow` — Import, archiviazione e organizzazione lavori da SD
-- `apps/photo-selector-app` — Selezione e classificazione foto avanzata
+- `apps/photo-selector-app` — Image Select Pro: selezione e classificazione foto avanzata
 
 ## Launcher Windows
 
@@ -23,7 +23,7 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 - `avvia-image-party-frame.bat`: avvia direttamente Image Party Frame
 - `avvia-image-id-print.bat`: avvia Image ID Print (con AI sidecar)
 - `avvia-archivio-flow.bat`: avvia Archivio Flow
-- `avvia-photo-selector.bat`: avvia Photo Selector
+- `avvia-photo-selector.bat`: avvia Image Select Pro
 
 ## Visione Suite FileX
 

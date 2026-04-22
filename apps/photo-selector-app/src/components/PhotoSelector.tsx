@@ -33,7 +33,14 @@ import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
   DEFAULT_PHOTO_FILTERS,
+  matchesFileTypeFilter,
+  type FileTypeFilter,
+  JPEG_EXTENSIONS,
+  RAW_EXTENSIONS,
   getAssetColorLabel,
+  getAssetFileExtension,
+  getAssetGroupingKey,
+  getAssetGroupingPriority,
   getAssetPickStatus,
   getAssetRating,
   matchesPhotoFilters,
@@ -117,6 +124,21 @@ type ColorFilter = "all" | ColorLabel;
 type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg";
 type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>;
 type BatchPulseKind = "dot" | "label";
+type PreviewFeedbackKind = "star" | "pill" | "dot" | "label";
+type PreviewSyncFeedback = {
+  token: number;
+  assetIds: string[];
+  kind: PreviewFeedbackKind;
+  label: string;
+  tone?: CustomLabelTone;
+  labels?: string[];
+};
+type PhotoGroupInfo = {
+  size: number;
+  rawCount: number;
+  jpegCount: number;
+  leaderId: string | null;
+};
 const CUSTOM_LABEL_TONES: CustomLabelTone[] = ["sand", "rose", "green", "blue", "purple", "slate"];
 
 const GRID_GAP_PX = 12;
@@ -455,6 +477,7 @@ export function PhotoSelector({
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
+  const [fileTypeFilter, setFileTypeFilter] = useState<FileTypeFilter>("all");
   const [formatFilter, setFormatFilter] = useState<FormatFilter>("all");
   const [customLabelFilter, setCustomLabelFilter] = useState<string>("all");
   const [folderFilter, setFolderFilter] = useState<string>("all");
@@ -541,6 +564,10 @@ export function PhotoSelector({
     kind: BatchPulseKind;
     ids: Set<string>;
   } | null>(null);
+  const previewFeedbackTokenRef = useRef(0);
+  const cardFeedbackTokenRef = useRef(0);
+  const [previewSyncFeedback, setPreviewSyncFeedback] = useState<PreviewSyncFeedback | null>(null);
+  const [cardSyncFeedback, setCardSyncFeedback] = useState<PreviewSyncFeedback | null>(null);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const effectiveRootFolderPath = useMemo(
     () => rootFolderPathOverride.trim() || sourceFolderPath.trim(),
@@ -583,6 +610,8 @@ export function PhotoSelector({
         pickFilter !== "all",
         ratingFilter !== "any",
         colorFilter !== "all",
+        fileTypeFilter !== "all",
+        formatFilter !== "all",
         formatFilter !== "all",
         customLabelFilter !== "all",
         folderFilter !== "all",
@@ -590,7 +619,7 @@ export function PhotoSelector({
         timeClusterFilter !== "all",
         searchQuery !== "",
       ].filter(Boolean).length,
-    [pickFilter, ratingFilter, colorFilter, formatFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
+    [pickFilter, ratingFilter, colorFilter, fileTypeFilter, formatFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
   );
 
   // Statistiche aggregate sull'intera cartella corrente: utili come "vital signs"
@@ -626,6 +655,8 @@ export function PhotoSelector({
     pickFilter !== "all" ||
     ratingFilter !== "any" ||
     colorFilter !== "all" ||
+    fileTypeFilter !== "all" ||
+    formatFilter !== "all" ||
     formatFilter !== "all" ||
     customLabelFilter !== "all" ||
     folderFilter !== "all" ||
@@ -675,6 +706,70 @@ export function PhotoSelector({
       batchPulseClearTimerRef.current = null;
     }, 1200);
   }, []);
+  const emitPreviewSyncFeedback = useCallback((feedback: Omit<PreviewSyncFeedback, "token"> | null) => {
+    if (!feedback || feedback.assetIds.length === 0) {
+      return;
+    }
+    previewFeedbackTokenRef.current += 1;
+    setPreviewSyncFeedback({
+      ...feedback,
+      token: previewFeedbackTokenRef.current,
+    });
+  }, []);
+  const emitCardSyncFeedback = useCallback((feedback: Omit<PreviewSyncFeedback, "token"> | null) => {
+    if (!feedback || feedback.assetIds.length === 0) {
+      return;
+    }
+    cardFeedbackTokenRef.current += 1;
+    setCardSyncFeedback({
+      ...feedback,
+      token: cardFeedbackTokenRef.current,
+    });
+  }, []);
+  const buildPreviewSyncFeedback = useCallback((
+    changes: PhotoMetadataChanges,
+    assetIds: string[],
+  ): Omit<PreviewSyncFeedback, "token"> | null => {
+    const uniqueIds = Array.from(new Set(assetIds));
+    if (uniqueIds.length === 0) {
+      return null;
+    }
+
+    if (changes.rating !== undefined) {
+      return {
+        assetIds: uniqueIds,
+        kind: "star",
+        label: changes.rating > 0 ? `Valutazione: ${"★".repeat(changes.rating)}` : "Valutazione rimossa",
+      };
+    }
+    if (changes.pickStatus !== undefined) {
+      return {
+        assetIds: uniqueIds,
+        kind: "pill",
+        label: `Stato: ${changes.pickStatus === "picked" ? "Pick" : changes.pickStatus === "rejected" ? "Scartata" : "Neutra"}`,
+      };
+    }
+    if (changes.colorLabel !== undefined) {
+      return {
+        assetIds: uniqueIds,
+        kind: "dot",
+        label: changes.colorLabel ? `Colore: ${COLOR_LABEL_NAMES[changes.colorLabel]}` : "Colore rimosso",
+      };
+    }
+    if (changes.customLabels !== undefined) {
+      const normalized = normalizeAssetCustomLabels(changes.customLabels);
+      const firstLabel = normalized[0];
+      return {
+        assetIds: uniqueIds,
+        kind: "label",
+        label: normalized.length > 0 ? `Etichette: ${normalized.join(", ")}` : "Etichette personalizzate rimosse",
+        tone: firstLabel ? (customLabelColors[firstLabel] ?? DEFAULT_CUSTOM_LABEL_TONE) : undefined,
+        labels: normalized.length > 0 ? normalized : undefined,
+      };
+    }
+
+    return null;
+  }, [customLabelColors]);
 
   useEffect(() => {
     let active = true;
@@ -748,7 +843,8 @@ export function PhotoSelector({
 
   const applyPhotoChanges = useCallback((
     id: string,
-    changes: PhotoMetadataChanges
+    changes: PhotoMetadataChanges,
+    source: "grid" | "modal" = "grid",
   ) => {
     if (!onPhotosChange) return;
 
@@ -785,14 +881,20 @@ export function PhotoSelector({
     if (changed) {
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, 1));
+      if (source === "grid") {
+        emitPreviewSyncFeedback(buildPreviewSyncFeedback(changes, [id]));
+      } else if (source === "modal") {
+        emitCardSyncFeedback(buildPreviewSyncFeedback(changes, [id]));
+      }
     }
-  }, [onPhotosChange, photos, pushTimelineEntry]);
+  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry]);
 
   function resetFilters() {
     setPickFilter("all");
     setFormatFilter("all");
     setRatingFilter("any");
     setColorFilter("all");
+    setFileTypeFilter("all");
     setCustomLabelFilter("all");
     setFolderFilter("all");
     setSeriesFilter("all");
@@ -1361,6 +1463,9 @@ export function PhotoSelector({
       })) {
         continue;
       }
+      if (!matchesFileTypeFilter(photo, fileTypeFilter)) {
+        continue;
+      }
 
       if (
         customLabelFilter !== "all"
@@ -1409,6 +1514,7 @@ export function PhotoSelector({
     colorFilter,
     customLabelFilter,
     deferredSearchQuery,
+    fileTypeFilter,
     folderFilter,
     formatFilter,
     metadataAssetById,
@@ -1431,6 +1537,73 @@ export function PhotoSelector({
     [visiblePhotoIds],
   );
   const visiblePhotoIdSet = useMemo(() => new Set(visiblePhotoIds), [visiblePhotoIds]);
+  const photoGroupKeyById = useMemo(() => {
+    const mapping = new Map<string, string>();
+    for (const photoId of visiblePhotoIds) {
+      const photo = metadataAssetById.get(photoId);
+      if (!photo) {
+        continue;
+      }
+      mapping.set(photoId, getAssetGroupingKey(photo));
+    }
+    return mapping;
+  }, [metadataAssetById, visiblePhotoIds]);
+  const photoGroupInfoByKey = useMemo(() => {
+    const grouped = new Map<string, {
+      ids: string[];
+      rawCount: number;
+      jpegCount: number;
+      leaderId: string;
+    }>();
+
+    for (const photoId of visiblePhotoIds) {
+      const photo = metadataAssetById.get(photoId);
+      if (!photo) {
+        continue;
+      }
+
+      const key = getAssetGroupingKey(photo);
+      const extension = getAssetFileExtension(photo);
+      const isRaw = RAW_EXTENSIONS.has(extension);
+      const isJpeg = JPEG_EXTENSIONS.has(extension);
+      const current = grouped.get(key);
+      if (!current) {
+        grouped.set(key, {
+          ids: [photoId],
+          rawCount: isRaw ? 1 : 0,
+          jpegCount: isJpeg ? 1 : 0,
+          leaderId: photoId,
+        });
+        continue;
+      }
+
+      current.ids.push(photoId);
+      if (isRaw) {
+        current.rawCount += 1;
+      }
+      if (isJpeg) {
+        current.jpegCount += 1;
+      }
+      const leader = metadataAssetById.get(current.leaderId);
+      if (leader) {
+        const priorityDiff = getAssetGroupingPriority(photo) - getAssetGroupingPriority(leader);
+        if (priorityDiff < 0 || (priorityDiff === 0 && photo.fileName.localeCompare(leader.fileName) < 0)) {
+          current.leaderId = photoId;
+        }
+      }
+    }
+
+    const result = new Map<string, PhotoGroupInfo>();
+    for (const [key, info] of grouped.entries()) {
+      result.set(key, {
+        size: info.ids.length,
+        rawCount: info.rawCount,
+        jpegCount: info.jpegCount,
+        leaderId: info.leaderId,
+      });
+    }
+    return result;
+  }, [metadataAssetById, visiblePhotoIds]);
   const gridColumnCount = useMemo(() => {
     const width = gridViewport.width || cardSize;
     return Math.max(1, Math.floor((width + GRID_GAP_PX) / (cardSize + GRID_GAP_PX)));
@@ -1519,6 +1692,31 @@ export function PhotoSelector({
       .filter((photo): photo is ImageAsset => Boolean(photo)),
     [assetById, renderedPhotoIds],
   );
+  const renderedPhotoCardMeta = useMemo(() => renderedPhotos.map((photo) => {
+    const groupKey = photoGroupKeyById.get(photo.id);
+    const groupInfo = groupKey ? photoGroupInfoByKey.get(groupKey) : null;
+
+    if (!groupInfo || groupInfo.size <= 1) {
+      return { photo, groupBadge: null, isGroupLeader: false };
+    }
+
+    const badgeParts: string[] = [];
+    if (groupInfo.rawCount > 0) {
+      badgeParts.push(groupInfo.rawCount > 1 ? `${groupInfo.rawCount} RAW` : "RAW");
+    }
+    if (groupInfo.jpegCount > 0) {
+      badgeParts.push(groupInfo.jpegCount > 1 ? `${groupInfo.jpegCount} JPG` : "JPG");
+    }
+    if (badgeParts.length === 0) {
+      badgeParts.push(`${groupInfo.size} file`);
+    }
+
+    return {
+      photo,
+      groupBadge: badgeParts.join(" + "),
+      isGroupLeader: groupInfo.leaderId === photo.id,
+    };
+  }), [photoGroupInfoByKey, photoGroupKeyById, renderedPhotos]);
   const topSpacerHeight = virtualRows[0]?.start ?? 0;
   const bottomSpacerHeight = Math.max(
     0,
@@ -2051,14 +2249,16 @@ export function PhotoSelector({
 
   function updatePhoto(
     id: string,
-    changes: PhotoMetadataChanges
+    changes: PhotoMetadataChanges,
+    source: "grid" | "modal" = "grid",
   ) {
-    applyPhotoChanges(id, changes);
+    applyPhotoChanges(id, changes, source);
   }
 
   const applyBatchChanges = useCallback((
     targetIds: string[],
-    changes: PhotoMetadataChanges
+    changes: PhotoMetadataChanges,
+    source: "grid" | "modal" = "grid",
   ) => {
     if (!onPhotosChange || targetIds.length === 0) {
       return;
@@ -2107,8 +2307,13 @@ export function PhotoSelector({
       if (changes.customLabels !== undefined) {
         triggerBatchPulse(changedIds, "label");
       }
+      if (source === "grid") {
+        emitPreviewSyncFeedback(buildPreviewSyncFeedback(changes, changedIds));
+      } else if (source === "modal") {
+        emitCardSyncFeedback(buildPreviewSyncFeedback(changes, changedIds));
+      }
     }
-  }, [onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
+  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
 
   const selectedCustomLabelCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -2256,6 +2461,15 @@ export function PhotoSelector({
     event.preventDefault();
     window.filexDesktop.startDragOut(targetPaths);
   }, [desktopDragOutCheck?.ok, selectedIds, selectedSet]);
+  const handlePreviewExternalDragStart = useCallback((photoId: string, event: DragEvent<HTMLElement>) => {
+    const targetPaths = getAssetAbsolutePaths([photoId]);
+    if (targetPaths.length === 0 || typeof window.filexDesktop?.startDragOut !== "function") {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    window.filexDesktop.startDragOut(targetPaths);
+  }, []);
 
   const clearSelection = useCallback(() => {
     onSelectionChange([]);
@@ -2295,7 +2509,7 @@ export function PhotoSelector({
   }, [onPhotosChange, selectedIds, selectedSet]);
 
   const handleUpdatePhoto = useCallback((id: string, changes: PhotoMetadataChanges) => {
-    applyPhotoChanges(id, changes);
+    applyPhotoChanges(id, changes, "grid");
   }, [applyPhotoChanges]);
 
   // ── On-demand preview URL for QuickPreviewModal ──
@@ -2907,6 +3121,19 @@ export function PhotoSelector({
         )}
 
         <label className="field">
+          <span>Tipo file</span>
+          <select
+            className={fileTypeFilter !== "all" ? "field__select--active" : undefined}
+            value={fileTypeFilter}
+            onChange={(event) => setFileTypeFilter(event.target.value as FileTypeFilter)}
+          >
+            <option value="all">Tutti</option>
+            <option value="raw">Solo RAW</option>
+            <option value="jpeg">Solo JPG</option>
+          </select>
+        </label>
+
+        <label className="field">
           <span>Stato</span>
           <select
             className={pickFilter !== "all" ? "field__select--active" : undefined}
@@ -3322,11 +3549,13 @@ export function PhotoSelector({
                 aria-hidden="true"
               />
             ) : null}
-            {renderedPhotos.map((photo) => (
+            {renderedPhotoCardMeta.map(({ photo, groupBadge, isGroupLeader }) => (
               <PhotoCard
                 key={photo.id}
                 photo={photo}
                 isSelected={selectedSet.has(photo.id)}
+                groupBadge={groupBadge}
+                isGroupLeader={isGroupLeader}
                 onToggle={togglePhoto}
                 onUpdatePhoto={handleUpdatePhoto}
                 onAfterShortcutClassification={advanceFocusToNext}
@@ -3346,6 +3575,7 @@ export function PhotoSelector({
                 disableNonEssentialUi={isFastScrollActive}
                 batchPulseToken={batchPulseState?.ids.has(photo.id) ? batchPulseState.token : 0}
                 batchPulseKind={batchPulseState?.ids.has(photo.id) ? batchPulseState.kind : null}
+                externalFeedback={cardSyncFeedback}
                 editable={!!onPhotosChange}
               />
             ))}
@@ -3630,10 +3860,13 @@ export function PhotoSelector({
         customLabelsCatalog={customLabelsCatalog}
         customLabelColors={customLabelColors}
         customLabelShortcuts={customLabelShortcuts}
+        externalFeedback={previewSyncFeedback}
+        canExternalDrag={Boolean(previewAssetWithUrl ? getAssetAbsolutePath(previewAssetWithUrl.id) : null)}
+        onExternalDragStart={handlePreviewExternalDragStart}
         autoAdvanceOnAction={autoAdvanceOnAction}
         onClose={closePreview}
         onSelectAsset={handlePreviewAssetSelection}
-        onUpdateAsset={(assetId, changes) => updatePhoto(assetId, changes)}
+        onUpdateAsset={(assetId, changes) => updatePhoto(assetId, changes, "modal")}
       />
 
       {isSettingsPanelOpen && (        <aside className="photo-selector__settings-flyout" aria-label="Impostazioni workspace">

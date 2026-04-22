@@ -603,9 +603,9 @@ export function PhotoQuickPreviewModal({
                 {activePage
                   ? activePageCanAccept
                     ? usage?.pageId === activePage.id
-                      ? "La foto e' gia' in questo foglio. Premi Invio per riorganizzarlo."
+                      ? "La foto e gia in questo foglio. Premi Invio per riorganizzarlo."
                       : "Premi Invio per aggiungere questa foto al foglio attivo."
-                    : "Il foglio attivo e' pieno. Seleziona un altro foglio nello studio."
+                    : "Il foglio attivo e pieno. Seleziona un altro foglio nello studio."
                   : "Seleziona un foglio nello studio per usare l'aggiunta rapida."}
               </span>
               {showAssignSuccess ? (

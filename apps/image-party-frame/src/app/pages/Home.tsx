@@ -7,7 +7,7 @@ import { ServerStatus } from "../components/ServerStatus";
 import { getImageFile, useProject } from "../contexts/ProjectContext";
 import { loadRecentProjects, onRecentProjectsUpdated, removeRecentProjectAt } from "../lib/recentProjects";
 import { importProjectPackage, importTemplateLibraryPackage, exportTemplateLibraryPackage } from "../lib/portablePackages";
-import partyFrameLogo from "../../assets/party_frame_logo.png";
+import appLogo from "../../../logo.png";
 import {
   clearSavedTemplatesLibrary,
   deleteSavedTemplate,
@@ -173,7 +173,7 @@ export default function Home() {
       <div className="h-16 bg-[var(--app-topbar)] border-b border-[var(--app-border)] flex items-center px-8 justify-between shadow-[0_10px_30px_rgba(0,0,0,0.12)]">
         <div className="flex items-center gap-3">
           <img
-            src={partyFrameLogo}
+            src={appLogo}
             alt="Image Party Frame"
             className="h-11 w-11 rounded-2xl object-cover shadow-[0_14px_24px_rgba(0,0,0,0.16)]"
           />

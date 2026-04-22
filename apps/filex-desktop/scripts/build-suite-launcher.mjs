@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = join(__dirname, "..");
 const sourceDir = join(desktopRoot, "suite-launcher-src");
-const outputDir = join(desktopRoot, "suite-launcher-dist");
+const outputDir = join(desktopRoot, ".output", "suite-launcher");
 
 await rm(outputDir, { recursive: true, force: true });
 await mkdir(outputDir, { recursive: true });

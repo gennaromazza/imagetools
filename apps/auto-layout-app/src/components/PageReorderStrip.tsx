@@ -1,4 +1,4 @@
-import { memo, useState, useRef, useCallback } from "react";
+import { memo, useState, useCallback } from "react";
 import type { GeneratedPageLayout } from "@photo-tools/shared-types";
 
 interface PageReorderStripProps {
@@ -36,18 +36,26 @@ function PageReorderStripContent({
 
   const handleDrop = useCallback((event: React.DragEvent, dropIndex: number) => {
     event.preventDefault();
-    const dragIndex = parseInt(event.dataTransfer.getData("text/plain"));
+    const dragIndex = Number.parseInt(event.dataTransfer.getData("text/plain"), 10);
 
-    if (dragIndex !== dropIndex && dragIndex !== dropIndex - 1) {
+    if (
+      Number.isInteger(dragIndex) &&
+      dragIndex >= 0 &&
+      dragIndex < pages.length &&
+      dragIndex !== dropIndex &&
+      dragIndex !== dropIndex - 1
+    ) {
       onReorderPages(dragIndex, dropIndex);
     }
 
     setDraggedIndex(null);
     setDragOverIndex(null);
-  }, [onReorderPages]);
+  }, [onReorderPages, pages.length]);
 
-  const handleDragLeave = useCallback(() => {
-    setDragOverIndex(null);
+  const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setDragOverIndex(null);
+    }
   }, []);
 
   return (

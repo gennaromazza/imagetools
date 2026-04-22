@@ -6,6 +6,7 @@ import type {
   ImageAsset,
   LayoutAssignment,
   LayoutTemplate,
+  PageSide,
   OutputSettings,
   RenderJob
 } from "@photo-tools/shared-types";
@@ -14,10 +15,10 @@ function countOrientation(assets: ImageAsset[], orientation: ImageAsset["orienta
   return assets.filter((asset) => asset.orientation === orientation).length;
 }
 
-function buildRenderQueue(output: OutputSettings, pageCount: number): RenderJob[] {
-  return Array.from({ length: pageCount }, (_, index) => ({
-    pageId: `page-${index + 1}`,
-    outputPath: `${output.folderPath}/${output.fileNamePattern.replace("{index}", String(index + 1))}.${output.format}`,
+function buildRenderQueue(output: OutputSettings, pages: GeneratedPageLayout[]): RenderJob[] {
+  return pages.map((page) => ({
+    pageId: page.id,
+    outputPath: `${output.folderPath}/${output.fileNamePattern.replace("{index}", String(page.pageNumber))}.${output.format}`,
     format: output.format
   }));
 }
@@ -33,13 +34,49 @@ export function syncPageImageIds(page: GeneratedPageLayout): GeneratedPageLayout
   };
 }
 
+function resolvePageSide(index: number, totalPages: number, existingSide?: GeneratedPageLayout["pageSide"]): PageSide {
+  if (existingSide === "left" || existingSide === "right") {
+    return existingSide;
+  }
+
+  if (totalPages <= 1) {
+    return "single";
+  }
+
+  return index % 2 === 0 ? "left" : "right";
+}
+
+function resolveSpreadId(
+  index: number,
+  totalPages: number,
+  pageSide: PageSide,
+  existingSpreadId?: string
+): string | undefined {
+  if (existingSpreadId) {
+    return existingSpreadId;
+  }
+
+  if (totalPages <= 1 || pageSide === "single") {
+    return undefined;
+  }
+
+  return `spread-${Math.floor(index / 2) + 1}`;
+}
+
 export function normalizePages(pages: GeneratedPageLayout[]): GeneratedPageLayout[] {
-  return pages.map((page, index) => ({
-    ...syncPageImageIds({
-      ...page,
-      pageNumber: index + 1
-    })
-  }));
+  const totalPages = pages.length;
+
+  return pages.map((page, index) => {
+    const pageSide = resolvePageSide(index, totalPages, page.pageSide);
+    return {
+      ...syncPageImageIds({
+        ...page,
+        pageNumber: index + 1,
+        pageSide,
+        spreadId: resolveSpreadId(index, totalPages, pageSide, page.spreadId)
+      })
+    };
+  });
 }
 
 export function buildAutoLayoutResult(
@@ -76,6 +113,6 @@ export function buildAutoLayoutResult(
     availableTemplates,
     unassignedAssets,
     warnings,
-    renderQueue: buildRenderQueue(request.output, normalizedPages.length)
+    renderQueue: buildRenderQueue(request.output, normalizedPages)
   };
 }

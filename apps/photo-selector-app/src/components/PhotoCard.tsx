@@ -32,6 +32,8 @@ function formatFileSize(bytes: number): string {
 interface PhotoCardProps {
   photo: ImageAsset;
   isSelected: boolean;
+  groupBadge?: string | null;
+  isGroupLeader?: boolean;
   onToggle: (id: string, event?: React.MouseEvent) => void;
   onUpdatePhoto: (
     id: string,
@@ -48,6 +50,7 @@ interface PhotoCardProps {
   disableNonEssentialUi?: boolean;
   batchPulseToken?: number;
   batchPulseKind?: "dot" | "label" | null;
+  externalFeedback?: CardExternalFeedback | null;
   editable: boolean;
 }
 
@@ -56,6 +59,13 @@ type CardFeedback = {
   label: string;
   token: number;
   value?: number | ColorLabel | PickStatus | null;
+  labels?: string[];
+};
+type CardExternalFeedback = {
+  token: number;
+  assetIds: string[];
+  kind: CardFeedback["kind"];
+  label: string;
   labels?: string[];
 };
 
@@ -75,10 +85,16 @@ function areLabelArraysEqual(left: string[] | undefined, right: string[] | undef
   return true;
 }
 
+function isFeedbackTarget(feedback: CardExternalFeedback | null | undefined, photoId: string): boolean {
+  return Boolean(feedback?.assetIds.includes(photoId));
+}
+
 export const PhotoCard = memo(
   function PhotoCard({
     photo,
     isSelected,
+    groupBadge = null,
+    isGroupLeader = false,
     onToggle,
     onUpdatePhoto,
     onAfterShortcutClassification,
@@ -92,6 +108,7 @@ export const PhotoCard = memo(
     disableNonEssentialUi = false,
     batchPulseToken = 0,
     batchPulseKind = null,
+    externalFeedback = null,
     editable,
   }: PhotoCardProps) {
     notePhotoCardRender(photo.id);
@@ -112,6 +129,7 @@ export const PhotoCard = memo(
     const [feedback, setFeedback] = useState<CardFeedback | null>(null);
     const batchPulseTimeoutRef = useRef<number | null>(null);
     const lastBatchPulseTokenRef = useRef(0);
+    const lastExternalFeedbackTokenRef = useRef(0);
     const [activeBatchPulseKind, setActiveBatchPulseKind] = useState<"dot" | "label" | null>(null);
     const [isToolbarVisible, setIsToolbarVisible] = useState(isSelected);
 
@@ -228,6 +246,42 @@ export const PhotoCard = memo(
         batchPulseTimeoutRef.current = null;
       }, 1200);
     }, [batchPulseKind, batchPulseToken, disableNonEssentialUi]);
+
+    useEffect(() => {
+      if (disableNonEssentialUi || !externalFeedback) {
+        return;
+      }
+      if (externalFeedback.token === lastExternalFeedbackTokenRef.current) {
+        return;
+      }
+      if (!externalFeedback.assetIds.includes(photo.id)) {
+        return;
+      }
+
+      lastExternalFeedbackTokenRef.current = externalFeedback.token;
+      const nextFeedback: CardFeedback = {
+        kind: externalFeedback.kind,
+        label: externalFeedback.label,
+        token: externalFeedback.token,
+        labels: externalFeedback.labels,
+      };
+      setFeedback(nextFeedback);
+
+      if (wrapperRef.current) {
+        const el = wrapperRef.current;
+        el.classList.remove("photo-card__image-wrapper--flash");
+        void el.offsetWidth;
+        el.classList.add("photo-card__image-wrapper--flash");
+      }
+
+      if (feedbackTimeoutRef.current !== null) {
+        window.clearTimeout(feedbackTimeoutRef.current);
+      }
+      feedbackTimeoutRef.current = window.setTimeout(() => {
+        setFeedback((current) => (current?.token === nextFeedback.token ? null : current));
+        feedbackTimeoutRef.current = null;
+      }, 1200);
+    }, [disableNonEssentialUi, externalFeedback, photo.id]);
 
     useEffect(() => {
       if (isSelected) {
@@ -413,6 +467,14 @@ export const PhotoCard = memo(
             {photo.fileName}
           </div>
           <div className="photo-card__meta">
+            {groupBadge ? (
+              <span
+                className={`photo-card__group-badge${isGroupLeader ? " photo-card__group-badge--leader" : ""}`}
+                title={isGroupLeader ? "Gruppo con priorita RAW" : "File raggruppato con varianti dello stesso scatto"}
+              >
+                {groupBadge}
+              </span>
+            ) : null}
             <span className="photo-card__orientation-icon" title={photo.orientation}>
               {orientationIcon}
             </span>
@@ -538,10 +600,18 @@ export const PhotoCard = memo(
   },
   (prev, next) =>
     prev.isSelected === next.isSelected &&
+    prev.groupBadge === next.groupBadge &&
+    prev.isGroupLeader === next.isGroupLeader &&
     prev.editable === next.editable &&
     prev.disableNonEssentialUi === next.disableNonEssentialUi &&
     prev.batchPulseToken === next.batchPulseToken &&
     prev.batchPulseKind === next.batchPulseKind &&
+    (
+      !isFeedbackTarget(prev.externalFeedback, prev.photo.id) &&
+      !isFeedbackTarget(next.externalFeedback, next.photo.id)
+        ? true
+        : (prev.externalFeedback?.token ?? 0) === (next.externalFeedback?.token ?? 0)
+    ) &&
     prev.photo.id === next.photo.id &&
     prev.photo.fileName === next.photo.fileName &&
     prev.photo.thumbnailUrl === next.photo.thumbnailUrl &&

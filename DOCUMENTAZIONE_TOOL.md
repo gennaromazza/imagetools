@@ -8,7 +8,7 @@ Breve spiegazione di cosa fa ogni tool/app della suite:
 - **avvia-auto-layout.bat**: Avvia l'applicazione Auto Layout.
 - **avvia-image-id-print.bat**: Avvia l'applicazione Image ID Print.
 - **avvia-image-party-frame.bat**: Avvia l'applicazione Image Party Frame.
-- **avvia-photo-selector.bat**: Avvia l'applicazione Photo Selector.
+- **avvia-photo-selector.bat**: Avvia l'applicazione Image Select Pro.
 - **avvia-progetto.bat**: Avvia l'intero progetto o più servizi insieme.
 
 ## apps/
@@ -51,6 +51,7 @@ Breve spiegazione di cosa fa ogni tool/app della suite:
 - Si ispira a Photo Mechanic per velocità di anteprima e browsing.
 - Ottimizza la pipeline di caricamento e caching delle anteprime.
 - Pensato per selezionare rapidamente le migliori foto da grandi set.
+- Nome prodotto: **Image Select Pro**.
 
 ## packages/
 - **core/**: Funzionalità di base condivise tra le app.

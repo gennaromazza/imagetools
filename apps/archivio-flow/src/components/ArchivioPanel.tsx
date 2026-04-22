@@ -273,13 +273,13 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
         || (selectionData.preferredPath ?? "").trim()
         || fallbackPath;
       await openJobInPhotoSelector(targetSelectionPath);
-      setRowFeedback(job.id, "Apro in Photo Selector", "success");
+      setRowFeedback(job.id, "Apro in Image Select Pro", "success");
     } catch (error) {
       try {
         await openJobInPhotoSelector(fallbackPath);
-        setRowFeedback(job.id, "Apro in Photo Selector", "success");
+        setRowFeedback(job.id, "Apro in Image Select Pro", "success");
       } catch {
-        const message = error instanceof Error ? error.message : "Impossibile aprire Photo Selector";
+        const message = error instanceof Error ? error.message : "Impossibile aprire Image Select Pro";
         setRowFeedback(job.id, message, "error");
       }
     } finally {
@@ -306,12 +306,12 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     setOpeningSelectionJobId(selectionModalJob.id);
     try {
       await openJobInPhotoSelector(targetPath);
-      setRowFeedback(selectionModalJob.id, "Apro in Photo Selector", "success");
+      setRowFeedback(selectionModalJob.id, "Apro in Image Select Pro", "success");
       setSelectionModalJob(null);
       setSelectionModalCandidates([]);
       setSelectionModalSelectedPath("");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Impossibile aprire Photo Selector";
+      const message = error instanceof Error ? error.message : "Impossibile aprire Image Select Pro";
       setRowFeedback(selectionModalJob.id, message, "error");
     } finally {
       setSelectionModalOpening(false);
@@ -561,7 +561,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
             className="secondary-button"
             style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
             onClick={() => void handleOpenInPhotoSelector(job)}
-            title="Apri questa cartella in Photo Selector"
+            title="Apri questa cartella in Image Select Pro"
             disabled={job.folderExists === false || openingSelectionJobId === job.id}
           >
             {openingSelectionJobId === job.id ? "Apro..." : "Seleziona"}
@@ -957,7 +957,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
           >
             <div className="stack" style={{ gap: "0.85rem" }}>
               <div>
-                <strong style={{ fontSize: "1rem" }}>Scegli cartella per Photo Selector</strong>
+                <strong style={{ fontSize: "1rem" }}>Scegli cartella per Image Select Pro</strong>
                 <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.86rem" }}>
                   {selectionModalJob.nomeLavoro}
                 </p>

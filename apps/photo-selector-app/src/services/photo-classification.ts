@@ -1,6 +1,22 @@
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 
 export const COLOR_LABELS: ColorLabel[] = ["red", "yellow", "green", "blue", "purple"];
+export type FileTypeFilter = "all" | "raw" | "jpeg";
+export const JPEG_EXTENSIONS = new Set([".jpg", ".jpeg"]);
+export const RAW_EXTENSIONS = new Set([
+  ".cr2", ".cr3", ".crw",
+  ".nef", ".nrw",
+  ".arw", ".srf", ".sr2",
+  ".raf",
+  ".dng",
+  ".rw2",
+  ".orf",
+  ".pef",
+  ".srw",
+  ".3fr",
+  ".x3f",
+  ".gpr",
+]);
 
 export const COLOR_LABEL_NAMES: Record<ColorLabel, string> = {
   red: "Rosso",
@@ -35,6 +51,31 @@ export interface PhotoShortcutInput {
   metaKey?: boolean;
 }
 
+function getFileExtension(fileName: string): string {
+  const lastDotIndex = fileName.lastIndexOf(".");
+  return lastDotIndex >= 0 ? fileName.slice(lastDotIndex).toLowerCase() : "";
+}
+
+export function getAssetFileExtension(asset: ImageAsset): string {
+  return getFileExtension(asset.fileName);
+}
+
+export function getAssetGroupingKey(asset: ImageAsset): string {
+  const normalizedPath = asset.path.replace(/\\/g, "/").toLocaleLowerCase();
+  return normalizedPath.replace(/\.[^.]+$/, "");
+}
+
+export function getAssetGroupingPriority(asset: ImageAsset): number {
+  const extension = getAssetFileExtension(asset);
+  if (RAW_EXTENSIONS.has(extension)) {
+    return 0;
+  }
+  if (JPEG_EXTENSIONS.has(extension)) {
+    return 1;
+  }
+  return 2;
+}
+
 export const PHOTO_CLASSIFICATION_SHORTCUTS: PhotoShortcutItem[] = [
   { keys: "1-5", description: "Assegna stelle" },
   { keys: "0", description: "Azzera le stelle" },
@@ -64,6 +105,19 @@ export function getAssetPickStatus(asset: ImageAsset): PickStatus {
 
 export function getAssetColorLabel(asset: ImageAsset): ColorLabel | null {
   return asset.colorLabel ?? null;
+}
+
+export function matchesFileTypeFilter(asset: ImageAsset, fileTypeFilter: FileTypeFilter): boolean {
+  if (fileTypeFilter === "all") {
+    return true;
+  }
+
+  const extension = getFileExtension(asset.fileName);
+  if (fileTypeFilter === "jpeg") {
+    return JPEG_EXTENSIONS.has(extension);
+  }
+
+  return RAW_EXTENSIONS.has(extension);
 }
 
 export function formatAssetStars(asset: ImageAsset): string {

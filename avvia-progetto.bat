@@ -33,7 +33,7 @@ echo 1. Auto Layout App
 echo 2. Image Party Frame
 echo 3. Archivio Flow
 echo 4. Image ID Print
-echo 5. Photo Selector
+echo 5. Image Select Pro
 echo.
 set /p TOOL_CHOICE=Seleziona il tool da avviare [1-5]: 
 

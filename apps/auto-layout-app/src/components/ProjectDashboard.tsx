@@ -46,6 +46,10 @@ export function ProjectDashboard({
   };
 
   const saveEdit = (projectId: string) => {
+    if (editingProjectId !== projectId) {
+      return;
+    }
+
     if (editingName.trim()) {
       onRenameProject(projectId, editingName.trim());
     }
@@ -82,10 +86,12 @@ export function ProjectDashboard({
       const content = await file.arrayBuffer();
       const { project } = await importProject(content);
 
-      if (onImportProject) {
-        onImportProject(project);
+      if (!onImportProject) {
+        toast.addToast("Importazione non disponibile in questa schermata.", "warning", 5000);
+        return;
       }
 
+      onImportProject(project);
       toast.addToast(`Progetto "${project.name}" importato con successo.`, "success");
     } catch (error) {
       toast.addToast(
@@ -111,7 +117,7 @@ export function ProjectDashboard({
     <div className="dashboard-container">
       <div className="dashboard-header">
         <div>
-          <span className="dashboard-eyebrow">ImageTools Auto Layout</span>
+          <span className="dashboard-eyebrow">ImageAlbumMaker</span>
           <h1 className="dashboard-title">Progetti e fogli pronti per la revisione</h1>
           <p className="dashboard-subtitle">
             Crea, riapri o importa un progetto con lo stesso feeling operativo di Image Party Frame.
@@ -138,7 +144,7 @@ export function ProjectDashboard({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".imagetool,application/json"
+            accept=".imagetool"
             onChange={handleImportProject}
             style={{ display: "none" }}
             aria-label="Seleziona file progetto da importare"
@@ -177,8 +183,14 @@ export function ProjectDashboard({
                     value={editingName}
                     onChange={(event) => setEditingName(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter") saveEdit(project.id);
-                      if (event.key === "Escape") setEditingProjectId(null);
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                      }
+                      if (event.key === "Escape") {
+                        setEditingProjectId(null);
+                        setEditingName("");
+                      }
                     }}
                     onBlur={() => saveEdit(project.id)}
                     autoFocus
@@ -258,6 +270,7 @@ export function ProjectDashboard({
           onConfirm={() => {
             onDeleteProject(projectPendingDeletion.id);
             toast.addToast(`Progetto "${projectPendingDeletion.name}" eliminato.`, "info");
+            setProjectPendingDeletion(null);
           }}
           onCancel={() => setProjectPendingDeletion(null)}
         />

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = join(__dirname, "..");
-const releaseDir = join(desktopRoot, "release");
+const releaseDir = join(desktopRoot, ".output", "releases");
 const manifestDir = join(desktopRoot, "release-manifests");
 
 const channelArg = process.argv.find((arg) => arg.startsWith("--channel="));
@@ -31,11 +31,11 @@ try {
 }
 const toolConfig = [
   { toolId: "suite-launcher", executableName: "FileX-Suite" },
-  { toolId: "auto-layout-app", executableName: "Auto-Layout" },
+  { toolId: "auto-layout-app", executableName: "ImageAlbumMaker" },
   { toolId: "image-party-frame", executableName: "Image-Party-Frame" },
   { toolId: "image-id-print", executableName: "Image-ID-Print" },
   { toolId: "archivio-flow", executableName: "Archivio-Flow" },
-  { toolId: "photo-selector-app", executableName: "Selezione-Foto" },
+  { toolId: "photo-selector-app", executableName: "Image-Select-Pro" },
 ];
 
 function parseVersion(fileName, executableName, releaseChannel) {

@@ -24,14 +24,22 @@ export function PhotoColorContextMenu({
   const menu = (
     <div
       className="ribbon-color-menu"
+      role="menu"
+      aria-label={title}
       style={{ left: `${x}px`, top: `${y}px` }}
       onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
     >
       <span className="ribbon-color-menu__title">{title}</span>
       <button
         type="button"
         className="ribbon-color-menu__clear"
         onClick={() => onSelect(null)}
+        aria-label="Rimuovi etichetta colore"
       >
         Rimuovi colore
       </button>
@@ -46,6 +54,8 @@ export function PhotoColorContextMenu({
                 : `asset-color-dot asset-color-dot--${value}`
             }
             title={`${COLOR_LABEL_NAMES[value]} | ${getColorShortcutHint(value)}`}
+            aria-label={`Seleziona colore ${COLOR_LABEL_NAMES[value]}`}
+            aria-pressed={selectedColor === value}
             onClick={() => onSelect(value)}
           />
         ))}

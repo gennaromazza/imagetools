@@ -19,7 +19,9 @@ import type {
   ImageAsset,
   LayoutAssignment,
   LayoutMove,
-  LayoutTemplate
+  LayoutTemplate,
+  PageSide,
+  TemplateVariantRole
 } from "@photo-tools/shared-types";
 import { ConfirmModal } from "./ConfirmModal";
 import { PageSettingsPanel } from "./PageSettingsPanel";
@@ -94,6 +96,7 @@ interface LayoutPreviewBoardProps {
     imageId: string,
     source?: "default" | "keyboard-enter",
   ) => void;
+  onMoveSlotImageToPage: (sourcePageId: string, sourceSlotId: string, targetPageId: string) => void;
   onDropToUnused: () => void;
   onClearSlot: (pageId: string, slotId: string) => void;
   onTemplateChange: (pageId: string, templateId: string) => void;
@@ -178,10 +181,93 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   );
 }
 
-function getTemplateOptions(templates: LayoutTemplate[], photoCount: number): LayoutTemplate[] {
+function getAllowedRolesForPageSide(pageSide: PageSide): TemplateVariantRole[] {
+  if (pageSide === "left") {
+    return ["mirror-left", "companion-left", "base"];
+  }
+
+  if (pageSide === "right") {
+    return ["mirror-right", "companion-right", "base"];
+  }
+
+  return ["base"];
+}
+
+function isTemplateCompatibleWithPageSide(template: LayoutTemplate, pageSide: PageSide): boolean {
+  if (!template.supportsPageSide) {
+    return true;
+  }
+
+  return getAllowedRolesForPageSide(pageSide).includes(template.variantRole ?? "base");
+}
+
+function getTemplateOptions(templates: LayoutTemplate[], page: GeneratedPageLayout | null): LayoutTemplate[] {
+  if (!page) {
+    return [];
+  }
+
+  const photoCount = Math.max(page.imageIds.length, 1);
+  const pageSide = page.pageSide ?? "single";
+
   return templates.filter(
-    (template) => photoCount >= template.minPhotos && photoCount <= template.maxPhotos
+    (template) =>
+      photoCount >= template.minPhotos &&
+      photoCount <= template.maxPhotos &&
+      (template.id === page.templateId || isTemplateCompatibleWithPageSide(template, pageSide))
   );
+}
+
+function getPageSideLabel(pageSide: PageSide): string {
+  if (pageSide === "left") {
+    return "Sinistra";
+  }
+
+  if (pageSide === "right") {
+    return "Destra";
+  }
+
+  return "Singola";
+}
+
+function getTemplateVariantBadgeLabel(template: LayoutTemplate): string | null {
+  if (!template.supportsPageSide) {
+    return null;
+  }
+
+  if (template.variantRole === "mirror-left" || template.variantRole === "mirror-right") {
+    return "Specchiato";
+  }
+
+  if (template.variantRole === "companion-left" || template.variantRole === "companion-right") {
+    return "Companion";
+  }
+
+  return "Spread";
+}
+
+function buildTemplateSelectionContext(
+  page: GeneratedPageLayout,
+  pages: GeneratedPageLayout[],
+  templates: LayoutTemplate[]
+) {
+  const pageIndex = pages.findIndex((candidate) => candidate.id === page.id);
+  const spreadTemplate =
+    page.pageSide === "right" && pageIndex > 0
+      ? templates.find((template) => template.id === pages[pageIndex - 1]?.templateId) ?? null
+      : null;
+  const recentTemplates =
+    pageIndex <= 0
+      ? []
+      : pages
+          .slice(Math.max(0, pageIndex - 2), pageIndex)
+          .map((candidate) => templates.find((template) => template.id === candidate.templateId))
+          .filter((template): template is LayoutTemplate => Boolean(template));
+
+  return {
+    pageSide: page.pageSide,
+    spreadTemplate,
+    recentTemplates
+  };
 }
 
 function normalizedAspectDistance(left: number, right: number): number {
@@ -668,6 +754,7 @@ export function LayoutPreviewBoard({
   onDrop,
   onAssetDropped,
   onAddToPage,
+  onMoveSlotImageToPage,
   onDropToUnused,
   onClearSlot,
   onTemplateChange,
@@ -731,7 +818,7 @@ export function LayoutPreviewBoard({
   const compatibleTemplates = useMemo(
     () =>
       activePage
-        ? getTemplateOptions(result.availableTemplates, Math.max(activePage.imageIds.length, 1))
+        ? getTemplateOptions(result.availableTemplates, activePage)
         : [],
     [activePage, result.availableTemplates]
   );
@@ -767,13 +854,18 @@ export function LayoutPreviewBoard({
       return null;
     }
 
-    return selectBestTemplate(currentAssets, compatibleTemplates, activePage.sheetSpec).id;
-  }, [activePage, assetsById, compatibleTemplates]);
+    return selectBestTemplate(
+      currentAssets,
+      compatibleTemplates,
+      activePage.sheetSpec,
+      buildTemplateSelectionContext(activePage, result.pages, compatibleTemplates)
+    ).id;
+  }, [activePage, assetsById, compatibleTemplates, result.pages]);
   const templatesByPageId = useMemo(() => {
     const map = new Map<string, LayoutTemplate[]>();
 
     for (const page of result.pages) {
-      map.set(page.id, getTemplateOptions(result.availableTemplates, Math.max(page.imageIds.length, 1)));
+      map.set(page.id, getTemplateOptions(result.availableTemplates, page));
     }
 
     return map;
@@ -795,7 +887,15 @@ export function LayoutPreviewBoard({
         continue;
       }
 
-      map.set(page.id, selectBestTemplate(currentAssets, pageTemplates, page.sheetSpec).id);
+      map.set(
+        page.id,
+        selectBestTemplate(
+          currentAssets,
+          pageTemplates,
+          page.sheetSpec,
+          buildTemplateSelectionContext(page, result.pages, pageTemplates)
+        ).id
+      );
     }
 
     return map;
@@ -1563,6 +1663,20 @@ export function LayoutPreviewBoard({
   if (!activePage) {
     return <p className="helper-copy">Non ci sono ancora fogli da mostrare.</p>;
   }
+
+  const handleDropToPageTarget = (targetPageId: string) => {
+    if (!dragState) {
+      return;
+    }
+
+    if (dragState.kind === "slot" && dragState.sourcePageId && dragState.sourceSlotId) {
+      onMoveSlotImageToPage(dragState.sourcePageId, dragState.sourceSlotId, targetPageId);
+      return;
+    }
+
+    onAddToPage(targetPageId, dragState.imageId);
+  };
+
   const workspaceStyle = {
     "--layout-rail-width": `${leftRailWidth}px`,
     "--layout-inspector-width": "clamp(272px, 22vw, 320px)"
@@ -1732,7 +1846,7 @@ export function LayoutPreviewBoard({
                               stopAutoScroll();
                               clearDragPageJump();
                               handleJumpToPage(page);
-                              onAddToPage(page.id, dragState.imageId);
+                              handleDropToPageTarget(page.id);
                             }
                           : undefined
                       }
@@ -1803,6 +1917,10 @@ export function LayoutPreviewBoard({
                     {renderSlotMiniMap(activePage.slotDefinitions)}
                     <strong>{activePage.templateLabel}</strong>
                     <span>{activePage.assignments.length} foto sul foglio corrente</span>
+                    <span className="template-drawer__recommend-badge">{getPageSideLabel(activePage.pageSide)}</span>
+                    {activePage.spreadId ? (
+                      <span className="template-drawer__density-badge">{activePage.spreadId}</span>
+                    ) : null}
                     {activePageCropGuidance?.tone ? (
                       <span className={`template-drawer__crop-badge template-drawer__crop-badge--${activePageCropGuidance.tone}`}>
                         {activePageCropGuidance.preservedCount} crop preservat{activePageCropGuidance.preservedCount === 1 ? "o" : "i"}
@@ -1827,6 +1945,14 @@ export function LayoutPreviewBoard({
                         ? "Stessa struttura attuale"
                         : "Selezionalo per vedere questo foglio riorganizzato con un layout alternativo"}
                     </span>
+                    {previewTemplate ? (
+                      <>
+                        <span className="template-drawer__recommend-badge">{getPageSideLabel(activePage.pageSide)}</span>
+                        {getTemplateVariantBadgeLabel(previewTemplate) ? (
+                          <span className="template-drawer__density-badge">{getTemplateVariantBadgeLabel(previewTemplate)}</span>
+                        ) : null}
+                      </>
+                    ) : null}
                     {previewTemplate && previewTemplate.id === recommendedTemplateId ? (
                       <span className="template-drawer__recommend-badge">Consigliato</span>
                     ) : null}
@@ -1877,6 +2003,10 @@ export function LayoutPreviewBoard({
                       {renderTemplateMiniMap(template)}
                       <strong>{template.label}</strong>
                       <span>{template.description}</span>
+                      <span className="template-drawer__recommend-badge">{getPageSideLabel(activePage.pageSide)}</span>
+                      {getTemplateVariantBadgeLabel(template) ? (
+                        <span className="template-drawer__density-badge">{getTemplateVariantBadgeLabel(template)}</span>
+                      ) : null}
                       {template.id === recommendedTemplateId ? (
                         <span className="template-drawer__recommend-badge">Consigliato</span>
                       ) : null}
@@ -2259,8 +2389,17 @@ export function LayoutPreviewBoard({
                           <span className="page-context-header__page-number">Foglio {page.pageNumber}</span>
                           <strong className="page-context-header__template-name">{page.templateLabel}</strong>
                           <span className="page-context-header__meta">
-                            {page.assignments.length} foto · {page.sheetSpec.label} · gap {page.sheetSpec.gapCm.toFixed(1)} cm
+                            {page.assignments.length} foto · {page.sheetSpec.label} · {getPageSideLabel(page.pageSide)} · gap {page.sheetSpec.gapCm.toFixed(1)} cm
                           </span>
+                          <span className="template-drawer__recommend-badge">{getPageSideLabel(page.pageSide)}</span>
+                          {page.spreadId ? (
+                            <span className="template-drawer__density-badge">Spread</span>
+                          ) : null}
+                          {(() => {
+                            const currentTemplate = (templatesByPageId.get(page.id) ?? []).find((template) => template.id === page.templateId);
+                            const variantBadge = currentTemplate ? getTemplateVariantBadgeLabel(currentTemplate) : null;
+                            return variantBadge ? <span className="template-drawer__density-badge">{variantBadge}</span> : null;
+                          })()}
                           {pageCropGuidance?.tone ? (
                             <span className={`page-context-header__crop-badge page-context-header__crop-badge--${pageCropGuidance.tone}`}>
                               {pageCropGuidance.title}
@@ -2298,7 +2437,7 @@ export function LayoutPreviewBoard({
                                 ? (event) => {
                                     event.preventDefault();
                                     event.stopPropagation();
-                                    onAddToPage(page.id, dragState.imageId);
+                                    handleDropToPageTarget(page.id);
                                   }
                                 : undefined
                             }
@@ -2542,6 +2681,7 @@ export function LayoutPreviewBoard({
                               onDrop={onDrop}
                               onAssetDropped={onAssetDropped}
                               onAddToPage={onAddToPage}
+                              onMoveSlotImageToPage={onMoveSlotImageToPage}
                               onClearSlot={onClearSlot}
                               onOpenPhotoWindow={onOpenPhotoWindow}
                               onContextMenu={onContextMenu}

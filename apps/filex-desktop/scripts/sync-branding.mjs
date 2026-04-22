@@ -1,66 +1,131 @@
 import { mkdir, readFile, writeFile, copyFile, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import sharp from "sharp";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
 const repoRoot = resolve(desktopRoot, "..", "..");
 const sourceDir = join(repoRoot, "ICONE E LOGHI");
-const targetDir = join(desktopRoot, "build", "branding");
+const targetDir = join(desktopRoot, ".output", "branding");
+const photoSelectorAssetsDir = join(repoRoot, "apps", "photo-selector-app", "src", "assets");
+const autoLayoutAssetsDir = join(repoRoot, "apps", "auto-layout-app", "src", "assets");
+const autoLayoutPublicDir = join(repoRoot, "apps", "auto-layout-app", "public");
+const photoSelectorLogoPath = join(sourceDir, "photo_selector.png");
+const photoSelectorIconPath = join(sourceDir, "photo_selector_icon.png");
+const autoLayoutLogoPath = join(sourceDir, "album_maker.png");
+const autoLayoutIconPath = join(sourceDir, "album_maker.ico");
 
 const toolBranding = [
   { toolId: "suite-launcher", sourceFile: "LOGO_Image_tool.png" },
-  { toolId: "auto-layout-app", sourceFile: "auto_layout_logo.png" },
-  { toolId: "image-party-frame", sourceFile: "party_frame_logo.png" },
+  {
+    toolId: "auto-layout-app",
+    pngSourcePath: autoLayoutLogoPath,
+    icoSourcePath: autoLayoutIconPath,
+  },
+  {
+    toolId: "image-party-frame",
+    sourceFile: "party_frame_logo.png",
+    pngSourcePath: join(repoRoot, "apps", "image-party-frame", "logo.png"),
+    icoSourcePath: join(repoRoot, "apps", "image-party-frame", "favico.ico"),
+  },
   { toolId: "image-id-print", sourceFile: "id_print_logo.png" },
   { toolId: "archivio-flow", sourceFile: "photo_Archivie.png" },
-  { toolId: "photo-selector-app", sourceFile: "photo_selector_icon.png" },
+  {
+    toolId: "photo-selector-app",
+    pngSourcePath: photoSelectorLogoPath,
+    icoSourcePath: photoSelectorIconPath,
+  },
+];
+
+const rendererAssetCopies = [
+  { from: autoLayoutLogoPath, to: join(autoLayoutAssetsDir, "album_maker.png") },
+  { from: autoLayoutIconPath, to: join(autoLayoutPublicDir, "album_maker.ico") },
+  { from: photoSelectorLogoPath, to: join(photoSelectorAssetsDir, "photo_selector.png") },
+  { from: photoSelectorLogoPath, to: join(photoSelectorAssetsDir, "logo.png") },
+  { from: photoSelectorIconPath, to: join(photoSelectorAssetsDir, "photo_selector_icon.png") },
+  { from: photoSelectorIconPath, to: join(photoSelectorAssetsDir, "favicon.png") },
 ];
 
 await mkdir(targetDir, { recursive: true });
+await mkdir(photoSelectorAssetsDir, { recursive: true });
+await mkdir(autoLayoutAssetsDir, { recursive: true });
+await mkdir(autoLayoutPublicDir, { recursive: true });
+
+for (const asset of rendererAssetCopies) {
+  await copyFile(asset.from, asset.to);
+}
 
 for (const tool of toolBranding) {
-  const sourcePath = join(sourceDir, tool.sourceFile);
+  const fallbackSourcePath = tool.sourceFile ? join(sourceDir, tool.sourceFile) : null;
+  const pngSourcePath = tool.pngSourcePath && existsSync(tool.pngSourcePath)
+    ? tool.pngSourcePath
+    : fallbackSourcePath;
+  const icoSourcePath = tool.icoSourcePath && existsSync(tool.icoSourcePath)
+    ? tool.icoSourcePath
+    : pngSourcePath;
   const pngTargetPath = join(targetDir, `${tool.toolId}.png`);
   const icoTargetPath = join(targetDir, `${tool.toolId}.ico`);
   const icnsTargetPath = join(targetDir, `${tool.toolId}.icns`);
 
-  await copyFile(sourcePath, pngTargetPath);
-  await generateIco(sourcePath, icoTargetPath);
-  await maybeGenerateIcns(sourcePath, icnsTargetPath);
+  if (!pngSourcePath) {
+    throw new Error(`Missing branding source for ${tool.toolId}`);
+  }
+
+  await copyFile(pngSourcePath, pngTargetPath);
+  await copyBrandIco(icoSourcePath, icoTargetPath);
+  await maybeGenerateIcns(pngSourcePath, icnsTargetPath);
 }
 
-async function generateIco(sourcePath, icoTargetPath) {
-  if (process.platform === "win32") {
-    await generateWindowsIco(sourcePath, icoTargetPath);
+async function copyBrandIco(sourcePath, icoTargetPath) {
+  if (sourcePath.toLowerCase().endsWith(".ico") && await isRealIco(sourcePath)) {
+    await copyFile(sourcePath, icoTargetPath);
     return;
   }
 
-  const pngBuffer = await readFile(sourcePath);
-  const icoBuffer = wrapPngAsIco(pngBuffer);
+  await generateIco(sourcePath, icoTargetPath);
+}
+
+async function isRealIco(sourcePath) {
+  const header = await readFile(sourcePath, { encoding: null });
+  return header.length >= 4
+    && header[0] === 0x00
+    && header[1] === 0x00
+    && header[2] === 0x01
+    && header[3] === 0x00;
+}
+
+async function generateIco(sourcePath, icoTargetPath) {
+  const icoBuffer = await buildMultiResolutionIco(sourcePath);
   await writeFile(icoTargetPath, icoBuffer);
 }
 
-function wrapPngAsIco(pngBuffer) {
-  const { width, height } = readPngSize(pngBuffer);
-
+function wrapPngsAsIco(pngBuffers) {
   const header = Buffer.alloc(6);
   header.writeUInt16LE(0, 0);
   header.writeUInt16LE(1, 2);
-  header.writeUInt16LE(1, 4);
+  header.writeUInt16LE(pngBuffers.length, 4);
 
-  const entry = Buffer.alloc(16);
-  entry.writeUInt8(width >= 256 ? 0 : width, 0);
-  entry.writeUInt8(height >= 256 ? 0 : height, 1);
-  entry.writeUInt8(0, 2);
-  entry.writeUInt8(0, 3);
-  entry.writeUInt16LE(1, 4);
-  entry.writeUInt16LE(32, 6);
-  entry.writeUInt32LE(pngBuffer.length, 8);
-  entry.writeUInt32LE(header.length + entry.length, 12);
+  const directory = Buffer.alloc(16 * pngBuffers.length);
+  let offset = header.length + directory.length;
 
-  return Buffer.concat([header, entry, pngBuffer]);
+  for (const [index, pngBuffer] of pngBuffers.entries()) {
+    const { width, height } = readPngSize(pngBuffer);
+    const entryOffset = index * 16;
+    directory.writeUInt8(width >= 256 ? 0 : width, entryOffset);
+    directory.writeUInt8(height >= 256 ? 0 : height, entryOffset + 1);
+    directory.writeUInt8(0, entryOffset + 2);
+    directory.writeUInt8(0, entryOffset + 3);
+    directory.writeUInt16LE(1, entryOffset + 4);
+    directory.writeUInt16LE(32, entryOffset + 6);
+    directory.writeUInt32LE(pngBuffer.length, entryOffset + 8);
+    directory.writeUInt32LE(offset, entryOffset + 12);
+    offset += pngBuffer.length;
+  }
+
+  return Buffer.concat([header, directory, ...pngBuffers]);
 }
 
 function readPngSize(pngBuffer) {
@@ -75,54 +140,37 @@ function readPngSize(pngBuffer) {
   };
 }
 
-async function generateWindowsIco(sourcePath, icoTargetPath) {
-  const script = `
-Add-Type -AssemblyName System.Drawing
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class NativeIcon {
-  [DllImport("user32.dll", SetLastError = true)]
-  public static extern bool DestroyIcon(IntPtr hIcon);
-}
-"@
-$source = ${toPowerShellString(sourcePath)}
-$target = ${toPowerShellString(icoTargetPath)}
-$bitmap = [System.Drawing.Bitmap]::FromFile($source)
-$resized = New-Object System.Drawing.Bitmap 256, 256
-$graphics = [System.Drawing.Graphics]::FromImage($resized)
-$graphics.Clear([System.Drawing.Color]::Transparent)
-$graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-$graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-$graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-$scale = [Math]::Min(256 / $bitmap.Width, 256 / $bitmap.Height)
-$drawWidth = [int][Math]::Round($bitmap.Width * $scale)
-$drawHeight = [int][Math]::Round($bitmap.Height * $scale)
-$offsetX = [int][Math]::Floor((256 - $drawWidth) / 2)
-$offsetY = [int][Math]::Floor((256 - $drawHeight) / 2)
-$graphics.DrawImage($bitmap, $offsetX, $offsetY, $drawWidth, $drawHeight)
-$icon = [System.Drawing.Icon]::FromHandle($resized.GetHicon())
-$fileStream = [System.IO.File]::Create($target)
-$icon.Save($fileStream)
-$fileStream.Close()
-[NativeIcon]::DestroyIcon($icon.Handle) | Out-Null
-$icon.Dispose()
-$graphics.Dispose()
-$resized.Dispose()
-$bitmap.Dispose()
-`;
+async function buildMultiResolutionIco(sourcePath) {
+  const iconSizes = [16, 24, 32, 40, 48, 64, 96, 128, 256];
+  const pngBuffers = [];
 
-  await runCommand("powershell", [
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-Command",
-    script,
-  ]);
-}
+  for (const size of iconSizes) {
+    const scale = size <= 24 ? 0.78 : size <= 48 ? 0.84 : size <= 64 ? 0.88 : 0.92;
+    const innerSize = Math.max(1, Math.round(size * scale));
+    const foreground = await sharp(sourcePath)
+      .resize(innerSize, innerSize, {
+        fit: "contain",
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
 
-function toPowerShellString(value) {
-  return `'${String(value).replace(/'/g, "''")}'`;
+    const framed = await sharp({
+      create: {
+        width: size,
+        height: size,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .composite([{ input: foreground, gravity: "center" }])
+      .png()
+      .toBuffer();
+
+    pngBuffers.push(framed);
+  }
+
+  return wrapPngsAsIco(pngBuffers);
 }
 
 async function maybeGenerateIcns(sourcePath, icnsTargetPath) {

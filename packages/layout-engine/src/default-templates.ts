@@ -1,5 +1,21 @@
 import type { LayoutSlot, LayoutTemplate } from "@photo-tools/shared-types";
 
+function mirrorSlotsHorizontally(slots: LayoutSlot[]): LayoutSlot[] {
+  return slots.map((slot) => ({
+    ...slot,
+    x: Number((1 - slot.x - slot.width).toFixed(4))
+  }));
+}
+
+function createVariantTemplate(
+  template: Omit<LayoutTemplate, "slots"> & { slots: LayoutSlot[] }
+): LayoutTemplate {
+  return {
+    ...template,
+    supportsPageSide: true
+  };
+}
+
 function buildGridSlots(count: number, columns: number, rows: number): LayoutSlot[] {
   const gap = 0.02;
   const cellWidth = (1 - gap * (columns - 1)) / columns;
@@ -331,6 +347,189 @@ const STORY_TEMPLATES_5_TO_8: LayoutTemplate[] = [
   }
 ];
 
+const SIDE_AWARE_TEMPLATES: LayoutTemplate[] = [
+  createVariantTemplate({
+    id: "duo-hero-focus-left",
+    label: "Doppio Hero Left",
+    description: "Hero verticale a sinistra con supporto laterale per aperture dinamiche.",
+    style: "editorial",
+    affinity: "portrait-heavy",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "duo-hero-focus",
+    variantRole: "mirror-left",
+    minPhotos: 2,
+    maxPhotos: 2,
+    slots: [
+      { id: "hero-left", x: 0, y: 0, width: 0.58, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "support-right", x: 0.63, y: 0.12, width: 0.37, height: 0.76, expectedOrientation: "vertical", priority: 84 }
+    ]
+  }),
+  createVariantTemplate({
+    id: "duo-hero-focus-right",
+    label: "Doppio Hero Right",
+    description: "Versione specchiata per spread coerenti sul lato destro.",
+    style: "editorial",
+    affinity: "portrait-heavy",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "duo-hero-focus",
+    variantRole: "mirror-right",
+    minPhotos: 2,
+    maxPhotos: 2,
+    slots: mirrorSlotsHorizontally([
+      { id: "hero-left", x: 0, y: 0, width: 0.58, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "support-right", x: 0.63, y: 0.12, width: 0.37, height: 0.76, expectedOrientation: "vertical", priority: 84 }
+    ])
+  }),
+  createVariantTemplate({
+    id: "trio-asymmetric-story-left",
+    label: "Trio Story Left",
+    description: "Hero alto a sinistra e doppia colonna di supporto per spread editoriali.",
+    style: "editorial",
+    affinity: "mixed",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "trio-asymmetric-story",
+    variantRole: "companion-left",
+    minPhotos: 3,
+    maxPhotos: 3,
+    slots: [
+      { id: "hero-left", x: 0, y: 0, width: 0.57, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "top-right", x: 0.61, y: 0, width: 0.39, height: 0.45, expectedOrientation: "horizontal", priority: 88 },
+      { id: "bottom-right", x: 0.61, y: 0.51, width: 0.39, height: 0.49, expectedOrientation: "horizontal", priority: 82 }
+    ]
+  }),
+  createVariantTemplate({
+    id: "trio-asymmetric-story-right",
+    label: "Trio Story Right",
+    description: "Companion non speculare con peso narrativo verso il lato destro.",
+    style: "editorial",
+    affinity: "mixed",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "trio-asymmetric-story",
+    variantRole: "companion-right",
+    minPhotos: 3,
+    maxPhotos: 3,
+    slots: [
+      { id: "top-left", x: 0, y: 0, width: 0.39, height: 0.45, expectedOrientation: "horizontal", priority: 88 },
+      { id: "bottom-left", x: 0, y: 0.51, width: 0.39, height: 0.49, expectedOrientation: "horizontal", priority: 82 },
+      { id: "hero-right", x: 0.43, y: 0, width: 0.57, height: 1, expectedOrientation: "vertical", priority: 100 }
+    ]
+  }),
+  createVariantTemplate({
+    id: "four-cascade-opening-left",
+    label: "Quattro Cascade Left",
+    description: "Hero verticale con tre supporti a cascata, pensato per la pagina sinistra.",
+    style: "collage",
+    affinity: "portrait-heavy",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "four-cascade-opening",
+    variantRole: "mirror-left",
+    minPhotos: 4,
+    maxPhotos: 4,
+    slots: [
+      { id: "hero-left", x: 0, y: 0, width: 0.46, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "top-right", x: 0.5, y: 0, width: 0.5, height: 0.28, expectedOrientation: "horizontal", priority: 88 },
+      { id: "mid-right", x: 0.56, y: 0.34, width: 0.44, height: 0.28, expectedOrientation: "horizontal", priority: 84 },
+      { id: "bottom-right", x: 0.62, y: 0.68, width: 0.38, height: 0.32, expectedOrientation: "vertical", priority: 80 }
+    ]
+  }),
+  createVariantTemplate({
+    id: "four-cascade-opening-right",
+    label: "Quattro Cascade Right",
+    description: "Versione specchiata per chiudere lo spread mantenendo la gerarchia.",
+    style: "collage",
+    affinity: "portrait-heavy",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "four-cascade-opening",
+    variantRole: "mirror-right",
+    minPhotos: 4,
+    maxPhotos: 4,
+    slots: mirrorSlotsHorizontally([
+      { id: "hero-left", x: 0, y: 0, width: 0.46, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "top-right", x: 0.5, y: 0, width: 0.5, height: 0.28, expectedOrientation: "horizontal", priority: 88 },
+      { id: "mid-right", x: 0.56, y: 0.34, width: 0.44, height: 0.28, expectedOrientation: "horizontal", priority: 84 },
+      { id: "bottom-right", x: 0.62, y: 0.68, width: 0.38, height: 0.32, expectedOrientation: "vertical", priority: 80 }
+    ])
+  }),
+  createVariantTemplate({
+    id: "five-ribbon-companion-left",
+    label: "Cinque Ribbon Left",
+    description: "Hero orizzontale con supporti sbilanciati per lato sinistro.",
+    style: "editorial",
+    affinity: "landscape-heavy",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "five-ribbon-companion",
+    variantRole: "companion-left",
+    minPhotos: 5,
+    maxPhotos: 5,
+    slots: [
+      { id: "hero-top", x: 0, y: 0, width: 1, height: 0.34, expectedOrientation: "horizontal", priority: 100 },
+      { id: "left-stack-1", x: 0, y: 0.4, width: 0.43, height: 0.28, expectedOrientation: "vertical", priority: 90 },
+      { id: "left-stack-2", x: 0, y: 0.72, width: 0.43, height: 0.28, expectedOrientation: "vertical", priority: 86 },
+      { id: "right-wide-1", x: 0.49, y: 0.4, width: 0.51, height: 0.26, expectedOrientation: "horizontal", priority: 84 },
+      { id: "right-wide-2", x: 0.49, y: 0.72, width: 0.51, height: 0.28, expectedOrientation: "horizontal", priority: 82 }
+    ]
+  }),
+  createVariantTemplate({
+    id: "five-ribbon-companion-right",
+    label: "Cinque Ribbon Right",
+    description: "Companion per lato destro con massa visiva invertita ma non speculare.",
+    style: "editorial",
+    affinity: "landscape-heavy",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "five-ribbon-companion",
+    variantRole: "companion-right",
+    minPhotos: 5,
+    maxPhotos: 5,
+    slots: [
+      { id: "hero-top", x: 0, y: 0, width: 1, height: 0.34, expectedOrientation: "horizontal", priority: 100 },
+      { id: "left-wide-1", x: 0, y: 0.4, width: 0.51, height: 0.26, expectedOrientation: "horizontal", priority: 84 },
+      { id: "left-wide-2", x: 0, y: 0.72, width: 0.51, height: 0.28, expectedOrientation: "horizontal", priority: 82 },
+      { id: "right-stack-1", x: 0.57, y: 0.4, width: 0.43, height: 0.28, expectedOrientation: "vertical", priority: 90 },
+      { id: "right-stack-2", x: 0.57, y: 0.72, width: 0.43, height: 0.28, expectedOrientation: "vertical", priority: 86 }
+    ]
+  }),
+  createVariantTemplate({
+    id: "six-mosaic-spread-left",
+    label: "Sei Mosaic Left",
+    description: "Mosaico arioso con hero e tasselli di supporto, variante lato sinistro.",
+    style: "collage",
+    affinity: "mixed",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "six-mosaic-spread",
+    variantRole: "mirror-left",
+    minPhotos: 6,
+    maxPhotos: 6,
+    slots: [
+      { id: "hero-left", x: 0, y: 0, width: 0.43, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "top-right-a", x: 0.47, y: 0, width: 0.24, height: 0.31, expectedOrientation: "horizontal", priority: 90 },
+      { id: "top-right-b", x: 0.75, y: 0, width: 0.25, height: 0.31, expectedOrientation: "horizontal", priority: 88 },
+      { id: "mid-right", x: 0.47, y: 0.37, width: 0.53, height: 0.27, expectedOrientation: "horizontal", priority: 86 },
+      { id: "bottom-right-a", x: 0.47, y: 0.7, width: 0.24, height: 0.3, expectedOrientation: "vertical", priority: 82 },
+      { id: "bottom-right-b", x: 0.75, y: 0.7, width: 0.25, height: 0.3, expectedOrientation: "vertical", priority: 80 }
+    ]
+  }),
+  createVariantTemplate({
+    id: "six-mosaic-spread-right",
+    label: "Sei Mosaic Right",
+    description: "Mosaico specchiato per spread più leggibili e meno ripetitivi.",
+    style: "collage",
+    affinity: "mixed",
+    targetSheetOrientation: "portrait",
+    variantGroupId: "six-mosaic-spread",
+    variantRole: "mirror-right",
+    minPhotos: 6,
+    maxPhotos: 6,
+    slots: mirrorSlotsHorizontally([
+      { id: "hero-left", x: 0, y: 0, width: 0.43, height: 1, expectedOrientation: "vertical", priority: 100 },
+      { id: "top-right-a", x: 0.47, y: 0, width: 0.24, height: 0.31, expectedOrientation: "horizontal", priority: 90 },
+      { id: "top-right-b", x: 0.75, y: 0, width: 0.25, height: 0.31, expectedOrientation: "horizontal", priority: 88 },
+      { id: "mid-right", x: 0.47, y: 0.37, width: 0.53, height: 0.27, expectedOrientation: "horizontal", priority: 86 },
+      { id: "bottom-right-a", x: 0.47, y: 0.7, width: 0.24, height: 0.3, expectedOrientation: "vertical", priority: 82 },
+      { id: "bottom-right-b", x: 0.75, y: 0.7, width: 0.25, height: 0.3, expectedOrientation: "vertical", priority: 80 }
+    ])
+  })
+];
+
 const STORY_TEMPLATES_9_TO_12: LayoutTemplate[] = [
   {
     id: "nine-magazine-ladder",
@@ -624,6 +823,7 @@ const STORY_TEMPLATES_13_TO_16: LayoutTemplate[] = [
 ];
 
 export const DEFAULT_LAYOUT_TEMPLATES: LayoutTemplate[] = [
+  ...SIDE_AWARE_TEMPLATES,
   {
     id: "single-hero",
     label: "Singola Protagonista",

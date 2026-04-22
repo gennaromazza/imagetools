@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent, type UIEvent } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type SyntheticEvent, type UIEvent } from "react";
 import { createPortal } from "react-dom";
 import type { DesktopQuickPreviewFrame, DesktopQuickPreviewSource } from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
@@ -31,12 +31,16 @@ import {
   COLOR_LABELS,
   DEFAULT_PHOTO_FILTERS,
   formatAssetStars,
+  getAssetFileExtension,
+  getAssetGroupingKey,
   getAssetColorLabel,
   getAssetPickStatus,
   getAssetRating,
   getColorShortcutHint,
+  JPEG_EXTENSIONS,
   matchesPhotoFilters,
   PICK_STATUS_LABELS,
+  RAW_EXTENSIONS,
   resolvePhotoClassificationShortcut
 } from "../services/photo-classification";
 import type { ThumbnailProfile } from "../services/photo-selector-preferences";
@@ -61,6 +65,16 @@ interface PhotoQuickPreviewModalProps {
   customLabelsCatalog?: string[];
   customLabelColors?: Record<string, CustomLabelTone>;
   customLabelShortcuts?: Record<string, CustomLabelShortcut | null>;
+  externalFeedback?: {
+    token: number;
+    assetIds: string[];
+    kind: "star" | "pill" | "dot" | "label";
+    label: string;
+    tone?: CustomLabelTone;
+    labels?: string[];
+  } | null;
+  canExternalDrag?: boolean;
+  onExternalDragStart?: (assetId: string, event: DragEvent<HTMLElement>) => void;
   autoAdvanceOnAction?: boolean;
   onClose: () => void;
   onSelectAsset?: (assetId: string) => void;
@@ -220,6 +234,9 @@ export function PhotoQuickPreviewModal({
   customLabelsCatalog = [],
   customLabelColors = {},
   customLabelShortcuts = {},
+  externalFeedback,
+  canExternalDrag = false,
+  onExternalDragStart,
   autoAdvanceOnAction = true,
   onClose,
   onSelectAsset,
@@ -234,6 +251,7 @@ export function PhotoQuickPreviewModal({
   const pendingDockViewportRef = useRef<VirtualStripViewport | null>(null);
   const assignFeedbackTimeoutRef = useRef<number | null>(null);
   const classificationFeedbackTimeoutRef = useRef<number | null>(null);
+  const lastExternalFeedbackTokenRef = useRef<number>(0);
   const previewWarmupTimeoutRef = useRef<number | null>(null);
   const detailPreviewTimeoutRef = useRef<number | null>(null);
   const fallbackPreviewTimeoutRef = useRef<number | null>(null);
@@ -417,6 +435,33 @@ export function PhotoQuickPreviewModal({
   const compareAsset = compareAssetId
     ? navigationAssets.find((item) => item.id === compareAssetId && item.id !== asset?.id) ?? null
     : null;
+  const groupSummaryByKey = useMemo(() => {
+    const summary = new Map<string, { totalCount: number; rawCount: number; jpegCount: number }>();
+    for (const item of navigationAssets) {
+      const key = getAssetGroupingKey(item);
+      const current = summary.get(key) ?? { totalCount: 0, rawCount: 0, jpegCount: 0 };
+      current.totalCount += 1;
+      const extension = getAssetFileExtension(item);
+      if (RAW_EXTENSIONS.has(extension)) {
+        current.rawCount += 1;
+      }
+      if (JPEG_EXTENSIONS.has(extension)) {
+        current.jpegCount += 1;
+      }
+      summary.set(key, current);
+    }
+    return summary;
+  }, [navigationAssets]);
+  const currentGroupSummary = useMemo(() => {
+    if (!asset) {
+      return null;
+    }
+    const summary = groupSummaryByKey.get(getAssetGroupingKey(asset));
+    if (!summary || summary.totalCount <= 1) {
+      return null;
+    }
+    return summary;
+  }, [asset, groupSummaryByKey]);
   const assetAbsolutePath = asset ? getAssetAbsolutePath(asset.id) : undefined;
   const compareAssetAbsolutePath = compareAsset ? getAssetAbsolutePath(compareAsset.id) : undefined;
   const canUseDesktopQuickPreview = Boolean(desktopQuickPreviewEnabled && assetAbsolutePath);
@@ -535,6 +580,37 @@ export function PhotoQuickPreviewModal({
       classificationFeedbackTimeoutRef.current = null;
     }, 1450);
   }, [customLabelColors]);
+
+  useEffect(() => {
+    if (!asset || !externalFeedback) {
+      return;
+    }
+    if (externalFeedback.token === lastExternalFeedbackTokenRef.current) {
+      return;
+    }
+    if (!externalFeedback.assetIds.includes(asset.id)) {
+      return;
+    }
+
+    lastExternalFeedbackTokenRef.current = externalFeedback.token;
+    const nextFeedback: PreviewFeedback = {
+      token: externalFeedback.token,
+      kind: externalFeedback.kind,
+      label: externalFeedback.label,
+      tone: externalFeedback.tone,
+      labels: externalFeedback.labels,
+    };
+    setClassificationFeedback(nextFeedback);
+    if (classificationFeedbackTimeoutRef.current !== null) {
+      window.clearTimeout(classificationFeedbackTimeoutRef.current);
+    }
+    classificationFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setClassificationFeedback((current) => (
+        current?.token === nextFeedback.token ? null : current
+      ));
+      classificationFeedbackTimeoutRef.current = null;
+    }, 1200);
+  }, [asset, externalFeedback]);
 
   const updateRating = useCallback(
     (rating: number) => {
@@ -719,11 +795,10 @@ export function PhotoQuickPreviewModal({
   ]);
 
   const availableCustomLabels = useMemo(() => {
-    const merged = [...customLabelsCatalog, ...Object.keys(customLabelColors)];
     const seen = new Set<string>();
     const labels: string[] = [];
 
-    for (const value of merged) {
+    for (const value of customLabelsCatalog) {
       const cleaned = value.replace(/\s+/g, " ").trim().slice(0, 48);
       if (!cleaned) {
         continue;
@@ -739,13 +814,17 @@ export function PhotoQuickPreviewModal({
     }
 
     return labels;
-  }, [customLabelColors, customLabelsCatalog]);
+  }, [customLabelsCatalog]);
 
   const customLabelByShortcut = useMemo(() => {
+    const allowed = new Set(availableCustomLabels.map((label) => label.toLocaleLowerCase()));
     const entries = Object.entries(customLabelShortcuts)
-      .filter((entry): entry is [string, CustomLabelShortcut] => Boolean(entry[1]));
+      .filter(
+        (entry): entry is [string, CustomLabelShortcut] =>
+          Boolean(entry[1]) && allowed.has(entry[0].toLocaleLowerCase()),
+      );
     return new Map(entries.map(([label, shortcut]) => [shortcut, label]));
-  }, [customLabelShortcuts]);
+  }, [availableCustomLabels, customLabelShortcuts]);
 
   const activePreviewAssetNeedsManagedPreview = Boolean(
     asset && (
@@ -1813,6 +1892,13 @@ export function PhotoQuickPreviewModal({
     ?? activeResolvedPreview
     ?? immediateFitPreview
     ?? null;
+  const handleExternalDragStart = useCallback((assetId: string, event: DragEvent<HTMLElement>) => {
+    if (!canExternalDrag || !onExternalDragStart) {
+      event.preventDefault();
+      return;
+    }
+    onExternalDragStart(assetId, event);
+  }, [canExternalDrag, onExternalDragStart]);
 
   const handleMainPreviewError = useCallback(() => {
     if (!asset || !canUseDesktopQuickPreview || !displayPreviewUrl?.startsWith("filex-preview://")) {
@@ -2177,7 +2263,7 @@ export function PhotoQuickPreviewModal({
       aria-modal="true"
       aria-label="Anteprima foto a schermo intero"
     >
-      {/* ── SIDEBAR SINISTRA: filtri + thumbnail verticali ── */}
+      {/* SIDEBAR SINISTRA: filtri + thumbnail verticali */}
       {assets.length > 1 ? (
         <div className="quick-preview__sidebar" onClick={(event) => event.stopPropagation()}>
           <div className="quick-preview__sidebar-filters">
@@ -2282,7 +2368,6 @@ export function PhotoQuickPreviewModal({
         </div>
       ) : null}
 
-      {/* ── AREA PRINCIPALE DESTRA: chrome + meta + foto + assign ── */}
       <div className="quick-preview__main" onClick={(event) => event.stopPropagation()}>
         <div className="quick-preview__chrome">
           <div className="quick-preview__title">
@@ -2297,6 +2382,11 @@ export function PhotoQuickPreviewModal({
             {asset.xmpHasEdits ? (
               <span className="quick-preview__xmp-badge" title="Metadati XMP rilevati">
                 XMP Edit: {asset.xmpEditInfo ?? "Sviluppo rilevato"}
+              </span>
+            ) : null}
+            {currentGroupSummary ? (
+              <span className="quick-preview__xmp-badge" title={`Gruppo: ${currentGroupSummary.totalCount} file`}>
+                Gruppo: {currentGroupSummary.rawCount} RAW + {currentGroupSummary.jpegCount} JPG
               </span>
             ) : null}
           </div>
@@ -2565,10 +2655,11 @@ export function PhotoQuickPreviewModal({
                     src={displayPreviewUrl}
                     alt={asset.fileName}
                     className="quick-preview__image quick-preview__image--compare"
-                    draggable={false}
+                    draggable={canExternalDrag}
                     decoding="sync"
                     onError={handleMainPreviewError}
                     onDoubleClick={toggleNativeFullscreen}
+                    onDragStart={(event) => handleExternalDragStart(asset.id, event)}
                   />
                 ) : (
                   <div className="quick-preview__placeholder">
@@ -2588,10 +2679,11 @@ export function PhotoQuickPreviewModal({
                     src={displayComparePreviewUrl}
                     alt={compareAsset.fileName}
                     className="quick-preview__image quick-preview__image--compare"
-                    draggable={false}
+                    draggable={canExternalDrag}
                     decoding="sync"
                     onError={handleComparePreviewError}
                     onDoubleClick={toggleNativeFullscreen}
+                    onDragStart={(event) => handleExternalDragStart(compareAsset.id, event)}
                   />
                 ) : (
                   <div className="quick-preview__placeholder">
@@ -2617,11 +2709,12 @@ export function PhotoQuickPreviewModal({
                     : "quick-preview__image quick-preview__image--zoomed"
                   : "quick-preview__image"
               }
-              draggable={false}
+              draggable={canExternalDrag}
               decoding="sync"
               onLoad={handleMainPreviewLoad}
               onError={handleMainPreviewError}
               onDoubleClick={toggleNativeFullscreen}
+              onDragStart={(event) => handleExternalDragStart(asset.id, event)}
               style={{
                 transform: `translate3d(${panOffset.x}px, ${panOffset.y}px, 0) scale(${zoomLevel})`,
               }}
@@ -2689,6 +2782,11 @@ export function PhotoQuickPreviewModal({
               {dockStripItems.map((item) => {
                 const itemPreview = getQuickPreviewThumbUrl(item);
                 const isActive = item.id === asset.id;
+                const itemGroupSummary = groupSummaryByKey.get(getAssetGroupingKey(item));
+                const itemGroupCount = itemGroupSummary?.totalCount ?? 0;
+                const itemGroupBadge = itemGroupSummary && itemGroupSummary.totalCount > 1
+                  ? `${itemGroupSummary.rawCount}R+${itemGroupSummary.jpegCount}J`
+                  : null;
 
                 return (
                   <button
@@ -2702,7 +2800,14 @@ export function PhotoQuickPreviewModal({
                     aria-current={isActive ? true : undefined}
                     onClick={() => selectAssetFromPreview(item.id, "jump")}
                     title={item.fileName}
+                    draggable={canExternalDrag && isActive}
+                    onDragStart={(event) => handleExternalDragStart(item.id, event)}
                   >
+                    {isActive && itemGroupBadge ? (
+                      <span className="quick-preview__dock-group-badge" title={`Gruppo ${itemGroupCount} file`}>
+                        {itemGroupBadge}
+                      </span>
+                    ) : null}
                     {itemPreview ? (
                       <img
                         src={itemPreview}
@@ -2746,9 +2851,9 @@ export function PhotoQuickPreviewModal({
                 {activePage
                   ? activePageCanAccept
                     ? usage?.pageId === activePage.id
-                      ? "La foto è già in questo foglio. Premi Invio per riorganizzarlo."
+                      ? "La foto \u00E8 gi\u00E0 in questo foglio. Premi Invio per riorganizzarlo."
                       : "Premi Invio per aggiungere questa foto al foglio attivo."
-                    : "Il foglio attivo è pieno. Seleziona un altro foglio nello studio."
+                    : "Il foglio attivo \u00E8 pieno. Seleziona un altro foglio nello studio."
                   : "Seleziona un foglio nello studio per usare l'aggiunta rapida."}
               </span>
               {showAssignSuccess ? (

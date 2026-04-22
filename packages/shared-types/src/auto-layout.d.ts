@@ -7,6 +7,8 @@ export type CropStrategy = "balanced" | "portraitSafe" | "landscapeSafe";
 export type OutputFormat = "jpg" | "png" | "tif";
 export type PlanningMode = "desiredSheetCount" | "maxPhotosPerSheet";
 export type WorkflowMode = "auto" | "manual";
+export type PageSide = "left" | "right" | "single";
+export type TemplateVariantRole = "base" | "mirror-left" | "mirror-right" | "companion-left" | "companion-right";
 export type TemplateStyle = "hero" | "paired" | "balanced-grid" | "editorial" | "collage";
 export type TemplateAffinity = "portrait-heavy" | "landscape-heavy" | "mixed" | "any";
 export interface ImageAsset {
@@ -63,6 +65,9 @@ export interface LayoutTemplate {
     style: TemplateStyle;
     affinity: TemplateAffinity;
     targetSheetOrientation: "portrait" | "landscape" | "any";
+    variantGroupId?: string;
+    variantRole?: TemplateVariantRole;
+    supportsPageSide?: boolean;
     minPhotos: number;
     maxPhotos: number;
     slots: LayoutSlot[];
@@ -84,6 +89,8 @@ export interface LayoutAssignment {
 export interface GeneratedPageLayout {
     id: string;
     pageNumber: number;
+    pageSide: PageSide;
+    spreadId?: string;
     sheetSpec: SheetSpec;
     templateId: string;
     templateLabel: string;

@@ -12,6 +12,12 @@ export interface OutputProfile {
 
 interface OutputPanelProps {
   request: AutoLayoutRequest;
+  pageCount: number;
+  unassignedCount: number;
+  warningCount: number;
+  readinessTone: "ok" | "warning" | "critical" | "progress";
+  readinessLabel: string;
+  readinessDetail: string;
   isExporting: boolean;
   exportMessage: string | null;
   supportsDirectoryPicker: boolean;
@@ -106,6 +112,12 @@ function buildCustomProfileId(profileName: string): string {
 
 export function OutputPanel({
   request,
+  pageCount,
+  unassignedCount,
+  warningCount,
+  readinessTone,
+  readinessLabel,
+  readinessDetail,
   isExporting,
   exportMessage,
   supportsDirectoryPicker,
@@ -137,6 +149,7 @@ export function OutputPanel({
   const isSelectedProfileCustom = Boolean(
     selectedProfile && !BUILTIN_OUTPUT_PROFILES.some((profile) => profile.id === selectedProfile.id)
   );
+  const needsFinalCheck = warningCount > 0 || unassignedCount > 0;
 
   const handleApplySelectedProfile = () => {
     if (!selectedProfile) {
@@ -180,151 +193,208 @@ export function OutputPanel({
   };
 
   return (
-    <div className="stack">
-      <div className="inline-grid inline-grid--2">
-        <label className="field">
-          <span>Cartella di output</span>
-          <input
-            type="text"
-            value={request.output.folderPath}
-            onChange={(event) => onOutputChange("folderPath", event.target.value)}
-          />
-        </label>
-
-        <label className="field">
-          <span>Nome file</span>
-          <input
-            type="text"
-            value={request.output.fileNamePattern}
-            onChange={(event) => onOutputChange("fileNamePattern", event.target.value)}
-          />
-        </label>
-      </div>
-
-      <div className="inline-grid inline-grid--2">
-        <label className="field">
-          <span>Formato</span>
-          <select
-            value={request.output.format}
-            onChange={(event) => onOutputChange("format", event.target.value as OutputFormat)}
-          >
-            <option value="jpg">JPG</option>
-            <option value="png">PNG</option>
-            <option value="tif">TIF (salvato come JPG)</option>
-          </select>
-        </label>
-
-        <label className="field">
-          <span>Qualita</span>
-          <input
-            type="number"
-            min="1"
-            max="100"
-            value={request.output.quality}
-            onChange={(event) => onOutputChange("quality", Number(event.target.value))}
-          />
-        </label>
-      </div>
-
-      <div className="inline-grid inline-grid--2">
-        <label className="field">
-          <span>Preset export</span>
-          <select
-            value={selectedProfileId}
-            onChange={(event) => setSelectedProfileId(event.target.value)}
-          >
-            {allProfiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name} · {profile.dpi}dpi · {profile.format.toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="field">
-          <span>Azioni preset</span>
-          <div className="button-row">
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={handleApplySelectedProfile}
-              disabled={!selectedProfile}
-            >
-              Applica preset
-            </button>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={handleDeleteSelectedProfile}
-              disabled={!isSelectedProfileCustom}
-            >
-              Elimina
-            </button>
-          </div>
+    <div className="output-panel stack">
+      <div className="stats-grid">
+        <div className={`stat-card stat-card--highlight output-panel__status-card output-panel__status-card--${readinessTone}`}>
+          <span>Stato export</span>
+          <strong>{readinessLabel}</strong>
+          <small className="output-panel__card-note">{readinessDetail}</small>
+        </div>
+        <div className="stat-card">
+          <span>Fogli pronti</span>
+          <strong>{pageCount}</strong>
+          <small className="output-panel__card-note">Verranno numerati con il pattern scelto.</small>
+        </div>
+        <div className="stat-card">
+          <span>Foto libere</span>
+          <strong>{unassignedCount}</strong>
+          <small className="output-panel__card-note">
+            {unassignedCount > 0 ? "Restano fuori dai fogli finche non le assegni." : "Tutte le foto attive sono gia distribuite."}
+          </small>
+        </div>
+        <div className="stat-card">
+          <span>Formato finale</span>
+          <strong>{request.output.format.toUpperCase()}</strong>
+          <small className="output-panel__card-note">Qualita {request.output.quality} / {request.sheet.dpi} DPI</small>
         </div>
       </div>
 
-      <div className="inline-grid inline-grid--2">
-        <label className="field">
-          <span>Salva preset corrente</span>
-          <input
-            type="text"
-            placeholder="Es. Lab wedding 300"
-            value={profileNameDraft}
-            onChange={(event) => setProfileNameDraft(event.target.value)}
-          />
-        </label>
-        <div className="field">
-          <span>&nbsp;</span>
-          <div className="button-row">
+      {needsFinalCheck ? (
+        <div className="message-box message-box--warning">
+          {warningCount > 0
+            ? `${warningCount} segnalazioni risultano ancora aperte.`
+            : "Nessun avviso bloccante aperto."}{" "}
+          {unassignedCount > 0
+            ? `${unassignedCount} foto non sono ancora finite in un foglio.`
+            : "La distribuzione foto e completa."}
+        </div>
+      ) : null}
+
+      <section className="output-panel__section">
+        <div className="output-panel__section-header">
+          <strong>Destinazione e nome file</strong>
+          <p>Definisci cartella finale e naming, cosi l'export resta leggibile anche fuori dall'app.</p>
+        </div>
+
+        <div className="inline-grid inline-grid--2">
+          <label className="field">
+            <span>Cartella di output</span>
+            <input
+              type="text"
+              value={request.output.folderPath}
+              onChange={(event) => onOutputChange("folderPath", event.target.value)}
+            />
+          </label>
+
+          <label className="field">
+            <span>Nome file</span>
+            <input
+              type="text"
+              value={request.output.fileNamePattern}
+              onChange={(event) => onOutputChange("fileNamePattern", event.target.value)}
+            />
+          </label>
+        </div>
+      </section>
+
+      <section className="output-panel__section">
+        <div className="output-panel__section-header">
+          <strong>Formato e preset</strong>
+          <p>Imposta il tipo di file finale oppure richiama un preset gia usato in produzione.</p>
+        </div>
+
+        <div className="inline-grid inline-grid--2">
+          <label className="field">
+            <span>Formato</span>
+            <select
+              value={request.output.format}
+              onChange={(event) => onOutputChange("format", event.target.value as OutputFormat)}
+            >
+              <option value="jpg">JPG</option>
+              <option value="png">PNG</option>
+              <option value="tif">TIF (salvato come JPG)</option>
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Qualita</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={request.output.quality}
+              onChange={(event) => onOutputChange("quality", Number(event.target.value))}
+            />
+          </label>
+        </div>
+
+        <div className="inline-grid inline-grid--2">
+          <label className="field">
+            <span>Preset export</span>
+            <select
+              value={selectedProfileId}
+              onChange={(event) => setSelectedProfileId(event.target.value)}
+            >
+              {allProfiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name} / {profile.dpi}dpi / {profile.format.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="field">
+            <span>Azioni preset</span>
+            <div className="button-row">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={handleApplySelectedProfile}
+                disabled={!selectedProfile}
+              >
+                Applica preset
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={handleDeleteSelectedProfile}
+                disabled={!isSelectedProfileCustom}
+              >
+                Elimina
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="inline-grid inline-grid--2">
+          <label className="field">
+            <span>Salva preset corrente</span>
+            <input
+              type="text"
+              placeholder="Es. Lab wedding 300"
+              value={profileNameDraft}
+              onChange={(event) => setProfileNameDraft(event.target.value)}
+            />
+          </label>
+          <div className="field">
+            <span>&nbsp;</span>
+            <div className="button-row">
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={handleSaveCurrentAsProfile}
+                disabled={profileNameDraft.trim().length === 0}
+              >
+                Salva preset
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="output-panel__section">
+        <div className="output-panel__section-header">
+          <strong>Esporta adesso</strong>
+          <p>Scegli se produrre i fogli standard oppure i PSD multilayer per ritocco e Camera Raw.</p>
+        </div>
+
+        <div className="button-row">
+          {supportsDirectoryPicker ? (
             <button
               type="button"
               className="secondary-button"
-              onClick={handleSaveCurrentAsProfile}
-              disabled={profileNameDraft.trim().length === 0}
+              onClick={onPickOutputFolder}
+              aria-label="Seleziona la cartella di output reale dal computer"
             >
-              Salva preset
+              Scegli cartella reale
             </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="button-row">
-        {supportsDirectoryPicker ? (
+          ) : null}
+          <button
+            type="button"
+            className="primary-button"
+            onClick={onGenerate}
+            disabled={isExporting}
+            aria-label="Esporta i fogli di stampa in base alle impostazioni"
+          >
+            {isExporting ? "Esportazione in corso..." : "Esporta fogli"}
+          </button>
           <button
             type="button"
             className="secondary-button"
-            onClick={onPickOutputFolder}
-            aria-label="Seleziona la cartella di output reale dal computer"
+            onClick={onExportPsd}
+            disabled={isExportingPsd || isExporting}
+            aria-label="Esporta ogni foglio come file PSD con Smart Objects separati per ogni foto"
+            title="Ogni foto diventa un layer Smart Object. In Photoshop fai doppio click per aprirla in Camera Raw."
           >
-            Scegli cartella reale
+            {isExportingPsd ? "Generazione PSD..." : "Esporta PSD con layer"}
           </button>
-        ) : null}
-        <button
-          type="button"
-          className="primary-button"
-          onClick={onGenerate}
-          disabled={isExporting}
-          aria-label="Esporta i fogli di stampa in base alle impostazioni"
-        >
-          {isExporting ? "Esportazione in corso..." : "Esporta fogli"}
-        </button>
-        <button
-          type="button"
-          className="secondary-button"
-          onClick={onExportPsd}
-          disabled={isExportingPsd || isExporting}
-          aria-label="Esporta ogni foglio come file PSD con Smart Objects separati per ogni foto"
-          title="Ogni foto diventa un layer Smart Object. In Photoshop fai doppio click per aprirla in Camera Raw."
-        >
-          {isExportingPsd ? "Generazione PSD..." : "Esporta PSD con layer"}
-        </button>
-      </div>
+        </div>
 
-      <p className="helper-copy">
-        {supportsDirectoryPicker
-          ? "Se scegli una cartella reale, i file vengono scritti direttamente li'."
-          : "La scelta diretta della cartella non e disponibile in questa build: i fogli verranno salvati come file."}
-      </p>
+        <p className="helper-copy">
+          {supportsDirectoryPicker
+            ? "Se scegli una cartella reale, i file vengono scritti direttamente li."
+            : "La scelta diretta della cartella non e disponibile in questa build: i fogli verranno salvati come file."}
+        </p>
+      </section>
 
       {exportMessage ? <div className="message-box message-box--warning">{exportMessage}</div> : null}
     </div>

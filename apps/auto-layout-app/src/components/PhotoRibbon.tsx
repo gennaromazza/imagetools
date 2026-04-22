@@ -61,35 +61,47 @@ function PhotoRibbonContent({
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<"all" | ColorLabel>(DEFAULT_PHOTO_FILTERS.colorLabel);
   const [filtersOpen, setFiltersOpen] = useState(false);
-
-  const hasActiveFilters =
-    pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all";
-
-  function resetFilters() {
-    setPickFilter("all");
-    setRatingFilter("any");
-    setColorFilter("all");
-  }
   const [contextMenuState, setContextMenuState] = useState<{
     assetId: string;
     x: number;
     y: number;
   } | null>(null);
 
+  const hasActiveFilters =
+    pickFilter !== "all" || ratingFilter !== "any" || colorFilter !== "all";
+
+  const resetFilters = useCallback(() => {
+    setPickFilter("all");
+    setRatingFilter("any");
+    setColorFilter("all");
+  }, []);
+
+  const assetById = useMemo(() => new Map(assets.map((asset) => [asset.id, asset] as const)), [assets]);
+
   const filteredAssets = useMemo(
     () =>
-      assets.filter((asset) =>
-        matchesPhotoFilters(asset, {
-          pickStatus: pickFilter,
-          ratingFilter,
-          colorLabel: colorFilter
-        })
-      ),
-    [assets, colorFilter, ratingFilter, pickFilter]
+      assets.filter((asset) => {
+        const isUsed = usageByAssetId.has(asset.id);
+        const matchesUsage =
+          assetFilter === "all" ||
+          (assetFilter === "used" && isUsed) ||
+          (assetFilter === "unused" && !isUsed);
+
+        return (
+          matchesUsage &&
+          matchesPhotoFilters(asset, {
+            pickStatus: pickFilter,
+            ratingFilter,
+            colorLabel: colorFilter
+          })
+        );
+      }),
+    [assets, usageByAssetId, assetFilter, pickFilter, ratingFilter, colorFilter]
   );
 
-  const startIndex = Math.max(0, Math.floor(scrollLeft / ITEM_WIDTH) - 1);
-  const endIndex = Math.min(startIndex + visibleItems + OVERSCAN_ITEMS, filteredAssets.length);
+  const firstVisibleIndex = Math.max(0, Math.floor(scrollLeft / ITEM_WIDTH));
+  const startIndex = Math.max(0, firstVisibleIndex - OVERSCAN_ITEMS);
+  const endIndex = Math.min(startIndex + visibleItems + OVERSCAN_ITEMS * 2, filteredAssets.length);
 
   const updateAssetMetadata = useCallback(
     (
@@ -177,6 +189,32 @@ function PhotoRibbonContent({
 
   const visibleAssets =
     variant === "vertical" ? filteredAssets : filteredAssets.slice(startIndex, endIndex);
+  const visibleRangeStart = filteredAssets.length === 0 ? 0 : variant === "horizontal" ? firstVisibleIndex + 1 : 1;
+  const visibleRangeEnd = filteredAssets.length === 0
+    ? 0
+    : variant === "horizontal"
+      ? Math.min(firstVisibleIndex + visibleItems, filteredAssets.length)
+      : filteredAssets.length;
+  const visibleCount =
+    filteredAssets.length === 0
+      ? 0
+      : variant === "horizontal"
+        ? Math.max(0, visibleRangeEnd - visibleRangeStart + 1)
+        : filteredAssets.length;
+  const ribbonStatusLabel =
+    filteredAssets.length === 0
+      ? "Nessuna foto visibile"
+      : variant === "horizontal" && filteredAssets.length > visibleCount
+        ? `${visibleRangeStart}-${visibleRangeEnd} di ${filteredAssets.length} foto`
+        : `${filteredAssets.length} foto visibili`;
+  const ribbonHint =
+    filteredAssets.length === 0
+      ? "Modifica i filtri o cambia raccolta per vedere altre foto."
+      : hasActiveFilters
+        ? "Filtri attivi: puoi azzerarli per tornare all'intera libreria."
+        : variant === "vertical"
+          ? "Scorri la libreria per vedere tutte le foto disponibili."
+          : "Usa rotella o frecce per scorrere la libreria.";
 
   return (
     <div
@@ -186,12 +224,11 @@ function PhotoRibbonContent({
           : "layout-photo-ribbon"
       }
     >
-      {/* ── COMPACT HEADER ── */}
       <div className="ribbon-header-compact">
         <div className="ribbon-header-compact__top">
           <span className="ribbon-header-compact__title">Libreria foto</span>
           <span className="ribbon-header-compact__count">
-            {usageByAssetId.size} usate · {assets.length - usageByAssetId.size} libere
+            {usageByAssetId.size} usate / {assets.length - usageByAssetId.size} libere
           </span>
           <PhotoClassificationHelpButton
             className="ribbon-header-compact__help"
@@ -216,15 +253,23 @@ function PhotoRibbonContent({
         </div>
       </div>
 
-      {/* ── COLLAPSIBLE ADVANCED FILTERS ── */}
       <div className="ribbon-filters-collapsible">
         <button
           type="button"
           className={`ribbon-filters-collapsible__toggle ${hasActiveFilters ? "ribbon-filters-collapsible__toggle--active" : ""}`}
           onClick={() => setFiltersOpen((prev) => !prev)}
         >
-          <span>Filtri avanzati {hasActiveFilters ? `(${[pickFilter !== "all" ? 1 : 0, ratingFilter !== "any" ? 1 : 0, colorFilter !== "all" ? 1 : 0].reduce((a, b) => a + b, 0)})` : ""}</span>
-          <span className="ribbon-filters-collapsible__arrow">{filtersOpen ? "▴" : "▾"}</span>
+          <span>
+            Filtri avanzati{" "}
+            {hasActiveFilters
+              ? `(${[
+                  pickFilter !== "all" ? 1 : 0,
+                  ratingFilter !== "any" ? 1 : 0,
+                  colorFilter !== "all" ? 1 : 0
+                ].reduce((sum, value) => sum + value, 0)})`
+              : ""}
+          </span>
+          <span className="ribbon-filters-collapsible__arrow">{filtersOpen ? "^" : "v"}</span>
         </button>
         {filtersOpen && (
           <div className="ribbon-filters-collapsible__body">
@@ -235,7 +280,7 @@ function PhotoRibbonContent({
                 onClick={resetFilters}
                 title="Azzera tutti i filtri"
               >
-                ✕ Azzera
+                X Azzera
               </button>
             ) : null}
 
@@ -267,18 +312,18 @@ function PhotoRibbonContent({
             >
               <option value="any">Tutte le stelle</option>
               <optgroup label="Minimo">
-                <option value="1+">★ 1+ stelle</option>
-                <option value="2+">★★ 2+ stelle</option>
-                <option value="3+">★★★ 3+ stelle</option>
-                <option value="4+">★★★★ 4+ stelle</option>
+                <option value="1+">1+ stelle</option>
+                <option value="2+">2+ stelle</option>
+                <option value="3+">3+ stelle</option>
+                <option value="4+">4+ stelle</option>
               </optgroup>
               <optgroup label="Esattamente">
                 <option value="0">Senza stelle</option>
-                <option value="1">★ Solo 1</option>
-                <option value="2">★★ Solo 2</option>
-                <option value="3">★★★ Solo 3</option>
-                <option value="4">★★★★ Solo 4</option>
-                <option value="5">★★★★★ Solo 5</option>
+                <option value="1">Solo 1 stella</option>
+                <option value="2">Solo 2 stelle</option>
+                <option value="3">Solo 3 stelle</option>
+                <option value="4">Solo 4 stelle</option>
+                <option value="5">Solo 5 stelle</option>
               </optgroup>
             </select>
 
@@ -312,7 +357,6 @@ function PhotoRibbonContent({
         )}
       </div>
 
-      {/* ── PHOTO LIST ── */}
       <div className="layout-photo-ribbon__track-wrapper">
         <div
           ref={scrollContainerRef}
@@ -340,6 +384,7 @@ function PhotoRibbonContent({
             const rating = getAssetRating(asset);
             const pickStatus = getAssetPickStatus(asset);
             const isUsed = Boolean(usage);
+            const displayFileName = asset.fileName ?? "Senza nome";
 
             return (
               <button
@@ -358,6 +403,7 @@ function PhotoRibbonContent({
                   .join(" ")}
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", asset.id);
+                  event.dataTransfer.effectAllowed = "move";
                   onDragAssetStart(asset.id);
                 }}
                 onDragEnd={onDragEnd}
@@ -400,12 +446,12 @@ function PhotoRibbonContent({
                 {asset.thumbnailUrl ?? asset.previewUrl ? (
                   <img
                     src={asset.thumbnailUrl ?? asset.previewUrl}
-                    alt={asset.fileName}
+                    alt={displayFileName}
                     className="ribbon-photo__image"
                     loading="lazy"
                   />
                 ) : (
-                  <div className="ribbon-photo__placeholder">{asset.fileName}</div>
+                  <div className="ribbon-photo__placeholder">{displayFileName}</div>
                 )}
                 {isUsed ? <span className="ribbon-photo__usage-overlay">Usata</span> : null}
                 <div className="ribbon-photo__badges">
@@ -420,9 +466,16 @@ function PhotoRibbonContent({
                   ) : null}
                 </div>
                 <div className="ribbon-photo__meta">
-                  <strong>{variant === "vertical" ? asset.fileName : asset.fileName?.substring(0, 14)}</strong>
+                  <strong>
+                    {variant === "vertical"
+                      ? displayFileName
+                      : displayFileName.substring(0, 14)}
+                  </strong>
                   {variant === "vertical" ? (
-                    <span>{usage ? `Foglio ${usage.pageNumber}` : "Disponibile"}{rating > 0 ? ` · ${formatAssetStars(asset)}` : ""}</span>
+                    <span>
+                      {usage ? `Foglio ${usage.pageNumber}` : "Disponibile"}
+                      {rating > 0 ? ` / ${formatAssetStars(asset)}` : ""}
+                    </span>
                   ) : (
                     <>
                       <span>{usage ? `Foglio ${usage.pageNumber}` : "Disponibile"}</span>
@@ -443,16 +496,15 @@ function PhotoRibbonContent({
       </div>
 
       <div className="layout-photo-ribbon__hint">
-        <small>{filteredAssets.length} foto visibili</small>
+        <small>{ribbonStatusLabel}</small>
+        <small>{ribbonHint}</small>
       </div>
 
       {contextMenuState ? (
         <PhotoColorContextMenu
           x={contextMenuState.x}
           y={contextMenuState.y}
-          selectedColor={
-            assets.find((asset) => asset.id === contextMenuState.assetId)?.colorLabel ?? null
-          }
+          selectedColor={assetById.get(contextMenuState.assetId)?.colorLabel ?? null}
           onSelect={(colorLabel) => {
             updateAssetMetadata(contextMenuState.assetId, { colorLabel });
             setContextMenuState(null);

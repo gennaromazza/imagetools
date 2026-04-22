@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+.output/
 .DS_Store
 coverage/
 *.log
@@ -8,9 +9,6 @@ playwright-report/
 test-results/
 TEST FOTO/
 *.env
-dist-electron/
-apps/filex-desktop/release/
-apps/filex-desktop/suite-launcher-dist/
 apps/image-party-frame/exports/
 apps/image-party-frame/uploads/
 apps/image-party-frame/temp-test.png

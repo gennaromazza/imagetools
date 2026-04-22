@@ -173,7 +173,7 @@ export async function openJobInPhotoSelector(folderPath: string): Promise<void> 
   const desktopApi = requireDesktopApi();
   const result = await desktopApi.openInstalledTool("photo-selector-app", ["--open-folder", folderPath]);
   if (!result?.ok) {
-    throw new Error(result?.message || "Impossibile aprire Photo Selector");
+    throw new Error(result?.message || "Impossibile aprire Image Select Pro");
   }
 }
 

@@ -16,6 +16,7 @@ export interface PhotoFilterPreset {
   id: string;
   name: string;
   filters: PhotoFilterState & {
+    fileTypeFilter?: string;
     customLabelFilter?: string;
     folderFilter?: string;
     seriesFilter?: string;
