@@ -98,7 +98,7 @@ img {
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--line);
   background: rgba(43, 49, 45, 0.72);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(8px);
   flex-wrap: wrap;
 }
 
@@ -133,7 +133,7 @@ img {
   color: var(--text-muted);
   font-size: 0.88rem;
   font-weight: 600;
-  transition: all 140ms ease;
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
 }
 
 .app-header__tab:hover:not(:disabled) {
@@ -330,7 +330,7 @@ img {
   border-radius: 6px;
   cursor: pointer;
   font-size: 0.9rem;
-  transition: all 120ms ease-out;
+  transition: border-color 120ms ease-out, background-color 120ms ease-out, color 120ms ease-out;
 }
 
 .checkbox-button:hover {
@@ -1314,6 +1314,17 @@ img {
   transition: none !important;
 }
 
+.photo-card--scroll-lite .photo-card__image-wrapper--flash,
+.photo-card--scroll-lite .photo-card__image-wrapper--batch-pulse,
+.photo-card--scroll-lite .photo-card__image-wrapper--batch-pulse-lite,
+.photo-card--scroll-lite .photo-card__label-chip--flash,
+.photo-card--scroll-lite .photo-card__label-chip--batch-pulse,
+.photo-card--scroll-lite .photo-card__star--flash,
+.photo-card--scroll-lite .photo-card__pill--flash,
+.photo-card--scroll-lite .asset-color-dot--flash {
+  animation: none !important;
+}
+
 .photo-card[draggable="true"] {
   cursor: grab;
 }
@@ -1341,12 +1352,6 @@ img {
   contain: layout paint;
   transform: translateZ(0);
   backface-visibility: hidden;
-}
-
-.photo-card__image {
-  /* Hint the compositor so image swaps (placeholder → thumbnail) don't
-     trigger a full-page repaint. */
-  will-change: opacity;
 }
 
 .photo-card:hover .photo-card__image-wrapper {
@@ -1548,7 +1553,6 @@ img {
   font-size: 0.7rem;
   font-weight: 700;
   text-align: center;
-  backdrop-filter: blur(8px);
   animation: photo-card-feedback-in 900ms cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
 }
@@ -1714,7 +1718,7 @@ img {
   font-size: 0.65rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 100ms ease;
+  transition: border-color 100ms ease, background-color 100ms ease, color 100ms ease;
 }
 
 .photo-card__pill:hover {
@@ -1731,8 +1735,8 @@ img {
 /* ── Classification change feedback animations ───────────────────────── */
 
 @keyframes flash-border {
-  0%   { box-shadow: 0 0 0 2px rgba(208, 165, 98, 0.8), 0 0 12px rgba(208, 165, 98, 0.4); }
-  100% { box-shadow: 0 0 0 0 transparent, 0 0 0 transparent; }
+  0%   { box-shadow: 0 0 0 1px rgba(208, 165, 98, 0.7); transform: translateZ(0) scale(1.004); }
+  100% { box-shadow: 0 0 0 0 rgba(208, 165, 98, 0); transform: translateZ(0) scale(1); }
 }
 
 @keyframes flash-star {
@@ -1741,26 +1745,26 @@ img {
 }
 
 @keyframes flash-pill {
-  0%   { transform: scale(1.15); filter: brightness(1.5); }
-  100% { transform: scale(1); filter: brightness(1); }
+  0%   { transform: scale(1.12); opacity: 0.86; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 @keyframes flash-dot {
-  0%   { transform: scale(1.5); box-shadow: 0 0 8px currentColor; }
-  100% { transform: scale(1); box-shadow: none; }
+  0%   { transform: scale(1.35); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
 }
 
 @keyframes flash-border-batch {
   0% {
-    box-shadow: 0 0 0 2px rgba(226, 155, 88, 0.62), 0 0 18px rgba(226, 155, 88, 0.32);
+    box-shadow: 0 0 0 1px rgba(226, 155, 88, 0.54);
     transform: translateZ(0) scale(1);
   }
   45% {
-    box-shadow: 0 0 0 3px rgba(226, 155, 88, 0.44), 0 0 24px rgba(226, 155, 88, 0.28);
-    transform: translateZ(0) scale(1.005);
+    box-shadow: 0 0 0 1px rgba(226, 155, 88, 0.4);
+    transform: translateZ(0) scale(1.003);
   }
   100% {
-    box-shadow: 0 0 0 0 transparent, 0 0 0 transparent;
+    box-shadow: 0 0 0 0 rgba(226, 155, 88, 0);
     transform: translateZ(0) scale(1);
   }
 }
@@ -1768,15 +1772,15 @@ img {
 @keyframes photo-card-label-chip-batch {
   0% {
     transform: translateY(2px) scale(0.96);
-    filter: saturate(0.92) brightness(0.95);
+    opacity: 0.82;
   }
   35% {
     transform: translateY(0) scale(1.03);
-    filter: saturate(1.15) brightness(1.08);
+    opacity: 1;
   }
   100% {
     transform: translateY(0) scale(1);
-    filter: saturate(1) brightness(1);
+    opacity: 1;
   }
 }
 
@@ -1912,7 +1916,7 @@ img {
   place-items: center;
   padding: 1.5rem;
   background: rgba(12, 14, 13, 0.72);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(8px);
 }
 
 .modal-panel {
@@ -1980,7 +1984,7 @@ img {
   place-items: stretch;
   padding: 0;
   background: rgba(12, 14, 13, 0.72);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(8px);
   overflow: hidden;
 }
 
@@ -2369,7 +2373,7 @@ img {
   gap: 0;
   padding: 0;
   background: rgba(5, 5, 5, 0.9);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(6px);
 }
 
 .quick-preview__sidebar {
@@ -3795,7 +3799,7 @@ img {
   font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease;
   white-space: nowrap;
 }
 
@@ -3811,7 +3815,7 @@ img {
   color: var(--text-muted);
   font-size: 1rem;
   cursor: pointer;
-  transition: all 150ms ease;
+  transition: background-color 150ms ease, color 150ms ease;
   border-radius: 999px;
 }
 
@@ -4297,7 +4301,7 @@ img {
   z-index: 200;
   background: rgba(28, 33, 30, 0.97);
   border-left: 1px solid var(--line);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -4857,4 +4861,20 @@ img {
 .photo-selector__qs-chip--color-green.photo-selector__qs-chip--active  { background: rgba(111, 159, 104, 0.18); border-color: #6f9f68; color: #6f9f68; }
 .photo-selector__qs-chip--color-blue.photo-selector__qs-chip--active   { background: rgba(95, 137, 200, 0.18); border-color: #5f89c8; color: #5f89c8; }
 .photo-selector__qs-chip--color-purple.photo-selector__qs-chip--active { background: rgba(139, 111, 199, 0.18); border-color: #8b6fc7; color: #8b6fc7; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .app-header,
+  .modal-backdrop,
+  .modal-fullscreen-backdrop,
+  .quick-preview,
+  .photo-selector__settings-flyout {
+    backdrop-filter: none !important;
+  }
+}
 

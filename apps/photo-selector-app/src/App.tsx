@@ -257,6 +257,61 @@ function mergeSets<T>(...sets: Array<Set<T>>): Set<T> {
   return merged;
 }
 
+function areStringArraysEqual(left: string[] | undefined, right: string[] | undefined): boolean {
+  const safeLeft = left ?? [];
+  const safeRight = right ?? [];
+  if (safeLeft.length !== safeRight.length) {
+    return false;
+  }
+
+  for (let index = 0; index < safeLeft.length; index += 1) {
+    if (safeLeft[index] !== safeRight[index]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function hasUndoableAssetChange(previous: ImageAsset | undefined, next: ImageAsset): boolean {
+  if (!previous || previous.id !== next.id) {
+    return false;
+  }
+
+  return previous.rating !== next.rating
+    || previous.pickStatus !== next.pickStatus
+    || previous.colorLabel !== next.colorLabel
+    || !areStringArraysEqual(previous.customLabels, next.customLabels);
+}
+
+function mergeUndoableSnapshotAssets(
+  previousAssets: ImageAsset[],
+  snapshotAssets: ImageAsset[],
+): { mergedAssets: ImageAsset[]; changedIds: string[] } {
+  const snapshotById = new Map(snapshotAssets.map((asset) => [asset.id, asset]));
+  const changedIds = new Set<string>();
+  const mergedAssets = previousAssets.map((asset) => {
+    const snapshotAsset = snapshotById.get(asset.id);
+    if (!snapshotAsset || !hasUndoableAssetChange(asset, snapshotAsset)) {
+      return asset;
+    }
+
+    changedIds.add(asset.id);
+    return {
+      ...asset,
+      rating: snapshotAsset.rating,
+      pickStatus: snapshotAsset.pickStatus,
+      colorLabel: snapshotAsset.colorLabel,
+      customLabels: snapshotAsset.customLabels ?? [],
+    };
+  });
+
+  return {
+    mergedAssets,
+    changedIds: Array.from(changedIds),
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // App
 // ═══════════════════════════════════════════════════════════════════════════
@@ -616,12 +671,18 @@ export function App() {
   // ── Undo/redo for classification changes ─────────────────────────────
   const allAssetsRef = useRef(allAssets);
   allAssetsRef.current = allAssets;
+  const queueXmpSyncRef = useRef<(assetIds: string[]) => void>(() => {});
 
   const undoRedo = useUndoRedo<ImageAsset[]>(
     () => allAssetsRef.current,
     (snapshot) => {
-      setAllAssets(snapshot);
+      const { mergedAssets, changedIds } = mergeUndoableSnapshotAssets(allAssetsRef.current, snapshot);
+      if (changedIds.length === 0) {
+        return;
+      }
+      setAllAssets(mergedAssets);
       bumpPhotoMetadataVersion();
+      queueXmpSyncRef.current(changedIds);
     },
   );
   const activeAssetIdsRef = useRef(activeAssetIds);
@@ -655,6 +716,7 @@ export function App() {
       setXmpSyncVersion((current) => current + 1);
     }
   }, [hasWritableFolderAccess, usesMockData]);
+  queueXmpSyncRef.current = queueXmpSync;
 
   const flushPendingXmpSync = useCallback(async (): Promise<boolean> => {
     if (usesMockData || !hasWritableFolderAccess) {
@@ -1611,67 +1673,77 @@ export function App() {
       setFolderTransitionLabel(rootPath ?? folderName);
       suspendActiveFolderWork();
 
-      await flushPendingXmpSync().catch(() => false);
-      if (folderOpenRequestRef.current !== openRequestId) {
-        return;
-      }
+      const normalizeComparablePath = (value: string | null | undefined): string =>
+        (value ?? "").replace(/[\\/]+$/, "").toLocaleLowerCase();
+      const nextFolderPath = normalizeComparablePath(rootPath ?? folderName);
+      const currentFolderPath = normalizeComparablePath(sourceFolderPath);
+      const isReopeningCurrentFolder =
+        nextFolderPath.length > 0
+        && currentFolderPath.length > 0
+        && nextFolderPath === currentFolderPath;
 
-      const thumbnailOptions = getThumbnailPipelineOptions(thumbnailProfile);
-      const minimumRawCacheDimension =
-        thumbnailProfile === "ultra-fast"
-          ? 160
-          : thumbnailProfile === "fast"
-            ? 200
-            : 280;
-      folderOpenStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const nextDiagnostics = diagnostics ?? {
-        source: "desktop-native",
-        selectedPath: rootPath ?? folderName,
-        topLevelSupportedCount: entries.length,
-        nestedSupportedDiscardedCount: 0,
-        totalSupportedSeen: entries.length,
-        nestedDirectoriesSeen: 0,
-      };
-      setFolderDiagnostics(nextDiagnostics);
-      setIsImportPanelDismissed(true);
-      hasLoggedFirstThumbnailRef.current = false;
-      hasLoggedGridCompleteRef.current = false;
-      cancelReactBatchMetric();
-      resetPerfByteReadStats();
-      setPerformanceSnapshot({
-        folderOpenToFirstThumbnailMs: null,
-        folderOpenToGridCompleteMs: null,
-        previewOpenLatencyMs: null,
-        previewNavigationLatencyMs: null,
-        xmpSyncLatencyMs: null,
-        cachedThumbnailCount: 0,
-        totalThumbnailCount: entries.length,
-        bytesRead: 0,
-        rawBytesRead: 0,
-        standardBytesRead: 0,
-        thumbnailProfile,
-        sortCacheEnabled,
-        reactCommitCount: 0,
-        hotPatchApplied: 0,
-        deferredPatchApplied: 0,
-        scrollLiteActiveMs: 0,
-        rawRenderCacheHit: 0,
-        lastUpdatedAt: Date.now(),
-      });
-      perfTime(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
-      perfTime(PERF_XMP_IMPORT);
+      try {
+        if (!isReopeningCurrentFolder) {
+          await flushPendingXmpSync().catch(() => false);
+        }
+        if (folderOpenRequestRef.current !== openRequestId) {
+          return;
+        }
 
-      if (entries.length === 0) {
-        perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
-        perfTimeEnd(PERF_XMP_IMPORT);
-        setIsFolderTransitionBusy(false);
-        setFolderTransitionLabel("");
-        addToast("Nessuna immagine supportata trovata nella cartella.", "warning");
-        return;
-      }
+        const thumbnailOptions = getThumbnailPipelineOptions(thumbnailProfile);
+        const minimumRawCacheDimension =
+          thumbnailProfile === "ultra-fast"
+            ? 160
+            : thumbnailProfile === "fast"
+              ? 200
+              : 280;
+        folderOpenStartedAtRef.current = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const nextDiagnostics = diagnostics ?? {
+          source: "desktop-native",
+          selectedPath: rootPath ?? folderName,
+          topLevelSupportedCount: entries.length,
+          nestedSupportedDiscardedCount: 0,
+          totalSupportedSeen: entries.length,
+          nestedDirectoriesSeen: 0,
+        };
+        setFolderDiagnostics(nextDiagnostics);
+        setIsImportPanelDismissed(true);
+        hasLoggedFirstThumbnailRef.current = false;
+        hasLoggedGridCompleteRef.current = false;
+        cancelReactBatchMetric();
+        resetPerfByteReadStats();
+        setPerformanceSnapshot({
+          folderOpenToFirstThumbnailMs: null,
+          folderOpenToGridCompleteMs: null,
+          previewOpenLatencyMs: null,
+          previewNavigationLatencyMs: null,
+          xmpSyncLatencyMs: null,
+          cachedThumbnailCount: 0,
+          totalThumbnailCount: entries.length,
+          bytesRead: 0,
+          rawBytesRead: 0,
+          standardBytesRead: 0,
+          thumbnailProfile,
+          sortCacheEnabled,
+          reactCommitCount: 0,
+          hotPatchApplied: 0,
+          deferredPatchApplied: 0,
+          scrollLiteActiveMs: 0,
+          rawRenderCacheHit: 0,
+          lastUpdatedAt: Date.now(),
+        });
+        perfTime(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+        perfTime(PERF_XMP_IMPORT);
 
-      // 1. Reset session for the new folder load
-      const folderLoadSession = folderLoadSessionRef.current;
+        if (entries.length === 0) {
+          perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
+          perfTimeEnd(PERF_XMP_IMPORT);
+          addToast("Nessuna immagine supportata trovata nella cartella.", "warning");
+          return;
+        }
+
+        // 1. Reset session for the new folder load
+        const folderLoadSession = folderLoadSessionRef.current;
 
       // 2. Clean up previous blob URLs
       revokeImageAssetUrls(allAssets);
@@ -1726,8 +1798,6 @@ export function App() {
       setHasWritableFolderAccess(writableAccess);
       setIsXmpBannerDismissed(false);
       setCurrentScreen("selection"); // instant — grid shows immediately
-      setIsFolderTransitionBusy(false);
-      setFolderTransitionLabel("");
       undoRedo.reset();
       pendingXmpSyncIdsRef.current.clear();
       setXmpSyncState({
@@ -1979,11 +2049,51 @@ export function App() {
         cached: Map<string, { url: string; width: number; height: number }>,
       ) => {
         const validCachedIds = new Set<string>();
+        const assetsSnapshot = allAssetsRef.current;
 
-        if (cached.size > 0) {
+        for (const [assetId, hit] of cached) {
+          const index = assetIndexByIdRef.current.get(assetId);
+          const asset = index === undefined ? null : assetsSnapshot[index] ?? null;
+          if (!asset || !isValidCachedThumbnail(asset, hit, minimumRawCacheDimension) || asset.thumbnailUrl) {
+            try {
+              URL.revokeObjectURL(hit.url);
+            } catch {
+              // Ignore stale cache blob cleanup failures.
+            }
+            continue;
+          }
+
+          validCachedIds.add(assetId);
+        }
+
+        if (validCachedIds.size > 0) {
           startTransition(() => {
             setAllAssets((prev) => {
+              if (folderLoadSessionRef.current !== folderLoadSession) {
+                for (const assetId of validCachedIds) {
+                  const hit = cached.get(assetId);
+                  if (hit) {
+                    try {
+                      URL.revokeObjectURL(hit.url);
+                    } catch {
+                      // Ignore stale cache blob cleanup failures.
+                    }
+                  }
+                }
+                return prev;
+              }
+
               if (prev.length === 0) {
+                for (const assetId of validCachedIds) {
+                  const hit = cached.get(assetId);
+                  if (hit) {
+                    try {
+                      URL.revokeObjectURL(hit.url);
+                    } catch {
+                      // Ignore stale cache blob cleanup failures.
+                    }
+                  }
+                }
                 return prev;
               }
 
@@ -1991,17 +2101,23 @@ export function App() {
               let changed = false;
 
               for (const [assetId, hit] of cached) {
+                if (!validCachedIds.has(assetId)) {
+                  continue;
+                }
+
                 const index = assetIndexByIdRef.current.get(assetId);
                 if (index === undefined) {
+                  URL.revokeObjectURL(hit.url);
                   continue;
                 }
 
                 const asset = next[index];
                 if (!asset || !isValidCachedThumbnail(asset, hit, minimumRawCacheDimension) || asset.thumbnailUrl) {
+                  URL.revokeObjectURL(hit.url);
+                  validCachedIds.delete(assetId);
                   continue;
                 }
 
-                validCachedIds.add(asset.id);
                 next[index] = {
                   ...asset,
                   thumbnailUrl: hit.url,
@@ -2140,6 +2256,24 @@ export function App() {
 
         enqueuePipelineEntries(pipelineEntries, "bootstrap");
       });
+      } catch (error) {
+        if (folderOpenRequestRef.current === openRequestId) {
+          addToast("Apertura cartella non riuscita. Riprova.", "error");
+        }
+        if (hasDesktopStateApi()) {
+          void logDesktopEvent({
+            channel: "folder-open",
+            level: "error",
+            message: "Apertura cartella fallita",
+            details: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } finally {
+        if (folderOpenRequestRef.current === openRequestId) {
+          setIsFolderTransitionBusy(false);
+          setFolderTransitionLabel("");
+        }
+      }
     },
     [
       addToast,
@@ -2155,6 +2289,7 @@ export function App() {
       suspendActiveFolderWork,
       syncThumbnailProgress,
       sortCacheEnabled,
+      sourceFolderPath,
       thumbnailProfile,
       undoRedo,
     ]
@@ -2231,20 +2366,35 @@ export function App() {
 
   const handlePhotosChange = useCallback((photos: ImageAsset[]) => {
     const previousAssets = allAssetsRef.current;
-    const changedIds: string[] = [];
+    let hasChanges = false;
+    const undoableChangedIds = new Set<string>();
 
-    for (let index = 0; index < photos.length; index += 1) {
-      if (photos[index] !== previousAssets[index]) {
-        changedIds.push(photos[index].id);
+    const maxLength = Math.max(photos.length, previousAssets.length);
+    for (let index = 0; index < maxLength; index += 1) {
+      const nextAsset = photos[index];
+      const previousAsset = previousAssets[index];
+      if (nextAsset !== previousAsset) {
+        hasChanges = true;
+        if (nextAsset && previousAsset && hasUndoableAssetChange(previousAsset, nextAsset)) {
+          undoableChangedIds.add(nextAsset.id);
+        }
       }
     }
 
-    undoRedo.push(allAssetsRef.current);
+    if (!hasChanges) {
+      return;
+    }
+
+    if (undoableChangedIds.size > 0) {
+      undoRedo.push(allAssetsRef.current);
+    }
     startTransition(() => {
       setAllAssets(photos);
     });
-    bumpPhotoMetadataVersion();
-    queueXmpSync(changedIds);
+    if (undoableChangedIds.size > 0) {
+      bumpPhotoMetadataVersion();
+      queueXmpSync(Array.from(undoableChangedIds));
+    }
   }, [bumpPhotoMetadataVersion, queueXmpSync, undoRedo]);
 
   const handleSelectionChange = useCallback((nextIds: string[]) => {
@@ -2439,12 +2589,38 @@ export function App() {
     (nextIds: string[], nextAssets: ImageAsset[]) => {
       const previousAssets = allAssetsRef.current;
       const changedIds = new Set<string>();
-
-      for (let index = 0; index < nextAssets.length; index += 1) {
-        if (nextAssets[index] !== previousAssets[index]) {
-          changedIds.add(nextAssets[index].id);
+      const nextAssetById = new Map(nextAssets.map((asset) => [asset.id, asset]));
+      const mergedAssets = previousAssets.map((asset) => {
+        const modalAsset = nextAssetById.get(asset.id);
+        if (!modalAsset) {
+          return asset;
         }
-      }
+
+        const nextRating = modalAsset.rating ?? asset.rating;
+        const nextPickStatus = modalAsset.pickStatus ?? asset.pickStatus;
+        const nextColorLabel = modalAsset.colorLabel !== undefined ? modalAsset.colorLabel : asset.colorLabel;
+        const nextCustomLabels = modalAsset.customLabels !== undefined
+          ? modalAsset.customLabels
+          : (asset.customLabels ?? []);
+
+        if (
+          asset.rating === nextRating
+          && asset.pickStatus === nextPickStatus
+          && asset.colorLabel === nextColorLabel
+          && areStringArraysEqual(asset.customLabels, nextCustomLabels)
+        ) {
+          return asset;
+        }
+
+        changedIds.add(asset.id);
+        return {
+          ...asset,
+          rating: nextRating,
+          pickStatus: nextPickStatus,
+          colorLabel: nextColorLabel,
+          customLabels: nextCustomLabels,
+        };
+      });
 
       const previousSet = new Set(activeAssetIdsRef.current);
       const nextSet = new Set(nextIds);
@@ -2459,11 +2635,15 @@ export function App() {
         }
       }
 
-      setAllAssets(nextAssets);
-      bumpPhotoMetadataVersion();
+      setAllAssets(mergedAssets);
+      if (changedIds.size > 0) {
+        bumpPhotoMetadataVersion();
+      }
       setActiveAssetIds(nextIds);
       setIsProjectSelectorOpen(false);
-      queueXmpSync(Array.from(changedIds));
+      if (changedIds.size > 0) {
+        queueXmpSync(Array.from(changedIds));
+      }
       addToast(`Selezione aggiornata: ${nextIds.length} foto attive.`, "success");
     },
     [addToast, bumpPhotoMetadataVersion, queueXmpSync]

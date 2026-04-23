@@ -246,6 +246,8 @@ export function PhotoQuickPreviewModal({
 }: PhotoQuickPreviewModalProps) {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const mainImageRef = useRef<HTMLImageElement | null>(null);
+  const pendingOneToOneZoomRef = useRef(false);
+  const previewWasClosedRef = useRef(true);
   const dockStripRef = useRef<HTMLDivElement | null>(null);
   const dockScrollRafRef = useRef<number | null>(null);
   const pendingDockViewportRef = useRef<VirtualStripViewport | null>(null);
@@ -326,6 +328,26 @@ export function PhotoQuickPreviewModal({
   } | null>(null);
   const panAnimationFrameRef = useRef<number | null>(null);
   const pendingPanOffsetRef = useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    // Il componente resta montato anche quando `asset` è null: senza reset esplicito,
+    // modalità/preview di una sessione precedente possono rientrare alla riapertura.
+    if (!asset) {
+      previewWasClosedRef.current = true;
+      pendingOneToOneZoomRef.current = false;
+      setCompareMode(false);
+      setCompareAssetId(null);
+      setResolvedComparePreview(null);
+      return;
+    }
+
+    if (previewWasClosedRef.current) {
+      previewWasClosedRef.current = false;
+      setCompareMode(false);
+      setCompareAssetId(null);
+      setResolvedComparePreview(null);
+    }
+  }, [asset]);
 
   const usage = asset ? usageByAssetId?.get(asset.id) : undefined;
   const activePage = useMemo(
@@ -1626,14 +1648,20 @@ export function PhotoQuickPreviewModal({
   const toggleZoom = useCallback(() => {
     // Z alterna tra "fit" e "100% pixel-perfect" (focus check).
     // Se l'immagine non è ancora caricata (naturalWidth=0), non fare nulla:
-    // un fallback arbitrario (es. 2.2x) darebbe un falso "100%" e disorienterebbe.
+    // usiamo uno zoom provvisorio e rifiniamo automaticamente appena disponibile.
     let nextZoom: number;
     if (zoomLevel > 1.05) {
+      pendingOneToOneZoomRef.current = false;
       nextZoom = 1;
     } else {
       const target = computeOneToOneZoom();
-      if (target === null) return;
-      nextZoom = target;
+      if (target === null) {
+        pendingOneToOneZoomRef.current = true;
+        nextZoom = 2.2;
+      } else {
+        pendingOneToOneZoomRef.current = false;
+        nextZoom = target;
+      }
     }
     pendingPanOffsetRef.current = { x: 0, y: 0 };
     setPanOffset({ x: 0, y: 0 });
@@ -1653,6 +1681,7 @@ export function PhotoQuickPreviewModal({
   }, [clampPan, commitPanOffset, compareMode, panOffset.x, panOffset.y, zoomLevel]);
 
   useEffect(() => {
+    pendingOneToOneZoomRef.current = startZoomed;
     preCompareZoomRef.current = startZoomed ? 2.2 : 1;
     setZoomLevel(startZoomed ? 2.2 : 1);
     setPanOffset({ x: 0, y: 0 });
@@ -2065,6 +2094,22 @@ export function PhotoQuickPreviewModal({
   }, []);
 
   const handleMainPreviewLoad = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
+    const maybeFinalizeDeferredOneToOneZoom = () => {
+      if (!pendingOneToOneZoomRef.current || zoomLevel <= 1.05) {
+        return;
+      }
+
+      const target = computeOneToOneZoom();
+      if (target === null) {
+        return;
+      }
+
+      pendingOneToOneZoomRef.current = false;
+      if (Math.abs(target - zoomLevel) > 0.01) {
+        applyZoom(target);
+      }
+    };
+
     if (canUseDesktopQuickPreview) {
       const renderedSource = event.currentTarget.currentSrc || event.currentTarget.src || previewSourceLabel;
       setQuickPreviewPerf((current) => ({
@@ -2072,6 +2117,7 @@ export function PhotoQuickPreviewModal({
         lastRenderedSource: `${previewSourceLabel}${UI_SEPARATOR}${renderedSource ? "ready" : "n/d"}`,
         lastRenderedAssetName: currentAssetFileName,
       }));
+      maybeFinalizeDeferredOneToOneZoom();
       return;
     }
 
@@ -2092,7 +2138,16 @@ export function PhotoQuickPreviewModal({
       lastRenderedAssetName: currentAssetFileName,
     }));
     previewPerfStartRef.current = null;
-  }, [canUseDesktopQuickPreview, currentAssetFileName, currentAssetId, previewSourceLabel]);
+    maybeFinalizeDeferredOneToOneZoom();
+  }, [
+    applyZoom,
+    canUseDesktopQuickPreview,
+    computeOneToOneZoom,
+    currentAssetFileName,
+    currentAssetId,
+    previewSourceLabel,
+    zoomLevel,
+  ]);
 
   useEffect(() => {
     if (!previewIsFallback || !currentAssetId) {

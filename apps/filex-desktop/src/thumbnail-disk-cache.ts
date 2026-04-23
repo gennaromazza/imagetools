@@ -46,7 +46,7 @@ interface WindowsLogicalDiskRow {
 const SETTINGS_FILE_NAME = "desktop-settings.json";
 const CACHE_FILE_EXTENSION = ".thumb";
 const PREVIEW_CACHE_FILE_EXTENSION = ".preview";
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const PREVIEW_CACHE_VERSION = "preview-v1";
 const CACHE_LOOKUP_CONCURRENCY = 24;
 const LOW_SPACE_FREE_BYTES_THRESHOLD = 15 * 1024 * 1024 * 1024;

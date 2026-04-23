@@ -1657,8 +1657,8 @@ function renderThumbnailFromResolvedSource(
   return {
     bytes: toOwnedUint8Array(thumbnailBuffer),
     mimeType: "image/jpeg",
-    width: source.source.width,
-    height: source.source.height,
+    width: targetWidth,
+    height: targetHeight,
   };
 }
 

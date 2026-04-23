@@ -2051,8 +2051,8 @@ export function PhotoSelector({
       // Quick preview open: let it handle keys
       if (previewAssetId) return;
 
-      const target = event.target as HTMLElement;
-      if (target.closest("select, input, textarea")) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("select, input, textarea")) return;
 
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
         const normalizedKey = event.key.toLowerCase();
@@ -2451,7 +2451,7 @@ export function PhotoSelector({
     if (
       targetPaths.length === 0
       || typeof window.filexDesktop?.startDragOut !== "function"
-      || (draggingSelection && (!desktopDragOutCheck?.ok || targetPaths.length !== selectedIds.length))
+      || (draggingSelection && !desktopDragOutCheck?.ok)
     ) {
       event.preventDefault();
       return;
@@ -2779,7 +2779,7 @@ export function PhotoSelector({
 
   const handleCopyPath = useCallback((ids: string[], root: string) => {
     const absolutePaths = getAssetAbsolutePaths(ids);
-    const paths = absolutePaths.length === ids.length
+    const paths = absolutePaths.length > 0
       ? absolutePaths
       : ids
         .map((id) => getAssetRelativePath(id))
@@ -2801,7 +2801,7 @@ export function PhotoSelector({
     }
 
     const directAbsolutePaths = getAssetAbsolutePaths(ids);
-    const absolutePaths = directAbsolutePaths.length === ids.length
+    const absolutePaths = directAbsolutePaths.length > 0
       ? directAbsolutePaths.map((value) => value.replace(/\//g, "\\"))
       : ids
         .map((id) => getAssetRelativePath(id))
@@ -3472,7 +3472,8 @@ export function PhotoSelector({
           // Never start a lasso drag while the context menu is open
           if (contextMenuState) return;
           // Only start drag on the grid background (not on photo cards)
-          if ((e.target as HTMLElement).closest(".photo-card")) return;
+          const eventTarget = e.target;
+          if (eventTarget instanceof HTMLElement && eventTarget.closest(".photo-card")) return;
           if (e.button !== 0) return;
           dragOriginRef.current = { x: e.clientX, y: e.clientY };
           setDragRect(null);

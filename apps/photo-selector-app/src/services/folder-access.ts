@@ -744,29 +744,36 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
         continue;
       }
 
-      const latestFile = new File([toOwnedArrayBuffer(payload.bytes)], payload.name, {
-        lastModified: payload.lastModified,
-      });
+      const relativePath = assetPathStore.get(assetId) ?? payload.name;
+      const nextSourceFileKey = buildSourceFileKeyFromStats(
+        relativePath,
+        payload.size,
+        payload.lastModified,
+      );
+      const currentSourceFileKey = assetSourceFileKeyStore.get(assetId);
       const currentFile = fileStore.get(assetId);
       const hasChanged =
-        !currentFile
-        || currentFile.lastModified !== latestFile.lastModified
-        || currentFile.size !== latestFile.size;
+        currentSourceFileKey
+          ? currentSourceFileKey !== nextSourceFileKey
+          : !currentFile
+            || currentFile.lastModified !== payload.lastModified
+            || currentFile.size !== payload.size;
 
       if (!hasChanged) continue;
 
+      const latestFile = new File([toOwnedArrayBuffer(payload.bytes)], payload.name, {
+        lastModified: payload.lastModified,
+      });
       fileStore.set(assetId, latestFile);
       invalidateOnDemandPreview(assetId);
 
-      const relativePath = assetPathStore.get(assetId) ?? latestFile.name;
-      const nextSourceFileKey = buildSourceFileKey(latestFile, relativePath);
       assetSourceFileKeyStore.set(assetId, nextSourceFileKey);
       const next: AssetDiskChange = {
         id: assetId,
         sourceFileKey: nextSourceFileKey,
       };
 
-      revokeLivePreviewUrl(assetId);
+      let refreshedPreview = false;
       if (hasDesktopPreviewBridge()) {
         const preview = await window.filexDesktop!.getPreview(absolutePath, {
           sourceFileKey: nextSourceFileKey,
@@ -775,6 +782,7 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
           const liveUrl = URL.createObjectURL(
             new Blob([toOwnedArrayBuffer(preview.bytes)], { type: preview.mimeType }),
           );
+          revokeLivePreviewUrl(assetId);
           livePreviewStore.set(assetId, liveUrl);
           preloadImageUrls([liveUrl]);
 
@@ -785,8 +793,11 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
           next.height = preview.height;
           next.orientation = detectOrientation(preview.width, preview.height);
           next.aspectRatio = preview.width / preview.height;
+          refreshedPreview = true;
         }
-      } else if (hasDesktopThumbnailBridge()) {
+      }
+
+      if (!refreshedPreview && hasDesktopThumbnailBridge()) {
         const thumbnail = await window.filexDesktop!.getThumbnail(
           absolutePath,
           320,
@@ -797,6 +808,7 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
           const liveUrl = URL.createObjectURL(
             new Blob([toOwnedArrayBuffer(thumbnail.bytes)], { type: thumbnail.mimeType }),
           );
+          revokeLivePreviewUrl(assetId);
           livePreviewStore.set(assetId, liveUrl);
           preloadImageUrls([liveUrl]);
 

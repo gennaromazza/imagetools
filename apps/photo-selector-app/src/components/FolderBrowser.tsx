@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+ï»¿import { useEffect, useState } from "react";
 import {
   getRecentFolders,
   hydrateRecentFolders,
@@ -27,6 +27,8 @@ function formatRelativeTime(timestamp: number): string {
 }
 
 export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserProps) {
+  const heroIcon = "\u{1F5BC}";
+  const recentFolderIcon = "\u{1F4C1}";
   const [openingRecentFolder, setOpeningRecentFolder] = useState<string | null>(null);
   const [recentFolders, setRecentFolders] = useState<RecentFolder[]>(() => getRecentFolders());
 
@@ -77,7 +79,7 @@ export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserP
   return (
     <div className="folder-browser">
       <div className="folder-browser__hero">
-        <div className="folder-browser__icon">??</div>
+        <div className="folder-browser__icon" aria-hidden="true">{heroIcon}</div>
         <h2 className="folder-browser__title">Apri una cartella</h2>
         <p className="folder-browser__subtitle">
           Seleziona una cartella con le foto per iniziare la selezione.
@@ -115,13 +117,13 @@ export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserP
                   onClick={() => void handleRecentFolderOpen(folder)}
                   disabled={openingRecentFolder !== null || isBusy}
                 >
-                  <div className="folder-browser__recent-icon">??</div>
+                  <div className="folder-browser__recent-icon" aria-hidden="true">{recentFolderIcon}</div>
                   <div className="folder-browser__recent-info">
                     <span className="folder-browser__recent-name">{folder.name}</span>
                     <span className="folder-browser__recent-meta">
                       {openingRecentFolder === folder.name
                         ? "Riapertura in corso..."
-                        : `${folder.imageCount} foto · ${formatRelativeTime(folder.openedAt)}`}
+                        : `${folder.imageCount} foto - ${formatRelativeTime(folder.openedAt)}`}
                     </span>
                   </div>
                 </button>
@@ -133,3 +135,4 @@ export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserP
     </div>
   );
 }
+

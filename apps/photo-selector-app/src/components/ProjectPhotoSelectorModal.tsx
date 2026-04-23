@@ -350,15 +350,15 @@ export function ProjectPhotoSelectorModal({
   }
 
   function applyQuickSelection() {
-    const nextIds = deferredAssets
-      .slice(0, Math.max(0, Math.min(quickSelectCount, deferredAssets.length)))
+    const nextIds = visibleAssets
+      .slice(0, Math.max(0, Math.min(quickSelectCount, visibleAssets.length)))
       .map((asset) => asset.id);
     setLocalSelection(nextIds);
   }
 
   function updateAsset(
     imageId: string,
-    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">>
+    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>
   ) {
     setLocalAssets((current) =>
       current.map((asset) => (asset.id === imageId ? { ...asset, ...changes } : asset))
@@ -434,8 +434,8 @@ export function ProjectPhotoSelectorModal({
       }
 
       // Don't steal arrows from form controls
-      const target = event.target as HTMLElement;
-      if (target.closest("select, input, textarea")) {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("select, input, textarea")) {
         return;
       }
 
@@ -571,7 +571,7 @@ export function ProjectPhotoSelectorModal({
                 <input
                   type="number"
                   min="0"
-                  max={deferredAssets.length}
+                  max={visibleAssets.length}
                   value={quickSelectCount}
                   onChange={(event) => setQuickSelectCount(Number(event.target.value))}
                 />

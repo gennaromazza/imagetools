@@ -72,8 +72,8 @@ export function useUndoRedo<T>(
       const mod = e.ctrlKey || e.metaKey;
       if (!mod || e.key.toLowerCase() !== "z") return;
 
-      const target = e.target as HTMLElement;
-      if (target.closest("input, textarea, select, [contenteditable]")) return;
+      const target = e.target;
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable]")) return;
 
       e.preventDefault();
       if (e.shiftKey) {

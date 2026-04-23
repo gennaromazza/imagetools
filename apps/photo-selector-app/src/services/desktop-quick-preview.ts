@@ -8,6 +8,7 @@ const QUICK_PREVIEW_FRAME_CACHE_MAX_ENTRIES = 64;
 
 const quickPreviewFrameCache = new Map<string, DesktopQuickPreviewFrame>();
 const quickPreviewFramePromiseCache = new Map<string, Promise<DesktopQuickPreviewFrame | null>>();
+let quickPreviewFrameCacheGeneration = 0;
 
 function buildRequestKey(request: DesktopQuickPreviewRequest): string {
   return [
@@ -75,10 +76,16 @@ export async function getDesktopQuickPreviewFrame(
     return pending;
   }
 
+  const generation = quickPreviewFrameCacheGeneration;
   const task = (async () => {
     try {
       const frame = await api.getQuickPreviewFrame(request);
       if (frame) {
+        if (generation !== quickPreviewFrameCacheGeneration) {
+          void releaseDesktopQuickPreviewFrames([frame.token]);
+          return null;
+        }
+
         const previous = quickPreviewFrameCache.get(cacheKey);
         if (previous && previous.token !== frame.token) {
           // Rilascia il token nativo del frame che stiamo per sovrascrivere
@@ -116,6 +123,7 @@ export function peekDesktopQuickPreviewFrame(
 }
 
 export function clearDesktopQuickPreviewFrameCache(): void {
+  quickPreviewFrameCacheGeneration += 1;
   const tokens = Array.from(quickPreviewFrameCache.values()).map((frame) => frame.token);
   quickPreviewFrameCache.clear();
   quickPreviewFramePromiseCache.clear();
@@ -125,6 +133,7 @@ export function clearDesktopQuickPreviewFrameCache(): void {
 export async function invalidateDesktopQuickPreviewFrame(
   request: DesktopQuickPreviewRequest,
 ): Promise<void> {
+  quickPreviewFrameCacheGeneration += 1;
   const cacheKey = buildRequestKey(request);
   const existing = quickPreviewFrameCache.get(cacheKey);
   quickPreviewFrameCache.delete(cacheKey);

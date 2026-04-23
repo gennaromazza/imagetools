@@ -35,9 +35,8 @@ interface QueueItem {
   priority: number;
 }
 
-interface ActiveTask {
-  id: string;
-  sourceFileKey?: string;
+interface ActiveTask extends QueueItem {
+  version: number;
 }
 
 function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -60,6 +59,7 @@ export class ThumbnailPipeline {
   private maxDimension: number;
   private quality: number;
   private desktopTaskLimit: number;
+  private optionsVersion = 0;
 
   constructor(onBatch: BatchCallback, onError?: ErrorCallback, options?: ThumbnailPipelineOptions) {
     this.onBatch = onBatch;
@@ -141,8 +141,30 @@ export class ThumbnailPipeline {
   }
 
   updateOptions(options?: ThumbnailPipelineOptions): void {
-    this.maxDimension = options?.maxDimension ?? DEFAULT_THUMBNAIL_MAX;
-    this.quality = options?.quality ?? DEFAULT_THUMBNAIL_QUALITY;
+    const nextMaxDimension = options?.maxDimension ?? DEFAULT_THUMBNAIL_MAX;
+    const nextQuality = options?.quality ?? DEFAULT_THUMBNAIL_QUALITY;
+    if (this.maxDimension === nextMaxDimension && this.quality === nextQuality) {
+      return;
+    }
+
+    this.maxDimension = nextMaxDimension;
+    this.quality = nextQuality;
+    this.optionsVersion += 1;
+
+    const activeItems = Array.from(this.activeDesktopTasks.values())
+      .map(({ version: _version, ...item }) => item);
+    this.activeDesktopTasks.clear();
+
+    for (const item of activeItems) {
+      if (this.completed.has(item.id) || this.queuedItems.has(item.id)) {
+        continue;
+      }
+      this.queue.push(item);
+      this.queuedItems.set(item.id, item);
+    }
+
+    this.sortQueue();
+    this.schedule();
   }
 
   invalidate(ids: Iterable<string>): void {
@@ -185,15 +207,18 @@ export class ThumbnailPipeline {
       }
 
       this.activeDesktopTasks.set(nextItem.id, {
-        id: nextItem.id,
-        sourceFileKey: nextItem.sourceFileKey,
+        ...nextItem,
+        version: this.optionsVersion,
       });
-      void this.dispatchDesktop(nextItem);
+      void this.dispatchDesktop(nextItem, this.optionsVersion);
     }
   }
 
-  private async dispatchDesktop(item: QueueItem): Promise<void> {
+  private async dispatchDesktop(item: QueueItem, version: number): Promise<void> {
     if (!item.absolutePath || typeof window === "undefined" || typeof window.filexDesktop?.getThumbnail !== "function") {
+      if (version !== this.optionsVersion) {
+        return;
+      }
       this.releaseDesktopTask(item.id);
       this.markFailed(item.id);
       return;
@@ -206,6 +231,9 @@ export class ThumbnailPipeline {
         this.quality,
         item.sourceFileKey,
       );
+      if (version !== this.optionsVersion) {
+        return;
+      }
       const task = this.releaseDesktopTask(item.id) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
       if (!rendered) {
         this.markFailed(task.id);
@@ -220,6 +248,9 @@ export class ThumbnailPipeline {
         height: rendered.height,
       }, task.sourceFileKey);
     } catch {
+      if (version !== this.optionsVersion) {
+        return;
+      }
       const task = this.releaseDesktopTask(item.id) ?? { id: item.id, sourceFileKey: item.sourceFileKey };
       this.markFailed(task.id);
     }
