@@ -1236,7 +1236,9 @@ img {
   bottom: 50px;
   left: 1rem;
   right: 1rem;
-  z-index: 100;
+  /* 110: leggermente sopra il livello base 100 ma ben sotto i modali, per
+     evitare la collisione con .toast-container (prima entrambi a 100). */
+  z-index: 110;
 }
 
 .photo-selector__grid {
@@ -3894,7 +3896,11 @@ img {
   position: fixed;
   bottom: 1.5rem;
   right: 1.5rem;
-  z-index: 100;
+  /* Toast sopra a tutti i modali (backdrop 80, fullscreen-backdrop 150,
+     import-progress 160, settings-flyout 200, context menu 220, shortcut
+     popover 230, compare-modal 7000, drag-rect 8000, hover-preview 9000):
+     una notifica deve restare visibile anche durante un import o una preview. */
+  z-index: 9500;
   display: grid;
   gap: 0.75rem;
   max-width: 360px;
@@ -4765,11 +4771,12 @@ img {
   color: var(--accent);
 }
 
-/* Context menu backdrop — sits below the menu, above everything else */
+/* Context menu backdrop — sits below the menu (.ribbon-color-menu /
+   .selection-context-menu sono a 220), un solo livello sotto. */
 .photo-selector__context-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 219;
+  z-index: 218;
   cursor: default;
   background: transparent;
 }
