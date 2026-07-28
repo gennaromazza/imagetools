@@ -22,6 +22,7 @@ export interface DesktopDockState {
     y: number;
     opacity: number;
     collapsed: boolean;
+    autoHide: boolean;
 }
 export type DesktopToolInstallStatus = "installed" | "not-installed" | "update-available";
 export interface DesktopToolInstallState {

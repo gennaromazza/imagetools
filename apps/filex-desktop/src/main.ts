@@ -189,7 +189,7 @@ let pendingOpenProjectPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
 let suiteTray: TrayInstance | null = null;
 let suiteDockWindow: BrowserWindowInstance | null = null;
-const defaultSuiteDockState: DesktopDockState = { x: 0, y: 0, opacity: 0.94, collapsed: false };
+const defaultSuiteDockState: DesktopDockState = { x: 0, y: 0, opacity: 0.94, collapsed: false, autoHide: false };
 
 function getSuiteDockStatePath(): string {
   return join(app.getPath("userData"), "suite-dock-state.json");
@@ -204,6 +204,7 @@ function sanitizeSuiteDockState(value: Partial<DesktopDockState> | null | undefi
     y: Number.isFinite(y) ? Math.round(y) : defaultSuiteDockState.y,
     opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0.45, opacity)) : defaultSuiteDockState.opacity,
     collapsed: Boolean(value?.collapsed),
+    autoHide: Boolean(value?.autoHide),
   };
 }
 
@@ -222,13 +223,16 @@ async function saveSuiteDockState(partial: Partial<DesktopDockState>): Promise<D
   const next = sanitizeSuiteDockState({
     ...current,
     ...partial,
-    x: bounds?.x ?? partial.x ?? current.x,
-    y: bounds?.y ?? partial.y ?? current.y,
+    x: typeof partial.x === "number" ? partial.x : bounds?.x ?? current.x,
+    y: typeof partial.y === "number" ? partial.y : bounds?.y ?? current.y,
   });
   if (suiteDockWindow && !suiteDockWindow.isDestroyed() && typeof partial.collapsed === "boolean") {
     const display = screen.getDisplayMatching(suiteDockWindow.getBounds());
     const width = next.collapsed ? 96 : Math.min(920, Math.max(680, display.workAreaSize.width - 80));
-    suiteDockWindow.setSize(width, 92, true);
+    suiteDockWindow.setSize(width, 190, true);
+  }
+  if (suiteDockWindow && !suiteDockWindow.isDestroyed() && (typeof partial.x === "number" || typeof partial.y === "number")) {
+    suiteDockWindow.setPosition(next.x, next.y, true);
   }
   if (suiteDockWindow && !suiteDockWindow.isDestroyed()) {
     suiteDockWindow.setOpacity(next.opacity);
@@ -1671,7 +1675,7 @@ async function createSuiteDock(): Promise<void> {
   const display = screen.getPrimaryDisplay();
   const dockState = await readSuiteDockState();
   const width = dockState.collapsed ? 96 : Math.min(920, Math.max(680, display.workAreaSize.width - 80));
-  const height = 92;
+  const height = 190;
   const defaultX = Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2);
   const defaultY = display.workArea.y + display.workAreaSize.height - height - 18;
   suiteDockWindow = new BrowserWindow({
