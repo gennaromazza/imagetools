@@ -10,18 +10,14 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 
 ## Tool Principali (Marzo 2026)
 
-- `apps/auto-layout-app` — Impaginazione automatica multifoto
 - `apps/image-party-frame` — Batch framing, crop live, export eventi
-- `apps/IMAGE ID PRINT` — Foto documento pronte per la stampa (AI/sidecar)
 - `apps/archivio-flow` — Import, archiviazione e organizzazione lavori da SD
 - `apps/photo-selector-app` — Image Select Pro: selezione e classificazione foto avanzata
 
 ## Launcher Windows
 
 - `avvia-progetto.bat`: schermata di scelta tool (da estendere per includere tutti i tool FileX)
-- `avvia-auto-layout.bat`: avvia direttamente Auto Layout
 - `avvia-image-party-frame.bat`: avvia direttamente Image Party Frame
-- `avvia-image-id-print.bat`: avvia Image ID Print (con AI sidecar)
 - `avvia-archivio-flow.bat`: avvia Archivio Flow
 - `avvia-photo-selector.bat`: avvia Image Select Pro
 

@@ -11,29 +11,19 @@ const repoRoot = resolve(desktopRoot, "..", "..");
 const sourceDir = join(repoRoot, "ICONE E LOGHI");
 const targetDir = join(desktopRoot, ".output", "branding");
 const photoSelectorAssetsDir = join(repoRoot, "apps", "photo-selector-app", "src", "assets");
-const autoLayoutAssetsDir = join(repoRoot, "apps", "auto-layout-app", "src", "assets");
-const autoLayoutPublicDir = join(repoRoot, "apps", "auto-layout-app", "public");
 const photoSelectorLogoPath = join(sourceDir, "photo_selector.png");
 const photoSelectorIconPath = join(sourceDir, "photo_selector_icon.png");
-const autoLayoutLogoPath = join(sourceDir, "album_maker.png");
-const autoLayoutIconPath = join(sourceDir, "album_maker.ico");
 
 const toolBranding = [
   { toolId: "suite-launcher", sourceFile: "filex-system/suite-launcher.svg" },
   {
-    toolId: "auto-layout-app",
-    sourceFile: "filex-generated/auto-layout-app.png",
-  },
-  {
     toolId: "image-party-frame",
     sourceFile: "filex-generated/image-party-frame.png",
   },
-  { toolId: "image-id-print", sourceFile: "filex-generated/image-id-print.png" },
   { toolId: "batch-print-layout", sourceFile: "filex-generated/batch-print-layout.png" },
   { toolId: "archivio-flow", sourceFile: "filex-generated/archivio-flow.png" },
   { toolId: "image-converter", sourceFile: "filex-generated/image-converter.png" },
   { toolId: "image-file-finder", sourceFile: "filex-generated/image-file-finder.png" },
-  { toolId: "network-drive-doctor", sourceFile: "filex-generated/network-drive-doctor.png" },
   {
     toolId: "photo-selector-app",
     sourceFile: "filex-generated/photo-selector-app.png",
@@ -41,8 +31,6 @@ const toolBranding = [
 ];
 
 const rendererAssetCopies = [
-  { from: autoLayoutLogoPath, to: join(autoLayoutAssetsDir, "album_maker.png") },
-  { from: autoLayoutIconPath, to: join(autoLayoutPublicDir, "album_maker.ico") },
   { from: photoSelectorLogoPath, to: join(photoSelectorAssetsDir, "photo_selector.png") },
   { from: photoSelectorLogoPath, to: join(photoSelectorAssetsDir, "logo.png") },
   { from: photoSelectorIconPath, to: join(photoSelectorAssetsDir, "photo_selector_icon.png") },
@@ -51,8 +39,6 @@ const rendererAssetCopies = [
 
 await mkdir(targetDir, { recursive: true });
 await mkdir(photoSelectorAssetsDir, { recursive: true });
-await mkdir(autoLayoutAssetsDir, { recursive: true });
-await mkdir(autoLayoutPublicDir, { recursive: true });
 
 for (const asset of rendererAssetCopies) {
   await copyFile(asset.from, asset.to);
@@ -84,15 +70,12 @@ for (const tool of toolBranding) {
 }
 
 const coordinatedRendererCopies = [
-  ["auto-layout-app.png", join(autoLayoutAssetsDir, "album_maker.png")],
-  ["auto-layout-app.ico", join(autoLayoutPublicDir, "album_maker.ico")],
   ["photo-selector-app.png", join(photoSelectorAssetsDir, "photo_selector.png")],
   ["photo-selector-app.png", join(photoSelectorAssetsDir, "logo.png")],
   ["photo-selector-app.png", join(photoSelectorAssetsDir, "photo_selector_icon.png")],
   ["photo-selector-app.png", join(photoSelectorAssetsDir, "favicon.png")],
   ["image-party-frame.png", join(repoRoot, "apps", "image-party-frame", "logo.png")],
   ["image-party-frame.ico", join(repoRoot, "apps", "image-party-frame", "favico.ico")],
-  ["image-id-print.png", join(repoRoot, "apps", "IMAGE ID PRINT", "src", "assets", "id_print_logo.png")],
   ["archivio-flow.png", join(repoRoot, "apps", "archivio-flow", "src", "assets", "photo_Archivie.png")],
 ];
 for (const [sourceName, destination] of coordinatedRendererCopies) {

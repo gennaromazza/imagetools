@@ -7,14 +7,11 @@ const gridTitle = document.querySelector('#grid-title');
 const gridSubtitle = document.querySelector('#grid-subtitle');
 const metadata = {
   'photo-selector-app': { icon:'select', category:'Selezione', description:'Seleziona, classifica e confronta grandi servizi fotografici.', color:'#36a97b' },
-  'auto-layout-app': { icon:'album', category:'Album', description:'Crea impaginazioni album professionali in modo rapido.', color:'#d7a33d' },
   'image-party-frame': { icon:'frame', category:'Creatività', description:'Applica cornici e composizioni per eventi e consegne.', color:'#d9695f' },
-  'image-id-print': { icon:'id', category:'Stampa', description:'Prepara fototessere e stampe documento precise.', color:'#4589c8' },
   'batch-print-layout': { icon:'print', category:'Stampa', description:'Organizza molte immagini su fogli pronti per la stampa.', color:'#8c71c8' },
   'archivio-flow': { icon:'archive', category:'Archivio', description:'Acquisisci, organizza e proteggi il tuo archivio fotografico.', color:'#6d9460' },
   'image-converter': { icon:'convert', category:'Utility', description:'Converti e comprimi immagini e negativi RAW.', color:'#df8647' },
   'image-file-finder': { icon:'find', category:'Utility', description:'Trova e raccogli fotografie partendo da una lista.', color:'#4c9caf' },
-  'network-drive-doctor': { icon:'network', category:'Utility', description:'Controlla e ripara i collegamenti ai dischi di rete.', color:'#7a8794' }
 };
 const categories = ['Tutti','Preferiti','Recenti','Selezione','Album','Creatività','Stampa','Archivio','Utility'];
 let states = [];
@@ -50,11 +47,10 @@ function renderTools() {
   }).join('') : '<div class="empty">Nessuno strumento in questa sezione.</div>';
 }
 async function refresh() {
-  const [runtime, tools, ai] = await Promise.all([api.getRuntimeInfo(), api.listAvailableTools(), api.getImageIdPrintAiStatus()]);
+  const [runtime, tools] = await Promise.all([api.getRuntimeInfo(), api.listAvailableTools()]);
   states = tools;
   document.querySelector('#suite-version').textContent = `FileX ${runtime.appVersion}`;
   document.querySelector('#runtime-info').textContent = `${tools.filter(x=>x.installed).length}/${tools.length} tool installati · canale ${runtime.releaseChannel}`;
-  document.querySelector('#ai-status').textContent = ai.installed && ai.pythonFound ? 'Disponibile' : ai.installed ? 'Runtime da configurare' : 'Componente opzionale non installato';
   renderTools();
 }
 async function install(id, button = null) {

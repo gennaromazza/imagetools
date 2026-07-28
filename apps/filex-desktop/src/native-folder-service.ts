@@ -337,23 +337,6 @@ export async function statFilesFromDisk(absolutePaths: string[]): Promise<Deskto
   return stats.filter((stat): stat is DesktopFileStat => stat !== null);
 }
 
-export async function createAutoLayoutHandoffFileDesktop(
-  fileName: string,
-  content: string,
-): Promise<string | null> {
-  const normalizedName = sanitizeTempFileName(fileName.endsWith(".imagetool") ? fileName : `${fileName}.imagetool`);
-  const handoffDir = join(app.getPath("temp"), "filex-handoffs");
-  const absolutePath = join(handoffDir, `${Date.now()}-${normalizedName}`);
-
-  try {
-    await mkdir(handoffDir, { recursive: true });
-    await writeFile(absolutePath, content, "utf8");
-    return absolutePath;
-  } catch {
-    return null;
-  }
-}
-
 export async function readSidecarXmpFromAssetPath(absolutePath: string): Promise<string | null> {
   try {
     return await readFile(sidecarPathForAsset(absolutePath), "utf8");

@@ -8,15 +8,6 @@
   ],
   "releases": [
     {
-      "toolId": "auto-layout-app",
-      "version": "0.1.0",
-      "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/ImageAlbumMaker-0.1.0-stable-x64-setup.exe",
-      "installerSha256": "737c5f7bc8c20612db078d9745ff9825bbfd16ee760160e30139826b022bf837",
-      "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.261Z"
-    },
-    {
       "toolId": "image-party-frame",
       "version": "0.1.0",
       "channel": "stable",
@@ -24,15 +15,6 @@
       "installerSha256": "bc088e6b5bb30e37046fd41891a53eb426c64e0018508f6f3941617d4adfce2e",
       "minLauncherVersion": "0.1.0",
       "publishedAt": "2026-07-28T08:08:15.337Z"
-    },
-    {
-      "toolId": "image-id-print",
-      "version": "0.1.0",
-      "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/Image-ID-Print-0.1.0-stable-x64-setup.exe",
-      "installerSha256": "5f79c20a4f6d05538f6190847e44a55841369bcf27d68017f8beca2f847f5bae",
-      "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.411Z"
     },
     {
       "toolId": "batch-print-layout",
