@@ -1,11 +1,84 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-04-04T10:47:51.301Z",
+  "generatedAt": "2026-07-28T08:08:15.775Z",
   "generatedBy": "generate-release-manifest.mjs",
   "channels": [
     "stable",
     "beta"
   ],
-  "releases": [],
-  "payloadSha256": "3951ac523c3f67d1959a941c20472809711def4c5ad47cbe3f1b07b044d4a5f7"
+  "releases": [
+    {
+      "toolId": "auto-layout-app",
+      "version": "0.1.0",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/ImageAlbumMaker-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "737c5f7bc8c20612db078d9745ff9825bbfd16ee760160e30139826b022bf837",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-07-28T08:08:15.261Z"
+    },
+    {
+      "toolId": "image-party-frame",
+      "version": "0.1.0",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/Image-Party-Frame-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "bc088e6b5bb30e37046fd41891a53eb426c64e0018508f6f3941617d4adfce2e",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-07-28T08:08:15.337Z"
+    },
+    {
+      "toolId": "image-id-print",
+      "version": "0.1.0",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/Image-ID-Print-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "5f79c20a4f6d05538f6190847e44a55841369bcf27d68017f8beca2f847f5bae",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-07-28T08:08:15.411Z"
+    },
+    {
+      "toolId": "batch-print-layout",
+      "version": "0.1.0",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/Batch-Print-Layout-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "58df8088fec53c671bdeb3cbc660ac2148ff15fadf9b463d0415f742df7f2ddc",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-07-28T08:08:15.484Z"
+    },
+    {
+      "toolId": "archivio-flow",
+      "version": "0.1.0",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/Archivio-Flow-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "120e2095cd589607ea40d723068d5ad379f9865d13c3409711a16cbc17c78a02",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-07-28T08:08:15.557Z"
+    },
+    {
+      "toolId": "image-converter",
+      "version": "0.1.0",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/Image-Converter-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "14c7a5d38985b2a06b30aad3cdba716cfb8b0369ebef4b0cf81daae7b75bf61c",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-07-28T08:08:15.629Z"
+    },
+    {
+      "toolId": "image-file-finder",
+      "version": "0.1.0",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/Trova-Foto-da-Lista-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "7fbc31dbabf49568a9da7edc3b26437748eebb9914409021d6618aec0fd98582",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-07-28T08:08:15.701Z"
+    },
+    {
+      "toolId": "photo-selector-app",
+      "version": "0.1.0",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/latest/download/Image-Select-Pro-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "5b51265435c7d02bdcfb2ae6bd4f378ce647f0e9d4704cdf04ae29494f0d146f",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-07-28T08:08:15.775Z"
+    }
+  ],
+  "payloadSha256": "47ae13130a474aee5ae6ad85c7819d3acdfc76c8833b4e0ccad78d453c289337"
 }

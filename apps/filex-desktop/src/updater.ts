@@ -164,7 +164,10 @@ export async function loadReleaseManifest(channelInput?: DesktopReleaseChannel):
   if (isAllowedReleaseUrl(urlValue)) {
     try {
       const raw = await requestJson(urlValue);
-      if (isDesktopReleaseManifest(raw) && verifyManifestIntegrity(raw)) {
+      // An empty remote manifest is valid JSON but cannot power the Suite
+      // installer. Fall through to the bundled manifest while a release is
+      // being published or when the remote index is temporarily stale.
+      if (isDesktopReleaseManifest(raw) && verifyManifestIntegrity(raw) && raw.releases.length > 0) {
         return raw;
       }
     } catch {
@@ -348,8 +351,17 @@ function patchJob(jobId: string, partial: Partial<DesktopToolUpdateJob>): Deskto
   return next;
 }
 
-function downloadFile(urlValue: string, destinationPath: string, onProgress: (downloaded: number, total: number | null) => void): Promise<void> {
+function downloadFile(
+  urlValue: string,
+  destinationPath: string,
+  onProgress: (downloaded: number, total: number | null) => void,
+  redirectCount = 0,
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error("Troppi redirect durante il download"));
+      return;
+    }
     const parsed = new URL(urlValue);
     const client = parsed.protocol === "http:" ? http : https;
     const request = client.get(
@@ -361,6 +373,18 @@ function downloadFile(urlValue: string, destinationPath: string, onProgress: (do
         },
       },
       (response) => {
+        if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400) {
+          const location = response.headers.location;
+          response.resume();
+          if (!location) {
+            reject(new Error("Redirect senza destinazione"));
+            return;
+          }
+          downloadFile(new URL(location, parsed).toString(), destinationPath, onProgress, redirectCount + 1)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
         if (!response.statusCode || response.statusCode >= 400) {
           reject(new Error(`Download failed (${response.statusCode ?? "unknown"})`));
           return;

@@ -19,24 +19,24 @@ const autoLayoutLogoPath = join(sourceDir, "album_maker.png");
 const autoLayoutIconPath = join(sourceDir, "album_maker.ico");
 
 const toolBranding = [
-  { toolId: "suite-launcher", sourceFile: "LOGO_Image_tool.png" },
+  { toolId: "suite-launcher", sourceFile: "filex-system/suite-launcher.svg" },
   {
     toolId: "auto-layout-app",
-    pngSourcePath: autoLayoutLogoPath,
-    icoSourcePath: autoLayoutIconPath,
+    sourceFile: "filex-generated/auto-layout-app.png",
   },
   {
     toolId: "image-party-frame",
-    sourceFile: "party_frame_logo.png",
-    pngSourcePath: join(repoRoot, "apps", "image-party-frame", "logo.png"),
-    icoSourcePath: join(repoRoot, "apps", "image-party-frame", "favico.ico"),
+    sourceFile: "filex-generated/image-party-frame.png",
   },
-  { toolId: "image-id-print", sourceFile: "id_print_logo.png" },
-  { toolId: "archivio-flow", sourceFile: "photo_Archivie.png" },
+  { toolId: "image-id-print", sourceFile: "filex-generated/image-id-print.png" },
+  { toolId: "batch-print-layout", sourceFile: "filex-generated/batch-print-layout.png" },
+  { toolId: "archivio-flow", sourceFile: "filex-generated/archivio-flow.png" },
+  { toolId: "image-converter", sourceFile: "filex-generated/image-converter.png" },
+  { toolId: "image-file-finder", sourceFile: "filex-generated/image-file-finder.png" },
+  { toolId: "network-drive-doctor", sourceFile: "filex-generated/network-drive-doctor.png" },
   {
     toolId: "photo-selector-app",
-    pngSourcePath: photoSelectorLogoPath,
-    icoSourcePath: photoSelectorIconPath,
+    sourceFile: "filex-generated/photo-selector-app.png",
   },
 ];
 
@@ -74,9 +74,30 @@ for (const tool of toolBranding) {
     throw new Error(`Missing branding source for ${tool.toolId}`);
   }
 
-  await copyFile(pngSourcePath, pngTargetPath);
+  if (pngSourcePath.toLowerCase().endsWith(".svg")) {
+    await sharp(pngSourcePath).resize(1024, 1024).png().toFile(pngTargetPath);
+  } else {
+    await copyFile(pngSourcePath, pngTargetPath);
+  }
   await copyBrandIco(icoSourcePath, icoTargetPath);
   await maybeGenerateIcns(pngSourcePath, icnsTargetPath);
+}
+
+const coordinatedRendererCopies = [
+  ["auto-layout-app.png", join(autoLayoutAssetsDir, "album_maker.png")],
+  ["auto-layout-app.ico", join(autoLayoutPublicDir, "album_maker.ico")],
+  ["photo-selector-app.png", join(photoSelectorAssetsDir, "photo_selector.png")],
+  ["photo-selector-app.png", join(photoSelectorAssetsDir, "logo.png")],
+  ["photo-selector-app.png", join(photoSelectorAssetsDir, "photo_selector_icon.png")],
+  ["photo-selector-app.png", join(photoSelectorAssetsDir, "favicon.png")],
+  ["image-party-frame.png", join(repoRoot, "apps", "image-party-frame", "logo.png")],
+  ["image-party-frame.ico", join(repoRoot, "apps", "image-party-frame", "favico.ico")],
+  ["image-id-print.png", join(repoRoot, "apps", "IMAGE ID PRINT", "src", "assets", "id_print_logo.png")],
+  ["archivio-flow.png", join(repoRoot, "apps", "archivio-flow", "src", "assets", "photo_Archivie.png")],
+];
+for (const [sourceName, destination] of coordinatedRendererCopies) {
+  await mkdir(dirname(destination), { recursive: true });
+  await copyFile(join(targetDir, sourceName), destination);
 }
 
 async function copyBrandIco(sourcePath, icoTargetPath) {

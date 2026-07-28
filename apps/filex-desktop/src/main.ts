@@ -1,5 +1,5 @@
 import * as electron from "electron";
-import type { BrowserWindow as BrowserWindowInstance } from "electron";
+import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { writeFile as writeFileAsync } from "node:fs/promises";
@@ -11,6 +11,7 @@ import type {
   DesktopEditorCandidate,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
+  DesktopFolderOpenOptions,
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
@@ -25,6 +26,11 @@ import type {
   DesktopToolId,
   DesktopToolInstallState,
   DesktopThumbnailCacheLookupEntry,
+  DesktopThumbnailBatchRequest,
+  DesktopThumbnailRequestOptions,
+  ImageConverterJobConfig,
+  ImageFileFinderJobConfig,
+  ImageFileFinderScanRequest,
 } from "@photo-tools/desktop-contracts";
 import {
   createAutoLayoutHandoffFileDesktop,
@@ -32,9 +38,12 @@ import {
   moveFilesToFolderDesktop,
   openFolderDesktop,
   readFileFromDisk,
+  readPhotoSelectorProjectFileDesktop,
   readSidecarXmpFromAssetPath,
   reopenFolderDesktop,
   saveFileAsDesktop,
+  statFilesFromDisk,
+  writePhotoSelectorProjectFileDesktop,
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
 import {
@@ -43,6 +52,9 @@ import {
   getDesktopQuickPreviewFrame,
   getDesktopPreview,
   getDesktopThumbnail,
+  getDesktopCachedThumbnailFrames,
+  getDesktopThumbnailFrame,
+  getDesktopThumbnails,
   getQuickPreviewFrameContent,
   QUICK_PREVIEW_PROTOCOL_SCHEME,
   releaseDesktopQuickPreviewFrames,
@@ -79,6 +91,7 @@ import {
   saveAutoLayoutProjects,
   saveDesktopSessionState,
   saveFolderAssetStates,
+  saveFolderAssetStatesDelta,
   saveFolderCatalogState,
   saveRecentFolder,
   saveSortCache,
@@ -91,9 +104,34 @@ import {
   listAvailableTools,
   openInstalledTool,
 } from "./updater.js";
-import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault } from "./tool-manifest.js";
+import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault, getSuiteManagedTools } from "./tool-manifest.js";
+import {
+  cancelImageConverterJobDesktop,
+  chooseImageConverterFoldersDesktop,
+  getImageConverterPresetsDesktop,
+  getImageConverterProgressDesktop,
+  openImageConverterFolderDesktop,
+  scanImageConverterInputsDesktop,
+  startImageConverterJobDesktop,
+} from "./image-converter-service.js";
+import {
+  cancelImageFileFinderJobDesktop,
+  chooseImageFileFinderDestinationFolderDesktop,
+  chooseImageFileFinderSourceFolderDesktop,
+  getImageFileFinderProgressDesktop,
+  openImageFileFinderFolderDesktop,
+  scanImageFileFinderMatchesDesktop,
+  startImageFileFinderJobDesktop,
+} from "./image-file-finder-service.js";
+import {
+  diagnoseNetworkDrive,
+  getStoredNetworkDriveConfig,
+  openNetworkDriveTarget,
+  repairNetworkDrive,
+  updateNetworkDriveConfig,
+} from "./network-drive-service.js";
 
-const { app, BrowserWindow, dialog, ipcMain, protocol, session, shell } = electron;
+const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, Tray } = electron;
 
 const EARLY_BOOT_LOG_PATH = join(process.env.TEMP || process.cwd(), "filex-image-party-frame-early.log");
 
@@ -148,6 +186,13 @@ let pendingOpenFolderPath: string | null = null;
 let isOpenProjectRequestRendererReady = false;
 let pendingOpenProjectPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
+let suiteTray: TrayInstance | null = null;
+let suiteDockWindow: BrowserWindowInstance | null = null;
+let archivioFlowTray: TrayInstance | null = null;
+let archivioFlowSdWatchTimer: NodeJS.Timeout | null = null;
+let archivioFlowKnownSdPaths = new Set<string>();
+let archivioFlowIsQuitting = false;
+const archivioFlowWatchMode = requestedTool.id === "archivio-flow" && process.argv.includes("--archivio-flow-watch");
 let archivioFlowModulePromise: Promise<any> | null = null;
 let imagePartyFrameServerModulePromise: Promise<any> | null = null;
 
@@ -316,6 +361,18 @@ function getArchivioFlowDataDir(): string {
 
 function getImagePartyFrameDataDir(): string {
   return join(app.getPath("userData"), "image-party-frame");
+}
+
+function resolveSuiteDockEntry(): string {
+  if (app.isPackaged) {
+    return join(process.resourcesPath, "apps/filex-desktop/suite-launcher", "dock.html");
+  }
+
+  return resolve(app.getAppPath(), ".output", "suite-launcher", "dock.html");
+}
+
+function getNetworkDriveDoctorDataDir(): string {
+  return join(app.getPath("userData"), "network-drive-doctor");
 }
 
 async function loadArchivioFlowModule(): Promise<any> {
@@ -984,8 +1041,9 @@ function registerIpcHandlers(): void {
     async (_event, toolId: DesktopToolId, launchArgs?: string[]) => openInstalledTool(toolId, launchArgs),
   );
   ipcMain.handle("filex:get-image-id-print-ai-status", () => getImageIdPrintAiStatus());
-  ipcMain.handle("filex:open-folder", () => openFolderDesktop());
-  ipcMain.handle("filex:reopen-folder", (_event, rootPath: string) => reopenFolderDesktop(rootPath));
+  ipcMain.handle("filex:open-folder", (_event, options?: DesktopFolderOpenOptions) => openFolderDesktop(options));
+  ipcMain.handle("filex:reopen-folder", (_event, rootPath: string, options?: DesktopFolderOpenOptions) =>
+    reopenFolderDesktop(sanitizeDesktopPath(rootPath), options));
   ipcMain.handle("filex:consume-pending-open-folder-path", () => {
     return pendingOpenFolderPath;
   });
@@ -1105,15 +1163,42 @@ function registerIpcHandlers(): void {
     }
   });
   ipcMain.handle("filex:read-file", (_event, absolutePath: string) => readFileFromDisk(absolutePath));
+  ipcMain.handle("filex:stat-files", (_event, absolutePaths: string[]) => statFilesFromDisk(absolutePaths));
   ipcMain.handle(
     "filex:get-thumbnail",
-    (_event, absolutePath: string, maxDimension: number, quality: number, sourceFileKey?: string) =>
-      getDesktopThumbnail(absolutePath, maxDimension, quality, sourceFileKey),
+    (
+      _event,
+      absolutePath: string,
+      maxDimension: number,
+      quality: number,
+      sourceFileKey?: string,
+      options?: DesktopThumbnailRequestOptions,
+    ) => getDesktopThumbnail(absolutePath, maxDimension, quality, sourceFileKey, options),
+  );
+  ipcMain.handle(
+    "filex:get-thumbnail-frame",
+    (
+      _event,
+      absolutePath: string,
+      maxDimension: number,
+      quality: number,
+      sourceFileKey?: string,
+      options?: DesktopThumbnailRequestOptions,
+    ) => getDesktopThumbnailFrame(absolutePath, maxDimension, quality, sourceFileKey, options),
+  );
+  ipcMain.handle(
+    "filex:get-thumbnails",
+    (_event, requests: DesktopThumbnailBatchRequest[]) => getDesktopThumbnails(requests),
   );
   ipcMain.handle(
     "filex:get-cached-thumbnails",
     (_event, entries: DesktopThumbnailCacheLookupEntry[], maxDimension: number, quality: number) =>
       getCachedThumbnailsFromDisk(entries, maxDimension, quality),
+  );
+  ipcMain.handle(
+    "filex:get-cached-thumbnail-frames",
+    (_event, entries: DesktopThumbnailCacheLookupEntry[], maxDimension: number, quality: number) =>
+      getDesktopCachedThumbnailFrames(entries, maxDimension, quality),
   );
   ipcMain.handle("filex:get-thumbnail-cache-info", async () => {
     const info = await getThumbnailCacheInfo();
@@ -1220,6 +1305,25 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:open-with-editor", async (_event, editorPath: string, absolutePaths: string[]) =>
     launchEditorProcess(editorPath, absolutePaths),
   );
+  ipcMain.handle("filex:choose-image-file", async (_event, currentPath?: string) => {
+    const normalizedCurrentPath = sanitizeDesktopPath(currentPath ?? "");
+    const result = await dialog.showOpenDialog({
+      title: "Seleziona foto salvata",
+      defaultPath: normalizedCurrentPath || undefined,
+      buttonLabel: "Usa questo file",
+      properties: ["openFile"],
+      filters: [
+        { name: "Immagini", extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff", "psd"] },
+        { name: "Tutti i file", extensions: ["*"] },
+      ],
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+
+    return sanitizeDesktopPath(result.filePaths[0]);
+  });
   ipcMain.handle("filex:copy-files-to-folder", async (_event, absolutePaths: string[]) =>
     copyFilesToFolderDesktop(absolutePaths),
   );
@@ -1232,6 +1336,14 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:get-desktop-preferences", () => getDesktopPreferences());
   ipcMain.handle("filex:save-desktop-preferences", (_event, preferences: DesktopPhotoSelectorPreferences) =>
     saveDesktopPreferences(preferences),
+  );
+  ipcMain.handle("filex:read-photo-selector-project-file", (_event, rootPath: string) =>
+    readPhotoSelectorProjectFileDesktop(sanitizeDesktopPath(rootPath)),
+  );
+  ipcMain.handle(
+    "filex:write-photo-selector-project-file",
+    (_event, rootPath: string, project) =>
+      writePhotoSelectorProjectFileDesktop(sanitizeDesktopPath(rootPath), project),
   );
   ipcMain.handle("filex:get-desktop-session-state", () => getDesktopSessionState());
   ipcMain.handle("filex:save-desktop-session-state", (_event, state: DesktopPersistedState) =>
@@ -1297,6 +1409,11 @@ function registerIpcHandlers(): void {
     "filex:save-folder-asset-states",
     (_event, folderPath: string, assetStates: DesktopFolderCatalogAssetState[]) =>
       saveFolderAssetStates(folderPath, assetStates),
+  );
+  ipcMain.handle(
+    "filex:save-folder-asset-states-delta",
+    (_event, folderPath: string, assetStates: DesktopFolderCatalogAssetState[]) =>
+      saveFolderAssetStatesDelta(folderPath, assetStates),
   );
   ipcMain.handle("filex:get-desktop-performance-snapshot", () => getDesktopPerformanceSnapshot());
   ipcMain.handle("filex:record-desktop-performance-snapshot", (_event, snapshot: DesktopPerformanceSnapshot) =>
@@ -1393,6 +1510,51 @@ function registerIpcHandlers(): void {
     }
     return { ok: true };
   });
+  ipcMain.handle("filex:get-image-converter-presets", () => getImageConverterPresetsDesktop());
+  ipcMain.handle("filex:choose-image-converter-folders", () => chooseImageConverterFoldersDesktop());
+  ipcMain.handle("filex:scan-image-converter-inputs", (_event, paths: string[]) =>
+    scanImageConverterInputsDesktop(paths),
+  );
+  ipcMain.handle("filex:start-image-converter-job", (_event, config: ImageConverterJobConfig) =>
+    startImageConverterJobDesktop(config),
+  );
+  ipcMain.handle("filex:get-image-converter-progress", () => getImageConverterProgressDesktop());
+  ipcMain.handle("filex:cancel-image-converter-job", () => cancelImageConverterJobDesktop());
+  ipcMain.handle("filex:open-image-converter-folder", (_event, folderPath: string) =>
+    openImageConverterFolderDesktop(folderPath),
+  );
+  ipcMain.handle("filex:choose-image-file-finder-source-folder", () =>
+    chooseImageFileFinderSourceFolderDesktop(),
+  );
+  ipcMain.handle("filex:choose-image-file-finder-destination-folder", () =>
+    chooseImageFileFinderDestinationFolderDesktop(),
+  );
+  ipcMain.handle("filex:scan-image-file-finder-matches", (_event, request: ImageFileFinderScanRequest) =>
+    scanImageFileFinderMatchesDesktop(request),
+  );
+  ipcMain.handle("filex:start-image-file-finder-job", (_event, config: ImageFileFinderJobConfig) =>
+    startImageFileFinderJobDesktop(config),
+  );
+  ipcMain.handle("filex:get-image-file-finder-progress", () => getImageFileFinderProgressDesktop());
+  ipcMain.handle("filex:cancel-image-file-finder-job", () => cancelImageFileFinderJobDesktop());
+  ipcMain.handle("filex:open-image-file-finder-folder", (_event, folderPath: string) =>
+    openImageFileFinderFolderDesktop(folderPath),
+  );
+  ipcMain.handle("filex:get-network-drive-config", () =>
+    getStoredNetworkDriveConfig(getNetworkDriveDoctorDataDir()),
+  );
+  ipcMain.handle("filex:save-network-drive-config", (_event, config: Record<string, unknown>) =>
+    updateNetworkDriveConfig(getNetworkDriveDoctorDataDir(), config),
+  );
+  ipcMain.handle("filex:get-network-drive-status", () =>
+    diagnoseNetworkDrive(getNetworkDriveDoctorDataDir()),
+  );
+  ipcMain.handle("filex:repair-network-drive", () =>
+    repairNetworkDrive(getNetworkDriveDoctorDataDir()),
+  );
+  ipcMain.handle("filex:open-network-drive", (_event, target: "drive" | "unc" | "credentials" | "network-settings" | "sharing-settings") =>
+    openNetworkDriveTarget(getNetworkDriveDoctorDataDir(), target),
+  );
 }
 
 async function loadRenderer(window: BrowserWindowInstance): Promise<void> {
@@ -1428,6 +1590,118 @@ async function ensureMainWindow(): Promise<void> {
     mainWindowCreationPromise = null;
   });
   await mainWindowCreationPromise;
+}
+
+function createSuiteTray(): void {
+  if (requestedTool.id !== "suite-launcher" || suiteTray) return;
+  suiteTray = new Tray(resolveWindowIcon());
+  suiteTray.setToolTip("FileX Suite");
+  const toolItems = getSuiteManagedTools().map((tool) => ({
+    label: tool.displayName,
+    click: async () => {
+      const result = await openInstalledTool(tool.id);
+      if (!result.ok) dialog.showErrorBox("FileX Suite", result.message);
+    },
+  }));
+  suiteTray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Apri FileX Suite", click: () => { void ensureMainWindow().then(focusMainWindow); } },
+    { type: "separator" },
+    ...toolItems,
+    { type: "separator" },
+    { label: "Esci", click: () => app.quit() },
+  ]));
+  suiteTray.on("double-click", () => { void ensureMainWindow().then(focusMainWindow); });
+}
+
+async function createSuiteDock(): Promise<void> {
+  if (requestedTool.id !== "suite-launcher" || (suiteDockWindow && !suiteDockWindow.isDestroyed())) return;
+
+  const display = screen.getPrimaryDisplay();
+  const width = Math.min(920, Math.max(680, display.workAreaSize.width - 80));
+  const height = 92;
+  suiteDockWindow = new BrowserWindow({
+    width,
+    height,
+    x: Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2),
+    y: display.workArea.y + display.workAreaSize.height - height - 18,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: join(app.getAppPath(), ".output", "electron", "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  suiteDockWindow.setAlwaysOnTop(true, "floating");
+  suiteDockWindow.on("closed", () => { suiteDockWindow = null; });
+  const entryPath = resolveSuiteDockEntry();
+  if (existsSync(entryPath)) {
+    await suiteDockWindow.loadFile(entryPath);
+    suiteDockWindow.showInactive();
+  } else {
+    writeBootLog(`Suite dock entry missing ${entryPath}`);
+  }
+}
+
+function stopArchivioFlowSdWatcher(): void {
+  if (archivioFlowSdWatchTimer) {
+    clearInterval(archivioFlowSdWatchTimer);
+    archivioFlowSdWatchTimer = null;
+  }
+}
+
+function createArchivioFlowTray(): void {
+  if (!archivioFlowWatchMode || archivioFlowTray) return;
+
+  archivioFlowTray = new Tray(resolveWindowIcon());
+  archivioFlowTray.setToolTip("Archivio Flow — rilevamento SD attivo");
+  archivioFlowTray.setContextMenu(Menu.buildFromTemplate([
+    {
+      label: "Apri Archivio Flow",
+      click: () => { void ensureMainWindow().then(focusMainWindow); },
+    },
+    { type: "separator" },
+    {
+      label: "Esci (il monitoraggio riparte all'accesso)",
+      click: () => {
+        archivioFlowIsQuitting = true;
+        stopArchivioFlowSdWatcher();
+        app.quit();
+      },
+    },
+  ]));
+  archivioFlowTray.on("double-click", () => { void ensureMainWindow().then(focusMainWindow); });
+}
+
+function startArchivioFlowSdWatcher(): void {
+  if (!archivioFlowWatchMode || archivioFlowSdWatchTimer) return;
+
+  const checkForNewSd = async () => {
+    try {
+      const cards = await getArchivioSdCardsDesktop();
+      const paths = new Set(cards.map((card) => card.path));
+      const hasNewCard = [...paths].some((cardPath) => !archivioFlowKnownSdPaths.has(cardPath));
+      archivioFlowKnownSdPaths = paths;
+      if (hasNewCard) {
+        await ensureMainWindow();
+        focusMainWindow();
+      }
+    } catch (error) {
+      writeBootLog(`Archivio Flow SD watcher error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  void checkForNewSd();
+  archivioFlowSdWatchTimer = setInterval(() => { void checkForNewSd(); }, 2500);
 }
 
 async function createMainWindow(): Promise<void> {
@@ -1488,6 +1762,14 @@ async function createMainWindow(): Promise<void> {
     }
     isOpenFolderRequestRendererReady = false;
   });
+
+  if (archivioFlowWatchMode) {
+    windowInstance.on("close", (event) => {
+      if (archivioFlowIsQuitting) return;
+      event.preventDefault();
+      windowInstance.hide();
+    });
+  }
 
   if (pendingOpenFolderPath) {
     focusMainWindow();
@@ -1568,7 +1850,22 @@ if (hasSingleInstanceLock) {
     registerPreviewProtocol();
     registerCrashTelemetryHandlers();
     registerIpcHandlers();
-    await ensureMainWindow();
+    if (requestedTool.id === "archivio-flow" && process.platform === "win32") {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        openAsHidden: true,
+        args: ["--archivio-flow-watch"],
+      });
+      writeBootLog(`Archivio Flow SD watcher ${archivioFlowWatchMode ? "started in background" : "startup registration enabled"}`);
+    }
+    if (requestedTool.id === "archivio-flow" && archivioFlowWatchMode) {
+      createArchivioFlowTray();
+      startArchivioFlowSdWatcher();
+    } else {
+      await ensureMainWindow();
+    }
+    createSuiteTray();
+    await createSuiteDock();
     writeBootLog("Startup sequence completed");
 
     app.on("activate", () => {
@@ -1590,12 +1887,22 @@ if (hasSingleInstanceLock) {
 }
 
 app.on("window-all-closed", () => {
+  if (requestedTool.id === "suite-launcher") return;
+  if (requestedTool.id === "archivio-flow" && archivioFlowWatchMode) return;
   if (process.platform !== "darwin") {
     app.quit();
   }
 });
 
 app.once("before-quit", () => {
+  archivioFlowIsQuitting = true;
+  stopArchivioFlowSdWatcher();
+  archivioFlowTray?.destroy();
+  archivioFlowTray = null;
+  suiteTray?.destroy();
+  suiteTray = null;
+  suiteDockWindow?.destroy();
+  suiteDockWindow = null;
   void shutdownDesktopImageService();
   shutdownDesktopStore();
 });
