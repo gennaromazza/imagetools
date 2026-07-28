@@ -57,16 +57,21 @@ async function refresh() {
   document.querySelector('#ai-status').textContent = ai.installed && ai.pythonFound ? 'Disponibile' : ai.installed ? 'Runtime da configurare' : 'Componente opzionale non installato';
   renderTools();
 }
-async function install(id) {
+async function install(id, button = null) {
+  const originalLabel = button?.textContent;
+  if (button) { button.disabled = true; button.textContent = 'Scarico...'; }
   const job = await api.downloadToolUpdate(id);
   if (job.status !== 'ready-to-apply') throw new Error(job.error || 'Download non riuscito');
+  if (button) button.textContent = 'Avvio...';
   const result = await api.applyToolUpdate(job.id);
   if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
+  await new Promise(resolve => setTimeout(resolve, 1200));
   await refresh();
+  if (button) { button.disabled = false; button.textContent = originalLabel || 'Aggiorna'; }
 }
 nav.addEventListener('click', e => { const b=e.target.closest('[data-category]'); if(!b)return; activeCategory=b.dataset.category; title.textContent=activeCategory==='Tutti'?'Tutti gli strumenti':activeCategory; gridTitle.textContent=activeCategory; gridSubtitle.textContent=activeCategory==='Preferiti'?'I tool che usi di più.':activeCategory==='Recenti'?'Gli ultimi workflow aperti.':'Accesso rapido ai tuoi workflow fotografici.'; renderNav(); renderTools(); });
 search.addEventListener('input', renderTools);
-toolsGrid.addEventListener('click', async e => { const b=e.target.closest('[data-action]'); if(!b)return; const {action,id}=b.dataset; if(action==='favorite'){ favorites.has(id)?favorites.delete(id):favorites.add(id); localStorage.setItem('filex-favorites',JSON.stringify([...favorites])); renderTools(); return; } b.disabled=true; try { if(action==='open'){ const result=await api.openInstalledTool(id); if(!result.ok) throw new Error(result.message); recent=[id,...recent.filter(x=>x!==id)].slice(0,6); localStorage.setItem('filex-recent',JSON.stringify(recent)); } else await install(id); } catch(error){ alert(error.message||String(error)); } finally { b.disabled=false; } });
+toolsGrid.addEventListener('click', async e => { const b=e.target.closest('[data-action]'); if(!b)return; const {action,id}=b.dataset; if(action==='favorite'){ favorites.has(id)?favorites.delete(id):favorites.add(id); localStorage.setItem('filex-favorites',JSON.stringify([...favorites])); renderTools(); return; } try { if(action==='open'){ b.disabled=true; const result=await api.openInstalledTool(id); if(!result.ok) throw new Error(result.message); recent=[id,...recent.filter(x=>x!==id)].slice(0,6); localStorage.setItem('filex-recent',JSON.stringify(recent)); b.disabled=false; } else await install(id,b); } catch(error){ b.disabled=false; alert(error.message||String(error)); } });
 document.querySelector('#refresh-btn').addEventListener('click', refresh);
 document.querySelector('#install-missing-btn').addEventListener('click', async e => { e.currentTarget.disabled=true; try { for(const item of states.filter(x=>!x.installed)) await install(item.toolId); } catch(error){ alert(error.message||String(error)); } finally { e.currentTarget.disabled=false; } });
 renderNav(); refresh().catch(error => { document.querySelector('#runtime-info').textContent=`Errore: ${error.message||error}`; });

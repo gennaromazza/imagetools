@@ -8,8 +8,14 @@
 </head>
 <body>
   <div class="dock-window">
+    <button id="suite-toggle" class="suite-toggle" title="Espandi FileX Suite"><img src="./icons/suite-launcher.png" alt="FileX Suite" /></button>
     <span class="dock-title">FILEX SUITE</span>
     <div id="dock-tools" class="dock-tools"></div>
+    <button id="dock-settings" class="dock-settings" title="Impostazioni dock">⚙</button>
+    <div id="dock-controls" class="dock-controls" hidden>
+      <label>Trasparenza <input id="dock-opacity" type="range" min="45" max="100" value="94" /></label>
+      <button id="dock-collapse" type="button">Riduci a icona</button>
+    </div>
   </div>
   <script type="module" src="./dock-window.js"></script>
 </body>
