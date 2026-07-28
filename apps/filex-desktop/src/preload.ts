@@ -2,7 +2,7 @@ import * as electron from "electron";
 import type { IpcRendererEvent } from "electron";
 import type { FileXDesktopApi } from "@photo-tools/desktop-contracts";
 
-const { contextBridge, ipcRenderer } = electron;
+const { contextBridge, ipcRenderer, webUtils } = electron;
 
 const api: FileXDesktopApi = {
   getRuntimeInfo: () => ipcRenderer.invoke("filex:get-runtime-info"),
@@ -13,8 +13,8 @@ const api: FileXDesktopApi = {
   applyToolUpdate: (jobId) => ipcRenderer.invoke("filex:apply-tool-update", jobId),
   openInstalledTool: (toolId, launchArgs) => ipcRenderer.invoke("filex:open-installed-tool", toolId, launchArgs),
   getImageIdPrintAiStatus: () => ipcRenderer.invoke("filex:get-image-id-print-ai-status"),
-  openFolder: () => ipcRenderer.invoke("filex:open-folder"),
-  reopenFolder: (rootPath) => ipcRenderer.invoke("filex:reopen-folder", rootPath),
+  openFolder: (options) => ipcRenderer.invoke("filex:open-folder", options),
+  reopenFolder: (rootPath, options) => ipcRenderer.invoke("filex:reopen-folder", rootPath, options),
   consumePendingOpenFolderPath: () => ipcRenderer.invoke("filex:consume-pending-open-folder-path"),
   acknowledgeOpenFolderRequest: (folderPath: string | null | undefined) =>
     ipcRenderer.invoke("filex:acknowledge-open-folder-request", folderPath),
@@ -43,10 +43,16 @@ const api: FileXDesktopApi = {
   canStartDragOut: (absolutePaths) => ipcRenderer.invoke("filex:can-start-drag-out", absolutePaths),
   startDragOut: (absolutePaths) => ipcRenderer.send("filex:start-drag-out", absolutePaths),
   readFile: (absolutePath) => ipcRenderer.invoke("filex:read-file", absolutePath),
-  getThumbnail: (absolutePath, maxDimension, quality, sourceFileKey) =>
-    ipcRenderer.invoke("filex:get-thumbnail", absolutePath, maxDimension, quality, sourceFileKey),
+  statFiles: (absolutePaths) => ipcRenderer.invoke("filex:stat-files", absolutePaths),
+  getThumbnail: (absolutePath, maxDimension, quality, sourceFileKey, options) =>
+    ipcRenderer.invoke("filex:get-thumbnail", absolutePath, maxDimension, quality, sourceFileKey, options),
+  getThumbnailFrame: (absolutePath, maxDimension, quality, sourceFileKey, options) =>
+    ipcRenderer.invoke("filex:get-thumbnail-frame", absolutePath, maxDimension, quality, sourceFileKey, options),
+  getThumbnails: (requests) => ipcRenderer.invoke("filex:get-thumbnails", requests),
   getCachedThumbnails: (entries, maxDimension, quality) =>
     ipcRenderer.invoke("filex:get-cached-thumbnails", entries, maxDimension, quality),
+  getCachedThumbnailFrames: (entries, maxDimension, quality) =>
+    ipcRenderer.invoke("filex:get-cached-thumbnail-frames", entries, maxDimension, quality),
   getThumbnailCacheInfo: () => ipcRenderer.invoke("filex:get-thumbnail-cache-info"),
   chooseThumbnailCacheDirectory: () => ipcRenderer.invoke("filex:choose-thumbnail-cache-directory"),
   setThumbnailCacheDirectory: (directoryPath) =>
@@ -72,6 +78,7 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:send-to-editor", editorPath, absolutePaths),
   openWithEditor: (editorPath, absolutePaths) =>
     ipcRenderer.invoke("filex:open-with-editor", editorPath, absolutePaths),
+  chooseImageFile: (currentPath) => ipcRenderer.invoke("filex:choose-image-file", currentPath),
   copyFilesToFolder: (absolutePaths) =>
     ipcRenderer.invoke("filex:copy-files-to-folder", absolutePaths),
   moveFilesToFolder: (absolutePaths) =>
@@ -80,6 +87,10 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:save-file-as", absolutePath),
   getDesktopPreferences: () => ipcRenderer.invoke("filex:get-desktop-preferences"),
   saveDesktopPreferences: (preferences) => ipcRenderer.invoke("filex:save-desktop-preferences", preferences),
+  readPhotoSelectorProjectFile: (rootPath) =>
+    ipcRenderer.invoke("filex:read-photo-selector-project-file", rootPath),
+  writePhotoSelectorProjectFile: (rootPath, project) =>
+    ipcRenderer.invoke("filex:write-photo-selector-project-file", rootPath, project),
   getDesktopSessionState: () => ipcRenderer.invoke("filex:get-desktop-session-state"),
   saveDesktopSessionState: (state) => ipcRenderer.invoke("filex:save-desktop-session-state", state),
   getAutoLayoutProjects: () => ipcRenderer.invoke("filex:get-auto-layout-projects"),
@@ -98,6 +109,8 @@ const api: FileXDesktopApi = {
   saveFolderCatalogState: (state) => ipcRenderer.invoke("filex:save-folder-catalog-state", state),
   saveFolderAssetStates: (folderPath, assetStates) =>
     ipcRenderer.invoke("filex:save-folder-asset-states", folderPath, assetStates),
+  saveFolderAssetStatesDelta: (folderPath, assetStates) =>
+    ipcRenderer.invoke("filex:save-folder-asset-states-delta", folderPath, assetStates),
   getDesktopPerformanceSnapshot: () => ipcRenderer.invoke("filex:get-desktop-performance-snapshot"),
   recordDesktopPerformanceSnapshot: (snapshot) =>
     ipcRenderer.invoke("filex:record-desktop-performance-snapshot", snapshot),
@@ -126,6 +139,26 @@ const api: FileXDesktopApi = {
   generateArchivioLowQuality: (jobId, overwrite, sourceSubfolder) =>
     ipcRenderer.invoke("filex:generate-archivio-low-quality", jobId, overwrite, sourceSubfolder),
   openArchivioFolder: (folderPath) => ipcRenderer.invoke("filex:open-archivio-folder", folderPath),
+  getImageConverterPresets: () => ipcRenderer.invoke("filex:get-image-converter-presets"),
+  chooseImageConverterFolders: () => ipcRenderer.invoke("filex:choose-image-converter-folders"),
+  scanImageConverterInputs: (paths) => ipcRenderer.invoke("filex:scan-image-converter-inputs", paths),
+  startImageConverterJob: (config) => ipcRenderer.invoke("filex:start-image-converter-job", config),
+  getImageConverterProgress: () => ipcRenderer.invoke("filex:get-image-converter-progress"),
+  cancelImageConverterJob: () => ipcRenderer.invoke("filex:cancel-image-converter-job"),
+  openImageConverterFolder: (folderPath) => ipcRenderer.invoke("filex:open-image-converter-folder", folderPath),
+  chooseImageFileFinderSourceFolder: () => ipcRenderer.invoke("filex:choose-image-file-finder-source-folder"),
+  chooseImageFileFinderDestinationFolder: () => ipcRenderer.invoke("filex:choose-image-file-finder-destination-folder"),
+  scanImageFileFinderMatches: (request) => ipcRenderer.invoke("filex:scan-image-file-finder-matches", request),
+  startImageFileFinderJob: (config) => ipcRenderer.invoke("filex:start-image-file-finder-job", config),
+  getImageFileFinderProgress: () => ipcRenderer.invoke("filex:get-image-file-finder-progress"),
+  cancelImageFileFinderJob: () => ipcRenderer.invoke("filex:cancel-image-file-finder-job"),
+  openImageFileFinderFolder: (folderPath) => ipcRenderer.invoke("filex:open-image-file-finder-folder", folderPath),
+  getNetworkDriveConfig: () => ipcRenderer.invoke("filex:get-network-drive-config"),
+  saveNetworkDriveConfig: (config) => ipcRenderer.invoke("filex:save-network-drive-config", config),
+  getNetworkDriveStatus: () => ipcRenderer.invoke("filex:get-network-drive-status"),
+  repairNetworkDrive: () => ipcRenderer.invoke("filex:repair-network-drive"),
+  openNetworkDrive: (target) => ipcRenderer.invoke("filex:open-network-drive", target),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
 };
 
 contextBridge.exposeInMainWorld("filexDesktop", api);

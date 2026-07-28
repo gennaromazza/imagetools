@@ -254,12 +254,18 @@ export default {
   },
   nsis: {
     oneClick: false,
+    // Keep the install scope stable across releases so a new setup upgrades
+    // the existing FileX installation instead of creating a second copy.
+    perMachine: true,
+    allowElevation: true,
     allowToChangeInstallationDirectory: true,
     uninstallDisplayName: requestedTool.productName,
     installerIcon: `${iconBasePath}.ico`,
     uninstallerIcon: `${iconBasePath}.ico`,
     installerHeaderIcon: `${iconBasePath}.ico`,
     shortcutName: requestedTool.productName,
+    createDesktopShortcut: requestedTool.id === "suite-launcher",
+    createStartMenuShortcut: true,
     include: nsisIncludePath,
   },
   dmg: {

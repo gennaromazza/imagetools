@@ -30,11 +30,14 @@ try {
   artifacts = [];
 }
 const toolConfig = [
-  { toolId: "suite-launcher", executableName: "FileX-Suite" },
   { toolId: "auto-layout-app", executableName: "ImageAlbumMaker" },
   { toolId: "image-party-frame", executableName: "Image-Party-Frame" },
   { toolId: "image-id-print", executableName: "Image-ID-Print" },
+  { toolId: "batch-print-layout", executableName: "Batch-Print-Layout" },
   { toolId: "archivio-flow", executableName: "Archivio-Flow" },
+  { toolId: "image-converter", executableName: "Image-Converter" },
+  { toolId: "image-file-finder", executableName: "Trova-Foto-da-Lista" },
+  { toolId: "network-drive-doctor", executableName: "Network-Drive-Doctor" },
   { toolId: "photo-selector-app", executableName: "Image-Select-Pro" },
 ];
 

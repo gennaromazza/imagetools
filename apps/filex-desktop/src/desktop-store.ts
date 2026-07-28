@@ -36,6 +36,7 @@ const DEFAULT_DESKTOP_PREFERENCES: DesktopPhotoSelectorPreferences = {
   customLabelShortcuts: {},
   thumbnailProfile: "ultra-fast",
   sortCacheEnabled: true,
+  ramBudgetPreset: "default",
   autoAdvanceOnAction: true,
   cardSize: 160,
   rootFolderPathOverride: "",
@@ -581,6 +582,61 @@ export function saveFolderAssetStates(
     deleteStatement.run(folderPath);
     for (const assetState of assetStates) {
       insertStatement.run(
+        folderPath,
+        assetState.assetId,
+        assetState.fileName,
+        assetState.relativePath,
+        assetState.absolutePath ?? null,
+        assetState.sourceFileKey ?? null,
+        assetState.rating,
+        assetState.pickStatus,
+        assetState.colorLabel ?? null,
+        serialize(assetState.customLabels),
+        assetState.updatedAt,
+      );
+    }
+  });
+}
+
+export function saveFolderAssetStatesDelta(
+  folderPath: string,
+  assetStates: DesktopFolderCatalogAssetState[],
+): void {
+  if (assetStates.length === 0) {
+    return;
+  }
+
+  const db = getDatabase();
+  const upsertStatement = db.prepare(`
+    INSERT INTO folder_asset_state (
+      folder_path,
+      asset_id,
+      file_name,
+      relative_path,
+      absolute_path,
+      source_file_key,
+      rating,
+      pick_status,
+      color_label,
+      custom_labels_json,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(folder_path, asset_id) DO UPDATE SET
+      file_name = excluded.file_name,
+      relative_path = excluded.relative_path,
+      absolute_path = excluded.absolute_path,
+      source_file_key = excluded.source_file_key,
+      rating = excluded.rating,
+      pick_status = excluded.pick_status,
+      color_label = excluded.color_label,
+      custom_labels_json = excluded.custom_labels_json,
+      updated_at = excluded.updated_at
+  `);
+
+  runInTransaction(() => {
+    for (const assetState of assetStates) {
+      upsertStatement.run(
         folderPath,
         assetState.assetId,
         assetState.fileName,

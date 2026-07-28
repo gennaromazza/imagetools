@@ -1,152 +1,72 @@
-const runtimeInfoEl = document.querySelector("#runtime-info");
-const toolsGridEl = document.querySelector("#tools-grid");
-const aiStatusEl = document.querySelector("#ai-status");
-const refreshBtn = document.querySelector("#refresh-btn");
-const installMissingBtn = document.querySelector("#install-missing-btn");
+const api = window.filexDesktop;
+const toolsGrid = document.querySelector('#tools-grid');
+const nav = document.querySelector('#category-nav');
+const search = document.querySelector('#search-input');
+const title = document.querySelector('#view-title');
+const gridTitle = document.querySelector('#grid-title');
+const gridSubtitle = document.querySelector('#grid-subtitle');
+const metadata = {
+  'photo-selector-app': { icon:'select', category:'Selezione', description:'Seleziona, classifica e confronta grandi servizi fotografici.', color:'#36a97b' },
+  'auto-layout-app': { icon:'album', category:'Album', description:'Crea impaginazioni album professionali in modo rapido.', color:'#d7a33d' },
+  'image-party-frame': { icon:'frame', category:'Creatività', description:'Applica cornici e composizioni per eventi e consegne.', color:'#d9695f' },
+  'image-id-print': { icon:'id', category:'Stampa', description:'Prepara fototessere e stampe documento precise.', color:'#4589c8' },
+  'batch-print-layout': { icon:'print', category:'Stampa', description:'Organizza molte immagini su fogli pronti per la stampa.', color:'#8c71c8' },
+  'archivio-flow': { icon:'archive', category:'Archivio', description:'Acquisisci, organizza e proteggi il tuo archivio fotografico.', color:'#6d9460' },
+  'image-converter': { icon:'convert', category:'Utility', description:'Converti e comprimi immagini e negativi RAW.', color:'#df8647' },
+  'image-file-finder': { icon:'find', category:'Utility', description:'Trova e raccogli fotografie partendo da una lista.', color:'#4c9caf' },
+  'network-drive-doctor': { icon:'network', category:'Utility', description:'Controlla e ripara i collegamenti ai dischi di rete.', color:'#7a8794' }
+};
+const categories = ['Tutti','Preferiti','Recenti','Selezione','Album','Creatività','Stampa','Archivio','Utility'];
+let states = [];
+let activeCategory = 'Tutti';
+let favorites = new Set(JSON.parse(localStorage.getItem('filex-favorites') || '[]'));
+let recent = JSON.parse(localStorage.getItem('filex-recent') || '[]');
 
-const desktopApi = window.filexDesktop;
-
-function normalizeToolName(toolId) {
-  return toolId.replace(/-/g, " ");
+function icon(name) { return `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`; }
+function renderNav() {
+  nav.innerHTML = categories.map(category => `<button class="nav-item ${category===activeCategory?'active':''}" data-category="${category}">${category==='Preferiti'?icon('star'):''}<span>${category}</span></button>`).join('');
 }
-
-function renderStatusPill(state) {
-  if (state.status === "installed") {
-    return '<span class="pill ok">Installato</span>';
-  }
-  if (state.status === "update-available") {
-    return '<span class="pill warn">Aggiornamento</span>';
-  }
-  return '<span class="pill off">Non installato</span>';
+function filteredTools() {
+  const query = search.value.trim().toLowerCase();
+  let list = [...states];
+  if (activeCategory === 'Preferiti') list = list.filter(x => favorites.has(x.toolId));
+  else if (activeCategory === 'Recenti') list = recent.map(id => list.find(x => x.toolId===id)).filter(Boolean);
+  else if (activeCategory !== 'Tutti') list = list.filter(x => metadata[x.toolId]?.category===activeCategory);
+  if (query) list = list.filter(x => `${x.toolName} ${metadata[x.toolId]?.description||''}`.toLowerCase().includes(query));
+  return list;
 }
-
-function renderToolCard(state) {
-  const latest = state.latestVersion ? `latest ${state.latestVersion}` : "latest n/d";
-  const installed = state.installedVersion ? `installed ${state.installedVersion}` : "installed n/d";
-  const toolName = state.toolName || normalizeToolName(state.toolId);
-
-  return `
-    <article class="card" data-tool-id="${state.toolId}">
-      <div class="head">
-        <strong>${toolName}</strong>
-        ${renderStatusPill(state)}
-      </div>
-      <p class="meta">${installed} · ${latest}</p>
-      <div class="actions">
-        <button class="btn secondary" data-action="open" data-tool-id="${state.toolId}">Apri</button>
-        <button class="btn primary" data-action="install" data-tool-id="${state.toolId}">Installa/Aggiorna</button>
-        <button class="btn ghost" data-action="check" data-tool-id="${state.toolId}">Controlla update</button>
-      </div>
-    </article>
-  `;
+function renderTools() {
+  const list = filteredTools();
+  toolsGrid.innerHTML = list.length ? list.map(state => {
+    const meta = metadata[state.toolId] || {icon:'suite',category:'Tool',description:'Strumento FileX',color:'#36a97b'};
+    const installed = Boolean(state.installed);
+    const update = state.status === 'update-available';
+    return `<article class="tool-card" style="--tool-color:${meta.color}">
+      <button class="favorite ${favorites.has(state.toolId)?'selected':''}" data-action="favorite" data-id="${state.toolId}" title="Preferito">${icon('star')}</button>
+      <div class="tool-icon"><img src="./icons/${state.toolId}.png" alt="" /></div><span class="category">${meta.category}</span><h3>${state.toolName}</h3><p>${meta.description}</p>
+      <div class="card-foot"><span class="status ${update?'warn':installed?'ok':'off'}">${update?'Aggiornamento':installed?'Pronto':'Da installare'}</span>
+      <div class="card-actions">${update?`<button class="update-mini" data-action="install" data-id="${state.toolId}">Aggiorna</button>`:''}<button class="launch" data-action="${installed?'open':'install'}" data-id="${state.toolId}">${installed?'Apri':'Installa'} <span>→</span></button></div></div>
+    </article>`;
+  }).join('') : '<div class="empty">Nessuno strumento in questa sezione.</div>';
 }
-
-async function refreshRuntime() {
-  const runtime = await desktopApi.getRuntimeInfo();
-  runtimeInfoEl.textContent = `Canale ${runtime.releaseChannel} · versione launcher ${runtime.appVersion} · piattaforma ${runtime.platform}`;
-  return runtime;
+async function refresh() {
+  const [runtime, tools, ai] = await Promise.all([api.getRuntimeInfo(), api.listAvailableTools(), api.getImageIdPrintAiStatus()]);
+  states = tools;
+  document.querySelector('#suite-version').textContent = `FileX ${runtime.appVersion}`;
+  document.querySelector('#runtime-info').textContent = `${tools.filter(x=>x.installed).length}/${tools.length} tool installati · canale ${runtime.releaseChannel}`;
+  document.querySelector('#ai-status').textContent = ai.installed && ai.pythonFound ? 'Disponibile' : ai.installed ? 'Runtime da configurare' : 'Componente opzionale non installato';
+  renderTools();
 }
-
-async function refreshTools() {
-  const tools = await desktopApi.listAvailableTools();
-  toolsGridEl.innerHTML = tools.map(renderToolCard).join("");
-  return tools;
+async function install(id) {
+  const job = await api.downloadToolUpdate(id);
+  if (job.status !== 'ready-to-apply') throw new Error(job.error || 'Download non riuscito');
+  const result = await api.applyToolUpdate(job.id);
+  if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
+  await refresh();
 }
-
-async function refreshAiStatus() {
-  const ai = await desktopApi.getImageIdPrintAiStatus();
-  if (ai.installed && ai.pythonFound) {
-    aiStatusEl.textContent = "AI sidecar installata e runtime Python disponibile.";
-    return;
-  }
-  if (!ai.installed) {
-    aiStatusEl.textContent = "AI sidecar non installata. Installazione opzionale disponibile post-release.";
-    return;
-  }
-  aiStatusEl.textContent = "AI sidecar presente ma runtime Python non rilevato.";
-}
-
-async function installOrUpdateTool(toolId) {
-  const job = await desktopApi.downloadToolUpdate(toolId);
-  if (job.status !== "ready-to-apply") {
-    alert(`Download update fallito: ${job.error || "errore sconosciuto"}`);
-    return;
-  }
-  const applied = await desktopApi.applyToolUpdate(job.id);
-  if (applied.status !== "completed") {
-    alert(`Apply update fallito: ${applied.error || "errore sconosciuto"}`);
-    return;
-  }
-  await refreshTools();
-}
-
-async function checkTool(toolId) {
-  const check = await desktopApi.checkToolUpdate(toolId);
-  if (!check.release) {
-    alert("Nessuna release trovata per questo tool.");
-    return;
-  }
-  if (check.available) {
-    alert(`Nuova versione disponibile: ${check.release.version}`);
-  } else {
-    alert("Tool aggiornato all'ultima versione disponibile.");
-  }
-}
-
-async function openTool(toolId) {
-  const result = await desktopApi.openInstalledTool(toolId);
-  if (!result.ok) {
-    alert(result.message);
-  }
-}
-
-async function installMissingTools() {
-  const tools = await desktopApi.listAvailableTools();
-  const missing = tools.filter((tool) => !tool.installed);
-  for (const tool of missing) {
-    await installOrUpdateTool(tool.toolId);
-  }
-}
-
-toolsGridEl.addEventListener("click", async (event) => {
-  const target = event.target;
-  if (!(target instanceof HTMLButtonElement)) return;
-  const toolId = target.dataset.toolId;
-  const action = target.dataset.action;
-  if (!toolId || !action) return;
-
-  target.disabled = true;
-  try {
-    if (action === "install") {
-      await installOrUpdateTool(toolId);
-    } else if (action === "check") {
-      await checkTool(toolId);
-    } else if (action === "open") {
-      await openTool(toolId);
-    }
-  } finally {
-    target.disabled = false;
-  }
-});
-
-refreshBtn.addEventListener("click", async () => {
-  refreshBtn.disabled = true;
-  try {
-    await Promise.all([refreshRuntime(), refreshTools(), refreshAiStatus()]);
-  } finally {
-    refreshBtn.disabled = false;
-  }
-});
-
-installMissingBtn.addEventListener("click", async () => {
-  installMissingBtn.disabled = true;
-  try {
-    await installMissingTools();
-  } finally {
-    installMissingBtn.disabled = false;
-  }
-});
-
-Promise.all([refreshRuntime(), refreshTools(), refreshAiStatus()]).catch((error) => {
-  runtimeInfoEl.textContent = `Errore launcher: ${error instanceof Error ? error.message : String(error)}`;
-});
+nav.addEventListener('click', e => { const b=e.target.closest('[data-category]'); if(!b)return; activeCategory=b.dataset.category; title.textContent=activeCategory==='Tutti'?'Tutti gli strumenti':activeCategory; gridTitle.textContent=activeCategory; gridSubtitle.textContent=activeCategory==='Preferiti'?'I tool che usi di più.':activeCategory==='Recenti'?'Gli ultimi workflow aperti.':'Accesso rapido ai tuoi workflow fotografici.'; renderNav(); renderTools(); });
+search.addEventListener('input', renderTools);
+toolsGrid.addEventListener('click', async e => { const b=e.target.closest('[data-action]'); if(!b)return; const {action,id}=b.dataset; if(action==='favorite'){ favorites.has(id)?favorites.delete(id):favorites.add(id); localStorage.setItem('filex-favorites',JSON.stringify([...favorites])); renderTools(); return; } b.disabled=true; try { if(action==='open'){ const result=await api.openInstalledTool(id); if(!result.ok) throw new Error(result.message); recent=[id,...recent.filter(x=>x!==id)].slice(0,6); localStorage.setItem('filex-recent',JSON.stringify(recent)); } else await install(id); } catch(error){ alert(error.message||String(error)); } finally { b.disabled=false; } });
+document.querySelector('#refresh-btn').addEventListener('click', refresh);
+document.querySelector('#install-missing-btn').addEventListener('click', async e => { e.currentTarget.disabled=true; try { for(const item of states.filter(x=>!x.installed)) await install(item.toolId); } catch(error){ alert(error.message||String(error)); } finally { e.currentTarget.disabled=false; } });
+renderNav(); refresh().catch(error => { document.querySelector('#runtime-info').textContent=`Errore: ${error.message||error}`; });

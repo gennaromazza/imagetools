@@ -10,6 +10,11 @@ import type {
   DesktopQuickPreviewSource,
   DesktopQuickPreviewWarmResult,
   DesktopRenderedImage,
+  DesktopCachedThumbnailFrame,
+  DesktopThumbnailFrame,
+  DesktopThumbnailBatchRequest,
+  DesktopThumbnailBatchResult,
+  DesktopThumbnailRequestOptions,
 } from "@photo-tools/desktop-contracts";
 import { ExifTool } from "exiftool-vendored";
 import { extractEmbeddedJpeg, locateEmbeddedJpegRange, locateJpegExifThumbnailRange } from "./raw-jpeg-extractor.js";
@@ -107,7 +112,9 @@ let THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = _limits.thumbnailMemoryCacheMaxEntries;
 let _activeBudgetBytes = _limits.autoCacheBudgetBytes;
 const THUMBNAIL_BATCH_WINDOW_MS = 8;
 const THUMBNAIL_BATCH_MAX_ITEMS = 128;
-const QUICK_PREVIEW_FRAME_MAX_ENTRIES = 128;
+// Card thumbnails also use the native protocol. Keep enough tokens for a
+// virtualized folder without letting protocol handles grow without bounds.
+const QUICK_PREVIEW_FRAME_MAX_ENTRIES = 2048;
 const RAW_EMBEDDED_RANGE_CACHE_MAX_ENTRIES = 20_000;
 const RAW_EMBEDDED_RANGE_CACHE_FILE_NAME = "raw-embedded-range-cache-v1.json";
 const RAW_EMBEDDED_RANGE_CACHE_PERSIST_DEBOUNCE_MS = 2_000;
@@ -121,8 +128,11 @@ const PERF_ENABLED = !app.isPackaged;
 const RAW_EXIFTOOL_MAX_PROCS = Math.max(2, Math.min(8, Math.ceil(availableParallelism() / 2)));
 const RAW_EXIFTOOL_TAGS = ["PreviewImage", "JpgFromRaw", "ThumbnailImage"] as const;
 const JPG_FROM_RAW_FIRST_EXTENSIONS = new Set([".nef", ".nrw", ".rw2"]);
-const STANDARD_DECODE_CONCURRENCY = Math.max(1, Math.min(availableParallelism(), 8));
-const RAW_DECODE_CONCURRENCY = Math.max(2, Math.min(Math.max(2, Math.floor(availableParallelism() / 2)), 4));
+// Sharp/nativeImage use substantial native memory per decode. Keep the shared
+// pool deliberately below the renderer fan-out so opening a large folder does
+// not saturate the machine and make the UI appear blocked.
+const STANDARD_DECODE_CONCURRENCY = Math.max(1, Math.min(availableParallelism(), 4));
+const RAW_DECODE_CONCURRENCY = Math.max(1, Math.min(Math.max(1, Math.floor(availableParallelism() / 2)), 2));
 
 function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -168,6 +178,14 @@ export function configureDesktopImageService(preset: string): void {
   THUMBNAIL_MEMORY_CACHE_MAX_BYTES = limits.thumbnailMemoryCacheMaxBytes;
   THUMBNAIL_MEMORY_CACHE_MAX_ENTRIES = limits.thumbnailMemoryCacheMaxEntries;
   _activeBudgetBytes = limits.autoCacheBudgetBytes;
+
+  // A preset can be changed while the desktop session is already open. Trim
+  // immediately so lowering the budget does not leave the previous RAM peak
+  // resident until the next decode.
+  trimPreviewSourceCache();
+  trimRenderedPreviewCache();
+  trimThumbnailMemoryCache();
+  trimQuickPreviewFrameStore();
 }
 
 const byteReadStats = {
@@ -235,6 +253,7 @@ interface DesktopPreviewRenderResult {
 
 interface QuickPreviewFrameEntry {
   cacheKey: string;
+  cacheKind: "preview" | "thumbnail";
   width: number;
   height: number;
   mimeType: string;
@@ -255,6 +274,7 @@ interface BatchedThumbnailRequest {
   maxDimension: number;
   quality: number;
   sourceFileKey?: string;
+  options?: DesktopThumbnailRequestOptions;
   resolvers: Array<(value: DesktopRenderedImage | null) => void>;
 }
 
@@ -381,6 +401,13 @@ function buildThumbnailDedupeKey(
 ): string {
   const normalizedQuality = Math.max(1, Math.min(100, Math.round(quality * 100)));
   return `${sourceFileKey ?? absolutePath}::${Math.max(0, Math.round(maxDimension))}::${normalizedQuality}`;
+}
+
+function getQuickPreviewFrameMapKey(
+  cacheKind: QuickPreviewFrameEntry["cacheKind"],
+  cacheKey: string,
+): string {
+  return `${cacheKind}:${cacheKey}`;
 }
 
 function getRawEmbeddedRangeCacheFilePath(): string {
@@ -663,7 +690,7 @@ async function tryReadJpegExifThumbnail(
   handle: FileHandle,
   fileSize: number,
   sourceCacheKey: string | undefined,
-  maxDimension: number,
+  minimumEmbeddedShortSide: number,
 ): Promise<Buffer | null> {
   await ensureJpegExifRangeCacheLoaded();
 
@@ -687,18 +714,13 @@ async function tryReadJpegExifThumbnail(
       recordDesktopBytesRead("standard", thumbnailBuffer.byteLength);
 
       if (thumbnailBuffer.byteLength >= 1000 && thumbnailBuffer[0] === 0xff && thumbnailBuffer[1] === 0xd8) {
-        // Validate that the embedded thumbnail is large enough to downscale (not upscale)
-        const decoded = decodeImage(thumbnailBuffer);
-        if (decoded) {
-          const shortSide = Math.min(decoded.width, decoded.height);
-          if (shortSide >= maxDimension) {
-            return thumbnailBuffer;
-          }
+        const dimensions = readJpegDimensionsOrDecode(thumbnailBuffer);
+        if (dimensions && Math.min(dimensions.width, dimensions.height) >= minimumEmbeddedShortSide) {
+          return thumbnailBuffer;
         }
       }
 
       // Range in cache is stale or too small — remove and fall through to re-probe
-      setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
       return null;
     }
 
@@ -743,11 +765,10 @@ async function tryReadJpegExifThumbnail(
       headerBuffer.byteOffset + range.offset,
       range.length,
     );
-    const decoded = decodeImage(thumbnailBuffer);
-    if (decoded && Math.min(decoded.width, decoded.height) >= maxDimension) {
+    const dimensions = readJpegDimensionsOrDecode(thumbnailBuffer);
+    if (dimensions && Math.min(dimensions.width, dimensions.height) >= minimumEmbeddedShortSide) {
       return thumbnailBuffer;
     }
-    setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
     return null;
   }
 
@@ -760,9 +781,12 @@ async function tryReadJpegExifThumbnail(
     return null;
   }
 
-  const decoded = decodeImage(thumbnailBuffer);
-  if (!decoded || Math.min(decoded.width, decoded.height) < maxDimension) {
+  const dimensions = readJpegDimensionsOrDecode(thumbnailBuffer);
+  if (!dimensions) {
     setCachedJpegExifRange(sourceCacheKey, { offset: JPEG_EXIF_SENTINEL_OFFSET, length: 0 });
+    return null;
+  }
+  if (Math.min(dimensions.width, dimensions.height) < minimumEmbeddedShortSide) {
     return null;
   }
 
@@ -900,8 +924,9 @@ function trimQuickPreviewFrameStore(): void {
 function removeQuickPreviewFrameToken(token: string): void {
   const existing = quickPreviewFrameStore.get(token);
   quickPreviewFrameStore.delete(token);
-  if (existing && quickPreviewFrameTokenByCacheKey.get(existing.cacheKey) === token) {
-    quickPreviewFrameTokenByCacheKey.delete(existing.cacheKey);
+  const mapKey = existing ? getQuickPreviewFrameMapKey(existing.cacheKind, existing.cacheKey) : null;
+  if (mapKey && quickPreviewFrameTokenByCacheKey.get(mapKey) === token) {
+    quickPreviewFrameTokenByCacheKey.delete(mapKey);
   }
 }
 
@@ -1306,6 +1331,73 @@ function decodeImage(buffer: Buffer) {
   return { decoded, width, height };
 }
 
+function readJpegDimensions(buffer: Buffer): { width: number; height: number } | null {
+  if (buffer.byteLength < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
+    return null;
+  }
+
+  let offset = 2;
+  while (offset + 9 < buffer.byteLength) {
+    if (buffer[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    while (offset < buffer.byteLength && buffer[offset] === 0xff) {
+      offset += 1;
+    }
+    if (offset >= buffer.byteLength) {
+      break;
+    }
+
+    const marker = buffer[offset];
+    offset += 1;
+
+    if (marker === 0xd9 || marker === 0xda) {
+      break;
+    }
+    if (marker >= 0xd0 && marker <= 0xd7) {
+      continue;
+    }
+    if (offset + 2 > buffer.byteLength) {
+      break;
+    }
+
+    const segmentLength = buffer.readUInt16BE(offset);
+    if (segmentLength < 2 || offset + segmentLength > buffer.byteLength) {
+      break;
+    }
+
+    const isStartOfFrame =
+      (marker >= 0xc0 && marker <= 0xcf) &&
+      marker !== 0xc4 &&
+      marker !== 0xc8 &&
+      marker !== 0xcc;
+    if (isStartOfFrame && segmentLength >= 7) {
+      const height = buffer.readUInt16BE(offset + 3);
+      const width = buffer.readUInt16BE(offset + 5);
+      if (width > 0 && height > 0) {
+        return { width, height };
+      }
+      return null;
+    }
+
+    offset += segmentLength;
+  }
+
+  return null;
+}
+
+function readJpegDimensionsOrDecode(buffer: Buffer): { width: number; height: number } | null {
+  const parsed = readJpegDimensions(buffer);
+  if (parsed) {
+    return parsed;
+  }
+
+  const decoded = decodeImage(buffer);
+  return decoded ? { width: decoded.width, height: decoded.height } : null;
+}
+
 async function renderNativePreviewFromPath(
   absolutePath: string,
   maxDimension: number,
@@ -1514,14 +1606,15 @@ function buildQuickPreviewFrameSrc(token: string): string {
 function registerQuickPreviewFrame(
   entry: QuickPreviewFrameEntry,
 ): DesktopQuickPreviewFrame {
-  const existingToken = quickPreviewFrameTokenByCacheKey.get(entry.cacheKey);
+  const mapKey = getQuickPreviewFrameMapKey(entry.cacheKind, entry.cacheKey);
+  const existingToken = quickPreviewFrameTokenByCacheKey.get(mapKey);
   const token = existingToken ?? randomUUID();
   quickPreviewFrameStore.delete(token);
   quickPreviewFrameStore.set(token, {
     ...entry,
     createdAt: Date.now(),
   });
-  quickPreviewFrameTokenByCacheKey.set(entry.cacheKey, token);
+  quickPreviewFrameTokenByCacheKey.set(mapKey, token);
   trimQuickPreviewFrameStore();
 
   return {
@@ -1543,7 +1636,9 @@ export function getQuickPreviewFrameContent(
     return null;
   }
 
-  const rendered = getCachedRenderedPreview(frame.cacheKey);
+  const rendered = frame.cacheKind === "thumbnail"
+    ? getCachedThumbnailFromMemory(frame.cacheKey)
+    : getCachedRenderedPreview(frame.cacheKey);
   if (!rendered) {
     removeQuickPreviewFrameToken(token);
     return null;
@@ -1574,6 +1669,7 @@ export async function getDesktopQuickPreviewFrame(
 
   return registerQuickPreviewFrame({
     cacheKey: result.cacheKey,
+    cacheKind: "preview",
     width: result.rendered.width,
     height: result.rendered.height,
     mimeType: result.rendered.mimeType,
@@ -1581,6 +1677,108 @@ export async function getDesktopQuickPreviewFrame(
     source: result.source,
     cacheHit: result.cacheHit,
     createdAt: Date.now(),
+  });
+}
+
+export async function getDesktopThumbnailFrame(
+  absolutePath: string,
+  maxDimension: number,
+  quality: number,
+  sourceFileKey?: string,
+  options?: DesktopThumbnailRequestOptions,
+): Promise<DesktopThumbnailFrame | null> {
+  const rendered = await getDesktopThumbnail(
+    absolutePath,
+    maxDimension,
+    quality,
+    sourceFileKey,
+    options,
+  );
+  if (!rendered) {
+    return null;
+  }
+
+  return registerQuickPreviewFrame({
+    cacheKey: buildThumbnailDedupeKey(absolutePath, maxDimension, quality, sourceFileKey),
+    cacheKind: "thumbnail",
+    width: rendered.width,
+    height: rendered.height,
+    mimeType: rendered.mimeType,
+    stage: "fit",
+    source: "memory-cache",
+    cacheHit: true,
+    createdAt: Date.now(),
+  });
+}
+
+export async function getDesktopCachedThumbnailFrames(
+  entries: Array<{ id: string; absolutePath: string; sourceFileKey?: string }>,
+  maxDimension: number,
+  quality: number,
+): Promise<DesktopCachedThumbnailFrame[]> {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return [];
+  }
+
+  const uniqueEntries = entries.filter((entry, index, current) =>
+    current.findIndex((candidate) => candidate.id === entry.id) === index,
+  );
+  const framesById = new Map<string, DesktopThumbnailFrame>();
+  const diskEntries: Array<{ id: string; absolutePath: string; sourceFileKey?: string }> = [];
+
+  for (const entry of uniqueEntries) {
+    const cacheKey = buildThumbnailDedupeKey(entry.absolutePath, maxDimension, quality, entry.sourceFileKey);
+    const cached = getCachedThumbnailFromMemory(cacheKey);
+    if (cached) {
+      framesById.set(entry.id, registerQuickPreviewFrame({
+        cacheKey,
+        cacheKind: "thumbnail",
+        width: cached.width,
+        height: cached.height,
+        mimeType: cached.mimeType,
+        stage: "fit",
+        source: "memory-cache",
+        cacheHit: true,
+        createdAt: Date.now(),
+      }));
+      continue;
+    }
+    diskEntries.push(entry);
+  }
+
+  if (diskEntries.length > 0) {
+    const diskHits = await getCachedThumbnailsFromDisk(diskEntries, maxDimension, quality);
+    const entryById = new Map(diskEntries.map((entry) => [entry.id, entry]));
+    for (const hit of diskHits) {
+      const entry = entryById.get(hit.id);
+      if (!entry) {
+        continue;
+      }
+
+      const cacheKey = buildThumbnailDedupeKey(entry.absolutePath, maxDimension, quality, entry.sourceFileKey);
+      const cached = cacheThumbnailInMemory(cacheKey, {
+        bytes: hit.bytes,
+        mimeType: hit.mimeType,
+        width: hit.width,
+        height: hit.height,
+      });
+      framesById.set(entry.id, registerQuickPreviewFrame({
+        cacheKey,
+        cacheKind: "thumbnail",
+        width: cached.width,
+        height: cached.height,
+        mimeType: cached.mimeType,
+        stage: "fit",
+        source: "disk-cache",
+        cacheHit: true,
+        createdAt: Date.now(),
+      }));
+    }
+  }
+
+  return uniqueEntries.flatMap((entry) => {
+    const frame = framesById.get(entry.id);
+    return frame ? [{ id: entry.id, frame }] : [];
   });
 }
 
@@ -1662,11 +1860,26 @@ function renderThumbnailFromResolvedSource(
   };
 }
 
+function resolveMinimumEmbeddedShortSide(
+  maxDimension: number,
+  options?: DesktopThumbnailRequestOptions,
+): number {
+  if (
+    typeof options?.minimumEmbeddedShortSide === "number" &&
+    Number.isFinite(options.minimumEmbeddedShortSide)
+  ) {
+    return clampNumber(Math.round(options.minimumEmbeddedShortSide), 1, Math.max(1, maxDimension));
+  }
+
+  return Math.max(1, Math.round(maxDimension));
+}
+
 async function computeDesktopThumbnail(
   absolutePath: string,
   maxDimension: number,
   quality: number,
   sourceFileKey?: string,
+  options?: DesktopThumbnailRequestOptions,
 ): Promise<DesktopRenderedImage | null> {
   const dedupeKey = buildThumbnailDedupeKey(absolutePath, maxDimension, quality, sourceFileKey);
   const memoryCached = getCachedThumbnailFromMemory(dedupeKey);
@@ -1674,23 +1887,26 @@ async function computeDesktopThumbnail(
     return memoryCached;
   }
 
-  const cached = await getCachedThumbnailsFromDisk(
-    [{ id: absolutePath, absolutePath, sourceFileKey }],
-    maxDimension,
-    quality,
-  );
-  const cachedHit = cached[0];
-  if (cachedHit) {
-    recordThumbnailMetric("cacheHitDisk");
-    return cacheThumbnailInMemory(dedupeKey, {
-      bytes: cachedHit.bytes,
-      mimeType: cachedHit.mimeType,
-      width: cachedHit.width,
-      height: cachedHit.height,
-    });
+  if (!options?.skipDiskCacheRead) {
+    const cached = await getCachedThumbnailsFromDisk(
+      [{ id: absolutePath, absolutePath, sourceFileKey }],
+      maxDimension,
+      quality,
+    );
+    const cachedHit = cached[0];
+    if (cachedHit) {
+      recordThumbnailMetric("cacheHitDisk");
+      return cacheThumbnailInMemory(dedupeKey, {
+        bytes: cachedHit.bytes,
+        mimeType: cachedHit.mimeType,
+        width: cachedHit.width,
+        height: cachedHit.height,
+      });
+    }
   }
 
   const rawPath = isRawPath(absolutePath);
+  const minimumEmbeddedShortSide = resolveMinimumEmbeddedShortSide(maxDimension, options);
 
   if (!rawPath) {
     // Fast-path: try to read the EXIF IFD1 thumbnail (50–500 KB partial read) before
@@ -1702,30 +1918,47 @@ async function computeDesktopThumbnail(
       handle = await open(absolutePath, "r");
       const stats = await handle.stat();
       const sourceCacheKey = getPreviewSourceCacheKey(absolutePath, sourceFileKey);
-      const exifThumbnailBuffer = await tryReadJpegExifThumbnail(handle, stats.size, sourceCacheKey, maxDimension);
+      const exifThumbnailBuffer = await tryReadJpegExifThumbnail(
+        handle,
+        stats.size,
+        sourceCacheKey,
+        minimumEmbeddedShortSide,
+      );
       if (exifThumbnailBuffer) {
+        const embeddedDimensions = readJpegDimensionsOrDecode(exifThumbnailBuffer);
+        if (
+          options?.allowDirectEmbeddedJpeg &&
+          embeddedDimensions &&
+          Math.max(embeddedDimensions.width, embeddedDimensions.height) <= maxDimension
+        ) {
+          const rendered: DesktopRenderedImage = {
+            bytes: toOwnedUint8Array(exifThumbnailBuffer),
+            mimeType: getMimeTypeForBuffer(exifThumbnailBuffer),
+            width: embeddedDimensions.width,
+            height: embeddedDimensions.height,
+          };
+          const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
+          void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
+          exifFastPathSucceeded = true;
+          return cachedRendered;
+        }
+
         const source: ResolvedPreviewSourceResult = {
           source: {
             buffer: exifThumbnailBuffer,
             mimeType: getMimeTypeForBuffer(exifThumbnailBuffer),
-            width: 0, // will be ignored — renderThumbnailFromResolvedSource decodes inline
-            height: 0,
+            width: embeddedDimensions?.width ?? 0,
+            height: embeddedDimensions?.height ?? 0,
           },
           origin: "embedded-preview",
           cacheHit: false,
         };
-        // Decode dimensions properly before rendering
-        const decoded = decodeImage(exifThumbnailBuffer);
-        if (decoded) {
-          source.source.width = decoded.width;
-          source.source.height = decoded.height;
-          const rendered = await runDecodeTask(false, () => renderThumbnailFromResolvedSource(source, maxDimension, quality));
-          if (rendered) {
-            const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
-            void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
-            exifFastPathSucceeded = true;
-            return cachedRendered;
-          }
+        const rendered = await runDecodeTask(false, () => renderThumbnailFromResolvedSource(source, maxDimension, quality));
+        if (rendered) {
+          const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
+          void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
+          exifFastPathSucceeded = true;
+          return cachedRendered;
         }
       }
     } catch {
@@ -1817,6 +2050,7 @@ function dispatchBatchedThumbnailRequest(request: BatchedThumbnailRequest): void
     request.maxDimension,
     request.quality,
     request.sourceFileKey,
+    request.options,
   )
     .catch(() => null)
     .finally(() => {
@@ -1865,6 +2099,7 @@ export function getDesktopThumbnail(
   maxDimension: number,
   quality: number,
   sourceFileKey?: string,
+  options?: DesktopThumbnailRequestOptions,
 ): Promise<DesktopRenderedImage | null> {
   recordThumbnailRequest();
 
@@ -1894,6 +2129,7 @@ export function getDesktopThumbnail(
       maxDimension,
       quality,
       sourceFileKey,
+      options,
       resolvers: [resolve],
     });
     thumbnailBatchOrder.push(dedupeKey);
@@ -1909,6 +2145,25 @@ export function getDesktopThumbnail(
 
     scheduleThumbnailBatchFlush();
   });
+}
+
+export async function getDesktopThumbnails(
+  requests: DesktopThumbnailBatchRequest[],
+): Promise<DesktopThumbnailBatchResult[]> {
+  if (!Array.isArray(requests) || requests.length === 0) {
+    return [];
+  }
+
+  return Promise.all(requests.map(async (request) => ({
+    id: request.id,
+    image: await getDesktopThumbnail(
+      request.absolutePath,
+      request.maxDimension,
+      request.quality,
+      request.sourceFileKey,
+      request.options,
+    ),
+  })));
 }
 
 export function getDesktopDisplayName(absolutePath: string): string {

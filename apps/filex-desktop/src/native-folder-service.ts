@@ -3,18 +3,24 @@ import { copyFile, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } 
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import type {
   DesktopCopyFilesResult,
+  DesktopFileStat,
   DesktopFilePayload,
   DesktopFolderEntry,
   DesktopFolderOpenDiagnostics,
+  DesktopFolderOpenOptions,
   DesktopFolderOpenResult,
   DesktopMoveFilesResult,
   DesktopNativeFileOpStatus,
+  DesktopPhotoSelectorProjectFile,
   DesktopSaveFileAsResult,
 } from "@photo-tools/desktop-contracts";
 
 const { app, dialog } = electron;
 
+const FOLDER_SCAN_STAT_CONCURRENCY = 32;
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const PHOTO_SELECTOR_PROJECT_FILE_NAME = ".image-select-pro.json";
+let projectFileWriteQueue: Promise<void> = Promise.resolve();
 const RAW_EXTENSIONS = new Set([
   ".cr2",
   ".cr3",
@@ -65,6 +71,10 @@ function sidecarPathForAsset(absolutePath: string): string {
   return join(assetDir, `${assetName}.xmp`);
 }
 
+function projectFilePathForFolder(rootPath: string): string {
+  return join(rootPath, PHOTO_SELECTOR_PROJECT_FILE_NAME);
+}
+
 function sanitizeTempFileName(fileName: string): string {
   const normalized = fileName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-");
   return normalized || `handoff-${Date.now()}.imagetool`;
@@ -81,95 +91,124 @@ function resolveCreatedAtMs(birthtimeMs: number, modifiedMs: number): number {
     : 0;
 }
 
-async function countNestedSupportedFiles(rootPath: string): Promise<{
-  nestedSupportedDiscardedCount: number;
-  nestedDirectoriesSeen: number;
-}> {
-  let nestedSupportedDiscardedCount = 0;
-  let nestedDirectoriesSeen = 0;
-  const pendingDirectories: string[] = [];
-
-  const rootEntries = await readdir(rootPath, { withFileTypes: true });
-  for (const dirEntry of rootEntries) {
-    if (dirEntry.isSymbolicLink() || !dirEntry.isDirectory()) {
-      continue;
-    }
-
-    nestedDirectoriesSeen += 1;
-    pendingDirectories.push(join(rootPath, dirEntry.name));
-  }
-
-  while (pendingDirectories.length > 0) {
-    const currentPath = pendingDirectories.pop();
-    if (!currentPath) {
-      continue;
-    }
-
-    const dirEntries = await readdir(currentPath, { withFileTypes: true });
-    for (const dirEntry of dirEntries) {
-      if (dirEntry.isSymbolicLink()) {
-        continue;
-      }
-
-      const absolutePath = join(currentPath, dirEntry.name);
-      if (dirEntry.isDirectory()) {
-        nestedDirectoriesSeen += 1;
-        pendingDirectories.push(absolutePath);
-        continue;
-      }
-
-      if (dirEntry.isFile() && isImageFile(dirEntry.name)) {
-        nestedSupportedDiscardedCount += 1;
-      }
-    }
-  }
-
-  return {
-    nestedSupportedDiscardedCount,
-    nestedDirectoriesSeen,
-  };
+function nowMs(): number {
+  return Date.now();
 }
 
-async function scanFolderByPath(rootPath: string): Promise<DesktopFolderOpenResult> {
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  async function run(): Promise<void> {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, () => run()),
+  );
+
+  return results;
+}
+
+async function scanFolderByPath(
+  rootPath: string,
+  options: DesktopFolderOpenOptions = {},
+): Promise<DesktopFolderOpenResult> {
   const stats = await lstat(rootPath);
   if (!stats.isDirectory()) {
     throw new Error("Selected path is not a directory");
   }
 
+  const recursiveScanEnabled = options.recursive !== false;
   const normalizedRootPath = rootPath.replace(/[\\/]+$/, "");
   const rootName = basename(normalizedRootPath) || normalizedRootPath;
-  const entries: DesktopFolderEntry[] = [];
 
-  const dirEntries = await readdir(normalizedRootPath, { withFileTypes: true });
-  dirEntries.sort((a, b) => a.name.localeCompare(b.name));
+  const scanStartedAt = nowMs();
+  const candidates: string[] = [];
+  let nestedDirectoriesSeen = 0;
+  let scannedDirectoryCount = 0;
+  let topLevelSupportedCount = 0;
 
-  for (const dirEntry of dirEntries) {
-    const absolutePath = join(normalizedRootPath, dirEntry.name);
-    if (dirEntry.isSymbolicLink() || !dirEntry.isFile() || !isImageFile(dirEntry.name)) {
-      continue;
+  async function collectImagePaths(directoryPath: string, depth: number): Promise<void> {
+    scannedDirectoryCount += 1;
+    const dirEntries = await readdir(directoryPath, { withFileTypes: true });
+    dirEntries.sort((a, b) => a.name.localeCompare(b.name));
+
+    for (const dirEntry of dirEntries) {
+      if (dirEntry.isSymbolicLink()) {
+        continue;
+      }
+
+      const absolutePath = join(directoryPath, dirEntry.name);
+      if (dirEntry.isDirectory()) {
+        if (depth === 0) {
+          nestedDirectoriesSeen += 1;
+        }
+        if (recursiveScanEnabled) {
+          await collectImagePaths(absolutePath, depth + 1);
+        }
+        continue;
+      }
+
+      if (!dirEntry.isFile() || !isImageFile(dirEntry.name)) {
+        continue;
+      }
+
+      if (depth === 0) {
+        topLevelSupportedCount += 1;
+      }
+      candidates.push(absolutePath);
     }
-
-    const fileStats = await lstat(absolutePath);
-    entries.push({
-      name: dirEntry.name,
-      relativePath: toRelativeAssetPath(rootName, normalizedRootPath, absolutePath),
-      absolutePath,
-      size: fileStats.size,
-      lastModified: Math.round(fileStats.mtimeMs),
-      createdAt: resolveCreatedAtMs(fileStats.birthtimeMs, fileStats.mtimeMs),
-    });
   }
 
-  entries.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  await collectImagePaths(normalizedRootPath, 0);
+  const scanMs = Math.max(0, nowMs() - scanStartedAt);
 
-  const nestedCounts = await countNestedSupportedFiles(normalizedRootPath);
+  const statStartedAt = nowMs();
+  const maybeEntries = await mapWithConcurrency(candidates, FOLDER_SCAN_STAT_CONCURRENCY, async (absolutePath) => {
+    try {
+      const fileStats = await lstat(absolutePath);
+      return {
+        name: basename(absolutePath),
+        relativePath: toRelativeAssetPath(rootName, normalizedRootPath, absolutePath),
+        absolutePath,
+        size: fileStats.size,
+        lastModified: Math.round(fileStats.mtimeMs),
+        createdAt: resolveCreatedAtMs(fileStats.birthtimeMs, fileStats.mtimeMs),
+      } satisfies DesktopFolderEntry;
+    } catch {
+      return null;
+    }
+  });
+  const statMs = Math.max(0, nowMs() - statStartedAt);
+
+  const entries = maybeEntries
+    .filter((entry): entry is DesktopFolderEntry => Boolean(entry))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    }));
+
   const diagnostics: DesktopFolderOpenDiagnostics = {
     source: "desktop-native",
     selectedPath: normalizedRootPath,
-    topLevelSupportedCount: entries.length,
-    nestedSupportedDiscardedCount: nestedCounts.nestedSupportedDiscardedCount,
-    totalSupportedSeen: entries.length + nestedCounts.nestedSupportedDiscardedCount,
-    nestedDirectoriesSeen: nestedCounts.nestedDirectoriesSeen,
+    topLevelSupportedCount,
+    nestedSupportedDiscardedCount: Math.max(0, entries.length - topLevelSupportedCount),
+    totalSupportedSeen: entries.length,
+    nestedDirectoriesSeen,
+    scanMs,
+    statMs,
+    nestedScanSkipped: !recursiveScanEnabled && nestedDirectoriesSeen > 0,
+    recursiveScanEnabled,
+    scannedDirectoryCount,
   };
 
   return {
@@ -180,7 +219,9 @@ async function scanFolderByPath(rootPath: string): Promise<DesktopFolderOpenResu
   };
 }
 
-export async function openFolderDesktop(): Promise<DesktopFolderOpenResult | null> {
+export async function openFolderDesktop(
+  options: DesktopFolderOpenOptions = {},
+): Promise<DesktopFolderOpenResult | null> {
   const result = await dialog.showOpenDialog({
     title: "Apri una cartella fotografica",
     properties: ["openDirectory"],
@@ -190,15 +231,66 @@ export async function openFolderDesktop(): Promise<DesktopFolderOpenResult | nul
     return null;
   }
 
-  return scanFolderByPath(result.filePaths[0]);
+  return scanFolderByPath(result.filePaths[0], options);
 }
 
-export async function reopenFolderDesktop(rootPath: string): Promise<DesktopFolderOpenResult | null> {
+export async function reopenFolderDesktop(
+  rootPath: string,
+  options: DesktopFolderOpenOptions = {},
+): Promise<DesktopFolderOpenResult | null> {
   try {
-    return await scanFolderByPath(rootPath);
+    return await scanFolderByPath(rootPath, options);
   } catch {
     return null;
   }
+}
+
+export async function readPhotoSelectorProjectFileDesktop(
+  rootPath: string,
+): Promise<DesktopPhotoSelectorProjectFile | null> {
+  try {
+    const stats = await lstat(rootPath);
+    if (!stats.isDirectory()) {
+      return null;
+    }
+
+    const content = await readFile(projectFilePathForFolder(rootPath), "utf8");
+    const parsed = JSON.parse(content) as Partial<DesktopPhotoSelectorProjectFile>;
+    if (parsed.schemaVersion !== 1 || parsed.app !== "image-select-pro") {
+      return null;
+    }
+
+    return parsed as DesktopPhotoSelectorProjectFile;
+  } catch {
+    return null;
+  }
+}
+
+export async function writePhotoSelectorProjectFileDesktop(
+  rootPath: string,
+  project: DesktopPhotoSelectorProjectFile,
+): Promise<boolean> {
+  const writeTask = projectFileWriteQueue.then(async () => {
+    const stats = await lstat(rootPath);
+    if (!stats.isDirectory()) {
+      throw new Error("Project root is not a directory");
+    }
+
+    const filePath = projectFilePathForFolder(rootPath);
+    const tempPath = join(rootPath, `${PHOTO_SELECTOR_PROJECT_FILE_NAME}.tmp`);
+    const payload: DesktopPhotoSelectorProjectFile = {
+      ...project,
+      schemaVersion: 1,
+      app: "image-select-pro",
+      updatedAt: Date.now(),
+    };
+    await writeFile(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    await rename(tempPath, filePath);
+  });
+
+  // Keep later writes serialized even when an earlier write fails.
+  projectFileWriteQueue = writeTask.catch(() => undefined);
+  return writeTask.then(() => true).catch(() => false);
 }
 
 export async function readFileFromDisk(absolutePath: string): Promise<DesktopFilePayload | null> {
@@ -218,6 +310,31 @@ export async function readFileFromDisk(absolutePath: string): Promise<DesktopFil
   } catch {
     return null;
   }
+}
+
+export async function statFilesFromDisk(absolutePaths: string[]): Promise<DesktopFileStat[]> {
+  const uniquePaths = Array.from(new Set(absolutePaths.filter((path) => typeof path === "string" && path.length > 0)));
+  const stats = await Promise.all(
+    uniquePaths.map(async (absolutePath) => {
+      try {
+        const stat = await lstat(absolutePath);
+        if (!stat.isFile()) {
+          return null;
+        }
+
+        return {
+          name: basename(absolutePath),
+          absolutePath,
+          size: stat.size,
+          lastModified: Math.round(stat.mtimeMs),
+        } satisfies DesktopFileStat;
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  return stats.filter((stat): stat is DesktopFileStat => stat !== null);
 }
 
 export async function createAutoLayoutHandoffFileDesktop(
