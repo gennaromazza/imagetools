@@ -136,6 +136,7 @@ export interface DesktopDockState {
   y: number;
   opacity: number;
   collapsed: boolean;
+  autoHide: boolean;
 }
 
 export interface DesktopFolderOpenOptions {
