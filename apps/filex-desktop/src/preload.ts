@@ -14,7 +14,6 @@ const api: FileXDesktopApi = {
   openInstalledTool: (toolId, launchArgs) => ipcRenderer.invoke("filex:open-installed-tool", toolId, launchArgs),
   getSuiteDockState: () => ipcRenderer.invoke("filex:get-suite-dock-state"),
   saveSuiteDockState: (state) => ipcRenderer.invoke("filex:save-suite-dock-state", state),
-  getImageIdPrintAiStatus: () => ipcRenderer.invoke("filex:get-image-id-print-ai-status"),
   openFolder: (options) => ipcRenderer.invoke("filex:open-folder", options),
   reopenFolder: (rootPath, options) => ipcRenderer.invoke("filex:reopen-folder", rootPath, options),
   consumePendingOpenFolderPath: () => ipcRenderer.invoke("filex:consume-pending-open-folder-path"),
@@ -30,7 +29,6 @@ const api: FileXDesktopApi = {
       ipcRenderer.removeListener("filex:open-folder-request", wrappedListener);
     };
   },
-  createAutoLayoutHandoffFile: (payload) => ipcRenderer.invoke("filex:create-auto-layout-handoff-file", payload),
   consumePendingOpenProjectPath: () => ipcRenderer.invoke("filex:consume-pending-open-project-path"),
   markOpenProjectRequestReady: () => ipcRenderer.invoke("filex:mark-open-project-request-ready"),
   onOpenProjectRequest: (listener) => {
@@ -95,8 +93,6 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:write-photo-selector-project-file", rootPath, project),
   getDesktopSessionState: () => ipcRenderer.invoke("filex:get-desktop-session-state"),
   saveDesktopSessionState: (state) => ipcRenderer.invoke("filex:save-desktop-session-state", state),
-  getAutoLayoutProjects: () => ipcRenderer.invoke("filex:get-auto-layout-projects"),
-  saveAutoLayoutProjects: (projects: unknown[]) => ipcRenderer.invoke("filex:save-auto-layout-projects", projects),
   chooseOutputFolder: () => ipcRenderer.invoke("filex:choose-output-folder"),
   saveNewFileAs: (suggestedName: string, bytes: Uint8Array) =>
     ipcRenderer.invoke("filex:save-new-file-as", suggestedName, bytes),
@@ -155,11 +151,6 @@ const api: FileXDesktopApi = {
   getImageFileFinderProgress: () => ipcRenderer.invoke("filex:get-image-file-finder-progress"),
   cancelImageFileFinderJob: () => ipcRenderer.invoke("filex:cancel-image-file-finder-job"),
   openImageFileFinderFolder: (folderPath) => ipcRenderer.invoke("filex:open-image-file-finder-folder", folderPath),
-  getNetworkDriveConfig: () => ipcRenderer.invoke("filex:get-network-drive-config"),
-  saveNetworkDriveConfig: (config) => ipcRenderer.invoke("filex:save-network-drive-config", config),
-  getNetworkDriveStatus: () => ipcRenderer.invoke("filex:get-network-drive-status"),
-  repairNetworkDrive: () => ipcRenderer.invoke("filex:repair-network-drive"),
-  openNetworkDrive: (target) => ipcRenderer.invoke("filex:open-network-drive", target),
   getPathForFile: (file) => webUtils.getPathForFile(file),
 };
 

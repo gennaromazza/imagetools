@@ -3,7 +3,7 @@ import type { ImageAsset, ImageOrientation, PickStatus } from "@photo-tools/shar
 /**
  * Output standardizzato della selezione foto.
  * Pensato per essere consumato dal Wedding Workflow Orchestrator
- * o da altri tool della suite (auto-layout, image-party-frame, ecc.).
+ * o da altri tool della suite.
  */
 export interface SelectionResult {
   projectId: string;

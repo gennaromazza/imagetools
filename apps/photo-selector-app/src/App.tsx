@@ -25,7 +25,6 @@ import {
   clearDesktopThumbnailCache,
   dismissDesktopCacheLocationRecommendation,
   getDesktopCacheLocationRecommendation,
-  getDesktopRamBudgetInfo,
   getDesktopThumbnailCacheInfo,
   migrateDesktopThumbnailCacheDirectory,
   relaunchDesktopApp,
@@ -52,8 +51,19 @@ import {
   type ThumbnailPipelineOptions,
   type ThumbnailUpdate,
 } from "./services/thumbnail-pipeline";
-import { cacheThumbnailBatch, loadCachedThumbnails } from "./services/thumbnail-cache";
-import { clearDesktopQuickPreviewFrameCache } from "./services/desktop-quick-preview";
+import { loadCachedThumbnails } from "./services/thumbnail-cache";
+import {
+  clearDesktopQuickPreviewFrameCache,
+  releaseDesktopQuickPreviewFrames,
+} from "./services/desktop-quick-preview";
+import {
+  applyThumbnailViews,
+  clearThumbnailViews,
+  getThumbnailView,
+  getThumbnailViewEntries,
+  removeThumbnailViews,
+  type ThumbnailViewState,
+} from "./services/thumbnail-view-store";
 import {
   beginReactBatchMetric,
   cancelReactBatchMetric,
@@ -75,12 +85,14 @@ import {
   hasDesktopStateApi,
   logDesktopEvent,
   recordDesktopPerformanceSnapshot,
+  readPhotoSelectorProjectFile,
   saveDesktopFolderAssetStates,
+  saveDesktopFolderAssetStatesDelta,
   saveDesktopFolderCatalogState,
   saveDesktopSessionState,
+  updatePhotoSelectorProjectFile,
 } from "./services/desktop-store";
 import { PreviewWarmupPipeline } from "./services/preview-warmup-pipeline";
-import { launchAutoLayoutFromSelection } from "./services/desktop-auto-layout-handoff";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { buildSelectionResult } from "./types/selection";
 import { useToast } from "./components/ToastProvider";
@@ -98,20 +110,29 @@ import { SelectionSummary } from "./components/SelectionSummary";
 
 const PROJECT_ID = "photo-selector-default";
 const THUMBNAIL_BOOTSTRAP_COUNT = 64;
-const XMP_IMPORT_CONCURRENCY = 16;
-const XMP_IMPORT_START_DELAY_MS = 0;
+const XMP_IMPORT_CONCURRENCY = 4;
+const XMP_WRITE_CONCURRENCY = 4;
+const XMP_IMPORT_START_DELAY_MS = 1000;
+const XMP_IMPORT_INITIAL_COUNT = 96;
+const XMP_IMPORT_BACKGROUND_CHUNK_SIZE = 96;
+const XMP_IMPORT_BACKGROUND_DELAY_MS = 450;
 const BACKGROUND_THUMBNAIL_ENQUEUE_DELAY_MS = 120;
 const BACKGROUND_WARMUP_START_DELAY_MS = 480;
 const BACKGROUND_WARMUP_CACHE_CHUNK_SIZE = 144;
 const BACKGROUND_WARMUP_PIPELINE_CHUNK_SIZE = 64;
 const RAW_PREVIEW_BOOTSTRAP_COUNT = 192;
 const RAW_PREVIEW_FILTER_WARM_COUNT = 72;
-const RAW_PREVIEW_WARMUP_START_DELAY_MS = 180;
+const RAW_PREVIEW_WARMUP_START_DELAY_MS = 1600;
 const QUICK_PREVIEW_PRIORITY_WARM_COUNT = 3;
-const BACKGROUND_FIT_PREVIEW_WARM_START_DELAY_MS = 900;
+const BACKGROUND_FIT_PREVIEW_WARM_START_DELAY_MS = 2400;
 const BACKGROUND_FIT_PREVIEW_WARM_BATCH_INTERVAL_MS = 520;
 const BACKGROUND_FIT_PREVIEW_WARM_BATCH_SIZE = 10;
 const BACKGROUND_FIT_PREVIEW_WARM_MAX_COUNT = 240;
+const BACKGROUND_WORK_INTERACTION_GRACE_MS = 900;
+const BACKGROUND_WORK_DEFER_RETRY_MS = 260;
+const CATALOG_PERSIST_DEBOUNCE_MS = 500;
+const PERFORMANCE_SNAPSHOT_PERSIST_DEBOUNCE_MS = 500;
+const PERFORMANCE_METRICS_UI_THROTTLE_MS = 180;
 const THUMBNAIL_PATCH_FLUSH_MAX_ITEMS = 64;
 const THUMBNAIL_PATCH_FLUSH_MIN_INTERVAL_MS = 32;
 const PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE = "[PERF] folder-open → first-thumbnail-visible";
@@ -124,6 +145,12 @@ function getThumbnailPipelineOptions(profile: ThumbnailProfile): ThumbnailPipeli
       maxDimension: 192,
       quality: 0.5,
       minimumPreviewShortSide: 480,
+      desktopOptions: {
+        minimumEmbeddedShortSide: 96,
+        preferEmbeddedPreview: true,
+        profile: "ultra-fast",
+        allowDirectEmbeddedJpeg: true,
+      },
     };
   }
 
@@ -132,6 +159,11 @@ function getThumbnailPipelineOptions(profile: ThumbnailProfile): ThumbnailPipeli
       maxDimension: 256,
       quality: 0.62,
       minimumPreviewShortSide: 640,
+      desktopOptions: {
+        minimumEmbeddedShortSide: 256,
+        preferEmbeddedPreview: true,
+        profile: "fast",
+      },
     };
   }
 
@@ -139,6 +171,11 @@ function getThumbnailPipelineOptions(profile: ThumbnailProfile): ThumbnailPipeli
     maxDimension: 320,
     quality: 0.72,
     minimumPreviewShortSide: 800,
+    desktopOptions: {
+      minimumEmbeddedShortSide: 320,
+      preferEmbeddedPreview: true,
+      profile: "balanced",
+    },
   };
 }
 
@@ -192,6 +229,7 @@ type ThumbnailPipelineEntry = {
   id: string;
   absolutePath?: string;
   sourceFileKey?: string;
+  skipDiskCacheRead?: boolean;
 };
 
 type ThumbnailAssetPatch = Pick<
@@ -216,6 +254,81 @@ function createThumbnailPipelineMetrics(): ThumbnailPipelineMetrics {
 function detectOrientation(w: number, h: number): ImageOrientation {
   if (w === h) return "square";
   return h > w ? "vertical" : "horizontal";
+}
+
+function revokeThumbnailViewUrl(view: ThumbnailViewState | undefined): void {
+  const url = view?.thumbnailUrl;
+  if (!url) {
+    return;
+  }
+
+  const token = getThumbnailFrameToken(url);
+  if (token) {
+    void releaseDesktopQuickPreviewFrames([token]);
+    return;
+  }
+
+  if (!url.startsWith("blob:")) {
+    return;
+  }
+
+  try {
+    URL.revokeObjectURL(url);
+  } catch {
+    // ignore: revokeObjectURL is best-effort cleanup
+  }
+}
+
+function revokeCachedThumbnailUrls(
+  cached: Iterable<{ url: string }>,
+): void {
+  for (const hit of cached) {
+    const token = getThumbnailFrameToken(hit.url);
+    if (token) {
+      void releaseDesktopQuickPreviewFrames([token]);
+      continue;
+    }
+
+    if (!hit.url.startsWith("blob:")) {
+      continue;
+    }
+
+    try {
+      URL.revokeObjectURL(hit.url);
+    } catch {
+      // Cache cleanup is best-effort when a folder load becomes stale.
+    }
+  }
+}
+
+function getThumbnailFrameToken(url: string | undefined): string | null {
+  if (!url || !url.startsWith("filex-preview://")) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "frame") {
+      return null;
+    }
+    return decodeURIComponent(parsed.pathname.replace(/^\/+/, "")) || null;
+  } catch {
+    return null;
+  }
+}
+
+
+function buildCatalogAssetStateSignature(assetState: DesktopFolderCatalogAssetState): string {
+  return JSON.stringify([
+    assetState.fileName,
+    assetState.relativePath,
+    assetState.absolutePath ?? null,
+    assetState.sourceFileKey ?? null,
+    assetState.rating,
+    assetState.pickStatus,
+    assetState.colorLabel ?? null,
+    assetState.customLabels ?? [],
+  ]);
 }
 
 function formatSyncTimestamp(timestamp: number | null): string {
@@ -279,6 +392,21 @@ function hasUndoableAssetChange(previous: ImageAsset | undefined, next: ImageAss
   }
 
   return previous.rating !== next.rating
+    || previous.pickStatus !== next.pickStatus
+    || previous.colorLabel !== next.colorLabel
+    || !areStringArraysEqual(previous.customLabels, next.customLabels);
+}
+
+function hasAssetRuntimeStateChange(previous: ImageAsset, next: ImageAsset): boolean {
+  return previous.sourceFileKey !== next.sourceFileKey
+    || previous.previewUrl !== next.previewUrl
+    || previous.sourceUrl !== next.sourceUrl
+    || previous.thumbnailUrl !== next.thumbnailUrl
+    || previous.width !== next.width
+    || previous.height !== next.height
+    || previous.orientation !== next.orientation
+    || previous.aspectRatio !== next.aspectRatio
+    || previous.rating !== next.rating
     || previous.pickStatus !== next.pickStatus
     || previous.colorLabel !== next.colorLabel
     || !areStringArraysEqual(previous.customLabels, next.customLabels);
@@ -459,6 +587,7 @@ export function App() {
   const interactiveThumbnailIdsRef = useRef(new Set<string>());
   const folderLoadSessionRef = useRef(0);
   const folderOpenRequestRef = useRef(0);
+  const persistedStateHydrationRef = useRef<{ folderPath: string; session: number } | null>(null);
   const xmpImportStartTimerRef = useRef<number | null>(null);
   const backgroundThumbnailEnqueueTimerRef = useRef<number | null>(null);
   const backgroundCacheLookupTimerRef = useRef<number | null>(null);
@@ -466,6 +595,7 @@ export function App() {
   const backgroundFitPreviewWarmupTimerRef = useRef<number | null>(null);
   const backgroundFitPreviewCursorRef = useRef(0);
   const backgroundFitPreviewOrderedIdsRef = useRef<string[]>([]);
+  const interactiveWorkUntilRef = useRef(0);
   const hasLoggedFirstThumbnailRef = useRef(false);
   const hasLoggedGridCompleteRef = useRef(false);
   const folderOpenStartedAtRef = useRef<number | null>(null);
@@ -476,7 +606,26 @@ export function App() {
   const thumbnailPatchFlushTimerRef = useRef<number | null>(null);
   const thumbnailPatchLastFlushAtRef = useRef(0);
   const thumbnailPipelineMetricsRef = useRef<ThumbnailPipelineMetrics>(createThumbnailPipelineMetrics());
+  const catalogPersistTimerRef = useRef<number | null>(null);
+  const catalogIdentitySignatureRef = useRef<string>("");
+  const catalogAssetStateSignatureRef = useRef(new Map<string, string>());
+  const catalogPersistedAssetsRef = useRef<ImageAsset[] | null>(null);
+  const catalogAssetStatesRef = useRef<DesktopFolderCatalogAssetState[]>([]);
+  const catalogProjectActiveSignatureRef = useRef("");
+  const catalogProjectNameRef = useRef("");
+  const performanceSnapshotPersistTimerRef = useRef<number | null>(null);
+  const performanceMetricsUiTimerRef = useRef<number | null>(null);
   const scrollLiteActiveMsRef = useRef(0);
+  const thumbnailProgressStateRef = useRef(thumbnailProgress);
+  const publishThumbnailProgress = useCallback((next: { done: number; total: number }) => {
+    const current = thumbnailProgressStateRef.current;
+    if (current.done === next.done && current.total === next.total) {
+      return;
+    }
+
+    thumbnailProgressStateRef.current = next;
+    setThumbnailProgress(next);
+  }, []);
 
   // ── Restore from IndexedDB on mount ──────────────────────────────────
   useEffect(() => {
@@ -561,7 +710,14 @@ export function App() {
       lastUpdatedAt: performanceSnapshot.lastUpdatedAt,
     };
 
-    void recordDesktopPerformanceSnapshot(nextSnapshot);
+    if (performanceSnapshotPersistTimerRef.current !== null) {
+      window.clearTimeout(performanceSnapshotPersistTimerRef.current);
+    }
+
+    performanceSnapshotPersistTimerRef.current = window.setTimeout(() => {
+      performanceSnapshotPersistTimerRef.current = null;
+      void recordDesktopPerformanceSnapshot(nextSnapshot);
+    }, PERFORMANCE_SNAPSHOT_PERSIST_DEBOUNCE_MS);
   }, [performanceSnapshot]);
 
   useEffect(() => {
@@ -606,32 +762,114 @@ export function App() {
       return;
     }
 
-    const timestamp = Date.now();
-    const folderName = sourceFolderPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? sourceFolderPath;
-    const catalogState: DesktopFolderCatalogState = {
-      folderPath: sourceFolderPath,
-      folderName,
-      imageCount: allAssets.length,
-      activeAssetIds,
-      lastOpenedAt: timestamp,
-      updatedAt: timestamp,
-    };
-    const assetStates: DesktopFolderCatalogAssetState[] = allAssets.map((asset) => ({
-      assetId: asset.id,
-      fileName: asset.fileName,
-      relativePath: asset.path,
-      absolutePath: getAssetAbsolutePath(asset.id) ?? undefined,
-      sourceFileKey: asset.sourceFileKey,
-      rating: asset.rating ?? 0,
-      pickStatus: asset.pickStatus ?? "unmarked",
-      colorLabel: asset.colorLabel ?? null,
-      customLabels: asset.customLabels ?? [],
-      updatedAt: timestamp,
-    }));
+    const pendingHydration = persistedStateHydrationRef.current;
+    if (
+      pendingHydration &&
+      pendingHydration.folderPath === sourceFolderPath &&
+      pendingHydration.session === folderLoadSessionRef.current
+    ) {
+      return;
+    }
 
-    void saveDesktopFolderCatalogState(catalogState);
-    void saveDesktopFolderAssetStates(sourceFolderPath, assetStates);
-  }, [activeAssetIds, allAssets, sourceFolderPath]);
+    if (catalogPersistTimerRef.current !== null) {
+      window.clearTimeout(catalogPersistTimerRef.current);
+    }
+
+    const scheduledFolderPath = sourceFolderPath;
+    const scheduledSession = folderLoadSessionRef.current;
+
+    catalogPersistTimerRef.current = window.setTimeout(() => {
+      catalogPersistTimerRef.current = null;
+      if (
+        scheduledSession !== folderLoadSessionRef.current ||
+        scheduledFolderPath !== sourceFolderPath
+      ) {
+        return;
+      }
+
+      const timestamp = Date.now();
+      const folderName = sourceFolderPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? sourceFolderPath;
+      const catalogState: DesktopFolderCatalogState = {
+        folderPath: sourceFolderPath,
+        folderName,
+        imageCount: allAssets.length,
+        activeAssetIds,
+        lastOpenedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const assetsReferenceChanged = catalogPersistedAssetsRef.current !== allAssets;
+      const assetStates = assetsReferenceChanged
+        ? allAssets.map((asset): DesktopFolderCatalogAssetState => ({
+          assetId: asset.id,
+          fileName: asset.fileName,
+          relativePath: asset.path,
+          absolutePath: getAssetAbsolutePath(asset.id) ?? undefined,
+          sourceFileKey: asset.sourceFileKey,
+          rating: asset.rating ?? 0,
+          pickStatus: asset.pickStatus ?? "unmarked",
+          colorLabel: asset.colorLabel ?? null,
+          customLabels: asset.customLabels ?? [],
+          updatedAt: timestamp,
+        }))
+        : catalogAssetStatesRef.current;
+
+      const identitySignature = assetsReferenceChanged
+        ? `${sourceFolderPath}::${allAssets.length}::${allAssets
+          .map((asset) => `${asset.id}:${asset.sourceFileKey ?? ""}`)
+          .join("|")}`
+        : catalogIdentitySignatureRef.current;
+      const requiresFullAssetSave = assetsReferenceChanged
+        && catalogIdentitySignatureRef.current !== identitySignature;
+      const changedAssetStates = requiresFullAssetSave
+        ? assetStates
+        : assetsReferenceChanged
+          ? assetStates.filter((assetState) => (
+          catalogAssetStateSignatureRef.current.get(assetState.assetId) !== buildCatalogAssetStateSignature(assetState)
+          ))
+          : [];
+
+      void saveDesktopFolderCatalogState(catalogState);
+      if (requiresFullAssetSave) {
+        void saveDesktopFolderAssetStates(sourceFolderPath, assetStates);
+        catalogIdentitySignatureRef.current = identitySignature;
+      } else if (changedAssetStates.length > 0) {
+        void saveDesktopFolderAssetStatesDelta(sourceFolderPath, changedAssetStates);
+      }
+
+      if (assetsReferenceChanged) {
+        catalogPersistedAssetsRef.current = allAssets;
+        catalogAssetStatesRef.current = assetStates;
+      }
+      for (const assetState of changedAssetStates) {
+        catalogAssetStateSignatureRef.current.set(
+          assetState.assetId,
+          buildCatalogAssetStateSignature(assetState),
+        );
+      }
+
+      const activeSignature = activeAssetIds.join("|");
+      const shouldWriteProject = assetsReferenceChanged
+        || catalogProjectActiveSignatureRef.current !== activeSignature
+        || catalogProjectNameRef.current !== projectName;
+      if (shouldWriteProject) {
+        catalogProjectActiveSignatureRef.current = activeSignature;
+        catalogProjectNameRef.current = projectName;
+        void updatePhotoSelectorProjectFile(sourceFolderPath, (existingProject) => ({
+          schemaVersion: 1,
+          app: "image-select-pro",
+          updatedAt: Date.now(),
+          projectName,
+          preferences: existingProject?.preferences,
+          folderState: {
+            activeAssetIds,
+            // The desktop project format accepts the same catalog state and
+            // avoids allocating a second array for the shared file.
+            assetStates,
+          },
+        })).catch(() => false);
+      }
+    }, CATALOG_PERSIST_DEBOUNCE_MS);
+  }, [activeAssetIds, allAssets, projectName, sourceFolderPath]);
 
   // ── Cleanup pipeline on unmount ──────────────────────────────────────
   useEffect(() => {
@@ -657,9 +895,32 @@ export function App() {
         window.clearTimeout(thumbnailPatchFlushTimerRef.current);
         thumbnailPatchFlushTimerRef.current = null;
       }
+      if (performanceMetricsUiTimerRef.current !== null) {
+        window.clearTimeout(performanceMetricsUiTimerRef.current);
+        performanceMetricsUiTimerRef.current = null;
+      }
+      if (catalogPersistTimerRef.current !== null) {
+        window.clearTimeout(catalogPersistTimerRef.current);
+        catalogPersistTimerRef.current = null;
+      }
+      if (performanceSnapshotPersistTimerRef.current !== null) {
+        window.clearTimeout(performanceSnapshotPersistTimerRef.current);
+        performanceSnapshotPersistTimerRef.current = null;
+      }
+      const staleThumbnailPatches = Array.from(thumbnailPatchStoreRef.current.values());
+      for (const patch of staleThumbnailPatches) {
+        revokeThumbnailViewUrl(patch);
+      }
       thumbnailPatchStoreRef.current.clear();
       thumbnailPatchDeferredQueueRef.current = [];
       thumbnailPatchDeferredSetRef.current.clear();
+      const staleThumbnailViews = Array.from(getThumbnailViewEntries(), ([, view]) => view);
+      for (const view of staleThumbnailViews) {
+        revokeThumbnailViewUrl(view);
+      }
+      // The store owns thumbnail views outside React state. Clearing it also
+      // notifies the virtualized grid before the pipeline is destroyed.
+      clearThumbnailViews();
       pipelineRef.current?.destroy();
       prioritizedThumbnailIdsRef.current = new Set();
       previewPriorityIdsRef.current = new Set();
@@ -754,8 +1015,10 @@ export function App() {
         lastSyncedAt: current.lastSyncedAt,
       }));
 
-      const task = Promise.all(
-        idsToSync.map(async (assetId) => {
+      const task = mapWithConcurrency(
+        idsToSync,
+        XMP_WRITE_CONCURRENCY,
+        async (assetId) => {
           const asset = assetMap.get(assetId);
           if (!asset) {
             return true;
@@ -768,7 +1031,7 @@ export function App() {
           } catch {
             return false;
           }
-        }),
+        },
       ).then((results) => {
         const failed = results.filter((result) => result === false).length;
         if (failed > 0) {
@@ -816,6 +1079,8 @@ export function App() {
 
   const suspendActiveFolderWork = useCallback(() => {
     folderLoadSessionRef.current += 1;
+    persistedStateHydrationRef.current = null;
+    interactiveWorkUntilRef.current = 0;
     pipelineRef.current?.destroy();
     pipelineRef.current = null;
 
@@ -847,6 +1112,18 @@ export function App() {
       window.clearTimeout(thumbnailPatchFlushTimerRef.current);
       thumbnailPatchFlushTimerRef.current = null;
     }
+    if (performanceMetricsUiTimerRef.current !== null) {
+      window.clearTimeout(performanceMetricsUiTimerRef.current);
+      performanceMetricsUiTimerRef.current = null;
+    }
+    if (catalogPersistTimerRef.current !== null) {
+      window.clearTimeout(catalogPersistTimerRef.current);
+      catalogPersistTimerRef.current = null;
+    }
+    if (performanceSnapshotPersistTimerRef.current !== null) {
+      window.clearTimeout(performanceSnapshotPersistTimerRef.current);
+      performanceSnapshotPersistTimerRef.current = null;
+    }
 
     previewWarmupPipelineRef.current?.destroy();
     previewWarmupPipelineRef.current = null;
@@ -860,17 +1137,32 @@ export function App() {
     settledThumbnailIdsRef.current = new Set();
     thumbnailEntryByIdRef.current = new Map();
     thumbnailTotalCountRef.current = 0;
+    const staleThumbnailPatches = Array.from(thumbnailPatchStoreRef.current.values());
+    for (const patch of staleThumbnailPatches) {
+      revokeThumbnailViewUrl(patch);
+    }
     thumbnailPatchStoreRef.current.clear();
     thumbnailPatchDeferredQueueRef.current = [];
     thumbnailPatchDeferredSetRef.current.clear();
     thumbnailPatchLastFlushAtRef.current = 0;
+    catalogIdentitySignatureRef.current = "";
+    catalogAssetStateSignatureRef.current.clear();
+    catalogPersistedAssetsRef.current = null;
+    catalogAssetStatesRef.current = [];
+    catalogProjectActiveSignatureRef.current = "";
+    catalogProjectNameRef.current = "";
+    const staleThumbnailViews = Array.from(getThumbnailViewEntries(), ([, view]) => view);
+    for (const view of staleThumbnailViews) {
+      revokeThumbnailViewUrl(view);
+    }
+    clearThumbnailViews();
     thumbnailPipelineMetricsRef.current = createThumbnailPipelineMetrics();
     scrollLiteActiveMsRef.current = 0;
     hasLoggedFirstThumbnailRef.current = false;
     hasLoggedGridCompleteRef.current = false;
     clearDesktopQuickPreviewFrameCache();
 
-    setThumbnailProgress({ done: 0, total: 0 });
+    publishThumbnailProgress({ done: 0, total: 0 });
     setPerformanceSnapshot((current) => ({
       ...current,
       reactCommitCount: 0,
@@ -891,7 +1183,18 @@ export function App() {
           }
         : current
     ));
+  }, [publishThumbnailProgress]);
+
+  const markInteractiveWork = useCallback((durationMs = BACKGROUND_WORK_INTERACTION_GRACE_MS) => {
+    const until = Date.now() + durationMs;
+    if (until > interactiveWorkUntilRef.current) {
+      interactiveWorkUntilRef.current = until;
+    }
   }, []);
+
+  const shouldDeferBackgroundWork = useCallback((priority: number) => (
+    priority >= 3 && Date.now() < interactiveWorkUntilRef.current
+  ), []);
 
   // ── Warn before losing unsaved work ──────────────────────────────────
   useEffect(() => {
@@ -908,7 +1211,7 @@ export function App() {
     const interactiveIds = interactiveThumbnailIdsRef.current;
     const total = interactiveIds.size;
     if (total === 0) {
-      setThumbnailProgress({ done: 0, total: 0 });
+      publishThumbnailProgress({ done: 0, total: 0 });
       setImportProgress((current) => (
         current.isOpen
           ? {
@@ -929,23 +1232,8 @@ export function App() {
       }
     }
 
-    setThumbnailProgress({ done: processed, total });
-    setImportProgress((current) =>
-      current.isOpen
-        ? {
-            ...current,
-            phase: "preparing",
-            total,
-            processed,
-            currentFile: lastProcessedId
-              ? assetNameByIdRef.current.get(lastProcessedId) ?? current.currentFile
-              : current.currentFile,
-          }
-        : current
-    );
-
     if (processed >= total) {
-      setThumbnailProgress({ done: 0, total: 0 });
+      publishThumbnailProgress({ done: 0, total: 0 });
       setImportProgress((current) => (
         current.isOpen
           ? {
@@ -956,8 +1244,37 @@ export function App() {
             }
           : current
       ));
+      return;
     }
-  }, []);
+
+    publishThumbnailProgress({ done: processed, total });
+    setImportProgress((current) => {
+      if (!current.isOpen) {
+        return current;
+      }
+
+      const currentFile = lastProcessedId
+        ? assetNameByIdRef.current.get(lastProcessedId) ?? current.currentFile
+        : current.currentFile;
+
+      if (
+        current.phase === "preparing" &&
+        current.total === total &&
+        current.processed === processed &&
+        current.currentFile === currentFile
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        phase: "preparing",
+        total,
+        processed,
+        currentFile,
+      };
+    });
+  }, [publishThumbnailProgress]);
 
   function checkAllThumbnailsSettled(): void {
     const total = thumbnailTotalCountRef.current;
@@ -976,14 +1293,23 @@ export function App() {
   ) => {
     const nextMetrics = updater(thumbnailPipelineMetricsRef.current);
     thumbnailPipelineMetricsRef.current = nextMetrics;
-    setPerformanceSnapshot((current) => ({
-      ...current,
-      reactCommitCount: nextMetrics.reactCommitCount,
-      hotPatchApplied: nextMetrics.hotPatchApplied,
-      deferredPatchApplied: nextMetrics.deferredPatchApplied,
-      scrollLiteActiveMs: Math.round(scrollLiteActiveMsRef.current),
-      lastUpdatedAt: Date.now(),
-    }));
+
+    if (performanceMetricsUiTimerRef.current !== null) {
+      return;
+    }
+
+    performanceMetricsUiTimerRef.current = window.setTimeout(() => {
+      performanceMetricsUiTimerRef.current = null;
+      const metrics = thumbnailPipelineMetricsRef.current;
+      setPerformanceSnapshot((current) => ({
+        ...current,
+        reactCommitCount: metrics.reactCommitCount,
+        hotPatchApplied: metrics.hotPatchApplied,
+        deferredPatchApplied: metrics.deferredPatchApplied,
+        scrollLiteActiveMs: Math.round(scrollLiteActiveMsRef.current),
+        lastUpdatedAt: Date.now(),
+      }));
+    }, PERFORMANCE_METRICS_UI_THROTTLE_MS);
   }, []);
 
   const resetThumbnailPatchPipeline = useCallback(() => {
@@ -994,6 +1320,14 @@ export function App() {
     if (thumbnailPatchFlushTimerRef.current !== null) {
       window.clearTimeout(thumbnailPatchFlushTimerRef.current);
       thumbnailPatchFlushTimerRef.current = null;
+    }
+    if (performanceMetricsUiTimerRef.current !== null) {
+      window.clearTimeout(performanceMetricsUiTimerRef.current);
+      performanceMetricsUiTimerRef.current = null;
+    }
+    const staleThumbnailPatches = Array.from(thumbnailPatchStoreRef.current.values());
+    for (const patch of staleThumbnailPatches) {
+      revokeThumbnailViewUrl(patch);
     }
     thumbnailPatchStoreRef.current.clear();
     thumbnailPatchDeferredQueueRef.current = [];
@@ -1062,14 +1396,21 @@ export function App() {
         continue;
       }
 
+      if (patch.sourceFileKey && asset.sourceFileKey && patch.sourceFileKey !== asset.sourceFileKey) {
+        revokeThumbnailViewUrl(patch);
+        thumbnailPatchStoreRef.current.delete(id);
+        continue;
+      }
+
       const patchSourceFileKey = patch.sourceFileKey ?? asset.sourceFileKey;
+      const currentView = getThumbnailView(id);
       if (
-        asset.thumbnailUrl === patch.thumbnailUrl
-        && asset.width === patch.width
-        && asset.height === patch.height
-        && asset.orientation === patch.orientation
-        && asset.aspectRatio === patch.aspectRatio
-        && asset.sourceFileKey === patchSourceFileKey
+        currentView?.thumbnailUrl === patch.thumbnailUrl
+        && currentView?.width === patch.width
+        && currentView?.height === patch.height
+        && currentView?.orientation === patch.orientation
+        && currentView?.aspectRatio === patch.aspectRatio
+        && (currentView?.sourceFileKey ?? asset.sourceFileKey) === patchSourceFileKey
       ) {
         thumbnailPatchStoreRef.current.delete(id);
         continue;
@@ -1085,52 +1426,40 @@ export function App() {
     const applicableIdSet = new Set(applicableIds);
     const renderMetricToken = beginReactBatchMetric(applicableIds.length, assetsSnapshot.length);
 
-    startTransition(() => {
-      setAllAssets((prev) => {
-        if (prev.length === 0) {
-          return prev;
-        }
-
-        const next = prev.slice();
-        let changed = false;
-        for (const id of applicableIds) {
-          const patch = thumbnailPatchStoreRef.current.get(id);
-          const index = assetIndexByIdRef.current.get(id);
-          if (!patch || index === undefined) {
-            continue;
-          }
-          const asset = next[index];
-          if (!asset) {
-            continue;
-          }
+    const nextViews: Array<[string, ThumbnailViewState]> = [];
+    for (const id of applicableIds) {
+      const patch = thumbnailPatchStoreRef.current.get(id);
+      const index = assetIndexByIdRef.current.get(id);
+      if (!patch || index === undefined) {
+        continue;
+      }
+      const asset = allAssetsRef.current[index];
+      if (!asset) {
+        continue;
+      }
 
           // Se l'asset aveva già una blob URL (es. da cache disco) e la pipeline
           // produce una nuova URL diversa, revochiamo la vecchia per evitare
           // che il browser tenga in memoria thumbnail orfani per tutta la sessione.
-          if (
-            asset.thumbnailUrl
-            && asset.thumbnailUrl !== patch.thumbnailUrl
-            && asset.thumbnailUrl.startsWith("blob:")
-          ) {
-            try {
-              URL.revokeObjectURL(asset.thumbnailUrl);
-            } catch {
-              // ignore: revokeObjectURL non lancia in pratica
-            }
-          }
+      if (patch.sourceFileKey && asset.sourceFileKey && patch.sourceFileKey !== asset.sourceFileKey) {
+        revokeThumbnailViewUrl(patch);
+        thumbnailPatchStoreRef.current.delete(id);
+        continue;
+      }
 
-          next[index] = {
-            ...asset,
-            ...patch,
-            sourceFileKey: patch.sourceFileKey ?? asset.sourceFileKey,
-          };
-          changed = true;
-          thumbnailPatchStoreRef.current.delete(id);
-        }
+      const previousView = getThumbnailView(id);
+      if (previousView?.thumbnailUrl && previousView.thumbnailUrl !== patch.thumbnailUrl) {
+        revokeThumbnailViewUrl(previousView);
+      }
 
-        return changed ? next : prev;
-      });
-    });
+      nextViews.push([id, {
+        ...patch,
+        sourceFileKey: patch.sourceFileKey ?? asset.sourceFileKey,
+      }]);
+      thumbnailPatchStoreRef.current.delete(id);
+    }
+
+    applyThumbnailViews(nextViews);
 
     updateThumbnailPipelineMetrics((current) => ({
       reactCommitCount: current.reactCommitCount + 1,
@@ -1324,13 +1653,18 @@ export function App() {
 
   const ensurePreviewWarmupPipeline = useCallback(() => {
     if (!previewWarmupPipelineRef.current) {
-      previewWarmupPipelineRef.current = new PreviewWarmupPipeline((assetId, maxDimension, priority) =>
-        warmOnDemandPreviewCache(assetId, priority, { maxDimension }),
+      previewWarmupPipelineRef.current = new PreviewWarmupPipeline(
+        (assetId, maxDimension, priority) =>
+          warmOnDemandPreviewCache(assetId, priority, { maxDimension }),
+        {
+          shouldDefer: shouldDeferBackgroundWork,
+          deferDelayMs: BACKGROUND_WORK_DEFER_RETRY_MS,
+        },
       );
     }
 
     return previewWarmupPipelineRef.current;
-  }, []);
+  }, [shouldDeferBackgroundWork]);
 
   const enqueuePreviewWarmupForIds = useCallback((
     ids: Iterable<string>,
@@ -1397,6 +1731,10 @@ export function App() {
 
     backgroundFitPreviewWarmupTimerRef.current = window.setTimeout(() => {
       backgroundFitPreviewWarmupTimerRef.current = null;
+      if (shouldDeferBackgroundWork(3)) {
+        scheduleBackgroundFitPreviewWarmup(BACKGROUND_WORK_DEFER_RETRY_MS);
+        return;
+      }
 
       const refreshedOrderedIds = backgroundFitPreviewOrderedIdsRef.current;
       const refreshedMaxCount = Math.min(refreshedOrderedIds.length, BACKGROUND_FIT_PREVIEW_WARM_MAX_COUNT);
@@ -1423,7 +1761,7 @@ export function App() {
         scheduleBackgroundFitPreviewWarmup(BACKGROUND_FIT_PREVIEW_WARM_BATCH_INTERVAL_MS);
       }
     }, delayMs);
-  }, [enqueueQuickPreviewWarmupForIds]);
+  }, [enqueueQuickPreviewWarmupForIds, shouldDeferBackgroundWork]);
 
   const handleBackgroundPreviewOrderChange = useCallback((orderedIds: string[]) => {
     if (typeof window === "undefined" || typeof window.filexDesktop === "undefined") {
@@ -1453,6 +1791,13 @@ export function App() {
 
     const invalidatedVisibleIds = invalidateThumbnailEntries(visibleIds);
     const invalidatedPriorityIds = invalidateThumbnailEntries(prioritizedIds);
+    const invalidatedIds = [...invalidatedVisibleIds, ...invalidatedPriorityIds];
+    if (invalidatedIds.length > 0) {
+      for (const id of invalidatedIds) {
+        revokeThumbnailViewUrl(getThumbnailView(id));
+      }
+      removeThumbnailViews(invalidatedIds);
+    }
 
     pipeline.updateViewport(visibleThumbnailIdsRef.current, effectivePriorityIds);
 
@@ -1508,6 +1853,10 @@ export function App() {
 
     const hotIds: string[] = [];
     for (const update of batch) {
+      const previousPatch = thumbnailPatchStoreRef.current.get(update.id);
+      if (previousPatch && previousPatch.thumbnailUrl !== update.url) {
+        revokeThumbnailViewUrl(previousPatch);
+      }
       thumbnailPatchStoreRef.current.set(update.id, {
         thumbnailUrl: update.url,
         width: update.width,
@@ -1535,14 +1884,6 @@ export function App() {
     syncThumbnailProgress(batch[batch.length - 1]?.id ?? null);
     checkAllThumbnailsSettled();
 
-    void cacheThumbnailBatch(
-      batch.map((item) => ({
-        id: item.id,
-        blob: item.blob,
-        width: item.width,
-        height: item.height,
-      })),
-    );
   }, [
     applyThumbnailPatches,
     checkAllThumbnailsSettled,
@@ -1557,7 +1898,11 @@ export function App() {
   const handleThumbnailError = useCallback((failedCount: number, failedId: string) => {
     if (failedId) {
       settledThumbnailIdsRef.current.add(failedId);
-      thumbnailPatchStoreRef.current.delete(failedId);
+      const stalePatch = thumbnailPatchStoreRef.current.get(failedId);
+      if (stalePatch) {
+        revokeThumbnailViewUrl(stalePatch);
+        thumbnailPatchStoreRef.current.delete(failedId);
+      }
       thumbnailPatchDeferredSetRef.current.delete(failedId);
     }
     syncThumbnailProgress(failedId);
@@ -1608,7 +1953,7 @@ export function App() {
     perfTimeEnd(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
     perfTimeEnd(PERF_XMP_IMPORT);
 
-    setThumbnailProgress({ done: 0, total: 0 });
+    publishThumbnailProgress({ done: 0, total: 0 });
     setImportProgress({
       isOpen: false,
       phase: "reading",
@@ -1657,7 +2002,7 @@ export function App() {
       lastUpdatedAt: Date.now(),
     }));
     undoRedo.reset();
-  }, [bumpPhotoMetadataVersion, resetThumbnailPatchPipeline, suspendActiveFolderWork, undoRedo]);
+  }, [bumpPhotoMetadataVersion, publishThumbnailProgress, resetThumbnailPatchPipeline, suspendActiveFolderWork, undoRedo]);
 
   const handleCancelImport = useCallback(() => {
     stopCurrentImport();
@@ -1673,19 +2018,11 @@ export function App() {
       setFolderTransitionLabel(rootPath ?? folderName);
       suspendActiveFolderWork();
 
-      const normalizeComparablePath = (value: string | null | undefined): string =>
-        (value ?? "").replace(/[\\/]+$/, "").toLocaleLowerCase();
-      const nextFolderPath = normalizeComparablePath(rootPath ?? folderName);
-      const currentFolderPath = normalizeComparablePath(sourceFolderPath);
-      const isReopeningCurrentFolder =
-        nextFolderPath.length > 0
-        && currentFolderPath.length > 0
-        && nextFolderPath === currentFolderPath;
-
       try {
-        if (!isReopeningCurrentFolder) {
-          await flushPendingXmpSync().catch(() => false);
-        }
+        // Pending sidecar writes must finish before the new folder snapshot
+        // clears the old asset map, including when the user reopens the same
+        // folder. Otherwise the queued IDs are discarded below.
+        await flushPendingXmpSync().catch(() => false);
         if (folderOpenRequestRef.current !== openRequestId) {
           return;
         }
@@ -1736,6 +2073,36 @@ export function App() {
         perfTime(PERF_XMP_IMPORT);
 
         if (entries.length === 0) {
+          revokeImageAssetUrls(allAssetsRef.current);
+          clearImageCache();
+          assetNameByIdRef.current = new Map();
+          assetIndexByIdRef.current = new Map();
+          pendingXmpSyncIdsRef.current.clear();
+          xmpSnapshotRef.current.clear();
+          setAllAssets([]);
+          bumpPhotoMetadataVersion();
+          setActiveAssetIds([]);
+          setSourceFolderPath(rootPath ?? folderName);
+          setHasWritableFolderAccess(false);
+          setIsProjectSelectorOpen(false);
+          setCurrentScreen("browse");
+          setXmpSyncState({
+            phase: "idle",
+            pending: 0,
+            failed: 0,
+            lastSyncedAt: null,
+          });
+          setImportProgress({
+            isOpen: false,
+            phase: "reading",
+            supported: 0,
+            ignored: 0,
+            total: 0,
+            processed: 0,
+            currentFile: null,
+            folderLabel: folderName,
+            diagnostics: nextDiagnostics,
+          });
           perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
           perfTimeEnd(PERF_XMP_IMPORT);
           addToast("Nessuna immagine supportata trovata nella cartella.", "warning");
@@ -1744,6 +2111,9 @@ export function App() {
 
         // 1. Reset session for the new folder load
         const folderLoadSession = folderLoadSessionRef.current;
+        persistedStateHydrationRef.current = rootPath
+          ? { folderPath: rootPath, session: folderLoadSession }
+          : null;
 
       // 2. Clean up previous blob URLs
       revokeImageAssetUrls(allAssets);
@@ -1755,32 +2125,94 @@ export function App() {
       setFolderDiagnostics((current) =>
         current ? { ...current, groupedAssetCount } : current,
       );
-      const cachedCatalogState = hasDesktopStateApi() && rootPath
-        ? await getDesktopFolderCatalogState(rootPath).catch(() => null)
-        : null;
-      if (folderOpenRequestRef.current !== openRequestId) {
-        return;
-      }
-      const cachedStateByPath = new Map(
-        (cachedCatalogState?.assetStates ?? []).map((assetState) => [
-          assetState.relativePath.toLocaleLowerCase(),
-          assetState,
-        ]),
-      );
-      const assets = placeholderAssets.map((asset) => {
-        const cachedState = cachedStateByPath.get(asset.path.toLocaleLowerCase());
-        if (!cachedState) {
-          return asset;
+      const assets = placeholderAssets;
+      const assetIdSet = new Set(assets.map((asset) => asset.id));
+      const hydratePersistedStateAfterPaint = () => {
+        if (!rootPath) {
+          return;
         }
 
-        return {
-          ...asset,
-          rating: cachedState.rating,
-          pickStatus: cachedState.pickStatus,
-          colorLabel: cachedState.colorLabel,
-          customLabels: cachedState.customLabels,
-        };
-      });
+        afterNextPaint(() => {
+          void (async () => {
+            try {
+              const [sharedProjectFile, cachedCatalogState] = await Promise.all([
+                readPhotoSelectorProjectFile(rootPath).catch(() => null),
+                hasDesktopStateApi()
+                  ? getDesktopFolderCatalogState(rootPath).catch(() => null)
+                  : Promise.resolve(null),
+              ]);
+
+              if (
+                folderOpenRequestRef.current !== openRequestId ||
+                folderLoadSessionRef.current !== folderLoadSession
+              ) {
+                return;
+              }
+
+              if (sharedProjectFile?.projectName) {
+                setProjectName(sharedProjectFile.projectName);
+              }
+
+              const cachedStates = sharedProjectFile?.folderState?.assetStates ?? cachedCatalogState?.assetStates ?? [];
+              if (cachedStates.length > 0) {
+                const cachedStateByPath = new Map(
+                  cachedStates.map((assetState) => [
+                    assetState.relativePath.toLocaleLowerCase(),
+                    assetState,
+                  ]),
+                );
+
+                startTransition(() => {
+                  setAllAssets((prev) => {
+                    if (prev.length === 0) {
+                      return prev;
+                    }
+
+                    let changed = false;
+                    const next = prev.map((asset) => {
+                      const cachedState = cachedStateByPath.get(asset.path.toLocaleLowerCase());
+                      if (!cachedState) {
+                        return asset;
+                      }
+
+                      changed = true;
+                      return {
+                        ...asset,
+                        rating: cachedState.rating,
+                        pickStatus: cachedState.pickStatus,
+                        colorLabel: cachedState.colorLabel,
+                        customLabels: cachedState.customLabels,
+                      };
+                    });
+
+                    return changed ? next : prev;
+                  });
+                });
+                bumpPhotoMetadataVersion();
+              }
+
+              const persistedActiveAssetIds = (
+                sharedProjectFile?.folderState?.activeAssetIds ??
+                cachedCatalogState?.activeAssetIds ??
+                []
+              ).filter((assetId) => assetIdSet.has(assetId));
+
+              if (persistedActiveAssetIds.length > 0) {
+                setActiveAssetIds(persistedActiveAssetIds);
+              }
+            } finally {
+              const pendingHydration = persistedStateHydrationRef.current;
+              if (
+                pendingHydration &&
+                pendingHydration.folderPath === rootPath &&
+                pendingHydration.session === folderLoadSession
+              ) {
+                persistedStateHydrationRef.current = null;
+              }
+            }
+          })();
+        });
+      };
       const rawPreviewBootstrapIds = assets
         .filter((asset) => isRawFile(asset.fileName))
         .slice(0, RAW_PREVIEW_BOOTSTRAP_COUNT)
@@ -1791,13 +2223,13 @@ export function App() {
 
       setAllAssets(assets);
       bumpPhotoMetadataVersion();
-      const seededActiveAssetIds = (cachedCatalogState?.activeAssetIds ?? [])
-        .filter((assetId) => assets.some((asset) => asset.id === assetId));
-      setActiveAssetIds(seededActiveAssetIds);
+      setActiveAssetIds([]);
       setSourceFolderPath(rootPath ?? folderName);
       setHasWritableFolderAccess(writableAccess);
       setIsXmpBannerDismissed(false);
       setCurrentScreen("selection"); // instant — grid shows immediately
+      markInteractiveWork(2200);
+      hydratePersistedStateAfterPaint();
       undoRedo.reset();
       pendingXmpSyncIdsRef.current.clear();
       setXmpSyncState({
@@ -1843,14 +2275,35 @@ export function App() {
             return;
           }
 
-          enqueuePreviewWarmupForIds(rawPreviewBootstrapIds, 1, RAW_PREVIEW_BOOTSTRAP_COUNT);
+          enqueuePreviewWarmupForIds(rawPreviewBootstrapIds, 3, RAW_PREVIEW_BOOTSTRAP_COUNT);
         }, RAW_PREVIEW_WARMUP_START_DELAY_MS);
       }
 
-      // 4. Import Adobe-compatible XMP sidecars in background with limited concurrency.
+      // 4. Import Adobe-compatible XMP sidecars progressively. The first chunk
+      // is enough to make the visible grid useful; the rest must not compete
+      // with thumbnail decoding while the user starts browsing.
+      let xmpCursor = 0;
+      let editedBySidecarTotal = 0;
+
       const runXmpImport = () => {
+        xmpImportStartTimerRef.current = null;
+        if (folderLoadSessionRef.current !== folderLoadSession) {
+          return;
+        }
+
+        const chunkSize = xmpCursor === 0
+          ? XMP_IMPORT_INITIAL_COUNT
+          : XMP_IMPORT_BACKGROUND_CHUNK_SIZE;
+        const chunk = assets.slice(xmpCursor, xmpCursor + chunkSize);
+        xmpCursor += chunk.length;
+        const isInitialXmpChunk = xmpCursor === chunk.length;
+        if (chunk.length === 0) {
+          perfTimeEnd(PERF_XMP_IMPORT);
+          return;
+        }
+
         void mapWithConcurrency(
-          assets,
+          chunk,
           XMP_IMPORT_CONCURRENCY,
           async (asset) => {
             if (folderLoadSessionRef.current !== folderLoadSession) {
@@ -1867,77 +2320,114 @@ export function App() {
           }
 
           const valid = records.filter((r): r is { id: string; state: ReturnType<typeof parseXmpState> } => r !== null);
-          if (valid.length === 0) return;
-
           const selectedByXmp = valid
             .filter((r) => r.state.selected === true)
             .map((r) => r.id);
+          const recordsToApply = valid.filter((record) => {
+            const index = assetIndexByIdRef.current.get(record.id);
+            const asset = index === undefined ? null : allAssetsRef.current[index] ?? null;
+            if (!asset) {
+              return false;
+            }
 
-          startTransition(() => {
-            setAllAssets((prev) => {
-              if (prev.length === 0) {
-                return prev;
-              }
+            const hasEdits = record.state.hasCameraRawAdjustments || record.state.hasPhotoshopAdjustments;
+            const xmpEditInfo = record.state.hasCameraRawAdjustments && record.state.hasPhotoshopAdjustments
+              ? "Camera Raw + Photoshop"
+              : record.state.hasCameraRawAdjustments
+                ? "Camera Raw"
+                : record.state.hasPhotoshopAdjustments
+                  ? "Photoshop"
+                  : undefined;
+            const nextRating = record.state.rating ?? asset.rating;
+            const nextPickStatus = record.state.pickStatus ?? asset.pickStatus;
+            const nextColorLabel = record.state.colorLabel !== undefined
+              ? record.state.colorLabel
+              : asset.colorLabel;
+            const nextCustomLabels = record.state.customLabels !== undefined
+              ? record.state.customLabels
+              : asset.customLabels;
 
-              const next = prev.slice();
-              let changed = false;
-
-              for (const record of valid) {
-                const index = assetIndexByIdRef.current.get(record.id);
-                if (index === undefined) {
-                  continue;
-                }
-
-                const asset = next[index];
-                if (!asset) {
-                  continue;
-                }
-
-                const hasEdits = record.state.hasCameraRawAdjustments || record.state.hasPhotoshopAdjustments;
-                const xmpEditInfo = record.state.hasCameraRawAdjustments && record.state.hasPhotoshopAdjustments
-                  ? "Camera Raw + Photoshop"
-                  : record.state.hasCameraRawAdjustments
-                    ? "Camera Raw"
-                    : record.state.hasPhotoshopAdjustments
-                      ? "Photoshop"
-                      : undefined;
-
-                next[index] = {
-                  ...asset,
-                  rating: record.state.rating ?? asset.rating,
-                  pickStatus: record.state.pickStatus ?? asset.pickStatus,
-                  colorLabel: record.state.colorLabel !== undefined ? record.state.colorLabel : asset.colorLabel,
-                  customLabels: record.state.customLabels !== undefined ? record.state.customLabels : asset.customLabels,
-                  xmpHasEdits: hasEdits,
-                  xmpEditInfo,
-                };
-                changed = true;
-              }
-
-              return changed ? next : prev;
-            });
+            return nextRating !== asset.rating
+              || nextPickStatus !== asset.pickStatus
+              || nextColorLabel !== asset.colorLabel
+              || !areStringArraysEqual(nextCustomLabels, asset.customLabels)
+              || asset.xmpHasEdits !== hasEdits
+              || asset.xmpEditInfo !== xmpEditInfo;
           });
-          if (valid.length > 0) {
+
+          if (recordsToApply.length > 0) {
+            startTransition(() => {
+              setAllAssets((prev) => {
+                if (prev.length === 0) {
+                  return prev;
+                }
+
+                const next = prev.slice();
+                let changed = false;
+
+                for (const record of recordsToApply) {
+                  const index = assetIndexByIdRef.current.get(record.id);
+                  if (index === undefined) {
+                    continue;
+                  }
+
+                  const asset = next[index];
+                  if (!asset) {
+                    continue;
+                  }
+
+                  const hasEdits = record.state.hasCameraRawAdjustments || record.state.hasPhotoshopAdjustments;
+                  const xmpEditInfo = record.state.hasCameraRawAdjustments && record.state.hasPhotoshopAdjustments
+                    ? "Camera Raw + Photoshop"
+                    : record.state.hasCameraRawAdjustments
+                      ? "Camera Raw"
+                      : record.state.hasPhotoshopAdjustments
+                        ? "Photoshop"
+                        : undefined;
+
+                  next[index] = {
+                    ...asset,
+                    rating: record.state.rating ?? asset.rating,
+                    pickStatus: record.state.pickStatus ?? asset.pickStatus,
+                    colorLabel: record.state.colorLabel !== undefined ? record.state.colorLabel : asset.colorLabel,
+                    customLabels: record.state.customLabels !== undefined ? record.state.customLabels : asset.customLabels,
+                    xmpHasEdits: hasEdits,
+                    xmpEditInfo,
+                  };
+                  changed = true;
+                }
+
+                return changed ? next : prev;
+              });
+            });
             bumpPhotoMetadataVersion();
           }
 
-          if (selectedByXmp.length > 0) {
+          if (isInitialXmpChunk && selectedByXmp.length > 0) {
             setActiveAssetIds(selectedByXmp);
           }
 
-          const editedBySidecar = valid.filter(
+          editedBySidecarTotal += valid.filter(
             (r) => r.state.hasCameraRawAdjustments || r.state.hasPhotoshopAdjustments,
           ).length;
-          if (editedBySidecar > 0) {
-            addToast(
-              `${editedBySidecar} foto con modifiche XMP (Camera Raw/Photoshop) rilevate.`,
-              "info",
-            );
-          }
         }).catch(() => {
           // Sidecar import is best-effort only.
         }).finally(() => {
-          xmpImportStartTimerRef.current = null;
+          if (folderLoadSessionRef.current !== folderLoadSession) {
+            return;
+          }
+
+          if (xmpCursor < assets.length) {
+            xmpImportStartTimerRef.current = window.setTimeout(runXmpImport, XMP_IMPORT_BACKGROUND_DELAY_MS);
+            return;
+          }
+
+          if (editedBySidecarTotal > 0) {
+            addToast(
+              `${editedBySidecarTotal} foto con modifiche XMP (Camera Raw/Photoshop) rilevate.`,
+              "info",
+            );
+          }
           perfTimeEnd(PERF_XMP_IMPORT);
         });
       };
@@ -1991,7 +2481,7 @@ export function App() {
       const bootstrapEntries = pipelineEntries.slice(0, bootstrapCacheCount);
       const remainingEntries = pipelineEntries.slice(bootstrapCacheCount);
       interactiveThumbnailIdsRef.current = new Set(bootstrapEntries.map((entry) => entry.id));
-      setThumbnailProgress({
+      publishThumbnailProgress({
         done: 0,
         total: interactiveThumbnailIdsRef.current.size,
       });
@@ -2007,7 +2497,11 @@ export function App() {
           pipelineRef.current = new ThumbnailPipeline(
             handleThumbnailBatch,
             handleThumbnailError,
-            thumbnailOptions,
+            {
+              ...thumbnailOptions,
+              shouldDefer: shouldDeferBackgroundWork,
+              deferDelayMs: BACKGROUND_WORK_DEFER_RETRY_MS,
+            },
           );
         }
 
@@ -2045,6 +2539,9 @@ export function App() {
         enqueueVisibleThumbnailEntries(visibleThumbnailIdsRef.current, 0);
       };
 
+      const markCacheMissEntries = (entriesToMark: ThumbnailPipelineEntry[]): ThumbnailPipelineEntry[] =>
+        entriesToMark.map((entry) => ({ ...entry, skipDiskCacheRead: true }));
+
       const applyCachedThumbnails = (
         cached: Map<string, { url: string; width: number; height: number }>,
       ) => {
@@ -2054,12 +2551,8 @@ export function App() {
         for (const [assetId, hit] of cached) {
           const index = assetIndexByIdRef.current.get(assetId);
           const asset = index === undefined ? null : assetsSnapshot[index] ?? null;
-          if (!asset || !isValidCachedThumbnail(asset, hit, minimumRawCacheDimension) || asset.thumbnailUrl) {
-            try {
-              URL.revokeObjectURL(hit.url);
-            } catch {
-              // Ignore stale cache blob cleanup failures.
-            }
+          if (!asset || !isValidCachedThumbnail(asset, hit, minimumRawCacheDimension) || getThumbnailView(assetId)?.thumbnailUrl) {
+            revokeCachedThumbnailUrls([hit]);
             continue;
           }
 
@@ -2067,38 +2560,28 @@ export function App() {
         }
 
         if (validCachedIds.size > 0) {
-          startTransition(() => {
-            setAllAssets((prev) => {
+          {
               if (folderLoadSessionRef.current !== folderLoadSession) {
                 for (const assetId of validCachedIds) {
                   const hit = cached.get(assetId);
                   if (hit) {
-                    try {
-                      URL.revokeObjectURL(hit.url);
-                    } catch {
-                      // Ignore stale cache blob cleanup failures.
-                    }
+                    revokeCachedThumbnailUrls([hit]);
                   }
                 }
-                return prev;
+                validCachedIds.clear();
               }
 
-              if (prev.length === 0) {
+              if (allAssetsRef.current.length === 0) {
                 for (const assetId of validCachedIds) {
                   const hit = cached.get(assetId);
                   if (hit) {
-                    try {
-                      URL.revokeObjectURL(hit.url);
-                    } catch {
-                      // Ignore stale cache blob cleanup failures.
-                    }
+                    revokeCachedThumbnailUrls([hit]);
                   }
                 }
-                return prev;
+                validCachedIds.clear();
               }
 
-              const next = prev.slice();
-              let changed = false;
+              const nextViews: Array<[string, ThumbnailViewState]> = [];
 
               for (const [assetId, hit] of cached) {
                 if (!validCachedIds.has(assetId)) {
@@ -2107,31 +2590,29 @@ export function App() {
 
                 const index = assetIndexByIdRef.current.get(assetId);
                 if (index === undefined) {
-                  URL.revokeObjectURL(hit.url);
+                  revokeCachedThumbnailUrls([hit]);
                   continue;
                 }
 
-                const asset = next[index];
-                if (!asset || !isValidCachedThumbnail(asset, hit, minimumRawCacheDimension) || asset.thumbnailUrl) {
-                  URL.revokeObjectURL(hit.url);
+                const asset = allAssetsRef.current[index];
+                if (!asset || !isValidCachedThumbnail(asset, hit, minimumRawCacheDimension) || getThumbnailView(assetId)?.thumbnailUrl) {
+                  revokeCachedThumbnailUrls([hit]);
                   validCachedIds.delete(assetId);
                   continue;
                 }
 
-                next[index] = {
-                  ...asset,
+                nextViews.push([assetId, {
                   thumbnailUrl: hit.url,
                   width: hit.width,
                   height: hit.height,
                   orientation: detectOrientation(hit.width, hit.height),
                   aspectRatio: hit.width / hit.height,
-                };
-                changed = true;
+                  sourceFileKey: asset.sourceFileKey,
+                }]);
               }
 
-              return changed ? next : prev;
-            });
-          });
+              applyThumbnailViews(nextViews);
+          }
         }
 
         if (validCachedIds.size > 0) {
@@ -2162,6 +2643,10 @@ export function App() {
 
         backgroundCacheLookupTimerRef.current = window.setTimeout(() => {
           backgroundCacheLookupTimerRef.current = null;
+          if (shouldDeferBackgroundWork(4)) {
+            scheduleRemainingCachePhase();
+            return;
+          }
 
           const processRemainingChunk = (startIndex: number) => {
             if (folderLoadSessionRef.current !== folderLoadSession) {
@@ -2175,11 +2660,12 @@ export function App() {
 
             void loadCachedThumbnails(chunk, thumbnailOptions).then((cached) => {
               if (folderLoadSessionRef.current !== folderLoadSession) {
+                revokeCachedThumbnailUrls(cached.values());
                 return;
               }
 
               const validCachedIds = applyCachedThumbnails(cached);
-              const uncachedRemaining = chunk.filter((entry) => !validCachedIds.has(entry.id));
+              const uncachedRemaining = markCacheMissEntries(chunk.filter((entry) => !validCachedIds.has(entry.id)));
 
               for (let index = 0; index < uncachedRemaining.length; index += BACKGROUND_WARMUP_PIPELINE_CHUNK_SIZE) {
                 const pipelineChunk = uncachedRemaining.slice(index, index + BACKGROUND_WARMUP_PIPELINE_CHUNK_SIZE);
@@ -2220,11 +2706,12 @@ export function App() {
 
       void loadCachedThumbnails(bootstrapEntries, thumbnailOptions).then((cached) => {
         if (folderLoadSessionRef.current !== folderLoadSession) {
+          revokeCachedThumbnailUrls(cached.values());
           return;
         }
 
         const validCachedIds = applyCachedThumbnails(cached);
-        const uncachedBootstrap = bootstrapEntries.filter((entry) => !validCachedIds.has(entry.id));
+        const uncachedBootstrap = markCacheMissEntries(bootstrapEntries.filter((entry) => !validCachedIds.has(entry.id)));
         enqueuePipelineEntries(uncachedBootstrap, "bootstrap");
         scheduleRemainingCachePhase();
 
@@ -2235,7 +2722,7 @@ export function App() {
             }
             markGridComplete();
           });
-          setThumbnailProgress({ done: 0, total: 0 });
+          publishThumbnailProgress({ done: 0, total: 0 });
           setImportProgress((current) => ({ ...current, isOpen: false, total: 0, processed: 0 }));
         }
       }).catch(() => {
@@ -2243,7 +2730,7 @@ export function App() {
           return;
         }
 
-        setThumbnailProgress({ done: 0, total: interactiveThumbnailIdsRef.current.size });
+        publishThumbnailProgress({ done: 0, total: interactiveThumbnailIdsRef.current.size });
         setImportProgress((current) => ({
           ...current,
           isOpen: interactiveThumbnailIdsRef.current.size > 0,
@@ -2286,6 +2773,8 @@ export function App() {
       handleThumbnailError,
       markFirstThumbnailVisible,
       markGridComplete,
+      markInteractiveWork,
+      publishThumbnailProgress,
       suspendActiveFolderWork,
       syncThumbnailProgress,
       sortCacheEnabled,
@@ -2322,7 +2811,7 @@ export function App() {
           await new Promise((resolve) => window.setTimeout(resolve, delayMs));
         }
 
-        reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath);
+        reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath, { recursive: false });
         if (reopenedFolder) {
           break;
         }
@@ -2388,9 +2877,104 @@ export function App() {
     if (undoableChangedIds.size > 0) {
       undoRedo.push(allAssetsRef.current);
     }
+    allAssetsRef.current = photos;
+    assetIndexByIdRef.current = new Map(photos.map((asset, index) => [asset.id, index]));
     startTransition(() => {
       setAllAssets(photos);
     });
+    if (undoableChangedIds.size > 0) {
+      bumpPhotoMetadataVersion();
+      queueXmpSync(Array.from(undoableChangedIds));
+    }
+  }, [bumpPhotoMetadataVersion, queueXmpSync, undoRedo]);
+
+  const handlePhotoUpdates = useCallback((updates: Array<{ id: string; asset: ImageAsset }>) => {
+    if (updates.length === 0) {
+      return;
+    }
+
+    const previousAssets = allAssetsRef.current;
+    const nextAssets = previousAssets.slice();
+    const undoableChangedIds = new Set<string>();
+    const thumbnailUpdates = new Map<string, ThumbnailViewState>();
+    const thumbnailRemovals = new Set<string>();
+    let hasChanges = false;
+
+    for (const update of updates) {
+      const index = assetIndexByIdRef.current.get(update.id);
+      if (index === undefined) {
+        continue;
+      }
+
+      const previousAsset = nextAssets[index];
+      if (!previousAsset || previousAsset === update.asset) {
+        continue;
+      }
+
+      if (update.asset.thumbnailUrl) {
+        thumbnailUpdates.set(update.id, {
+          thumbnailUrl: update.asset.thumbnailUrl,
+          width: update.asset.width,
+          height: update.asset.height,
+          orientation: update.asset.orientation,
+          aspectRatio: update.asset.aspectRatio,
+          sourceFileKey: update.asset.sourceFileKey ?? previousAsset.sourceFileKey,
+        });
+      } else if (
+        update.asset.sourceFileKey &&
+        previousAsset.sourceFileKey &&
+        update.asset.sourceFileKey !== previousAsset.sourceFileKey
+      ) {
+        thumbnailRemovals.add(update.id);
+      }
+
+      const metadataAsset: ImageAsset = {
+        ...update.asset,
+        thumbnailUrl: previousAsset.thumbnailUrl,
+      };
+
+      if (hasAssetRuntimeStateChange(previousAsset, metadataAsset)) {
+        nextAssets[index] = metadataAsset;
+        hasChanges = true;
+      }
+      if (hasUndoableAssetChange(previousAsset, metadataAsset)) {
+        undoableChangedIds.add(update.id);
+      }
+    }
+
+    if (thumbnailUpdates.size > 0 || thumbnailRemovals.size > 0) {
+      (() => {
+        for (const id of thumbnailRemovals) {
+          const previousView = getThumbnailView(id);
+          if (!previousView) {
+            continue;
+          }
+          revokeThumbnailViewUrl(previousView);
+        }
+        removeThumbnailViews(thumbnailRemovals);
+        for (const [id, view] of thumbnailUpdates) {
+          const previousView = getThumbnailView(id);
+          if (previousView?.thumbnailUrl && previousView.thumbnailUrl !== view.thumbnailUrl) {
+            revokeThumbnailViewUrl(previousView);
+          }
+        }
+        applyThumbnailViews(thumbnailUpdates);
+      })();
+    }
+
+    if (!hasChanges) {
+      return;
+    }
+
+    if (undoableChangedIds.size > 0) {
+      undoRedo.push(previousAssets);
+    }
+
+    allAssetsRef.current = nextAssets;
+    startTransition(() => {
+      setAllAssets(nextAssets);
+    });
+
     if (undoableChangedIds.size > 0) {
       bumpPhotoMetadataVersion();
       queueXmpSync(Array.from(undoableChangedIds));
@@ -2674,19 +3258,9 @@ export function App() {
     );
   }, [activeAssetIds, addToast, allAssets, projectName]);
 
-  const handleOpenInAutoLayout = useCallback(async () => {
-    const result = await launchAutoLayoutFromSelection({
-      projectName,
-      sourceFolderPath,
-      allAssets,
-      activeAssetIds,
-    });
-
-    addToast(result.message, result.ok ? "success" : "error");
-  }, [activeAssetIds, addToast, allAssets, projectName, sourceFolderPath]);
-
   // ── Viewport tracking for pipeline priority ──────────────────────────
   const handleVisibleIdsChange = useCallback((ids: Set<string>) => {
+    markInteractiveWork();
     if (areSetsEqual(visibleThumbnailIdsRef.current, ids)) {
       return;
     }
@@ -2697,9 +3271,10 @@ export function App() {
       mergeSets(prioritizedThumbnailIdsRef.current, previewPriorityIdsRef.current),
     );
     flushHotThumbnailPatches();
-  }, [enqueueVisibleThumbnailEntries, flushHotThumbnailPatches]);
+  }, [enqueueVisibleThumbnailEntries, flushHotThumbnailPatches, markInteractiveWork]);
 
   const handlePriorityIdsChange = useCallback((ids: Set<string>) => {
+    markInteractiveWork();
     if (areSetsEqual(prioritizedThumbnailIdsRef.current, ids)) {
       return;
     }
@@ -2712,9 +3287,10 @@ export function App() {
       mergeSets(ids, previewPriorityIdsRef.current),
     );
     flushHotThumbnailPatches();
-  }, [enqueuePreviewWarmupForIds, enqueuePriorityThumbnailEntries, flushHotThumbnailPatches]);
+  }, [enqueuePreviewWarmupForIds, enqueuePriorityThumbnailEntries, flushHotThumbnailPatches, markInteractiveWork]);
 
   const handlePreviewPriorityIdsChange = useCallback((ids: Set<string>) => {
+    markInteractiveWork();
     if (areSetsEqual(previewPriorityIdsRef.current, ids)) {
       return;
     }
@@ -2727,7 +3303,13 @@ export function App() {
       mergeSets(prioritizedThumbnailIdsRef.current, ids),
     );
     flushHotThumbnailPatches();
-  }, [enqueuePriorityThumbnailEntries, enqueueQuickPreviewWarmupForIds, flushHotThumbnailPatches]);
+  }, [enqueuePriorityThumbnailEntries, enqueueQuickPreviewWarmupForIds, flushHotThumbnailPatches, markInteractiveWork]);
+
+  const handleScrollActivityChange = useCallback((active: boolean) => {
+    if (active) {
+      markInteractiveWork();
+    }
+  }, [markInteractiveWork]);
 
   const handleScrollLiteActiveMsChange = useCallback((activeMs: number) => {
     const roundedValue = Math.max(0, Math.round(activeMs));
@@ -3058,6 +3640,24 @@ export function App() {
                   <span>Sottocartelle viste</span>
                   <strong>{folderDiagnostics.nestedDirectoriesSeen ?? 0}</strong>
                 </div>
+                {typeof folderDiagnostics.scanMs === "number" ? (
+                  <div className="folder-diagnostics-panel__item">
+                    <span>Scan top-level</span>
+                    <strong>{Math.round(folderDiagnostics.scanMs)} ms</strong>
+                  </div>
+                ) : null}
+                {typeof folderDiagnostics.statMs === "number" ? (
+                  <div className="folder-diagnostics-panel__item">
+                    <span>Stat file</span>
+                    <strong>{Math.round(folderDiagnostics.statMs)} ms</strong>
+                  </div>
+                ) : null}
+                {folderDiagnostics.nestedScanSkipped ? (
+                  <div className="folder-diagnostics-panel__item">
+                    <span>Scan annidati</span>
+                    <strong>Rimandato</strong>
+                  </div>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -3079,11 +3679,13 @@ export function App() {
                 selectedIds={activeAssetIds}
                 onSelectionChange={handleSelectionChange}
                 onPhotosChange={handlePhotosChange}
+                onPhotoUpdates={handlePhotoUpdates}
                 onVisibleIdsChange={handleVisibleIdsChange}
                 onPriorityIdsChange={handlePriorityIdsChange}
                 onPreviewPriorityIdsChange={handlePreviewPriorityIdsChange}
                 onBackgroundPreviewOrderChange={handleBackgroundPreviewOrderChange}
                 onScrollLiteActiveMsChange={handleScrollLiteActiveMsChange}
+                onScrollActivityChange={handleScrollActivityChange}
                 onUndo={undoRedo.undo}
                 onRedo={undoRedo.redo}
                 canUndo={undoRedo.canUndo}

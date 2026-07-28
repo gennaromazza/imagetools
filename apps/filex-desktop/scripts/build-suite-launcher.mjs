@@ -15,8 +15,8 @@ await cp(sourceDir, outputDir, { recursive: true });
 await mkdir(iconsDir, { recursive: true });
 for (const toolId of [
   "suite-launcher",
-  "photo-selector-app", "auto-layout-app", "image-party-frame", "image-id-print",
-  "batch-print-layout", "archivio-flow", "image-converter", "image-file-finder", "network-drive-doctor",
+  "photo-selector-app", "image-party-frame", "batch-print-layout", "archivio-flow",
+  "image-converter", "image-file-finder",
 ]) {
   await cp(join(brandingDir, `${toolId}.png`), join(iconsDir, `${toolId}.png`));
 }

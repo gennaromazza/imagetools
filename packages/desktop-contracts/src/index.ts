@@ -1,13 +1,10 @@
 export type DesktopToolId =
   | "suite-launcher"
-  | "auto-layout-app"
   | "image-party-frame"
-  | "image-id-print"
   | "batch-print-layout"
   | "archivio-flow"
   | "image-converter"
   | "image-file-finder"
-  | "network-drive-doctor"
   | "photo-selector-app";
 
 export type DesktopReleaseChannel = "stable" | "beta";
@@ -918,14 +915,12 @@ export interface FileXDesktopApi {
   ) => Promise<{ ok: boolean; message: string }>;
   getSuiteDockState: () => Promise<DesktopDockState>;
   saveSuiteDockState: (state: Partial<DesktopDockState>) => Promise<DesktopDockState>;
-  getImageIdPrintAiStatus: () => Promise<DesktopAiSidecarStatus>;
   openFolder: (options?: DesktopFolderOpenOptions) => Promise<DesktopFolderOpenResult | null>;
   reopenFolder: (rootPath: string, options?: DesktopFolderOpenOptions) => Promise<DesktopFolderOpenResult | null>;
   consumePendingOpenFolderPath: () => Promise<string | null>;
   acknowledgeOpenFolderRequest: (folderPath?: string | null) => Promise<void>;
   markOpenFolderRequestReady: () => Promise<void>;
   onOpenFolderRequest: (listener: (folderPath: string) => void) => () => void;
-  createAutoLayoutHandoffFile: (payload: DesktopAutoLayoutHandoffFile) => Promise<string | null>;
   consumePendingOpenProjectPath: () => Promise<string | null>;
   markOpenProjectRequestReady: () => Promise<void>;
   onOpenProjectRequest: (listener: (projectPath: string) => void) => () => void;
@@ -1011,8 +1006,6 @@ export interface FileXDesktopApi {
   ) => Promise<boolean>;
   getDesktopSessionState: () => Promise<DesktopPersistedState | null>;
   saveDesktopSessionState: (state: DesktopPersistedState) => Promise<void>;
-  getAutoLayoutProjects: () => Promise<unknown[]>;
-  saveAutoLayoutProjects: (projects: unknown[]) => Promise<void>;
   chooseOutputFolder: () => Promise<string | null>;
   saveNewFileAs: (suggestedName: string, bytes: Uint8Array) => Promise<string | null>;
   writeFile: (absolutePath: string, bytes: Uint8Array) => Promise<boolean>;
@@ -1089,10 +1082,5 @@ export interface FileXDesktopApi {
   getImageFileFinderProgress: () => Promise<ImageFileFinderProgressSnapshot>;
   cancelImageFileFinderJob: () => Promise<{ ok: boolean; active: boolean }>;
   openImageFileFinderFolder: (folderPath: string) => Promise<{ ok: boolean }>;
-  getNetworkDriveConfig: () => Promise<NetworkDriveConfig>;
-  saveNetworkDriveConfig: (config: Partial<NetworkDriveConfig>) => Promise<NetworkDriveConfig>;
-  getNetworkDriveStatus: () => Promise<NetworkDriveStatusReport>;
-  repairNetworkDrive: () => Promise<NetworkDriveRepairResult>;
-  openNetworkDrive: (target: "drive" | "unc" | "credentials" | "network-settings" | "sharing-settings") => Promise<{ ok: boolean; message?: string }>;
   getPathForFile: (file: File) => string;
 }

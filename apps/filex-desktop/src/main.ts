@@ -6,7 +6,6 @@ import { readFile as readFileAsync, writeFile as writeFileAsync } from "node:fs/
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
-  DesktopAiSidecarStatus,
   DesktopDragOutCheck,
   DesktopDockState,
   DesktopEditorCandidate,
@@ -34,7 +33,6 @@ import type {
   ImageFileFinderScanRequest,
 } from "@photo-tools/desktop-contracts";
 import {
-  createAutoLayoutHandoffFileDesktop,
   copyFilesToFolderDesktop,
   moveFilesToFolderDesktop,
   openFolderDesktop,
@@ -81,7 +79,6 @@ import {
   getDesktopPreferences,
   getDesktopSessionState,
   getDesktopPerformanceSnapshot,
-  getAutoLayoutProjects,
   getFolderCatalogState,
   getRecentFolders,
   getSortCache,
@@ -89,7 +86,6 @@ import {
   recordDesktopPerformanceSnapshot,
   removeRecentFolder,
   saveDesktopPreferences,
-  saveAutoLayoutProjects,
   saveDesktopSessionState,
   saveFolderAssetStates,
   saveFolderAssetStatesDelta,
@@ -124,13 +120,6 @@ import {
   scanImageFileFinderMatchesDesktop,
   startImageFileFinderJobDesktop,
 } from "./image-file-finder-service.js";
-import {
-  diagnoseNetworkDrive,
-  getStoredNetworkDriveConfig,
-  openNetworkDriveTarget,
-  repairNetworkDrive,
-  updateNetworkDriveConfig,
-} from "./network-drive-service.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, Tray } = electron;
 
@@ -250,40 +239,6 @@ let imagePartyFrameServerModulePromise: Promise<any> | null = null;
 
 function resolveReleaseChannel(): DesktopReleaseChannel {
   return process.env.FILEX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
-}
-
-function getImageIdPrintAiStatus(): DesktopAiSidecarStatus {
-  const sidecarRoot = join(app.getPath("userData"), "image-id-print-ai");
-  const serverScriptPath = join(sidecarRoot, "rembg_server.py");
-  const requirementsPath = join(sidecarRoot, "requirements.txt");
-  const pythonCandidates = ["python", "py"];
-  let pythonFound = false;
-  for (const command of pythonCandidates) {
-    try {
-      execSync(`${command} --version`, { stdio: ["ignore", "ignore", "ignore"] });
-      pythonFound = true;
-      break;
-    } catch {
-      // continue
-    }
-  }
-
-  const hasScript = existsSync(serverScriptPath);
-  const installed = hasScript && existsSync(requirementsPath);
-  let health: DesktopAiSidecarStatus["health"] = "ok";
-  if (!hasScript) {
-    health = "missing-script";
-  } else if (!pythonFound) {
-    health = "missing-runtime";
-  }
-
-  return {
-    installed,
-    pythonFound,
-    serverScriptPath: hasScript ? serverScriptPath : null,
-    requirementsPath: existsSync(requirementsPath) ? requirementsPath : null,
-    health,
-  };
 }
 
 protocol.registerSchemesAsPrivileged([
@@ -421,10 +376,6 @@ function resolveSuiteDockEntry(): string {
   }
 
   return resolve(app.getAppPath(), ".output", "suite-launcher", "dock.html");
-}
-
-function getNetworkDriveDoctorDataDir(): string {
-  return join(app.getPath("userData"), "network-drive-doctor");
 }
 
 async function loadArchivioFlowModule(): Promise<any> {
@@ -1056,7 +1007,7 @@ function registerIpcHandlers(): void {
       toolId: requestedTool.id,
       toolName: requestedTool.displayName,
       releaseChannel: resolveReleaseChannel(),
-      aiSidecarInstalled: getImageIdPrintAiStatus().installed,
+      aiSidecarInstalled: false,
       installedTools,
     };
 
@@ -1092,7 +1043,6 @@ function registerIpcHandlers(): void {
     "filex:open-installed-tool",
     async (_event, toolId: DesktopToolId, launchArgs?: string[]) => openInstalledTool(toolId, launchArgs),
   );
-  ipcMain.handle("filex:get-image-id-print-ai-status", () => getImageIdPrintAiStatus());
   ipcMain.handle("filex:open-folder", (_event, options?: DesktopFolderOpenOptions) => openFolderDesktop(options));
   ipcMain.handle("filex:reopen-folder", (_event, rootPath: string, options?: DesktopFolderOpenOptions) =>
     reopenFolderDesktop(sanitizeDesktopPath(rootPath), options));
@@ -1128,12 +1078,6 @@ function registerIpcHandlers(): void {
       deliverOpenFolderRequest(pendingOpenFolderPath);
     }
   });
-  ipcMain.handle("filex:create-auto-layout-handoff-file", (_event, payload: { fileName?: string; content?: string }) =>
-    createAutoLayoutHandoffFileDesktop(
-      payload?.fileName ?? "photo-selector-handoff.imagetool",
-      payload?.content ?? "",
-    ),
-  );
   ipcMain.handle("filex:consume-pending-open-project-path", () => {
     const projectPath = pendingOpenProjectPath;
     pendingOpenProjectPath = null;
@@ -1405,10 +1349,6 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:save-desktop-session-state", (_event, state: DesktopPersistedState) =>
     saveDesktopSessionState(state),
   );
-  ipcMain.handle("filex:get-auto-layout-projects", () => getAutoLayoutProjects());
-  ipcMain.handle("filex:save-auto-layout-projects", (_event, projects: unknown[]) => {
-    saveAutoLayoutProjects(Array.isArray(projects) ? projects : []);
-  });
   ipcMain.handle("filex:choose-output-folder", async () => {
     const result = await dialog.showOpenDialog({
       title: "Seleziona cartella output",
@@ -1595,21 +1535,6 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:cancel-image-file-finder-job", () => cancelImageFileFinderJobDesktop());
   ipcMain.handle("filex:open-image-file-finder-folder", (_event, folderPath: string) =>
     openImageFileFinderFolderDesktop(folderPath),
-  );
-  ipcMain.handle("filex:get-network-drive-config", () =>
-    getStoredNetworkDriveConfig(getNetworkDriveDoctorDataDir()),
-  );
-  ipcMain.handle("filex:save-network-drive-config", (_event, config: Record<string, unknown>) =>
-    updateNetworkDriveConfig(getNetworkDriveDoctorDataDir(), config),
-  );
-  ipcMain.handle("filex:get-network-drive-status", () =>
-    diagnoseNetworkDrive(getNetworkDriveDoctorDataDir()),
-  );
-  ipcMain.handle("filex:repair-network-drive", () =>
-    repairNetworkDrive(getNetworkDriveDoctorDataDir()),
-  );
-  ipcMain.handle("filex:open-network-drive", (_event, target: "drive" | "unc" | "credentials" | "network-settings" | "sharing-settings") =>
-    openNetworkDriveTarget(getNetworkDriveDoctorDataDir(), target),
   );
 }
 

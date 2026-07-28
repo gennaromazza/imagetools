@@ -1,0 +1,61 @@
+@echo off
+setlocal
+
+cd /d "%~dp0"
+title IMAGETOOLS - Selezione tool
+
+where npm >nul 2>nul
+if errorlevel 1 (
+  echo npm non trovato. Installa Node.js e riprova.
+  pause
+  exit /b 1
+)
+
+if not exist "node_modules" (
+  echo Dipendenze non trovate. Avvio l'installazione...
+  call npm install
+  if errorlevel 1 (
+    echo Installazione fallita.
+    pause
+    exit /b 1
+  )
+)
+
+echo.
+echo ==============================
+echo        IMAGETOOLS SUITE
+echo ==============================
+echo.
+
+
+
+echo 1. Image Party Frame
+echo 2. Archivio Flow
+echo 3. Image Select Pro
+echo 4. Image Converter
+echo.
+set /p TOOL_CHOICE=Seleziona il tool da avviare [1-4]:
+
+if "%TOOL_CHOICE%"=="1" (
+  call "%~dp0avvia-image-party-frame.bat"
+  exit /b %errorlevel%
+)
+
+if "%TOOL_CHOICE%"=="2" (
+  call "%~dp0avvia-archivio-flow.bat"
+  exit /b %errorlevel%
+)
+
+if "%TOOL_CHOICE%"=="3" (
+  call "%~dp0avvia-photo-selector.bat"
+  exit /b %errorlevel%
+)
+
+if "%TOOL_CHOICE%"=="4" (
+  call "%~dp0avvia-image-converter.bat"
+  exit /b %errorlevel%
+)
+
+echo Scelta non valida.
+pause
+exit /b 1
