@@ -3,7 +3,11 @@ export type DesktopToolId =
   | "auto-layout-app"
   | "image-party-frame"
   | "image-id-print"
+  | "batch-print-layout"
   | "archivio-flow"
+  | "image-converter"
+  | "image-file-finder"
+  | "network-drive-doctor"
   | "photo-selector-app";
 
 export type DesktopReleaseChannel = "stable" | "beta";
@@ -120,6 +124,22 @@ export interface DesktopFolderOpenDiagnostics {
   nestedSupportedDiscardedCount: number;
   totalSupportedSeen: number;
   nestedDirectoriesSeen: number;
+  scanMs?: number;
+  statMs?: number;
+  nestedScanSkipped?: boolean;
+  recursiveScanEnabled?: boolean;
+  scannedDirectoryCount?: number;
+}
+
+export interface DesktopDockState {
+  x: number;
+  y: number;
+  opacity: number;
+  collapsed: boolean;
+}
+
+export interface DesktopFolderOpenOptions {
+  recursive?: boolean;
 }
 
 export interface DesktopFolderOpenResult {
@@ -137,11 +157,52 @@ export interface DesktopFilePayload {
   lastModified: number;
 }
 
+export interface DesktopFileStat {
+  name: string;
+  absolutePath: string;
+  size: number;
+  lastModified: number;
+}
+
 export interface DesktopRenderedImage {
   bytes: Uint8Array;
   mimeType: string;
   width: number;
   height: number;
+}
+
+export interface DesktopThumbnailFrame {
+  token: string;
+  src: string;
+  width: number;
+  height: number;
+}
+
+export interface DesktopCachedThumbnailFrame {
+  id: string;
+  frame: DesktopThumbnailFrame;
+}
+
+export interface DesktopThumbnailRequestOptions {
+  minimumEmbeddedShortSide?: number;
+  preferEmbeddedPreview?: boolean;
+  profile?: DesktopThumbnailProfile;
+  skipDiskCacheRead?: boolean;
+  allowDirectEmbeddedJpeg?: boolean;
+}
+
+export interface DesktopThumbnailBatchRequest {
+  id: string;
+  absolutePath: string;
+  maxDimension: number;
+  quality: number;
+  sourceFileKey?: string;
+  options?: DesktopThumbnailRequestOptions;
+}
+
+export interface DesktopThumbnailBatchResult {
+  id: string;
+  image: DesktopRenderedImage | null;
 }
 
 export interface DesktopPreviewOptions {
@@ -249,6 +310,18 @@ export interface DesktopPhotoSelectorPreferences {
   preferredEditorPath: string;
   ramBudgetPreset: DesktopRamBudgetPreset;
   autoAdvanceOnAction: boolean;
+}
+
+export interface DesktopPhotoSelectorProjectFile {
+  schemaVersion: 1;
+  app: "image-select-pro";
+  updatedAt: number;
+  projectName?: string;
+  preferences?: Partial<DesktopPhotoSelectorPreferences>;
+  folderState?: {
+    activeAssetIds?: string[];
+    assetStates?: DesktopFolderCatalogAssetState[];
+  };
 }
 
 export interface DesktopPersistedState {
@@ -423,6 +496,258 @@ export interface DesktopQuickPreviewWarmResult {
   failedCount: number;
 }
 
+export type ImageConverterPresetId =
+  | "web-quality"
+  | "web-light"
+  | "social"
+  | "quick-preview"
+  | "print-jpg"
+  | "raw-archive-lossless";
+
+export type ImageConverterOutputFormat = "jpg" | "webp" | "dng";
+export type ImageConverterJobStatus = "idle" | "scanning" | "running" | "completed" | "cancelled" | "error";
+
+export interface ImageConverterPreset {
+  id: ImageConverterPresetId;
+  name: string;
+  description: string;
+  maxLongEdge: number;
+  format: ImageConverterOutputFormat;
+  quality: number;
+}
+
+export interface ImageConverterInputEntry {
+  sourceRoot: string;
+  absolutePath: string;
+  relativePath: string;
+  size: number;
+  sourceKind: "bitmap" | "raw";
+}
+
+export interface ImageConverterInputIssue {
+  path: string;
+  message: string;
+}
+
+export interface ImageConverterScanResult {
+  roots: string[];
+  totalImages: number;
+  entries: ImageConverterInputEntry[];
+  issues: ImageConverterInputIssue[];
+  duplicateCount: number;
+}
+
+export interface ImageConverterJobConfig {
+  inputPaths: string[];
+  presetId: ImageConverterPresetId;
+  overrides?: {
+    maxLongEdge?: number | null;
+    targetMaxBytesMb?: number | null;
+    openOutputWhenDone?: boolean;
+  };
+}
+
+export interface ImageConverterProgressLogEntry {
+  level: "info" | "warn" | "error";
+  message: string;
+  path?: string;
+  timestamp: number;
+}
+
+export interface ImageConverterProgressSnapshot {
+  jobId: string | null;
+  status: ImageConverterJobStatus;
+  presetId: ImageConverterPresetId | null;
+  total: number;
+  completed: number;
+  generated: number;
+  skipped: number;
+  errors: number;
+  currentFile: string | null;
+  outputRoots: string[];
+  startedAt: number | null;
+  finishedAt: number | null;
+  error: string | null;
+  logs: ImageConverterProgressLogEntry[];
+}
+
+export interface ImageConverterJobStartResult {
+  ok: boolean;
+  progress: ImageConverterProgressSnapshot;
+  error?: string;
+}
+
+export type ImageFileFinderMatchMode = "exact" | "stem" | "contains";
+export type ImageFileFinderOperation = "copy" | "move";
+export type ImageFileFinderJobStatus = "idle" | "scanning" | "running" | "completed" | "cancelled" | "error";
+
+export interface ImageFileFinderInputParseResult {
+  names: string[];
+  ignoredDuplicates: string[];
+}
+
+export interface ImageFileFinderFileMatch {
+  requestedName: string;
+  absolutePath: string;
+  fileName: string;
+  relativePath: string;
+  size: number;
+}
+
+export interface ImageFileFinderMissingMatch {
+  requestedName: string;
+}
+
+export interface ImageFileFinderAmbiguousMatch {
+  requestedName: string;
+  matches: ImageFileFinderFileMatch[];
+}
+
+export interface ImageFileFinderScanIssue {
+  path: string;
+  message: string;
+}
+
+export interface ImageFileFinderScanRequest {
+  sourceFolder: string;
+  rawInput: string;
+  matchMode: ImageFileFinderMatchMode;
+}
+
+export interface ImageFileFinderScanResult {
+  sourceFolder: string;
+  requestedNames: string[];
+  ignoredDuplicates: string[];
+  matched: ImageFileFinderFileMatch[];
+  missing: ImageFileFinderMissingMatch[];
+  ambiguous: ImageFileFinderAmbiguousMatch[];
+  issues: ImageFileFinderScanIssue[];
+  scannedFiles: number;
+}
+
+export interface ImageFileFinderJobConfig extends ImageFileFinderScanRequest {
+  destinationFolder: string;
+  operation: ImageFileFinderOperation;
+}
+
+export interface ImageFileFinderProgressLogEntry {
+  level: "info" | "warn" | "error";
+  message: string;
+  path?: string;
+  timestamp: number;
+}
+
+export interface ImageFileFinderProgressSnapshot {
+  jobId: string | null;
+  status: ImageFileFinderJobStatus;
+  operation: ImageFileFinderOperation | null;
+  matchMode: ImageFileFinderMatchMode | null;
+  sourceFolder: string | null;
+  destinationFolder: string | null;
+  total: number;
+  completed: number;
+  copied: number;
+  moved: number;
+  skipped: number;
+  errors: number;
+  currentFile: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  error: string | null;
+  logs: ImageFileFinderProgressLogEntry[];
+}
+
+export interface ImageFileFinderJobStartResult {
+  ok: boolean;
+  progress: ImageFileFinderProgressSnapshot;
+  scan?: ImageFileFinderScanResult;
+  error?: string;
+}
+
+export type NetworkDriveHealth =
+  | "unknown"
+  | "healthy"
+  | "missing-mapping"
+  | "ghost-mapping"
+  | "read-only"
+  | "unreachable"
+  | "misconfigured"
+  | "error";
+
+export type NetworkDriveCheckStatus = "ok" | "warning" | "error" | "timeout" | "skipped";
+
+export interface NetworkDriveConfig {
+  driveLetter: string;
+  uncPath: string;
+  autoCheckOnStartup: boolean;
+}
+
+export interface NetworkDriveLogEntry {
+  timestamp: number;
+  level: "info" | "warn" | "error";
+  message: string;
+}
+
+export interface NetworkDriveDiagnosticItem {
+  id: string;
+  label: string;
+  status: NetworkDriveCheckStatus;
+  message: string;
+  durationMs?: number;
+}
+
+export interface NetworkDriveSpaceInfo {
+  availableBytes: number;
+  totalBytes: number;
+}
+
+export interface NetworkDriveLocalShare {
+  name: string;
+  path: string;
+  description: string;
+  uncPath: string;
+  writable: boolean | null;
+}
+
+export interface NetworkDriveMappedDrive {
+  driveLetter: string;
+  uncPath: string;
+}
+
+export interface NetworkDriveEnvironmentReport {
+  computerName: string;
+  localShares: NetworkDriveLocalShare[];
+  mappedDrives: NetworkDriveMappedDrive[];
+  roleHint: "server" | "client" | "mixed" | "unknown";
+  setupHints: string[];
+}
+
+export interface NetworkDriveStatusReport {
+  config: NetworkDriveConfig;
+  checkedAt: number;
+  health: NetworkDriveHealth;
+  summary: string;
+  humanReport: string;
+  mappedUnc: string | null;
+  mappingPresent: boolean;
+  mappingReadable: boolean;
+  mappingNavigable: boolean;
+  mappingWritable: boolean;
+  mappingTimedOut: boolean;
+  uncReachable: boolean;
+  space: NetworkDriveSpaceInfo | null;
+  environment: NetworkDriveEnvironmentReport;
+  diagnostics: NetworkDriveDiagnosticItem[];
+  logs: NetworkDriveLogEntry[];
+}
+
+export interface NetworkDriveRepairResult {
+  ok: boolean;
+  message: string;
+  status: NetworkDriveStatusReport;
+  logs: NetworkDriveLogEntry[];
+}
+
 export interface ArchivioArchiveHierarchyConfig {
   yearLevel: number | null;
   categoryLevel: number | null;
@@ -493,6 +818,7 @@ export interface ArchivioImportRequest {
 
 export interface ArchivioImportResult {
   ok: boolean;
+  incomplete?: boolean;
   job: ArchivioJob;
   reusedExistingJob?: boolean;
   copiedFiles: number;
@@ -500,6 +826,8 @@ export interface ArchivioImportResult {
   jpgGenerati: number;
   cartellaFotoFinale: string;
   errors: string[];
+  failedFiles?: string[];
+  duplicateFiles?: string[];
 }
 
 export interface ArchivioImportProgressSnapshot {
@@ -587,9 +915,11 @@ export interface FileXDesktopApi {
     toolId: DesktopToolId,
     launchArgs?: string[],
   ) => Promise<{ ok: boolean; message: string }>;
+  getSuiteDockState: () => Promise<DesktopDockState>;
+  saveSuiteDockState: (state: Partial<DesktopDockState>) => Promise<DesktopDockState>;
   getImageIdPrintAiStatus: () => Promise<DesktopAiSidecarStatus>;
-  openFolder: () => Promise<DesktopFolderOpenResult | null>;
-  reopenFolder: (rootPath: string) => Promise<DesktopFolderOpenResult | null>;
+  openFolder: (options?: DesktopFolderOpenOptions) => Promise<DesktopFolderOpenResult | null>;
+  reopenFolder: (rootPath: string, options?: DesktopFolderOpenOptions) => Promise<DesktopFolderOpenResult | null>;
   consumePendingOpenFolderPath: () => Promise<string | null>;
   acknowledgeOpenFolderRequest: (folderPath?: string | null) => Promise<void>;
   markOpenFolderRequestReady: () => Promise<void>;
@@ -601,17 +931,34 @@ export interface FileXDesktopApi {
   canStartDragOut: (absolutePaths: string[]) => Promise<DesktopDragOutCheck>;
   startDragOut: (absolutePaths: string[]) => void;
   readFile: (absolutePath: string) => Promise<DesktopFilePayload | null>;
+  statFiles: (absolutePaths: string[]) => Promise<DesktopFileStat[]>;
   getThumbnail: (
     absolutePath: string,
     maxDimension: number,
     quality: number,
     sourceFileKey?: string,
+    options?: DesktopThumbnailRequestOptions,
   ) => Promise<DesktopRenderedImage | null>;
+  getThumbnailFrame: (
+    absolutePath: string,
+    maxDimension: number,
+    quality: number,
+    sourceFileKey?: string,
+    options?: DesktopThumbnailRequestOptions,
+  ) => Promise<DesktopThumbnailFrame | null>;
+  getThumbnails: (
+    requests: DesktopThumbnailBatchRequest[],
+  ) => Promise<DesktopThumbnailBatchResult[]>;
   getCachedThumbnails: (
     entries: DesktopThumbnailCacheLookupEntry[],
     maxDimension: number,
     quality: number,
   ) => Promise<DesktopCachedThumbnail[]>;
+  getCachedThumbnailFrames: (
+    entries: DesktopThumbnailCacheLookupEntry[],
+    maxDimension: number,
+    quality: number,
+  ) => Promise<DesktopCachedThumbnailFrame[]>;
   getThumbnailCacheInfo: () => Promise<DesktopThumbnailCacheInfo>;
   chooseThumbnailCacheDirectory: () => Promise<DesktopThumbnailCacheInfo | null>;
   setThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopThumbnailCacheInfo>;
@@ -648,6 +995,7 @@ export interface FileXDesktopApi {
     editorPath: string,
     absolutePaths: string[],
   ) => Promise<DesktopSendToEditorResult>;
+  chooseImageFile: (currentPath?: string) => Promise<string | null>;
   copyFilesToFolder: (absolutePaths: string[]) => Promise<DesktopCopyFilesResult>;
   moveFilesToFolder: (absolutePaths: string[]) => Promise<DesktopMoveFilesResult>;
   saveFileAs: (absolutePath: string) => Promise<DesktopSaveFileAsResult>;
@@ -655,6 +1003,11 @@ export interface FileXDesktopApi {
   saveDesktopPreferences: (
     preferences: DesktopPhotoSelectorPreferences,
   ) => Promise<DesktopPhotoSelectorPreferences>;
+  readPhotoSelectorProjectFile: (rootPath: string) => Promise<DesktopPhotoSelectorProjectFile | null>;
+  writePhotoSelectorProjectFile: (
+    rootPath: string,
+    project: DesktopPhotoSelectorProjectFile,
+  ) => Promise<boolean>;
   getDesktopSessionState: () => Promise<DesktopPersistedState | null>;
   saveDesktopSessionState: (state: DesktopPersistedState) => Promise<void>;
   getAutoLayoutProjects: () => Promise<unknown[]>;
@@ -670,6 +1023,10 @@ export interface FileXDesktopApi {
   getFolderCatalogState: (folderPath: string) => Promise<DesktopFolderCatalogState | null>;
   saveFolderCatalogState: (state: DesktopFolderCatalogState) => Promise<void>;
   saveFolderAssetStates: (
+    folderPath: string,
+    assetStates: DesktopFolderCatalogAssetState[],
+  ) => Promise<void>;
+  saveFolderAssetStatesDelta: (
     folderPath: string,
     assetStates: DesktopFolderCatalogAssetState[],
   ) => Promise<void>;
@@ -717,4 +1074,24 @@ export interface FileXDesktopApi {
     durationMs: number;
   }>;
   openArchivioFolder: (folderPath: string) => Promise<{ ok: boolean }>;
+  getImageConverterPresets: () => Promise<ImageConverterPreset[]>;
+  chooseImageConverterFolders: () => Promise<string[]>;
+  scanImageConverterInputs: (paths: string[]) => Promise<ImageConverterScanResult>;
+  startImageConverterJob: (config: ImageConverterJobConfig) => Promise<ImageConverterJobStartResult>;
+  getImageConverterProgress: () => Promise<ImageConverterProgressSnapshot>;
+  cancelImageConverterJob: () => Promise<{ ok: boolean; active: boolean }>;
+  openImageConverterFolder: (folderPath: string) => Promise<{ ok: boolean }>;
+  chooseImageFileFinderSourceFolder: () => Promise<string | null>;
+  chooseImageFileFinderDestinationFolder: () => Promise<string | null>;
+  scanImageFileFinderMatches: (request: ImageFileFinderScanRequest) => Promise<ImageFileFinderScanResult>;
+  startImageFileFinderJob: (config: ImageFileFinderJobConfig) => Promise<ImageFileFinderJobStartResult>;
+  getImageFileFinderProgress: () => Promise<ImageFileFinderProgressSnapshot>;
+  cancelImageFileFinderJob: () => Promise<{ ok: boolean; active: boolean }>;
+  openImageFileFinderFolder: (folderPath: string) => Promise<{ ok: boolean }>;
+  getNetworkDriveConfig: () => Promise<NetworkDriveConfig>;
+  saveNetworkDriveConfig: (config: Partial<NetworkDriveConfig>) => Promise<NetworkDriveConfig>;
+  getNetworkDriveStatus: () => Promise<NetworkDriveStatusReport>;
+  repairNetworkDrive: () => Promise<NetworkDriveRepairResult>;
+  openNetworkDrive: (target: "drive" | "unc" | "credentials" | "network-settings" | "sharing-settings") => Promise<{ ok: boolean; message?: string }>;
+  getPathForFile: (file: File) => string;
 }

@@ -6,26 +6,41 @@ const toolNames = {
   'image-converter':'Image Converter', 'image-file-finder':'Trova Foto da Lista', 'network-drive-doctor':'Ripara Disco Rete'
 };
 let states = [];
+let dockState = { x: 0, y: 0, opacity: 0.94, collapsed: false };
 function render() {
-  root.innerHTML = states.map(state => `<button class="dock-item ${state.installed?'ready':'missing'}" data-id="${state.toolId}" title="${toolNames[state.toolId] || state.toolName}"><img src="./icons/${state.toolId}.png" alt="${toolNames[state.toolId] || state.toolName}" /><i></i></button>`).join('');
+  root.innerHTML = states.filter(state => state.installed).map(state => `<button class="dock-item ready" data-id="${state.toolId}" title="${toolNames[state.toolId] || state.toolName}"><img src="./icons/${state.toolId}.png" alt="${toolNames[state.toolId] || state.toolName}" /><i></i></button>`).join('');
 }
 async function refresh() { states = await api.listAvailableTools(); render(); }
 async function activate(id, button) {
   button.disabled = true;
   try {
     const state = states.find(item => item.toolId === id);
-    if (state?.installed) {
-      const result = await api.openInstalledTool(id);
-      if (!result.ok) throw new Error(result.message);
-    } else {
-      const job = await api.downloadToolUpdate(id);
-      if (job.status !== 'ready-to-apply') throw new Error(job.error || 'Download non riuscito');
-      const result = await api.applyToolUpdate(job.id);
-      if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
-      await refresh();
-    }
+    if (!state?.installed) return;
+    const result = await api.openInstalledTool(id);
+    if (!result.ok) throw new Error(result.message);
   } catch (error) { alert(error.message || String(error)); }
   finally { button.disabled = false; }
 }
 root.addEventListener('click', event => { const button = event.target.closest('[data-id]'); if (button) void activate(button.dataset.id, button); });
-refresh().catch(error => { root.innerHTML = `<span class="dock-error">${error.message || error}</span>`; });
+document.querySelector('#suite-toggle').addEventListener('click', async () => {
+  dockState = await api.saveSuiteDockState({ collapsed: !dockState.collapsed });
+  document.body.classList.toggle('collapsed', dockState.collapsed);
+});
+document.querySelector('#dock-settings').addEventListener('click', () => {
+  document.querySelector('#dock-controls').hidden = !document.querySelector('#dock-controls').hidden;
+});
+document.querySelector('#dock-opacity').addEventListener('input', async event => {
+  dockState = await api.saveSuiteDockState({ opacity: Number(event.target.value) / 100 });
+});
+document.querySelector('#dock-collapse').addEventListener('click', async () => {
+  dockState = await api.saveSuiteDockState({ collapsed: true });
+  document.body.classList.add('collapsed');
+});
+window.addEventListener('mouseup', () => { void api.saveSuiteDockState({}); });
+async function boot() {
+  dockState = await api.getSuiteDockState();
+  document.querySelector('#dock-opacity').value = String(Math.round(dockState.opacity * 100));
+  document.body.classList.toggle('collapsed', dockState.collapsed);
+  await refresh();
+}
+boot().catch(error => { root.innerHTML = `<span class="dock-error">${error.message || error}</span>`; });

@@ -1,5 +1,5 @@
 import * as electron from "electron";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
 import { unlink, readFile } from "node:fs/promises";
@@ -218,6 +218,21 @@ function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
   return Array.from(candidates);
 }
 
+function readExecutableVersion(executablePath: string): string | null {
+  if (process.platform !== "win32") return null;
+  try {
+    const escapedPath = executablePath.replace(/'/g, "''");
+    const output = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", `(Get-Item -LiteralPath '${escapedPath}').VersionInfo.ProductVersion`],
+      { encoding: "utf8", windowsHide: true, timeout: 4000 },
+    ).trim();
+    return output || null;
+  } catch {
+    return null;
+  }
+}
+
 function detectInstalledExecutable(toolId: DesktopToolId): { path: string | null; version: string | null } {
   for (const candidate of resolveExecutableCandidates(toolId)) {
     try {
@@ -226,7 +241,7 @@ function detectInstalledExecutable(toolId: DesktopToolId): { path: string | null
       if (!stats.isFile()) continue;
       return {
         path: candidate,
-        version: null,
+        version: readExecutableVersion(candidate),
       };
     } catch {
       // keep scanning next candidate

@@ -2,12 +2,13 @@ import * as electron from "electron";
 import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { writeFile as writeFileAsync } from "node:fs/promises";
+import { readFile as readFileAsync, writeFile as writeFileAsync } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type {
   DesktopAiSidecarStatus,
   DesktopDragOutCheck,
+  DesktopDockState,
   DesktopEditorCandidate,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
@@ -188,6 +189,53 @@ let pendingOpenProjectPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
 let suiteTray: TrayInstance | null = null;
 let suiteDockWindow: BrowserWindowInstance | null = null;
+const defaultSuiteDockState: DesktopDockState = { x: 0, y: 0, opacity: 0.94, collapsed: false };
+
+function getSuiteDockStatePath(): string {
+  return join(app.getPath("userData"), "suite-dock-state.json");
+}
+
+function sanitizeSuiteDockState(value: Partial<DesktopDockState> | null | undefined): DesktopDockState {
+  const x = Number(value?.x);
+  const y = Number(value?.y);
+  const opacity = Number(value?.opacity);
+  return {
+    x: Number.isFinite(x) ? Math.round(x) : defaultSuiteDockState.x,
+    y: Number.isFinite(y) ? Math.round(y) : defaultSuiteDockState.y,
+    opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0.45, opacity)) : defaultSuiteDockState.opacity,
+    collapsed: Boolean(value?.collapsed),
+  };
+}
+
+async function readSuiteDockState(): Promise<DesktopDockState> {
+  try {
+    const raw = JSON.parse(await readFileAsync(getSuiteDockStatePath(), "utf8")) as Partial<DesktopDockState>;
+    return { ...defaultSuiteDockState, ...sanitizeSuiteDockState(raw) };
+  } catch {
+    return { ...defaultSuiteDockState };
+  }
+}
+
+async function saveSuiteDockState(partial: Partial<DesktopDockState>): Promise<DesktopDockState> {
+  const current = await readSuiteDockState();
+  const bounds = suiteDockWindow && !suiteDockWindow.isDestroyed() ? suiteDockWindow.getBounds() : null;
+  const next = sanitizeSuiteDockState({
+    ...current,
+    ...partial,
+    x: bounds?.x ?? partial.x ?? current.x,
+    y: bounds?.y ?? partial.y ?? current.y,
+  });
+  if (suiteDockWindow && !suiteDockWindow.isDestroyed() && typeof partial.collapsed === "boolean") {
+    const display = screen.getDisplayMatching(suiteDockWindow.getBounds());
+    const width = next.collapsed ? 96 : Math.min(920, Math.max(680, display.workAreaSize.width - 80));
+    suiteDockWindow.setSize(width, 92, true);
+  }
+  if (suiteDockWindow && !suiteDockWindow.isDestroyed()) {
+    suiteDockWindow.setOpacity(next.opacity);
+  }
+  await writeFileAsync(getSuiteDockStatePath(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return next;
+}
 let archivioFlowTray: TrayInstance | null = null;
 let archivioFlowSdWatchTimer: NodeJS.Timeout | null = null;
 let archivioFlowKnownSdPaths = new Set<string>();
@@ -1175,6 +1223,10 @@ function registerIpcHandlers(): void {
       options?: DesktopThumbnailRequestOptions,
     ) => getDesktopThumbnail(absolutePath, maxDimension, quality, sourceFileKey, options),
   );
+  ipcMain.handle("filex:get-suite-dock-state", () => readSuiteDockState());
+  ipcMain.handle("filex:save-suite-dock-state", (_event, state: Partial<DesktopDockState>) =>
+    saveSuiteDockState(state ?? {}),
+  );
   ipcMain.handle(
     "filex:get-thumbnail-frame",
     (
@@ -1617,13 +1669,16 @@ async function createSuiteDock(): Promise<void> {
   if (requestedTool.id !== "suite-launcher" || (suiteDockWindow && !suiteDockWindow.isDestroyed())) return;
 
   const display = screen.getPrimaryDisplay();
-  const width = Math.min(920, Math.max(680, display.workAreaSize.width - 80));
+  const dockState = await readSuiteDockState();
+  const width = dockState.collapsed ? 96 : Math.min(920, Math.max(680, display.workAreaSize.width - 80));
   const height = 92;
+  const defaultX = Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2);
+  const defaultY = display.workArea.y + display.workAreaSize.height - height - 18;
   suiteDockWindow = new BrowserWindow({
     width,
     height,
-    x: Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2),
-    y: display.workArea.y + display.workAreaSize.height - height - 18,
+    x: dockState.x || defaultX,
+    y: dockState.y || defaultY,
     frame: false,
     transparent: true,
     resizable: false,
@@ -1641,6 +1696,7 @@ async function createSuiteDock(): Promise<void> {
       sandbox: false,
     },
   });
+  suiteDockWindow.setOpacity(dockState.opacity);
   suiteDockWindow.setAlwaysOnTop(true, "floating");
   suiteDockWindow.on("closed", () => { suiteDockWindow = null; });
   const entryPath = resolveSuiteDockEntry();
