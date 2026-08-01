@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-01 - FileX Suite 0.1.4
+
+### Dock adattiva
+- avvio ridotto a icona anche per gli utenti provenienti dalle versioni precedenti
+- tema chiaro o scuro sincronizzato automaticamente con Windows
+- animazione di ingrandimento più fluida e progressiva in stile macOS
+- riordino delle icone tramite trascinamento con ordine persistente
+- finestra trasparente ridimensionata al contenuto per limitare l'area occupata e l'intercettazione del mouse
+- riduzione automatica dopo l'avvio di un tool o un breve periodo di inattività
+
 ## 2026-08-01 - FileX Suite 0.1.3
 
 ### Pulizia strumenti dismessi

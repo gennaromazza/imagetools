@@ -18,11 +18,15 @@ export interface DesktopRuntimeInfo {
     installedTools: DesktopToolInstallState[];
 }
 export interface DesktopDockState {
+    schemaVersion: 2;
     x: number;
     y: number;
     opacity: number;
     collapsed: boolean;
     autoHide: boolean;
+    toolOrder: DesktopToolId[];
+    visibleToolCount: number;
+    settingsOpen: boolean;
 }
 export type DesktopToolInstallStatus = "installed" | "not-installed" | "update-available";
 export interface DesktopToolInstallState {

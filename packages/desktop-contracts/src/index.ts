@@ -129,11 +129,15 @@ export interface DesktopFolderOpenDiagnostics {
 }
 
 export interface DesktopDockState {
+  schemaVersion: 2;
   x: number;
   y: number;
   opacity: number;
   collapsed: boolean;
   autoHide: boolean;
+  toolOrder: DesktopToolId[];
+  visibleToolCount: number;
+  settingsOpen: boolean;
 }
 
 export interface DesktopFolderOpenOptions {
