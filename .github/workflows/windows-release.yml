@@ -46,13 +46,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build all Windows installers
-        run: npm run dist:filex-desktop:all-tools:win
+      - name: Build FileX Suite installer
+        run: npm run dist:filex-desktop:suite:win
 
-      - name: Generate release manifest
+      - name: Validate tool release manifest
         run: |
           cd apps/filex-desktop
-          node ./scripts/generate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL --base-url=https://github.com/${{ github.repository }}/releases/download/$env:FILEX_RELEASE_VERSION
           node ./scripts/validate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL
 
       - name: Create permanent Suite download alias
