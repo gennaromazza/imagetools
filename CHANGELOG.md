@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-08-01 - FileX Suite 0.1.3
+
+### Pulizia strumenti dismessi
+- rimossi definitivamente dal launcher ImageAlbumMaker, Ripara Disco Rete e Image ID Print
+- la Suite distribuita mostra esclusivamente i sei strumenti supportati
+- mantenuta la gestione degli installer tramite manifesto remoto con URL di release versionati
+
 ## 2026-03-27 - Desktop workflows, performance e branding
 
 Commit: `01e61e7` - `feat: improve desktop workflows and suite branding`

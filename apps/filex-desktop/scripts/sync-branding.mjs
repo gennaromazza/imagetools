@@ -15,18 +15,19 @@ const photoSelectorLogoPath = join(sourceDir, "photo_selector.png");
 const photoSelectorIconPath = join(sourceDir, "photo_selector_icon.png");
 
 const toolBranding = [
-  { toolId: "suite-launcher", sourceFile: "filex-system/suite-launcher.svg" },
+  { toolId: "suite-launcher", sourceFile: "LOGO_Image_tool.png" },
   {
     toolId: "image-party-frame",
-    sourceFile: "filex-generated/image-party-frame.png",
+    sourceFile: "party_frame_logo.png",
+    icoSourcePath: join(sourceDir, "party_frame.ico"),
   },
-  { toolId: "batch-print-layout", sourceFile: "filex-generated/batch-print-layout.png" },
-  { toolId: "archivio-flow", sourceFile: "filex-generated/archivio-flow.png" },
-  { toolId: "image-converter", sourceFile: "filex-generated/image-converter.png" },
-  { toolId: "image-file-finder", sourceFile: "filex-generated/image-file-finder.png" },
+  { toolId: "batch-print-layout", sourceFile: "LOGO_Image_tool.png" },
+  { toolId: "archivio-flow", sourceFile: "photo_Archivie.png" },
+  { toolId: "image-converter", sourceFile: "LOGO_Image_tool.png" },
+  { toolId: "image-file-finder", sourceFile: "LOGO_Image_tool.png" },
   {
     toolId: "photo-selector-app",
-    sourceFile: "filex-generated/photo-selector-app.png",
+    sourceFile: "photo_selector_icon.png",
   },
 ];
 
@@ -75,7 +76,6 @@ const coordinatedRendererCopies = [
   ["photo-selector-app.png", join(photoSelectorAssetsDir, "photo_selector_icon.png")],
   ["photo-selector-app.png", join(photoSelectorAssetsDir, "favicon.png")],
   ["image-party-frame.png", join(repoRoot, "apps", "image-party-frame", "logo.png")],
-  ["image-party-frame.ico", join(repoRoot, "apps", "image-party-frame", "favico.ico")],
   ["archivio-flow.png", join(repoRoot, "apps", "archivio-flow", "src", "assets", "photo_Archivie.png")],
 ];
 for (const [sourceName, destination] of coordinatedRendererCopies) {
