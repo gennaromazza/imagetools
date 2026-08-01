@@ -1,0 +1,40 @@
+.suite-update-panel {
+  position: relative;
+  margin: 0 0 22px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
+  border: 1px solid #8bc8a7;
+  border-radius: 16px;
+  background: linear-gradient(112deg, #effaf4, #f8fbf8);
+  box-shadow: 0 10px 28px #17482f16;
+}
+.suite-update-panel[hidden] { display: none; }
+.suite-update-panel::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: #36a97b; }
+.suite-update-copy { min-width: 0; display: grid; gap: 3px; }
+.suite-update-badge { color: #25805b; font-size: 9px; font-weight: 900; letter-spacing: 1.5px; }
+.suite-update-copy strong { font-size: 16px; }
+.suite-update-copy > span:last-of-type { color: var(--muted); font-size: 12px; }
+.suite-update-progress { position: relative; width: min(520px, 55vw); height: 5px; margin-top: 8px; overflow: hidden; border-radius: 999px; background: #dcebe2; }
+.suite-update-progress i { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #24805a, #57c88e); transition: width 200ms ease; }
+.suite-update-progress.indeterminate i { width: 38% !important; animation: suite-update-progress 1.15s ease-in-out infinite; }
+.suite-update-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.suite-update-actions button { padding: 9px 12px; border: 1px solid #b9d5c4; border-radius: 9px; background: #fff; color: #28523f; font-weight: 800; cursor: pointer; }
+.suite-update-actions button:hover { background: #edf7f1; }
+.suite-update-actions #suite-update-install { border-color: #277e59; background: #277e59; color: #fff; }
+.suite-update-actions #suite-update-dismiss { padding: 4px 8px; border: 0; background: transparent; font-size: 19px; }
+.suite-update-actions button[hidden] { display: none; }
+
+@keyframes suite-update-progress {
+  0% { transform: translateX(-105%); }
+  50% { transform: translateX(85%); }
+  100% { transform: translateX(265%); }
+}
+
+@media (max-width: 1180px) {
+  .suite-update-panel { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .suite-update-progress { width: 100%; }
+}

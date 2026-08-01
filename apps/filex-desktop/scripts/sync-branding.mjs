@@ -15,19 +15,18 @@ const photoSelectorLogoPath = join(sourceDir, "photo_selector.png");
 const photoSelectorIconPath = join(sourceDir, "photo_selector_icon.png");
 
 const toolBranding = [
-  { toolId: "suite-launcher", sourceFile: "LOGO_Image_tool.png" },
+  { toolId: "suite-launcher", sourceFile: "filex-system/suite-launcher.png" },
   {
     toolId: "image-party-frame",
-    sourceFile: "party_frame_logo.png",
-    icoSourcePath: join(sourceDir, "party_frame.ico"),
+    sourceFile: "filex-generated/image-party-frame.png",
   },
-  { toolId: "batch-print-layout", sourceFile: "LOGO_Image_tool.png" },
-  { toolId: "archivio-flow", sourceFile: "photo_Archivie.png" },
-  { toolId: "image-converter", sourceFile: "LOGO_Image_tool.png" },
-  { toolId: "image-file-finder", sourceFile: "LOGO_Image_tool.png" },
+  { toolId: "batch-print-layout", sourceFile: "filex-generated/batch-print-layout.png" },
+  { toolId: "archivio-flow", sourceFile: "filex-generated/archivio-flow.png" },
+  { toolId: "image-converter", sourceFile: "filex-generated/image-converter.png" },
+  { toolId: "image-file-finder", sourceFile: "filex-generated/image-file-finder.png" },
   {
     toolId: "photo-selector-app",
-    sourceFile: "photo_selector_icon.png",
+    sourceFile: "filex-generated/photo-selector-app.png",
   },
 ];
 

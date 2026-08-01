@@ -21,6 +21,7 @@ import type {
   DesktopQuickPreviewRequest,
   DesktopRecentFolder,
   DesktopRuntimeInfo,
+  DesktopSuiteUpdateState,
   DesktopSendToEditorResult,
   DesktopSortCacheEntry,
   DesktopToolId,
@@ -102,6 +103,12 @@ import {
   openInstalledTool,
 } from "./updater.js";
 import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault, getSuiteManagedTools } from "./tool-manifest.js";
+import {
+  checkSuiteUpdate,
+  configureSuiteUpdater,
+  getSuiteUpdateState,
+  installSuiteUpdate,
+} from "./suite-updater.js";
 import {
   cancelImageConverterJobDesktop,
   chooseImageConverterFoldersDesktop,
@@ -1048,6 +1055,9 @@ function buildMissingRendererHtml(entryPath: string): string {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle("filex:get-suite-update-state", () => getSuiteUpdateState());
+  ipcMain.handle("filex:check-suite-update", () => checkSuiteUpdate());
+  ipcMain.handle("filex:install-suite-update", () => installSuiteUpdate());
   ipcMain.handle("filex:get-runtime-info", async () => {
     let installedTools: DesktopToolInstallState[] = [];
     try {
@@ -1898,6 +1908,16 @@ if (hasSingleInstanceLock) {
     registerPreviewProtocol();
     registerCrashTelemetryHandlers();
     registerIpcHandlers();
+    configureSuiteUpdater({
+      currentVersion: app.getVersion(),
+      enabled: requestedTool.id === "suite-launcher" && app.isPackaged && process.platform === "win32",
+      allowPrerelease: resolveReleaseChannel() === "beta",
+      onState: (state: DesktopSuiteUpdateState) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("filex:suite-update-state", state);
+        }
+      },
+    });
     if (requestedTool.id === "archivio-flow" && process.platform === "win32") {
       app.setLoginItemSettings({
         openAtLogin: true,
@@ -1914,6 +1934,9 @@ if (hasSingleInstanceLock) {
     }
     createSuiteTray();
     await createSuiteDock();
+    if (requestedTool.id === "suite-launcher" && app.isPackaged) {
+      setTimeout(() => { void checkSuiteUpdate(); }, 3500);
+    }
     writeBootLog("Startup sequence completed");
 
     app.on("activate", () => {

@@ -5,6 +5,15 @@ const search = document.querySelector('#search-input');
 const title = document.querySelector('#view-title');
 const gridTitle = document.querySelector('#grid-title');
 const gridSubtitle = document.querySelector('#grid-subtitle');
+const suiteUpdatePanel = document.querySelector('#suite-update-panel');
+const suiteUpdateTitle = document.querySelector('#suite-update-title');
+const suiteUpdateMessage = document.querySelector('#suite-update-message');
+const suiteUpdateProgress = document.querySelector('.suite-update-progress');
+const suiteUpdateProgressBar = document.querySelector('#suite-update-progress-bar');
+const suiteUpdateRetry = document.querySelector('#suite-update-retry');
+const suiteUpdateLater = document.querySelector('#suite-update-later');
+const suiteUpdateInstall = document.querySelector('#suite-update-install');
+const suiteUpdateDismiss = document.querySelector('#suite-update-dismiss');
 const metadata = {
   'photo-selector-app': { icon:'select', category:'Selezione', description:'Seleziona, classifica e confronta grandi servizi fotografici.', color:'#36a97b' },
   'image-party-frame': { icon:'frame', category:'Creatività', description:'Applica cornici e composizioni per eventi e consegne.', color:'#d9695f' },
@@ -13,11 +22,97 @@ const metadata = {
   'image-converter': { icon:'convert', category:'Utility', description:'Converti e comprimi immagini e negativi RAW.', color:'#df8647' },
   'image-file-finder': { icon:'find', category:'Utility', description:'Trova e raccogli fotografie partendo da una lista.', color:'#4c9caf' },
 };
-const categories = ['Tutti','Preferiti','Recenti','Selezione','Album','Creatività','Stampa','Archivio','Utility'];
+const categories = ['Tutti','Preferiti','Recenti','Selezione','Creatività','Stampa','Archivio','Utility'];
 let states = [];
 let activeCategory = 'Tutti';
 let favorites = new Set(JSON.parse(localStorage.getItem('filex-favorites') || '[]'));
 let recent = JSON.parse(localStorage.getItem('filex-recent') || '[]');
+let suiteUpdateDeferred = false;
+let suiteInstallTimer = null;
+let suiteInstallSeconds = 0;
+
+function stopSuiteInstallCountdown() {
+  if (suiteInstallTimer) clearInterval(suiteInstallTimer);
+  suiteInstallTimer = null;
+}
+
+function formatDownloadSpeed(bytesPerSecond) {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '';
+  const megabytes = bytesPerSecond / (1024 * 1024);
+  return `${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB/s`;
+}
+
+function startSuiteInstallCountdown(version) {
+  if (suiteInstallTimer || suiteUpdateDeferred) return;
+  suiteInstallSeconds = 10;
+  suiteUpdateInstall.textContent = `Installa ora (${suiteInstallSeconds})`;
+  suiteInstallTimer = setInterval(() => {
+    suiteInstallSeconds -= 1;
+    suiteUpdateInstall.textContent = `Installa ora (${Math.max(0, suiteInstallSeconds)})`;
+    if (suiteInstallSeconds > 0) return;
+    stopSuiteInstallCountdown();
+    suiteUpdateTitle.textContent = `Installazione FileX ${version}`;
+    suiteUpdateMessage.textContent = 'La Suite verrà riavviata automaticamente.';
+    void api.installSuiteUpdate();
+  }, 1000);
+}
+
+function renderSuiteUpdate(state) {
+  const status = state?.status || 'idle';
+  const version = state?.availableVersion || '';
+  const shouldHide = ['idle', 'disabled', 'up-to-date'].includes(status) || (suiteUpdateDeferred && status !== 'installing');
+  suiteUpdatePanel.hidden = shouldHide;
+  suiteUpdateRetry.hidden = true;
+  suiteUpdateLater.hidden = true;
+  suiteUpdateInstall.hidden = true;
+  suiteUpdateDismiss.hidden = true;
+  suiteUpdateProgress.classList.remove('indeterminate');
+  suiteUpdateProgressBar.style.width = `${Math.min(100, Math.max(0, state?.percent || 0))}%`;
+  if (shouldHide) {
+    stopSuiteInstallCountdown();
+    return;
+  }
+
+  if (status === 'checking') {
+    suiteUpdateTitle.textContent = 'Controllo aggiornamenti...';
+    suiteUpdateMessage.textContent = 'Verifico la versione più recente di FileX Suite.';
+    suiteUpdateProgress.classList.add('indeterminate');
+    return;
+  }
+  if (status === 'available' || status === 'downloading') {
+    const percent = Math.round(state.percent || 0);
+    const speed = formatDownloadSpeed(state.bytesPerSecond);
+    suiteUpdateTitle.textContent = `FileX ${version} è disponibile`;
+    suiteUpdateMessage.textContent = status === 'available'
+      ? 'Preparazione del download automatico...'
+      : `Download ${percent}%${speed ? ` · ${speed}` : ''}. Puoi continuare a lavorare.`;
+    suiteUpdateLater.hidden = false;
+    return;
+  }
+  if (status === 'ready') {
+    suiteUpdateTitle.textContent = `FileX ${version} è pronto`;
+    suiteUpdateMessage.textContent = 'L’installazione partirà automaticamente. Windows potrebbe chiedere conferma.';
+    suiteUpdateProgressBar.style.width = '100%';
+    suiteUpdateLater.hidden = false;
+    suiteUpdateInstall.hidden = false;
+    startSuiteInstallCountdown(version);
+    return;
+  }
+  if (status === 'installing') {
+    stopSuiteInstallCountdown();
+    suiteUpdateTitle.textContent = `Installazione FileX ${version}`;
+    suiteUpdateMessage.textContent = 'Chiusura della Suite e applicazione dell’aggiornamento...';
+    suiteUpdateProgressBar.style.width = '100%';
+    return;
+  }
+  if (status === 'error') {
+    stopSuiteInstallCountdown();
+    suiteUpdateTitle.textContent = 'Aggiornamento non completato';
+    suiteUpdateMessage.textContent = 'La connessione non è disponibile o è instabile. FileX continuerà a funzionare normalmente.';
+    suiteUpdateRetry.hidden = false;
+    suiteUpdateDismiss.hidden = false;
+  }
+}
 
 function icon(name) { return `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`; }
 function renderNav() {
@@ -68,6 +163,28 @@ async function install(id, button = null) {
 nav.addEventListener('click', e => { const b=e.target.closest('[data-category]'); if(!b)return; activeCategory=b.dataset.category; title.textContent=activeCategory==='Tutti'?'Tutti gli strumenti':activeCategory; gridTitle.textContent=activeCategory; gridSubtitle.textContent=activeCategory==='Preferiti'?'I tool che usi di più.':activeCategory==='Recenti'?'Gli ultimi workflow aperti.':'Accesso rapido ai tuoi workflow fotografici.'; renderNav(); renderTools(); });
 search.addEventListener('input', renderTools);
 toolsGrid.addEventListener('click', async e => { const b=e.target.closest('[data-action]'); if(!b)return; const {action,id}=b.dataset; if(action==='favorite'){ favorites.has(id)?favorites.delete(id):favorites.add(id); localStorage.setItem('filex-favorites',JSON.stringify([...favorites])); renderTools(); return; } try { if(action==='open'){ b.disabled=true; const result=await api.openInstalledTool(id); if(!result.ok) throw new Error(result.message); recent=[id,...recent.filter(x=>x!==id)].slice(0,6); localStorage.setItem('filex-recent',JSON.stringify(recent)); b.disabled=false; } else await install(id,b); } catch(error){ b.disabled=false; alert(error.message||String(error)); } });
-document.querySelector('#refresh-btn').addEventListener('click', refresh);
+document.querySelector('#refresh-btn').addEventListener('click', () => {
+  suiteUpdateDeferred = false;
+  void Promise.all([refresh(), api.checkSuiteUpdate()]);
+});
 document.querySelector('#install-missing-btn').addEventListener('click', async e => { e.currentTarget.disabled=true; try { for(const item of states.filter(x=>!x.installed)) await install(item.toolId); } catch(error){ alert(error.message||String(error)); } finally { e.currentTarget.disabled=false; } });
+suiteUpdateRetry.addEventListener('click', () => {
+  suiteUpdateDeferred = false;
+  void api.checkSuiteUpdate();
+});
+suiteUpdateLater.addEventListener('click', () => {
+  suiteUpdateDeferred = true;
+  stopSuiteInstallCountdown();
+  suiteUpdatePanel.hidden = true;
+});
+suiteUpdateInstall.addEventListener('click', () => {
+  stopSuiteInstallCountdown();
+  void api.installSuiteUpdate();
+});
+suiteUpdateDismiss.addEventListener('click', () => {
+  suiteUpdateDeferred = true;
+  suiteUpdatePanel.hidden = true;
+});
+api.onSuiteUpdateState(renderSuiteUpdate);
+void api.getSuiteUpdateState().then(renderSuiteUpdate);
 renderNav(); refresh().catch(error => { document.querySelector('#runtime-info').textContent=`Errore: ${error.message||error}`; });

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-01 - FileX Suite 0.1.5
+
+### Aggiornamento automatico della Suite
+- controllo automatico della versione stabile all'avvio
+- download in background con avanzamento e velocità visibili nel launcher
+- verifica SHA-512 dell'installer tramite electron-updater
+- installazione automatica con conto alla rovescia, possibilità di installare subito o rimandare
+- gestione non bloccante delle connessioni lente o temporaneamente assenti
+- pubblicazione obbligatoria di `latest.yml` e blockmap nelle release future
+
 ## 2026-08-01 - FileX Suite 0.1.4
 
 ### Dock adattiva
