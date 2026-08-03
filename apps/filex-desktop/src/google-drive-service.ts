@@ -1,0 +1,443 @@
+import { createServer, type Server } from "node:http";
+import { createHash, randomBytes } from "node:crypto";
+import { appendFile, readFile, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import * as electron from "electron";
+import type {
+  DesktopCloudProjectManifest,
+  DesktopCloudProjectVersion,
+  DesktopGoogleDriveStatus,
+} from "@photo-tools/desktop-contracts";
+import {
+  GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET,
+} from "./google-drive-config.generated.js";
+
+const { app, safeStorage, shell } = electron;
+
+// The sync searches a shared application folder and its version files on every
+// computer. The per-file scope cannot reliably discover a folder that was
+// created on another computer, so the Drive integration needs the full Drive
+// scope for this workflow.
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
+const DRIVE_ROOT_FOLDER = "Image Select Pro";
+const TOKEN_FILE_NAME = "google-drive-token.bin";
+const FOLDER_MIME = "application/vnd.google-apps.folder";
+
+interface StoredToken {
+  refreshToken: string;
+  accessToken?: string;
+  expiresAt?: number;
+  accountEmail?: string;
+  scope?: string;
+}
+
+interface DriveFile {
+  id: string;
+  name?: string;
+  createdTime?: string;
+  size?: string;
+}
+
+interface DriveListResponse {
+  files?: DriveFile[];
+}
+
+let cachedToken: StoredToken | null | undefined;
+
+function tokenPath(): string {
+  return join(app.getPath("userData"), TOKEN_FILE_NAME);
+}
+
+async function writeDriveLog(message: string, details?: string): Promise<void> {
+  try {
+    await appendFile(
+      join(app.getPath("userData"), "google-drive.log"),
+      `${new Date().toISOString()} ${message}${details ? ` :: ${details.slice(0, 1000)}` : ""}\n`,
+      "utf8",
+    );
+  } catch {
+    // Diagnostics must never interfere with the Drive operation.
+  }
+}
+
+async function loadToken(): Promise<StoredToken | null> {
+  if (cachedToken !== undefined) {
+    return cachedToken;
+  }
+
+  try {
+    const encoded = await readFile(tokenPath(), "utf8");
+    const raw = safeStorage.isEncryptionAvailable()
+      ? safeStorage.decryptString(Buffer.from(encoded, "base64"))
+      : encoded;
+    const parsed = JSON.parse(raw) as StoredToken;
+    if (parsed.scope !== DRIVE_SCOPE) {
+      cachedToken = null;
+      await unlink(tokenPath()).catch(() => undefined);
+      return null;
+    }
+    cachedToken = parsed;
+    return cachedToken;
+  } catch {
+    cachedToken = null;
+    return null;
+  }
+}
+
+async function saveToken(token: StoredToken): Promise<void> {
+  const raw = JSON.stringify(token);
+  const encoded = safeStorage.isEncryptionAvailable()
+    ? safeStorage.encryptString(raw).toString("base64")
+    : raw;
+  await writeFile(tokenPath(), encoded, "utf8");
+  cachedToken = token;
+}
+
+async function clearToken(): Promise<void> {
+  cachedToken = null;
+  try {
+    await unlink(tokenPath());
+  } catch {
+    // The token may already be absent.
+  }
+}
+
+function jsonHeaders(): HeadersInit {
+  return { "Content-Type": "application/json" };
+}
+
+async function exchangeRefreshToken(token: StoredToken): Promise<string> {
+  if (token.accessToken && token.expiresAt && token.expiresAt > Date.now() + 60_000) {
+    return token.accessToken;
+  }
+
+  const response = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      ...(GOOGLE_CLIENT_SECRET ? { client_secret: GOOGLE_CLIENT_SECRET } : {}),
+      refresh_token: token.refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Google token refresh failed (${response.status})`);
+  }
+
+  const payload = await response.json() as { access_token?: string; expires_in?: number };
+  if (!payload.access_token) {
+    throw new Error("Google non ha restituito un access token valido.");
+  }
+
+  token.accessToken = payload.access_token;
+  token.expiresAt = Date.now() + (payload.expires_in ?? 3600) * 1000;
+  await saveToken(token);
+  return token.accessToken;
+}
+
+async function driveFetch(
+  path: string,
+  init: RequestInit = {},
+  retry = true,
+): Promise<Response> {
+  const token = await loadToken();
+  if (!token) {
+    throw new Error("Google Drive non è collegato.");
+  }
+
+  const accessToken = await exchangeRefreshToken(token);
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  const response = await fetch(`https://www.googleapis.com/drive/v3${path}`, { ...init, headers });
+  void writeDriveLog("Drive API response", `${init.method ?? "GET"} ${path} -> ${response.status}`);
+
+  if (response.status === 401 && retry) {
+    token.accessToken = undefined;
+    token.expiresAt = undefined;
+    await saveToken(token);
+    return driveFetch(path, init, false);
+  }
+
+  return response;
+}
+
+async function ensureResponse(response: Response): Promise<Response> {
+  if (response.ok) {
+    return response;
+  }
+
+  const message = await response.text().catch(() => "");
+  if (
+    response.status === 403
+    && /insufficient\s+(authentication\s+)?scopes|insufficientpermissions/i.test(message)
+  ) {
+    await clearToken();
+    throw new Error(
+      "I permessi Google Drive del collegamento sono insufficienti. Premi nuovamente «Collega Drive» per autorizzare l'accesso ai progetti.",
+    );
+  }
+  throw new Error(`Google Drive error (${response.status})${message ? `: ${message.slice(0, 300)}` : ""}`);
+}
+
+function escapeDriveQuery(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+async function listFiles(query: string): Promise<DriveFile[]> {
+  const params = new URLSearchParams({
+    q: query,
+    spaces: "drive",
+    pageSize: "1000",
+    fields: "files(id,name,createdTime,size)",
+    orderBy: "createdTime desc",
+  });
+  const response = await ensureResponse(await driveFetch(`/files?${params.toString()}`));
+  const payload = await response.json() as DriveListResponse;
+  return payload.files ?? [];
+}
+
+async function createFolder(name: string, parentId?: string): Promise<DriveFile> {
+  const metadata = {
+    name,
+    mimeType: FOLDER_MIME,
+    ...(parentId ? { parents: [parentId] } : {}),
+  };
+  const response = await ensureResponse(await driveFetch("/files", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(metadata),
+  }));
+  return await response.json() as DriveFile;
+}
+
+async function ensureFolder(name: string, parentId?: string): Promise<DriveFile> {
+  const parentQuery = parentId ? ` and '${escapeDriveQuery(parentId)}' in parents` : "";
+  const files = await listFiles(
+    `name = '${escapeDriveQuery(name)}' and mimeType = '${FOLDER_MIME}' and trashed = false${parentQuery}`,
+  );
+  return files[0] ?? createFolder(name, parentId);
+}
+
+async function uploadManifest(
+  parentId: string,
+  fileName: string,
+  manifest: DesktopCloudProjectManifest,
+): Promise<DriveFile> {
+  const boundary = `filex-${randomBytes(12).toString("hex")}`;
+  const metadata = JSON.stringify({
+    name: fileName,
+    mimeType: "application/json",
+    parents: [parentId],
+  });
+  const content = JSON.stringify(manifest, null, 2);
+  const body = [
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n`,
+    `--${boundary}\r\nContent-Type: application/json\r\n\r\n${content}\r\n`,
+    `--${boundary}--\r\n`,
+  ].join("");
+  const response = await ensureResponse(await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,createdTime,size",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${await exchangeRefreshToken((await loadToken()) as StoredToken)}`,
+        "Content-Type": `multipart/related; boundary=${boundary}`,
+      },
+      body,
+    },
+  ));
+  void writeDriveLog("Drive upload response", `${fileName} -> ${response.status}`);
+  return await response.json() as DriveFile;
+}
+
+async function readDriveFile(fileId: string): Promise<DesktopCloudProjectManifest> {
+  const response = await ensureResponse(await driveFetch(`/files/${encodeURIComponent(fileId)}?alt=media`));
+  const manifest = await response.json() as DesktopCloudProjectManifest;
+  if (manifest.schemaVersion !== 1 || manifest.app !== "image-select-pro") {
+    throw new Error("Il progetto Google Drive non è compatibile con Image Select Pro.");
+  }
+  return manifest;
+}
+
+async function getAccountEmail(token: StoredToken): Promise<string | null> {
+  const accessToken = await exchangeRefreshToken(token);
+  const response = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) {
+    return null;
+  }
+  const payload = await response.json() as { email?: string };
+  return payload.email ?? null;
+}
+
+function statusFor(token: StoredToken | null): DesktopGoogleDriveStatus {
+  return {
+    configured: Boolean(GOOGLE_CLIENT_ID),
+    connected: Boolean(token),
+    accountEmail: token?.accountEmail ?? null,
+  };
+}
+
+export async function getGoogleDriveStatus(): Promise<DesktopGoogleDriveStatus> {
+  const token = await loadToken();
+  void writeDriveLog("Status requested", statusFor(token).connected ? "connected" : "disconnected");
+  return statusFor(token);
+}
+
+export async function connectGoogleDrive(): Promise<DesktopGoogleDriveStatus> {
+  const existing = await loadToken();
+  if (existing) {
+    existing.accountEmail = existing.accountEmail ?? (await getAccountEmail(existing)) ?? undefined;
+    await saveToken(existing);
+    return statusFor(existing);
+  }
+
+  const state = randomBytes(24).toString("hex");
+  const codeVerifier = randomBytes(48).toString("base64url");
+  const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
+  let callbackServer: Server | null = null;
+  let resolveCallback: ((value: URL) => void) | null = null;
+  let rejectCallback: ((reason?: unknown) => void) | null = null;
+  const callback = new Promise<URL>((resolve, reject) => {
+    resolveCallback = resolve;
+    rejectCallback = reject;
+  });
+
+  callbackServer = createServer((request, response) => {
+    try {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (url.pathname !== "/oauth2callback") {
+        response.writeHead(404).end();
+        return;
+      }
+      response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      response.end("<h2>Autorizzazione Google ricevuta. Puoi tornare a Image Select Pro.</h2>");
+      if (url.searchParams.get("state") !== state) {
+        rejectCallback?.(new Error("Risposta OAuth non valida."));
+        return;
+      }
+      if (url.searchParams.get("error")) {
+        rejectCallback?.(new Error(`Autorizzazione Google annullata: ${url.searchParams.get("error")}`));
+        return;
+      }
+      resolveCallback?.(url);
+    } catch (error) {
+      rejectCallback?.(error);
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    callbackServer?.once("error", reject);
+    callbackServer?.listen(0, "127.0.0.1", () => resolve());
+  });
+
+  const address = callbackServer.address();
+  if (!address || typeof address === "string") {
+    callbackServer.close();
+    throw new Error("Non è stato possibile avviare il callback OAuth locale.");
+  }
+  const redirectUri = `http://127.0.0.1:${address.port}/oauth2callback`;
+  const authParams = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: `openid email ${DRIVE_SCOPE}`,
+    access_type: "offline",
+    prompt: "consent",
+    state,
+    code_challenge: codeChallenge,
+    code_challenge_method: "S256",
+  });
+
+  try {
+    await shell.openExternal(`https://accounts.google.com/o/oauth2/v2/auth?${authParams.toString()}`);
+    const callbackUrl = await Promise.race([
+      callback,
+      new Promise<URL>((_, reject) => setTimeout(() => reject(new Error("Login Google scaduto.")), 180_000)),
+    ]);
+    const code = callbackUrl.searchParams.get("code");
+    if (!code) {
+      throw new Error("Google non ha restituito il codice di autorizzazione.");
+    }
+
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        ...(GOOGLE_CLIENT_SECRET ? { client_secret: GOOGLE_CLIENT_SECRET } : {}),
+        code,
+        code_verifier: codeVerifier,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+    if (!tokenResponse.ok) {
+      const details = await tokenResponse.text().catch(() => "");
+      throw new Error(
+        `Autorizzazione Google fallita (${tokenResponse.status})${details ? `: ${details.slice(0, 500)}` : "."}`,
+      );
+    }
+    const payload = await tokenResponse.json() as { refresh_token?: string; access_token?: string; expires_in?: number };
+    if (!payload.refresh_token) {
+      throw new Error("Google non ha restituito un refresh token.");
+    }
+    const token: StoredToken = {
+      refreshToken: payload.refresh_token,
+      accessToken: payload.access_token,
+      expiresAt: Date.now() + (payload.expires_in ?? 3600) * 1000,
+      scope: DRIVE_SCOPE,
+    };
+    token.accountEmail = (await getAccountEmail(token)) ?? undefined;
+    await saveToken(token);
+    return statusFor(token);
+  } finally {
+    callbackServer.close();
+  }
+}
+
+export async function disconnectGoogleDrive(): Promise<DesktopGoogleDriveStatus> {
+  await clearToken();
+  return statusFor(null);
+}
+
+export async function exportPhotoSelectorProjectToDrive(
+  manifest: DesktopCloudProjectManifest,
+): Promise<DesktopCloudProjectVersion> {
+  await writeDriveLog("Export started", `${manifest.projectName} (${manifest.assets.length} assets)`);
+  const root = await ensureFolder(DRIVE_ROOT_FOLDER);
+  const projectFolder = await ensureFolder(manifest.projectName || "Senza nome", root.id);
+  const timestamp = manifest.exportedAt.replace(/[:.]/g, "-");
+  const fileName = `${timestamp}__${manifest.projectName || "project"}.json`.replace(/[\\/:*?"<>|]+/g, "-");
+  const file = await uploadManifest(projectFolder.id, fileName, manifest);
+  await writeDriveLog("Export completed", file.id);
+  return {
+    id: file.id,
+    name: file.name ?? fileName,
+    createdAt: file.createdTime ?? manifest.exportedAt,
+    size: Number(file.size ?? 0),
+  };
+}
+
+export async function listPhotoSelectorDriveVersions(
+  projectName: string,
+): Promise<DesktopCloudProjectVersion[]> {
+  const root = await ensureFolder(DRIVE_ROOT_FOLDER);
+  const projectFolder = await ensureFolder(projectName || "Senza nome", root.id);
+  const files = await listFiles(`'${escapeDriveQuery(projectFolder.id)}' in parents and trashed = false and mimeType = 'application/json'`);
+  return files.map((file) => ({
+    id: file.id,
+    name: file.name ?? "Versione senza nome",
+    createdAt: file.createdTime ?? new Date().toISOString(),
+    size: Number(file.size ?? 0),
+  }));
+}
+
+export async function downloadPhotoSelectorDriveVersion(
+  versionId: string,
+): Promise<DesktopCloudProjectManifest> {
+  return readDriveFile(versionId);
+}

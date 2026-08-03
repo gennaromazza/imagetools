@@ -9,6 +9,7 @@ playwright-report/
 test-results/
 TEST FOTO/
 *.env
+apps/filex-desktop/src/google-drive-config.generated.ts
 apps/image-party-frame/exports/
 apps/image-party-frame/uploads/
 apps/image-party-frame/temp-test.png
