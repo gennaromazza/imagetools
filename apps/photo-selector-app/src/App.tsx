@@ -509,6 +509,7 @@ export function App() {
   const pipelineRef = useRef<ThumbnailPipeline | null>(null);
   const previewWarmupPipelineRef = useRef<PreviewWarmupPipeline | null>(null);
   const [thumbnailProgress, setThumbnailProgress] = useState({ done: 0, total: 0 });
+  const [thumbnailViewVersion, setThumbnailViewVersion] = useState(0);
   const [thumbnailProfile, setThumbnailProfile] = useState<ThumbnailProfile>(
     initialPreferencesRef.current.thumbnailProfile,
   );
@@ -603,6 +604,14 @@ export function App() {
   const thumbnailPatchFlushTimerRef = useRef<number | null>(null);
   const thumbnailPatchLastFlushAtRef = useRef(0);
   const thumbnailPipelineMetricsRef = useRef<ThumbnailPipelineMetrics>(createThumbnailPipelineMetrics());
+  const applyThumbnailViewsAndNotify = useCallback((updates: Iterable<[string, ThumbnailViewState]>) => {
+    const entries = Array.from(updates);
+    if (entries.length === 0) {
+      return;
+    }
+    applyThumbnailViews(entries);
+    setThumbnailViewVersion((current) => current + 1);
+  }, []);
   const catalogPersistTimerRef = useRef<number | null>(null);
   const catalogIdentitySignatureRef = useRef<string>("");
   const catalogAssetStateSignatureRef = useRef(new Map<string, string>());
@@ -1456,7 +1465,7 @@ export function App() {
       thumbnailPatchStoreRef.current.delete(id);
     }
 
-    applyThumbnailViews(nextViews);
+    applyThumbnailViewsAndNotify(nextViews);
 
     updateThumbnailPipelineMetrics((current) => ({
       reactCommitCount: current.reactCommitCount + 1,
@@ -1481,7 +1490,7 @@ export function App() {
     });
 
     return applicableIds.length;
-  }, [markFirstThumbnailVisible, updateThumbnailPipelineMetrics]);
+  }, [applyThumbnailViewsAndNotify, markFirstThumbnailVisible, updateThumbnailPipelineMetrics]);
 
   const flushDeferredThumbnailPatchQueue = useCallback(() => {
     if (thumbnailPatchFlushRafRef.current !== null) {
@@ -2606,7 +2615,7 @@ export function App() {
                 }]);
               }
 
-              applyThumbnailViews(nextViews);
+              applyThumbnailViewsAndNotify(nextViews);
           }
         }
 
@@ -2953,7 +2962,7 @@ export function App() {
             revokeThumbnailViewUrl(previousView);
           }
         }
-        applyThumbnailViews(thumbnailUpdates);
+        applyThumbnailViewsAndNotify(thumbnailUpdates);
       })();
     }
 
@@ -3387,6 +3396,14 @@ export function App() {
 
   // ── Computed values ──────────────────────────────────────────────────
 
+  const assetsWithThumbnailViews = useMemo(
+    () => allAssets.map((asset) => {
+      const thumbnailView = getThumbnailView(asset.id);
+      return thumbnailView ? { ...asset, ...thumbnailView } : asset;
+    }),
+    [allAssets, thumbnailViewVersion],
+  );
+
   const isGeneratingThumbnails =
     thumbnailProgress.total > 0 && thumbnailProgress.done < thumbnailProgress.total;
   const shouldShowXmpBanner =
@@ -3579,7 +3596,7 @@ export function App() {
           {currentScreen === "selection" ? (
             <div className="app-section app-section--full">
               <PhotoSelector
-                photos={allAssets}
+                photos={assetsWithThumbnailViews}
                 metadataVersion={photoMetadataVersion}
                 sourceFolderPath={sourceFolderPath}
                 selectedIds={activeAssetIds}
