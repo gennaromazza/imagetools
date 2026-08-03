@@ -101,6 +101,15 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:read-photo-selector-project-file", rootPath),
   writePhotoSelectorProjectFile: (rootPath, project) =>
     ipcRenderer.invoke("filex:write-photo-selector-project-file", rootPath, project),
+  getGoogleDriveStatus: () => ipcRenderer.invoke("filex:get-google-drive-status"),
+  connectGoogleDrive: () => ipcRenderer.invoke("filex:connect-google-drive"),
+  disconnectGoogleDrive: () => ipcRenderer.invoke("filex:disconnect-google-drive"),
+  exportPhotoSelectorProjectToDrive: (manifest) =>
+    ipcRenderer.invoke("filex:export-photo-selector-project-to-drive", manifest),
+  listPhotoSelectorDriveVersions: (projectName) =>
+    ipcRenderer.invoke("filex:list-photo-selector-drive-versions", projectName),
+  downloadPhotoSelectorDriveVersion: (versionId) =>
+    ipcRenderer.invoke("filex:download-photo-selector-drive-version", versionId),
   getDesktopSessionState: () => ipcRenderer.invoke("filex:get-desktop-session-state"),
   saveDesktopSessionState: (state) => ipcRenderer.invoke("filex:save-desktop-session-state", state),
   chooseOutputFolder: () => ipcRenderer.invoke("filex:choose-output-folder"),

@@ -1397,18 +1397,18 @@ img {
 }
 
 /* Color label border tint on card image wrapper */
-.photo-card--color-red:not(.photo-card--selected) .photo-card__image-wrapper    { border-color: rgba(185, 101, 88, 0.85); }
-.photo-card--color-yellow:not(.photo-card--selected) .photo-card__image-wrapper { border-color: rgba(215, 185, 95, 0.85); }
-.photo-card--color-green:not(.photo-card--selected) .photo-card__image-wrapper  { border-color: rgba(111, 159, 104, 0.85); }
-.photo-card--color-blue:not(.photo-card--selected) .photo-card__image-wrapper   { border-color: rgba(95, 137, 200, 0.85); }
-.photo-card--color-purple:not(.photo-card--selected) .photo-card__image-wrapper { border-color: rgba(139, 111, 199, 0.85); }
+.photo-card--color-red .photo-card__image-wrapper    { border-color: rgba(185, 101, 88, 0.85); }
+.photo-card--color-yellow .photo-card__image-wrapper { border-color: rgba(215, 185, 95, 0.85); }
+.photo-card--color-green .photo-card__image-wrapper  { border-color: rgba(111, 159, 104, 0.85); }
+.photo-card--color-blue .photo-card__image-wrapper   { border-color: rgba(95, 137, 200, 0.85); }
+.photo-card--color-purple .photo-card__image-wrapper { border-color: rgba(139, 111, 199, 0.85); }
 
-.photo-card--custom-sand:not(.photo-card--selected) .photo-card__image-wrapper   { border-color: rgba(184, 154, 99, 0.85); }
-.photo-card--custom-rose:not(.photo-card--selected) .photo-card__image-wrapper   { border-color: rgba(194, 104, 122, 0.85); }
-.photo-card--custom-green:not(.photo-card--selected) .photo-card__image-wrapper  { border-color: rgba(89, 163, 115, 0.85); }
-.photo-card--custom-blue:not(.photo-card--selected) .photo-card__image-wrapper   { border-color: rgba(80, 136, 209, 0.85); }
-.photo-card--custom-purple:not(.photo-card--selected) .photo-card__image-wrapper { border-color: rgba(148, 108, 199, 0.85); }
-.photo-card--custom-slate:not(.photo-card--selected) .photo-card__image-wrapper  { border-color: rgba(115, 132, 147, 0.85); }
+.photo-card--custom-sand .photo-card__image-wrapper   { border-color: rgba(184, 154, 99, 0.85); }
+.photo-card--custom-rose .photo-card__image-wrapper   { border-color: rgba(194, 104, 122, 0.85); }
+.photo-card--custom-green .photo-card__image-wrapper  { border-color: rgba(89, 163, 115, 0.85); }
+.photo-card--custom-blue .photo-card__image-wrapper   { border-color: rgba(80, 136, 209, 0.85); }
+.photo-card--custom-purple .photo-card__image-wrapper { border-color: rgba(148, 108, 199, 0.85); }
+.photo-card--custom-slate .photo-card__image-wrapper  { border-color: rgba(115, 132, 147, 0.85); }
 
 .photo-card__image {
   width: 100%;
@@ -2029,6 +2029,92 @@ img {
   max-height: min(58vh, 760px);
   overflow-y: auto;
   padding-right: 0.25rem;
+}
+
+.modal-panel--drive-picker {
+  width: min(620px, 100%);
+}
+
+.drive-version-picker__list {
+  gap: 0.65rem;
+}
+
+.drive-version-picker__option {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(20, 24, 22, 0.62);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.drive-version-picker__option:hover,
+.drive-version-picker__option:focus-visible {
+  border-color: var(--accent);
+  background: rgba(59, 77, 66, 0.72);
+  transform: translateY(-1px);
+}
+
+.drive-version-picker__number {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(201, 164, 103, 0.18);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.drive-version-picker__details {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.drive-version-picker__details strong,
+.drive-version-picker__details span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drive-version-picker__details span {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+}
+
+.drive-version-picker__arrow {
+  color: var(--accent-strong);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.drive-manual-root-picker__label {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+.drive-manual-root-picker__input {
+  width: 100%;
+  padding: 0.78rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(20, 24, 22, 0.72);
+  color: var(--text);
+  font: inherit;
+}
+
+.drive-manual-root-picker__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── 12. Modal photo card ─────────────────────────────────────────────── */

@@ -279,6 +279,39 @@ export interface DesktopPhotoSelectorProjectFile {
         assetStates?: DesktopFolderCatalogAssetState[];
     };
 }
+export interface DesktopCloudPhotoState {
+    relativePath: string;
+    fileName: string;
+    size?: number;
+    sourceFileKey?: string;
+    rating: number;
+    pickStatus: DesktopPickStatus;
+    colorLabel: DesktopColorLabel | null;
+    customLabels: string[];
+    active?: boolean;
+}
+export interface DesktopCloudProjectManifest {
+    schemaVersion: 1;
+    app: "image-select-pro";
+    projectId: string;
+    projectName: string;
+    sourceFolderName: string;
+    exportedAt: string;
+    exportedFrom?: string;
+    activeRelativePaths: string[];
+    assets: DesktopCloudPhotoState[];
+}
+export interface DesktopCloudProjectVersion {
+    id: string;
+    name: string;
+    createdAt: string;
+    size: number;
+}
+export interface DesktopGoogleDriveStatus {
+    configured: boolean;
+    connected: boolean;
+    accountEmail: string | null;
+}
 export interface DesktopPersistedState {
     projectName: string;
     sourceFolderPath: string;
@@ -822,6 +855,12 @@ export interface FileXDesktopApi {
     saveDesktopPreferences: (preferences: DesktopPhotoSelectorPreferences) => Promise<DesktopPhotoSelectorPreferences>;
     readPhotoSelectorProjectFile: (rootPath: string) => Promise<DesktopPhotoSelectorProjectFile | null>;
     writePhotoSelectorProjectFile: (rootPath: string, project: DesktopPhotoSelectorProjectFile) => Promise<boolean>;
+    getGoogleDriveStatus: () => Promise<DesktopGoogleDriveStatus>;
+    connectGoogleDrive: () => Promise<DesktopGoogleDriveStatus>;
+    disconnectGoogleDrive: () => Promise<DesktopGoogleDriveStatus>;
+    exportPhotoSelectorProjectToDrive: (manifest: DesktopCloudProjectManifest) => Promise<DesktopCloudProjectVersion>;
+    listPhotoSelectorDriveVersions: (projectName: string) => Promise<DesktopCloudProjectVersion[]>;
+    downloadPhotoSelectorDriveVersion: (versionId: string) => Promise<DesktopCloudProjectManifest>;
     getDesktopSessionState: () => Promise<DesktopPersistedState | null>;
     saveDesktopSessionState: (state: DesktopPersistedState) => Promise<void>;
     chooseOutputFolder: () => Promise<string | null>;

@@ -5,6 +5,20 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "no
 import { readFile as readFileAsync, writeFile as writeFileAsync } from "node:fs/promises";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+
+// When the app is launched from a terminal that is later closed, Node can
+// report EPIPE for diagnostic console writes. It must not terminate the
+// desktop process while a folder is being scanned or exported.
+for (const output of [process.stdout, process.stderr]) {
+  output.on("error", (error: NodeJS.ErrnoException) => {
+    if (error.code !== "EPIPE") {
+      // Keep the error observable without allowing a broken diagnostic pipe
+      // to take down the renderer/main process.
+      return;
+    }
+  });
+}
+
 import type {
   DesktopDragOutCheck,
   DesktopDockState,
@@ -109,6 +123,14 @@ import {
   getSuiteUpdateState,
   installSuiteUpdate,
 } from "./suite-updater.js";
+import {
+  connectGoogleDrive,
+  disconnectGoogleDrive,
+  downloadPhotoSelectorDriveVersion,
+  exportPhotoSelectorProjectToDrive,
+  getGoogleDriveStatus,
+  listPhotoSelectorDriveVersions,
+} from "./google-drive-service.js";
 import {
   cancelImageConverterJobDesktop,
   chooseImageConverterFoldersDesktop,
@@ -1435,6 +1457,18 @@ function registerIpcHandlers(): void {
     "filex:write-photo-selector-project-file",
     (_event, rootPath: string, project) =>
       writePhotoSelectorProjectFileDesktop(sanitizeDesktopPath(rootPath), project),
+  );
+  ipcMain.handle("filex:get-google-drive-status", () => getGoogleDriveStatus());
+  ipcMain.handle("filex:connect-google-drive", () => connectGoogleDrive());
+  ipcMain.handle("filex:disconnect-google-drive", () => disconnectGoogleDrive());
+  ipcMain.handle("filex:export-photo-selector-project-to-drive", (_event, manifest) =>
+    exportPhotoSelectorProjectToDrive(manifest),
+  );
+  ipcMain.handle("filex:list-photo-selector-drive-versions", (_event, projectName: string) =>
+    listPhotoSelectorDriveVersions(projectName),
+  );
+  ipcMain.handle("filex:download-photo-selector-drive-version", (_event, versionId: string) =>
+    downloadPhotoSelectorDriveVersion(versionId),
   );
   ipcMain.handle("filex:get-desktop-session-state", () => getDesktopSessionState());
   ipcMain.handle("filex:save-desktop-session-state", (_event, state: DesktopPersistedState) =>

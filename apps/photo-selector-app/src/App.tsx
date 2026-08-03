@@ -1,5 +1,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  DesktopCloudProjectManifest,
+  DesktopCloudProjectVersion,
   DesktopCacheLocationRecommendation,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
@@ -100,8 +102,19 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DismissibleBanner } from "./components/DismissibleBanner";
 import { FolderBrowser } from "./components/FolderBrowser";
 import { ImportProgressModal } from "./components/ImportProgressModal";
+import {
+  DriveManualRootPickerModal,
+  DriveVersionPickerModal,
+} from "./components/GoogleDriveDialogs";
 import { PhotoSelector } from "./components/PhotoSelector";
 import { SelectionSummary } from "./components/SelectionSummary";
+import {
+  connectGoogleDrive,
+  downloadGoogleDriveVersion,
+  exportProjectToGoogleDrive,
+  getGoogleDriveStatus,
+  listGoogleDriveVersions,
+} from "./services/google-drive-projects";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Constants
@@ -133,6 +146,44 @@ const CATALOG_PERSIST_DEBOUNCE_MS = 500;
 const PERFORMANCE_SNAPSHOT_PERSIST_DEBOUNCE_MS = 500;
 const PERFORMANCE_METRICS_UI_THROTTLE_MS = 180;
 const THUMBNAIL_PATCH_FLUSH_MAX_ITEMS = 64;
+
+function normalizeCloudPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+|\/+$/g, "").toLocaleLowerCase();
+}
+
+function buildCloudManifest(
+  projectName: string,
+  sourceFolderPath: string,
+  assets: ImageAsset[],
+  activeAssetIds: string[],
+  exportedFrom?: string,
+): DesktopCloudProjectManifest {
+  const byId = new Map(assets.map((asset) => [asset.id, asset]));
+  return {
+    schemaVersion: 1,
+    app: "image-select-pro",
+    projectId: PROJECT_ID,
+    projectName: projectName.trim() || "Senza nome",
+    sourceFolderName: sourceFolderPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? "Cartella",
+    exportedAt: new Date().toISOString(),
+    exportedFrom,
+    activeRelativePaths: activeAssetIds
+      .map((id) => byId.get(id)?.path)
+      .filter((path): path is string => Boolean(path))
+      .map(normalizeCloudPath),
+    assets: assets.map((asset) => ({
+      relativePath: asset.path.replace(/\\/g, "/"),
+      fileName: asset.fileName,
+      size: asset.size,
+      sourceFileKey: asset.sourceFileKey,
+      rating: asset.rating ?? 0,
+      pickStatus: asset.pickStatus ?? "unmarked",
+      colorLabel: asset.colorLabel ?? null,
+      customLabels: asset.customLabels ?? [],
+      active: activeAssetIds.includes(asset.id),
+    })),
+  };
+}
 const THUMBNAIL_PATCH_FLUSH_MIN_INTERVAL_MS = 32;
 const PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE = "[PERF] folder-open → first-thumbnail-visible";
 const PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE = "[PERF] first-thumbnail → grid-complete";
@@ -494,6 +545,21 @@ export function App() {
   // ── Persisted state ──────────────────────────────────────────────────
   const [projectName, setProjectName] = useState("Image Select Pro");
   const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntimeInfo | null>(null);
+  const [googleDriveStatus, setGoogleDriveStatus] = useState({
+    configured: false,
+    connected: false,
+    accountEmail: null as string | null,
+  });
+  const [isGoogleDriveBusy, setIsGoogleDriveBusy] = useState(false);
+  const [driveVersionPicker, setDriveVersionPicker] = useState<{
+    versions: DesktopCloudProjectVersion[];
+    resolve: (version: DesktopCloudProjectVersion | null) => void;
+  } | null>(null);
+  const [driveManualRootPicker, setDriveManualRootPicker] = useState<{
+    initialPath: string;
+    unmatchedCount: number;
+    resolve: (path: string | null) => void;
+  } | null>(null);
   const [sourceFolderPath, setSourceFolderPath] = useState("");
 
   // ── Asset catalog ────────────────────────────────────────────────────
@@ -3014,6 +3080,196 @@ export function App() {
     queueXmpSync(Array.from(changedIds));
   }, [queueXmpSync]);
 
+  const handleGoogleDriveConnect = useCallback(async () => {
+    setIsGoogleDriveBusy(true);
+    try {
+      const status = await connectGoogleDrive();
+      setGoogleDriveStatus(status);
+      addToast(
+        status.accountEmail ? `Google Drive collegato: ${status.accountEmail}` : "Google Drive collegato.",
+        "success",
+        3200,
+      );
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "Collegamento Google Drive non riuscito.", "error", 5000);
+    } finally {
+      setIsGoogleDriveBusy(false);
+    }
+  }, [addToast]);
+
+  const chooseGoogleDriveVersion = useCallback(
+    (versions: DesktopCloudProjectVersion[]) => new Promise<DesktopCloudProjectVersion | null>((resolve) => {
+      setDriveVersionPicker({ versions, resolve });
+    }),
+    [],
+  );
+
+  const chooseGoogleDriveManualRoot = useCallback(
+    (initialPath: string, unmatchedCount: number) => new Promise<string | null>((resolve) => {
+      setDriveManualRootPicker({ initialPath, unmatchedCount, resolve });
+    }),
+    [],
+  );
+
+  const handleGoogleDriveExport = useCallback(async () => {
+    if (allAssets.length === 0) {
+      addToast("Apri prima una cartella di foto.", "warning");
+      return;
+    }
+
+    setIsGoogleDriveBusy(true);
+    try {
+      let status = googleDriveStatus;
+      if (!status.connected) {
+        status = await connectGoogleDrive();
+        setGoogleDriveStatus(status);
+      }
+
+      const manifest = buildCloudManifest(
+        projectName,
+        sourceFolderPath,
+        allAssets,
+        activeAssetIds,
+        desktopRuntime?.appVersion,
+      );
+      const version = await exportProjectToGoogleDrive(manifest);
+      addToast(
+        `Selezione esportata su Google Drive: ${new Date(version.createdAt).toLocaleString("it-IT")}`,
+        "success",
+        5000,
+      );
+    } catch (error) {
+      const refreshedStatus = await getGoogleDriveStatus().catch(() => null);
+      if (refreshedStatus) {
+        setGoogleDriveStatus(refreshedStatus);
+      }
+      addToast(error instanceof Error ? error.message : "Esportazione Google Drive non riuscita.", "error", 6000);
+    } finally {
+      setIsGoogleDriveBusy(false);
+    }
+  }, [activeAssetIds, addToast, allAssets, desktopRuntime?.appVersion, googleDriveStatus, projectName, sourceFolderPath]);
+
+  const handleGoogleDriveImport = useCallback(async () => {
+    if (allAssets.length === 0) {
+      addToast("Apri prima il backup locale del matrimonio.", "warning");
+      return;
+    }
+
+    setIsGoogleDriveBusy(true);
+    try {
+      let status = googleDriveStatus;
+      if (!status.connected) {
+        status = await connectGoogleDrive();
+        setGoogleDriveStatus(status);
+      }
+
+      const versions = await listGoogleDriveVersions(projectName);
+      if (versions.length === 0) {
+        addToast("Non ho trovato versioni di questo progetto su Google Drive.", "warning", 5000);
+        return;
+      }
+
+      const version = await chooseGoogleDriveVersion(versions);
+      if (!version) {
+        return;
+      }
+
+      const manifest = await downloadGoogleDriveVersion(version.id);
+      const byPath = new Map<string, ImageAsset>();
+      const bySourceKey = new Map<string, ImageAsset>();
+      const byNameAndSize = new Map<string, ImageAsset>();
+      for (const asset of allAssets) {
+        byPath.set(normalizeCloudPath(asset.path), asset);
+        if (asset.sourceFileKey) {
+          bySourceKey.set(asset.sourceFileKey, asset);
+        }
+        byNameAndSize.set(`${asset.fileName.toLocaleLowerCase()}::${asset.size ?? ""}`, asset);
+      }
+
+      let unmatched = 0;
+      for (const cloudAsset of manifest.assets) {
+        const match = byPath.get(normalizeCloudPath(cloudAsset.relativePath))
+          ?? (cloudAsset.sourceFileKey ? bySourceKey.get(cloudAsset.sourceFileKey) : undefined)
+          ?? byNameAndSize.get(`${cloudAsset.fileName.toLocaleLowerCase()}::${cloudAsset.size ?? ""}`);
+        if (!match) {
+          unmatched += 1;
+          continue;
+        }
+      }
+
+      if (unmatched > 0) {
+        const manualRoot = await chooseGoogleDriveManualRoot(sourceFolderPath, unmatched);
+        if (manualRoot?.trim() && window.filexDesktop?.reopenFolder) {
+          const reopened = await window.filexDesktop.reopenFolder(manualRoot.trim(), { recursive: true });
+          if (reopened) {
+            await handleFolderOpened(reopened);
+            addToast("Cartella backup riaperta. Premi di nuovo Continua da Drive per completare la mappatura.", "info", 6000);
+            return;
+          }
+        }
+        addToast(`Importazione annullata: ${unmatched} foto non sono state mappate.`, "warning", 7000);
+        return;
+      }
+
+      const localBackup = buildCloudManifest(
+        projectName,
+        sourceFolderPath,
+        allAssets,
+        activeAssetIds,
+        desktopRuntime?.appVersion,
+      );
+      const desktopApi = typeof window === "undefined" ? null : window.filexDesktop;
+      if (desktopApi?.writeFile && sourceFolderPath) {
+        const backupPath = `${sourceFolderPath.replace(/[\\/]+$/, "")}\\.image-select-pro.backup-${Date.now()}.json`;
+        await desktopApi.writeFile(backupPath, new TextEncoder().encode(JSON.stringify(localBackup, null, 2)));
+      }
+
+      const stateByCloudPath = new Map(manifest.assets.map((asset) => [normalizeCloudPath(asset.relativePath), asset]));
+      const stateBySourceKey = new Map(manifest.assets.filter((asset) => asset.sourceFileKey).map((asset) => [asset.sourceFileKey as string, asset]));
+      const nextAssets = allAssets.map((asset) => {
+        const state = stateByCloudPath.get(normalizeCloudPath(asset.path))
+          ?? (asset.sourceFileKey ? stateBySourceKey.get(asset.sourceFileKey) : undefined);
+        if (!state) {
+          return asset;
+        }
+        return {
+          ...asset,
+          rating: state.rating,
+          pickStatus: state.pickStatus,
+          colorLabel: state.colorLabel,
+          customLabels: state.customLabels,
+        };
+      });
+      handlePhotosChange(nextAssets);
+
+      handleSelectionChange(nextAssets
+        .filter((asset) => {
+          const state = manifest.assets.find((candidate) => (
+            normalizeCloudPath(candidate.relativePath) === normalizeCloudPath(asset.path)
+            || (candidate.sourceFileKey && candidate.sourceFileKey === asset.sourceFileKey)
+            || (candidate.fileName.toLocaleLowerCase() === asset.fileName.toLocaleLowerCase()
+              && candidate.size === asset.size)
+          ));
+          return state?.active === true;
+        })
+        .map((asset) => asset.id));
+      setProjectName(manifest.projectName);
+      addToast(
+        `Selezione importata: versione del ${new Date(manifest.exportedAt).toLocaleString("it-IT")}. XMP in aggiornamento.`,
+        "success",
+        6000,
+      );
+    } catch (error) {
+      const refreshedStatus = await getGoogleDriveStatus().catch(() => null);
+      if (refreshedStatus) {
+        setGoogleDriveStatus(refreshedStatus);
+      }
+      addToast(error instanceof Error ? error.message : "Importazione Google Drive non riuscita.", "error", 6000);
+    } finally {
+      setIsGoogleDriveBusy(false);
+    }
+  }, [activeAssetIds, addToast, allAssets, chooseGoogleDriveManualRoot, chooseGoogleDriveVersion, desktopRuntime?.appVersion, googleDriveStatus, handleFolderOpened, handlePhotosChange, handleSelectionChange, projectName, sourceFolderPath]);
+
   const refreshDesktopThumbnailCacheInfo = useCallback(async () => {
     const info = await getDesktopThumbnailCacheInfo();
     setDesktopThumbnailCacheInfo(info);
@@ -3311,6 +3567,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    void getGoogleDriveStatus().then((status) => {
+      if (!cancelled) {
+        setGoogleDriveStatus(status);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     void refreshDesktopThumbnailCacheInfo();
     void refreshDesktopCacheLocationRecommendation();
   }, [refreshDesktopCacheLocationRecommendation, refreshDesktopThumbnailCacheInfo]);
@@ -3467,6 +3735,37 @@ export function App() {
             </button>
           </nav>
           <div className="app-header__actions">
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => void handleGoogleDriveConnect()}
+              disabled={isGoogleDriveBusy}
+              title={googleDriveStatus.accountEmail ?? "Collega Google Drive"}
+            >
+              {googleDriveStatus.connected
+                ? `Drive: ${googleDriveStatus.accountEmail ?? "collegato"}`
+                : "Collega Drive"}
+            </button>
+            {allAssets.length > 0 ? (
+              <>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void handleGoogleDriveExport()}
+                  disabled={isGoogleDriveBusy}
+                >
+                  Esporta su Drive
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => void handleGoogleDriveImport()}
+                  disabled={isGoogleDriveBusy}
+                >
+                  Continua da Drive
+                </button>
+              </>
+            ) : null}
             {isGeneratingThumbnails ? (
               <button
                 type="button"
@@ -3667,6 +3966,35 @@ export function App() {
           onDismiss={() => setIsImportPanelDismissed(true)}
           onCancel={handleCancelImport}
         />
+
+        {driveVersionPicker ? (
+          <DriveVersionPickerModal
+            versions={driveVersionPicker.versions}
+            onSelect={(version) => {
+              driveVersionPicker.resolve(version);
+              setDriveVersionPicker(null);
+            }}
+            onCancel={() => {
+              driveVersionPicker.resolve(null);
+              setDriveVersionPicker(null);
+            }}
+          />
+        ) : null}
+
+        {driveManualRootPicker ? (
+          <DriveManualRootPickerModal
+            initialPath={driveManualRootPicker.initialPath}
+            unmatchedCount={driveManualRootPicker.unmatchedCount}
+            onConfirm={(path) => {
+              driveManualRootPicker.resolve(path);
+              setDriveManualRootPicker(null);
+            }}
+            onCancel={() => {
+              driveManualRootPicker.resolve(null);
+              setDriveManualRootPicker(null);
+            }}
+          />
+        ) : null}
       </div>
     </ErrorBoundary>
   );

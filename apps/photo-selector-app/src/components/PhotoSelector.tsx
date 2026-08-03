@@ -574,7 +574,11 @@ export function PhotoSelector({
   );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const metadataPhotos = useMemo(() => photos, [metadataVersion, photos.length]);
+  // The parent replaces the photo array after every classification change. Keep
+  // the array identity in this dependency list: depending only on its length
+  // leaves the filter metadata one render behind whenever a color/label is
+  // assigned to an existing photo.
+  const metadataPhotos = useMemo(() => photos, [metadataVersion, photos]);
   const metadataAssetById = useMemo(
     () => new Map(metadataPhotos.map((photo) => [photo.id, photo])),
     [metadataPhotos],
@@ -1352,7 +1356,17 @@ export function PhotoSelector({
       }
     }
 
-    return customLabelsCatalog
+    // Also discover labels already present in the project. This keeps the
+    // filter available when a project/XMP was opened on another computer and
+    // its local preferences do not yet contain the label catalog.
+    const labels = [...customLabelsCatalog];
+    for (const label of counts.keys()) {
+      if (!labels.some((knownLabel) => knownLabel.toLocaleLowerCase() === label.toLocaleLowerCase())) {
+        labels.push(label);
+      }
+    }
+
+    return labels
       .map((label) => ({ label, count: counts.get(label) ?? 0 }))
       .filter(({ count }) => count > 0);
   }, [customLabelsCatalog, metadataPhotos]);
@@ -3192,18 +3206,6 @@ export function PhotoSelector({
           </div>
         </div>
 
-        <button
-          type="button"
-          className={`photo-selector__advanced-toggle${isAdvancedFiltersOpen ? " photo-selector__advanced-toggle--open" : ""}`}
-          onClick={() => setIsAdvancedFiltersOpen((open) => !open)}
-          aria-expanded={isAdvancedFiltersOpen}
-        >
-          Filtri avanzati
-          <span className="photo-selector__filter-count-badge">{activeFilterCount}</span>
-          <span aria-hidden="true">{isAdvancedFiltersOpen ? "⌃" : "⌄"}</span>
-        </button>
-
-        {isAdvancedFiltersOpen && <div className="photo-selector__advanced-filters">
         {customLabelFilterOptions.length > 0 && (
           <label className="field">
             <span>Label custom</span>
@@ -3222,6 +3224,18 @@ export function PhotoSelector({
           </label>
         )}
 
+        <button
+          type="button"
+          className={`photo-selector__advanced-toggle${isAdvancedFiltersOpen ? " photo-selector__advanced-toggle--open" : ""}`}
+          onClick={() => setIsAdvancedFiltersOpen((open) => !open)}
+          aria-expanded={isAdvancedFiltersOpen}
+        >
+          Filtri avanzati
+          <span className="photo-selector__filter-count-badge">{activeFilterCount}</span>
+          <span aria-hidden="true">{isAdvancedFiltersOpen ? "⌃" : "⌄"}</span>
+        </button>
+
+        {isAdvancedFiltersOpen && <div className="photo-selector__advanced-filters">
         {seriesGroups.length > 1 && (
           <label className="field">
             <span>Serie</span>
