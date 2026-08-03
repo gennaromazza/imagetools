@@ -23,6 +23,7 @@ const ALLOWED_RELEASE_HOSTS = new Set([
   "github.com",
   "api.github.com",
   "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
   "raw.githubusercontent.com",
 ]);
 const UPDATE_RETRY_LIMIT = 2;
