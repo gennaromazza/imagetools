@@ -86,7 +86,7 @@ function isAllowedReleaseUrl(urlValue: string): boolean {
   }
 }
 
-function requestJson(urlValue: string): Promise<unknown> {
+function requestJson(urlValue: string, redirectCount = 0): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(urlValue);
     const client = parsed.protocol === "http:" ? http : https;
@@ -99,6 +99,21 @@ function requestJson(urlValue: string): Promise<unknown> {
         },
       },
       (response) => {
+        if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400) {
+          const location = response.headers.location;
+          if (!location || redirectCount >= 5) {
+            reject(new Error("Manifest redirect non valido"));
+            return;
+          }
+          const redirectedUrl = new URL(location, parsed).toString();
+          if (!isAllowedReleaseUrl(redirectedUrl)) {
+            reject(new Error("Manifest redirect non autorizzato"));
+            return;
+          }
+          response.resume();
+          requestJson(redirectedUrl, redirectCount + 1).then(resolve, reject);
+          return;
+        }
         if (!response.statusCode || response.statusCode >= 400) {
           reject(new Error(`Manifest request failed (${response.statusCode ?? "unknown"})`));
           return;
