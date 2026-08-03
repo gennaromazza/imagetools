@@ -15,6 +15,7 @@
     "dev:photo-selector": "npm --workspace @photo-tools/photo-selector-app run dev",
     "dev:archivio-flow": "npm --workspace @photo-tools/archivio-flow run dev",
     "dev:all:archivio-flow": "npm --workspace @photo-tools/archivio-flow run dev:all",
+    "audit:photo-selector": "powershell -ExecutionPolicy Bypass -File scripts/audit-photo-selector.ps1",
     "dev:batch-print-layout": "npm --workspace @photo-tools/batch-print-layout run dev",
     "dev:image-converter": "npm --workspace @photo-tools/image-converter run dev",
     "dev:image-file-finder": "npm --workspace @photo-tools/image-file-finder run dev",

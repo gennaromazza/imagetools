@@ -33,8 +33,6 @@ import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
   DEFAULT_PHOTO_FILTERS,
-  matchesFileTypeFilter,
-  type FileTypeFilter,
   JPEG_EXTENSIONS,
   RAW_EXTENSIONS,
   getAssetColorLabel,
@@ -477,7 +475,6 @@ export function PhotoSelector({
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
-  const [fileTypeFilter, setFileTypeFilter] = useState<FileTypeFilter>("all");
   const [formatFilter, setFormatFilter] = useState<FormatFilter>("all");
   const [customLabelFilter, setCustomLabelFilter] = useState<string>("all");
   const [folderFilter, setFolderFilter] = useState<string>("all");
@@ -501,6 +498,8 @@ export function PhotoSelector({
   const [newBatchCustomLabelShortcut, setNewBatchCustomLabelShortcut] = useState<CustomLabelShortcut | null>(null);
   const [timelineEntries, setTimelineEntries] = useState<Array<{ id: string; label: string }>>([]);
   const [isBatchToolsOpen, setIsBatchToolsOpen] = useState(false);
+  const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = useState(false);
+  const [isSelectionActionsOpen, setIsSelectionActionsOpen] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [cardSize, setCardSize] = useState<number>(160);
@@ -610,8 +609,6 @@ export function PhotoSelector({
         pickFilter !== "all",
         ratingFilter !== "any",
         colorFilter !== "all",
-        fileTypeFilter !== "all",
-        formatFilter !== "all",
         formatFilter !== "all",
         customLabelFilter !== "all",
         folderFilter !== "all",
@@ -619,7 +616,7 @@ export function PhotoSelector({
         timeClusterFilter !== "all",
         searchQuery !== "",
       ].filter(Boolean).length,
-    [pickFilter, ratingFilter, colorFilter, fileTypeFilter, formatFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
+    [pickFilter, ratingFilter, colorFilter, formatFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
   );
 
   // Statistiche aggregate sull'intera cartella corrente: utili come "vital signs"
@@ -655,8 +652,6 @@ export function PhotoSelector({
     pickFilter !== "all" ||
     ratingFilter !== "any" ||
     colorFilter !== "all" ||
-    fileTypeFilter !== "all" ||
-    formatFilter !== "all" ||
     formatFilter !== "all" ||
     customLabelFilter !== "all" ||
     folderFilter !== "all" ||
@@ -894,7 +889,6 @@ export function PhotoSelector({
     setFormatFilter("all");
     setRatingFilter("any");
     setColorFilter("all");
-    setFileTypeFilter("all");
     setCustomLabelFilter("all");
     setFolderFilter("all");
     setSeriesFilter("all");
@@ -1463,10 +1457,6 @@ export function PhotoSelector({
       })) {
         continue;
       }
-      if (!matchesFileTypeFilter(photo, fileTypeFilter)) {
-        continue;
-      }
-
       if (
         customLabelFilter !== "all"
         && !normalizeAssetCustomLabels(photo.customLabels).some(
@@ -1514,7 +1504,6 @@ export function PhotoSelector({
     colorFilter,
     customLabelFilter,
     deferredSearchQuery,
-    fileTypeFilter,
     folderFilter,
     formatFilter,
     metadataAssetById,
@@ -2232,18 +2221,21 @@ export function PhotoSelector({
 
   function toggleAll(selectAll: boolean) {
     if (selectAll) {
-      const idsToSelect = hasActiveFilters
-        ? visiblePhotoIds
-        : photos.map((p) => p.id);
-      onSelectionChange(idsToSelect);
+      const nextSelection = hasActiveFilters ? new Set(selectedIds) : new Set<string>();
+      const idsToSelect = hasActiveFilters ? visiblePhotoIds : photos.map((p) => p.id);
+      idsToSelect.forEach((id) => nextSelection.add(id));
+      onSelectionChange(Array.from(nextSelection));
       pushTimelineEntry(
         hasActiveFilters
           ? `Selezionate ${idsToSelect.length} foto visibili con i filtri attivi`
           : `Selezionate tutte le ${idsToSelect.length} foto`
       );
     } else {
-      onSelectionChange([]);
-      pushTimelineEntry("Deselezionate tutte le foto");
+      const nextSelection = hasActiveFilters
+        ? selectedIds.filter((id) => !visiblePhotoIdSet.has(id))
+        : [];
+      onSelectionChange(nextSelection);
+      pushTimelineEntry(hasActiveFilters ? "Deselezionate le foto visibili" : "Deselezionate tutte le foto");
     }
   }
 
@@ -2628,12 +2620,14 @@ export function PhotoSelector({
       .filter((photo): photo is ImageAsset => Boolean(photo));
   }, [assetById, previewAssetId, visiblePhotoIds]);
 
-  const allSelected = photos.length > 0 && selectedIds.length === photos.length;
-  const someSelected = selectedIds.length > 0 && selectedIds.length < photos.length;
   const visibleSelectedCount = useMemo(
     () => visiblePhotoIds.filter((photoId) => selectedSet.has(photoId)).length,
     [selectedSet, visiblePhotoIds],
   );
+  const allVisibleSelected = visiblePhotoIds.length > 0 && visibleSelectedCount === visiblePhotoIds.length;
+  const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected;
+  const allSelected = !hasActiveFilters && photos.length > 0 && selectedIds.length === photos.length;
+  const someSelected = !hasActiveFilters && selectedIds.length > 0 && selectedIds.length < photos.length;
 
   const photoStats = useMemo(() => {
     const ratingCounts = new Map<number, number>();
@@ -3121,19 +3115,6 @@ export function PhotoSelector({
         )}
 
         <label className="field">
-          <span>Tipo file</span>
-          <select
-            className={fileTypeFilter !== "all" ? "field__select--active" : undefined}
-            value={fileTypeFilter}
-            onChange={(event) => setFileTypeFilter(event.target.value as FileTypeFilter)}
-          >
-            <option value="all">Tutti</option>
-            <option value="raw">Solo RAW</option>
-            <option value="jpeg">Solo JPG</option>
-          </select>
-        </label>
-
-        <label className="field">
           <span>Stato</span>
           <select
             className={pickFilter !== "all" ? "field__select--active" : undefined}
@@ -3209,6 +3190,18 @@ export function PhotoSelector({
           </div>
         </div>
 
+        <button
+          type="button"
+          className={`photo-selector__advanced-toggle${isAdvancedFiltersOpen ? " photo-selector__advanced-toggle--open" : ""}`}
+          onClick={() => setIsAdvancedFiltersOpen((open) => !open)}
+          aria-expanded={isAdvancedFiltersOpen}
+        >
+          Filtri avanzati
+          <span className="photo-selector__filter-count-badge">{activeFilterCount}</span>
+          <span aria-hidden="true">{isAdvancedFiltersOpen ? "⌃" : "⌄"}</span>
+        </button>
+
+        {isAdvancedFiltersOpen && <div className="photo-selector__advanced-filters">
         {customLabelFilterOptions.length > 0 && (
           <label className="field">
             <span>Label custom</span>
@@ -3269,6 +3262,7 @@ export function PhotoSelector({
             {filterPresets.map((preset) => (
               <button
                 key={preset.id}
+                type="button"
                 className="photo-selector__preset-apply"
                 onClick={() => applyPreset(preset)}
               >
@@ -3277,6 +3271,7 @@ export function PhotoSelector({
             ))}
           </div>
         )}
+        </div>}
       </div>
 
       {/* ── TOOLBAR ── */}
@@ -3305,28 +3300,42 @@ export function PhotoSelector({
           <div className="photo-selector__toolbar-divider" />
           <button
             type="button"
-            className={`checkbox-button photo-selector__toolbar-control ${allSelected ? "checkbox-button--checked" : someSelected ? "checkbox-button--indeterminate" : ""}`}
-            onClick={() => toggleAll(!allSelected)}
+            className={`checkbox-button photo-selector__toolbar-control ${allSelected || allVisibleSelected ? "checkbox-button--checked" : someSelected || someVisibleSelected ? "checkbox-button--indeterminate" : ""}`}
+            onClick={() => toggleAll(!(hasActiveFilters ? allVisibleSelected : allSelected))}
           >
-            {allSelected ? "Deseleziona tutto" : "Seleziona tutto"}
+            {hasActiveFilters
+              ? allVisibleSelected ? "Deseleziona visibili" : "Seleziona visibili"
+              : allSelected ? "Deseleziona tutto" : "Seleziona tutto"}
           </button>
           <div className="photo-selector__toolbar-divider" />
           <button
             type="button"
             className="ghost-button ghost-button--small"
-            onClick={selectVisible}
-            title="Seleziona le foto visibili"
+            onClick={() => setIsSelectionActionsOpen((open) => !open)}
+            aria-expanded={isSelectionActionsOpen}
+            title="Apri le azioni sulla selezione"
           >
-            Visibili
+            Azioni selezione
           </button>
-          <button
-            type="button"
-            className="ghost-button ghost-button--small"
-            onClick={activatePickedOnly}
-            title="Seleziona solo le foto Pick"
-          >
-            Solo pick
-          </button>
+          {isSelectionActionsOpen && (
+            <div className="photo-selector__selection-actions-menu">
+              <button type="button" className="ghost-button ghost-button--small" onClick={selectVisible}>
+                Sostituisci con visibili ({visiblePhotoIds.length})
+              </button>
+              <button type="button" className="ghost-button ghost-button--small" onClick={addVisibleToSelection} disabled={visiblePhotoIds.length === 0}>
+                Aggiungi visibili ({visiblePhotoIds.length})
+              </button>
+              <button type="button" className="ghost-button ghost-button--small" onClick={removeVisibleFromSelection} disabled={visibleSelectedCount === 0}>
+                Rimuovi visibili ({visibleSelectedCount})
+              </button>
+              <button type="button" className="ghost-button ghost-button--small" onClick={invertVisibleSelection} disabled={visiblePhotoIds.length === 0}>
+                Inverti visibili
+              </button>
+              <button type="button" className="ghost-button ghost-button--small" onClick={activatePickedOnly}>
+                Sostituisci con Pick
+              </button>
+            </div>
+          )}
           {selectedIds.length >= 2 && selectedIds.length <= 4 && (
             <button
               type="button"
@@ -3655,7 +3664,7 @@ export function PhotoSelector({
               draggable={canStartDesktopDragOut}
               onDragStart={handleSelectionDragStart}
               title={canStartDesktopDragOut
-                ? "Trascina la selezione direttamente dentro Auto Layout, Photoshop o un'altra app desktop."
+                ? "Trascina la selezione verso un editor esterno o un'altra app desktop."
                 : desktopDragOutDisabledMessage}
               disabled={!canStartDesktopDragOut}
             >

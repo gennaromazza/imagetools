@@ -1,4 +1,5 @@
 import { perfLog } from "./performance-utils";
+import type { DesktopThumbnailRequestOptions } from "@photo-tools/desktop-contracts";
 
 const DEFAULT_THUMBNAIL_MAX = 320;
 const DEFAULT_THUMBNAIL_QUALITY = 0.72;
@@ -23,6 +24,9 @@ export interface ThumbnailPipelineOptions {
   maxDimension?: number;
   quality?: number;
   minimumPreviewShortSide?: number;
+  desktopOptions?: DesktopThumbnailRequestOptions;
+  shouldDefer?: (priority: number) => boolean;
+  deferDelayMs?: number;
 }
 
 interface QueueItem {
@@ -31,6 +35,7 @@ interface QueueItem {
   loadFile?: () => Promise<File | null>;
   absolutePath?: string;
   sourceFileKey?: string;
+  skipDiskCacheRead?: boolean;
   createSourceFileKey?: (file: File) => string;
   priority: number;
 }
@@ -60,12 +65,19 @@ export class ThumbnailPipeline {
   private quality: number;
   private desktopTaskLimit: number;
   private optionsVersion = 0;
+  private desktopOptions: DesktopThumbnailRequestOptions = {};
+  private shouldDefer: ((priority: number) => boolean) | undefined;
+  private deferDelayMs = 260;
+  private deferTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(onBatch: BatchCallback, onError?: ErrorCallback, options?: ThumbnailPipelineOptions) {
     this.onBatch = onBatch;
     this.onError = onError ?? null;
     this.maxDimension = options?.maxDimension ?? DEFAULT_THUMBNAIL_MAX;
     this.quality = options?.quality ?? DEFAULT_THUMBNAIL_QUALITY;
+    this.desktopOptions = options?.desktopOptions ?? {};
+    this.shouldDefer = options?.shouldDefer;
+    this.deferDelayMs = options?.deferDelayMs ?? this.deferDelayMs;
 
     const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 4 : 4;
     this.desktopTaskLimit = Math.max(4, Math.min(12, cores));
@@ -143,6 +155,9 @@ export class ThumbnailPipeline {
   updateOptions(options?: ThumbnailPipelineOptions): void {
     const nextMaxDimension = options?.maxDimension ?? DEFAULT_THUMBNAIL_MAX;
     const nextQuality = options?.quality ?? DEFAULT_THUMBNAIL_QUALITY;
+    this.desktopOptions = options?.desktopOptions ?? {};
+    this.shouldDefer = options?.shouldDefer;
+    this.deferDelayMs = options?.deferDelayMs ?? this.deferDelayMs;
     if (this.maxDimension === nextMaxDimension && this.quality === nextQuality) {
       return;
     }
@@ -180,6 +195,10 @@ export class ThumbnailPipeline {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
     }
+    if (this.deferTimer) {
+      clearTimeout(this.deferTimer);
+      this.deferTimer = null;
+    }
     this.flushBatch();
     this.activeDesktopTasks.clear();
     this.queue = [];
@@ -206,6 +225,18 @@ export class ThumbnailPipeline {
         continue;
       }
 
+      if (this.shouldDefer?.(nextItem.priority)) {
+        this.queue.unshift(nextItem);
+        this.queuedItems.set(nextItem.id, nextItem);
+        if (!this.deferTimer) {
+          this.deferTimer = setTimeout(() => {
+            this.deferTimer = null;
+            this.schedule();
+          }, this.deferDelayMs);
+        }
+        return;
+      }
+
       this.activeDesktopTasks.set(nextItem.id, {
         ...nextItem,
         version: this.optionsVersion,
@@ -230,6 +261,10 @@ export class ThumbnailPipeline {
         this.maxDimension,
         this.quality,
         item.sourceFileKey,
+        {
+          ...this.desktopOptions,
+          skipDiskCacheRead: item.skipDiskCacheRead,
+        },
       );
       if (version !== this.optionsVersion) {
         return;

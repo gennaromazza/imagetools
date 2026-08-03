@@ -1,6 +1,4 @@
 import { useEffect } from "react";
-import type { FolderOpenDiagnostics } from "../services/folder-access";
-
 interface ImportProgressModalProps {
   isOpen: boolean;
   phase: "reading" | "preparing";
@@ -10,13 +8,8 @@ interface ImportProgressModalProps {
   processed: number;
   currentFile: string | null;
   folderLabel: string;
-  diagnostics: FolderOpenDiagnostics | null;
   onDismiss: () => void;
   onCancel: () => void;
-}
-
-function formatDiagnosticsSource(source: FolderOpenDiagnostics["source"]): string {
-  return source === "desktop-native" ? "Desktop Windows" : source;
 }
 
 export function ImportProgressModal({
@@ -28,7 +21,6 @@ export function ImportProgressModal({
   processed,
   currentFile,
   folderLabel,
-  diagnostics,
   onDismiss,
   onCancel,
 }: ImportProgressModalProps) {
@@ -116,25 +108,6 @@ export function ImportProgressModal({
             <span>{phaseTitle}</span>
             <strong>{currentFile ?? phaseDescription}</strong>
           </div>
-
-          {diagnostics ? (
-            <div className="import-progress__diagnostics">
-              <div className="import-progress__diagnostics-header">
-                <strong>Diagnostica import</strong>
-                <span>{formatDiagnosticsSource(diagnostics.source)}</span>
-              </div>
-              <div className="import-progress__diagnostics-grid">
-                <span>Path selezionato</span>
-                <strong title={diagnostics.selectedPath}>{diagnostics.selectedPath}</strong>
-                <span>Top-level caricati</span>
-                <strong>{diagnostics.topLevelSupportedCount}</strong>
-                <span>Annidati scartati</span>
-                <strong>{diagnostics.nestedSupportedDiscardedCount}</strong>
-                <span>Totale supportate viste</span>
-                <strong>{diagnostics.totalSupportedSeen}</strong>
-              </div>
-            </div>
-          ) : null}
 
           <p className="import-progress__hint">{phaseDescription}</p>
         </div>

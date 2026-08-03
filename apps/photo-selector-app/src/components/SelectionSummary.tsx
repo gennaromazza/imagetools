@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ImageAsset } from "@photo-tools/shared-types";
 import { useToast } from "./ToastProvider";
 import {
@@ -14,7 +14,6 @@ interface SelectionSummaryProps {
   projectName: string;
   onExportSelection: () => void;
   onBackToSelection: () => void;
-  onOpenProjectSelector: () => void;
 }
 
 export function SelectionSummary({
@@ -23,9 +22,9 @@ export function SelectionSummary({
   projectName,
   onExportSelection,
   onBackToSelection,
-  onOpenProjectSelector,
 }: SelectionSummaryProps) {
   const { addToast } = useToast();
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState(false);
 
   const stats = useMemo(() => {
     const activeSet = new Set(activeAssetIds);
@@ -163,22 +162,7 @@ export function SelectionSummary({
 
       <div className="selection-summary__actions">
         <button type="button" className="ghost-button" onClick={onBackToSelection}>
-          Torna alla selezione
-        </button>
-        <button type="button" className="ghost-button" onClick={onOpenProjectSelector} disabled={stats.totalImported === 0}>
-          Apri selezione progetto
-        </button>
-        <button type="button" className="ghost-button" onClick={handleCopyFileNames} disabled={stats.totalActive === 0}>
-          Copia nomi file
-        </button>
-        <button type="button" className="ghost-button" onClick={handleExportFileList} disabled={stats.totalActive === 0}>
-          Esporta lista TXT
-        </button>
-        <button type="button" className="ghost-button" onClick={handleExportCsv} disabled={stats.totalActive === 0}>
-          Esporta CSV
-        </button>
-        <button type="button" className="ghost-button" onClick={handleExportJson} disabled={stats.totalActive === 0}>
-          Esporta JSON
+          Vai alla selezione
         </button>
         <button
           type="button"
@@ -188,7 +172,38 @@ export function SelectionSummary({
         >
           Esporta selezione ({stats.totalActive} foto)
         </button>
+        <button
+          type="button"
+          className="ghost-button"
+          onClick={() => setIsExportMenuOpen((current) => !current)}
+          aria-expanded={isExportMenuOpen}
+        >
+          {isExportMenuOpen ? "Nascondi altri export" : "Altri export"}
+        </button>
+        {isExportMenuOpen ? (
+          <div className="selection-summary__secondary-actions">
+            <button type="button" className="ghost-button ghost-button--small" onClick={handleCopyFileNames} disabled={stats.totalActive === 0}>
+              Copia nomi
+            </button>
+            <button type="button" className="ghost-button ghost-button--small" onClick={handleExportFileList} disabled={stats.totalActive === 0}>
+              TXT
+            </button>
+            <button type="button" className="ghost-button ghost-button--small" onClick={handleExportCsv} disabled={stats.totalActive === 0}>
+              CSV
+            </button>
+            <button type="button" className="ghost-button ghost-button--small" onClick={handleExportJson} disabled={stats.totalActive === 0}>
+              JSON
+            </button>
+          </div>
+        ) : null}
       </div>
+
+      {stats.totalActive === 0 ? (
+        <div className="selection-summary__empty-state">
+          <strong>Nessuna foto selezionata</strong>
+          <span>Vai alla schermata Selezione per scegliere le foto da esportare.</span>
+        </div>
+      ) : null}
 
       <div className="stats-grid">
         <div className="stat-card stat-card--highlight">

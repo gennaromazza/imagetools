@@ -73,4 +73,4 @@ jobs:
             apps/filex-desktop/.output/releases/*.exe
             apps/filex-desktop/.output/releases/*.exe.blockmap
             apps/filex-desktop/.output/releases/latest.yml
-            apps/filex-desktop/release-manifests/${{ inputs.channel }}.json
+            apps/filex-desktop/release-manifests/${{ github.event_name == 'push' && 'stable' || inputs.channel }}.json

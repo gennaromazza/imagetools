@@ -252,6 +252,7 @@ function toDesktopPreferences(preferences: PhotoSelectorPreferences): DesktopPho
     cardSize: preferences.cardSize,
     rootFolderPathOverride: preferences.rootFolderPathOverride,
     preferredEditorPath: preferences.preferredEditorPath,
+    ramBudgetPreset: "default",
     autoAdvanceOnAction: preferences.autoAdvanceOnAction,
   };
 }

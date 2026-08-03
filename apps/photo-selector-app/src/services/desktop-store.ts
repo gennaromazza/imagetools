@@ -5,6 +5,7 @@ import type {
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
   DesktopPhotoSelectorPreferences,
+  DesktopPhotoSelectorProjectFile,
   DesktopRecentFolder,
   DesktopSortCacheEntry,
 } from "@photo-tools/desktop-contracts";
@@ -52,6 +53,38 @@ export async function saveDesktopPreferences(
     return await api.saveDesktopPreferences(preferences);
   } catch {
     return null;
+  }
+}
+
+export async function readPhotoSelectorProjectFile(
+  rootPath: string,
+): Promise<DesktopPhotoSelectorProjectFile | null> {
+  const api = getDesktopApi();
+  if (!api?.readPhotoSelectorProjectFile) {
+    return null;
+  }
+
+  try {
+    return await api.readPhotoSelectorProjectFile(rootPath);
+  } catch {
+    return null;
+  }
+}
+
+export async function updatePhotoSelectorProjectFile(
+  rootPath: string,
+  update: (project: DesktopPhotoSelectorProjectFile | null) => DesktopPhotoSelectorProjectFile,
+): Promise<boolean> {
+  const api = getDesktopApi();
+  if (!api?.readPhotoSelectorProjectFile || !api.writePhotoSelectorProjectFile) {
+    return false;
+  }
+
+  try {
+    const current = await api.readPhotoSelectorProjectFile(rootPath);
+    return await api.writePhotoSelectorProjectFile(rootPath, update(current));
+  } catch {
+    return false;
   }
 }
 
@@ -186,6 +219,23 @@ export async function saveDesktopFolderAssetStates(
 
   try {
     await api.saveFolderAssetStates(folderPath, assetStates);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function saveDesktopFolderAssetStatesDelta(
+  folderPath: string,
+  assetStates: DesktopFolderCatalogAssetState[],
+): Promise<boolean> {
+  const api = getDesktopApi();
+  if (!api?.saveFolderAssetStatesDelta) {
+    return false;
+  }
+
+  try {
+    await api.saveFolderAssetStatesDelta(folderPath, assetStates);
     return true;
   } catch {
     return false;
