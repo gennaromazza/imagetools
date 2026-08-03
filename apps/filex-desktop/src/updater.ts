@@ -1,11 +1,11 @@
 import * as electron from "electron";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { unlink, readFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type {
   DesktopReleaseChannel,
   DesktopReleaseManifest,
@@ -221,6 +221,15 @@ function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
 function readExecutableVersion(executablePath: string): string | null {
   if (process.platform !== "win32") return null;
   try {
+    const packagePath = join(dirname(executablePath), "resources", "app.asar", "package.json");
+    const packageJson = JSON.parse(readFileSync(packagePath, "utf8")) as { version?: unknown };
+    if (typeof packageJson.version === "string" && packageJson.version.trim()) {
+      return packageJson.version.trim();
+    }
+  } catch {
+    // Fall back to the Windows executable metadata for older installations.
+  }
+  try {
     const escapedPath = executablePath.replace(/'/g, "''");
     const output = execFileSync(
       "powershell.exe",
@@ -271,7 +280,7 @@ export async function listAvailableTools(channelInput?: DesktopReleaseChannel): 
     const hasUpdate =
       Boolean(installed.path) &&
       Boolean(latest?.version) &&
-      compareVersions(latest?.version, installed.version) > 0;
+      (!installed.version || compareVersions(latest?.version, installed.version) > 0);
     return {
       toolId: tool.id,
       toolName: tool.displayName,

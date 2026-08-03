@@ -1,9 +1,10 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getDesktopToolOrDefault } from "./.output/electron/tool-manifest.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const packageVersion = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf8")).version;
 const requestedTool = getDesktopToolOrDefault(process.env.FILEX_TOOL);
 const outputRoot = join(__dirname, ".output");
 const iconBasePath = join(outputRoot, "branding", requestedTool.id);
@@ -186,6 +187,7 @@ mkdirSync(outputRoot, { recursive: true });
 writeFileSync(nsisIncludePath, buildNsisIncludeContent(requestedTool), "utf8");
 
 export default {
+  buildVersion: packageVersion,
   appId: `studio.filex.${requestedTool.id}`,
   productName: requestedTool.productName,
   executableName: requestedTool.executableName,
