@@ -56,7 +56,7 @@ jobs:
         shell: pwsh
         run: |
           $env:FILEX_OUTPUT_DIR = ".output/releases-photo-selector"
-          npm run dist:filex-desktop:photo-selector:win64
+          npm run dist:filex-desktop:photo-selector:win
 
       - name: Prepare release assets and manifest
         shell: pwsh
