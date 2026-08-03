@@ -69,7 +69,7 @@ jobs:
           Copy-Item "apps/filex-desktop/.output/releases-photo-selector/Image-Select-Pro-*.exe" $releaseDir -Force
           Copy-Item "apps/filex-desktop/.output/releases-photo-selector/Image-Select-Pro-*.exe.blockmap" $releaseDir -Force
           $baseUrl = "https://github.com/gennaromazza/imagetools/releases/download/$env:FILEX_RELEASE_VERSION"
-          node ./scripts/generate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL --base-url=$baseUrl --min-launcher-version=0.1.0
+          node ./apps/filex-desktop/scripts/generate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL --base-url=$baseUrl --min-launcher-version=0.1.0
 
       - name: Validate tool release manifest
         run: |
