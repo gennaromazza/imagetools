@@ -37,6 +37,19 @@ Include:
 
 ## Manifest Release
 
+Il manifest stabile pubblico è l'unica fonte usata dal launcher per gli aggiornamenti dei tool:
+
+`https://github.com/gennaromazza/imagetools/releases/latest/download/stable.json`
+
+Ogni release deve pubblicare nello stesso tag:
+
+- installer FileX Suite;
+- installer di ogni tool costruito;
+- `stable.json` o `beta.json` del canale;
+- checksum e blockmap degli installer.
+
+Il launcher segue i redirect GitHub verso `release-assets.githubusercontent.com`, verifica l'integrità del manifest e poi confronta la versione di ogni tool installato con la versione più recente del manifest.
+
 Generazione:
 
 ```bash
@@ -65,3 +78,14 @@ Policy:
 
 - `stable` solo build verificate QA/UAT.
 - `beta` per smoke estesi e feedback pre-rollout.
+
+## Contratto UX degli aggiornamenti
+
+Tutti i tool devono rispettare lo stesso contratto:
+
+- `Installa` se il tool non è presente;
+- `Apri` se il tool è installato e aggiornato;
+- `Aggiorna` se esiste una versione remota più recente;
+- refresh globale della Suite per rileggere lo stato di tutti i tool.
+
+Non aggiungere aggiornamenti tool-specifici nella barra dell'aggiornamento della Suite: Suite e tool sono distribuiti separatamente.
