@@ -132,6 +132,7 @@ const DOCK_THUMB_ESTIMATED_SIZE = 81;
 const DOCK_THUMB_OVERSCAN = 4;
 const QUICK_PREVIEW_DESKTOP_FALLBACK_DELAY_MS = 80;
 const QUICK_PREVIEW_DETAIL_IDLE_DELAY_MS = 160;
+const QUICK_PREVIEW_INTERACTIVE_ZOOM = 2.2;
 const UI_SEPARATOR = " | ";
 const STAR_SYMBOL = "\u2605";
 
@@ -1639,10 +1640,17 @@ export function PhotoQuickPreviewModal({
       return null;
     }
     const ratio = img.naturalWidth / img.clientWidth;
-    if (!Number.isFinite(ratio) || ratio <= 1.05) {
-      return 1;
+    if (!Number.isFinite(ratio)) {
+      return null;
     }
-    return Math.min(12, Number(ratio.toFixed(2)));
+
+    // Una thumbnail/preview a bassa risoluzione può essere già più piccola
+    // del riquadro: in quel caso il rapporto pixel-perfect sarebbe < 1 e Z
+    // sembrerebbe non fare nulla. Manteniamo comunque uno zoom percepibile.
+    return Math.min(
+      12,
+      Math.max(QUICK_PREVIEW_INTERACTIVE_ZOOM, Number(ratio.toFixed(2))),
+    );
   }, []);
 
   const toggleZoom = useCallback(() => {
@@ -1657,7 +1665,7 @@ export function PhotoQuickPreviewModal({
       const target = computeOneToOneZoom();
       if (target === null) {
         pendingOneToOneZoomRef.current = true;
-        nextZoom = 2.2;
+        nextZoom = QUICK_PREVIEW_INTERACTIVE_ZOOM;
       } else {
         pendingOneToOneZoomRef.current = false;
         nextZoom = target;
@@ -1682,8 +1690,8 @@ export function PhotoQuickPreviewModal({
 
   useEffect(() => {
     pendingOneToOneZoomRef.current = startZoomed;
-    preCompareZoomRef.current = startZoomed ? 2.2 : 1;
-    setZoomLevel(startZoomed ? 2.2 : 1);
+    preCompareZoomRef.current = startZoomed ? QUICK_PREVIEW_INTERACTIVE_ZOOM : 1;
+    setZoomLevel(startZoomed ? QUICK_PREVIEW_INTERACTIVE_ZOOM : 1);
     setPanOffset({ x: 0, y: 0 });
     pendingPanOffsetRef.current = { x: 0, y: 0 };
     setIsPanning(false);

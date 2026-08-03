@@ -2835,7 +2835,6 @@ export function App() {
       }
 
       await handleFolderOpened(reopenedFolder);
-      await acknowledgeDesktopOpenFolderRequest(normalizedPath);
       if (hasDesktopStateApi()) {
         void logDesktopEvent({
           channel: "folder-open",
@@ -2854,8 +2853,17 @@ export function App() {
           details: error instanceof Error ? error.message : String(error),
         });
       }
+    } finally {
+      // Anche un percorso non più disponibile deve chiudere la richiesta
+      // desktop, altrimenti resta pendente e viene riproposto a ogni focus.
+      await acknowledgeDesktopOpenFolderRequest(normalizedPath);
     }
   }, [addToast, handleFolderOpened]);
+
+  // Il listener IPC resta montato mentre cambiano asset e stato della UI;
+  // il ref gli fornisce sempre l'ultima versione della callback.
+  const desktopFolderRequestHandlerRef = useRef(handleDesktopRequestedFolderOpen);
+  desktopFolderRequestHandlerRef.current = handleDesktopRequestedFolderOpen;
 
   const handlePhotosChange = useCallback((photos: ImageAsset[]) => {
     const previousAssets = allAssetsRef.current;
@@ -3281,14 +3289,14 @@ export function App() {
 
   useEffect(() => {
     const unsubscribe = subscribeDesktopOpenFolderRequest((folderPath) => {
-      void handleDesktopRequestedFolderOpen(folderPath);
+      void desktopFolderRequestHandlerRef.current(folderPath);
     });
     let cancelled = false;
 
     void (async () => {
       const pendingFolderPath = await consumePendingDesktopOpenFolderPath();
       if (!cancelled && pendingFolderPath) {
-        await handleDesktopRequestedFolderOpen(pendingFolderPath);
+        await desktopFolderRequestHandlerRef.current(pendingFolderPath);
       }
 
       if (!cancelled) {
@@ -3300,7 +3308,7 @@ export function App() {
       cancelled = true;
       unsubscribe?.();
     };
-  }, [handleDesktopRequestedFolderOpen]);
+  }, []);
 
   useEffect(() => {
     void refreshDesktopThumbnailCacheInfo();

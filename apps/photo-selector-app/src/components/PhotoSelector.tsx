@@ -876,13 +876,14 @@ export function PhotoSelector({
     if (changed) {
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, 1));
+      addToast(describeMetadataChanges(changes, 1), "success", 1800);
       if (source === "grid") {
         emitPreviewSyncFeedback(buildPreviewSyncFeedback(changes, [id]));
       } else if (source === "modal") {
         emitCardSyncFeedback(buildPreviewSyncFeedback(changes, [id]));
       }
     }
-  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry]);
+  }, [addToast, buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry]);
 
   function resetFilters() {
     setPickFilter("all");
@@ -2293,6 +2294,7 @@ export function PhotoSelector({
     if (changed) {
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, targetIds.length));
+      addToast(describeMetadataChanges(changes, changedIds.length), "success", 2200);
       if (changes.colorLabel !== undefined) {
         triggerBatchPulse(changedIds, "dot");
       }
@@ -2305,7 +2307,7 @@ export function PhotoSelector({
         emitCardSyncFeedback(buildPreviewSyncFeedback(changes, changedIds));
       }
     }
-  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
+  }, [addToast, buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
 
   const selectedCustomLabelCounts = useMemo(() => {
     const counts = new Map<string, number>();
