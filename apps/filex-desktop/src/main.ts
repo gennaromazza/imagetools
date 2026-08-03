@@ -21,6 +21,7 @@ import type {
   DesktopQuickPreviewRequest,
   DesktopRecentFolder,
   DesktopRuntimeInfo,
+  DesktopSuiteUpdateState,
   DesktopSendToEditorResult,
   DesktopSortCacheEntry,
   DesktopToolId,
@@ -103,6 +104,12 @@ import {
 } from "./updater.js";
 import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault, getSuiteManagedTools } from "./tool-manifest.js";
 import {
+  checkSuiteUpdate,
+  configureSuiteUpdater,
+  getSuiteUpdateState,
+  installSuiteUpdate,
+} from "./suite-updater.js";
+import {
   cancelImageConverterJobDesktop,
   chooseImageConverterFoldersDesktop,
   getImageConverterPresetsDesktop,
@@ -178,7 +185,17 @@ let pendingOpenProjectPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
 let suiteTray: TrayInstance | null = null;
 let suiteDockWindow: BrowserWindowInstance | null = null;
-const defaultSuiteDockState: DesktopDockState = { x: 0, y: 0, opacity: 0.94, collapsed: false, autoHide: false };
+const defaultSuiteDockState: DesktopDockState = {
+  schemaVersion: 2,
+  x: 0,
+  y: 0,
+  opacity: 0.94,
+  collapsed: true,
+  autoHide: true,
+  toolOrder: getSuiteManagedTools().map((tool) => tool.id),
+  visibleToolCount: 0,
+  settingsOpen: false,
+};
 
 function getSuiteDockStatePath(): string {
   return join(app.getPath("userData"), "suite-dock-state.json");
@@ -188,22 +205,66 @@ function sanitizeSuiteDockState(value: Partial<DesktopDockState> | null | undefi
   const x = Number(value?.x);
   const y = Number(value?.y);
   const opacity = Number(value?.opacity);
+  const visibleToolCount = Number(value?.visibleToolCount);
+  const allowedToolIds = new Set(getSuiteManagedTools().map((tool) => tool.id));
+  const requestedOrder = Array.isArray(value?.toolOrder) ? value.toolOrder : [];
+  const toolOrder = Array.from(new Set(requestedOrder.filter((toolId) => allowedToolIds.has(toolId))));
+  for (const tool of getSuiteManagedTools()) {
+    if (!toolOrder.includes(tool.id)) toolOrder.push(tool.id);
+  }
   return {
+    schemaVersion: 2,
     x: Number.isFinite(x) ? Math.round(x) : defaultSuiteDockState.x,
     y: Number.isFinite(y) ? Math.round(y) : defaultSuiteDockState.y,
     opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0.45, opacity)) : defaultSuiteDockState.opacity,
     collapsed: Boolean(value?.collapsed),
     autoHide: Boolean(value?.autoHide),
+    toolOrder,
+    visibleToolCount: Number.isFinite(visibleToolCount)
+      ? Math.min(getSuiteManagedTools().length, Math.max(0, Math.round(visibleToolCount)))
+      : defaultSuiteDockState.visibleToolCount,
+    settingsOpen: Boolean(value?.settingsOpen),
   };
 }
 
 async function readSuiteDockState(): Promise<DesktopDockState> {
   try {
     const raw = JSON.parse(await readFileAsync(getSuiteDockStatePath(), "utf8")) as Partial<DesktopDockState>;
+    if (raw.schemaVersion !== 2) {
+      return sanitizeSuiteDockState({
+        ...raw,
+        schemaVersion: 2,
+        collapsed: true,
+        autoHide: true,
+        settingsOpen: false,
+      });
+    }
     return { ...defaultSuiteDockState, ...sanitizeSuiteDockState(raw) };
   } catch {
     return { ...defaultSuiteDockState };
   }
+}
+
+function applySuiteDockWindowLayout(state: DesktopDockState, animate: boolean): void {
+  if (!suiteDockWindow || suiteDockWindow.isDestroyed()) return;
+  const currentBounds = suiteDockWindow.getBounds();
+  const display = screen.getDisplayMatching(currentBounds);
+  const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, state.visibleToolCount));
+  const expandedWidth = Math.min(
+    display.workAreaSize.width - 24,
+    Math.max(220, 142 + itemCount * 62),
+  );
+  const width = state.collapsed ? 88 : expandedWidth;
+  const height = state.settingsOpen && !state.collapsed ? 190 : 100;
+  const centerX = currentBounds.x + currentBounds.width / 2;
+  const bottom = currentBounds.y + currentBounds.height;
+  const minX = display.workArea.x;
+  const maxX = display.workArea.x + display.workAreaSize.width - width;
+  const minY = display.workArea.y;
+  const maxY = display.workArea.y + display.workAreaSize.height - height;
+  const x = Math.min(maxX, Math.max(minX, Math.round(centerX - width / 2)));
+  const y = Math.min(maxY, Math.max(minY, Math.round(bottom - height)));
+  suiteDockWindow.setBounds({ x, y, width, height }, animate);
 }
 
 async function saveSuiteDockState(partial: Partial<DesktopDockState>): Promise<DesktopDockState> {
@@ -215,10 +276,17 @@ async function saveSuiteDockState(partial: Partial<DesktopDockState>): Promise<D
     x: typeof partial.x === "number" ? partial.x : bounds?.x ?? current.x,
     y: typeof partial.y === "number" ? partial.y : bounds?.y ?? current.y,
   });
-  if (suiteDockWindow && !suiteDockWindow.isDestroyed() && typeof partial.collapsed === "boolean") {
-    const display = screen.getDisplayMatching(suiteDockWindow.getBounds());
-    const width = next.collapsed ? 96 : Math.min(920, Math.max(680, display.workAreaSize.width - 80));
-    suiteDockWindow.setSize(width, 190, true);
+  if (
+    suiteDockWindow &&
+    !suiteDockWindow.isDestroyed() &&
+    (typeof partial.collapsed === "boolean" ||
+      typeof partial.visibleToolCount === "number" ||
+      typeof partial.settingsOpen === "boolean")
+  ) {
+    applySuiteDockWindowLayout(next, true);
+    const resizedBounds = suiteDockWindow.getBounds();
+    next.x = resizedBounds.x;
+    next.y = resizedBounds.y;
   }
   if (suiteDockWindow && !suiteDockWindow.isDestroyed() && (typeof partial.x === "number" || typeof partial.y === "number")) {
     suiteDockWindow.setPosition(next.x, next.y, true);
@@ -987,6 +1055,9 @@ function buildMissingRendererHtml(entryPath: string): string {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle("filex:get-suite-update-state", () => getSuiteUpdateState());
+  ipcMain.handle("filex:check-suite-update", () => checkSuiteUpdate());
+  ipcMain.handle("filex:install-suite-update", () => installSuiteUpdate());
   ipcMain.handle("filex:get-runtime-info", async () => {
     let installedTools: DesktopToolInstallState[] = [];
     try {
@@ -1599,8 +1670,10 @@ async function createSuiteDock(): Promise<void> {
 
   const display = screen.getPrimaryDisplay();
   const dockState = await readSuiteDockState();
-  const width = dockState.collapsed ? 96 : Math.min(920, Math.max(680, display.workAreaSize.width - 80));
-  const height = 190;
+  const width = dockState.collapsed
+    ? 88
+    : Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + dockState.visibleToolCount * 62));
+  const height = dockState.settingsOpen && !dockState.collapsed ? 190 : 100;
   const defaultX = Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2);
   const defaultY = display.workArea.y + display.workAreaSize.height - height - 18;
   suiteDockWindow = new BrowserWindow({
@@ -1835,6 +1908,16 @@ if (hasSingleInstanceLock) {
     registerPreviewProtocol();
     registerCrashTelemetryHandlers();
     registerIpcHandlers();
+    configureSuiteUpdater({
+      currentVersion: app.getVersion(),
+      enabled: requestedTool.id === "suite-launcher" && app.isPackaged && process.platform === "win32",
+      allowPrerelease: resolveReleaseChannel() === "beta",
+      onState: (state: DesktopSuiteUpdateState) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("filex:suite-update-state", state);
+        }
+      },
+    });
     if (requestedTool.id === "archivio-flow" && process.platform === "win32") {
       app.setLoginItemSettings({
         openAtLogin: true,
@@ -1851,6 +1934,9 @@ if (hasSingleInstanceLock) {
     }
     createSuiteTray();
     await createSuiteDock();
+    if (requestedTool.id === "suite-launcher" && app.isPackaged) {
+      setTimeout(() => { void checkSuiteUpdate(); }, 3500);
+    }
     writeBootLog("Startup sequence completed");
 
     app.on("activate", () => {

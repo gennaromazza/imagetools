@@ -27,6 +27,9 @@ for (const release of raw.releases) {
   if (!/^https:\/\//i.test(release.installerUrl)) {
     throw new Error(`installerUrl non sicuro: ${release.installerUrl}`);
   }
+  if (/\/releases\/latest\/download(?:\/|$)/i.test(release.installerUrl)) {
+    throw new Error(`installerUrl non riproducibile: usa un tag di release preciso per ${release.toolId}`);
+  }
   if (!/^[0-9a-f]{64}$/i.test(release.installerSha256)) {
     throw new Error(`checksum non valido: ${release.toolId}`);
   }

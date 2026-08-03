@@ -6,6 +6,16 @@ const { contextBridge, ipcRenderer, webUtils } = electron;
 
 const api: FileXDesktopApi = {
   getRuntimeInfo: () => ipcRenderer.invoke("filex:get-runtime-info"),
+  getSuiteUpdateState: () => ipcRenderer.invoke("filex:get-suite-update-state"),
+  checkSuiteUpdate: () => ipcRenderer.invoke("filex:check-suite-update"),
+  installSuiteUpdate: () => ipcRenderer.invoke("filex:install-suite-update"),
+  onSuiteUpdateState: (listener) => {
+    const wrappedListener = (_event: IpcRendererEvent, state: Parameters<typeof listener>[0]) => {
+      listener(state);
+    };
+    ipcRenderer.on("filex:suite-update-state", wrappedListener);
+    return () => ipcRenderer.removeListener("filex:suite-update-state", wrappedListener);
+  },
   listAvailableTools: (channel) => ipcRenderer.invoke("filex:list-available-tools", channel),
   checkToolUpdate: (toolId, currentVersion, channel) =>
     ipcRenderer.invoke("filex:check-tool-update", toolId, currentVersion, channel),

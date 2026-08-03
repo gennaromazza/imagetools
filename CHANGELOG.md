@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-08-01 - FileX Suite 0.1.5
+
+### Aggiornamento automatico della Suite
+- controllo automatico della versione stabile all'avvio
+- download in background con avanzamento e velocità visibili nel launcher
+- verifica SHA-512 dell'installer tramite electron-updater
+- installazione automatica con conto alla rovescia, possibilità di installare subito o rimandare
+- gestione non bloccante delle connessioni lente o temporaneamente assenti
+- pubblicazione obbligatoria di `latest.yml` e blockmap nelle release future
+
+## 2026-08-01 - FileX Suite 0.1.4
+
+### Dock adattiva
+- avvio ridotto a icona anche per gli utenti provenienti dalle versioni precedenti
+- tema chiaro o scuro sincronizzato automaticamente con Windows
+- animazione di ingrandimento più fluida e progressiva in stile macOS
+- riordino delle icone tramite trascinamento con ordine persistente
+- finestra trasparente ridimensionata al contenuto per limitare l'area occupata e l'intercettazione del mouse
+- riduzione automatica dopo l'avvio di un tool o un breve periodo di inattività
+
+## 2026-08-01 - FileX Suite 0.1.3
+
+### Pulizia strumenti dismessi
+- rimossi definitivamente dal launcher ImageAlbumMaker, Ripara Disco Rete e Image ID Print
+- la Suite distribuita mostra esclusivamente i sei strumenti supportati
+- mantenuta la gestione degli installer tramite manifesto remoto con URL di release versionati
+
 ## 2026-03-27 - Desktop workflows, performance e branding
 
 Commit: `01e61e7` - `feat: improve desktop workflows and suite branding`

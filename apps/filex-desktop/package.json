@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/filex-desktop",
   "private": true,
-  "version": "0.1.2",
+  "version": "0.1.5",
   "description": "FileX Suite desktop shell for Windows packaging and native bridge work.",
   "author": "FileX",
   "type": "module",
@@ -50,17 +50,18 @@
     "dist:photo-selector:win64": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --win nsis --x64",
     "dist:photo-selector:win32": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --win nsis --ia32",
     "dist:photo-selector:mac": "npm run build:photo-selector && cross-env FILEX_TOOL=photo-selector-app electron-builder --config electron-builder.config.mjs --mac dmg zip",
-    "dist:all-tools:win": "npm run dist:image-party-frame:win && npm run dist:batch-print-layout:win64 && npm run dist:archivio-flow:win64 && npm run dist:image-converter:win64 && npm run dist:image-file-finder:win64 && npm run dist:photo-selector:win64 && npm run dist:suite:win && node ./scripts/collect-installers.mjs && node ./scripts/clean-release.mjs",
-    "manifest:generate:stable": "node ./scripts/generate-release-manifest.mjs --channel=stable --base-url=https://github.com/gennaromazza/imagetools/releases/latest/download",
-    "manifest:generate:beta": "node ./scripts/generate-release-manifest.mjs --channel=beta --base-url=https://github.com/gennaromazza/imagetools/releases/latest/download",
+    "dist:all-tools:win": "npm run dist:image-party-frame:win && npm run dist:batch-print-layout:win64 && npm run dist:archivio-flow:win64 && npm run dist:image-converter:win64 && npm run dist:image-file-finder:win64 && npm run dist:photo-selector:win64 && npm run dist:suite:win",
+    "manifest:generate:stable": "node ./scripts/generate-release-manifest.mjs --channel=stable",
+    "manifest:generate:beta": "node ./scripts/generate-release-manifest.mjs --channel=beta",
     "manifest:validate:stable": "node ./scripts/validate-release-manifest.mjs --channel=stable",
     "manifest:validate:beta": "node ./scripts/validate-release-manifest.mjs --channel=beta"
   },
   "dependencies": {
     "@photo-tools/desktop-contracts": "0.1.0",
     "cors": "^2.8.5",
-    "exiftool-vendored": "^35.15.1",
     "dotenv": "^17.3.1",
+    "electron-updater": "^6.8.9",
+    "exiftool-vendored": "^35.15.1",
     "express": "^5.0.0",
     "multer": "^2.1.1",
     "sharp": "^0.34.0"

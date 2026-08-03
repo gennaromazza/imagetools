@@ -18,11 +18,26 @@ export interface DesktopRuntimeInfo {
     installedTools: DesktopToolInstallState[];
 }
 export interface DesktopDockState {
+    schemaVersion: 2;
     x: number;
     y: number;
     opacity: number;
     collapsed: boolean;
     autoHide: boolean;
+    toolOrder: DesktopToolId[];
+    visibleToolCount: number;
+    settingsOpen: boolean;
+}
+export type DesktopSuiteUpdateStatus = "idle" | "disabled" | "checking" | "up-to-date" | "available" | "downloading" | "ready" | "installing" | "error";
+export interface DesktopSuiteUpdateState {
+    status: DesktopSuiteUpdateStatus;
+    currentVersion: string;
+    availableVersion: string | null;
+    percent: number | null;
+    transferredBytes: number;
+    totalBytes: number | null;
+    bytesPerSecond: number | null;
+    error: string | null;
 }
 export type DesktopToolInstallStatus = "installed" | "not-installed" | "update-available";
 export interface DesktopToolInstallState {
@@ -747,6 +762,10 @@ export interface ArchivioFilterPreviewData {
 }
 export interface FileXDesktopApi {
     getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
+    getSuiteUpdateState: () => Promise<DesktopSuiteUpdateState>;
+    checkSuiteUpdate: () => Promise<DesktopSuiteUpdateState>;
+    installSuiteUpdate: () => Promise<DesktopSuiteUpdateState>;
+    onSuiteUpdateState: (listener: (state: DesktopSuiteUpdateState) => void) => () => void;
     listAvailableTools: (channel?: DesktopReleaseChannel) => Promise<DesktopToolInstallState[]>;
     checkToolUpdate: (toolId: DesktopToolId, currentVersion?: string | null, channel?: DesktopReleaseChannel) => Promise<DesktopToolUpdateCheckResult>;
     downloadToolUpdate: (toolId: DesktopToolId, channel?: DesktopReleaseChannel) => Promise<DesktopToolUpdateJob>;

@@ -19,6 +19,11 @@ if (!baseUrlArg) {
   throw new Error("Parametro richiesto: --base-url=<url-release-assets>");
 }
 const baseUrl = baseUrlArg.split("=")[1].replace(/\/+$/, "");
+if (/\/releases\/latest\/download(?:\/|$)/i.test(baseUrl)) {
+  throw new Error(
+    "--base-url deve indicare un tag di release preciso (es. /releases/download/v0.2.0), non /releases/latest/download.",
+  );
+}
 
 const launcherVersionArg = process.argv.find((arg) => arg.startsWith("--min-launcher-version="));
 const minLauncherVersion = (launcherVersionArg ? launcherVersionArg.split("=")[1] : "0.1.0").trim();
