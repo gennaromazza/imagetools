@@ -7,6 +7,11 @@ interface PreviewWarmupTask {
 
 type WarmPreviewFn = (assetId: string, maxDimension: number, priority: number) => Promise<boolean>;
 
+interface PreviewWarmupPipelineOptions {
+  shouldDefer?: (priority: number) => boolean;
+  deferDelayMs?: number;
+}
+
 export class PreviewWarmupPipeline {
   private queue: PreviewWarmupTask[] = [];
   private queued = new Map<string, PreviewWarmupTask>();
@@ -14,11 +19,16 @@ export class PreviewWarmupPipeline {
   private destroyed = false;
   private readonly concurrency: number;
   private readonly warmPreview: WarmPreviewFn;
+  private readonly shouldDefer: ((priority: number) => boolean) | undefined;
+  private readonly deferDelayMs: number;
+  private deferTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(warmPreview: WarmPreviewFn) {
+  constructor(warmPreview: WarmPreviewFn, options?: PreviewWarmupPipelineOptions) {
     const cores = typeof navigator !== "undefined" ? navigator.hardwareConcurrency || 4 : 4;
     this.concurrency = Math.max(3, Math.min(8, cores));
     this.warmPreview = warmPreview;
+    this.shouldDefer = options?.shouldDefer;
+    this.deferDelayMs = options?.deferDelayMs ?? 260;
   }
 
   enqueue(
@@ -56,6 +66,10 @@ export class PreviewWarmupPipeline {
     this.queue = [];
     this.queued.clear();
     this.active.clear();
+    if (this.deferTimer) {
+      clearTimeout(this.deferTimer);
+      this.deferTimer = null;
+    }
   }
 
   private sortQueue(): void {
@@ -74,6 +88,17 @@ export class PreviewWarmupPipeline {
       }
 
       this.queued.delete(task.cacheKey);
+      if (this.shouldDefer?.(task.priority)) {
+        this.queue.unshift(task);
+        this.queued.set(task.cacheKey, task);
+        if (!this.deferTimer) {
+          this.deferTimer = setTimeout(() => {
+            this.deferTimer = null;
+            this.schedule();
+          }, this.deferDelayMs);
+        }
+        return;
+      }
       this.active.add(task.cacheKey);
 
       void this.warmPreview(task.assetId, task.maxDimension, task.priority)

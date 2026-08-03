@@ -180,6 +180,7 @@ const appUserModelId = `studio.filex.${requestedTool.id}`;
 let mainWindow: BrowserWindowInstance | null = null;
 let isOpenFolderRequestRendererReady = false;
 let pendingOpenFolderPath: string | null = null;
+let deliveredOpenFolderPath: string | null = null;
 let isOpenProjectRequestRendererReady = false;
 let pendingOpenProjectPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
@@ -623,6 +624,13 @@ function deliverOpenFolderRequest(folderPath: string): void {
     return;
   }
 
+  // Manteniamo la richiesta pendente fino all'ack del renderer, ma non la
+  // rispediamo a ogni evento di focus mentre la cartella è in apertura.
+  if (deliveredOpenFolderPath === folderPath) {
+    return;
+  }
+
+  deliveredOpenFolderPath = folderPath;
   mainWindow.webContents.send("filex:open-folder-request", folderPath);
   logDesktopEvent({
     channel: "folder-open",
@@ -687,7 +695,11 @@ if (!hasSingleInstanceLock) {
   });
 
   app.on("browser-window-focus", () => {
-    if (pendingOpenFolderPath && isOpenFolderRequestRendererReady) {
+    if (
+      pendingOpenFolderPath
+      && pendingOpenFolderPath !== deliveredOpenFolderPath
+      && isOpenFolderRequestRendererReady
+    ) {
       deliverOpenFolderRequest(pendingOpenFolderPath);
     }
     if (pendingOpenProjectPath && isOpenProjectRequestRendererReady) {
@@ -1123,19 +1135,27 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:acknowledge-open-folder-request", (_event, folderPath?: string | null) => {
     const normalizedFolderPath = typeof folderPath === "string" ? sanitizeDesktopPath(folderPath) : "";
     const normalizedPendingPath = pendingOpenFolderPath ? sanitizeDesktopPath(pendingOpenFolderPath) : "";
+    const normalizedDeliveredPath = deliveredOpenFolderPath ? sanitizeDesktopPath(deliveredOpenFolderPath) : "";
 
-    if (!pendingOpenFolderPath) {
+    if (!pendingOpenFolderPath && !deliveredOpenFolderPath) {
       return;
     }
 
-    if (!normalizedFolderPath || normalizedFolderPath === normalizedPendingPath) {
+    const acknowledgesPending = !normalizedFolderPath || normalizedFolderPath === normalizedPendingPath;
+    const acknowledgesDelivered = !normalizedFolderPath || normalizedFolderPath === normalizedDeliveredPath;
+    if (acknowledgesPending || acknowledgesDelivered) {
       logDesktopEvent({
         channel: "folder-open",
         level: "info",
         message: "Richiesta apertura cartella confermata dal renderer",
-        details: pendingOpenFolderPath,
+        details: folderPath ?? pendingOpenFolderPath ?? deliveredOpenFolderPath ?? "",
       });
-      pendingOpenFolderPath = null;
+      if (acknowledgesPending) {
+        pendingOpenFolderPath = null;
+      }
+      if (acknowledgesDelivered) {
+        deliveredOpenFolderPath = null;
+      }
     }
   });
   ipcMain.handle("filex:mark-open-folder-request-ready", (event) => {
@@ -1145,7 +1165,7 @@ function registerIpcHandlers(): void {
     }
 
     isOpenFolderRequestRendererReady = true;
-    if (pendingOpenFolderPath) {
+    if (pendingOpenFolderPath && pendingOpenFolderPath !== deliveredOpenFolderPath) {
       deliverOpenFolderRequest(pendingOpenFolderPath);
     }
   });
@@ -1783,6 +1803,7 @@ async function createMainWindow(): Promise<void> {
 
   mainWindow = windowInstance;
   isOpenFolderRequestRendererReady = false;
+  deliveredOpenFolderPath = null;
 
   windowInstance.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);

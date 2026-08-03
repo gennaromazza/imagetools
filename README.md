@@ -16,6 +16,16 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 
 ## Launcher Windows
 
+FileX Suite gestisce ogni tool separatamente. La Suite ha il proprio aggiornamento; ogni tool installato mostra nella sua scheda `Installa`, `Apri` oppure `Aggiorna` in base al manifest remoto della release.
+
+Per aggiornare:
+
+1. aggiornare FileX Suite quando richiesto;
+2. riaprire la Suite e premere il refresh;
+3. premere `Aggiorna` nella scheda del tool interessato.
+
+Download ufficiali: [release Windows](https://github.com/gennaromazza/imagetools/releases/latest).
+
 - `avvia-progetto.bat`: schermata di scelta tool (da estendere per includere tutti i tool FileX)
 - `avvia-image-party-frame.bat`: avvia direttamente Image Party Frame
 - `avvia-archivio-flow.bat`: avvia Archivio Flow

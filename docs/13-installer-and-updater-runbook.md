@@ -8,13 +8,25 @@
 4. Eseguire install on-demand da launcher.
 5. Verificare apertura tool e runtime desktop.
 
-## SOP Aggiornamento
+## SOP Aggiornamento per ogni tool
 
-1. Aprire launcher.
-2. `Controlla update` per tool.
-3. `Installa/Aggiorna`.
-4. Verificare checksum e avvio installer.
-5. Riavviare tool interessato.
+FileX Suite si aggiorna separatamente dai tool. Ogni tool installato usa lo stesso flusso:
+
+1. Aprire FileX Suite.
+2. Premere il refresh nella barra laterale per rileggere il manifest remoto `stable.json`.
+3. Nella scheda del tool verificare la versione installata e quella disponibile.
+4. Quando compare `Aggiorna`, premere quel pulsante nella scheda del tool interessato.
+5. Attendere download, verifica SHA-256 e avvio dell'installer Windows.
+6. Chiudere e riaprire il tool aggiornato.
+
+Il pulsante `Aggiorna` non appartiene all'aggiornamento della Suite: compare solo nella scheda del singolo tool quando la versione pubblicata è più recente.
+
+### Risoluzione problemi
+
+- Se compare `Pronto` ma è disponibile una release più recente, chiudere e riaprire FileX Suite e premere il refresh.
+- Se un tool viene installato con una versione vecchia, aggiornare prima FileX Suite: la Suite deve poter leggere il manifest remoto della release corrente.
+- Verificare che il computer possa raggiungere `github.com` e `release-assets.githubusercontent.com` tramite HTTPS.
+- Se il problema persiste, controllare il percorso dell'eseguibile installato e la versione mostrata nella scheda del tool.
 
 ## Rollback Operativo
 
@@ -34,4 +46,5 @@
 - Runtime info disponibile da tool.
 - Apertura cartelle native funzionante.
 - Build/versione coerente con release manifest.
+- Ogni tool installato mostra `Aggiorna` quando la release remota è più recente.
 - Nessun crash all'avvio nei primi 2 minuti.

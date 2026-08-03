@@ -47,7 +47,29 @@ jobs:
         run: npm ci
 
       - name: Build FileX Suite installer
-        run: npm run dist:filex-desktop:suite:win
+        shell: pwsh
+        run: |
+          $env:FILEX_OUTPUT_DIR = ".output/releases-suite"
+          npm run dist:filex-desktop:suite:win
+
+      - name: Build Image Select Pro installer
+        shell: pwsh
+        run: |
+          $env:FILEX_OUTPUT_DIR = ".output/releases-photo-selector"
+          npm run dist:filex-desktop:photo-selector:win
+
+      - name: Prepare release assets and manifest
+        shell: pwsh
+        run: |
+          $releaseDir = "apps/filex-desktop/.output/releases"
+          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+          Copy-Item "apps/filex-desktop/.output/releases-suite/*.exe" $releaseDir -Force
+          Copy-Item "apps/filex-desktop/.output/releases-suite/*.exe.blockmap" $releaseDir -Force
+          Copy-Item "apps/filex-desktop/.output/releases-suite/latest.yml" $releaseDir -Force
+          Copy-Item "apps/filex-desktop/.output/releases-photo-selector/Image-Select-Pro-*.exe" $releaseDir -Force
+          Copy-Item "apps/filex-desktop/.output/releases-photo-selector/Image-Select-Pro-*.exe.blockmap" $releaseDir -Force
+          $baseUrl = "https://github.com/gennaromazza/imagetools/releases/download/$env:FILEX_RELEASE_VERSION"
+          node ./apps/filex-desktop/scripts/generate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL --base-url=$baseUrl --min-launcher-version=0.1.0
 
       - name: Validate tool release manifest
         run: |
@@ -73,4 +95,4 @@ jobs:
             apps/filex-desktop/.output/releases/*.exe
             apps/filex-desktop/.output/releases/*.exe.blockmap
             apps/filex-desktop/.output/releases/latest.yml
-            apps/filex-desktop/release-manifests/${{ inputs.channel }}.json
+            apps/filex-desktop/release-manifests/${{ github.event_name == 'push' && 'stable' || inputs.channel }}.json

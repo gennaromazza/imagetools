@@ -1,11 +1,11 @@
 import * as electron from "electron";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { unlink, readFile } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type {
   DesktopReleaseChannel,
   DesktopReleaseManifest,
@@ -23,6 +23,7 @@ const ALLOWED_RELEASE_HOSTS = new Set([
   "github.com",
   "api.github.com",
   "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
   "raw.githubusercontent.com",
 ]);
 const UPDATE_RETRY_LIMIT = 2;
@@ -73,7 +74,7 @@ function getReleaseManifestUrl(channel: DesktopReleaseChannel): string {
     return generic.replace("{channel}", channel);
   }
 
-  return `https://raw.githubusercontent.com/gennaromazza/imagetools/main/apps/filex-desktop/release-manifests/${channel}.json`;
+  return `https://github.com/gennaromazza/imagetools/releases/latest/download/${channel}.json`;
 }
 
 function isAllowedReleaseUrl(urlValue: string): boolean {
@@ -86,7 +87,7 @@ function isAllowedReleaseUrl(urlValue: string): boolean {
   }
 }
 
-function requestJson(urlValue: string): Promise<unknown> {
+function requestJson(urlValue: string, redirectCount = 0): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(urlValue);
     const client = parsed.protocol === "http:" ? http : https;
@@ -99,6 +100,21 @@ function requestJson(urlValue: string): Promise<unknown> {
         },
       },
       (response) => {
+        if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400) {
+          const location = response.headers.location;
+          if (!location || redirectCount >= 5) {
+            reject(new Error("Manifest redirect non valido"));
+            return;
+          }
+          const redirectedUrl = new URL(location, parsed).toString();
+          if (!isAllowedReleaseUrl(redirectedUrl)) {
+            reject(new Error("Manifest redirect non autorizzato"));
+            return;
+          }
+          response.resume();
+          requestJson(redirectedUrl, redirectCount + 1).then(resolve, reject);
+          return;
+        }
         if (!response.statusCode || response.statusCode >= 400) {
           reject(new Error(`Manifest request failed (${response.statusCode ?? "unknown"})`));
           return;
@@ -221,6 +237,15 @@ function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
 function readExecutableVersion(executablePath: string): string | null {
   if (process.platform !== "win32") return null;
   try {
+    const packagePath = join(dirname(executablePath), "resources", "app.asar", "package.json");
+    const packageJson = JSON.parse(readFileSync(packagePath, "utf8")) as { version?: unknown };
+    if (typeof packageJson.version === "string" && packageJson.version.trim()) {
+      return packageJson.version.trim();
+    }
+  } catch {
+    // Fall back to the Windows executable metadata for older installations.
+  }
+  try {
     const escapedPath = executablePath.replace(/'/g, "''");
     const output = execFileSync(
       "powershell.exe",
@@ -271,7 +296,7 @@ export async function listAvailableTools(channelInput?: DesktopReleaseChannel): 
     const hasUpdate =
       Boolean(installed.path) &&
       Boolean(latest?.version) &&
-      compareVersions(latest?.version, installed.version) > 0;
+      (!installed.version || compareVersions(latest?.version, installed.version) > 0);
     return {
       toolId: tool.id,
       toolName: tool.displayName,

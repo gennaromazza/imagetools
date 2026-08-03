@@ -101,7 +101,6 @@ import { DismissibleBanner } from "./components/DismissibleBanner";
 import { FolderBrowser } from "./components/FolderBrowser";
 import { ImportProgressModal } from "./components/ImportProgressModal";
 import { PhotoSelector } from "./components/PhotoSelector";
-import { ProjectPhotoSelectorModal } from "./components/ProjectPhotoSelectorModal";
 import { SelectionSummary } from "./components/SelectionSummary";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -463,7 +462,6 @@ interface ImportProgressState {
   processed: number;
   currentFile: string | null;
   folderLabel: string;
-  diagnostics: FolderOpenDiagnostics | null;
 }
 
 interface PerformanceSnapshot {
@@ -511,6 +509,7 @@ export function App() {
   const pipelineRef = useRef<ThumbnailPipeline | null>(null);
   const previewWarmupPipelineRef = useRef<PreviewWarmupPipeline | null>(null);
   const [thumbnailProgress, setThumbnailProgress] = useState({ done: 0, total: 0 });
+  const [thumbnailViewVersion, setThumbnailViewVersion] = useState(0);
   const [thumbnailProfile, setThumbnailProfile] = useState<ThumbnailProfile>(
     initialPreferencesRef.current.thumbnailProfile,
   );
@@ -540,7 +539,6 @@ export function App() {
 
   // ── UI state ─────────────────────────────────────────────────────────
   const [currentScreen, setCurrentScreen] = useState<Screen>("browse");
-  const [isProjectSelectorOpen, setIsProjectSelectorOpen] = useState(false);
   const [isFolderTransitionBusy, setIsFolderTransitionBusy] = useState(false);
   const [folderTransitionLabel, setFolderTransitionLabel] = useState("");
   const [hasWritableFolderAccess, setHasWritableFolderAccess] = useState(false);
@@ -565,10 +563,10 @@ export function App() {
     processed: 0,
     currentFile: null,
     folderLabel: "",
-    diagnostics: null,
   });
   const [isImportPanelDismissed, setIsImportPanelDismissed] = useState(false);
   const [folderDiagnostics, setFolderDiagnostics] = useState<FolderOpenDiagnostics | null>(null);
+  const [isFolderDiagnosticsExpanded, setIsFolderDiagnosticsExpanded] = useState(false);
   const [desktopThumbnailCacheInfo, setDesktopThumbnailCacheInfo] = useState<DesktopThumbnailCacheInfo | null>(null);
   const [desktopCacheLocationRecommendation, setDesktopCacheLocationRecommendation] =
     useState<DesktopCacheLocationRecommendation | null>(null);
@@ -606,6 +604,14 @@ export function App() {
   const thumbnailPatchFlushTimerRef = useRef<number | null>(null);
   const thumbnailPatchLastFlushAtRef = useRef(0);
   const thumbnailPipelineMetricsRef = useRef<ThumbnailPipelineMetrics>(createThumbnailPipelineMetrics());
+  const applyThumbnailViewsAndNotify = useCallback((updates: Iterable<[string, ThumbnailViewState]>) => {
+    const entries = Array.from(updates);
+    if (entries.length === 0) {
+      return;
+    }
+    applyThumbnailViews(entries);
+    setThumbnailViewVersion((current) => current + 1);
+  }, []);
   const catalogPersistTimerRef = useRef<number | null>(null);
   const catalogIdentitySignatureRef = useRef<string>("");
   const catalogAssetStateSignatureRef = useRef(new Map<string, string>());
@@ -1459,7 +1465,7 @@ export function App() {
       thumbnailPatchStoreRef.current.delete(id);
     }
 
-    applyThumbnailViews(nextViews);
+    applyThumbnailViewsAndNotify(nextViews);
 
     updateThumbnailPipelineMetrics((current) => ({
       reactCommitCount: current.reactCommitCount + 1,
@@ -1484,7 +1490,7 @@ export function App() {
     });
 
     return applicableIds.length;
-  }, [markFirstThumbnailVisible, updateThumbnailPipelineMetrics]);
+  }, [applyThumbnailViewsAndNotify, markFirstThumbnailVisible, updateThumbnailPipelineMetrics]);
 
   const flushDeferredThumbnailPatchQueue = useCallback(() => {
     if (thumbnailPatchFlushRafRef.current !== null) {
@@ -1963,7 +1969,6 @@ export function App() {
       processed: 0,
       currentFile: null,
       folderLabel: "",
-      diagnostics: null,
     });
     setIsImportPanelDismissed(false);
     setAllAssets([]);
@@ -1972,7 +1977,7 @@ export function App() {
     setSourceFolderPath("");
     setHasWritableFolderAccess(false);
     setFolderDiagnostics(null);
-    setIsProjectSelectorOpen(false);
+    setIsFolderDiagnosticsExpanded(false);
     setCurrentScreen("browse");
     setIsXmpBannerDismissed(false);
     setXmpSyncState({
@@ -2084,7 +2089,7 @@ export function App() {
           setActiveAssetIds([]);
           setSourceFolderPath(rootPath ?? folderName);
           setHasWritableFolderAccess(false);
-          setIsProjectSelectorOpen(false);
+          setIsFolderDiagnosticsExpanded(false);
           setCurrentScreen("browse");
           setXmpSyncState({
             phase: "idle",
@@ -2101,7 +2106,6 @@ export function App() {
             processed: 0,
             currentFile: null,
             folderLabel: folderName,
-            diagnostics: nextDiagnostics,
           });
           perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
           perfTimeEnd(PERF_XMP_IMPORT);
@@ -2226,6 +2230,7 @@ export function App() {
       setActiveAssetIds([]);
       setSourceFolderPath(rootPath ?? folderName);
       setHasWritableFolderAccess(writableAccess);
+      setIsFolderDiagnosticsExpanded(false);
       setIsXmpBannerDismissed(false);
       setCurrentScreen("selection"); // instant — grid shows immediately
       markInteractiveWork(2200);
@@ -2256,7 +2261,6 @@ export function App() {
         processed: 0,
         currentFile: entries[0]?.name ?? null,
         folderLabel: folderName,
-        diagnostics: nextDiagnostics,
       });
       addToast(`${entries.length} foto trovate in "${folderName}".`, "info");
       if (hasDesktopStateApi() && rootPath) {
@@ -2611,7 +2615,7 @@ export function App() {
                 }]);
               }
 
-              applyThumbnailViews(nextViews);
+              applyThumbnailViewsAndNotify(nextViews);
           }
         }
 
@@ -2831,7 +2835,6 @@ export function App() {
       }
 
       await handleFolderOpened(reopenedFolder);
-      await acknowledgeDesktopOpenFolderRequest(normalizedPath);
       if (hasDesktopStateApi()) {
         void logDesktopEvent({
           channel: "folder-open",
@@ -2850,8 +2853,17 @@ export function App() {
           details: error instanceof Error ? error.message : String(error),
         });
       }
+    } finally {
+      // Anche un percorso non più disponibile deve chiudere la richiesta
+      // desktop, altrimenti resta pendente e viene riproposto a ogni focus.
+      await acknowledgeDesktopOpenFolderRequest(normalizedPath);
     }
   }, [addToast, handleFolderOpened]);
+
+  // Il listener IPC resta montato mentre cambiano asset e stato della UI;
+  // il ref gli fornisce sempre l'ultima versione della callback.
+  const desktopFolderRequestHandlerRef = useRef(handleDesktopRequestedFolderOpen);
+  desktopFolderRequestHandlerRef.current = handleDesktopRequestedFolderOpen;
 
   const handlePhotosChange = useCallback((photos: ImageAsset[]) => {
     const previousAssets = allAssetsRef.current;
@@ -2958,7 +2970,7 @@ export function App() {
             revokeThumbnailViewUrl(previousView);
           }
         }
-        applyThumbnailViews(thumbnailUpdates);
+        applyThumbnailViewsAndNotify(thumbnailUpdates);
       })();
     }
 
@@ -3169,70 +3181,6 @@ export function App() {
     }
   }, []);
 
-  const handleSelectorApply = useCallback(
-    (nextIds: string[], nextAssets: ImageAsset[]) => {
-      const previousAssets = allAssetsRef.current;
-      const changedIds = new Set<string>();
-      const nextAssetById = new Map(nextAssets.map((asset) => [asset.id, asset]));
-      const mergedAssets = previousAssets.map((asset) => {
-        const modalAsset = nextAssetById.get(asset.id);
-        if (!modalAsset) {
-          return asset;
-        }
-
-        const nextRating = modalAsset.rating ?? asset.rating;
-        const nextPickStatus = modalAsset.pickStatus ?? asset.pickStatus;
-        const nextColorLabel = modalAsset.colorLabel !== undefined ? modalAsset.colorLabel : asset.colorLabel;
-        const nextCustomLabels = modalAsset.customLabels !== undefined
-          ? modalAsset.customLabels
-          : (asset.customLabels ?? []);
-
-        if (
-          asset.rating === nextRating
-          && asset.pickStatus === nextPickStatus
-          && asset.colorLabel === nextColorLabel
-          && areStringArraysEqual(asset.customLabels, nextCustomLabels)
-        ) {
-          return asset;
-        }
-
-        changedIds.add(asset.id);
-        return {
-          ...asset,
-          rating: nextRating,
-          pickStatus: nextPickStatus,
-          colorLabel: nextColorLabel,
-          customLabels: nextCustomLabels,
-        };
-      });
-
-      const previousSet = new Set(activeAssetIdsRef.current);
-      const nextSet = new Set(nextIds);
-      for (const assetId of previousSet) {
-        if (!nextSet.has(assetId)) {
-          changedIds.add(assetId);
-        }
-      }
-      for (const assetId of nextSet) {
-        if (!previousSet.has(assetId)) {
-          changedIds.add(assetId);
-        }
-      }
-
-      setAllAssets(mergedAssets);
-      if (changedIds.size > 0) {
-        bumpPhotoMetadataVersion();
-      }
-      setActiveAssetIds(nextIds);
-      setIsProjectSelectorOpen(false);
-      if (changedIds.size > 0) {
-        queueXmpSync(Array.from(changedIds));
-      }
-      addToast(`Selezione aggiornata: ${nextIds.length} foto attive.`, "success");
-    },
-    [addToast, bumpPhotoMetadataVersion, queueXmpSync]
-  );
-
   const handleExportSelection = useCallback(() => {
     const result = buildSelectionResult(
       PROJECT_ID,
@@ -3341,14 +3289,14 @@ export function App() {
 
   useEffect(() => {
     const unsubscribe = subscribeDesktopOpenFolderRequest((folderPath) => {
-      void handleDesktopRequestedFolderOpen(folderPath);
+      void desktopFolderRequestHandlerRef.current(folderPath);
     });
     let cancelled = false;
 
     void (async () => {
       const pendingFolderPath = await consumePendingDesktopOpenFolderPath();
       if (!cancelled && pendingFolderPath) {
-        await handleDesktopRequestedFolderOpen(pendingFolderPath);
+        await desktopFolderRequestHandlerRef.current(pendingFolderPath);
       }
 
       if (!cancelled) {
@@ -3360,7 +3308,7 @@ export function App() {
       cancelled = true;
       unsubscribe?.();
     };
-  }, [handleDesktopRequestedFolderOpen]);
+  }, []);
 
   useEffect(() => {
     void refreshDesktopThumbnailCacheInfo();
@@ -3455,7 +3403,14 @@ export function App() {
   }, [allAssets.length, flushPendingXmpSync, hasWritableFolderAccess, usesMockData, xmpSyncVersion]);
 
   // ── Computed values ──────────────────────────────────────────────────
-  const emptyUsageMap = useMemo(() => new Map(), []);
+
+  const assetsWithThumbnailViews = useMemo(
+    () => allAssets.map((asset) => {
+      const thumbnailView = getThumbnailView(asset.id);
+      return thumbnailView ? { ...asset, ...thumbnailView } : asset;
+    }),
+    [allAssets, thumbnailViewVersion],
+  );
 
   const isGeneratingThumbnails =
     thumbnailProgress.total > 0 && thumbnailProgress.done < thumbnailProgress.total;
@@ -3502,13 +3457,13 @@ export function App() {
             >
               Selezione ({activeAssetIds.length})
             </button>
-              <button
-                type="button"
-                className={currentScreen === "review" ? "app-header__tab app-header__tab--active" : "app-header__tab"}
-                onClick={() => setCurrentScreen("review")}
-                disabled={activeAssetIds.length === 0}
+            <button
+              type="button"
+              className={currentScreen === "review" ? "app-header__tab app-header__tab--active" : "app-header__tab"}
+              onClick={() => setCurrentScreen("review")}
+              disabled={allAssets.length === 0}
             >
-              Riepilogo
+              Riepilogo ({activeAssetIds.length})
             </button>
           </nav>
           <div className="app-header__actions">
@@ -3542,35 +3497,12 @@ export function App() {
                 onClick={() => setCurrentScreen("browse")}
                 disabled={isFolderTransitionBusy}
               >
-                Apri cartella
-              </button>
-            ) : null}
-            {allAssets.length > 0 ? (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => setIsProjectSelectorOpen(true)}
-              >
-                Selezione progetto
-              </button>
-            ) : null}
-            {activeAssetIds.length > 0 ? (
-              <button
-                type="button"
-                className="secondary-button"
-                onClick={() => void handleOpenInAutoLayout()}
-              >
-                Impagina
+                Cambia cartella
               </button>
             ) : null}
             {!usesMockData && allAssets.length > 0 ? (
               <div className={`app-header__sync-status app-header__sync-status--${xmpSyncState.phase}`}>
                 {xmpSyncLabel}
-              </div>
-            ) : null}
-            {allAssets.length > 0 ? (
-              <div className="app-header__folder-pill">
-                {sourceFolderPath || "Cartella attiva"}
               </div>
             ) : null}
             <label className="field app-header__project-name">
@@ -3604,61 +3536,60 @@ export function App() {
           {folderDiagnostics ? (
             <div className="folder-diagnostics-panel" role="status" aria-live="polite">
               <div className="folder-diagnostics-panel__header">
-                <div>
-                  <strong>Diagnostica cartella</strong>
-                  <span>{formatFolderDiagnosticsSource(folderDiagnostics.source)}</span>
+                <div className="folder-diagnostics-panel__context">
+                  <strong>Cartella attiva</strong>
+                  <span title={folderDiagnostics.selectedPath}>{folderDiagnostics.selectedPath}</span>
                 </div>
-                <div className="folder-diagnostics-panel__badge">
-                  {folderDiagnostics.topLevelSupportedCount} top-level
+                <div className="folder-diagnostics-panel__actions">
+                  <span className="folder-diagnostics-panel__badge">
+                    {folderDiagnostics.groupedAssetCount ?? folderDiagnostics.topLevelSupportedCount} foto
+                  </span>
+                  {folderDiagnostics.nestedSupportedDiscardedCount > 0 ? (
+                    <span className="folder-diagnostics-panel__warning">
+                      {folderDiagnostics.nestedSupportedDiscardedCount} annidate ignorate
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="ghost-button ghost-button--small"
+                    onClick={() => setIsFolderDiagnosticsExpanded((current) => !current)}
+                    aria-expanded={isFolderDiagnosticsExpanded}
+                  >
+                    {isFolderDiagnosticsExpanded ? "Nascondi dettagli" : "Dettagli"}
+                  </button>
                 </div>
               </div>
 
-              <div className="folder-diagnostics-panel__grid">
-                <div className="folder-diagnostics-panel__item">
-                  <span>Path selezionato</span>
-                  <strong title={folderDiagnostics.selectedPath}>{folderDiagnostics.selectedPath}</strong>
-                </div>
-                <div className="folder-diagnostics-panel__item">
-                  <span>Top-level caricati (file fisici)</span>
-                  <strong>{folderDiagnostics.topLevelSupportedCount}</strong>
-                </div>
-                {typeof folderDiagnostics.groupedAssetCount === "number" ? (
+              {isFolderDiagnosticsExpanded ? (
+                <div className="folder-diagnostics-panel__grid">
                   <div className="folder-diagnostics-panel__item">
-                    <span>Scatti unici (gruppi)</span>
-                    <strong>{folderDiagnostics.groupedAssetCount}</strong>
+                    <span>Origine</span>
+                    <strong>{formatFolderDiagnosticsSource(folderDiagnostics.source)}</strong>
                   </div>
-                ) : null}
-                <div className="folder-diagnostics-panel__item">
-                  <span>Annidati scartati</span>
-                  <strong>{folderDiagnostics.nestedSupportedDiscardedCount}</strong>
-                </div>
-                <div className="folder-diagnostics-panel__item">
-                  <span>Totale supportate viste</span>
-                  <strong>{folderDiagnostics.totalSupportedSeen}</strong>
-                </div>
-                <div className="folder-diagnostics-panel__item">
-                  <span>Sottocartelle viste</span>
-                  <strong>{folderDiagnostics.nestedDirectoriesSeen ?? 0}</strong>
-                </div>
-                {typeof folderDiagnostics.scanMs === "number" ? (
                   <div className="folder-diagnostics-panel__item">
-                    <span>Scan top-level</span>
-                    <strong>{Math.round(folderDiagnostics.scanMs)} ms</strong>
+                    <span>File fisici nella cartella</span>
+                    <strong>{folderDiagnostics.topLevelSupportedCount}</strong>
                   </div>
-                ) : null}
-                {typeof folderDiagnostics.statMs === "number" ? (
+                  {typeof folderDiagnostics.groupedAssetCount === "number" ? (
+                    <div className="folder-diagnostics-panel__item">
+                      <span>Foto dopo raggruppamento</span>
+                      <strong>{folderDiagnostics.groupedAssetCount}</strong>
+                    </div>
+                  ) : null}
                   <div className="folder-diagnostics-panel__item">
-                    <span>Stat file</span>
-                    <strong>{Math.round(folderDiagnostics.statMs)} ms</strong>
+                    <span>File nelle sottocartelle ignorati</span>
+                    <strong>{folderDiagnostics.nestedSupportedDiscardedCount}</strong>
                   </div>
-                ) : null}
-                {folderDiagnostics.nestedScanSkipped ? (
                   <div className="folder-diagnostics-panel__item">
-                    <span>Scan annidati</span>
-                    <strong>Rimandato</strong>
+                    <span>Totale file supportati rilevati</span>
+                    <strong>{folderDiagnostics.totalSupportedSeen}</strong>
                   </div>
-                ) : null}
-              </div>
+                  <div className="folder-diagnostics-panel__item">
+                    <span>Sottocartelle analizzate</span>
+                    <strong>{folderDiagnostics.nestedDirectoriesSeen ?? 0}</strong>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
           {currentScreen === "browse" ? (
@@ -3673,19 +3604,17 @@ export function App() {
           {currentScreen === "selection" ? (
             <div className="app-section app-section--full">
               <PhotoSelector
-                photos={allAssets}
+                photos={assetsWithThumbnailViews}
                 metadataVersion={photoMetadataVersion}
                 sourceFolderPath={sourceFolderPath}
                 selectedIds={activeAssetIds}
                 onSelectionChange={handleSelectionChange}
                 onPhotosChange={handlePhotosChange}
-                onPhotoUpdates={handlePhotoUpdates}
                 onVisibleIdsChange={handleVisibleIdsChange}
                 onPriorityIdsChange={handlePriorityIdsChange}
                 onPreviewPriorityIdsChange={handlePreviewPriorityIdsChange}
                 onBackgroundPreviewOrderChange={handleBackgroundPreviewOrderChange}
                 onScrollLiteActiveMsChange={handleScrollLiteActiveMsChange}
-                onScrollActivityChange={handleScrollActivityChange}
                 onUndo={undoRedo.undo}
                 onRedo={undoRedo.redo}
                 canUndo={undoRedo.canUndo}
@@ -3721,22 +3650,11 @@ export function App() {
                 projectName={projectName}
                 onExportSelection={handleExportSelection}
                 onBackToSelection={() => setCurrentScreen("selection")}
-                onOpenProjectSelector={() => setIsProjectSelectorOpen(true)}
               />
             </div>
           ) : null}
         </main>
 
-        {/* Project Photo Selector Modal — full-screen cataloging */}
-        {isProjectSelectorOpen ? (
-          <ProjectPhotoSelectorModal
-            assets={allAssets}
-            activeAssetIds={activeAssetIds}
-            usageByAssetId={emptyUsageMap}
-            onClose={() => setIsProjectSelectorOpen(false)}
-            onApply={handleSelectorApply}
-          />
-        ) : null}
         <ImportProgressModal
           isOpen={importProgress.isOpen && !isImportPanelDismissed}
           phase={importProgress.phase}
@@ -3746,7 +3664,6 @@ export function App() {
           processed={importProgress.processed}
           currentFile={importProgress.currentFile}
           folderLabel={importProgress.folderLabel}
-          diagnostics={importProgress.diagnostics}
           onDismiss={() => setIsImportPanelDismissed(true)}
           onCancel={handleCancelImport}
         />
