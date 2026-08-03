@@ -51,7 +51,7 @@ function parseVersion(fileName, executableName, releaseChannel) {
   return match ? match[1] : null;
 }
 
-const releases = [];
+const generatedReleases = [];
 for (const tool of toolConfig) {
   const candidate = artifacts
     .filter((entry) => entry.isFile())
@@ -69,7 +69,7 @@ for (const tool of toolConfig) {
   const content = await readFile(absolutePath);
   const sha256 = createHash("sha256").update(content).digest("hex");
 
-  releases.push({
+  generatedReleases.push({
     toolId: tool.toolId,
     version,
     channel,
@@ -79,6 +79,24 @@ for (const tool of toolConfig) {
     publishedAt: new Date().toISOString(),
   });
 }
+
+let previousReleases = [];
+try {
+  const previousManifest = JSON.parse(
+    await readFile(join(manifestDir, `${channel}.json`), "utf8"),
+  );
+  previousReleases = Array.isArray(previousManifest.releases) ? previousManifest.releases : [];
+} catch {
+  previousReleases = [];
+}
+
+const generatedToolIds = new Set(generatedReleases.map((release) => release.toolId));
+const releases = [
+  ...previousReleases.filter(
+    (release) => !generatedToolIds.has(release.toolId) || release.channel !== channel,
+  ),
+  ...generatedReleases,
+];
 
 const manifest = {
   schemaVersion: 1,

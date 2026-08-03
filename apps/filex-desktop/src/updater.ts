@@ -73,7 +73,7 @@ function getReleaseManifestUrl(channel: DesktopReleaseChannel): string {
     return generic.replace("{channel}", channel);
   }
 
-  return `https://raw.githubusercontent.com/gennaromazza/imagetools/main/apps/filex-desktop/release-manifests/${channel}.json`;
+  return `https://github.com/gennaromazza/imagetools/releases/latest/download/${channel}.json`;
 }
 
 function isAllowedReleaseUrl(urlValue: string): boolean {
