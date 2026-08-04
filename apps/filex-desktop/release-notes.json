@@ -1,0 +1,56 @@
+{
+  "image-party-frame": {
+    "0.1.18": [
+      "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
+      "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
+      "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
+    ],
+    "0.1.0": [
+      "Creazione di progetti fotografici con template predefiniti o personalizzati.",
+      "Regolazione visuale di ritaglio e zoom, confronto del risultato ed esportazione in batch.",
+      "Importazione ed esportazione di pacchetti portabili per progetti e librerie di template."
+    ]
+  },
+  "batch-print-layout": {
+    "0.1.0": [
+      "Impaginazione automatica di piu fotografie su fogli pronti per la stampa.",
+      "Organizzazione batch delle immagini per ridurre sprechi e operazioni manuali."
+    ]
+  },
+  "archivio-flow": {
+    "0.1.18": [
+      "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
+      "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
+      "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
+    ],
+    "0.1.0": [
+      "Importazione guidata delle fotografie da scheda e creazione automatica del lavoro.",
+      "Struttura cartelle, rinomina coerente e archivio consultabile dei servizi fotografici."
+    ]
+  },
+  "image-converter": {
+    "0.1.0": [
+      "Conversione batch in JPG e WebP con preset per web, social, revisione e stampa.",
+      "Conversione dei negativi RAW in DNG compresso, conservando originali e sidecar XMP.",
+      "Controllo di dimensioni e peso del file con cartelle di output separate."
+    ]
+  },
+  "image-file-finder": {
+    "0.1.0": [
+      "Ricerca automatica di fotografie in cartelle e sottocartelle a partire da una lista di nomi.",
+      "Raccolta dei file trovati in una destinazione unica con riepilogo degli elementi mancanti."
+    ]
+  },
+  "photo-selector-app": {
+    "0.1.18": [
+      "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
+      "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
+      "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
+    ],
+    "0.1.0": [
+      "Selezione e classificazione rapida di grandi servizi fotografici, inclusi i file RAW.",
+      "Confronto, anteprima veloce, valutazioni, etichette colore e sincronizzazione XMP.",
+      "Salvataggio dei progetti e trasferimento delle selezioni tramite Google Drive."
+    ]
+  }
+}

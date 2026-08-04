@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-08-04 - FileX Suite 0.1.18
+
+### FileX Suite
+- descrizioni operative complete per tutti i software presenti nel launcher
+- dettagli della nuova versione mostrati direttamente nella scheda prima del pulsante `Aggiorna`
+- note di rilascio obbligatorie per ogni tool: il manifest non viene generato se le novità non sono specificate
+
+### Aggiornamenti coordinati
+- chiusura dell'intera famiglia di processi FileX prima di aggiornare la Suite o un singolo tool
+- tentativo di chiusura ordinata seguito dalla terminazione dei soli processi rimasti bloccati
+- riavvio automatico di FileX Suite al termine dell'installer
+- ripristino automatico dei tool che erano aperti prima dell'aggiornamento
+
+### Release engineering
+- Image Party Frame entra nella pipeline insieme a FileX Suite, Image Select Pro e Archivio Flow
+- manifest stabile completo di versione, checksum, URL e novità per ciascun tool pubblicato
+- chiusura processi già predisposta anche per Batch Print Layout, Image Converter e Trova Foto da Lista quando torneranno disponibili i relativi workspace applicativi
+
 ## 2026-08-04 - FileX Suite 0.1.17
 
 ### Archivio Flow

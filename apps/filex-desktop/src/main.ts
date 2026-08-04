@@ -117,6 +117,7 @@ import {
   openInstalledTool,
 } from "./updater.js";
 import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault, getSuiteManagedTools } from "./tool-manifest.js";
+import { consumeFileXRestartPlan } from "./filex-process-coordinator.js";
 import {
   checkSuiteUpdate,
   configureSuiteUpdater,
@@ -2013,6 +2014,10 @@ if (hasSingleInstanceLock) {
     createSuiteTray();
     await createSuiteDock();
     if (requestedTool.id === "suite-launcher" && app.isPackaged) {
+      const toolsToRestart = consumeFileXRestartPlan();
+      for (const toolId of toolsToRestart) {
+        await openInstalledTool(toolId);
+      }
       setTimeout(() => { void checkSuiteUpdate(); }, 3500);
     }
     writeBootLog("Startup sequence completed");

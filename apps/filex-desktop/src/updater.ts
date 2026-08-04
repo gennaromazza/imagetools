@@ -15,9 +15,10 @@ import type {
   DesktopToolUpdateCheckResult,
   DesktopToolUpdateJob,
 } from "@photo-tools/desktop-contracts";
+import { launchToolUpdateAndRestartSuite } from "./filex-process-coordinator.js";
 import { desktopToolManifest, getSuiteManagedTools, type DesktopToolDescriptor } from "./tool-manifest.js";
 
-const { app, shell } = electron;
+const { app } = electron;
 
 const ALLOWED_RELEASE_HOSTS = new Set([
   "github.com",
@@ -141,7 +142,12 @@ function isDesktopReleaseManifest(value: unknown): value is DesktopReleaseManife
     Boolean(manifest) &&
     manifest.schemaVersion === 1 &&
     Array.isArray(manifest.channels) &&
-    Array.isArray(manifest.releases)
+    Array.isArray(manifest.releases) &&
+    manifest.releases.every((release) =>
+      Array.isArray(release.highlights)
+      && release.highlights.length > 0
+      && release.highlights.every((item) => typeof item === "string" && item.trim().length > 0),
+    )
   );
 }
 
@@ -317,6 +323,9 @@ export async function listAvailableTools(channelInput?: DesktopReleaseChannel): 
       executablePath: installed.path,
       installedVersion: installed.version,
       latestVersion: latest?.version ?? null,
+      releaseHighlights: Array.isArray(latest?.highlights)
+        ? latest.highlights.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        : [],
       status: hasUpdate ? "update-available" : installed.path ? "installed" : "not-installed",
     };
   });
@@ -562,11 +571,12 @@ export async function applyToolUpdate(jobId: string): Promise<DesktopToolUpdateJ
   }
 
   patchJob(jobId, { status: "applying" });
-  const result = await shell.openPath(job.installerPath);
-  if (result) {
+  try {
+    await launchToolUpdateAndRestartSuite(job.installerPath);
+  } catch (error) {
     return patchJob(jobId, {
       status: "failed",
-      error: result,
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 

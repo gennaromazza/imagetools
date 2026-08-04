@@ -15,6 +15,35 @@
   cursor: pointer;
 }
 
+.tool-description {
+  min-height: 7.4em;
+}
+
+.tool-update-notes {
+  margin: 14px 0 2px;
+  padding: 12px 13px;
+  border: 1px solid #ead39e;
+  border-radius: 11px;
+  background: #fffaf0;
+  color: #594418;
+}
+
+.tool-update-notes strong {
+  display: block;
+  font-size: 12px;
+}
+
+.tool-update-notes ul {
+  margin: 7px 0 0;
+  padding-left: 17px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tool-update-notes li + li {
+  margin-top: 4px;
+}
+
 .tool-icon {
   overflow: hidden;
   background: transparent;

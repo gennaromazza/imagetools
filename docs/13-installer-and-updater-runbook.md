@@ -17,7 +17,10 @@ FileX Suite si aggiorna separatamente dai tool. Ogni tool installato usa lo stes
 3. Nella scheda del tool verificare la versione installata e quella disponibile.
 4. Quando compare `Aggiorna`, premere quel pulsante nella scheda del tool interessato.
 5. Attendere download, verifica SHA-256 e avvio dell'installer Windows.
-6. Chiudere e riaprire il tool aggiornato.
+6. FileX registra i tool aperti, chiude tutti i processi della Suite e applica l'aggiornamento.
+7. Al termine FileX Suite riparte automaticamente e riapre i tool che erano in esecuzione.
+
+La chiusura viene richiesta prima in modo ordinato. Solo i processi che non rispondono vengono terminati, così l'installer non trova file bloccati. Salvare sempre il lavoro prima di confermare un aggiornamento.
 
 Il pulsante `Aggiorna` non appartiene all'aggiornamento della Suite: compare solo nella scheda del singolo tool quando la versione pubblicata è più recente.
 
@@ -48,6 +51,7 @@ Il pulsante `Aggiorna` non appartiene all'aggiornamento della Suite: compare sol
 - Build/versione coerente con release manifest.
 - Ogni tool installato mostra `Aggiorna` quando la release remota è più recente.
 - Nessun crash all'avvio nei primi 2 minuti.
+- Suite riavviata e tool precedentemente aperti ripristinati dopo l'aggiornamento.
 
 ## Chiusura di una pubblicazione
 

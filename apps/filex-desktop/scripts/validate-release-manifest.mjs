@@ -33,6 +33,13 @@ for (const release of raw.releases) {
   if (!/^[0-9a-f]{64}$/i.test(release.installerSha256)) {
     throw new Error(`checksum non valido: ${release.toolId}`);
   }
+  if (
+    !Array.isArray(release.highlights)
+    || release.highlights.length === 0
+    || release.highlights.some((item) => typeof item !== "string" || !item.trim())
+  ) {
+    throw new Error(`Novita dell'aggiornamento mancanti: ${release.toolId} ${release.version}`);
+  }
 }
 
 const payload = JSON.stringify({

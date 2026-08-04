@@ -1,6 +1,7 @@
 import electronUpdater from "electron-updater";
 import type { DesktopSuiteUpdateState } from "@photo-tools/desktop-contracts";
 import https from "node:https";
+import { saveFileXRestartPlan, terminateFileXToolsExceptSuite } from "./filex-process-coordinator.js";
 
 const { autoUpdater } = electronUpdater;
 
@@ -195,7 +196,16 @@ export function installSuiteUpdate(): DesktopSuiteUpdateState {
   if (!enabled || state.status !== "ready") return snapshot();
   const next = patchState({ status: "installing", error: null });
   setTimeout(() => {
-    autoUpdater.quitAndInstall(true, true);
+    try {
+      saveFileXRestartPlan();
+      terminateFileXToolsExceptSuite();
+      autoUpdater.quitAndInstall(true, true);
+    } catch (error) {
+      patchState({
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }, 250);
   return next;
 }

@@ -7,6 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = join(__dirname, "..");
 const releaseDir = join(desktopRoot, ".output", "releases");
 const manifestDir = join(desktopRoot, "release-manifests");
+const releaseNotesPath = join(desktopRoot, "release-notes.json");
 
 const channelArg = process.argv.find((arg) => arg.startsWith("--channel="));
 const channel = (channelArg ? channelArg.split("=")[1] : "stable").trim();
@@ -43,6 +44,23 @@ const toolConfig = [
   { toolId: "photo-selector-app", executableName: "Image-Select-Pro" },
 ];
 
+let releaseNotes = {};
+try {
+  releaseNotes = JSON.parse(await readFile(releaseNotesPath, "utf8"));
+} catch (error) {
+  throw new Error(`Impossibile leggere ${releaseNotesPath}: ${error instanceof Error ? error.message : error}`);
+}
+
+function getReleaseHighlights(toolId, version) {
+  const highlights = releaseNotes?.[toolId]?.[version];
+  if (!Array.isArray(highlights) || highlights.length === 0 || highlights.some((item) => typeof item !== "string" || !item.trim())) {
+    throw new Error(
+      `Note di rilascio mancanti per ${toolId} ${version}. Aggiungile a release-notes.json prima di generare il manifest.`,
+    );
+  }
+  return highlights.map((item) => item.trim());
+}
+
 function parseVersion(fileName, executableName, releaseChannel) {
   const escapedName = executableName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const escapedChannel = releaseChannel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -77,6 +95,7 @@ for (const tool of toolConfig) {
     installerSha256: sha256,
     minLauncherVersion,
     publishedAt: new Date().toISOString(),
+    highlights: getReleaseHighlights(tool.toolId, version),
   });
 }
 
