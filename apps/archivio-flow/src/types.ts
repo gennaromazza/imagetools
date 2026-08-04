@@ -1,5 +1,9 @@
 import type {
   ArchivioArchiveHierarchyConfig,
+  ArchivioArchiveAnalysisItem,
+  ArchivioArchiveAnalysisResult,
+  ArchivioArchiveRenameResult,
+  ArchivioArchiveRenameRequest,
   ArchivioFilterPreviewData,
   ArchivioImportProgressSnapshot,
   ArchivioImportRequest,
@@ -23,3 +27,7 @@ export type ArchiveHierarchySettings = ArchivioArchiveHierarchyConfig;
 export type ArchivioFlowSettings = ArchivioSettings;
 export type FilterPreviewData = ArchivioFilterPreviewData;
 export type SelectionCandidate = ArchivioSelectionCandidate;
+export type ArchiveAnalysisItem = ArchivioArchiveAnalysisItem;
+export type ArchiveAnalysisResult = ArchivioArchiveAnalysisResult;
+export type ArchiveRenameResult = ArchivioArchiveRenameResult;
+export type ArchiveRenameRequest = ArchivioArchiveRenameRequest;

@@ -34,7 +34,8 @@ const DEFAULT_ARCHIVE_HIERARCHY: ArchiveHierarchySettings = {
 };
 
 function normalizeHierarchyLevel(rawValue: unknown, fallback: number | null): number | null {
-  if (rawValue === null || rawValue === undefined || rawValue === "") return fallback;
+  if (rawValue === undefined) return fallback;
+  if (rawValue === null || rawValue === "") return null;
   const parsed = Number.parseInt(String(rawValue), 10);
   if (!Number.isFinite(parsed)) return fallback;
   if (parsed <= 0) return null;
@@ -395,6 +396,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     if (!usaLavoroEsistente || !existingJobId) return;
     const selected = jobsEsistenti.find((j) => j.id === existingJobId);
     if (!selected) return;
+    setNomeLavoro(selected.nomeLavoro);
+    setDataLavoro(selected.dataLavoro);
     setContrattoLink(selected.contrattoLink ?? "");
   }, [usaLavoroEsistente, existingJobId, jobsEsistenti]);
 
@@ -564,7 +567,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         setImportSuccess(importResult);
         if (openFolderOnFinish) {
           autoOpenedJobRef.current = importResult.job.id;
-          await openFolderInExplorer(importResult.cartellaFotoFinale || importResult.job.percorsoCartella);
+          try {
+            await openFolderInExplorer(importResult.cartellaFotoFinale || importResult.job.percorsoCartella);
+          } catch {
+            // Import is already complete; Explorer failures must not turn it into a failed import.
+          }
         }
         await refreshExistingJobs();
         onImportDone(importResult);
@@ -1878,13 +1885,21 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
       {importSuccess && (
         <div
           className="message-box"
-          style={{ borderColor: "rgba(142, 178, 142, 0.4)", background: "rgba(142, 178, 142, 0.08)" }}
+          style={{
+            borderColor: importSuccess.incomplete ? "rgba(184, 154, 99, 0.45)" : "rgba(142, 178, 142, 0.4)",
+            background: importSuccess.incomplete ? "rgba(184, 154, 99, 0.1)" : "rgba(142, 178, 142, 0.08)",
+          }}
         >
-          <p style={{ color: "var(--success)" }}>
-            ✓ Importazione completata — {importSuccess.copiedFiles} file copiati
+          <p style={{ color: importSuccess.incomplete ? "var(--accent-strong)" : "var(--success)" }}>
+            {importSuccess.incomplete ? "Importazione incompleta" : "✓ Importazione completata"} — {importSuccess.copiedFiles} file copiati
             {importSuccess.jpgGenerati > 0 && `, ${importSuccess.jpgGenerati} JPG compressi`}
             {importSuccess.errors.length > 0 && ` (${importSuccess.errors.length} errori)`}
           </p>
+          {importSuccess.errors.length > 0 && (
+            <ul style={{ margin: "0.45rem 0 0", paddingLeft: "1.1rem", color: "var(--danger)", fontSize: "0.8rem" }}>
+              {importSuccess.errors.slice(0, 20).map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}
+            </ul>
+          )}
           <p style={{ margin: "0.4rem 0 0", fontSize: "0.88rem", color: "var(--text-muted)" }}>
             {importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella}
           </p>

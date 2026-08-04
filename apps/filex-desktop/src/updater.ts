@@ -15,7 +15,7 @@ import type {
   DesktopToolUpdateCheckResult,
   DesktopToolUpdateJob,
 } from "@photo-tools/desktop-contracts";
-import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
+import { desktopToolManifest, getSuiteManagedTools, type DesktopToolDescriptor } from "./tool-manifest.js";
 
 const { app, shell } = electron;
 
@@ -202,7 +202,7 @@ export async function loadReleaseManifest(channelInput?: DesktopReleaseChannel):
 }
 
 function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
-  const descriptor = desktopToolManifest[toolId];
+  const descriptor: DesktopToolDescriptor = desktopToolManifest[toolId];
   const candidates = new Set<string>();
 
   if (toolId === desktopToolManifest["suite-launcher"].id && app.isPackaged) {
@@ -215,19 +215,31 @@ function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
     }
   }
 
-  // Check both productName ("Image Select Pro") and executableName ("Image-Select-Pro") as folder names,
-  // because electron-builder NSIS may use either depending on install mode and user choice.
-  const folderNames = Array.from(new Set([descriptor.productName, descriptor.executableName]));
+  // NSIS installations and older FileX releases used both display names and
+  // executable-safe names for their folders. Try every known combination so
+  // Suite tools can discover one another across upgrades.
+  const folderNames = Array.from(new Set([
+    descriptor.productName,
+    descriptor.executableName,
+    ...(descriptor.legacyUpgradeDisplayNames ?? []),
+    ...(descriptor.legacyExecutableNames ?? []),
+  ]));
+  const executableNames = Array.from(new Set([
+    descriptor.executableName,
+    ...(descriptor.legacyExecutableNames ?? []),
+  ])).map((name) => name.toLowerCase().endsWith(".exe") ? name : `${name}.exe`);
 
-  for (const folderName of folderNames) {
-    if (process.env.LOCALAPPDATA) {
-      candidates.add(join(process.env.LOCALAPPDATA, "Programs", folderName, `${descriptor.executableName}.exe`));
-    }
-    if (process.env.ProgramFiles) {
-      candidates.add(join(process.env.ProgramFiles, folderName, `${descriptor.executableName}.exe`));
-    }
-    if (process.env["ProgramFiles(x86)"]) {
-      candidates.add(join(process.env["ProgramFiles(x86)"], folderName, `${descriptor.executableName}.exe`));
+  const installRoots = new Set<string>();
+  if (process.env.LOCALAPPDATA) installRoots.add(join(process.env.LOCALAPPDATA, "Programs"));
+  if (process.env.ProgramFiles) installRoots.add(process.env.ProgramFiles);
+  if (process.env["ProgramFiles(x86)"]) installRoots.add(process.env["ProgramFiles(x86)"]!);
+  if (app.isPackaged) installRoots.add(dirname(dirname(process.execPath)));
+
+  for (const installRoot of installRoots) {
+    for (const folderName of folderNames) {
+      for (const executableName of executableNames) {
+        candidates.add(join(installRoot, folderName, executableName));
+      }
     }
   }
 
@@ -576,31 +588,48 @@ export function openInstalledTool(
     return Promise.resolve({ ok: false, message: "Tool non installato" });
   }
 
-  const safeArgs = Array.isArray(launchArgs)
+  const filteredArgs = Array.isArray(launchArgs)
     ? launchArgs.filter((value) => typeof value === "string" && value.trim().length > 0)
     : [];
-
-  if (safeArgs.length > 0) {
-    try {
-      const child = spawn(installed.path, safeArgs, {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: false,
-      });
-      child.unref();
-      return Promise.resolve({ ok: true, message: "Tool avviato" });
-    } catch (error) {
-      return Promise.resolve({
-        ok: false,
-        message: error instanceof Error ? error.message : "Impossibile avviare il tool",
-      });
+  const safeArgs: string[] = [];
+  for (let index = 0; index < filteredArgs.length; index += 1) {
+    const argument = filteredArgs[index]!;
+    const nextArgument = filteredArgs[index + 1];
+    if ((argument === "--open-folder" || argument === "--open-project") && nextArgument) {
+      // A single key=value argument survives Electron's Windows
+      // second-instance forwarding more reliably than a flag/path pair.
+      safeArgs.push(`${argument}=${nextArgument}`);
+      index += 1;
+    } else {
+      safeArgs.push(argument);
     }
   }
 
-  return shell.openPath(installed.path).then((result) => {
-    if (result) {
-      return { ok: false, message: result };
+  const launchEnv: NodeJS.ProcessEnv = { ...process.env, FILEX_TOOL: toolId };
+  delete launchEnv.ELECTRON_RUN_AS_NODE;
+
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(installed.path!, safeArgs, {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: false,
+        env: launchEnv,
+      });
+    } catch (error) {
+      resolve({
+        ok: false,
+        message: error instanceof Error ? error.message : "Impossibile avviare il tool",
+      });
+      return;
     }
-    return { ok: true, message: "Tool avviato" };
+    child.once("error", (error) => {
+      resolve({ ok: false, message: error.message || "Impossibile avviare il tool" });
+    });
+    child.once("spawn", () => {
+      child.unref();
+      resolve({ ok: true, message: "Tool avviato" });
+    });
   });
 }

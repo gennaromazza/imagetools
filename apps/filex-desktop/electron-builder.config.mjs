@@ -10,7 +10,6 @@ const outputRoot = join(__dirname, ".output");
 const iconBasePath = join(outputRoot, "branding", requestedTool.id);
 const nsisIncludePath = join(outputRoot, "generated-installer-hooks.nsh");
 const releaseChannel = process.env.FILEX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
-const shouldCodeSign = process.env.FILEX_CODE_SIGNING === "1";
 const outputDirectory = process.env.FILEX_OUTPUT_DIR || join(".output", "releases");
 
 function escapeNsisString(value) {
@@ -230,7 +229,9 @@ export default {
   ],
   win: {
     icon: `${iconBasePath}.ico`,
-    signAndEditExecutable: shouldCodeSign,
+    // Resource editing is what embeds the product icon in the Windows .exe.
+    // It must stay enabled even for unsigned local/stable builds.
+    signAndEditExecutable: true,
     target: [
       {
         target: "nsis",

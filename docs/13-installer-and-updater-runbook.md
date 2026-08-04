@@ -48,3 +48,7 @@ Il pulsante `Aggiorna` non appartiene all'aggiornamento della Suite: compare sol
 - Build/versione coerente con release manifest.
 - Ogni tool installato mostra `Aggiorna` quando la release remota è più recente.
 - Nessun crash all'avvio nei primi 2 minuti.
+
+## Chiusura di una pubblicazione
+
+Una pubblicazione e' conclusa solo dopo aver verificato GitHub Release, GitHub Pages e il manifest remoto. Seguire `docs/18-publish-build-contract.md` per la checklist completa.

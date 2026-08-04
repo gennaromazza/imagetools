@@ -9,6 +9,7 @@
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\"",
     "build": "vite build",
     "build:server": "tsc -p server/tsconfig.json",
+    "test:archive": "tsx --test server/archive-analysis.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

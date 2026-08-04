@@ -37,7 +37,9 @@ export default function App() {
       next[idx] = result.job;
       return next;
     });
-    setScreen("archivio");
+    if (!result.incomplete) {
+      setScreen("archivio");
+    }
   }
 
   return (

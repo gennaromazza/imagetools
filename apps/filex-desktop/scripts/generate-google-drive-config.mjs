@@ -11,8 +11,8 @@ await mkdir(dirname(outputPath), { recursive: true });
 await writeFile(
   outputPath,
   `// Generated at build time. Do not commit this file.\n` +
-    `export const GOOGLE_CLIENT_ID = ${JSON.stringify(clientId)};\n` +
-    `export const GOOGLE_CLIENT_SECRET = ${JSON.stringify(clientSecret)};\n`,
+    `export const GOOGLE_CLIENT_ID: string = ${JSON.stringify(clientId)};\n` +
+    `export const GOOGLE_CLIENT_SECRET: string = ${JSON.stringify(clientSecret)};\n`,
   "utf8",
 );
 

@@ -12,6 +12,11 @@
 - [x] Gestione autore come cartella sotto `FOTO_SD\<Autore>`
 - [x] Generazione `BASSA_QUALITA` via IPC
 - [x] Archivio lavori, link contratto e delete via IPC
+- [x] Mappatura persistente delle cartelle esterne al software
+- [x] Risanamento manuale nome/data con anteprima, conferma, collision check e rollback
+- [x] Apertura e cambio cartella in Image Select Pro gia' avviato
+- [x] Scrollbar visibile nel modulo di riallineamento
+- [x] Test automatico filesystem per analisi, rinomina, import e BASSA_QUALITA
 - [x] Build desktop Archivio Flow x64 riuscita
 - [x] Build desktop Archivio Flow ia32 riuscita
 - [ ] Build Mac artefatto finale

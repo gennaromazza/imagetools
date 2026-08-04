@@ -105,6 +105,43 @@ img { display: block; max-width: 100%; }
   gap: var(--space-3);
 }
 
+.archive-repair-modal__layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.archive-repair-modal__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: var(--accent) rgba(255, 255, 255, 0.07);
+}
+
+.archive-repair-modal__list::-webkit-scrollbar {
+  width: 12px;
+}
+
+.archive-repair-modal__list::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
+}
+
+.archive-repair-modal__list::-webkit-scrollbar-thumb {
+  background: var(--accent);
+  border: 3px solid rgba(27, 33, 30, 0.99);
+  border-radius: 999px;
+}
+
+.archive-repair-modal__footer {
+  flex: 0 0 auto;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;

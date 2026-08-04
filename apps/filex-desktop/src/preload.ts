@@ -146,6 +146,8 @@ const api: FileXDesktopApi = {
   getArchivioPreviewImage: (sdPath, filePath) => ipcRenderer.invoke("filex:get-archivio-preview-image", sdPath, filePath),
   startArchivioImport: (input) => ipcRenderer.invoke("filex:start-archivio-import", input),
   listArchivioJobs: () => ipcRenderer.invoke("filex:list-archivio-jobs"),
+  analyzeArchivioArchive: () => ipcRenderer.invoke("filex:analyze-archivio-archive"),
+  renameArchivioArchiveJobs: (requests) => ipcRenderer.invoke("filex:rename-archivio-archive-jobs", requests),
   deleteArchivioJob: (jobId) => ipcRenderer.invoke("filex:delete-archivio-job", jobId),
   updateArchivioJobContractLink: (jobId, contrattoLink) =>
     ipcRenderer.invoke("filex:update-archivio-job-contract-link", jobId, contrattoLink),
