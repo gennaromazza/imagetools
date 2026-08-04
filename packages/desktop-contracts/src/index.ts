@@ -844,6 +844,50 @@ export interface ArchivioJob {
   numeroFile: number;
   folderExists?: boolean;
   hasLowQualityFiles?: boolean;
+  discoveredFromArchive?: boolean;
+}
+
+export type ArchivioArchiveAnalysisStatus = "aligned" | "rename-ready" | "needs-review" | "conflict";
+
+export interface ArchivioArchiveAnalysisItem {
+  jobId: string;
+  currentFolderName: string;
+  currentFolderPath: string;
+  proposedFolderName: string | null;
+  proposedFolderPath: string | null;
+  nomeLavoro: string;
+  dataLavoro: string | null;
+  annoArchivio?: string;
+  categoriaArchivio?: string;
+  status: ArchivioArchiveAnalysisStatus;
+  reason: string;
+}
+
+export interface ArchivioArchiveAnalysisResult {
+  archiveRoot: string;
+  warnings: string[];
+  scannedJobs: number;
+  registeredJobs: number;
+  alignedJobs: number;
+  renameReadyJobs: number;
+  needsReviewJobs: number;
+  conflictJobs: number;
+  items: ArchivioArchiveAnalysisItem[];
+}
+
+export interface ArchivioArchiveRenameRequest {
+  jobId: string;
+  nomeLavoro?: string;
+  dataLavoro?: string;
+}
+
+export interface ArchivioArchiveRenameResult {
+  ok: true;
+  renamed: Array<{
+    jobId: string;
+    previousFolderPath: string;
+    folderPath: string;
+  }>;
 }
 
 export interface ArchivioSelectionCandidate {
@@ -1126,6 +1170,8 @@ export interface FileXDesktopApi {
   getArchivioPreviewImage: (sdPath: string, filePath: string) => Promise<DesktopRenderedImage | null>;
   startArchivioImport: (input: ArchivioImportRequest) => Promise<ArchivioImportResult>;
   listArchivioJobs: () => Promise<ArchivioJob[]>;
+  analyzeArchivioArchive: () => Promise<ArchivioArchiveAnalysisResult>;
+  renameArchivioArchiveJobs: (requests: ArchivioArchiveRenameRequest[]) => Promise<ArchivioArchiveRenameResult>;
   deleteArchivioJob: (jobId: string) => Promise<{ ok: boolean }>;
   updateArchivioJobContractLink: (jobId: string, contrattoLink: string) => Promise<ArchivioJob>;
   listArchivioJobSubfolders: (jobId: string) => Promise<{ subfolders: string[] }>;

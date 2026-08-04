@@ -700,18 +700,33 @@ function queueOpenProjectPath(projectPath: string | null): void {
   }
 }
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const initialOpenFolderPath = extractOpenFolderPathFromArgv(process.argv, process.cwd());
+const initialOpenProjectPath = extractOpenProjectPathFromArgv(process.argv);
+const hasSingleInstanceLock = app.requestSingleInstanceLock({
+  requestedToolId: requestedTool.id,
+  openFolderPath: initialOpenFolderPath,
+  openProjectPath: initialOpenProjectPath,
+});
 if (!hasSingleInstanceLock) {
   writeEarlyBootLog("Single instance lock denied, quitting");
   app.quit();
 } else {
   writeEarlyBootLog("Single instance lock acquired");
-  pendingOpenFolderPath = extractOpenFolderPathFromArgv(process.argv, process.cwd());
-  pendingOpenProjectPath = extractOpenProjectPathFromArgv(process.argv);
+  pendingOpenFolderPath = initialOpenFolderPath;
+  pendingOpenProjectPath = initialOpenProjectPath;
 
-  app.on("second-instance", (_event, argv, workingDirectory) => {
-    queueOpenFolderPath(extractOpenFolderPathFromArgv(argv, workingDirectory));
-    queueOpenProjectPath(extractOpenProjectPathFromArgv(argv));
+  app.on("second-instance", (_event, argv, workingDirectory, additionalData) => {
+    const launchData = additionalData && typeof additionalData === "object"
+      ? additionalData as { openFolderPath?: unknown; openProjectPath?: unknown }
+      : null;
+    const sharedFolderPath = typeof launchData?.openFolderPath === "string"
+      ? resolveValidDirectoryPath(launchData.openFolderPath)
+      : null;
+    const sharedProjectPath = typeof launchData?.openProjectPath === "string"
+      ? resolveValidFilePath(launchData.openProjectPath)
+      : null;
+    queueOpenFolderPath(sharedFolderPath ?? extractOpenFolderPathFromArgv(argv, workingDirectory));
+    queueOpenProjectPath(sharedProjectPath ?? extractOpenProjectPathFromArgv(argv));
     void ensureMainWindow();
     focusMainWindow();
   });
@@ -1595,6 +1610,14 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:list-archivio-jobs", async () => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.listJobsService();
+  });
+  ipcMain.handle("filex:analyze-archivio-archive", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.analyzeArchiveService();
+  });
+  ipcMain.handle("filex:rename-archivio-archive-jobs", async (_event, requests: Array<{ jobId: string; nomeLavoro?: string; dataLavoro?: string }>) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.renameArchiveJobsService(requests);
   });
   ipcMain.handle("filex:delete-archivio-job", async (_event, jobId: string) => {
     const archivio = await loadArchivioFlowModule();

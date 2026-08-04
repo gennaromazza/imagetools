@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-08-04 - FileX Suite 0.1.17
+
+### Archivio Flow
+- mappatura persistente delle cartelle archivio create fuori da Archivio Flow
+- nuovo modulo guidato per correggere nome e data e riallineare in sicurezza i nomi delle cartelle
+- anteprima, selezione esplicita, controllo collisioni, rollback e scrollbar sempre visibile nel modulo di riallineamento
+- import piu' sicuro: blocco destinazioni interne alla SD, gestione link, confronto contenuti e risultati parziali espliciti
+- generazione BASSA_QUALITA piu' robusta e riutilizzabile anche sui file gia' importati
+- icona Windows corretta al posto dell'icona Electron
+
+### Integrazione FileX Suite e Image Select Pro
+- rilevamento esteso delle installazioni attuali e legacy di Image Select Pro
+- apertura automatica della cartella selezionata da Archivio Flow
+- cambio cartella affidabile quando Image Select Pro e' gia' aperto, senza creare finestre duplicate
+- forwarding Windows irrobustito tramite dati single-instance e argomento `--open-folder=...`
+
+### Release engineering
+- FileX Suite, Image Select Pro e Archivio Flow pubblicati insieme al manifest stabile aggiornato
+- contratto permanente "pubblica e builda" documentato per versioni, changelog, sito, installer e verifica updater
+
 ## 2026-08-01 - FileX Suite 0.1.5
 
 ### Aggiornamento automatico della Suite

@@ -35,6 +35,8 @@ Include:
 - installer singoli tool
 - installer Suite (`suite-launcher`)
 
+Il workflow deve costruire almeno FileX Suite e tutti i tool modificati dalla release. Per `v0.1.17` gli artefatti obbligatori sono Suite, Image Select Pro e Archivio Flow.
+
 ## Manifest Release
 
 Il manifest stabile pubblico è l'unica fonte usata dal launcher per gli aggiornamenti dei tool:
@@ -47,6 +49,8 @@ Ogni release deve pubblicare nello stesso tag:
 - installer di ogni tool costruito;
 - `stable.json` o `beta.json` del canale;
 - checksum e blockmap degli installer.
+
+Il tag `vX.Y.Z` deve coincidere con la versione in `apps/filex-desktop/package.json`; la pipeline interrompe la pubblicazione in caso di disallineamento.
 
 Il launcher segue i redirect GitHub verso `release-assets.githubusercontent.com`, verifica l'integrità del manifest e poi confronta la versione di ogni tool installato con la versione più recente del manifest.
 
@@ -87,5 +91,7 @@ Tutti i tool devono rispettare lo stesso contratto:
 - `Apri` se il tool è installato e aggiornato;
 - `Aggiorna` se esiste una versione remota più recente;
 - refresh globale della Suite per rileggere lo stato di tutti i tool.
+
+La definizione completa della richiesta "pubblica e builda" e' in `docs/18-publish-build-contract.md`.
 
 Non aggiungere aggiornamenti tool-specifici nella barra dell'aggiornamento della Suite: Suite e tool sono distribuiti separatamente.

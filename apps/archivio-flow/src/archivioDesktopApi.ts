@@ -1,4 +1,7 @@
 import type {
+  ArchiveAnalysisResult,
+  ArchiveRenameResult,
+  ArchiveRenameRequest,
   ArchivioFlowSettings,
   FilterPreviewData,
   ImportRequest,
@@ -95,6 +98,22 @@ export async function getArchivioJobs(): Promise<Job[]> {
     return await desktopApi.listArchivioJobs();
   }
   return await apiGet<Job[]>("/api/jobs");
+}
+
+export async function analyzeArchivioArchive(): Promise<ArchiveAnalysisResult> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) {
+    return await desktopApi.analyzeArchivioArchive();
+  }
+  return await apiPost<ArchiveAnalysisResult>("/api/archive/analyze");
+}
+
+export async function renameArchivioArchiveJobs(requests: ArchiveRenameRequest[]): Promise<ArchiveRenameResult> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) {
+    return await desktopApi.renameArchivioArchiveJobs(requests);
+  }
+  return await apiPost<ArchiveRenameResult>("/api/archive/rename", { requests });
 }
 
 export async function getArchivioSdCards(): Promise<SdCard[]> {

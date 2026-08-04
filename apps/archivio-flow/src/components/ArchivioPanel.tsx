@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { List as VirtualList, type RowComponentProps } from "react-window";
-import type { Job, LowQualityProgressSnapshot, SelectionCandidate } from "../types";
+import type { ArchiveAnalysisResult, Job, LowQualityProgressSnapshot, SelectionCandidate } from "../types";
 import {
+  analyzeArchivioArchive,
   deleteArchivioJob,
   getArchivioJobSelectionCandidates,
   generateArchivioLowQuality,
@@ -9,6 +10,7 @@ import {
   getArchivioLowQualityProgress,
   openJobInPhotoSelector,
   openArchivioFolder,
+  renameArchivioArchiveJobs,
   updateArchivioJobContractLink,
 } from "../archivioDesktopApi";
 
@@ -64,6 +66,14 @@ function displayCategoryFilterLabel(value: string): string {
 
 type BadgeTone = "ok" | "missing" | "todo";
 type RowFeedbackTone = "success" | "error" | "info";
+type RenameDraft = { nomeLavoro: string; dataLavoro: string };
+
+function buildRepairedFolderName(draft: RenameDraft): string {
+  const safeName = draft.nomeLavoro.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").trim();
+  const match = draft.dataLavoro.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!safeName || !match) return "";
+  return `${draft.dataLavoro} - ${safeName} - ${match[3]}-${match[2]}-${match[1]}`;
+}
 
 function renderStatusBadge(label: string, tone: BadgeTone) {
   const palette: Record<BadgeTone, { border: string; background: string; color: string; text: string }> = {
@@ -155,6 +165,11 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
   const [contractFeedback, setContractFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [lowQualityFeedback, setLowQualityFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [archiveFeedback, setArchiveFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [archiveAnalysis, setArchiveAnalysis] = useState<ArchiveAnalysisResult | null>(null);
+  const [selectedRenameIds, setSelectedRenameIds] = useState<Set<string>>(new Set());
+  const [renameDrafts, setRenameDrafts] = useState<Record<string, RenameDraft>>({});
+  const [analyzingArchive, setAnalyzingArchive] = useState(false);
+  const [renamingArchive, setRenamingArchive] = useState(false);
   const feedbackTimersRef = useRef<Record<string, number>>({});
 
   const availableYears = Array.from(
@@ -440,6 +455,79 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     }
   }
 
+  async function handleAnalyzeArchive() {
+    setAnalyzingArchive(true);
+    setArchiveFeedback(null);
+    try {
+      const result = await analyzeArchivioArchive();
+      setArchiveAnalysis(result);
+      setRenameDrafts(Object.fromEntries(result.items.map((item) => [item.jobId, {
+        nomeLavoro: item.nomeLavoro,
+        dataLavoro: item.dataLavoro ?? "",
+      }])));
+      setSelectedRenameIds(new Set(
+        result.items.filter((item) => item.status === "rename-ready").map((item) => item.jobId),
+      ));
+      onRefresh();
+    } catch (error) {
+      setArchiveFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Analisi archivio non riuscita",
+      });
+    } finally {
+      setAnalyzingArchive(false);
+    }
+  }
+
+  function toggleRenameSelection(jobId: string) {
+    setSelectedRenameIds((current) => {
+      const next = new Set(current);
+      if (next.has(jobId)) next.delete(jobId);
+      else next.add(jobId);
+      return next;
+    });
+  }
+
+  function updateRenameDraft(jobId: string, patch: Partial<RenameDraft>) {
+    setRenameDrafts((current) => ({
+      ...current,
+      [jobId]: { ...(current[jobId] ?? { nomeLavoro: "", dataLavoro: "" }), ...patch },
+    }));
+  }
+
+  async function confirmArchiveRename() {
+    const requests = [...selectedRenameIds].map((jobId) => ({
+      jobId,
+      nomeLavoro: renameDrafts[jobId]?.nomeLavoro ?? "",
+      dataLavoro: renameDrafts[jobId]?.dataLavoro ?? "",
+    }));
+    if (requests.length === 0) return;
+    setRenamingArchive(true);
+    setArchiveFeedback(null);
+    try {
+      const result = await renameArchivioArchiveJobs(requests);
+      const refreshedAnalysis = await analyzeArchivioArchive();
+      setArchiveAnalysis(refreshedAnalysis);
+      setRenameDrafts(Object.fromEntries(refreshedAnalysis.items.map((item) => [item.jobId, {
+        nomeLavoro: item.nomeLavoro,
+        dataLavoro: item.dataLavoro ?? "",
+      }])));
+      setSelectedRenameIds(new Set());
+      setArchiveFeedback({
+        type: "success",
+        text: `${result.renamed.length} ${result.renamed.length === 1 ? "cartella rinominata" : "cartelle rinominate"} e registro aggiornato.`,
+      });
+      onRefresh();
+    } catch (error) {
+      setArchiveFeedback({
+        type: "error",
+        text: error instanceof Error ? error.message : "Rinomina archivio non riuscita",
+      });
+    } finally {
+      setRenamingArchive(false);
+    }
+  }
+
   function renderJobItem(job: Job, compact: boolean) {
     const hasContract = Boolean(job.contrattoLink);
     const hasLowQuality = job.hasLowQualityFiles === true;
@@ -706,6 +794,9 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
           </p>
         </div>
         <div className="workspace__header-actions">
+          <button className="secondary-button" onClick={() => void handleAnalyzeArchive()} disabled={loading || analyzingArchive}>
+            {analyzingArchive ? "Analizzo..." : "Sistema nomi cartelle"}
+          </button>
           <button className="ghost-button" onClick={() => setShowMissingFolders((prev) => !prev)}>
             {showMissingFolders ? "Nascondi mancanti" : "Mostra mancanti"}
           </button>
@@ -931,6 +1022,159 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
           <p style={{ color: lowQualityFeedback.type === "success" ? "var(--success)" : "var(--danger)" }}>
             {lowQualityFeedback.text}
           </p>
+        </div>
+      )}
+
+      {archiveAnalysis && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 10, 9, 0.76)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 90,
+            padding: "1rem",
+          }}
+        >
+          <div
+            className="panel-section"
+            style={{
+              width: "min(920px, 100%)",
+              height: "88vh",
+              maxHeight: 900,
+              overflow: "hidden",
+              padding: "1.1rem",
+              borderColor: "var(--line-strong)",
+              background: "rgba(27, 33, 30, 0.99)",
+            }}
+          >
+            <div className="archive-repair-modal__layout" style={{ gap: "0.85rem" }}>
+              <div>
+                <strong style={{ fontSize: "1.05rem" }}>Sistema e allinea i nomi delle cartelle</strong>
+                <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.84rem", wordBreak: "break-all" }}>
+                  {archiveAnalysis.archiveRoot}
+                </p>
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
+                {renderStatusBadge(`${archiveAnalysis.scannedJobs} mappate`, "ok")}
+                {renderStatusBadge(`${archiveAnalysis.alignedJobs} allineate`, "ok")}
+                {renderStatusBadge(`${archiveAnalysis.renameReadyJobs} rinominabili`, archiveAnalysis.renameReadyJobs > 0 ? "todo" : "ok")}
+                {renderStatusBadge(`${archiveAnalysis.needsReviewJobs} da verificare`, archiveAnalysis.needsReviewJobs > 0 ? "todo" : "ok")}
+                {renderStatusBadge(`${archiveAnalysis.conflictJobs} conflitti`, archiveAnalysis.conflictJobs > 0 ? "missing" : "ok")}
+              </div>
+
+              {archiveAnalysis.registeredJobs > 0 && (
+                <div className="message-box" style={{ padding: "0.55rem 0.7rem" }}>
+                  <p style={{ margin: 0, fontSize: "0.84rem" }}>
+                    {archiveAnalysis.registeredJobs} nuove cartelle registrate stabilmente nell'archivio.
+                  </p>
+                </div>
+              )}
+
+              {archiveAnalysis.warnings.length > 0 && (
+                <div
+                  className="message-box"
+                  style={{ borderColor: "rgba(212, 163, 156, 0.4)", background: "rgba(212, 163, 156, 0.08)" }}
+                >
+                  <p style={{ margin: "0 0 0.35rem", color: "var(--danger)", fontSize: "0.84rem" }}>
+                    Analisi incompleta: {archiveAnalysis.warnings.length} cartelle non leggibili.
+                  </p>
+                  <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "var(--text-muted)", fontSize: "0.78rem" }}>
+                    {archiveAnalysis.warnings.slice(0, 10).map((warning) => <li key={warning}>{warning}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
+                Correggi nome e data dove necessario, controlla l'anteprima e seleziona le cartelle da rinominare. Nessuna modifica avviene senza conferma.
+              </p>
+
+              <div className="stack archive-repair-modal__list" style={{ gap: "0.45rem", paddingRight: "0.55rem" }}>
+                {archiveAnalysis.items.filter((item) => item.status !== "aligned").map((item) => {
+                  const draft = renameDrafts[item.jobId] ?? { nomeLavoro: item.nomeLavoro, dataLavoro: item.dataLavoro ?? "" };
+                  const repairedFolderName = buildRepairedFolderName(draft);
+                  const canRename = Boolean(repairedFolderName) && repairedFolderName !== item.currentFolderName;
+                  return (
+                    <div
+                      key={item.jobId}
+                      style={{
+                        display: "grid",
+                        gap: "0.35rem",
+                        padding: "0.65rem 0.72rem",
+                        border: `1px solid ${canRename && selectedRenameIds.has(item.jobId) ? "var(--line-strong)" : "var(--line)"}`,
+                        borderRadius: 10,
+                        background: canRename && selectedRenameIds.has(item.jobId) ? "rgba(255,255,255,0.05)" : "transparent",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedRenameIds.has(item.jobId)}
+                          disabled={!canRename || renamingArchive}
+                          onChange={() => toggleRenameSelection(item.jobId)}
+                          style={{ accentColor: "var(--accent)" }}
+                        />
+                        <strong style={{ fontSize: "0.88rem" }}>{item.currentFolderName}</strong>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) 170px", gap: "0.55rem" }}>
+                        <label className="field" style={{ gap: "0.25rem" }}>
+                          <span>Nome lavoro</span>
+                          <input
+                            type="text"
+                            value={draft.nomeLavoro}
+                            disabled={renamingArchive}
+                            onChange={(event) => updateRenameDraft(item.jobId, { nomeLavoro: event.target.value })}
+                          />
+                        </label>
+                        <label className="field" style={{ gap: "0.25rem" }}>
+                          <span>Data lavoro</span>
+                          <input
+                            type="date"
+                            value={draft.dataLavoro}
+                            disabled={renamingArchive}
+                            onChange={(event) => updateRenameDraft(item.jobId, { dataLavoro: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.35rem", fontSize: "0.82rem" }}>
+                        <span style={{ color: "var(--text-muted)" }}>→</span>
+                        <strong style={{ color: canRename ? "var(--success)" : "var(--text-muted)", wordBreak: "break-word" }}>
+                          {repairedFolderName || "Inserisci nome e data per vedere il nome corretto"}
+                        </strong>
+                      </div>
+                      <span style={{ color: item.status === "conflict" ? "var(--danger)" : "var(--text-muted)", fontSize: "0.78rem" }}>
+                        {item.reason}
+                      </span>
+                    </div>
+                  );
+                })}
+                {archiveAnalysis.items.every((item) => item.status === "aligned") && (
+                  <div className="message-box">
+                    <p style={{ margin: 0, color: "var(--success)" }}>Tutte le cartelle riconosciute sono gia allineate.</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="button-row archive-repair-modal__footer" style={{ justifyContent: "flex-end" }}>
+                <button
+                  className="ghost-button"
+                  onClick={() => setArchiveAnalysis(null)}
+                  disabled={renamingArchive}
+                >
+                  Chiudi
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => void confirmArchiveRename()}
+                  disabled={renamingArchive || selectedRenameIds.size === 0}
+                >
+                  {renamingArchive ? "Rinomino..." : `Rinomina selezionate (${selectedRenameIds.size})`}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

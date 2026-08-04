@@ -71,6 +71,50 @@ export interface Job {
   numeroFile: number;
   folderExists?: boolean;
   hasLowQualityFiles?: boolean;
+  discoveredFromArchive?: boolean;
+}
+
+export type ArchiveAnalysisStatus = "aligned" | "rename-ready" | "needs-review" | "conflict";
+
+export interface ArchiveAnalysisItem {
+  jobId: string;
+  currentFolderName: string;
+  currentFolderPath: string;
+  proposedFolderName: string | null;
+  proposedFolderPath: string | null;
+  nomeLavoro: string;
+  dataLavoro: string | null;
+  annoArchivio?: string;
+  categoriaArchivio?: string;
+  status: ArchiveAnalysisStatus;
+  reason: string;
+}
+
+export interface ArchiveAnalysisResult {
+  archiveRoot: string;
+  warnings: string[];
+  scannedJobs: number;
+  registeredJobs: number;
+  alignedJobs: number;
+  renameReadyJobs: number;
+  needsReviewJobs: number;
+  conflictJobs: number;
+  items: ArchiveAnalysisItem[];
+}
+
+export interface ArchiveRenameResult {
+  ok: true;
+  renamed: Array<{
+    jobId: string;
+    previousFolderPath: string;
+    folderPath: string;
+  }>;
+}
+
+export interface ArchiveRenameRequest {
+  jobId: string;
+  nomeLavoro?: string;
+  dataLavoro?: string;
 }
 
 export interface JobSelectionCandidate {
@@ -159,7 +203,8 @@ const COPY_CONCURRENCY_MIN = 2;
 const JPG_CONCURRENCY = 2;
 const JOB_FILE_COUNT_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const RAW_EXT = new Set([
-  ".raf", ".cr2", ".cr3", ".arw", ".nef", ".dng", ".orf", ".rw2", ".pef", ".srw",
+  ".raf", ".cr2", ".cr3", ".crw", ".arw", ".srf", ".sr2", ".nef", ".nrw",
+  ".dng", ".orf", ".rw2", ".pef", ".srw", ".3fr", ".x3f", ".gpr",
 ]);
 const JPG_EXT = new Set([".jpg", ".jpeg"]);
 const PHOTO_SELECTOR_STANDARD_EXT = new Set([".jpg", ".jpeg", ".png", ".webp"]);
@@ -334,6 +379,11 @@ function resolveAndValidate(p: string): string {
   return resolved;
 }
 
+function isSameOrNestedPath(parentPath: string, candidatePath: string): boolean {
+  const relative = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 /** "YYYY-MM-DD" → "YYYYMMDD" */
 function ymd(dateStr: string): string {
   return dateStr.replace(/-/g, "");
@@ -355,6 +405,7 @@ async function collectFiles(dir: string): Promise<string[]> {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   const result: string[] = [];
   for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       result.push(...(await collectFiles(full)));
@@ -368,6 +419,7 @@ async function collectFiles(dir: string): Promise<string[]> {
 async function* walkFiles(dir: string): AsyncGenerator<string> {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       yield* walkFiles(full);
@@ -382,6 +434,7 @@ async function collectSampleFiles(dir: string, limit: number, acc: string[] = []
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     if (acc.length >= limit) break;
+    if (entry.isSymbolicLink()) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       await collectSampleFiles(full, limit, acc);
@@ -443,7 +496,7 @@ function buildDestinationFileName(params: {
   const base = rinominaFile
     ? `${safeNome}_${safeData}_${safeAutore}_${stem}`
     : stem;
-  return `${base}_${suffix}${ext}`;
+  return rinominaFile ? `${base}_${suffix}${ext}` : `${base}${ext}`;
 }
 
 function isCopyableFile(filePath: string): boolean {
@@ -606,7 +659,7 @@ async function safeCopyFileVerified(
 ): Promise<"copied" | "skipped"> {
   try {
     const destStat = await fs.promises.stat(dest);
-    if (destStat.size === sourceSize) {
+    if (destStat.size === sourceSize && await filesHaveSameContent(src, dest)) {
       return "skipped";
     }
   } catch {
@@ -624,7 +677,7 @@ async function safeCopyFileVerified(
         throw new Error(`Verifica size fallita (${sourceSize} != ${tmpStat.size})`);
       }
 
-      await fs.promises.rename(tmp, dest);
+      await replaceFileAtomically(tmp, dest);
       return "copied";
     } catch (error) {
       try { await fs.promises.unlink(tmp); } catch { /* ignore */ }
@@ -728,25 +781,11 @@ export function deleteJob(jobId: string): boolean {
   return true;
 }
 
-function shouldPruneMissingJob(job: Job): boolean {
-  const folderPath = job.percorsoCartella;
-  if (!folderPath) return false;
-  if (fs.existsSync(folderPath)) return false;
-
-  const rootPath = path.parse(folderPath).root;
-  if (!rootPath) return false;
-
-  // Prune only if the underlying drive/root is available.
-  return fs.existsSync(rootPath);
-}
-
 export function cleanupMissingJobs(): Job[] {
-  const jobs = loadJobs();
-  const next = jobs.filter((job) => !shouldPruneMissingJob(job));
-  if (next.length !== jobs.length) {
-    writeJsonAtomic(JOBS_FILE, next);
-  }
-  return next;
+  // Missing paths stay in the registry until the user removes them explicitly.
+  // Automatically pruning them loses contract links and other metadata after a
+  // manual rename, a temporary drive outage, or a delayed network mount.
+  return loadJobs();
 }
 
 function directoryHasAnyFile(dirPath: string): boolean {
@@ -1111,6 +1150,11 @@ function writeCachedJobFileCount(jobFolderPath: string, count: number): void {
   saveFileCountCacheToDisk();
 }
 
+function invalidateCachedJobFileCount(jobFolderPath: string): void {
+  jobFileCountCache.delete(getJobFileCountCacheKey(jobFolderPath));
+  saveFileCountCacheToDisk();
+}
+
 function withFolderStatus(job: Job): Job {
   return {
     ...job,
@@ -1123,7 +1167,9 @@ export async function hydrateArchiveListJob(job: Job): Promise<Job> {
   const jobWithStatus = withFolderStatus(job);
   if (!jobWithStatus.folderExists) return jobWithStatus;
 
-  const needsDynamicFileCount = jobWithStatus.id.startsWith("fs:") || (jobWithStatus.numeroFile ?? 0) <= 0;
+  const needsDynamicFileCount = jobWithStatus.discoveredFromArchive === true
+    || jobWithStatus.id.startsWith("fs:")
+    || (jobWithStatus.numeroFile ?? 0) <= 0;
   if (!needsDynamicFileCount) return jobWithStatus;
 
   const cachedCount = readCachedJobFileCount(jobWithStatus.percorsoCartella);
@@ -1214,7 +1260,8 @@ function isYearFolder(dirName: string): boolean {
 }
 
 function sanitizeHierarchyLevel(rawValue: unknown, fallback: number | null, min = 1, max = 8): number | null {
-  if (rawValue === null || rawValue === undefined || rawValue === "") return fallback;
+  if (rawValue === undefined) return fallback;
+  if (rawValue === null || rawValue === "") return null;
   const parsed = Number.parseInt(String(rawValue), 10);
   if (!Number.isFinite(parsed)) return fallback;
   if (parsed <= 0) return null;
@@ -1433,7 +1480,12 @@ function looksLikeJobFolder(dirPath: string): boolean {
   }
 }
 
-export async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[], hierarchy: ArchiveHierarchyConfig): Promise<Job[]> {
+export async function discoverArchiveJobs(
+  archiveRoot: string,
+  knownJobs: Job[],
+  hierarchy: ArchiveHierarchyConfig,
+  warnings: string[] = [],
+): Promise<Job[]> {
   const normalizedRoot = archiveRoot.trim();
   if (!normalizedRoot) return [];
 
@@ -1478,7 +1530,8 @@ export async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[],
     let entries: fs.Dirent[];
     try {
       entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      warnings.push(`Cartella non leggibile: ${dirPath} (${error instanceof Error ? error.message : String(error)})`);
       return [];
     }
 
@@ -1492,8 +1545,8 @@ export async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[],
       try {
         const stat = await fs.promises.stat(fullPath);
         directories.push({ name: entry.name, fullPath, stat });
-      } catch {
-        /* ignore unreadable directory */
+      } catch (error) {
+        warnings.push(`Impossibile leggere i dati della cartella: ${fullPath} (${error instanceof Error ? error.message : String(error)})`);
       }
     }
 
@@ -1518,6 +1571,359 @@ export async function discoverArchiveJobs(archiveRoot: string, knownJobs: Job[],
 
   await walkArchive(rootPath, 0, []);
   return discovered;
+}
+
+function createStableJobId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function reconcileDiscoveredArchiveJobs(settings: Settings): Promise<{ jobs: Job[]; registered: number; warnings: string[] }> {
+  const registeredJobs = cleanupMissingJobs();
+  const warnings: string[] = [];
+  const discoveredJobs = await discoverArchiveJobs(
+    settings.archiveRoot,
+    registeredJobs,
+    settings.archiveHierarchy,
+    warnings,
+  );
+  if (discoveredJobs.length === 0) {
+    return { jobs: registeredJobs, registered: 0, warnings };
+  }
+
+  // Reload after the asynchronous scan so an import completed in the meantime is not overwritten.
+  const latestJobs = loadJobs();
+  const knownPaths = new Set(latestJobs.map((job) => path.resolve(job.percorsoCartella).toLowerCase()));
+  const additions: Job[] = [];
+
+  for (const discovered of discoveredJobs) {
+    const normalizedPath = path.resolve(discovered.percorsoCartella).toLowerCase();
+    if (knownPaths.has(normalizedPath)) continue;
+    knownPaths.add(normalizedPath);
+    additions.push({
+      ...discovered,
+      id: createStableJobId(),
+      discoveredFromArchive: true,
+    });
+  }
+
+  if (additions.length > 0) {
+    writeJsonAtomic(JOBS_FILE, [...additions, ...latestJobs]);
+    invalidateJobsListCache();
+  }
+
+  return { jobs: [...additions, ...latestJobs], registered: additions.length, warnings };
+}
+
+function isPathInsideArchive(candidatePath: string, archiveRoot: string): boolean {
+  const relative = path.relative(path.resolve(archiveRoot), path.resolve(candidatePath));
+  return relative.length > 0 && !relative.startsWith("..") && !path.isAbsolute(relative);
+}
+
+function buildArchiveAnalysisItem(job: Job, archiveRoot: string): ArchiveAnalysisItem | null {
+  if (!job.percorsoCartella || !fs.existsSync(job.percorsoCartella)) return null;
+  if (!isPathInsideArchive(job.percorsoCartella, archiveRoot)) return null;
+
+  const currentFolderPath = path.resolve(job.percorsoCartella);
+  const currentFolderName = path.basename(currentFolderPath);
+  const inferredDate = extractHistoricalIsoDate(currentFolderName);
+  const categoryLabel = getArchiveCategoryLabel(job.categoriaArchivio ?? "") ?? job.categoriaArchivio ?? null;
+  const inferredName = normalizeDiscoveredJobName(currentFolderName, categoryLabel);
+
+  if (!inferredDate) {
+    return {
+      jobId: job.id,
+      currentFolderName,
+      currentFolderPath,
+      proposedFolderName: null,
+      proposedFolderPath: null,
+      nomeLavoro: inferredName,
+      dataLavoro: null,
+      annoArchivio: job.annoArchivio,
+      categoriaArchivio: job.categoriaArchivio,
+      status: "needs-review",
+      reason: "Data non riconoscibile dal nome della cartella: nessuna rinomina proposta.",
+    };
+  }
+
+  const proposedFolderName = buildFolderName(inferredName, inferredDate);
+  const proposedFolderPath = path.join(path.dirname(currentFolderPath), proposedFolderName);
+  if (currentFolderName === proposedFolderName) {
+    return {
+      jobId: job.id,
+      currentFolderName,
+      currentFolderPath,
+      proposedFolderName,
+      proposedFolderPath,
+      nomeLavoro: inferredName,
+      dataLavoro: inferredDate,
+      annoArchivio: job.annoArchivio,
+      categoriaArchivio: job.categoriaArchivio,
+      status: "aligned",
+      reason: "Nome gia allineato allo standard Archivio Flow.",
+    };
+  }
+
+  const isSameWindowsPath = currentFolderPath.toLowerCase() === proposedFolderPath.toLowerCase();
+  if (!isSameWindowsPath && fs.existsSync(proposedFolderPath)) {
+    return {
+      jobId: job.id,
+      currentFolderName,
+      currentFolderPath,
+      proposedFolderName,
+      proposedFolderPath,
+      nomeLavoro: inferredName,
+      dataLavoro: inferredDate,
+      annoArchivio: job.annoArchivio,
+      categoriaArchivio: job.categoriaArchivio,
+      status: "conflict",
+      reason: "Esiste gia una cartella con il nome proposto.",
+    };
+  }
+
+  return {
+    jobId: job.id,
+    currentFolderName,
+    currentFolderPath,
+    proposedFolderName,
+    proposedFolderPath,
+    nomeLavoro: inferredName,
+    dataLavoro: inferredDate,
+    annoArchivio: job.annoArchivio,
+    categoriaArchivio: job.categoriaArchivio,
+    status: "rename-ready",
+    reason: "Data e nome riconosciuti: rinomina disponibile dopo conferma.",
+  };
+}
+
+export async function analyzeArchive(settings = loadSettings()): Promise<ArchiveAnalysisResult> {
+  const archiveRoot = settings.archiveRoot.trim();
+  if (!archiveRoot) throw new Error("Configura prima la radice archivio nelle Impostazioni.");
+
+  const resolvedRoot = resolveAndValidate(archiveRoot);
+  if (!fs.existsSync(resolvedRoot)) throw new Error("Radice archivio non trovata.");
+
+  const reconciled = await reconcileDiscoveredArchiveJobs(settings);
+  const jobs = reconciled.jobs.map((job) => withArchiveMetadata(job, resolvedRoot, settings.archiveHierarchy));
+  const items = jobs
+    .map((job) => buildArchiveAnalysisItem(job, resolvedRoot))
+    .filter((item): item is ArchiveAnalysisItem => item !== null)
+    .sort((a, b) => a.currentFolderPath.localeCompare(b.currentFolderPath, "it"));
+
+  return {
+    archiveRoot: resolvedRoot,
+    warnings: reconciled.warnings,
+    scannedJobs: items.length,
+    registeredJobs: reconciled.registered,
+    alignedJobs: items.filter((item) => item.status === "aligned").length,
+    renameReadyJobs: items.filter((item) => item.status === "rename-ready").length,
+    needsReviewJobs: items.filter((item) => item.status === "needs-review").length,
+    conflictJobs: items.filter((item) => item.status === "conflict").length,
+    items,
+  };
+}
+
+function remapNestedPath(value: string | undefined, previousRoot: string, nextRoot: string): string | undefined {
+  if (!value) return value;
+  const relative = path.relative(previousRoot, value);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return value;
+  return relative ? path.join(nextRoot, relative) : nextRoot;
+}
+
+async function renameDirectoryPreservingCaseSupport(sourcePath: string, targetPath: string): Promise<void> {
+  if (sourcePath === targetPath) return;
+  if (sourcePath.toLowerCase() !== targetPath.toLowerCase()) {
+    await fs.promises.rename(sourcePath, targetPath);
+    return;
+  }
+
+  const temporaryPath = path.join(
+    path.dirname(sourcePath),
+    `.archivio-flow-rename-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  );
+  await fs.promises.rename(sourcePath, temporaryPath);
+  try {
+    await fs.promises.rename(temporaryPath, targetPath);
+  } catch (error) {
+    await fs.promises.rename(temporaryPath, sourcePath).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function hashFile(filePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  const stream = fs.createReadStream(filePath);
+  for await (const chunk of stream) {
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest("hex");
+}
+
+async function filesHaveSameContent(firstPath: string, secondPath: string): Promise<boolean> {
+  const [firstHash, secondHash] = await Promise.all([hashFile(firstPath), hashFile(secondPath)]);
+  return firstHash === secondHash;
+}
+
+async function replaceFileAtomically(temporaryPath: string, destinationPath: string): Promise<void> {
+  let destinationExists = false;
+  try {
+    destinationExists = (await fs.promises.stat(destinationPath)).isFile();
+  } catch {
+    destinationExists = false;
+  }
+
+  if (!destinationExists) {
+    await fs.promises.rename(temporaryPath, destinationPath);
+    return;
+  }
+
+  const backupPath = `${destinationPath}.backup.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  await fs.promises.rename(destinationPath, backupPath);
+  try {
+    await fs.promises.rename(temporaryPath, destinationPath);
+  } catch (error) {
+    await fs.promises.rename(backupPath, destinationPath).catch(() => undefined);
+    throw error;
+  }
+  await fs.promises.unlink(backupPath).catch(() => undefined);
+}
+
+async function isUsableJpeg(filePath: string): Promise<boolean> {
+  try {
+    const stats = await fs.promises.stat(filePath);
+    if (!stats.isFile() || stats.size <= 0) return false;
+    const metadata = await sharp(filePath).metadata();
+    return metadata.format === "jpeg" && Boolean(metadata.width && metadata.height);
+  } catch {
+    return false;
+  }
+}
+
+async function writeLowQualityJpeg(sourcePath: string, destinationPath: string): Promise<void> {
+  await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
+  const temporaryPath = `${destinationPath}.part.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    await sharp(sourcePath)
+      .resize({ width: 1920, withoutEnlargement: true })
+      .jpeg({ quality: 70 })
+      .toFile(temporaryPath);
+    await replaceFileAtomically(temporaryPath, destinationPath);
+  } catch (error) {
+    await fs.promises.unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
+}
+
+export async function renameAnalyzedArchiveJobs(
+  requests: Array<string | ArchiveRenameRequest>,
+): Promise<ArchiveRenameResult> {
+  const normalizedRequests = new Map<string, ArchiveRenameRequest>();
+  for (const value of requests ?? []) {
+    const request = typeof value === "string" ? { jobId: value } : value;
+    const jobId = String(request?.jobId ?? "").trim();
+    if (!jobId) continue;
+    normalizedRequests.set(jobId, {
+      jobId,
+      nomeLavoro: typeof request.nomeLavoro === "string" ? request.nomeLavoro.trim() : undefined,
+      dataLavoro: typeof request.dataLavoro === "string" ? request.dataLavoro.trim() : undefined,
+    });
+  }
+  if (normalizedRequests.size === 0) throw new Error("Seleziona almeno una cartella da rinominare.");
+
+  const settings = loadSettings();
+  const analysis = await analyzeArchive(settings);
+  const analysisById = new Map(analysis.items.map((item) => [item.jobId, item]));
+  const jobs = loadJobs();
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+  const operations: Array<{
+    item: ArchiveAnalysisItem;
+    job: Job;
+    source: string;
+    target: string;
+    nomeLavoro: string;
+    dataLavoro: string;
+    proposedFolderName: string;
+  }> = [];
+  const targetPaths = new Set<string>();
+
+  for (const [jobId, request] of normalizedRequests) {
+    const item = analysisById.get(jobId);
+    const job = jobsById.get(jobId);
+    if (!item || !job) throw new Error("Una delle cartelle selezionate non e piu disponibile. Ripeti l'analisi.");
+    const nomeLavoro = request.nomeLavoro || item.nomeLavoro.trim();
+    const dataLavoro = request.dataLavoro || item.dataLavoro || "";
+    const isoDateMatch = dataLavoro.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const parsedDate = isoDateMatch ? new Date(`${dataLavoro}T00:00:00Z`) : null;
+    if (!nomeLavoro) {
+      throw new Error(`Inserisci il nome del lavoro per: ${item.currentFolderName}`);
+    }
+    if (
+      !isoDateMatch
+      || !parsedDate
+      || Number.isNaN(parsedDate.getTime())
+      || parsedDate.toISOString().slice(0, 10) !== dataLavoro
+    ) {
+      throw new Error(`Inserisci una data valida per: ${item.currentFolderName}`);
+    }
+
+    const source = path.resolve(item.currentFolderPath);
+    const proposedFolderName = buildFolderName(nomeLavoro, dataLavoro);
+    const target = path.resolve(path.dirname(source), proposedFolderName);
+    if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) {
+      throw new Error(`Cartella sorgente non trovata: ${source}`);
+    }
+    if (source === target) {
+      throw new Error(`La cartella e gia allineata: ${item.currentFolderName}`);
+    }
+    if (path.dirname(source).toLowerCase() !== path.dirname(target).toLowerCase()) {
+      throw new Error("La rinomina non puo spostare un lavoro fuori dalla cartella corrente.");
+    }
+    if (source.toLowerCase() !== target.toLowerCase() && fs.existsSync(target)) {
+      throw new Error(`La destinazione esiste gia: ${target}`);
+    }
+    const targetKey = target.toLowerCase();
+    if (targetPaths.has(targetKey)) throw new Error(`Due cartelle produrrebbero lo stesso nome: ${target}`);
+    targetPaths.add(targetKey);
+    operations.push({ item, job, source, target, nomeLavoro, dataLavoro, proposedFolderName });
+  }
+
+  const completed: typeof operations = [];
+  try {
+    for (const operation of operations) {
+      await renameDirectoryPreservingCaseSupport(operation.source, operation.target);
+      completed.push(operation);
+    }
+
+    const operationById = new Map(operations.map((operation) => [operation.job.id, operation]));
+    const updatedJobs = jobs.map((job) => {
+      const operation = operationById.get(job.id);
+      if (!operation) return job;
+      return {
+        ...job,
+        nomeLavoro: operation.nomeLavoro,
+        dataLavoro: operation.dataLavoro,
+        percorsoCartella: operation.target,
+        percorsoSelezione: remapNestedPath(job.percorsoSelezione, operation.source, operation.target),
+        nomeCartella: operation.proposedFolderName,
+        folderExists: true,
+      };
+    });
+    writeJsonAtomic(JOBS_FILE, updatedJobs);
+  } catch (error) {
+    for (const operation of completed.reverse()) {
+      await renameDirectoryPreservingCaseSupport(operation.target, operation.source).catch(() => undefined);
+    }
+    throw error;
+  }
+
+  invalidateJobsListCache();
+  return {
+    ok: true,
+    renamed: operations.map((operation) => ({
+      jobId: operation.job.id,
+      previousFolderPath: operation.source,
+      folderPath: operation.target,
+    })),
+  };
 }
 
 export interface Settings {
@@ -1946,8 +2352,6 @@ const getSdPreviewHandler = async (req: Request, res: Response) => {
 
   try {
     const allFiles = await collectFiles(normalized);
-    const RAW_EXT = new Set([".raf", ".cr2", ".cr3", ".arw", ".nef", ".dng", ".orf", ".rw2", ".pef", ".srw"]);
-    const JPG_EXT = new Set([".jpg", ".jpeg"]);
     const rawFiles = allFiles.filter((f) => RAW_EXT.has(path.extname(f).toLowerCase())).length;
     const jpgFiles = allFiles.filter((f) => JPG_EXT.has(path.extname(f).toLowerCase())).length;
     res.json({ totalFiles: allFiles.length, rawFiles, jpgFiles });
@@ -2208,6 +2612,12 @@ const importHandler = async (req: Request, res: Response) => {
     ? resolveAndValidate(existingJob.percorsoCartella)
     : path.join(destNorm, folderName);
 
+  if (isSameOrNestedPath(sdNorm, jobRoot)) {
+    return void res.status(400).json({
+      error: "La cartella di destinazione non puo trovarsi dentro la SD sorgente.",
+    });
+  }
+
   if (!existingJob && fs.existsSync(jobRoot)) {
     return void res.status(409).json({ error: "Cartella già esistente: " + folderName });
   }
@@ -2236,8 +2646,10 @@ const importHandler = async (req: Request, res: Response) => {
     return void res.status(500).json({ error: "Errore creazione cartelle: " + String(err) });
   }
 
-  const safeNome = toSafeId(nomeLavoro.trim());
-  const safeData = ymd(dataLavoro);
+  const effectiveNomeLavoro = existingJob?.nomeLavoro?.trim() || nomeLavoro.trim();
+  const effectiveDataLavoro = existingJob?.dataLavoro || dataLavoro;
+  const safeNome = toSafeId(effectiveNomeLavoro);
+  const safeData = ymd(effectiveDataLavoro);
   const safeAutore = toSafeId(autore.trim());
   const safeContrattoLink = normalizeContractLink(contrattoLink);
   const filter = parseFilterCriteria({ fileNameIncludes, mtimeFrom, mtimeTo });
@@ -2266,10 +2678,16 @@ const importHandler = async (req: Request, res: Response) => {
   let plannedFiles = 0;
   let filteredOutFiles = 0;
   let manifestSkippedFiles = 0;
-  const copiedDestPaths: string[] = [];
+  const jpgDestPaths = new Set<string>();
   const errors: string[] = [];
   const manifestPath = path.join(targetFotoDir, ".import-manifest.json");
   const manifest = loadImportManifest(manifestPath);
+  const reservedDestinationNames = new Map<string, string>();
+  for (const record of Object.values(manifest)) {
+    const safeDestName = path.basename(record.destFileName ?? "");
+    if (!safeDestName) continue;
+    reservedDestinationNames.set(safeDestName.toLowerCase(), record.sourceRelativePath);
+  }
   let manifestDirty = 0;
   let lastManifestFlushAt = Date.now();
   let manifestFlushChain: Promise<void> = Promise.resolve();
@@ -2326,7 +2744,6 @@ const importHandler = async (req: Request, res: Response) => {
         }
         const result = await safeCopyFileVerified(task.srcFile, task.destPath, task.sourceSize);
         if (result === "copied") {
-          copiedDestPaths.push(task.destPath);
           copiedCount += 1;
           updateImportProgress({
             copiedFiles: copiedCount,
@@ -2336,6 +2753,9 @@ const importHandler = async (req: Request, res: Response) => {
         } else {
           skippedCount += 1;
           updateImportProgress({ skippedFiles: skippedCount });
+        }
+        if (JPG_EXT.has(path.extname(task.destPath).toLowerCase())) {
+          jpgDestPaths.add(task.destPath);
         }
 
         manifest[task.manifestKey] = {
@@ -2405,12 +2825,17 @@ const importHandler = async (req: Request, res: Response) => {
       const manifestEntry = manifest[manifestKey];
 
       if (manifestEntry?.status === "done") {
-        const manifestDestPath = path.join(targetFotoDir, manifestEntry.destFileName);
+        const manifestDestPath = path.join(targetFotoDir, path.basename(manifestEntry.destFileName));
         try {
           const st = await fs.promises.stat(manifestDestPath);
+          // The manifest key already includes source path, size and mtime.
+          // Avoid hashing every file again during a normal resume/re-import.
           if (st.size === sourceSize) {
             skippedCount += 1;
             manifestSkippedFiles += 1;
+            if (JPG_EXT.has(path.extname(manifestDestPath).toLowerCase())) {
+              jpgDestPaths.add(manifestDestPath);
+            }
             updateImportProgress({
               skippedFiles: skippedCount,
               manifestSkippedFiles,
@@ -2422,14 +2847,41 @@ const importHandler = async (req: Request, res: Response) => {
         }
       }
 
-      const destName = buildDestinationFileName({
-        originalName,
-        sourceRelativePath,
-        rinominaFile,
-        safeNome,
-        safeData,
-        safeAutore,
-      });
+      let destName = manifestEntry?.destFileName
+        ? path.basename(manifestEntry.destFileName)
+        : buildDestinationFileName({
+            originalName,
+            sourceRelativePath,
+            rinominaFile,
+            safeNome,
+            safeData,
+            safeAutore,
+          });
+
+      if (!rinominaFile && !manifestEntry) {
+        const candidateKey = destName.toLowerCase();
+        const reservedFor = reservedDestinationNames.get(candidateKey);
+        let needsCollisionSuffix = Boolean(reservedFor && reservedFor !== sourceRelativePath);
+        const candidatePath = path.join(targetFotoDir, destName);
+
+        if (!reservedFor && fs.existsSync(candidatePath)) {
+          try {
+            const candidateStat = await fs.promises.stat(candidatePath);
+            needsCollisionSuffix = candidateStat.size !== sourceSize
+              || !(await filesHaveSameContent(srcFile, candidatePath));
+          } catch {
+            needsCollisionSuffix = true;
+          }
+        }
+
+        if (needsCollisionSuffix) {
+          const ext = path.extname(originalName);
+          const stem = path.basename(originalName, ext);
+          destName = `${stem}_${shortStableSuffix(sourceRelativePath)}${ext}`;
+        }
+      }
+
+      reservedDestinationNames.set(destName.toLowerCase(), sourceRelativePath);
       const destPath = path.join(targetFotoDir, destName);
       plannedFiles += 1;
       updateImportProgress({ plannedFiles });
@@ -2473,7 +2925,7 @@ const importHandler = async (req: Request, res: Response) => {
   const compressStartedAt = Date.now();
   if (generaJpg) {
     updateImportProgress({ phase: "compressing", inFlight: 0, currentFileName: null });
-    const jpgFiles = copiedDestPaths.filter((f) => JPG_EXT.has(path.extname(f).toLowerCase()));
+    const jpgFiles = [...jpgDestPaths];
     updateImportProgress({ jpgPlanned: jpgFiles.length, jpgDone: 0 });
     await runWithConcurrency(jpgFiles, JPG_CONCURRENCY, async (src) => {
       if (importCancelRequested) {
@@ -2483,15 +2935,11 @@ const importHandler = async (req: Request, res: Response) => {
       const relativeFromFotoSd = path.relative(fotoSdDir, src);
       const destPath = path.join(bassaQualitaDir, relativeFromFotoSd);
       try {
-        await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
-        await sharp(src)
-          .resize({ width: 1920, withoutEnlargement: true })
-          .jpeg({ quality: 70 })
-          .toFile(destPath);
+        await writeLowQualityJpeg(src, destPath);
         jpgGenerati += 1;
         updateImportProgress({ jpgDone: jpgGenerati });
-      } catch {
-        /* Skip unreadable files silently */
+      } catch (error) {
+        errors.push(`${path.basename(src)}: JPG BASSA_QUALITA non generato (${String(error)})`);
       }
     });
     if (importCancelRequested) {
@@ -2551,8 +2999,11 @@ const importHandler = async (req: Request, res: Response) => {
     appendJob(job);
   }
 
+  invalidateCachedJobFileCount(jobRoot);
+
   res.json({
     ok: true,
+    incomplete: errors.length > 0,
     job,
     reusedExistingJob: Boolean(existingJob),
     copiedFiles: copiedCount,
@@ -2573,7 +3024,8 @@ const importHandler = async (req: Request, res: Response) => {
       initialCopyConcurrency,
       jpgConcurrency: JPG_CONCURRENCY,
     },
-    errors: errors.slice(0, 20),
+    errors,
+    failedFiles: errors,
   });
 
   updateImportProgress({
@@ -2596,10 +3048,10 @@ app.post("/api/import", importHandler);
 
 async function buildJobsList(): Promise<Job[]> {
   const settings = loadSettings();
-  const registeredJobs = cleanupMissingJobs()
+  const reconciled = await reconcileDiscoveredArchiveJobs(settings);
+  const registeredJobs = reconciled.jobs
     .map((job) => withArchiveMetadata(job, settings.archiveRoot, settings.archiveHierarchy));
-  const discoveredJobs = await discoverArchiveJobs(settings.archiveRoot, registeredJobs, settings.archiveHierarchy);
-  const jobsForList = [...registeredJobs, ...discoveredJobs]
+  const jobsForList = registeredJobs
     .sort((a, b) => new Date(b.dataCreazione).getTime() - new Date(a.dataCreazione).getTime());
   const hydratedJobs = new Array<Job>(jobsForList.length);
 
@@ -2662,15 +3114,39 @@ const listJobsHandler = async (_req: Request, res: Response) => {
 
   // No usable cache — build and cache
   try {
-    const jobs = await buildRegisteredJobsList();
+    const jobs = await buildJobsList();
     jobsListCache = { jobs, cachedAt: Date.now(), refreshing: false };
-    refreshJobsListCacheInBackground();
     res.json(jobs);
   } catch (err) {
     res.status(500).json({ error: "Impossibile caricare la lista lavori" });
   }
 };
 app.get("/api/jobs", listJobsHandler);
+
+const analyzeArchiveHandler = async (_req: Request, res: Response) => {
+  try {
+    const result = await analyzeArchive();
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : "Analisi archivio non riuscita" });
+  }
+};
+app.post("/api/archive/analyze", analyzeArchiveHandler);
+
+const renameArchiveJobsHandler = async (req: Request, res: Response) => {
+  const requests = Array.isArray(req.body?.requests)
+    ? req.body.requests
+    : Array.isArray(req.body?.jobIds)
+      ? req.body.jobIds.map((jobId: unknown) => ({ jobId: String(jobId) }))
+      : [];
+  try {
+    const result = await renameAnalyzedArchiveJobs(requests);
+    res.json(result);
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "Rinomina archivio non riuscita" });
+  }
+};
+app.post("/api/archive/rename", renameArchiveJobsHandler);
 
 /**
  * DELETE /api/jobs/:id
@@ -2837,20 +3313,11 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
   const overwrite = Boolean(req.body?.overwrite);
   const rawSourceSubfolder = typeof req.body?.sourceSubfolder === "string" ? req.body.sourceSubfolder.trim() : "";
 
-  if (lowQualityProgress.active && lowQualityProgress.jobId !== jobId) {
+  if (lowQualityProgress.active) {
     return void res.status(409).json({
       error: `Generazione BQ già in corso per ${lowQualityProgress.jobName || "un altro lavoro"}`,
     });
   }
-
-  lowQualityProgress = createEmptyLowQualityProgress();
-  updateLowQualityProgress({
-    active: true,
-    phase: "scanning",
-    startedAt: Date.now(),
-    overwrite,
-    jobId,
-  });
 
   const registeredJobs = cleanupMissingJobs();
   let job = registeredJobs.find((j) => j.id === jobId);
@@ -2862,6 +3329,9 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
   }
 
   if (!job) return void res.status(404).json({ error: "Lavoro non trovato" });
+  if (!fs.existsSync(job.percorsoCartella) || !fs.statSync(job.percorsoCartella).isDirectory()) {
+    return void res.status(404).json({ error: "Cartella del lavoro non trovata" });
+  }
 
   // Validate sourceSubfolder if provided: must be a direct child, not a system dir
   let resolvedSourceRoot: string | null = null;
@@ -2882,14 +3352,21 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
     resolvedSourceRoot = resolvedCandidate;
   }
 
+  lowQualityProgress = createEmptyLowQualityProgress();
+  updateLowQualityProgress({
+    active: true,
+    phase: "scanning",
+    startedAt: Date.now(),
+    overwrite,
+    jobId,
+  });
+
   updateLowQualityProgress({
     jobName: job.nomeLavoro,
     outputDir: path.join(job.percorsoCartella, "BASSA_QUALITA"),
   });
 
   const bassaQualitaDir = path.join(job.percorsoCartella, "BASSA_QUALITA");
-
-  fs.mkdirSync(bassaQualitaDir, { recursive: true });
 
   const startedAt = Date.now();
   let totalJpg = 0;
@@ -2900,16 +3377,26 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
   // Collect JPG sources: specific subfolder or full job (default behaviour)
   let sourceRoot: string;
   let jpgFiles: string[];
-  if (resolvedSourceRoot) {
-    sourceRoot = resolvedSourceRoot;
-    jpgFiles = [];
-    for await (const srcFile of walkFiles(resolvedSourceRoot)) {
-      if (JPG_EXT.has(path.extname(srcFile).toLowerCase())) {
-        jpgFiles.push(srcFile);
+  try {
+    fs.mkdirSync(bassaQualitaDir, { recursive: true });
+    if (resolvedSourceRoot) {
+      sourceRoot = resolvedSourceRoot;
+      jpgFiles = [];
+      for await (const srcFile of walkFiles(resolvedSourceRoot)) {
+        if (JPG_EXT.has(path.extname(srcFile).toLowerCase())) {
+          jpgFiles.push(srcFile);
+        }
       }
+    } else {
+      ({ sourceRoot, jpgFiles } = await collectJpgSourcesForLowQuality(job.percorsoCartella));
     }
-  } else {
-    ({ sourceRoot, jpgFiles } = await collectJpgSourcesForLowQuality(job.percorsoCartella));
+  } catch (error) {
+    updateLowQualityProgress({
+      active: false,
+      phase: "error",
+      error: `Impossibile leggere o preparare le cartelle: ${String(error)}`,
+    });
+    return void res.status(500).json({ error: `Impossibile leggere o preparare le cartelle: ${String(error)}` });
   }
 
   updateLowQualityProgress({ sourceRoot });
@@ -2947,8 +3434,7 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
       const relativeFromFotoSd = path.relative(sourceRoot, src);
       const destPath = path.join(bassaQualitaDir, relativeFromFotoSd);
       if (!overwrite) {
-        try {
-          await fs.promises.access(destPath, fs.constants.F_OK);
+        if (await isUsableJpeg(destPath)) {
           skippedExisting += 1;
           processedJpg += 1;
           updateLowQualityProgress({
@@ -2958,17 +3444,11 @@ const generateLowQualityHandler = async (req: Request, res: Response) => {
             errors,
           });
           return;
-        } catch {
-          /* continue and generate */
         }
       }
 
       try {
-        await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
-        await sharp(src)
-          .resize({ width: 1920, withoutEnlargement: true })
-          .jpeg({ quality: 70 })
-          .toFile(destPath);
+        await writeLowQualityJpeg(src, destPath);
         generated += 1;
       } catch {
         errors += 1;
@@ -3128,6 +3608,7 @@ export async function getPreviewImageService(sdPath: string, filePath: string): 
 
 export async function importService(input: ImportRequest): Promise<{
   ok: true;
+  incomplete: boolean;
   job: Job;
   reusedExistingJob: boolean;
   copiedFiles: number;
@@ -3136,6 +3617,7 @@ export async function importService(input: ImportRequest): Promise<{
   cartellaFotoFinale: string;
   performance: Record<string, number>;
   errors: string[];
+  failedFiles: string[];
 }> {
   importCancelRequested = false;
   return unwrapInvocationResult(await invokeHandler(importHandler, { body: input }));
@@ -3143,6 +3625,14 @@ export async function importService(input: ImportRequest): Promise<{
 
 export async function listJobsService(): Promise<Job[]> {
   return unwrapInvocationResult(await invokeHandler(listJobsHandler, {}));
+}
+
+export async function analyzeArchiveService(): Promise<ArchiveAnalysisResult> {
+  return unwrapInvocationResult(await invokeHandler(analyzeArchiveHandler, {}));
+}
+
+export async function renameArchiveJobsService(requests: ArchiveRenameRequest[]): Promise<ArchiveRenameResult> {
+  return unwrapInvocationResult(await invokeHandler(renameArchiveJobsHandler, { body: { requests } }));
 }
 
 export async function deleteJobService(jobId: string): Promise<{ ok: true }> {
