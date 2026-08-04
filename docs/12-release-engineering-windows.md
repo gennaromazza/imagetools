@@ -35,7 +35,7 @@ Include:
 - installer singoli tool
 - installer Suite (`suite-launcher`)
 
-Il workflow deve costruire almeno FileX Suite e tutti i tool modificati dalla release. Per `v0.1.17` gli artefatti obbligatori sono Suite, Image Select Pro e Archivio Flow.
+Il workflow deve costruire almeno FileX Suite e tutti i tool modificati dalla release. Per `v0.1.18` gli artefatti obbligatori sono Suite, Image Party Frame, Image Select Pro e Archivio Flow. Batch Print Layout, Image Converter e Trova Foto da Lista restano nel contratto processi e nel manifest storico, ma non hanno attualmente un workspace applicativo versionato da cui generare nuovi installer.
 
 ## Manifest Release
 
@@ -49,6 +49,7 @@ Ogni release deve pubblicare nello stesso tag:
 - installer di ogni tool costruito;
 - `stable.json` o `beta.json` del canale;
 - checksum e blockmap degli installer.
+- un elenco `highlights` non vuoto che spiega miglioramenti e funzionalità della versione per ogni tool.
 
 Il tag `vX.Y.Z` deve coincidere con la versione in `apps/filex-desktop/package.json`; la pipeline interrompe la pubblicazione in caso di disallineamento.
 
@@ -91,6 +92,8 @@ Tutti i tool devono rispettare lo stesso contratto:
 - `Apri` se il tool è installato e aggiornato;
 - `Aggiorna` se esiste una versione remota più recente;
 - refresh globale della Suite per rileggere lo stato di tutti i tool.
+- dettagli delle novità visibili nella scheda prima di avviare l'aggiornamento;
+- chiusura coordinata di Suite e tool, seguita dal ripristino automatico delle applicazioni aperte.
 
 La definizione completa della richiesta "pubblica e builda" e' in `docs/18-publish-build-contract.md`.
 

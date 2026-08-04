@@ -15,12 +15,12 @@ const suiteUpdateLater = document.querySelector('#suite-update-later');
 const suiteUpdateInstall = document.querySelector('#suite-update-install');
 const suiteUpdateDismiss = document.querySelector('#suite-update-dismiss');
 const metadata = {
-  'photo-selector-app': { icon:'select', category:'Selezione', description:'Seleziona, classifica e confronta grandi servizi fotografici.', color:'#36a97b' },
-  'image-party-frame': { icon:'frame', category:'Creatività', description:'Applica cornici e composizioni per eventi e consegne.', color:'#d9695f' },
-  'batch-print-layout': { icon:'print', category:'Stampa', description:'Organizza molte immagini su fogli pronti per la stampa.', color:'#8c71c8' },
-  'archivio-flow': { icon:'archive', category:'Archivio', description:'Acquisisci, organizza e proteggi il tuo archivio fotografico.', color:'#6d9460' },
-  'image-converter': { icon:'convert', category:'Utility', description:'Converti e comprimi immagini e negativi RAW.', color:'#df8647' },
-  'image-file-finder': { icon:'find', category:'Utility', description:'Trova e raccogli fotografie partendo da una lista.', color:'#4c9caf' },
+  'photo-selector-app': { icon:'select', category:'Selezione', description:'Gestisce la selezione completa di servizi fotografici anche molto grandi. Permette di sfogliare rapidamente JPEG e RAW, confrontare gli scatti, assegnare valutazioni, preferenze ed etichette colore, sincronizzare i dati XMP e salvare o trasferire il progetto tramite Google Drive.', color:'#36a97b' },
+  'image-party-frame': { icon:'frame', category:'Creatività', description:'Crea progetti fotografici con cornici e composizioni grafiche usando template predefiniti o personalizzati. Consente di regolare ritaglio e zoom per ogni immagine, confrontare prima e dopo, validare il risultato ed esportare interi gruppi di fotografie pronti per eventi e consegne.', color:'#d9695f' },
+  'batch-print-layout': { icon:'print', category:'Stampa', description:'Impagina automaticamente molte fotografie su fogli pronti per la stampa. Organizza il lavoro in batch, distribuisce le immagini nei layout disponibili e riduce le operazioni manuali e lo spreco di carta durante la preparazione delle stampe.', color:'#8c71c8' },
+  'archivio-flow': { icon:'archive', category:'Archivio', description:'Accompagna l\'importazione delle fotografie dalla scheda alla creazione del lavoro in archivio. Rileva i file, applica una struttura di cartelle e nomi coerenti, prepara copie operative e leggere e mantiene i servizi consultabili e riapribili nel tempo.', color:'#6d9460' },
+  'image-converter': { icon:'convert', category:'Utility', description:'Converte intere cartelle di immagini in JPG o WebP usando preset per web, social, revisione e stampa, con controllo di dimensioni, qualità e peso. Gestisce inoltre i negativi RAW trasformandoli in DNG compresso, conservando gli originali e i relativi file XMP.', color:'#df8647' },
+  'image-file-finder': { icon:'find', category:'Utility', description:'Cerca automaticamente fotografie dentro cartelle e sottocartelle partendo da una lista di nomi o codici file. Raccoglie in una destinazione unica le immagini trovate e produce un riepilogo chiaro di corrispondenze, duplicati ed elementi mancanti.', color:'#4c9caf' },
 };
 const categories = ['Tutti','Preferiti','Recenti','Selezione','Creatività','Stampa','Archivio','Utility'];
 let states = [];
@@ -52,7 +52,7 @@ function startSuiteInstallCountdown(version) {
     if (suiteInstallSeconds > 0) return;
     stopSuiteInstallCountdown();
     suiteUpdateTitle.textContent = `Installazione FileX ${version}`;
-    suiteUpdateMessage.textContent = 'La Suite verrà riavviata automaticamente.';
+    suiteUpdateMessage.textContent = 'FileX e tutti i tool aperti verranno chiusi e riavviati automaticamente.';
     void api.installSuiteUpdate();
   }, 1000);
 }
@@ -101,7 +101,7 @@ function renderSuiteUpdate(state) {
   if (status === 'installing') {
     stopSuiteInstallCountdown();
     suiteUpdateTitle.textContent = `Installazione FileX ${version}`;
-    suiteUpdateMessage.textContent = 'Chiusura della Suite e applicazione dell’aggiornamento...';
+    suiteUpdateMessage.textContent = 'Chiusura di FileX e di tutti i tool, applicazione dell’aggiornamento e riavvio...';
     suiteUpdateProgressBar.style.width = '100%';
     return;
   }
@@ -115,6 +115,11 @@ function renderSuiteUpdate(state) {
 }
 
 function icon(name) { return `<svg aria-hidden="true"><use href="#i-${name}"/></svg>`; }
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+  })[character]);
+}
 function renderNav() {
   nav.innerHTML = categories.map(category => `<button class="nav-item ${category===activeCategory?'active':''}" data-category="${category}">${category==='Preferiti'?icon('star'):''}<span>${category}</span></button>`).join('');
 }
@@ -133,9 +138,15 @@ function renderTools() {
     const meta = metadata[state.toolId] || {icon:'suite',category:'Tool',description:'Strumento FileX',color:'#36a97b'};
     const installed = Boolean(state.installed);
     const update = state.status === 'update-available';
+    const releaseHighlights = Array.isArray(state.releaseHighlights) ? state.releaseHighlights : [];
+    const updateDetails = update ? `<aside class="tool-update-notes" aria-label="Novità versione ${escapeHtml(state.latestVersion)}">
+      <strong>Novità della versione ${escapeHtml(state.latestVersion)}</strong>
+      <ul>${releaseHighlights.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>
+    </aside>` : '';
     return `<article class="tool-card" style="--tool-color:${meta.color}">
       <button class="favorite ${favorites.has(state.toolId)?'selected':''}" data-action="favorite" data-id="${state.toolId}" title="Preferito">${icon('star')}</button>
-      <div class="tool-icon"><img src="./icons/${state.toolId}.png" alt="" /></div><span class="category">${meta.category}</span><h3>${state.toolName}</h3><p>${meta.description}</p>
+      <div class="tool-icon"><img src="./icons/${state.toolId}.png" alt="" /></div><span class="category">${meta.category}</span><h3>${escapeHtml(state.toolName)}</h3><p class="tool-description">${meta.description}</p>
+      ${updateDetails}
       <div class="card-foot"><span class="status ${update?'warn':installed?'ok':'off'}">${update?'Aggiornamento':installed?'Pronto':'Da installare'}</span>
       <div class="card-actions">${update?`<button class="update-mini" data-action="install" data-id="${state.toolId}">Aggiorna</button>`:''}<button class="launch" data-action="${installed?'open':'install'}" data-id="${state.toolId}">${installed?'Apri':'Installa'} <span>→</span></button></div></div>
     </article>`;
@@ -153,7 +164,7 @@ async function install(id, button = null) {
   if (button) { button.disabled = true; button.textContent = 'Scarico...'; }
   const job = await api.downloadToolUpdate(id);
   if (job.status !== 'ready-to-apply') throw new Error(job.error || 'Download non riuscito');
-  if (button) button.textContent = 'Avvio...';
+  if (button) button.textContent = 'Riavvio...';
   const result = await api.applyToolUpdate(job.id);
   if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
   await new Promise(resolve => setTimeout(resolve, 1200));

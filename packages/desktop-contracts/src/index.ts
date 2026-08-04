@@ -38,6 +38,7 @@ export interface DesktopToolInstallState {
   executablePath: string | null;
   installedVersion: string | null;
   latestVersion: string | null;
+  releaseHighlights: string[];
   status: DesktopToolInstallStatus;
 }
 
@@ -49,6 +50,8 @@ export interface DesktopToolReleaseEntry {
   installerSha256: string;
   minLauncherVersion: string;
   publishedAt: string;
+  /** Concise, user-facing list of improvements included in this tool release. */
+  highlights: string[];
 }
 
 export interface DesktopReleaseManifest {

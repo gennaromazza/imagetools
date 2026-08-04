@@ -14,7 +14,12 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Image-Party-Frame-0.1.0-stable-x64-setup.exe",
       "installerSha256": "bc088e6b5bb30e37046fd41891a53eb426c64e0018508f6f3941617d4adfce2e",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.337Z"
+      "publishedAt": "2026-07-28T08:08:15.337Z",
+      "highlights": [
+        "Creazione di progetti fotografici con template predefiniti o personalizzati.",
+        "Regolazione visuale di ritaglio e zoom, confronto del risultato ed esportazione in batch.",
+        "Importazione ed esportazione di pacchetti portabili per progetti e librerie di template."
+      ]
     },
     {
       "toolId": "batch-print-layout",
@@ -23,7 +28,11 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Batch-Print-Layout-0.1.0-stable-x64-setup.exe",
       "installerSha256": "58df8088fec53c671bdeb3cbc660ac2148ff15fadf9b463d0415f742df7f2ddc",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.484Z"
+      "publishedAt": "2026-07-28T08:08:15.484Z",
+      "highlights": [
+        "Impaginazione automatica di piu fotografie su fogli pronti per la stampa.",
+        "Organizzazione batch delle immagini per ridurre sprechi e operazioni manuali."
+      ]
     },
     {
       "toolId": "archivio-flow",
@@ -32,7 +41,11 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Archivio-Flow-0.1.0-stable-x64-setup.exe",
       "installerSha256": "120e2095cd589607ea40d723068d5ad379f9865d13c3409711a16cbc17c78a02",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.557Z"
+      "publishedAt": "2026-07-28T08:08:15.557Z",
+      "highlights": [
+        "Importazione guidata delle fotografie da scheda e creazione automatica del lavoro.",
+        "Struttura cartelle, rinomina coerente e archivio consultabile dei servizi fotografici."
+      ]
     },
     {
       "toolId": "image-converter",
@@ -41,7 +54,12 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Image-Converter-0.1.0-stable-x64-setup.exe",
       "installerSha256": "14c7a5d38985b2a06b30aad3cdba716cfb8b0369ebef4b0cf81daae7b75bf61c",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.629Z"
+      "publishedAt": "2026-07-28T08:08:15.629Z",
+      "highlights": [
+        "Conversione batch in JPG e WebP con preset per web, social, revisione e stampa.",
+        "Conversione dei negativi RAW in DNG compresso, conservando originali e sidecar XMP.",
+        "Controllo di dimensioni e peso del file con cartelle di output separate."
+      ]
     },
     {
       "toolId": "image-file-finder",
@@ -50,7 +68,11 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Trova-Foto-da-Lista-0.1.0-stable-x64-setup.exe",
       "installerSha256": "7fbc31dbabf49568a9da7edc3b26437748eebb9914409021d6618aec0fd98582",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.701Z"
+      "publishedAt": "2026-07-28T08:08:15.701Z",
+      "highlights": [
+        "Ricerca automatica di fotografie in cartelle e sottocartelle a partire da una lista di nomi.",
+        "Raccolta dei file trovati in una destinazione unica con riepilogo degli elementi mancanti."
+      ]
     },
     {
       "toolId": "photo-selector-app",
@@ -59,8 +81,13 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Image-Select-Pro-0.1.0-stable-x64-setup.exe",
       "installerSha256": "5b51265435c7d02bdcfb2ae6bd4f378ce647f0e9d4704cdf04ae29494f0d146f",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.775Z"
+      "publishedAt": "2026-07-28T08:08:15.775Z",
+      "highlights": [
+        "Selezione e classificazione rapida di grandi servizi fotografici, inclusi i file RAW.",
+        "Confronto, anteprima veloce, valutazioni, etichette colore e sincronizzazione XMP.",
+        "Salvataggio dei progetti e trasferimento delle selezioni tramite Google Drive."
+      ]
     }
   ],
-  "payloadSha256": "9cf723b4f89bad033a39027e0ccc6f32e81498493ddf7de875fc32bd2213a9ae"
+  "payloadSha256": "988b209e2ba5e77ca3dba4c7bcf0f298228f5b43ff79b17172d89d78f6b55ca2"
 }

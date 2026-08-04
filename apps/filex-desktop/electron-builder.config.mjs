@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getDesktopToolOrDefault } from "./.output/electron/tool-manifest.js";
+import { desktopToolManifest, getDesktopToolOrDefault } from "./.output/electron/tool-manifest.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const packageVersion = JSON.parse(readFileSync(join(__dirname, "package.json"), "utf8")).version;
@@ -21,7 +21,8 @@ function buildNsisIncludeContent(tool) {
     new Set([tool.productName, ...(tool.legacyUpgradeDisplayNames ?? [])].filter(Boolean)),
   );
   const processNames = Array.from(
-    new Set([tool.executableName, ...(tool.legacyExecutableNames ?? [])]
+    new Set(Object.values(desktopToolManifest)
+      .flatMap((suiteTool) => [suiteTool.executableName, ...(suiteTool.legacyExecutableNames ?? [])])
       .filter(Boolean)
       .map((name) => name.toLowerCase().endsWith(".exe") ? name : `${name}.exe`)),
   );
@@ -76,6 +77,8 @@ FunctionEnd
 
 Function terminateProcessByName
   Exch $0
+  ExecWait 'taskkill /IM "$0" /T'
+  Sleep 1200
   ExecWait 'taskkill /IM "$0" /F /T'
   Pop $0
 FunctionEnd
