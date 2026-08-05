@@ -863,6 +863,7 @@ export interface FileXDesktopApi {
     listAvailableTools: (channel?: DesktopReleaseChannel) => Promise<DesktopToolInstallState[]>;
     checkToolUpdate: (toolId: DesktopToolId, currentVersion?: string | null, channel?: DesktopReleaseChannel) => Promise<DesktopToolUpdateCheckResult>;
     downloadToolUpdate: (toolId: DesktopToolId, channel?: DesktopReleaseChannel) => Promise<DesktopToolUpdateJob>;
+    getToolUpdateJob: (jobId: string) => Promise<DesktopToolUpdateJob | null>;
     applyToolUpdate: (jobId: string) => Promise<DesktopToolUpdateJob>;
     openInstalledTool: (toolId: DesktopToolId, launchArgs?: string[]) => Promise<{
         ok: boolean;

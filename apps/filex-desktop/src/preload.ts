@@ -20,6 +20,7 @@ const api: FileXDesktopApi = {
   checkToolUpdate: (toolId, currentVersion, channel) =>
     ipcRenderer.invoke("filex:check-tool-update", toolId, currentVersion, channel),
   downloadToolUpdate: (toolId, channel) => ipcRenderer.invoke("filex:download-tool-update", toolId, channel),
+  getToolUpdateJob: (jobId) => ipcRenderer.invoke("filex:get-tool-update-job", jobId),
   applyToolUpdate: (jobId) => ipcRenderer.invoke("filex:apply-tool-update", jobId),
   openInstalledTool: (toolId, launchArgs) => ipcRenderer.invoke("filex:open-installed-tool", toolId, launchArgs),
   getSuiteDockState: () => ipcRenderer.invoke("filex:get-suite-dock-state"),

@@ -117,6 +117,7 @@ import {
   applyToolUpdate,
   checkToolUpdate,
   downloadToolUpdate,
+  getUpdateJob,
   listAvailableTools,
   openInstalledTool,
 } from "./updater.js";
@@ -1163,6 +1164,7 @@ function registerIpcHandlers(): void {
     async (_event, toolId: DesktopToolId, channel?: DesktopReleaseChannel) =>
       downloadToolUpdate(toolId, channel ?? resolveReleaseChannel()),
   );
+  ipcMain.handle("filex:get-tool-update-job", (_event, jobId: string) => getUpdateJob(jobId));
   ipcMain.handle("filex:apply-tool-update", async (_event, jobId: string) => applyToolUpdate(jobId));
   ipcMain.handle(
     "filex:open-installed-tool",

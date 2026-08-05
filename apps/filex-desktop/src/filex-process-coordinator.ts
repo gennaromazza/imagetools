@@ -121,11 +121,17 @@ function writeToolUpdateOrchestrator(): string {
   const scriptPath = join(app.getPath("userData"), "updates", "run-filex-tool-update.ps1");
   const script = `param(
   [Parameter(Mandatory = $true)][string]$InstallerPath,
-  [Parameter(Mandatory = $true)][string]$SuitePath
+  [Parameter(Mandatory = $true)][string]$SuitePath,
+  [Parameter(Mandatory = $true)][int]$SuiteProcessId
 )
 $ErrorActionPreference = 'Stop'
 $installerExitCode = 1
 try {
+  try {
+    Wait-Process -Id $SuiteProcessId -ErrorAction SilentlyContinue
+  } catch {
+    # La Suite potrebbe essere gia' terminata prima dell'avvio dello script.
+  }
   $installer = Start-Process -FilePath $InstallerPath -PassThru -Wait
   if ($null -eq $installer.ExitCode) { $installerExitCode = 0 } else { $installerExitCode = $installer.ExitCode }
 } finally {
@@ -139,30 +145,47 @@ exit $installerExitCode
   return scriptPath;
 }
 
+function toPowerShellSingleQuoted(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 export async function launchToolUpdateAndRestartSuite(installerPath: string): Promise<void> {
   if (process.platform !== "win32") {
     throw new Error("Il riavvio coordinato degli aggiornamenti è supportato su Windows.");
   }
   saveFileXRestartPlan();
   const scriptPath = writeToolUpdateOrchestrator();
+  const elevatedArguments = [
+    "-NoLogo",
+    "-NoProfile",
+    "-ExecutionPolicy", "Bypass",
+    "-File", scriptPath,
+    "-InstallerPath", installerPath,
+    "-SuitePath", process.execPath,
+    "-SuiteProcessId", String(process.pid),
+  ];
+  const startElevatedCommand = [
+    `Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @(${elevatedArguments
+      .map(toPowerShellSingleQuoted)
+      .join(", ")})`,
+  ].join(";");
   await new Promise<void>((resolve, reject) => {
     const child = spawn("powershell.exe", [
       "-NoLogo",
       "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy", "Bypass",
-      "-File", scriptPath,
-      "-InstallerPath", installerPath,
-      "-SuitePath", process.execPath,
+      "-Command", startElevatedCommand,
     ], {
-      detached: true,
       stdio: "ignore",
       windowsHide: true,
     });
     child.once("error", reject);
-    child.once("spawn", () => {
-      child.unref();
-      resolve();
+    child.once("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error("Autorizzazione amministratore annullata o non disponibile"));
     });
   });
+  app.quit();
 }

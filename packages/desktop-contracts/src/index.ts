@@ -1043,6 +1043,7 @@ export interface FileXDesktopApi {
     toolId: DesktopToolId,
     channel?: DesktopReleaseChannel,
   ) => Promise<DesktopToolUpdateJob>;
+  getToolUpdateJob: (jobId: string) => Promise<DesktopToolUpdateJob | null>;
   applyToolUpdate: (jobId: string) => Promise<DesktopToolUpdateJob>;
   openInstalledTool: (
     toolId: DesktopToolId,

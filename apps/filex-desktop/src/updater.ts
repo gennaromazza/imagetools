@@ -1,11 +1,12 @@
 import * as electron from "electron";
 import { execFileSync, spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { unlink, readFile } from "node:fs/promises";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { readFile, unlink } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
 import { dirname, join } from "node:path";
+import semver from "semver";
 import type {
   DesktopReleaseChannel,
   DesktopReleaseManifest,
@@ -39,26 +40,19 @@ function sanitizeChannel(channel: DesktopReleaseChannel | undefined): DesktopRel
   return "stable";
 }
 
-function normalizeVersion(value: string | null | undefined): number[] {
+function normalizeSemver(value: string | null | undefined): string | null {
   const clean = (value ?? "").replace(/^v/i, "").trim();
-  if (!clean) return [0];
-  return clean
-    .split(".")
-    .map((part) => Number.parseInt(part.replace(/[^\d].*$/g, ""), 10))
-    .map((part) => (Number.isFinite(part) ? part : 0));
+  if (!clean) return null;
+  return semver.valid(clean) ?? semver.valid(semver.coerce(clean));
 }
 
 function compareVersions(left: string | null | undefined, right: string | null | undefined): number {
-  const leftParts = normalizeVersion(left);
-  const rightParts = normalizeVersion(right);
-  const maxLength = Math.max(leftParts.length, rightParts.length);
-  for (let index = 0; index < maxLength; index += 1) {
-    const a = leftParts[index] ?? 0;
-    const b = rightParts[index] ?? 0;
-    if (a > b) return 1;
-    if (a < b) return -1;
-  }
-  return 0;
+  const normalizedLeft = normalizeSemver(left);
+  const normalizedRight = normalizeSemver(right);
+  if (!normalizedLeft && !normalizedRight) return 0;
+  if (!normalizedLeft) return -1;
+  if (!normalizedRight) return 1;
+  return semver.compare(normalizedLeft, normalizedRight);
 }
 
 function getReleaseManifestUrl(channel: DesktopReleaseChannel): string {
@@ -117,6 +111,7 @@ function requestJson(urlValue: string, redirectCount = 0): Promise<unknown> {
           return;
         }
         if (!response.statusCode || response.statusCode >= 400) {
+          response.resume();
           reject(new Error(`Manifest request failed (${response.statusCode ?? "unknown"})`));
           return;
         }
@@ -277,20 +272,22 @@ function readExecutableVersion(executablePath: string): string | null {
 }
 
 function detectInstalledExecutable(toolId: DesktopToolId): { path: string | null; version: string | null } {
+  const installations: Array<{ path: string; version: string | null }> = [];
   for (const candidate of resolveExecutableCandidates(toolId)) {
     try {
       if (!candidate || !existsSync(candidate)) continue;
       const stats = statSync(candidate);
       if (!stats.isFile()) continue;
-      return {
+      installations.push({
         path: candidate,
         version: readExecutableVersion(candidate),
-      };
+      });
     } catch {
       // keep scanning next candidate
     }
   }
-  return { path: null, version: null };
+  installations.sort((left, right) => compareVersions(right.version, left.version));
+  return installations[0] ?? { path: null, version: null };
 }
 
 function pickLatestRelease(
@@ -418,9 +415,31 @@ function downloadFile(
   onProgress: (downloaded: number, total: number | null) => void,
   redirectCount = 0,
 ): Promise<void> {
+  // Write to .part file; rename atomically only on success to avoid leaving
+  // a stale partial file that a concurrent cleanup could delete mid-verify.
+  const partPath = `${destinationPath}.part`;
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let writeStream: ReturnType<typeof createWriteStream> | null = null;
+    const succeed = () => {
+      if (settled) return;
+      settled = true;
+      try { renameSync(partPath, destinationPath); } catch { /* best-effort */ }
+      resolve();
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      writeStream?.destroy();
+      try { unlinkSync(partPath); } catch { /* already gone */ }
+      reject(error);
+    };
+    if (!isAllowedReleaseUrl(urlValue)) {
+      fail(new Error("URL installer non autorizzato"));
+      return;
+    }
     if (redirectCount > 5) {
-      reject(new Error("Troppi redirect durante il download"));
+      fail(new Error("Troppi redirect durante il download"));
       return;
     }
     const parsed = new URL(urlValue);
@@ -438,46 +457,60 @@ function downloadFile(
           const location = response.headers.location;
           response.resume();
           if (!location) {
-            reject(new Error("Redirect senza destinazione"));
+            fail(new Error("Redirect senza destinazione"));
             return;
           }
-          downloadFile(new URL(location, parsed).toString(), destinationPath, onProgress, redirectCount + 1)
-            .then(resolve)
-            .catch(reject);
+          const redirectedUrl = new URL(location, parsed).toString();
+          if (!isAllowedReleaseUrl(redirectedUrl)) {
+            fail(new Error("Redirect installer non autorizzato"));
+            return;
+          }
+          downloadFile(redirectedUrl, destinationPath, onProgress, redirectCount + 1)
+            .then(succeed)
+            .catch(fail);
           return;
         }
         if (!response.statusCode || response.statusCode >= 400) {
-          reject(new Error(`Download failed (${response.statusCode ?? "unknown"})`));
+          response.resume();
+          fail(new Error(`Download failed (${response.statusCode ?? "unknown"})`));
           return;
         }
         const total = response.headers["content-length"] ? Number.parseInt(response.headers["content-length"], 10) : null;
         let downloaded = 0;
-        const writeStream = createWriteStream(destinationPath, { flags: "w" });
+        writeStream = createWriteStream(partPath, { flags: "w" });
         response.on("data", (chunk) => {
           downloaded += chunk.length;
           onProgress(downloaded, Number.isFinite(total) ? total : null);
         });
+        response.once("aborted", () => fail(new Error("Download interrotto dal server")));
+        response.once("error", (error) => fail(error));
         response.pipe(writeStream);
-        writeStream.on("error", reject);
-        writeStream.on("finish", () => resolve());
+        writeStream.once("error", fail);
+        writeStream.once("finish", succeed);
       },
     );
-    request.on("error", reject);
+    request.setTimeout(60_000, () => request.destroy(new Error("Timeout download installer")));
+    request.once("error", fail);
   });
 }
 
 async function verifySha256(filePath: string, expectedHex: string): Promise<boolean> {
-  const buffer = await readFile(filePath);
-  const hash = createHash("sha256").update(buffer).digest("hex");
-  return hash.toLowerCase() === expectedHex.trim().toLowerCase();
+  const actualHash = await new Promise<string>((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(filePath);
+    stream.once("error", reject);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.once("end", () => resolve(hash.digest("hex")));
+  });
+  return actualHash.toLowerCase() === expectedHex.trim().toLowerCase();
 }
 
-export async function downloadToolUpdate(
+async function runToolUpdateDownload(
   toolId: DesktopToolId,
+  job: DesktopToolUpdateJob,
   channelInput?: DesktopReleaseChannel,
 ): Promise<DesktopToolUpdateJob> {
   const channel = sanitizeChannel(channelInput);
-  const job = createJob(toolId, channel);
 
   try {
     const check = await checkToolUpdate(toolId, null, channel);
@@ -556,6 +589,16 @@ export async function downloadToolUpdate(
       error: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+export function downloadToolUpdate(
+  toolId: DesktopToolId,
+  channelInput?: DesktopReleaseChannel,
+): DesktopToolUpdateJob {
+  const channel = sanitizeChannel(channelInput);
+  const job = createJob(toolId, channel);
+  void runToolUpdateDownload(toolId, job, channel);
+  return job;
 }
 
 export async function applyToolUpdate(jobId: string): Promise<DesktopToolUpdateJob> {

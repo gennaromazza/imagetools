@@ -162,8 +162,16 @@ async function refresh() {
 async function install(id, button = null) {
   const originalLabel = button?.textContent;
   if (button) { button.disabled = true; button.textContent = 'Scarico...'; }
-  const job = await api.downloadToolUpdate(id);
-  if (job.status !== 'ready-to-apply') throw new Error(job.error || 'Download non riuscito');
+  let job = await api.downloadToolUpdate(id);
+  while (job && !['ready-to-apply', 'failed'].includes(job.status)) {
+    if (button) {
+      const percent = job.totalBytes ? Math.floor((job.downloadedBytes / job.totalBytes) * 100) : null;
+      button.textContent = job.status === 'verifying' ? 'Verifica...' : percent !== null ? `Scarico ${percent}%` : 'Scarico...';
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+    job = await api.getToolUpdateJob(job.id);
+  }
+  if (!job || job.status !== 'ready-to-apply') throw new Error(job?.error || 'Download non riuscito');
   if (button) button.textContent = 'Riavvio...';
   const result = await api.applyToolUpdate(job.id);
   if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
