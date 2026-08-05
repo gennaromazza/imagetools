@@ -1,26 +1,12 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-28T08:08:15.775Z",
+  "generatedAt": "2026-08-05T12:50:28.564Z",
   "generatedBy": "generate-release-manifest.mjs",
   "channels": [
     "stable",
     "beta"
   ],
   "releases": [
-    {
-      "toolId": "image-party-frame",
-      "version": "0.1.0",
-      "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Image-Party-Frame-0.1.0-stable-x64-setup.exe",
-      "installerSha256": "bc088e6b5bb30e37046fd41891a53eb426c64e0018508f6f3941617d4adfce2e",
-      "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.337Z",
-      "highlights": [
-        "Creazione di progetti fotografici con template predefiniti o personalizzati.",
-        "Regolazione visuale di ritaglio e zoom, confronto del risultato ed esportazione in batch.",
-        "Importazione ed esportazione di pacchetti portabili per progetti e librerie di template."
-      ]
-    },
     {
       "toolId": "batch-print-layout",
       "version": "0.1.0",
@@ -32,19 +18,6 @@
       "highlights": [
         "Impaginazione automatica di piu fotografie su fogli pronti per la stampa.",
         "Organizzazione batch delle immagini per ridurre sprechi e operazioni manuali."
-      ]
-    },
-    {
-      "toolId": "archivio-flow",
-      "version": "0.1.0",
-      "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Archivio-Flow-0.1.0-stable-x64-setup.exe",
-      "installerSha256": "120e2095cd589607ea40d723068d5ad379f9865d13c3409711a16cbc17c78a02",
-      "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.557Z",
-      "highlights": [
-        "Importazione guidata delle fotografie da scheda e creazione automatica del lavoro.",
-        "Struttura cartelle, rinomina coerente e archivio consultabile dei servizi fotografici."
       ]
     },
     {
@@ -75,19 +48,47 @@
       ]
     },
     {
-      "toolId": "photo-selector-app",
-      "version": "0.1.0",
+      "toolId": "image-party-frame",
+      "version": "0.1.18",
       "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.0/Image-Select-Pro-0.1.0-stable-x64-setup.exe",
-      "installerSha256": "5b51265435c7d02bdcfb2ae6bd4f378ce647f0e9d4704cdf04ae29494f0d146f",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Image-Party-Frame-0.1.18-stable-x64-setup.exe",
+      "installerSha256": "6761217c6c3bbe27421a0040f91acb48099a45c0c48bf8560450a25c636a1412",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-07-28T08:08:15.775Z",
+      "publishedAt": "2026-08-05T12:50:28.354Z",
       "highlights": [
-        "Selezione e classificazione rapida di grandi servizi fotografici, inclusi i file RAW.",
-        "Confronto, anteprima veloce, valutazioni, etichette colore e sincronizzazione XMP.",
-        "Salvataggio dei progetti e trasferimento delle selezioni tramite Google Drive."
+        "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
+        "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
+        "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
+      ]
+    },
+    {
+      "toolId": "archivio-flow",
+      "version": "0.1.18",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Archivio-Flow-0.1.18-stable-x64-setup.exe",
+      "installerSha256": "2e159ef98b9232916f1f1bbbaa27287f9a1e19557fd52840cef71409989c7eb7",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-08-05T12:50:28.462Z",
+      "highlights": [
+        "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
+        "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
+        "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
+      ]
+    },
+    {
+      "toolId": "photo-selector-app",
+      "version": "0.1.18",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Image-Select-Pro-0.1.18-stable-x64-setup.exe",
+      "installerSha256": "005992111608b960100b1ebfee12c8fa188dc66df25a2d45e0d4f3471ff35e5d",
+      "minLauncherVersion": "0.1.0",
+      "publishedAt": "2026-08-05T12:50:28.564Z",
+      "highlights": [
+        "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
+        "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
+        "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
       ]
     }
   ],
-  "payloadSha256": "988b209e2ba5e77ca3dba4c7bcf0f298228f5b43ff79b17172d89d78f6b55ca2"
+  "payloadSha256": "b1defa4cd281ebe369c93b6bb3d8228b8919def003d43278a430d7f2408eade6"
 }
