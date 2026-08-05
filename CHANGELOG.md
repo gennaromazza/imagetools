@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-08-05 - FileX Suite 0.1.19
+
+### Image Select Pro
+- anteprima rapida in modalita focus con filtri e dock richiudibili per dedicare piu spazio allo scatto
+- controllo zoom diretto e pulsanti di spostamento disponibili quando l'immagine e' ingrandita
+
+### Release engineering
+- FileX Suite, Image Party Frame, Image Select Pro e Archivio Flow vengono pubblicati insieme alla versione `0.1.19`
+- manifest stabile, installer, blockmap e `latest.yml` sono distribuiti dalla stessa GitHub Release per gli aggiornamenti nel launcher
+
 ## 2026-08-04 - FileX Suite 0.1.18
 
 ### FileX Suite

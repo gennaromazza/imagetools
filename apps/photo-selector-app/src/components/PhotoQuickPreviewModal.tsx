@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type SyntheticEvent, type UIEvent } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type SyntheticEvent, type UIEvent } from "react";
 import { createPortal } from "react-dom";
 import type { DesktopQuickPreviewFrame, DesktopQuickPreviewSource } from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
@@ -297,6 +297,7 @@ export function PhotoQuickPreviewModal({
   const [compareAssetId, setCompareAssetId] = useState<string | null>(null);
   const [resolvedComparePreview, setResolvedComparePreview] = useState<ManagedPreviewState | null>(null);
   const [classificationFeedback, setClassificationFeedback] = useState<PreviewFeedback | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [quickPreviewPerf, setQuickPreviewPerf] = useState<QuickPreviewPerfSnapshot>({
     openLatencyMs: null,
     navigationLatencyMs: null,
@@ -335,6 +336,7 @@ export function PhotoQuickPreviewModal({
     // modalità/preview di una sessione precedente possono rientrare alla riapertura.
     if (!asset) {
       previewWasClosedRef.current = true;
+      setSidebarCollapsed(true);
       pendingOneToOneZoomRef.current = false;
       setCompareMode(false);
       setCompareAssetId(null);
@@ -2101,6 +2103,18 @@ export function PhotoQuickPreviewModal({
     });
   }, []);
 
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((current) => !current);
+  }, []);
+
+  const handleZoomSliderChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    applyZoom(Number(event.currentTarget.value));
+  }, [applyZoom]);
+
+  const handlePanControl = useCallback((deltaX: number, deltaY: number) => {
+    panBy(deltaX, deltaY);
+  }, [panBy]);
+
   const handleMainPreviewLoad = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
     const maybeFinalizeDeferredOneToOneZoom = () => {
       if (!pendingOneToOneZoomRef.current || zoomLevel <= 1.05) {
@@ -2320,7 +2334,7 @@ export function PhotoQuickPreviewModal({
 
   const previewContent = (
     <div
-      className="quick-preview"
+      className={sidebarCollapsed ? "quick-preview quick-preview--focus-mode" : "quick-preview"}
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -2328,7 +2342,7 @@ export function PhotoQuickPreviewModal({
     >
       {/* SIDEBAR SINISTRA: filtri + thumbnail verticali */}
       {assets.length > 1 ? (
-        <div className="quick-preview__sidebar" onClick={(event) => event.stopPropagation()}>
+        <div className="quick-preview__sidebar" id="quick-preview-sidebar" onClick={(event) => event.stopPropagation()}>
           <div className="quick-preview__sidebar-filters">
             <div className="quick-preview__filter-summary">
               {hasActiveFilters
@@ -2455,6 +2469,16 @@ export function PhotoQuickPreviewModal({
           </div>
 
         <div className="quick-preview__actions">
+          <button
+            type="button"
+            className={sidebarCollapsed ? "ghost-button quick-preview__action quick-preview__action--active" : "ghost-button quick-preview__action"}
+            onClick={toggleSidebarCollapsed}
+            aria-controls="quick-preview-sidebar"
+            aria-expanded={!sidebarCollapsed}
+            title={sidebarCollapsed ? "Apri filtri e dock" : "Compatta filtri e dock"}
+          >
+            {sidebarCollapsed ? "Apri pannelli" : "Compatta pannelli"}
+          </button>
           <span className="quick-preview__stars">{formatAssetStars(asset)}</span>
             {classificationFeedback ? (
               <span
@@ -2504,6 +2528,19 @@ export function PhotoQuickPreviewModal({
             >
               Fullscreen
             </button>
+            <label className="quick-preview__zoom-control" title="Zoom immagine">
+              <span>Zoom</span>
+              <input
+                type="range"
+                min={1}
+                max={12}
+                step={0.05}
+                value={zoomLevel}
+                onChange={handleZoomSliderChange}
+                aria-label="Zoom immagine"
+              />
+              <strong>{Math.round(zoomLevel * 100)}%</strong>
+            </label>
             <button
               type="button"
               className="ghost-button quick-preview__action"
@@ -2699,6 +2736,15 @@ export function PhotoQuickPreviewModal({
             setIsPanning(false);
           }}
         >
+          {zoomLevel > 1.05 && !compareMode ? (
+            <div className="quick-preview__stage-tools" onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(-160, 0)} aria-label="Sposta a sinistra">←</button>
+              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(0, -160)} aria-label="Sposta in alto">↑</button>
+              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(0, 160)} aria-label="Sposta in basso">↓</button>
+              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(160, 0)} aria-label="Sposta a destra">→</button>
+            </div>
+          ) : null}
+
           {previousAsset ? (
             <button
               type="button"

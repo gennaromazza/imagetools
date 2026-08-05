@@ -2415,6 +2415,42 @@ img {
   backdrop-filter: blur(6px);
 }
 
+.quick-preview--focus-mode {
+  grid-template-columns: 0px minmax(0, 1fr);
+  transition: grid-template-columns 280ms ease;
+}
+
+.quick-preview--focus-mode .quick-preview__sidebar {
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+
+.quick-preview:not(.quick-preview--focus-mode) .quick-preview__sidebar {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 200ms ease;
+}
+
+.quick-preview--focus-mode .quick-preview__main {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.quick-preview--focus-mode .quick-preview__meta-bar,
+.quick-preview--focus-mode .quick-preview__dock {
+  display: none;
+}
+
+.quick-preview:not(.quick-preview--focus-mode) {
+  grid-template-columns: 220px minmax(0, 1fr);
+  transition: grid-template-columns 280ms ease;
+}
+
+.quick-preview:not(.quick-preview--focus-mode) .quick-preview__main {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
 .quick-preview__sidebar {
   display: grid;
   grid-template-rows: auto;
@@ -2479,6 +2515,34 @@ img {
   gap: 0.5rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.quick-preview__zoom-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.quick-preview__zoom-control span {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.quick-preview__zoom-control input {
+  width: 120px;
+  accent-color: #e5a569;
+}
+
+.quick-preview__zoom-control strong {
+  min-width: 3.4rem;
+  text-align: right;
+  color: #fff7eb;
 }
 
 .quick-preview__perf-badge {
@@ -2830,6 +2894,34 @@ img {
 
 .quick-preview__stage--compare {
   padding: 1rem;
+}
+
+.quick-preview__stage-tools {
+  position: absolute;
+  top: 0.85rem;
+  right: 0.85rem;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-width: 9.5rem;
+  justify-content: flex-end;
+}
+
+.quick-preview__pan-button {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 18, 16, 0.78);
+  color: #fff6ea;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.quick-preview__pan-button:hover,
+.quick-preview__pan-button:focus-visible {
+  border-color: rgba(229, 165, 105, 0.5);
+  background: rgba(44, 33, 22, 0.84);
 }
 
 .quick-preview__footer {

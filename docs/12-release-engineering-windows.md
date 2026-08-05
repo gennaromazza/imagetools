@@ -35,7 +35,7 @@ Include:
 - installer singoli tool
 - installer Suite (`suite-launcher`)
 
-Il workflow deve costruire almeno FileX Suite e tutti i tool modificati dalla release. Per `v0.1.18` gli artefatti obbligatori sono Suite, Image Party Frame, Image Select Pro e Archivio Flow. Batch Print Layout, Image Converter e Trova Foto da Lista restano nel contratto processi e nel manifest storico, ma non hanno attualmente un workspace applicativo versionato da cui generare nuovi installer.
+Il workflow deve costruire almeno FileX Suite e tutti i tool modificati dalla release. Per `v0.1.19` gli artefatti obbligatori sono Suite, Image Party Frame, Image Select Pro e Archivio Flow. Batch Print Layout, Image Converter e Trova Foto da Lista restano nel contratto processi e nel manifest storico, ma non hanno attualmente un workspace applicativo versionato da cui generare nuovi installer.
 
 ## Manifest Release
 
