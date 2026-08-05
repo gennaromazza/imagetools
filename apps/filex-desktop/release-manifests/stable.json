@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-05T12:50:28.564Z",
+  "generatedAt": "2026-08-05T14:11:00.700Z",
   "generatedBy": "generate-release-manifest.mjs",
   "channels": [
     "stable",
@@ -54,7 +54,7 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Image-Party-Frame-0.1.18-stable-x64-setup.exe",
       "installerSha256": "6761217c6c3bbe27421a0040f91acb48099a45c0c48bf8560450a25c636a1412",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-08-05T12:50:28.354Z",
+      "publishedAt": "2026-08-05T14:11:00.498Z",
       "highlights": [
         "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
         "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
@@ -68,7 +68,7 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Archivio-Flow-0.1.18-stable-x64-setup.exe",
       "installerSha256": "2e159ef98b9232916f1f1bbbaa27287f9a1e19557fd52840cef71409989c7eb7",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-08-05T12:50:28.462Z",
+      "publishedAt": "2026-08-05T14:11:00.598Z",
       "highlights": [
         "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
         "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
@@ -82,7 +82,7 @@
       "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Image-Select-Pro-0.1.18-stable-x64-setup.exe",
       "installerSha256": "005992111608b960100b1ebfee12c8fa188dc66df25a2d45e0d4f3471ff35e5d",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-08-05T12:50:28.564Z",
+      "publishedAt": "2026-08-05T14:11:00.699Z",
       "highlights": [
         "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
         "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
@@ -90,5 +90,5 @@
       ]
     }
   ],
-  "payloadSha256": "b1defa4cd281ebe369c93b6bb3d8228b8919def003d43278a430d7f2408eade6"
+  "payloadSha256": "880cf6044c39e08a4c13a3fdd3f5c47444f8596435fbaf06b9e4768e166bd2a3"
 }
