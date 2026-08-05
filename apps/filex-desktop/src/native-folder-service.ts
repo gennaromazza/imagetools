@@ -1,5 +1,5 @@
 import * as electron from "electron";
-import { copyFile, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import type {
   DesktopCopyFilesResult,
@@ -12,6 +12,8 @@ import type {
   DesktopMoveFilesResult,
   DesktopNativeFileOpStatus,
   DesktopPhotoSelectorProjectFile,
+  DesktopPhotoSelectorProjectLocation,
+  DesktopPhotoSelectorProjectRelocationResult,
   DesktopSaveFileAsResult,
 } from "@photo-tools/desktop-contracts";
 
@@ -60,8 +62,16 @@ function isImageFile(fileName: string): boolean {
   return STANDARD_EXTENSIONS.has(ext) || RAW_EXTENSIONS.has(ext);
 }
 
-function toRelativeAssetPath(rootName: string, rootPath: string, absolutePath: string): string {
+function toRelativeAssetPath(
+  rootName: string,
+  rootPath: string,
+  absolutePath: string,
+  mode: DesktopFolderOpenOptions["relativePathMode"] = "legacy",
+): string {
   const rel = normalizeSlashes(relative(rootPath, absolutePath));
+  if (mode === "project-relative") {
+    return rel;
+  }
   return rel.length > 0 ? `${rootName}/${rel}` : rootName;
 }
 
@@ -178,7 +188,12 @@ async function scanFolderByPath(
       const fileStats = await lstat(absolutePath);
       return {
         name: basename(absolutePath),
-        relativePath: toRelativeAssetPath(rootName, normalizedRootPath, absolutePath),
+        relativePath: toRelativeAssetPath(
+          rootName,
+          normalizedRootPath,
+          absolutePath,
+          options.relativePathMode,
+        ),
         absolutePath,
         size: fileStats.size,
         lastModified: Math.round(fileStats.mtimeMs),
@@ -266,6 +281,76 @@ export async function readPhotoSelectorProjectFileDesktop(
   }
 }
 
+async function readProjectAtPath(rootPath: string): Promise<DesktopPhotoSelectorProjectFile | null> {
+  try {
+    const content = await readFile(projectFilePathForFolder(rootPath), "utf8");
+    const parsed = JSON.parse(content) as Partial<DesktopPhotoSelectorProjectFile>;
+    if (parsed.schemaVersion !== 1 || parsed.app !== "image-select-pro") {
+      return null;
+    }
+    return parsed as DesktopPhotoSelectorProjectFile;
+  } catch {
+    return null;
+  }
+}
+
+export async function resolvePhotoSelectorProjectDesktop(
+  folderPath: string,
+): Promise<DesktopPhotoSelectorProjectLocation | null> {
+  let currentPath = folderPath.replace(/[\\/]+$/, "");
+  try {
+    const stats = await lstat(currentPath);
+    if (!stats.isDirectory()) {
+      currentPath = dirname(currentPath);
+    }
+  } catch {
+    return null;
+  }
+
+  while (currentPath) {
+    const project = await readProjectAtPath(currentPath);
+    if (project?.projectMode === "master") {
+      return { rootPath: currentPath, project };
+    }
+    const parentPath = dirname(currentPath);
+    if (parentPath === currentPath) {
+      break;
+    }
+    currentPath = parentPath;
+  }
+  return null;
+}
+
+export async function listPhotoSelectorLegacyProjectsDesktop(
+  rootPath: string,
+): Promise<DesktopPhotoSelectorProjectLocation[]> {
+  const normalizedRootPath = rootPath.replace(/[\\/]+$/, "");
+  const results: DesktopPhotoSelectorProjectLocation[] = [];
+
+  async function visit(directoryPath: string): Promise<void> {
+    const project = await readProjectAtPath(directoryPath);
+    if (project) {
+      results.push({ rootPath: directoryPath, project });
+    }
+
+    let entries;
+    try {
+      entries = await readdir(directoryPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) {
+        continue;
+      }
+      await visit(join(directoryPath, entry.name));
+    }
+  }
+
+  await visit(normalizedRootPath);
+  return results;
+}
+
 export async function writePhotoSelectorProjectFileDesktop(
   rootPath: string,
   project: DesktopPhotoSelectorProjectFile,
@@ -278,6 +363,11 @@ export async function writePhotoSelectorProjectFileDesktop(
 
     const filePath = projectFilePathForFolder(rootPath);
     const tempPath = join(rootPath, `${PHOTO_SELECTOR_PROJECT_FILE_NAME}.tmp`);
+    const existingProject = await readProjectAtPath(rootPath);
+    if (project.projectMode === "master" && existingProject && existingProject.projectMode !== "master") {
+      const legacyBackupPath = join(rootPath, `.image-select-pro.legacy-${Date.now()}.json`);
+      await copyFile(filePath, legacyBackupPath);
+    }
     const payload: DesktopPhotoSelectorProjectFile = {
       ...project,
       schemaVersion: 1,
@@ -291,6 +381,106 @@ export async function writePhotoSelectorProjectFileDesktop(
   // Keep later writes serialized even when an earlier write fails.
   projectFileWriteQueue = writeTask.catch(() => undefined);
   return writeTask.then(() => true).catch(() => false);
+}
+
+export async function relocatePhotoSelectorProjectFileDesktop(
+  sourceRootPath: string,
+  targetRootPath: string,
+  project: DesktopPhotoSelectorProjectFile,
+): Promise<DesktopPhotoSelectorProjectRelocationResult> {
+  const relocationTask = projectFileWriteQueue.then(async (): Promise<DesktopPhotoSelectorProjectRelocationResult> => {
+    const [sourceStats, targetStats] = await Promise.all([
+      lstat(sourceRootPath),
+      lstat(targetRootPath),
+    ]);
+    if (!sourceStats.isDirectory() || sourceStats.isSymbolicLink()) {
+      throw new Error("La cartella master attuale non è una directory locale valida.");
+    }
+    if (!targetStats.isDirectory() || targetStats.isSymbolicLink()) {
+      throw new Error("La nuova cartella master non è una directory locale valida.");
+    }
+
+    const [resolvedSourceRoot, resolvedTargetRoot] = await Promise.all([
+      realpath(sourceRootPath),
+      realpath(targetRootPath),
+    ]);
+    const targetRelativeToSource = relative(resolvedSourceRoot, resolvedTargetRoot);
+    if (
+      !targetRelativeToSource
+      || targetRelativeToSource === ".."
+      || targetRelativeToSource.startsWith(`..${sep}`)
+    ) {
+      throw new Error("La correzione richiede una sottocartella del master attuale.");
+    }
+    if (project.projectMode !== "master") {
+      throw new Error("Il nuovo file non è un progetto master valido.");
+    }
+
+    const sourceProject = await readProjectAtPath(resolvedSourceRoot);
+    if (sourceProject?.projectMode !== "master") {
+      throw new Error("Il progetto master di origine non è più disponibile.");
+    }
+    const targetProject = await readProjectAtPath(resolvedTargetRoot);
+    if (targetProject?.projectMode === "master") {
+      throw new Error("La cartella scelta è già un progetto master.");
+    }
+
+    const timestamp = Date.now();
+    const sourceFilePath = projectFilePathForFolder(resolvedSourceRoot);
+    const sourceBackupPath = join(resolvedSourceRoot, `.image-select-pro.previous-master-${timestamp}.json`);
+    const targetFilePath = projectFilePathForFolder(resolvedTargetRoot);
+    const targetBackupPath = join(resolvedTargetRoot, `.image-select-pro.before-master-correction-${timestamp}.json`);
+    const targetTempPath = join(resolvedTargetRoot, `.image-select-pro.correcting-${timestamp}.tmp`);
+    const payload: DesktopPhotoSelectorProjectFile = {
+      ...project,
+      schemaVersion: 1,
+      app: "image-select-pro",
+      projectMode: "master",
+      updatedAt: timestamp,
+    };
+
+    let targetWasBackedUp = false;
+    let sourceWasBackedUp = false;
+    try {
+      await writeFile(targetTempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+      try {
+        const existingTargetStats = await lstat(targetFilePath);
+        if (!existingTargetStats.isFile() || existingTargetStats.isSymbolicLink()) {
+          throw new Error("Il file progetto esistente nella destinazione non è un file locale valido.");
+        }
+        await rename(targetFilePath, targetBackupPath);
+        targetWasBackedUp = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+      }
+
+      await rename(sourceFilePath, sourceBackupPath);
+      sourceWasBackedUp = true;
+      await rename(targetTempPath, targetFilePath);
+      return {
+        ok: true,
+        sourceBackupPath,
+        ...(targetWasBackedUp ? { targetBackupPath } : {}),
+      };
+    } catch (error) {
+      await unlink(targetTempPath).catch(() => undefined);
+      if (sourceWasBackedUp) {
+        await rename(sourceBackupPath, sourceFilePath).catch(() => undefined);
+      }
+      if (targetWasBackedUp) {
+        await rename(targetBackupPath, targetFilePath).catch(() => undefined);
+      }
+      throw error;
+    }
+  });
+
+  projectFileWriteQueue = relocationTask.then(() => undefined, () => undefined);
+  return relocationTask.catch((error) => ({
+    ok: false,
+    message: error instanceof Error ? error.message : String(error),
+  }));
 }
 
 export async function readFileFromDisk(absolutePath: string): Promise<DesktopFilePayload | null> {

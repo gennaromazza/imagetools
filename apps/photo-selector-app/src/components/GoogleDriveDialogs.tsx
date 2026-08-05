@@ -51,7 +51,14 @@ export function DriveVersionPickerModal({
               <span className="drive-version-picker__number">{index + 1}</span>
               <span className="drive-version-picker__details">
                 <strong>{new Date(version.createdAt).toLocaleString("it-IT")}</strong>
-                <span>{version.name}</span>
+                <span>
+                  {[version.projectName, version.sourceFolderName].filter(Boolean).join(" — ") || version.name}
+                </span>
+                {typeof version.totalAssets === "number" ? (
+                  <span>
+                    {version.totalAssets} foto · {version.selectedAssets ?? 0} selezionate
+                  </span>
+                ) : null}
               </span>
               <span className="drive-version-picker__arrow" aria-hidden="true">›</span>
             </button>

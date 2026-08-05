@@ -72,6 +72,7 @@ interface PhotoSelectorProps {
   photos: ImageAsset[];
   metadataVersion: number;
   sourceFolderPath?: string;
+  initialFolderFilter?: string | null;
   selectedIds: string[];
   onSelectionChange: (selectedIds: string[]) => void;
   onPhotosChange?: (photos: ImageAsset[]) => void;
@@ -437,6 +438,7 @@ export function PhotoSelector({
   photos,
   metadataVersion,
   sourceFolderPath = "",
+  initialFolderFilter = null,
   selectedIds,
   onSelectionChange,
   onPhotosChange,
@@ -480,6 +482,10 @@ export function PhotoSelector({
   const [folderFilter, setFolderFilter] = useState<string>("all");
   const [seriesFilter, setSeriesFilter] = useState<string>("all");
   const [timeClusterFilter, setTimeClusterFilter] = useState<string>("all");
+
+  useEffect(() => {
+    setFolderFilter(initialFolderFilter?.trim() || "all");
+  }, [initialFolderFilter, sourceFolderPath]);
   const [searchQuery, setSearchQuery] = useState("");
   const [customColorNames, setCustomColorNames] = useState<Record<ColorLabel, string>>(() => ({ ...COLOR_LABEL_NAMES }));
   const [customLabelsCatalog, setCustomLabelsCatalog] = useState<string[]>([]);

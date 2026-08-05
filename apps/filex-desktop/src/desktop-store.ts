@@ -520,6 +520,19 @@ export function getFolderCatalogState(folderPath: string): DesktopFolderCatalogS
   };
 }
 
+export function listFolderCatalogStatesUnderRoot(rootPath: string): DesktopFolderCatalogState[] {
+  const db = getDatabase();
+  const normalizedRoot = rootPath.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase();
+  const rows = db.prepare("SELECT folder_path FROM folder_catalog").all() as Array<{ folder_path: string }>;
+  return rows
+    .filter((row) => {
+      const normalizedPath = row.folder_path.replace(/\\/g, "/").replace(/\/+$/, "").toLocaleLowerCase();
+      return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
+    })
+    .map((row) => getFolderCatalogState(row.folder_path))
+    .filter((state): state is DesktopFolderCatalogState => state !== null);
+}
+
 export function saveFolderCatalogState(state: DesktopFolderCatalogState): void {
   const db = getDatabase();
   db.prepare(`

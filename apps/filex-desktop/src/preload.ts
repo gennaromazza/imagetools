@@ -101,6 +101,12 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:read-photo-selector-project-file", rootPath),
   writePhotoSelectorProjectFile: (rootPath, project) =>
     ipcRenderer.invoke("filex:write-photo-selector-project-file", rootPath, project),
+  relocatePhotoSelectorProjectFile: (sourceRootPath, targetRootPath, project) =>
+    ipcRenderer.invoke("filex:relocate-photo-selector-project-file", sourceRootPath, targetRootPath, project),
+  resolvePhotoSelectorProject: (folderPath) =>
+    ipcRenderer.invoke("filex:resolve-photo-selector-project", folderPath),
+  listPhotoSelectorLegacyProjects: (rootPath) =>
+    ipcRenderer.invoke("filex:list-photo-selector-legacy-projects", rootPath),
   getGoogleDriveStatus: () => ipcRenderer.invoke("filex:get-google-drive-status"),
   connectGoogleDrive: () => ipcRenderer.invoke("filex:connect-google-drive"),
   disconnectGoogleDrive: () => ipcRenderer.invoke("filex:disconnect-google-drive"),

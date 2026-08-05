@@ -6,6 +6,8 @@ import type {
   DesktopPersistedState,
   DesktopPhotoSelectorPreferences,
   DesktopPhotoSelectorProjectFile,
+  DesktopPhotoSelectorProjectLocation,
+  DesktopPhotoSelectorProjectRelocationResult,
   DesktopRecentFolder,
   DesktopSortCacheEntry,
 } from "@photo-tools/desktop-contracts";
@@ -85,6 +87,50 @@ export async function updatePhotoSelectorProjectFile(
     return await api.writePhotoSelectorProjectFile(rootPath, update(current));
   } catch {
     return false;
+  }
+}
+
+export async function relocatePhotoSelectorProjectFile(
+  sourceRootPath: string,
+  targetRootPath: string,
+  project: DesktopPhotoSelectorProjectFile,
+): Promise<DesktopPhotoSelectorProjectRelocationResult> {
+  const api = getDesktopApi();
+  if (!api?.relocatePhotoSelectorProjectFile) {
+    return { ok: false, message: "La correzione del master richiede l'app desktop aggiornata." };
+  }
+  try {
+    return await api.relocatePhotoSelectorProjectFile(sourceRootPath, targetRootPath, project);
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function resolvePhotoSelectorProject(
+  folderPath: string,
+): Promise<DesktopPhotoSelectorProjectLocation | null> {
+  const api = getDesktopApi();
+  if (!api?.resolvePhotoSelectorProject) {
+    return null;
+  }
+  try {
+    return await api.resolvePhotoSelectorProject(folderPath);
+  } catch {
+    return null;
+  }
+}
+
+export async function listPhotoSelectorLegacyProjects(
+  rootPath: string,
+): Promise<DesktopPhotoSelectorProjectLocation[]> {
+  const api = getDesktopApi();
+  if (!api?.listPhotoSelectorLegacyProjects) {
+    return [];
+  }
+  try {
+    return await api.listPhotoSelectorLegacyProjects(rootPath);
+  } catch {
+    return [];
   }
 }
 

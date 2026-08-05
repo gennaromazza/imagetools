@@ -41,7 +41,9 @@ import {
   getAssetAbsolutePath,
   buildSourceFileKeyFromStats,
   isRawFile,
+  openProjectFolderNative,
   readSidecarXmp,
+  reopenProjectFolder,
   warmOnDemandPreviewCache,
   writeSidecarXmp,
   type FolderOpenDiagnostics,
@@ -88,6 +90,9 @@ import {
   logDesktopEvent,
   recordDesktopPerformanceSnapshot,
   readPhotoSelectorProjectFile,
+  listPhotoSelectorLegacyProjects,
+  relocatePhotoSelectorProjectFile,
+  resolvePhotoSelectorProject,
   saveDesktopFolderAssetStates,
   saveDesktopFolderAssetStatesDelta,
   saveDesktopFolderCatalogState,
@@ -106,6 +111,15 @@ import {
   DriveManualRootPickerModal,
   DriveVersionPickerModal,
 } from "./components/GoogleDriveDialogs";
+import {
+  ConfirmProjectCreationModal,
+  ConfirmMasterCorrectionModal,
+  RenameProjectModal,
+  UnassignedFolderModal,
+  type MasterCorrectionPreview,
+  type ProjectCreationPreview,
+  type UnassignedFolderChoice,
+} from "./components/ProjectDialogs";
 import { PhotoSelector } from "./components/PhotoSelector";
 import { SelectionSummary } from "./components/SelectionSummary";
 import {
@@ -115,6 +129,8 @@ import {
   getGoogleDriveStatus,
   listGoogleDriveVersions,
 } from "./services/google-drive-projects";
+import { buildMasterProject } from "./services/project-workflow";
+import { mapCloudProjectToAssets, normalizeCloudPath } from "./services/cloud-project-mapping";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Constants
@@ -147,22 +163,19 @@ const PERFORMANCE_SNAPSHOT_PERSIST_DEBOUNCE_MS = 500;
 const PERFORMANCE_METRICS_UI_THROTTLE_MS = 180;
 const THUMBNAIL_PATCH_FLUSH_MAX_ITEMS = 64;
 
-function normalizeCloudPath(value: string): string {
-  return value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+|\/+$/g, "").toLocaleLowerCase();
-}
-
 function buildCloudManifest(
   projectName: string,
   sourceFolderPath: string,
   assets: ImageAsset[],
   activeAssetIds: string[],
   exportedFrom?: string,
+  projectId = PROJECT_ID,
 ): DesktopCloudProjectManifest {
   const byId = new Map(assets.map((asset) => [asset.id, asset]));
   return {
     schemaVersion: 1,
     app: "image-select-pro",
-    projectId: PROJECT_ID,
+    projectId,
     projectName: projectName.trim() || "Senza nome",
     sourceFolderName: sourceFolderPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? "Cartella",
     exportedAt: new Date().toISOString(),
@@ -560,7 +573,21 @@ export function App() {
     unmatchedCount: number;
     resolve: (path: string | null) => void;
   } | null>(null);
+  const [unassignedFolderPrompt, setUnassignedFolderPrompt] = useState<{
+    folderPath: string;
+    resolve: (choice: UnassignedFolderChoice) => void;
+  } | null>(null);
+  const [projectCreationPrompt, setProjectCreationPrompt] = useState<{
+    preview: ProjectCreationPreview;
+    resolve: (confirmed: boolean) => void;
+  } | null>(null);
+  const [masterCorrectionPrompt, setMasterCorrectionPrompt] = useState<{
+    preview: MasterCorrectionPreview;
+    resolve: (confirmed: boolean) => void;
+  } | null>(null);
+  const [isRenameProjectOpen, setIsRenameProjectOpen] = useState(false);
   const [sourceFolderPath, setSourceFolderPath] = useState("");
+  const [projectFolderFocus, setProjectFolderFocus] = useState<string | null>(null);
 
   // ── Asset catalog ────────────────────────────────────────────────────
   const [allAssets, setAllAssets] = useState<ImageAsset[]>([]);
@@ -702,11 +729,16 @@ export function App() {
   // ── Restore from IndexedDB on mount ──────────────────────────────────
   useEffect(() => {
     let active = true;
+    const folderRequestAtStart = folderOpenRequestRef.current;
 
     void (async () => {
       const persisted = await getDesktopSessionState();
 
-      if (!active || !persisted) {
+      if (
+        !active
+        || !persisted
+        || folderOpenRequestRef.current !== folderRequestAtStart
+      ) {
         return;
       }
 
@@ -927,11 +959,11 @@ export function App() {
         catalogProjectActiveSignatureRef.current = activeSignature;
         catalogProjectNameRef.current = projectName;
         void updatePhotoSelectorProjectFile(sourceFolderPath, (existingProject) => ({
+          ...existingProject,
           schemaVersion: 1,
           app: "image-select-pro",
           updatedAt: Date.now(),
           projectName,
-          preferences: existingProject?.preferences,
           folderState: {
             activeAssetIds,
             // The desktop project format accepts the same catalog state and
@@ -2366,7 +2398,6 @@ export function App() {
           : XMP_IMPORT_BACKGROUND_CHUNK_SIZE;
         const chunk = assets.slice(xmpCursor, xmpCursor + chunkSize);
         xmpCursor += chunk.length;
-        const isInitialXmpChunk = xmpCursor === chunk.length;
         if (chunk.length === 0) {
           perfTimeEnd(PERF_XMP_IMPORT);
           return;
@@ -2473,8 +2504,8 @@ export function App() {
             bumpPhotoMetadataVersion();
           }
 
-          if (isInitialXmpChunk && selectedByXmp.length > 0) {
-            setActiveAssetIds(selectedByXmp);
+          if (selectedByXmp.length > 0) {
+            setActiveAssetIds((current) => Array.from(new Set([...current, ...selectedByXmp])));
           }
 
           editedBySidecarTotal += valid.filter(
@@ -2857,6 +2888,275 @@ export function App() {
   // ── Load mock data ───────────────────────────────────────────────────
 
   // ── Photo metadata changes (with undo history) ───────────────────────
+  const chooseUnassignedFolderAction = useCallback(
+    (folderPath: string) => new Promise<UnassignedFolderChoice>((resolve) => {
+      setUnassignedFolderPrompt({ folderPath, resolve });
+    }),
+    [],
+  );
+
+  const confirmProjectCreation = useCallback(
+    (preview: ProjectCreationPreview) => new Promise<boolean>((resolve) => {
+      setProjectCreationPrompt({ preview, resolve });
+    }),
+    [],
+  );
+
+  const confirmMasterCorrection = useCallback(
+    (preview: MasterCorrectionPreview) => new Promise<boolean>((resolve) => {
+      setMasterCorrectionPrompt({ preview, resolve });
+    }),
+    [],
+  );
+
+  const openExistingMasterProject = useCallback(async (rootPath: string, requestedFolderPath?: string) => {
+    const projectFolder = await reopenProjectFolder(rootPath);
+    if (!projectFolder) {
+      addToast("Non sono riuscito ad aprire la cartella master del progetto.", "error");
+      return false;
+    }
+    const normalizedRoot = rootPath.replace(/[\\/]+$/, "").toLocaleLowerCase();
+    const normalizedRequested = requestedFolderPath?.replace(/[\\/]+$/, "") ?? "";
+    const relativeFocus = normalizedRequested.toLocaleLowerCase().startsWith(`${normalizedRoot}\\`)
+      || normalizedRequested.toLocaleLowerCase().startsWith(`${normalizedRoot}/`)
+      ? normalizedRequested.slice(rootPath.replace(/[\\/]+$/, "").length + 1).replace(/\\/g, "/")
+      : "";
+    setProjectFolderFocus(relativeFocus || null);
+    await handleFolderOpened(projectFolder);
+    return true;
+  }, [addToast, handleFolderOpened]);
+
+  const createMasterProject = useCallback(async (projectFolder: FolderOpenResult) => {
+    if (!projectFolder.rootPath || projectFolder.entries.length === 0) {
+      addToast("La cartella master non contiene fotografie supportate.", "warning");
+      return false;
+    }
+
+    await flushPendingXmpSync().catch(() => false);
+    const legacyProjects = await listPhotoSelectorLegacyProjects(projectFolder.rootPath);
+    const normalizedProjectRoot = projectFolder.rootPath.replace(/[\\/]+$/, "").toLocaleLowerCase();
+    const nestedMasterProjects = legacyProjects.filter((location) => (
+      location.project.projectMode === "master"
+      && location.rootPath.replace(/[\\/]+$/, "").toLocaleLowerCase() !== normalizedProjectRoot
+    ));
+    if (nestedMasterProjects.length > 0) {
+      addToast(
+        `Cartella troppo ampia: contiene già ${nestedMasterProjects.length} progetto/i master. Scegli la cartella del singolo lavoro.`,
+        "error",
+        8000,
+      );
+      return false;
+    }
+    const assets = buildPlaceholderAssets(projectFolder.entries);
+    const pathSegments = projectFolder.rootPath.split(/[\\/]+/).filter(Boolean);
+    const parentFolderName = pathSegments.at(-2);
+    const suggestedName = projectFolder.name.toLocaleUpperCase() === "FOTO_SD" && parentFolderName
+      ? parentFolderName
+      : projectFolder.name;
+    const merge = buildMasterProject(
+      projectFolder.name,
+      suggestedName,
+      assets,
+      getAssetAbsolutePath,
+      legacyProjects,
+    );
+    const topLevelPhotos = Math.min(
+      projectFolder.entries.length,
+      Math.max(0, projectFolder.diagnostics?.topLevelSupportedCount ?? projectFolder.entries.length),
+    );
+    const confirmed = await confirmProjectCreation({
+      folderPath: projectFolder.rootPath,
+      folderName: suggestedName,
+      totalPhotos: projectFolder.entries.length,
+      topLevelPhotos,
+      nestedPhotos: Math.max(0, projectFolder.entries.length - topLevelPhotos),
+      nestedFolders: projectFolder.diagnostics?.nestedDirectoriesSeen ?? 0,
+      legacyProjectCount: merge.legacyProjectCount,
+      recoverableSelections: merge.migratedSelectionCount,
+    });
+    if (!confirmed) {
+      return false;
+    }
+    const written = await updatePhotoSelectorProjectFile(
+      projectFolder.rootPath,
+      () => merge.project,
+    );
+    if (!written) {
+      addToast("Creazione del progetto master non riuscita. I progetti esistenti non sono stati modificati.", "error", 7000);
+      return false;
+    }
+
+    setProjectName(merge.project.projectName ?? suggestedName);
+    setProjectFolderFocus(null);
+    await handleFolderOpened(projectFolder);
+    addToast(
+      `Progetto master creato: ${projectFolder.entries.length} foto, ${merge.migratedSelectionCount} selezioni recuperate da ${merge.legacyProjectCount} progetto/i esistenti.`,
+      "success",
+      8000,
+    );
+    return true;
+  }, [addToast, confirmProjectCreation, flushPendingXmpSync, handleFolderOpened]);
+
+  const handleCreateProject = useCallback(async () => {
+    const selectedFolder = await openProjectFolderNative();
+    if (!selectedFolder) {
+      return;
+    }
+    const existingProject = await resolvePhotoSelectorProject(selectedFolder.rootPath);
+    if (existingProject) {
+      await openExistingMasterProject(existingProject.rootPath, selectedFolder.rootPath);
+      addToast("Questa cartella appartiene già a un progetto master esistente.", "info");
+      return;
+    }
+    await createMasterProject(selectedFolder);
+  }, [addToast, createMasterProject, openExistingMasterProject]);
+
+  const handleRenameProject = useCallback(async (nextName: string) => {
+    const normalizedName = nextName.trim();
+    if (!normalizedName || !sourceFolderPath) {
+      return;
+    }
+    const localProject = await readPhotoSelectorProjectFile(sourceFolderPath);
+    if (localProject?.projectMode !== "master") {
+      addToast("È possibile rinominare soltanto un progetto master.", "warning", 5000);
+      setIsRenameProjectOpen(false);
+      return;
+    }
+    const saved = await updatePhotoSelectorProjectFile(sourceFolderPath, (current) => ({
+      ...(current ?? localProject),
+      schemaVersion: 1,
+      app: "image-select-pro",
+      updatedAt: Date.now(),
+      projectName: normalizedName,
+    }));
+    if (!saved) {
+      addToast("Rinomina non riuscita. Il nome precedente è rimasto invariato.", "error", 6000);
+      return;
+    }
+    setProjectName(normalizedName);
+    setIsRenameProjectOpen(false);
+    addToast("Progetto rinominato. Le versioni Drive continueranno a usare la stessa identità.", "success", 5000);
+  }, [addToast, sourceFolderPath]);
+
+  const handleCorrectProjectMaster = useCallback(async () => {
+    if (!sourceFolderPath || allAssets.length === 0) {
+      addToast("Apri prima il progetto master da correggere.", "warning", 5000);
+      return;
+    }
+    const currentProject = await readPhotoSelectorProjectFile(sourceFolderPath);
+    if (currentProject?.projectMode !== "master") {
+      addToast("La cartella aperta non è un progetto master.", "warning", 5000);
+      return;
+    }
+
+    const targetFolder = await openProjectFolderNative();
+    if (!targetFolder) {
+      return;
+    }
+    const normalizedSource = sourceFolderPath.replace(/[\\/]+$/, "");
+    const normalizedTarget = targetFolder.rootPath.replace(/[\\/]+$/, "");
+    if (normalizedTarget.toLocaleLowerCase() === normalizedSource.toLocaleLowerCase()) {
+      addToast("Hai scelto la cartella master già attiva.", "info", 4500);
+      return;
+    }
+    const isDescendant = normalizedTarget.toLocaleLowerCase().startsWith(`${normalizedSource.toLocaleLowerCase()}\\`)
+      || normalizedTarget.toLocaleLowerCase().startsWith(`${normalizedSource.toLocaleLowerCase()}/`);
+    if (!isDescendant) {
+      addToast("Scegli una sottocartella del master attuale.", "warning", 6000);
+      return;
+    }
+    if (targetFolder.entries.length === 0) {
+      addToast("La nuova cartella master non contiene fotografie supportate.", "warning", 6000);
+      return;
+    }
+
+    await flushPendingXmpSync().catch(() => false);
+    const targetLegacyProjects = await listPhotoSelectorLegacyProjects(targetFolder.rootPath);
+    const assets = buildPlaceholderAssets(targetFolder.entries);
+    const merge = buildMasterProject(
+      targetFolder.name,
+      currentProject.projectName ?? projectName,
+      assets,
+      getAssetAbsolutePath,
+      [
+        ...targetLegacyProjects,
+        { rootPath: sourceFolderPath, project: currentProject },
+      ],
+    );
+    const sourceFolderName = normalizedSource.split(/[\\/]+/).filter(Boolean).pop() ?? normalizedSource;
+    const targetSegments = normalizedTarget.split(/[\\/]+/).filter(Boolean);
+    const targetParentName = targetSegments.at(-2);
+    const targetSuggestedName = targetFolder.name.toLocaleUpperCase() === "FOTO_SD" && targetParentName
+      ? targetParentName
+      : targetFolder.name;
+    const currentProjectName = (currentProject.projectName ?? projectName).trim();
+    const correctedProjectName = currentProjectName.toLocaleLowerCase() === sourceFolderName.toLocaleLowerCase()
+      ? targetSuggestedName
+      : currentProjectName;
+    const relocatedProject = {
+      ...merge.project,
+      projectId: currentProject.projectId ?? merge.project.projectId,
+      createdAt: currentProject.createdAt ?? merge.project.createdAt,
+      projectName: correctedProjectName,
+    };
+    const currentSelectionCount = currentProject.folderState?.activeAssetIds?.length ?? activeAssetIds.length;
+    const confirmed = await confirmMasterCorrection({
+      currentFolderPath: sourceFolderPath,
+      targetFolderPath: targetFolder.rootPath,
+      totalPhotos: assets.length,
+      recoveredSelections: merge.migratedSelectionCount,
+      excludedSelections: Math.max(0, currentSelectionCount - merge.migratedSelectionCount),
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    if (catalogPersistTimerRef.current !== null) {
+      window.clearTimeout(catalogPersistTimerRef.current);
+      catalogPersistTimerRef.current = null;
+    }
+    setIsFolderTransitionBusy(true);
+    setFolderTransitionLabel(targetFolder.rootPath);
+    const relocation = await relocatePhotoSelectorProjectFile(
+      sourceFolderPath,
+      targetFolder.rootPath,
+      relocatedProject,
+    );
+    if (!relocation.ok) {
+      setIsFolderTransitionBusy(false);
+      setFolderTransitionLabel("");
+      addToast(relocation.message ?? "Correzione della cartella master non riuscita.", "error", 7000);
+      return;
+    }
+
+    setProjectFolderFocus(null);
+    await handleFolderOpened(targetFolder);
+    addToast(
+      `Master corretto: ${assets.length} foto e ${merge.migratedSelectionCount} selezioni recuperate. Il master precedente è stato conservato come backup.`,
+      "success",
+      9000,
+    );
+  }, [
+    activeAssetIds.length,
+    addToast,
+    allAssets.length,
+    confirmMasterCorrection,
+    flushPendingXmpSync,
+    handleFolderOpened,
+    projectName,
+    sourceFolderPath,
+  ]);
+
+  const handleFolderCandidateOpened = useCallback(async (folder: FolderOpenResult) => {
+    const projectLocation = await resolvePhotoSelectorProject(folder.rootPath);
+    if (projectLocation) {
+      await openExistingMasterProject(projectLocation.rootPath, folder.rootPath);
+      return;
+    }
+    setProjectFolderFocus(null);
+    await handleFolderOpened(folder);
+  }, [handleFolderOpened, openExistingMasterProject]);
+
   const handleDesktopRequestedFolderOpen = useCallback(async (folderPath: string) => {
     if (
       typeof window === "undefined"
@@ -2872,6 +3172,34 @@ export function App() {
     }
 
     try {
+      const projectLocation = await resolvePhotoSelectorProject(normalizedPath);
+      if (projectLocation) {
+        await openExistingMasterProject(projectLocation.rootPath, normalizedPath);
+        if (hasDesktopStateApi()) {
+          void logDesktopEvent({
+            channel: "folder-open",
+            level: "info",
+            message: "Sottocartella aperta nel progetto master",
+            details: `${normalizedPath} -> ${projectLocation.rootPath}`,
+          });
+        }
+        return;
+      }
+
+      const unassignedChoice = await chooseUnassignedFolderAction(normalizedPath);
+      if (unassignedChoice === "cancel") {
+        return;
+      }
+      if (unassignedChoice === "choose-master") {
+        await handleCreateProject();
+        return;
+      }
+      const projectFolder = await reopenProjectFolder(normalizedPath);
+      if (projectFolder) {
+        await createMasterProject(projectFolder);
+        return;
+      }
+
       let reopenedFolder = null;
       const retryDelaysMs = [0, 180, 420, 900];
 
@@ -2924,7 +3252,14 @@ export function App() {
       // desktop, altrimenti resta pendente e viene riproposto a ogni focus.
       await acknowledgeDesktopOpenFolderRequest(normalizedPath);
     }
-  }, [addToast, handleFolderOpened]);
+  }, [
+    addToast,
+    chooseUnassignedFolderAction,
+    createMasterProject,
+    handleCreateProject,
+    handleFolderOpened,
+    openExistingMasterProject,
+  ]);
 
   // Il listener IPC resta montato mentre cambiano asset e stato della UI;
   // il ref gli fornisce sempre l'ultima versione della callback.
@@ -3119,6 +3454,11 @@ export function App() {
 
     setIsGoogleDriveBusy(true);
     try {
+      const localProject = await readPhotoSelectorProjectFile(sourceFolderPath);
+      if (localProject?.projectMode !== "master") {
+        addToast("Prima crea o apri un progetto master. Le cartelle singole non vengono esportate su Drive.", "warning", 7000);
+        return;
+      }
       let status = googleDriveStatus;
       if (!status.connected) {
         status = await connectGoogleDrive();
@@ -3131,6 +3471,7 @@ export function App() {
         allAssets,
         activeAssetIds,
         desktopRuntime?.appVersion,
+        localProject.projectId,
       );
       const version = await exportProjectToGoogleDrive(manifest);
       addToast(
@@ -3150,22 +3491,24 @@ export function App() {
   }, [activeAssetIds, addToast, allAssets, desktopRuntime?.appVersion, googleDriveStatus, projectName, sourceFolderPath]);
 
   const handleGoogleDriveImport = useCallback(async () => {
-    if (allAssets.length === 0) {
-      addToast("Apri prima il backup locale del matrimonio.", "warning");
-      return;
-    }
-
     setIsGoogleDriveBusy(true);
     try {
+      if (allAssets.length > 0) {
+        const localProject = await readPhotoSelectorProjectFile(sourceFolderPath);
+        if (localProject?.projectMode !== "master") {
+          addToast("Questa è una cartella singola. Crea o apri il progetto master prima di continuare da Drive.", "warning", 7000);
+          return;
+        }
+      }
       let status = googleDriveStatus;
       if (!status.connected) {
         status = await connectGoogleDrive();
         setGoogleDriveStatus(status);
       }
 
-      const versions = await listGoogleDriveVersions(projectName);
+      const versions = await listGoogleDriveVersions();
       if (versions.length === 0) {
-        addToast("Non ho trovato versioni di questo progetto su Google Drive.", "warning", 5000);
+        addToast("Non ho trovato selezioni PhotoSelector su Google Drive.", "warning", 5000);
         return;
       }
 
@@ -3175,30 +3518,99 @@ export function App() {
       }
 
       const manifest = await downloadGoogleDriveVersion(version.id);
-      const byPath = new Map<string, ImageAsset>();
-      const bySourceKey = new Map<string, ImageAsset>();
-      const byNameAndSize = new Map<string, ImageAsset>();
-      for (const asset of allAssets) {
-        byPath.set(normalizeCloudPath(asset.path), asset);
-        if (asset.sourceFileKey) {
-          bySourceKey.set(asset.sourceFileKey, asset);
+
+      if (allAssets.length === 0) {
+        addToast(`Scegli la cartella master locale per “${manifest.sourceFolderName}”.`, "info", 6000);
+        let projectFolder = await openProjectFolderNative();
+        if (!projectFolder) {
+          return;
         }
-        byNameAndSize.set(`${asset.fileName.toLocaleLowerCase()}::${asset.size ?? ""}`, asset);
+
+        let createdForDriveImport = false;
+        const existingProject = await resolvePhotoSelectorProject(projectFolder.rootPath);
+        if (existingProject) {
+          projectFolder = await reopenProjectFolder(existingProject.rootPath);
+          if (!projectFolder) {
+            throw new Error("Non sono riuscito ad aprire il progetto master locale.");
+          }
+        } else {
+          const created = await createMasterProject(projectFolder);
+          if (!created) {
+            return;
+          }
+          createdForDriveImport = true;
+        }
+
+        const targetAssets = buildPlaceholderAssets(projectFolder.entries);
+        const mapping = mapCloudProjectToAssets(targetAssets, manifest.assets);
+        const cloudStateByAssetId = mapping.stateByAssetId;
+        if (mapping.unmatchedCount > 0 || mapping.ambiguousCount > 0) {
+          const details = [
+            mapping.unmatchedCount > 0 ? `${mapping.unmatchedCount} non trovate` : null,
+            mapping.ambiguousCount > 0 ? `${mapping.ambiguousCount} ambigue` : null,
+          ].filter(Boolean).join(", ");
+          addToast(`Cartella non compatibile: ${details}. Nessuna selezione è stata sovrascritta.`, "warning", 8000);
+          return;
+        }
+
+        const localProject = await readPhotoSelectorProjectFile(projectFolder.rootPath);
+        const localStateByPath = new Map(
+          (localProject?.folderState?.assetStates ?? []).map((state) => [normalizeCloudPath(state.relativePath), state]),
+        );
+        const localActiveIds = new Set(localProject?.folderState?.activeAssetIds ?? []);
+        const now = Date.now();
+        const activeAssetIds: string[] = [];
+        const assetStates = targetAssets.map((asset) => {
+          const cloudState = cloudStateByAssetId.get(asset.id);
+          const localState = localStateByPath.get(normalizeCloudPath(asset.path));
+          if (cloudState ? cloudState.active === true : localActiveIds.has(asset.id)) {
+            activeAssetIds.push(asset.id);
+          }
+          return {
+            assetId: asset.id,
+            fileName: asset.fileName,
+            relativePath: asset.path,
+            absolutePath: getAssetAbsolutePath(asset.id) ?? undefined,
+            sourceFileKey: asset.sourceFileKey,
+            rating: cloudState?.rating ?? localState?.rating ?? asset.rating ?? 0,
+            pickStatus: cloudState?.pickStatus ?? localState?.pickStatus ?? asset.pickStatus ?? "unmarked",
+            colorLabel: cloudState?.colorLabel ?? localState?.colorLabel ?? asset.colorLabel ?? null,
+            customLabels: cloudState?.customLabels ?? localState?.customLabels ?? asset.customLabels ?? [],
+            updatedAt: now,
+          };
+        });
+        const saved = await updatePhotoSelectorProjectFile(projectFolder.rootPath, (current) => ({
+          ...(current ?? {
+            schemaVersion: 1,
+            app: "image-select-pro" as const,
+            updatedAt: now,
+          }),
+          projectMode: "master",
+          projectId: createdForDriveImport
+            ? manifest.projectId
+            : current?.projectId ?? manifest.projectId ?? globalThis.crypto?.randomUUID?.() ?? `project-${now}`,
+          projectRootFolderName: projectFolder.name,
+          createdAt: current?.createdAt ?? now,
+          projectName: createdForDriveImport ? manifest.projectName : current?.projectName ?? manifest.projectName,
+          folderState: { activeAssetIds, assetStates },
+        }));
+        if (!saved) {
+          throw new Error("Non sono riuscito a salvare la selezione nel progetto master locale.");
+        }
+        await handleFolderOpened(projectFolder);
+        setProjectName(createdForDriveImport ? manifest.projectName : localProject?.projectName ?? manifest.projectName);
+        addToast(
+          `Selezione recuperata: ${activeAssetIds.length} foto da “${manifest.sourceFolderName}”.`,
+          "success",
+          7000,
+        );
+        return;
       }
 
-      let unmatched = 0;
-      for (const cloudAsset of manifest.assets) {
-        const match = byPath.get(normalizeCloudPath(cloudAsset.relativePath))
-          ?? (cloudAsset.sourceFileKey ? bySourceKey.get(cloudAsset.sourceFileKey) : undefined)
-          ?? byNameAndSize.get(`${cloudAsset.fileName.toLocaleLowerCase()}::${cloudAsset.size ?? ""}`);
-        if (!match) {
-          unmatched += 1;
-          continue;
-        }
-      }
-
-      if (unmatched > 0) {
-        const manualRoot = await chooseGoogleDriveManualRoot(sourceFolderPath, unmatched);
+      const mapping = mapCloudProjectToAssets(allAssets, manifest.assets);
+      const mappingIssueCount = mapping.unmatchedCount + mapping.ambiguousCount;
+      if (mappingIssueCount > 0) {
+        const manualRoot = await chooseGoogleDriveManualRoot(sourceFolderPath, mappingIssueCount);
         if (manualRoot?.trim() && window.filexDesktop?.reopenFolder) {
           const reopened = await window.filexDesktop.reopenFolder(manualRoot.trim(), { recursive: true });
           if (reopened) {
@@ -3207,7 +3619,11 @@ export function App() {
             return;
           }
         }
-        addToast(`Importazione annullata: ${unmatched} foto non sono state mappate.`, "warning", 7000);
+        addToast(
+          `Importazione annullata: ${mapping.unmatchedCount} foto non trovate e ${mapping.ambiguousCount} ambigue.`,
+          "warning",
+          7000,
+        );
         return;
       }
 
@@ -3224,11 +3640,9 @@ export function App() {
         await desktopApi.writeFile(backupPath, new TextEncoder().encode(JSON.stringify(localBackup, null, 2)));
       }
 
-      const stateByCloudPath = new Map(manifest.assets.map((asset) => [normalizeCloudPath(asset.relativePath), asset]));
-      const stateBySourceKey = new Map(manifest.assets.filter((asset) => asset.sourceFileKey).map((asset) => [asset.sourceFileKey as string, asset]));
+      const importedStateByAssetId = mapping.stateByAssetId;
       const nextAssets = allAssets.map((asset) => {
-        const state = stateByCloudPath.get(normalizeCloudPath(asset.path))
-          ?? (asset.sourceFileKey ? stateBySourceKey.get(asset.sourceFileKey) : undefined);
+        const state = importedStateByAssetId.get(asset.id);
         if (!state) {
           return asset;
         }
@@ -3242,17 +3656,11 @@ export function App() {
       });
       handlePhotosChange(nextAssets);
 
-      handleSelectionChange(nextAssets
-        .filter((asset) => {
-          const state = manifest.assets.find((candidate) => (
-            normalizeCloudPath(candidate.relativePath) === normalizeCloudPath(asset.path)
-            || (candidate.sourceFileKey && candidate.sourceFileKey === asset.sourceFileKey)
-            || (candidate.fileName.toLocaleLowerCase() === asset.fileName.toLocaleLowerCase()
-              && candidate.size === asset.size)
-          ));
-          return state?.active === true;
-        })
-        .map((asset) => asset.id));
+      const retainedActiveIds = activeAssetIds.filter((assetId) => !importedStateByAssetId.has(assetId));
+      const importedActiveIds = Array.from(importedStateByAssetId.entries())
+        .filter(([, state]) => state.active === true)
+        .map(([assetId]) => assetId);
+      handleSelectionChange([...retainedActiveIds, ...importedActiveIds]);
       setProjectName(manifest.projectName);
       addToast(
         `Selezione importata: versione del ${new Date(manifest.exportedAt).toLocaleString("it-IT")}. XMP in aggiornamento.`,
@@ -3268,7 +3676,7 @@ export function App() {
     } finally {
       setIsGoogleDriveBusy(false);
     }
-  }, [activeAssetIds, addToast, allAssets, chooseGoogleDriveManualRoot, chooseGoogleDriveVersion, desktopRuntime?.appVersion, googleDriveStatus, handleFolderOpened, handlePhotosChange, handleSelectionChange, projectName, sourceFolderPath]);
+  }, [activeAssetIds, addToast, allAssets, chooseGoogleDriveManualRoot, chooseGoogleDriveVersion, createMasterProject, desktopRuntime?.appVersion, googleDriveStatus, handleFolderOpened, handlePhotosChange, handleSelectionChange, projectName, sourceFolderPath]);
 
   const refreshDesktopThumbnailCacheInfo = useCallback(async () => {
     const info = await getDesktopThumbnailCacheInfo();
@@ -3704,10 +4112,12 @@ export function App() {
     <ErrorBoundary>
       <div className="photo-selector-app">
         <header className="app-header">
-          <img src={logo} alt="Logo" style={{ height: 40, marginRight: 16 }} />
-          <div className="app-header__brand">
-            <h1 className="app-header__title">Image Select Pro</h1>
-            <span className="app-header__subtitle">Photo Tools Suite</span>
+          <div className="app-header__identity">
+            <img className="app-header__logo" src={logo} alt="" />
+            <div className="app-header__brand">
+              <h1 className="app-header__title">Image Select Pro</h1>
+              <span className="app-header__subtitle">Photo Tools Suite</span>
+            </div>
           </div>
           <nav className="app-header__nav">
             <button
@@ -3734,84 +4144,128 @@ export function App() {
               Riepilogo ({activeAssetIds.length})
             </button>
           </nav>
-          <div className="app-header__actions">
+          <div className="app-header__primary-actions">
             <button
               type="button"
-              className="ghost-button"
-              onClick={() => void handleGoogleDriveConnect()}
-              disabled={isGoogleDriveBusy}
-              title={googleDriveStatus.accountEmail ?? "Collega Google Drive"}
+              className="primary-button app-header__button"
+              onClick={() => void handleCreateProject()}
+              disabled={isFolderTransitionBusy || isGoogleDriveBusy}
             >
-              {googleDriveStatus.connected
-                ? `Drive: ${googleDriveStatus.accountEmail ?? "collegato"}`
-                : "Collega Drive"}
+              Nuovo progetto
             </button>
             {allAssets.length > 0 ? (
               <>
                 <button
                   type="button"
-                  className="secondary-button"
+                  className="ghost-button app-header__button"
+                  onClick={() => void handleCorrectProjectMaster()}
+                  disabled={isFolderTransitionBusy || isGoogleDriveBusy}
+                >
+                  Correggi master
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button app-header__button"
+                  onClick={() => setCurrentScreen("browse")}
+                  disabled={isFolderTransitionBusy}
+                >
+                  Apri altro
+                </button>
+              </>
+            ) : null}
+          </div>
+
+          <div className="app-header__context">
+            {allAssets.length > 0 ? (
+              <div className="app-header__project-name">
+                <span>Nome progetto</span>
+                <div className="app-header__project-name-value">
+                  <strong title={projectName}>{projectName}</strong>
+                  <button
+                    type="button"
+                    className="ghost-button app-header__rename-button"
+                    onClick={() => setIsRenameProjectOpen(true)}
+                    disabled={isFolderTransitionBusy || isGoogleDriveBusy}
+                  >
+                    Rinomina
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="app-header__project-empty">
+                <span>Progetto</span>
+                <strong>Nessun progetto aperto</strong>
+              </div>
+            )}
+
+            <div className="app-header__drive-actions">
+              <button
+                type="button"
+                className="ghost-button app-header__button app-header__drive-account"
+                onClick={() => void handleGoogleDriveConnect()}
+                disabled={isGoogleDriveBusy}
+                title={googleDriveStatus.accountEmail ?? "Collega Google Drive"}
+              >
+                <span className="app-header__drive-label">
+                  {googleDriveStatus.connected ? "Drive collegato" : "Collega Drive"}
+                </span>
+                {googleDriveStatus.connected && googleDriveStatus.accountEmail ? (
+                  <span className="app-header__drive-email">{googleDriveStatus.accountEmail}</span>
+                ) : null}
+              </button>
+              {allAssets.length > 0 ? (
+                <button
+                  type="button"
+                  className="secondary-button app-header__button"
                   onClick={() => void handleGoogleDriveExport()}
                   disabled={isGoogleDriveBusy}
                 >
                   Esporta su Drive
                 </button>
+              ) : null}
+              <button
+                type="button"
+                className="secondary-button app-header__button"
+                onClick={() => void handleGoogleDriveImport()}
+                disabled={isGoogleDriveBusy || isFolderTransitionBusy}
+                title={allAssets.length > 0
+                  ? "Importa una versione Drive nel progetto aperto"
+                  : "Recupera una selezione Drive e associala alla cartella master locale"}
+              >
+                {allAssets.length > 0 ? "Continua da Drive" : "Recupera da Drive"}
+              </button>
+            </div>
+
+            <div className="app-header__statuses" aria-live="polite">
+              {isGeneratingThumbnails ? (
                 <button
                   type="button"
-                  className="secondary-button"
-                  onClick={() => void handleGoogleDriveImport()}
-                  disabled={isGoogleDriveBusy}
+                  className="app-header__pipeline-status app-header__pipeline-status--button"
+                  onClick={() => setIsImportPanelDismissed(false)}
+                  title="Mostra stato caricamento"
                 >
-                  Continua da Drive
+                  <div className="pipeline-progress">
+                    <div
+                      className="pipeline-progress__fill"
+                      style={{ width: `${Math.round((thumbnailProgress.done / Math.max(1, thumbnailProgress.total)) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="pipeline-progress__label">
+                    {thumbnailProgress.done}/{thumbnailProgress.total}
+                  </span>
                 </button>
-              </>
-            ) : null}
-            {isGeneratingThumbnails ? (
-              <button
-                type="button"
-                className="app-header__pipeline-status app-header__pipeline-status--button"
-                onClick={() => setIsImportPanelDismissed(false)}
-                title="Mostra stato caricamento"
-              >
-                <div className="pipeline-progress">
-                  <div
-                    className="pipeline-progress__fill"
-                    style={{ width: `${Math.round((thumbnailProgress.done / Math.max(1, thumbnailProgress.total)) * 100)}%` }}
-                  />
+              ) : null}
+              {isFolderTransitionBusy ? (
+                <div className="app-header__sync-status app-header__sync-status--pending" title={folderTransitionLabel}>
+                  Cambio cartella...
                 </div>
-                <span className="pipeline-progress__label">
-                  {thumbnailProgress.done}/{thumbnailProgress.total}
-                </span>
-              </button>
-            ) : null}
-            {isFolderTransitionBusy ? (
-              <div className="app-header__sync-status app-header__sync-status--pending">
-                {`Cambio cartella${folderTransitionLabel ? `: ${folderTransitionLabel}` : "..."}`}
-              </div>
-            ) : null}
-            {allAssets.length > 0 ? (
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setCurrentScreen("browse")}
-                disabled={isFolderTransitionBusy}
-              >
-                Cambia cartella
-              </button>
-            ) : null}
-            {!usesMockData && allAssets.length > 0 ? (
-              <div className={`app-header__sync-status app-header__sync-status--${xmpSyncState.phase}`}>
-                {xmpSyncLabel}
-              </div>
-            ) : null}
-            <label className="field app-header__project-name">
-              <input
-                type="text"
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                placeholder="Nome progetto"
-              />
-            </label>
+              ) : null}
+              {!usesMockData && allAssets.length > 0 ? (
+                <div className={`app-header__sync-status app-header__sync-status--${xmpSyncState.phase}`}>
+                  {xmpSyncLabel}
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
 
@@ -3894,7 +4348,8 @@ export function App() {
           {currentScreen === "browse" ? (
             <div className="app-section">
               <FolderBrowser
-                onFolderOpened={handleFolderOpened}
+                onFolderOpened={handleFolderCandidateOpened}
+                onCreateProject={handleCreateProject}
                 isBusy={isFolderTransitionBusy}
               />
             </div>
@@ -3906,6 +4361,7 @@ export function App() {
                 photos={assetsWithThumbnailViews}
                 metadataVersion={photoMetadataVersion}
                 sourceFolderPath={sourceFolderPath}
+                initialFolderFilter={projectFolderFocus}
                 selectedIds={activeAssetIds}
                 onSelectionChange={handleSelectionChange}
                 onPhotosChange={handlePhotosChange}
@@ -3993,6 +4449,52 @@ export function App() {
               driveManualRootPicker.resolve(null);
               setDriveManualRootPicker(null);
             }}
+          />
+        ) : null}
+
+        {unassignedFolderPrompt ? (
+          <UnassignedFolderModal
+            folderPath={unassignedFolderPrompt.folderPath}
+            onChoose={(choice) => {
+              unassignedFolderPrompt.resolve(choice);
+              setUnassignedFolderPrompt(null);
+            }}
+          />
+        ) : null}
+
+        {projectCreationPrompt ? (
+          <ConfirmProjectCreationModal
+            preview={projectCreationPrompt.preview}
+            onConfirm={() => {
+              projectCreationPrompt.resolve(true);
+              setProjectCreationPrompt(null);
+            }}
+            onCancel={() => {
+              projectCreationPrompt.resolve(false);
+              setProjectCreationPrompt(null);
+            }}
+          />
+        ) : null}
+
+        {masterCorrectionPrompt ? (
+          <ConfirmMasterCorrectionModal
+            preview={masterCorrectionPrompt.preview}
+            onConfirm={() => {
+              masterCorrectionPrompt.resolve(true);
+              setMasterCorrectionPrompt(null);
+            }}
+            onCancel={() => {
+              masterCorrectionPrompt.resolve(false);
+              setMasterCorrectionPrompt(null);
+            }}
+          />
+        ) : null}
+
+        {isRenameProjectOpen ? (
+          <RenameProjectModal
+            currentName={projectName}
+            onConfirm={(name) => void handleRenameProject(name)}
+            onCancel={() => setIsRenameProjectOpen(false)}
           />
         ) : null}
       </div>

@@ -35,7 +35,7 @@ export async function exportProjectToGoogleDrive(
 }
 
 export async function listGoogleDriveVersions(
-  projectName: string,
+  projectName?: string,
 ): Promise<DesktopCloudProjectVersion[]> {
   const api = getApi();
   if (!api?.listPhotoSelectorDriveVersions) {

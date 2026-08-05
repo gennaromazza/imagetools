@@ -50,10 +50,13 @@ import type {
 import {
   copyFilesToFolderDesktop,
   moveFilesToFolderDesktop,
+  listPhotoSelectorLegacyProjectsDesktop,
   openFolderDesktop,
   readFileFromDisk,
   readPhotoSelectorProjectFileDesktop,
   readSidecarXmpFromAssetPath,
+  relocatePhotoSelectorProjectFileDesktop,
+  resolvePhotoSelectorProjectDesktop,
   reopenFolderDesktop,
   saveFileAsDesktop,
   statFilesFromDisk,
@@ -95,6 +98,7 @@ import {
   getDesktopSessionState,
   getDesktopPerformanceSnapshot,
   getFolderCatalogState,
+  listFolderCatalogStatesUnderRoot,
   getRecentFolders,
   getSortCache,
   logDesktopEvent,
@@ -1474,6 +1478,36 @@ function registerIpcHandlers(): void {
     (_event, rootPath: string, project) =>
       writePhotoSelectorProjectFileDesktop(sanitizeDesktopPath(rootPath), project),
   );
+  ipcMain.handle(
+    "filex:relocate-photo-selector-project-file",
+    (_event, sourceRootPath: string, targetRootPath: string, project) =>
+      relocatePhotoSelectorProjectFileDesktop(
+        sanitizeDesktopPath(sourceRootPath),
+        sanitizeDesktopPath(targetRootPath),
+        project,
+      ),
+  );
+  ipcMain.handle("filex:resolve-photo-selector-project", (_event, folderPath: string) =>
+    resolvePhotoSelectorProjectDesktop(sanitizeDesktopPath(folderPath)),
+  );
+  ipcMain.handle("filex:list-photo-selector-legacy-projects", async (_event, rootPath: string) => {
+    const normalizedRootPath = sanitizeDesktopPath(rootPath);
+    const fileProjects = await listPhotoSelectorLegacyProjectsDesktop(normalizedRootPath);
+    const catalogProjects = listFolderCatalogStatesUnderRoot(normalizedRootPath).map((catalog) => ({
+      rootPath: catalog.folderPath,
+      project: {
+        schemaVersion: 1 as const,
+        app: "image-select-pro" as const,
+        updatedAt: catalog.updatedAt,
+        projectName: catalog.folderName,
+        folderState: {
+          activeAssetIds: catalog.activeAssetIds,
+          assetStates: catalog.assetStates ?? [],
+        },
+      },
+    }));
+    return [...fileProjects, ...catalogProjects];
+  });
   ipcMain.handle("filex:get-google-drive-status", () => getGoogleDriveStatus());
   ipcMain.handle("filex:connect-google-drive", () => connectGoogleDrive());
   ipcMain.handle("filex:disconnect-google-drive", () => disconnectGoogleDrive());

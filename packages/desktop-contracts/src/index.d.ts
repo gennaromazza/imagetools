@@ -126,6 +126,7 @@ export interface DesktopFolderOpenDiagnostics {
 }
 export interface DesktopFolderOpenOptions {
     recursive?: boolean;
+    relativePathMode?: "legacy" | "project-relative";
 }
 export interface DesktopFolderOpenResult {
     name: string;
@@ -275,12 +276,26 @@ export interface DesktopPhotoSelectorProjectFile {
     schemaVersion: 1;
     app: "image-select-pro";
     updatedAt: number;
+    projectMode?: "master";
+    projectId?: string;
+    projectRootFolderName?: string;
+    createdAt?: number;
     projectName?: string;
     preferences?: Partial<DesktopPhotoSelectorPreferences>;
     folderState?: {
         activeAssetIds?: string[];
         assetStates?: DesktopFolderCatalogAssetState[];
     };
+}
+export interface DesktopPhotoSelectorProjectLocation {
+    rootPath: string;
+    project: DesktopPhotoSelectorProjectFile;
+}
+export interface DesktopPhotoSelectorProjectRelocationResult {
+    ok: boolean;
+    sourceBackupPath?: string;
+    targetBackupPath?: string;
+    message?: string;
 }
 export interface DesktopCloudPhotoState {
     relativePath: string;
@@ -309,6 +324,10 @@ export interface DesktopCloudProjectVersion {
     name: string;
     createdAt: string;
     size: number;
+    projectName?: string;
+    sourceFolderName?: string;
+    totalAssets?: number;
+    selectedAssets?: number;
 }
 export interface DesktopGoogleDriveStatus {
     configured: boolean;
@@ -897,11 +916,14 @@ export interface FileXDesktopApi {
     saveDesktopPreferences: (preferences: DesktopPhotoSelectorPreferences) => Promise<DesktopPhotoSelectorPreferences>;
     readPhotoSelectorProjectFile: (rootPath: string) => Promise<DesktopPhotoSelectorProjectFile | null>;
     writePhotoSelectorProjectFile: (rootPath: string, project: DesktopPhotoSelectorProjectFile) => Promise<boolean>;
+    relocatePhotoSelectorProjectFile: (sourceRootPath: string, targetRootPath: string, project: DesktopPhotoSelectorProjectFile) => Promise<DesktopPhotoSelectorProjectRelocationResult>;
+    resolvePhotoSelectorProject: (folderPath: string) => Promise<DesktopPhotoSelectorProjectLocation | null>;
+    listPhotoSelectorLegacyProjects: (rootPath: string) => Promise<DesktopPhotoSelectorProjectLocation[]>;
     getGoogleDriveStatus: () => Promise<DesktopGoogleDriveStatus>;
     connectGoogleDrive: () => Promise<DesktopGoogleDriveStatus>;
     disconnectGoogleDrive: () => Promise<DesktopGoogleDriveStatus>;
     exportPhotoSelectorProjectToDrive: (manifest: DesktopCloudProjectManifest) => Promise<DesktopCloudProjectVersion>;
-    listPhotoSelectorDriveVersions: (projectName: string) => Promise<DesktopCloudProjectVersion[]>;
+    listPhotoSelectorDriveVersions: (projectName?: string) => Promise<DesktopCloudProjectVersion[]>;
     downloadPhotoSelectorDriveVersion: (versionId: string) => Promise<DesktopCloudProjectManifest>;
     getDesktopSessionState: () => Promise<DesktopPersistedState | null>;
     saveDesktopSessionState: (state: DesktopPersistedState) => Promise<void>;

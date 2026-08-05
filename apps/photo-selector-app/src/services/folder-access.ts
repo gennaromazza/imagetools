@@ -1,4 +1,5 @@
 import type {
+  DesktopFolderOpenResult,
   DesktopNativeFileOpStatus,
 } from "@photo-tools/desktop-contracts";
 import type { ImageAsset } from "@photo-tools/shared-types";
@@ -285,6 +286,57 @@ export async function openFolderNative(): Promise<FolderOpenResult | null> {
     entries,
     diagnostics,
   );
+}
+
+function mapProjectFolderResult(result: DesktopFolderOpenResult | null): FolderOpenResult | null {
+  if (!result) {
+    return null;
+  }
+  const entries = result.entries.map((entry) => ({
+    name: entry.name,
+    relativePath: entry.relativePath,
+    absolutePath: entry.absolutePath,
+    size: entry.size,
+    lastModified: entry.lastModified,
+    createdAt: entry.createdAt,
+  }));
+  return toFolderOpenResult(
+    result.name,
+    result.rootPath,
+    entries,
+    result.diagnostics
+      ? {
+          source: "desktop-native",
+          selectedPath: result.diagnostics.selectedPath ?? result.rootPath,
+          topLevelSupportedCount: result.diagnostics.topLevelSupportedCount,
+          nestedSupportedDiscardedCount: result.diagnostics.nestedSupportedDiscardedCount,
+          totalSupportedSeen: result.diagnostics.totalSupportedSeen,
+          nestedDirectoriesSeen: result.diagnostics.nestedDirectoriesSeen ?? 0,
+        }
+      : buildFolderDiagnostics(result.rootPath, entries.length, 0),
+  );
+}
+
+export async function openProjectFolderNative(): Promise<FolderOpenResult | null> {
+  if (!hasDesktopFolderBridge()) {
+    return null;
+  }
+  const result = await window.filexDesktop!.openFolder({
+    recursive: true,
+    relativePathMode: "legacy",
+  });
+  return mapProjectFolderResult(result);
+}
+
+export async function reopenProjectFolder(rootPath: string): Promise<FolderOpenResult | null> {
+  if (!hasDesktopFolderBridge() || typeof window.filexDesktop?.reopenFolder !== "function") {
+    return null;
+  }
+  const result = await window.filexDesktop.reopenFolder(rootPath, {
+    recursive: true,
+    relativePathMode: "legacy",
+  });
+  return mapProjectFolderResult(result);
 }
 
 export async function reopenRecentFolder(folder: RecentFolder): Promise<FolderOpenResult | null> {

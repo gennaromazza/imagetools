@@ -47,6 +47,9 @@ $summaryPath = Join-Path $sourceRoot "components\SelectionSummary.tsx"
 $progressPath = Join-Path $sourceRoot "components\ImportProgressModal.tsx"
 $stylePath = Join-Path $sourceRoot "styles.css"
 $selectorPath = Join-Path $sourceRoot "components\PhotoSelector.tsx"
+$projectDialogsPath = Join-Path $sourceRoot "components\ProjectDialogs.tsx"
+$projectWorkflowPath = Join-Path $sourceRoot "services\project-workflow.ts"
+$cloudMappingPath = Join-Path $sourceRoot "services\cloud-project-mapping.ts"
 
 Assert-Contains $appPath 'Riepilogo \(\{activeAssetIds\.length\}\)' 'NAV-001' 'Il Riepilogo espone il conteggio e resta una vista rapida.'
 Assert-Contains $appPath 'folder-diagnostics-panel' 'FOLDER-001' 'La diagnostica cartella ha un contenitore persistente.'
@@ -57,7 +60,24 @@ Assert-Contains $summaryPath 'Nessuna foto selezionata' 'SUMMARY-002' 'Il Riepil
 Assert-Contains $selectorPath 'Filtri avanzati' 'FILTER-002' 'I filtri avanzati sono richiudibili.'
 Assert-Contains $selectorPath 'Sostituisci con visibili|Aggiungi visibili|Rimuovi visibili' 'SELECT-002' 'Le azioni sulla selezione dichiarano l''effetto.'
 Assert-NotContains $selectorPath 'Tipo file|fileTypeFilter|matchesFileTypeFilter' 'CLEAN-002' 'Il filtro Tipo file duplicato e stato rimosso.'
-Assert-Contains $stylePath 'max-width: 1280px' 'RESP-001' 'L’header ha un comportamento responsive dichiarato.'
+Assert-Contains $stylePath 'grid-template-areas:\s*"identity nav primary"\s*"context context context"' 'RESP-001' 'L’header separa navigazione, azioni e contesto progetto.'
+Assert-Contains $stylePath '@media \(max-width: 1120px\)' 'RESP-002' 'L’header ha un layout intermedio per finestre ridotte.'
+Assert-Contains $stylePath '@media \(max-width: 720px\)' 'RESP-003' 'L’header ha un layout compatto per finestre strette.'
+Assert-Contains $stylePath 'app-header__drive-email[\s\S]*text-overflow:\s*ellipsis' 'RESP-004' 'L’account Drive lungo non forza sovrapposizioni.'
+Assert-Contains $appPath 'app-header__project-name-value' 'PROJECT-001' 'Il nome progetto è mostrato in modalità non modificabile.'
+Assert-Contains $appPath 'Rinomina' 'PROJECT-006' 'La modifica del nome richiede un’azione esplicita.'
+Assert-Contains $projectDialogsPath 'Conferma cartella master' 'PROJECT-002' 'La creazione richiede conferma esplicita del perimetro master.'
+Assert-Contains $appPath 'nestedMasterProjects' 'PROJECT-003' 'La creazione blocca cartelle che contengono altri master.'
+Assert-Contains $appPath 'resolvePhotoSelectorProject\(normalizedPath\)' 'PROJECT-004' 'L’apertura da Esplora file risolve prima il progetto master.'
+Assert-Contains $appPath 'chooseUnassignedFolderAction\(normalizedPath\)' 'PROJECT-005' 'Una cartella non assegnata aperta da Windows richiede una scelta esplicita.'
+Assert-Contains $appPath 'Correggi master' 'PROJECT-007' 'Un master creato troppo in alto può essere corretto dall’interfaccia.'
+Assert-Contains $appPath 'relocatePhotoSelectorProjectFile' 'PROJECT-008' 'La correzione trasferisce il progetto tramite il bridge desktop.'
+Assert-Contains (Join-Path $repoRoot 'apps\filex-desktop\src\native-folder-service.ts') 'previous-master' 'PROJECT-009' 'Il vecchio master viene conservato come backup recuperabile.'
+Assert-Contains $projectWorkflowPath 'selectedLegacyPaths' 'MIGRATE-001' 'La migrazione conserva l’unione delle selezioni precedenti.'
+Assert-Contains $appPath 'localProject\?\.projectMode !== "master"' 'DRIVE-001' 'Drive opera solo su un progetto master esplicito.'
+Assert-Contains $cloudMappingPath 'UniqueAssetIndex' 'DRIVE-002' 'La mappatura Drive rileva chiavi locali duplicate.'
+Assert-Contains $cloudMappingPath 'claimedAssetIds' 'DRIVE-003' 'Una foto locale non può ricevere due record Drive.'
+Assert-Contains (Join-Path $repoRoot 'apps\filex-desktop\src\google-drive-service.ts') 'PROJECT_ID_PROPERTY' 'DRIVE-004' 'La cartella Drive è associata all’identità stabile del progetto.'
 
 $sourceFiles = Get-ChildItem -LiteralPath $sourceRoot -Recurse -File |
   Where-Object { $_.Extension -in @('.ts', '.tsx', '.css') }

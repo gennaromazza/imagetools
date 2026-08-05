@@ -23,6 +23,8 @@ const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive";
 const DRIVE_ROOT_FOLDER = "Image Select Pro";
 const TOKEN_FILE_NAME = "google-drive-token.bin";
 const FOLDER_MIME = "application/vnd.google-apps.folder";
+const PROJECT_ID_PROPERTY = "imageSelectProProjectId";
+const LEGACY_DEFAULT_PROJECT_ID = "photo-selector-default";
 
 interface StoredToken {
   refreshToken: string;
@@ -37,6 +39,7 @@ interface DriveFile {
   name?: string;
   createdTime?: string;
   size?: string;
+  appProperties?: Record<string, string>;
 }
 
 interface DriveListResponse {
@@ -190,7 +193,7 @@ async function listFiles(query: string): Promise<DriveFile[]> {
     q: query,
     spaces: "drive",
     pageSize: "1000",
-    fields: "files(id,name,createdTime,size)",
+    fields: "files(id,name,createdTime,size,appProperties)",
     orderBy: "createdTime desc",
   });
   const response = await ensureResponse(await driveFetch(`/files?${params.toString()}`));
@@ -198,13 +201,18 @@ async function listFiles(query: string): Promise<DriveFile[]> {
   return payload.files ?? [];
 }
 
-async function createFolder(name: string, parentId?: string): Promise<DriveFile> {
+async function createFolder(
+  name: string,
+  parentId?: string,
+  appProperties?: Record<string, string>,
+): Promise<DriveFile> {
   const metadata = {
     name,
     mimeType: FOLDER_MIME,
     ...(parentId ? { parents: [parentId] } : {}),
+    ...(appProperties ? { appProperties } : {}),
   };
-  const response = await ensureResponse(await driveFetch("/files", {
+  const response = await ensureResponse(await driveFetch("/files?fields=id,name,createdTime,size,appProperties", {
     method: "POST",
     headers: jsonHeaders(),
     body: JSON.stringify(metadata),
@@ -218,6 +226,88 @@ async function ensureFolder(name: string, parentId?: string): Promise<DriveFile>
     `name = '${escapeDriveQuery(name)}' and mimeType = '${FOLDER_MIME}' and trashed = false${parentQuery}`,
   );
   return files[0] ?? createFolder(name, parentId);
+}
+
+async function updateProjectFolderIdentity(
+  folder: DriveFile,
+  projectName: string,
+  projectId: string,
+): Promise<DriveFile> {
+  if (
+    folder.name === projectName
+    && folder.appProperties?.[PROJECT_ID_PROPERTY] === projectId
+  ) {
+    return folder;
+  }
+  const response = await ensureResponse(await driveFetch(
+    `/files/${encodeURIComponent(folder.id)}?fields=id,name,createdTime,size,appProperties`,
+    {
+      method: "PATCH",
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        name: projectName,
+        appProperties: {
+          ...folder.appProperties,
+          [PROJECT_ID_PROPERTY]: projectId,
+        },
+      }),
+    },
+  ));
+  return await response.json() as DriveFile;
+}
+
+async function folderContainsProjectId(folderId: string, projectId: string): Promise<boolean> {
+  if (!projectId || projectId === LEGACY_DEFAULT_PROJECT_ID) {
+    return false;
+  }
+  const files = await listFiles(
+    `'${escapeDriveQuery(folderId)}' in parents and trashed = false and mimeType = 'application/json'`,
+  );
+  for (const file of files) {
+    try {
+      const manifest = await readDriveFile(file.id);
+      if (manifest.projectId === projectId) {
+        return true;
+      }
+    } catch {
+      // Ignore unrelated or damaged JSON files in the project folder.
+    }
+  }
+  return false;
+}
+
+async function ensureProjectFolder(
+  manifest: DesktopCloudProjectManifest,
+  rootId: string,
+): Promise<DriveFile> {
+  const projectName = manifest.projectName.trim() || "Senza nome";
+  const projectId = manifest.projectId.trim();
+  const folders = await listFiles(
+    `'${escapeDriveQuery(rootId)}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`,
+  );
+
+  const taggedFolder = folders.find(
+    (folder) => folder.appProperties?.[PROJECT_ID_PROPERTY] === projectId,
+  );
+  if (taggedFolder) {
+    return updateProjectFolderIdentity(taggedFolder, projectName, projectId);
+  }
+
+  const sameNameFolder = folders.find((folder) => folder.name === projectName);
+  if (sameNameFolder) {
+    return updateProjectFolderIdentity(sameNameFolder, projectName, projectId);
+  }
+
+  for (const folder of folders) {
+    if (
+      !folder.appProperties?.[PROJECT_ID_PROPERTY]
+      && await folderContainsProjectId(folder.id, projectId)
+    ) {
+      return updateProjectFolderIdentity(folder, projectName, projectId);
+    }
+  }
+
+  return createFolder(projectName, rootId, { [PROJECT_ID_PROPERTY]: projectId });
 }
 
 async function uploadManifest(
@@ -409,7 +499,7 @@ export async function exportPhotoSelectorProjectToDrive(
 ): Promise<DesktopCloudProjectVersion> {
   await writeDriveLog("Export started", `${manifest.projectName} (${manifest.assets.length} assets)`);
   const root = await ensureFolder(DRIVE_ROOT_FOLDER);
-  const projectFolder = await ensureFolder(manifest.projectName || "Senza nome", root.id);
+  const projectFolder = await ensureProjectFolder(manifest, root.id);
   const timestamp = manifest.exportedAt.replace(/[:.]/g, "-");
   const fileName = `${timestamp}__${manifest.projectName || "project"}.json`.replace(/[\\/:*?"<>|]+/g, "-");
   const file = await uploadManifest(projectFolder.id, fileName, manifest);
@@ -419,21 +509,50 @@ export async function exportPhotoSelectorProjectToDrive(
     name: file.name ?? fileName,
     createdAt: file.createdTime ?? manifest.exportedAt,
     size: Number(file.size ?? 0),
+    projectName: manifest.projectName,
+    sourceFolderName: manifest.sourceFolderName,
+    totalAssets: manifest.assets.length,
+    selectedAssets: manifest.assets.filter((asset) => asset.active === true).length,
   };
 }
 
 export async function listPhotoSelectorDriveVersions(
-  projectName: string,
+  projectName?: string,
 ): Promise<DesktopCloudProjectVersion[]> {
   const root = await ensureFolder(DRIVE_ROOT_FOLDER);
-  const projectFolder = await ensureFolder(projectName || "Senza nome", root.id);
-  const files = await listFiles(`'${escapeDriveQuery(projectFolder.id)}' in parents and trashed = false and mimeType = 'application/json'`);
-  return files.map((file) => ({
-    id: file.id,
-    name: file.name ?? "Versione senza nome",
-    createdAt: file.createdTime ?? new Date().toISOString(),
-    size: Number(file.size ?? 0),
-  }));
+  const normalizedProjectName = projectName?.trim();
+  const projectFolders = normalizedProjectName
+    ? [await ensureFolder(normalizedProjectName, root.id)]
+    : await listFiles(`'${escapeDriveQuery(root.id)}' in parents and trashed = false and mimeType = '${FOLDER_MIME}'`);
+
+  const versions: DesktopCloudProjectVersion[] = [];
+  for (const projectFolder of projectFolders) {
+    const files = await listFiles(`'${escapeDriveQuery(projectFolder.id)}' in parents and trashed = false and mimeType = 'application/json'`);
+    const described = await Promise.all(files.map(async (file): Promise<DesktopCloudProjectVersion> => {
+      const baseVersion = {
+        id: file.id,
+        name: file.name ?? "Versione senza nome",
+        createdAt: file.createdTime ?? new Date().toISOString(),
+        size: Number(file.size ?? 0),
+        projectName: projectFolder.name ?? normalizedProjectName,
+      };
+      try {
+        const manifest = await readDriveFile(file.id);
+        return {
+          ...baseVersion,
+          projectName: manifest.projectName,
+          sourceFolderName: manifest.sourceFolderName,
+          totalAssets: manifest.assets.length,
+          selectedAssets: manifest.assets.filter((asset) => asset.active === true).length,
+        };
+      } catch {
+        return baseVersion;
+      }
+    }));
+    versions.push(...described);
+  }
+
+  return versions.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
 export async function downloadPhotoSelectorDriveVersion(

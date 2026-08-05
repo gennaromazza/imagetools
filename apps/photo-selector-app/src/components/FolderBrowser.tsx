@@ -11,6 +11,7 @@ import {
 
 interface FolderBrowserProps {
   onFolderOpened: (result: FolderOpenResult) => void | Promise<void>;
+  onCreateProject: () => void | Promise<void>;
   isBusy?: boolean;
 }
 
@@ -26,7 +27,7 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString("it-IT");
 }
 
-export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserProps) {
+export function FolderBrowser({ onFolderOpened, onCreateProject, isBusy = false }: FolderBrowserProps) {
   const heroIcon = "\u{1F5BC}";
   const recentFolderIcon = "\u{1F4C1}";
   const [openingRecentFolder, setOpeningRecentFolder] = useState<string | null>(null);
@@ -80,14 +81,17 @@ export function FolderBrowser({ onFolderOpened, isBusy = false }: FolderBrowserP
     <div className="folder-browser">
       <div className="folder-browser__hero">
         <div className="folder-browser__icon" aria-hidden="true">{heroIcon}</div>
-        <h2 className="folder-browser__title">Apri una cartella</h2>
+        <h2 className="folder-browser__title">Apri o crea un progetto</h2>
         <p className="folder-browser__subtitle">
-          Seleziona una cartella con le foto per iniziare la selezione.
+          Un progetto master mantiene unite tutte le sottocartelle e rende stabili le selezioni.
         </p>
 
         <div className="folder-browser__actions">
-          <button type="button" className="primary-button" onClick={handleBrowse} disabled={isBusy}>
-            {isBusy ? "Apertura in corso..." : "Sfoglia cartella..."}
+          <button type="button" className="primary-button" onClick={() => void onCreateProject()} disabled={isBusy}>
+            {isBusy ? "Apertura in corso..." : "Nuovo progetto master..."}
+          </button>
+          <button type="button" className="secondary-button" onClick={handleBrowse} disabled={isBusy}>
+            Apri progetto o cartella...
           </button>
         </div>
 
