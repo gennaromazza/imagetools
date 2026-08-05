@@ -29,6 +29,8 @@ const ALLOWED_RELEASE_HOSTS = new Set([
   "raw.githubusercontent.com",
 ]);
 const UPDATE_RETRY_LIMIT = 2;
+const DOWNLOAD_FINALIZE_RETRY_LIMIT = 12;
+const DOWNLOAD_FINALIZE_RETRY_DELAY_MS = 250;
 const updateJobs = new Map<string, DesktopToolUpdateJob>();
 
 function now(): number {
@@ -395,6 +397,33 @@ function createJob(toolId: DesktopToolId, channel: DesktopReleaseChannel): Deskt
   return job;
 }
 
+function isRetryableFinalizeError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String(error.code)
+    : "";
+  return code === "EACCES" || code === "EBUSY" || code === "EPERM";
+}
+
+function waitForFinalizeRetry(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, DOWNLOAD_FINALIZE_RETRY_DELAY_MS));
+}
+
+async function finalizeDownloadedFile(partPath: string, destinationPath: string): Promise<void> {
+  for (let attempt = 0; attempt < DOWNLOAD_FINALIZE_RETRY_LIMIT; attempt += 1) {
+    try {
+      if (existsSync(destinationPath)) {
+        unlinkSync(destinationPath);
+      }
+      renameSync(partPath, destinationPath);
+      return;
+    } catch (error) {
+      const canRetry = attempt < DOWNLOAD_FINALIZE_RETRY_LIMIT - 1 && isRetryableFinalizeError(error);
+      if (!canRetry) throw error;
+      await waitForFinalizeRetry();
+    }
+  }
+}
+
 function patchJob(jobId: string, partial: Partial<DesktopToolUpdateJob>): DesktopToolUpdateJob {
   const current = updateJobs.get(jobId);
   if (!current) {
@@ -415,8 +444,7 @@ function downloadFile(
   onProgress: (downloaded: number, total: number | null) => void,
   redirectCount = 0,
 ): Promise<void> {
-  // Write to .part file; rename atomically only on success to avoid leaving
-  // a stale partial file that a concurrent cleanup could delete mid-verify.
+  // Write to .part file; rename only after the Windows file handle is closed.
   const partPath = `${destinationPath}.part`;
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -424,7 +452,6 @@ function downloadFile(
     const succeed = () => {
       if (settled) return;
       settled = true;
-      try { renameSync(partPath, destinationPath); } catch { /* best-effort */ }
       resolve();
     };
     const fail = (error: Error) => {
@@ -433,6 +460,10 @@ function downloadFile(
       writeStream?.destroy();
       try { unlinkSync(partPath); } catch { /* already gone */ }
       reject(error);
+    };
+    const finalize = () => {
+      if (settled) return;
+      void finalizeDownloadedFile(partPath, destinationPath).then(succeed, fail);
     };
     if (!isAllowedReleaseUrl(urlValue)) {
       fail(new Error("URL installer non autorizzato"));
@@ -486,7 +517,7 @@ function downloadFile(
         response.once("error", (error) => fail(error));
         response.pipe(writeStream);
         writeStream.once("error", fail);
-        writeStream.once("finish", succeed);
+        writeStream.once("close", finalize);
       },
     );
     request.setTimeout(60_000, () => request.destroy(new Error("Timeout download installer")));

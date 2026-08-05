@@ -1,5 +1,9 @@
 {
   "image-party-frame": {
+    "0.1.20": [
+      "Pubblicazione coordinata con FileX Suite 0.1.20 per mantenere coerenti installer, manifest e canale stabile.",
+      "Installer Windows ripubblicato con verifica SHA-256 prima dell'avvio."
+    ],
     "0.1.19": [
       "Pubblicazione coordinata con FileX Suite 0.1.19 per mantenere allineati installer, manifest e aggiornamenti dal launcher.",
       "Aggiornamento distribuito con verifica SHA-256 prima dell'avvio dell'installer Windows."
@@ -22,6 +26,10 @@
     ]
   },
   "archivio-flow": {
+    "0.1.20": [
+      "Pubblicazione coordinata con FileX Suite 0.1.20 per mantenere coerenti installer, manifest e canale stabile.",
+      "Installer Windows ripubblicato con verifica SHA-256 prima dell'avvio."
+    ],
     "0.1.19": [
       "Pubblicazione coordinata con FileX Suite 0.1.19 per mantenere allineati installer, manifest e aggiornamenti dal launcher.",
       "Aggiornamento distribuito con verifica SHA-256 prima dell'avvio dell'installer Windows."
@@ -50,6 +58,10 @@
     ]
   },
   "photo-selector-app": {
+    "0.1.20": [
+      "Pubblicazione coordinata con FileX Suite 0.1.20 per rendere affidabile il completamento degli aggiornamenti dal launcher.",
+      "Installer Windows ripubblicato con verifica SHA-256 prima dell'avvio."
+    ],
     "0.1.19": [
       "L'anteprima rapida apre ora in modalita focus, con filtri e dock richiudibili quando serve piu spazio per la foto.",
       "Aggiunti controllo zoom diretto e comandi di spostamento dell'immagine ingrandita."
