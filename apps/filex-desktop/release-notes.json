@@ -1,5 +1,9 @@
 {
   "image-party-frame": {
+    "0.1.19": [
+      "Pubblicazione coordinata con FileX Suite 0.1.19 per mantenere allineati installer, manifest e aggiornamenti dal launcher.",
+      "Aggiornamento distribuito con verifica SHA-256 prima dell'avvio dell'installer Windows."
+    ],
     "0.1.18": [
       "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
       "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
@@ -18,6 +22,10 @@
     ]
   },
   "archivio-flow": {
+    "0.1.19": [
+      "Pubblicazione coordinata con FileX Suite 0.1.19 per mantenere allineati installer, manifest e aggiornamenti dal launcher.",
+      "Aggiornamento distribuito con verifica SHA-256 prima dell'avvio dell'installer Windows."
+    ],
     "0.1.18": [
       "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
       "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
@@ -42,6 +50,10 @@
     ]
   },
   "photo-selector-app": {
+    "0.1.19": [
+      "L'anteprima rapida apre ora in modalita focus, con filtri e dock richiudibili quando serve piu spazio per la foto.",
+      "Aggiunti controllo zoom diretto e comandi di spostamento dell'immagine ingrandita."
+    ],
     "0.1.18": [
       "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
       "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
