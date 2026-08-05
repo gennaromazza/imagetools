@@ -57,6 +57,6 @@ Il pulsante `Aggiorna` non appartiene all'aggiornamento della Suite: compare sol
 
 Una pubblicazione e' conclusa solo dopo aver verificato GitHub Release, GitHub Pages e il manifest remoto. Seguire `docs/18-publish-build-contract.md` per la checklist completa.
 
-## Verifica release 0.1.19
+## Verifica release 0.1.20
 
-La release stabile `v0.1.19` deve esporre gli installer Windows di FileX Suite, Image Party Frame, Image Select Pro e Archivio Flow. Per ogni tool il manifest stabile deve indicare versione `0.1.19`, URL riferito al tag e checksum SHA-256 valido.
+La release stabile `v0.1.20` deve esporre gli installer Windows di FileX Suite, Image Party Frame, Image Select Pro e Archivio Flow. Per ogni tool il manifest stabile deve indicare versione `0.1.20`, URL riferito al tag e checksum SHA-256 valido.

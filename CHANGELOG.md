@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-05 - FileX Suite 0.1.20
+
+### FileX Suite
+- corretto il completamento del download degli aggiornamenti: l'installer viene usato solo dopo la chiusura del file temporaneo e la rinomina effettiva in `.exe`
+- gli errori transitori di lock di Windows vengono ritentati prima della verifica SHA-256, evitando riavvii o richieste UAC su installer non disponibili
+
+### Release engineering
+- FileX Suite, Image Party Frame, Image Select Pro e Archivio Flow vengono ripubblicati alla versione `0.1.20` con manifest stabile, installer, blockmap e `latest.yml` coerenti
+
 ## 2026-08-05 - FileX Suite 0.1.19
 
 ### Image Select Pro
