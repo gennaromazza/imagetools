@@ -3261,6 +3261,7 @@ export function PhotoSelector({
                 pickFilter={pickFilter}
                 formatFilter={formatFilter}
                 ratingFilter={ratingFilter}
+                ratingCounts={photoStats.ratingCounts}
                 colorFilter={colorFilter}
                 customColorNames={customColorNames}
                 customLabelFilter={customLabelFilter}
@@ -3299,6 +3300,7 @@ export function PhotoSelector({
                 someVisibleSelected={someVisibleSelected}
                 visibleCount={visiblePhotoIds.length}
                 visibleSelectedCount={visibleSelectedCount}
+                currentFolderSelectedCount={currentFolderSelectedIds.length}
                 selectedCount={selectedIds.length}
                 isMenuOpen={isSelectionActionsOpen}
                 onUndo={handleUndoClick}
@@ -3509,8 +3511,8 @@ export function PhotoSelector({
       <footer className="photo-selector__bottom-bar">
         <div className="photo-selector__stats">
           <span className="photo-selector__count">
-            {currentFolderPhotos.length} elementi — {currentFolderSelectedIds.length} selezionati
-            {hasActiveFilters ? ` (${visiblePhotoIds.length} filtrati)` : ""}
+            Cartella: {currentFolderPhotos.length} foto · {currentFolderSelectedIds.length} selezionate qui
+            {hasActiveFilters ? ` · ${visiblePhotoIds.length} visibili con i filtri` : ""}
           </span>
           {selectionStats && (
             <div className="photo-selector__stat-chips">

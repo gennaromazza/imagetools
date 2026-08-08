@@ -8,6 +8,7 @@ interface SelectionActionsPanelProps {
   someVisibleSelected: boolean;
   visibleCount: number;
   visibleSelectedCount: number;
+  currentFolderSelectedCount: number;
   selectedCount: number;
   isMenuOpen: boolean;
   onUndo: () => void;
@@ -32,7 +33,12 @@ export function SelectionActionsPanel(props: SelectionActionsPanelProps) {
         <button type="button" className="icon-button" onClick={props.onUndo} disabled={!props.canUndo} title="Annulla">↶</button>
         <button type="button" className="icon-button" onClick={props.onRedo} disabled={!props.canRedo} title="Ripeti">↷</button>
       </div>
-      <span className="command-bar__selection-count">{props.selectedCount} selezionate</span>
+      <span className="command-bar__selection-count">
+        {props.currentFolderSelectedCount} nella cartella
+        {props.selectedCount !== props.currentFolderSelectedCount
+          ? ` · ${props.selectedCount} nel progetto`
+          : ""}
+      </span>
       <div className="command-bar__group command-bar__group--primary">
       <button
         type="button"

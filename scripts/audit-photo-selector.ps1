@@ -97,14 +97,19 @@ Assert-Contains $appHeaderPath 'Riconnetti Drive' 'DRIVE-005' 'Una sessione Goog
 Assert-Contains (Join-Path $repoRoot 'apps\filex-desktop\src\google-drive-service.ts') 'await clearToken\(\)[\s\S]*Riconnetti Google Drive' 'DRIVE-006' 'Un refresh token rifiutato invalida la sessione locale e richiede un nuovo OAuth.'
 Assert-NotContains $stylePath 'margin-top:\s*-1\.5rem' 'LAYOUT-001' 'Il workspace non risale sotto l header e i pannelli superiori restano leggibili.'
 Assert-Contains $stylePath '\.app-header[\s\S]*z-index:\s*1000' 'LAYOUT-002' 'I menu della testata restano sopra il workspace.'
+Assert-Contains $stylePath '\.quick-preview\s*\{[\s\S]{0,320}z-index:\s*6000' 'LAYOUT-003' 'La quick preview copre la testata senza lasciare titolo e comandi nascosti sotto l header.'
+Assert-Contains $filterPanelPath 'minimumRatingCount[\s\S]*esattamente' 'COUNT-001' 'Il filtro stelle mostra sia il totale minimo sia il conteggio esatto.'
+Assert-Contains $selectionActionsPath 'nella cartella[\s\S]*nel progetto' 'COUNT-002' 'La selezione distingue esplicitamente cartella corrente e progetto.'
+Assert-Contains $selectorPath 'visibili con i filtri' 'COUNT-003' 'La barra inferiore distingue foto visibili e selezionate.'
 Assert-Contains $appPath 'PhotoLoadingOverlay' 'LOAD-001' 'Le prime anteprime espongono un loader progressivo prima della griglia interattiva.'
 Assert-Contains (Join-Path $repoRoot 'apps\filex-desktop\src\main.ts') 'getGPUFeatureStatus' 'GPU-001' 'Lo stato accelerazione hardware deriva dai dati reali di Electron.'
 Assert-Contains $selectorPath 'Accelerazione grafica attiva' 'GPU-002' 'Il pannello Prestazioni mostra lo stato GPU effettivo.'
 Assert-NotContains $selectorPath 'Applica e riavvia' 'PERF-001' 'Il budget RAM applicato live non forza un riavvio inutile.'
 Assert-Contains (Join-Path $repoRoot 'apps\filex-desktop\src\main.ts') 'ramBudgetPreset:\s*await loadRamBudgetPreset\(\)' 'PERF-002' 'Le preferenze UI non sovrascrivono il budget RAM nativo realmente attivo.'
-Assert-Contains (Join-Path $sourceRoot 'components\PhotoQuickPreviewModal.tsx') 'Avanza:.*ON.*OFF' 'QUICK-001' 'Quick Preview espone direttamente il toggle di avanzamento automatico.'
+Assert-Contains (Join-Path $sourceRoot 'components\PhotoQuickPreviewModal.tsx') 'quick-preview__auto-advance[\s\S]*role="switch"[\s\S]*aria-checked=\{autoAdvanceOnAction\}' 'QUICK-001' 'Quick Preview espone direttamente un interruttore accessibile per l avanzamento automatico.'
 Assert-Contains (Join-Path $sourceRoot 'components\PhotoQuickPreviewModal.tsx') 'classificationMutationRef[\s\S]*navigationIds\.add\(asset\.id\)' 'QUICK-002' 'Una classificazione che modifica i filtri mantiene la foto corrente e non produce doppi salti.'
 Assert-Contains (Join-Path $sourceRoot 'components\PhotoQuickPreviewModal.tsx') 'advanceAfterChange && autoAdvanceOnAction' 'QUICK-003' 'Le etichette da tastiera rispettano lo stesso toggle di auto-avanzamento.'
+Assert-Contains $selectorPath 'savePhotoSelectorPreferences\(\{ autoAdvanceOnAction: nextEnabled \}\)' 'QUICK-004' 'La scelta di auto-avanzamento viene conservata nelle preferenze.'
 
 $sourceFiles = Get-ChildItem -LiteralPath $sourceRoot -Recurse -File |
   Where-Object { $_.Extension -in @('.ts', '.tsx', '.css') }

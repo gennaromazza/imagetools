@@ -2535,18 +2535,22 @@ export function PhotoQuickPreviewModal({
             {onAutoAdvanceOnActionChange ? (
               <button
                 type="button"
-                className={
-                  autoAdvanceOnAction
-                    ? "ghost-button quick-preview__action quick-preview__action--active"
-                    : "ghost-button quick-preview__action"
-                }
+                className={`quick-preview__auto-advance${
+                  autoAdvanceOnAction ? " quick-preview__auto-advance--on" : " quick-preview__auto-advance--off"
+                }`}
                 onClick={() => onAutoAdvanceOnActionChange(!autoAdvanceOnAction)}
-                aria-pressed={autoAdvanceOnAction}
+                role="switch"
+                aria-checked={autoAdvanceOnAction}
+                aria-label="Avanza dopo classificazione"
                 title={autoAdvanceOnAction
                   ? "Dopo una classificazione da tastiera passa alla foto successiva. Premi per disattivare."
                   : "Resta sulla foto dopo la classificazione. Usa le frecce per andare avanti o indietro."}
               >
-                Avanza: {autoAdvanceOnAction ? "ON" : "OFF"}
+                <span>Avanza dopo classificazione</span>
+                <span className="quick-preview__switch-track" aria-hidden="true">
+                  <span className="quick-preview__switch-thumb" />
+                </span>
+                <strong>{autoAdvanceOnAction ? "ON" : "OFF"}</strong>
               </button>
             ) : null}
             <span
