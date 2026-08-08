@@ -81,8 +81,8 @@ export function AppHeader(props: AppHeaderProps) {
       <nav className="app-header__nav" aria-label="Fasi del progetto">
         {([
           ["browse", "Sfoglia"],
-          ["selection", `Selezione (${props.selectedCount})`],
-          ["review", `Riepilogo (${props.selectedCount})`],
+          ["selection", `Selezione (${props.selectedCount} tot.)`],
+          ["review", `Riepilogo (${props.selectedCount} tot.)`],
         ] as const).map(([screen, label]) => (
           <button
             key={screen}

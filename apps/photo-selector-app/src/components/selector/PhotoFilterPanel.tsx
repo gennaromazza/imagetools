@@ -16,6 +16,7 @@ interface PhotoFilterPanelProps {
   pickFilter: PickFilter;
   formatFilter: FormatFilter;
   ratingFilter: string;
+  ratingCounts: Map<number, number>;
   colorFilter: ColorFilter;
   customColorNames: Record<ColorLabel, string>;
   customLabelFilter: string;
@@ -50,6 +51,7 @@ export function PhotoFilterPanel(props: PhotoFilterPanelProps) {
     pickFilter,
     formatFilter,
     ratingFilter,
+    ratingCounts,
     colorFilter,
     customColorNames,
     customLabelFilter,
@@ -63,6 +65,20 @@ export function PhotoFilterPanel(props: PhotoFilterPanelProps) {
   } = props;
 
   const advancedFilterCount = [seriesFilter !== "all", timeClusterFilter !== "all"].filter(Boolean).length;
+  const exactRatingCount = (rating: number) => ratingCounts.get(rating) ?? 0;
+  const minimumRatingCount = (rating: number) => {
+    let count = 0;
+    for (let value = rating; value <= 5; value += 1) {
+      count += exactRatingCount(value);
+    }
+    return count;
+  };
+  const activeRating = Number.parseInt(ratingFilter, 10);
+  const activeRatingResult = Number.isFinite(activeRating)
+    ? ratingFilter.endsWith("+")
+      ? `${minimumRatingCount(activeRating)} foto con ${activeRating}+ stelle · ${exactRatingCount(activeRating)} esattamente ${activeRating}★`
+      : `${exactRatingCount(activeRating)} foto con esattamente ${activeRating}★`
+    : null;
 
   return (
     <div className="selector-filter-panel">
@@ -118,13 +134,22 @@ export function PhotoFilterPanel(props: PhotoFilterPanelProps) {
         <select value={ratingFilter} onChange={(event) => props.onRatingFilterChange(event.target.value)}>
           <option value="any">Tutte</option>
           <optgroup label="Minimo">
-            {[1, 2, 3, 4].map((rating) => <option key={`${rating}+`} value={`${rating}+`}>{rating} stelle o più</option>)}
+            {[1, 2, 3, 4].map((rating) => (
+              <option key={`${rating}+`} value={`${rating}+`}>
+                {rating === 1 ? "1 stella o più" : `${rating} stelle o più`} ({minimumRatingCount(rating)})
+              </option>
+            ))}
           </optgroup>
           <optgroup label="Esattamente">
-            <option value="0">Senza stelle</option>
-            {[1, 2, 3, 4, 5].map((rating) => <option key={rating} value={rating}>{rating} stelle</option>)}
+            <option value="0">Senza stelle ({exactRatingCount(0)})</option>
+            {[1, 2, 3, 4, 5].map((rating) => (
+              <option key={rating} value={rating}>
+                {rating === 1 ? "1 stella" : `${rating} stelle`} ({exactRatingCount(rating)})
+              </option>
+            ))}
           </optgroup>
         </select>
+        {activeRatingResult ? <small className="selector-filter-panel__filter-result">{activeRatingResult}</small> : null}
       </label>
 
       <div className="field photo-selector__color-filter">

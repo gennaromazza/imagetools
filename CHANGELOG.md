@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-08-08 - FileX Suite 0.1.25
+
+### Image Select Pro
+- l'anteprima rapida ora copre correttamente la testata dell'applicazione, evitando comandi e contenuti nascosti sotto il layout principale
+- aggiunto un interruttore visibile e accessibile `Avanza dopo classificazione`: in `OFF` stelle, Pick/Scarta, colori ed etichette restano sulla foto corrente, mentre le frecce continuano a navigare manualmente
+- la preferenza di avanzamento automatico viene conservata tra le sessioni
+- i conteggi distinguono chiaramente selezioni nella cartella, selezioni complessive del progetto e fotografie visibili con i filtri
+- il filtro stelle mostra sia il numero minimo (`1 stella o piu`) sia il totale esatto della singola valutazione
+
+### Release engineering
+- FileX Suite, Image Party Frame, Image Select Pro e Archivio Flow vengono riallineati alla versione `0.1.25` con installer per-user, blockmap, `latest.yml` e manifest stabile verificato
+
 ## 2026-08-08 - FileX Suite 0.1.24
 
 ### Aggiornamento dei tool

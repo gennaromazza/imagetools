@@ -1115,6 +1115,15 @@ img {
   padding: 0.42rem 0.5rem;
 }
 
+.selector-filter-panel .selector-filter-panel__filter-result {
+  color: #f5dea8;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-transform: none;
+}
+
 .selector-filter-panel__summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3031,7 +3040,10 @@ img {
 .quick-preview {
   position: fixed;
   inset: 0;
-  z-index: 140;
+  /* L'anteprima e' un modal a schermo intero: deve coprire anche la testata
+     dell'app (1000) e i flyout (1600), restando sotto il confronto (7000)
+     e le notifiche globali (9500). */
+  z-index: 6000;
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 0;
@@ -3191,6 +3203,81 @@ img {
   border-color: rgba(226, 155, 88, 0.4);
   background: rgba(226, 155, 88, 0.14);
   color: #fff5e8;
+}
+
+.quick-preview__auto-advance {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.35rem;
+  padding: 0.38rem 0.55rem 0.38rem 0.72rem;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.quick-preview__auto-advance:hover,
+.quick-preview__auto-advance:focus-visible {
+  border-color: rgba(229, 165, 105, 0.58);
+  outline: none;
+}
+
+.quick-preview__auto-advance--on {
+  border-color: rgba(229, 165, 105, 0.42);
+  background: rgba(229, 165, 105, 0.14);
+  color: #fff5e8;
+}
+
+.quick-preview__auto-advance--off {
+  background: rgba(20, 23, 21, 0.78);
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.quick-preview__switch-track {
+  position: relative;
+  width: 2rem;
+  height: 1.1rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  transition: background 150ms ease;
+}
+
+.quick-preview__switch-thumb {
+  position: absolute;
+  top: 0.18rem;
+  left: 0.18rem;
+  width: 0.74rem;
+  height: 0.74rem;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.48);
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.quick-preview__auto-advance--on .quick-preview__switch-track {
+  background: rgba(229, 165, 105, 0.78);
+}
+
+.quick-preview__auto-advance--on .quick-preview__switch-thumb {
+  transform: translateX(0.9rem);
+  background: #fff8ee;
+}
+
+.quick-preview__auto-advance strong {
+  min-width: 1.7rem;
+  color: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-align: left;
 }
 
 .quick-preview__tiny-action {
