@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/filex-desktop",
   "private": true,
-  "version": "0.1.23",
+  "version": "0.1.24",
   "description": "FileX Suite desktop shell for Windows packaging and native bridge work.",
   "author": "FileX",
   "type": "module",
@@ -58,6 +58,7 @@
     "manifest:validate:beta": "node ./scripts/validate-release-manifest.mjs --channel=beta"
   },
   "dependencies": {
+    "@electron/asar": "3.4.1",
     "@photo-tools/desktop-contracts": "0.1.0",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",

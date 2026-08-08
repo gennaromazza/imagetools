@@ -164,6 +164,25 @@ function buildNsisIncludeContent(tool) {
 
   return `!ifndef BUILD_UNINSTALLER
 
+; In modalita' silenziosa un errore dell'uninstaller precedente deve tornare
+; alla Suite come exit code, non aprire una MessageBox invisibile che lascia
+; l'aggiornamento sospeso per sempre. La Suite puo' quindi attendere e ritentare.
+!macro customUnInstallCheck
+  \${if} \${errors}
+    DetailPrint "Disinstallatore precedente non avviabile. Proseguo con la gestione standard."
+    Return
+  \${endif}
+
+  \${if} $R0 != 0
+    \${IfNot} \${Silent}
+      MessageBox MB_OK|MB_ICONEXCLAMATION "$(uninstallFailed): $R0"
+    \${endif}
+    DetailPrint "Disinstallazione precedente terminata con codice $R0."
+    SetErrorLevel 2
+    Quit
+  \${endif}
+!macroend
+
 !macro customInit
   Call terminateLegacyProcesses
 !macroend

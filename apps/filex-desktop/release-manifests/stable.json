@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-05T14:12:09.735Z",
+  "generatedAt": "2026-08-08T18:44:02.668Z",
   "generatedBy": "generate-release-manifest.mjs",
   "channels": [
     "stable",
@@ -49,46 +49,43 @@
     },
     {
       "toolId": "image-party-frame",
-      "version": "0.1.18",
+      "version": "0.1.24",
       "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Image-Party-Frame-0.1.18-stable-x64-setup.exe",
-      "installerSha256": "6761217c6c3bbe27421a0040f91acb48099a45c0c48bf8560450a25c636a1412",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.24/Image-Party-Frame-0.1.24-stable-x64-setup.exe",
+      "installerSha256": "c167fb771a7cf4944bff5e9108d3349b09c82380afcb6407b4c441d361516cab",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-08-05T14:12:09.529Z",
+      "publishedAt": "2026-08-08T18:44:02.371Z",
       "highlights": [
-        "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
-        "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
-        "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
+        "Corretto l'aggiornamento dei tool quando FileX Suite e' aperta: la lettura della versione non mantiene piu' bloccato l'archivio dell'applicazione.",
+        "Installer silenzioso e chiusura dei processi resi piu' affidabili, con ritenti controllati in caso di file temporaneamente occupati."
       ]
     },
     {
       "toolId": "archivio-flow",
-      "version": "0.1.18",
+      "version": "0.1.24",
       "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Archivio-Flow-0.1.18-stable-x64-setup.exe",
-      "installerSha256": "2e159ef98b9232916f1f1bbbaa27287f9a1e19557fd52840cef71409989c7eb7",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.24/Archivio-Flow-0.1.24-stable-x64-setup.exe",
+      "installerSha256": "27e220eb695a913c36815c03fe98b46c5a34de4edf593fd7134c60b5bcb64bc4",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-08-05T14:12:09.630Z",
+      "publishedAt": "2026-08-08T18:44:02.510Z",
       "highlights": [
-        "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
-        "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
-        "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
+        "Corretto l'aggiornamento dei tool quando FileX Suite e' aperta: la lettura della versione non mantiene piu' bloccato l'archivio dell'applicazione.",
+        "Installer silenzioso e chiusura dei processi resi piu' affidabili, con ritenti controllati in caso di file temporaneamente occupati."
       ]
     },
     {
       "toolId": "photo-selector-app",
-      "version": "0.1.18",
+      "version": "0.1.24",
       "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.18/Image-Select-Pro-0.1.18-stable-x64-setup.exe",
-      "installerSha256": "005992111608b960100b1ebfee12c8fa188dc66df25a2d45e0d4f3471ff35e5d",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/v0.1.24/Image-Select-Pro-0.1.24-stable-x64-setup.exe",
+      "installerSha256": "e5e7949daf0b9d18ea459ea34a5a6ca56c62100d2dd524dc5a146cca6e4d3e0c",
       "minLauncherVersion": "0.1.0",
-      "publishedAt": "2026-08-05T14:12:09.734Z",
+      "publishedAt": "2026-08-08T18:44:02.655Z",
       "highlights": [
-        "Aggiunto il riavvio coordinato: durante un aggiornamento vengono chiusi FileX e tutti i tool collegati.",
-        "Al termine dell'installazione la Suite riparte automaticamente e riapre i software usati prima dell'aggiornamento.",
-        "La scheda del software ora spiega in dettaglio funzioni e novita della versione prima dell'installazione."
+        "Risolto l'errore 'Impossibile disinstallare i vecchi file dell'applicazione: 2' durante l'aggiornamento da FileX Suite.",
+        "FileX Suite non mantiene piu' aperto app.asar di Image Select Pro e ritenta automaticamente i lock transitori senza lasciare finestre nascoste."
       ]
     }
   ],
-  "payloadSha256": "3cb552c3275bf2fcd95e547865b0d2c75c0d24433e6294941b89d7f8a313b339"
+  "payloadSha256": "e97780e8569c37a32a19c1de4a550258bcf4ae4fec377ef7293b2fbfdaa8d7ec"
 }

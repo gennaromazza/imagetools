@@ -6,9 +6,22 @@ import {
   type DesktopToolDescriptor,
 } from "./tool-manifest.js";
 
-const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000;
+const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 12_000;
 const TOOL_FORCE_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TOOL_SHUTDOWN_POLL_INTERVAL_MS = 250;
+const TOOL_POST_SHUTDOWN_SETTLE_MS = 2_500;
+const INSTALLER_TIMEOUT_MS = 5 * 60_000;
+const INSTALLER_RETRY_DELAYS_MS = [0, 3_000, 7_000] as const;
+
+class InstallerExitError extends Error {
+  constructor(
+    message: string,
+    readonly exitCode: number | null,
+  ) {
+    super(message);
+    this.name = "InstallerExitError";
+  }
+}
 
 function normalizeProcessName(value: string): string {
   return value
@@ -135,15 +148,29 @@ function runInstaller(installerPath: string): Promise<void> {
       windowsHide: true,
     });
 
-    installer.once("error", reject);
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    const timeout = setTimeout(() => {
+      installer.kill();
+      finish(() => reject(new Error("Installer FileX bloccato oltre 5 minuti.")));
+    }, INSTALLER_TIMEOUT_MS);
+
+    installer.once("error", (error) => finish(() => reject(error)));
     installer.once("close", (code, signal) => {
       if (code === 0) {
-        resolve();
+        finish(resolve);
         return;
       }
 
       const detail = signal ? `segnale ${signal}` : `codice ${code ?? "sconosciuto"}`;
-      reject(new Error(`Installer FileX terminato con ${detail}.`));
+      finish(() => reject(
+        new InstallerExitError(`Installer FileX terminato con ${detail}.`, code),
+      ));
     });
   });
 }
@@ -169,6 +196,31 @@ export async function installFileXToolUpdate(
     throw new Error("Installer FileX non valido o non disponibile.");
   }
 
-  await stopFileXTool(toolId);
-  await runInstaller(installerPath);
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < INSTALLER_RETRY_DELAYS_MS.length; attempt += 1) {
+    const retryDelay = INSTALLER_RETRY_DELAYS_MS[attempt];
+    if (retryDelay > 0) {
+      await delay(retryDelay);
+    }
+
+    await stopFileXTool(toolId);
+    // Electron puo' aver chiuso il processo principale mentre ExifTool o altri
+    // helper nativi stanno ancora rilasciando handle dentro la cartella app.
+    await delay(TOOL_POST_SHUTDOWN_SETTLE_MS);
+
+    try {
+      await runInstaller(installerPath);
+      return;
+    } catch (error) {
+      lastError = error;
+      const canRetry = error instanceof InstallerExitError && error.exitCode === 2;
+      if (!canRetry || attempt === INSTALLER_RETRY_DELAYS_MS.length - 1) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Installazione FileX non completata.");
 }

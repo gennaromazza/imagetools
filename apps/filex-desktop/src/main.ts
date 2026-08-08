@@ -2121,7 +2121,21 @@ app.on("window-all-closed", () => {
   }
 });
 
-app.once("before-quit", () => {
+const NATIVE_SHUTDOWN_TIMEOUT_MS = 10_000;
+let nativeShutdownStarted = false;
+let nativeShutdownCompleted = false;
+
+app.on("before-quit", (event) => {
+  if (nativeShutdownCompleted) {
+    return;
+  }
+
+  event.preventDefault();
+  if (nativeShutdownStarted) {
+    return;
+  }
+  nativeShutdownStarted = true;
+
   archivioFlowIsQuitting = true;
   stopArchivioFlowSdWatcher();
   archivioFlowTray?.destroy();
@@ -2130,7 +2144,18 @@ app.once("before-quit", () => {
   suiteTray = null;
   suiteDockWindow?.destroy();
   suiteDockWindow = null;
-  void shutdownDesktopImageService();
-  void shutdownNativeFolderService();
-  shutdownDesktopStore();
+
+  const nativeShutdown = Promise.allSettled([
+    shutdownDesktopImageService(),
+    shutdownNativeFolderService(),
+  ]);
+  const timeout = new Promise<void>((resolve) => {
+    setTimeout(resolve, NATIVE_SHUTDOWN_TIMEOUT_MS);
+  });
+
+  void Promise.race([nativeShutdown, timeout]).finally(() => {
+    shutdownDesktopStore();
+    nativeShutdownCompleted = true;
+    app.quit();
+  });
 });
