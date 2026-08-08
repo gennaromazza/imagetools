@@ -1,7 +1,8 @@
 import * as electron from "electron";
+import { extractFile } from "@electron/asar";
 import { spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
@@ -256,14 +257,13 @@ function readExecutableVersion(
   executablePath: string,
 ): string | null {
   try {
-    const packagePath = join(
+    const archivePath = join(
       dirname(executablePath),
       "resources",
       "app.asar",
-      "package.json",
     );
     const packageJson = JSON.parse(
-      readFileSync(packagePath, "utf8"),
+      extractFile(archivePath, "package.json").toString("utf8"),
     ) as { version?: unknown };
     if (
       typeof packageJson.version === "string" &&
@@ -273,7 +273,7 @@ function readExecutableVersion(
     }
   } catch {
     // Installazioni legacy potrebbero non
-    // esporre package.json tramite app.asar.
+    // contenere un archivio ASAR leggibile.
   }
   return null;
 }

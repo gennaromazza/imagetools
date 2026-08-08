@@ -19,6 +19,7 @@
     "test:photo-selector-workflow": "tsx scripts/test-photo-selector-workflow.ts",
     "test:photo-selector-relocation": "tsx scripts/test-photo-selector-relocation.ts",
     "test:photo-selector-xmp": "tsx scripts/test-photo-selector-xmp.ts",
+    "test:filex-updater-lock": "node scripts/test-filex-updater-lock.mjs",
     "dev:batch-print-layout": "npm --workspace @photo-tools/batch-print-layout run dev",
     "dev:image-converter": "npm --workspace @photo-tools/image-converter run dev",
     "dev:image-file-finder": "npm --workspace @photo-tools/image-file-finder run dev",

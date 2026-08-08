@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-08-08 - FileX Suite 0.1.24
+
+### Aggiornamento dei tool
+- corretto il lock di `resources/app.asar` causato dalla lettura della versione installata: FileX Suite non mantiene piu' aperti i file di Image Select Pro e degli altri tool
+- l'installer silenzioso non resta piu' sospeso dietro una finestra di errore; restituisce alla Suite il codice di file occupato, che viene ritentato con attese progressive
+- la chiusura della Suite ora attende i servizi nativi prima di terminare, riducendo i processi residui e i file ancora in uso
+- aggiunto un test di regressione Windows che legge la versione dall'ASAR e verifica che l'archivio possa essere rinominato immediatamente
+
+### Release engineering
+- FileX Suite, Image Party Frame, Image Select Pro e Archivio Flow vengono riallineati alla versione `0.1.24` con installer per-user, blockmap, `latest.yml` e manifest stabile verificato
+
 ## 2026-08-08 - FileX Suite 0.1.23
 
 ### Image Select Pro

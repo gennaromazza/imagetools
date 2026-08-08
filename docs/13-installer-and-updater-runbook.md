@@ -65,8 +65,10 @@ Le versioni precedenti al passaggio per-user sono installate in `C:\Program File
 
 Una pubblicazione e' conclusa solo dopo aver verificato GitHub Release, GitHub Pages e il manifest remoto. Seguire `docs/18-publish-build-contract.md` per la checklist completa.
 
-## Verifica release 0.1.23
+## Verifica release 0.1.24
 
-La release stabile `v0.1.23` deve esporre gli installer Windows di FileX Suite, Image Party Frame, Image Select Pro e Archivio Flow, oltre a blockmap e `latest.yml` della Suite. Per ogni tool il manifest stabile deve indicare versione `0.1.23`, URL riferito al tag e checksum SHA-256 valido.
+La release stabile `v0.1.24` deve esporre gli installer Windows di FileX Suite, Image Party Frame, Image Select Pro e Archivio Flow, oltre a blockmap e `latest.yml` della Suite. Per ogni tool il manifest stabile deve indicare versione `0.1.24`, URL riferito al tag e checksum SHA-256 valido.
 
-Da una vecchia installazione verificare due percorsi distinti: l'aggiornamento automatico di FileX Suite tramite `latest.yml` e il pulsante `Aggiorna` nella scheda Image Select Pro tramite `stable.json`. Dopo il secondo aggiornamento il titolo della finestra deve mostrare `Image Select Pro — Versione 0.1.23`.
+Da una vecchia installazione verificare due percorsi distinti: l'aggiornamento automatico di FileX Suite tramite `latest.yml` e il pulsante `Aggiorna` nella scheda Image Select Pro tramite `stable.json`. Dopo il secondo aggiornamento il titolo della finestra deve mostrare `Image Select Pro — Versione 0.1.24`.
+
+Con FileX Suite aperta, verificare inoltre che la lettura della versione installata non mantenga un lock su `resources/app.asar`. L'aggiornamento silenzioso di Image Select Pro deve completarsi senza la finestra "Impossibile disinstallare i vecchi file"; un lock transitorio deve produrre codice `2`, essere ritentato dalla Suite e terminare entro il timeout previsto.
