@@ -111,6 +111,10 @@ function jsonHeaders(): HeadersInit {
 }
 
 async function exchangeRefreshToken(token: StoredToken): Promise<string> {
+  if (!GOOGLE_CLIENT_ID) {
+    throw new Error("Google Drive OAuth non è configurato in questa build.");
+  }
+
   if (token.accessToken && token.expiresAt && token.expiresAt > Date.now() + 60_000) {
     return token.accessToken;
   }
@@ -126,7 +130,12 @@ async function exchangeRefreshToken(token: StoredToken): Promise<string> {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Google token refresh failed (${response.status})`);
+    const authenticationExpired = response.status === 400 || response.status === 401;
+    if (authenticationExpired) {
+      await clearToken();
+      throw new Error("Sessione Google Drive scaduta. Riconnetti Google Drive.");
+    }
+    throw new Error(`Aggiornamento della sessione Google Drive non riuscito (${response.status}).`);
   }
 
   const payload = await response.json() as { access_token?: string; expires_in?: number };
@@ -363,26 +372,55 @@ async function getAccountEmail(token: StoredToken): Promise<string | null> {
   return payload.email ?? null;
 }
 
-function statusFor(token: StoredToken | null): DesktopGoogleDriveStatus {
+function statusFor(token: StoredToken | null, requiresReconnect = false): DesktopGoogleDriveStatus {
   return {
     configured: Boolean(GOOGLE_CLIENT_ID),
     connected: Boolean(token),
     accountEmail: token?.accountEmail ?? null,
+    requiresReconnect,
   };
 }
 
 export async function getGoogleDriveStatus(): Promise<DesktopGoogleDriveStatus> {
   const token = await loadToken();
-  void writeDriveLog("Status requested", statusFor(token).connected ? "connected" : "disconnected");
-  return statusFor(token);
+  if (!token) {
+    void writeDriveLog("Status requested", "disconnected");
+    return statusFor(null);
+  }
+
+  try {
+    await exchangeRefreshToken(token);
+    void writeDriveLog("Status requested", "connected");
+    return statusFor(token);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Sessione Google Drive scaduta")) {
+      void writeDriveLog("Status requested", "reconnect-required");
+      return statusFor(null, true);
+    }
+    void writeDriveLog("Status requested", "connected-unverified");
+    return statusFor(token);
+  }
 }
 
 export async function connectGoogleDrive(): Promise<DesktopGoogleDriveStatus> {
+  if (!GOOGLE_CLIENT_ID) {
+    throw new Error("Google Drive OAuth non è configurato in questa build.");
+  }
+
   const existing = await loadToken();
   if (existing) {
-    existing.accountEmail = existing.accountEmail ?? (await getAccountEmail(existing)) ?? undefined;
-    await saveToken(existing);
-    return statusFor(existing);
+    try {
+      await exchangeRefreshToken(existing);
+      existing.accountEmail = existing.accountEmail ?? (await getAccountEmail(existing)) ?? undefined;
+      await saveToken(existing);
+      return statusFor(existing);
+    } catch (error) {
+      // A rejected refresh token is removed by exchangeRefreshToken. In that
+      // case continue directly with OAuth so "Riconnetti" remains one click.
+      if (await loadToken()) {
+        throw error;
+      }
+    }
   }
 
   const state = randomBytes(24).toString("hex");

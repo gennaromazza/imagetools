@@ -1,4 +1,4 @@
-import type { DesktopRuntimeInfo } from "@photo-tools/desktop-contracts";
+import type { DesktopGraphicsStatus, DesktopRuntimeInfo } from "@photo-tools/desktop-contracts";
 
 export async function getDesktopRuntimeInfo(): Promise<DesktopRuntimeInfo | null> {
   if (typeof window === "undefined" || typeof window.filexDesktop === "undefined") {
@@ -7,6 +7,18 @@ export async function getDesktopRuntimeInfo(): Promise<DesktopRuntimeInfo | null
 
   try {
     return await window.filexDesktop.getRuntimeInfo();
+  } catch {
+    return null;
+  }
+}
+
+export async function getDesktopGraphicsStatus(): Promise<DesktopGraphicsStatus | null> {
+  if (typeof window === "undefined" || typeof window.filexDesktop?.getGraphicsStatus !== "function") {
+    return null;
+  }
+
+  try {
+    return await window.filexDesktop.getGraphicsStatus();
   } catch {
     return null;
   }

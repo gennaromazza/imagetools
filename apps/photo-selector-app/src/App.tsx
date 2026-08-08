@@ -5,6 +5,7 @@ import type {
   DesktopCacheLocationRecommendation,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
+  DesktopGraphicsStatus,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
   DesktopRamBudgetPreset,
@@ -18,6 +19,7 @@ import {
 import {
   acknowledgeDesktopOpenFolderRequest,
   consumePendingDesktopOpenFolderPath,
+  getDesktopGraphicsStatus,
   getDesktopRuntimeInfo,
   markDesktopOpenFolderRequestReady,
   subscribeDesktopOpenFolderRequest,
@@ -29,7 +31,6 @@ import {
   getDesktopCacheLocationRecommendation,
   getDesktopThumbnailCacheInfo,
   migrateDesktopThumbnailCacheDirectory,
-  relaunchDesktopApp,
   resetDesktopThumbnailCacheDirectory,
   setDesktopRamBudgetPreset,
   setDesktopThumbnailCacheDirectory,
@@ -78,9 +79,11 @@ import {
   perfTimeEnd,
   resetPerfByteReadStats,
 } from "./services/performance-utils";
+import { AppHeader } from "./components/AppHeader";
 import {
   loadPhotoSelectorPreferences,
   hydratePhotoSelectorPreferences,
+  noteActiveRamBudgetPreset,
   type ThumbnailProfile,
 } from "./services/photo-selector-preferences";
 import {
@@ -107,6 +110,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DismissibleBanner } from "./components/DismissibleBanner";
 import { FolderBrowser } from "./components/FolderBrowser";
 import { ImportProgressModal } from "./components/ImportProgressModal";
+import { PhotoLoadingOverlay } from "./components/PhotoLoadingOverlay";
 import {
   DriveManualRootPickerModal,
   DriveVersionPickerModal,
@@ -405,6 +409,11 @@ function formatSyncTimestamp(timestamp: number | null): string {
   });
 }
 
+function isGoogleDriveAuthenticationError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /sessione google drive scaduta|google token refresh failed\s*\((?:400|401)\)|invalid_grant|google drive non (?:è|e') collegato/i.test(message);
+}
+
 function formatFolderDiagnosticsSource(source: FolderOpenDiagnostics["source"]): string {
   return source === "desktop-native" ? "Desktop Windows" : source;
 }
@@ -558,12 +567,14 @@ export function App() {
   // ── Persisted state ──────────────────────────────────────────────────
   const [projectName, setProjectName] = useState("Image Select Pro");
   const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntimeInfo | null>(null);
+  const [desktopGraphicsStatus, setDesktopGraphicsStatus] = useState<DesktopGraphicsStatus | null>(null);
   const [googleDriveStatus, setGoogleDriveStatus] = useState({
     configured: false,
     connected: false,
     accountEmail: null as string | null,
   });
   const [isGoogleDriveBusy, setIsGoogleDriveBusy] = useState(false);
+  const [googleDriveNeedsReconnect, setGoogleDriveNeedsReconnect] = useState(false);
   const [driveVersionPicker, setDriveVersionPicker] = useState<{
     versions: DesktopCloudProjectVersion[];
     resolve: (version: DesktopCloudProjectVersion | null) => void;
@@ -3292,12 +3303,17 @@ export function App() {
     }
     allAssetsRef.current = photos;
     assetIndexByIdRef.current = new Map(photos.map((asset, index) => [asset.id, index]));
-    startTransition(() => {
-      setAllAssets(photos);
-    });
     if (undoableChangedIds.size > 0) {
+      // Classification changes (rating, pick, color label, custom labels) need
+      // immediate visual feedback. startTransition would be interrupted by the
+      // thumbnail-pipeline's urgent updates and the border change would never commit.
+      setAllAssets(photos);
       bumpPhotoMetadataVersion();
       queueXmpSync(Array.from(undoableChangedIds));
+    } else {
+      startTransition(() => {
+        setAllAssets(photos);
+      });
     }
   }, [bumpPhotoMetadataVersion, queueXmpSync, undoRedo]);
 
@@ -3420,12 +3436,17 @@ export function App() {
     try {
       const status = await connectGoogleDrive();
       setGoogleDriveStatus(status);
+      setGoogleDriveNeedsReconnect(false);
       addToast(
         status.accountEmail ? `Google Drive collegato: ${status.accountEmail}` : "Google Drive collegato.",
         "success",
         3200,
       );
     } catch (error) {
+      if (isGoogleDriveAuthenticationError(error)) {
+        setGoogleDriveNeedsReconnect(true);
+        setGoogleDriveStatus((current) => ({ ...current, connected: false }));
+      }
       addToast(error instanceof Error ? error.message : "Collegamento Google Drive non riuscito.", "error", 5000);
     } finally {
       setIsGoogleDriveBusy(false);
@@ -3480,11 +3501,13 @@ export function App() {
         5000,
       );
     } catch (error) {
+      const authenticationExpired = isGoogleDriveAuthenticationError(error);
       const refreshedStatus = await getGoogleDriveStatus().catch(() => null);
       if (refreshedStatus) {
         setGoogleDriveStatus(refreshedStatus);
       }
-      addToast(error instanceof Error ? error.message : "Esportazione Google Drive non riuscita.", "error", 6000);
+      setGoogleDriveNeedsReconnect(authenticationExpired || Boolean(refreshedStatus?.requiresReconnect));
+      addToast(authenticationExpired ? "Sessione Google Drive scaduta. Premi ‘Riconnetti Drive’ per accedere di nuovo." : error instanceof Error ? error.message : "Esportazione Google Drive non riuscita.", "error", 7000);
     } finally {
       setIsGoogleDriveBusy(false);
     }
@@ -3668,11 +3691,13 @@ export function App() {
         6000,
       );
     } catch (error) {
+      const authenticationExpired = isGoogleDriveAuthenticationError(error);
       const refreshedStatus = await getGoogleDriveStatus().catch(() => null);
       if (refreshedStatus) {
         setGoogleDriveStatus(refreshedStatus);
       }
-      addToast(error instanceof Error ? error.message : "Importazione Google Drive non riuscita.", "error", 6000);
+      setGoogleDriveNeedsReconnect(authenticationExpired || Boolean(refreshedStatus?.requiresReconnect));
+      addToast(authenticationExpired ? "Sessione Google Drive scaduta. Premi ‘Riconnetti Drive’ per accedere di nuovo." : error instanceof Error ? error.message : "Importazione Google Drive non riuscita.", "error", 7000);
     } finally {
       setIsGoogleDriveBusy(false);
     }
@@ -3841,6 +3866,7 @@ export function App() {
   const handleRamBudgetPresetChange = useCallback(async (preset: DesktopRamBudgetPreset) => {
     const info = await setDesktopRamBudgetPreset(preset);
     if (info) {
+      noteActiveRamBudgetPreset(info.ramBudgetPreset ?? preset);
       setDesktopThumbnailCacheInfo(info);
     }
   }, []);
@@ -3940,9 +3966,10 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
 
-    void getDesktopRuntimeInfo().then((runtimeInfo) => {
+    void Promise.all([getDesktopRuntimeInfo(), getDesktopGraphicsStatus()]).then(([runtimeInfo, graphicsStatus]) => {
       if (!cancelled) {
         setDesktopRuntime(runtimeInfo);
+        setDesktopGraphicsStatus(graphicsStatus);
       }
     });
 
@@ -3979,6 +4006,7 @@ export function App() {
     void getGoogleDriveStatus().then((status) => {
       if (!cancelled) {
         setGoogleDriveStatus(status);
+        setGoogleDriveNeedsReconnect(Boolean(status.requiresReconnect));
       }
     });
     return () => {
@@ -4090,6 +4118,15 @@ export function App() {
 
   const isGeneratingThumbnails =
     thumbnailProgress.total > 0 && thumbnailProgress.done < thumbnailProgress.total;
+  const initialThumbnailReadyTarget = Math.min(thumbnailProgress.total, 12);
+  const shouldShowPhotoLoader = currentScreen === "selection" && (
+    isFolderTransitionBusy
+    || (
+      allAssets.length > 0
+      && isGeneratingThumbnails
+      && thumbnailProgress.done < initialThumbnailReadyTarget
+    )
+  );
   const shouldShowXmpBanner =
     !isXmpBannerDismissed &&
     !usesMockData &&
@@ -4111,165 +4148,48 @@ export function App() {
   return (
     <ErrorBoundary>
       <div className="photo-selector-app">
-        <header className="app-header">
-          <div className="app-header__identity">
-            <img className="app-header__logo" src={logo} alt="" />
-            <div className="app-header__brand">
-              <h1 className="app-header__title">Image Select Pro</h1>
-              <span className="app-header__subtitle">Photo Tools Suite</span>
-            </div>
-          </div>
-          <nav className="app-header__nav">
-            <button
-              type="button"
-              className={currentScreen === "browse" ? "app-header__tab app-header__tab--active" : "app-header__tab"}
-              onClick={() => setCurrentScreen("browse")}
-            >
-              Sfoglia
-            </button>
-            <button
-              type="button"
-              className={currentScreen === "selection" ? "app-header__tab app-header__tab--active" : "app-header__tab"}
-              onClick={() => setCurrentScreen("selection")}
-              disabled={allAssets.length === 0}
-            >
-              Selezione ({activeAssetIds.length})
-            </button>
-            <button
-              type="button"
-              className={currentScreen === "review" ? "app-header__tab app-header__tab--active" : "app-header__tab"}
-              onClick={() => setCurrentScreen("review")}
-              disabled={allAssets.length === 0}
-            >
-              Riepilogo ({activeAssetIds.length})
-            </button>
-          </nav>
-          <div className="app-header__primary-actions">
-            <button
-              type="button"
-              className="primary-button app-header__button"
-              onClick={() => void handleCreateProject()}
-              disabled={isFolderTransitionBusy || isGoogleDriveBusy}
-            >
-              Nuovo progetto
-            </button>
-            {allAssets.length > 0 ? (
-              <>
-                <button
-                  type="button"
-                  className="ghost-button app-header__button"
-                  onClick={() => void handleCorrectProjectMaster()}
-                  disabled={isFolderTransitionBusy || isGoogleDriveBusy}
-                >
-                  Correggi master
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button app-header__button"
-                  onClick={() => setCurrentScreen("browse")}
-                  disabled={isFolderTransitionBusy}
-                >
-                  Apri altro
-                </button>
-              </>
-            ) : null}
-          </div>
-
-          <div className="app-header__context">
-            {allAssets.length > 0 ? (
-              <div className="app-header__project-name">
-                <span>Nome progetto</span>
-                <div className="app-header__project-name-value">
-                  <strong title={projectName}>{projectName}</strong>
-                  <button
-                    type="button"
-                    className="ghost-button app-header__rename-button"
-                    onClick={() => setIsRenameProjectOpen(true)}
-                    disabled={isFolderTransitionBusy || isGoogleDriveBusy}
-                  >
-                    Rinomina
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="app-header__project-empty">
-                <span>Progetto</span>
-                <strong>Nessun progetto aperto</strong>
-              </div>
-            )}
-
-            <div className="app-header__drive-actions">
-              <button
-                type="button"
-                className="ghost-button app-header__button app-header__drive-account"
-                onClick={() => void handleGoogleDriveConnect()}
-                disabled={isGoogleDriveBusy}
-                title={googleDriveStatus.accountEmail ?? "Collega Google Drive"}
-              >
-                <span className="app-header__drive-label">
-                  {googleDriveStatus.connected ? "Drive collegato" : "Collega Drive"}
-                </span>
-                {googleDriveStatus.connected && googleDriveStatus.accountEmail ? (
-                  <span className="app-header__drive-email">{googleDriveStatus.accountEmail}</span>
-                ) : null}
-              </button>
-              {allAssets.length > 0 ? (
-                <button
-                  type="button"
-                  className="secondary-button app-header__button"
-                  onClick={() => void handleGoogleDriveExport()}
-                  disabled={isGoogleDriveBusy}
-                >
-                  Esporta su Drive
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="secondary-button app-header__button"
-                onClick={() => void handleGoogleDriveImport()}
-                disabled={isGoogleDriveBusy || isFolderTransitionBusy}
-                title={allAssets.length > 0
-                  ? "Importa una versione Drive nel progetto aperto"
-                  : "Recupera una selezione Drive e associala alla cartella master locale"}
-              >
-                {allAssets.length > 0 ? "Continua da Drive" : "Recupera da Drive"}
-              </button>
-            </div>
-
-            <div className="app-header__statuses" aria-live="polite">
-              {isGeneratingThumbnails ? (
-                <button
-                  type="button"
-                  className="app-header__pipeline-status app-header__pipeline-status--button"
-                  onClick={() => setIsImportPanelDismissed(false)}
-                  title="Mostra stato caricamento"
-                >
-                  <div className="pipeline-progress">
-                    <div
-                      className="pipeline-progress__fill"
-                      style={{ width: `${Math.round((thumbnailProgress.done / Math.max(1, thumbnailProgress.total)) * 100)}%` }}
-                    />
-                  </div>
-                  <span className="pipeline-progress__label">
-                    {thumbnailProgress.done}/{thumbnailProgress.total}
-                  </span>
-                </button>
-              ) : null}
-              {isFolderTransitionBusy ? (
-                <div className="app-header__sync-status app-header__sync-status--pending" title={folderTransitionLabel}>
-                  Cambio cartella...
-                </div>
-              ) : null}
-              {!usesMockData && allAssets.length > 0 ? (
-                <div className={`app-header__sync-status app-header__sync-status--${xmpSyncState.phase}`}>
-                  {xmpSyncLabel}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </header>
+        <AppHeader
+          logo={logo}
+          currentScreen={currentScreen}
+          assetCount={allAssets.length}
+          selectedCount={activeAssetIds.length}
+          projectName={projectName}
+          folderPath={folderDiagnostics?.selectedPath ?? null}
+          folderPhotoCount={folderDiagnostics?.groupedAssetCount ?? folderDiagnostics?.topLevelSupportedCount ?? null}
+          ignoredNestedPhotoCount={folderDiagnostics?.nestedSupportedDiscardedCount ?? 0}
+          isFolderDetailsOpen={isFolderDiagnosticsExpanded}
+          isFolderTransitionBusy={isFolderTransitionBusy}
+          folderTransitionLabel={folderTransitionLabel}
+          isGoogleDriveBusy={isGoogleDriveBusy}
+          driveConfigured={googleDriveStatus.configured}
+          driveConnected={googleDriveStatus.connected}
+          driveNeedsReconnect={googleDriveNeedsReconnect}
+          driveAccountEmail={googleDriveStatus.accountEmail}
+          isGeneratingThumbnails={isGeneratingThumbnails}
+          thumbnailDone={thumbnailProgress.done}
+          thumbnailTotal={thumbnailProgress.total}
+          showXmpStatus={!usesMockData && allAssets.length > 0}
+          xmpPhase={xmpSyncState.phase}
+          xmpLabel={xmpSyncLabel}
+          onScreenChange={setCurrentScreen}
+          onCreateProject={() => void handleCreateProject()}
+          onCorrectMaster={() => void handleCorrectProjectMaster()}
+          onRenameProject={() => setIsRenameProjectOpen(true)}
+          onDriveConnect={() => void handleGoogleDriveConnect()}
+          onDriveExport={() => void handleGoogleDriveExport()}
+          onDriveImport={() => void handleGoogleDriveImport()}
+          onShowImportProgress={() => setIsImportPanelDismissed(false)}
+          onToggleFolderDetails={() => setIsFolderDiagnosticsExpanded((current) => !current)}
+        />
 
         <main className="app-main">
+          {shouldShowPhotoLoader ? (
+            <PhotoLoadingOverlay
+              done={thumbnailProgress.done}
+              total={thumbnailProgress.total}
+              scanning={isFolderTransitionBusy}
+            />
+          ) : null}
           {shouldShowXmpBanner ? (
             <DismissibleBanner
               title="Sincronizzazione XMP non attiva"
@@ -4286,11 +4206,11 @@ export function App() {
               onDismiss={() => setIsXmpBannerDismissed(true)}
             />
           ) : null}
-          {folderDiagnostics ? (
-            <div className="folder-diagnostics-panel" role="status" aria-live="polite">
+          {folderDiagnostics && isFolderDiagnosticsExpanded ? (
+            <div className="folder-diagnostics-panel folder-diagnostics-panel--expanded" role="status" aria-live="polite">
               <div className="folder-diagnostics-panel__header">
                 <div className="folder-diagnostics-panel__context">
-                  <strong>Cartella attiva</strong>
+                  <strong>Dettagli cartella</strong>
                   <span title={folderDiagnostics.selectedPath}>{folderDiagnostics.selectedPath}</span>
                 </div>
                 <div className="folder-diagnostics-panel__actions">
@@ -4304,11 +4224,13 @@ export function App() {
                   ) : null}
                   <button
                     type="button"
-                    className="ghost-button ghost-button--small"
+                    className="ghost-button ghost-button--small folder-diagnostics-panel__toggle"
                     onClick={() => setIsFolderDiagnosticsExpanded((current) => !current)}
                     aria-expanded={isFolderDiagnosticsExpanded}
+                    aria-label={isFolderDiagnosticsExpanded ? "Nascondi dettagli cartella" : "Mostra dettagli cartella"}
+                    title={isFolderDiagnosticsExpanded ? "Nascondi dettagli" : "Mostra dettagli"}
                   >
-                    {isFolderDiagnosticsExpanded ? "Nascondi dettagli" : "Dettagli"}
+                    ×
                   </button>
                 </div>
               </div>
@@ -4378,6 +4300,7 @@ export function App() {
                 thumbnailProfile={thumbnailProfile}
                 sortCacheEnabled={sortCacheEnabled}
                 performanceSnapshot={performanceSnapshot}
+                desktopGraphicsStatus={desktopGraphicsStatus}
                 onThumbnailProfileChange={setThumbnailProfile}
                 onSortCacheEnabledChange={setSortCacheEnabled}
                 desktopThumbnailCacheInfo={desktopThumbnailCacheInfo}
@@ -4392,7 +4315,6 @@ export function App() {
                 onSnoozeDesktopCacheRecommendation={handleSnoozeDesktopCacheRecommendation}
                 onDismissDesktopCacheRecommendation={handleDismissDesktopCacheRecommendation}
                 onRamBudgetPresetChange={handleRamBudgetPresetChange}
-                  onRelaunch={relaunchDesktopApp}
                 />
             </div>
           ) : null}

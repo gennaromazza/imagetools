@@ -26,6 +26,7 @@ import type {
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
   DesktopFolderOpenOptions,
+  DesktopGraphicsStatus,
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
@@ -59,6 +60,7 @@ import {
   resolvePhotoSelectorProjectDesktop,
   reopenFolderDesktop,
   saveFileAsDesktop,
+  shutdownNativeFolderService,
   statFilesFromDisk,
   writePhotoSelectorProjectFileDesktop,
   writeSidecarXmpForAssetPath,
@@ -122,7 +124,6 @@ import {
   openInstalledTool,
 } from "./updater.js";
 import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault, getSuiteManagedTools } from "./tool-manifest.js";
-import { consumeFileXRestartPlan } from "./filex-process-coordinator.js";
 import {
   checkSuiteUpdate,
   configureSuiteUpdater,
@@ -1139,6 +1140,32 @@ function registerIpcHandlers(): void {
 
     return payload;
   });
+  ipcMain.handle("filex:get-graphics-status", async () => {
+    const features = app.getGPUFeatureStatus() as unknown as Record<string, string>;
+    const gpuInfo = await app.getGPUInfo("basic").catch(() => null) as {
+      gpuDevice?: Array<{ deviceString?: string }>;
+      auxAttributes?: { glRenderer?: string };
+    } | null;
+    const gpuCompositing = features.gpu_compositing ?? "unknown";
+    const webgl = features.webgl ?? "unknown";
+    const isAccelerated = (status: string) => status.startsWith("enabled");
+    const payload: DesktopGraphicsStatus = {
+      hardwareAccelerationEnabled:
+        !app.commandLine.hasSwitch("disable-gpu")
+        && (isAccelerated(gpuCompositing) || isAccelerated(webgl)),
+      gpuCompositing,
+      webgl,
+      rasterization: features.rasterization ?? "unknown",
+      videoDecode: features.video_decode ?? "unknown",
+      deviceName: gpuInfo?.gpuDevice?.find((device) => device.deviceString)?.deviceString
+        ?? gpuInfo?.auxAttributes?.glRenderer
+        ?? null,
+    };
+    writeBootLog(
+      `GPU status accelerated=${payload.hardwareAccelerationEnabled} compositing=${gpuCompositing} webgl=${webgl} raster=${payload.rasterization} device=${payload.deviceName ?? "unknown"}`,
+    );
+    return payload;
+  });
   ipcMain.handle("filex:list-available-tools", async (_event, channel?: DesktopReleaseChannel) =>
     listAvailableTools(channel ?? resolveReleaseChannel()).catch((error) => {
       logDesktopEvent({
@@ -1468,9 +1495,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:save-file-as", async (_event, absolutePath: string) =>
     saveFileAsDesktop(absolutePath),
   );
-  ipcMain.handle("filex:get-desktop-preferences", () => getDesktopPreferences());
-  ipcMain.handle("filex:save-desktop-preferences", (_event, preferences: DesktopPhotoSelectorPreferences) =>
-    saveDesktopPreferences(preferences),
+  ipcMain.handle("filex:get-desktop-preferences", async () => ({
+    ...(await getDesktopPreferences()),
+    ramBudgetPreset: await loadRamBudgetPreset(),
+  }));
+  ipcMain.handle("filex:save-desktop-preferences", async (_event, preferences: DesktopPhotoSelectorPreferences) =>
+    saveDesktopPreferences({
+      ...preferences,
+      // The native image service owns this setting. Do not let an unrelated
+      // UI preference save overwrite the preset that is actually in use.
+      ramBudgetPreset: await loadRamBudgetPreset(),
+    }),
   );
   ipcMain.handle("filex:read-photo-selector-project-file", (_event, rootPath: string) =>
     readPhotoSelectorProjectFileDesktop(sanitizeDesktopPath(rootPath)),
@@ -1878,8 +1913,9 @@ function startArchivioFlowSdWatcher(): void {
 
 async function createMainWindow(): Promise<void> {
   writeBootLog("Creating main window");
+  const windowTitle = `${requestedTool.productName} — Versione ${app.getVersion()}`;
   const windowInstance = new BrowserWindow({
-    title: requestedTool.productName,
+    title: windowTitle,
     width: requestedTool.defaultWindowWidth,
     height: requestedTool.defaultWindowHeight,
     minWidth: requestedTool.minWindowWidth,
@@ -1904,6 +1940,11 @@ async function createMainWindow(): Promise<void> {
     return { action: "deny" };
   });
 
+  windowInstance.on("page-title-updated", (event) => {
+    event.preventDefault();
+    windowInstance.setTitle(windowTitle);
+  });
+
   windowInstance.webContents.on("will-prevent-unload", (event) => {
     event.preventDefault();
     windowInstance.destroy();
@@ -1921,7 +1962,7 @@ async function createMainWindow(): Promise<void> {
 
   await loadRenderer(windowInstance);
 
-  windowInstance.setTitle(requestedTool.productName);
+  windowInstance.setTitle(windowTitle);
   writeBootLog("Main window created");
 
   if (!app.isPackaged) {
@@ -2050,10 +2091,6 @@ if (hasSingleInstanceLock) {
     createSuiteTray();
     await createSuiteDock();
     if (requestedTool.id === "suite-launcher" && app.isPackaged) {
-      const toolsToRestart = consumeFileXRestartPlan();
-      for (const toolId of toolsToRestart) {
-        await openInstalledTool(toolId);
-      }
       setTimeout(() => { void checkSuiteUpdate(); }, 3500);
     }
     writeBootLog("Startup sequence completed");
@@ -2094,5 +2131,6 @@ app.once("before-quit", () => {
   suiteDockWindow?.destroy();
   suiteDockWindow = null;
   void shutdownDesktopImageService();
+  void shutdownNativeFolderService();
   shutdownDesktopStore();
 });

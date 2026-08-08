@@ -76,6 +76,7 @@ interface PhotoQuickPreviewModalProps {
   canExternalDrag?: boolean;
   onExternalDragStart?: (assetId: string, event: DragEvent<HTMLElement>) => void;
   autoAdvanceOnAction?: boolean;
+  onAutoAdvanceOnActionChange?: (enabled: boolean) => void;
   onClose: () => void;
   onSelectAsset?: (assetId: string) => void;
   onAddToPage?: (pageId: string, assetId: string) => void;
@@ -239,6 +240,7 @@ export function PhotoQuickPreviewModal({
   canExternalDrag = false,
   onExternalDragStart,
   autoAdvanceOnAction = true,
+  onAutoAdvanceOnActionChange,
   onClose,
   onSelectAsset,
   onAddToPage,
@@ -254,6 +256,7 @@ export function PhotoQuickPreviewModal({
   const pendingDockViewportRef = useRef<VirtualStripViewport | null>(null);
   const assignFeedbackTimeoutRef = useRef<number | null>(null);
   const classificationFeedbackTimeoutRef = useRef<number | null>(null);
+  const classificationMutationRef = useRef(false);
   const lastExternalFeedbackTokenRef = useRef<number>(0);
   const previewWarmupTimeoutRef = useRef<number | null>(null);
   const detailPreviewTimeoutRef = useRef<number | null>(null);
@@ -327,6 +330,11 @@ export function PhotoQuickPreviewModal({
     startY: number;
     originX: number;
     originY: number;
+  } | null>(null);
+  const swipeDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
   } | null>(null);
   const panAnimationFrameRef = useRef<number | null>(null);
   const pendingPanOffsetRef = useRef<{ x: number; y: number } | null>(null);
@@ -438,16 +446,33 @@ export function PhotoQuickPreviewModal({
 
   useEffect(() => {
     if (!asset || !onSelectAsset || !hasActiveFilters) {
+      classificationMutationRef.current = false;
       return;
     }
 
     const assetIsVisible = filteredAssets.some((item) => item.id === asset.id);
-    if (!assetIsVisible && filteredAssets.length > 0) {
+    const followsClassification = classificationMutationRef.current;
+    classificationMutationRef.current = false;
+    if (!assetIsVisible && filteredAssets.length > 0 && !followsClassification) {
       selectAssetFromPreview(filteredAssets[0].id, "jump");
     }
   }, [asset, filteredAssets, hasActiveFilters, onSelectAsset, selectAssetFromPreview]);
 
-  const navigationAssets = hasActiveFilters ? filteredAssets : assets;
+  const navigationAssets = useMemo(() => {
+    if (!hasActiveFilters) {
+      return assets;
+    }
+    if (!asset || filteredAssets.some((item) => item.id === asset.id)) {
+      return filteredAssets;
+    }
+
+    // Keep the classified photo in its original position until the user
+    // explicitly navigates. This prevents filter changes caused by the
+    // classification itself from producing an implicit or double skip.
+    const navigationIds = new Set(filteredAssets.map((item) => item.id));
+    navigationIds.add(asset.id);
+    return assets.filter((item) => navigationIds.has(item.id));
+  }, [asset, assets, filteredAssets, hasActiveFilters]);
   const currentIndex = useMemo(
     () => (asset ? navigationAssets.findIndex((item) => item.id === asset.id) : -1),
     [asset, navigationAssets]
@@ -641,6 +666,7 @@ export function PhotoQuickPreviewModal({
     (rating: number) => {
       if (asset && onUpdateAsset) {
         const changes = { rating } satisfies Partial<Pick<ImageAsset, "rating">>;
+        classificationMutationRef.current = true;
         onUpdateAsset(asset.id, changes);
         announceClassificationFeedback(changes);
       }
@@ -652,6 +678,7 @@ export function PhotoQuickPreviewModal({
     (pickStatus: PickStatus) => {
       if (asset && onUpdateAsset) {
         const changes = { pickStatus } satisfies Partial<Pick<ImageAsset, "pickStatus">>;
+        classificationMutationRef.current = true;
         onUpdateAsset(asset.id, changes);
         announceClassificationFeedback(changes);
       }
@@ -663,6 +690,7 @@ export function PhotoQuickPreviewModal({
     (colorLabel: ColorLabel | null) => {
       if (asset && onUpdateAsset) {
         const changes = { colorLabel } satisfies Partial<Pick<ImageAsset, "colorLabel">>;
+        classificationMutationRef.current = true;
         onUpdateAsset(asset.id, changes);
         announceClassificationFeedback(changes);
       }
@@ -1698,6 +1726,7 @@ export function PhotoQuickPreviewModal({
     pendingPanOffsetRef.current = { x: 0, y: 0 };
     setIsPanning(false);
     panDragRef.current = null;
+    swipeDragRef.current = null;
   }, [asset?.id, startZoomed]);
 
   useEffect(() => {
@@ -1709,6 +1738,7 @@ export function PhotoQuickPreviewModal({
       setPanOffset({ x: 0, y: 0 });
       setIsPanning(false);
       panDragRef.current = null;
+      swipeDragRef.current = null;
       return;
     }
 
@@ -1720,11 +1750,12 @@ export function PhotoQuickPreviewModal({
     }
     setIsPanning(false);
     panDragRef.current = null;
+    swipeDragRef.current = null;
   }, [compareMode]);
 
   const currentCustomLabels = asset?.customLabels ?? [];
 
-  const toggleCustomLabel = useCallback((label: string) => {
+  const toggleCustomLabel = useCallback((label: string, advanceAfterChange = false) => {
     if (!asset || !onUpdateAsset) {
       return;
     }
@@ -1734,11 +1765,15 @@ export function PhotoQuickPreviewModal({
       ? currentCustomLabels.filter((currentLabel) => currentLabel !== label)
       : [...currentCustomLabels, label];
 
+    classificationMutationRef.current = true;
     onUpdateAsset(asset.id, {
       customLabels: nextCustomLabels,
     });
     announceCustomLabelFeedback(label, nextIsActive);
-  }, [announceCustomLabelFeedback, asset, currentCustomLabels, onUpdateAsset]);
+    if (advanceAfterChange && autoAdvanceOnAction) {
+      window.setTimeout(() => handleNavigate("next"), 0);
+    }
+  }, [announceCustomLabelFeedback, asset, autoAdvanceOnAction, currentCustomLabels, handleNavigate, onUpdateAsset]);
 
   useEffect(() => {
     if (!asset) {
@@ -1768,7 +1803,7 @@ export function PhotoQuickPreviewModal({
         const shortcutLabel = customLabelByShortcut.get(event.key.toUpperCase() as CustomLabelShortcut);
         if (shortcutLabel) {
           event.preventDefault();
-          toggleCustomLabel(shortcutLabel);
+          toggleCustomLabel(shortcutLabel, true);
           return;
         }
       }
@@ -1844,6 +1879,7 @@ export function PhotoQuickPreviewModal({
 
       if (shortcutChanges) {
         event.preventDefault();
+        classificationMutationRef.current = true;
         onUpdateAsset(asset.id, shortcutChanges);
         announceClassificationFeedback(shortcutChanges);
         if (autoAdvanceOnAction) {
@@ -2496,6 +2532,23 @@ export function PhotoQuickPreviewModal({
               </span>
             ) : null}
             <PhotoClassificationHelpButton title="Scorciatoie preview foto" />
+            {onAutoAdvanceOnActionChange ? (
+              <button
+                type="button"
+                className={
+                  autoAdvanceOnAction
+                    ? "ghost-button quick-preview__action quick-preview__action--active"
+                    : "ghost-button quick-preview__action"
+                }
+                onClick={() => onAutoAdvanceOnActionChange(!autoAdvanceOnAction)}
+                aria-pressed={autoAdvanceOnAction}
+                title={autoAdvanceOnAction
+                  ? "Dopo una classificazione da tastiera passa alla foto successiva. Premi per disattivare."
+                  : "Resta sulla foto dopo la classificazione. Usa le frecce per andare avanti o indietro."}
+              >
+                Avanza: {autoAdvanceOnAction ? "ON" : "OFF"}
+              </button>
+            ) : null}
             <span
               className="quick-preview__perf-badge"
               title={`Benchmark locale della quick preview | ${quickPreviewPerf.sourceBreakdown}`}
@@ -2691,9 +2744,31 @@ export function PhotoQuickPreviewModal({
             applyZoom(nextZoom);
           }}
           onPointerDown={(event) => {
-            if (compareMode || zoomLevel <= 1.05 || event.button !== 0) {
+            if (event.button !== 0) {
               return;
             }
+            const pointerTarget = event.target;
+            if (
+              pointerTarget instanceof HTMLElement
+              && pointerTarget.closest("button, input, select, textarea")
+            ) {
+              return;
+            }
+
+            if (compareMode) {
+              return;
+            }
+
+            if (zoomLevel <= 1.05) {
+              swipeDragRef.current = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+              };
+              event.currentTarget.setPointerCapture(event.pointerId);
+              return;
+            }
+
             panDragRef.current = {
               pointerId: event.pointerId,
               startX: event.clientX,
@@ -2720,6 +2795,22 @@ export function PhotoQuickPreviewModal({
               if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                 event.currentTarget.releasePointerCapture(event.pointerId);
               }
+              return;
+            }
+
+            if (swipeDragRef.current?.pointerId === event.pointerId) {
+              const swipe = swipeDragRef.current;
+              swipeDragRef.current = null;
+
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+
+              const deltaX = event.clientX - swipe.startX;
+              const deltaY = event.clientY - swipe.startY;
+              if (Math.abs(deltaX) >= 56 && Math.abs(deltaY) <= 48) {
+                handleNavigate(deltaX < 0 ? "next" : "previous");
+              }
             }
           }}
           onPointerCancel={(event) => {
@@ -2730,10 +2821,17 @@ export function PhotoQuickPreviewModal({
                 event.currentTarget.releasePointerCapture(event.pointerId);
               }
             }
+            if (swipeDragRef.current?.pointerId === event.pointerId) {
+              swipeDragRef.current = null;
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+            }
           }}
           onLostPointerCapture={() => {
             panDragRef.current = null;
             setIsPanning(false);
+            swipeDragRef.current = null;
           }}
         >
           {zoomLevel > 1.05 && !compareMode ? (

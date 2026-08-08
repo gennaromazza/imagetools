@@ -1,5 +1,5 @@
 import type { ColorLabel } from "@photo-tools/shared-types";
-import type { DesktopPhotoSelectorPreferences } from "@photo-tools/desktop-contracts";
+import type { DesktopPhotoSelectorPreferences, DesktopRamBudgetPreset } from "@photo-tools/desktop-contracts";
 import type { PhotoFilterState } from "./photo-classification";
 import { COLOR_LABEL_NAMES } from "./photo-classification";
 import { getDesktopPreferences, hasDesktopStateApi, saveDesktopPreferences as saveDesktopPreferencesNative } from "./desktop-store";
@@ -17,6 +17,7 @@ export interface PhotoFilterPreset {
   name: string;
   filters: PhotoFilterState & {
     fileTypeFilter?: string;
+    formatFilter?: "all" | "jpg" | "raw" | "raw+jpg";
     customLabelFilter?: string;
     folderFilter?: string;
     seriesFilter?: string;
@@ -54,6 +55,7 @@ export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
 };
 
 let preferencesCache: PhotoSelectorPreferences = { ...DEFAULT_PHOTO_SELECTOR_PREFERENCES };
+let activeRamBudgetPreset: DesktopRamBudgetPreset = "default";
 
 export function normalizeCustomLabelName(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 48);
@@ -252,7 +254,7 @@ function toDesktopPreferences(preferences: PhotoSelectorPreferences): DesktopPho
     cardSize: preferences.cardSize,
     rootFolderPathOverride: preferences.rootFolderPathOverride,
     preferredEditorPath: preferences.preferredEditorPath,
-    ramBudgetPreset: "default",
+    ramBudgetPreset: activeRamBudgetPreset,
     autoAdvanceOnAction: preferences.autoAdvanceOnAction,
   };
 }
@@ -263,8 +265,13 @@ export async function hydratePhotoSelectorPreferences(): Promise<PhotoSelectorPr
   }
 
   const nativePreferences = await getDesktopPreferences();
+  activeRamBudgetPreset = nativePreferences?.ramBudgetPreset ?? "default";
   preferencesCache = parseStoredPreferences(nativePreferences);
   return preferencesCache;
+}
+
+export function noteActiveRamBudgetPreset(preset: DesktopRamBudgetPreset): void {
+  activeRamBudgetPreset = preset;
 }
 
 export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorPreferences>): void {

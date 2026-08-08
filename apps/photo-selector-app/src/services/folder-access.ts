@@ -635,7 +635,7 @@ export async function readSidecarXmp(assetId: string): Promise<string | null> {
     return window.filexDesktop!.readSidecarXmp(companionAbsolutePath);
   }
 
-  return absolutePath ? null : null;
+  return null;
 }
 
 export async function writeSidecarXmp(assetId: string, xml: string): Promise<boolean> {

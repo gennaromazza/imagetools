@@ -16,6 +16,10 @@ import type {
   DesktopPhotoSelectorProjectRelocationResult,
   DesktopSaveFileAsResult,
 } from "@photo-tools/desktop-contracts";
+import {
+  shutdownXmpCompatibilityService,
+  writeEmbeddedStandardXmp,
+} from "./xmp-compatibility.js";
 
 const { app, dialog } = electron;
 
@@ -541,10 +545,14 @@ export async function writeSidecarXmpForAssetPath(
 ): Promise<boolean> {
   try {
     await writeFile(sidecarPathForAsset(absolutePath), xml, "utf8");
-    return true;
+    return await writeEmbeddedStandardXmp(absolutePath, xml);
   } catch {
     return false;
   }
+}
+
+export async function shutdownNativeFolderService(): Promise<void> {
+  await shutdownXmpCompatibilityService();
 }
 
 async function resolveExistingFiles(paths: string[]): Promise<string[]> {

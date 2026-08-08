@@ -11,7 +11,7 @@ function getApi() {
 export async function getGoogleDriveStatus(): Promise<DesktopGoogleDriveStatus> {
   const api = getApi();
   if (!api?.getGoogleDriveStatus) {
-    return { configured: false, connected: false, accountEmail: null };
+    return { configured: false, connected: false, accountEmail: null, requiresReconnect: false };
   }
   return api.getGoogleDriveStatus();
 }
