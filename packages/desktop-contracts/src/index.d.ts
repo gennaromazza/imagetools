@@ -333,6 +333,15 @@ export interface DesktopGoogleDriveStatus {
     configured: boolean;
     connected: boolean;
     accountEmail: string | null;
+    requiresReconnect?: boolean;
+}
+export interface DesktopGraphicsStatus {
+    hardwareAccelerationEnabled: boolean;
+    gpuCompositing: string;
+    webgl: string;
+    rasterization: string;
+    videoDecode: string;
+    deviceName: string | null;
 }
 export interface DesktopPersistedState {
     projectName: string;
@@ -856,6 +865,7 @@ export interface ArchivioFilterPreviewData {
 }
 export interface FileXDesktopApi {
     getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
+    getGraphicsStatus: () => Promise<DesktopGraphicsStatus>;
     getSuiteUpdateState: () => Promise<DesktopSuiteUpdateState>;
     checkSuiteUpdate: () => Promise<DesktopSuiteUpdateState>;
     installSuiteUpdate: () => Promise<DesktopSuiteUpdateState>;

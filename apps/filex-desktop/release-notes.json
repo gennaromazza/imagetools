@@ -1,5 +1,9 @@
 {
   "image-party-frame": {
+    "0.1.23": [
+      "Pubblicazione coordinata con FileX Suite 0.1.23 per allineare installer per-user, manifest e canale stabile.",
+      "Aggiornamento Windows distribuito con verifica SHA-256 e gestione piu' affidabile dei processi aperti."
+    ],
     "0.1.20": [
       "Pubblicazione coordinata con FileX Suite 0.1.20 per mantenere coerenti installer, manifest e canale stabile.",
       "Installer Windows ripubblicato con verifica SHA-256 prima dell'avvio."
@@ -26,6 +30,10 @@
     ]
   },
   "archivio-flow": {
+    "0.1.23": [
+      "Pubblicazione coordinata con FileX Suite 0.1.23 per allineare installer per-user, manifest e canale stabile.",
+      "Aggiornamento Windows distribuito con verifica SHA-256 e gestione piu' affidabile dei processi aperti."
+    ],
     "0.1.20": [
       "Pubblicazione coordinata con FileX Suite 0.1.20 per mantenere coerenti installer, manifest e canale stabile.",
       "Installer Windows ripubblicato con verifica SHA-256 prima dell'avvio."
@@ -58,6 +66,12 @@
     ]
   },
   "photo-selector-app": {
+    "0.1.23": [
+      "Area di lavoro modulare con pannelli compatti, richiudibili e riposizionabili, senza sovrapposizioni sulla griglia.",
+      "Anteprima rapida con avanzamento automatico disattivabile e navigazione manuale stabile, senza doppi salti dopo la classificazione.",
+      "Caricamento e rendering ottimizzati per migliaia di fotografie, con loader esplicito e diagnostica reale dell'accelerazione hardware.",
+      "Riconnessione Google Drive guidata quando il token e' scaduto o revocato e compatibilita' XMP rafforzata."
+    ],
     "0.1.20": [
       "Pubblicazione coordinata con FileX Suite 0.1.20 per rendere affidabile il completamento degli aggiornamenti dal launcher.",
       "Installer Windows ripubblicato con verifica SHA-256 prima dell'avvio."

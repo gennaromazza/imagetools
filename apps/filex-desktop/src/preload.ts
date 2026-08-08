@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer, webUtils } = electron;
 
 const api: FileXDesktopApi = {
   getRuntimeInfo: () => ipcRenderer.invoke("filex:get-runtime-info"),
+  getGraphicsStatus: () => ipcRenderer.invoke("filex:get-graphics-status"),
   getSuiteUpdateState: () => ipcRenderer.invoke("filex:get-suite-update-state"),
   checkSuiteUpdate: () => ipcRenderer.invoke("filex:check-suite-update"),
   installSuiteUpdate: () => ipcRenderer.invoke("filex:install-suite-update"),

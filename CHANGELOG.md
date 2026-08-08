@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-08-08 - FileX Suite 0.1.23
+
+### Image Select Pro
+- nuova area di lavoro modulare: pannelli Selezione, Vista, Filtri e Statistiche sono compatti, richiudibili e riposizionabili senza coprire la griglia
+- barra superiore e comandi contestuali riorganizzati per ridurre ingombro e clic ripetuti; corretti contenuti tagliati, sovrapposizioni e livelli dei modali
+- caricamento esplicito per servizi con migliaia di fotografie, rendering alleggerito e diagnostica reale dell'accelerazione hardware nel pannello impostazioni
+- in anteprima rapida l'avanzamento dopo una classificazione e' ora disattivabile direttamente con `Avanza: ON/OFF`; eliminato il doppio salto causato dall'interazione con i filtri attivi
+- navigazione manuale avanti/indietro preservata anche quando la classificazione corrente non soddisfa piu' il filtro visibile
+- riconnessione Google Drive disponibile quando il refresh del token scade o viene revocato, con messaggio operativo al posto dell'errore generico 400
+- sincronizzazione XMP resa piu' robusta e verificabile sulle varianti di metadati usate dai principali software fotografici
+
+### FileX Suite e aggiornamenti
+- FileX Suite e i tool Windows distribuiti vengono riallineati alla versione `0.1.23` tramite un'unica release stabile
+- installer per-user, blockmap, `latest.yml` e manifest `stable.json` sono pubblicati insieme per consentire l'aggiornamento sia della Suite sia di Image Select Pro dalle installazioni precedenti
+- rilevamento processi, chiusura ordinata e individuazione degli eseguibili installati resi piu' affidabili durante gli aggiornamenti
+
+## 2026-08-07 - FileX Suite 0.1.22 (per-user)
+
+### Aggiornamenti senza privilegi amministrativi
+- gli installer dei tool passano a NSIS one-click per-user (`perMachine: false`): installazione in `%LOCALAPPDATA%\Programs\<ToolName>` senza UAC
+- `packElevateHelper: false`: nessun helper di elevazione incorporato negli installer
+- l'aggiornamento di un tool chiude SOLO quel tool, esegue l'installer con `/S` e riapre il tool se era in esecuzione; la Suite e gli altri tool restano aperti
+- eliminato PowerShell dal flusso di aggiornamento: chiusura processi via `tasklist`/`taskkill`, lettura versione da `resources/app.asar/package.json`
+- rimosse le funzioni NSIS di disinstallazione legacy HKLM/HKCU (`uninstallLegacyVersions`, `uninstallByDisplayName`, `loop_hkcu`, `loop_hklm`)
+- `extraMetadata.name` impostato sull'`executableName` di ogni tool: con one-click per-user electron-builder deriva la cartella di installazione dal nome del package, che era condiviso tra tutti i tool e causava installazioni sovrapposte in `@photo-toolsfilex-desktop`
+- ogni finestra mostra nel titolo il nome del tool e la versione installata, letta direttamente dal package Electron
+
+### Migrazione
+- le installazioni precedenti in `C:\Program Files\...` possono restare temporaneamente: la Suite cerca sia `%LOCALAPPDATA%\Programs` sia `Program Files` e sceglie la versione più recente
+- dopo la verifica della nuova architettura, rimuovere manualmente le vecchie installazioni per-machine
+
 ## 2026-08-05 - FileX Suite 0.1.20
 
 ### FileX Suite

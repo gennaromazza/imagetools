@@ -39,6 +39,10 @@ interface PhotoCardProps {
     id: string,
     changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>
   ) => void;
+  onApplyShortcutChanges?: (
+    id: string,
+    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>
+  ) => void;
   onAfterShortcutClassification?: (id: string) => void;
   onFocus: (id: string) => void;
   onPreview: (id: string) => void;
@@ -97,6 +101,7 @@ export const PhotoCard = memo(
     isGroupLeader = false,
     onToggle,
     onUpdatePhoto,
+    onApplyShortcutChanges,
     onAfterShortcutClassification,
     onFocus,
     onPreview,
@@ -381,7 +386,11 @@ export const PhotoCard = memo(
             });
             if (changes) {
               event.preventDefault();
-              onUpdatePhoto(photo.id, changes);
+              if (onApplyShortcutChanges) {
+                onApplyShortcutChanges(photo.id, changes);
+              } else {
+                onUpdatePhoto(photo.id, changes);
+              }
               onAfterShortcutClassification?.(photo.id);
             }
           }

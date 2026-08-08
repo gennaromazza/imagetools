@@ -1,5 +1,5 @@
 import * as electron from "electron";
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
@@ -16,7 +16,10 @@ import type {
   DesktopToolUpdateCheckResult,
   DesktopToolUpdateJob,
 } from "@photo-tools/desktop-contracts";
-import { launchToolUpdateAndRestartSuite } from "./filex-process-coordinator.js";
+import {
+  installFileXToolUpdate,
+  isFileXToolRunning,
+} from "./filex-process-coordinator.js";
 import { desktopToolManifest, getSuiteManagedTools, type DesktopToolDescriptor } from "./tool-manifest.js";
 
 const { app } = electron;
@@ -249,28 +252,30 @@ function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
   return Array.from(candidates);
 }
 
-function readExecutableVersion(executablePath: string): string | null {
-  if (process.platform !== "win32") return null;
+function readExecutableVersion(
+  executablePath: string,
+): string | null {
   try {
-    const packagePath = join(dirname(executablePath), "resources", "app.asar", "package.json");
-    const packageJson = JSON.parse(readFileSync(packagePath, "utf8")) as { version?: unknown };
-    if (typeof packageJson.version === "string" && packageJson.version.trim()) {
+    const packagePath = join(
+      dirname(executablePath),
+      "resources",
+      "app.asar",
+      "package.json",
+    );
+    const packageJson = JSON.parse(
+      readFileSync(packagePath, "utf8"),
+    ) as { version?: unknown };
+    if (
+      typeof packageJson.version === "string" &&
+      packageJson.version.trim()
+    ) {
       return packageJson.version.trim();
     }
   } catch {
-    // Fall back to the Windows executable metadata for older installations.
+    // Installazioni legacy potrebbero non
+    // esporre package.json tramite app.asar.
   }
-  try {
-    const escapedPath = executablePath.replace(/'/g, "''");
-    const output = execFileSync(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", `(Get-Item -LiteralPath '${escapedPath}').VersionInfo.ProductVersion`],
-      { encoding: "utf8", windowsHide: true, timeout: 4000 },
-    ).trim();
-    return output || null;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 function detectInstalledExecutable(toolId: DesktopToolId): { path: string | null; version: string | null } {
@@ -632,31 +637,121 @@ export function downloadToolUpdate(
   return job;
 }
 
-export async function applyToolUpdate(jobId: string): Promise<DesktopToolUpdateJob> {
+export async function applyToolUpdate(
+  jobId: string,
+): Promise<DesktopToolUpdateJob> {
   const job = updateJobs.get(jobId);
   if (!job) {
     throw new Error("Update job non trovato");
   }
-  if (!job.installerPath || !existsSync(job.installerPath)) {
+  if (
+    !job.installerPath ||
+    !existsSync(job.installerPath)
+  ) {
     return patchJob(jobId, {
       status: "failed",
       error: "Installer non disponibile",
     });
   }
 
-  patchJob(jobId, { status: "applying" });
+  /*
+   * Ricordiamo se QUESTO tool era aperto
+   * prima di chiuderlo per l'installazione.
+   */
+  const wasRunning = isFileXToolRunning(job.toolId);
+
+  patchJob(jobId, { status: "applying", error: undefined });
   try {
-    await launchToolUpdateAndRestartSuite(job.installerPath);
+    /*
+     * Installazione NSIS diretta.
+     * Nessun PowerShell. Nessun UAC.
+     * Nessun restart della Suite.
+     */
+    await installFileXToolUpdate(
+      job.toolId,
+      job.installerPath,
+    );
+
+    /*
+     * Aspettiamo che Windows/NSIS abbia
+     * reso visibile la nuova installazione.
+     */
+    const verificationDeadline = Date.now() + 15_000;
+    let installed = detectInstalledExecutable(job.toolId);
+    while (Date.now() < verificationDeadline) {
+      const expectedVersion = job.releaseVersion;
+      const versionIsCorrect =
+        !expectedVersion ||
+        (installed.version &&
+          compareVersions(
+            installed.version,
+            expectedVersion,
+          ) >= 0);
+      if (installed.path && versionIsCorrect) {
+        break;
+      }
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, 300),
+      );
+      installed = detectInstalledExecutable(job.toolId);
+    }
+
+    if (!installed.path) {
+      throw new Error(
+        "Installazione completata ma il nuovo tool non è stato trovato.",
+      );
+    }
+    if (job.releaseVersion) {
+      if (!installed.version) {
+        throw new Error(
+          "Il tool è stato installato ma non è stato possibile verificarne la versione.",
+        );
+      }
+      if (
+        compareVersions(
+          installed.version,
+          job.releaseVersion,
+        ) < 0
+      ) {
+        throw new Error(
+          `Aggiornamento non applicato. Versione trovata: ${installed.version}; attesa: ${job.releaseVersion}.`,
+        );
+      }
+    }
+
+    /*
+     * Riapriamo il tool soltanto se era
+     * aperto prima dell'aggiornamento.
+     */
+    if (wasRunning) {
+      const launchResult = await openInstalledTool(job.toolId);
+      if (!launchResult.ok) {
+        // L'update è comunque riuscito.
+        console.warn(
+          `Tool aggiornato ma non riaperto: ${launchResult.message}`,
+        );
+      }
+    }
+
+    /*
+     * L'installer non serve più.
+     */
+    await unlink(job.installerPath).catch(() => undefined);
+
+    return patchJob(jobId, {
+      status: "completed",
+      checksumVerified: true,
+      error: undefined,
+    });
   } catch (error) {
     return patchJob(jobId, {
       status: "failed",
-      error: error instanceof Error ? error.message : String(error),
+      error:
+        error instanceof Error
+          ? error.message
+          : String(error),
     });
   }
-
-  return patchJob(jobId, {
-    status: "completed",
-  });
 }
 
 export function getUpdateJob(jobId: string): DesktopToolUpdateJob | null {

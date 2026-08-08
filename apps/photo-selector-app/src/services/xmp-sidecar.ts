@@ -2,6 +2,7 @@ import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-typ
 
 const RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const XMP_NS = "http://ns.adobe.com/xap/1.0/";
+const MICROSOFT_PHOTO_NS = "http://ns.microsoft.com/photo/1.0/";
 const PHOTOSUITE_NS = "https://imagetool.local/ns/photosuite/1.0/";
 
 export interface XmpState {
@@ -66,11 +67,11 @@ function normalizeCustomLabels(values: string[] | undefined): string[] {
 }
 
 function getDescriptionElement(doc: Document): Element {
-  const byTag = doc.getElementsByTagName("rdf:Description");
+  const byTag = doc.getElementsByTagNameNS(RDF_NS, "Description");
   if (byTag.length > 0) return byTag[0];
 
-  const about = doc.querySelector("Description");
-  if (about) return about;
+  const unprefixed = doc.getElementsByTagName("Description");
+  if (unprefixed.length > 0) return unprefixed[0];
 
   const rdf = doc.createElementNS(RDF_NS, "rdf:RDF");
   const desc = doc.createElementNS(RDF_NS, "rdf:Description");
@@ -80,8 +81,52 @@ function getDescriptionElement(doc: Document): Element {
   return desc;
 }
 
+function getElementChildren(parent: Element): Element[] {
+  return Array.from(parent.childNodes)
+    .filter((node): node is Element => node.nodeType === 1);
+}
+
+function getDescriptionElements(doc: Document): Element[] {
+  const byNamespace = Array.from(doc.getElementsByTagNameNS(RDF_NS, "Description"));
+  if (byNamespace.length > 0) {
+    return byNamespace;
+  }
+  return Array.from(doc.getElementsByTagName("rdf:Description"));
+}
+
+function isNamespacedProperty(
+  node: Attr | Element,
+  namespaceUri: string,
+  prefix: string,
+  localName: string,
+): boolean {
+  const resolvedLocalName = node.localName || node.nodeName.split(":").pop() || node.nodeName;
+  return resolvedLocalName === localName
+    && (node.namespaceURI === namespaceUri || node.nodeName === `${prefix}:${localName}`);
+}
+
+function removePropertyFromAllDescriptions(
+  doc: Document,
+  namespaceUri: string,
+  prefix: string,
+  localName: string,
+): void {
+  for (const description of getDescriptionElements(doc)) {
+    for (const attr of Array.from(description.attributes)) {
+      if (isNamespacedProperty(attr, namespaceUri, prefix, localName)) {
+        description.removeAttributeNode(attr);
+      }
+    }
+    for (const child of getElementChildren(description)) {
+      if (isNamespacedProperty(child, namespaceUri, prefix, localName)) {
+        description.removeChild(child);
+      }
+    }
+  }
+}
+
 function findDirectChildByNamespace(parent: Element, namespaceUri: string, localName: string): Element | null {
-  for (const child of Array.from(parent.children)) {
+  for (const child of getElementChildren(parent)) {
     const childLocalName = child.localName || child.tagName.split(":").pop() || child.tagName;
     if ((child.namespaceURI === namespaceUri || child.tagName === `photosuite:${localName}`) && childLocalName === localName) {
       return child;
@@ -142,56 +187,63 @@ export function parseXmpState(xml: string): XmpState {
     return result;
   }
 
-  const parseErr = doc.querySelector("parsererror");
-  if (parseErr) return result;
+  if (doc.getElementsByTagName("parsererror").length > 0) return result;
 
-  const descriptions = Array.from(doc.getElementsByTagName("rdf:Description"));
+  const descriptions = getDescriptionElements(doc);
+  const applyRating = (value: string) => {
+    const rating = Number.parseFloat(value);
+    if (!Number.isFinite(rating)) {
+      return;
+    }
+    if (rating < 0) {
+      result.pickStatus = "rejected";
+    } else {
+      result.rating = clampRating(rating);
+    }
+  };
+  const applyLabel = (value: string) => {
+    const lv = value.trim().toLowerCase();
+    if (lv === "select" || lv === "picked") result.pickStatus = "picked";
+    if (lv === "reject" || lv === "rejected") result.pickStatus = "rejected";
+    const color = toColorLabel(value);
+    if (color) result.colorLabel = color;
+  };
+
   for (const el of descriptions) {
     for (let i = 0; i < el.attributes.length; i++) {
       const attr = el.attributes[i];
       const localName = attr.localName || attr.name.split(":").pop() || attr.name;
       const value = attr.value;
 
-      if (localName === "Rating") {
-        const rating = Number.parseInt(value, 10);
-        if (Number.isFinite(rating)) {
-          if (rating < 0) {
-            result.pickStatus = "rejected";
-          } else {
-            result.rating = clampRating(rating);
-          }
-        }
+      if (isNamespacedProperty(attr, XMP_NS, "xmp", "Rating")) {
+        applyRating(value);
       }
 
-      if (localName === "Rejected") {
+      if (isNamespacedProperty(attr, PHOTOSUITE_NS, "photosuite", "Rejected")) {
         const rv = value.trim().toLowerCase();
         if (rv === "true" || rv === "1" || rv === "yes") {
           result.pickStatus = "rejected";
         }
       }
 
-      if (localName === "PreservedRating") {
+      if (isNamespacedProperty(attr, PHOTOSUITE_NS, "photosuite", "PreservedRating")) {
         const preserved = Number.parseInt(value, 10);
         if (Number.isFinite(preserved) && preserved >= 0) {
           result.rating = clampRating(preserved);
         }
       }
 
-      if (localName === "Label") {
-        const lv = value.trim().toLowerCase();
-        if (lv === "select" || lv === "picked") result.pickStatus = "picked";
-        if (lv === "reject" || lv === "rejected") result.pickStatus = "rejected";
-        const color = toColorLabel(value);
-        if (color) result.colorLabel = color;
+      if (isNamespacedProperty(attr, XMP_NS, "xmp", "Label")) {
+        applyLabel(value);
       }
 
-      if (localName === "Pick") {
+      if (isNamespacedProperty(attr, PHOTOSUITE_NS, "photosuite", "Pick")) {
         const pick = Number.parseInt(value, 10);
         if (pick > 0) result.pickStatus = "picked";
         else if (pick < 0) result.pickStatus = "rejected";
       }
 
-      if (localName === "Selected") {
+      if (isNamespacedProperty(attr, PHOTOSUITE_NS, "photosuite", "Selected")) {
         const sv = value.trim().toLowerCase();
         result.selected = sv === "1" || sv === "true" || sv === "yes";
       }
@@ -207,6 +259,15 @@ export function parseXmpState(xml: string): XmpState {
       }
       if ((attr.namespaceURI ?? "").toLowerCase().includes("photoshop/1.0")) {
         result.hasPhotoshopAdjustments = true;
+      }
+    }
+
+    for (const child of getElementChildren(el)) {
+      const value = child.textContent ?? "";
+      if (isNamespacedProperty(child, XMP_NS, "xmp", "Rating")) {
+        applyRating(value);
+      } else if (isNamespacedProperty(child, XMP_NS, "xmp", "Label")) {
+        applyLabel(value);
       }
     }
 
@@ -235,7 +296,7 @@ export function upsertXmpState(
     doc = new DOMParser().parseFromString(fallbackXml, "application/xml");
   }
 
-  if (doc.querySelector("parsererror")) {
+  if (doc.getElementsByTagName("parsererror").length > 0) {
     doc = new DOMParser().parseFromString(fallbackXml, "application/xml");
   }
 
@@ -246,6 +307,10 @@ export function upsertXmpState(
   // Per compatibilità con Adobe (Bridge/Lightroom) usiamo xmp:Rating = -1 per "rejected",
   // ma preserviamo il valore numerico in photosuite:PreservedRating per round-trip senza perdita.
   const ratingValue = isRejected ? -1 : numericRating;
+  removePropertyFromAllDescriptions(doc, XMP_NS, "xmp", "Rating");
+  // Bridge elimina la vecchia scala Microsoft (1/25/50/75/99) quando assegna
+  // una stella Adobe. Lasciarla nel pacchetto produce letture conflittuali.
+  removePropertyFromAllDescriptions(doc, MICROSOFT_PHOTO_NS, "MicrosoftPhoto", "Rating");
   desc.setAttributeNS(XMP_NS, "xmp:Rating", String(ratingValue));
 
   if (isRejected && numericRating > 0) {
@@ -258,6 +323,7 @@ export function upsertXmpState(
   desc.setAttributeNS(PHOTOSUITE_NS, "photosuite:Rejected", isRejected ? "True" : "False");
 
   const labelValue = toLabelValue(asset.pickStatus ?? "unmarked", asset.colorLabel ?? null);
+  removePropertyFromAllDescriptions(doc, XMP_NS, "xmp", "Label");
   if (labelValue) {
     desc.setAttributeNS(XMP_NS, "xmp:Label", labelValue);
   } else {

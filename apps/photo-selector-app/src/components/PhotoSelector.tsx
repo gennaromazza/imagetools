@@ -4,13 +4,12 @@ import type {
   DesktopCacheLocationRecommendation,
   DesktopDragOutCheck,
   DesktopEditorCandidate,
+  DesktopGraphicsStatus,
   DesktopRamBudgetPreset,
   DesktopThumbnailCacheInfo,
 } from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
-import { PhotoClassificationHelpButton } from "./PhotoClassificationHelpButton";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
-import { PhotoSearchBar } from "./PhotoSearchBar";
 import { PhotoCard } from "./PhotoCard";
 import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
 import { CompareModal } from "./CompareModal";
@@ -67,6 +66,12 @@ import {
 } from "../services/photo-sort-cache";
 import { logDesktopEvent } from "../services/desktop-store";
 import { useToast } from "./ToastProvider";
+import { DockableWorkspace } from "./workspace/DockableWorkspace";
+import { useWorkspacePanelLayout } from "./workspace/useWorkspacePanelLayout";
+import { PhotoFilterPanel } from "./selector/PhotoFilterPanel";
+import { QuickStatsPanel } from "./selector/QuickStatsPanel";
+import { SelectionActionsPanel } from "./selector/SelectionActionsPanel";
+import { ViewControlsPanel } from "./selector/ViewControlsPanel";
 
 interface PhotoSelectorProps {
   photos: ImageAsset[];
@@ -99,6 +104,7 @@ interface PhotoSelectorProps {
     thumbnailProfile: ThumbnailProfile;
     sortCacheEnabled: boolean;
   } | null;
+  desktopGraphicsStatus?: DesktopGraphicsStatus | null;
   onThumbnailProfileChange?: (profile: ThumbnailProfile) => void;
   onSortCacheEnabledChange?: (enabled: boolean) => void;
   desktopThumbnailCacheInfo?: DesktopThumbnailCacheInfo | null;
@@ -113,7 +119,6 @@ interface PhotoSelectorProps {
   onSnoozeDesktopCacheRecommendation?: () => void | Promise<void>;
   onDismissDesktopCacheRecommendation?: () => void | Promise<void>;
   onRamBudgetPresetChange?: (preset: DesktopRamBudgetPreset) => void | Promise<void>;
-  onRelaunch?: () => void;
 }
 
 type SortMode = "name" | "orientation" | "rating" | "createdAt";
@@ -144,12 +149,9 @@ const GRID_GAP_PX = 12;
 const CARD_STAGE_HEIGHT_RATIO = 0.75;
 const QUICK_PREVIEW_FIT_MAX_DIMENSION = 2048;
 const CARD_CHROME_HEIGHT_PX = 64;
-const VIRTUAL_OVERSCAN_ROWS_IDLE = 4;
-const VIRTUAL_OVERSCAN_ROWS_FAST = 10;
-const PRIORITY_PREFETCH_ROWS_BEFORE_IDLE = 2;
-const PRIORITY_PREFETCH_ROWS_AFTER_IDLE = 6;
-const PRIORITY_PREFETCH_ROWS_BEFORE_FAST = 2;
-const PRIORITY_PREFETCH_ROWS_AFTER_FAST = 14;
+const VIRTUAL_OVERSCAN_ROWS = 4;
+const PRIORITY_PREFETCH_ROWS_BEFORE = 2;
+const PRIORITY_PREFETCH_ROWS_AFTER = 6;
 const PRIORITY_PREFETCH_MAX_IDS = 360;
 const FAST_SCROLL_COOLDOWN_MS = 120;
 const ROOT_FOLDER_OVERRIDE_KEY = "ps-root-folder-path-override";
@@ -344,13 +346,11 @@ function RamBudgetSection({
   activePreset,
   activeRamBudgetBytes,
   onPresetChange,
-  onRelaunch,
 }: {
   systemTotalMemoryBytes: number;
   activePreset: DesktopRamBudgetPreset | null;
   activeRamBudgetBytes: number | null;
   onPresetChange: (preset: DesktopRamBudgetPreset) => void | Promise<void>;
-  onRelaunch?: () => void;
 }) {
   const [pendingPreset, setPendingPreset] = useState<DesktopRamBudgetPreset | null>(null);
   const [applying, setApplying] = useState(false);
@@ -364,7 +364,6 @@ function RamBudgetSection({
     await onPresetChange(pendingPreset);
     setPendingPreset(null);
     setApplying(false);
-    onRelaunch?.();
   }
 
   return (
@@ -400,7 +399,7 @@ function RamBudgetSection({
             onClick={() => void handleApply()}
             disabled={applying}
           >
-            {applying ? "Salvo…" : "Applica e riavvia"}
+            {applying ? "Applico…" : "Applica"}
           </button>
           <button
             type="button"
@@ -455,6 +454,7 @@ export function PhotoSelector({
   thumbnailProfile = "ultra-fast",
   sortCacheEnabled = true,
   performanceSnapshot = null,
+  desktopGraphicsStatus = null,
   onThumbnailProfileChange,
   onSortCacheEnabledChange,
   desktopThumbnailCacheInfo = null,
@@ -469,7 +469,6 @@ export function PhotoSelector({
   onSnoozeDesktopCacheRecommendation,
   onDismissDesktopCacheRecommendation,
   onRamBudgetPresetChange,
-  onRelaunch,
 }: PhotoSelectorProps) {
   const { addToast } = useToast();
   const [sortBy, setSortBy] = useState<SortMode>("name");
@@ -508,6 +507,11 @@ export function PhotoSelector({
   const [isSelectionActionsOpen, setIsSelectionActionsOpen] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const {
+    layout: workspacePanelLayout,
+    movePanel: moveWorkspacePanel,
+    togglePanel: toggleWorkspacePanel,
+  } = useWorkspacePanelLayout();
   const [cardSize, setCardSize] = useState<number>(160);
   const [rootFolderPathOverride, setRootFolderPathOverride] = useState<string>("");
   const [preferredEditorPath, setPreferredEditorPath] = useState<string>("");
@@ -563,7 +567,6 @@ export function PhotoSelector({
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const [gridViewport, setGridViewport] = useState({ width: 0, height: 720 });
-  const [isFastScrollActive, setIsFastScrollActive] = useState(false);
   const [batchPulseState, setBatchPulseState] = useState<{
     token: number;
     kind: BatchPulseKind;
@@ -588,6 +591,20 @@ export function PhotoSelector({
   const metadataAssetById = useMemo(
     () => new Map(metadataPhotos.map((photo) => [photo.id, photo])),
     [metadataPhotos],
+  );
+  const currentFolderPhotos = useMemo(
+    () => folderFilter === "all"
+      ? metadataPhotos
+      : metadataPhotos.filter((photo) => getSubfolder(photo.path) === folderFilter),
+    [folderFilter, metadataPhotos],
+  );
+  const currentFolderPhotoIdSet = useMemo(
+    () => new Set(currentFolderPhotos.map((photo) => photo.id)),
+    [currentFolderPhotos],
+  );
+  const currentFolderSelectedIds = useMemo(
+    () => selectedIds.filter((photoId) => currentFolderPhotoIdSet.has(photoId)),
+    [currentFolderPhotoIdSet, selectedIds],
   );
   const assetById = useMemo(() => new Map(photos.map((photo) => [photo.id, photo])), [photos]);
   const photosRef = useRef(photos);
@@ -629,14 +646,14 @@ export function PhotoSelector({
     [pickFilter, ratingFilter, colorFilter, formatFilter, customLabelFilter, folderFilter, seriesFilter, timeClusterFilter, searchQuery]
   );
 
-  // Statistiche aggregate sull'intera cartella corrente: utili come "vital signs"
+  // Statistiche aggregate sulla cartella visualizzata: utili come "vital signs"
   // sempre visibili in cima alla griglia, indipendentemente da selezione/filtri.
   const folderStats = useMemo(() => {
-    const total = photos.length;
+    const total = currentFolderPhotos.length;
     if (total === 0) return null;
     let picked = 0;
     let rejected = 0;
-    for (const p of photos) {
+    for (const p of currentFolderPhotos) {
       const status = getAssetPickStatus(p);
       if (status === "picked") picked += 1;
       else if (status === "rejected") rejected += 1;
@@ -644,11 +661,11 @@ export function PhotoSelector({
     const decided = picked + rejected;
     const completionPct = Math.round((decided / total) * 100);
     return { total, picked, rejected, completionPct };
-  }, [photos]);
+  }, [currentFolderPhotos]);
 
   const selectionStats = useMemo(() => {
-    if (selectedIds.length === 0) return null;
-    const sel = selectedIds
+    if (currentFolderSelectedIds.length === 0) return null;
+    const sel = currentFolderSelectedIds
       .map((photoId) => metadataAssetById.get(photoId))
       .filter((photo): photo is ImageAsset => !!photo);
     return {
@@ -656,7 +673,7 @@ export function PhotoSelector({
       rejected: sel.filter((p) => getAssetPickStatus(p) === "rejected").length,
       highRating: sel.filter((p) => getAssetRating(p) >= 3).length,
     };
-  }, [metadataAssetById, selectedIds]);
+  }, [currentFolderSelectedIds, metadataAssetById]);
 
   const hasActiveFilters =
     pickFilter !== "all" ||
@@ -951,6 +968,7 @@ export function PhotoSelector({
         pickStatus: pickFilter,
         ratingFilter,
         colorLabel: colorFilter,
+        formatFilter,
         customLabelFilter,
         folderFilter,
         seriesFilter,
@@ -965,12 +983,13 @@ export function PhotoSelector({
       return next;
     });
     setNewPresetName("");
-  }, [colorFilter, customColorNames, customLabelFilter, customLabelsCatalog, folderFilter, newPresetName, persistPreferences, pickFilter, ratingFilter, searchQuery, seriesFilter, timeClusterFilter]);
+  }, [colorFilter, customColorNames, customLabelFilter, customLabelsCatalog, folderFilter, formatFilter, newPresetName, persistPreferences, pickFilter, ratingFilter, searchQuery, seriesFilter, timeClusterFilter]);
 
   const applyPreset = useCallback((preset: PhotoFilterPreset) => {
     setPickFilter(preset.filters.pickStatus);
     setRatingFilter(preset.filters.ratingFilter);
     setColorFilter(preset.filters.colorLabel);
+    setFormatFilter((preset.filters.formatFilter as FormatFilter | undefined) ?? "all");
     setCustomLabelFilter(preset.filters.customLabelFilter ?? "all");
     setFolderFilter(preset.filters.folderFilter ?? "all");
     setSeriesFilter(preset.filters.seriesFilter ?? "all");
@@ -1641,7 +1660,7 @@ export function PhotoSelector({
     count: totalVirtualRows,
     getScrollElement: () => gridRef.current,
     estimateSize: () => gridRowHeight,
-    overscan: isFastScrollActive ? VIRTUAL_OVERSCAN_ROWS_FAST : VIRTUAL_OVERSCAN_ROWS_IDLE,
+    overscan: VIRTUAL_OVERSCAN_ROWS,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
   const renderedPhotoIds = useMemo(() => {
@@ -1658,30 +1677,56 @@ export function PhotoSelector({
     }
     return ids;
   }, [gridColumnCount, virtualRows, visiblePhotoIds]);
+  const viewportPhotoIds = useMemo(() => {
+    if (visiblePhotoIds.length === 0) {
+      return [] as string[];
+    }
+
+    const grid = gridRef.current;
+    if (!grid || gridRowHeight <= 0) {
+      return renderedPhotoIds;
+    }
+
+    const firstVisibleRow = Math.max(
+      0,
+      Math.min(totalVirtualRows - 1, Math.floor(grid.scrollTop / gridRowHeight)),
+    );
+    const visibleRowCount = Math.max(1, Math.ceil(grid.clientHeight / gridRowHeight) + 1);
+    const startIndex = firstVisibleRow * gridColumnCount;
+    const endIndex = Math.min(
+      visiblePhotoIds.length,
+      (firstVisibleRow + visibleRowCount) * gridColumnCount,
+    );
+    return visiblePhotoIds.slice(startIndex, endIndex);
+  }, [gridColumnCount, gridRowHeight, renderedPhotoIds, totalVirtualRows, virtualRows, visiblePhotoIds]);
   const viewportPriorityIds = useMemo(() => {
     if (visiblePhotoIds.length === 0) {
       return [] as string[];
     }
 
-    const prefetchBefore = isFastScrollActive
-      ? PRIORITY_PREFETCH_ROWS_BEFORE_FAST
-      : PRIORITY_PREFETCH_ROWS_BEFORE_IDLE;
-    const prefetchAfter = isFastScrollActive
-      ? PRIORITY_PREFETCH_ROWS_AFTER_FAST
-      : PRIORITY_PREFETCH_ROWS_AFTER_IDLE;
-
-    if (virtualRows.length === 0) {
+    const grid = gridRef.current;
+    if (!grid || gridRowHeight <= 0 || virtualRows.length === 0) {
       const fallbackCount = Math.min(
         visiblePhotoIds.length,
-        Math.max(gridColumnCount * (prefetchBefore + prefetchAfter + 2), gridColumnCount * 6),
+        Math.max(
+          gridColumnCount * (PRIORITY_PREFETCH_ROWS_BEFORE + PRIORITY_PREFETCH_ROWS_AFTER + 2),
+          gridColumnCount * 6,
+        ),
       );
       return visiblePhotoIds.slice(0, Math.min(PRIORITY_PREFETCH_MAX_IDS, fallbackCount));
     }
 
-    const firstVisibleRow = virtualRows[0]?.index ?? 0;
-    const lastVisibleRow = virtualRows[virtualRows.length - 1]?.index ?? firstVisibleRow;
-    const rowStart = Math.max(0, firstVisibleRow - prefetchBefore);
-    const rowEndExclusive = Math.min(totalVirtualRows, lastVisibleRow + 1 + prefetchAfter);
+    const firstVisibleRow = Math.max(
+      0,
+      Math.min(totalVirtualRows - 1, Math.floor(grid.scrollTop / gridRowHeight)),
+    );
+    const visibleRowCount = Math.max(1, Math.ceil(grid.clientHeight / gridRowHeight) + 1);
+    const lastVisibleRow = Math.min(totalVirtualRows - 1, firstVisibleRow + visibleRowCount - 1);
+    const rowStart = Math.max(0, firstVisibleRow - PRIORITY_PREFETCH_ROWS_BEFORE);
+    const rowEndExclusive = Math.min(
+      totalVirtualRows,
+      lastVisibleRow + 1 + PRIORITY_PREFETCH_ROWS_AFTER,
+    );
     const startIndex = rowStart * gridColumnCount;
     const endIndex = Math.min(visiblePhotoIds.length, rowEndExclusive * gridColumnCount);
 
@@ -1695,7 +1740,7 @@ export function PhotoSelector({
     }
 
     return ids.slice(0, PRIORITY_PREFETCH_MAX_IDS);
-  }, [gridColumnCount, isFastScrollActive, totalVirtualRows, virtualRows, visiblePhotoIds]);
+  }, [gridColumnCount, gridRowHeight, totalVirtualRows, virtualRows, visiblePhotoIds]);
   const renderedPhotos = useMemo(
     () => renderedPhotoIds
       .map((photoId) => assetById.get(photoId))
@@ -1727,7 +1772,9 @@ export function PhotoSelector({
       isGroupLeader: groupInfo.leaderId === photo.id,
     };
   }), [photoGroupInfoByKey, photoGroupKeyById, renderedPhotos]);
-  const topSpacerHeight = virtualRows[0]?.start ?? 0;
+  // The spacer is itself a CSS-grid row, so the grid inserts one gap after it.
+  // Subtract that gap or every virtual-window change shifts the cards downward.
+  const topSpacerHeight = Math.max(0, (virtualRows[0]?.start ?? 0) - GRID_GAP_PX);
   const bottomSpacerHeight = Math.max(
     0,
     rowVirtualizer.getTotalSize() - (virtualRows[virtualRows.length - 1]?.end ?? 0),
@@ -1824,7 +1871,7 @@ export function PhotoSelector({
     if (fastScrollStartedAtRef.current === null) {
       fastScrollStartedAtRef.current = now;
     }
-    setIsFastScrollActive(true);
+    gridRef.current?.classList.add("photo-selector__grid--scrolling");
 
     if (fastScrollCooldownTimerRef.current !== null) {
       window.clearTimeout(fastScrollCooldownTimerRef.current);
@@ -1832,7 +1879,7 @@ export function PhotoSelector({
 
     fastScrollCooldownTimerRef.current = window.setTimeout(() => {
       fastScrollCooldownTimerRef.current = null;
-      setIsFastScrollActive(false);
+      gridRef.current?.classList.remove("photo-selector__grid--scrolling");
       flushFastScrollAccumulatedMs(true);
     }, FAST_SCROLL_COOLDOWN_MS);
   }, [flushFastScrollAccumulatedMs]);
@@ -1843,14 +1890,21 @@ export function PhotoSelector({
       return;
     }
 
+    let resizeFrame = 0;
     const syncGridViewport = () => {
-      setGridViewport((current) => {
-        const width = grid.clientWidth;
-        const height = grid.clientHeight;
-        if (current.width === width && current.height === height) {
-          return current;
-        }
-        return { width, height };
+      if (document.body.classList.contains("workspace-is-resizing") || resizeFrame !== 0) {
+        return;
+      }
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = 0;
+        setGridViewport((current) => {
+          const width = grid.clientWidth;
+          const height = grid.clientHeight;
+          if (current.width === width && current.height === height) {
+            return current;
+          }
+          return { width, height };
+        });
       });
     };
 
@@ -1860,6 +1914,7 @@ export function PhotoSelector({
     window.addEventListener("resize", syncGridViewport);
 
     return () => {
+      if (resizeFrame !== 0) window.cancelAnimationFrame(resizeFrame);
       resizeObserver.disconnect();
       window.removeEventListener("resize", syncGridViewport);
     };
@@ -1871,6 +1926,7 @@ export function PhotoSelector({
         window.clearTimeout(fastScrollCooldownTimerRef.current);
         fastScrollCooldownTimerRef.current = null;
       }
+      gridRef.current?.classList.remove("photo-selector__grid--scrolling");
       flushFastScrollAccumulatedMs(true);
     };
   }, [flushFastScrollAccumulatedMs]);
@@ -1880,7 +1936,7 @@ export function PhotoSelector({
       return;
     }
 
-    const ids = renderedPhotoIds;
+    const ids = viewportPhotoIds;
     if (areOrderedIdsEqual(lastVisibleIdsRef.current, ids)) {
       return;
     }
@@ -1905,7 +1961,7 @@ export function PhotoSelector({
       lastVisibleIdsRef.current = pendingIds.slice();
       onVisibleIdsChange(new Set(pendingIds));
     });
-  }, [onVisibleIdsChange, renderedPhotoIds]);
+  }, [onVisibleIdsChange, viewportPhotoIds]);
 
   useEffect(() => {
     if (!onPriorityIdsChange) {
@@ -2348,11 +2404,14 @@ export function PhotoSelector({
   const handleToggleBatchCustomLabel = useCallback((label: string) => {
     const activeCount = selectedCustomLabelCounts.get(label) ?? 0;
     const shouldRemove = selectedIds.length > 0 && activeCount === selectedIds.length;
+    const lowerLabel = label.toLocaleLowerCase();
     updateCustomLabelsForIds(
       selectedIds,
       (currentLabels) => shouldRemove
-        ? currentLabels.filter((currentLabel) => currentLabel !== label)
-        : [...currentLabels, label],
+        ? currentLabels.filter((cl) => cl.toLocaleLowerCase() !== lowerLabel)
+        : currentLabels.some((cl) => cl.toLocaleLowerCase() === lowerLabel)
+          ? currentLabels
+          : [...currentLabels, label],
       shouldRemove
         ? `${selectedIds.length === 1 ? "1 foto" : `${selectedIds.length} foto`}: rimossa etichetta ${label}`
         : `${selectedIds.length === 1 ? "1 foto" : `${selectedIds.length} foto`}: aggiunta etichetta ${label}`,
@@ -2367,7 +2426,10 @@ export function PhotoSelector({
     );
   }, [selectedIds, updateCustomLabelsForIds]);
 
-  const selectedAbsolutePaths = useMemo(() => getAssetAbsolutePaths(selectedIds), [selectedIds]);
+  const selectedAbsolutePaths = useMemo(
+    () => getAssetAbsolutePaths(currentFolderSelectedIds),
+    [currentFolderSelectedIds],
+  );
   const selectedAbsolutePathsSignature = useMemo(
     () => selectedAbsolutePaths.join("\n"),
     [selectedAbsolutePaths],
@@ -2385,7 +2447,7 @@ export function PhotoSelector({
 
     // Snapshot stabile della selezione per questa esecuzione: evita race in cui
     // il signature cambia mentre la promise è in volo.
-    const requestedCount = selectedIds.length;
+    const requestedCount = currentFolderSelectedIds.length;
     const pathsSnapshot = selectedAbsolutePaths.slice();
 
     if (pathsSnapshot.length === 0) {
@@ -2440,8 +2502,8 @@ export function PhotoSelector({
   );
   const desktopDragOutMessage = desktopDragOutCheck?.message
     ?? "Drag esterno non disponibile in questa sessione desktop.";
-  const desktopDragOutDisabledMessage = selectedIds.length === 0
-    ? "Seleziona almeno una foto per il drag esterno."
+  const desktopDragOutDisabledMessage = currentFolderSelectedIds.length === 0
+    ? "Seleziona almeno una foto nella cartella corrente per il drag esterno."
     : desktopDragOutMessage;
 
   const handleSelectionDragStart = useCallback((event: DragEvent<HTMLElement>) => {
@@ -2459,7 +2521,7 @@ export function PhotoSelector({
   const handleCardExternalDragStart = useCallback((photoId: string, event: DragEvent<HTMLDivElement>) => {
     const draggingSelection = selectedSet.has(photoId);
     const targetPaths = draggingSelection
-      ? getAssetAbsolutePaths(selectedIds)
+      ? getAssetAbsolutePaths(currentFolderSelectedIds)
       : getAssetAbsolutePaths([photoId]);
 
     if (
@@ -2474,7 +2536,7 @@ export function PhotoSelector({
     // Important: prevent HTML drag so Electron native drag-out is the only active channel.
     event.preventDefault();
     window.filexDesktop.startDragOut(targetPaths);
-  }, [desktopDragOutCheck?.ok, selectedIds, selectedSet]);
+  }, [currentFolderSelectedIds, desktopDragOutCheck?.ok, selectedSet]);
   const handlePreviewExternalDragStart = useCallback((photoId: string, event: DragEvent<HTMLElement>) => {
     const targetPaths = getAssetAbsolutePaths([photoId]);
     if (targetPaths.length === 0 || typeof window.filexDesktop?.startDragOut !== "function") {
@@ -2523,8 +2585,79 @@ export function PhotoSelector({
   }, [onPhotosChange, selectedIds, selectedSet]);
 
   const handleUpdatePhoto = useCallback((id: string, changes: PhotoMetadataChanges) => {
+    const targetIds = selectedSet.has(id) && selectedIds.length > 1
+      ? selectedIds
+      : [id];
+
+    if (targetIds.length > 1) {
+      applyBatchChanges(targetIds, changes, "grid");
+      return;
+    }
+
     applyPhotoChanges(id, changes, "grid");
-  }, [applyPhotoChanges]);
+  }, [applyBatchChanges, applyPhotoChanges, selectedIds, selectedSet]);
+
+  const handleShortcutClassification = useCallback((id: string, changes: PhotoMetadataChanges) => {
+    const targetIds = selectedSet.has(id) && selectedIds.length > 1
+      ? selectedIds
+      : [id];
+
+    if (targetIds.length > 1) {
+      applyBatchChanges(targetIds, changes, "grid");
+      return;
+    }
+
+    applyPhotoChanges(id, changes, "grid");
+  }, [applyBatchChanges, applyPhotoChanges, selectedIds, selectedSet]);
+
+  const handleModalAssetUpdate = useCallback((assetId: string, changes: PhotoMetadataChanges) => {
+    const targetIds = selectedSet.has(assetId) && selectedIds.length > 1
+      ? selectedIds
+      : [assetId];
+
+    if (targetIds.length > 1) {
+      if (changes.customLabels !== undefined) {
+        const sourceAsset = assetById.get(assetId);
+        const currentLabels = normalizeAssetCustomLabels(sourceAsset?.customLabels);
+        const nextLabels = normalizeAssetCustomLabels(changes.customLabels);
+        const addedLabels = nextLabels.filter(
+          (label) => !currentLabels.some((current) => current.toLocaleLowerCase() === label.toLocaleLowerCase()),
+        );
+        const removedLabels = currentLabels.filter(
+          (label) => !nextLabels.some((next) => next.toLocaleLowerCase() === label.toLocaleLowerCase()),
+        );
+
+        if (addedLabels.length === 1 && removedLabels.length === 0) {
+          const labelToAdd = addedLabels[0];
+          updateCustomLabelsForIds(
+            targetIds,
+            (labels) => labels.some((label) => label.toLocaleLowerCase() === labelToAdd.toLocaleLowerCase())
+              ? labels
+              : [...labels, labelToAdd],
+            `${targetIds.length === 1 ? "1 foto" : `${targetIds.length} foto`}: aggiunta etichetta ${labelToAdd}`,
+          );
+          return;
+        }
+
+        if (removedLabels.length === 1 && addedLabels.length === 0) {
+          const labelToRemove = removedLabels[0];
+          updateCustomLabelsForIds(
+            targetIds,
+            (labels) => labels.filter(
+              (label) => label.toLocaleLowerCase() !== labelToRemove.toLocaleLowerCase(),
+            ),
+            `${targetIds.length === 1 ? "1 foto" : `${targetIds.length} foto`}: rimossa etichetta ${labelToRemove}`,
+          );
+          return;
+        }
+      }
+
+      applyBatchChanges(targetIds, changes, "modal");
+      return;
+    }
+
+    applyPhotoChanges(assetId, changes, "modal");
+  }, [applyBatchChanges, applyPhotoChanges, assetById, selectedIds, selectedSet, updateCustomLabelsForIds]);
 
   // ── On-demand preview URL for QuickPreviewModal ──
   // Key insight: the URL must be stable for a given asset ID so the browser
@@ -2655,7 +2788,7 @@ export function PhotoSelector({
     const ratingCounts = new Map<number, number>();
     const pickCounts = new Map<PickStatus, number>();
     const colorCounts = new Map<ColorLabel, number>();
-    for (const photo of metadataPhotos) {
+    for (const photo of currentFolderPhotos) {
       const r = getAssetRating(photo);
       ratingCounts.set(r, (ratingCounts.get(r) ?? 0) + 1);
       const ps = getAssetPickStatus(photo);
@@ -2664,7 +2797,7 @@ export function PhotoSelector({
       if (cl) colorCounts.set(cl, (colorCounts.get(cl) ?? 0) + 1);
     }
     return { ratingCounts, pickCounts, colorCounts };
-  }, [metadataPhotos]);
+  }, [currentFolderPhotos]);
 
   function selectVisible() {
     onSelectionChange(visiblePhotoIds);
@@ -2686,8 +2819,8 @@ export function PhotoSelector({
   }
 
   function activatePickedOnly() {
-    onSelectionChange(photos.filter((photo) => photo.pickStatus === "picked").map((photo) => photo.id));
-    pushTimelineEntry("Selezionate solo le foto Pick");
+    onSelectionChange(currentFolderPhotos.filter((photo) => photo.pickStatus === "picked").map((photo) => photo.id));
+    pushTimelineEntry("Selezionate solo le foto Pick della cartella corrente");
   }
 
   function excludeRejected() {
@@ -2699,8 +2832,8 @@ export function PhotoSelector({
   }
 
   function selectByMinimumRating(minRating: number) {
-    onSelectionChange(photos.filter((photo) => getAssetRating(photo) >= minRating).map((photo) => photo.id));
-    pushTimelineEntry(`Selezionate le foto con almeno ${minRating} stelle`);
+    onSelectionChange(currentFolderPhotos.filter((photo) => getAssetRating(photo) >= minRating).map((photo) => photo.id));
+    pushTimelineEntry(`Selezionate nella cartella corrente le foto con almeno ${minRating} stelle`);
   }
 
   const scrolledInitialRef = useRef(false);
@@ -2890,14 +3023,39 @@ export function PhotoSelector({
 
     let disposed = false;
     let running = false;
+    const MAX_DISK_POLL_TARGETS = 28;
+    const POLL_FAST_MS = 4000;
+    const POLL_MEDIUM_MS = 6500;
+    const POLL_SLOW_MS = 9500;
+
+    const pollIntervalMs = selectedIds.length > 40
+      ? POLL_SLOW_MS
+      : selectedIds.length > 12
+        ? POLL_MEDIUM_MS
+        : POLL_FAST_MS;
 
     const run = async () => {
       if (running) return;
       if (typeof document !== "undefined" && document.hidden) return;
-      const targets = Array.from(new Set([
-        ...selectedIds,
-        ...(previewAssetId ? [previewAssetId] : []),
-      ]));
+
+      const targets: string[] = [];
+      const seen = new Set<string>();
+      const appendTarget = (id: string | null | undefined) => {
+        if (!id || seen.has(id) || targets.length >= MAX_DISK_POLL_TARGETS) {
+          return;
+        }
+        seen.add(id);
+        targets.push(id);
+      };
+
+      appendTarget(previewAssetId);
+      for (const selectedId of selectedIds) {
+        appendTarget(selectedId);
+        if (targets.length >= MAX_DISK_POLL_TARGETS) {
+          break;
+        }
+      }
+
       if (targets.length === 0) return;
 
       running = true;
@@ -2941,7 +3099,7 @@ export function PhotoSelector({
 
     const timer = window.setInterval(() => {
       void run();
-    }, 4000);
+    }, pollIntervalMs);
 
     return () => {
       disposed = true;
@@ -3086,409 +3244,120 @@ export function PhotoSelector({
 
   return (
     <div className="photo-selector">
-      {/* ── FILTER BAR ── */}
-      <div className="photo-selector__filter-bar">
-        {folderStats && (
-          <div
-            className="photo-selector__folder-stats"
-            title={`Totale ${folderStats.total} · Picked ${folderStats.picked} · Scartate ${folderStats.rejected} · Decise ${folderStats.completionPct}%`}
-          >
-            <span className="photo-selector__folder-stats-total">{folderStats.total} foto</span>
-            <span className="photo-selector__folder-stats-sep">·</span>
-            <span className="photo-selector__folder-stats-picked">{folderStats.picked} pick</span>
-            <span className="photo-selector__folder-stats-sep">·</span>
-            <span className="photo-selector__folder-stats-rejected">{folderStats.rejected} scart.</span>
-            <span className="photo-selector__folder-stats-sep">·</span>
-            <span className="photo-selector__folder-stats-progress">{folderStats.completionPct}% decise</span>
-          </div>
-        )}
-        {hasActiveFilters && (
-          <div className="selector-filters__reset">
-            <button
-              type="button"
-              className="ghost-button ghost-button--small"
-              onClick={resetFilters}
-              title={`${activeFilterCount} filtro/i attivo/i`}
-            >
-              ✕ Azzera
-              {activeFilterCount > 0 && (
-                <span className="photo-selector__filter-count-badge">{activeFilterCount}</span>
-              )}
-            </button>
-          </div>
-        )}
-
-        {subfolders.length > 1 && (
-          <label className="field">
-            <span>Cartella</span>
-            <select
-              className={folderFilter !== "all" ? "field__select--active" : undefined}
-              value={folderFilter}
-              onChange={(event) => setFolderFilter(event.target.value)}
-            >
-              <option value="all">Tutte ({photos.length})</option>
-              {subfolders.map(({ folder, count }) => (
-                <option key={folder} value={folder}>
-                  {folder === "" ? "Root" : folder} ({count})
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        <label className="field">
-          <span>Stato</span>
-          <select
-            className={pickFilter !== "all" ? "field__select--active" : undefined}
-            value={pickFilter}
-            onChange={(event) => setPickFilter(event.target.value as PickFilter)}
-          >
-            <option value="all">Tutti</option>
-            <option value="picked">Pick</option>
-            <option value="rejected">Scartate</option>
-            <option value="unmarked">Neutre</option>
-          </select>
-        </label>
-
-        <label className="field">
-          <span>Formato</span>
-          <select
-            className={formatFilter !== "all" ? "field__select--active" : undefined}
-            value={formatFilter}
-            onChange={(event) => setFormatFilter(event.target.value as FormatFilter)}
-          >
-            <option value="all">Tutti</option>
-            <option value="jpg">JPG</option>
-            <option value="raw">RAW</option>
-            <option value="raw+jpg">RAW + JPG</option>
-          </select>
-        </label>
-
-        <label className="field">
-          <span>Stelle</span>
-          <select
-            className={ratingFilter !== "any" ? "field__select--active" : undefined}
-            value={ratingFilter}
-            onChange={(event) => setRatingFilter(event.target.value)}
-          >
-            <option value="any">Tutte</option>
-            <optgroup label="Minimo">
-              <option value="1+">★ 1+</option>
-              <option value="2+">★★ 2+</option>
-              <option value="3+">★★★ 3+</option>
-              <option value="4+">★★★★ 4+</option>
-            </optgroup>
-            <optgroup label="Esattamente">
-              <option value="0">Senza stelle</option>
-              <option value="1">★ 1</option>
-              <option value="2">★★ 2</option>
-              <option value="3">★★★ 3</option>
-              <option value="4">★★★★ 4</option>
-              <option value="5">★★★★★ 5</option>
-            </optgroup>
-          </select>
-        </label>
-
-        <div className="field photo-selector__color-filter">
-          <span>Colore</span>
-          <div className="photo-selector__color-filter-dots">
-            <button
-              type="button"
-              className={`photo-selector__color-all-btn${colorFilter === "all" ? " photo-selector__color-all-btn--active" : ""}`}
-              onClick={() => setColorFilter("all")}
-              title="Tutti i colori"
-            >
-              ✕
-            </button>
-            {COLOR_LABELS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                className={`asset-color-dot asset-color-dot--${value}${colorFilter === value ? " asset-color-dot--selected" : ""}`}
-                onClick={() => setColorFilter(colorFilter === value ? "all" : value)}
-                title={customColorNames[value]}
+      <DockableWorkspace
+        layout={workspacePanelLayout}
+        panels={[
+          {
+            id: "filters",
+            title: "Filtri",
+            content: (
+              <PhotoFilterPanel
+                folderStats={folderStats}
+                activeFilterCount={activeFilterCount}
+                hasActiveFilters={hasActiveFilters}
+                photosCount={photos.length}
+                subfolders={subfolders}
+                folderFilter={folderFilter}
+                pickFilter={pickFilter}
+                formatFilter={formatFilter}
+                ratingFilter={ratingFilter}
+                colorFilter={colorFilter}
+                customColorNames={customColorNames}
+                customLabelFilter={customLabelFilter}
+                customLabelFilterOptions={customLabelFilterOptions}
+                isAdvancedFiltersOpen={isAdvancedFiltersOpen}
+                seriesGroups={seriesGroups}
+                seriesFilter={seriesFilter}
+                timeClusters={timeClusters}
+                timeClusterFilter={timeClusterFilter}
+                filterPresets={filterPresets}
+                onReset={resetFilters}
+                onFolderFilterChange={setFolderFilter}
+                onPickFilterChange={setPickFilter}
+                onFormatFilterChange={setFormatFilter}
+                onRatingFilterChange={setRatingFilter}
+                onColorFilterChange={setColorFilter}
+                onCustomLabelFilterChange={setCustomLabelFilter}
+                onAdvancedFiltersToggle={() => setIsAdvancedFiltersOpen((open) => !open)}
+                onSeriesFilterChange={setSeriesFilter}
+                onTimeClusterFilterChange={setTimeClusterFilter}
+                onApplyPreset={applyPreset}
               />
-            ))}
-          </div>
-        </div>
-
-        {customLabelFilterOptions.length > 0 && (
-          <label className="field">
-            <span>Label custom</span>
-            <select
-              className={customLabelFilter !== "all" ? "field__select--active" : undefined}
-              value={customLabelFilter}
-              onChange={(event) => setCustomLabelFilter(event.target.value)}
-            >
-              <option value="all">Tutte</option>
-              {customLabelFilterOptions.map(({ label, count }) => (
-                <option key={label} value={label}>
-                  {label} ({count})
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        <button
-          type="button"
-          className={`photo-selector__advanced-toggle${isAdvancedFiltersOpen ? " photo-selector__advanced-toggle--open" : ""}`}
-          onClick={() => setIsAdvancedFiltersOpen((open) => !open)}
-          aria-expanded={isAdvancedFiltersOpen}
-        >
-          Filtri avanzati
-          <span className="photo-selector__filter-count-badge">{activeFilterCount}</span>
-          <span aria-hidden="true">{isAdvancedFiltersOpen ? "⌃" : "⌄"}</span>
-        </button>
-
-        {isAdvancedFiltersOpen && <div className="photo-selector__advanced-filters">
-        {seriesGroups.length > 1 && (
-          <label className="field">
-            <span>Serie</span>
-            <select
-              className={seriesFilter !== "all" ? "field__select--active" : undefined}
-              value={seriesFilter}
-              onChange={(event) => setSeriesFilter(event.target.value)}
-            >
-              <option value="all">Tutte</option>
-              {seriesGroups.map(({ key, count }) => (
-                <option key={key} value={key}>
-                  {key} ({count})
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        {timeClusters.length > 1 && (
-          <label className="field">
-            <span>Fascia oraria</span>
-            <select
-              className={timeClusterFilter !== "all" ? "field__select--active" : undefined}
-              value={timeClusterFilter}
-              onChange={(event) => setTimeClusterFilter(event.target.value)}
-            >
-              <option value="all">Tutte</option>
-              {timeClusters.map(({ key, count }) => (
-                <option key={key} value={key}>
-                  {key} ({count})
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        {filterPresets.length > 0 && (
-          <div className="photo-selector__preset-chips">
-            <span className="photo-selector__filter-bar-label">Preset</span>
-            {filterPresets.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className="photo-selector__preset-apply"
-                onClick={() => applyPreset(preset)}
-              >
-                {preset.name}
-              </button>
-            ))}
-          </div>
-        )}
-        </div>}
-      </div>
-
-      {/* ── TOOLBAR ── */}
-      <div className="photo-selector__controls">
-        <div className="photo-selector__action-inline">
-          <div className="photo-selector__undo-group">
-            <button
-              type="button"
-              className="icon-button"
-              onClick={handleUndoClick}
-              disabled={!canUndo}
-              title="Annulla"
-            >
-              ↩
-            </button>
-            <button
-              type="button"
-              className="icon-button"
-              onClick={handleRedoClick}
-              disabled={!canRedo}
-              title="Ripeti"
-            >
-              ↪
-            </button>
-          </div>
-          <div className="photo-selector__toolbar-divider" />
-          <button
-            type="button"
-            className={`checkbox-button photo-selector__toolbar-control ${allSelected || allVisibleSelected ? "checkbox-button--checked" : someSelected || someVisibleSelected ? "checkbox-button--indeterminate" : ""}`}
-            onClick={() => toggleAll(!(hasActiveFilters ? allVisibleSelected : allSelected))}
-          >
-            {hasActiveFilters
-              ? allVisibleSelected ? "Deseleziona visibili" : "Seleziona visibili"
-              : allSelected ? "Deseleziona tutto" : "Seleziona tutto"}
-          </button>
-          <div className="photo-selector__toolbar-divider" />
-          <button
-            type="button"
-            className="ghost-button ghost-button--small"
-            onClick={() => setIsSelectionActionsOpen((open) => !open)}
-            aria-expanded={isSelectionActionsOpen}
-            title="Apri le azioni sulla selezione"
-          >
-            Azioni selezione
-          </button>
-          {isSelectionActionsOpen && (
-            <div className="photo-selector__selection-actions-menu">
-              <button type="button" className="ghost-button ghost-button--small" onClick={selectVisible}>
-                Sostituisci con visibili ({visiblePhotoIds.length})
-              </button>
-              <button type="button" className="ghost-button ghost-button--small" onClick={addVisibleToSelection} disabled={visiblePhotoIds.length === 0}>
-                Aggiungi visibili ({visiblePhotoIds.length})
-              </button>
-              <button type="button" className="ghost-button ghost-button--small" onClick={removeVisibleFromSelection} disabled={visibleSelectedCount === 0}>
-                Rimuovi visibili ({visibleSelectedCount})
-              </button>
-              <button type="button" className="ghost-button ghost-button--small" onClick={invertVisibleSelection} disabled={visiblePhotoIds.length === 0}>
-                Inverti visibili
-              </button>
-              <button type="button" className="ghost-button ghost-button--small" onClick={activatePickedOnly}>
-                Sostituisci con Pick
-              </button>
-            </div>
-          )}
-          {selectedIds.length >= 2 && selectedIds.length <= 4 && (
-            <button
-              type="button"
-              className="ghost-button ghost-button--small"
-              onClick={() => setIsCompareOpen(true)}
-              title={`Confronta ${selectedIds.length} foto selezionate`}
-            >
-              Confronta
-            </button>
-          )}
-        </div>
-
-        <div className="photo-selector__action-inline photo-selector__toolbar-search">
-          <PhotoSearchBar
-            value={searchQuery}
-            onChange={setSearchQuery}
-            resultCount={visiblePhotoIds.length}
-            totalCount={photos.length}
-          />
-        </div>
-
-        <div className="photo-selector__action-inline">
-          <label className="photo-selector__zoom-label" title="Dimensione card">
-            <span>🔎</span>
-            <input
-              type="range"
-              className="photo-selector__zoom-slider"
-              min={100}
-              max={320}
-              step={10}
-              value={cardSize}
-              onChange={(e) => setCardSize(Number(e.target.value))}
-              aria-label="Dimensione card"
-            />
-          </label>
-          <div className="photo-selector__toolbar-divider" />
-          <select
-            className="photo-selector__sort photo-selector__toolbar-control"
-            value={sortBy === "createdAt" ? `createdAt:${createdAtSortDirection}` : sortBy}
-            onChange={(event) => {
-              const nextSort = event.target.value;
-              if (nextSort === "createdAt:asc") {
-                setSortBy("createdAt");
-                setCreatedAtSortDirection("asc");
-                return;
-              }
-              if (nextSort === "createdAt:desc") {
-                setSortBy("createdAt");
-                setCreatedAtSortDirection("desc");
-                return;
-              }
-              setSortBy(nextSort as SortMode);
-            }}
-          >
-            <option value="name">AZ ↑ Nome</option>
-            <option value="createdAt:desc">Data creazione ↓</option>
-            <option value="createdAt:asc">Data creazione ↑</option>
-            <option value="orientation">Orientamento</option>
-            <option value="rating">Valutazione</option>
-          </select>
-          <button
-            type="button"
-            className={`icon-button${isSettingsPanelOpen ? " icon-button--active" : ""}`}
-            onClick={() => setIsSettingsPanelOpen((v) => !v)}
-            title="Impostazioni workspace"
-          >
-            ⚙
-          </button>
-          <PhotoClassificationHelpButton />
-        </div>
-      </div>
-
-      {/* ── QUICK STATS CHIPS ── */}
-      {photos.length > 0 && (
-        <div className="photo-selector__quick-stats">
-          {[1, 2, 3, 4, 5].map((r) => {
-            const count = photoStats.ratingCounts.get(r) ?? 0;
-            if (count === 0) return null;
-            const isActive = ratingFilter === String(r);
-            return (
-              <button
-                key={r}
-                type="button"
-                className={`photo-selector__qs-chip photo-selector__qs-chip--star${isActive ? " photo-selector__qs-chip--active" : ""}`}
-                onClick={() => setRatingFilter(isActive ? "any" : String(r))}
-                title={`${r} stelle — ${count} foto`}
-              >
-                {"★".repeat(r)}
-                <span className="photo-selector__qs-count">{count}</span>
-              </button>
-            );
-          })}
-          {(["picked", "rejected"] as PickStatus[]).map((ps) => {
-            const count = photoStats.pickCounts.get(ps) ?? 0;
-            if (count === 0) return null;
-            const isActive = pickFilter === ps;
-            return (
-              <button
-                key={ps}
-                type="button"
-                className={`photo-selector__qs-chip photo-selector__qs-chip--${ps}${isActive ? " photo-selector__qs-chip--active" : ""}`}
-                onClick={() => setPickFilter(isActive ? "all" : ps)}
-                title={ps === "picked" ? `Pick — ${count} foto` : `Scartate — ${count} foto`}
-              >
-                {ps === "picked" ? "✓" : "✕"}
-                <span className="photo-selector__qs-count">{count}</span>
-              </button>
-            );
-          })}
-          {COLOR_LABELS.map((cl) => {
-            const count = photoStats.colorCounts.get(cl) ?? 0;
-            if (count === 0) return null;
-            const isActive = colorFilter === cl;
-            return (
-              <button
-                key={cl}
-                type="button"
-                className={`photo-selector__qs-chip photo-selector__qs-chip--color-${cl}${isActive ? " photo-selector__qs-chip--active" : ""}`}
-                onClick={() => setColorFilter(isActive ? "all" : cl)}
-                title={`${customColorNames[cl]} — ${count} foto`}
-              >
-                <span
-                  className={`asset-color-dot asset-color-dot--${cl}`}
-                  style={{ width: "8px", height: "8px", minWidth: "8px" }}
-                />
-                <span className="photo-selector__qs-count">{count}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
+            ),
+          },
+          {
+            id: "selection",
+            title: "Selezione",
+            content: (
+              <SelectionActionsPanel
+                canUndo={canUndo}
+                canRedo={canRedo}
+                hasActiveFilters={hasActiveFilters}
+                allSelected={allSelected}
+                allVisibleSelected={allVisibleSelected}
+                someSelected={someSelected}
+                someVisibleSelected={someVisibleSelected}
+                visibleCount={visiblePhotoIds.length}
+                visibleSelectedCount={visibleSelectedCount}
+                selectedCount={selectedIds.length}
+                isMenuOpen={isSelectionActionsOpen}
+                onUndo={handleUndoClick}
+                onRedo={handleRedoClick}
+                onToggleAll={toggleAll}
+                onToggleMenu={() => setIsSelectionActionsOpen((open) => !open)}
+                onSelectVisible={() => { selectVisible(); setIsSelectionActionsOpen(false); }}
+                onAddVisible={() => { addVisibleToSelection(); setIsSelectionActionsOpen(false); }}
+                onRemoveVisible={() => { removeVisibleFromSelection(); setIsSelectionActionsOpen(false); }}
+                onInvertVisible={() => { invertVisibleSelection(); setIsSelectionActionsOpen(false); }}
+                onActivatePickedOnly={() => { activatePickedOnly(); setIsSelectionActionsOpen(false); }}
+                onCompare={() => setIsCompareOpen(true)}
+              />
+            ),
+          },
+          {
+            id: "view",
+            title: "Vista",
+            content: (
+              <ViewControlsPanel
+                searchQuery={searchQuery}
+                resultCount={visiblePhotoIds.length}
+                totalCount={photos.length}
+                cardSize={cardSize}
+                sortBy={sortBy}
+                createdAtSortDirection={createdAtSortDirection}
+                isSettingsPanelOpen={isSettingsPanelOpen}
+                onSearchChange={setSearchQuery}
+                onCardSizeChange={setCardSize}
+                onSortChange={(nextSort, direction) => {
+                  setSortBy(nextSort);
+                  if (direction) setCreatedAtSortDirection(direction);
+                }}
+                onSettingsToggle={() => setIsSettingsPanelOpen((open) => !open)}
+              />
+            ),
+          },
+          {
+            id: "stats",
+            title: "Statistiche rapide",
+            content: (
+              <QuickStatsPanel
+                ratingCounts={photoStats.ratingCounts}
+                pickCounts={photoStats.pickCounts}
+                colorCounts={photoStats.colorCounts}
+                ratingFilter={ratingFilter}
+                pickFilter={pickFilter}
+                colorFilter={colorFilter}
+                customColorNames={customColorNames}
+                onRatingFilterChange={setRatingFilter}
+                onPickFilterChange={setPickFilter}
+                onColorFilterChange={setColorFilter}
+              />
+            ),
+          },
+        ]}
+        onMovePanel={moveWorkspacePanel}
+        onTogglePanel={toggleWorkspacePanel}
+      >
 
       {/* ── MAIN CONTENT ── */}
       <div
@@ -3590,6 +3459,7 @@ export function PhotoSelector({
                 isGroupLeader={isGroupLeader}
                 onToggle={togglePhoto}
                 onUpdatePhoto={handleUpdatePhoto}
+                onApplyShortcutChanges={handleShortcutClassification}
                 onAfterShortcutClassification={advanceFocusToNext}
                 onFocus={handleFocus}
                 onPreview={handlePreview}
@@ -3604,7 +3474,6 @@ export function PhotoSelector({
                       ? canStartDesktopDragOut
                       : Boolean(getAssetAbsolutePath(photo.id))
                   )}
-                disableNonEssentialUi={isFastScrollActive}
                 batchPulseToken={batchPulseState?.ids.has(photo.id) ? batchPulseState.token : 0}
                 batchPulseKind={batchPulseState?.ids.has(photo.id) ? batchPulseState.kind : null}
                 externalFeedback={cardSyncFeedback}
@@ -3634,11 +3503,13 @@ export function PhotoSelector({
         )}
       </div>
 
+      </DockableWorkspace>
+
       {/* ── STATUS BAR (Bridge Bottom Style) ── */}
       <footer className="photo-selector__bottom-bar">
         <div className="photo-selector__stats">
           <span className="photo-selector__count">
-            {photos.length} elementi — {selectedIds.length} selezionati
+            {currentFolderPhotos.length} elementi — {currentFolderSelectedIds.length} selezionati
             {hasActiveFilters ? ` (${visiblePhotoIds.length} filtrati)` : ""}
           </span>
           {selectionStats && (
@@ -3690,7 +3561,7 @@ export function PhotoSelector({
                 : desktopDragOutDisabledMessage}
               disabled={!canStartDesktopDragOut}
             >
-              Trascina fuori ({selectedIds.length})
+              Trascina fuori ({currentFolderSelectedIds.length})
             </button>
           {!canStartDesktopDragOut && (
             <span className="photo-selector__dragout-feedback" role="status" aria-live="polite">
@@ -3896,9 +3767,10 @@ export function PhotoSelector({
         canExternalDrag={Boolean(previewAssetWithUrl ? getAssetAbsolutePath(previewAssetWithUrl.id) : null)}
         onExternalDragStart={handlePreviewExternalDragStart}
         autoAdvanceOnAction={autoAdvanceOnAction}
+        onAutoAdvanceOnActionChange={handleAutoAdvanceChange}
         onClose={closePreview}
         onSelectAsset={handlePreviewAssetSelection}
-        onUpdateAsset={(assetId, changes) => updatePhoto(assetId, changes, "modal")}
+        onUpdateAsset={handleModalAssetUpdate}
       />
 
       {isSettingsPanelOpen && (        <aside className="photo-selector__settings-flyout" aria-label="Impostazioni workspace">
@@ -4247,6 +4119,27 @@ export function PhotoSelector({
               }.
               {selectedThumbnailProfile !== thumbnailProfile ? " Aggiorno subito task attivi e quick preview; riaprire la cartella rigenera tutta la cache col nuovo profilo." : ""}
             </p>
+            <div className={`performance-hardware-status${desktopGraphicsStatus?.hardwareAccelerationEnabled ? " performance-hardware-status--active" : " performance-hardware-status--inactive"}`}>
+              <span className="performance-hardware-status__indicator" aria-hidden="true" />
+              <div>
+                <strong>
+                  {desktopGraphicsStatus
+                    ? desktopGraphicsStatus.hardwareAccelerationEnabled
+                      ? "Accelerazione grafica attiva"
+                      : "Accelerazione grafica non attiva"
+                    : "Stato GPU disponibile solo nell’app desktop"}
+                </strong>
+                {desktopGraphicsStatus ? (
+                  <>
+                    <span>{desktopGraphicsStatus.deviceName ?? "Scheda video non identificata"}</span>
+                    <small>
+                      Compositing: {desktopGraphicsStatus.gpuCompositing} · WebGL: {desktopGraphicsStatus.webgl} · Raster: {desktopGraphicsStatus.rasterization}
+                    </small>
+                  </>
+                ) : null}
+                <small>La GPU accelera rendering e scorrimento; la decodifica RAW/JPEG usa la pipeline nativa CPU.</small>
+              </div>
+            </div>
             {performanceSnapshot ? (
               <>
                 <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
@@ -4266,7 +4159,6 @@ export function PhotoSelector({
                 activePreset={desktopThumbnailCacheInfo.ramBudgetPreset ?? null}
                 activeRamBudgetBytes={desktopThumbnailCacheInfo.ramBudgetBytes ?? null}
                 onPresetChange={onRamBudgetPresetChange}
-                onRelaunch={onRelaunch}
               />
             ) : null}
           </div>

@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/filex-desktop",
   "private": true,
-  "version": "0.1.20",
+  "version": "0.1.23",
   "description": "FileX Suite desktop shell for Windows packaging and native bridge work.",
   "author": "FileX",
   "type": "module",
@@ -67,6 +67,9 @@
     "multer": "^2.1.1",
     "semver": "^7.8.5",
     "sharp": "^0.34.0"
+  },
+  "optionalDependencies": {
+    "exiftool-vendored.exe": "^13.57.0"
   },
   "devDependencies": {
     "@types/semver": "^7.8.0",

@@ -1,43 +1,59 @@
-import * as electron from "electron";
-import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { execFile, execFileSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import type { DesktopToolId } from "@photo-tools/desktop-contracts";
-import { desktopToolManifest, type DesktopToolDescriptor } from "./tool-manifest.js";
+import {
+  desktopToolManifest,
+  type DesktopToolDescriptor,
+} from "./tool-manifest.js";
 
-const { app } = electron;
-const RESTART_PLAN_MAX_AGE_MS = 30 * 60 * 1000;
-
-interface FileXRestartPlan {
-  createdAt: number;
-  toolIds: DesktopToolId[];
-}
+const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 5_000;
+const TOOL_FORCE_SHUTDOWN_TIMEOUT_MS = 3_000;
+const TOOL_SHUTDOWN_POLL_INTERVAL_MS = 250;
 
 function normalizeProcessName(value: string): string {
-  return value.trim().toLowerCase().replace(/\.exe$/i, "");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\.exe$/i, "");
 }
 
 function executableNamesForTool(toolId: DesktopToolId): string[] {
   const descriptor: DesktopToolDescriptor = desktopToolManifest[toolId];
-  return Array.from(new Set([
-    descriptor.executableName,
-    ...(descriptor.legacyExecutableNames ?? []),
-  ].map(normalizeProcessName).filter(Boolean)));
+
+  return Array.from(
+    new Set(
+      [
+        descriptor.executableName,
+        ...(descriptor.legacyExecutableNames ?? []),
+      ]
+        .map(normalizeProcessName)
+        .filter(Boolean),
+    ),
+  );
 }
 
 function listRunningProcessNames(): Set<string> {
-  if (process.platform !== "win32") return new Set();
+  if (process.platform !== "win32") {
+    return new Set();
+  }
+
   try {
-    const output = execFileSync("tasklist.exe", ["/FO", "CSV", "/NH"], {
-      encoding: "utf8",
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    const output = execFileSync(
+      "tasklist.exe",
+      ["/FO", "CSV", "/NH"],
+      {
+        encoding: "utf8",
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+
     const names = new Set<string>();
     for (const line of output.split(/\r?\n/)) {
       const match = line.match(/^"((?:[^"]|"")+)"/);
-      if (!match?.[1]) continue;
-      names.add(normalizeProcessName(match[1].replace(/""/g, '"')));
+      if (match?.[1]) {
+        names.add(normalizeProcessName(match[1].replace(/""/g, '"')));
+      }
     }
     return names;
   } catch {
@@ -45,147 +61,114 @@ function listRunningProcessNames(): Set<string> {
   }
 }
 
-function getRunningToolIds(): DesktopToolId[] {
+function isAnyProcessRunning(processNames: readonly string[]): boolean {
   const runningNames = listRunningProcessNames();
-  return (Object.keys(desktopToolManifest) as DesktopToolId[]).filter((toolId) =>
-    executableNamesForTool(toolId).some((name) => runningNames.has(name)),
+  return processNames.some((name) => runningNames.has(name));
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitUntilProcessesExit(
+  processNames: readonly string[],
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isAnyProcessRunning(processNames)) {
+      return true;
+    }
+    await delay(TOOL_SHUTDOWN_POLL_INTERVAL_MS);
+  }
+  return !isAnyProcessRunning(processNames);
+}
+
+function terminateProcess(processName: string, force: boolean): Promise<void> {
+  const args = ["/IM", `${processName}.exe`, "/T"];
+  if (force) {
+    args.push("/F");
+  }
+
+  return new Promise((resolve) => {
+    execFile(
+      "taskkill.exe",
+      args,
+      { windowsHide: true },
+      () => resolve(),
+    );
+  });
+}
+
+async function stopFileXTool(toolId: DesktopToolId): Promise<void> {
+  const processNames = executableNamesForTool(toolId);
+  if (!isAnyProcessRunning(processNames)) {
+    return;
+  }
+
+  await Promise.all(processNames.map((name) => terminateProcess(name, false)));
+  if (await waitUntilProcessesExit(processNames, TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS)) {
+    return;
+  }
+
+  const stillRunning = listRunningProcessNames();
+  await Promise.all(
+    processNames
+      .filter((name) => stillRunning.has(name))
+      .map((name) => terminateProcess(name, true)),
   );
-}
 
-function restartPlanPath(): string {
-  const updateDirectory = join(app.getPath("userData"), "updates");
-  mkdirSync(updateDirectory, { recursive: true });
-  return join(updateDirectory, "filex-restart-plan.json");
-}
-
-export function saveFileXRestartPlan(): FileXRestartPlan {
-  const plan: FileXRestartPlan = {
-    createdAt: Date.now(),
-    toolIds: getRunningToolIds().filter((toolId) => toolId !== "suite-launcher"),
-  };
-  writeFileSync(restartPlanPath(), `${JSON.stringify(plan, null, 2)}\n`, "utf8");
-  return plan;
-}
-
-export function consumeFileXRestartPlan(): DesktopToolId[] {
-  const filePath = restartPlanPath();
-  if (!existsSync(filePath)) return [];
-  try {
-    const raw = JSON.parse(readFileSync(filePath, "utf8")) as Partial<FileXRestartPlan>;
-    const isFresh = typeof raw.createdAt === "number" && Date.now() - raw.createdAt <= RESTART_PLAN_MAX_AGE_MS;
-    const toolIds = Array.isArray(raw.toolIds)
-      ? raw.toolIds.filter((toolId): toolId is DesktopToolId =>
-          typeof toolId === "string" && toolId in desktopToolManifest && toolId !== "suite-launcher",
-        )
-      : [];
-    return isFresh ? Array.from(new Set(toolIds)) : [];
-  } catch {
-    return [];
-  } finally {
-    try {
-      unlinkSync(filePath);
-    } catch {
-      // Il piano può essere già stato consumato da un'altra istanza della Suite.
-    }
+  if (!(await waitUntilProcessesExit(processNames, TOOL_FORCE_SHUTDOWN_TIMEOUT_MS))) {
+    throw new Error(
+      `Impossibile chiudere ${desktopToolManifest[toolId].displayName}. ` +
+        "Chiudi il tool manualmente e riprova.",
+    );
   }
 }
 
-export function terminateFileXToolsExceptSuite(): void {
-  if (process.platform !== "win32") return;
-  const toolIds = (Object.keys(desktopToolManifest) as DesktopToolId[])
-    .filter((toolId) => toolId !== "suite-launcher");
-  const processNames = new Set(toolIds.flatMap(executableNamesForTool));
-  for (const processName of processNames) {
-    try {
-      execFileSync("taskkill.exe", ["/IM", `${processName}.exe`, "/T"], {
-        windowsHide: true,
-        stdio: "ignore",
-      });
-    } catch {
-      // taskkill restituisce un errore anche quando il processo non è in esecuzione.
-    }
-  }
-  for (const processName of processNames) {
-    try {
-      execFileSync("taskkill.exe", ["/IM", `${processName}.exe`, "/F", "/T"], {
-        windowsHide: true,
-        stdio: "ignore",
-      });
-    } catch {
-      // Il processo si è già chiuso correttamente.
-    }
-  }
-}
-
-function writeToolUpdateOrchestrator(): string {
-  const scriptPath = join(app.getPath("userData"), "updates", "run-filex-tool-update.ps1");
-  const script = `param(
-  [Parameter(Mandatory = $true)][string]$InstallerPath,
-  [Parameter(Mandatory = $true)][string]$SuitePath,
-  [Parameter(Mandatory = $true)][int]$SuiteProcessId
-)
-$ErrorActionPreference = 'Stop'
-$installerExitCode = 1
-try {
-  try {
-    Wait-Process -Id $SuiteProcessId -ErrorAction SilentlyContinue
-  } catch {
-    # La Suite potrebbe essere gia' terminata prima dell'avvio dello script.
-  }
-  $installer = Start-Process -FilePath $InstallerPath -PassThru -Wait
-  if ($null -eq $installer.ExitCode) { $installerExitCode = 0 } else { $installerExitCode = $installer.ExitCode }
-} finally {
-  if (Test-Path -LiteralPath $SuitePath -PathType Leaf) {
-    Start-Process -FilePath $SuitePath
-  }
-}
-exit $installerExitCode
-`;
-  writeFileSync(scriptPath, script, "utf8");
-  return scriptPath;
-}
-
-function toPowerShellSingleQuoted(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
-export async function launchToolUpdateAndRestartSuite(installerPath: string): Promise<void> {
-  if (process.platform !== "win32") {
-    throw new Error("Il riavvio coordinato degli aggiornamenti è supportato su Windows.");
-  }
-  saveFileXRestartPlan();
-  const scriptPath = writeToolUpdateOrchestrator();
-  const elevatedArguments = [
-    "-NoLogo",
-    "-NoProfile",
-    "-ExecutionPolicy", "Bypass",
-    "-File", scriptPath,
-    "-InstallerPath", installerPath,
-    "-SuitePath", process.execPath,
-    "-SuiteProcessId", String(process.pid),
-  ];
-  const startElevatedCommand = [
-    `Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList @(${elevatedArguments
-      .map(toPowerShellSingleQuoted)
-      .join(", ")})`,
-  ].join(";");
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn("powershell.exe", [
-      "-NoLogo",
-      "-NoProfile",
-      "-Command", startElevatedCommand,
-    ], {
+function runInstaller(installerPath: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const installer = spawn(installerPath, ["/S"], {
+      detached: false,
+      shell: false,
       stdio: "ignore",
       windowsHide: true,
     });
-    child.once("error", reject);
-    child.once("close", (code) => {
+
+    installer.once("error", reject);
+    installer.once("close", (code, signal) => {
       if (code === 0) {
         resolve();
         return;
       }
-      reject(new Error("Autorizzazione amministratore annullata o non disponibile"));
+
+      const detail = signal ? `segnale ${signal}` : `codice ${code ?? "sconosciuto"}`;
+      reject(new Error(`Installer FileX terminato con ${detail}.`));
     });
   });
-  app.quit();
+}
+
+export function isFileXToolRunning(toolId: DesktopToolId): boolean {
+  if (process.platform !== "win32" || toolId === "suite-launcher") {
+    return false;
+  }
+  return isAnyProcessRunning(executableNamesForTool(toolId));
+}
+
+export async function installFileXToolUpdate(
+  toolId: DesktopToolId,
+  installerPath: string,
+): Promise<void> {
+  if (process.platform !== "win32") {
+    throw new Error("Gli aggiornamenti automatici dei tool sono supportati su Windows.");
+  }
+  if (toolId === "suite-launcher") {
+    throw new Error("FileX Suite usa il proprio sistema di aggiornamento dedicato.");
+  }
+  if (!installerPath.toLowerCase().endsWith(".exe") || !existsSync(installerPath)) {
+    throw new Error("Installer FileX non valido o non disponibile.");
+  }
+
+  await stopFileXTool(toolId);
+  await runInstaller(installerPath);
 }
