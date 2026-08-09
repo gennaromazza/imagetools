@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-08-09 - FileX Suite 0.1.29
+
+- spostato FileX Adobe Cleaner nella sezione generale `Utility`, eliminando la categoria separata `Utility Adobe`
+- aggiunte sezioni personali persistenti, creabili, rinominabili, riordinabili ed eliminabili dall'utente
+- consentita l'assegnazione dello stesso tool a più sezioni tramite selezione multipla o trascinamento
+- aggiunto il ripristino sicuro dell'organizzazione predefinita senza disinstallare o modificare alcun tool
+
 ## 2026-08-09 - FileX Adobe Cleaner 0.1.0
 
 ### FileX Adobe Cleaner
