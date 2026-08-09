@@ -90,6 +90,8 @@ if (args.component === "filex-send") {
     "/.output/electron/filex-send/electron/main.js",
     "/.output/electron/filex-send/electron/preload.cjs",
     "/.output/electron/filex-send/electron/file-send-service.js",
+    "/.output/electron/filex-send/electron/firebase-anonymous-auth.js",
+    "/.output/electron/filex-send/electron/remote-client-service.js",
   ]) {
     if (!entries.includes(requiredEntry)) throw new Error(`FileX Send non contiene ${requiredEntry}`);
   }

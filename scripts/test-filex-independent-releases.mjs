@@ -18,6 +18,7 @@ const photoSelectorPackage = JSON.parse(await read("apps/photo-selector-app/pack
 const imagePartyFramePackage = JSON.parse(await read("apps/image-party-frame/package.json"));
 const archivioFlowPackage = JSON.parse(await read("apps/archivio-flow/package.json"));
 const cacheSweepPackage = JSON.parse(await read("apps/cache-sweep/package.json"));
+const filexSendPackage = JSON.parse(await read("apps/filex-send/package.json"));
 const builder = await read("apps/filex-desktop/electron-builder.config.mjs");
 const toolManifest = await read("apps/filex-desktop/src/tool-manifest.ts");
 const suiteMain = await read("apps/filex-desktop/src/suite-main.ts");
@@ -36,6 +37,7 @@ for (const [name, packageJson] of [
   ["image-party-frame", imagePartyFramePackage],
   ["archivio-flow", archivioFlowPackage],
   ["cache-sweep", cacheSweepPackage],
+  ["filex-send", filexSendPackage],
 ]) {
   assert(/^\d+\.\d+\.\d+$/.test(packageJson.version), `Versione non semantica per ${name}`);
 }
@@ -64,6 +66,8 @@ assert(
   toolManifest.includes('versionPackageRelativeToShell: "../photo-selector-app"')
     && toolManifest.includes('versionPackageRelativeToShell: "../cache-sweep"')
     && toolManifest.includes('electronPreloadOutputFile: "cache-sweep/electron/preload.cjs"')
+    && toolManifest.includes('versionPackageRelativeToShell: "../filex-send"')
+    && toolManifest.includes('electronPreloadOutputFile: "filex-send/electron/preload.cjs"')
     && toolManifest.includes('versionPackageRelativeToShell: "."'),
   "Il manifest desktop non distingue le sorgenti versione di Suite e tool.",
 );
@@ -117,6 +121,7 @@ assert(
 assert(
   releaseWorkflow.includes('"suite-v*"')
     && releaseWorkflow.includes('"cache-sweep-v*"')
+    && releaseWorkflow.includes('"filex-send-v*"')
     && releaseWorkflow.includes("Build selected installer")
     && releaseWorkflow.includes("verify-packaged-component.mjs")
     && releaseWorkflow.includes("Get-Content $feedPath -Raw")
@@ -125,8 +130,8 @@ assert(
     && releaseWorkflow.includes("foreach ($attempt in 1..6)")
     && releaseWorkflow.includes("Bootstrap dedicated tool catalog")
     && releaseWorkflow.includes("releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json")
-    && releaseWorkflow.includes('$component -eq "cache-sweep"')
-    && releaseWorkflow.includes('{ "0.1.28" } else { "0.1.26" }')
+    && releaseWorkflow.includes('$component -eq "filex-send"')
+    && releaseWorkflow.includes('{ "0.1.31" } elseif ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }')
     && releaseWorkflow.includes("git branch -r --contains $env:GITHUB_SHA")
     && releaseWorkflow.includes('"refs/heads/main"')
     && !releaseWorkflow.includes("Build FileX Suite installer"),

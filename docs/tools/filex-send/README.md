@@ -19,7 +19,9 @@ La schermata iniziale chiede soltanto dove si trova il cliente:
 - **Qui con me** mantiene il trasferimento diretto nella LAN.
 - **A distanza** crea un link temporaneo da condividere via WhatsApp, email o SMS.
 
-Il cliente apre il link senza account, invia i file e FileX Send li scarica automaticamente nella cartella scelta. Dopo ogni download confermato, il file viene eliminato dal server. La sessione scade comunque entro 72 ore.
+Il fotografo imposta data e ora di scadenza del link, da 15 minuti fino a 7 giorni. Il cliente lo apre senza account e può inviare anche mentre il PC è spento o FileX Send è chiuso. Alla riapertura, FileX Send scarica automaticamente nella cartella scelta tutto ciò che è in attesa.
+
+La scadenza chiude soltanto la possibilità di aggiungere nuovi file. I file già ricevuti restano nello storage finché il PC non li scarica e ne verifica la dimensione; dopo la conferma rimangono recuperabili per un'ora, quindi la pulizia automatica li elimina.
 
 Il servizio pubblico è distribuito nel progetto Firebase **FileX Cloud** (`gen-lang-client-0321087169`):
 
@@ -27,8 +29,8 @@ Il servizio pubblico è distribuito nel progetto Firebase **FileX Cloud** (`gen-
 - Cloud Functions 2nd gen espone l'API autenticata in `europe-west1`;
 - Firestore conserva esclusivamente metadati e stato temporaneo della sessione;
 - il bucket privato europeo `filex-cloud-391620173227-eu` conserva i file fino alla consegna;
-- Cloud Scheduler elimina ogni ora le sessioni scadute e i relativi oggetti;
-- Secret Manager conserva l'autorizzazione usata dall'installazione desktop.
+- Cloud Scheduler controlla ogni 15 minuti i file confermati e conserva senza scadenza quelli ancora da scaricare;
+- Firebase Anonymous Auth assegna automaticamente un'identità a ogni installazione, senza login o password per il fotografo.
 
 URL di collaudo: `https://gen-lang-client-0321087169.web.app`. Il dominio tecnico verrà sostituito da un dominio FileX personalizzato prima della pubblicazione commerciale.
 
@@ -46,7 +48,7 @@ npm.cmd run test:filex-cloud
 firebase.cmd deploy --project gen-lang-client-0321087169 --only "functions:filex-cloud,hosting,firestore"
 ```
 
-Il segreto `FILEX_SEND_CREATE_TOKEN` non deve essere scritto nel repository. Le regole Firestore negano ogni accesso diretto dal browser; tutte le operazioni passano dall'API, che conserva soltanto hash dei token di sessione.
+Le regole Firestore negano ogni accesso diretto dal browser; tutte le operazioni passano dall'API, che conserva soltanto hash dei token di sessione. L'identità anonima dell'installazione e i token desktop vengono salvati localmente tramite Windows DPAPI.
 
 ## Avvio per sviluppo
 
@@ -91,5 +93,6 @@ Alla prima esecuzione Windows può chiedere di consentire FileX Send sulle reti 
 - Bucket con prevenzione dell'accesso pubblico e upload tramite URL resumable monouso.
 - Metadati Firestore non accessibili direttamente ai client.
 - Eliminazione del file cloud soltanto dopo download locale e verifica della dimensione.
-- Scadenza automatica a 72 ore e pulizia oraria delle sessioni abbandonate.
-- Segreti del servizio in Google Secret Manager e credenziali locali cifrate tramite Windows DPAPI.
+- Scadenza configurabile del link da 15 minuti a 7 giorni, senza cancellare i file ancora da scaricare.
+- Cancellazione automatica un'ora dopo la conferma del download locale.
+- Identità Firebase anonima per installazione e credenziali locali cifrate tramite Windows DPAPI.
