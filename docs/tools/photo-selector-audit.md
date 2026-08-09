@@ -47,6 +47,10 @@ Il controllo statico verifica:
 | FILTER-02 | Filtri avanzati chiusi/aperti | La riga base resta leggibile; i filtri secondari compaiono solo su richiesta. |
 | SELECT-01 | Selezione parziale | Conteggi header, toolbar e fondo pagina coincidono. |
 | SELECT-02 | Selezione con filtri attivi | È chiaro se un’azione sostituisce, aggiunge o rimuove foto. |
+| SELECT-03 | Da 2 a 4 foto selezionate nella griglia | Compare `Confronta (N)` anche se il progetto contiene selezioni non visibili; la modale rispetta l'ordine della griglia. |
+| SELECT-04 | `Ctrl+B` nella griglia | Apre e richiude Confronta; con meno di 2 o più di 4 foto visibili mostra un messaggio operativo. |
+| SELECT-05 | Scroll con foto selezionate o colorate | I bordi restano visibili e le ombre diffuse vengono sospese fino al termine dello scroll. |
+| BROWSE-01 | Elenco cartelle recenti più alto della finestra | La pagina scorre fino all'ultima cartella mantenendo visibile la testata. |
 | EXPORT-01 | Export principale | Scarica un JSON con il numero corretto di foto attive. |
 | EXPORT-02 | Export secondari | Sono disponibili senza occupare la prima riga delle CTA. |
 | LOAD-01 | Anteprime ancora in caricamento | L’utente può continuare a selezionare e può riaprire lo stato caricamento. |

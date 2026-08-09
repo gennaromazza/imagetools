@@ -80,3 +80,11 @@ Con FileX Suite aperta, verificare inoltre che la lettura della versione install
 In Quick Preview verificare che il controllo `Avanza dopo classificazione` sia visibile sopra la testata. Con il controllo in `OFF`, assegnare una stella, Pick/Scarta, un colore e un'etichetta: la foto deve restare corrente e la navigazione manuale con le frecce deve continuare a funzionare. Riavviando il tool, la preferenza deve restare invariata.
 
 Con un filtro stelle attivo, verificare che pannello Filtri, pannello Selezione e barra inferiore distinguano senza ambiguita il totale nella cartella, il totale nel progetto e le foto visibili con i filtri.
+
+## Verifica Image Select Pro 0.1.26
+
+La release `photo-selector-app-v0.1.26` deve contenere esclusivamente l'installer Windows x64 di Image Select Pro, la relativa blockmap e `stable.json`. Non deve produrre installer della Suite o di altri tool.
+
+Nel catalogo `update-catalog-stable`, la voce `photo-selector-app` deve indicare versione `0.1.26`, URL riferito al tag namespaced e checksum SHA-256 valido; le versioni degli altri tool devono restare invariate.
+
+Prima della pubblicazione verificare gli scenari `BROWSE-01` e `SELECT-03`–`SELECT-05` in `docs/tools/photo-selector-audit.md`. Dopo l'aggiornamento, il titolo deve mostrare `Image Select Pro — Versione 0.1.26` e FileX Suite deve restare aperta.

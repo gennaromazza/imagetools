@@ -37,10 +37,9 @@ for (const [name, packageJson] of [
 ]) {
   assert(/^\d+\.\d+\.\d+$/.test(packageJson.version), `Versione non semantica per ${name}`);
 }
-assert(
-  desktopPackage.version !== photoSelectorPackage.version,
-  "La versione Suite deve poter avanzare senza modificare la versione dei tool.",
-);
+// Component versions are sourced independently and may legitimately coincide
+// after separate patch releases. The packaging assertions below verify the
+// independence contract without coupling it to a transient version mismatch.
 
 assert(
   !desktopPackage.scripts["build:suite"].includes("photo-selector-app"),
@@ -121,6 +120,7 @@ assert(
     && releaseWorkflow.includes("foreach ($attempt in 1..6)")
     && releaseWorkflow.includes("Bootstrap dedicated tool catalog")
     && releaseWorkflow.includes("releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json")
+    && releaseWorkflow.includes('$minSuiteVersion = "0.1.26"')
     && releaseWorkflow.includes("git branch -r --contains $env:GITHUB_SHA")
     && releaseWorkflow.includes('"refs/heads/main"')
     && !releaseWorkflow.includes("Build FileX Suite installer"),

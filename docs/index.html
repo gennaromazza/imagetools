@@ -38,7 +38,7 @@
     const notes=value=>safeText(value||'Novità non specificate.').replace(/^###?\s?/gm,'').replace(/^[-*]\s/gm,'• ');
     fetch(`${apiBase}/releases?per_page=30`).then(response=>response.ok?response.json():[]).then(releases=>{
       const stable=releases.filter(release=>!release.draft&&!release.prerelease);
-      const latest=stable[0];
+      const latest=stable.find(release=>/^suite-v\d+\.\d+\.\d+/.test(release.tag_name))||stable[0];
       if(!latest)return;
       const installer=latest.assets.find(asset=>/^FileX-Suite-.*-stable-x64-setup\.exe$/.test(asset.name));
       if(installer)document.querySelector('#download-link').href=installer.browser_download_url;

@@ -1566,6 +1566,21 @@ export function PhotoSelector({
     [visiblePhotoIds],
   );
   const visiblePhotoIdSet = useMemo(() => new Set(visiblePhotoIds), [visiblePhotoIds]);
+  const comparePhotos = useMemo(
+    () => visiblePhotoIds
+      .filter((photoId) => selectedSet.has(photoId))
+      .map((photoId) => assetById.get(photoId))
+      .filter((photo): photo is ImageAsset => Boolean(photo)),
+    [assetById, selectedSet, visiblePhotoIds],
+  );
+  const canComparePhotos = comparePhotos.length >= 2 && comparePhotos.length <= 4;
+  const openCompare = useCallback(() => {
+    if (!canComparePhotos) {
+      addToast("Per confrontare, seleziona da 2 a 4 foto visibili nella griglia.", "info");
+      return;
+    }
+    setIsCompareOpen(true);
+  }, [addToast, canComparePhotos]);
   const photoGroupKeyById = useMemo(() => {
     const mapping = new Map<string, string>();
     for (const photoId of visiblePhotoIds) {
@@ -2127,6 +2142,18 @@ export function PhotoSelector({
           toggleAll(true);
           return;
         }
+        if (normalizedKey === "b") {
+          event.preventDefault();
+          if (event.repeat) {
+            return;
+          }
+          if (isCompareOpen) {
+            setIsCompareOpen(false);
+          } else {
+            openCompare();
+          }
+          return;
+        }
       }
 
       if (!event.ctrlKey && !event.metaKey && !event.altKey) {
@@ -2220,8 +2247,10 @@ export function PhotoSelector({
       contextMenuState,
       focusedPhotoId,
       hasActiveFilters,
+      isCompareOpen,
       onSelectionChange,
       openPreview,
+      openCompare,
       photos,
       previewAssetId,
       pushTimelineEntry,
@@ -3302,6 +3331,7 @@ export function PhotoSelector({
                 visibleSelectedCount={visibleSelectedCount}
                 currentFolderSelectedCount={currentFolderSelectedIds.length}
                 selectedCount={selectedIds.length}
+                compareCount={comparePhotos.length}
                 isMenuOpen={isSelectionActionsOpen}
                 onUndo={handleUndoClick}
                 onRedo={handleRedoClick}
@@ -3312,7 +3342,7 @@ export function PhotoSelector({
                 onRemoveVisible={() => { removeVisibleFromSelection(); setIsSelectionActionsOpen(false); }}
                 onInvertVisible={() => { invertVisibleSelection(); setIsSelectionActionsOpen(false); }}
                 onActivatePickedOnly={() => { activatePickedOnly(); setIsSelectionActionsOpen(false); }}
-                onCompare={() => setIsCompareOpen(true)}
+                onCompare={openCompare}
               />
             ),
           },
@@ -4491,9 +4521,9 @@ export function PhotoSelector({
         />
       ) : null}
 
-      {isCompareOpen && selectedIds.length >= 2 && (
+      {isCompareOpen && canComparePhotos && (
         <CompareModal
-          photos={photos.filter((p) => selectedSet.has(p.id)).slice(0, 4)}
+          photos={comparePhotos}
           onClose={() => setIsCompareOpen(false)}
           onUpdatePhoto={(id, changes) => updatePhoto(id, changes)}
         />

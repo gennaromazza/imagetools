@@ -1,6 +1,18 @@
 # Changelog
 
-## In sviluppo - FileX Suite 0.1.26
+## 2026-08-09 - Image Select Pro 0.1.26
+
+### Image Select Pro
+- la schermata Sfoglia permette ora di scorrere tutte le cartelle e i progetti recenti mantenendo fissa la testata
+- la modalita Confronta usa da 2 a 4 foto selezionate e visibili nella griglia, conserva l'ordine corrente e resta accessibile anche nei pannelli stretti
+- aggiunta la scorciatoia `Ctrl+B` per aprire e chiudere rapidamente il confronto
+- durante lo scorrimento della griglia le ombre diffuse delle card vengono sospese, mantenendo visibili bordi di selezione ed etichette colore
+
+### Release engineering
+- prima release indipendente di Image Select Pro con tag `photo-selector-app-v0.1.26`, installer Windows x64, requisito minimo FileX Suite `0.1.26` e catalogo stabile dedicato
+- FileX Suite e gli altri tool mantengono invariata la propria versione
+
+## 2026-08-09 - FileX Suite 0.1.26
 
 - versionamento separato per FileX Suite, Image Select Pro, Image Party Frame e Archivio Flow
 - build Windows selettiva del solo componente pubblicato
