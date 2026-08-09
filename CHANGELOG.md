@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-09 - FileX Suite 0.1.30
+
+- corretta la rinomina delle sezioni personali nel launcher Electron
+- sostituito il prompt nativo non supportato con un editor integrato nella finestra `Organizza sezioni`
+- aggiunti salvataggio con `Invio` o pulsante di conferma e annullamento con `Esc`
+
 ## 2026-08-09 - FileX Suite 0.1.29
 
 - spostato FileX Adobe Cleaner nella sezione generale `Utility`, eliminando la categoria separata `Utility Adobe`

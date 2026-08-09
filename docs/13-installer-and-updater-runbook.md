@@ -108,3 +108,7 @@ Dalla Suite 0.1.28 verificare `Installa`, apertura del tool e stato `Pronto`. Su
 La release `suite-v0.1.29` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre la versione 0.1.29 senza modificare le versioni presenti nel catalogo dei tool.
 
 Dopo l'aggiornamento verificare che FileX Adobe Cleaner compaia in `Utility` e che `Utility Adobe` non sia più presente. Creare due sezioni personali, assegnare lo stesso tool a entrambe sia dal comando `Sezioni` sia tramite trascinamento, quindi riavviare la Suite e verificare la persistenza. Rinomina, riordino, eliminazione e ripristino predefinito non devono disinstallare tool né rimuovere dati applicativi.
+
+## Verifica FileX Suite 0.1.30
+
+La release `suite-v0.1.30` deve contenere esclusivamente l'installer Windows x64 della Suite, la blockmap e `latest.yml`. Creare una sezione personale, premere la matita e verificare che il nome diventi modificabile direttamente nella finestra. Confermare una rinomina con `Invio` e con il pulsante di conferma; verificare inoltre l'annullamento con `Esc`. Il nuovo nome e le assegnazioni dei tool devono restare invariati dopo il riavvio della Suite.

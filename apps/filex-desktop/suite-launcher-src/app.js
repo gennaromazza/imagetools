@@ -41,6 +41,7 @@ let suiteUpdateDeferred = false;
 let suiteInstallTimer = null;
 let suiteInstallSeconds = 0;
 let toastTimer = null;
+let renamingCategoryIndex = null;
 
 function readStoredOrganization() {
   try {
@@ -215,16 +216,22 @@ function renderManageSectionsDialog() {
   sectionsDialogTitle.textContent = 'Le tue sezioni';
   const rows = customCategories.length ? customCategories.map((category, index) => {
     const count = states.filter(state => categoriesForTool(state.toolId).includes(category)).length;
-    return `<div class="section-row"><div><strong>${escapeHtml(category)}</strong><small>${count} tool</small></div><div class="section-row-actions">
-      <button type="button" data-section-action="up" data-index="${index}" title="Sposta su" ${index === 0 ? 'disabled' : ''}>↑</button>
+    const nameEditor = renamingCategoryIndex === index
+      ? `<input class="section-rename-input" data-rename-input="${index}" maxlength="32" value="${escapeHtml(category)}" aria-label="Nuovo nome della sezione ${escapeHtml(category)}">`
+      : `<strong>${escapeHtml(category)}</strong><small>${count} tool</small>`;
+    const actions = renamingCategoryIndex === index
+      ? `<button type="button" data-section-action="save-rename" data-index="${index}" title="Salva nome">✓</button><button type="button" data-section-action="cancel-rename" data-index="${index}" title="Annulla">×</button>`
+      : `<button type="button" data-section-action="up" data-index="${index}" title="Sposta su" ${index === 0 ? 'disabled' : ''}>↑</button>
       <button type="button" data-section-action="down" data-index="${index}" title="Sposta giù" ${index === customCategories.length - 1 ? 'disabled' : ''}>↓</button>
       <button type="button" data-section-action="rename" data-index="${index}" title="Rinomina">✎</button>
-      <button type="button" data-section-action="delete" data-index="${index}" title="Elimina">×</button>
+      <button type="button" data-section-action="delete" data-index="${index}" title="Elimina">×</button>`;
+    return `<div class="section-row"><div>${nameEditor}</div><div class="section-row-actions">
+      ${actions}
     </div></div>`;
   }).join('') : '<div class="empty">Non hai ancora creato sezioni personali.</div>';
   sectionsDialogContent.innerHTML = `<div class="section-create"><input id="new-section-name" maxlength="32" placeholder="Nome nuova sezione" aria-label="Nome nuova sezione"><button id="create-section-btn" class="secondary-action" type="button">Crea</button></div><div class="section-list">${rows}</div><p class="dialog-help">Trascina un tool su una sezione per aggiungerlo. Lo stesso tool può comparire in tutte le sezioni che desideri.</p><button id="reset-sections-btn" class="reset-sections" type="button">Ripristina organizzazione predefinita</button>`;
 }
-function openManageSectionsDialog() { renderManageSectionsDialog(); sectionsDialog.showModal(); }
+function openManageSectionsDialog() { renamingCategoryIndex = null; renderManageSectionsDialog(); sectionsDialog.showModal(); }
 function openToolSectionsDialog(toolId) {
   const state = states.find(item => item.toolId === toolId);
   if (!state) return;
@@ -291,13 +298,27 @@ sectionsDialogContent.addEventListener('click', event => {
     if (destination < 0 || destination >= customCategories.length) return;
     [customCategories[index], customCategories[destination]] = [customCategories[destination], customCategories[index]];
   } else if (action === 'rename') {
+    renamingCategoryIndex = index;
+    renderManageSectionsDialog();
+    const input = sectionsDialogContent.querySelector(`[data-rename-input="${index}"]`);
+    input?.focus();
+    input?.select();
+    return;
+  } else if (action === 'cancel-rename') {
+    renamingCategoryIndex = null;
+    renderManageSectionsDialog();
+    return;
+  } else if (action === 'save-rename') {
     const oldName = customCategories[index];
-    const newName = normalizeCategoryName(prompt('Nuovo nome della sezione:', oldName));
-    if (!newName || newName === oldName) return;
+    const input = sectionsDialogContent.querySelector(`[data-rename-input="${index}"]`);
+    const newName = normalizeCategoryName(input?.value);
+    if (!newName) { input?.focus(); return; }
+    if (newName === oldName) { renamingCategoryIndex = null; renderManageSectionsDialog(); return; }
     if (categoryNameExists(newName, index)) { alert('Esiste già una sezione con questo nome.'); return; }
     customCategories[index] = newName;
     Object.keys(toolCategoryOverrides).forEach(toolId => { toolCategoryOverrides[toolId] = toolCategoryOverrides[toolId].map(name => name === oldName ? newName : name); });
     if (activeCategory === oldName) activeCategory = newName;
+    renamingCategoryIndex = null;
   } else if (action === 'delete') {
     const removed = customCategories[index];
     if (!confirm(`Eliminare la sezione “${removed}”? I tool non verranno disinstallati.`)) return;
@@ -310,6 +331,18 @@ sectionsDialogContent.addEventListener('click', event => {
   saveOrganization(); refreshOrganizationViews(); renderManageSectionsDialog();
 });
 sectionsDialogContent.addEventListener('keydown', event => {
+  const renameInput = event.target.closest('[data-rename-input]');
+  if (renameInput && event.key === 'Enter') {
+    event.preventDefault();
+    sectionsDialogContent.querySelector(`[data-section-action="save-rename"][data-index="${renameInput.dataset.renameInput}"]`)?.click();
+    return;
+  }
+  if (renameInput && event.key === 'Escape') {
+    event.preventDefault();
+    renamingCategoryIndex = null;
+    renderManageSectionsDialog();
+    return;
+  }
   if (event.key === 'Enter' && event.target.id === 'new-section-name') { event.preventDefault(); sectionsDialogContent.querySelector('#create-section-btn')?.click(); }
 });
 sectionsDialogContent.addEventListener('change', event => {
