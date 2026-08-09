@@ -50,6 +50,13 @@ jobs:
           npm.cmd --workspace @photo-tools/archivio-flow run build
           npm.cmd --workspace @photo-tools/cache-sweep run test
           npm.cmd --workspace @photo-tools/cache-sweep run build
+          npm.cmd --workspace @photo-tools/filex-send run test
+          npm.cmd --workspace @photo-tools/filex-send run build
+          npm.cmd --workspace @photo-tools/filex-send-remote-server run test
+          npm.cmd --workspace @photo-tools/filex-send-remote-server run build
+          npm.cmd --workspace @photo-tools/filex-cloud-functions run test
+          npm.cmd --workspace @photo-tools/filex-cloud-functions run typecheck
+          npm.cmd --workspace @photo-tools/filex-cloud-functions run build
 
       - name: Validate stable manifest
         run: npm.cmd --workspace @photo-tools/filex-desktop run manifest:validate:stable

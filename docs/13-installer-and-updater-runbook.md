@@ -60,6 +60,9 @@ Le versioni precedenti al passaggio per-user sono installate in `C:\Program File
 - Nessun crash all'avvio nei primi 2 minuti.
 - Dopo l'aggiornamento: Suite ancora aperta, altri tool ancora aperti e tool aggiornato riaperto se era in esecuzione.
 - L'installazione del tool è in `%LOCALAPPDATA%\Programs\<ToolName>` e l'uninstall è visibile in `Impostazioni > App`.
+- Per FileX Send verificare entrambe le modalità: doppio QR sulla rete locale e link remoto con scadenza impostata dal fotografo.
+- Chiudere FileX Send durante un upload remoto di prova, completare l'invio dal telefono e riaprire il tool: il file deve essere scaricato automaticamente nella cartella della sessione e deve comparire la notifica Windows.
+- Dopo la conferma del download il file non deve più comparire nella coda desktop; la risposta API deve indicare una retention residua di circa 60 minuti.
 
 ## Chiusura di una pubblicazione
 
@@ -112,3 +115,11 @@ Dopo l'aggiornamento verificare che FileX Adobe Cleaner compaia in `Utility` e c
 ## Verifica FileX Suite 0.1.30
 
 La release `suite-v0.1.30` deve contenere esclusivamente l'installer Windows x64 della Suite, la blockmap e `latest.yml`. Creare una sezione personale, premere la matita e verificare che il nome diventi modificabile direttamente nella finestra. Confermare una rinomina con `Invio` e con il pulsante di conferma; verificare inoltre l'annullamento con `Esc`. Il nuovo nome e le assegnazioni dei tool devono restare invariati dopo il riavvio della Suite.
+
+## Verifica FileX Suite 0.1.31 e FileX Send 0.1.0
+
+Pubblicare prima `suite-v0.1.31`: release e feed Suite devono contenere soltanto installer Suite x64, blockmap e `latest.yml`. Dopo l'aggiornamento, la scheda **FileX Send** deve comparire nella sezione `Consegna` senza modificare le sezioni personali esistenti.
+
+Pubblicare quindi `filex-send-v0.1.0`: la release deve contenere soltanto `FileX-Send-0.1.0-stable-x64-setup.exe`, blockmap e `stable.json`. Nel catalogo dedicato la voce `filex-send` deve avere `minLauncherVersion` 0.1.31, URL sul tag namespaced e checksum SHA-256 valido; tutte le altre voci devono restare invariate.
+
+Dalla Suite 0.1.31 verificare `Installa`, apertura e stato `Pronto`. Provare il doppio QR locale e un invio remoto a FileX Send chiuso: alla riapertura il file deve essere scaricato automaticamente, la coda cloud deve svuotarsi e la retention restituita dal server deve essere di circa 60 minuti.

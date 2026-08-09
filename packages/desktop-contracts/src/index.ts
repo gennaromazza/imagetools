@@ -6,6 +6,7 @@ export type DesktopToolId =
   | "image-converter"
   | "image-file-finder"
   | "cache-sweep"
+  | "filex-send"
   | "photo-selector-app";
 
 export type DesktopReleaseChannel = "stable" | "beta";

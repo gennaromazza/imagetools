@@ -26,9 +26,10 @@ const metadata = {
   'image-converter': { icon:'convert', category:'Utility', description:'Converte intere cartelle di immagini in JPG o WebP usando preset per web, social, revisione e stampa, con controllo di dimensioni, qualità e peso. Gestisce inoltre i negativi RAW trasformandoli in DNG compresso, conservando gli originali e i relativi file XMP.', color:'#df8647' },
   'image-file-finder': { icon:'find', category:'Utility', description:'Cerca automaticamente fotografie dentro cartelle e sottocartelle partendo da una lista di nomi o codici file. Raccoglie in una destinazione unica le immagini trovate e produce un riepilogo chiaro di corrispondenze, duplicati ed elementi mancanti.', color:'#4c9caf' },
   'cache-sweep': { icon:'suite', category:'Utility', description:'FileX Adobe Cleaner lavora esclusivamente sui programmi Adobe: libera le cache supportate e individua vecchie versioni installate accanto a quella corrente. Ogni rimozione è spiegata e confermata; cataloghi, progetti, preset, preferenze, licenze e dati di recupero restano protetti.', color:'#e5b34f' },
+  'filex-send': { icon:'suite', category:'Consegna', description:'Riceve foto e video dal cliente tramite QR sulla rete locale oppure con un link remoto temporaneo. Gli invii restano disponibili anche a PC spento e vengono scaricati automaticamente alla riapertura.', color:'#39c9a5' },
 };
 const systemCategories = ['Tutti', 'Preferiti', 'Recenti'];
-const defaultCategories = ['Selezione', 'Creatività', 'Stampa', 'Archivio', 'Utility'];
+const defaultCategories = ['Selezione', 'Creatività', 'Stampa', 'Archivio', 'Consegna', 'Utility'];
 const organizationStorageKey = 'filex-organization-v1';
 const storedOrganization = readStoredOrganization();
 let customCategories = storedOrganization.customCategories;
@@ -57,8 +58,14 @@ function readStoredOrganization() {
   }
 }
 
-function allCategories() { return [...systemCategories, ...defaultCategories, ...customCategories]; }
-function editableCategories() { return [...defaultCategories, ...customCategories]; }
+function allCategories() {
+  return [...systemCategories, ...defaultCategories, ...customCategories];
+}
+
+function editableCategories() {
+  return [...defaultCategories, ...customCategories];
+}
+
 function categoriesForTool(toolId) {
   const saved = toolCategoryOverrides[toolId];
   if (Array.isArray(saved)) {
@@ -67,14 +74,17 @@ function categoriesForTool(toolId) {
   }
   return [metadata[toolId]?.category || 'Utility'];
 }
+
 function saveOrganization() {
   localStorage.setItem(organizationStorageKey, JSON.stringify({ customCategories, toolCategories: toolCategoryOverrides }));
 }
+
 function setToolCategories(toolId, categoryNames) {
   const valid = [...new Set(categoryNames.filter(name => editableCategories().includes(name)))];
   toolCategoryOverrides[toolId] = valid.length ? valid : [metadata[toolId]?.category || 'Utility'];
   saveOrganization();
 }
+
 function showToast(message) {
   clearTimeout(toastTimer);
   suiteToast.textContent = message;
@@ -206,32 +216,44 @@ function renderTools() {
   }).join('') : '<div class="empty">Nessuno strumento in questa sezione.</div>';
 }
 
-function normalizeCategoryName(value) { return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 32); }
+function normalizeCategoryName(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 32);
+}
+
 function categoryNameExists(name, ignoredIndex = -1) {
   const normalized = name.toLocaleLowerCase('it');
   return [...systemCategories, ...defaultCategories, ...customCategories.filter((_, index) => index !== ignoredIndex)]
     .some(item => item.toLocaleLowerCase('it') === normalized);
 }
+
 function renderManageSectionsDialog() {
   sectionsDialogTitle.textContent = 'Le tue sezioni';
-  const rows = customCategories.length ? customCategories.map((category, index) => {
-    const count = states.filter(state => categoriesForTool(state.toolId).includes(category)).length;
-    const nameEditor = renamingCategoryIndex === index
-      ? `<input class="section-rename-input" data-rename-input="${index}" maxlength="32" value="${escapeHtml(category)}" aria-label="Nuovo nome della sezione ${escapeHtml(category)}">`
-      : `<strong>${escapeHtml(category)}</strong><small>${count} tool</small>`;
-    const actions = renamingCategoryIndex === index
-      ? `<button type="button" data-section-action="save-rename" data-index="${index}" title="Salva nome">✓</button><button type="button" data-section-action="cancel-rename" data-index="${index}" title="Annulla">×</button>`
-      : `<button type="button" data-section-action="up" data-index="${index}" title="Sposta su" ${index === 0 ? 'disabled' : ''}>↑</button>
-      <button type="button" data-section-action="down" data-index="${index}" title="Sposta giù" ${index === customCategories.length - 1 ? 'disabled' : ''}>↓</button>
-      <button type="button" data-section-action="rename" data-index="${index}" title="Rinomina">✎</button>
-      <button type="button" data-section-action="delete" data-index="${index}" title="Elimina">×</button>`;
-    return `<div class="section-row"><div>${nameEditor}</div><div class="section-row-actions">
-      ${actions}
-    </div></div>`;
-  }).join('') : '<div class="empty">Non hai ancora creato sezioni personali.</div>';
+  const rows = customCategories.length
+    ? customCategories.map((category, index) => {
+      const count = states.filter(state => categoriesForTool(state.toolId).includes(category)).length;
+      const nameEditor = renamingCategoryIndex === index
+        ? `<input class="section-rename-input" data-rename-input="${index}" maxlength="32" value="${escapeHtml(category)}" aria-label="Nuovo nome della sezione ${escapeHtml(category)}">`
+        : `<strong>${escapeHtml(category)}</strong><small>${count} tool</small>`;
+      const actions = renamingCategoryIndex === index
+        ? `<button type="button" data-section-action="save-rename" data-index="${index}" title="Salva nome">✓</button><button type="button" data-section-action="cancel-rename" data-index="${index}" title="Annulla">×</button>`
+        : `<button type="button" data-section-action="up" data-index="${index}" title="Sposta su" ${index === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" data-section-action="down" data-index="${index}" title="Sposta giù" ${index === customCategories.length - 1 ? 'disabled' : ''}>↓</button>
+        <button type="button" data-section-action="rename" data-index="${index}" title="Rinomina">✎</button>
+        <button type="button" data-section-action="delete" data-index="${index}" title="Elimina">×</button>`;
+      return `<div class="section-row"><div>${nameEditor}</div><div class="section-row-actions">
+        ${actions}
+      </div></div>`;
+    }).join('')
+    : '<div class="empty">Non hai ancora creato sezioni personali.</div>';
   sectionsDialogContent.innerHTML = `<div class="section-create"><input id="new-section-name" maxlength="32" placeholder="Nome nuova sezione" aria-label="Nome nuova sezione"><button id="create-section-btn" class="secondary-action" type="button">Crea</button></div><div class="section-list">${rows}</div><p class="dialog-help">Trascina un tool su una sezione per aggiungerlo. Lo stesso tool può comparire in tutte le sezioni che desideri.</p><button id="reset-sections-btn" class="reset-sections" type="button">Ripristina organizzazione predefinita</button>`;
 }
-function openManageSectionsDialog() { renamingCategoryIndex = null; renderManageSectionsDialog(); sectionsDialog.showModal(); }
+
+function openManageSectionsDialog() {
+  renamingCategoryIndex = null;
+  renderManageSectionsDialog();
+  sectionsDialog.showModal();
+}
+
 function openToolSectionsDialog(toolId) {
   const state = states.find(item => item.toolId === toolId);
   if (!state) return;
@@ -240,6 +262,7 @@ function openToolSectionsDialog(toolId) {
   sectionsDialogContent.innerHTML = `<div class="section-checks">${editableCategories().map(category => `<label class="section-check"><input type="checkbox" data-tool-section="${escapeHtml(category)}" data-tool-id="${toolId}" ${selected.includes(category) ? 'checked' : ''}><span>${escapeHtml(category)}</span></label>`).join('')}</div><p class="dialog-help">Seleziona una o più sezioni. Togliere una spunta rimuove soltanto il collegamento: il tool non viene disinstallato.</p>`;
   sectionsDialog.showModal();
 }
+
 function refreshOrganizationViews() {
   if (!allCategories().includes(activeCategory)) activeCategory = 'Tutti';
   renderNav();
@@ -279,14 +302,25 @@ document.querySelector('#manage-sections-btn').addEventListener('click', openMan
 sectionsDialogContent.addEventListener('click', event => {
   if (event.target.id === 'reset-sections-btn') {
     if (!confirm('Ripristinare le sezioni predefinite? Le sezioni personali verranno eliminate, ma nessun tool sarà disinstallato.')) return;
-    customCategories = []; toolCategoryOverrides = {}; activeCategory = 'Tutti'; saveOrganization(); refreshOrganizationViews(); renderManageSectionsDialog(); showToast('Organizzazione predefinita ripristinata.'); return;
+    customCategories = [];
+    toolCategoryOverrides = {};
+    activeCategory = 'Tutti';
+    saveOrganization();
+    refreshOrganizationViews();
+    renderManageSectionsDialog();
+    showToast('Organizzazione predefinita ripristinata.');
+    return;
   }
   if (event.target.id === 'create-section-btn') {
     const input = sectionsDialogContent.querySelector('#new-section-name');
     const name = normalizeCategoryName(input.value);
     if (!name) { input.focus(); return; }
     if (categoryNameExists(name)) { alert('Esiste già una sezione con questo nome.'); return; }
-    customCategories.push(name); saveOrganization(); refreshOrganizationViews(); renderManageSectionsDialog(); return;
+    customCategories.push(name);
+    saveOrganization();
+    refreshOrganizationViews();
+    renderManageSectionsDialog();
+    return;
   }
   const button = event.target.closest('[data-section-action]');
   if (!button) return;
@@ -316,7 +350,9 @@ sectionsDialogContent.addEventListener('click', event => {
     if (newName === oldName) { renamingCategoryIndex = null; renderManageSectionsDialog(); return; }
     if (categoryNameExists(newName, index)) { alert('Esiste già una sezione con questo nome.'); return; }
     customCategories[index] = newName;
-    Object.keys(toolCategoryOverrides).forEach(toolId => { toolCategoryOverrides[toolId] = toolCategoryOverrides[toolId].map(name => name === oldName ? newName : name); });
+    Object.keys(toolCategoryOverrides).forEach(toolId => {
+      toolCategoryOverrides[toolId] = (Array.isArray(toolCategoryOverrides[toolId]) ? toolCategoryOverrides[toolId] : []).map(name => name === oldName ? newName : name);
+    });
     if (activeCategory === oldName) activeCategory = newName;
     renamingCategoryIndex = null;
   } else if (action === 'delete') {
@@ -324,11 +360,13 @@ sectionsDialogContent.addEventListener('click', event => {
     if (!confirm(`Eliminare la sezione “${removed}”? I tool non verranno disinstallati.`)) return;
     customCategories.splice(index, 1);
     Object.keys(toolCategoryOverrides).forEach(toolId => {
-      const remaining = toolCategoryOverrides[toolId].filter(name => name !== removed);
+      const remaining = (Array.isArray(toolCategoryOverrides[toolId]) ? toolCategoryOverrides[toolId] : []).filter(name => name !== removed);
       toolCategoryOverrides[toolId] = remaining.length ? remaining : [metadata[toolId]?.category || 'Utility'];
     });
   }
-  saveOrganization(); refreshOrganizationViews(); renderManageSectionsDialog();
+  saveOrganization();
+  refreshOrganizationViews();
+  renderManageSectionsDialog();
 });
 sectionsDialogContent.addEventListener('keydown', event => {
   const renameInput = event.target.closest('[data-rename-input]');
@@ -343,31 +381,56 @@ sectionsDialogContent.addEventListener('keydown', event => {
     renderManageSectionsDialog();
     return;
   }
-  if (event.key === 'Enter' && event.target.id === 'new-section-name') { event.preventDefault(); sectionsDialogContent.querySelector('#create-section-btn')?.click(); }
+  if (event.key === 'Enter' && event.target.id === 'new-section-name') {
+    event.preventDefault();
+    sectionsDialogContent.querySelector('#create-section-btn')?.click();
+  }
 });
 sectionsDialogContent.addEventListener('change', event => {
   const checkbox = event.target.closest('[data-tool-section]');
   if (!checkbox) return;
   const checked = [...sectionsDialogContent.querySelectorAll('[data-tool-section]:checked')].map(item => item.dataset.toolSection);
-  if (!checked.length) { checkbox.checked = true; showToast('Ogni tool deve restare in almeno una sezione.'); return; }
-  setToolCategories(checkbox.dataset.toolId, checked); refreshOrganizationViews();
+  if (!checked.length) {
+    checkbox.checked = true;
+    showToast('Ogni tool deve restare in almeno una sezione.');
+    return;
+  }
+  setToolCategories(checkbox.dataset.toolId, checked);
+  refreshOrganizationViews();
 });
 toolsGrid.addEventListener('dragstart', event => {
-  const card = event.target.closest('[data-tool-id]'); if (!card) return;
-  event.dataTransfer.setData('text/filex-tool-id', card.dataset.toolId); event.dataTransfer.effectAllowed = 'copy'; card.classList.add('dragging');
+  const card = event.target.closest('[data-tool-id]');
+  if (!card) return;
+  event.dataTransfer.setData('text/filex-tool-id', card.dataset.toolId);
+  event.dataTransfer.effectAllowed = 'copy';
+  card.classList.add('dragging');
 });
-toolsGrid.addEventListener('dragend', event => { event.target.closest('[data-tool-id]')?.classList.remove('dragging'); nav.querySelectorAll('.drag-target').forEach(item => item.classList.remove('drag-target')); });
+toolsGrid.addEventListener('dragend', event => {
+  event.target.closest('[data-tool-id]')?.classList.remove('dragging');
+  nav.querySelectorAll('.drag-target').forEach(item => item.classList.remove('drag-target'));
+});
 nav.addEventListener('dragover', event => {
-  const target = event.target.closest('[data-category]'); if (!target || !editableCategories().includes(target.dataset.category)) return;
-  event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; nav.querySelectorAll('.drag-target').forEach(item => item.classList.toggle('drag-target', item === target));
+  const target = event.target.closest('[data-category]');
+  if (!target || !editableCategories().includes(target.dataset.category)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+  nav.querySelectorAll('.drag-target').forEach(item => item.classList.toggle('drag-target', item === target));
 });
-nav.addEventListener('dragleave', event => { if (!nav.contains(event.relatedTarget)) nav.querySelectorAll('.drag-target').forEach(item => item.classList.remove('drag-target')); });
+nav.addEventListener('dragleave', event => {
+  if (!nav.contains(event.relatedTarget)) nav.querySelectorAll('.drag-target').forEach(item => item.classList.remove('drag-target'));
+});
 nav.addEventListener('drop', event => {
-  const target = event.target.closest('[data-category]'); const category = target?.dataset.category; const toolId = event.dataTransfer.getData('text/filex-tool-id');
+  const target = event.target.closest('[data-category]');
+  const category = target?.dataset.category;
+  const toolId = event.dataTransfer.getData('text/filex-tool-id');
   nav.querySelectorAll('.drag-target').forEach(item => item.classList.remove('drag-target'));
   if (!toolId || !editableCategories().includes(category)) return;
-  event.preventDefault(); const memberships = categoriesForTool(toolId); if (!memberships.includes(category)) setToolCategories(toolId, [...memberships, category]); refreshOrganizationViews();
-  const toolName = states.find(item => item.toolId === toolId)?.toolName || 'Tool'; showToast(`${toolName} aggiunto a “${category}”.`);
+  event.preventDefault();
+  const memberships = categoriesForTool(toolId);
+  if (!memberships.includes(category)) setToolCategories(toolId, [...memberships, category]);
+  refreshOrganizationViews();
+  const toolName = states.find(item => item.toolId === toolId)?.toolName || 'Tool';
+  showToast(`${toolName} aggiunto a “${category}”.`);
 });
 document.querySelector('#refresh-btn').addEventListener('click', () => {
   void refresh();

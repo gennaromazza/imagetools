@@ -8,6 +8,7 @@ on:
       - "image-party-frame-v*"
       - "archivio-flow-v*"
       - "cache-sweep-v*"
+      - "filex-send-v*"
   workflow_dispatch:
     inputs:
       component:
@@ -20,6 +21,7 @@ on:
           - image-party-frame
           - archivio-flow
           - cache-sweep
+          - filex-send
       channel:
         description: Canale release
         required: true
@@ -83,13 +85,13 @@ jobs:
 
           if ("${{ github.event_name }}" -eq "push") {
             $releaseTag = "${{ github.ref_name }}"
-            if ($releaseTag -notmatch "^(suite|photo-selector-app|image-party-frame|archivio-flow|cache-sweep)-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$") {
+            if ($releaseTag -notmatch "^(suite|photo-selector-app|image-party-frame|archivio-flow|cache-sweep|filex-send)-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$") {
               throw "Tag componente non valido: $releaseTag"
             }
             $component = $Matches[1]
             $version = $Matches[2]
             $channel = if ($version.Contains("-")) { "beta" } else { "stable" }
-            $minSuiteVersion = if ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }
+            $minSuiteVersion = if ($component -eq "filex-send") { "0.1.31" } elseif ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }
           } else {
             $component = "${{ inputs.component }}"
             $version = "${{ inputs.version }}".TrimStart("v")
@@ -108,6 +110,7 @@ jobs:
             "image-party-frame" { "apps/image-party-frame/package.json" }
             "archivio-flow" { "apps/archivio-flow/package.json" }
             "cache-sweep" { "apps/cache-sweep/package.json" }
+            "filex-send" { "apps/filex-send/package.json" }
             default { throw "Componente non supportato: $component" }
           }
           $packageVersion = (Get-Content $packagePath -Raw | ConvertFrom-Json).version
@@ -161,6 +164,7 @@ jobs:
             "image-party-frame" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-party-frame:win }
             "archivio-flow" { npm.cmd --workspace @photo-tools/filex-desktop run dist:archivio-flow:win64 }
             "cache-sweep" { npm.cmd --workspace @photo-tools/filex-desktop run dist:cache-sweep:win }
+            "filex-send" { npm.cmd --workspace @photo-tools/filex-desktop run dist:filex-send:win }
             default { throw "Componente non supportato: $env:FILEX_COMPONENT" }
           }
 
@@ -191,6 +195,7 @@ jobs:
             "image-party-frame" { "Image-Party-Frame" }
             "archivio-flow" { "Archivio-Flow" }
             "cache-sweep" { "FileX-Adobe-Cleaner" }
+            "filex-send" { "FileX-Send" }
           }
           $installers = @(Get-ChildItem "apps/filex-desktop/.output/releases/$expectedPrefix-$env:FILEX_RELEASE_VERSION-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe")
           if ($installers.Count -ne 1) {

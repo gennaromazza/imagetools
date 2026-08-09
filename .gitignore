@@ -2,6 +2,7 @@ node_modules/
 dist/
 build/
 .output/
+.firebase/
 .DS_Store
 coverage/
 *.log
@@ -15,6 +16,8 @@ apps/image-party-frame/uploads/
 apps/image-party-frame/temp-test.png
 apps/archivio-flow/server/data/jobs.json
 apps/archivio-flow/server/data/settings.json
+apps/filex-send-remote-server/.data/
+apps/filex-cloud-functions/lib/
 
 # Local Python environments
 .venv/

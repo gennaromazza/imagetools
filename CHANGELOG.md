@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-08-09 - FileX Suite 0.1.31
+
+- aggiunto FileX Send al launcher e al Dock della Suite con installazione e aggiornamenti indipendenti
+- aggiunta la sezione predefinita `Consegna`, compatibile con le sezioni personalizzabili introdotte nella Suite 0.1.29
+- aggiornati catalogo, sito download e workflow Windows per la nuova applicazione
+
+## 2026-08-09 - FileX Send 0.1.0
+
+- aggiunto il nuovo tool per ricevere foto e video dal telefono del cliente sulla rete locale del negozio tramite QR code
+- introdotte sessioni locali isolate e link cloud con scadenza configurabile da 15 minuti a 7 giorni
+- aggiunti upload a flusso fino a 25 GB per file, file temporanei protetti e rinomina automatica dei duplicati
+- realizzate l'interfaccia desktop per il fotografo e la pagina mobile senza app o account
+- aggiunto il flusso guidato a due QR: connessione Wi-Fi con credenziali incorporate e successiva apertura della pagina di invio
+- aggiunto il rilevamento automatico del profilo Wi-Fi Windows, con riuso via Ethernet e password memorizzata tramite cifratura Windows
+- aggiunta la scelta iniziale `Qui con me` / `A distanza`, mantenendo invariato il flusso locale
+- introdotto FileX Cloud con link attivi anche a PC spento, upload via Internet e download automatico alla riapertura di FileX Send
+- mantenuti nel cloud i file non ancora scaricati e programmata la cancellazione un'ora dopo il download locale verificato
+- creato FileX Cloud su Firebase con Hosting HTTPS, Functions europee, Firestore privato, Storage europeo e pulizia automatica
+- aggiunta la ripresa della sessione remota dopo il riavvio del PC, con token cifrato tramite Windows DPAPI e notifica Windows alla ricezione
+- aggiunta un'identità Firebase anonima per installazione, creata automaticamente e conservata cifrata tramite Windows DPAPI
+- verificato il flusso cloud end-to-end reale: scadenza personalizzata, upload con desktop inattivo, recupero, download integro, conferma e retention di 60 minuti
+- integrati catalogo e Dock della Suite, branding, build indipendente, test e controlli CI
+- documentata la configurazione consigliata con access point dedicato e i limiti dell'MVP
+
 ## 2026-08-09 - FileX Suite 0.1.30
 
 - corretta la rinomina delle sezioni personali nel launcher Electron

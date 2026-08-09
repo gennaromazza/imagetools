@@ -38,6 +38,8 @@ Include:
 
 FileX Adobe Cleaner è pubblicato come componente `cache-sweep`, tag `cache-sweep-vX.Y.Z` e installer `FileX-Adobe-Cleaner-X.Y.Z-stable-x64-setup.exe`.
 
+FileX Send è pubblicato come componente `filex-send`, tag `filex-send-vX.Y.Z` e installer `FileX-Send-X.Y.Z-stable-x64-setup.exe`. La prima release richiede FileX Suite 0.1.31 o successiva.
+
 Una release ordinaria deve costruire un solo componente. Batch Print Layout, Image Converter e Trova Foto da Lista restano nel manifest storico, ma non sono pubblicabili finche' i relativi workspace non vengono ripristinati.
 
 ## Manifest Release

@@ -1,0 +1,10 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // FileX Cloud is accessed only by trusted Cloud Functions.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

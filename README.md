@@ -14,6 +14,9 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 - `apps/archivio-flow` — Import, archiviazione e organizzazione lavori da SD
 - `apps/photo-selector-app` — Image Select Pro: selezione e classificazione foto avanzata
 - `apps/cache-sweep` — FileX Adobe Cleaner: utility esclusivamente Adobe per pulire cache supportate e rimuovere vecchie versioni affiancate a quella corrente su Windows
+- `apps/filex-send` — Ricezione locale tramite Wi-Fi/QR e consegna remota con link configurabile, upload a PC spento e recupero automatico
+- `apps/filex-cloud-functions` — API europea, storage dei file in attesa e cancellazione automatica un'ora dopo la consegna verificata
+- `apps/filex-send-web` — Pagina mobile HTTPS di FileX Send, senza app o account cliente
 
 ## Launcher Windows
 
