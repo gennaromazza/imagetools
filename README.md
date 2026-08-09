@@ -19,6 +19,8 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 
 FileX Suite gestisce ogni tool separatamente. La Suite usa un feed di aggiornamento dedicato; ogni tool mostra `Installa`, `Apri` oppure `Aggiorna` in base al catalogo remoto dei tool. Una release tool non costruisce o aggiorna la Suite.
 
+Il launcher consente di organizzare i tool in sezioni personali persistenti. Lo stesso tool può comparire in più sezioni, essere aggiunto tramite trascinamento e tornare in qualsiasi momento all'organizzazione predefinita senza modificare l'installazione.
+
 Per aggiornare:
 
 1. aggiornare FileX Suite quando richiesto;

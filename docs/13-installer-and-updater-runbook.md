@@ -102,3 +102,9 @@ Pubblicare prima `suite-v0.1.28`: la release e il feed `suite-channel-stable` de
 Pubblicare quindi `cache-sweep-v0.1.0`: la release deve contenere esclusivamente `FileX-Adobe-Cleaner-0.1.0-stable-x64-setup.exe`, blockmap e `stable.json`. La voce `cache-sweep` del catalogo deve avere `minLauncherVersion` 0.1.28, URL sul tag namespaced e checksum SHA-256 valido; tutte le altre voci devono restare invariate.
 
 Dalla Suite 0.1.28 verificare `Installa`, apertura del tool e stato `Pronto`. Su un PC con due versioni principali dello stesso programma Adobe verificare che venga proposta solo la versione precedente e che la versione corrente sia esclusa. La disinstallazione deve usare Adobe HDBox, conservare le preferenze e mostrare UAC; in assenza di HDBox deve fermarsi senza cancellare cartelle manualmente.
+
+## Verifica FileX Suite 0.1.29
+
+La release `suite-v0.1.29` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre la versione 0.1.29 senza modificare le versioni presenti nel catalogo dei tool.
+
+Dopo l'aggiornamento verificare che FileX Adobe Cleaner compaia in `Utility` e che `Utility Adobe` non sia più presente. Creare due sezioni personali, assegnare lo stesso tool a entrambe sia dal comando `Sezioni` sia tramite trascinamento, quindi riavviare la Suite e verificare la persistenza. Rinomina, riordino, eliminazione e ripristino predefinito non devono disinstallare tool né rimuovere dati applicativi.
