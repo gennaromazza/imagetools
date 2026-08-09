@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/filex-desktop",
   "private": true,
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "FileX Suite desktop shell for Windows packaging and native bridge work.",
   "author": "FileX",
   "type": "module",
@@ -11,7 +11,7 @@
     "sync:branding": "node ./scripts/sync-branding.mjs",
     "build:suite-launcher": "node ./scripts/build-suite-launcher.mjs",
     "build:shell": "npm run generate:google-drive-config && npm run sync:branding && tsc -p tsconfig.json",
-    "build:suite": "npm run build:shell && npm --workspace @photo-tools/photo-selector-app run build && npm run build:suite-launcher",
+    "build:suite": "npm run build:shell && npm run build:suite-launcher",
     "build:image-party-frame": "npm run build:shell && npm --workspace @photo-tools/image-party-frame-app run build && npm --workspace @photo-tools/image-party-frame-app run build:server && node ./scripts/copy-image-party-frame-server.mjs",
     "build:batch-print-layout": "npm run build:shell && npm --workspace @photo-tools/batch-print-layout run build",
     "build:archivio-flow": "npm run build:shell && npm --workspace @photo-tools/archivio-flow run build && npm --workspace @photo-tools/archivio-flow run build:server && node ./scripts/copy-archivio-server.mjs",

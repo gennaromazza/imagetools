@@ -1,12 +1,10 @@
 import electronUpdater from "electron-updater";
 import type { DesktopSuiteUpdateState } from "@photo-tools/desktop-contracts";
-import https from "node:https";
 
 const { autoUpdater } = electronUpdater;
 
 let configured = false;
 let enabled = false;
-let prereleaseEnabled = false;
 let emitState: (state: DesktopSuiteUpdateState) => void = () => undefined;
 let state: DesktopSuiteUpdateState = {
   status: "idle",
@@ -30,58 +28,16 @@ function patchState(partial: Partial<DesktopSuiteUpdateState>): DesktopSuiteUpda
   return next;
 }
 
-function normalizeVersion(value: string): number[] {
-  return value
-    .replace(/^v/i, "")
-    .split(".")
-    .map((part) => Number.parseInt(part.replace(/[^\d].*$/g, ""), 10))
-    .map((part) => (Number.isFinite(part) ? part : 0));
-}
+function getSuiteFeedUrl(allowPrerelease: boolean): string {
+  const explicitUrl = allowPrerelease
+    ? process.env.FILEX_SUITE_UPDATE_BETA_URL
+    : process.env.FILEX_SUITE_UPDATE_STABLE_URL;
+  if (explicitUrl?.trim()) return explicitUrl.trim().replace(/\/+$/, "");
 
-function compareVersions(left: string, right: string): number {
-  const leftParts = normalizeVersion(left);
-  const rightParts = normalizeVersion(right);
-  const length = Math.max(leftParts.length, rightParts.length);
-  for (let index = 0; index < length; index += 1) {
-    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
-    if (difference !== 0) return difference > 0 ? 1 : -1;
-  }
-  return 0;
-}
-
-function requestLatestStableVersion(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const request = https.get(
-      "https://api.github.com/repos/gennaromazza/imagetools/releases/latest",
-      {
-        headers: {
-          Accept: "application/vnd.github+json",
-          "User-Agent": "FileX-Suite-Updater/1.0",
-          "X-GitHub-Api-Version": "2022-11-28",
-        },
-      },
-      (response) => {
-        if (!response.statusCode || response.statusCode >= 400) {
-          response.resume();
-          reject(new Error(`Controllo release non riuscito (${response.statusCode ?? "unknown"})`));
-          return;
-        }
-        const chunks: Buffer[] = [];
-        response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-        response.on("end", () => {
-          try {
-            const payload = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { tag_name?: string };
-            if (!payload.tag_name) throw new Error("Versione release mancante");
-            resolve(payload.tag_name.replace(/^v/i, ""));
-          } catch (error) {
-            reject(error);
-          }
-        });
-      },
-    );
-    request.setTimeout(15_000, () => request.destroy(new Error("Timeout controllo aggiornamenti")));
-    request.on("error", reject);
-  });
+  const channelTag = allowPrerelease
+    ? "suite-channel-beta"
+    : "suite-channel-stable";
+  return `https://github.com/gennaromazza/imagetools/releases/download/${channelTag}`;
 }
 
 export function configureSuiteUpdater(options: {
@@ -92,7 +48,6 @@ export function configureSuiteUpdater(options: {
 }): DesktopSuiteUpdateState {
   emitState = options.onState;
   enabled = options.enabled;
-  prereleaseEnabled = options.allowPrerelease;
   state = {
     ...state,
     currentVersion: options.currentVersion,
@@ -106,6 +61,10 @@ export function configureSuiteUpdater(options: {
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.allowPrerelease = options.allowPrerelease;
+  autoUpdater.setFeedURL({
+    provider: "generic",
+    url: getSuiteFeedUrl(options.allowPrerelease),
+  });
 
   autoUpdater.on("checking-for-update", () => {
     patchState({ status: "checking", error: null, percent: null });
@@ -169,18 +128,6 @@ export async function checkSuiteUpdate(): Promise<DesktopSuiteUpdateState> {
   }
   patchState({ status: "checking", error: null, percent: null });
   try {
-    if (!prereleaseEnabled) {
-      const latestVersion = await requestLatestStableVersion();
-      if (compareVersions(latestVersion, state.currentVersion) <= 0) {
-        return patchState({
-          status: "up-to-date",
-          availableVersion: latestVersion,
-          error: null,
-          percent: null,
-        });
-      }
-      patchState({ status: "available", availableVersion: latestVersion, percent: 0 });
-    }
     await autoUpdater.checkForUpdates();
   } catch (error) {
     patchState({

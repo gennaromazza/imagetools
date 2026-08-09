@@ -138,6 +138,7 @@ function renderTools() {
     const meta = metadata[state.toolId] || {icon:'suite',category:'Tool',description:'Strumento FileX',color:'#36a97b'};
     const installed = Boolean(state.installed);
     const update = state.status === 'update-available';
+    const suiteUpdateRequired = state.status === 'suite-update-required';
     const releaseHighlights = Array.isArray(state.releaseHighlights) ? state.releaseHighlights : [];
     const updateDetails = update ? `<aside class="tool-update-notes" aria-label="Novità versione ${escapeHtml(state.latestVersion)}">
       <strong>Novità della versione ${escapeHtml(state.latestVersion)}</strong>
@@ -147,8 +148,8 @@ function renderTools() {
       <button class="favorite ${favorites.has(state.toolId)?'selected':''}" data-action="favorite" data-id="${state.toolId}" title="Preferito">${icon('star')}</button>
       <div class="tool-icon"><img src="./icons/${state.toolId}.png" alt="" /></div><span class="category">${meta.category}</span><h3>${escapeHtml(state.toolName)}</h3><p class="tool-description">${meta.description}</p>
       ${updateDetails}
-      <div class="card-foot"><span class="status ${update?'warn':installed?'ok':'off'}">${update?'Aggiornamento':installed?'Pronto':'Da installare'}</span>
-      <div class="card-actions">${update?`<button class="update-mini" data-action="install" data-id="${state.toolId}">Aggiorna</button>`:''}<button class="launch" data-action="${installed?'open':'install'}" data-id="${state.toolId}">${installed?'Apri':'Installa'} <span>→</span></button></div></div>
+      <div class="card-foot"><span class="status ${update||suiteUpdateRequired?'warn':installed?'ok':'off'}">${suiteUpdateRequired?'Aggiorna prima la Suite':update?'Aggiornamento':installed?'Pronto':'Da installare'}</span>
+      <div class="card-actions">${update?`<button class="update-mini" data-action="install" data-id="${state.toolId}">Aggiorna</button>`:''}<button class="launch" data-action="${installed?'open':'install'}" data-id="${state.toolId}" ${suiteUpdateRequired&&!installed?'disabled':''}>${installed?'Apri':'Installa'} <span>→</span></button></div></div>
     </article>`;
   }).join('') : '<div class="empty">Nessuno strumento in questa sezione.</div>';
 }
@@ -183,8 +184,11 @@ nav.addEventListener('click', e => { const b=e.target.closest('[data-category]')
 search.addEventListener('input', renderTools);
 toolsGrid.addEventListener('click', async e => { const b=e.target.closest('[data-action]'); if(!b)return; const {action,id}=b.dataset; if(action==='favorite'){ favorites.has(id)?favorites.delete(id):favorites.add(id); localStorage.setItem('filex-favorites',JSON.stringify([...favorites])); renderTools(); return; } try { if(action==='open'){ b.disabled=true; const result=await api.openInstalledTool(id); if(!result.ok) throw new Error(result.message); recent=[id,...recent.filter(x=>x!==id)].slice(0,6); localStorage.setItem('filex-recent',JSON.stringify(recent)); b.disabled=false; } else await install(id,b); } catch(error){ b.disabled=false; alert(error.message||String(error)); } });
 document.querySelector('#refresh-btn').addEventListener('click', () => {
+  void refresh();
+});
+document.querySelector('#check-suite-update-btn').addEventListener('click', () => {
   suiteUpdateDeferred = false;
-  void Promise.all([refresh(), api.checkSuiteUpdate()]);
+  void api.checkSuiteUpdate();
 });
 document.querySelector('#install-missing-btn').addEventListener('click', async e => { e.currentTarget.disabled=true; try { for(const item of states.filter(x=>!x.installed)) await install(item.toolId); } catch(error){ alert(error.message||String(error)); } finally { e.currentTarget.disabled=false; } });
 suiteUpdateRetry.addEventListener('click', () => {

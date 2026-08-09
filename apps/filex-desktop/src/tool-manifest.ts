@@ -8,6 +8,9 @@ export interface DesktopToolDescriptor {
   legacyUpgradeDisplayNames?: string[];
   legacyExecutableNames?: string[];
   workspacePackageName: string;
+  versionPackageRelativeToShell: string;
+  electronMainOutputFile: string;
+  electronPreloadOutputFile: string;
   workspaceDistDirRelativeToShell: string;
   packagedDistDir: string;
   brandAssetName: string;
@@ -30,6 +33,9 @@ export const desktopToolManifest = {
     executableName: "FileX-Suite",
     legacyUpgradeDisplayNames: ["FileX Suite", "FileX Desktop Suite"],
     workspacePackageName: "@photo-tools/filex-desktop",
+    versionPackageRelativeToShell: ".",
+    electronMainOutputFile: "suite-main.js",
+    electronPreloadOutputFile: "suite-preload.js",
     workspaceDistDirRelativeToShell: ".output/suite-launcher",
     packagedDistDir: "apps/filex-desktop/suite-launcher",
     brandAssetName: "LOGO_Image_tool",
@@ -48,6 +54,9 @@ export const desktopToolManifest = {
     executableName: "Image-Party-Frame",
     legacyUpgradeDisplayNames: ["Image Party Frame"],
     workspacePackageName: "@photo-tools/image-party-frame-app",
+    versionPackageRelativeToShell: "../image-party-frame",
+    electronMainOutputFile: "main.js",
+    electronPreloadOutputFile: "preload.js",
     workspaceDistDirRelativeToShell: "../image-party-frame/.output/web",
     packagedDistDir: "apps/image-party-frame/web",
     brandAssetName: "logo",
@@ -66,6 +75,9 @@ export const desktopToolManifest = {
     executableName: "Batch-Print-Layout",
     legacyUpgradeDisplayNames: ["Batch Print Layout"],
     workspacePackageName: "@photo-tools/batch-print-layout",
+    versionPackageRelativeToShell: "../batch-print-layout",
+    electronMainOutputFile: "main.js",
+    electronPreloadOutputFile: "preload.js",
     workspaceDistDirRelativeToShell: "../batch-print-layout/.output/web",
     packagedDistDir: "apps/batch-print-layout/web",
     brandAssetName: "LOGO_Image_tool",
@@ -85,6 +97,9 @@ export const desktopToolManifest = {
     executableName: "Archivio-Flow",
     legacyUpgradeDisplayNames: ["Archivio Flow"],
     workspacePackageName: "@photo-tools/archivio-flow",
+    versionPackageRelativeToShell: "../archivio-flow",
+    electronMainOutputFile: "main.js",
+    electronPreloadOutputFile: "preload.js",
     workspaceDistDirRelativeToShell: "../archivio-flow/.output/web",
     packagedDistDir: "apps/archivio-flow/web",
     brandAssetName: "photo_Archivie",
@@ -103,6 +118,9 @@ export const desktopToolManifest = {
     executableName: "Image-Converter",
     legacyUpgradeDisplayNames: ["Image Converter"],
     workspacePackageName: "@photo-tools/image-converter",
+    versionPackageRelativeToShell: "../image-converter",
+    electronMainOutputFile: "main.js",
+    electronPreloadOutputFile: "preload.js",
     workspaceDistDirRelativeToShell: "../image-converter/.output/web",
     packagedDistDir: "apps/image-converter/web",
     brandAssetName: "LOGO_Image_tool",
@@ -121,6 +139,9 @@ export const desktopToolManifest = {
     executableName: "Trova-Foto-da-Lista",
     legacyUpgradeDisplayNames: ["Trova Foto da Lista"],
     workspacePackageName: "@photo-tools/image-file-finder",
+    versionPackageRelativeToShell: "../image-file-finder",
+    electronMainOutputFile: "main.js",
+    electronPreloadOutputFile: "preload.js",
     workspaceDistDirRelativeToShell: "../image-file-finder/.output/web",
     packagedDistDir: "apps/image-file-finder/web",
     brandAssetName: "LOGO_Image_tool",
@@ -152,6 +173,9 @@ export const desktopToolManifest = {
       "Selezione-Foto",
     ],
     workspacePackageName: "@photo-tools/photo-selector-app",
+    versionPackageRelativeToShell: "../photo-selector-app",
+    electronMainOutputFile: "main.js",
+    electronPreloadOutputFile: "preload.js",
     workspaceDistDirRelativeToShell: "../photo-selector-app/.output/web",
     packagedDistDir: "apps/photo-selector-app/web",
     brandAssetName: "photo_selector",

@@ -39,7 +39,7 @@ export interface DesktopSuiteUpdateState {
     bytesPerSecond: number | null;
     error: string | null;
 }
-export type DesktopToolInstallStatus = "installed" | "not-installed" | "update-available";
+export type DesktopToolInstallStatus = "installed" | "not-installed" | "update-available" | "suite-update-required";
 export interface DesktopToolInstallState {
     toolId: DesktopToolId;
     toolName: string;
@@ -78,7 +78,7 @@ export interface DesktopToolUpdateCheckResult {
     currentVersion: string | null;
     available: boolean;
     release: DesktopToolReleaseEntry | null;
-    reason?: "up-to-date" | "new-version" | "not-installed" | "not-found";
+    reason?: "up-to-date" | "new-version" | "not-installed" | "not-found" | "suite-update-required";
 }
 export type DesktopToolUpdateJobStatus = "queued" | "downloading" | "downloaded" | "verifying" | "ready-to-apply" | "applying" | "completed" | "failed";
 export interface DesktopToolUpdateJob {

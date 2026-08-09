@@ -7,7 +7,8 @@ Workflow: `.github/workflows/windows-release.yml`
 Input manuali:
 
 - `channel`: `stable` o `beta`
-- `version`: tag release (`vX.Y.Z`)
+- `component`: `suite` oppure il `toolId` da pubblicare
+- `version`: versione del componente senza prefisso
 
 ## Prerequisiti CI
 
@@ -24,7 +25,7 @@ Env principali:
 
 ## Build/Dist
 
-Comando suite all-in:
+Il workflow usa una build selettiva. Il comando all-in rimane disponibile soltanto per manutenzione o regressione completa:
 
 ```bash
 npm run dist:filex-desktop:all-tools:win
@@ -35,23 +36,24 @@ Include:
 - installer singoli tool
 - installer Suite (`suite-launcher`)
 
-Il workflow deve costruire almeno FileX Suite e tutti i tool modificati dalla release. Per `v0.1.20` gli artefatti obbligatori sono Suite, Image Party Frame, Image Select Pro e Archivio Flow. Batch Print Layout, Image Converter e Trova Foto da Lista restano nel contratto processi e nel manifest storico, ma non hanno attualmente un workspace applicativo versionato da cui generare nuovi installer.
+Una release ordinaria deve costruire un solo componente. Batch Print Layout, Image Converter e Trova Foto da Lista restano nel manifest storico, ma non sono pubblicabili finche' i relativi workspace non vengono ripristinati.
 
 ## Manifest Release
 
 Il manifest stabile pubblico è l'unica fonte usata dal launcher per gli aggiornamenti dei tool:
 
-`https://github.com/gennaromazza/imagetools/releases/latest/download/stable.json`
+`https://github.com/gennaromazza/imagetools/releases/download/update-catalog-stable/stable.json`
 
-Ogni release deve pubblicare nello stesso tag:
+Ogni release tool deve pubblicare nel proprio tag:
 
-- installer FileX Suite;
-- installer di ogni tool costruito;
+- installer del solo tool;
 - `stable.json` o `beta.json` del canale;
-- checksum e blockmap degli installer.
+- checksum e blockmap dell'installer.
 - un elenco `highlights` non vuoto che spiega miglioramenti e funzionalità della versione per ogni tool.
 
-Il tag `vX.Y.Z` deve coincidere con la versione in `apps/filex-desktop/package.json`; la pipeline interrompe la pubblicazione in caso di disallineamento.
+Il tag `<tool-id>-vX.Y.Z` deve coincidere con la versione nel `package.json` del tool. Per la Suite il tag `suite-vX.Y.Z` coincide con `apps/filex-desktop/package.json`.
+
+Il workflow rifiuta tag che non puntano a un commit gia' integrato in `main`; anche l'avvio manuale e' consentito soltanto dal branch `main`.
 
 Il launcher segue i redirect GitHub verso `release-assets.githubusercontent.com`, verifica l'integrità del manifest e poi confronta la versione di ogni tool installato con la versione più recente del manifest.
 

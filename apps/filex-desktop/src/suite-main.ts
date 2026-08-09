@@ -1,0 +1,341 @@
+import * as electron from "electron";
+import type {
+  BrowserWindow as BrowserWindowInstance,
+  Tray as TrayInstance,
+} from "electron";
+import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import type {
+  DesktopDockState,
+  DesktopReleaseChannel,
+  DesktopRuntimeInfo,
+  DesktopSuiteUpdateState,
+  DesktopToolId,
+} from "@photo-tools/desktop-contracts";
+import {
+  applyToolUpdate,
+  checkToolUpdate,
+  downloadToolUpdate,
+  getUpdateJob,
+  listAvailableTools,
+  openInstalledTool,
+} from "./updater.js";
+import {
+  checkSuiteUpdate,
+  configureSuiteUpdater,
+  getSuiteUpdateState,
+  installSuiteUpdate,
+} from "./suite-updater.js";
+import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
+
+const { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell, Tray } = electron;
+const suite = desktopToolManifest["suite-launcher"];
+const appUserModelId = `studio.filex.${suite.id}`;
+let mainWindow: BrowserWindowInstance | null = null;
+let dockWindow: BrowserWindowInstance | null = null;
+let tray: TrayInstance | null = null;
+
+const defaultDockState: DesktopDockState = {
+  schemaVersion: 2,
+  x: 0,
+  y: 0,
+  opacity: 0.94,
+  collapsed: true,
+  autoHide: true,
+  toolOrder: getSuiteManagedTools().map((tool) => tool.id),
+  visibleToolCount: 0,
+  settingsOpen: false,
+};
+
+function releaseChannel(): DesktopReleaseChannel {
+  return process.env.FILEX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
+}
+
+function preloadPath(): string {
+  return join(app.getAppPath(), ".output", "electron", suite.electronPreloadOutputFile);
+}
+
+function rendererPath(fileName = "index.html"): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, suite.packagedDistDir, fileName)
+    : resolve(app.getAppPath(), suite.workspaceDistDirRelativeToShell, fileName);
+}
+
+function iconPath(): string {
+  const extension = process.platform === "win32" ? "ico" : "png";
+  return app.isPackaged
+    ? join(process.resourcesPath, "branding", `${suite.id}.${extension}`)
+    : resolve(app.getAppPath(), ".output", "branding", `${suite.id}.${extension}`);
+}
+
+function dockStatePath(): string {
+  return join(app.getPath("userData"), "suite-dock-state.json");
+}
+
+function sanitizeDockState(value: Partial<DesktopDockState> | null | undefined): DesktopDockState {
+  const allowedToolIds = new Set(getSuiteManagedTools().map((tool) => tool.id));
+  const requestedOrder = Array.isArray(value?.toolOrder) ? value.toolOrder : [];
+  const toolOrder = Array.from(new Set(requestedOrder.filter((toolId) => allowedToolIds.has(toolId))));
+  for (const tool of getSuiteManagedTools()) {
+    if (!toolOrder.includes(tool.id)) toolOrder.push(tool.id);
+  }
+  const x = Number(value?.x);
+  const y = Number(value?.y);
+  const opacity = Number(value?.opacity);
+  const visibleToolCount = Number(value?.visibleToolCount);
+  return {
+    schemaVersion: 2,
+    x: Number.isFinite(x) ? Math.round(x) : 0,
+    y: Number.isFinite(y) ? Math.round(y) : 0,
+    opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0.45, opacity)) : defaultDockState.opacity,
+    collapsed: value?.collapsed ?? defaultDockState.collapsed,
+    autoHide: value?.autoHide ?? defaultDockState.autoHide,
+    toolOrder,
+    visibleToolCount: Number.isFinite(visibleToolCount)
+      ? Math.min(getSuiteManagedTools().length, Math.max(0, Math.round(visibleToolCount)))
+      : 0,
+    settingsOpen: value?.settingsOpen ?? false,
+  };
+}
+
+async function readDockState(): Promise<DesktopDockState> {
+  try {
+    const stored = JSON.parse(await readFile(dockStatePath(), "utf8")) as Partial<DesktopDockState>;
+    return sanitizeDockState(stored);
+  } catch {
+    return { ...defaultDockState, toolOrder: [...defaultDockState.toolOrder] };
+  }
+}
+
+function applyDockLayout(state: DesktopDockState, animate: boolean): void {
+  if (!dockWindow || dockWindow.isDestroyed()) return;
+  const currentBounds = dockWindow.getBounds();
+  const display = screen.getDisplayMatching(currentBounds);
+  const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, state.visibleToolCount));
+  const width = state.collapsed
+    ? 88
+    : Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + itemCount * 62));
+  const height = state.settingsOpen && !state.collapsed ? 190 : 100;
+  const centerX = currentBounds.x + currentBounds.width / 2;
+  const bottom = currentBounds.y + currentBounds.height;
+  const x = Math.min(
+    display.workArea.x + display.workAreaSize.width - width,
+    Math.max(display.workArea.x, Math.round(centerX - width / 2)),
+  );
+  const y = Math.min(
+    display.workArea.y + display.workAreaSize.height - height,
+    Math.max(display.workArea.y, Math.round(bottom - height)),
+  );
+  dockWindow.setBounds({ x, y, width, height }, animate);
+}
+
+async function saveDockState(partial: Partial<DesktopDockState>): Promise<DesktopDockState> {
+  const current = await readDockState();
+  const bounds = dockWindow && !dockWindow.isDestroyed() ? dockWindow.getBounds() : null;
+  const next = sanitizeDockState({
+    ...current,
+    ...partial,
+    x: typeof partial.x === "number" ? partial.x : bounds?.x ?? current.x,
+    y: typeof partial.y === "number" ? partial.y : bounds?.y ?? current.y,
+  });
+  if (dockWindow && !dockWindow.isDestroyed()) {
+    if (
+      typeof partial.collapsed === "boolean"
+      || typeof partial.visibleToolCount === "number"
+      || typeof partial.settingsOpen === "boolean"
+    ) {
+      applyDockLayout(next, true);
+      const resizedBounds = dockWindow.getBounds();
+      next.x = resizedBounds.x;
+      next.y = resizedBounds.y;
+    }
+    if (typeof partial.x === "number" || typeof partial.y === "number") {
+      dockWindow.setPosition(next.x, next.y, true);
+    }
+    dockWindow.setOpacity(next.opacity);
+  }
+  await writeFile(dockStatePath(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return next;
+}
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+async function createMainWindow(): Promise<void> {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    focusMainWindow();
+    return;
+  }
+  const title = `${suite.productName} — Versione ${app.getVersion()}`;
+  const window = new BrowserWindow({
+    title,
+    width: suite.defaultWindowWidth,
+    height: suite.defaultWindowHeight,
+    minWidth: suite.minWindowWidth,
+    minHeight: suite.minWindowHeight,
+    autoHideMenuBar: true,
+    backgroundColor: "#181d1a",
+    icon: iconPath(),
+    webPreferences: {
+      preload: preloadPath(),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  mainWindow = window;
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: "deny" };
+  });
+  window.on("page-title-updated", (event) => {
+    event.preventDefault();
+    window.setTitle(title);
+  });
+  window.on("closed", () => {
+    if (mainWindow === window) mainWindow = null;
+  });
+  const entry = rendererPath();
+  if (!existsSync(entry)) throw new Error(`Renderer FileX Suite non trovato: ${entry}`);
+  await window.loadFile(entry);
+}
+
+async function createDock(): Promise<void> {
+  if (dockWindow && !dockWindow.isDestroyed()) return;
+  const display = screen.getPrimaryDisplay();
+  const state = await readDockState();
+  const width = state.collapsed
+    ? 88
+    : Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + state.visibleToolCount * 62));
+  const height = state.settingsOpen && !state.collapsed ? 190 : 100;
+  dockWindow = new BrowserWindow({
+    width,
+    height,
+    x: state.x || Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2),
+    y: state.y || display.workArea.y + display.workAreaSize.height - height - 18,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    backgroundColor: "#00000000",
+    webPreferences: {
+      preload: preloadPath(),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  dockWindow.setOpacity(state.opacity);
+  dockWindow.setAlwaysOnTop(true, "floating");
+  dockWindow.on("closed", () => { dockWindow = null; });
+  const entry = rendererPath("dock.html");
+  if (existsSync(entry)) {
+    await dockWindow.loadFile(entry);
+    dockWindow.showInactive();
+  }
+}
+
+function createTray(): void {
+  if (tray) return;
+  tray = new Tray(iconPath());
+  tray.setToolTip("FileX Suite");
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: "Apri FileX Suite", click: () => { void createMainWindow(); } },
+    { type: "separator" },
+    ...getSuiteManagedTools().map((tool) => ({
+      label: tool.displayName,
+      click: async () => {
+        const result = await openInstalledTool(tool.id);
+        if (!result.ok) dialog.showErrorBox("FileX Suite", result.message);
+      },
+    })),
+    { type: "separator" },
+    { label: "Esci", click: () => app.quit() },
+  ]));
+  tray.on("double-click", () => { void createMainWindow(); });
+}
+
+function registerIpcHandlers(): void {
+  ipcMain.handle("filex:get-suite-update-state", () => getSuiteUpdateState());
+  ipcMain.handle("filex:check-suite-update", () => checkSuiteUpdate());
+  ipcMain.handle("filex:install-suite-update", () => installSuiteUpdate());
+  ipcMain.handle("filex:get-runtime-info", async () => {
+    const installedTools = await listAvailableTools(releaseChannel()).catch(() => []);
+    const runtime: DesktopRuntimeInfo = {
+      shell: "electron",
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      appVersion: app.getVersion(),
+      toolId: suite.id,
+      toolName: suite.displayName,
+      releaseChannel: releaseChannel(),
+      aiSidecarInstalled: false,
+      installedTools,
+    };
+    return runtime;
+  });
+  ipcMain.handle("filex:list-available-tools", (_event, channel?: DesktopReleaseChannel) =>
+    listAvailableTools(channel ?? releaseChannel()).catch(() => []));
+  ipcMain.handle(
+    "filex:check-tool-update",
+    (_event, toolId: DesktopToolId, currentVersion?: string | null, channel?: DesktopReleaseChannel) =>
+      checkToolUpdate(toolId, currentVersion, channel ?? releaseChannel()),
+  );
+  ipcMain.handle("filex:download-tool-update", (_event, toolId: DesktopToolId, channel?: DesktopReleaseChannel) =>
+    downloadToolUpdate(toolId, channel ?? releaseChannel()));
+  ipcMain.handle("filex:get-tool-update-job", (_event, jobId: string) => getUpdateJob(jobId));
+  ipcMain.handle("filex:apply-tool-update", (_event, jobId: string) => applyToolUpdate(jobId));
+  ipcMain.handle("filex:open-installed-tool", (_event, toolId: DesktopToolId, launchArgs?: string[]) =>
+    openInstalledTool(toolId, launchArgs));
+  ipcMain.handle("filex:get-suite-dock-state", () => readDockState());
+  ipcMain.handle("filex:save-suite-dock-state", (_event, state: Partial<DesktopDockState>) => saveDockState(state));
+}
+
+app.setName(suite.productName);
+if (process.platform === "win32") app.setAppUserModelId(appUserModelId);
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => focusMainWindow());
+  app.whenReady().then(async () => {
+    registerIpcHandlers();
+    configureSuiteUpdater({
+      currentVersion: app.getVersion(),
+      enabled: app.isPackaged && process.platform === "win32",
+      allowPrerelease: releaseChannel() === "beta",
+      onState: (state: DesktopSuiteUpdateState) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("filex:suite-update-state", state);
+        }
+      },
+    });
+    await createMainWindow();
+    createTray();
+    await createDock();
+    if (app.isPackaged) setTimeout(() => { void checkSuiteUpdate(); }, 3500);
+  }).catch((error) => {
+    console.error("FileX Suite failed to start", error);
+    app.exit(1);
+  });
+}
+
+app.on("activate", () => { void createMainWindow(); });
+app.on("window-all-closed", () => undefined);
+app.on("before-quit", () => {
+  tray?.destroy();
+  tray = null;
+  dockWindow?.destroy();
+  dockWindow = null;
+});

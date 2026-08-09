@@ -18,17 +18,29 @@ const __dirname = dirname(
   fileURLToPath(import.meta.url),
 );
 
-const packageVersion = JSON.parse(
-  readFileSync(
-    join(__dirname, "package.json"),
-    "utf8",
-  ),
-).version;
-
 const requestedTool =
   getDesktopToolOrDefault(
     process.env.FILEX_TOOL,
   );
+
+const versionPackagePath = join(
+  __dirname,
+  requestedTool.versionPackageRelativeToShell,
+  "package.json",
+);
+
+const targetVersion = JSON.parse(
+  readFileSync(
+    versionPackagePath,
+    "utf8",
+  ),
+).version;
+
+if (typeof targetVersion !== "string" || !targetVersion.trim()) {
+  throw new Error(
+    `Versione package non valida per ${requestedTool.id}: ${versionPackagePath}`,
+  );
+}
 
 const outputRoot = join(
   __dirname,
@@ -277,7 +289,7 @@ writeFileSync(
 );
 
 export default {
-  buildVersion: packageVersion,
+  buildVersion: targetVersion,
 
   appId: `studio.filex.${requestedTool.id}`,
 
@@ -305,16 +317,20 @@ export default {
    */
   extraMetadata: {
     name: requestedTool.executableName,
+    version: targetVersion,
+    main: `.output/electron/${requestedTool.electronMainOutputFile}`,
   },
 
   asar: true,
 
-  asarUnpack: [
-    "**/node_modules/exiftool-vendored.exe/**",
-    "**/node_modules/exiftool-vendored.pl/**",
-    "**/node_modules/sharp/**",
-    "**/node_modules/@img/**",
-  ],
+  asarUnpack: requestedTool.id === "suite-launcher"
+    ? []
+    : [
+        "**/node_modules/exiftool-vendored.exe/**",
+        "**/node_modules/exiftool-vendored.pl/**",
+        "**/node_modules/sharp/**",
+        "**/node_modules/@img/**",
+      ],
 
   npmRebuild: false,
 
@@ -325,10 +341,29 @@ export default {
     output: outputDirectory,
   },
 
-  files: [
-    ".output/electron/**/*",
-    "package.json",
-  ],
+  files: requestedTool.id === "suite-launcher"
+    ? [
+        ".output/electron/suite-main.js",
+        ".output/electron/suite-preload.js",
+        ".output/electron/suite-updater.js",
+        ".output/electron/updater.js",
+        ".output/electron/filex-process-coordinator.js",
+        ".output/electron/tool-manifest.js",
+        "package.json",
+        "!node_modules/@img{,/**/*}",
+        "!node_modules/cors{,/**/*}",
+        "!node_modules/dotenv{,/**/*}",
+        "!node_modules/exiftool-vendored{,/**/*}",
+        "!node_modules/exiftool-vendored.exe{,/**/*}",
+        "!node_modules/exiftool-vendored.pl{,/**/*}",
+        "!node_modules/express{,/**/*}",
+        "!node_modules/multer{,/**/*}",
+        "!node_modules/sharp{,/**/*}",
+      ]
+    : [
+        ".output/electron/**/*",
+        "package.json",
+      ],
 
   extraResources: [
     {
@@ -357,17 +392,15 @@ export default {
         `branding/${requestedTool.id}.ico`,
     },
 
-    {
-      from:
-        "release-manifests",
-
-      to:
-        "release-manifests",
-
-      filter: [
-        "**/*.json",
-      ],
-    },
+    ...(requestedTool.id === "suite-launcher"
+      ? [
+          {
+            from: "release-manifests",
+            to: "release-manifests",
+            filter: ["**/*.json"],
+          },
+        ]
+      : []),
   ],
 
   win: {

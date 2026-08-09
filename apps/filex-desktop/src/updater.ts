@@ -75,7 +75,7 @@ function getReleaseManifestUrl(channel: DesktopReleaseChannel): string {
     return generic.replace("{channel}", channel);
   }
 
-  return `https://github.com/gennaromazza/imagetools/releases/latest/download/${channel}.json`;
+  return `https://github.com/gennaromazza/imagetools/releases/download/update-catalog-${channel}/${channel}.json`;
 }
 
 function isAllowedReleaseUrl(urlValue: string): boolean {
@@ -308,6 +308,13 @@ function pickLatestRelease(
   return candidates[0] ?? null;
 }
 
+function requiresNewerSuite(release: DesktopToolReleaseEntry | null): boolean {
+  return Boolean(
+    release?.minLauncherVersion
+    && compareVersions(release.minLauncherVersion, app.getVersion()) > 0,
+  );
+}
+
 export async function listAvailableTools(channelInput?: DesktopReleaseChannel): Promise<DesktopToolInstallState[]> {
   const channel = sanitizeChannel(channelInput);
   const manifest = await loadReleaseManifest(channel);
@@ -319,6 +326,7 @@ export async function listAvailableTools(channelInput?: DesktopReleaseChannel): 
       Boolean(installed.path) &&
       Boolean(latest?.version) &&
       (!installed.version || compareVersions(latest?.version, installed.version) > 0);
+    const suiteUpdateRequired = requiresNewerSuite(latest);
     return {
       toolId: tool.id,
       toolName: tool.displayName,
@@ -330,7 +338,13 @@ export async function listAvailableTools(channelInput?: DesktopReleaseChannel): 
       releaseHighlights: Array.isArray(latest?.highlights)
         ? latest.highlights.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
         : [],
-      status: hasUpdate ? "update-available" : installed.path ? "installed" : "not-installed",
+      status: suiteUpdateRequired
+        ? "suite-update-required"
+        : hasUpdate
+          ? "update-available"
+          : installed.path
+            ? "installed"
+            : "not-installed",
     };
   });
 }
@@ -353,6 +367,16 @@ export async function checkToolUpdate(
       available: false,
       release: null,
       reason: "not-found",
+    };
+  }
+  if (requiresNewerSuite(release)) {
+    return {
+      toolId,
+      channel,
+      currentVersion,
+      available: false,
+      release,
+      reason: "suite-update-required",
     };
   }
   if (!installed.path && !currentVersionInput) {
@@ -557,6 +581,13 @@ async function runToolUpdateDownload(
       });
     }
     const release = check.release;
+    if (check.reason === "suite-update-required") {
+      return patchJob(job.id, {
+        status: "failed",
+        releaseVersion: release.version,
+        error: `Aggiorna FileX Suite alla versione ${release.minLauncherVersion} o successiva prima di installare questo tool.`,
+      });
+    }
     if (!isAllowedReleaseUrl(release.installerUrl)) {
       return patchJob(job.id, {
         status: "failed",
