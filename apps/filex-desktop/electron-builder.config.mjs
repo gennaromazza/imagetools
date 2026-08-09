@@ -323,7 +323,7 @@ export default {
 
   asar: true,
 
-  asarUnpack: requestedTool.id === "suite-launcher"
+  asarUnpack: requestedTool.id === "suite-launcher" || requestedTool.id === "cache-sweep"
     ? []
     : [
         "**/node_modules/exiftool-vendored.exe/**",
@@ -359,6 +359,12 @@ export default {
         "!node_modules/express{,/**/*}",
         "!node_modules/multer{,/**/*}",
         "!node_modules/sharp{,/**/*}",
+      ]
+    : requestedTool.id === "cache-sweep"
+    ? [
+        ".output/electron/cache-sweep/**/*",
+        "package.json",
+        "!node_modules{,/**/*}",
       ]
     : [
         ".output/electron/**/*",

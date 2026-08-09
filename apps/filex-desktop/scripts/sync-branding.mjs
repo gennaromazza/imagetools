@@ -24,6 +24,7 @@ const toolBranding = [
   { toolId: "archivio-flow", sourceFile: "filex-generated/archivio-flow.png" },
   { toolId: "image-converter", sourceFile: "filex-generated/image-converter.png" },
   { toolId: "image-file-finder", sourceFile: "filex-generated/image-file-finder.png" },
+  { toolId: "cache-sweep", sourceFile: "filex-generated/cache-sweep.png" },
   {
     toolId: "photo-selector-app",
     sourceFile: "filex-generated/photo-selector-app.png",

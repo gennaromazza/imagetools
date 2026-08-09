@@ -58,6 +58,7 @@ const toolConfig = [
   { toolId: "archivio-flow", executableName: "Archivio-Flow" },
   { toolId: "image-converter", executableName: "Image-Converter" },
   { toolId: "image-file-finder", executableName: "Trova-Foto-da-Lista" },
+  { toolId: "cache-sweep", executableName: "FileX-Adobe-Cleaner" },
   { toolId: "photo-selector-app", executableName: "Image-Select-Pro" },
 ];
 if (selectedToolId && !toolConfig.some((tool) => tool.toolId === selectedToolId)) {

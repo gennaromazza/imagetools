@@ -21,8 +21,9 @@ const metadata = {
   'archivio-flow': { icon:'archive', category:'Archivio', description:'Accompagna l\'importazione delle fotografie dalla scheda alla creazione del lavoro in archivio. Rileva i file, applica una struttura di cartelle e nomi coerenti, prepara copie operative e leggere e mantiene i servizi consultabili e riapribili nel tempo.', color:'#6d9460' },
   'image-converter': { icon:'convert', category:'Utility', description:'Converte intere cartelle di immagini in JPG o WebP usando preset per web, social, revisione e stampa, con controllo di dimensioni, qualità e peso. Gestisce inoltre i negativi RAW trasformandoli in DNG compresso, conservando gli originali e i relativi file XMP.', color:'#df8647' },
   'image-file-finder': { icon:'find', category:'Utility', description:'Cerca automaticamente fotografie dentro cartelle e sottocartelle partendo da una lista di nomi o codici file. Raccoglie in una destinazione unica le immagini trovate e produce un riepilogo chiaro di corrispondenze, duplicati ed elementi mancanti.', color:'#4c9caf' },
+  'cache-sweep': { icon:'suite', category:'Utility Adobe', description:'FileX Adobe Cleaner lavora esclusivamente sui programmi Adobe: libera le cache supportate e individua vecchie versioni installate accanto a quella corrente. Ogni rimozione è spiegata e confermata; cataloghi, progetti, preset, preferenze, licenze e dati di recupero restano protetti.', color:'#e5b34f' },
 };
-const categories = ['Tutti','Preferiti','Recenti','Selezione','Creatività','Stampa','Archivio','Utility'];
+const categories = ['Tutti','Preferiti','Recenti','Selezione','Creatività','Stampa','Archivio','Utility','Utility Adobe'];
 let states = [];
 let activeCategory = 'Tutti';
 let favorites = new Set(JSON.parse(localStorage.getItem('filex-favorites') || '[]'));

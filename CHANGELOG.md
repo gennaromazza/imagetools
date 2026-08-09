@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-08-09 - FileX Adobe Cleaner 0.1.0
+
+### FileX Adobe Cleaner
+- aggiunto il nuovo tool Windows per rilevare le applicazioni Adobe installate e pulire soltanto cache esplicitamente supportate
+- chiarito nell'interfaccia, nella Suite e nei testi marketing che il tool lavora esclusivamente sui programmi Adobe e non è un pulitore generico del PC
+- introdotti profili consigliato, personalizzato e profondo con anteprima dello spazio, conseguenze e conferma prima della cancellazione
+- la chiusura dei processi Adobe coinvolti avviene prima in modalita normale; la terminazione forzata richiede una seconda conferma
+- aggiunte protezioni sui percorsi, blocco dei processi ancora attivi e report degli elementi eliminati, saltati o non accessibili
+- corretto il formato CommonJS del preload sandboxed, rendendo disponibile il bridge nativo anche nella build Windows pacchettizzata
+- adottato il nome FileX Adobe Cleaner e chiarito il posizionamento esclusivamente dedicato alle applicazioni Adobe
+- aggiunto il rilevamento conservativo delle vecchie versioni affiancate e la rimozione tramite Adobe HDBox con preferenze conservate e conferma UAC
+
+### Release engineering
+- aggiunti workspace, branding, build indipendente, installer Windows selettivo e controlli CI per il canale stabile
+
+## 2026-08-09 - FileX Suite 0.1.28
+
+- aggiunto FileX Adobe Cleaner al launcher e al Dock della Suite con installazione e aggiornamenti indipendenti
+- il catalogo riconosce `cache-sweep` e richiede FileX Suite 0.1.28 o successiva
+- aggiornati sito download, documentazione e workflow Windows per la nuova applicazione
+
 ## 2026-08-09 - FileX Suite 0.1.27
 
 - corretta la verifica della versione dei tool installati: la Suite legge prima `package.json` tramite il filesystem ASAR virtuale di Electron

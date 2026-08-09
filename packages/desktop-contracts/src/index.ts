@@ -5,6 +5,7 @@ export type DesktopToolId =
   | "archivio-flow"
   | "image-converter"
   | "image-file-finder"
+  | "cache-sweep"
   | "photo-selector-app";
 
 export type DesktopReleaseChannel = "stable" | "beta";

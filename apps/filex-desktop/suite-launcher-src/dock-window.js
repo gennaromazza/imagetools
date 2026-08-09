@@ -11,6 +11,7 @@ const toolNames = {
   'archivio-flow': 'Archivio Flow',
   'image-converter': 'Image Converter',
   'image-file-finder': 'Trova Foto da Lista',
+  'cache-sweep': 'FileX Adobe Cleaner',
 };
 
 let states = [];

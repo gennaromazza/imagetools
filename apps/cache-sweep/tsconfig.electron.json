@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": "../filex-desktop/.output/electron/cache-sweep"
+  },
+  "include": ["electron/**/*.ts", "electron/**/*.cts", "src/contracts.ts"]
+}
