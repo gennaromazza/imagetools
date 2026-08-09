@@ -265,7 +265,7 @@ jobs:
             $metadata = ""
             foreach ($attempt in 1..6) {
               $nonce = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-$attempt"
-              Invoke-WebRequest -Uri "$feedUrl?t=$nonce" -OutFile $feedPath
+              Invoke-WebRequest -Uri "${feedUrl}?t=$nonce" -OutFile $feedPath
               $metadata = Get-Content $feedPath -Raw
               if ($metadata -match [regex]::Escape($env:FILEX_RELEASE_VERSION)) { break }
               if ($attempt -lt 6) { Start-Sleep -Seconds (5 * $attempt) }
@@ -286,7 +286,7 @@ jobs:
             $entry = @()
             foreach ($attempt in 1..6) {
               $nonce = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-$attempt"
-              Invoke-WebRequest -Uri "$catalogUrl?t=$nonce" -OutFile $catalogPath
+              Invoke-WebRequest -Uri "${catalogUrl}?t=$nonce" -OutFile $catalogPath
               $catalog = Get-Content $catalogPath -Raw | ConvertFrom-Json
               $entry = @($catalog.releases | Where-Object { $_.toolId -eq $env:FILEX_COMPONENT -and $_.channel -eq $env:FILEX_RELEASE_CHANNEL })
               if ($entry.Count -eq 1 -and $entry[0].version -eq $env:FILEX_RELEASE_VERSION) { break }

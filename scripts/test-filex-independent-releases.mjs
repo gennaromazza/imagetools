@@ -116,6 +116,8 @@ assert(
     && releaseWorkflow.includes("Build selected installer")
     && releaseWorkflow.includes("verify-packaged-component.mjs")
     && releaseWorkflow.includes("Get-Content $feedPath -Raw")
+    && releaseWorkflow.includes('"${feedUrl}?t=$nonce"')
+    && releaseWorkflow.includes('"${catalogUrl}?t=$nonce"')
     && releaseWorkflow.includes("foreach ($attempt in 1..6)")
     && releaseWorkflow.includes("Bootstrap dedicated tool catalog")
     && releaseWorkflow.includes("releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json")
