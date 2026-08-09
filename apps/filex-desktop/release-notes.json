@@ -1,4 +1,12 @@
 {
+  "cache-sweep": {
+    "0.1.0": [
+      "Utility dedicata esclusivamente ai programmi Adobe: rilevamento locale delle applicazioni installate e misurazione delle sole cache supportate, senza pulizia generica del PC.",
+      "Pulizia guidata con spiegazione delle conseguenze, chiusura coordinata dei processi e protezioni sui percorsi.",
+      "Supporto iniziale per Media Cache Adobe video, Camera Raw, Bridge, anteprime Lightroom e cache InDesign delimitate.",
+      "Nuovo nome FileX Adobe Cleaner e rilevamento delle vecchie versioni principali, rimovibili con il disinstallatore ufficiale Adobe mantenendo le preferenze."
+    ]
+  },
   "image-party-frame": {
     "0.1.25": [
       "Pubblicazione coordinata con FileX Suite 0.1.25 per mantenere allineati installer, manifest e canale stabile.",

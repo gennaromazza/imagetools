@@ -14,6 +14,7 @@ const expectedPackages = {
   "photo-selector-app": { name: "Image-Select-Pro", main: ".output/electron/main.js" },
   "image-party-frame": { name: "Image-Party-Frame", main: ".output/electron/main.js" },
   "archivio-flow": { name: "Archivio-Flow", main: ".output/electron/main.js" },
+  "cache-sweep": { name: "FileX-Adobe-Cleaner", main: ".output/electron/cache-sweep/electron/main.js" },
 };
 
 const expected = expectedPackages[args.component];
@@ -57,6 +58,28 @@ if (args.component === "suite") {
     forbiddenEntries.some((forbidden) => entry === forbidden || entry.startsWith(`${forbidden}/`)));
   if (bundledForbiddenEntries.length > 0) {
     throw new Error(`La Suite contiene moduli tool-specifici:\n${bundledForbiddenEntries.slice(0, 20).join("\n")}`);
+  }
+}
+
+if (args.component === "cache-sweep") {
+  const entries = listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/"));
+  const requiredEntries = [
+    "/.output/electron/cache-sweep/electron/main.js",
+    "/.output/electron/cache-sweep/electron/preload.cjs",
+    "/.output/electron/cache-sweep/electron/cache-sweep-service.js",
+  ];
+  for (const requiredEntry of requiredEntries) {
+    if (!entries.includes(requiredEntry)) {
+      throw new Error(`Cache Sweep non contiene ${requiredEntry}`);
+    }
+  }
+  const forbiddenEntries = entries.filter((entry) =>
+    entry.startsWith("/node_modules/")
+    || entry === "/.output/electron/main.js"
+    || entry === "/.output/electron/native-image-service.js"
+    || entry === "/.output/electron/thumbnail-disk-cache.js");
+  if (forbiddenEntries.length > 0) {
+    throw new Error(`Cache Sweep contiene dipendenze o runtime estranei:\n${forbiddenEntries.slice(0, 20).join("\n")}`);
   }
 }
 

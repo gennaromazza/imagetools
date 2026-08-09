@@ -8,11 +8,12 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 - `packages/`: moduli condivisi
 - `docs/`: documentazione di suite e dei singoli tool
 
-## Tool Principali (Marzo 2026)
+## Tool principali
 
 - `apps/image-party-frame` — Batch framing, crop live, export eventi
 - `apps/archivio-flow` — Import, archiviazione e organizzazione lavori da SD
 - `apps/photo-selector-app` — Image Select Pro: selezione e classificazione foto avanzata
+- `apps/cache-sweep` — FileX Adobe Cleaner: utility esclusivamente Adobe per pulire cache supportate e rimuovere vecchie versioni affiancate a quella corrente su Windows
 
 ## Launcher Windows
 

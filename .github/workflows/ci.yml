@@ -48,6 +48,8 @@ jobs:
           npm.cmd --workspace @photo-tools/photo-selector-app run build
           npm.cmd --workspace @photo-tools/image-party-frame-app run build
           npm.cmd --workspace @photo-tools/archivio-flow run build
+          npm.cmd --workspace @photo-tools/cache-sweep run test
+          npm.cmd --workspace @photo-tools/cache-sweep run build
 
       - name: Validate stable manifest
         run: npm.cmd --workspace @photo-tools/filex-desktop run manifest:validate:stable

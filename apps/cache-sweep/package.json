@@ -1,0 +1,31 @@
+{
+  "name": "@photo-tools/cache-sweep",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FileX Adobe Cleaner: cache cleanup and safe removal of older Adobe app versions on Windows.",
+  "type": "module",
+  "main": "../filex-desktop/.output/electron/cache-sweep/electron/main.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4235",
+    "start": "npm run build && electron .",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "tsx --test electron/cache-sweep-service.test.ts"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "41.0.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.2.0"
+  }
+}
