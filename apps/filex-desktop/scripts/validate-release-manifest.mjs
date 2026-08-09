@@ -20,6 +20,7 @@ if (!Array.isArray(raw.releases)) {
   throw new Error("Manifest releases non valido");
 }
 
+const releaseKeys = new Set();
 for (const release of raw.releases) {
   if (!release.toolId || !release.version || !release.installerUrl || !release.installerSha256) {
     throw new Error(`Release incompleta: ${JSON.stringify(release)}`);
@@ -33,6 +34,17 @@ for (const release of raw.releases) {
   if (!/^[0-9a-f]{64}$/i.test(release.installerSha256)) {
     throw new Error(`checksum non valido: ${release.toolId}`);
   }
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(release.version)) {
+    throw new Error(`versione non semantica: ${release.toolId} ${release.version}`);
+  }
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(release.minLauncherVersion)) {
+    throw new Error(`minLauncherVersion non valida: ${release.toolId}`);
+  }
+  const releaseKey = `${release.channel}:${release.toolId}`;
+  if (releaseKeys.has(releaseKey)) {
+    throw new Error(`Release duplicata nel catalogo: ${releaseKey}`);
+  }
+  releaseKeys.add(releaseKey);
   if (
     !Array.isArray(release.highlights)
     || release.highlights.length === 0

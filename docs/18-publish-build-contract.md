@@ -7,24 +7,24 @@ Questa procedura definisce cosa significa **pubblicare e buildare FileX**. Va ap
 Al termine devono essere disponibili:
 
 - codice integrato in `main` tramite il workflow Git documentato;
-- tag Git coerente con la versione degli installer;
+- tag Git namespaced coerente con la versione del componente (`suite-vX.Y.Z` o `<tool-id>-vX.Y.Z`);
 - changelog e documentazione aggiornati;
 - sito GitHub Pages aggiornato;
-- installer FileX Suite e installer dei tool modificati;
-- blockmap e `latest.yml` per l'auto-update della Suite;
-- `stable.json` o `beta.json` con versione, URL e SHA-256 dei tool;
+- installer del solo componente pubblicato;
+- blockmap e, soltanto per una release Suite, `latest.yml` nel feed Suite dedicato;
+- soltanto per una release tool, aggiornamento della sua voce in `stable.json` o `beta.json`;
 - verifica che FileX Suite mostri `Aggiorna` per ogni tool con versione installata inferiore.
 
 ## Sequenza standard
 
 1. Sincronizzare `main` con `git pull --ff-only origin main` e creare un branch release.
-2. Individuare i tool interessati e scegliere la nuova versione semantica.
-3. Allineare versione del package desktop, lockfile e tag `vX.Y.Z`.
+2. Individuare il componente interessato e scegliere la sua nuova versione semantica.
+3. Allineare il relativo `package.json`, il lockfile e il tag namespaced.
 4. Aggiornare `CHANGELOG.md`, documentazione tecnica, checklist e pagina download.
 5. Eseguire test, typecheck e build locali in proporzione alle modifiche.
-6. Aggiornare `.github/workflows/windows-release.yml` se un tool modificato non e' incluso negli artefatti.
+6. Verificare che `.github/workflows/windows-release.yml` supporti il componente senza costruire Suite o tool estranei.
 7. Aprire e integrare la PR verso `main`.
-8. Creare e pushare il tag stabile; il workflow `FileX Windows Release` genera installer, manifest e GitHub Release.
+8. Creare e pushare il tag del componente; il workflow genera soltanto il suo installer e aggiorna il feed pertinente.
 9. Attendere il completamento dei workflow `FileX Windows Release` e `Publish FileX Suite page`.
 10. Scaricare e validare il manifest remoto e controllare asset, alias download e sito pubblico.
 
@@ -32,7 +32,7 @@ Al termine devono essere disponibili:
 
 Il controllo finale usa:
 
-`https://github.com/gennaromazza/imagetools/releases/latest/download/stable.json`
+`https://github.com/gennaromazza/imagetools/releases/download/update-catalog-stable/stable.json`
 
 Per ogni tool modificato il manifest deve avere:
 

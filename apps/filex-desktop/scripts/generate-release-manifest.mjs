@@ -1,13 +1,20 @@
 import { createHash, createHmac } from "node:crypto";
-import { readdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = join(__dirname, "..");
-const releaseDir = join(desktopRoot, ".output", "releases");
-const manifestDir = join(desktopRoot, "release-manifests");
-const releaseNotesPath = join(desktopRoot, "release-notes.json");
+
+function readArgument(name) {
+  const prefix = `--${name}=`;
+  const argument = process.argv.find((value) => value.startsWith(prefix));
+  return argument ? argument.slice(prefix.length).trim() : null;
+}
+
+const releaseDir = resolve(readArgument("release-dir") || join(desktopRoot, ".output", "releases"));
+const manifestDir = resolve(readArgument("manifest-dir") || join(desktopRoot, "release-manifests"));
+const releaseNotesPath = resolve(readArgument("release-notes") || join(desktopRoot, "release-notes.json"));
 
 const channelArg = process.argv.find((arg) => arg.startsWith("--channel="));
 const channel = (channelArg ? channelArg.split("=")[1] : "stable").trim();
@@ -28,6 +35,16 @@ if (/\/releases\/latest\/download(?:\/|$)/i.test(baseUrl)) {
 
 const launcherVersionArg = process.argv.find((arg) => arg.startsWith("--min-launcher-version="));
 const minLauncherVersion = (launcherVersionArg ? launcherVersionArg.split("=")[1] : "0.1.0").trim();
+const toolArg = process.argv.find((arg) => arg.startsWith("--tool="));
+const selectedToolId = toolArg ? toolArg.split("=")[1].trim() : null;
+const previousManifestUrlArg = process.argv.find((arg) => arg.startsWith("--previous-manifest-url="));
+const previousManifestUrl = previousManifestUrlArg
+  ? previousManifestUrlArg.slice(previousManifestUrlArg.indexOf("=") + 1).trim()
+  : null;
+const bootstrapManifestUrlArg = process.argv.find((arg) => arg.startsWith("--bootstrap-manifest-url="));
+const bootstrapManifestUrl = bootstrapManifestUrlArg
+  ? bootstrapManifestUrlArg.slice(bootstrapManifestUrlArg.indexOf("=") + 1).trim()
+  : null;
 
 let artifacts = [];
 try {
@@ -43,6 +60,12 @@ const toolConfig = [
   { toolId: "image-file-finder", executableName: "Trova-Foto-da-Lista" },
   { toolId: "photo-selector-app", executableName: "Image-Select-Pro" },
 ];
+if (selectedToolId && !toolConfig.some((tool) => tool.toolId === selectedToolId)) {
+  throw new Error(`Tool non supportato: ${selectedToolId}`);
+}
+const selectedToolConfig = selectedToolId
+  ? toolConfig.filter((tool) => tool.toolId === selectedToolId)
+  : toolConfig;
 
 let releaseNotes = {};
 try {
@@ -70,7 +93,7 @@ function parseVersion(fileName, executableName, releaseChannel) {
 }
 
 const generatedReleases = [];
-for (const tool of toolConfig) {
+for (const tool of selectedToolConfig) {
   const candidate = artifacts
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
@@ -99,15 +122,50 @@ for (const tool of toolConfig) {
   });
 }
 
-let previousReleases = [];
-try {
-  const previousManifest = JSON.parse(
-    await readFile(join(manifestDir, `${channel}.json`), "utf8"),
+if (selectedToolId && generatedReleases.length !== 1) {
+  throw new Error(
+    `Atteso un installer per ${selectedToolId} nel canale ${channel}, trovati ${generatedReleases.length}.`,
   );
-  previousReleases = Array.isArray(previousManifest.releases) ? previousManifest.releases : [];
-} catch {
-  previousReleases = [];
 }
+
+async function readBundledManifest() {
+  try {
+    return JSON.parse(
+      await readFile(join(manifestDir, `${channel}.json`), "utf8"),
+    );
+  } catch {
+    return { releases: [] };
+  }
+}
+
+let previousManifest;
+if (previousManifestUrl) {
+  const separator = previousManifestUrl.includes("?") ? "&" : "?";
+  const response = await fetch(`${previousManifestUrl}${separator}t=${Date.now()}`);
+  if (response.status === 404) {
+    if (bootstrapManifestUrl) {
+      const bootstrapSeparator = bootstrapManifestUrl.includes("?") ? "&" : "?";
+      const bootstrapResponse = await fetch(
+        `${bootstrapManifestUrl}${bootstrapSeparator}t=${Date.now()}`,
+      );
+      if (!bootstrapResponse.ok) {
+        throw new Error(`Impossibile inizializzare il catalogo remoto: HTTP ${bootstrapResponse.status}`);
+      }
+      previousManifest = await bootstrapResponse.json();
+    } else {
+      previousManifest = await readBundledManifest();
+    }
+  } else if (!response.ok) {
+    throw new Error(`Impossibile rileggere il catalogo remoto: HTTP ${response.status}`);
+  } else {
+    previousManifest = await response.json();
+  }
+} else {
+  previousManifest = await readBundledManifest();
+}
+const previousReleases = Array.isArray(previousManifest.releases)
+  ? previousManifest.releases
+  : [];
 
 const generatedToolIds = new Set(generatedReleases.map((release) => release.toolId));
 const releases = [
@@ -143,6 +201,7 @@ if (signatureKey) {
 }
 
 const outputPath = join(manifestDir, `${channel}.json`);
+await mkdir(manifestDir, { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
 console.log(`Manifest generato: ${outputPath}`);

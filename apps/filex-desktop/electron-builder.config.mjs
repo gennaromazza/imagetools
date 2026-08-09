@@ -18,17 +18,29 @@ const __dirname = dirname(
   fileURLToPath(import.meta.url),
 );
 
-const packageVersion = JSON.parse(
-  readFileSync(
-    join(__dirname, "package.json"),
-    "utf8",
-  ),
-).version;
-
 const requestedTool =
   getDesktopToolOrDefault(
     process.env.FILEX_TOOL,
   );
+
+const versionPackagePath = join(
+  __dirname,
+  requestedTool.versionPackageRelativeToShell,
+  "package.json",
+);
+
+const targetVersion = JSON.parse(
+  readFileSync(
+    versionPackagePath,
+    "utf8",
+  ),
+).version;
+
+if (typeof targetVersion !== "string" || !targetVersion.trim()) {
+  throw new Error(
+    `Versione package non valida per ${requestedTool.id}: ${versionPackagePath}`,
+  );
+}
 
 const outputRoot = join(
   __dirname,
@@ -277,7 +289,7 @@ writeFileSync(
 );
 
 export default {
-  buildVersion: packageVersion,
+  buildVersion: targetVersion,
 
   appId: `studio.filex.${requestedTool.id}`,
 
@@ -305,6 +317,7 @@ export default {
    */
   extraMetadata: {
     name: requestedTool.executableName,
+    version: targetVersion,
   },
 
   asar: true,
@@ -357,17 +370,15 @@ export default {
         `branding/${requestedTool.id}.ico`,
     },
 
-    {
-      from:
-        "release-manifests",
-
-      to:
-        "release-manifests",
-
-      filter: [
-        "**/*.json",
-      ],
-    },
+    ...(requestedTool.id === "suite-launcher"
+      ? [
+          {
+            from: "release-manifests",
+            to: "release-manifests",
+            filter: ["**/*.json"],
+          },
+        ]
+      : []),
   ],
 
   win: {

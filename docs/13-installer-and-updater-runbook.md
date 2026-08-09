@@ -13,7 +13,7 @@
 FileX Suite si aggiorna separatamente dai tool. Ogni tool installato usa lo stesso flusso:
 
 1. Aprire FileX Suite.
-2. Premere il refresh nella barra laterale per rileggere il manifest remoto `stable.json`.
+2. Premere il refresh nella barra laterale per rileggere il catalogo remoto dei tool.
 3. Nella scheda del tool verificare la versione installata e quella disponibile.
 4. Quando compare `Aggiorna`, premere quel pulsante nella scheda del tool interessato.
 5. Attendere download, verifica SHA-256 e avvio dell'installer Windows.
@@ -25,7 +25,7 @@ L'installer NSIS installa in `%LOCALAPPDATA%\Programs\<ToolName>`: nessun privil
 
 La versione installata è sempre visibile nel titolo della finestra di ogni tool (`Nome tool — Versione X.Y.Z`) ed è ricavata dal package Electron, la stessa sorgente usata dagli installer e dalla Suite.
 
-Il pulsante `Aggiorna` non appartiene all'aggiornamento della Suite: compare solo nella scheda del singolo tool quando la versione pubblicata è più recente.
+Il pulsante `Aggiorna` non appartiene all'aggiornamento della Suite: compare solo nella scheda del singolo tool quando la versione pubblicata è più recente. Il comando `Aggiorna FileX Suite` interroga invece soltanto il feed dedicato `suite-channel-stable`.
 
 ### Migrazione da installazioni per-machine
 
@@ -64,6 +64,10 @@ Le versioni precedenti al passaggio per-user sono installate in `C:\Program File
 ## Chiusura di una pubblicazione
 
 Una pubblicazione e' conclusa solo dopo aver verificato GitHub Release, GitHub Pages e il manifest remoto. Seguire `docs/18-publish-build-contract.md` per la checklist completa.
+
+## Migrazione ai canali indipendenti
+
+La prima pubblicazione della nuova architettura deve essere `suite-v0.1.26`. Va installata e verificata prima di pubblicare nuovi tag dei tool: questa versione sposta l'updater Suite su `suite-channel-stable` e il catalogo tool su `update-catalog-stable`. Solo dopo la verifica remota della Suite 0.1.26 si possono creare release tool namespaced.
 
 ## Verifica release 0.1.25
 

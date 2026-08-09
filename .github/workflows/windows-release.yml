@@ -1,13 +1,25 @@
-name: FileX Windows Release
+name: FileX component release
 
 on:
   push:
     tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "suite-v*"
+      - "photo-selector-app-v*"
+      - "image-party-frame-v*"
+      - "archivio-flow-v*"
   workflow_dispatch:
     inputs:
+      component:
+        description: Componente da pubblicare
+        required: true
+        type: choice
+        options:
+          - suite
+          - photo-selector-app
+          - image-party-frame
+          - archivio-flow
       channel:
-        description: Release channel
+        description: Canale release
         required: true
         default: stable
         type: choice
@@ -15,23 +27,29 @@ on:
           - stable
           - beta
       version:
-        description: Version tag (es. v0.2.0)
+        description: Versione senza prefisso (es. 0.2.0)
         required: true
+        type: string
+      min_suite_version:
+        description: Versione minima Suite richiesta dai tool
+        required: true
+        default: "0.1.25"
         type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: filex-release-${{ github.event_name == 'push' && 'stable' || inputs.channel }}
+  cancel-in-progress: false
+
 jobs:
   build-and-release:
     runs-on: windows-latest
     env:
-      FILEX_RELEASE_CHANNEL: ${{ github.event_name == 'push' && 'stable' || inputs.channel }}
-      FILEX_RELEASE_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
       FILEX_CODE_SIGNING: "1"
       CSC_LINK: ${{ secrets.FILEX_WINDOWS_CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.FILEX_WINDOWS_CSC_KEY_PASSWORD }}
-      FILEX_MANIFEST_HMAC_KEY: ${{ secrets.FILEX_MANIFEST_HMAC_KEY }}
       IMAGE_SELECT_GOOGLE_CLIENT_ID: ${{ secrets.IMAGE_SELECT_GOOGLE_CLIENT_ID }}
       IMAGE_SELECT_GOOGLE_CLIENT_SECRET: ${{ secrets.IMAGE_SELECT_GOOGLE_CLIENT_SECRET }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -45,97 +63,197 @@ jobs:
           node-version: "22"
           cache: npm
 
+      - name: Resolve component and validate version
+        id: release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          if ("${{ github.event_name }}" -eq "push") {
+            $releaseTag = "${{ github.ref_name }}"
+            if ($releaseTag -notmatch "^(suite|photo-selector-app|image-party-frame|archivio-flow)-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$") {
+              throw "Tag componente non valido: $releaseTag"
+            }
+            $component = $Matches[1]
+            $version = $Matches[2]
+            $channel = if ($version.Contains("-")) { "beta" } else { "stable" }
+            $minSuiteVersion = "0.1.25"
+          } else {
+            $component = "${{ inputs.component }}"
+            $version = "${{ inputs.version }}".TrimStart("v")
+            $channel = "${{ inputs.channel }}"
+            $minSuiteVersion = "${{ inputs.min_suite_version }}".TrimStart("v")
+            $releaseTag = "$component-v$version"
+          }
+
+          if ($version -notmatch "^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$") {
+            throw "Versione semantica non valida: $version"
+          }
+
+          $packagePath = switch ($component) {
+            "suite" { "apps/filex-desktop/package.json" }
+            "photo-selector-app" { "apps/photo-selector-app/package.json" }
+            "image-party-frame" { "apps/image-party-frame/package.json" }
+            "archivio-flow" { "apps/archivio-flow/package.json" }
+            default { throw "Componente non supportato: $component" }
+          }
+          $packageVersion = (Get-Content $packagePath -Raw | ConvertFrom-Json).version
+          if ($packageVersion -ne $version) {
+            throw "Il tag $releaseTag non coincide con $packagePath ($packageVersion)"
+          }
+
+          "FILEX_COMPONENT=$component" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FILEX_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FILEX_RELEASE_TAG=$releaseTag" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FILEX_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FILEX_MIN_SUITE_VERSION=$minSuiteVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "component=$component" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate release version
+      - name: Test and typecheck shared release code
         shell: pwsh
         run: |
-          $packageVersion = (Get-Content "apps/filex-desktop/package.json" -Raw | ConvertFrom-Json).version
-          $tagVersion = $env:FILEX_RELEASE_VERSION.TrimStart("v")
-          if ($packageVersion -ne $tagVersion) {
-            throw "Release tag $env:FILEX_RELEASE_VERSION does not match desktop package version $packageVersion"
+          npm.cmd run test:filex-updater-lock
+          npm.cmd run test:filex-independent-releases
+          npm.cmd --workspace @photo-tools/filex-desktop run build:shell
+
+      - name: Download current catalog snapshot
+        if: steps.release.outputs.component == 'suite'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $catalogUrl = "https://github.com/gennaromazza/imagetools/releases/download/update-catalog-$env:FILEX_RELEASE_CHANNEL/$env:FILEX_RELEASE_CHANNEL.json?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+          try {
+            Invoke-WebRequest -Uri $catalogUrl -OutFile "apps/filex-desktop/release-manifests/$env:FILEX_RELEASE_CHANNEL.json"
+          } catch {
+            Write-Warning "Catalogo remoto non ancora disponibile; uso il fallback versionato nel repository."
           }
 
-      - name: Build FileX Suite installer
+      - name: Build selected installer
         shell: pwsh
         run: |
-          $env:FILEX_OUTPUT_DIR = ".output/releases-suite"
-          npm run dist:filex-desktop:suite:win
-
-      - name: Build Image Select Pro installer
-        shell: pwsh
-        run: |
-          $env:FILEX_OUTPUT_DIR = ".output/releases-photo-selector"
-          npm run dist:filex-desktop:photo-selector:win
-
-      - name: Build Image Party Frame installer
-        shell: pwsh
-        run: |
-          $env:FILEX_OUTPUT_DIR = ".output/releases-image-party-frame"
-          npm --workspace @photo-tools/filex-desktop run dist:image-party-frame:win
-
-      - name: Build Archivio Flow installer
-        shell: pwsh
-        run: |
-          $env:FILEX_OUTPUT_DIR = ".output/releases-archivio-flow"
-          npm --workspace @photo-tools/filex-desktop run dist:archivio-flow:win64
-
-      - name: Prepare release assets and manifest
-        shell: pwsh
-        run: |
-          $releaseDir = "apps/filex-desktop/.output/releases"
-          New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-          Copy-Item "apps/filex-desktop/.output/releases-suite/*.exe" $releaseDir -Force
-          Copy-Item "apps/filex-desktop/.output/releases-suite/*.exe.blockmap" $releaseDir -Force
-          Copy-Item "apps/filex-desktop/.output/releases-suite/latest.yml" $releaseDir -Force
-          Copy-Item "apps/filex-desktop/.output/releases-photo-selector/Image-Select-Pro-*.exe" $releaseDir -Force
-          Copy-Item "apps/filex-desktop/.output/releases-photo-selector/Image-Select-Pro-*.exe.blockmap" $releaseDir -Force
-          Copy-Item "apps/filex-desktop/.output/releases-image-party-frame/Image-Party-Frame-*.exe" $releaseDir -Force
-          Copy-Item "apps/filex-desktop/.output/releases-image-party-frame/Image-Party-Frame-*.exe.blockmap" $releaseDir -Force
-          Copy-Item "apps/filex-desktop/.output/releases-archivio-flow/Archivio-Flow-*.exe" $releaseDir -Force
-          Copy-Item "apps/filex-desktop/.output/releases-archivio-flow/Archivio-Flow-*.exe.blockmap" $releaseDir -Force
-          $baseUrl = "https://github.com/gennaromazza/imagetools/releases/download/$env:FILEX_RELEASE_VERSION"
-          node ./apps/filex-desktop/scripts/generate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL --base-url=$baseUrl --min-launcher-version=0.1.0
-
-      - name: Validate tool release manifest
-        run: |
-          cd apps/filex-desktop
-          node ./scripts/validate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL
-
-      - name: Validate changed tool versions in manifest
-        shell: pwsh
-        run: |
-          $manifest = Get-Content "apps/filex-desktop/release-manifests/$env:FILEX_RELEASE_CHANNEL.json" -Raw | ConvertFrom-Json
-          $expectedVersion = $env:FILEX_RELEASE_VERSION.TrimStart("v")
-          foreach ($toolId in @(
-            "image-party-frame",
-            "archivio-flow",
-            "photo-selector-app"
-          )) {
-            $release = @($manifest.releases | Where-Object { $_.toolId -eq $toolId -and $_.channel -eq $env:FILEX_RELEASE_CHANNEL })
-            if ($release.Count -ne 1 -or $release[0].version -ne $expectedVersion) {
-              throw "Manifest entry for $toolId is missing or does not match $expectedVersion"
-            }
+          $ErrorActionPreference = "Stop"
+          $env:FILEX_OUTPUT_DIR = ".output/releases"
+          switch ($env:FILEX_COMPONENT) {
+            "suite" { npm.cmd run dist:filex-desktop:suite:win }
+            "photo-selector-app" { npm.cmd --workspace @photo-tools/filex-desktop run dist:photo-selector:win64 }
+            "image-party-frame" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-party-frame:win }
+            "archivio-flow" { npm.cmd --workspace @photo-tools/filex-desktop run dist:archivio-flow:win64 }
+            default { throw "Componente non supportato: $env:FILEX_COMPONENT" }
           }
 
-      - name: Create permanent Suite download alias
+      - name: Generate selected tool catalog entry
+        if: steps.release.outputs.component != 'suite'
         shell: pwsh
         run: |
-          $installers = @(Get-ChildItem "apps/filex-desktop/.output/releases/FileX-Suite-*-stable-x64-setup.exe")
+          $ErrorActionPreference = "Stop"
+          $baseUrl = "https://github.com/gennaromazza/imagetools/releases/download/$env:FILEX_RELEASE_TAG"
+          $catalogUrl = "https://github.com/gennaromazza/imagetools/releases/download/update-catalog-$env:FILEX_RELEASE_CHANNEL/$env:FILEX_RELEASE_CHANNEL.json"
+          $legacyCatalogUrl = "https://github.com/gennaromazza/imagetools/releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json"
+          node ./apps/filex-desktop/scripts/generate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL --tool=$env:FILEX_COMPONENT --base-url=$baseUrl --previous-manifest-url=$catalogUrl --bootstrap-manifest-url=$legacyCatalogUrl --min-launcher-version=$env:FILEX_MIN_SUITE_VERSION
+          Push-Location apps/filex-desktop
+          try {
+            node ./scripts/validate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL
+          } finally {
+            Pop-Location
+          }
+
+      - name: Verify selected artifact version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $expectedPrefix = switch ($env:FILEX_COMPONENT) {
+            "suite" { "FileX-Suite" }
+            "photo-selector-app" { "Image-Select-Pro" }
+            "image-party-frame" { "Image-Party-Frame" }
+            "archivio-flow" { "Archivio-Flow" }
+          }
+          $installers = @(Get-ChildItem "apps/filex-desktop/.output/releases/$expectedPrefix-$env:FILEX_RELEASE_VERSION-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe")
           if ($installers.Count -ne 1) {
-            throw "Expected exactly one stable x64 Suite installer, found $($installers.Count)"
+            throw "Atteso un installer x64 per $env:FILEX_COMPONENT $env:FILEX_RELEASE_VERSION, trovati $($installers.Count)"
           }
-          Copy-Item $installers[0].FullName "apps/filex-desktop/.output/releases/FileX-Suite-stable-x64-setup.exe"
 
-      - name: Upload release assets
+      - name: Upload Suite release assets
+        if: steps.release.outputs.component == 'suite'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.FILEX_RELEASE_VERSION }}
+          tag_name: ${{ env.FILEX_RELEASE_TAG }}
           prerelease: ${{ env.FILEX_RELEASE_CHANNEL == 'beta' }}
           generate_release_notes: true
           files: |
             apps/filex-desktop/.output/releases/*.exe
             apps/filex-desktop/.output/releases/*.exe.blockmap
             apps/filex-desktop/.output/releases/latest.yml
-            apps/filex-desktop/release-manifests/${{ github.event_name == 'push' && 'stable' || inputs.channel }}.json
+
+      - name: Upload tool release assets
+        if: steps.release.outputs.component != 'suite'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.FILEX_RELEASE_TAG }}
+          prerelease: ${{ env.FILEX_RELEASE_CHANNEL == 'beta' }}
+          generate_release_notes: true
+          files: |
+            apps/filex-desktop/.output/releases/*.exe
+            apps/filex-desktop/.output/releases/*.exe.blockmap
+            apps/filex-desktop/release-manifests/${{ env.FILEX_RELEASE_CHANNEL }}.json
+
+      - name: Publish dedicated Suite update feed
+        if: steps.release.outputs.component == 'suite'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $channelTag = "suite-channel-$env:FILEX_RELEASE_CHANNEL"
+          gh release view $channelTag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $channelTag --prerelease --title "FileX Suite $env:FILEX_RELEASE_CHANNEL update feed" --notes "Canale tecnico dell'updater FileX Suite."
+          }
+          $versionedInstaller = Get-ChildItem "apps/filex-desktop/.output/releases/FileX-Suite-$env:FILEX_RELEASE_VERSION-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe" | Select-Object -First 1
+          $aliasPath = "apps/filex-desktop/.output/releases/FileX-Suite-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe"
+          Copy-Item $versionedInstaller.FullName $aliasPath -Force
+          gh release upload $channelTag $versionedInstaller.FullName "$($versionedInstaller.FullName).blockmap" "apps/filex-desktop/.output/releases/latest.yml" $aliasPath --clobber
+
+      - name: Publish dedicated tool catalog
+        if: steps.release.outputs.component != 'suite'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $catalogTag = "update-catalog-$env:FILEX_RELEASE_CHANNEL"
+          gh release view $catalogTag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $catalogTag --prerelease --title "FileX $env:FILEX_RELEASE_CHANNEL tool catalog" --notes "Catalogo tecnico degli aggiornamenti indipendenti dei tool FileX."
+          }
+          gh release upload $catalogTag "apps/filex-desktop/release-manifests/$env:FILEX_RELEASE_CHANNEL.json" --clobber
+
+      - name: Verify remote publication
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Start-Sleep -Seconds 5
+          if ($env:FILEX_COMPONENT -eq "suite") {
+            $url = "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-$env:FILEX_RELEASE_CHANNEL/latest.yml?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+            $metadata = (Invoke-WebRequest -Uri $url).Content
+            if ($metadata -notmatch [regex]::Escape($env:FILEX_RELEASE_VERSION)) {
+              throw "Il feed Suite remoto non contiene la versione $env:FILEX_RELEASE_VERSION"
+            }
+            $remoteInstaller = Join-Path $env:RUNNER_TEMP "FileX-Suite-remote.exe"
+            $installerUrl = "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-$env:FILEX_RELEASE_CHANNEL/FileX-Suite-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+            Invoke-WebRequest -Uri $installerUrl -OutFile $remoteInstaller
+            $localInstaller = Get-ChildItem "apps/filex-desktop/.output/releases/FileX-Suite-$env:FILEX_RELEASE_VERSION-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe" | Select-Object -First 1
+            if ((Get-FileHash $remoteInstaller -Algorithm SHA256).Hash -ne (Get-FileHash $localInstaller.FullName -Algorithm SHA256).Hash) {
+              throw "Checksum remoto dell'installer Suite non valido"
+            }
+          } else {
+            $url = "https://github.com/gennaromazza/imagetools/releases/download/update-catalog-$env:FILEX_RELEASE_CHANNEL/$env:FILEX_RELEASE_CHANNEL.json?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+            $catalog = (Invoke-WebRequest -Uri $url).Content | ConvertFrom-Json
+            $entry = @($catalog.releases | Where-Object { $_.toolId -eq $env:FILEX_COMPONENT -and $_.channel -eq $env:FILEX_RELEASE_CHANNEL })
+            if ($entry.Count -ne 1 -or $entry[0].version -ne $env:FILEX_RELEASE_VERSION) {
+              throw "Il catalogo remoto non contiene $env:FILEX_COMPONENT $env:FILEX_RELEASE_VERSION"
+            }
+            $remoteInstaller = Join-Path $env:RUNNER_TEMP "$env:FILEX_COMPONENT-remote.exe"
+            Invoke-WebRequest -Uri "$($entry[0].installerUrl)?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" -OutFile $remoteInstaller
+            $remoteSha256 = (Get-FileHash $remoteInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($remoteSha256 -ne $entry[0].installerSha256.ToLowerInvariant()) {
+              throw "Checksum remoto dell'installer $env:FILEX_COMPONENT non valido"
+            }
+          }

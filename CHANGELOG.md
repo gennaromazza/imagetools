@@ -1,5 +1,12 @@
 # Changelog
 
+## In sviluppo - FileX Suite 0.1.26
+
+- versionamento separato per FileX Suite, Image Select Pro, Image Party Frame e Archivio Flow
+- build Windows selettiva del solo componente pubblicato
+- feed Suite e catalogo tool separati dagli alias GitHub `releases/latest`
+- tag namespaced e controllo aggiornamenti distinto nell'interfaccia della Suite
+
 ## 2026-08-08 - FileX Suite 0.1.25
 
 ### Image Select Pro
