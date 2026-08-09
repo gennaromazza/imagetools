@@ -2,7 +2,7 @@ import * as electron from "electron";
 import { extractFile } from "@electron/asar";
 import { spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
@@ -256,14 +256,19 @@ function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
 function readExecutableVersion(
   executablePath: string,
 ): string | null {
+  const archivePath = join(
+    dirname(executablePath),
+    "resources",
+    "app.asar",
+  );
+
   try {
-    const archivePath = join(
-      dirname(executablePath),
-      "resources",
-      "app.asar",
-    );
+    // In Electron, node:fs espone app.asar come filesystem virtuale. Leggere
+    // direttamente il file interno evita che @electron/asar tenti di aprire
+    // l'archivio attraverso lo stesso layer virtuale e restituisca un falso
+    // negativo dopo un aggiornamento riuscito.
     const packageJson = JSON.parse(
-      extractFile(archivePath, "package.json").toString("utf8"),
+      readFileSync(join(archivePath, "package.json"), "utf8"),
     ) as { version?: unknown };
     if (
       typeof packageJson.version === "string" &&
@@ -272,8 +277,21 @@ function readExecutableVersion(
       return packageJson.version.trim();
     }
   } catch {
-    // Installazioni legacy potrebbero non
-    // contenere un archivio ASAR leggibile.
+    // In Node puro (test e strumenti di verifica) app.asar non viene montato
+    // come directory virtuale. Manteniamo quindi il reader ASAR esplicito.
+    try {
+      const packageJson = JSON.parse(
+        extractFile(archivePath, "package.json").toString("utf8"),
+      ) as { version?: unknown };
+      if (
+        typeof packageJson.version === "string" &&
+        packageJson.version.trim()
+      ) {
+        return packageJson.version.trim();
+      }
+    } catch {
+      // Installazioni legacy potrebbero non contenere un ASAR leggibile.
+    }
   }
   return null;
 }

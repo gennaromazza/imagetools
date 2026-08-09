@@ -48,8 +48,15 @@ try {
     "utf8",
   );
 
-  if (!updaterSource.includes('extractFile(archivePath, "package.json")')) {
-    throw new Error("L'updater non usa il reader ASAR che rilascia il file.");
+  const virtualAsarRead = 'readFileSync(join(archivePath, "package.json"), "utf8")';
+  const explicitAsarFallback = 'extractFile(archivePath, "package.json")';
+  const virtualReadIndex = updaterSource.indexOf(virtualAsarRead);
+  const fallbackIndex = updaterSource.indexOf(explicitAsarFallback);
+  if (virtualReadIndex < 0) {
+    throw new Error("L'updater non usa il filesystem ASAR virtuale di Electron.");
+  }
+  if (fallbackIndex < 0 || fallbackIndex < virtualReadIndex) {
+    throw new Error("L'updater non mantiene il reader ASAR esplicito come fallback.");
   }
   if (!mainSource.includes("Promise.allSettled([")) {
     throw new Error("La chiusura desktop non attende i servizi nativi.");
