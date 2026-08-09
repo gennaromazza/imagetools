@@ -123,3 +123,9 @@ Pubblicare prima `suite-v0.1.31`: release e feed Suite devono contenere soltanto
 Pubblicare quindi `filex-send-v0.1.0`: la release deve contenere soltanto `FileX-Send-0.1.0-stable-x64-setup.exe`, blockmap e `stable.json`. Nel catalogo dedicato la voce `filex-send` deve avere `minLauncherVersion` 0.1.31, URL sul tag namespaced e checksum SHA-256 valido; tutte le altre voci devono restare invariate.
 
 Dalla Suite 0.1.31 verificare `Installa`, apertura e stato `Pronto`. Provare il doppio QR locale e un invio remoto a FileX Send chiuso: alla riapertura il file deve essere scaricato automaticamente, la coda cloud deve svuotarsi e la retention restituita dal server deve essere di circa 60 minuti.
+
+## Verifica FileX Send 0.1.1
+
+La release `filex-send-v0.1.1` deve contenere esclusivamente installer FileX Send x64, blockmap e `stable.json`; Suite e altri tool non devono essere ricostruiti. Il catalogo deve aggiornare soltanto `filex-send` da 0.1.0 a 0.1.1, conservando `minLauncherVersion` 0.1.31.
+
+Creare un link remoto, completare un primo gruppo di file e verificare che la pagina mostri **Invia altri file**. Senza riaprire FileX Send sul PC, inviare un secondo gruppo dallo stesso link: entrambi devono comparire e scaricarsi alla riapertura. Soltanto la scadenza o **Archivia invio** devono produrre `Sessione chiusa o scaduta`.

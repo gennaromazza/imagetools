@@ -1,5 +1,10 @@
 {
   "filex-send": {
+    "0.1.1": [
+      "Lo stesso link remoto può ricevere più gruppi di foto e video fino alla scadenza impostata.",
+      "Corretto l’errore che indicava una sessione scaduta dopo il primo invio completato.",
+      "Aggiunto il pulsante Invia altri file nella conferma mostrata al cliente."
+    ],
     "0.1.0": [
       "Ricezione locale di foto e video dal telefono del cliente tramite QR code, senza account o cloud.",
       "Link remoto con scadenza configurabile: il cliente può caricare anche a PC spento e FileX Send recupera tutto automaticamente alla riapertura.",

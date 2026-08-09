@@ -21,6 +21,8 @@ La schermata iniziale chiede soltanto dove si trova il cliente:
 
 Il fotografo imposta data e ora di scadenza del link, da 15 minuti fino a 7 giorni. Il cliente lo apre senza account e può inviare anche mentre il PC è spento o FileX Send è chiuso. Alla riapertura, FileX Send scarica automaticamente nella cartella scelta tutto ciò che è in attesa.
 
+Lo stesso collegamento può essere usato più volte fino alla scadenza. Al termine di ogni gruppo la pagina conferma la consegna e propone **Invia altri file**; questa conferma non chiude la sessione. Soltanto la data impostata oppure **Archivia invio** dal PC disattivano definitivamente il link.
+
 La scadenza chiude soltanto la possibilità di aggiungere nuovi file. I file già ricevuti restano nello storage finché il PC non li scarica e ne verifica la dimensione; dopo la conferma rimangono recuperabili per un'ora, quindi la pulizia automatica li elimina.
 
 Il servizio pubblico è distribuito nel progetto Firebase **FileX Cloud** (`gen-lang-client-0321087169`):
