@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-08-09 - FileX Suite 0.1.27
+
+- corretta la verifica della versione dei tool installati: la Suite legge prima `package.json` tramite il filesystem ASAR virtuale di Electron
+- mantenuto il reader ASAR esplicito come fallback per test, diagnostica e installazioni non eseguite dentro Electron
+- eliminato il falso errore "il tool è stato installato ma non è stato possibile verificarne la versione" dopo un aggiornamento riuscito
+- Image Select Pro e gli altri tool mantengono invariata la propria versione
+
 ## 2026-08-09 - Image Select Pro 0.1.26
 
 ### Image Select Pro

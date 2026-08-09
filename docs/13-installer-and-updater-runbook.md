@@ -88,3 +88,9 @@ La release `photo-selector-app-v0.1.26` deve contenere esclusivamente l'installe
 Nel catalogo `update-catalog-stable`, la voce `photo-selector-app` deve indicare versione `0.1.26`, URL riferito al tag namespaced e checksum SHA-256 valido; le versioni degli altri tool devono restare invariate.
 
 Prima della pubblicazione verificare gli scenari `BROWSE-01` e `SELECT-03`–`SELECT-05` in `docs/tools/photo-selector-audit.md`. Dopo l'aggiornamento, il titolo deve mostrare `Image Select Pro — Versione 0.1.26` e FileX Suite deve restare aperta.
+
+## Verifica FileX Suite 0.1.27
+
+La release `suite-v0.1.27` deve contenere esclusivamente l'installer Windows x64 della Suite e la relativa blockmap. Il feed `suite-channel-stable` deve inoltre esporre `latest.yml`, l'installer versionato e l'alias stabile della Suite.
+
+Dopo l'aggiornamento della Suite, installare o aggiornare Image Select Pro 0.1.26 dalla relativa scheda. La verifica post-installazione deve leggere la versione dall'ASAR virtuale di Electron, non deve mostrare l'errore "non è stato possibile verificarne la versione" e la scheda deve passare a `Pronto` senza riproporre lo stesso aggiornamento.
