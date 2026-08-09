@@ -9,6 +9,7 @@ const send = document.querySelector("#send");
 const summary = document.querySelector("#summary");
 const status = document.querySelector("#status");
 const bar = document.querySelector("#bar");
+const again = document.querySelector("#again");
 let files = [];
 
 const formatBytes = (bytes) => bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
@@ -74,5 +75,7 @@ send.addEventListener("click", async () => {
     input.disabled = false;
   }
 });
+
+again.addEventListener("click", () => location.reload());
 
 void initialize();

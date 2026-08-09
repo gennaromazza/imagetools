@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-08-10 - FileX Send 0.1.1
+
+- corretto il falso errore `Sessione chiusa o scaduta` dopo il primo gruppo di foto inviato
+- lo stesso link remoto accetta ora più invii consecutivi fino alla data e ora impostate dal fotografo
+- chiudere FileX Send sul PC continua a lasciare operativo il collegamento; soltanto scadenza o `Archivia invio` lo invalidano
+- aggiunto nella pagina cliente il comando `Invia altri file` dopo ogni consegna completata
+
 ## 2026-08-09 - FileX Suite 0.1.31
 
 - aggiunto FileX Send al launcher e al Dock della Suite con installazione e aggiornamenti indipendenti

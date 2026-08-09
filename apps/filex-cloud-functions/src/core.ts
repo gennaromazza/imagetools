@@ -47,6 +47,10 @@ export function downloadedFileExpired(downloadedAt: number | null | undefined, n
   return typeof downloadedAt === "number" && downloadedAt + DOWNLOADED_RETENTION_MS <= now;
 }
 
+export function publicUploadAllowed(session: { expiresAt: number; clientCompleted?: boolean }, now = Date.now()): boolean {
+  return session.expiresAt > now;
+}
+
 export function sanitizeLabel(value: unknown): string {
   if (typeof value !== "string") return "FileX Send";
   return value.trim().replace(/[\u0000-\u001f]/g, "").slice(0, 80) || "FileX Send";

@@ -5,7 +5,7 @@ import { getStorage } from "firebase-admin/storage";
 import { logger } from "firebase-functions";
 import { onRequest, type Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, hashToken, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
+import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, hashToken, publicUploadAllowed, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
 
 if (!getApps().length) initializeApp({ storageBucket: "filex-cloud-391620173227-eu" });
 
@@ -115,7 +115,7 @@ async function publicSession(rawCredential: string, response: HttpResponse) {
 
 async function beginUpload(rawCredential: string, request: Request, response: HttpResponse) {
   const authorized = await authorizePublic(rawCredential);
-  if (!authorized || authorized.data.clientCompleted) return json(response, 410, { error: "Sessione chiusa o scaduta." });
+  if (!authorized || !publicUploadAllowed({ expiresAt: authorized.data.expiresAt.toMillis(), clientCompleted: authorized.data.clientCompleted })) return json(response, 410, { error: "Sessione chiusa o scaduta." });
   const size = Number(request.body?.size);
   const name = sanitizeFileName(request.body?.name);
   const contentType = typeof request.body?.contentType === "string" ? request.body.contentType.slice(0, 120) : "application/octet-stream";
@@ -123,6 +123,7 @@ async function beginUpload(rawCredential: string, request: Request, response: Ht
   const fileId = randomUUID();
   const downloadToken = createToken();
   const objectPath = `filex-send/${authorized.id}/${fileId}`;
+  await authorized.ref.update({ clientCompleted: false, lastUploadStartedAt: Timestamp.now() });
   const [uploadUrl] = await bucket.file(objectPath).createResumableUpload({
     metadata: {
       contentType,
@@ -135,7 +136,7 @@ async function beginUpload(rawCredential: string, request: Request, response: Ht
 
 async function finishUpload(rawCredential: string, fileId: string, request: Request, response: HttpResponse) {
   const authorized = await authorizePublic(rawCredential);
-  if (!authorized || authorized.data.clientCompleted) return json(response, 410, { error: "Sessione chiusa o scaduta." });
+  if (!authorized || !publicUploadAllowed({ expiresAt: authorized.data.expiresAt.toMillis(), clientCompleted: authorized.data.clientCompleted })) return json(response, 410, { error: "Sessione chiusa o scaduta." });
   const objectPath = `filex-send/${authorized.id}/${fileId}`;
   const file = bucket.file(objectPath);
   const [metadata] = await file.getMetadata();

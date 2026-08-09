@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DOWNLOADED_RETENTION_MS, MAX_LINK_TTL_MS, MIN_LINK_TTL_MS, createSessionIdentity, downloadedFileExpired, hashToken, normalizeLinkExpiry, sanitizeFileName, sessionCredential, tokensEqual } from "./core.js";
+import { DOWNLOADED_RETENTION_MS, MAX_LINK_TTL_MS, MIN_LINK_TTL_MS, createSessionIdentity, downloadedFileExpired, hashToken, normalizeLinkExpiry, publicUploadAllowed, sanitizeFileName, sessionCredential, tokensEqual } from "./core.js";
 
 test("creates an expiring session with independent tokens", () => {
   const session = createSessionIdentity(1_000);
@@ -17,6 +17,12 @@ test("clamps the configurable link expiry and retains downloads for one hour", (
   assert.equal(normalizeLinkExpiry(now + 99 * MAX_LINK_TTL_MS, now), now + MAX_LINK_TTL_MS);
   assert.equal(downloadedFileExpired(now, now + DOWNLOADED_RETENTION_MS - 1), false);
   assert.equal(downloadedFileExpired(now, now + DOWNLOADED_RETENTION_MS), true);
+});
+
+test("keeps accepting new batches after a client completed a previous upload", () => {
+  const now = 100_000;
+  assert.equal(publicUploadAllowed({ expiresAt: now + 1, clientCompleted: true }, now), true);
+  assert.equal(publicUploadAllowed({ expiresAt: now, clientCompleted: false }, now), false);
 });
 
 test("parses public credentials and sanitizes names", () => {
