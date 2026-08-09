@@ -23,6 +23,7 @@ const suiteUpdater = await read("apps/filex-desktop/src/suite-updater.ts");
 const toolUpdater = await read("apps/filex-desktop/src/updater.ts");
 const launcher = await read("apps/filex-desktop/suite-launcher-src/app.js");
 const releaseWorkflow = await read(".github/workflows/windows-release.yml");
+const ciWorkflow = await read(".github/workflows/ci.yml");
 const manifestGenerator = await read("apps/filex-desktop/scripts/generate-release-manifest.mjs");
 const downloadPage = await read("docs/index.html");
 
@@ -74,6 +75,12 @@ assert(
     && releaseWorkflow.includes("Build selected installer")
     && !releaseWorkflow.includes("Build FileX Suite installer"),
   "Il workflow non e' selettivo per componente.",
+);
+assert(
+  ciWorkflow.includes("pull_request:")
+    && ciWorkflow.includes("test:filex-independent-releases")
+    && ciWorkflow.includes("build:suite"),
+  "La PR non dispone dei controlli automatici per il nuovo contratto di release.",
 );
 assert(
   manifestGenerator.includes("--tool=")

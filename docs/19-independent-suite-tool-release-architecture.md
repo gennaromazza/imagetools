@@ -20,6 +20,7 @@ Implementato sul branch `codex/independent-component-releases`:
 - controllo UI Suite distinto dal refresh automatico delle schede tool;
 - applicazione di `minLauncherVersion` prima del download di un tool;
 - test di regressione per il contratto di release indipendente.
+- CI Windows su pull request con test, typecheck e build separate di Suite e tool attivi.
 
 Rimane come fase successiva la separazione fisica degli host Electron descritta nella Fase 4.
 

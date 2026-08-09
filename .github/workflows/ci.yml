@@ -1,0 +1,53 @@
+name: FileX CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: filex-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate independent release contract
+        run: npm.cmd run test:filex-independent-releases
+
+      - name: Validate updater file locking
+        run: npm.cmd run test:filex-updater-lock
+
+      - name: Typecheck workspaces
+        run: npm.cmd run typecheck
+
+      - name: Build Suite without tool renderers
+        run: npm.cmd --workspace @photo-tools/filex-desktop run build:suite
+
+      - name: Build active tool renderers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          npm.cmd --workspace @photo-tools/photo-selector-app run build
+          npm.cmd --workspace @photo-tools/image-party-frame-app run build
+          npm.cmd --workspace @photo-tools/archivio-flow run build
+
+      - name: Validate stable manifest
+        run: npm.cmd --workspace @photo-tools/filex-desktop run manifest:validate:stable
