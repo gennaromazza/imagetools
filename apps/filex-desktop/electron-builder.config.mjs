@@ -323,7 +323,7 @@ export default {
 
   asar: true,
 
-  asarUnpack: requestedTool.id === "suite-launcher" || requestedTool.id === "cache-sweep"
+  asarUnpack: requestedTool.id === "suite-launcher" || requestedTool.id === "cache-sweep" || requestedTool.id === "filex-send"
     ? []
     : [
         "**/node_modules/exiftool-vendored.exe/**",
@@ -360,9 +360,9 @@ export default {
         "!node_modules/multer{,/**/*}",
         "!node_modules/sharp{,/**/*}",
       ]
-    : requestedTool.id === "cache-sweep"
+    : requestedTool.id === "cache-sweep" || requestedTool.id === "filex-send"
     ? [
-        ".output/electron/cache-sweep/**/*",
+        `.output/electron/${requestedTool.id}/**/*`,
         "package.json",
         "!node_modules{,/**/*}",
       ]
@@ -428,8 +428,9 @@ export default {
       },
     ],
 
-    artifactName:
-      `${requestedTool.executableName}-\${version}-${releaseChannel}-\${arch}-setup.\${ext}`,
+    artifactName: process.env.FILEX_PORTABLE === "1"
+      ? `${requestedTool.executableName}-\${version}-${releaseChannel}-\${arch}-portable.\${ext}`
+      : `${requestedTool.executableName}-\${version}-${releaseChannel}-\${arch}-setup.\${ext}`,
   },
 
   mac: {

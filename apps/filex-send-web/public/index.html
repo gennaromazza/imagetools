@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0c2d27" />
+    <title>FileX Send</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <div class="brand"><span>FX</span><strong>FileX Send</strong></div>
+      <section class="card" id="loading"><div class="spinner"></div><p>Preparazione dell’invio…</p></section>
+      <section class="card" id="upload" hidden>
+        <p class="eyebrow">CONSEGNA PRIVATA</p>
+        <h1>Invia foto e video</h1>
+        <p>Destinazione: <strong id="label">FileX Send</strong></p>
+        <label class="picker">Scegli foto e video<input id="files" type="file" accept="image/*,video/*" multiple /></label>
+        <div class="summary" id="summary">Nessun file selezionato</div>
+        <button class="send" id="send" disabled>Invia ora</button>
+        <div class="progress"><div id="bar"></div></div>
+        <div class="status" id="status"></div>
+        <small id="expiry"></small>
+      </section>
+      <section class="card done" id="done" hidden><div class="check">✓</div><h1>Invio completato</h1><p>Puoi chiudere questa pagina. I file saranno eliminati dal cloud dopo la consegna al fotografo.</p></section>
+      <section class="card error" id="error" hidden><h1>Link non disponibile</h1><p id="errorText">La sessione è scaduta.</p></section>
+      <footer>FileX Cloud · Trasferimento temporaneo</footer>
+    </main>
+    <script src="/app.js" defer></script>
+  </body>
+</html>

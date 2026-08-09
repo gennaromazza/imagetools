@@ -1,5 +1,21 @@
 # Changelog
 
+## Non pubblicato - FileX Send 0.1.0
+
+- aggiunto il nuovo tool per ricevere foto e video dal telefono del cliente sulla rete locale del negozio tramite QR code
+- introdotte sessioni temporanee con token casuale, invalidazione alla chiusura e una sola ricezione attiva alla volta
+- aggiunti upload a flusso fino a 25 GB per file, file temporanei protetti e rinomina automatica dei duplicati
+- realizzate l'interfaccia desktop per il fotografo e la pagina mobile senza app, account o cloud
+- aggiunto il flusso guidato a due QR: connessione Wi-Fi con credenziali incorporate e successiva apertura della pagina di invio
+- aggiunto il rilevamento automatico del profilo Wi-Fi Windows, con riuso via Ethernet e password memorizzata tramite cifratura Windows
+- aggiunta la scelta iniziale `Qui con me` / `A distanza`, mantenendo invariato il flusso locale
+- introdotto il servizio FileX Send Remote con link temporanei, upload via Internet, download automatico sul PC e cancellazione dal server dopo la ricezione
+- creato FileX Cloud su Firebase con Hosting HTTPS, Functions europee, Firestore privato, Storage europeo e pulizia automatica delle sessioni dopo 72 ore
+- aggiunta la ripresa della sessione remota dopo il riavvio del PC, con token cifrato tramite Windows DPAPI e notifica Windows alla ricezione
+- verificato il flusso cloud end-to-end: creazione sessione, upload resumable, download, controllo dimensione, cancellazione del file e chiusura sessione
+- integrati catalogo e Dock della Suite, branding, build indipendente, test e controlli CI
+- documentata la configurazione consigliata con access point dedicato e i limiti dell'MVP
+
 ## 2026-08-09 - FileX Adobe Cleaner 0.1.0
 
 ### FileX Adobe Cleaner

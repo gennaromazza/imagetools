@@ -15,6 +15,7 @@ const expectedPackages = {
   "image-party-frame": { name: "Image-Party-Frame", main: ".output/electron/main.js" },
   "archivio-flow": { name: "Archivio-Flow", main: ".output/electron/main.js" },
   "cache-sweep": { name: "FileX-Adobe-Cleaner", main: ".output/electron/cache-sweep/electron/main.js" },
+  "filex-send": { name: "FileX-Send", main: ".output/electron/filex-send/electron/main.js" },
 };
 
 const expected = expectedPackages[args.component];
@@ -81,6 +82,19 @@ if (args.component === "cache-sweep") {
   if (forbiddenEntries.length > 0) {
     throw new Error(`Cache Sweep contiene dipendenze o runtime estranei:\n${forbiddenEntries.slice(0, 20).join("\n")}`);
   }
+}
+
+if (args.component === "filex-send") {
+  const entries = listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/"));
+  for (const requiredEntry of [
+    "/.output/electron/filex-send/electron/main.js",
+    "/.output/electron/filex-send/electron/preload.cjs",
+    "/.output/electron/filex-send/electron/file-send-service.js",
+  ]) {
+    if (!entries.includes(requiredEntry)) throw new Error(`FileX Send non contiene ${requiredEntry}`);
+  }
+  const forbiddenEntries = entries.filter((entry) => entry.startsWith("/node_modules/") || entry === "/.output/electron/main.js");
+  if (forbiddenEntries.length > 0) throw new Error(`FileX Send contiene runtime estranei:\n${forbiddenEntries.slice(0, 20).join("\n")}`);
 }
 
 console.log(`${args.component} ${args.version}: ASAR verificato (${packageJson.main}).`);

@@ -1,0 +1,33 @@
+{
+  "name": "@photo-tools/filex-send",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FileX Send: ricezione locale di foto e video tramite QR code.",
+  "type": "module",
+  "main": "../filex-desktop/.output/electron/filex-send/electron/main.js",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4245",
+    "start": "npm run build && electron .",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "test": "tsx --test electron/file-send-service.test.ts electron/firebase-anonymous-auth.test.ts electron/wifi-detection.test.ts"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "electron": "41.0.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "vite": "^6.2.0"
+  }
+}

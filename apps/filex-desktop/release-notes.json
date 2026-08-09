@@ -1,4 +1,11 @@
 {
+  "filex-send": {
+    "0.1.0": [
+      "Ricezione locale di foto e video dal telefono del cliente tramite QR code, senza account o cloud.",
+      "Sessione temporanea isolata, cartella automatica e aggiornamento in tempo reale dei file ricevuti.",
+      "Pagina mobile ottimizzata per selezioni multiple, avanzamento e conferma finale del trasferimento."
+    ]
+  },
   "cache-sweep": {
     "0.1.0": [
       "Utility dedicata esclusivamente ai programmi Adobe: rilevamento locale delle applicazioni installate e misurazione delle sole cache supportate, senza pulizia generica del PC.",

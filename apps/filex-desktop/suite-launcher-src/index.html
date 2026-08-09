@@ -23,6 +23,7 @@
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark"><svg><use href="#i-suite"/></svg></span><div><strong>FileX</strong><small>Creative Suite</small></div></div>
       <nav id="category-nav"></nav>
+      <button id="manage-sections-btn" class="manage-sections" type="button">+ Organizza sezioni</button>
       <div class="sidebar-foot"><span id="suite-version">Versione...</span><button id="refresh-btn" class="icon-btn" title="Controlla aggiornamenti dei tool">↻</button></div>
     </aside>
     <main class="content">
@@ -47,6 +48,14 @@
       <section class="suite-status"><div><strong>Stato Suite</strong><span id="runtime-info">Caricamento...</span></div><button id="check-suite-update-btn" class="secondary-action" type="button">Aggiorna FileX Suite</button></section>
     </main>
   </div>
+  <dialog id="sections-dialog" class="sections-dialog">
+    <form method="dialog" class="sections-dialog-card">
+      <header><div><p class="eyebrow">ORGANIZZAZIONE</p><h2 id="sections-dialog-title">Le tue sezioni</h2></div><button class="dialog-close" value="cancel" aria-label="Chiudi">×</button></header>
+      <div id="sections-dialog-content"></div>
+      <footer><button class="secondary-action" value="cancel">Chiudi</button></footer>
+    </form>
+  </dialog>
+  <div id="suite-toast" class="suite-toast" role="status" aria-live="polite" hidden></div>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

@@ -12,6 +12,7 @@ const toolNames = {
   'image-converter': 'Image Converter',
   'image-file-finder': 'Trova Foto da Lista',
   'cache-sweep': 'FileX Adobe Cleaner',
+  'filex-send': 'FileX Send',
 };
 
 let states = [];

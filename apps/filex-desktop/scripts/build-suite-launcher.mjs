@@ -18,6 +18,7 @@ for (const toolId of [
   "photo-selector-app", "image-party-frame", "batch-print-layout", "archivio-flow",
   "image-converter", "image-file-finder",
   "cache-sweep",
+  "filex-send",
 ]) {
   await cp(join(brandingDir, `${toolId}.png`), join(iconsDir, `${toolId}.png`));
 }
