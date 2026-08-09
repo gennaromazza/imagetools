@@ -5,11 +5,11 @@
 - Tipo: studio architetturale e piano di refactoring.
 - Ambito: versionamento, build, installer, pubblicazione e aggiornamento di FileX Suite e dei tool Windows.
 - Obiettivo: una modifica a un tool deve richiedere la build e la pubblicazione del solo tool; una modifica alla Suite deve richiedere la build e la pubblicazione della sola Suite.
-- Pubblicazione remota esclusa: l'implementazione va integrata e verificata prima del rollout.
+- Stato operativo: indipendenza di release integrata in `main`; rollout iniziale FileX Suite 0.1.26 eseguito il 9 agosto 2026.
 
 ## Avanzamento implementazione
 
-Implementato sul branch `codex/independent-component-releases`:
+Implementato e integrato in `main` tramite PR #17:
 
 - versioni indipendenti dei tre tool attivi e FileX Suite 0.1.26;
 - versione Electron risolta dal package del componente selezionato;
@@ -23,8 +23,19 @@ Implementato sul branch `codex/independent-component-releases`:
 - CI Windows su pull request con test, typecheck e build separate di Suite e tool attivi.
 - entrypoint `suite-main.ts` e `suite-preload.ts` dedicati, senza servizi nativi dei tool;
 - pacchetto Suite limitato ai moduli Electron necessari a launcher, catalogo e updater, con esclusione di Sharp, ExifTool e dipendenze server dei tool.
+- pubblicazione affidata soltanto al workflow: Electron Builder usa sempre `--publish never` e non puo' creare release legacy implicite;
+- verifica remota resistente a content type binario e propagazione CDN tramite file UTF-8 e retry progressivo.
+- bootstrap del catalogo tecnico dalla release legacy durante la prima pubblicazione Suite, senza sovrascrivere cataloghi dedicati gia' esistenti.
 
-La separazione fisica descritta nella Fase 4 e' iniziata dalla Suite. Rimane da estrarre il runtime comune dei tool e, progressivamente, assegnare a ogni tool un host e dipendenze di packaging propri.
+L'obiettivo operativo richiesto e' completo: Suite e tool hanno versioni, build, tag, feed e aggiornamenti indipendenti. La separazione fisica descritta nella Fase 4 e' iniziata dalla Suite; l'estrazione futura degli host Electron dei singoli tool e' hardening non bloccante e non richiede piu' di ricostruire la Suite quando cambia un tool.
+
+### Evidenza del rollout iniziale
+
+- CI della PR: test architetturali, lock updater, typecheck e build dei renderer completati con successo.
+- Release reale `suite-v0.1.26`: costruito soltanto l'installer Suite; step build completato in 91 secondi.
+- ASAR verificato con versione 0.1.26, entrypoint `suite-main.js` e assenza di Sharp, ExifTool e moduli nativi dei tool.
+- Feed `suite-channel-stable/latest.yml`: versione 0.1.26 e installer con checksum coerente.
+- Migrazione dalla 0.1.25: `suite-v0.1.26` e' la GitHub Release stabile piu' recente, quindi il vecchio updater la rileva; dopo l'installazione, la 0.1.26 usa esclusivamente il feed dedicato.
 
 ## Risultato atteso
 

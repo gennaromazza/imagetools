@@ -138,7 +138,13 @@ jobs:
           try {
             Invoke-WebRequest -Uri $catalogUrl -OutFile "apps/filex-desktop/release-manifests/$env:FILEX_RELEASE_CHANNEL.json"
           } catch {
-            Write-Warning "Catalogo remoto non ancora disponibile; uso il fallback versionato nel repository."
+            $legacyCatalogUrl = "https://github.com/gennaromazza/imagetools/releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+            try {
+              Invoke-WebRequest -Uri $legacyCatalogUrl -OutFile "apps/filex-desktop/release-manifests/$env:FILEX_RELEASE_CHANNEL.json"
+              Write-Warning "Catalogo dedicato non ancora disponibile; importato il catalogo della release legacy piu recente."
+            } catch {
+              Write-Warning "Nessun catalogo remoto disponibile; uso il fallback versionato nel repository."
+            }
           }
 
       - name: Build selected installer
@@ -225,6 +231,18 @@ jobs:
           Copy-Item $versionedInstaller.FullName $aliasPath -Force
           gh release upload $channelTag $versionedInstaller.FullName "$($versionedInstaller.FullName).blockmap" "apps/filex-desktop/.output/releases/latest.yml" $aliasPath --clobber
 
+      - name: Bootstrap dedicated tool catalog
+        if: steps.release.outputs.component == 'suite'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $catalogTag = "update-catalog-$env:FILEX_RELEASE_CHANNEL"
+          gh release view $catalogTag 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $catalogTag --prerelease --title "FileX $env:FILEX_RELEASE_CHANNEL tool catalog" --notes "Catalogo tecnico degli aggiornamenti indipendenti dei tool FileX."
+            gh release upload $catalogTag "apps/filex-desktop/release-manifests/$env:FILEX_RELEASE_CHANNEL.json"
+          }
+
       - name: Publish dedicated tool catalog
         if: steps.release.outputs.component != 'suite'
         shell: pwsh
@@ -241,24 +259,39 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          Start-Sleep -Seconds 5
           if ($env:FILEX_COMPONENT -eq "suite") {
-            $url = "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-$env:FILEX_RELEASE_CHANNEL/latest.yml?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
-            $metadata = (Invoke-WebRequest -Uri $url).Content
+            $feedPath = Join-Path $env:RUNNER_TEMP "latest.yml"
+            $feedUrl = "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-$env:FILEX_RELEASE_CHANNEL/latest.yml"
+            $metadata = ""
+            foreach ($attempt in 1..6) {
+              $nonce = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-$attempt"
+              Invoke-WebRequest -Uri "$feedUrl?t=$nonce" -OutFile $feedPath
+              $metadata = Get-Content $feedPath -Raw
+              if ($metadata -match [regex]::Escape($env:FILEX_RELEASE_VERSION)) { break }
+              if ($attempt -lt 6) { Start-Sleep -Seconds (5 * $attempt) }
+            }
             if ($metadata -notmatch [regex]::Escape($env:FILEX_RELEASE_VERSION)) {
               throw "Il feed Suite remoto non contiene la versione $env:FILEX_RELEASE_VERSION"
             }
             $remoteInstaller = Join-Path $env:RUNNER_TEMP "FileX-Suite-remote.exe"
-            $installerUrl = "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-$env:FILEX_RELEASE_CHANNEL/FileX-Suite-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
+            $installerUrl = "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-$env:FILEX_RELEASE_CHANNEL/FileX-Suite-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
             Invoke-WebRequest -Uri $installerUrl -OutFile $remoteInstaller
             $localInstaller = Get-ChildItem "apps/filex-desktop/.output/releases/FileX-Suite-$env:FILEX_RELEASE_VERSION-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe" | Select-Object -First 1
             if ((Get-FileHash $remoteInstaller -Algorithm SHA256).Hash -ne (Get-FileHash $localInstaller.FullName -Algorithm SHA256).Hash) {
               throw "Checksum remoto dell'installer Suite non valido"
             }
           } else {
-            $url = "https://github.com/gennaromazza/imagetools/releases/download/update-catalog-$env:FILEX_RELEASE_CHANNEL/$env:FILEX_RELEASE_CHANNEL.json?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())"
-            $catalog = (Invoke-WebRequest -Uri $url).Content | ConvertFrom-Json
-            $entry = @($catalog.releases | Where-Object { $_.toolId -eq $env:FILEX_COMPONENT -and $_.channel -eq $env:FILEX_RELEASE_CHANNEL })
+            $catalogPath = Join-Path $env:RUNNER_TEMP "$env:FILEX_RELEASE_CHANNEL.json"
+            $catalogUrl = "https://github.com/gennaromazza/imagetools/releases/download/update-catalog-$env:FILEX_RELEASE_CHANNEL/$env:FILEX_RELEASE_CHANNEL.json"
+            $entry = @()
+            foreach ($attempt in 1..6) {
+              $nonce = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-$attempt"
+              Invoke-WebRequest -Uri "$catalogUrl?t=$nonce" -OutFile $catalogPath
+              $catalog = Get-Content $catalogPath -Raw | ConvertFrom-Json
+              $entry = @($catalog.releases | Where-Object { $_.toolId -eq $env:FILEX_COMPONENT -and $_.channel -eq $env:FILEX_RELEASE_CHANNEL })
+              if ($entry.Count -eq 1 -and $entry[0].version -eq $env:FILEX_RELEASE_VERSION) { break }
+              if ($attempt -lt 6) { Start-Sleep -Seconds (5 * $attempt) }
+            }
             if ($entry.Count -ne 1 -or $entry[0].version -ne $env:FILEX_RELEASE_VERSION) {
               throw "Il catalogo remoto non contiene $env:FILEX_COMPONENT $env:FILEX_RELEASE_VERSION"
             }
