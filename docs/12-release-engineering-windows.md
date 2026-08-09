@@ -53,6 +53,8 @@ Ogni release tool deve pubblicare nel proprio tag:
 
 Il tag `<tool-id>-vX.Y.Z` deve coincidere con la versione nel `package.json` del tool. Per la Suite il tag `suite-vX.Y.Z` coincide con `apps/filex-desktop/package.json`.
 
+Il workflow rifiuta tag che non puntano a un commit gia' integrato in `main`; anche l'avvio manuale e' consentito soltanto dal branch `main`.
+
 Il launcher segue i redirect GitHub verso `release-assets.githubusercontent.com`, verifica l'integrità del manifest e poi confronta la versione di ogni tool installato con la versione più recente del manifest.
 
 Generazione:

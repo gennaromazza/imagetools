@@ -107,6 +107,8 @@ assert(
   releaseWorkflow.includes('"suite-v*"')
     && releaseWorkflow.includes("Build selected installer")
     && releaseWorkflow.includes("verify-packaged-component.mjs")
+    && releaseWorkflow.includes("git branch -r --contains $env:GITHUB_SHA")
+    && releaseWorkflow.includes('"refs/heads/main"')
     && !releaseWorkflow.includes("Build FileX Suite installer"),
   "Il workflow non e' selettivo per componente.",
 );
