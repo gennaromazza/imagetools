@@ -91,6 +91,6 @@ Prima della pubblicazione verificare gli scenari `BROWSE-01` e `SELECT-03`–`SE
 
 ## Verifica FileX Suite 0.1.27
 
-La release `suite-v0.1.27` deve contenere esclusivamente l'installer Windows x64 della Suite e la relativa blockmap. Il feed `suite-channel-stable` deve inoltre esporre `latest.yml`, l'installer versionato e l'alias stabile della Suite.
+La release `suite-v0.1.27` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve inoltre esporre `latest.yml`, l'installer versionato e l'alias stabile della Suite.
 
 Dopo l'aggiornamento della Suite, installare o aggiornare Image Select Pro 0.1.26 dalla relativa scheda. La verifica post-installazione deve leggere la versione dall'ASAR virtuale di Electron, non deve mostrare l'errore "non è stato possibile verificarne la versione" e la scheda deve passare a `Pronto` senza riproporre lo stesso aggiornamento.
