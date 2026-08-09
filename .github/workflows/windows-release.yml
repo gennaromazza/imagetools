@@ -163,6 +163,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          node ./apps/filex-desktop/scripts/verify-packaged-component.mjs --component=$env:FILEX_COMPONENT --version=$env:FILEX_RELEASE_VERSION
           $expectedPrefix = switch ($env:FILEX_COMPONENT) {
             "suite" { "FileX-Suite" }
             "photo-selector-app" { "Image-Select-Pro" }

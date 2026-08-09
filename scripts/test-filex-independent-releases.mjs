@@ -19,6 +19,8 @@ const imagePartyFramePackage = JSON.parse(await read("apps/image-party-frame/pac
 const archivioFlowPackage = JSON.parse(await read("apps/archivio-flow/package.json"));
 const builder = await read("apps/filex-desktop/electron-builder.config.mjs");
 const toolManifest = await read("apps/filex-desktop/src/tool-manifest.ts");
+const suiteMain = await read("apps/filex-desktop/src/suite-main.ts");
+const suitePreload = await read("apps/filex-desktop/src/suite-preload.ts");
 const suiteUpdater = await read("apps/filex-desktop/src/suite-updater.ts");
 const toolUpdater = await read("apps/filex-desktop/src/updater.ts");
 const launcher = await read("apps/filex-desktop/suite-launcher-src/app.js");
@@ -55,6 +57,37 @@ assert(
   "Il manifest desktop non distingue le sorgenti versione di Suite e tool.",
 );
 assert(
+  toolManifest.includes('electronMainOutputFile: "suite-main.js"')
+    && toolManifest.includes('electronPreloadOutputFile: "suite-preload.js"'),
+  "La Suite non dispone di entrypoint Electron dedicati.",
+);
+assert(
+  builder.includes("requestedTool.electronMainOutputFile")
+    && builder.includes('".output/electron/suite-main.js"')
+    && !/requestedTool\.id === "suite-launcher"\s*\?\s*\[\s*"\.output\/electron\/\*\*\/\*"/.test(builder),
+  "Il pacchetto Suite puo ancora includere indiscriminatamente l'intero runtime Electron.",
+);
+for (const excludedDependency of ["@img", "exiftool-vendored", "exiftool-vendored.exe", "sharp"]) {
+  assert(
+    builder.includes(`!node_modules/${excludedDependency}{,/**/*}`),
+    `La Suite puo ancora incorporare la dipendenza tool-specifica ${excludedDependency}.`,
+  );
+}
+for (const forbiddenModule of [
+  "desktop-store",
+  "google-drive-service",
+  "native-folder-service",
+  "native-image-service",
+  "thumbnail-disk-cache",
+  "raw-jpeg-extractor",
+  "xmp-compatibility",
+]) {
+  assert(
+    !suiteMain.includes(`./${forbiddenModule}.js`) && !suitePreload.includes(forbiddenModule),
+    `Il runtime Suite importa ancora il modulo tool-specifico ${forbiddenModule}.`,
+  );
+}
+assert(
   suiteUpdater.includes("suite-channel-stable")
     && !suiteUpdater.includes("repos/gennaromazza/imagetools/releases/latest"),
   "L'updater Suite dipende ancora dalla release GitHub globale piu recente.",
@@ -73,6 +106,7 @@ assert(
 assert(
   releaseWorkflow.includes('"suite-v*"')
     && releaseWorkflow.includes("Build selected installer")
+    && releaseWorkflow.includes("verify-packaged-component.mjs")
     && !releaseWorkflow.includes("Build FileX Suite installer"),
   "Il workflow non e' selettivo per componente.",
 );

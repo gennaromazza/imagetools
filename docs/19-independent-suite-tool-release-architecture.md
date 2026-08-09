@@ -21,8 +21,10 @@ Implementato sul branch `codex/independent-component-releases`:
 - applicazione di `minLauncherVersion` prima del download di un tool;
 - test di regressione per il contratto di release indipendente.
 - CI Windows su pull request con test, typecheck e build separate di Suite e tool attivi.
+- entrypoint `suite-main.ts` e `suite-preload.ts` dedicati, senza servizi nativi dei tool;
+- pacchetto Suite limitato ai moduli Electron necessari a launcher, catalogo e updater, con esclusione di Sharp, ExifTool e dipendenze server dei tool.
 
-Rimane come fase successiva la separazione fisica degli host Electron descritta nella Fase 4.
+La separazione fisica descritta nella Fase 4 e' iniziata dalla Suite. Rimane da estrarre il runtime comune dei tool e, progressivamente, assegnare a ogni tool un host e dipendenze di packaging propri.
 
 ## Risultato atteso
 
