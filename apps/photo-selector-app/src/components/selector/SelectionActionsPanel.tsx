@@ -10,6 +10,7 @@ interface SelectionActionsPanelProps {
   visibleSelectedCount: number;
   currentFolderSelectedCount: number;
   selectedCount: number;
+  compareCount: number;
   isMenuOpen: boolean;
   onUndo: () => void;
   onRedo: () => void;
@@ -52,9 +53,15 @@ export function SelectionActionsPanel(props: SelectionActionsPanelProps) {
       <button type="button" className="ghost-button ghost-button--small" onClick={props.onToggleMenu} aria-expanded={props.isMenuOpen}>
         Azioni <span aria-hidden="true">⌄</span>
       </button>
-      {props.selectedCount >= 2 && props.selectedCount <= 4 ? (
-        <button type="button" className="ghost-button ghost-button--small" onClick={props.onCompare}>
-          Confronta ({props.selectedCount})
+      {props.compareCount >= 2 && props.compareCount <= 4 ? (
+        <button
+          type="button"
+          className="ghost-button ghost-button--small"
+          onClick={props.onCompare}
+          title={`Confronta ${props.compareCount} foto selezionate nella griglia (Ctrl+B)`}
+          aria-keyshortcuts="Control+B"
+        >
+          Confronta ({props.compareCount})
         </button>
       ) : null}
       </div>

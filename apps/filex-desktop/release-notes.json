@@ -82,6 +82,11 @@
     ]
   },
   "photo-selector-app": {
+    "0.1.26": [
+      "La schermata Sfoglia consente di scorrere tutte le cartelle e i progetti recenti senza spostare la testata.",
+      "Confronta mostra correttamente da due a quattro foto selezionate nella griglia, nello stesso ordine visivo, ed e' disponibile con Ctrl+B.",
+      "Lo scorrimento della griglia e' piu fluido grazie alla sospensione temporanea delle ombre diffuse sulle card."
+    ],
     "0.1.25": [
       "Quick Preview correttamente in primo piano, con interruttore visibile e persistente per disattivare l'avanzamento dopo stelle, Pick/Scarta, colori ed etichette.",
       "Conteggi resi coerenti e comprensibili tra cartella, progetto e risultati filtrati, incluso il totale esatto per ogni valutazione a stelle.",

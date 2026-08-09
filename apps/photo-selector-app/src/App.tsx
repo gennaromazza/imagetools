@@ -4182,7 +4182,7 @@ export function App() {
           onToggleFolderDetails={() => setIsFolderDiagnosticsExpanded((current) => !current)}
         />
 
-        <main className="app-main">
+        <main className={`app-main${currentScreen === "selection" ? "" : " app-main--scrollable"}`}>
           {shouldShowPhotoLoader ? (
             <PhotoLoadingOverlay
               done={thumbnailProgress.done}

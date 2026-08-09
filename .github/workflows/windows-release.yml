@@ -33,7 +33,7 @@ on:
       min_suite_version:
         description: Versione minima Suite richiesta dai tool
         required: true
-        default: "0.1.25"
+        default: "0.1.26"
         type: string
 
 permissions:
@@ -87,7 +87,7 @@ jobs:
             $component = $Matches[1]
             $version = $Matches[2]
             $channel = if ($version.Contains("-")) { "beta" } else { "stable" }
-            $minSuiteVersion = "0.1.25"
+            $minSuiteVersion = "0.1.26"
           } else {
             $component = "${{ inputs.component }}"
             $version = "${{ inputs.version }}".TrimStart("v")
