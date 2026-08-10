@@ -1,5 +1,10 @@
 {
   "filex-send": {
+    "0.1.2": [
+      "Corretto l'aggiornamento che poteva terminare con codice 2 sulle installazioni esistenti.",
+      "L'installer usa automaticamente un percorso compatibile senza richiedere la disinstallazione manuale.",
+      "La barra del titolo mostra ora sempre la versione installata di FileX Send."
+    ],
     "0.1.1": [
       "Lo stesso link remoto può ricevere più gruppi di foto e video fino alla scadenza impostata.",
       "Corretto l’errore che indicava una sessione scaduta dopo il primo invio completato.",

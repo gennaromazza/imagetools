@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/filex-send",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "FileX Send: ricezione locale di foto e video tramite QR code.",
   "type": "module",
   "main": "../filex-desktop/.output/electron/filex-send/electron/main.js",

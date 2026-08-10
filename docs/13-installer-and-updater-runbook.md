@@ -129,3 +129,9 @@ Dalla Suite 0.1.31 verificare `Installa`, apertura e stato `Pronto`. Provare il 
 La release `filex-send-v0.1.1` deve contenere esclusivamente installer FileX Send x64, blockmap e `stable.json`; Suite e altri tool non devono essere ricostruiti. Il catalogo deve aggiornare soltanto `filex-send` da 0.1.0 a 0.1.1, conservando `minLauncherVersion` 0.1.31.
 
 Creare un link remoto, completare un primo gruppo di file e verificare che la pagina mostri **Invia altri file**. Senza riaprire FileX Send sul PC, inviare un secondo gruppo dallo stesso link: entrambi devono comparire e scaricarsi alla riapertura. Soltanto la scadenza o **Archivia invio** devono produrre `Sessione chiusa o scaduta`.
+
+## Verifica FileX Send 0.1.2
+
+La release `filex-send-v0.1.2` deve contenere esclusivamente installer FileX Send x64, blockmap e `stable.json`; Suite e altri tool devono restare invariati. Il catalogo deve aggiornare soltanto `filex-send` da 0.1.1 a 0.1.2 e conservare `minLauncherVersion` 0.1.31.
+
+Installare la 0.1.1, quindi applicare la 0.1.2 dalla Suite. L'installer silenzioso deve terminare con codice `0`, preservare dati e impostazioni e non richiedere una disinstallazione manuale. Dopo l'avvio, il titolo della finestra deve mostrare `FileX Send — Versione 0.1.2` e la scheda della Suite deve passare a `Pronto`.
