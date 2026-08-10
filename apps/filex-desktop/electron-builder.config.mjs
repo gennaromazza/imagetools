@@ -186,6 +186,21 @@ function buildNsisIncludeContent(tool) {
   \${endif}
 
   \${if} $R0 != 0
+    ; Alcune versioni gia' distribuite di FileX Send restituiscono codice 2
+    ; quando electron-builder combina /currentuser, --updated e _?= nel
+    ; richiamo del vecchio uninstaller. Il vecchio uninstaller funziona invece
+    ; correttamente con il percorso di compatibilita' silenzioso qui sotto.
+    ; Questo fallback permette di aggiornare quelle installazioni senza
+    ; richiedere una disinstallazione manuale e continua a preservare i dati.
+    DetailPrint "Disinstallazione standard terminata con codice $R0. Provo il percorso compatibile."
+    ClearErrors
+    ExecWait '"$INSTDIR\\\${UNINSTALL_FILENAME}" /S /KEEP_APP_DATA' $R0
+
+    \${if} $R0 == 0
+      DetailPrint "Disinstallazione compatibile completata."
+      Return
+    \${endif}
+
     \${IfNot} \${Silent}
       MessageBox MB_OK|MB_ICONEXCLAMATION "$(uninstallFailed): $R0"
     \${endif}

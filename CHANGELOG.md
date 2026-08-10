@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-10 - FileX Send 0.1.2
+
+- corretto l'aggiornamento delle installazioni esistenti che terminava con codice `2`
+- aggiunto un percorso NSIS compatibile che preserva i dati e non richiede la disinstallazione manuale
+- mostrata stabilmente la versione installata nel titolo della finestra di FileX Send
+
 ## 2026-08-10 - FileX Send 0.1.1
 
 - corretto il falso errore `Sessione chiusa o scaduta` dopo il primo gruppo di foto inviato

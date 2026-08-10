@@ -203,12 +203,13 @@ async function refreshDetectedWifi() {
 }
 
 async function createWindow(): Promise<void> {
+  const windowTitle = `FileX Send — Versione ${app.getVersion()}`;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 980,
     minHeight: 700,
-    title: "FileX Send",
+    title: windowTitle,
     icon: iconPath(),
     backgroundColor: "#091321",
     show: false,
@@ -218,6 +219,10 @@ async function createWindow(): Promise<void> {
       nodeIntegration: false,
       sandbox: true,
     },
+  });
+  mainWindow.on("page-title-updated", (event) => {
+    event.preventDefault();
+    mainWindow?.setTitle(windowTitle);
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("closed", () => { mainWindow = null; });

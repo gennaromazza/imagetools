@@ -2,6 +2,8 @@
 
 FileX Send riceve foto e video dal telefono di un cliente direttamente su un PC Windows collegato alla stessa rete locale. Il telefono non richiede app, account o accesso a servizi cloud.
 
+La versione installata e' sempre visibile nella barra del titolo. Gli aggiornamenti dalla Suite preservano impostazioni, sessioni remote e dati locali; anche le installazioni precedenti che restituivano codice `2` vengono migrate automaticamente senza disinstallazione manuale.
+
 ## Flusso MVP
 
 1. Il fotografo collega il PC all'access point dedicato `FileX Send` e apre il tool.
