@@ -92,6 +92,14 @@ Nel catalogo `update-catalog-stable`, la voce `photo-selector-app` deve indicare
 
 Prima della pubblicazione verificare gli scenari `BROWSE-01` e `SELECT-03`–`SELECT-05` in `docs/tools/photo-selector-audit.md`. Dopo l'aggiornamento, il titolo deve mostrare `Image Select Pro — Versione 0.1.26` e FileX Suite deve restare aperta.
 
+## Verifica Image Select Pro 0.1.27
+
+La release `photo-selector-app-v0.1.27` deve contenere esclusivamente l'installer Windows x64 di Image Select Pro, la relativa blockmap e `stable.json`. FileX Suite e gli altri tool devono rimanere invariati.
+
+Nel catalogo `update-catalog-stable`, la sola voce `photo-selector-app` deve passare da 0.1.26 a 0.1.27, mantenere `minLauncherVersion` 0.1.26 e puntare all'installer della release namespaced con checksum SHA-256 valido.
+
+Aprire un progetto, selezionare rapidamente foto diverse mentre e' attivo il rilevamento delle modifiche esterne, quindi chiudere la vista. Non devono comparire aggiornamenti tardivi o errori dopo la chiusura. Dopo l'installazione il titolo deve mostrare `Image Select Pro — Versione 0.1.27`, la Suite deve restare aperta e la scheda deve passare a `Pronto`.
+
 ## Verifica FileX Suite 0.1.27
 
 La release `suite-v0.1.27` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve inoltre esporre `latest.yml`, l'installer versionato e l'alias stabile della Suite.
