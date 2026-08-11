@@ -129,6 +129,7 @@ export const PhotoCard = memo(
     const prevClassRef = useRef({ rating, pickStatus, colorLabel, customLabels });
     const cardRef = useRef<HTMLDivElement>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
+    const imageRef = useRef<HTMLImageElement>(null);
     const feedbackTimeoutRef = useRef<number | null>(null);
     const feedbackTokenRef = useRef(0);
     const [feedback, setFeedback] = useState<CardFeedback | null>(null);
@@ -137,6 +138,28 @@ export const PhotoCard = memo(
     const lastExternalFeedbackTokenRef = useRef(0);
     const [activeBatchPulseKind, setActiveBatchPulseKind] = useState<"dot" | "label" | null>(null);
     const [isToolbarVisible, setIsToolbarVisible] = useState(isSelected);
+
+    // FIX: Lazy loading delle immagini con IntersectionObserver
+    useEffect(() => {
+      const imageElement = imageRef.current;
+      if (!imageElement || !previewUrl) return;
+
+      const observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              imageElement.src = previewUrl;
+              observer.unobserve(entry.target);
+            }
+          });
+        },
+        { rootMargin: "200px" }
+      );
+
+      observer.observe(imageElement);
+      return () => observer.disconnect();
+    }, [previewUrl]);
+
 
     useEffect(() => {
       const prev = prevClassRef.current;
