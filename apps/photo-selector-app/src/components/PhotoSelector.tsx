@@ -423,11 +423,9 @@ function RamBudgetSection({
 
 // Revoca una blob: URL precedente quando viene rimpiazzata da una nuova URL
 // diversa. Ignora valori falsy, URL identiche e URL non-blob (es. http:, file:).
-// FIX: Revoca SEMPRE le blob URL vecchie, anche se next è undefined o uguale.
-// Questo previene memory leak quando le foto vengono aggiornate o rimosse.
 function revokeBlobUrlIfReplaced(previous: string | undefined, next: string | undefined): void {
-  if (!previous?.startsWith("blob:")) return;
-  if (previous === next) return;
+  if (!previous || !next || previous === next) return;
+  if (!previous.startsWith("blob:")) return;
   try {
     URL.revokeObjectURL(previous);
   } catch {
@@ -1684,16 +1682,16 @@ export function PhotoSelector({
     const ids: string[] = [];
     for (const row of virtualRows) {
       const rowStart = row.index * gridColumnCount;
-      const rowEnd = Math.min(deferredVisiblePhotoIds.length, rowStart + gridColumnCount);
+      const rowEnd = Math.min(visiblePhotoIds.length, rowStart + gridColumnCount);
       for (let index = rowStart; index < rowEnd; index += 1) {
-        const id = deferredVisiblePhotoIds[index];
+        const id = visiblePhotoIds[index];
         if (id) {
           ids.push(id);
         }
       }
     }
     return ids;
-  }, [gridColumnCount, virtualRows, deferredVisiblePhotoIds]);
+  }, [gridColumnCount, virtualRows, visiblePhotoIds]);
   const viewportPhotoIds = useMemo(() => {
     if (visiblePhotoIds.length === 0) {
       return [] as string[];
@@ -1900,26 +1898,6 @@ export function PhotoSelector({
       flushFastScrollAccumulatedMs(true);
     }, FAST_SCROLL_COOLDOWN_MS);
   }, [flushFastScrollAccumulatedMs]);
-
-  // FIX: Pulizia del timer di cooldown per prevenire memory leak
-  useEffect(() => {
-    return () => {
-      if (fastScrollCooldownTimerRef.current !== null) {
-        window.clearTimeout(fastScrollCooldownTimerRef.current);
-        fastScrollCooldownTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  // FIX: Pulizia del timer di cooldown per prevenire memory leak
-  useEffect(() => {
-    return () => {
-      if (fastScrollCooldownTimerRef.current !== null) {
-        window.clearTimeout(fastScrollCooldownTimerRef.current);
-        fastScrollCooldownTimerRef.current = null;
-      }
-    };
-  }, []);
 
   useEffect(() => {
     const grid = gridRef.current;
@@ -2131,13 +2109,11 @@ export function PhotoSelector({
       if (!nextId || nextId === currentId) return;
       setFocusedPhotoId(nextId);
       scrollPhotoIntoView(nextId);
-      const focusRaf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
         const grid = gridRef.current;
         const el = grid?.querySelector<HTMLElement>(`[data-preview-asset-id="${nextId}"]`);
         if (el) el.focus();
       });
-      // FIX: Pulizia del requestAnimationFrame per prevenire memory leak
-      return () => window.cancelAnimationFrame(focusRaf);
     },
     [autoAdvanceOnAction, scrollPhotoIntoView, visiblePhotoIds, visiblePhotoIndexById],
   );
@@ -3088,7 +3064,7 @@ export function PhotoSelector({
         : POLL_FAST_MS;
 
     const run = async () => {
-      if (disposed || running) return; // FIX: Aggiunto check disposed per prevenire race condition
+      if (disposed || running) return;
       if (typeof document !== "undefined" && document.hidden) return;
 
       const targets: string[] = [];

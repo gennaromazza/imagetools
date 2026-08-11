@@ -29,23 +29,19 @@ export interface ThumbnailPipelineOptions {
   deferDelayMs?: number;
 }
 
-interface QueueItemBase {
+interface QueueItem {
   id: string;
-  priority: number;
-}
-
-interface QueueItem extends QueueItemBase {
-  file?: File | null;
+  file?: File;
   loadFile?: () => Promise<File | null>;
-  absolutePath?: string | null;
-  sourceFileKey?: string | null;
+  absolutePath?: string;
+  sourceFileKey?: string;
   skipDiskCacheRead?: boolean;
   createSourceFileKey?: (file: File) => string;
+  priority: number;
 }
 
 interface ActiveTask extends QueueItem {
   version: number;
-  startedAt: number; // FIX: Aggiunto timestamp per tracciare il tempo di inizio
 }
 
 function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -56,14 +52,12 @@ function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 
 export class ThumbnailPipeline {
   private queue: QueueItem[] = [];
-  private queuedItems: Map<string, QueueItem> = new Map();
-  private activeDesktopTasks: Map<string, ActiveTask> = new Map();
-  private completed: Set<string> = new Set();
-  private failedIds: Set<string> = new Set();
+  private queuedItems = new Map<string, QueueItem>();
+  private activeDesktopTasks = new Map<string, ActiveTask>();
+  private completed = new Set<string>();
+  private failedIds = new Set<string>();
   private pendingBatch: ThumbnailUpdate[] = [];
-  private readonly maxPendingBatchSize = MAX_PENDING_BATCH_SIZE;
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
-  private deferTimer: ReturnType<typeof setTimeout> | null = null;
   private destroyed = false;
   private onBatch: BatchCallback;
   private onError: ErrorCallback | null;
