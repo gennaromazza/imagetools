@@ -3064,7 +3064,7 @@ export function PhotoSelector({
         : POLL_FAST_MS;
 
     const run = async () => {
-      if (running) return;
+      if (disposed || running) return;
       if (typeof document !== "undefined" && document.hidden) return;
 
       const targets: string[] = [];
