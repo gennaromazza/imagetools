@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-11 - Image Select Pro 0.1.27
+
+- impedita l'esecuzione tardiva del polling delle modifiche esterne dopo la chiusura o il rinnovo del relativo effetto
+- evitati aggiornamenti asincroni obsoleti delle anteprime quando cambia rapidamente la selezione o viene chiuso il tool
+- mantenute invariate le versioni di FileX Suite e degli altri tool
+
 ## 2026-08-10 - FileX Send 0.1.2
 
 - corretto l'aggiornamento delle installazioni esistenti che terminava con codice `2`

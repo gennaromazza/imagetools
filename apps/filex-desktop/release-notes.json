@@ -107,6 +107,11 @@
     ]
   },
   "photo-selector-app": {
+    "0.1.27": [
+      "Corretto il polling delle modifiche esterne affinche' non prosegua dopo la chiusura o il rinnovo della vista.",
+      "Le anteprime non ricevono piu' aggiornamenti asincroni obsoleti quando la selezione cambia rapidamente.",
+      "Aggiornamento indipendente di Image Select Pro: FileX Suite e gli altri tool restano invariati."
+    ],
     "0.1.26": [
       "La schermata Sfoglia consente di scorrere tutte le cartelle e i progetti recenti senza spostare la testata.",
       "Confronta mostra correttamente da due a quattro foto selezionate nella griglia, nello stesso ordine visivo, ed e' disponibile con Ctrl+B.",
