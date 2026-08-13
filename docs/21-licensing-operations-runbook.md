@@ -29,7 +29,17 @@ Secret runtime:
 - `LEMONSQUEEZY_WEBHOOK_SECRET`: secret HMAC del webhook;
 - `FILEX_LICENSE_SIGNING_PRIVATE_KEY`: chiave privata Ed25519 generata una sola volta; la pubblica e' compilata nella Suite;
 
-Il comando amministrativo `node scripts/filex-license-admin.mjs` richiede Application Default Credentials locali. Non usare service-account JSON permanenti nel repository. In assenza di ADC, leggere e modificare la configurazione tramite strumenti Google autenticati approvati durante l'onboarding operativo.
+Il comando `create-support-license`, usato dal collegamento cliccabile, riusa automaticamente il login locale della Firebase CLI. Gli altri comandi amministrativi richiedono ancora le Application Default Credentials Google. Non usare service-account JSON permanenti nel repository.
+
+### Licenza prova con doppio clic
+
+Su Windows l'amministratore puo' aprire `Crea licenza prova FileX.cmd` dalla cartella principale del progetto. La procedura chiede il nome della persona e la durata (30 giorni per default), crea una licenza `FileX All Access`, mostra la chiave una sola volta e la copia negli appunti. Non richiede una nuova build o distribuzione di FileX.
+
+Il collegamento usa lo stesso comando amministrativo sicuro e riusa il login Firebase gia' presente sul PC. Per verificare la procedura senza scrivere nel backend:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/create-filex-trial-license.ps1 -Name "Mario Rossi" -Days 30 -DryRun
+```
 
 ### Lemon Squeezy test mode (13 agosto 2026)
 
