@@ -143,3 +143,9 @@ Creare un link remoto, completare un primo gruppo di file e verificare che la pa
 La release `filex-send-v0.1.2` deve contenere esclusivamente installer FileX Send x64, blockmap e `stable.json`; Suite e altri tool devono restare invariati. Il catalogo deve aggiornare soltanto `filex-send` da 0.1.1 a 0.1.2 e conservare `minLauncherVersion` 0.1.31.
 
 Installare la 0.1.1, quindi applicare la 0.1.2 dalla Suite. L'installer silenzioso deve terminare con codice `0`, preservare dati e impostazioni e non richiedere una disinstallazione manuale. Dopo l'avvio, il titolo della finestra deve mostrare `FileX Send — Versione 0.1.2` e la scheda della Suite deve passare a `Pronto`.
+
+## Verifica FileX Suite 0.1.32 — licenze prova
+
+La release `suite-v0.1.32` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.32 senza cambiare le versioni del catalogo tool.
+
+Dopo l'aggiornamento, aprire la gestione licenza, attivare una chiave generata con `Crea licenza prova FileX.cmd` e verificare lo stato `active`, il conteggio `1 di 2` e la persistenza dopo il riavvio. Ripetere su un secondo PC e verificare che il terzo venga rifiutato. Disattivare il PC corrente e controllare che lo slot venga liberato. Durante questa fase `enforcement` deve restare `observe`: un problema di licenza non deve bloccare i tool.

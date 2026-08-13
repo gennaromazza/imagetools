@@ -1,13 +1,15 @@
 # Changelog
 
-## 2026-08-13 - Licensing e pagamenti FileX
+## 2026-08-13 - FileX Suite 0.1.32
 
 - introdotto l'entitlement unico FileX All Access per tutti i tool, con due dispositivi, sette giorni di cortesia e attestazione offline firmata valida fino a 14 giorni
 - aggiunti attivazione, validazione, disattivazione, webhook Lemon Squeezy firmati, rate limit e retention automatica dei log tecnici
 - aggiunta gestione licenza nella Suite e gate per runtime condiviso e applicazioni Electron autonome
 - resa obbligatoria nel manifest la strategia licenza di ogni tool e aggiunto il test `test:filex-license-coverage` per proteggere anche i tool futuri
 - pubblicati sito, condizioni, privacy, EULA, rimborsi e pagina post-acquisto; configurato Lemon Squeezy Test mode con piani da 12 EUR/mese e 100 EUR/anno
+- aggiunto il creatore amministrativo cliccabile di licenze prova, con durata configurabile e copia automatica della chiave
 - enforcement mantenuto in `observe` fino all'approvazione e al collaudo live dello store
+- pubblicata soltanto FileX Suite 0.1.32; le versioni dei tool indipendenti restano invariate
 
 ## 2026-08-11 - Image Select Pro 0.1.27
 
