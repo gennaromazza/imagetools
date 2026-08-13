@@ -66,7 +66,7 @@ Le versioni precedenti al passaggio per-user sono installate in `C:\Program File
 
 ## Chiusura di una pubblicazione
 
-Una pubblicazione e' conclusa solo dopo aver verificato GitHub Release, GitHub Pages e il manifest remoto. Seguire `docs/18-publish-build-contract.md` per la checklist completa.
+Una pubblicazione e' conclusa solo dopo aver verificato GitHub Release, Firebase Hosting e il manifest remoto. Seguire `docs/18-publish-build-contract.md` per la checklist completa.
 
 ## Migrazione ai canali indipendenti
 

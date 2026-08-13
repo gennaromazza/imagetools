@@ -1,4 +1,5 @@
 import * as electron from "electron";
+import { getLicenseState } from "./license-service.js";
 import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
@@ -2051,6 +2052,14 @@ process.on("uncaughtException", (error) => {
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     writeBootLog(`App ready for tool ${requestedTool.id}`);
+    if (requestedTool.id !== "suite-launcher") {
+      const license = await getLicenseState();
+      if (!license.canUseTools) {
+        dialog.showErrorBox("FileX All Access", "La licenza FileX non e' attiva. Apri FileX Suite per attivarla o aggiornare il pagamento.");
+        app.quit();
+        return;
+      }
+    }
     // Apply the persisted RAM budget before registering IPC handlers so that
     // the cache limits are already in effect when the first thumbnail request arrives.
     const savedPreset = await loadRamBudgetPreset();

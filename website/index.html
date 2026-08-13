@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1712" />
+  <meta name="description" content="FileX è la suite pensata da un fotografo per fotografi: strumenti specializzati, indipendenti e progettati per lavorare insieme." />
+  <meta name="author" content="Gennaro Mazzacane" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <link rel="canonical" href="https://filex-suite.web.app/" />
+  <link rel="alternate" hreflang="it" href="https://filex-suite.web.app/" />
+  <link rel="alternate" hreflang="x-default" href="https://filex-suite.web.app/" />
+  <link rel="icon" href="favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/icons/apple-touch-icon.png" />
+  <link rel="manifest" href="site.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&amp;family=Manrope:wght@500;600;700;800&amp;display=swap" rel="stylesheet" />
+  <meta property="og:title" content="FileX — ogni lavoro, lo strumento giusto" />
+  <meta property="og:description" content="Strumenti specializzati per fotografi, indipendenti quando vuoi e coordinati quando serve. 12 € al mese o 100 € all'anno." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://filex-suite.web.app/" />
+  <meta property="og:site_name" content="FileX" />
+  <meta property="og:locale" content="it_IT" />
+  <meta property="og:image" content="https://filex-suite.web.app/og.png" />
+  <meta property="og:image:width" content="1732" />
+  <meta property="og:image:height" content="909" />
+  <meta property="og:image:alt" content="FileX — ogni lavoro, lo strumento giusto. Otto tool, un solo piano." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="FileX — ogni lavoro, lo strumento giusto" />
+  <meta name="twitter:description" content="La suite pensata da un fotografo per fotografi. Tutti i tool a 12 € al mese o 100 € all'anno." />
+  <meta name="twitter:image" content="https://filex-suite.web.app/og.png" />
+  <meta name="twitter:image:alt" content="FileX — otto strumenti fotografici in un unico piano" />
+  <title>FileX — ogni lavoro, lo strumento giusto</title>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://filex-suite.web.app/#organization",
+        "name": "Image Studio Fotografico",
+        "alternateName": "FileX",
+        "url": "https://filex-suite.web.app/",
+        "logo": "https://filex-suite.web.app/assets/icons/icon-512.png",
+        "taxID": "IT08039821213",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "Via Quinto Orazio Flacco 5",
+          "postalCode": "81031",
+          "addressLocality": "Aversa",
+          "addressRegion": "CE",
+          "addressCountry": "IT"
+        },
+        "founder": {
+          "@type": "Person",
+          "name": "Gennaro Mazzacane",
+          "jobTitle": "Fotografo e ideatore di FileX",
+          "url": "https://imagestudiofotografico.com/storie"
+        }
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://filex-suite.web.app/#website",
+        "url": "https://filex-suite.web.app/",
+        "name": "FileX",
+        "description": "Suite di strumenti professionali pensata da un fotografo per fotografi.",
+        "inLanguage": "it-IT",
+        "publisher": { "@id": "https://filex-suite.web.app/#organization" }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://filex-suite.web.app/#software",
+        "name": "FileX Suite",
+        "url": "https://filex-suite.web.app/",
+        "downloadUrl": "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe",
+        "image": "https://filex-suite.web.app/og.png",
+        "description": "Suite Windows di strumenti specializzati per selezione, archivio, conversione, stampa, composizione, ricerca, manutenzione e trasferimento di fotografie.",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Windows 10, Windows 11",
+        "inLanguage": "it-IT",
+        "author": { "@id": "https://filex-suite.web.app/#organization" },
+        "offers": [
+          { "@type": "Offer", "name": "FileX All Access mensile", "price": "12.00", "priceCurrency": "EUR", "url": "https://filex-suite.web.app/#prezzi" },
+          { "@type": "Offer", "name": "FileX All Access annuale", "price": "100.00", "priceCurrency": "EUR", "url": "https://filex-suite.web.app/#prezzi" }
+        ]
+      }
+    ]
+  }
+  </script>
+  <style>
+    :root {
+      --ink: #102019;
+      --muted: #66756d;
+      --green: #176c4c;
+      --green-dark: #0e4e36;
+      --lime: #b9ec9f;
+      --mint: #e8f7ee;
+      --cream: #f5f3eb;
+      --paper: #fffefa;
+      --gold: #f1c870;
+      --line: #dce7df;
+      --shadow: 0 24px 70px rgba(18, 56, 39, .12);
+      --display: "Manrope", system-ui, sans-serif;
+      --body: "DM Sans", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; color: var(--ink); background: var(--paper); font-family: var(--body); }
+    a { color: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    button { font: inherit; }
+    .shell { width: min(1180px, calc(100% - 40px)); margin-inline: auto; }
+
+    .announcement {
+      padding: 9px 20px;
+      text-align: center;
+      color: #d7ecdf;
+      background: #0b1712;
+      font-size: 13px;
+    }
+    .announcement strong { color: var(--lime); }
+
+    .nav-wrap {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      border-bottom: 1px solid rgba(220, 231, 223, .75);
+      background: rgba(255, 254, 250, .88);
+      backdrop-filter: blur(18px);
+    }
+    nav { height: 72px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }
+    .brand { display: inline-flex; align-items: center; gap: 11px; text-decoration: none; font: 800 22px var(--display); }
+    .brand-mark { width: 38px; height: 38px; display: block; border-radius: 11px; box-shadow: 0 8px 20px rgba(23,108,76,.2); }
+    .nav-links { display: flex; align-items: center; gap: 28px; color: #47574f; font-size: 14px; font-weight: 600; }
+    .nav-links a { text-decoration: none; }
+    .nav-links a:hover { color: var(--green); }
+    .nav-cta { padding: 10px 16px; border-radius: 10px; color: white !important; background: var(--ink); }
+
+    .hero { position: relative; overflow: hidden; padding: 88px 0 74px; background: radial-gradient(circle at 78% 20%, #dff6e9 0, transparent 33%), linear-gradient(180deg, #fffefa, #f7faf7); }
+    .hero::after { content: ""; position: absolute; right: -120px; top: 80px; width: 360px; height: 360px; border: 1px solid #c8e2d2; border-radius: 50%; opacity: .65; }
+    .hero-grid { position: relative; z-index: 1; display: grid; grid-template-columns: 1.03fr .97fr; gap: 74px; align-items: center; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 20px; color: var(--green); font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--green); }
+    h1, h2, h3 { font-family: var(--display); }
+    h1 { max-width: 720px; margin: 0; font-size: clamp(45px, 6.2vw, 76px); line-height: .99; letter-spacing: -.055em; }
+    h1 span { color: var(--green); }
+    .hero-copy { max-width: 610px; margin: 26px 0 0; color: #52625a; font-size: 19px; line-height: 1.62; }
+    .hero-actions { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; margin-top: 34px; }
+    .button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 50px; padding: 0 21px; border: 0; border-radius: 12px; text-decoration: none; font-weight: 800; cursor: pointer; transition: transform .2s ease, box-shadow .2s ease, background .2s ease; }
+    .button:hover { transform: translateY(-2px); }
+    .button-primary { color: #12251c; background: var(--gold); box-shadow: 0 12px 28px rgba(176, 125, 27, .2); }
+    .button-secondary { border: 1px solid var(--line); background: white; }
+    .button-dark { color: white; background: var(--ink); }
+    .microcopy { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 19px; color: #708078; font-size: 12px; }
+    .microcopy span::before { content: "✓"; margin-right: 6px; color: var(--green); font-weight: 900; }
+
+    .product-window { position: relative; padding: 12px; border: 1px solid #d7e5dc; border-radius: 25px; background: rgba(255,255,255,.82); box-shadow: var(--shadow); transform: rotate(1deg); }
+    .product-window::before { content: ""; position: absolute; inset: -20px; z-index: -1; border-radius: 35px; background: linear-gradient(135deg, rgba(185,236,159,.42), transparent 70%); }
+    .window-top { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; }
+    .window-top i { width: 8px; height: 8px; display: block; border-radius: 50%; background: #b9c8c0; }
+    .window-body { display: grid; grid-template-columns: 120px 1fr; min-height: 385px; overflow: hidden; border-radius: 16px; color: #dbe9e1; background: #10231a; }
+    .mock-sidebar { padding: 22px 14px; background: #0b1913; }
+    .mock-logo { margin-bottom: 28px; color: white; font: 800 18px var(--display); }
+    .mock-nav { display: grid; gap: 8px; }
+    .mock-nav span { padding: 9px 10px; border-radius: 8px; color: #80988b; font-size: 10px; }
+    .mock-nav .active { color: white; background: #1b3d2d; }
+    .mock-main { padding: 26px 22px; }
+    .mock-main small { color: #83a18f; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; }
+    .mock-main h3 { margin: 6px 0 20px; color: white; font-size: 22px; }
+    .tool-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .mock-tool { min-height: 105px; padding: 12px; border: 1px solid #294637; border-radius: 11px; background: #152c21; }
+    .mock-tool img { width: 32px; height: 32px; display: block; margin-bottom: 8px; border-radius: 9px; object-fit: cover; }
+    .mock-tool b { display: block; margin-bottom: 9px; color: #e9f5ed; font-size: 10px; }
+    .mock-tool span { display: inline-block; padding: 4px 7px; border-radius: 5px; color: #addabb; background: #1c4934; font-size: 8px; }
+    .mock-tool.featured { background: linear-gradient(145deg, #1c553b, #173725); }
+    .floating-note { position: absolute; right: -24px; bottom: 32px; padding: 13px 16px; border: 1px solid #dbe8df; border-radius: 13px; background: white; box-shadow: 0 14px 30px rgba(18,56,39,.14); font-size: 12px; font-weight: 800; transform: rotate(-2deg); }
+    .floating-note span { color: var(--green); }
+
+    .trust { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: white; }
+    .trust-row { min-height: 92px; display: flex; align-items: center; justify-content: space-between; gap: 28px; }
+    .trust-row > strong { max-width: 200px; font: 700 13px var(--display); }
+    .trust-points { display: flex; align-items: center; justify-content: flex-end; gap: 42px; color: #65766d; font-size: 13px; }
+    .trust-points span { display: flex; align-items: center; gap: 9px; }
+    .trust-points b { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; color: var(--green); background: var(--mint); }
+
+    .origin { overflow: hidden; background: #102019; color: white; }
+    .origin-grid { display: grid; grid-template-columns: .92fr 1.08fr; gap: 78px; align-items: center; }
+    .origin-photos { position: relative; min-height: 620px; }
+    .origin-photo-main { position: absolute; inset: 0 90px 30px 0; width: calc(100% - 90px); height: calc(100% - 30px); border-radius: 26px; object-fit: cover; filter: contrast(1.04); }
+    .origin-photo-small { position: absolute; right: 0; bottom: 0; width: 42%; aspect-ratio: .82; border: 8px solid #102019; border-radius: 22px; object-fit: cover; }
+    .origin-caption { position: absolute; left: 24px; bottom: 0; padding: 11px 15px; border-radius: 10px; color: var(--ink); background: var(--gold); font-size: 11px; font-weight: 800; }
+    .origin .section-kicker { color: var(--lime); }
+    .origin h2 { max-width: 640px; }
+    .origin-copy > p { color: #b4c7bd; font-size: 16px; line-height: 1.72; }
+    .origin-quote { margin: 28px 0; padding: 21px 0 21px 23px; border-left: 3px solid var(--gold); color: white; font: 700 23px/1.4 var(--display); }
+    .origin-signature { display: flex; align-items: center; gap: 13px; margin-top: 26px; }
+    .origin-signature span { width: 34px; height: 1px; background: #739080; }
+    .origin-signature strong { display: block; font-size: 13px; }
+    .origin-signature small { display: block; margin-top: 3px; color: #8fa69a; }
+    .story-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 24px; color: var(--lime); font-size: 13px; font-weight: 800; text-decoration: none; }
+    .story-link:hover { color: white; }
+
+    section { padding: 112px 0; }
+    .section-head { max-width: 680px; margin-bottom: 48px; }
+    .section-head.center { margin-inline: auto; text-align: center; }
+    .section-kicker { margin-bottom: 11px; color: var(--green); font-size: 12px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+    h2 { margin: 0; font-size: clamp(34px, 4.7vw, 54px); line-height: 1.08; letter-spacing: -.045em; }
+    .section-head p { margin: 18px 0 0; color: var(--muted); font-size: 17px; line-height: 1.65; }
+
+    .workflow { background: var(--cream); }
+    .principles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .principle { min-height: 235px; padding: 27px; border: 1px solid #e3e0d4; border-radius: 20px; background: var(--paper); }
+    .principle-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: var(--green); background: var(--mint); font-size: 18px; font-weight: 900; }
+    .principle h3 { margin: 34px 0 10px; font-size: 21px; }
+    .principle p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.62; }
+
+    .tools-section { background: #102019; color: white; }
+    .tools-section .section-kicker { color: var(--lime); }
+    .tools-section .section-head p { color: #a8bbb0; }
+    .tools-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .tool-card { min-height: 220px; display: block; padding: 24px; border: 1px solid #294238; border-radius: 18px; color: white; background: #14271f; text-decoration: none; transition: border-color .2s, transform .2s; }
+    .tool-card:hover { border-color: #537a67; transform: translateY(-3px); }
+    .tool-icon { width: 64px; height: 64px; display: block; margin-bottom: 28px; border: 1px solid #365448; border-radius: 17px; object-fit: cover; box-shadow: 0 12px 24px rgba(0,0,0,.18); }
+    .tool-card h3 { margin: 0 0 8px; font-size: 18px; }
+    .tool-card p { margin: 0; color: #98aca1; font-size: 13px; line-height: 1.58; }
+
+    .examples { background: #f7f5ee; }
+    .scenario-list { display: grid; gap: 18px; }
+    .scenario { display: grid; grid-template-columns: 230px 1fr; gap: 32px; padding: 30px; border: 1px solid #e0ded3; border-radius: 20px; background: var(--paper); }
+    .scenario-label { display: flex; flex-direction: column; justify-content: space-between; min-height: 130px; }
+    .scenario-label small { color: var(--green); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .scenario-label h3 { margin: 16px 0 0; font-size: 22px; line-height: 1.2; }
+    .scenario-body p { margin: 0 0 18px; color: var(--muted); font-size: 14px; line-height: 1.6; }
+    .tool-chain { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .chain-tool { padding: 9px 12px; border: 1px solid #cfe2d5; border-radius: 9px; color: var(--green-dark); background: var(--mint); font-size: 12px; font-weight: 800; }
+    .chain-arrow { color: #93a29a; }
+    .independent-note { margin-top: 24px; padding: 20px 24px; border-left: 4px solid var(--green); border-radius: 10px; color: #52625a; background: white; font-size: 14px; line-height: 1.6; }
+
+    .benefit-grid { display: grid; grid-template-columns: .9fr 1.1fr; gap: 76px; align-items: center; }
+    .benefit-panel { position: relative; min-height: 510px; overflow: hidden; border-radius: 28px; color: white; background: linear-gradient(145deg, #176c4c, #0d3828); box-shadow: var(--shadow); }
+    .benefit-panel::before { content: ""; position: absolute; width: 330px; height: 330px; right: -100px; top: -100px; border: 65px solid rgba(185,236,159,.13); border-radius: 50%; }
+    .stat-main { position: absolute; left: 38px; top: 42px; }
+    .stat-main small { color: #b8d9c5; font-weight: 700; }
+    .stat-main strong { display: block; margin-top: 8px; font: 800 76px/1 var(--display); letter-spacing: -.07em; }
+    .stat-main span { display: block; max-width: 240px; margin-top: 11px; color: #c9ded1; line-height: 1.5; }
+    .panel-card { position: absolute; left: 38px; right: 38px; bottom: 34px; padding: 22px; border: 1px solid rgba(255,255,255,.15); border-radius: 16px; background: rgba(255,255,255,.1); backdrop-filter: blur(8px); }
+    .panel-card b { display: block; margin-bottom: 6px; }
+    .panel-card span { color: #c5ddd0; font-size: 13px; }
+    .benefits { display: grid; gap: 8px; }
+    .benefit { display: grid; grid-template-columns: 44px 1fr; gap: 17px; padding: 21px 0; border-bottom: 1px solid var(--line); }
+    .benefit:last-child { border-bottom: 0; }
+    .benefit > span { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 12px; color: var(--green); background: var(--mint); font-weight: 900; }
+    .benefit h3 { margin: 0 0 7px; font-size: 18px; }
+    .benefit p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.55; }
+
+    .pricing { background: linear-gradient(180deg, #eef8f2, #f8fbf8); }
+    .pricing-card { width: min(810px, 100%); margin-inline: auto; display: grid; grid-template-columns: .9fr 1.1fr; overflow: hidden; border: 1px solid #cfe2d5; border-radius: 28px; background: white; box-shadow: var(--shadow); }
+    .pricing-summary { padding: 44px; color: white; background: #102019; }
+    .pricing-summary .pill { display: inline-block; padding: 7px 10px; border-radius: 999px; color: var(--lime); background: #1c3b2e; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    .pricing-summary h3 { margin: 25px 0 11px; font-size: 31px; }
+    .pricing-summary p { margin: 0; color: #a8bbb0; line-height: 1.6; }
+    .toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 30px; padding: 4px; border-radius: 11px; background: #0a1611; }
+    .toggle button { padding: 10px; border: 0; border-radius: 8px; color: #83998d; background: transparent; font-size: 12px; font-weight: 800; cursor: pointer; }
+    .toggle button.active { color: var(--ink); background: white; }
+    .price-side { padding: 44px; }
+    .price-row { display: flex; align-items: end; gap: 9px; }
+    .price { font: 800 62px/1 var(--display); letter-spacing: -.06em; }
+    .period { padding-bottom: 7px; color: var(--muted); }
+    .saving { min-height: 24px; margin: 12px 0 24px; color: var(--green); font-size: 13px; font-weight: 800; }
+    .included { display: grid; gap: 12px; margin: 25px 0 30px; padding: 0; list-style: none; }
+    .included li { display: flex; gap: 10px; color: #47574f; font-size: 14px; }
+    .included li::before { content: "✓"; color: var(--green); font-weight: 900; }
+    .price-side .button { width: 100%; }
+    .price-note { margin-top: 13px; color: #7a8981; text-align: center; font-size: 11px; }
+
+    .faq-layout { display: grid; grid-template-columns: .7fr 1.3fr; gap: 80px; }
+    .faq-layout h2 { font-size: 42px; }
+    .faq-layout > div:first-child p { color: var(--muted); line-height: 1.65; }
+    details { border-bottom: 1px solid var(--line); }
+    summary { position: relative; padding: 22px 38px 22px 0; list-style: none; font: 700 16px var(--display); cursor: pointer; }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; position: absolute; right: 4px; top: 17px; color: var(--green); font-size: 25px; font-weight: 400; }
+    details[open] summary::after { content: "−"; }
+    details p { margin: -4px 36px 23px 0; color: var(--muted); font-size: 14px; line-height: 1.65; }
+
+    .final-cta { padding-top: 40px; }
+    .cta-panel { position: relative; overflow: hidden; padding: 70px; border-radius: 28px; color: white; background: #176c4c; }
+    .cta-panel::after { content: "FILEX"; position: absolute; right: -18px; bottom: -42px; color: rgba(255,255,255,.07); font: 800 132px var(--display); letter-spacing: -.08em; }
+    .cta-panel h2 { position: relative; z-index: 1; max-width: 650px; }
+    .cta-panel p { position: relative; z-index: 1; max-width: 580px; margin: 18px 0 28px; color: #d5ebde; font-size: 17px; line-height: 1.6; }
+    .cta-panel .button { position: relative; z-index: 1; }
+
+    footer { margin-top: 110px; padding: 55px 0 28px; color: #a5b8ae; background: #0b1712; }
+    .footer-grid { display: grid; grid-template-columns: 1.5fr repeat(2, 1fr); gap: 60px; }
+    .footer-grid .brand { color: white; }
+    .footer-about { max-width: 340px; margin-top: 15px; line-height: 1.6; font-size: 13px; }
+    footer h4 { margin: 4px 0 16px; color: white; font: 700 13px var(--display); }
+    footer a { display: block; margin: 10px 0; color: #a5b8ae; text-decoration: none; font-size: 13px; }
+    footer a:hover { color: white; }
+    .footer-bottom { display: flex; justify-content: space-between; gap: 20px; margin-top: 48px; padding-top: 22px; border-top: 1px solid #203129; font-size: 11px; }
+
+    @media (max-width: 920px) {
+      .nav-links a:not(.nav-cta) { display: none; }
+      .hero { padding-top: 62px; }
+      .hero-grid, .benefit-grid { grid-template-columns: 1fr; }
+      .origin-grid { grid-template-columns: 1fr; }
+      .origin-photos { width: min(620px, 100%); min-height: 590px; }
+      .hero-grid { gap: 58px; }
+      .product-window { width: min(620px, 100%); margin-inline: auto; }
+      .principles, .tools-list { grid-template-columns: repeat(2, 1fr); }
+      .trust-row { padding-block: 24px; align-items: flex-start; flex-direction: column; }
+      .trust-points { width: 100%; justify-content: space-between; }
+      .faq-layout { grid-template-columns: 1fr; gap: 20px; }
+    }
+
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 28px, 1180px); }
+      .announcement { font-size: 11px; }
+      nav { height: 62px; }
+      .nav-cta { padding: 9px 12px; font-size: 12px; }
+      .hero { padding: 54px 0; }
+      h1 { font-size: 45px; }
+      .hero-copy { font-size: 17px; }
+      .hero-actions .button { width: 100%; }
+      .window-body { grid-template-columns: 82px 1fr; min-height: 335px; }
+      .mock-sidebar { padding: 18px 8px; }
+      .mock-logo { font-size: 13px; }
+      .mock-nav span { padding: 8px 5px; font-size: 8px; }
+      .mock-main { padding: 20px 12px; }
+      .mock-main h3 { font-size: 18px; }
+      .mock-tool { min-height: 88px; padding: 10px; }
+      .floating-note { right: -4px; bottom: 18px; }
+      .trust-points { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      .origin-grid { gap: 52px; }
+      .origin-photos { min-height: 470px; }
+      .origin-photo-main { right: 55px; width: calc(100% - 55px); }
+      .origin-photo-small { width: 44%; border-width: 6px; }
+      section { padding: 78px 0; }
+      .principles, .tools-list { grid-template-columns: 1fr; }
+      .principle { min-height: 210px; }
+      .scenario { grid-template-columns: 1fr; gap: 18px; padding: 24px; }
+      .scenario-label { min-height: auto; }
+      .benefit-panel { min-height: 460px; }
+      .pricing-card { grid-template-columns: 1fr; }
+      .pricing-summary, .price-side { padding: 30px 25px; }
+      .cta-panel { padding: 44px 25px; }
+      .cta-panel::after { font-size: 80px; }
+      .footer-grid { grid-template-columns: 1fr 1fr; gap: 34px; }
+      .footer-grid > div:first-child { grid-column: 1 / -1; }
+      .footer-bottom { flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="announcement"><strong>FileX All Access</strong> · Tutti i tool, anche quelli futuri, in un solo piano.</div>
+
+  <div class="nav-wrap">
+    <nav class="shell" aria-label="Navigazione principale">
+      <a class="brand" href="#top" aria-label="FileX home"><img class="brand-mark" src="assets/icons/suite-launcher.png" width="256" height="256" alt="" />FileX</a>
+      <div class="nav-links">
+        <a href="#workflow">La filosofia</a>
+        <a href="#storia">La storia</a>
+        <a href="#strumenti">Strumenti</a>
+        <a href="#esempi">Esempi d’uso</a>
+        <a href="#prezzi">Prezzi</a>
+        <a href="supporto/index.html">Supporto</a>
+        <a class="nav-cta" href="#download">Scarica FileX</a>
+      </div>
+    </nav>
+  </div>
+
+  <main id="top">
+    <header class="hero">
+      <div class="shell hero-grid">
+        <div>
+          <div class="eyebrow">Pensata da un fotografo, per fotografi</div>
+          <h1>Ogni lavoro. <span>Lo strumento giusto.</span></h1>
+          <p class="hero-copy">FileX è una famiglia di strumenti fotografici specializzati. Ognuno risolve bene un compito preciso; insieme si combinano nei flussi che servono davvero al tuo studio.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#download">Scarica FileX <span aria-hidden="true">↓</span></a>
+            <a class="button button-secondary" href="#esempi">Guarda gli esempi d’uso</a>
+          </div>
+          <div class="microcopy"><span>Download senza account</span><span>Windows 10 e 11</span><span>Aggiornamenti automatici</span></div>
+        </div>
+
+        <div class="product-window" aria-label="Anteprima dell'applicazione FileX Suite">
+          <div class="window-top"><i></i><i></i><i></i></div>
+          <div class="window-body">
+            <aside class="mock-sidebar">
+              <div class="mock-logo">FileX</div>
+              <div class="mock-nav"><span class="active">I miei tool</span><span>Produzione</span><span>Archivio</span><span>Consegna</span></div>
+            </aside>
+            <div class="mock-main">
+              <small>Il tuo spazio di lavoro</small>
+              <h3>Buon lavoro.</h3>
+              <div class="tool-grid">
+                <div class="mock-tool"><img src="assets/icons/photo-selector-app.png" width="256" height="256" alt="" /><b>Image Select Pro</b><span>Apri</span></div>
+                <div class="mock-tool"><img src="assets/icons/archivio-flow.png" width="256" height="256" alt="" /><b>Archivio Flow</b><span>Apri</span></div>
+                <div class="mock-tool"><img src="assets/icons/image-party-frame.png" width="256" height="256" alt="" /><b>Image Party Frame</b><span>Apri</span></div>
+                <div class="mock-tool"><img src="assets/icons/batch-print-layout.png" width="256" height="256" alt="" /><b>Batch Print Layout</b><span>Installa</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="floating-note"><span>8 tool</span> · una sola Suite</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="trust">
+      <div class="shell trust-row">
+        <strong>Strumenti indipendenti. Un ecosistema coordinato.</strong>
+        <div class="trust-points">
+          <span><b>✓</b> File locali</span>
+          <span><b>↻</b> Sempre aggiornato</span>
+          <span><b>＋</b> Nuovi tool inclusi</span>
+        </div>
+      </div>
+    </div>
+
+    <section class="origin" id="storia">
+      <div class="shell origin-grid">
+        <div class="origin-photos">
+          <img class="origin-photo-main" src="assets/story/gennaro-mazzacane.jpg" width="1100" height="1320" loading="lazy" decoding="async" alt="Gennaro Mazzacane con la sua fotocamera" />
+          <img class="origin-photo-small" src="assets/story/gennaro-al-lavoro.jpg" width="760" height="920" loading="lazy" decoding="async" alt="Gennaro Mazzacane durante il lavoro fotografico" />
+          <span class="origin-caption">Dietro FileX c’è uno studio vero</span>
+        </div>
+        <div class="origin-copy">
+          <div class="section-kicker">L’origine di FileX</div>
+          <h2>Prima di essere software, è esperienza sul campo.</h2>
+          <p>Mi chiamo <strong>Gennaro Mazzacane</strong> e la fotografia è con me da quando, a dieci anni, una piccola macchina fotografica ricevuta in regalo mi portò per la prima volta nello studio di un professionista. Le fotografie, le attrezzature e la camera oscura mi mostrarono un mondo dal quale non sono più uscito.</p>
+          <p>Negli anni ho scelto di raccontare matrimoni e persone. Lavorando ogni giorno con migliaia di immagini ho incontrato operazioni ripetitive, software troppo generici e passaggi che sottraevano attenzione al lavoro creativo.</p>
+          <div class="origin-quote">“Il momento viene prima di tutto.”</div>
+          <p>FileX nasce da qui: non per insegnare ai fotografi come lavorare, ma per costruire gli strumenti che avrei voluto trovare nel mio studio. Ogni tool risponde a un’esigenza realmente vissuta e lascia al fotografo il controllo delle proprie scelte.</p>
+          <div class="origin-signature"><span></span><div><strong>Gennaro Mazzacane</strong><small>Fotografo e ideatore di FileX</small></div></div>
+          <a class="story-link" href="https://imagestudiofotografico.com/storie" target="_blank" rel="noopener">Leggi la mia storia completa <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="workflow" id="workflow">
+      <div class="shell">
+        <div class="section-head">
+          <div class="section-kicker">La logica di FileX</div>
+          <h2>Non un percorso obbligato. Un sistema che si adatta.</h2>
+          <p>Non tutti i lavori iniziano e finiscono nello stesso modo. Per questo ogni tool FileX conserva una funzione chiara e può essere usato da solo oppure insieme agli altri.</p>
+        </div>
+        <div class="principles">
+          <article class="principle"><div class="principle-icon">1</div><h3>Specializzato</h3><p>Ogni applicazione affronta un problema concreto: selezione, archivio, stampa, conversione, ricerca, composizione, manutenzione o trasferimento.</p></article>
+          <article class="principle"><div class="principle-icon">∞</div><h3>Indipendente</h3><p>Apri soltanto il tool che ti serve. Non devi attraversare funzioni inutili o cambiare il tuo metodo di lavoro.</p></article>
+          <article class="principle"><div class="principle-icon">↔</div><h3>Coordinato</h3><p>Quando un lavoro richiede più passaggi, i tool condividono una logica comune e si inseriscono naturalmente nella stessa organizzazione.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="tools-section" id="strumenti">
+      <div class="shell">
+        <div class="section-head">
+          <div class="section-kicker">Tutto incluso</div>
+          <h2>Otto strumenti. Otto problemi risolti bene.</h2>
+          <p>Installa solo ciò che ti serve e gestisci apertura, versioni e aggiornamenti dalla stessa Suite.</p>
+        </div>
+        <div class="tools-list">
+          <a class="tool-card" href="strumenti/image-select-pro/index.html"><img class="tool-icon" src="assets/icons/photo-selector-app.png" width="256" height="256" loading="lazy" decoding="async" alt="Icona ufficiale di Image Select Pro" /><h3>Image Select Pro</h3><p>Selezione veloce, confronto, classificazione, XMP e trasferimento dei progetti.</p></a>
+          <a class="tool-card" href="strumenti/archivio-flow/index.html"><img class="tool-icon" src="assets/icons/archivio-flow.png" width="256" height="256" loading="lazy" decoding="async" alt="Icona ufficiale di Archivio Flow" /><h3>Archivio Flow</h3><p>Importazione da scheda, nomenclatura coerente e organizzazione dei lavori.</p></a>
+          <a class="tool-card" href="strumenti/filex-send/index.html"><img class="tool-icon" src="assets/icons/filex-send.png" width="256" height="256" loading="lazy" decoding="async" alt="Icona ufficiale di FileX Send" /><h3>FileX Send</h3><p>Ricezione locale con QR e consegna remota tramite link temporanei.</p></a>
+          <a class="tool-card" href="strumenti/image-party-frame/index.html"><img class="tool-icon" src="assets/icons/image-party-frame.png" width="256" height="256" loading="lazy" decoding="async" alt="Icona ufficiale di Image Party Frame" /><h3>Image Party Frame</h3><p>Template, cornici, ritaglio live ed esportazione di interi gruppi di immagini.</p></a>
+          <a class="tool-card" href="strumenti/batch-print-layout/index.html"><img class="tool-icon" src="assets/icons/batch-print-layout.png" width="256" height="256" loading="lazy" decoding="async" alt="Icona ufficiale di Batch Print Layout" /><h3>Batch Print Layout</h3><p>Impaginazione automatica su fogli pronti per la stampa e meno sprechi.</p></a>
+          <a class="tool-card" href="strumenti/image-converter/index.html"><img class="tool-icon" src="assets/icons/image-converter.png" width="256" height="256" loading="lazy" decoding="async" alt="Icona ufficiale di Image Converter" /><h3>Image Converter</h3><p>Conversioni JPG, WebP e DNG con preset per web, stampa e archivio.</p></a>
+          <a class="tool-card" href="strumenti/trova-foto/index.html"><img class="tool-icon" src="assets/icons/image-file-finder.png" width="256" height="256" loading="lazy" decoding="async" alt="Icona ufficiale di Trova Foto da Lista" /><h3>Trova Foto da Lista</h3><p>Ricerca in cartelle e sottocartelle con controllo di file mancanti e duplicati.</p></a>
+          <a class="tool-card" href="strumenti/adobe-cleaner/index.html"><img class="tool-icon" src="assets/icons/cache-sweep.png" width="256" height="256" loading="lazy" decoding="async" alt="Icona ufficiale di FileX Adobe Cleaner" /><h3>Adobe Cleaner</h3><p>Pulizia controllata delle cache e delle vecchie versioni dei programmi Adobe.</p></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="examples" id="esempi">
+      <div class="shell">
+        <div class="section-head">
+          <div class="section-kicker">Esempi reali</div>
+          <h2>Componi il flusso in base al lavoro.</h2>
+          <p>FileX non decide come devi lavorare. Ti offre strumenti che possono collaborare in combinazioni diverse.</p>
+        </div>
+        <div class="scenario-list">
+          <article class="scenario">
+            <div class="scenario-label"><small>Matrimonio o servizio fotografico</small><h3>Dalla scheda alla selezione ordinata</h3></div>
+            <div class="scenario-body"><p>Il lavoro viene importato con una struttura coerente, selezionato rapidamente e infine preparato nel formato richiesto dal laboratorio o dal cliente.</p><div class="tool-chain"><span class="chain-tool">Archivio Flow</span><span class="chain-arrow">→</span><span class="chain-tool">Image Select Pro</span><span class="chain-arrow">→</span><span class="chain-tool">Image Converter</span></div></div>
+          </article>
+          <article class="scenario">
+            <div class="scenario-label"><small>Evento, villaggio o photo booth</small><h3>Dalla raccolta alla stampa sul posto</h3></div>
+            <div class="scenario-body"><p>Le immagini arrivano dagli ospiti o dagli operatori, vengono inserite in una cornice coordinata e impaginate per una stampa efficiente.</p><div class="tool-chain"><span class="chain-tool">FileX Send</span><span class="chain-arrow">→</span><span class="chain-tool">Image Party Frame</span><span class="chain-arrow">→</span><span class="chain-tool">Batch Print Layout</span></div></div>
+          </article>
+          <article class="scenario">
+            <div class="scenario-label"><small>Ristampa e recupero ordine</small><h3>Dalla lista del cliente ai file pronti</h3></div>
+            <div class="scenario-body"><p>Da un elenco di nomi si recuperano rapidamente le fotografie nell’archivio, si controllano assenze e duplicati e si prepara il formato di uscita.</p><div class="tool-chain"><span class="chain-tool">Trova Foto da Lista</span><span class="chain-arrow">→</span><span class="chain-tool">Image Converter</span><span class="chain-arrow">→</span><span class="chain-tool">Batch Print Layout</span></div></div>
+          </article>
+          <article class="scenario">
+            <div class="scenario-label"><small>Manutenzione dello studio</small><h3>Un ambiente più ordinato e affidabile</h3></div>
+            <div class="scenario-body"><p>Archivio Flow mantiene coerenti i lavori mentre Adobe Cleaner elimina in modo controllato cache e vecchie installazioni che appesantiscono la postazione.</p><div class="tool-chain"><span class="chain-tool">Archivio Flow</span><span class="chain-arrow">＋</span><span class="chain-tool">Adobe Cleaner</span></div></div>
+          </article>
+        </div>
+        <div class="independent-note"><strong>Non serve usare tutta la catena.</strong> Ogni strumento rimane completo nel proprio compito: gli esempi mostrano possibilità di collaborazione, non un percorso imposto.</div>
+      </div>
+    </section>
+
+    <section>
+      <div class="shell benefit-grid">
+        <div class="benefit-panel">
+          <div class="stat-main"><small>Un ecosistema, molte possibilità</small><strong>8</strong><span>strumenti con la stessa dignità, ciascuno dedicato a un’esigenza concreta.</span></div>
+          <div class="panel-card"><b>FileX lavora con te, non al posto tuo.</b><span>I tuoi file rimangono sotto il tuo controllo e ogni passaggio resta trasparente.</span></div>
+        </div>
+        <div>
+          <div class="section-head"><div class="section-kicker">Semplice per scelta</div><h2>Più strumenti, senza più complessità.</h2></div>
+          <div class="benefits">
+            <article class="benefit"><span>1</span><div><h3>Un solo abbonamento</h3><p>Nessun pacchetto da confrontare e nessun tool da acquistare separatamente.</p></div></article>
+            <article class="benefit"><span>2</span><div><h3>Un solo punto di accesso</h3><p>Installazione, apertura e aggiornamento degli strumenti direttamente dalla Suite.</p></div></article>
+            <article class="benefit"><span>3</span><div><h3>Un progetto che continua a crescere</h3><p>Ogni nuovo tool e ogni aggiornamento sono già compresi nel piano attivo.</p></div></article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="pricing" id="prezzi">
+      <div class="shell">
+        <div class="section-head center">
+          <div class="section-kicker">FileX All Access</div>
+          <h2>Scegli solo quanto a lungo restare.</h2>
+          <p>Le funzioni sono sempre le stesse. Con l’annuale risparmi 44 € rispetto al pagamento mensile.</p>
+        </div>
+        <div class="pricing-card">
+          <div class="pricing-summary">
+            <span class="pill">FileX All Access</span>
+            <h3>Tutto. Sempre.</h3>
+            <p>Un piano trasparente che include ogni strumento presente e futuro.</p>
+            <div class="toggle" role="group" aria-label="Frequenza di pagamento">
+              <button id="monthly-toggle" type="button">Mensile</button>
+              <button id="annual-toggle" class="active" type="button">Annuale</button>
+            </div>
+          </div>
+          <div class="price-side">
+            <div class="price-row"><span class="price" id="price">100 €</span><span class="period" id="period">/anno</span></div>
+            <div class="saving" id="saving">Equivale a 8,33 € al mese · risparmi 44 €</div>
+            <ul class="included">
+              <li>Tutti i tool FileX</li>
+              <li>Tutti i nuovi strumenti futuri</li>
+              <li>Aggiornamenti continui</li>
+              <li>FileX Send incluso</li>
+              <li>Utilizzo su due PC</li>
+            </ul>
+            <a class="button button-dark" id="checkout-button" href="#download">Scarica la versione disponibile</a>
+            <div class="price-note" id="checkout-note">Checkout in preparazione · rinnovo automatico · nessun addebito attivo</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="shell faq-layout">
+        <div><div class="section-kicker">Domande frequenti</div><h2>Tutto chiaro, prima di iniziare.</h2><p>FileX nasce per togliere complessità anche dall’acquisto.</p></div>
+        <div>
+          <details open><summary>Quali strumenti sono inclusi?</summary><p>Tutti. Il piano comprende gli strumenti disponibili nella Suite e quelli che verranno pubblicati in futuro, senza costi di acquisto separati.</p></details>
+          <details><summary>Il piano annuale ha funzioni diverse?</summary><p>No. Mensile e annuale comprendono esattamente le stesse funzioni. Con il piano annuale paghi 100 € invece di 144 € complessivi.</p></details>
+          <details><summary>Posso usare un solo tool senza seguire un flusso completo?</summary><p>Sì. Ogni tool è un’applicazione autonoma e può essere usato indipendentemente. Le integrazioni servono a semplificare i lavori che richiedono più strumenti, non a imporre un percorso.</p></details>
+          <details><summary>Posso usare FileX su più computer?</summary><p>Il piano è pensato per un singolo professionista e comprende l’utilizzo su due PC dello stesso titolare.</p></details>
+          <details><summary>Cosa succede ai miei file?</summary><p>I tool locali lavorano direttamente sul tuo computer. Gli invii remoti di FileX Send vengono conservati temporaneamente e cancellati automaticamente dopo la consegna verificata.</p></details>
+          <details><summary>Come funziona il rinnovo?</summary><p>Mensile e annuale si rinnovano automaticamente. Puoi cancellare prima del rinnovo dal portale cliente indicato nella ricevuta; l’accesso continua fino alla fine del periodo già pagato.</p></details>
+          <details><summary>C’è una prova gratuita?</summary><p>No, non è prevista una prova gratuita al lancio. Prima del pagamento vedi prezzo totale, imposte applicabili, frequenza e condizioni del piano.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta" id="download">
+      <div class="shell">
+        <div class="cta-panel">
+          <h2>Il prossimo lavoro può già essere più semplice.</h2>
+          <p>Installa FileX Suite, scopri tutti gli strumenti e prova l’intero workflow in un unico spazio.</p>
+          <a class="button button-primary" id="download-link" href="https://github.com/gennaromazza/imagetools/releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe">Scarica FileX per Windows <span aria-hidden="true">↓</span></a>
+          <div class="microcopy"><span id="version-label">Ultima versione stabile</span><span>Installer per utente</span><span>Nessun privilegio amministratore</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="shell">
+      <div class="footer-grid">
+        <div><a class="brand" href="#top"><img class="brand-mark" src="assets/icons/suite-launcher.png" width="256" height="256" loading="lazy" decoding="async" alt="" />FileX</a><p class="footer-about">Strumenti professionali per semplificare il lavoro quotidiano di fotografi e studi.</p></div>
+        <div><h4>FileX</h4><a href="#storia">La storia</a><a href="strumenti/index.html">Tutti gli strumenti</a><a href="#prezzi">Prezzi</a><a href="#download">Download</a><a href="stato/index.html">Stato</a></div>
+        <div><h4>Supporto e condizioni</h4><a href="supporto/index.html">Centro assistenza</a><a href="requisiti/index.html">Requisiti</a><a href="sicurezza/index.html">Sicurezza</a><a href="privacy/index.html">Privacy</a><a href="cookie/index.html">Cookie</a><a href="termini/index.html">Termini</a><a href="licenza/index.html">Licenza</a><a href="rimborsi/index.html">Rimborsi</a></div>
+      </div>
+      <div class="footer-bottom"><span>© <span id="year"></span> FileX. Tutti i diritti riservati.</span><span>Creato in Italia per chi lavora con le immagini.</span></div>
+    </div>
+  </footer>
+
+  <script>
+    const monthly = document.querySelector('#monthly-toggle');
+    const annual = document.querySelector('#annual-toggle');
+    const price = document.querySelector('#price');
+    const period = document.querySelector('#period');
+    const saving = document.querySelector('#saving');
+
+    function setBilling(mode) {
+      const isAnnual = mode === 'annual';
+      monthly.classList.toggle('active', !isAnnual);
+      annual.classList.toggle('active', isAnnual);
+      monthly.setAttribute('aria-pressed', String(!isAnnual));
+      annual.setAttribute('aria-pressed', String(isAnnual));
+      price.textContent = isAnnual ? '100 €' : '12 €';
+      period.textContent = isAnnual ? '/anno' : '/mese';
+      saving.textContent = isAnnual ? 'Equivale a 8,33 € al mese · risparmi 44 €' : 'Flessibile · interrompi prima del rinnovo';
+      const checkout = document.querySelector('#checkout-button');
+      const configuredUrl = isAnnual ? window.filexCheckout?.annual : window.filexCheckout?.monthly;
+      if (configuredUrl) {
+        checkout.href = configuredUrl;
+        checkout.textContent = isAnnual ? 'Scegli annuale' : 'Scegli mensile';
+        document.querySelector('#checkout-note').textContent = 'Pagamento sicuro · due PC inclusi';
+      }
+    }
+
+    monthly.addEventListener('click', () => setBilling('monthly'));
+    annual.addEventListener('click', () => setBilling('annual'));
+    window.filexCheckout = { monthly: null, annual: null };
+    fetch('/api/licensing/health', { cache: 'no-store' })
+      .then(response => response.ok ? response.json() : null)
+      .then(payload => {
+        if (payload?.checkout) window.filexCheckout = payload.checkout;
+        setBilling(annual.classList.contains('active') ? 'annual' : 'monthly');
+      })
+      .catch(() => undefined);
+    setBilling('annual');
+    document.querySelector('#year').textContent = new Date().getFullYear();
+
+    fetch('https://api.github.com/repos/gennaromazza/imagetools/releases?per_page=30')
+      .then(response => response.ok ? response.json() : [])
+      .then(releases => {
+        const release = releases.find(item => !item.draft && !item.prerelease && /^suite-v\d+\.\d+\.\d+/.test(item.tag_name));
+        if (!release) return;
+        const installer = release.assets.find(asset => /^FileX-Suite-.*-stable-x64-setup\.exe$/.test(asset.name));
+        if (installer) document.querySelector('#download-link').href = installer.browser_download_url;
+        document.querySelector('#version-label').textContent = release.tag_name;
+      })
+      .catch(() => {});
+  </script>
+</body>
+</html>

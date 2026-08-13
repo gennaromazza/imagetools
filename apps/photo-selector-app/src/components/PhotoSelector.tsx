@@ -561,6 +561,7 @@ export function PhotoSelector({
   const pendingVisibleIdsRef = useRef<string[] | null>(null);
   const visibleIdsDispatchRafRef = useRef<number | null>(null);
   const lastBackgroundPreviewOrderSignatureRef = useRef<string>("");
+  const lastAppliedGridResetSignatureRef = useRef<string | null>(null);
   const frozenDynamicSortOrderRef = useRef<{ sortBy: SortMode; signature: string; ids: string[] } | null>(null);
   const batchPulseTokenRef = useRef(0);
   const batchPulseClearTimerRef = useRef<number | null>(null);
@@ -583,11 +584,10 @@ export function PhotoSelector({
   );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  // The parent replaces the photo array after every classification change. Keep
-  // the array identity in this dependency list: depending only on its length
-  // leaves the filter metadata one render behind whenever a color/label is
-  // assigned to an existing photo.
-  const metadataPhotos = useMemo(() => photos, [metadataVersion, photos]);
+  // Thumbnail batches replace the photo array many times per second. Metadata
+  // only needs rebuilding for actual metadata changes and once at pipeline end,
+  // when orientation-based sorting can consume the final thumbnail dimensions.
+  const metadataPhotos = useMemo(() => photos, [metadataVersion, isThumbnailLoading]);
   const metadataAssetById = useMemo(
     () => new Map(metadataPhotos.map((photo) => [photo.id, photo])),
     [metadataPhotos],
@@ -1837,6 +1837,7 @@ export function PhotoSelector({
       pickFilter,
       ratingFilter,
       colorFilter,
+      formatFilter,
       customLabelFilter,
       folderFilter,
       seriesFilter,
@@ -1849,6 +1850,7 @@ export function PhotoSelector({
       customLabelFilter,
       deferredSearchQuery,
       folderFilter,
+      formatFilter,
       pickFilter,
       ratingFilter,
       seriesFilter,
@@ -2269,6 +2271,11 @@ export function PhotoSelector({
   }, [handleWindowKeyDown]);
 
   useEffect(() => {
+    if (lastAppliedGridResetSignatureRef.current === gridResetSignature) {
+      return;
+    }
+    lastAppliedGridResetSignatureRef.current = gridResetSignature;
+
     const grid = gridRef.current;
     if (grid) {
       grid.scrollTo({ top: 0 });

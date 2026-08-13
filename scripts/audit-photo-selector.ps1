@@ -116,6 +116,7 @@ Assert-Contains (Join-Path $sourceRoot 'components\PhotoQuickPreviewModal.tsx') 
 Assert-Contains (Join-Path $sourceRoot 'components\PhotoQuickPreviewModal.tsx') 'classificationMutationRef[\s\S]*navigationIds\.add\(asset\.id\)' 'QUICK-002' 'Una classificazione che modifica i filtri mantiene la foto corrente e non produce doppi salti.'
 Assert-Contains (Join-Path $sourceRoot 'components\PhotoQuickPreviewModal.tsx') 'advanceAfterChange && autoAdvanceOnAction' 'QUICK-003' 'Le etichette da tastiera rispettano lo stesso toggle di auto-avanzamento.'
 Assert-Contains $selectorPath 'savePhotoSelectorPreferences\(\{ autoAdvanceOnAction: nextEnabled \}\)' 'QUICK-004' 'La scelta di auto-avanzamento viene conservata nelle preferenze.'
+Assert-Contains $selectorPath 'lastAppliedGridResetSignatureRef\.current === gridResetSignature' 'GRID-001' 'Gli aggiornamenti asincroni non devono riportare lo scroll della griglia in alto.'
 
 $sourceFiles = Get-ChildItem -LiteralPath $sourceRoot -Recurse -File |
   Where-Object { $_.Extension -in @('.ts', '.tsx', '.css') }

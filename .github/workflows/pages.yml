@@ -1,11 +1,6 @@
-name: Publish FileX Suite page
+name: Publish FileX website (legacy GitHub Pages)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "docs/**"
-      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -31,7 +26,7 @@ jobs:
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: website
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4

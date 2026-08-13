@@ -364,6 +364,9 @@ export default {
         ".output/electron/updater.js",
         ".output/electron/filex-process-coordinator.js",
         ".output/electron/tool-manifest.js",
+        ".output/electron/license-service.js",
+        ".output/electron/license-attestation.js",
+        ".output/electron/license-public-key.js",
         "package.json",
         "!node_modules/@img{,/**/*}",
         "!node_modules/cors{,/**/*}",
@@ -483,7 +486,11 @@ export default {
      * Per gli aggiornamenti FileX: eseguito con /S
      * direttamente dal processo Electron della Suite.
      */
-    oneClick: true,
+    oneClick: false,
+
+    license: "build/license_it.txt",
+
+    allowToChangeInstallationDirectory: false,
 
     /*
      * CRITICO: installazione per utente.

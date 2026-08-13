@@ -24,3 +24,4 @@ apps/filex-cloud-functions/lib/
 **/.venv/
 .vscode/extensions.json
 install.sh
+.release-worktrees/

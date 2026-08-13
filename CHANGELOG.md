@@ -1,10 +1,33 @@
 # Changelog
 
+## 2026-08-13 - Licensing e pagamenti FileX
+
+- introdotto l'entitlement unico FileX All Access per tutti i tool, con due dispositivi, sette giorni di cortesia e attestazione offline firmata valida fino a 14 giorni
+- aggiunti attivazione, validazione, disattivazione, webhook Lemon Squeezy firmati, rate limit e retention automatica dei log tecnici
+- aggiunta gestione licenza nella Suite e gate per runtime condiviso e applicazioni Electron autonome
+- resa obbligatoria nel manifest la strategia licenza di ogni tool e aggiunto il test `test:filex-license-coverage` per proteggere anche i tool futuri
+- pubblicati sito, condizioni, privacy, EULA, rimborsi e pagina post-acquisto; configurato Lemon Squeezy Test mode con piani da 12 EUR/mese e 100 EUR/anno
+- enforcement mantenuto in `observe` fino all'approvazione e al collaudo live dello store
+
 ## 2026-08-11 - Image Select Pro 0.1.27
 
 - impedita l'esecuzione tardiva del polling delle modifiche esterne dopo la chiusura o il rinnovo del relativo effetto
 - evitati aggiornamenti asincroni obsoleti delle anteprime quando cambia rapidamente la selezione o viene chiuso il tool
 - mantenute invariate le versioni di FileX Suite e degli altri tool
+
+## 2026-08-10 - Image Select Pro 0.1.27
+
+### Image Select Pro
+- la scrittura dei sidecar XMP non modifica piu' il file immagine sorgente e conserva data e ora originali
+- un sidecar XMP gia' invariato non viene piu' riscritto, evitando tocchi superflui su disco e cartelle recenti
+- deduplicati i target sidecar quando sorgente e companion RAWs condividono lo stesso file `.xmp`
+- ridotti i ri-render del pannello di classificazione durante i batch di miniature: la memoizzazione dei metadati non dipende piu' dall'identita' dell'array foto
+- lo scroll della griglia non torna piu' in alto dopo aggiornamenti asincroni che non cambiano l'insieme filtrato
+- aggiunte verifiche automatiche che il sidecar non alteri il sorgente e che non venga riscritto se identico
+
+### Release engineering
+- release indipendente di Image Select Pro con tag `photo-selector-app-v0.1.27`, installer Windows x64 e catalogo stabile dedicato
+- FileX Suite e gli altri tool mantengono invariata la propria versione
 
 ## 2026-08-10 - FileX Send 0.1.2
 

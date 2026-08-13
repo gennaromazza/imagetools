@@ -452,7 +452,7 @@ Gate: analisi degli installer dimostra che ciascun ASAR contiene soltanto codice
 - `docs/13-installer-and-updater-runbook.md`
 - `docs/18-publish-build-contract.md`
 - `docs/GIT_WORKFLOW.md`, soltanto se cambiano naming o gestione dei branch release
-- `docs/index.html`
+- `website/index.html`
 
 ### Test
 

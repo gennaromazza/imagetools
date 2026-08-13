@@ -28,6 +28,7 @@ import {
   installSuiteUpdate,
 } from "./suite-updater.js";
 import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
+import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState } from "./license-service.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell, Tray } = electron;
 const suite = desktopToolManifest["suite-launcher"];
@@ -255,6 +256,11 @@ function createTray(): void {
     ...getSuiteManagedTools().map((tool) => ({
       label: tool.displayName,
       click: async () => {
+        const license = await getLicenseState();
+        if (!license.canUseTools) {
+          dialog.showErrorBox("FileX Suite", "FileX All Access non e' attivo. Apri la Suite per gestire la licenza.");
+          return;
+        }
         const result = await openInstalledTool(tool.id);
         if (!result.ok) dialog.showErrorBox("FileX Suite", result.message);
       },
@@ -296,9 +302,19 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:get-tool-update-job", (_event, jobId: string) => getUpdateJob(jobId));
   ipcMain.handle("filex:apply-tool-update", (_event, jobId: string) => applyToolUpdate(jobId));
   ipcMain.handle("filex:open-installed-tool", (_event, toolId: DesktopToolId, launchArgs?: string[]) =>
-    openInstalledTool(toolId, launchArgs));
+    getLicenseState().then((license) => license.canUseTools
+      ? openInstalledTool(toolId, launchArgs)
+      : ({ ok: false, message: "FileX All Access non e' attivo. Apri la sezione Licenza nella Suite." })));
   ipcMain.handle("filex:get-suite-dock-state", () => readDockState());
   ipcMain.handle("filex:save-suite-dock-state", (_event, state: Partial<DesktopDockState>) => saveDockState(state));
+  ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => getLicenseState(Boolean(refresh)));
+  ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) => activateLicense(licenseKey, deviceLabel));
+  ipcMain.handle("filex:deactivate-license", () => deactivateLicense());
+  ipcMain.handle("filex:open-license-checkout", async (_event, billingPeriod: "monthly" | "annual") => {
+    const checkout = await getCheckoutConfiguration();
+    const destination = checkout[billingPeriod] ?? "https://filex-suite.web.app/#prezzi";
+    return shell.openExternal(destination);
+  });
 }
 
 app.setName(suite.productName);

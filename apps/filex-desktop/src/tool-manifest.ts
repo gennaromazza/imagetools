@@ -23,6 +23,7 @@ export interface DesktopToolDescriptor {
   releaseManifestKey: string;
   aiSidecarOptional?: boolean;
   suiteVisible: boolean;
+  licenseRuntime: "management" | "shared-runtime" | "standalone";
 }
 
 export const desktopToolManifest = {
@@ -46,6 +47,7 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "suite-launcher",
     suiteVisible: false,
+    licenseRuntime: "management",
   },
   "image-party-frame": {
     id: "image-party-frame",
@@ -67,6 +69,7 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "image-party-frame",
     suiteVisible: true,
+    licenseRuntime: "shared-runtime",
   },
   "batch-print-layout": {
     id: "batch-print-layout",
@@ -89,6 +92,7 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "batch-print-layout",
     suiteVisible: true,
+    licenseRuntime: "shared-runtime",
   },
   "archivio-flow": {
     id: "archivio-flow",
@@ -110,6 +114,7 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "archivio-flow",
     suiteVisible: true,
+    licenseRuntime: "shared-runtime",
   },
   "image-converter": {
     id: "image-converter",
@@ -131,6 +136,7 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "image-converter",
     suiteVisible: true,
+    licenseRuntime: "shared-runtime",
   },
   "image-file-finder": {
     id: "image-file-finder",
@@ -153,6 +159,7 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "image-file-finder",
     suiteVisible: true,
+    licenseRuntime: "shared-runtime",
   },
   "cache-sweep": {
     id: "cache-sweep",
@@ -176,6 +183,7 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "cache-sweep",
     suiteVisible: true,
+    licenseRuntime: "standalone",
   },
   "filex-send": {
     id: "filex-send",
@@ -198,6 +206,30 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "filex-send",
     suiteVisible: true,
+    licenseRuntime: "standalone",
+  },
+  "backup-guard": {
+    id: "backup-guard",
+    displayName: "FileX Backup Guard",
+    productName: "FileX Backup Guard",
+    executableName: "FileX-Backup-Guard",
+    legacyUpgradeDisplayNames: ["FileX Backup Guard"],
+    workspacePackageName: "@photo-tools/backup-guard",
+    versionPackageRelativeToShell: "../backup-guard",
+    electronMainOutputFile: "backup-guard/electron/main.js",
+    electronPreloadOutputFile: "backup-guard/electron/preload.cjs",
+    workspaceDistDirRelativeToShell: "../backup-guard/.output/web",
+    packagedDistDir: "apps/backup-guard/web",
+    brandAssetName: "backup-guard",
+    defaultWindowWidth: 1380,
+    defaultWindowHeight: 920,
+    minWindowWidth: 1060,
+    minWindowHeight: 720,
+    devUrl: "http://127.0.0.1:4255",
+    releaseChannelDefault: "stable",
+    releaseManifestKey: "backup-guard",
+    suiteVisible: true,
+    licenseRuntime: "standalone",
   },
   "photo-selector-app": {
     id: "photo-selector-app",
@@ -232,6 +264,7 @@ export const desktopToolManifest = {
     releaseChannelDefault: "stable",
     releaseManifestKey: "photo-selector-app",
     suiteVisible: true,
+    licenseRuntime: "shared-runtime",
   },
 } satisfies Record<DesktopToolId, DesktopToolDescriptor>;
 

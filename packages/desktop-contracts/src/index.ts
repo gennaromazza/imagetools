@@ -7,6 +7,7 @@ export type DesktopToolId =
   | "image-file-finder"
   | "cache-sweep"
   | "filex-send"
+  | "backup-guard"
   | "photo-selector-app";
 
 export type DesktopReleaseChannel = "stable" | "beta";

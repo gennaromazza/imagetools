@@ -31,6 +31,12 @@ const suiteApi = {
   getSuiteDockState: (): Promise<DesktopDockState> => ipcRenderer.invoke("filex:get-suite-dock-state"),
   saveSuiteDockState: (state: Partial<DesktopDockState>): Promise<DesktopDockState> =>
     ipcRenderer.invoke("filex:save-suite-dock-state", state),
+  getLicenseState: (refresh?: boolean) => ipcRenderer.invoke("filex:get-license-state", refresh),
+  activateLicense: (licenseKey: string, deviceLabel?: string) =>
+    ipcRenderer.invoke("filex:activate-license", licenseKey, deviceLabel),
+  deactivateLicense: () => ipcRenderer.invoke("filex:deactivate-license"),
+  openLicenseCheckout: (billingPeriod: "monthly" | "annual") =>
+    ipcRenderer.invoke("filex:open-license-checkout", billingPeriod),
 };
 
 contextBridge.exposeInMainWorld("filexDesktop", suiteApi);

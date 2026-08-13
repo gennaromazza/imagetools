@@ -1,5 +1,18 @@
 {
   "projects": {
     "default": "gen-lang-client-0321087169"
-  }
+  },
+  "targets": {
+    "gen-lang-client-0321087169": {
+      "hosting": {
+        "filex-send": [
+          "gen-lang-client-0321087169"
+        ],
+        "filex-website": [
+          "filex-suite"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }
