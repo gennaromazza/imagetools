@@ -650,17 +650,21 @@ export async function writeSidecarXmp(assetId: string, xml: string): Promise<boo
     return false;
   }
 
-  let allOk = true;
-  if (absolutePath) {
-    const ok = await window.filexDesktop!.writeSidecarXmp(absolutePath, xml);
-    if (!ok) allOk = false;
-  }
-  if (companionAbsolutePath) {
-    const ok = await window.filexDesktop!.writeSidecarXmp(companionAbsolutePath, xml);
-    if (!ok) allOk = false;
+  const uniqueSidecarTargets = new Map<string, string>();
+  for (const path of [absolutePath, companionAbsolutePath]) {
+    if (!path) {
+      continue;
+    }
+    const sidecarKey = path.replace(/\.[^./\\]+$/, ".xmp").toLocaleLowerCase();
+    if (!uniqueSidecarTargets.has(sidecarKey)) {
+      uniqueSidecarTargets.set(sidecarKey, path);
+    }
   }
 
-  return allOk;
+  const results = await Promise.all(
+    Array.from(uniqueSidecarTargets.values(), (path) => window.filexDesktop!.writeSidecarXmp(path, xml)),
+  );
+  return results.every(Boolean);
 }
 
 export async function createOnDemandPreviewAsync(

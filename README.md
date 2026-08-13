@@ -7,6 +7,7 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 - `apps/`: applicazioni finali della suite
 - `packages/`: moduli condivisi
 - `docs/`: documentazione di suite e dei singoli tool
+- `website/`: sito pubblico e landing page di FileX, pubblicati sul target Firebase Hosting `filex-website`
 
 ## Tool principali
 
@@ -24,6 +25,14 @@ FileX Suite gestisce ogni tool separatamente. La Suite usa un feed di aggiorname
 
 Il launcher consente di organizzare i tool in sezioni personali persistenti. Lo stesso tool può comparire in più sezioni, essere aggiunto tramite trascinamento e tornare in qualsiasi momento all'organizzazione predefinita senza modificare l'installazione.
 Le sezioni personali possono essere rinominate direttamente nell'interfaccia, confermando con `Invio` o annullando con `Esc`.
+
+## Licenze e pagamenti
+
+FileX usa un solo entitlement, `filex-all-access`, valido per tutti gli strumenti presenti e futuri. La Suite gestisce attivazione, disattivazione, verifica online e attestazione firmata per l'uso offline; il piano prevede due dispositivi e 14 giorni offline dopo una verifica valida. Il backend Firebase non riceve dati carta e traduce esclusivamente gli eventi firmati del Merchant of Record nello stato tecnico della licenza.
+
+La copertura e' obbligatoria nel manifest desktop: i tool sul runtime condiviso ereditano automaticamente il gate centrale, mentre un'app con entry point Electron autonomo deve dichiarare `licenseRuntime: "standalone"` e invocare il gate prima di creare la finestra. `npm run test:filex-license-coverage` impedisce di aggiungere o pubblicare un tool futuro privo di questo collegamento.
+
+Stato commerciale al 13 agosto 2026: Lemon Squeezy e' configurato in Test mode con prodotto, varianti e webhook; lo store live e' in revisione. L'enforcement remoto resta `observe` fino al collaudo end-to-end live.
 
 Per aggiornare:
 
@@ -60,5 +69,7 @@ L’obiettivo è una suite integrata, con:
 - `docs/03-desktop-windows-migration.md`: piano di migrazione desktop Windows condiviso per tutta la suite
 - `docs/GIT_WORKFLOW.md`: policy Git operativa (branch, sync, conflitti, recovery)
 - `docs/18-publish-build-contract.md`: contratto completo per build, pubblicazione, sito e updater
+- `docs/20-licensing-and-payments-mvp.md`: architettura, sicurezza e rollout di licenze e pagamenti
+- `docs/21-licensing-operations-runbook.md`: configurazione e operazioni Lemon Squeezy/Firebase
 - `docs/10-product-vision-suite-desktop.md` .. `docs/17-roadmap-v2.md`: documentazione enterprise per programma EXE Suite
 - `docs/tools/`: documenti specifici dei singoli tool

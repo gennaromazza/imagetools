@@ -16,6 +16,7 @@ const expectedPackages = {
   "archivio-flow": { name: "Archivio-Flow", main: ".output/electron/main.js" },
   "cache-sweep": { name: "FileX-Adobe-Cleaner", main: ".output/electron/cache-sweep/electron/main.js" },
   "filex-send": { name: "FileX-Send", main: ".output/electron/filex-send/electron/main.js" },
+  "backup-guard": { name: "FileX-Backup-Guard", main: ".output/electron/backup-guard/electron/main.js" },
 };
 
 const expected = expectedPackages[args.component];
@@ -41,6 +42,13 @@ if (packageJson.main !== expected.main) {
 
 if (args.component === "suite") {
   const entries = listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/"));
+  for (const requiredEntry of [
+    "/.output/electron/license-service.js",
+    "/.output/electron/license-attestation.js",
+    "/.output/electron/license-public-key.js",
+  ]) {
+    if (!entries.includes(requiredEntry)) throw new Error(`La Suite non contiene ${requiredEntry}`);
+  }
   const forbiddenEntries = [
     "/.output/electron/main.js",
     "/.output/electron/desktop-store.js",
@@ -68,6 +76,7 @@ if (args.component === "cache-sweep") {
     "/.output/electron/cache-sweep/electron/main.js",
     "/.output/electron/cache-sweep/electron/preload.cjs",
     "/.output/electron/cache-sweep/electron/cache-sweep-service.js",
+    "/.output/electron/cache-sweep/electron/license-gate.js",
   ];
   for (const requiredEntry of requiredEntries) {
     if (!entries.includes(requiredEntry)) {
@@ -92,11 +101,24 @@ if (args.component === "filex-send") {
     "/.output/electron/filex-send/electron/file-send-service.js",
     "/.output/electron/filex-send/electron/firebase-anonymous-auth.js",
     "/.output/electron/filex-send/electron/remote-client-service.js",
+    "/.output/electron/filex-send/electron/license-gate.js",
   ]) {
     if (!entries.includes(requiredEntry)) throw new Error(`FileX Send non contiene ${requiredEntry}`);
   }
   const forbiddenEntries = entries.filter((entry) => entry.startsWith("/node_modules/") || entry === "/.output/electron/main.js");
   if (forbiddenEntries.length > 0) throw new Error(`FileX Send contiene runtime estranei:\n${forbiddenEntries.slice(0, 20).join("\n")}`);
+}
+
+if (args.component === "backup-guard") {
+  const entries = listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/"));
+  for (const requiredEntry of [
+    "/.output/electron/backup-guard/electron/main.js",
+    "/.output/electron/backup-guard/electron/preload.cjs",
+    "/.output/electron/backup-guard/electron/backup-guard-service.js",
+    "/.output/electron/backup-guard/electron/license-gate.js",
+  ]) {
+    if (!entries.includes(requiredEntry)) throw new Error(`Backup Guard non contiene ${requiredEntry}`);
+  }
 }
 
 console.log(`${args.component} ${args.version}: ASAR verificato (${packageJson.main}).`);

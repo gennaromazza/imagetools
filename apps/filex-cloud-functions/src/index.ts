@@ -3,9 +3,11 @@ import { getApps, initializeApp } from "firebase-admin/app";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { logger } from "firebase-functions";
+import { defineSecret } from "firebase-functions/params";
 import { onRequest, type Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, hashToken, publicUploadAllowed, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
+import { handleLicensingRequest } from "./licensing-api.js";
 
 if (!getApps().length) initializeApp({ storageBucket: "filex-cloud-391620173227-eu" });
 
@@ -13,6 +15,8 @@ const db = getFirestore();
 const bucket = getStorage().bucket();
 const publicBaseUrl = "https://gen-lang-client-0321087169.web.app";
 const firebaseWebApiKey = "AIzaSyAilpdQ7nneAsZ8eKvOMPrEb7wS1axNUkQ";
+const lemonSqueezyWebhookSecret = defineSecret("LEMONSQUEEZY_WEBHOOK_SECRET");
+const licenseSigningPrivateKey = defineSecret("FILEX_LICENSE_SIGNING_PRIVATE_KEY");
 
 interface SessionRecord {
   ownerUid: string;
@@ -42,11 +46,15 @@ interface HttpResponse {
   status(code: number): { json(value: unknown): unknown };
 }
 
-export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memory: "256MiB" }, async (request, response) => {
+export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memory: "256MiB", secrets: [lemonSqueezyWebhookSecret, licenseSigningPrivateKey] }, async (request, response) => {
   response.set("Cache-Control", "no-store");
   try {
     const rawPath = request.path.replace(/\/+$/, "") || "/";
     const path = rawPath.replace(/^\/api(?=\/|$)/, "") || "/";
+    if (path === "/licensing" || path.startsWith("/licensing/")) {
+      await handleLicensingRequest(db, request, response, lemonSqueezyWebhookSecret.value(), licenseSigningPrivateKey.value());
+      return;
+    }
     if (request.method === "GET" && path === "/health") return json(response, 200, { ok: true, service: "FileX Cloud" });
     if (request.method === "POST" && path === "/sessions") return createSession(request, response);
 

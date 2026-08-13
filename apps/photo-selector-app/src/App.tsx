@@ -648,7 +648,6 @@ export function App() {
   const [hasWritableFolderAccess, setHasWritableFolderAccess] = useState(false);
   const [isXmpBannerDismissed, setIsXmpBannerDismissed] = useState(false);
   const xmpSyncTimerRef = useRef<number | null>(null);
-  const xmpSnapshotRef = useRef(new Map<string, string>());
   const pendingXmpSyncIdsRef = useRef(new Set<string>());
   const xmpSyncInFlightRef = useRef<Promise<{ synced: number; failed: number }> | null>(null);
   const [xmpSyncVersion, setXmpSyncVersion] = useState(0);
@@ -1142,6 +1141,9 @@ export function App() {
           try {
             const existingXml = await readSidecarXmp(asset.id);
             const nextXml = upsertXmpState(existingXml, asset, activeSet.has(asset.id));
+            if (existingXml === nextXml) {
+              return true;
+            }
             return await writeSidecarXmp(asset.id, nextXml);
           } catch {
             return false;
@@ -2062,7 +2064,6 @@ export function App() {
     assetNameByIdRef.current = new Map();
     assetIndexByIdRef.current = new Map();
     pendingXmpSyncIdsRef.current.clear();
-    xmpSnapshotRef.current.clear();
     cancelReactBatchMetric();
     perfTimeEnd(PERF_FOLDER_OPEN_TO_FIRST_THUMBNAIL_VISIBLE);
     perfTimeEnd(PERF_FIRST_THUMBNAIL_TO_GRID_COMPLETE);
@@ -2192,7 +2193,6 @@ export function App() {
           assetNameByIdRef.current = new Map();
           assetIndexByIdRef.current = new Map();
           pendingXmpSyncIdsRef.current.clear();
-          xmpSnapshotRef.current.clear();
           setAllAssets([]);
           bumpPhotoMetadataVersion();
           setActiveAssetIds([]);

@@ -9,7 +9,7 @@ Al termine devono essere disponibili:
 - codice integrato in `main` tramite il workflow Git documentato;
 - tag Git namespaced coerente con la versione del componente (`suite-vX.Y.Z` o `<tool-id>-vX.Y.Z`);
 - changelog e documentazione aggiornati;
-- sito GitHub Pages aggiornato;
+- sito Firebase Hosting in `website/` aggiornato;
 - installer del solo componente pubblicato;
 - blockmap e, soltanto per una release Suite, `latest.yml` nel feed Suite dedicato;
 - soltanto per una release tool, aggiornamento della sua voce in `stable.json` o `beta.json`;
@@ -20,13 +20,13 @@ Al termine devono essere disponibili:
 1. Sincronizzare `main` con `git pull --ff-only origin main` e creare un branch release.
 2. Individuare il componente interessato e scegliere la sua nuova versione semantica.
 3. Allineare il relativo `package.json`, il lockfile e il tag namespaced.
-4. Aggiornare `CHANGELOG.md`, documentazione tecnica, checklist e pagina download.
+4. Aggiornare `CHANGELOG.md`, documentazione tecnica e checklist in `docs/`, oltre alla pagina download in `website/`.
 5. Eseguire test, typecheck e build locali in proporzione alle modifiche.
 6. Verificare che `.github/workflows/windows-release.yml` supporti il componente senza costruire Suite o tool estranei.
 7. Aprire e integrare la PR verso `main`.
 8. Creare e pushare il tag del componente; il workflow genera soltanto il suo installer e aggiorna il feed pertinente.
-9. Attendere il completamento dei workflow `FileX Windows Release` e `Publish FileX Suite page`.
-10. Scaricare e validare il manifest remoto e controllare asset, alias download e sito pubblico.
+9. Attendere il completamento del workflow `FileX Windows Release` e, se `website/` e' cambiato, pubblicare il target Firebase `filex-website` con `npm run deploy:website`.
+10. Scaricare e validare il manifest remoto e controllare asset, alias download e sito pubblico su `https://filex-suite.web.app`.
 
 ## Verifica updater
 

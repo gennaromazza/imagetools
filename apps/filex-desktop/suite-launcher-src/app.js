@@ -18,6 +18,11 @@ const sectionsDialog = document.querySelector('#sections-dialog');
 const sectionsDialogTitle = document.querySelector('#sections-dialog-title');
 const sectionsDialogContent = document.querySelector('#sections-dialog-content');
 const suiteToast = document.querySelector('#suite-toast');
+const licenseDialog = document.querySelector('#license-dialog');
+const licenseActiveView = document.querySelector('#license-active-view');
+const licenseActivationView = document.querySelector('#license-activation-view');
+const licenseError = document.querySelector('#license-error');
+let licenseState = null;
 const metadata = {
   'photo-selector-app': { icon:'select', category:'Selezione', description:'Gestisce la selezione completa di servizi fotografici anche molto grandi. Permette di sfogliare rapidamente JPEG e RAW, confrontare gli scatti, assegnare valutazioni, preferenze ed etichette colore, sincronizzare i dati XMP e salvare o trasferire il progetto tramite Google Drive.', color:'#36a97b' },
   'image-party-frame': { icon:'frame', category:'Creatività', description:'Crea progetti fotografici con cornici e composizioni grafiche usando template predefiniti o personalizzati. Consente di regolare ritaglio e zoom per ogni immagine, confrontare prima e dopo, validare il risultato ed esportare interi gruppi di fotografie pronti per eventi e consegne.', color:'#d9695f' },
@@ -90,6 +95,45 @@ function showToast(message) {
   suiteToast.textContent = message;
   suiteToast.hidden = false;
   toastTimer = setTimeout(() => { suiteToast.hidden = true; }, 2600);
+}
+
+function formatLicenseDate(value) {
+  return typeof value === 'number' ? new Date(value).toLocaleDateString('it-IT', { day:'2-digit', month:'short', year:'numeric' }) : '-';
+}
+
+function renderLicense(state) {
+  licenseState = state;
+  const permitted = state?.status === 'active' || state?.status === 'grace';
+  const statusLabel = state?.status === 'active' ? 'Attiva' : state?.status === 'grace' ? 'Da aggiornare' : state?.status === 'unavailable' ? 'Offline' : 'Non attiva';
+  document.querySelector('#license-sidebar-status').textContent = statusLabel;
+  document.querySelector('#license-dot').classList.toggle('active', permitted);
+  document.querySelector('#license-summary-title').textContent = permitted ? 'FileX All Access' : 'Licenza FileX';
+  document.querySelector('#license-summary-copy').textContent = state?.message || 'Verifica non disponibile.';
+  document.querySelector('#license-mode').textContent = `Modalita licenze: ${state?.enforcement || 'observe'}`;
+  licenseActiveView.hidden = !permitted;
+  licenseActivationView.hidden = permitted;
+  if (permitted) {
+    document.querySelector('#license-state-badge').textContent = state.status === 'grace' ? 'PERIODO DI CORTESIA' : 'ATTIVA';
+    document.querySelector('#license-state-message').textContent = state.message;
+    document.querySelector('#license-devices').textContent = `${state.activation.current} di ${state.activation.limit}`;
+    document.querySelector('#license-valid-until').textContent = formatLicenseDate(state.validUntil);
+    document.querySelector('#license-offline-until').textContent = formatLicenseDate(state.offlineUntil);
+  } else if (state?.message) {
+    licenseError.textContent = state.message;
+    licenseError.hidden = state.status === 'unlicensed';
+  }
+}
+
+async function refreshLicense(force = false) {
+  const state = await api.getLicenseState(force);
+  renderLicense(state);
+  return state;
+}
+
+function openLicenseDialog() {
+  licenseError.hidden = true;
+  if (licenseState) renderLicense(licenseState);
+  licenseDialog.showModal();
 }
 
 function stopSuiteInstallCountdown() {
@@ -299,6 +343,47 @@ nav.addEventListener('click', e => { const b=e.target.closest('[data-category]')
 search.addEventListener('input', renderTools);
 toolsGrid.addEventListener('click', async e => { const b=e.target.closest('[data-action]'); if(!b)return; const {action,id}=b.dataset; if(action==='favorite'){ favorites.has(id)?favorites.delete(id):favorites.add(id); localStorage.setItem('filex-favorites',JSON.stringify([...favorites])); renderTools(); return; } if(action==='sections'){ openToolSectionsDialog(id); return; } try { if(action==='open'){ b.disabled=true; const result=await api.openInstalledTool(id); if(!result.ok) throw new Error(result.message); recent=[id,...recent.filter(x=>x!==id)].slice(0,6); localStorage.setItem('filex-recent',JSON.stringify(recent)); b.disabled=false; } else await install(id,b); } catch(error){ b.disabled=false; alert(error.message||String(error)); } });
 document.querySelector('#manage-sections-btn').addEventListener('click', openManageSectionsDialog);
+document.querySelector('#license-btn').addEventListener('click', openLicenseDialog);
+document.querySelector('#license-summary-button').addEventListener('click', openLicenseDialog);
+document.querySelector('#license-refresh').addEventListener('click', async event => {
+  event.currentTarget.disabled = true;
+  try { await refreshLicense(true); } catch (error) { alert(error.message || String(error)); }
+  finally { event.currentTarget.disabled = false; }
+});
+const licenseConsent = document.querySelector('#license-consent');
+const licenseActivateButton = document.querySelector('#license-activate');
+licenseConsent.addEventListener('change', () => { licenseActivateButton.disabled = !licenseConsent.checked; });
+document.querySelector('#license-activate').addEventListener('click', async event => {
+  if (!licenseConsent.checked) return;
+  const key = document.querySelector('#license-key').value;
+  const label = document.querySelector('#license-device-label').value;
+  licenseError.hidden = true;
+  event.currentTarget.disabled = true;
+  event.currentTarget.textContent = 'Attivazione...';
+  try {
+    const state = await api.activateLicense(key, label);
+    renderLicense(state);
+    document.querySelector('#license-key').value = '';
+    licenseConsent.checked = false;
+    licenseActivateButton.disabled = true;
+    showToast('FileX All Access attivato.');
+  } catch (error) {
+    licenseError.textContent = error.message || String(error);
+    licenseError.hidden = false;
+  } finally {
+    event.currentTarget.disabled = false;
+    event.currentTarget.textContent = 'Attiva FileX';
+  }
+});
+document.querySelector('#license-deactivate').addEventListener('click', async event => {
+  if (!confirm('Disattivare FileX su questo PC? I tuoi file e progetti non verranno eliminati.')) return;
+  event.currentTarget.disabled = true;
+  try { renderLicense(await api.deactivateLicense()); showToast('PC disattivato.'); }
+  catch (error) { alert(error.message || String(error)); }
+  finally { event.currentTarget.disabled = false; }
+});
+document.querySelector('#buy-annual').addEventListener('click', () => api.openLicenseCheckout('annual'));
+document.querySelector('#buy-monthly').addEventListener('click', () => api.openLicenseCheckout('monthly'));
 sectionsDialogContent.addEventListener('click', event => {
   if (event.target.id === 'reset-sections-btn') {
     if (!confirm('Ripristinare le sezioni predefinite? Le sezioni personali verranno eliminate, ma nessun tool sarà disinstallato.')) return;
@@ -459,4 +544,6 @@ suiteUpdateDismiss.addEventListener('click', () => {
 });
 api.onSuiteUpdateState(renderSuiteUpdate);
 void api.getSuiteUpdateState().then(renderSuiteUpdate);
-renderNav(); refresh().catch(error => { document.querySelector('#runtime-info').textContent=`Errore: ${error.message||error}`; });
+renderNav();
+void refreshLicense().catch(error => renderLicense({ status:'unavailable', enforcement:'observe', activation:{current:0,limit:2}, message:error.message||String(error) }));
+refresh().catch(error => { document.querySelector('#runtime-info').textContent=`Errore: ${error.message||error}`; });

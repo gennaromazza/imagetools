@@ -24,6 +24,7 @@
       <div class="brand"><span class="brand-mark"><svg><use href="#i-suite"/></svg></span><div><strong>FileX</strong><small>Creative Suite</small></div></div>
       <nav id="category-nav"></nav>
       <button id="manage-sections-btn" class="manage-sections" type="button">+ Organizza sezioni</button>
+      <button id="license-btn" class="license-sidebar" type="button"><span id="license-dot"></span><div><strong>Licenza</strong><small id="license-sidebar-status">Verifica...</small></div></button>
       <div class="sidebar-foot"><span id="suite-version">Versione...</span><button id="refresh-btn" class="icon-btn" title="Controlla aggiornamenti dei tool">↻</button></div>
     </aside>
     <main class="content">
@@ -45,7 +46,7 @@
       <section class="hero-card"><div><span class="hero-kicker">FILEX SUITE</span><h2>Tutto il tuo studio.<br>Da un solo posto.</h2><p>Seleziona, impagina, stampa, archivia e consegna senza riempire il desktop di collegamenti.</p></div><div class="hero-orbit"><span></span><svg><use href="#i-suite"/></svg></div></section>
       <section class="section-head"><div><h2 id="grid-title">Strumenti</h2><p id="grid-subtitle">Accesso rapido ai tuoi workflow fotografici.</p></div><button id="install-missing-btn" class="secondary-action">Installa mancanti</button></section>
       <section id="tools-grid" class="tools-grid"></section>
-      <section class="suite-status"><div><strong>Stato Suite</strong><span id="runtime-info">Caricamento...</span></div><button id="check-suite-update-btn" class="secondary-action" type="button">Aggiorna FileX Suite</button></section>
+      <section class="suite-status"><div><strong>Stato Suite</strong><span id="runtime-info">Caricamento...</span></div><div class="license-summary"><strong id="license-summary-title">Licenza FileX</strong><span id="license-summary-copy">Verifica in corso...</span><button id="license-summary-button" class="secondary-action" type="button">Gestisci</button></div><button id="check-suite-update-btn" class="secondary-action" type="button">Aggiorna FileX Suite</button></section>
     </main>
   </div>
   <dialog id="sections-dialog" class="sections-dialog">
@@ -53,6 +54,25 @@
       <header><div><p class="eyebrow">ORGANIZZAZIONE</p><h2 id="sections-dialog-title">Le tue sezioni</h2></div><button class="dialog-close" value="cancel" aria-label="Chiudi">×</button></header>
       <div id="sections-dialog-content"></div>
       <footer><button class="secondary-action" value="cancel">Chiudi</button></footer>
+    </form>
+  </dialog>
+  <dialog id="license-dialog" class="sections-dialog license-dialog">
+    <form method="dialog" class="sections-dialog-card">
+      <header><div><p class="eyebrow">FILEX ALL ACCESS</p><h2>Licenza</h2></div><button class="dialog-close" value="cancel" aria-label="Chiudi">×</button></header>
+      <div id="license-active-view" hidden>
+        <div class="license-state-card"><span id="license-state-badge">ATTIVA</span><h3>FileX All Access</h3><p id="license-state-message"></p><dl><div><dt>Dispositivi</dt><dd id="license-devices">-</dd></div><div><dt>Valida fino al</dt><dd id="license-valid-until">-</dd></div><div><dt>Uso offline fino al</dt><dd id="license-offline-until">-</dd></div></dl></div>
+        <div class="license-actions"><button id="license-refresh" class="secondary-action" type="button">Verifica ora</button><button id="license-deactivate" class="danger-action" type="button">Disattiva questo PC</button></div>
+      </div>
+      <div id="license-activation-view" hidden>
+        <p class="license-intro">Inserisci la chiave ricevuta dopo l'acquisto. Il piano comprende due PC dello stesso titolare.</p>
+        <label class="license-field"><span>Chiave licenza</span><input id="license-key" autocomplete="off" spellcheck="false" placeholder="FILEX-XXXX-XXXX-XXXX"></label>
+        <label class="license-field"><span>Nome di questo PC</span><input id="license-device-label" maxlength="80" value="PC FileX"></label>
+        <label class="license-consent"><input id="license-consent" type="checkbox"><span>Ho letto e accetto <a href="https://filex-suite.web.app/licenza/" target="_blank" rel="noreferrer">licenza</a> e <a href="https://filex-suite.web.app/termini/" target="_blank" rel="noreferrer">termini</a>, e ho preso visione della <a href="https://filex-suite.web.app/privacy/" target="_blank" rel="noreferrer">privacy</a>.</span></label>
+        <p id="license-error" class="license-error" hidden></p>
+        <button id="license-activate" class="license-primary" type="button" disabled>Attiva FileX</button>
+        <div class="license-buy"><span>Non hai ancora una licenza?</span><button id="buy-annual" type="button">100 EUR / anno</button><button id="buy-monthly" type="button">12 EUR / mese</button></div>
+      </div>
+      <footer><span class="license-mode" id="license-mode"></span><button class="secondary-action" value="cancel">Chiudi</button></footer>
     </form>
   </dialog>
   <div id="suite-toast" class="suite-toast" role="status" aria-live="polite" hidden></div>

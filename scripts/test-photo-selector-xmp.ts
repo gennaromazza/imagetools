@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
@@ -12,6 +12,7 @@ import {
   shutdownXmpCompatibilityService,
   writeEmbeddedStandardXmp,
 } from "../apps/filex-desktop/src/xmp-compatibility.ts";
+import { writeSidecarXmpForAssetPath } from "../apps/filex-desktop/src/native-folder-service.ts";
 
 Object.assign(globalThis, {
   DOMParser,
@@ -124,6 +125,31 @@ try {
   assert.equal(ratingTags["XMP-microsoft:RatingPercent"], undefined);
   assert.equal(ratingTags["IFD0:Rating"], undefined);
   assert.equal(ratingTags["IFD0:RatingPercent"], undefined);
+
+  const sourceBeforeSidecarWrite = await readFile(jpegPath);
+  const sourceModifiedBeforeSidecarWrite = (await stat(jpegPath)).mtimeMs;
+  assert.equal(await writeSidecarXmpForAssetPath(jpegPath, canonicalXml), true);
+  assert.deepEqual(
+    await readFile(jpegPath),
+    sourceBeforeSidecarWrite,
+    "Writing a sidecar must not alter the source image",
+  );
+  assert.equal(
+    (await stat(jpegPath)).mtimeMs,
+    sourceModifiedBeforeSidecarWrite,
+    "Writing a sidecar must preserve the source image modification time",
+  );
+
+  const sidecarPath = join(temporaryDirectory, "rating-test.xmp");
+  assert.equal(await readFile(sidecarPath, "utf8"), canonicalXml);
+  const sidecarModifiedAt = (await stat(sidecarPath)).mtimeMs;
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(await writeSidecarXmpForAssetPath(jpegPath, canonicalXml), true);
+  assert.equal(
+    (await stat(sidecarPath)).mtimeMs,
+    sidecarModifiedAt,
+    "An unchanged sidecar must not be rewritten",
+  );
 } finally {
   await verifierExifTool.end().catch(() => {});
   await shutdownXmpCompatibilityService();

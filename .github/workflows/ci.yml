@@ -16,6 +16,10 @@ concurrency:
 jobs:
   validate:
     runs-on: windows-latest
+    env:
+      # Validation never launches or packages Electron. Skipping the binary avoids
+      # concurrent workspace installers racing on the shared Windows cache.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,6 +38,9 @@ jobs:
 
       - name: Validate updater file locking
         run: npm.cmd run test:filex-updater-lock
+
+      - name: Validate licensing coverage
+        run: npm.cmd run test:filex-license-coverage
 
       - name: Typecheck workspaces
         run: npm.cmd run typecheck
@@ -54,6 +61,8 @@ jobs:
           npm.cmd --workspace @photo-tools/filex-send run build
           npm.cmd --workspace @photo-tools/filex-send-remote-server run test
           npm.cmd --workspace @photo-tools/filex-send-remote-server run build
+          npm.cmd --workspace @photo-tools/backup-guard run test
+          npm.cmd --workspace @photo-tools/backup-guard run build
           npm.cmd --workspace @photo-tools/filex-cloud-functions run test
           npm.cmd --workspace @photo-tools/filex-cloud-functions run typecheck
           npm.cmd --workspace @photo-tools/filex-cloud-functions run build

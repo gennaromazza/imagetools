@@ -8,6 +8,7 @@ import { detectCurrentWifi } from "./wifi-detection.js";
 import { FileSendRemoteClient, type PersistedRemoteSession } from "./remote-client-service.js";
 import type { FirebaseAnonymousAuthState } from "./firebase-anonymous-auth.js";
 import type { FileSendSnapshot } from "../src/contracts.js";
+import { directToolLicenseAllowed } from "./license-gate.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -241,6 +242,7 @@ if (!hasSingleInstanceLock) {
     mainWindow.focus();
   });
   app.whenReady().then(async () => {
+    if (!(await directToolLicenseAllowed())) { app.quit(); return; }
     settings = await readSettings();
     const detected = await detectCurrentWifi();
     if (detected.wifi) {

@@ -1,0 +1,8 @@
+FileX
+Pensato da un fotografo per fotografi.
+
+Ideatore: Gennaro Mazzacane
+Sede: Aversa, Italia
+Contatto: image.studio.fotografico@gmail.com
+Tecnologie: HTML, CSS, JavaScript, React, TypeScript, Electron
+Ultimo aggiornamento del sito: 2026-08-12

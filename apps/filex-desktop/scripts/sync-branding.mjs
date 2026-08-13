@@ -27,6 +27,11 @@ const toolBranding = [
   { toolId: "cache-sweep", sourceFile: "filex-generated/cache-sweep.png" },
   { toolId: "filex-send", sourceFile: "filex-generated/filex-send.png" },
   {
+    toolId: "backup-guard",
+    sourceFile: "filex-generated/backup-guard.png",
+    icoSourcePath: join(sourceDir, "filex-system", "backup-guard.ico"),
+  },
+  {
     toolId: "photo-selector-app",
     sourceFile: "filex-generated/photo-selector-app.png",
   },
@@ -78,6 +83,7 @@ const coordinatedRendererCopies = [
   ["photo-selector-app.png", join(photoSelectorAssetsDir, "favicon.png")],
   ["image-party-frame.png", join(repoRoot, "apps", "image-party-frame", "logo.png")],
   ["archivio-flow.png", join(repoRoot, "apps", "archivio-flow", "src", "assets", "photo_Archivie.png")],
+  ["backup-guard.png", join(repoRoot, "apps", "backup-guard", "src", "assets", "backup-guard.png")],
 ];
 for (const [sourceName, destination] of coordinatedRendererCopies) {
   await mkdir(dirname(destination), { recursive: true });

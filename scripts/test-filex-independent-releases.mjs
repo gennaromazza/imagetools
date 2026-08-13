@@ -29,7 +29,7 @@ const launcher = await read("apps/filex-desktop/suite-launcher-src/app.js");
 const releaseWorkflow = await read(".github/workflows/windows-release.yml");
 const ciWorkflow = await read(".github/workflows/ci.yml");
 const manifestGenerator = await read("apps/filex-desktop/scripts/generate-release-manifest.mjs");
-const downloadPage = await read("docs/index.html");
+const downloadPage = await read("website/index.html");
 
 for (const [name, packageJson] of [
   ["suite", desktopPackage],
