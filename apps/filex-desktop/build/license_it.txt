@@ -1,0 +1,41 @@
+CONTRATTO DI LICENZA FILEX
+Versione 13 agosto 2026
+
+Licenziante: Gennaro Mazzacane - Image Studio Fotografico
+Sede fiscale: Via Quinto Orazio Flacco 5, 81031 Aversa (CE), Italia
+Partita IVA: IT08039821213
+Email: image.studio.fotografico@gmail.com
+
+Installando, attivando o usando FileX accetti questo contratto e le condizioni
+pubblicate su https://filex-suite.web.app/termini/ . Se non le accetti, non
+installare o attivare il software.
+
+1. Con un abbonamento valido e' concessa una licenza limitata, non esclusiva,
+non trasferibile e revocabile per usare FileX nelle attivita' lecite del
+titolare su un massimo di due PC.
+
+2. FileX All Access comprende la Suite e gli strumenti pubblicati nel catalogo.
+I tool condividono la stessa licenza e lo stesso limite di attivazione.
+
+3. Non e' consentito vendere, sublicenziare o distribuire copie non
+autorizzate; condividere chiavi o token; aggirare attivazioni, firme o limiti;
+rimuovere indicazioni di proprieta'; usare FileX per contenuti illeciti. Sono
+salve le attivita' consentite inderogabilmente dalla legge.
+
+4. La licenza viene verificata periodicamente. Dopo una verifica valida e'
+possibile l'uso offline fino a 14 giorni. Alla scadenza, al rimborso totale o
+alla revoca i tool commerciali possono essere bloccati; i file locali non sono
+eliminati.
+
+5. L'utente conserva ogni diritto sulle proprie fotografie ed e' responsabile
+dei permessi, dei file sorgente, delle copie di sicurezza e della verifica dei
+risultati. FileX non sostituisce un backup.
+
+6. Il software include componenti open source o di terze parti soggetti alle
+rispettive licenze. Questa licenza non limita garanzie o diritti inderogabili
+del consumatore.
+
+Testo completo e aggiornamenti:
+https://filex-suite.web.app/licenza/
+Privacy: https://filex-suite.web.app/privacy/
+Rimborsi e recesso: https://filex-suite.web.app/rimborsi/
