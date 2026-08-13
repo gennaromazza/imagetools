@@ -1,6 +1,8 @@
 node_modules/
 dist/
 build/
+!apps/filex-desktop/build/
+!apps/filex-desktop/build/license_it.txt
 .output/
 .firebase/
 .DS_Store

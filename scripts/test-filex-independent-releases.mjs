@@ -30,6 +30,7 @@ const releaseWorkflow = await read(".github/workflows/windows-release.yml");
 const ciWorkflow = await read(".github/workflows/ci.yml");
 const manifestGenerator = await read("apps/filex-desktop/scripts/generate-release-manifest.mjs");
 const downloadPage = await read("website/index.html");
+const installerLicense = await read("apps/filex-desktop/build/license_it.txt");
 
 for (const [name, packageJson] of [
   ["suite", desktopPackage],
@@ -152,6 +153,12 @@ assert(
 assert(
   downloadPage.includes("releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe"),
   "Il sito download dipende ancora dalla release globale piu recente.",
+);
+assert(
+  installerLicense.includes("CONTRATTO DI LICENZA FILEX")
+    && installerLicense.includes("IT08039821213")
+    && installerLicense.includes("https://filex-suite.web.app/licenza/"),
+  "La licenza italiana richiesta dall'installer Suite e' assente o incompleta.",
 );
 
 const temporaryRoot = await mkdtemp(join(tmpdir(), "filex-independent-release-test-"));
