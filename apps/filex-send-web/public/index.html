@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#0c2d27" />
     <title>FileX Send</title>
     <link rel="stylesheet" href="/styles.css" />
+    <style>.download-list{display:grid;margin-top:22px}.download-row{display:flex;align-items:center;gap:12px;padding:14px 0;border-top:1px solid #dfe7eb}.download-row div{min-width:0;flex:1}.download-row strong,.download-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.download-row small{color:#718194;margin-top:4px}.download-row a{background:#139c79;color:#fff;text-decoration:none;font-weight:900;padding:11px 14px;border-radius:12px}</style>
   </head>
   <body>
     <main>
@@ -15,13 +16,19 @@
         <p class="eyebrow">CONSEGNA PRIVATA</p>
         <h1>Invia foto e video</h1>
         <p>Destinazione: <strong id="label">FileX Send</strong></p>
-        <label class="picker">Scegli foto e video<input id="files" type="file" accept="image/*,video/*" multiple /></label>
+        <div class="pickers">
+          <label class="picker picker--primary"><span class="picker-icon" aria-hidden="true">▦</span><span>Scegli dalla galleria<small>Foto e video del telefono</small></span><input id="mediaFiles" type="file" accept="image/*,video/*" multiple /></label>
+          <label class="picker picker--secondary"><span class="picker-icon" aria-hidden="true">⌕</span><span>Sfoglia altri file<small>Download, cartelle e documenti</small></span><input id="otherFiles" type="file" multiple /></label>
+        </div>
+        <p class="picker-help">Puoi selezionare più elementi insieme. Su alcuni telefoni devi tenere premuta la prima foto.</p>
         <div class="summary" id="summary">Nessun file selezionato</div>
+        <div class="previews" id="previews" aria-live="polite"></div>
         <button class="send" id="send" disabled>Invia ora</button>
         <div class="progress"><div id="bar"></div></div>
         <div class="status" id="status"></div>
         <small id="expiry"></small>
       </section>
+      <section class="card download-card" id="download" hidden><p class="eyebrow">FILE PER TE</p><h1>Scarica i file condivisi</h1><p><strong id="downloadLabel">FileX Send</strong> ha preparato questi file.</p><div class="download-list" id="downloadList"></div><small id="downloadExpiry"></small></section>
       <section class="card done" id="done" hidden><div class="check">✓</div><h1>Invio completato</h1><p>Puoi chiudere questa pagina oppure inviare altri file con lo stesso link fino alla scadenza.</p><button class="send" id="again">Invia altri file</button></section>
       <section class="card error" id="error" hidden><h1>Link non disponibile</h1><p id="errorText">La sessione è scaduta.</p></section>
       <footer>FileX Cloud · Trasferimento temporaneo</footer>

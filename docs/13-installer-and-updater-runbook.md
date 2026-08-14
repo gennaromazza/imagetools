@@ -144,6 +144,12 @@ La release `filex-send-v0.1.2` deve contenere esclusivamente installer FileX Sen
 
 Installare la 0.1.1, quindi applicare la 0.1.2 dalla Suite. L'installer silenzioso deve terminare con codice `0`, preservare dati e impostazioni e non richiedere una disinstallazione manuale. Dopo l'avvio, il titolo della finestra deve mostrare `FileX Send — Versione 0.1.2` e la scheda della Suite deve passare a `Pronto`.
 
+## Verifica FileX Send 0.1.3
+
+La release `filex-send-v0.1.3` deve contenere esclusivamente `FileX-Send-0.1.3-stable-x64-setup.exe`, blockmap e `stable.json`. Il catalogo deve aggiornare soltanto `filex-send`, conservando `minLauncherVersion` 0.1.31; FileX Suite e gli altri tool devono restare invariati.
+
+Verificare i quattro percorsi: ricezione e invio, sia locale sia remoto. Nell'invio locale il QR deve mostrare soltanto i file selezionati e ogni download deve conservare nome e contenuto. Nell'invio remoto il desktop deve completare il caricamento prima di mostrare il link; il telefono deve vedere la lista di download fino alla scadenza e **Termina condivisione** deve revocare immediatamente il link. Per la ricezione mobile verificare i pulsanti distinti **Scegli dalla galleria** e **Sfoglia altri file**, la selezione multipla e le anteprime.
+
 ## Verifica FileX Suite 0.1.32 — licenze prova
 
 La release `suite-v0.1.32` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.32 senza cambiare le versioni del catalogo tool.
@@ -161,3 +167,11 @@ Con una licenza attiva, aprire **Gestisci licenza** e premere **Verifica ora**: 
 La release `suite-v0.1.34` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.34 senza cambiare le versioni del catalogo tool.
 
 Con la dock ridotta verificare che non compaia alcuna ombra rettangolare appartenente alla finestra trasparente. Nei temi chiaro e scuro il bordo e l'ombra devono seguire la sagoma arrotondata. Espandere la dock e verificare il separatore tra Suite e strumenti, l'ingresso morbido delle icone, la magnification contenuta, il riordino tramite trascinamento e il focus visibile da tastiera. Riduzione automatica, impostazioni e apertura dei tool devono restare operative.
+
+## Verifica FileX Backup Guard 0.2.0-beta.1
+
+La prerelease `backup-guard-v0.2.0-beta.1` deve contenere esclusivamente `FileX-Backup-Guard-0.2.0-beta.1-beta-x64-setup.exe`, blockmap e `beta.json`. FileX Suite e gli altri tool devono rimanere invariati.
+
+Nel catalogo `update-catalog-beta`, la voce `backup-guard` deve indicare versione `0.2.0-beta.1`, `minLauncherVersion` 0.1.33, URL sul tag namespaced e checksum SHA-256 valido. Su FileX Suite 0.1.33 o successiva, selezionare il canale beta e verificare che la scheda proponga l'installazione.
+
+Eseguire un collaudo con volumi fisici distinti: copia iniziale, file nuovo sul clone, modifica master, cancellazione master confermata, ripristino dal cestino, conflitto, catalogo Lightroom aperto, pausa e annullamento. Il master non deve essere cancellato o sovrascritto automaticamente in nessuno scenario.

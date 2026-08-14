@@ -136,6 +136,18 @@ function registerIpc(): void {
     await remoteClient.startSession(typeof label === "string" ? label : undefined, typeof expiresAt === "number" ? expiresAt : undefined);
     return composeSnapshot();
   });
+  ipcMain.handle("filex-send:start-send-session", async (_event, mode: unknown, label: unknown, expiresAt: unknown) => {
+    if (mode !== "local" && mode !== "remote") throw new Error("Modalità di invio non valida.");
+    const selected = await dialog.showOpenDialog(mainWindow!, {
+      title: "Scegli i file da inviare",
+      properties: ["openFile", "multiSelections"],
+    });
+    if (selected.canceled || selected.filePaths.length === 0) return composeSnapshot();
+    currentMode = mode;
+    if (mode === "local") await service.startSendSession(selected.filePaths, typeof label === "string" ? label : undefined);
+    else await remoteClient.startSendSession(selected.filePaths, typeof label === "string" ? label : undefined, typeof expiresAt === "number" ? expiresAt : undefined);
+    return composeSnapshot();
+  });
   ipcMain.handle("filex-send:close-session", async () => {
     if (currentMode === "remote") await remoteClient.closeSession();
     else service.closeSession();

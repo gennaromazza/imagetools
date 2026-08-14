@@ -1,14 +1,16 @@
 const credential = decodeURIComponent(location.pathname.replace(/^\/r\//, "").split("/")[0] || "");
 const loading = document.querySelector("#loading");
 const upload = document.querySelector("#upload");
+const download = document.querySelector("#download");
 const done = document.querySelector("#done");
 const errorCard = document.querySelector("#error");
 const errorText = document.querySelector("#errorText");
-const input = document.querySelector("#files");
+const inputs = [...document.querySelectorAll("#mediaFiles, #otherFiles")];
 const send = document.querySelector("#send");
 const summary = document.querySelector("#summary");
 const status = document.querySelector("#status");
 const bar = document.querySelector("#bar");
+const previews = document.querySelector("#previews");
 const again = document.querySelector("#again");
 let files = [];
 
@@ -25,6 +27,20 @@ async function initialize() {
   if (!credential) return showError("Il collegamento non è valido.");
   try {
     const session = await api(`/public/${encodeURIComponent(credential)}`);
+    if (session.direction === "send") {
+      document.querySelector("#downloadLabel").textContent = session.label;
+      document.querySelector("#downloadExpiry").textContent = `Link valido fino al ${new Date(session.expiresAt).toLocaleString("it-IT")}`;
+      const list = document.querySelector("#downloadList");
+      session.files.forEach((file) => {
+        const row = document.createElement("div"); row.className = "download-row";
+        const info = document.createElement("div");
+        const name = document.createElement("strong"); name.textContent = file.name;
+        const size = document.createElement("small"); size.textContent = formatBytes(file.size);
+        const link = document.createElement("a"); link.href = file.downloadUrl; link.textContent = "Scarica"; link.setAttribute("download", file.name);
+        info.append(name, size); row.append(info, link); list.append(row);
+      });
+      loading.hidden = true; download.hidden = false; return;
+    }
     document.querySelector("#label").textContent = session.label;
     document.querySelector("#expiry").textContent = `Link valido fino al ${new Date(session.expiresAt).toLocaleString("it-IT")}`;
     loading.hidden = true;
@@ -32,12 +48,39 @@ async function initialize() {
   } catch (cause) { showError(cause.message); }
 }
 
-input.addEventListener("change", () => {
+function showSelection(input) {
   files = [...input.files];
   const total = files.reduce((sum, file) => sum + file.size, 0);
   summary.textContent = files.length ? `${files.length} file · ${formatBytes(total)}` : "Nessun file selezionato";
   send.disabled = files.length === 0;
-});
+  previews.replaceChildren(...files.slice(0, 7).map((file) => {
+    const item = document.createElement("div");
+    item.className = "preview";
+    if (file.type.startsWith("image/") || file.type.startsWith("video/")) {
+      const media = document.createElement(file.type.startsWith("video/") ? "video" : "img");
+      const objectUrl = URL.createObjectURL(file);
+      media.src = objectUrl;
+      media.alt = file.name;
+      const release = () => URL.revokeObjectURL(objectUrl);
+      media.addEventListener("load", release, { once: true });
+      media.addEventListener("loadeddata", release, { once: true });
+      item.append(media);
+    } else {
+      item.classList.add("preview--file");
+      item.textContent = file.name;
+    }
+    return item;
+  }));
+  if (files.length > 7) {
+    const more = document.createElement("div");
+    more.className = "preview-more";
+    more.textContent = `+${files.length - 7}`;
+    previews.append(more);
+  }
+  inputs.forEach((candidate) => { if (candidate !== input) candidate.value = ""; });
+}
+
+inputs.forEach((input) => input.addEventListener("change", () => showSelection(input)));
 
 function uploadFile(url, file, onProgress) {
   return new Promise((resolve, reject) => {
@@ -54,7 +97,7 @@ function uploadFile(url, file, onProgress) {
 
 send.addEventListener("click", async () => {
   send.disabled = true;
-  input.disabled = true;
+  inputs.forEach((input) => { input.disabled = true; });
   const total = files.reduce((sum, file) => sum + file.size, 0);
   let completed = 0;
   try {
@@ -72,7 +115,7 @@ send.addEventListener("click", async () => {
   } catch (cause) {
     status.textContent = cause.message;
     send.disabled = false;
-    input.disabled = false;
+    inputs.forEach((input) => { input.disabled = false; });
   }
 });
 

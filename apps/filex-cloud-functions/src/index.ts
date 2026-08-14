@@ -19,6 +19,7 @@ const lemonSqueezyWebhookSecret = defineSecret("LEMONSQUEEZY_WEBHOOK_SECRET");
 const licenseSigningPrivateKey = defineSecret("FILEX_LICENSE_SIGNING_PRIVATE_KEY");
 
 interface SessionRecord {
+  direction: "receive" | "send";
   ownerUid: string;
   label: string;
   publicTokenHash: string;
@@ -93,8 +94,10 @@ async function createSession(request: Request, response: HttpResponse) {
   if (activeCount >= 3) return json(response, 429, { error: "Hai già tre invii cloud in attesa. Completa o archivia un invio prima di crearne un altro." });
   const identity = createSessionIdentity(Date.now(), request.body?.expiresAt);
   const label = sanitizeLabel(request.body?.label);
+  const direction = request.body?.direction === "send" ? "send" : "receive";
   await db.collection("filexSendSessions").doc(identity.id).set({
     ownerUid,
+    direction,
     label,
     publicTokenHash: identity.publicTokenHash,
     desktopTokenHash: identity.desktopTokenHash,
@@ -118,7 +121,17 @@ async function createSession(request: Request, response: HttpResponse) {
 async function publicSession(rawCredential: string, response: HttpResponse) {
   const authorized = await authorizePublic(rawCredential);
   if (!authorized) return json(response, 410, { error: "Sessione scaduta." });
-  return json(response, 200, { label: authorized.data.label, expiresAt: authorized.data.expiresAt.toMillis() });
+  const direction = authorized.data.direction ?? "receive";
+  const files = direction === "send" ? await authorized.ref.collection("files").orderBy("receivedAt").get() : null;
+  return json(response, 200, {
+    label: authorized.data.label,
+    direction,
+    expiresAt: authorized.data.expiresAt.toMillis(),
+    files: files?.docs.map((doc) => {
+      const file = doc.data() as FileRecord;
+      return { id: doc.id, name: file.name, size: file.size, downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(file.objectPath)}?alt=media&token=${encodeURIComponent(file.downloadToken)}` };
+    }) ?? [],
+  });
 }
 
 async function beginUpload(rawCredential: string, request: Request, response: HttpResponse) {
@@ -185,6 +198,7 @@ async function desktopStatus(id: string, request: Request, response: HttpRespons
   const files = await authorized.ref.collection("files").orderBy("receivedAt").get();
   return json(response, 200, {
     sessionId: id,
+    direction: authorized.data.direction ?? "receive",
     label: authorized.data.label,
     expiresAt: authorized.data.expiresAt.toMillis(),
     retentionExpiresAt: (authorized.data.retentionExpiresAt ?? authorized.data.expiresAt).toMillis(),
@@ -244,9 +258,10 @@ export const cleanupExpiredSessions = onSchedule({ schedule: "every 15 minutes",
   let expiredSessionsRemoved = 0;
   let pendingSessionsRetained = 0;
   for (const session of expired.docs) {
+    const sessionData = session.data() as SessionRecord;
     const sessionFiles = await session.ref.collection("files").get();
     const hasUndownloaded = sessionFiles.docs.some((file) => !(file.data() as FileRecord).downloadedAt);
-    if (hasUndownloaded) {
+    if (hasUndownloaded && (sessionData.direction ?? "receive") === "receive") {
       await session.ref.update({ retentionExpiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000) });
       pendingSessionsRetained += 1;
       continue;

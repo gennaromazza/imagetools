@@ -1,4 +1,5 @@
 import { access, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -57,7 +58,7 @@ export class FileSendRemoteClient {
     this.onFilesReceived = options.onFilesReceived;
     this.auth = new FirebaseAnonymousAuth(options.firebaseApiKey, options.authState, this.onChange);
     if (options.restoredSession) {
-      this.session = { ...options.restoredSession, receivedFiles: [...options.restoredSession.receivedFiles] };
+      this.session = { ...options.restoredSession, direction: options.restoredSession.direction ?? "receive", receivedFiles: [...options.restoredSession.receivedFiles] };
     }
   }
 
@@ -99,7 +100,7 @@ export class FileSendRemoteClient {
     const response = await fetch(`${this.baseUrl}/api/sessions`, {
       method: "POST",
       headers: { authorization: `Bearer ${idToken}`, "content-type": "application/json" },
-      body: JSON.stringify({ label, expiresAt }),
+      body: JSON.stringify({ label, expiresAt, direction: "receive" }),
     });
     if (!response.ok) throw new Error(`Creazione sessione remota non riuscita (${response.status}).`);
     const created = await response.json() as CreatedRemoteSession;
@@ -108,6 +109,7 @@ export class FileSendRemoteClient {
     const folderPath = await createUniqueDirectory(this.outputRoot, `${formatDate(createdAt)}_${safeLabel}`);
     this.session = {
       id: created.sessionId,
+      direction: "receive",
       desktopToken: created.desktopToken,
       label: safeLabel.replaceAll("-", " "),
       uploadUrl: created.uploadUrl,
@@ -124,6 +126,48 @@ export class FileSendRemoteClient {
     this.error = null;
     this.timer = setInterval(() => void this.poll(), 5_000);
     await this.poll();
+    return this.getSession()!;
+  }
+
+  async startSendSession(filePaths: string[], label?: string, expiresAt?: number): Promise<FileSendSession> {
+    if (!this.available && !await this.checkAvailability()) throw new Error(this.error ?? "Servizio remoto non disponibile.");
+    const idToken = await this.auth.getIdToken();
+    const response = await fetch(`${this.baseUrl}/api/sessions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${idToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ label, expiresAt, direction: "send" }),
+    });
+    if (!response.ok) throw new Error(`Creazione condivisione remota non riuscita (${response.status}).`);
+    const created = await response.json() as CreatedRemoteSession;
+    const createdAt = Date.now();
+    const safeLabel = sanitizeLabel(label) || `Consegna-${new Date(createdAt).toTimeString().slice(0, 5).replace(":", "")}`;
+    this.session = {
+      id: created.sessionId, desktopToken: created.desktopToken, direction: "send",
+      label: safeLabel.replaceAll("-", " "), uploadUrl: created.uploadUrl, folderPath: this.outputRoot,
+      createdAt, expiresAt: created.expiresAt, retentionExpiresAt: created.retentionExpiresAt,
+      receivedBytes: 0, receivedFiles: [], activeUploads: 0, activeUploadBytes: 0, clientCompleted: false,
+    };
+    const credential = created.uploadUrl.split("/r/").pop()!;
+    for (const path of filePaths) {
+      const info = await stat(path);
+      const name = sanitizeFileName(basename(path));
+      const pendingResponse = await fetch(`${this.baseUrl}/api/public/${encodeURIComponent(credential)}/uploads`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, size: info.size, contentType: "application/octet-stream" }),
+      });
+      if (!pendingResponse.ok) throw new Error(`Preparazione di ${name} non riuscita.`);
+      const pending = await pendingResponse.json() as { fileId: string; uploadUrl: string };
+      const body = Readable.toWeb(createReadStream(path)) as BodyInit;
+      const uploaded = await fetch(pending.uploadUrl, { method: "PUT", headers: { "content-type": "application/octet-stream", "content-range": `bytes 0-${info.size - 1}/${info.size}` }, body, duplex: "half" } as RequestInit & { duplex: "half" });
+      if (!uploaded.ok) throw new Error(`Caricamento di ${name} non riuscito.`);
+      const completed = await fetch(`${this.baseUrl}/api/public/${encodeURIComponent(credential)}/uploads/${pending.fileId}/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      if (!completed.ok) throw new Error(`Conferma di ${name} non riuscita.`);
+      this.session.receivedFiles.push({ id: pending.fileId, name, size: info.size, receivedAt: Date.now() });
+      this.session.receivedBytes += info.size;
+      this.onChange?.();
+    }
+    this.timer = setInterval(() => void this.poll(), 5_000);
+    this.onChange?.();
     return this.getSession()!;
   }
 
@@ -154,6 +198,7 @@ export class FileSendRemoteClient {
       session.activeUploads = status.activeUploads;
       session.expiresAt = status.expiresAt;
       session.retentionExpiresAt = status.retentionExpiresAt;
+      if (session.direction === "send") { this.error = null; return; }
       let downloaded = 0;
       for (const file of status.files) {
         if (this.downloading.has(file.id)) continue;

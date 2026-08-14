@@ -6,6 +6,7 @@ export interface FileSendReceivedFile {
 }
 
 export interface FileSendSession {
+  direction: "receive" | "send";
   id: string;
   label: string;
   uploadUrl: string;
@@ -47,6 +48,7 @@ export interface FileSendDesktopApi {
   getSnapshot: () => Promise<FileSendSnapshot>;
   startSession: (label?: string) => Promise<FileSendSnapshot>;
   startRemoteSession: (label?: string, expiresAt?: number) => Promise<FileSendSnapshot>;
+  startSendSession: (mode: "local" | "remote", label?: string, expiresAt?: number) => Promise<FileSendSnapshot>;
   closeSession: () => Promise<FileSendSnapshot>;
   chooseOutputRoot: () => Promise<FileSendSnapshot>;
   saveWifi: (wifi: FileSendWifiConfig) => Promise<FileSendSnapshot>;

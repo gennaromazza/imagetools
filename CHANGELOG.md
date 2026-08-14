@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-08-14 - FileX Backup Guard 0.2.0-beta.1
+
+- pubblicata la prima beta indipendente di FileX Backup Guard per i tester FileX
+- aggiunte sincronizzazione master-clone, importazione controllata dal clone, propagazione delle cancellazioni e cestino recuperabile
+- aggiunti SHA-256, verifica profonda, controllo spazio, velocita, ETA, pausa e annullamento sicuro
+- aggiunte gestione esplicita dei conflitti, snapshot Lightroom e collegamento con i nuovi lavori di Archivio Flow
+- esteso il workflow Windows e il catalogo beta per costruire e distribuire soltanto Backup Guard
+- aggiunta la pagina pubblica di Backup Guard al sito FileX; Suite e versioni degli altri tool restano invariate
+
+## 2026-08-14 - FileX Send 0.1.3
+
+- aggiunta la scelta iniziale tra ricezione e invio di file dal PC al cliente
+- introdotta la condivisione tramite QR nella rete locale con download protetto dei soli file selezionati
+- introdotta la consegna remota PC → cloud → cliente tramite link temporaneo revocabile
+- migliorata la selezione mobile con accessi separati a galleria e altri file, istruzioni e anteprime
+- pubblicato soltanto FileX Send 0.1.3; FileX Suite e gli altri tool restano invariati
+
 ## 2026-08-14 - FileX Suite 0.1.34
 
 - rimossa l'ombra rettangolare nativa della finestra trasparente della dock su Windows
