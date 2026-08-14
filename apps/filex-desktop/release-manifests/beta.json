@@ -1,11 +1,27 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-04-04T10:47:51.296Z",
+  "generatedAt": "2026-08-14T12:33:40.522Z",
   "generatedBy": "generate-release-manifest.mjs",
   "channels": [
     "stable",
     "beta"
   ],
-  "releases": [],
-  "payloadSha256": "171c845969dbed65f069eee5b9b26d7f83adb556c12599471e3bf5df60e3a5dc"
+  "releases": [
+    {
+      "toolId": "backup-guard",
+      "version": "0.2.0-beta.1",
+      "channel": "beta",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/backup-guard-v0.2.0-beta.1/FileX-Backup-Guard-0.2.0-beta.1-beta-x64-setup.exe",
+      "installerSha256": "84929ddf47b7be5c333ceef6dd8011539d401b98983ea5046eb2c860e56a24cf",
+      "minLauncherVersion": "0.1.33",
+      "publishedAt": "2026-08-14T12:33:39.289Z",
+      "highlights": [
+        "Prima beta pubblica di FileX Backup Guard per proteggere un archivio fotografico master e il relativo clone fisico.",
+        "Sincronizzazione verificata SHA-256 con cancellazioni propagate dal master, cestino recuperabile, controllo spazio, velocita, ETA, pausa e annullamento sicuro.",
+        "Verifica profonda byte-per-byte, gestione esplicita dei conflitti e snapshot dedicati per i cataloghi Lightroom.",
+        "Integrazione con Archivio Flow e cronologia ricercabile ed esportabile per rendere ogni operazione controllabile dai beta tester."
+      ]
+    }
+  ],
+  "payloadSha256": "f900e663f3953ebb1ac3cbaa9e42d535d6edb1ceed8e0dba6402811c5d3cb22d"
 }

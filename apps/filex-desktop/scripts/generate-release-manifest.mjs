@@ -151,10 +151,13 @@ if (previousManifestUrl) {
       const bootstrapResponse = await fetch(
         `${bootstrapManifestUrl}${bootstrapSeparator}t=${Date.now()}`,
       );
-      if (!bootstrapResponse.ok) {
+      if (bootstrapResponse.status === 404) {
+        previousManifest = await readBundledManifest();
+      } else if (!bootstrapResponse.ok) {
         throw new Error(`Impossibile inizializzare il catalogo remoto: HTTP ${bootstrapResponse.status}`);
+      } else {
+        previousManifest = await bootstrapResponse.json();
       }
-      previousManifest = await bootstrapResponse.json();
     } else {
       previousManifest = await readBundledManifest();
     }

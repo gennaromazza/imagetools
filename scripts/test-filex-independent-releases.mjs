@@ -31,6 +31,7 @@ const launcherBuilder = await read("apps/filex-desktop/scripts/build-suite-launc
 const releaseWorkflow = await read(".github/workflows/windows-release.yml");
 const ciWorkflow = await read(".github/workflows/ci.yml");
 const manifestGenerator = await read("apps/filex-desktop/scripts/generate-release-manifest.mjs");
+const packagedComponentVerifier = await read("apps/filex-desktop/scripts/verify-packaged-component.mjs");
 const downloadPage = await read("website/index.html");
 const installerLicense = await read("apps/filex-desktop/build/license_it.txt");
 
@@ -165,8 +166,14 @@ assert(
 assert(
   manifestGenerator.includes("--tool=")
     && manifestGenerator.includes("--previous-manifest-url=")
-    && manifestGenerator.includes("--bootstrap-manifest-url="),
+    && manifestGenerator.includes("--bootstrap-manifest-url=")
+    && manifestGenerator.includes("bootstrapResponse.status === 404")
+    && manifestGenerator.includes("previousManifest = await readBundledManifest()"),
   "Il generatore non aggiorna atomicamente un singolo tool dal catalogo remoto.",
+);
+assert(
+  packagedComponentVerifier.includes("(?:-[0-9A-Za-z.-]+)?"),
+  "Il verificatore degli installer non accetta versioni prerelease.",
 );
 assert(
   downloadPage.includes("releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe"),

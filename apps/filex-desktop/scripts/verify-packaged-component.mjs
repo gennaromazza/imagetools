@@ -20,7 +20,7 @@ const expectedPackages = {
 };
 
 const expected = expectedPackages[args.component];
-if (!expected || !/^\d+\.\d+\.\d+$/.test(args.version ?? "")) {
+if (!expected || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(args.version ?? "")) {
   throw new Error("Uso: verify-packaged-component.mjs --component=<id> --version=<semver> [--archive=<app.asar>]");
 }
 
