@@ -156,7 +156,16 @@ body { color: var(--dock-text); user-select: none; }
 .dock-error { color: #d88779; font-size: 12px; }
 
 .collapsed .dock-tools, .collapsed .dock-settings, .collapsed .dock-controls { display: none; }
-.collapsed .dock-window { width: 68px; height: 68px; padding: 7px; border-radius: 22px; }
+.collapsed .dock-window {
+  width: 68px;
+  height: 68px;
+  padding: 7px;
+  border-color: transparent;
+  border-radius: 22px;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+}
 .collapsed .suite-toggle { margin: auto; }
 
 @keyframes dock-item-in { from { opacity: 0; transform: translateY(6px) scale(.94); } }

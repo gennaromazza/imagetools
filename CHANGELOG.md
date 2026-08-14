@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-08-14 - FileX Suite 0.1.35
+
+- eliminato il rettangolo grigio residuo dietro la dock ridotta, causato dal `backdrop-filter` della finestra trasparente su Windows
+- resi completamente trasparenti sfondo, bordo e contenitore esterno quando la dock e' chiusa, lasciando visibile soltanto l'icona arrotondata
+- pubblicata soltanto FileX Suite 0.1.35; le versioni e il catalogo remoto dei tool indipendenti restano invariati
+
 ## 2026-08-14 - FileX Backup Guard 0.2.0
 
 - promossa FileX Backup Guard a prima release ufficiale stabile nel catalogo standard di FileX Suite
