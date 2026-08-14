@@ -1,0 +1,96 @@
+.pending-projects {
+  max-width: 1100px;
+  margin: 0 auto 16px;
+  padding: 16px 18px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(241, 181, 47, 0.35);
+  border-radius: 15px;
+  background: rgba(241, 181, 47, 0.08);
+}
+
+.pending-projects span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.test-mode {
+  max-width: 1100px;
+  margin: 0 auto 16px;
+  padding: 10px 14px;
+  border: 1px solid rgba(241, 181, 47, 0.55);
+  border-radius: 12px;
+  background: rgba(241, 181, 47, 0.12);
+  color: #f3ca71;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+.header-actions,
+.progress-actions,
+.conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.header-actions > button,
+.progress-actions button,
+.conflict-actions button {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #343b36;
+  color: #f2ece5;
+  cursor: pointer;
+}
+
+.header-actions .primary {
+  padding: 13px 20px;
+}
+
+.progress-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.progress-actions {
+  margin-top: 3px;
+}
+
+.danger-button {
+  color: #efc0b9 !important;
+  border-color: rgba(212, 163, 156, 0.45) !important;
+  background: rgba(212, 163, 156, 0.1) !important;
+}
+
+.conflict-actions {
+  margin-top: 5px;
+}
+
+.success-summary.warning {
+  border-color: rgba(241, 181, 47, 0.45);
+  background: rgba(241, 181, 47, 0.08);
+}
+
+.badge.verified {
+  color: #b6d8f5;
+  background: rgba(118, 176, 224, 0.12);
+}
+
+.history-search {
+  max-width: 1100px;
+  margin: 0 auto 16px;
+}
+
+.history-search input {
+  width: 100%;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  color: #f2ece5;
+  background: #222824;
+}

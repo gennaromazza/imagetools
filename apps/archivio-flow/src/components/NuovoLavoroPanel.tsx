@@ -12,6 +12,7 @@ import {
   openArchivioFolder,
   saveArchivioSettings,
   startArchivioImport,
+  notifyBackupGuardProject,
 } from "../archivioDesktopApi";
 import { DesktopPreviewImage } from "./DesktopPreviewImage";
 import { FilterRangePickerModal } from "./FilterRangePickerModal";
@@ -565,6 +566,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           }));
         }
         setImportSuccess(importResult);
+        try {
+          await notifyBackupGuardProject(importResult);
+        } catch {
+          // L'importazione e' conclusa: la coda Backup Guard non deve invalidarla.
+        }
         if (openFolderOnFinish) {
           autoOpenedJobRef.current = importResult.job.id;
           try {

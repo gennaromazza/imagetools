@@ -1636,6 +1636,15 @@ function registerIpcHandlers(): void {
     writeSidecarXmpForAssetPath(absolutePath, xml),
   );
   ipcMain.handle("filex:browse-archivio-folder", () => browseArchivioFolderDesktop());
+  ipcMain.handle("filex:notify-backup-guard-project", (_event, notification: unknown) => {
+    if (!notification || typeof notification !== "object") return { ok: false };
+    const candidate = notification as Record<string, unknown>;
+    if (candidate.schemaVersion !== 1 || typeof candidate.eventId !== "string" || typeof candidate.projectId !== "string" || typeof candidate.absolutePath !== "string") return { ok: false };
+    const sharedDirectory = join(app.getPath("appData"), "FileX", "shared");
+    mkdirSync(sharedDirectory, { recursive: true });
+    appendFileSync(join(sharedDirectory, "backup-guard-inbox.jsonl"), `${JSON.stringify(candidate)}\n`, "utf8");
+    return { ok: true };
+  });
   ipcMain.handle("filex:get-archivio-settings", async () => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.getSettingsService();

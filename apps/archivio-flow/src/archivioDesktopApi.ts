@@ -155,6 +155,20 @@ export async function startArchivioImport(input: ImportRequest): Promise<ImportR
   return await apiPost<ImportResult>("/api/import", input);
 }
 
+export async function notifyBackupGuardProject(result: ImportResult): Promise<void> {
+  const desktopApi = getDesktopApi();
+  if (!desktopApi) return;
+  await desktopApi.notifyBackupGuardProject({
+    schemaVersion: 1,
+    eventId: crypto.randomUUID(),
+    projectId: result.job.id,
+    projectName: result.job.nomeLavoro,
+    absolutePath: result.job.percorsoCartella,
+    importedAt: new Date().toISOString(),
+    fileCount: result.job.numeroFile,
+  });
+}
+
 export async function cancelArchivioImport(): Promise<{ ok: boolean; active: boolean }> {
   const desktopApi = getDesktopApi();
   if (desktopApi) {

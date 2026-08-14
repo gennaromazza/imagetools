@@ -1,6 +1,6 @@
 # FileX Backup Guard
 
-Stato: specifica di prodotto iniziale approvata; implementazione non ancora avviata.
+Stato: prima versione operativa locale implementata; validazione su archivi reali multi-terabyte ancora necessaria prima della pubblicazione.
 
 FileX Backup Guard mantiene un archivio fotografico principale e un clone fisico coerenti, verificati e comprensibili. L'archivio principale e' sempre la fonte di verita'. Il clone riceve aggiunte, modifiche e cancellazioni dal principale; puo' inoltre riportare nel principale soltanto contenuti nuovi creati durante il lavoro fuori studio.
 
@@ -37,6 +37,29 @@ L'assenza di un elemento dal master e' una cancellazione da propagare al clone s
 - [Brand identity e specifica degli asset](06-brand-identity.md)
 - [UX, wireframe e linguaggio](07-ux-wireframes.md)
 - [Test, prestazioni e roadmap](08-validation-performance-roadmap.md)
+
+## Stato dell'implementazione
+
+Sono disponibili:
+
+- associazione persistente master-clone con verifica dell'identita' del volume;
+- scansione incrementale basata su metadata e baseline;
+- piano immutabile ricalcolato prima dell'esecuzione;
+- copia master-clone e importazione dei nuovi file dal clone;
+- SHA-256 su origine e staging prima dell'attivazione, con una sola lettura della sorgente;
+- sostituzione con rollback della vecchia copia;
+- cancellazioni master-clone spostate nel cestino FileX;
+- conferma esplicita delle cancellazioni e controllo preventivo dello spazio libero;
+- journal persistente, recupero dopo interruzione, cronologia ricercabile ed esportabile;
+- progresso con byte, MB/s, ETA, pausa e annullamento sicuro;
+- verifica profonda byte-per-byte su richiesta;
+- cestino grafico con recupero separato nel master;
+- risoluzione grafica dei conflitti senza sovrascritture silenziose;
+- rilevamento dei lock Lightroom e snapshot del pacchetto prima delle scelte di conflitto;
+- coda persistente dei nuovi lavori provenienti da Archivio Flow;
+- integrazione con FileX Suite, branding e build indipendente.
+
+Restano gate obbligatori prima della prima release: benchmark multi-terabyte, prove fisiche di disconnessione e power-loss e verifica su piu' filesystem Windows. I flussi software equivalenti sono coperti dalla suite automatica locale.
 
 ## Confini della prima versione
 
