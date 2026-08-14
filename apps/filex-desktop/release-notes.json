@@ -1,5 +1,11 @@
 {
   "backup-guard": {
+    "0.2.0": [
+      "Prima versione stabile di FileX Backup Guard, disponibile direttamente nel catalogo ufficiale di FileX Suite.",
+      "Sincronizzazione master-clone verificata SHA-256 con propagazione delle cancellazioni, cestino recuperabile e importazione sicura dei nuovi file dal clone.",
+      "Controllo spazio, velocita, ETA, pausa, annullamento sicuro e verifica profonda per archivi fotografici di grandi dimensioni.",
+      "Cronologia ricercabile ed esportabile, gestione esplicita dei conflitti, protezione dei cataloghi Lightroom e integrazione con Archivio Flow."
+    ],
     "0.2.0-beta.1": [
       "Prima beta pubblica di FileX Backup Guard per proteggere un archivio fotografico master e il relativo clone fisico.",
       "Sincronizzazione verificata SHA-256 con cancellazioni propagate dal master, cestino recuperabile, controllo spazio, velocita, ETA, pausa e annullamento sicuro.",
