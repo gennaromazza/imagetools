@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-14 - FileX Suite 0.1.33
+
+- corretto il comando `Verifica ora` della licenza: mostra lo stato di avanzamento, conferma l'orario della verifica e torna sempre cliccabile anche dopo una richiesta asincrona
+- ripristinati logo, categoria e descrizione completa di FileX Backup Guard nel catalogo della Suite
+- corretto il creatore amministrativo di licenze prova affinche' riusi in modo temporaneo e sicuro il login Firebase CLI locale
+- resa effettiva la modalita' remota `enforce` tramite override esplicito: i tool sono accessibili soltanto con licenza attiva, commerciale o creata manualmente dall'amministratore
+- pubblicata soltanto FileX Suite 0.1.33; le versioni e il catalogo remoto dei tool indipendenti restano invariati
+
 ## 2026-08-13 - FileX Suite 0.1.32
 
 - introdotto l'entitlement unico FileX All Access per tutti i tool, con due dispositivi, sette giorni di cortesia e attestazione offline firmata valida fino a 14 giorni

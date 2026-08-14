@@ -1,15 +1,24 @@
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getApps, initializeApp } from "firebase-admin/app";
 import { Timestamp, getFirestore } from "firebase-admin/firestore";
 
 const [command, ...args] = process.argv.slice(2);
 const projectId = process.env.GCLOUD_PROJECT || "gen-lang-client-0321087169";
+const temporaryAdcDirectory = configureFirebaseCliAdc();
+if (temporaryAdcDirectory) {
+  process.on("exit", () => rmSync(temporaryAdcDirectory, { recursive: true, force: true }));
+}
 if (!getApps().length) initializeApp({ projectId });
 const db = getFirestore();
 const hash = (value) => createHash("sha256").update(value.trim()).digest("hex");
 
-function firebaseCliAccessToken() {
+function configureFirebaseCliAdc() {
+  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return null;
   const executable = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "firebase";
   const cliArgs = process.platform === "win32"
     ? ["/d", "/s", "/c", "firebase.cmd login:list --json"]
@@ -19,30 +28,33 @@ function firebaseCliAccessToken() {
     windowsHide: true,
     stdio: ["ignore", "pipe", "ignore"],
   }));
-  const token = response?.result?.[0]?.tokens?.access_token;
-  if (!token) throw new Error("Firebase CLI is not logged in. Run firebase login first.");
-  return token;
-}
+  const login = response?.result?.[0];
+  const refreshToken = login?.tokens?.refresh_token;
+  const clientId = login?.user?.azp;
+  if (!refreshToken || !clientId) throw new Error("Firebase CLI is not logged in. Run firebase login first.");
 
-async function createSupportLicenseDocument(id, value) {
-  const token = firebaseCliAccessToken();
-  const url = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/(default)/documents/licenseSubscriptions/${encodeURIComponent(id)}`;
-  const response = await fetch(url, {
-    method: "PATCH",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ fields: {
-      provider: { stringValue: value.provider },
-      providerSubscriptionId: { stringValue: value.providerSubscriptionId },
-      entitlement: { stringValue: value.entitlement },
-      status: { stringValue: value.status },
-      currentPeriodEnd: { integerValue: String(value.currentPeriodEnd) },
-      paymentFailedAt: { nullValue: null },
-      licenseKeyHash: { stringValue: value.licenseKeyHash },
-      supportLabel: { stringValue: value.supportLabel },
-      updatedAt: { timestampValue: new Date().toISOString() },
-    } }),
-  });
-  if (!response.ok) throw new Error(`Firestore rejected the support license (${response.status}): ${await response.text()}`);
+  const npmRootArgs = process.platform === "win32"
+    ? ["/d", "/s", "/c", "npm.cmd root -g"]
+    : ["root", "-g"];
+  const npmExecutable = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "npm";
+  const globalModules = execFileSync(npmExecutable, npmRootArgs, {
+    encoding: "utf8",
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+  const require = createRequire(import.meta.url);
+  const firebaseApi = require(join(globalModules, "firebase-tools", "lib", "api.js"));
+  const directory = mkdtempSync(join(tmpdir(), "filex-license-admin-"));
+  const credentialPath = join(directory, "application-default-credentials.json");
+  writeFileSync(credentialPath, JSON.stringify({
+    type: "authorized_user",
+    client_id: clientId,
+    client_secret: firebaseApi.clientSecret(),
+    refresh_token: refreshToken,
+    quota_project_id: projectId,
+  }), { encoding: "utf8", mode: 0o600 });
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = credentialPath;
+  return directory;
 }
 
 if (command === "status") {
@@ -57,7 +69,11 @@ if (command === "status") {
 } else if (command === "enforcement") {
   const mode = args[0];
   if (!["observe", "warn", "enforce"].includes(mode)) throw new Error("Use: enforcement observe|warn|enforce");
-  await db.collection("licenseConfiguration").doc("public").set({ enforcement: mode, updatedAt: Timestamp.now() }, { merge: true });
+  await db.collection("licenseConfiguration").doc("public").set({
+    enforcement: mode,
+    enforcementOverride: true,
+    updatedAt: Timestamp.now(),
+  }, { merge: true });
   console.log(`FileX licensing enforcement: ${mode}`);
 } else if (command === "configure-commerce") {
   const [monthlyVariantId, annualVariantId, monthlyUrl, annualUrl] = args;
@@ -81,7 +97,7 @@ if (command === "status") {
   if (!Number.isInteger(days) || days < 1 || days > 366) throw new Error("Days must be between 1 and 366");
   const key = `FILEX-${randomBytes(4).toString("hex")}-${randomBytes(4).toString("hex")}-${randomBytes(4).toString("hex")}`.toUpperCase();
   const id = `support-${Date.now()}-${label}`;
-  await createSupportLicenseDocument(id, {
+  await db.collection("licenseSubscriptions").doc(id).set({
     provider: "filex-support",
     providerSubscriptionId: id,
     entitlement: "filex-all-access",
@@ -90,6 +106,7 @@ if (command === "status") {
     paymentFailedAt: null,
     licenseKeyHash: hash(key),
     supportLabel: label,
+    updatedAt: Timestamp.now(),
   });
   console.log(`Support license (${days} days): ${key}`);
 } else {
