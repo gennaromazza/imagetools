@@ -8,6 +8,11 @@
     ]
   },
   "filex-send": {
+    "0.1.3": [
+      "FileX Send ora permette di scegliere tra Ricevi file e Invia file.",
+      "La consegna dal PC al cliente funziona tramite QR locale o link remoto temporaneo.",
+      "La selezione mobile separa galleria e altri file e mostra le anteprime prima dell'invio."
+    ],
     "0.1.2": [
       "Corretto l'aggiornamento che poteva terminare con codice 2 sulle installazioni esistenti.",
       "L'installer usa automaticamente un percorso compatibile senza richiedere la disinstallazione manuale.",
