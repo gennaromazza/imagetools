@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-08-14 - FileX Suite 0.1.36
+
+- ripristinato il riposizionamento della dock ridotta trascinando direttamente l'icona Suite
+- distinta l'apertura dal trascinamento tramite una soglia di movimento, evitando espansioni accidentali dopo lo spostamento
+- mantenuto il contenitore esterno completamente trasparente senza reintrodurre il rettangolo grigio
+- pubblicata soltanto FileX Suite 0.1.36; le versioni e il catalogo remoto dei tool indipendenti restano invariati
+
 ## 2026-08-14 - FileX Suite 0.1.35
 
 - eliminato il rettangolo grigio residuo dietro la dock ridotta, causato dal `backdrop-filter` della finestra trasparente su Windows

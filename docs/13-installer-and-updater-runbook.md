@@ -189,3 +189,9 @@ Ripetere il collaudo della beta con volumi fisici distinti e verificare inoltre 
 La release `suite-v0.1.35` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.35 senza cambiare le versioni del catalogo tool.
 
 Ridurre la dock sopra una superficie chiara e verificare che attorno all'icona non compaiano rettangoli grigi o aree sfocate corrispondenti ai limiti della finestra Electron. In stato ridotto devono essere disattivati sfondo, bordo, ombra e `backdrop-filter` del contenitore; l'espansione deve ripristinare normalmente l'effetto vetro e tutti i controlli.
+
+## Verifica FileX Suite 0.1.36 — trascinamento dock ridotta
+
+La release `suite-v0.1.36` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.36 senza cambiare le versioni del catalogo tool.
+
+Con la dock ridotta, trascinare direttamente l'icona Suite e verificare che la finestra segua il puntatore e conservi la nuova posizione. Un clic breve deve espandere la dock; un trascinamento oltre la soglia non deve aprirla al rilascio. Il rettangolo grigio non deve ricomparire.
