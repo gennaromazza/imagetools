@@ -26,6 +26,7 @@ const suitePreload = await read("apps/filex-desktop/src/suite-preload.ts");
 const suiteUpdater = await read("apps/filex-desktop/src/suite-updater.ts");
 const toolUpdater = await read("apps/filex-desktop/src/updater.ts");
 const launcher = await read("apps/filex-desktop/suite-launcher-src/app.js");
+const launcherBuilder = await read("apps/filex-desktop/scripts/build-suite-launcher.mjs");
 const releaseWorkflow = await read(".github/workflows/windows-release.yml");
 const ciWorkflow = await read(".github/workflows/ci.yml");
 const manifestGenerator = await read("apps/filex-desktop/scripts/generate-release-manifest.mjs");
@@ -118,6 +119,18 @@ assert(
     && launcher.includes("check-suite-update-btn")
     && !launcher.includes("Promise.all([refresh(), api.checkSuiteUpdate()])"),
   "I controlli espliciti di Suite e tool sono ancora accoppiati nella UI.",
+);
+assert(
+  launcher.includes("'backup-guard':")
+    && launcher.includes("Controlla che fotografie, cataloghi e progetti importanti")
+    && launcherBuilder.includes('"backup-guard"'),
+  "Backup Guard non dispone di descrizione o icona nel launcher Suite.",
+);
+assert(
+  launcher.includes("button.textContent = 'Verifica...'")
+    && launcher.includes("showToast(`Licenza verificata alle ${checkedAt}.`)")
+    && launcher.includes("button.textContent = 'Verifica ora'"),
+  "Il comando Verifica ora non fornisce feedback e ripristino affidabili.",
 );
 assert(
   releaseWorkflow.includes('"suite-v*"')

@@ -149,3 +149,9 @@ Installare la 0.1.1, quindi applicare la 0.1.2 dalla Suite. L'installer silenzio
 La release `suite-v0.1.32` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.32 senza cambiare le versioni del catalogo tool.
 
 Dopo l'aggiornamento, aprire la gestione licenza, attivare una chiave generata con `Crea licenza prova FileX.cmd` e verificare lo stato `active`, il conteggio `1 di 2` e la persistenza dopo il riavvio. Ripetere su un secondo PC e verificare che il terzo venga rifiutato. Disattivare il PC corrente e controllare che lo slot venga liberato. Durante questa fase `enforcement` deve restare `observe`: un problema di licenza non deve bloccare i tool.
+
+## Verifica FileX Suite 0.1.33 — licenze e Backup Guard
+
+La release `suite-v0.1.33` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.33 senza cambiare le versioni del catalogo tool.
+
+Con una licenza attiva, aprire **Gestisci licenza** e premere **Verifica ora**: il pulsante deve mostrare `Verifica...`, poi tornare cliccabile e visualizzare una conferma con l'orario. La scheda **FileX Backup Guard** deve mostrare il logo dedicato, la categoria `Utility` e la descrizione completa. Con enforcement remoto `enforce`, un PC privo di licenza attiva o prova manuale non deve poter aprire i tool; la gestione licenza e gli aggiornamenti della Suite devono restare accessibili.

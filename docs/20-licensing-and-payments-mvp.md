@@ -1,6 +1,6 @@
 # FileX licensing e pagamenti — MVP semplice
 
-Stato al 13 agosto 2026: backend, Suite, attestazioni, sito legale e configurazione Lemon Squeezy Test mode implementati. Lo store live e' in revisione; l'enforcement resta `observe` fino al collaudo end-to-end live.
+Stato al 14 agosto 2026: backend, Suite, attestazioni, sito legale e configurazione Lemon Squeezy Test mode implementati. Lo store live e' in revisione; l'enforcement e' `enforce` e durante la revisione l'accesso viene concesso tramite licenze prova create manualmente dall'amministratore.
 
 ## Decisione raccomandata
 

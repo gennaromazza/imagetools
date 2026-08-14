@@ -32,6 +32,7 @@ const metadata = {
   'image-file-finder': { icon:'find', category:'Utility', description:'Cerca automaticamente fotografie dentro cartelle e sottocartelle partendo da una lista di nomi o codici file. Raccoglie in una destinazione unica le immagini trovate e produce un riepilogo chiaro di corrispondenze, duplicati ed elementi mancanti.', color:'#4c9caf' },
   'cache-sweep': { icon:'suite', category:'Utility', description:'FileX Adobe Cleaner lavora esclusivamente sui programmi Adobe: libera le cache supportate e individua vecchie versioni installate accanto a quella corrente. Ogni rimozione è spiegata e confermata; cataloghi, progetti, preset, preferenze, licenze e dati di recupero restano protetti.', color:'#e5b34f' },
   'filex-send': { icon:'suite', category:'Consegna', description:'Riceve foto e video dal cliente tramite QR sulla rete locale oppure con un link remoto temporaneo. Gli invii restano disponibili anche a PC spento e vengono scaricati automaticamente alla riapertura.', color:'#39c9a5' },
+  'backup-guard': { icon:'suite', category:'Utility', description:'Controlla che fotografie, cataloghi e progetti importanti dispongano davvero di copie di sicurezza utilizzabili. Rileva dischi e destinazioni disponibili, segnala lavori non protetti e guida verifiche e backup senza cancellare o modificare i file originali.', color:'#62b985' },
 };
 const systemCategories = ['Tutti', 'Preferiti', 'Recenti'];
 const defaultCategories = ['Selezione', 'Creatività', 'Stampa', 'Archivio', 'Consegna', 'Utility'];
@@ -346,20 +347,31 @@ document.querySelector('#manage-sections-btn').addEventListener('click', openMan
 document.querySelector('#license-btn').addEventListener('click', openLicenseDialog);
 document.querySelector('#license-summary-button').addEventListener('click', openLicenseDialog);
 document.querySelector('#license-refresh').addEventListener('click', async event => {
-  event.currentTarget.disabled = true;
-  try { await refreshLicense(true); } catch (error) { alert(error.message || String(error)); }
-  finally { event.currentTarget.disabled = false; }
+  const button = event.currentTarget;
+  button.disabled = true;
+  button.textContent = 'Verifica...';
+  try {
+    const state = await refreshLicense(true);
+    const checkedAt = new Date(state.lastCheckedAt || Date.now()).toLocaleTimeString('it-IT', { hour:'2-digit', minute:'2-digit' });
+    showToast(`Licenza verificata alle ${checkedAt}.`);
+  } catch (error) {
+    alert(error.message || String(error));
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Verifica ora';
+  }
 });
 const licenseConsent = document.querySelector('#license-consent');
 const licenseActivateButton = document.querySelector('#license-activate');
 licenseConsent.addEventListener('change', () => { licenseActivateButton.disabled = !licenseConsent.checked; });
 document.querySelector('#license-activate').addEventListener('click', async event => {
+  const button = event.currentTarget;
   if (!licenseConsent.checked) return;
   const key = document.querySelector('#license-key').value;
   const label = document.querySelector('#license-device-label').value;
   licenseError.hidden = true;
-  event.currentTarget.disabled = true;
-  event.currentTarget.textContent = 'Attivazione...';
+  button.disabled = true;
+  button.textContent = 'Attivazione...';
   try {
     const state = await api.activateLicense(key, label);
     renderLicense(state);
@@ -371,16 +383,17 @@ document.querySelector('#license-activate').addEventListener('click', async even
     licenseError.textContent = error.message || String(error);
     licenseError.hidden = false;
   } finally {
-    event.currentTarget.disabled = false;
-    event.currentTarget.textContent = 'Attiva FileX';
+    button.disabled = false;
+    button.textContent = 'Attiva FileX';
   }
 });
 document.querySelector('#license-deactivate').addEventListener('click', async event => {
+  const button = event.currentTarget;
   if (!confirm('Disattivare FileX su questo PC? I tuoi file e progetti non verranno eliminati.')) return;
-  event.currentTarget.disabled = true;
+  button.disabled = true;
   try { renderLicense(await api.deactivateLicense()); showToast('PC disattivato.'); }
   catch (error) { alert(error.message || String(error)); }
-  finally { event.currentTarget.disabled = false; }
+  finally { button.disabled = false; }
 });
 document.querySelector('#buy-annual').addEventListener('click', () => api.openLicenseCheckout('annual'));
 document.querySelector('#buy-monthly').addEventListener('click', () => api.openLicenseCheckout('monthly'));

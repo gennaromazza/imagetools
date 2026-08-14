@@ -19,6 +19,7 @@ for (const toolId of [
   "image-converter", "image-file-finder",
   "cache-sweep",
   "filex-send",
+  "backup-guard",
 ]) {
   await cp(join(brandingDir, `${toolId}.png`), join(iconsDir, `${toolId}.png`));
 }

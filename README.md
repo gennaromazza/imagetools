@@ -32,7 +32,7 @@ FileX usa un solo entitlement, `filex-all-access`, valido per tutti gli strument
 
 La copertura e' obbligatoria nel manifest desktop: i tool sul runtime condiviso ereditano automaticamente il gate centrale, mentre un'app con entry point Electron autonomo deve dichiarare `licenseRuntime: "standalone"` e invocare il gate prima di creare la finestra. `npm run test:filex-license-coverage` impedisce di aggiungere o pubblicare un tool futuro privo di questo collegamento.
 
-Stato commerciale al 13 agosto 2026: Lemon Squeezy e' configurato in Test mode con prodotto, varianti e webhook; lo store live e' in revisione. L'enforcement remoto resta `observe` fino al collaudo end-to-end live.
+Stato commerciale al 14 agosto 2026: Lemon Squeezy e' configurato in Test mode con prodotto, varianti e webhook; lo store live e' in revisione. L'enforcement remoto e' `enforce`: l'accesso ai tool richiede una licenza attiva, inclusa una licenza prova creata manualmente dall'amministratore.
 
 Per aggiornare:
 
