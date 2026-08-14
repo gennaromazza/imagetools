@@ -126,6 +126,8 @@ jobs:
           "component=$component" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
         run: npm ci
 
       - name: Test and typecheck shared release code
