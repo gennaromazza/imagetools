@@ -69,7 +69,11 @@ if (command === "status") {
 } else if (command === "enforcement") {
   const mode = args[0];
   if (!["observe", "warn", "enforce"].includes(mode)) throw new Error("Use: enforcement observe|warn|enforce");
-  await db.collection("licenseConfiguration").doc("public").set({ enforcement: mode, updatedAt: Timestamp.now() }, { merge: true });
+  await db.collection("licenseConfiguration").doc("public").set({
+    enforcement: mode,
+    enforcementOverride: true,
+    updatedAt: Timestamp.now(),
+  }, { merge: true });
   console.log(`FileX licensing enforcement: ${mode}`);
 } else if (command === "configure-commerce") {
   const [monthlyVariantId, annualVariantId, monthlyUrl, annualUrl] = args;
