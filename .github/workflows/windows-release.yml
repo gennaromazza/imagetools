@@ -179,6 +179,7 @@ jobs:
           $catalogUrl = "https://github.com/gennaromazza/imagetools/releases/download/update-catalog-$env:FILEX_RELEASE_CHANNEL/$env:FILEX_RELEASE_CHANNEL.json"
           $legacyCatalogUrl = "https://github.com/gennaromazza/imagetools/releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json"
           node ./apps/filex-desktop/scripts/generate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL --tool=$env:FILEX_COMPONENT --base-url=$baseUrl --previous-manifest-url=$catalogUrl --bootstrap-manifest-url=$legacyCatalogUrl --min-launcher-version=$env:FILEX_MIN_SUITE_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "Generazione catalogo non riuscita con codice $LASTEXITCODE" }
           Push-Location apps/filex-desktop
           try {
             node ./scripts/validate-release-manifest.mjs --channel=$env:FILEX_RELEASE_CHANNEL
