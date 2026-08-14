@@ -35,25 +35,25 @@ I numeri di throughput non diventano requisiti finche' non viene creata una macc
 
 Documentazione, logo, contratti e prototipo del piano.
 
-### M1 - Scanner read-only
+### M1 - Scanner read-only (completata)
 
 Associazione volumi, scansione, baseline iniziale e piano senza mutazioni. Gate: nessun falso positivo di cancellazione nei dataset di prova.
 
-### M2 - Copia verificata
+### M2 - Copia verificata (completata nel motore locale)
 
-Master verso clone, staging, SHA-256, journal e ripresa.
+Master verso clone, staging, SHA-256, journal, recupero degli staging interrotti e ripresa dalle sole operazioni ancora necessarie. La sorgente viene letta una sola volta durante copia e hashing; lo staging viene poi riletto per la verifica indipendente.
 
-### M3 - Cancellazioni e recupero
+### M3 - Cancellazioni e recupero (completata nel motore e nella UI)
 
-Propagazione master verso clone, cestino, soglie e cronologia.
+Propagazione master verso clone, cestino per sessione, recupero senza sovrascrittura, eliminazione definitiva esplicita, soglie e cronologia ricercabile/esportabile.
 
-### M4 - Lavoro fuori studio
+### M4 - Lavoro fuori studio (completata)
 
-Importazione di nuovi elementi dal clone e gestione completa dei conflitti.
+Importazione di nuovi elementi dal clone e gestione grafica dei conflitti: conserva entrambe, usa master oppure usa clone preservando la versione sostituita.
 
-### M5 - Lightroom e Archivio Flow
+### M5 - Lightroom e Archivio Flow (funzioni operative; test fotografici da ampliare)
 
-Pacchetti coerenti, lock, eventi nuovo lavoro e stato protezione.
+Lock, snapshot dei file e delle directory del pacchetto prima di risolvere un conflitto, eventi nuovo lavoro e stato in attesa/protetto.
 
 ### M6 - Suite e release
 

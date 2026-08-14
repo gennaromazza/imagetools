@@ -798,6 +798,15 @@ export interface ArchivioImportResult {
     failedFiles?: string[];
     duplicateFiles?: string[];
 }
+export interface BackupGuardProjectNotification {
+    schemaVersion: 1;
+    eventId: string;
+    projectId: string;
+    projectName: string;
+    absolutePath: string;
+    importedAt: string;
+    fileCount: number;
+}
 export interface ArchivioImportProgressSnapshot {
     active: boolean;
     phase: "idle" | "copying" | "compressing" | "done" | "error";
@@ -975,6 +984,9 @@ export interface FileXDesktopApi {
     }) => Promise<ArchivioFilterPreviewData>;
     getArchivioPreviewImage: (sdPath: string, filePath: string) => Promise<DesktopRenderedImage | null>;
     startArchivioImport: (input: ArchivioImportRequest) => Promise<ArchivioImportResult>;
+    notifyBackupGuardProject: (notification: BackupGuardProjectNotification) => Promise<{
+        ok: boolean;
+    }>;
     listArchivioJobs: () => Promise<ArchivioJob[]>;
     analyzeArchivioArchive: () => Promise<ArchivioArchiveAnalysisResult>;
     renameArchivioArchiveJobs: (requests: ArchivioArchiveRenameRequest[]) => Promise<ArchivioArchiveRenameResult>;

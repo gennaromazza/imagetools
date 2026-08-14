@@ -153,6 +153,7 @@ const api: FileXDesktopApi = {
   getArchivioFilterPreview: (input) => ipcRenderer.invoke("filex:get-archivio-filter-preview", input),
   getArchivioPreviewImage: (sdPath, filePath) => ipcRenderer.invoke("filex:get-archivio-preview-image", sdPath, filePath),
   startArchivioImport: (input) => ipcRenderer.invoke("filex:start-archivio-import", input),
+  notifyBackupGuardProject: (notification) => ipcRenderer.invoke("filex:notify-backup-guard-project", notification),
   listArchivioJobs: () => ipcRenderer.invoke("filex:list-archivio-jobs"),
   analyzeArchivioArchive: () => ipcRenderer.invoke("filex:analyze-archivio-archive"),
   renameArchivioArchiveJobs: (requests) => ipcRenderer.invoke("filex:rename-archivio-archive-jobs", requests),

@@ -19,6 +19,7 @@ const imagePartyFramePackage = JSON.parse(await read("apps/image-party-frame/pac
 const archivioFlowPackage = JSON.parse(await read("apps/archivio-flow/package.json"));
 const cacheSweepPackage = JSON.parse(await read("apps/cache-sweep/package.json"));
 const filexSendPackage = JSON.parse(await read("apps/filex-send/package.json"));
+const backupGuardPackage = JSON.parse(await read("apps/backup-guard/package.json"));
 const builder = await read("apps/filex-desktop/electron-builder.config.mjs");
 const toolManifest = await read("apps/filex-desktop/src/tool-manifest.ts");
 const suiteMain = await read("apps/filex-desktop/src/suite-main.ts");
@@ -30,6 +31,7 @@ const launcherBuilder = await read("apps/filex-desktop/scripts/build-suite-launc
 const releaseWorkflow = await read(".github/workflows/windows-release.yml");
 const ciWorkflow = await read(".github/workflows/ci.yml");
 const manifestGenerator = await read("apps/filex-desktop/scripts/generate-release-manifest.mjs");
+const packagedComponentVerifier = await read("apps/filex-desktop/scripts/verify-packaged-component.mjs");
 const downloadPage = await read("website/index.html");
 const installerLicense = await read("apps/filex-desktop/build/license_it.txt");
 
@@ -40,8 +42,9 @@ for (const [name, packageJson] of [
   ["archivio-flow", archivioFlowPackage],
   ["cache-sweep", cacheSweepPackage],
   ["filex-send", filexSendPackage],
+  ["backup-guard", backupGuardPackage],
 ]) {
-  assert(/^\d+\.\d+\.\d+$/.test(packageJson.version), `Versione non semantica per ${name}`);
+  assert(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(packageJson.version), `Versione non semantica per ${name}`);
 }
 // Component versions are sourced independently and may legitimately coincide
 // after separate patch releases. The packaging assertions below verify the
@@ -70,6 +73,8 @@ assert(
     && toolManifest.includes('electronPreloadOutputFile: "cache-sweep/electron/preload.cjs"')
     && toolManifest.includes('versionPackageRelativeToShell: "../filex-send"')
     && toolManifest.includes('electronPreloadOutputFile: "filex-send/electron/preload.cjs"')
+    && toolManifest.includes('versionPackageRelativeToShell: "../backup-guard"')
+    && toolManifest.includes('electronPreloadOutputFile: "backup-guard/electron/preload.cjs"')
     && toolManifest.includes('versionPackageRelativeToShell: "."'),
   "Il manifest desktop non distingue le sorgenti versione di Suite e tool.",
 );
@@ -136,6 +141,7 @@ assert(
   releaseWorkflow.includes('"suite-v*"')
     && releaseWorkflow.includes('"cache-sweep-v*"')
     && releaseWorkflow.includes('"filex-send-v*"')
+    && releaseWorkflow.includes('"backup-guard-v*"')
     && releaseWorkflow.includes("Build selected installer")
     && releaseWorkflow.includes("verify-packaged-component.mjs")
     && releaseWorkflow.includes("Get-Content $feedPath -Raw")
@@ -144,8 +150,8 @@ assert(
     && releaseWorkflow.includes("foreach ($attempt in 1..6)")
     && releaseWorkflow.includes("Bootstrap dedicated tool catalog")
     && releaseWorkflow.includes("releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json")
-    && releaseWorkflow.includes('$component -eq "filex-send"')
-    && releaseWorkflow.includes('{ "0.1.31" } elseif ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }')
+    && releaseWorkflow.includes('$component -eq "backup-guard"')
+    && releaseWorkflow.includes('{ "0.1.33" } elseif ($component -eq "filex-send") { "0.1.31" } elseif ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }')
     && releaseWorkflow.includes("git branch -r --contains $env:GITHUB_SHA")
     && releaseWorkflow.includes('"refs/heads/main"')
     && !releaseWorkflow.includes("Build FileX Suite installer"),
@@ -160,8 +166,14 @@ assert(
 assert(
   manifestGenerator.includes("--tool=")
     && manifestGenerator.includes("--previous-manifest-url=")
-    && manifestGenerator.includes("--bootstrap-manifest-url="),
+    && manifestGenerator.includes("--bootstrap-manifest-url=")
+    && manifestGenerator.includes("bootstrapResponse.status === 404")
+    && manifestGenerator.includes("previousManifest = await readBundledManifest()"),
   "Il generatore non aggiorna atomicamente un singolo tool dal catalogo remoto.",
+);
+assert(
+  packagedComponentVerifier.includes("(?:-[0-9A-Za-z.-]+)?"),
+  "Il verificatore degli installer non accetta versioni prerelease.",
 );
 assert(
   downloadPage.includes("releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe"),
