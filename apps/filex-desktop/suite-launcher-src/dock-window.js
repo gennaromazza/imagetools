@@ -34,6 +34,10 @@ let pointerX = null;
 let magnificationFrame = null;
 let dragState = null;
 let suppressClickUntil = 0;
+let suiteDragState = null;
+let suppressSuiteToggleClick = false;
+let pendingSuitePosition = null;
+let suiteMoveInFlight = false;
 
 function installedStatesInOrder() {
   const installed = states.filter((state) => state.installed);
@@ -199,6 +203,39 @@ function finishDrag(event) {
   scheduleAutoCollapse();
 }
 
+async function flushSuitePosition() {
+  if (suiteMoveInFlight) return;
+  suiteMoveInFlight = true;
+  try {
+    while (pendingSuitePosition) {
+      const position = pendingSuitePosition;
+      pendingSuitePosition = null;
+      dockState = await api.saveSuiteDockState(position);
+    }
+  } finally {
+    suiteMoveInFlight = false;
+  }
+}
+
+function queueSuitePosition(x, y) {
+  pendingSuitePosition = { x: Math.round(x), y: Math.round(y) };
+  void flushSuitePosition();
+}
+
+function finishSuiteDrag(event) {
+  if (!suiteDragState || event.pointerId !== suiteDragState.pointerId) return;
+  const state = suiteDragState;
+  if (suiteToggle.hasPointerCapture(event.pointerId)) suiteToggle.releasePointerCapture(event.pointerId);
+  suiteDragState = null;
+  suiteToggle.classList.remove('dragging');
+  if (!state.moved) return;
+  suppressSuiteToggleClick = true;
+  queueSuitePosition(
+    state.startDockX + event.screenX - state.startScreenX,
+    state.startDockY + event.screenY - state.startScreenY,
+  );
+}
+
 root.addEventListener('click', (event) => {
   if (performance.now() < suppressClickUntil) return;
   const button = event.target.closest('[data-id]');
@@ -245,7 +282,37 @@ root.addEventListener('pointerleave', () => {
 root.addEventListener('pointerup', finishDrag);
 root.addEventListener('pointercancel', finishDrag);
 
-suiteToggle.addEventListener('click', () => { void setCollapsed(!dockState.collapsed); });
+suiteToggle.addEventListener('pointerdown', (event) => {
+  if (!dockState.collapsed || event.button !== 0) return;
+  suiteDragState = {
+    pointerId: event.pointerId,
+    startScreenX: event.screenX,
+    startScreenY: event.screenY,
+    startDockX: dockState.x,
+    startDockY: dockState.y,
+    moved: false,
+  };
+  suiteToggle.setPointerCapture(event.pointerId);
+});
+suiteToggle.addEventListener('pointermove', (event) => {
+  if (!suiteDragState || event.pointerId !== suiteDragState.pointerId) return;
+  const deltaX = event.screenX - suiteDragState.startScreenX;
+  const deltaY = event.screenY - suiteDragState.startScreenY;
+  if (!suiteDragState.moved && Math.hypot(deltaX, deltaY) < 5) return;
+  suiteDragState.moved = true;
+  suiteToggle.classList.add('dragging');
+  queueSuitePosition(suiteDragState.startDockX + deltaX, suiteDragState.startDockY + deltaY);
+});
+suiteToggle.addEventListener('pointerup', finishSuiteDrag);
+suiteToggle.addEventListener('pointercancel', finishSuiteDrag);
+suiteToggle.addEventListener('click', (event) => {
+  if (suppressSuiteToggleClick) {
+    suppressSuiteToggleClick = false;
+    event.preventDefault();
+    return;
+  }
+  void setCollapsed(!dockState.collapsed);
+});
 settingsButton.addEventListener('click', () => { void setSettingsOpen(controls.hidden); });
 document.querySelector('#dock-opacity').addEventListener('input', async (event) => {
   dockState = await api.saveSuiteDockState({ opacity: Number(event.target.value) / 100 });

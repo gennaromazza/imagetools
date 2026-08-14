@@ -167,6 +167,8 @@ body { color: var(--dock-text); user-select: none; }
   backdrop-filter: none;
 }
 .collapsed .suite-toggle { margin: auto; }
+.collapsed .suite-toggle { cursor: grab; touch-action: none; }
+.collapsed .suite-toggle.dragging { cursor: grabbing; transform: scale(1.02); }
 
 @keyframes dock-item-in { from { opacity: 0; transform: translateY(6px) scale(.94); } }
 
