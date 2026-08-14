@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-14 - FileX Suite 0.1.34
+
+- rimossa l'ombra rettangolare nativa della finestra trasparente della dock su Windows
+- alleggeriti ombra, bordo e superficie effetto vetro della dock nei temi chiaro e scuro
+- resa piu' compatta la dock ridotta e aggiunti separatore, animazioni di ingresso e focus da tastiera
+- ridotta la magnification delle icone per un'interazione piu' stabile e leggibile
+- pubblicata soltanto FileX Suite 0.1.34; le versioni e il catalogo remoto dei tool indipendenti restano invariati
+
 ## 2026-08-14 - FileX Suite 0.1.33
 
 - corretto il comando `Verifica ora` della licenza: mostra lo stato di avanzamento, conferma l'orario della verifica e torna sempre cliccabile anche dopo una richiesta asincrona

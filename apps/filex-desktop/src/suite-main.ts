@@ -221,6 +221,7 @@ async function createDock(): Promise<void> {
     y: state.y || display.workArea.y + display.workAreaSize.height - height - 18,
     frame: false,
     transparent: true,
+    hasShadow: false,
     resizable: false,
     movable: true,
     minimizable: false,

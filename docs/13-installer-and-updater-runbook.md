@@ -155,3 +155,9 @@ Dopo l'aggiornamento, aprire la gestione licenza, attivare una chiave generata c
 La release `suite-v0.1.33` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.33 senza cambiare le versioni del catalogo tool.
 
 Con una licenza attiva, aprire **Gestisci licenza** e premere **Verifica ora**: il pulsante deve mostrare `Verifica...`, poi tornare cliccabile e visualizzare una conferma con l'orario. La scheda **FileX Backup Guard** deve mostrare il logo dedicato, la categoria `Utility` e la descrizione completa. Con enforcement remoto `enforce`, un PC privo di licenza attiva o prova manuale non deve poter aprire i tool; la gestione licenza e gli aggiornamenti della Suite devono restare accessibili.
+
+## Verifica FileX Suite 0.1.34 — dock Windows
+
+La release `suite-v0.1.34` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.34 senza cambiare le versioni del catalogo tool.
+
+Con la dock ridotta verificare che non compaia alcuna ombra rettangolare appartenente alla finestra trasparente. Nei temi chiaro e scuro il bordo e l'ombra devono seguire la sagoma arrotondata. Espandere la dock e verificare il separatore tra Suite e strumenti, l'ingresso morbido delle icone, la magnification contenuta, il riordino tramite trascinamento e il focus visibile da tastiera. Riduzione automatica, impostazioni e apertura dei tool devono restare operative.

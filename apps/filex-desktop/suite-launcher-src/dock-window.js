@@ -146,8 +146,8 @@ function scheduleMagnification() {
       const distance = Math.abs(pointerX - (rect.left + rect.width / 2));
       const normalized = Math.min(1, distance / 145);
       const influence = (Math.cos(normalized * Math.PI) + 1) / 2;
-      const scale = 1 + 0.28 * influence;
-      const lift = -17 * influence;
+      const scale = 1 + 0.16 * influence;
+      const lift = -10 * influence;
       item.style.transform = `translate3d(0, ${lift}px, 0) scale(${scale})`;
     }
   });

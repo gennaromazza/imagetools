@@ -1833,6 +1833,7 @@ async function createSuiteDock(): Promise<void> {
     y: dockState.y || defaultY,
     frame: false,
     transparent: true,
+    hasShadow: false,
     resizable: false,
     movable: true,
     minimizable: false,
