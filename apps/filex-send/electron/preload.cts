@@ -5,6 +5,7 @@ const api: FileSendDesktopApi = {
   getSnapshot: () => ipcRenderer.invoke("filex-send:get-snapshot"),
   startSession: (label) => ipcRenderer.invoke("filex-send:start-session", label),
   startRemoteSession: (label, expiresAt) => ipcRenderer.invoke("filex-send:start-remote-session", label, expiresAt),
+  startSendSession: (mode, label, expiresAt) => ipcRenderer.invoke("filex-send:start-send-session", mode, label, expiresAt),
   closeSession: () => ipcRenderer.invoke("filex-send:close-session"),
   chooseOutputRoot: () => ipcRenderer.invoke("filex-send:choose-output-root"),
   saveWifi: (wifi) => ipcRenderer.invoke("filex-send:save-wifi", wifi),

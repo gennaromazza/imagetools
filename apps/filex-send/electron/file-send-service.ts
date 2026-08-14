@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { access, mkdir, open, rename, rm } from "node:fs/promises";
+import { access, mkdir, open, rename, rm, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { basename, extname, join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -15,6 +16,7 @@ interface ActiveUpload {
 interface InternalSession extends FileSendSession {
   token: string;
   active: Map<string, ActiveUpload>;
+  sharedPaths: Map<string, string>;
 }
 
 export interface FileSendServiceOptions {
@@ -110,6 +112,7 @@ export class FileSendService {
       id,
       token,
       label: safeLabel.replaceAll("-", " "),
+      direction: "receive",
       uploadUrl: `http://${address}:${this.port}/s/${token}`,
       folderPath,
       createdAt,
@@ -118,7 +121,36 @@ export class FileSendService {
       activeUploads: 0,
       activeUploadBytes: 0,
       active: new Map(),
+      sharedPaths: new Map(),
       clientCompleted: false,
+    };
+    this.emit(true);
+    return this.snapshot();
+  }
+
+  async startSendSession(filePaths: string[], label?: string): Promise<FileSendSnapshot> {
+    if (!this.server || !this.port) await this.start();
+    if (filePaths.length === 0) throw new Error("Scegli almeno un file da inviare.");
+    const createdAt = Date.now();
+    const safeLabel = sanitizeLabel(label) || `Consegna-${String(new Date(createdAt).getHours()).padStart(2, "0")}${String(new Date(createdAt).getMinutes()).padStart(2, "0")}`;
+    const token = randomBytes(18).toString("base64url");
+    const id = randomUUID();
+    const address = this.publicAddress ?? listLanAddresses()[0] ?? "127.0.0.1";
+    const sharedPaths = new Map<string, string>();
+    const files: FileSendReceivedFile[] = [];
+    for (const path of filePaths) {
+      const info = await stat(path);
+      if (!info.isFile() || info.size > MAX_FILE_BYTES) throw new Error(`File non valido o troppo grande: ${basename(path)}`);
+      const fileId = randomUUID();
+      sharedPaths.set(fileId, path);
+      files.push({ id: fileId, name: sanitizeFileName(basename(path)), size: info.size, receivedAt: createdAt });
+    }
+    this.session = {
+      id, token, direction: "send", label: safeLabel.replaceAll("-", " "),
+      uploadUrl: `http://${address}:${this.port}/s/${token}`,
+      folderPath: this.outputRoot, createdAt,
+      receivedBytes: files.reduce((sum, file) => sum + file.size, 0), receivedFiles: files,
+      activeUploads: 0, activeUploadBytes: 0, active: new Map(), sharedPaths, clientCompleted: false,
     };
     this.emit(true);
     return this.snapshot();
@@ -162,6 +194,7 @@ export class FileSendService {
     const pageMatch = url.pathname.match(/^\/s\/([A-Za-z0-9_-]+)$/);
     const uploadMatch = url.pathname.match(/^\/api\/session\/([A-Za-z0-9_-]+)\/files$/);
     const completeMatch = url.pathname.match(/^\/api\/session\/([A-Za-z0-9_-]+)\/complete$/);
+    const downloadMatch = url.pathname.match(/^\/api\/session\/([A-Za-z0-9_-]+)\/downloads\/([0-9a-f-]{36})$/i);
 
     if (request.method === "GET" && url.pathname === "/health") {
       this.sendJson(response, 200, { ok: true });
@@ -170,7 +203,22 @@ export class FileSendService {
     if (request.method === "GET" && pageMatch) {
       if (!this.isActiveToken(pageMatch[1])) return this.sendExpired(response);
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      response.end(mobilePage(this.session!.label, pageMatch[1]));
+      response.end(this.session!.direction === "send" ? downloadPage(this.session!, pageMatch[1]) : mobilePage(this.session!.label, pageMatch[1]));
+      return;
+    }
+    if (request.method === "GET" && downloadMatch) {
+      if (!this.isActiveToken(downloadMatch[1])) return this.sendExpired(response);
+      const session = this.session!;
+      const path = session.sharedPaths.get(downloadMatch[2]);
+      const file = session.receivedFiles.find((candidate) => candidate.id === downloadMatch[2]);
+      if (!path || !file || session.direction !== "send") return this.sendJson(response, 404, { error: "File non trovato." });
+      response.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": String(file.size),
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+        "cache-control": "no-store",
+      });
+      createReadStream(path).pipe(response);
       return;
     }
     if (request.method === "PUT" && uploadMatch) {
@@ -265,7 +313,7 @@ function normalizeWifi(wifi: FileSendWifiConfig): FileSendWifiConfig {
 }
 
 function publicSession(session: InternalSession): FileSendSession {
-  const { token: _token, active: _active, ...value } = session;
+  const { token: _token, active: _active, sharedPaths: _sharedPaths, ...value } = session;
   return { ...value, receivedFiles: [...value.receivedFiles] };
 }
 
@@ -366,15 +414,26 @@ function escapeHtml(value: string): string {
 
 function mobilePage(label: string, token: string): string {
   return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101b2d"><title>Invia a FileX Send</title><style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(155deg,#0b1423,#142a43);color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;padding:24px 18px}main{max-width:560px;margin:0 auto}.brand{font-weight:850;letter-spacing:.08em;color:#63e6be;margin:10px 0 34px}.card{background:#fff;color:#122033;border-radius:28px;padding:30px 24px;box-shadow:0 24px 70px #0007}h1{font-size:30px;line-height:1.08;margin:0 0 10px}p{color:#637086;line-height:1.5}.shop{font-weight:750;color:#122033}.picker{display:block;text-align:center;background:#1167d8;color:#fff;font-weight:800;font-size:18px;padding:18px;border-radius:16px;margin:25px 0 14px}.picker input{display:none}.summary{min-height:28px;font-weight:700}.send{width:100%;border:0;border-radius:16px;background:#0db383;color:white;font-size:18px;font-weight:850;padding:17px}.send:disabled{opacity:.38}.progress{height:12px;background:#e7edf4;border-radius:99px;overflow:hidden;margin:22px 0 10px}.bar{height:100%;width:0;background:linear-gradient(90deg,#0db383,#55d9b2);transition:width .15s}.status{text-align:center;font-weight:750;color:#33445c}.done{text-align:center;padding:28px 0}.done .check{width:72px;height:72px;border-radius:50%;background:#0db383;color:#fff;font-size:42px;display:grid;place-items:center;margin:0 auto 18px}</style></head><body><main><div class="brand">FILEX SEND</div><section class="card" id="upload"><h1>Invia foto e video</h1><p>Consegna diretta a <span class="shop">${escapeHtml(label)}</span>. I file restano nella rete del negozio.</p><label class="picker">Scegli foto e video<input id="files" type="file" accept="image/*,video/*" multiple></label><div class="summary" id="summary">Nessun file selezionato</div><button class="send" id="send" disabled>Invia ora</button><div class="progress"><div class="bar" id="bar"></div></div><div class="status" id="status"></div></section><section class="card done" id="done" hidden><div class="check">✓</div><h1>Trasferimento completato</h1><p>Le foto sono arrivate. Puoi chiudere questa pagina.</p></section></main><script>
-const token=${JSON.stringify(token)},input=document.querySelector('#files'),send=document.querySelector('#send'),summary=document.querySelector('#summary'),bar=document.querySelector('#bar'),status=document.querySelector('#status');let files=[];
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(155deg,#0b1423,#142a43);color:#f8fafc;font-family:system-ui,-apple-system,sans-serif;padding:24px 18px}main{max-width:560px;margin:0 auto}.brand{font-weight:850;letter-spacing:.08em;color:#63e6be;margin:10px 0 34px}.card{background:#fff;color:#122033;border-radius:28px;padding:30px 24px;box-shadow:0 24px 70px #0007}h1{font-size:30px;line-height:1.08;margin:0 0 10px}p{color:#637086;line-height:1.5}.shop{font-weight:750;color:#122033}.pickers{display:grid;gap:10px;margin:25px 0 9px}.picker{display:flex;align-items:center;justify-content:center;gap:10px;text-align:left;background:#1167d8;color:#fff;font-weight:800;font-size:18px;padding:16px;border-radius:16px}.picker.secondary{background:#e7edf4;color:#213d5b}.picker small{display:block;font-size:12px;opacity:.75;margin-top:3px}.picker input{position:absolute;width:1px;height:1px;opacity:0}.help{font-size:13px;margin:0 2px 14px}.summary{min-height:28px;font-weight:700}.previews{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin:5px 0 12px}.preview{aspect-ratio:1;border-radius:10px;overflow:hidden;background:#e7edf4;display:grid;place-items:center;font-size:10px;text-align:center;word-break:break-word}.preview img,.preview video{width:100%;height:100%;object-fit:cover}.send{width:100%;border:0;border-radius:16px;background:#0db383;color:white;font-size:18px;font-weight:850;padding:17px}.send:disabled{opacity:.38}.progress{height:12px;background:#e7edf4;border-radius:99px;overflow:hidden;margin:22px 0 10px}.bar{height:100%;width:0;background:linear-gradient(90deg,#0db383,#55d9b2);transition:width .15s}.status{text-align:center;font-weight:750;color:#33445c}.done{text-align:center;padding:28px 0}.done .check{width:72px;height:72px;border-radius:50%;background:#0db383;color:#fff;font-size:42px;display:grid;place-items:center;margin:0 auto 18px}</style></head><body><main><div class="brand">FILEX SEND</div><section class="card" id="upload"><h1>Invia foto e video</h1><p>Consegna diretta a <span class="shop">${escapeHtml(label)}</span>. I file restano nella rete del negozio.</p><div class="pickers"><label class="picker"><span>▦</span><span>Scegli dalla galleria<small>Foto e video del telefono</small></span><input id="mediaFiles" type="file" accept="image/*,video/*" multiple></label><label class="picker secondary"><span>⌕</span><span>Sfoglia altri file<small>Download, cartelle e documenti</small></span><input id="otherFiles" type="file" multiple></label></div><p class="help">Puoi selezionare più elementi insieme. Su alcuni telefoni devi tenere premuta la prima foto.</p><div class="summary" id="summary">Nessun file selezionato</div><div class="previews" id="previews"></div><button class="send" id="send" disabled>Invia ora</button><div class="progress"><div class="bar" id="bar"></div></div><div class="status" id="status"></div></section><section class="card done" id="done" hidden><div class="check">✓</div><h1>Trasferimento completato</h1><p>Le foto sono arrivate. Puoi chiudere questa pagina.</p></section></main><script>
+const token=${JSON.stringify(token)},inputs=[...document.querySelectorAll('#mediaFiles,#otherFiles')],send=document.querySelector('#send'),summary=document.querySelector('#summary'),previews=document.querySelector('#previews'),bar=document.querySelector('#bar'),status=document.querySelector('#status');let files=[];
 const fmt=n=>n<1024?n+' B':n<1048576?(n/1024).toFixed(1)+' KB':n<1073741824?(n/1048576).toFixed(1)+' MB':(n/1073741824).toFixed(1)+' GB';
-input.onchange=()=>{files=[...input.files];const total=files.reduce((s,f)=>s+f.size,0);summary.textContent=files.length?files.length+' file · '+fmt(total):'Nessun file selezionato';send.disabled=!files.length};
+inputs.forEach(input=>input.onchange=()=>{files=[...input.files];const total=files.reduce((s,f)=>s+f.size,0);summary.textContent=files.length?files.length+' file · '+fmt(total):'Nessun file selezionato';send.disabled=!files.length;previews.replaceChildren(...files.slice(0,8).map(file=>{const item=document.createElement('div');item.className='preview';if(file.type.startsWith('image/')||file.type.startsWith('video/')){const media=document.createElement(file.type.startsWith('video/')?'video':'img'),url=URL.createObjectURL(file);media.src=url;media.alt=file.name;media.onload=media.onloadeddata=()=>URL.revokeObjectURL(url);item.append(media)}else item.textContent=file.name;return item}));inputs.forEach(other=>{if(other!==input)other.value=''})});
 function upload(file,onprogress){return new Promise((resolve,reject)=>{const xhr=new XMLHttpRequest();xhr.open('PUT','/api/session/'+token+'/files');xhr.setRequestHeader('X-File-Name',encodeURIComponent(file.name));xhr.upload.onprogress=e=>onprogress(e.loaded);xhr.onload=()=>xhr.status===201?resolve():reject(new Error('Invio non riuscito'));xhr.onerror=()=>reject(new Error('Connessione interrotta'));xhr.send(file)})}
-send.onclick=async()=>{send.disabled=true;input.disabled=true;const total=files.reduce((s,f)=>s+f.size,0);let complete=0;try{for(let i=0;i<files.length;i++){const f=files[i];status.textContent='Invio '+(i+1)+' di '+files.length+' · '+f.name;await upload(f,n=>{bar.style.width=((complete+n)/total*100)+'%'});complete+=f.size}await fetch('/api/session/'+token+'/complete',{method:'POST'});document.querySelector('#upload').hidden=true;document.querySelector('#done').hidden=false}catch(e){status.textContent=e.message+' Tocca “Invia ora” per riprovare.';send.disabled=false;input.disabled=false}};
+send.onclick=async()=>{send.disabled=true;inputs.forEach(input=>input.disabled=true);const total=files.reduce((s,f)=>s+f.size,0);let complete=0;try{for(let i=0;i<files.length;i++){const f=files[i];status.textContent='Invio '+(i+1)+' di '+files.length+' · '+f.name;await upload(f,n=>{bar.style.width=((complete+n)/total*100)+'%'});complete+=f.size}await fetch('/api/session/'+token+'/complete',{method:'POST'});document.querySelector('#upload').hidden=true;document.querySelector('#done').hidden=false}catch(e){status.textContent=e.message+' Tocca “Invia ora” per riprovare.';send.disabled=false;inputs.forEach(input=>input.disabled=false)}};
 </script></body></html>`;
 }
 
 function expiredPage(): string {
   return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sessione terminata</title><style>body{font-family:system-ui;background:#0f1b2d;color:white;display:grid;place-items:center;min-height:100vh;margin:0;text-align:center;padding:30px}main{max-width:420px}h1{font-size:34px}p{color:#b9c7da;font-size:18px}</style></head><body><main><h1>Sessione terminata</h1><p>Chiedi al fotografo di creare un nuovo trasferimento e scansiona il nuovo QR code.</p></main></body></html>`;
+}
+
+function downloadPage(session: InternalSession, token: string): string {
+  const files = session.receivedFiles.map((file) => `<li><div><strong>${escapeHtml(file.name)}</strong><small>${formatFileSize(file.size)}</small></div><a href="/api/session/${token}/downloads/${file.id}" download>Scarica</a></li>`).join("");
+  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101b2d"><title>File da FileX Send</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(155deg,#0b1423,#142a43);font-family:system-ui,-apple-system,sans-serif;color:#fff;padding:24px 18px}main{max-width:560px;margin:auto}.brand{font-weight:900;letter-spacing:.08em;color:#63e6be;margin:10px 0 30px}.card{background:#fff;color:#122033;border-radius:28px;padding:28px 23px;box-shadow:0 24px 70px #0007}h1{font-size:30px;line-height:1.08;margin:0 0 10px}p{color:#637086;line-height:1.5}ul{list-style:none;padding:0;margin:24px 0 0}li{display:flex;align-items:center;gap:12px;padding:15px 0;border-top:1px solid #e2e9ef}li div{min-width:0;flex:1}strong,small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}small{color:#75869a;margin-top:4px}a{background:#1167d8;color:#fff;text-decoration:none;font-weight:850;padding:11px 14px;border-radius:12px}</style></head><body><main><div class="brand">FILEX SEND</div><section class="card"><h1>File pronti per te</h1><p><strong>${escapeHtml(session.label)}</strong> ha condiviso ${session.receivedFiles.length} ${session.receivedFiles.length === 1 ? "file" : "file"}. Tocca Scarica accanto a ogni elemento.</p><ul>${files}</ul></section></main></body></html>`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
 }

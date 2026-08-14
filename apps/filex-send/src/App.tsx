@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import type { FileSendSession, FileSendSnapshot, FileSendWifiConfig } from "./contracts";
 
 type Choice = "home" | "local" | "remote";
+type Direction = "receive" | "send";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -28,6 +29,7 @@ function localDateTimeValue(timestamp: number): string {
 export function App() {
   const [snapshot, setSnapshot] = useState<FileSendSnapshot | null>(null);
   const [choice, setChoice] = useState<Choice>("home");
+  const [direction, setDirection] = useState<Direction | null>(null);
   const [label, setLabel] = useState("");
   const [remoteExpiresAt, setRemoteExpiresAt] = useState(() => localDateTimeValue(Date.now() + 24 * 60 * 60 * 1000));
   const [uploadQr, setUploadQr] = useState("");
@@ -78,9 +80,11 @@ export function App() {
   const start = async () => {
     setBusy(true); setError(null);
     try {
-      const next = choice === "remote"
-        ? await window.fileXSend.startRemoteSession(label, expiryTimestamp)
-        : await window.fileXSend.startSession(label);
+      const next = direction === "send"
+        ? await window.fileXSend.startSendSession(choice === "remote" ? "remote" : "local", label, expiryTimestamp)
+        : choice === "remote"
+          ? await window.fileXSend.startRemoteSession(label, expiryTimestamp)
+          : await window.fileXSend.startSession(label);
       setSnapshot(next); setLabel("");
     } catch (cause) { setError(message(cause)); }
     finally { setBusy(false); }
@@ -88,7 +92,7 @@ export function App() {
 
   const close = async () => {
     setBusy(true); setError(null);
-    try { setSnapshot(await window.fileXSend.closeSession()); setChoice("home"); }
+    try { setSnapshot(await window.fileXSend.closeSession()); setChoice("home"); setDirection(null); }
     catch (cause) { setError(message(cause)); }
     finally { setBusy(false); }
   };
@@ -127,17 +131,18 @@ export function App() {
     </header>
     {error && <div className="notice error">{error}</div>}
 
-    {!snapshot.session && choice === "home" && <ModeChoice onChoose={setChoice} remoteAvailable={snapshot.remoteAvailable} />}
+    {!snapshot.session && choice === "home" && !direction && <DirectionChoice onChoose={setDirection} />}
+    {!snapshot.session && choice === "home" && direction && <ModeChoice onChoose={setChoice} remoteAvailable={snapshot.remoteAvailable} direction={direction} onBack={() => setDirection(null)} />}
 
     {!snapshot.session && choice !== "home" && <section className="welcome-grid">
       <div className="welcome-copy">
         <button className="back-button" onClick={() => setChoice("home")}>← Indietro</button>
         <p className="eyebrow">{choice === "local" ? "CLIENTE QUI CON TE" : "CLIENTE A DISTANZA"}</p>
-        <h1>{choice === "local" ? <>Ricevi direttamente<br />nella rete locale.</> : <>Crea un link.<br />Al resto pensa FileX.</>}</h1>
-        <p className="lead">{choice === "local" ? "Il cliente si collega al Wi-Fi, scansiona il QR e invia." : "Invia il link via WhatsApp o email. Le foto arriveranno automaticamente nella cartella."}</p>
+        <h1>{direction === "send" ? (choice === "local" ? <>Condividi direttamente<br />nella rete locale.</> : <>Carica i file.<br />Invia un solo link.</>) : choice === "local" ? <>Ricevi direttamente<br />nella rete locale.</> : <>Crea un link.<br />Al resto pensa FileX.</>}</h1>
+        <p className="lead">{direction === "send" ? "Scegli i file dal PC: il cliente li scaricherà dal QR o dal link temporaneo." : choice === "local" ? "Il cliente si collega al Wi-Fi, scansiona il QR e invia." : "Invia il link via WhatsApp o email. Le foto arriveranno automaticamente nella cartella."}</p>
         <label className="client-label"><span>Nome cliente <em>facoltativo</em></span><input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Es. Famiglia Rossi" maxLength={60} /></label>
         {choice === "remote" && <label className="client-label"><span>Il cliente può inviare fino a</span><input type="datetime-local" value={remoteExpiresAt} min={localDateTimeValue(Date.now() + 15 * 60 * 1000)} max={localDateTimeValue(Date.now() + 7 * 24 * 60 * 60 * 1000)} onChange={(event) => setRemoteExpiresAt(event.target.value)} /><small>Da 15 minuti a 7 giorni. I file già inviati restano in attesa del tuo PC.</small></label>}
-        <button className="primary-action" onClick={() => void start()} disabled={busy || (choice === "local" ? !wifiReady || Boolean(snapshot.warning) : !snapshot.remoteAvailable || !expiryValid)}>{busy ? "Preparazione…" : choice === "local" ? "Nuovo trasferimento locale" : "Crea link temporaneo"}<span>→</span></button>
+        <button className="primary-action" onClick={() => void start()} disabled={busy || (choice === "local" ? !wifiReady || Boolean(snapshot.warning) : !snapshot.remoteAvailable || !expiryValid)}>{busy ? "Preparazione…" : direction === "send" ? "Scegli file e crea collegamento" : choice === "local" ? "Nuovo trasferimento locale" : "Crea link temporaneo"}<span>→</span></button>
       </div>
       {choice === "local"
         ? <WifiCard snapshot={snapshot} wifiReady={wifiReady} wifiSsid={wifiSsid} wifiPassword={wifiPassword} showPassword={showPassword} detecting={detectingWifi} draftValid={wifiDraftValid} setWifiSsid={setWifiSsid} setWifiPassword={setWifiPassword} setShowPassword={setShowPassword} detectWifi={detectWifi} saveWifi={saveWifi} chooseFolder={chooseFolder} />
@@ -151,8 +156,12 @@ export function App() {
   </main>;
 }
 
-function ModeChoice({ onChoose, remoteAvailable }: { onChoose: (choice: Choice) => void; remoteAvailable: boolean }) {
-  return <section className="mode-screen"><div className="mode-heading"><p className="eyebrow">NUOVO TRASFERIMENTO</p><h1>Dove si trova il cliente?</h1><p>Una scelta, poi FileX Send prepara tutto automaticamente.</p></div><div className="mode-grid"><button className="mode-card" onClick={() => onChoose("local")}><span className="mode-icon">⌁</span><small>STESSO POSTO</small><strong>Qui con me</strong><p>Wi-Fi locale e trasferimento diretto al PC.</p><b>Continua →</b></button><button className="mode-card remote" onClick={() => onChoose("remote")}><span className="mode-icon">↗</span><small>DA CASA O ALTROVE</small><strong>A distanza</strong><p>Link temporaneo da inviare al cliente.</p><b>{remoteAvailable ? "Continua →" : "Configura servizio →"}</b></button></div></section>;
+function DirectionChoice({ onChoose }: { onChoose: (direction: Direction) => void }) {
+  return <section className="mode-screen"><div className="mode-heading"><p className="eyebrow">FILEX SEND</p><h1>Cosa vuoi fare?</h1><p>Puoi ricevere file dal cliente oppure consegnargli i tuoi.</p></div><div className="mode-grid"><button className="mode-card" onClick={() => onChoose("receive")}><span className="mode-icon">⇩</span><small>DAL CLIENTE AL PC</small><strong>Ricevi file</strong><p>Il cliente sceglie foto, video o documenti dal telefono.</p><b>Continua →</b></button><button className="mode-card remote" onClick={() => onChoose("send")}><span className="mode-icon">⇧</span><small>DAL PC AL CLIENTE</small><strong>Invia file</strong><p>Scegli dal PC e condividi con un QR o un link.</p><b>Continua →</b></button></div></section>;
+}
+
+function ModeChoice({ onChoose, remoteAvailable, direction, onBack }: { onChoose: (choice: Choice) => void; remoteAvailable: boolean; direction: Direction; onBack: () => void }) {
+  return <section className="mode-screen"><button className="back-button mode-back" onClick={onBack}>← Indietro</button><div className="mode-heading"><p className="eyebrow">{direction === "send" ? "INVIA FILE" : "RICEVI FILE"}</p><h1>Dove si trova il cliente?</h1><p>Una scelta, poi FileX Send prepara tutto automaticamente.</p></div><div className="mode-grid"><button className="mode-card" onClick={() => onChoose("local")}><span className="mode-icon">⌁</span><small>STESSO POSTO</small><strong>Qui con me</strong><p>Wi-Fi locale e trasferimento diretto.</p><b>Continua →</b></button><button className="mode-card remote" onClick={() => onChoose("remote")}><span className="mode-icon">↗</span><small>DA CASA O ALTROVE</small><strong>A distanza</strong><p>Link temporaneo da condividere col cliente.</p><b>{remoteAvailable ? "Continua →" : "Configura servizio →"}</b></button></div></section>;
 }
 
 function WifiCard(props: { snapshot: FileSendSnapshot; wifiReady: boolean; wifiSsid: string; wifiPassword: string; showPassword: boolean; detecting: boolean; draftValid: boolean; setWifiSsid: (value: string) => void; setWifiPassword: (value: string) => void; setShowPassword: (value: boolean) => void; detectWifi: () => Promise<void>; saveWifi: () => Promise<void>; chooseFolder: () => Promise<void> }) {
@@ -169,11 +178,13 @@ function Destination({ snapshot, chooseFolder }: { snapshot: FileSendSnapshot; c
 }
 
 function LocalSession({ snapshot, wifiQr, uploadQr, busy, close }: { snapshot: FileSendSnapshot; wifiQr: string; uploadQr: string; busy: boolean; close: () => Promise<void> }) {
-  return <section className="session-grid"><QrCard step="1" eyebrow="CONNETTI AL WI-FI" title={snapshot.wifi.ssid} qr={wifiQr} help="Scansiona e conferma Connetti." /><QrCard step="2" eyebrow="APRI FILEX SEND" title="Scegli e invia" qr={uploadQr} help="Dopo la connessione, scansiona questo QR." /><TransferPanel session={snapshot.session!} busy={busy} close={close} remote={false} /> </section>;
+  const sending = snapshot.session!.direction === "send";
+  return <section className="session-grid"><QrCard step="1" eyebrow="CONNETTI AL WI-FI" title={snapshot.wifi.ssid} qr={wifiQr} help="Scansiona e conferma Connetti." /><QrCard step="2" eyebrow="APRI FILEX SEND" title={sending ? "Apri e scarica" : "Scegli e invia"} qr={uploadQr} help="Dopo la connessione, scansiona questo QR." /><TransferPanel session={snapshot.session!} busy={busy} close={close} remote={false} /> </section>;
 }
 
 function RemoteSession({ snapshot, uploadQr, copied, copyLink, busy, close }: { snapshot: FileSendSnapshot; uploadQr: string; copied: boolean; copyLink: () => Promise<void>; busy: boolean; close: () => Promise<void> }) {
-  return <section className="remote-session"><article className="qr-card remote-link-card"><p className="eyebrow">LINK TEMPORANEO</p><h1>Invialo al cliente</h1><div className="qr-wrap">{uploadQr ? <img src={uploadQr} alt="QR del link remoto" /> : <div className="qr-loading" />}</div><code className="share-url">{snapshot.session!.uploadUrl}</code><button className="copy-button" onClick={() => void copyLink()}>{copied ? "Link copiato ✓" : "Copia link"}</button><p className="qr-help">Il cliente può inviare fino al {snapshot.session!.expiresAt ? new Date(snapshot.session!.expiresAt).toLocaleString("it-IT") : "termine impostato"}. Il link resta attivo anche se chiudi l’app.</p></article><TransferPanel session={snapshot.session!} busy={busy} close={close} remote /></section>;
+  const sending = snapshot.session!.direction === "send";
+  return <section className="remote-session"><article className="qr-card remote-link-card"><p className="eyebrow">LINK TEMPORANEO</p><h1>Invialo al cliente</h1><div className="qr-wrap">{uploadQr ? <img src={uploadQr} alt="QR del link remoto" /> : <div className="qr-loading" />}</div><code className="share-url">{snapshot.session!.uploadUrl}</code><button className="copy-button" onClick={() => void copyLink()}>{copied ? "Link copiato ✓" : "Copia link"}</button><p className="qr-help">{sending ? "Il cliente può scaricare i file" : "Il cliente può inviare"} fino al {snapshot.session!.expiresAt ? new Date(snapshot.session!.expiresAt).toLocaleString("it-IT") : "termine impostato"}. Il link resta attivo anche se chiudi l’app.</p></article><TransferPanel session={snapshot.session!} busy={busy} close={close} remote /></section>;
 }
 
 function QrCard({ step, eyebrow, title, qr, help }: { step: string; eyebrow: string; title: string; qr: string; help: string }) {
@@ -181,10 +192,11 @@ function QrCard({ step, eyebrow, title, qr, help }: { step: string; eyebrow: str
 }
 
 function TransferPanel({ session, busy, close, remote }: { session: FileSendSession; busy: boolean; close: () => Promise<void>; remote: boolean }) {
+  const sending = session.direction === "send";
   const total = useMemo(() => session.receivedBytes + session.activeUploadBytes, [session]);
   const linkExpired = Boolean(session.expiresAt && session.expiresAt <= Date.now());
-  const canClose = session.activeUploads === 0 && (!remote || session.clientCompleted || linkExpired);
-  return <article className="transfer-card"><div className="session-heading"><div><p className="eyebrow">RICEZIONE</p><h2>{session.label}</h2></div><span className={session.clientCompleted ? "status done" : "status live"}>{session.clientCompleted ? "Completato" : session.activeUploads ? "Invio in corso" : linkExpired ? "Link scaduto" : "In attesa"}</span></div><div className="metrics"><div><small>File ricevuti</small><strong>{session.receivedFiles.length}</strong></div><div><small>Dati ricevuti</small><strong>{formatBytes(total)}</strong></div></div><div className="file-list">{session.receivedFiles.length === 0 ? <div className="empty"><span>⇩</span><strong>In attesa delle foto</strong><p>{remote ? "Puoi chiudere l’app: il link continuerà a ricevere fino alla scadenza." : "I file compariranno qui durante l’invio."}</p></div> : session.receivedFiles.slice().reverse().map((file) => <div className="file-row" key={file.id}><span className="file-check">✓</span><div><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></div></div>)}</div><div className="session-actions"><button className="secondary" onClick={() => void window.fileXSend.openSessionFolder()}>Apri cartella</button><button className="finish" onClick={() => void close()} disabled={busy || !canClose}>{session.activeUploads ? "Invio in corso…" : remote && !canClose ? "In attesa del cliente" : remote ? "Archivia invio" : "Termina sessione"}</button></div></article>;
+  const canClose = sending || (session.activeUploads === 0 && (!remote || session.clientCompleted || linkExpired));
+  return <article className="transfer-card"><div className="session-heading"><div><p className="eyebrow">{sending ? "CONDIVISIONE" : "RICEZIONE"}</p><h2>{session.label}</h2></div><span className="status live">{linkExpired ? "Link scaduto" : sending ? "Disponibile" : session.activeUploads ? "Invio in corso" : "In attesa"}</span></div><div className="metrics"><div><small>{sending ? "File condivisi" : "File ricevuti"}</small><strong>{session.receivedFiles.length}</strong></div><div><small>{sending ? "Dati condivisi" : "Dati ricevuti"}</small><strong>{formatBytes(total)}</strong></div></div><div className="file-list">{session.receivedFiles.length === 0 ? <div className="empty"><span>⇩</span><strong>In attesa delle foto</strong></div> : session.receivedFiles.slice().reverse().map((file) => <div className="file-row" key={file.id}><span className="file-check">✓</span><div><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></div></div>)}</div><div className="session-actions">{!sending && <button className="secondary" onClick={() => void window.fileXSend.openSessionFolder()}>Apri cartella</button>}<button className="finish" onClick={() => void close()} disabled={busy || !canClose}>{sending ? "Termina condivisione" : session.activeUploads ? "Invio in corso…" : remote && !canClose ? "In attesa del cliente" : remote ? "Archivia invio" : "Termina sessione"}</button></div></article>;
 }
 
 function message(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause); }

@@ -1,6 +1,8 @@
 # FileX Send
 
-FileX Send riceve foto e video dal telefono di un cliente direttamente su un PC Windows collegato alla stessa rete locale. Il telefono non richiede app, account o accesso a servizi cloud.
+FileX Send trasferisce file in entrambe le direzioni tra un PC Windows e il telefono del cliente. Il telefono non richiede app o account.
+
+La schermata iniziale propone **Ricevi file** e **Invia file**. Con **Invia file**, il fotografo seleziona uno o più elementi dal PC e genera un QR o un link temporaneo: il cliente apre la pagina e scarica ogni file senza vedere cartelle o percorsi del computer.
 
 La versione installata e' sempre visibile nella barra del titolo. Gli aggiornamenti dalla Suite preservano impostazioni, sessioni remote e dati locali; anche le installazioni precedenti che restituivano codice `2` vengono migrate automaticamente senza disinstallazione manuale.
 
@@ -24,6 +26,8 @@ La schermata iniziale chiede soltanto dove si trova il cliente:
 Il fotografo imposta data e ora di scadenza del link, da 15 minuti fino a 7 giorni. Il cliente lo apre senza account e può inviare anche mentre il PC è spento o FileX Send è chiuso. Alla riapertura, FileX Send scarica automaticamente nella cartella scelta tutto ciò che è in attesa.
 
 Lo stesso collegamento può essere usato più volte fino alla scadenza. Al termine di ogni gruppo la pagina conferma la consegna e propone **Invia altri file**; questa conferma non chiude la sessione. Soltanto la data impostata oppure **Archivia invio** dal PC disattivano definitivamente il link.
+
+Per una consegna dal PC al cliente, FileX Send carica i file selezionati nello storage privato e il link mostra esclusivamente gli elementi della sessione. Alla scadenza il collegamento non è più consultabile; **Termina condivisione** lo revoca immediatamente.
 
 La scadenza chiude soltanto la possibilità di aggiungere nuovi file. I file già ricevuti restano nello storage finché il PC non li scarica e ne verifica la dimensione; dopo la conferma rimangono recuperabili per un'ora, quindi la pulizia automatica li elimina.
 
