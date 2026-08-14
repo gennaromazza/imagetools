@@ -29,7 +29,7 @@ Secret runtime:
 - `LEMONSQUEEZY_WEBHOOK_SECRET`: secret HMAC del webhook;
 - `FILEX_LICENSE_SIGNING_PRIVATE_KEY`: chiave privata Ed25519 generata una sola volta; la pubblica e' compilata nella Suite;
 
-Il comando `create-support-license`, usato dal collegamento cliccabile, riusa automaticamente il login locale della Firebase CLI. Gli altri comandi amministrativi richiedono ancora le Application Default Credentials Google. Non usare service-account JSON permanenti nel repository.
+Il comando amministrativo riusa automaticamente il login locale della Firebase CLI trasformandolo, solo per la durata del processo, in credenziali ADC temporanee compatibili con Firestore. Il file temporaneo viene eliminato alla chiusura del comando. Non usare service-account JSON permanenti nel repository.
 
 ### Licenza prova con doppio clic
 
