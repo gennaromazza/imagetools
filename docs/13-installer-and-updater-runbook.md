@@ -175,3 +175,11 @@ La prerelease `backup-guard-v0.2.0-beta.1` deve contenere esclusivamente `FileX-
 Nel catalogo `update-catalog-beta`, la voce `backup-guard` deve indicare versione `0.2.0-beta.1`, `minLauncherVersion` 0.1.33, URL sul tag namespaced e checksum SHA-256 valido. Su FileX Suite 0.1.33 o successiva, selezionare il canale beta e verificare che la scheda proponga l'installazione.
 
 Eseguire un collaudo con volumi fisici distinti: copia iniziale, file nuovo sul clone, modifica master, cancellazione master confermata, ripristino dal cestino, conflitto, catalogo Lightroom aperto, pausa e annullamento. Il master non deve essere cancellato o sovrascritto automaticamente in nessuno scenario.
+
+## Verifica FileX Backup Guard 0.2.0
+
+La release stabile `backup-guard-v0.2.0` deve contenere esclusivamente `FileX-Backup-Guard-0.2.0-stable-x64-setup.exe`, la relativa blockmap e `stable.json`. FileX Suite e gli altri tool devono rimanere invariati.
+
+Nel catalogo `update-catalog-stable`, la voce `backup-guard` deve indicare versione `0.2.0`, `minLauncherVersion` 0.1.33, URL sul tag namespaced e checksum SHA-256 valido. FileX Suite 0.1.33 o successiva deve proporre l'installazione dalla normale scheda del tool, senza selezionare un canale beta.
+
+Ripetere il collaudo della beta con volumi fisici distinti e verificare inoltre l'aggiornamento da `0.2.0-beta.1`: configurazione, associazione master-clone, cronologia e cestino devono restare disponibili. Il master non deve essere cancellato o sovrascritto automaticamente in nessuno scenario.

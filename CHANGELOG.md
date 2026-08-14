@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-08-14 - FileX Backup Guard 0.2.0
+
+- promossa FileX Backup Guard a prima release ufficiale stabile nel catalogo standard di FileX Suite
+- mantenute sincronizzazione master-clone verificata, propagazione controllata delle cancellazioni e importazione dei soli file nuovi dal clone
+- confermate verifica SHA-256, controllo spazio, velocita, ETA, pausa, annullamento sicuro, verifica profonda e cestino recuperabile
+- incluse cronologia ricercabile ed esportabile, gestione dei conflitti, protezione Lightroom e integrazione con Archivio Flow
+- pubblicato soltanto FileX Backup Guard 0.2.0 nel catalogo stabile; FileX Suite e gli altri tool restano invariati
+
 ## 2026-08-14 - FileX Backup Guard 0.2.0-beta.1
 
 - pubblicata la prima beta indipendente di FileX Backup Guard per i tester FileX
