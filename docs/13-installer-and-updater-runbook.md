@@ -183,3 +183,9 @@ La release stabile `backup-guard-v0.2.0` deve contenere esclusivamente `FileX-Ba
 Nel catalogo `update-catalog-stable`, la voce `backup-guard` deve indicare versione `0.2.0`, `minLauncherVersion` 0.1.33, URL sul tag namespaced e checksum SHA-256 valido. FileX Suite 0.1.33 o successiva deve proporre l'installazione dalla normale scheda del tool, senza selezionare un canale beta.
 
 Ripetere il collaudo della beta con volumi fisici distinti e verificare inoltre l'aggiornamento da `0.2.0-beta.1`: configurazione, associazione master-clone, cronologia e cestino devono restare disponibili. Il master non deve essere cancellato o sovrascritto automaticamente in nessuno scenario.
+
+## Verifica FileX Suite 0.1.35 — dock ridotta trasparente
+
+La release `suite-v0.1.35` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.35 senza cambiare le versioni del catalogo tool.
+
+Ridurre la dock sopra una superficie chiara e verificare che attorno all'icona non compaiano rettangoli grigi o aree sfocate corrispondenti ai limiti della finestra Electron. In stato ridotto devono essere disattivati sfondo, bordo, ombra e `backdrop-filter` del contenitore; l'espansione deve ripristinare normalmente l'effetto vetro e tutti i controlli.
