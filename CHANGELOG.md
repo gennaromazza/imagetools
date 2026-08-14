@@ -6,6 +6,7 @@
 - alleggeriti ombra, bordo e superficie effetto vetro della dock nei temi chiaro e scuro
 - resa piu' compatta la dock ridotta e aggiunti separatore, animazioni di ingresso e focus da tastiera
 - ridotta la magnification delle icone per un'interazione piu' stabile e leggibile
+- stabilizzata l'installazione delle dipendenze nel runner Windows evitando download Electron concorrenti durante `npm ci`
 - pubblicata soltanto FileX Suite 0.1.34; le versioni e il catalogo remoto dei tool indipendenti restano invariati
 
 ## 2026-08-14 - FileX Suite 0.1.33
