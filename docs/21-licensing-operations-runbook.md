@@ -1,5 +1,8 @@
 # FileX licensing — runbook operativo
 
+## Relazione con il Modello architetturale dei Tool
+Le regole di licensing descritte in questo documento operano in base alla configurazione della proprietà `licenseRuntime` all'interno del manifesto del desktop (`tool-manifest.ts`). Per i dettagli sulla configurazione lato sorgente e sulla creazione di un nuovo pacchetto soggetto o meno a queste licenze, fare riferimento al **[Runbook Creazione e Rilascio di un Nuovo Tool (22-new-tool-creation-runbook.md)](./22-new-tool-creation-runbook.md)**.
+
 ## Stato sicuro pre-lancio
 
 - `FILEX_LICENSE_ENFORCEMENT` assente o `observe`: nessun tool viene bloccato.

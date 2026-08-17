@@ -4,9 +4,12 @@
 
 1. Installare `FileX Suite` (launcher).
 2. Avviare wizard iniziale.
-3. Selezionare tool richiesti dallo studio.
-4. Eseguire install on-demand da launcher.
-5. Verificare apertura tool e runtime desktop.
+3. Inserire la licenza FileX All Access per sbloccare l'ambiente condiviso, se necessaria per i tool desiderati.
+4. Selezionare i tool richiesti dallo studio.
+5. Eseguire install on-demand da launcher.
+6. Verificare apertura tool e runtime desktop.
+
+*(N.B: Per sapere come creare e distribuire un nuovo tool su questo catalogo, consultare il **[Runbook Creazione e Rilascio di un Nuovo Tool (22-new-tool-creation-runbook.md)](./22-new-tool-creation-runbook.md)**)*
 
 ## SOP Aggiornamento per ogni tool
 

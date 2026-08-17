@@ -15,6 +15,8 @@ Al termine devono essere disponibili:
 - soltanto per una release tool, aggiornamento della sua voce in `stable.json` o `beta.json`;
 - verifica che FileX Suite mostri `Aggiorna` per ogni tool con versione installata inferiore.
 
+> **Nota per i nuovi tool:** Quando si aggiunge per la prima volta uno strumento all'ecosistema, assicurarsi di aver seguito preventivamente il **[Runbook Creazione e Rilascio (22-new-tool-creation-runbook.md)](./22-new-tool-creation-runbook.md)**. Se il tool non è registrato in `.github/workflows/windows-release.yml` o nel manifesto (`tool-manifest.ts`), non verrà rilasciato o non potrà essere avviato per problemi di licenza.
+
 ## Sequenza standard
 
 1. Sincronizzare `main` con `git pull --ff-only origin main` e creare un branch release.

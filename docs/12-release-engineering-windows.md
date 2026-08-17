@@ -25,7 +25,10 @@ Env principali:
 
 ## Build/Dist
 
-Il workflow usa una build selettiva. Il comando all-in rimane disponibile soltanto per manutenzione o regressione completa:
+Il workflow usa una build selettiva e dipende strettamente dai descrittori nel manifest del desktop e dalle voci nel workflow stesso.
+Per la registrazione di nuovi applicativi, fare riferimento a **[Runbook Creazione e Rilascio di un Nuovo Tool (22-new-tool-creation-runbook.md)](./22-new-tool-creation-runbook.md)**.
+
+Il comando all-in rimane disponibile soltanto per manutenzione o regressione completa:
 
 ```bash
 npm run dist:filex-desktop:all-tools:win
