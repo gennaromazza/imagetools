@@ -10,6 +10,9 @@ on:
       - "cache-sweep-v*"
       - "filex-send-v*"
       - "backup-guard-v*"
+      - "batch-print-layout-v*"
+      - "image-converter-v*"
+      - "image-file-finder-v*"
   workflow_dispatch:
     inputs:
       component:
@@ -24,6 +27,9 @@ on:
           - cache-sweep
           - filex-send
           - backup-guard
+          - batch-print-layout
+          - image-converter
+          - image-file-finder
       channel:
         description: Canale release
         required: true
@@ -204,6 +210,9 @@ jobs:
             "cache-sweep" { "FileX-Adobe-Cleaner" }
             "filex-send" { "FileX-Send" }
             "backup-guard" { "FileX-Backup-Guard" }
+            "batch-print-layout" { "Batch-Print-Layout" }
+            "image-converter" { "Image-Converter" }
+            "image-file-finder" { "Trova-Foto-da-Lista" }
           }
           $installers = @(Get-ChildItem "apps/filex-desktop/.output/releases/$expectedPrefix-$env:FILEX_RELEASE_VERSION-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe")
           if ($installers.Count -ne 1) {

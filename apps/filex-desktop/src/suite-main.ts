@@ -258,7 +258,7 @@ function createTray(): void {
       label: tool.displayName,
       click: async () => {
         const license = await getLicenseState();
-        if (!license.canUseTools) {
+        if (!license.canUseTools && tool.licenseRuntime !== "standalone") {
           dialog.showErrorBox("FileX Suite", "FileX All Access non e' attivo. Apri la Suite per gestire la licenza.");
           return;
         }
@@ -302,10 +302,12 @@ function registerIpcHandlers(): void {
     downloadToolUpdate(toolId, channel ?? releaseChannel()));
   ipcMain.handle("filex:get-tool-update-job", (_event, jobId: string) => getUpdateJob(jobId));
   ipcMain.handle("filex:apply-tool-update", (_event, jobId: string) => applyToolUpdate(jobId));
-  ipcMain.handle("filex:open-installed-tool", (_event, toolId: DesktopToolId, launchArgs?: string[]) =>
-    getLicenseState().then((license) => license.canUseTools
+  ipcMain.handle("filex:open-installed-tool", (_event, toolId: DesktopToolId, launchArgs?: string[]) => {
+    const requiresLicense = desktopToolManifest[toolId]?.licenseRuntime !== "standalone";
+    return getLicenseState().then((license) => !requiresLicense || license.canUseTools
       ? openInstalledTool(toolId, launchArgs)
-      : ({ ok: false, message: "FileX All Access non e' attivo. Apri la sezione Licenza nella Suite." })));
+      : ({ ok: false, message: "FileX All Access non e' attivo. Apri la sezione Licenza nella Suite." }));
+  });
   ipcMain.handle("filex:get-suite-dock-state", () => readDockState());
   ipcMain.handle("filex:save-suite-dock-state", (_event, state: Partial<DesktopDockState>) => saveDockState(state));
   ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => getLicenseState(Boolean(refresh)));
