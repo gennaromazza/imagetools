@@ -1,5 +1,48 @@
 # Changelog
 
+<!--
+  FORMATO OBBLIGATORIO PER GLI HEADER DI VERSIONE "FileX Suite"
+  ================================================================
+  release-filex-suite.bat legge automaticamente da qui la versione piu
+  recente della FileX Suite: cerca la prima riga che rispetta ESATTAMENTE
+  questo pattern (regex, ancorata a inizio riga):
+
+      ^## YYYY-MM-DD - FileX Suite X.Y.Z
+
+  Esempio valido:
+      ## 2026-08-19 - FileX Suite 0.1.38
+
+  Regole da rispettare quando si aggiunge una nuova entry (umano o AI):
+  1. Data in formato YYYY-MM-DD.
+  2. Nome prodotto ESATTAMENTE "FileX Suite" (case-sensitive). NON usare
+     varianti tipo "Filex Suite", "FileX-Suite", "Suite FileX": lo script
+     non le riconoscerebbe e tornerebbe al prompt manuale.
+  3. Versione in formato semver semplice X.Y.Z. Niente prefisso "v",
+     niente suffissi pre-release come "-beta.1" (lo script li scarta).
+  4. Le entry degli altri tool del monorepo (FileX Backup Guard, FileX
+     Send, ecc.) NON devono contenere la stringa "FileX Suite" nel loro
+     header, altrimenti verrebbero lette per errore al posto della Suite.
+  5. Le nuove entry vanno sempre aggiunte in cima al file, subito sotto
+     questo commento: lo script prende la PRIMA corrispondenza trovata,
+     quindi l'ordine cronologico decrescente e' essenziale.
+
+  Se questo formato cambia, aggiornare anche la regex corrispondente in
+  release-filex-suite.bat, sezione "4. Richiesta nuova versione".
+-->
+
+## 2026-08-19 - FileX Suite 0.1.38
+
+### Release e aggiornamenti
+- aggiunto `release-filex-suite.bat` per automatizzare l'intero ciclo di pubblicazione della FileX Suite
+- aggiunti controlli preventivi sullo stato Git, sul branch `main`, sulle modifiche locali e sull'allineamento tra `HEAD` e `origin/main`
+- automatizzati aggiornamento della versione, commit, push, creazione del tag `suite-vX.Y.Z` e avvio della GitHub Action ufficiale
+- aggiunta l'attesa automatica del workflow GitHub Actions con interruzione della procedura in caso di build o pubblicazione fallita
+- aggiunta la verifica finale degli asset della release e del feed `suite-channel-stable/latest.yml`
+- verificata la presenza dell'alias permanente `FileX-Suite-stable-x64-setup.exe`, utilizzato sia dal sito sia dal sistema di aggiornamento
+- aggiunto il controllo che il `latest.yml` remoto contenga effettivamente la nuova versione prima di considerare conclusa la release
+- integrato il deploy del sito FileX tramite `npm run deploy:website`
+- normalizzati i link di download del sito verso il canale stabile dedicato, evitando la dipendenza da `releases/latest`
+- mantenute indipendenti le versioni e le release dei singoli tool FileX
 ## 2026-08-14 - FileX Suite 0.1.35
 
 - eliminato il rettangolo grigio residuo dietro la dock ridotta, causato dal `backdrop-filter` della finestra trasparente su Windows
