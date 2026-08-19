@@ -219,13 +219,37 @@ jobs:
             throw "Atteso un installer x64 per $env:FILEX_COMPONENT $env:FILEX_RELEASE_VERSION, trovati $($installers.Count)"
           }
 
+      - name: Generate Suite release notes from changelog
+        if: steps.release.outputs.component == 'suite'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $content = Get-Content "CHANGELOG.md" -Raw
+          $version = [regex]::Escape($env:FILEX_RELEASE_VERSION)
+          $pattern = "(?ms)^## \d{4}-\d{2}-\d{2} - FileX Suite $version\s*\r?\n(.*?)(?=^## |\z)"
+          $match = [regex]::Match($content, $pattern)
+          if (-not $match.Success) {
+            throw "CHANGELOG.md non contiene FileX Suite $env:FILEX_RELEASE_VERSION"
+          }
+          $notes = $match.Groups[1].Value.Trim()
+          if ([string]::IsNullOrWhiteSpace($notes)) {
+            throw "Le release notes di FileX Suite $env:FILEX_RELEASE_VERSION sono vuote"
+          }
+          $body = @(
+            "# FileX Suite $env:FILEX_RELEASE_VERSION",
+            "",
+            $notes
+          ) -join [Environment]::NewLine
+          Set-Content -Path "release-notes.md" -Value $body -Encoding UTF8
+          Write-Host "Release notes estratte dal CHANGELOG.md"
+
       - name: Upload Suite release assets
         if: steps.release.outputs.component == 'suite'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.FILEX_RELEASE_TAG }}
           prerelease: ${{ env.FILEX_RELEASE_CHANNEL == 'beta' }}
-          generate_release_notes: true
+          body_path: release-notes.md
           files: |
             apps/filex-desktop/.output/releases/*.exe
             apps/filex-desktop/.output/releases/*.exe.blockmap
