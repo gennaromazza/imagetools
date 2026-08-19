@@ -64,9 +64,14 @@ if ($DryRun) {
 }
 
 Write-Host "Creazione in corso..." -ForegroundColor Yellow
+
+# Converti il percorso relativo in assoluto per evitare che Node.js
+# lo interpreti come URL (file:///) invece di percorso Windows
+$adminScriptAbsolute = (Resolve-Path -LiteralPath $adminScript).Path
+
 Push-Location $projectRoot
 try {
-  $output = & node.exe $adminScript "create-support-license" "$Days" "$label" 2>&1
+  $output = & node.exe "$adminScriptAbsolute" "create-support-license" "$Days" "$label" 2>&1
   $exitCode = $LASTEXITCODE
 } finally {
   Pop-Location
@@ -101,4 +106,3 @@ Write-Host "Chiave:   $licenseKey" -ForegroundColor White
 Write-Host ""
 Write-Host $clipboardMessage -ForegroundColor Green
 Write-Host "Inviala alla persona, che dovra' inserirla in FileX Suite > Attiva FileX."
-
