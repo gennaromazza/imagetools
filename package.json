@@ -62,6 +62,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "firebase-tools": "^15.27.0",
     "typescript": "^5.8.0"
   }
 }

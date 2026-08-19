@@ -19,10 +19,10 @@ const hash = (value) => createHash("sha256").update(value.trim()).digest("hex");
 
 function configureFirebaseCliAdc() {
   if (process.env.GOOGLE_APPLICATION_CREDENTIALS) return null;
-  const executable = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "firebase";
+  const executable = process.platform === "win32" ? process.env.ComSpec ?? "cmd.exe" : "npx";
   const cliArgs = process.platform === "win32"
-    ? ["/d", "/s", "/c", "firebase.cmd login:list --json"]
-    : ["login:list", "--json"];
+    ? ["/d", "/s", "/c", "npx --no-install firebase login:list --json"]
+    : ["--no-install", "firebase", "login:list", "--json"];
   const response = JSON.parse(execFileSync(executable, cliArgs, {
     encoding: "utf8",
     windowsHide: true,
