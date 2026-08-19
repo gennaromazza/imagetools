@@ -7,12 +7,12 @@ set "REPO=gennaromazza/imagetools"
 set "BRANCH=main"
 set "PACKAGE_FILE=apps\filex-desktop\package.json"
 set "WORKFLOW=windows-release.yml"
-
 set "CANONICAL_DOWNLOAD=https://github.com/gennaromazza/imagetools/releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe"
 set "FEED_URL=https://github.com/gennaromazza/imagetools/releases/download/suite-channel-stable/latest.yml"
 
 set "RELEASE_DONE=0"
 set "TAG_PUSHED=0"
+set "RUN_ID="
 
 echo.
 echo ============================================================
@@ -47,7 +47,8 @@ if errorlevel 1 (
 where gh >nul 2>&1
 if errorlevel 1 (
     echo ERRORE: GitHub CLI ^(gh^) non trovato.
-    echo Installa GitHub CLI e fai: gh auth login
+    echo Installa GitHub CLI e poi esegui:
+    echo     gh auth login
     goto :fail
 )
 
@@ -61,9 +62,7 @@ gh auth status >nul 2>&1
 if errorlevel 1 (
     echo ERRORE: GitHub CLI non autenticato.
     echo Esegui:
-    echo.
     echo     gh auth login
-    echo.
     goto :fail
 )
 
@@ -71,14 +70,14 @@ echo OK.
 echo.
 
 REM ============================================================
-REM 2. Verifica repository
+REM 2. Verifica repository e branch
 REM ============================================================
 
 echo [2/16] Verifica repository Git...
 
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
-    echo ERRORE: questo script deve essere eseguito dalla root di imagetools.
+    echo ERRORE: esegui questo BAT dalla root del repository imagetools.
     goto :fail
 )
 
@@ -92,7 +91,7 @@ for /f "delims=" %%B in ('git branch --show-current') do set "CURRENT_BRANCH=%%B
 
 if /I not "%CURRENT_BRANCH%"=="%BRANCH%" (
     echo ERRORE: sei sul branch "%CURRENT_BRANCH%".
-    echo La release deve essere creata da "%BRANCH%".
+    echo La release deve partire da "%BRANCH%".
     goto :fail
 )
 
@@ -101,97 +100,10 @@ echo OK.
 echo.
 
 REM ============================================================
-REM 3. Legge versione corrente
+REM 3. Fetch e sincronizzazione con origin/main
 REM ============================================================
 
-echo [3/16] Lettura versione corrente...
-
-for /f "delims=" %%V in ('node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('apps/filex-desktop/package.json','utf8'));console.log(p.version)"') do set "CURRENT_VERSION=%%V"
-
-if not defined CURRENT_VERSION (
-    echo ERRORE: impossibile leggere la versione corrente.
-    goto :fail
-)
-
-echo Versione locale FileX Suite: %CURRENT_VERSION%
-echo.
-
-REM ============================================================
-REM 4. Richiesta nuova versione
-REM
-REM Il formato atteso dell'header nel CHANGELOG.md
-REM ("## YYYY-MM-DD - FileX Suite X.Y.Z") e' documentato nel
-REM commento HTML in cima a CHANGELOG.md. Se cambi la regex qui
-REM sotto, aggiorna anche quella nota.
-REM ============================================================
-
-echo [4/16] Lettura versione dal CHANGELOG...
-
-set "CHANGELOG_VERSION="
-
-if exist CHANGELOG.md (
-    for /f "delims=" %%V in ('node -e "const fs=require('fs');const s=fs.readFileSync('CHANGELOG.md','utf8');const m=s.match(/^## \d{4}-\d{2}-\d{2} - FileX Suite (\d+\.\d+\.\d+)/m);if(!m){process.exit(1)};console.log(m[1])" 2^>nul') do set "CHANGELOG_VERSION=%%V"
-) else (
-    echo ATTENZIONE: CHANGELOG.md non trovato.
-)
-
-if defined CHANGELOG_VERSION (
-    echo Versione piu recente nel CHANGELOG ^("FileX Suite"^): %CHANGELOG_VERSION%
-) else (
-    echo ATTENZIONE: nessuna voce "FileX Suite X.Y.Z" trovata in CHANGELOG.md.
-    echo La versione dovra essere inserita manualmente.
-)
-echo.
-
-set "VERSION=%~1"
-
-if not defined VERSION (
-    if defined CHANGELOG_VERSION (
-        set /p "VERSION=Nuova versione [invio per usare %CHANGELOG_VERSION%]: "
-        if not defined VERSION set "VERSION=%CHANGELOG_VERSION%"
-    ) else (
-        set /p "VERSION=Inserisci nuova versione, es. 0.1.37: "
-    )
-)
-
-if not defined VERSION (
-    echo ERRORE: versione non specificata.
-    goto :fail
-)
-
-node -e "const v=process.argv[1];process.exit(/^\d+\.\d+\.\d+$/.test(v)?0:1)" "%VERSION%"
-if errorlevel 1 (
-    echo ERRORE: versione non valida "%VERSION%".
-    echo Usa il formato X.Y.Z, per esempio 0.1.37
-    goto :fail
-)
-
-if defined CHANGELOG_VERSION if not "%VERSION%"=="%CHANGELOG_VERSION%" (
-    echo.
-    echo ATTENZIONE:
-    echo Stai per rilasciare la versione %VERSION%, ma la voce piu recente
-    echo "FileX Suite" nel CHANGELOG.md e %CHANGELOG_VERSION%.
-    echo.
-    choice /C SN /N /M "Vuoi continuare comunque con %VERSION%? [S/N] "
-    if errorlevel 2 goto :abort
-)
-
-if not "%VERSION%"=="%CURRENT_VERSION%" (
-    node -e "const a=process.argv[1].split('.').map(Number),b=process.argv[2].split('.').map(Number);const gt=a[0]>b[0]||(a[0]===b[0]&&(a[1]>b[1]||(a[1]===b[1]&&a[2]>b[2])));if(!gt){console.error('La nuova versione deve essere superiore a '+process.argv[2]);process.exit(1)}" "%VERSION%" "%CURRENT_VERSION%"
-    if errorlevel 1 goto :fail
-)
-
-set "TAG=suite-v%VERSION%"
-
-echo Nuova versione : %VERSION%
-echo Tag Git         : %TAG%
-echo.
-
-REM ============================================================
-REM 5. Fetch e confronto locale/remoto
-REM ============================================================
-
-echo [5/16] Sincronizzazione con GitHub...
+echo [3/16] Sincronizzazione con GitHub...
 
 git fetch origin --prune
 if errorlevel 1 (
@@ -201,7 +113,6 @@ if errorlevel 1 (
 
 set "BEHIND=0"
 set "AHEAD=0"
-
 for /f "tokens=1,2" %%A in ('git rev-list --left-right --count origin/%BRANCH%...HEAD') do (
     set "BEHIND=%%A"
     set "AHEAD=%%B"
@@ -212,50 +123,24 @@ echo Commit presenti solo in locale : %AHEAD%
 echo.
 
 if %BEHIND% GTR 0 if %AHEAD% GTR 0 (
-    echo ERRORE: main locale e origin/main sono divergenti.
-    echo Lo script si ferma per evitare merge o rebase automatici.
+    echo ERRORE: HEAD e origin/%BRANCH% sono divergenti.
+    echo Lo script non esegue merge o rebase automatici.
     goto :fail
 )
 
-REM ============================================================
-REM 6. Stato modifiche locali
-REM ============================================================
+set "PRE_PULL_DIRTY="
+for /f "delims=" %%S in ('git status --porcelain') do set "PRE_PULL_DIRTY=1"
 
-echo [6/16] Verifica modifiche locali...
-
-set "DIRTY="
-
-for /f "delims=" %%S in ('git status --porcelain') do set "DIRTY=1"
-
-if defined DIRTY (
-    echo.
-    echo Sono presenti modifiche locali:
-    echo ------------------------------------------------------------
-    git status --short
-    echo ------------------------------------------------------------
-    echo.
-
-    if %BEHIND% GTR 0 (
+if %BEHIND% GTR 0 (
+    if defined PRE_PULL_DIRTY (
         echo ERRORE:
-        echo GitHub contiene commit che non hai in locale e ci sono anche
-        echo modifiche locali non committate.
-        echo.
-        echo Lo script non effettua stash/rebase automatici per sicurezza.
+        echo GitHub contiene commit non presenti in locale,
+        echo ma ci sono anche modifiche locali non committate.
+        echo Risolvi prima manualmente la situazione.
         goto :fail
     )
 
-    choice /C SN /N /M "Vuoi includere TUTTE queste modifiche nella release? [S/N] "
-    if errorlevel 2 goto :abort
-)
-
-REM ============================================================
-REM 7. Se GitHub e avanti, fast-forward locale
-REM ============================================================
-
-if %BEHIND% GTR 0 (
-    echo.
-    echo Aggiornamento main locale...
-
+    echo Aggiornamento locale tramite fast-forward...
     git pull --ff-only origin %BRANCH%
     if errorlevel 1 (
         echo ERRORE durante git pull --ff-only.
@@ -263,12 +148,74 @@ if %BEHIND% GTR 0 (
     )
 )
 
+echo Repository sincronizzato.
+echo.
+
 REM ============================================================
-REM 8. Verifica tag non esistente
+REM 4. Legge versione corrente e nuova versione
 REM ============================================================
 
+echo [4/16] Verifica versione e CHANGELOG...
+
+for /f "delims=" %%V in ('node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('apps/filex-desktop/package.json','utf8'));console.log(p.version)"') do set "CURRENT_VERSION=%%V"
+
+if not defined CURRENT_VERSION (
+    echo ERRORE: impossibile leggere la versione corrente.
+    goto :fail
+)
+
+echo Versione package corrente: %CURRENT_VERSION%
+
+set "VERSION=%~1"
+if not defined VERSION (
+    set /p "VERSION=Inserisci nuova versione, es. 0.1.39: "
+)
+
+if not defined VERSION (
+    echo ERRORE: versione non specificata.
+    goto :fail
+)
+
+node -e "const v=process.argv[1];process.exit(/^\d+\.\d+\.\d+$/.test(v)?0:1)" "%VERSION%"
+if errorlevel 1 (
+    echo ERRORE: versione non valida "%VERSION%".
+    echo Usa il formato X.Y.Z, per esempio 0.1.39
+    goto :fail
+)
+
+node -e "const a=process.argv[1].split('.').map(Number),b=process.argv[2].split('.').map(Number);const c=(a[0]-b[0])||(a[1]-b[1])||(a[2]-b[2]);process.exit(c>=0?0:1)" "%VERSION%" "%CURRENT_VERSION%"
+if errorlevel 1 (
+    echo ERRORE: la versione %VERSION% e inferiore alla versione corrente %CURRENT_VERSION%.
+    goto :fail
+)
+
+if not exist CHANGELOG.md (
+    echo ERRORE: CHANGELOG.md non trovato.
+    goto :fail
+)
+
+node -e "const fs=require('fs');const v=process.argv[1];const s=fs.readFileSync('CHANGELOG.md','utf8');const r=new RegExp('^## \\d{4}-\\d{2}-\\d{2} - FileX Suite '+v.replace(/\\./g,'\\\\.')+'(?:\\r?\\n|$)','m');process.exit(r.test(s)?0:1)" "%VERSION%"
+if errorlevel 1 (
+    echo.
+    echo ERRORE: CHANGELOG.md non contiene una voce per FileX Suite %VERSION%.
+    echo Aggiungi prima una sezione del tipo:
+    echo     ## YYYY-MM-DD - FileX Suite %VERSION%
+    echo.
+    goto :fail
+)
+
+set "TAG=suite-v%VERSION%"
+
+echo Nuova versione : %VERSION%
+echo Tag Git         : %TAG%
+echo CHANGELOG       : OK
 echo.
-echo [7/16] Verifica tag %TAG%...
+
+REM ============================================================
+REM 5. Verifica tag non esistente
+REM ============================================================
+
+echo [5/16] Verifica tag %TAG%...
 
 git show-ref --verify --quiet "refs/tags/%TAG%"
 if not errorlevel 1 (
@@ -279,23 +226,47 @@ if not errorlevel 1 (
 git ls-remote --exit-code --tags origin "refs/tags/%TAG%" >nul 2>&1
 if not errorlevel 1 (
     echo ERRORE: il tag %TAG% esiste gia su GitHub.
+    echo NON rilanciare una release gia pubblicata.
     goto :fail
 )
 
-echo OK.
+echo Tag disponibile.
 echo.
 
 REM ============================================================
-REM 9. Aggiornamento package.json + package-lock
+REM 6. Stato modifiche locali
 REM ============================================================
 
-echo [8/16] Aggiornamento versione FileX Suite...
+echo [6/16] Verifica modifiche locali...
+
+set "DIRTY="
+for /f "delims=" %%S in ('git status --porcelain') do set "DIRTY=1"
+
+if defined DIRTY (
+    echo.
+    echo Modifiche che entreranno nella release:
+    echo ------------------------------------------------------------
+    git status --short
+    echo ------------------------------------------------------------
+    echo.
+    choice /C SN /N /M "Vuoi includere TUTTE queste modifiche? [S/N] "
+    if errorlevel 2 goto :abort
+) else (
+    echo Nessuna modifica locale presente.
+)
+
+echo.
+
+REM ============================================================
+REM 7. Aggiorna versione package
+REM ============================================================
+
+echo [7/16] Aggiornamento versione FileX Suite...
 
 if "%CURRENT_VERSION%"=="%VERSION%" (
     echo package.json e gia alla versione %VERSION%.
 ) else (
     call npm version "%VERSION%" --workspace @photo-tools/filex-desktop --no-git-tag-version
-
     if errorlevel 1 (
         echo ERRORE durante npm version.
         goto :fail
@@ -313,80 +284,70 @@ echo Versione package verificata: %CHECK_VERSION%
 echo.
 
 REM ============================================================
-REM 10. Normalizza tutti i link download del sito
+REM 8. Normalizza link download sito
 REM ============================================================
 
-echo [9/16] Controllo link download del sito...
+echo [8/16] Controllo link download del sito...
 
-node -e "const fs=require('fs'),p=require('path');const root='website',exts=new Set(['.html','.js','.json','.md','.txt']),canonical='https://github.com/gennaromazza/imagetools/releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe';const pats=[/https:\/\/github\.com\/gennaromazza\/imagetools\/releases\/latest\/download\/FileX-Suite-[^\s\"']+setup\.exe/g,/https:\/\/github\.com\/gennaromazza\/imagetools\/releases\/download\/suite-v[0-9A-Za-z.-]+\/FileX-Suite-[^\s\"']+setup\.exe/g];let changed=0,hits=0;function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f);else if(exts.has(p.extname(e.name).toLowerCase())){let s=fs.readFileSync(f,'utf8'),t=s;for(const r of pats)t=t.replace(r,canonical);hits+=t.split(canonical).length-1;if(t!==s){fs.writeFileSync(f,t);console.log('Link aggiornato: '+f);changed++;}}}}walk(root);console.log('File modificati: '+changed);console.log('Link canonici trovati: '+hits);if(hits===0)process.exit(2);"
+if not exist website (
+    echo ERRORE: cartella website non trovata.
+    goto :fail
+)
+
+node -e "const fs=require('fs'),p=require('path');const root='website';const canonical='https://github.com/gennaromazza/imagetools/releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe';const exts=new Set(['.html','.js','.json','.md','.txt']);const pats=[/https:\/\/github\.com\/gennaromazza\/imagetools\/releases\/latest\/download\/FileX-Suite-[^\s\"']+setup\.exe/g,/https:\/\/github\.com\/gennaromazza\/imagetools\/releases\/download\/suite-v[0-9A-Za-z.-]+\/FileX-Suite-[^\s\"']+setup\.exe/g];let changed=0,hits=0;function walk(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory()){walk(f);continue;}if(!exts.has(p.extname(e.name).toLowerCase()))continue;const s=fs.readFileSync(f,'utf8');let t=s;for(const r of pats)t=t.replace(r,canonical);hits+=t.split(canonical).length-1;if(t!==s){fs.writeFileSync(f,t);console.log('Link aggiornato: '+f);changed++;}}}walk(root);console.log('File modificati: '+changed);console.log('Link canonici trovati: '+hits);process.exit(hits>0?0:2);"
 
 if errorlevel 1 (
     echo ERRORE durante il controllo dei link del sito.
     goto :fail
 )
 
-echo.
 echo Link canonico:
 echo %CANONICAL_DOWNLOAD%
 echo.
 
 REM ============================================================
-REM 11. Controllo CHANGELOG
+REM 9. Dipendenze con fingerprint locale
 REM ============================================================
 
-echo [10/16] Controllo CHANGELOG...
+echo [9/16] Verifica dipendenze...
 
-if defined CHANGELOG_VERSION (
-    echo CHANGELOG verificato allo step precedente ^(versione %CHANGELOG_VERSION%^).
+set "DEP_HASH="
+for /f "delims=" %%H in ('node -e "const fs=require('fs'),c=require('crypto');const files=['package-lock.json','package.json','apps/filex-desktop/package.json'];const h=c.createHash('sha256');for(const f of files){if(fs.existsSync(f))h.update(fs.readFileSync(f));}h.update(process.version);console.log(h.digest('hex'))" 2^>nul') do set "DEP_HASH=%%H"
+
+if not defined DEP_HASH (
+    echo ERRORE: impossibile calcolare fingerprint dipendenze.
+    goto :fail
+)
+
+set "DEP_STAMP=node_modules\.filex-dependencies-hash"
+set "CACHED_DEP_HASH="
+if exist "%DEP_STAMP%" set /p "CACHED_DEP_HASH=" < "%DEP_STAMP%"
+
+if exist "node_modules" if "%DEP_HASH%"=="%CACHED_DEP_HASH%" (
+    echo Dipendenze gia sincronizzate.
+    echo npm ci saltato.
 ) else (
-    findstr /L /C:"%VERSION%" CHANGELOG.md >nul 2>&1
-
+    echo Dipendenze cambiate o mancanti.
+    echo Avvio npm ci...
+    call npm ci
     if errorlevel 1 (
         echo.
-        echo ATTENZIONE:
-        echo CHANGELOG.md non contiene ancora la versione %VERSION%.
-        echo Il contratto ufficiale FileX richiede il changelog aggiornato.
-        echo.
-        choice /C SN /N /M "Vuoi continuare comunque? [S/N] "
-        if errorlevel 2 goto :abort
-    ) else (
-        echo CHANGELOG contiene %VERSION%.
+        echo ============================================================
+        echo ERRORE: npm ci fallito
+        echo ============================================================
+        echo Controlla l'errore npm immediatamente sopra.
+        goto :fail
     )
+    > "%DEP_STAMP%" echo %DEP_HASH%
 )
 
 echo.
 
 REM ============================================================
-REM 12. Installazione dipendenze e test release
+REM 10. Test e build pre-release
 REM ============================================================
 
-echo [11/16] npm ci...
-
-REM Salta npm ci se package-lock.json e' identico all'ultima
-REM installazione riuscita (hash salvato in node_modules, che
-REM viene comunque azzerato ogni volta che npm ci gira davvero).
-
-set "LOCK_HASH="
-for /f "delims=" %%H in ('node -e "const {createHash}=require('crypto');const fs=require('fs');console.log(createHash('sha256').update(fs.readFileSync('package-lock.json')).digest('hex'))" 2^>nul') do set "LOCK_HASH=%%H"
-
-set "CACHED_HASH="
-if exist "node_modules\.npm-ci-lock-hash" (
-    set /p "CACHED_HASH=" < "node_modules\.npm-ci-lock-hash"
-)
-
-if defined LOCK_HASH if exist "node_modules" if "%LOCK_HASH%"=="%CACHED_HASH%" (
-    echo Dipendenze gia sincronizzate con package-lock.json.
-    echo npm ci saltato ^(cancella la cartella node_modules per forzare una reinstallazione completa^).
-) else (
-    call npm ci
-    if errorlevel 1 (
-        echo ERRORE durante npm ci.
-        goto :fail
-    )
-    if defined LOCK_HASH (
-        > "node_modules\.npm-ci-lock-hash" echo %LOCK_HASH%
-    )
-)
+echo [10/16] Test e build pre-release...
 
 echo.
 echo Test updater...
@@ -405,18 +366,33 @@ if errorlevel 1 (
 )
 
 echo.
-echo Test OK.
+echo Build shell FileX Suite...
+call npm.cmd --workspace @photo-tools/filex-desktop run build:shell
+if errorlevel 1 (
+    echo.
+    echo ============================================================
+    echo ERRORE: build FileX Suite fallita
+    echo ============================================================
+    echo Comando fallito:
+    echo npm.cmd --workspace @photo-tools/filex-desktop run build:shell
+    echo.
+    echo Controlla l'errore npm immediatamente sopra.
+    echo La release NON e stata pubblicata.
+    goto :fail
+)
+
+echo.
+echo Test e build OK.
 echo.
 
 REM ============================================================
-REM 13. Ultima verifica prima del commit
+REM 11. Revisione finale
 REM ============================================================
 
-echo [12/16] Stato finale prima della pubblicazione...
+echo [11/16] Stato finale prima della pubblicazione...
 echo.
 
 git status --short
-
 echo.
 echo ------------------------------------------------------------
 git diff --stat
@@ -427,17 +403,21 @@ choice /C SN /N /M "Procedo con COMMIT + PUSH + RELEASE %TAG%? [S/N] "
 if errorlevel 2 goto :abort
 
 REM ============================================================
-REM 14. Commit
+REM 12. Commit e push main
 REM ============================================================
 
 echo.
-echo [13/16] Commit e push su main...
+echo [12/16] Commit e push su %BRANCH%...
 
 set "FINAL_DIRTY="
 for /f "delims=" %%S in ('git status --porcelain') do set "FINAL_DIRTY=1"
 
 if defined FINAL_DIRTY (
     git add -A
+    if errorlevel 1 (
+        echo ERRORE durante git add.
+        goto :fail
+    )
 
     git commit -m "release: FileX Suite v%VERSION%"
     if errorlevel 1 (
@@ -445,33 +425,34 @@ if defined FINAL_DIRTY (
         goto :fail
     )
 ) else (
-    echo Nessuna modifica non committata.
+    echo Nessuna modifica da committare.
 )
 
-git push origin main
+git push origin %BRANCH%
 if errorlevel 1 (
-    echo ERRORE durante git push origin main.
+    echo ERRORE durante git push origin %BRANCH%.
     goto :fail
 )
 
-REM ============================================================
-REM 15. Verifica HEAD == origin/main
-REM ============================================================
-
 echo.
-echo Verifica allineamento locale / GitHub...
 
-git fetch origin main
+REM ============================================================
+REM 13. Verifica HEAD == origin/main
+REM ============================================================
+
+echo [13/16] Verifica allineamento locale / GitHub...
+
+git fetch origin %BRANCH%
 if errorlevel 1 goto :fail
 
 for /f "delims=" %%L in ('git rev-parse HEAD') do set "LOCAL_SHA=%%L"
-for /f "delims=" %%R in ('git rev-parse origin/main') do set "REMOTE_SHA=%%R"
+for /f "delims=" %%R in ('git rev-parse origin/%BRANCH%') do set "REMOTE_SHA=%%R"
 
 echo Locale : %LOCAL_SHA%
 echo GitHub : %REMOTE_SHA%
 
 if not "%LOCAL_SHA%"=="%REMOTE_SHA%" (
-    echo ERRORE: HEAD locale e origin/main non coincidono.
+    echo ERRORE: HEAD locale e origin/%BRANCH% non coincidono.
     goto :fail
 )
 
@@ -488,10 +469,10 @@ echo Repository perfettamente allineato.
 echo.
 
 REM ============================================================
-REM 16. Creazione tag e avvio GitHub Actions
+REM 14. Tag + GitHub Actions
 REM ============================================================
 
-echo [14/16] Creazione tag %TAG%...
+echo [14/16] Creazione tag e avvio GitHub Actions...
 
 git tag -a "%TAG%" -m "FileX Suite %VERSION%"
 if errorlevel 1 (
@@ -508,28 +489,19 @@ if errorlevel 1 (
 set "TAG_PUSHED=1"
 
 echo.
-echo Tag pubblicato.
-echo GitHub Actions dovrebbe partire automaticamente.
+echo Tag pubblicato: %TAG%
+echo Ricerca workflow GitHub Actions...
 echo.
 
-REM ============================================================
-REM 17. Cerca workflow run
-REM ============================================================
-
-echo Ricerca workflow GitHub Actions...
-
 set "RUN_ID="
-
 for /l %%I in (1,1,40) do (
     for /f "delims=" %%R in ('gh run list --repo "%REPO%" --workflow "%WORKFLOW%" --branch "%TAG%" --event push --limit 1 --json databaseId --jq ".[0].databaseId" 2^>nul') do set "RUN_ID=%%R"
-
     if defined RUN_ID goto :run_found
-
     timeout /t 3 /nobreak >nul
 )
 
-echo ERRORE: impossibile trovare il workflow della release.
-echo Controlla manualmente:
+echo ERRORE: impossibile individuare il workflow della release.
+echo Controlla:
 echo https://github.com/%REPO%/actions
 goto :fail
 
@@ -537,17 +509,24 @@ goto :fail
 
 echo Workflow trovato: %RUN_ID%
 echo.
-echo Attendo il risultato della GitHub Action...
+echo Attendo completamento GitHub Actions...
 echo.
 
 gh run watch "%RUN_ID%" --repo "%REPO%" --exit-status
-
 if errorlevel 1 (
     echo.
-    echo ERRORE: GitHub Actions ha fallito.
+    echo ============================================================
+    echo GITHUB ACTIONS FALLITA
+    echo ============================================================
+    echo Workflow: %RUN_ID%
     echo.
-    echo Per vedere i log:
-    echo     gh run view %RUN_ID% --repo %REPO% --log-failed
+    echo Log degli step falliti:
+    echo ------------------------------------------------------------
+    gh run view "%RUN_ID%" --repo "%REPO%" --log-failed
+    echo ------------------------------------------------------------
+    echo.
+    echo Workflow:
+    echo https://github.com/%REPO%/actions/runs/%RUN_ID%
     echo.
     goto :fail
 )
@@ -559,7 +538,7 @@ echo GitHub Actions completata con SUCCESSO.
 echo.
 
 REM ============================================================
-REM 18. Verifica release
+REM 15. Verifica release e feed reale
 REM ============================================================
 
 echo [15/16] Verifica release e feed updater...
@@ -575,80 +554,54 @@ echo Asset release %TAG%:
 gh release view "%TAG%" --repo "%REPO%" --json assets --jq ".assets[].name"
 echo.
 
-set "ASSET_FILE=%TEMP%\filex-assets-%RANDOM%.txt"
-
-gh release view "suite-channel-stable" --repo "%REPO%" --json assets --jq ".assets[].name" > "%ASSET_FILE%"
-
+set "FEED_FILE=%TEMP%\filex-latest-%RANDOM%-%RANDOM%.yml"
+curl.exe -fsSL --retry 6 --retry-delay 3 "%FEED_URL%?t=%RANDOM%%RANDOM%" -o "%FEED_FILE%"
 if errorlevel 1 (
-    echo ERRORE: impossibile leggere suite-channel-stable.
-    goto :fail
-)
-
-findstr /X /C:"latest.yml" "%ASSET_FILE%" >nul
-if errorlevel 1 (
-    echo ERRORE: latest.yml non trovato nel feed stabile.
-    del "%ASSET_FILE%" >nul 2>&1
-    goto :fail
-)
-
-findstr /X /C:"FileX-Suite-stable-x64-setup.exe" "%ASSET_FILE%" >nul
-if errorlevel 1 (
-    echo ERRORE: alias stabile EXE non trovato.
-    del "%ASSET_FILE%" >nul 2>&1
-    goto :fail
-)
-
-del "%ASSET_FILE%" >nul 2>&1
-
-set "FEED_FILE=%TEMP%\filex-latest-%RANDOM%.yml"
-
-curl.exe -fsSL --retry 5 --retry-delay 3 "%FEED_URL%?t=%RANDOM%" -o "%FEED_FILE%"
-
-if errorlevel 1 (
-    echo ERRORE: impossibile scaricare latest.yml remoto.
+    echo ERRORE: impossibile scaricare latest.yml dal feed stabile.
     del "%FEED_FILE%" >nul 2>&1
     goto :fail
 )
 
 findstr /L /C:"version: %VERSION%" "%FEED_FILE%" >nul
-
 if errorlevel 1 (
     echo.
-    echo ERRORE:
-    echo latest.yml remoto non contiene la versione %VERSION%.
+    echo ERRORE: il feed stabile non contiene FileX Suite %VERSION%.
     echo.
+    echo Contenuto ricevuto:
+    echo ------------------------------------------------------------
     type "%FEED_FILE%"
+    echo ------------------------------------------------------------
     del "%FEED_FILE%" >nul 2>&1
     goto :fail
 )
 
 del "%FEED_FILE%" >nul 2>&1
 
-echo Feed updater verificato: versione %VERSION%.
+echo Feed updater verificato: FileX Suite %VERSION%.
 echo.
 
 REM ============================================================
-REM 19. Deploy sito Firebase
+REM 16. Deploy sito Firebase
 REM ============================================================
 
 echo [16/16] Deploy sito FileX...
 
 call npm run deploy:website
-
 if errorlevel 1 (
     echo.
     echo ATTENZIONE:
-    echo La release GitHub e stata creata correttamente,
+    echo La release %TAG% e stata creata correttamente,
     echo ma il deploy Firebase del sito e fallito.
     echo.
-    echo Puoi riprovare manualmente con:
+    echo NON rifare la release.
+    echo Ripeti soltanto:
     echo     npm run deploy:website
     echo.
     goto :fail
 )
 
 REM ============================================================
-REM COMPLETATO
+REM SUCCESSO
 REM ============================================================
 
 echo.
@@ -656,9 +609,9 @@ echo ============================================================
 echo   RELEASE FILEX SUITE COMPLETATA
 echo ============================================================
 echo.
-echo Versione: %VERSION%
-echo Tag:      %TAG%
-echo Commit:   %LOCAL_SHA%
+echo Versione : %VERSION%
+echo Tag      : %TAG%
+echo Commit   : %LOCAL_SHA%
 echo.
 echo Release:
 echo https://github.com/%REPO%/releases/tag/%TAG%
@@ -672,73 +625,57 @@ echo.
 echo Sito:
 echo https://filex-suite.web.app/
 echo.
-echo La FileX Suite gia installata dovrebbe ora rilevare
+echo FileX Suite installato dovrebbe ora rilevare
 echo automaticamente la versione %VERSION%.
 echo.
 pause
 exit /b 0
 
-
 :abort
+
 echo.
-echo Operazione annullata.
-echo Nessun tag di release e stato pubblicato da questo punto.
+echo ============================================================
+echo   OPERAZIONE ANNULLATA
+echo ============================================================
+echo.
+echo Nessun nuovo tag di release e stato pubblicato.
 echo.
 pause
 exit /b 2
 
-
 :fail
+
 echo.
 echo ============================================================
 echo   RELEASE INTERROTTA
-echo ============================================================
+ echo ============================================================
 echo.
 
 if "%RELEASE_DONE%"=="1" (
-    echo NOTA:
-    echo La release GitHub risulta gia completata.
+    echo IMPORTANTE:
+    echo La GitHub Action della release e gia terminata con SUCCESSO.
+    echo NON rilanciare la stessa versione.
     echo L'errore e avvenuto in una verifica successiva
     echo oppure durante il deploy del sito.
     echo.
 )
 
 if "%TAG_PUSHED%"=="1" if not "%RELEASE_DONE%"=="1" (
-    echo ATTENZIONE:
-    echo Il tag %TAG% e stato pubblicato su GitHub, ma la release
-    echo NON risulta completata con successo ^(probabilmente la
-    echo GitHub Action e fallita o e stata interrotta^).
+    echo IMPORTANTE:
+    echo Il tag %TAG% e gia stato pubblicato su GitHub,
+    echo ma il workflow non e terminato correttamente.
     echo.
-    echo Se non elimini il tag, un nuovo tentativo con la stessa
-    echo versione fallira allo step "Verifica tag" perche il tag
-    echo esiste gia.
-    echo.
-    choice /C SN /N /M "Vuoi eliminare ora il tag %TAG% ^(locale + GitHub^)? [S/N] "
-    if not errorlevel 2 (
-        echo.
-        echo Rimozione tag locale...
-        git tag -d "%TAG%" >nul 2>&1
-
-        echo Rimozione tag remoto...
-        git push origin ":refs/tags/%TAG%" >nul 2>&1
-
-        if errorlevel 1 (
-            echo ATTENZIONE: non sono riuscito a rimuovere il tag remoto.
-            echo Rimuovilo manualmente con:
-            echo     git push origin :refs/tags/%TAG%
-        ) else (
-            echo Tag %TAG% rimosso. Puoi ripetere la release.
-        )
+    echo NON elimino automaticamente il tag.
+    echo Prima controlla il workflow con:
+    if defined RUN_ID (
+        echo     gh run view %RUN_ID% --repo %REPO% --log-failed
     ) else (
-        echo.
-        echo Tag NON rimosso. Per rimuoverlo manualmente in seguito:
-        echo     git tag -d %TAG%
-        echo     git push origin :refs/tags/%TAG%
+        echo     gh run list --repo %REPO% --workflow %WORKFLOW%
     )
     echo.
 )
 
-echo Controlla il messaggio di errore sopra.
+echo Controlla l'errore riportato sopra.
 echo.
 pause
 exit /b 1
