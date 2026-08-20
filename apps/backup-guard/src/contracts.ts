@@ -11,10 +11,11 @@ export interface BackupGuardConfiguration {
   deletionByteThreshold: number;
 }
 
-export type BackupGuardDifferenceKind = "copy-to-clone" | "import-from-clone" | "delete-from-clone" | "restore-to-clone" | "conflict";
+export type BackupGuardDifferenceKind = "copy-to-clone" | "import-from-clone" | "delete-from-clone" | "restore-to-clone" | "rename-on-clone" | "conflict";
 
 export interface BackupGuardDifference {
   relativePath: string;
+  previousRelativePath?: string;
   kind: BackupGuardDifferenceKind;
   entryType: "file" | "directory";
   masterBytes: number | null;
@@ -44,7 +45,7 @@ export interface BackupGuardScanResult {
 export interface BackupGuardExecutionProgress {
   active: boolean;
   sessionId: string | null;
-  phase: "idle" | "preflight" | "copying" | "importing" | "deleting" | "verifying" | "completed" | "failed";
+  phase: "idle" | "preflight" | "copying" | "importing" | "renaming" | "deleting" | "verifying" | "completed" | "failed";
   completedOperations: number;
   totalOperations: number;
   bytesCompleted: number;
@@ -66,6 +67,7 @@ export interface BackupGuardExecutionResult {
   importedToMaster: number;
   deletedFromClone: number;
   restoredToClone: number;
+  renamedOnClone: number;
   conflictsSkipped: number;
   verifiedFiles: number;
   bytesTransferred: number;

@@ -10,6 +10,15 @@ Input manuali:
 - `component`: `suite` oppure il `toolId` da pubblicare
 - `version`: versione del componente senza prefisso
 
+### Avvio dalla FileX Dev Console
+
+La dashboard locale espone `release-filex-suite.bat` in due modalità non interattive:
+
+- `release-filex-suite.bat X.Y.Z --preflight`: controlla strumenti, branch, sincronizzazione, versione, CHANGELOG, tag, dipendenze, test e build; non crea commit, tag, release o deploy.
+- `release-filex-suite.bat X.Y.Z --publish PUBBLICA-suite-vX.Y.Z`: esegue il workflow completo, inclusi commit, push, tag, attesa GitHub Actions, verifica del feed e deploy del sito.
+
+La pubblicazione dalla dashboard richiede `main`, working tree pulita e conferma testuale esatta. I log sono visibili nel pannello e il server non accetta comandi shell arbitrari.
+
 ## Prerequisiti CI
 
 Secrets richiesti:

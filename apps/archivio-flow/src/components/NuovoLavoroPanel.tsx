@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { SdCard, SdPreview, ImportRequest, ImportResult, Job, ImportProgressSnapshot, FilterPreviewData } from "../types";
+import type { SdCard, SdPreview, SafeToFormatResult, StudioFlowStatus, ArchivioFlowSettings, ImportRequest, ImportResult, Job, ImportProgressSnapshot, FilterPreviewData } from "../types";
 import {
   browseArchivioFolder,
   cancelArchivioImport,
+  checkArchivioSafeToFormat,
   getArchivioFilterPreview,
   getArchivioImportProgress,
   getArchivioJobs,
   getArchivioSdCards,
   getArchivioSdPreview,
   getArchivioSettings,
+  getArchivioStudioFlowStatus,
   openArchivioFolder,
   saveArchivioSettings,
+  reconcileArchivioIndex,
+  resumeArchivioImport,
+  syncArchivioDriveRegistry,
   startArchivioImport,
   notifyBackupGuardProject,
 } from "../archivioDesktopApi";
@@ -21,6 +26,8 @@ interface Props {
   onImportDone: (result: ImportResult) => void;
   activeView?: "nuovo" | "impostazioni";
 }
+
+type CategoryLayout = "year-category" | "category-year" | "category-only" | "custom";
 
 interface ArchiveHierarchySettings {
   yearLevel: number | null;
@@ -190,6 +197,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const [sdPreview, setSdPreview] = useState<SdPreview | null>(null);
   const [loadingSd, setLoadingSd] = useState(false);
   const [refreshingSd, setRefreshingSd] = useState(false);
+  const [safeCheck, setSafeCheck] = useState<SafeToFormatResult | null>(null);
+  const [checkingSafe, setCheckingSafe] = useState(false);
+  const [safeCheckError, setSafeCheckError] = useState<string | null>(null);
+  const [studioFlowStatus, setStudioFlowStatus] = useState<StudioFlowStatus | null>(null);
+  const [studioFlowBusy, setStudioFlowBusy] = useState(false);
+  const [studioFlowError, setStudioFlowError] = useState<string | null>(null);
   const [hasMultipleJobsOnSd, setHasMultipleJobsOnSd] = useState<boolean | null>(null);
   const [showMultiJobConfirm, setShowMultiJobConfirm] = useState(false);
   const [fileNameIncludesFilter, setFileNameIncludesFilter] = useState("");
@@ -220,6 +233,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const [jobsEsistenti, setJobsEsistenti] = useState<Job[]>([]);
   const [existingJobId, setExistingJobId] = useState("");
   const [existingJobSearch, setExistingJobSearch] = useState("");
+  const [categoryKey, setCategoryKey] = useState("");
+  const [destinationOverride, setDestinationOverride] = useState(false);
 
   // ── Import state ─────────────────────────────────────────────────────────────
   const [importing, setImporting] = useState(false);
@@ -243,6 +258,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const [savedCartellePredefinite, setSavedCartellePredefinite] = useState<string[]>([]);
   const [archiveHierarchy, setArchiveHierarchy] = useState<ArchiveHierarchySettings>(DEFAULT_ARCHIVE_HIERARCHY);
   const [savedArchiveHierarchy, setSavedArchiveHierarchy] = useState<ArchiveHierarchySettings>(DEFAULT_ARCHIVE_HIERARCHY);
+  const [categoryMappings, setCategoryMappings] = useState<ArchivioFlowSettings["categoryMappings"]>([]);
+  const [savedCategoryMappings, setSavedCategoryMappings] = useState<ArchivioFlowSettings["categoryMappings"]>([]);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryPath, setNewCategoryPath] = useState("");
+  const [newCategoryLayout, setNewCategoryLayout] = useState<CategoryLayout>("year-category");
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [nuovaCartellaPredefinita, setNuovaCartellaPredefinita] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -382,6 +403,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         }
         setArchiveHierarchy(normalizedHierarchy);
         setSavedArchiveHierarchy(normalizedHierarchy);
+        const mappings = Array.isArray(data?.categoryMappings) ? data.categoryMappings : [];
+        setCategoryMappings(mappings);
+        setSavedCategoryMappings(mappings);
       })
       .catch(() => {/* runtime desktop non pronto */})
       .finally(() => {
@@ -417,6 +441,84 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     }
   }, [sdPath]);
 
+  async function handleSafeCheck() {
+    if (!sdPath.trim()) return;
+    setCheckingSafe(true);
+    setSafeCheck(null);
+    setSafeCheckError(null);
+    try {
+      setSafeCheck(await checkArchivioSafeToFormat(sdPath.trim()));
+    } catch (error) {
+      setSafeCheckError(error instanceof Error ? error.message : "Verifica non disponibile");
+    } finally {
+      setCheckingSafe(false);
+    }
+  }
+
+  const refreshStudioFlowStatus = useCallback(async () => {
+    try {
+      setStudioFlowStatus(await getArchivioStudioFlowStatus());
+      setStudioFlowError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Stato locale non disponibile";
+      setStudioFlowError(
+        !window.filexDesktop || /failed to fetch|richiesta api fallita/i.test(message)
+          ? "Backend locale non raggiungibile. Avvia Archivio Flow dalla dashboard FileX per usare database, indice e Drive."
+          : message,
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeView === "impostazioni") void refreshStudioFlowStatus();
+  }, [activeView, refreshStudioFlowStatus]);
+
+  useEffect(() => {
+    if (activeView !== "impostazioni") return;
+    const timer = window.setInterval(() => void refreshStudioFlowStatus(), 3000);
+    return () => window.clearInterval(timer);
+  }, [activeView, refreshStudioFlowStatus]);
+
+  async function handleReconcileIndex() {
+    setStudioFlowBusy(true);
+    try {
+      await reconcileArchivioIndex();
+      await refreshStudioFlowStatus();
+    } catch (error) {
+      setStudioFlowError(error instanceof Error ? error.message : "Riconciliazione fallita");
+    } finally {
+      setStudioFlowBusy(false);
+    }
+  }
+
+  async function handleResumeSession(sessionId: string) {
+    setStudioFlowBusy(true);
+    try {
+      const result = await resumeArchivioImport(sessionId);
+      setImportSuccess(result);
+      onImportDone(result);
+      await refreshStudioFlowStatus();
+    } catch (error) {
+      setStudioFlowError(error instanceof Error ? error.message : "Ripresa fallita");
+    } finally {
+      setStudioFlowBusy(false);
+    }
+  }
+
+  async function handleDriveSync() {
+    setStudioFlowBusy(true);
+    try {
+      const result = await syncArchivioDriveRegistry();
+      setStudioFlowError(null);
+      setSettingsFeedback({ type: "success", message: result.message });
+      await refreshStudioFlowStatus();
+    } catch (error) {
+      setStudioFlowError(error instanceof Error ? error.message : "Sincronizzazione Drive fallita");
+    } finally {
+      setStudioFlowBusy(false);
+    }
+  }
+
   // Load SD cards on mount
   useEffect(() => {
     fetchSdCards();
@@ -434,6 +536,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           clearImportValidationField("sdPath");
         } else if (field === "dest") {
           setDestinazione(selectedPath);
+          setDestinationOverride(true);
           clearImportValidationField("destinazione");
         }
         else setArchiveRoot(selectedPath);
@@ -457,6 +560,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         defaultAutore: autore.trim(),
         cartellePredefinite,
         archiveHierarchy,
+        categoryMappings,
       });
         setSavedArchiveRoot(normalizedArchiveRoot);
         setSavedDestinazione(normalizedDefaultDestinazione);
@@ -466,6 +570,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         setSavedAutore(autore.trim());
         setSavedCartellePredefinite(cartellePredefinite);
         setSavedArchiveHierarchy(archiveHierarchy);
+        setSavedCategoryMappings(categoryMappings);
         setSettingsFeedback({
           type: "success",
           message: showSpinner ? "Impostazioni salvate." : "Impostazioni salvate automaticamente.",
@@ -542,6 +647,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
         mtimeFrom: mtimeFromFilter.trim() || undefined,
         mtimeTo: mtimeToFilter.trim() || undefined,
+        categoryKey: categoryKey || undefined,
+        destinationOverride,
       } satisfies ImportRequest);
         const fromMsDone = mtimeFromFilter.trim() ? Date.parse(mtimeFromFilter.trim()) : NaN;
         const toMsDone = mtimeToFilter.trim() ? Date.parse(mtimeToFilter.trim()) : NaN;
@@ -629,9 +736,20 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const currentSdKey = sdPath.trim();
   const importedRangesForCurrentSd = currentSdKey ? (importedRangesBySd[currentSdKey] ?? []) : [];
   const effectiveDestinazione = destinazione.trim() || archiveRoot.trim() || savedDestinazione || savedArchiveRoot;
-  const folderPreview = usaLavoroEsistente
+  const baseFolderPreview = usaLavoroEsistente
     ? (selectedExistingJob?.nomeCartella ?? "—")
     : buildFolderPreview(nomeLavoro, dataLavoro);
+  const selectedCategoryMapping = categoryMappings.find((item) => item.enabled && item.categoryKey === categoryKey);
+  const [previewYear = "", previewMonth = "", previewDay = ""] = dataLavoro.split("-");
+  const previewTokens: Record<string, string> = { year:previewYear, month:previewMonth, day:previewDay, date:dataLavoro, "date-dmy":[previewDay, previewMonth, previewYear].join("-"), client:nomeLavoro.trim(), job:nomeLavoro.trim() };
+  const renderPreviewPattern = (pattern: string) => pattern.replace(/\{([a-z-]+)\}/gi, (_match, key: string) => previewTokens[key.toLowerCase()] ?? "");
+  const mappedParentPreview = selectedCategoryMapping && !destinationOverride
+    ? [archiveRoot.trim(), renderPreviewPattern(selectedCategoryMapping.relativePathPattern)].filter(Boolean).join("\\")
+    : effectiveDestinazione;
+  const mappedFolderPreview = selectedCategoryMapping && !usaLavoroEsistente
+    ? renderPreviewPattern(selectedCategoryMapping.jobFolderPattern || "{date} - {client} - {date-dmy}")
+    : baseFolderPreview;
+  const folderPreview = mappedFolderPreview === "—" ? "—" : [mappedParentPreview, mappedFolderPreview].filter(Boolean).join("\\");
   const safeAutoreFolder = buildSafeFolderSegment(autore);
   const safeSottoCartella = buildSafeFolderSegment(sottoCartella);
   const fotoDestPreview = safeAutoreFolder
@@ -639,6 +757,29 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
       ? `FOTO_SD\\${safeAutoreFolder}\\${safeSottoCartella}`
       : `FOTO_SD\\${safeAutoreFolder}`)
     : "FOTO_SD\\(autore)";
+  const categoryFolderPreview = normalizeFolderName(newCategoryName) || "Categoria";
+  const proposedCategoryPattern = newCategoryLayout === "custom"
+    ? newCategoryPath.trim()
+    : newCategoryLayout === "category-year"
+      ? `${categoryFolderPreview}\\{year}`
+      : newCategoryLayout === "category-only"
+        ? categoryFolderPreview
+        : `{year}\\${categoryFolderPreview}`;
+  const categoryPreviewYear = String(new Date().getFullYear());
+  const categoryDestinationPreview = [
+    archiveRoot.trim() || "Radice archivio",
+    proposedCategoryPattern.replace(/\{year\}/gi, categoryPreviewYear).replace(/\//g, "\\"),
+    `${categoryPreviewYear}-08-20 - Mario e Anna - 20-08-${categoryPreviewYear}`,
+  ].filter(Boolean).join("\\");
+  const canSaveCategory = Boolean(newCategoryName.trim() && (newCategoryLayout !== "custom" || newCategoryPath.trim()));
+  const archiveIsScanning = studioFlowStatus?.archiveIndex.state === "scanning";
+  const archiveIndexLabel = archiveIsScanning
+    ? `Scansione in corso · ${studioFlowStatus?.archiveIndex.fileCount.toLocaleString("it-IT") ?? 0} file letti`
+    : studioFlowStatus?.archiveIndex.state === "ready"
+      ? `Indice pronto · ${studioFlowStatus.archiveIndex.fileCount.toLocaleString("it-IT")} file`
+      : studioFlowStatus?.archiveIndex.state === "error"
+        ? "Indice in errore"
+        : "Indice non ancora costruito";
   const blockingImportIssues = collectImportValidationIssues(effectiveDestinazione);
   const canImport = !importing && blockingImportIssues.length === 0;
   const settingsChanged =
@@ -646,7 +787,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     destinazione.trim() !== savedDestinazione ||
     autore.trim() !== savedAutore ||
     JSON.stringify(cartellePredefinite) !== JSON.stringify(savedCartellePredefinite) ||
-    JSON.stringify(archiveHierarchy) !== JSON.stringify(savedArchiveHierarchy);
+    JSON.stringify(archiveHierarchy) !== JSON.stringify(savedArchiveHierarchy) ||
+    JSON.stringify(categoryMappings) !== JSON.stringify(savedCategoryMappings);
 
   useEffect(() => {
     if (!settingsLoaded || !settingsChanged || savingSettings) return;
@@ -661,7 +803,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         window.clearTimeout(saveTimerRef.current);
       }
     };
-  }, [settingsLoaded, settingsChanged, savingSettings, archiveRoot, destinazione, autore, cartellePredefinite, archiveHierarchy]);
+  }, [settingsLoaded, settingsChanged, savingSettings, archiveRoot, destinazione, autore, cartellePredefinite, archiveHierarchy, categoryMappings]);
 
   function applyEventoRapido(nomeEvento: string) {
     setSottoCartella(nomeEvento);
@@ -691,6 +833,40 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
 
   function removeCartellaPredefinita(name: string) {
     setCartellePredefinite((prev) => prev.filter((v) => v !== name));
+  }
+
+  function addCategoryMapping() {
+    const displayName = newCategoryName.trim();
+    const categoryFolder = normalizeFolderName(displayName);
+    const relativePathPattern = newCategoryLayout === "custom"
+      ? newCategoryPath.trim()
+      : newCategoryLayout === "category-year"
+        ? `${categoryFolder}\\{year}`
+        : newCategoryLayout === "category-only"
+          ? categoryFolder
+          : `{year}\\${categoryFolder}`;
+    if (!displayName || !relativePathPattern) return;
+    const generatedKey = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const key = editingCategoryId || generatedKey || `categoria-${Date.now()}`;
+    setCategoryMappings((previous) => [
+      ...previous.filter((item) => item.categoryKey !== key),
+      { id:key, categoryKey:key, displayName, relativePathPattern, jobFolderPattern:"{date} - {client} - {date-dmy}", enabled:true },
+    ]);
+    cancelCategoryEditing();
+  }
+
+  function editCategoryMapping(mapping: NonNullable<ArchivioFlowSettings["categoryMappings"]>[number]) {
+    setEditingCategoryId(mapping.categoryKey);
+    setNewCategoryName(mapping.displayName);
+    setNewCategoryPath(mapping.relativePathPattern);
+    setNewCategoryLayout("custom");
+  }
+
+  function cancelCategoryEditing() {
+    setEditingCategoryId(null);
+    setNewCategoryName("");
+    setNewCategoryPath("");
+    setNewCategoryLayout("year-category");
   }
 
   async function handleFilterPreview() {
@@ -1139,6 +1315,115 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
         </div>
       )}
 
+      {activeView === "impostazioni" && (
+        <div className="panel-section" style={{ padding: "var(--space-4)" }}>
+          <div className="stack">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+              <div>
+                <strong>Motore locale StudioFlow</strong>
+                <p style={{ margin: "0.35rem 0 0", color: "var(--text-muted)" }}>
+                  Database {studioFlowStatus?.health.integrity ?? "…"} · schema {studioFlowStatus?.health.schemaVersion ?? "…"} · {archiveIndexLabel}
+                </p>
+              </div>
+              <div className="button-row">
+                <button className="ghost-button" title="Aggiorna soltanto le informazioni mostrate, senza avviare una scansione." onClick={() => void refreshStudioFlowStatus()} disabled={studioFlowBusy}>Aggiorna stato</button>
+                <button className="secondary-button" title="Scansiona l’archivio in sola lettura e aggiorna l’indice locale. Le fotografie non vengono modificate." onClick={handleReconcileIndex} disabled={studioFlowBusy || archiveIsScanning || !archiveRoot.trim()}>
+                  {archiveIsScanning ? "Scansione in corso…" : studioFlowBusy ? "Operazione in corso…" : "Riconcilia archivio"}
+                </button>
+                <button className="ghost-button" onClick={handleDriveSync} disabled={studioFlowBusy || (studioFlowStatus?.health.pendingOutbox ?? 0) === 0}>
+                  Sincronizza Drive ({studioFlowStatus?.health.pendingOutbox ?? 0})
+                </button>
+              </div>
+            </div>
+            {archiveIsScanning && (
+              <div className="message-box" style={{ borderColor: "var(--line-strong)", background: "rgba(184, 154, 99, 0.06)" }}>
+                <p><strong>Indicizzazione in corso:</strong> il conteggio aumenta mentre StudioFlow legge le cartelle. È un’operazione in sola lettura: nessuna fotografia viene spostata, rinominata o eliminata. Attendi il completamento; il pulsante è disattivato automaticamente.</p>
+              </div>
+            )}
+            {studioFlowError && <div className="message-box"><p style={{ color: "var(--danger)" }}>{studioFlowError}</p></div>}
+            {studioFlowStatus?.archiveIndex.lastError && <div className="message-box"><p style={{ color: "var(--danger)" }}>{studioFlowStatus.archiveIndex.lastError}</p></div>}
+
+            <div className="stack" style={{ gap: "0.85rem" }}>
+              <div>
+                <strong>Dove salvare ogni tipo di lavoro</strong>
+                <p style={{ margin: "0.35rem 0 0", fontSize: "0.86rem", color: "var(--text-muted)" }}>
+                  Crea una regola per Matrimoni, Battesimi, Shooting o qualsiasi altra categoria. Durante un nuovo lavoro ti basterà scegliere la categoria: Archivio Flow preparerà la destinazione.
+                </p>
+              </div>
+              <div className="inline-grid inline-grid--2">
+                <label className="field">
+                  <span>1. Nome della categoria</span>
+                  <input value={newCategoryName} onChange={(event) => setNewCategoryName(event.target.value)} placeholder="es. Matrimoni" />
+                  <small>È il nome che vedrai quando crei un lavoro.</small>
+                </label>
+                <label className="field">
+                  <span>2. Come organizzare le cartelle</span>
+                  <select value={newCategoryLayout} onChange={(event) => setNewCategoryLayout(event.target.value as CategoryLayout)}>
+                    <option value="year-category">Anno → Categoria (consigliato)</option>
+                    <option value="category-year">Categoria → Anno</option>
+                    <option value="category-only">Solo categoria</option>
+                    <option value="custom">Percorso personalizzato</option>
+                  </select>
+                  <small>Non devi scrivere codici o percorsi tecnici.</small>
+                </label>
+              </div>
+
+              {newCategoryLayout === "custom" && (
+                <label className="field">
+                  <span>Percorso personalizzato (avanzato)</span>
+                  <input value={newCategoryPath} onChange={(event) => setNewCategoryPath(event.target.value)} placeholder="es. CLIENTI/{year}/MATRIMONI" />
+                  <small>Puoi usare {'{year}'}, {'{month}'}, {'{client}'} e {'{date}'}.</small>
+                </label>
+              )}
+
+              <div className="message-box" style={{ background: "rgba(255,255,255,0.04)" }}>
+                <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem" }}>Anteprima destinazione</p>
+                <strong style={{ display: "block", marginTop: "0.35rem", overflowWrap: "anywhere" }}>{categoryDestinationPreview}</strong>
+              </div>
+
+              <div className="button-row">
+                <button className="secondary-button" onClick={addCategoryMapping} disabled={!canSaveCategory}>
+                  {editingCategoryId ? "Salva modifica" : "+ Crea regola categoria"}
+                </button>
+                {editingCategoryId && <button className="ghost-button" onClick={cancelCategoryEditing}>Annulla</button>}
+              </div>
+
+              {categoryMappings.length > 0 && <strong style={{ marginTop: "0.35rem" }}>Regole attive</strong>}
+              {categoryMappings.map((mapping) => (
+                <div key={mapping.id} className="message-box" style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <strong>{mapping.displayName}</strong>
+                    <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                      Salva in: {mapping.relativePathPattern.replace(/\{year\}/gi, categoryPreviewYear).replace(/\{month\}/gi, "08").replace(/\{client\}/gi, "Mario e Anna").replace(/\{date\}/gi, `${categoryPreviewYear}-08-20`)}
+                    </p>
+                  </div>
+                  <div className="button-row">
+                    <button className="ghost-button" onClick={() => editCategoryMapping(mapping)}>Modifica</button>
+                    <button className="ghost-button" onClick={() => setCategoryMappings((items) => items.filter((item) => item.id !== mapping.id))}>Rimuovi</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {(studioFlowStatus?.resumable.length ?? 0) > 0 && (
+              <div className="stack" style={{ gap: "0.55rem" }}>
+                <strong>Importazioni recuperabili</strong>
+                {studioFlowStatus!.resumable.map((session) => (
+                  <div key={session.id} className="message-box" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                    <div>
+                      <strong>{session.status}</strong>
+                      <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)" }}>
+                        {session.sourceRoot} · {session.verifiedFiles}/{session.plannedFiles} verificati
+                      </p>
+                    </div>
+                    <button className="secondary-button" onClick={() => void handleResumeSession(session.id)} disabled={studioFlowBusy}>Riprendi</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {activeView === "nuovo" && (
         <>
       {/* SD Card section */}
@@ -1221,6 +1506,26 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
               <div className="stat-card">
                 <span>File JPG</span>
                 <strong>{loadingSd ? "…" : (sdPreview?.jpgFiles ?? "—")}</strong>
+              </div>
+            </div>
+          )}
+
+          {sdPath.trim() && (
+            <div className="message-box" style={{
+              borderColor: safeCheck?.status === "SAFE" ? "var(--success)" : safeCheck ? "#d4a35c" : "var(--line)",
+            }}>
+              <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                <div>
+                  <strong>Sicurezza formattazione</strong>
+                  <p style={{ margin: "0.35rem 0 0", color: "var(--text-muted)" }}>
+                    {safeCheck
+                      ? `${safeCheck.status}: ${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file verificati. ${safeCheck.reason ?? "Tutti i file hanno una copia verificata nell’archivio."}`
+                      : safeCheckError ?? "Controllo fail-closed basato sul contenuto. Nessuna formattazione viene eseguita da questa schermata."}
+                  </p>
+                </div>
+                <button className="secondary-button" onClick={handleSafeCheck} disabled={checkingSafe || importing}>
+                  {checkingSafe ? "Verifica in corso…" : "Verifica SD"}
+                </button>
               </div>
             </div>
           )}
@@ -1568,6 +1873,18 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             </div>
           )}
 
+          {!usaLavoroEsistente && categoryMappings.length > 0 && (
+            <label className="field">
+              <span>Categoria</span>
+              <select value={categoryKey} onChange={(event) => { setCategoryKey(event.target.value); setDestinationOverride(false); }}>
+                <option value="">Nessuna categoria automatica</option>
+                {categoryMappings.filter((item) => item.enabled).map((mapping) => (
+                  <option key={mapping.id} value={mapping.categoryKey}>{mapping.displayName} → {mapping.relativePathPattern}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
           <div className="inline-grid inline-grid--2">
             <label className="field">
               <span>Nome lavoro / cliente</span>
@@ -1623,18 +1940,19 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           </label>
 
           <div className="field">
-            <span>Cartella di destinazione</span>
+            <span>{categoryKey && !destinationOverride ? "Destinazione automatica (override opzionale)" : "Cartella di destinazione"}</span>
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <input
                 type="text"
                 value={destinazione}
                 onChange={(e) => {
                   setDestinazione(e.target.value);
+                  setDestinationOverride(true);
                   clearImportValidationField("destinazione");
                 }}
                 placeholder="C:\\Foto\\Lavori"
                 style={{ flex: 1, ...getInvalidInputStyle("destinazione") }}
-                disabled={usaLavoroEsistente}
+                disabled={usaLavoroEsistente || (Boolean(categoryKey) && !destinationOverride)}
               />
               <button
                 className="secondary-button"
@@ -1642,7 +1960,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                 disabled={browsingField === "dest" || usaLavoroEsistente}
                 style={{ flexShrink: 0, padding: "0.7rem 1rem", whiteSpace: "nowrap" }}
               >
-                {browsingField === "dest" ? "…" : "Sfoglia"}
+                {browsingField === "dest" ? "…" : categoryKey && !destinationOverride ? "Modifica destinazione" : "Sfoglia"}
               </button>
             </div>
           </div>

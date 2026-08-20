@@ -97,7 +97,7 @@ function DesktopOnlyBlockedScreen({ missingMethods }: { missingMethods: string[]
         <div className="modal-panel__body" style={{ display: "grid", gap: "0.8rem" }}>
           <p>
             {isBridgeMissing
-              ? "Bridge desktop non rilevato. Avvia il tool con `npm run dev:filex-desktop:photo-selector` o dalla build FileX Desktop."
+              ? "Bridge desktop non rilevato. Avvia il tool con `npm run dev:photo-selector-app` o dalla build FileX Desktop."
               : "Shell desktop rilevata ma non compatibile con questa versione del renderer. Aggiorna FileX Desktop e riavvia il tool."}
           </p>
           {!isBridgeMissing ? (

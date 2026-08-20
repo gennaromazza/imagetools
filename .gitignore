@@ -12,12 +12,18 @@ playwright-report/
 test-results/
 TEST FOTO/
 *.env
+.env.local
+**/.env.local
 apps/filex-desktop/src/google-drive-config.generated.ts
 apps/image-party-frame/exports/
 apps/image-party-frame/uploads/
 apps/image-party-frame/temp-test.png
 apps/archivio-flow/server/data/jobs.json
 apps/archivio-flow/server/data/settings.json
+apps/archivio-flow/server/data/file-count-cache.json
+apps/archivio-flow/server/data/*.sqlite*
+apps/archivio-flow/server/data/*.log.jsonl
+apps/archivio-flow/.runtime-test-data/
 apps/filex-send-remote-server/.data/
 apps/filex-cloud-functions/lib/
 
@@ -27,3 +33,5 @@ apps/filex-cloud-functions/lib/
 .vscode/extensions.json
 install.sh
 .release-worktrees/
+mnt/
+test-output.txt

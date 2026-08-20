@@ -1,12 +1,16 @@
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import { execSync } from "child_process";
-import { createHash } from "crypto";
+import { execFileSync, execSync } from "child_process";
+import { createHash, randomUUID } from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import sharp from "sharp";
 import { fileURLToPath, pathToFileURL } from "url";
+import { StudioFlowStore, type ImportSessionRecord } from "./studioflow-store.js";
+import { resolveDestination, type CategoryMapping } from "./destination-resolver.js";
+import { createBloomFilter } from "./bloom-filter.js";
+import type { ArchivioArchiveRenameProgress } from "@photo-tools/desktop-contracts";
 
 const app = express();
 app.use(cors());
@@ -23,10 +27,29 @@ const DATA_DIR = process.env.ARCHIVIO_FLOW_DATA_DIR?.trim()
 const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const FILE_COUNT_CACHE_FILE = path.join(DATA_DIR, "file-count-cache.json");
+const LOG_FILE = path.join(DATA_DIR, "studioflow.log.jsonl");
 fs.mkdirSync(DATA_DIR, { recursive: true });
+const studioFlowStore = new StudioFlowStore(DATA_DIR);
+
+function writeStudioFlowLog(level: "info" | "warn" | "error", event: string, details: Record<string, unknown> = {}): void {
+  try {
+    fs.appendFileSync(LOG_FILE, `${JSON.stringify({ at:new Date().toISOString(), level, event, ...details })}\n`, "utf8");
+  } catch { /* logging never blocks the workflow */ }
+}
+
+app.use((req, res, next) => {
+  const correlationId = typeof req.headers["x-correlation-id"] === "string" ? req.headers["x-correlation-id"] : randomUUID();
+  res.setHeader("X-Correlation-Id", correlationId);
+  const startedAt = Date.now();
+  res.on("finish", () => writeStudioFlowLog(res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info", "http_request", {
+    correlationId, method:req.method, route:req.path, statusCode:res.statusCode, durationMs:Date.now() - startedAt,
+  }));
+  next();
+});
 
 function migrateLegacyDataIfNeeded(): void {
   if (DATA_DIR === LEGACY_DATA_DIR) return;
+  if (process.env.ARCHIVIO_FLOW_SKIP_LEGACY_MIGRATION === "1") return;
 
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -54,6 +77,8 @@ export interface SdCard {
   totalSize: number;
   freeSpace: number;
   path: string;
+  volumeSerial?: string;
+  filesystem?: string;
 }
 
 export interface Job {
@@ -144,6 +169,32 @@ export interface ImportRequest {
   fileNameIncludes?: string;
   mtimeFrom?: string;
   mtimeTo?: string;
+  categoryKey?: string;
+  destinationOverride?: boolean;
+}
+
+export interface CardSnapshot {
+  id: string;
+  cardId: string;
+  volumeLabel: string;
+  filesystem: string;
+  capacityBytes: number;
+  contentFingerprint: string;
+  fileCount: number;
+  totalBytes: number;
+  captureSignature: string;
+  createdAt: number;
+  lastSeenAt: number;
+}
+
+export interface FileFingerprint {
+  relativePath: string;
+  filename: string;
+  extension: string;
+  size: number;
+  mtimeMs: number;
+  fastFingerprint: string; // level 1 partial hash
+  fullHash: string | null; // level 2 full SHA-256
 }
 
 interface FilterCriteria {
@@ -339,9 +390,300 @@ let lowQualityProgress: LowQualityProgressState = createEmptyLowQualityProgress(
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
-/** Remove characters illegal in Windows file/folder names */
+/** Level 0 — Discovery: collect basic file info */
+function collectFileDiscovery(filePath: string, relPath: string, stat: fs.Stats): FileFingerprint {
+  return {
+    relativePath: relPath,
+    filename: path.basename(filePath),
+    extension: path.extname(filePath),
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    fastFingerprint: "",
+    fullHash: null,
+  };
+}
+
+/** Level 1 — Fast signature: partial hash from head/middle/tail */
+async function computeFastFingerprint(filePath: string): Promise<string> {
+  const stream = fs.createReadStream(filePath, { start: 0, end: 63 * 1023 });
+  const headHash = createHash("sha256");
+  return new Promise<string>((resolve, reject) => {
+    stream.on("error", reject);
+    stream.on("data", (chunk) => headHash.update(chunk));
+    stream.on("end", () => {
+      const midSize = 64 * 1024;
+      const stat = fs.statSync(filePath);
+      const middleStart = Math.max(0, Math.floor(stat.size / 2) - Math.floor(midSize / 2));
+      const middleEnd = Math.min(stat.size, middleStart + midSize);
+      const tailStart = Math.max(0, stat.size - midSize);
+
+      const middleStream = fs.createReadStream(filePath, { start: middleStart, end: Math.max(middleStart, middleEnd - 1) });
+      const midHash = createHash("sha256");
+      middleStream.on("error", reject);
+      middleStream.on("data", (chunk) => midHash.update(chunk));
+      middleStream.on("end", () => {
+        const tailStream = fs.createReadStream(filePath, { start: tailStart });
+        const tailHash = createHash("sha256");
+        tailStream.on("error", reject);
+        tailStream.on("data", (chunk) => tailHash.update(chunk));
+        tailStream.on("end", () => {
+          const result = `${headHash.digest("hex")}|${midHash.digest("hex")}|${tailHash.digest("hex")}`;
+          resolve(result);
+        });
+      });
+    });
+  });
+}
+
+/** Level 2 — Full hash (only when necessary) */
+async function computeFullHash(filePath: string): Promise<string> {
+  const hash = createHash("sha256");
+  const stream = fs.createReadStream(filePath);
+  for await (const chunk of stream) {
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest("hex");
+}
+
+/** Card content fingerprint: deterministic combine of file fingerprints */
+function computeCardFingerprint(fingerprints: FileFingerprint[]): string {
+  const sorted = [...fingerprints].sort((a, b) =>
+    a.relativePath.localeCompare(b.relativePath, "it")
+  );
+  const normalized = sorted.map((fp) =>
+    `${fp.relativePath}|${fp.size}|${fp.fastFingerprint}`
+  ).join("|");
+  return createHash("sha256").update(normalized).digest("hex");
+}
+
+/** Safe-to-format verification algorithm (spec §63) */
+async function checkSafeToFormat(
+  sdPath: string,
+  archiveRoot: string,
+  _hierarchy: ArchiveHierarchyConfig
+): Promise<{
+  status: "SAFE" | "PARTIAL" | "UNSAFE" | "UNKNOWN";
+  totalFiles: number;
+  verifiedFiles: number;
+  unknownFiles: number;
+  reason?: string;
+  sessions: string[];
+}> {
+  // 1. scan current media files on SD
+  let sdNorm: string;
+  try {
+    sdNorm = resolveAndValidate(sdPath);
+  } catch (e) {
+    return {
+    status: "UNKNOWN",
+    totalFiles: 0,
+    verifiedFiles: 0,
+    unknownFiles: 0,
+    reason: "Percorso SD non valido",
+    sessions: [],
+  };
+  }
+
+  if (!fs.existsSync(sdNorm)) {
+    return {
+    status: "UNKNOWN",
+    totalFiles: 0,
+    verifiedFiles: 0,
+    unknownFiles: 0,
+    reason: "Percorso SD non trovato",
+    sessions: [],
+  };
+  }
+
+  const allFiles: FileFingerprint[] = [];
+  const systemDirs = new Set(["$RECYCLE.BIN", "System Volume Information", "$WINRE_BACKUP_PARTITION.MARKER"]);
+
+  for await (const srcFile of walkFiles(sdNorm)) {
+    const baseName = path.basename(srcFile).toLowerCase();
+    if (systemDirs.has(baseName)) continue;
+    if (!isCopyableFile(srcFile)) continue;
+
+    const relPath = path.relative(sdNorm, srcFile);
+    const stat = await fs.promises.stat(srcFile);
+    const ff: FileFingerprint = {
+      relativePath: relPath,
+      filename: path.basename(srcFile),
+      extension: path.extname(srcFile),
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      fastFingerprint: "", // will be computed if needed
+      fullHash: null,
+    };
+    allFiles.push(ff);
+  }
+
+  const totalFiles = allFiles.length;
+  if (totalFiles === 0) {
+    return {
+    status: "UNKNOWN",
+    totalFiles: 0,
+    verifiedFiles: 0,
+    unknownFiles: 0,
+    reason: "Nessun file trovabile sulla scheda",
+    sessions: [],
+  };
+  }
+
+  // Fingerprint progressivo: firma veloce per cercare candidati, hash completo
+  // soltanto per confermare la prova che autorizza SAFE.
+  for (const ff of allFiles) {
+    ff.fastFingerprint = await computeFastFingerprint(path.join(sdNorm, ff.relativePath));
+  }
+
+  let verifiedFiles = 0;
+  let unknownFiles = 0;
+  const matchedSessionIds: string[] = [];
+  const archiveRootNorm = archiveRoot.trim() ? resolveAndValidate(archiveRoot) : "";
+
+  for (const file of allFiles) {
+    const sourcePath = path.join(sdNorm, file.relativePath);
+    const candidates = studioFlowStore.findSafeEvidence(file.size, file.fastFingerprint);
+    let matched = false;
+    for (const candidate of candidates) {
+      try {
+        const destination = resolveAndValidate(candidate.destinationPath);
+        if (archiveRootNorm) {
+          const relative = path.relative(archiveRootNorm, destination);
+          if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+        }
+        const destinationStat = await fs.promises.stat(destination);
+        if (!destinationStat.isFile() || destinationStat.size !== file.size) continue;
+        const [sourceHash, destinationHash] = await Promise.all([
+          computeFullHash(sourcePath),
+          computeFullHash(destination),
+        ]);
+        if (sourceHash !== destinationHash) continue;
+        matched = true;
+        matchedSessionIds.push(candidate.sessionId);
+        break;
+      } catch {
+        // Prova non più valida (file spostato/cancellato/illeggibile): fail closed.
+        continue;
+      }
+    }
+    if (matched) verifiedFiles += 1;
+    else unknownFiles += 1;
+  }
+  const uniqueSessionIds = [...new Set(matchedSessionIds)];
+
+  let status: "SAFE" | "PARTIAL" | "UNSAFE" | "UNKNOWN";
+  let reason: string | undefined;
+
+  if (verifiedFiles === totalFiles) {
+    status = "SAFE";
+  } else if (verifiedFiles > 0 && verifiedFiles < totalFiles) {
+    status = "PARTIAL";
+    unknownFiles = totalFiles - verifiedFiles;
+    reason = `${unknownFiles} file non risultano archiviati`;
+  } else {
+    status = "UNSAFE";
+    reason = "Nessun file corrisponde a importazioni verificate precedenti";
+  }
+
+  return {
+    status,
+    totalFiles,
+    verifiedFiles,
+    unknownFiles,
+    reason,
+    sessions: uniqueSessionIds,
+  };
+}
+
+/** Remove characters illegal in Windows file/folder names. */
 function sanitizeName(name: string): string {
   return name.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").trim();
+}
+
+export type ArchiveRenameProgress = ArchivioArchiveRenameProgress;
+
+let archiveRenameRuntime: ArchiveRenameProgress = {
+  operationId: null,
+  phase: "idle",
+  active: false,
+  total: 0,
+  completed: 0,
+  currentFolderName: null,
+  message: "Nessuna rinomina in corso.",
+  startedAt: null,
+  finishedAt: null,
+  renamedCount: 0,
+  error: null,
+};
+
+export function getArchiveRenameProgress(): ArchiveRenameProgress {
+  return { ...archiveRenameRuntime };
+}
+
+interface VolumeIdentity {
+  volumeLabel: string;
+  volumeSerial: string | null;
+  filesystem: string | null;
+  capacityBytes: number;
+}
+
+async function readVolumeIdentity(sdPath: string): Promise<VolumeIdentity> {
+  const resolved = resolveAndValidate(sdPath);
+  let capacityBytes = 0;
+  try {
+    const stats = await fs.promises.statfs(resolved);
+    capacityBytes = Number(stats.blocks) * Number(stats.bsize);
+  } catch { /* optional signal */ }
+  const fallback: VolumeIdentity = {
+    volumeLabel: path.basename(path.parse(resolved).root) || path.parse(resolved).root,
+    volumeSerial: null,
+    filesystem: null,
+    capacityBytes,
+  };
+  if (process.platform !== "win32") return fallback;
+  const deviceId = path.parse(resolved).root.slice(0, 2).toUpperCase();
+  if (!/^[A-Z]:$/.test(deviceId)) return fallback;
+  try {
+    const script = `$d=Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='${deviceId}'\"; if($d){$d | Select-Object VolumeName,VolumeSerialNumber,FileSystem,Size | ConvertTo-Json -Compress}`;
+    const raw = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", timeout: 7000 }).trim();
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      volumeLabel: String(value.VolumeName ?? fallback.volumeLabel),
+      volumeSerial: value.VolumeSerialNumber ? String(value.VolumeSerialNumber) : null,
+      filesystem: value.FileSystem ? String(value.FileSystem) : null,
+      capacityBytes: Number(value.Size) || capacityBytes,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+export async function captureCardSnapshot(sdPath: string): Promise<CardSnapshot> {
+  const sdNorm = resolveAndValidate(sdPath);
+  const identity = await readVolumeIdentity(sdNorm);
+  const fingerprints: FileFingerprint[] = [];
+  let totalBytes = 0;
+  for await (const filePath of walkFiles(sdNorm)) {
+    if (!isCopyableFile(filePath)) continue;
+    const stat = await fs.promises.stat(filePath);
+    const relativePath = path.relative(sdNorm, filePath).replace(/\\/g, "/");
+    const fingerprint = collectFileDiscovery(filePath, relativePath, stat);
+    fingerprint.fastFingerprint = await computeFastFingerprint(filePath);
+    fingerprints.push(fingerprint);
+    totalBytes += stat.size;
+  }
+  const contentFingerprint = computeCardFingerprint(fingerprints);
+  const physicalSignal = `${identity.volumeSerial ?? "no-serial"}|${identity.filesystem ?? "unknown"}|${identity.capacityBytes}`;
+  const cardId = createHash("sha256").update(physicalSignal).digest("hex").slice(0, 24);
+  const snapshotId = createHash("sha256").update(`${cardId}|${contentFingerprint}`).digest("hex").slice(0, 32);
+  const now = Date.now();
+  const snapshot: CardSnapshot = {
+    id:snapshotId, cardId, volumeLabel:identity.volumeLabel, filesystem:identity.filesystem ?? "unknown",
+    capacityBytes:identity.capacityBytes, contentFingerprint, fileCount:fingerprints.length, totalBytes,
+    captureSignature:"fast-v1:head-middle-tail-sha256", createdAt:now, lastSeenAt:now,
+  };
+  studioFlowStore.saveCardSnapshot({ id:cardId, volumeSerial:identity.volumeSerial, filesystem:identity.filesystem, capacityBytes:identity.capacityBytes }, snapshot);
+  return snapshot;
 }
 
 /** Keep a single safe folder segment (no nested path) */
@@ -689,14 +1031,21 @@ async function safeCopyFileVerified(
 }
 
 export function loadJobs(): Job[] {
-  try {
-    if (fs.existsSync(JOBS_FILE)) {
-      return JSON.parse(fs.readFileSync(JOBS_FILE, "utf-8")) as Job[];
+  if (studioFlowStore.getMeta("jobs_json_migrated") !== "1") {
+    let legacy: Job[] = [];
+    try {
+      if (fs.existsSync(JOBS_FILE)) legacy = JSON.parse(fs.readFileSync(JOBS_FILE, "utf-8")) as Job[];
+    } catch { /* malformed legacy JSON is not authoritative */ }
+    if (legacy.length > 0 && studioFlowStore.listDomainRecords<Job>("jobs").length === 0) {
+      studioFlowStore.replaceDomainRecords("jobs", legacy);
     }
-  } catch {
-    /* ignore parse errors, start fresh */
+    studioFlowStore.setMeta("jobs_json_migrated", "1");
   }
-  return [];
+  return studioFlowStore.listDomainRecords<Job>("jobs");
+}
+
+function saveJobs(jobs: Job[]): void {
+  studioFlowStore.replaceDomainRecords("jobs", jobs);
 }
 
 function normalizeJobLookupId(rawValue: string): string {
@@ -735,7 +1084,7 @@ function writeJsonAtomic(filePath: string, value: unknown): void {
 function appendJob(job: Job): void {
   const jobs = loadJobs();
   jobs.unshift(job);
-  writeJsonAtomic(JOBS_FILE, jobs);
+  saveJobs(jobs);
 }
 
 function incrementJobFiles(
@@ -755,7 +1104,7 @@ function incrementJobFiles(
     percorsoSelezione: percorsoSelezione ?? current.percorsoSelezione,
   };
   jobs[idx] = updated;
-  writeJsonAtomic(JOBS_FILE, jobs);
+  saveJobs(jobs);
   return updated;
 }
 
@@ -769,7 +1118,7 @@ export function updateJobContractLink(jobId: string, contrattoLink: string | und
     contrattoLink,
   };
   jobs[idx] = updated;
-  writeJsonAtomic(JOBS_FILE, jobs);
+  saveJobs(jobs);
   return updated;
 }
 
@@ -777,7 +1126,7 @@ export function deleteJob(jobId: string): boolean {
   const jobs = loadJobs();
   const next = jobs.filter((job) => job.id !== jobId);
   if (next.length === jobs.length) return false;
-  writeJsonAtomic(JOBS_FILE, next);
+  saveJobs(next);
   return true;
 }
 
@@ -1573,6 +1922,262 @@ export async function discoverArchiveJobs(
   return discovered;
 }
 
+export interface ArchiveIndexStatus {
+  archiveId: string | null;
+  rootPath: string;
+  state: "idle" | "scanning" | "ready" | "error";
+  entryCount: number;
+  fileCount: number;
+  lastFullScanAt: number | null;
+  lastReconciledAt: number | null;
+  lastError: string | null;
+}
+
+let archiveIndexRuntime: ArchiveIndexStatus = {
+  archiveId: null, rootPath: "", state: "idle", entryCount: 0, fileCount: 0,
+  lastFullScanAt: null, lastReconciledAt: null, lastError: null,
+};
+let archiveWatcher: fs.FSWatcher | null = null;
+let archiveWatchDebounce: NodeJS.Timeout | null = null;
+let archiveReconcileInterval: NodeJS.Timeout | null = null;
+let archiveScanPromise: Promise<ArchiveIndexStatus> | null = null;
+const pendingArchiveSubtrees = new Set<string>();
+const ARCHIVE_FALLBACK_RECONCILE_MS = 6 * 60 * 60_000;
+
+function archiveIdForRoot(rootPath: string): string {
+  return createHash("sha256").update(path.resolve(rootPath).toLowerCase()).digest("hex").slice(0, 24);
+}
+
+export async function rebuildArchiveIndex(settings = loadSettings()): Promise<ArchiveIndexStatus> {
+  if (archiveScanPromise) return archiveScanPromise;
+  archiveScanPromise = (async () => {
+    const rawRoot = settings.archiveRoot.trim();
+    if (!rawRoot) throw new Error("Radice archivio non configurata");
+    const rootPath = resolveAndValidate(rawRoot);
+    if (!fs.existsSync(rootPath)) throw new Error("Radice archivio non trovata");
+    const archiveId = archiveIdForRoot(rootPath);
+    archiveIndexRuntime = { ...archiveIndexRuntime, archiveId, rootPath, state: "scanning", lastError: null };
+    const entries: Array<{ relativePath: string; entryType: "file" | "directory"; size: number; mtimeMs: number }> = [];
+    let scannedFileCount = 0;
+
+    async function scanDirectory(directory: string): Promise<void> {
+      const dirEntries = await fs.promises.readdir(directory, { withFileTypes: true });
+      for (const entry of dirEntries) {
+        if (isArchiveSystemDir(entry.name)) continue;
+        const absolutePath = path.join(directory, entry.name);
+        const relativePath = path.relative(rootPath, absolutePath).replace(/\\/g, "/");
+        try {
+          const stat = await fs.promises.stat(absolutePath);
+          if (entry.isDirectory()) {
+            entries.push({ relativePath, entryType: "directory", size: 0, mtimeMs: stat.mtimeMs });
+            await scanDirectory(absolutePath);
+          } else if (entry.isFile()) {
+            entries.push({ relativePath, entryType: "file", size: stat.size, mtimeMs: stat.mtimeMs });
+            scannedFileCount += 1;
+          }
+          if (entries.length % 250 === 0) {
+            archiveIndexRuntime = {
+              ...archiveIndexRuntime,
+              entryCount:entries.length,
+              fileCount:scannedFileCount,
+            };
+          }
+        } catch {
+          // File rimosso durante la scansione: la successiva riconciliazione lo recupera.
+        }
+      }
+    }
+
+    await scanDirectory(rootPath);
+    studioFlowStore.upsertArchive(archiveId, rootPath, settings.archiveHierarchy);
+    studioFlowStore.replaceArchiveEntries(archiveId, entries);
+    const persisted = studioFlowStore.getArchiveStatus(archiveId);
+    archiveIndexRuntime = { archiveId, rootPath, state: "ready", ...persisted, lastError: null };
+    return archiveIndexRuntime;
+  })().catch((error) => {
+    archiveIndexRuntime = { ...archiveIndexRuntime, state: "error", lastError: error instanceof Error ? error.message : String(error) };
+    throw error;
+  }).finally(() => {
+    archiveScanPromise = null;
+  });
+  return archiveScanPromise;
+}
+
+function normalizedArchiveSubtree(
+  archiveRoot: string,
+  hierarchy: ArchiveHierarchyConfig,
+  changedPath: string,
+): string | null {
+  const absolutePath = path.isAbsolute(changedPath)
+    ? path.resolve(changedPath)
+    : path.resolve(archiveRoot, changedPath);
+  const relativePath = path.relative(archiveRoot, absolutePath);
+  if (!relativePath || relativePath.startsWith("..") || path.isAbsolute(relativePath)) return null;
+  const segments = relativePath.split(/[\\/]+/u).filter(Boolean);
+  if (segments.length === 0 || isArchiveSystemDir(segments[0]!)) return null;
+  return segments.slice(0, Math.min(hierarchy.jobLevel, segments.length)).join("/");
+}
+
+async function collectArchiveSubtreeEntries(
+  archiveRoot: string,
+  relativePrefix: string,
+): Promise<Array<{ relativePath: string; entryType: "file" | "directory"; size: number; mtimeMs: number }>> {
+  const entries: Array<{ relativePath: string; entryType: "file" | "directory"; size: number; mtimeMs: number }> = [];
+  const target = path.resolve(archiveRoot, ...relativePrefix.split("/"));
+  if (!fs.existsSync(target)) return entries;
+
+  async function visit(absolutePath: string): Promise<void> {
+    let stat: fs.Stats;
+    try {
+      stat = await fs.promises.stat(absolutePath);
+    } catch {
+      return;
+    }
+    const relativePath = path.relative(archiveRoot, absolutePath).replace(/\\/g, "/");
+    if (stat.isDirectory()) {
+      entries.push({ relativePath, entryType: "directory", size: 0, mtimeMs: stat.mtimeMs });
+      let children: fs.Dirent[];
+      try {
+        children = await fs.promises.readdir(absolutePath, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const child of children) {
+        if (isArchiveSystemDir(child.name)) continue;
+        await visit(path.join(absolutePath, child.name));
+      }
+    } else if (stat.isFile()) {
+      entries.push({ relativePath, entryType: "file", size: stat.size, mtimeMs: stat.mtimeMs });
+    }
+  }
+
+  await visit(target);
+  return entries;
+}
+
+export async function refreshArchiveIndexSubtree(
+  changedPath: string,
+  settings = loadSettings(),
+): Promise<ArchiveIndexStatus> {
+  const rawRoot = settings.archiveRoot.trim();
+  if (!rawRoot) throw new Error("Radice archivio non configurata");
+  const rootPath = resolveAndValidate(rawRoot);
+  const relativePrefix = normalizedArchiveSubtree(rootPath, settings.archiveHierarchy, changedPath);
+  if (!relativePrefix) return getArchiveIndexStatus();
+  if (archiveScanPromise) await archiveScanPromise;
+
+  const archiveId = archiveIdForRoot(rootPath);
+  studioFlowStore.upsertArchive(archiveId, rootPath, settings.archiveHierarchy);
+  const entries = await collectArchiveSubtreeEntries(rootPath, relativePrefix);
+  studioFlowStore.replaceArchiveSubtree(archiveId, relativePrefix, entries);
+  const persisted = studioFlowStore.getArchiveStatus(archiveId);
+  archiveIndexRuntime = { archiveId, rootPath, state: "ready", ...persisted, lastError: null };
+  writeStudioFlowLog("info", "archive_subtree_refreshed", {
+    archiveId,
+    relativePrefix,
+    entries: entries.length,
+    files: entries.filter((entry) => entry.entryType === "file").length,
+  });
+  return getArchiveIndexStatus();
+}
+
+function coalesceArchiveSubtrees(values: Iterable<string>): string[] {
+  const sorted = [...new Set(values)].sort((a, b) => a.length - b.length || a.localeCompare(b));
+  return sorted.filter((candidate, index) => !sorted.slice(0, index).some(
+    (parent) => candidate === parent || candidate.startsWith(`${parent}/`),
+  ));
+}
+
+async function flushArchiveSubtreeChanges(): Promise<void> {
+  archiveWatchDebounce = null;
+  if (importProgress.active || archiveRenameRuntime.active) {
+    archiveWatchDebounce = setTimeout(() => void flushArchiveSubtreeChanges(), 1500);
+    return;
+  }
+  const subtrees = coalesceArchiveSubtrees(pendingArchiveSubtrees);
+  pendingArchiveSubtrees.clear();
+  if (subtrees.length === 0) return;
+  const settings = loadSettings();
+  try {
+    for (const subtree of subtrees) await refreshArchiveIndexSubtree(subtree, settings);
+    await reconcileDiscoveredArchiveJobs(settings);
+    invalidateJobsListCache();
+  } catch (error) {
+    writeStudioFlowLog("warn", "archive_incremental_refresh_failed", {
+      subtrees,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function scheduleArchiveReconciliation(changedPath?: string | Buffer | null): void {
+  const settings = loadSettings();
+  const root = settings.archiveRoot.trim();
+  if (!root || !changedPath) return;
+  const subtree = normalizedArchiveSubtree(path.resolve(root), settings.archiveHierarchy, String(changedPath));
+  if (!subtree) return;
+  pendingArchiveSubtrees.add(subtree);
+  if (archiveWatchDebounce) clearTimeout(archiveWatchDebounce);
+  archiveWatchDebounce = setTimeout(() => void flushArchiveSubtreeChanges(), 1500);
+}
+
+function startArchiveFallbackReconciliation(): void {
+  if (archiveReconcileInterval) return;
+  archiveReconcileInterval = setInterval(() => {
+    const settings = loadSettings();
+    void reconcileDiscoveredArchiveJobs(settings)
+      .then(() => invalidateJobsListCache())
+      .catch(() => undefined);
+  }, ARCHIVE_FALLBACK_RECONCILE_MS);
+  archiveReconcileInterval.unref();
+}
+
+export function configureArchiveWatcher(settings = loadSettings()): void {
+  archiveWatcher?.close();
+  archiveWatcher = null;
+  if (archiveReconcileInterval) clearInterval(archiveReconcileInterval);
+  archiveReconcileInterval = null;
+  const root = settings.archiveRoot.trim();
+  if (!root || !fs.existsSync(root)) return;
+  const normalizedRoot = path.resolve(root);
+  const archiveId = archiveIdForRoot(normalizedRoot);
+  const cached = studioFlowStore.getArchiveStatus(archiveId);
+  const scanForCurrentArchiveIsRunning = Boolean(
+    archiveScanPromise && archiveIndexRuntime.archiveId === archiveId,
+  );
+  archiveIndexRuntime = scanForCurrentArchiveIsRunning
+    ? {
+        ...archiveIndexRuntime,
+        archiveId,
+        rootPath: normalizedRoot,
+        state: "scanning",
+        lastError: null,
+      }
+    : {
+        archiveId, rootPath: normalizedRoot,
+        state: cached.lastFullScanAt ? "ready" : "idle",
+        ...cached,
+        lastError: null,
+      };
+  try {
+    archiveWatcher = fs.watch(root, { recursive: true }, (_eventType, filename) => {
+      scheduleArchiveReconciliation(filename);
+    });
+    archiveWatcher.on("error", () => {
+      archiveWatcher?.close();
+      archiveWatcher = null;
+      startArchiveFallbackReconciliation();
+    });
+  } catch {
+    // Senza watcher eseguiamo una verifica completa, ma non ogni pochi minuti.
+    startArchiveFallbackReconciliation();
+  }
+}
+
+export function getArchiveIndexStatus(): ArchiveIndexStatus {
+  return { ...archiveIndexRuntime };
+}
+
 function createStableJobId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -1607,7 +2212,7 @@ async function reconcileDiscoveredArchiveJobs(settings: Settings): Promise<{ job
   }
 
   if (additions.length > 0) {
-    writeJsonAtomic(JOBS_FILE, [...additions, ...latestJobs]);
+    saveJobs([...additions, ...latestJobs]);
     invalidateJobsListCache();
   }
 
@@ -1701,6 +2306,12 @@ export async function analyzeArchive(settings = loadSettings()): Promise<Archive
 
   const resolvedRoot = resolveAndValidate(archiveRoot);
   if (!fs.existsSync(resolvedRoot)) throw new Error("Radice archivio non trovata.");
+
+  configureArchiveWatcher(settings);
+  const archiveId = archiveIdForRoot(resolvedRoot);
+  if (!studioFlowStore.getArchiveStatus(archiveId).lastFullScanAt) {
+    await rebuildArchiveIndex(settings);
+  }
 
   const reconciled = await reconcileDiscoveredArchiveJobs(settings);
   const jobs = reconciled.jobs.map((job) => withArchiveMetadata(job, resolvedRoot, settings.archiveHierarchy));
@@ -1829,71 +2440,137 @@ export async function renameAnalyzedArchiveJobs(
   }
   if (normalizedRequests.size === 0) throw new Error("Seleziona almeno una cartella da rinominare.");
 
-  const settings = loadSettings();
-  const analysis = await analyzeArchive(settings);
-  const analysisById = new Map(analysis.items.map((item) => [item.jobId, item]));
-  const jobs = loadJobs();
-  const jobsById = new Map(jobs.map((job) => [job.id, job]));
-  const operations: Array<{
-    item: ArchiveAnalysisItem;
-    job: Job;
-    source: string;
-    target: string;
-    nomeLavoro: string;
-    dataLavoro: string;
-    proposedFolderName: string;
-  }> = [];
-  const targetPaths = new Set<string>();
-
-  for (const [jobId, request] of normalizedRequests) {
-    const item = analysisById.get(jobId);
-    const job = jobsById.get(jobId);
-    if (!item || !job) throw new Error("Una delle cartelle selezionate non e piu disponibile. Ripeti l'analisi.");
-    const nomeLavoro = request.nomeLavoro || item.nomeLavoro.trim();
-    const dataLavoro = request.dataLavoro || item.dataLavoro || "";
-    const isoDateMatch = dataLavoro.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    const parsedDate = isoDateMatch ? new Date(`${dataLavoro}T00:00:00Z`) : null;
-    if (!nomeLavoro) {
-      throw new Error(`Inserisci il nome del lavoro per: ${item.currentFolderName}`);
-    }
-    if (
-      !isoDateMatch
-      || !parsedDate
-      || Number.isNaN(parsedDate.getTime())
-      || parsedDate.toISOString().slice(0, 10) !== dataLavoro
-    ) {
-      throw new Error(`Inserisci una data valida per: ${item.currentFolderName}`);
-    }
-
-    const source = path.resolve(item.currentFolderPath);
-    const proposedFolderName = buildFolderName(nomeLavoro, dataLavoro);
-    const target = path.resolve(path.dirname(source), proposedFolderName);
-    if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) {
-      throw new Error(`Cartella sorgente non trovata: ${source}`);
-    }
-    if (source === target) {
-      throw new Error(`La cartella e gia allineata: ${item.currentFolderName}`);
-    }
-    if (path.dirname(source).toLowerCase() !== path.dirname(target).toLowerCase()) {
-      throw new Error("La rinomina non puo spostare un lavoro fuori dalla cartella corrente.");
-    }
-    if (source.toLowerCase() !== target.toLowerCase() && fs.existsSync(target)) {
-      throw new Error(`La destinazione esiste gia: ${target}`);
-    }
-    const targetKey = target.toLowerCase();
-    if (targetPaths.has(targetKey)) throw new Error(`Due cartelle produrrebbero lo stesso nome: ${target}`);
-    targetPaths.add(targetKey);
-    operations.push({ item, job, source, target, nomeLavoro, dataLavoro, proposedFolderName });
+  if (archiveRenameRuntime.active) {
+    throw new Error("Una rinomina dell'archivio e gia in corso. Attendi il completamento prima di riprovare.");
   }
 
-  const completed: typeof operations = [];
+  const operationId = randomUUID();
+  const startedAt = Date.now();
+  archiveRenameRuntime = {
+    operationId,
+    phase: "preparing",
+    active: true,
+    total: normalizedRequests.size,
+    completed: 0,
+    currentFolderName: null,
+    message: "Verifico le cartelle selezionate...",
+    startedAt,
+    finishedAt: null,
+    renamedCount: 0,
+    error: null,
+  };
+  writeStudioFlowLog("info", "archive_rename_started", { operationId, total: normalizedRequests.size });
+
   try {
+    const settings = loadSettings();
+    if (!settings.archiveRoot.trim()) throw new Error("Configura prima la radice archivio nelle Impostazioni.");
+    const archiveRoot = resolveAndValidate(settings.archiveRoot.trim());
+    if (!fs.existsSync(archiveRoot)) throw new Error("Radice archivio non trovata.");
+    const jobs = loadJobs();
+    const jobsById = new Map(jobs.map((job) => [job.id, job]));
+    const operations: Array<{
+      item: ArchiveAnalysisItem;
+      job: Job;
+      source: string;
+      target: string;
+      nomeLavoro: string;
+      dataLavoro: string;
+      proposedFolderName: string;
+    }> = [];
+    const targetPaths = new Set<string>();
+
+    for (const [jobId, request] of normalizedRequests) {
+      const job = jobsById.get(jobId);
+      const item = job ? buildArchiveAnalysisItem(job, archiveRoot) : null;
+      if (!item || !job) throw new Error("Una delle cartelle selezionate non e piu disponibile. Ripeti l'analisi.");
+      const nomeLavoro = request.nomeLavoro || item.nomeLavoro.trim();
+      const dataLavoro = request.dataLavoro || item.dataLavoro || "";
+      const isoDateMatch = dataLavoro.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const parsedDate = isoDateMatch ? new Date(`${dataLavoro}T00:00:00Z`) : null;
+      if (!nomeLavoro) throw new Error(`Inserisci il nome del lavoro per: ${item.currentFolderName}`);
+      if (
+        !isoDateMatch
+        || !parsedDate
+        || Number.isNaN(parsedDate.getTime())
+        || parsedDate.toISOString().slice(0, 10) !== dataLavoro
+      ) {
+        throw new Error(`Inserisci una data valida per: ${item.currentFolderName}`);
+      }
+
+      const source = path.resolve(item.currentFolderPath);
+      const proposedFolderName = buildFolderName(nomeLavoro, dataLavoro);
+      const target = path.resolve(path.dirname(source), proposedFolderName);
+      if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) {
+        throw new Error(`Cartella sorgente non trovata: ${source}`);
+      }
+      if (source === target) throw new Error(`La cartella e gia allineata: ${item.currentFolderName}`);
+      if (path.dirname(source).toLowerCase() !== path.dirname(target).toLowerCase()) {
+        throw new Error("La rinomina non puo spostare un lavoro fuori dalla cartella corrente.");
+      }
+      if (source.toLowerCase() !== target.toLowerCase() && fs.existsSync(target)) {
+        throw new Error(`La destinazione esiste gia: ${target}`);
+      }
+      const targetKey = target.toLowerCase();
+      if (targetPaths.has(targetKey)) throw new Error(`Due cartelle produrrebbero lo stesso nome: ${target}`);
+      targetPaths.add(targetKey);
+      operations.push({ item, job, source, target, nomeLavoro, dataLavoro, proposedFolderName });
+    }
+
+    const completed: typeof operations = [];
+    archiveRenameRuntime = {
+      ...archiveRenameRuntime,
+      phase: "renaming",
+      message: `Rinomino 0 di ${operations.length} cartelle...`,
+    };
+
     for (const operation of operations) {
-      await renameDirectoryPreservingCaseSupport(operation.source, operation.target);
-      completed.push(operation);
+      archiveRenameRuntime = {
+        ...archiveRenameRuntime,
+        currentFolderName: operation.item.currentFolderName,
+        message: `Rinomino ${completed.length + 1} di ${operations.length}: ${operation.item.currentFolderName}`,
+      };
+      try {
+        await renameDirectoryPreservingCaseSupport(operation.source, operation.target);
+        completed.push(operation);
+        archiveRenameRuntime = {
+          ...archiveRenameRuntime,
+          completed: completed.length,
+          renamedCount: completed.length,
+        };
+      } catch (error) {
+        for (const renamedOperation of completed.reverse()) {
+          await renameDirectoryPreservingCaseSupport(renamedOperation.target, renamedOperation.source).catch(() => undefined);
+        }
+        throw error;
+      }
     }
 
     const operationById = new Map(operations.map((operation) => [operation.job.id, operation]));
+    const refreshedFileCounts = new Map<string, number>();
+    archiveRenameRuntime = {
+      ...archiveRenameRuntime,
+      phase: "counting",
+      completed: 0,
+      currentFolderName: null,
+      message: `Verifico i file di 0 di ${operations.length} cartelle...`,
+    };
+    for (const [index, operation] of operations.entries()) {
+      archiveRenameRuntime = {
+        ...archiveRenameRuntime,
+        currentFolderName: operation.proposedFolderName,
+        message: `Verifico i file di ${index + 1} di ${operations.length}: ${operation.proposedFolderName}`,
+      };
+      const fileCount = await countImportableFilesInDirectory(operation.target, true)
+        .catch(() => operation.job.numeroFile);
+      refreshedFileCounts.set(operation.job.id, fileCount);
+      archiveRenameRuntime = { ...archiveRenameRuntime, completed: index + 1 };
+    }
+    archiveRenameRuntime = {
+      ...archiveRenameRuntime,
+      phase: "saving",
+      currentFolderName: null,
+      message: "Aggiorno il registro dei lavori...",
+    };
     const updatedJobs = jobs.map((job) => {
       const operation = operationById.get(job.id);
       if (!operation) return job;
@@ -1905,25 +2582,65 @@ export async function renameAnalyzedArchiveJobs(
         percorsoSelezione: remapNestedPath(job.percorsoSelezione, operation.source, operation.target),
         nomeCartella: operation.proposedFolderName,
         folderExists: true,
+        numeroFile: refreshedFileCounts.get(job.id) ?? job.numeroFile,
       };
     });
-    writeJsonAtomic(JOBS_FILE, updatedJobs);
-  } catch (error) {
-    for (const operation of completed.reverse()) {
-      await renameDirectoryPreservingCaseSupport(operation.target, operation.source).catch(() => undefined);
+    try {
+      saveJobs(updatedJobs);
+    } catch (error) {
+      for (const renamedOperation of [...operations].reverse()) {
+        await renameDirectoryPreservingCaseSupport(renamedOperation.target, renamedOperation.source).catch(() => undefined);
+      }
+      throw error;
     }
+    invalidateJobsListCache();
+    const result: ArchiveRenameResult = {
+      ok: true,
+      renamed: operations.map((operation) => ({
+        jobId: operation.job.id,
+        previousFolderPath: operation.source,
+        folderPath: operation.target,
+      })),
+    };
+    archiveRenameRuntime = {
+      ...archiveRenameRuntime,
+      phase: "completed",
+      active: false,
+      completed: operations.length,
+      currentFolderName: null,
+      message: `${operations.length} ${operations.length === 1 ? "cartella rinominata" : "cartelle rinominate"}.`,
+      finishedAt: Date.now(),
+      renamedCount: operations.length,
+    };
+    for (const operation of operations) {
+      scheduleArchiveReconciliation(operation.source);
+      scheduleArchiveReconciliation(operation.target);
+    }
+    writeStudioFlowLog("info", "archive_rename_completed", {
+      operationId,
+      total: operations.length,
+      durationMs: Date.now() - startedAt,
+    });
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Rinomina archivio non riuscita";
+    archiveRenameRuntime = {
+      ...archiveRenameRuntime,
+      phase: "error",
+      active: false,
+      currentFolderName: null,
+      message,
+      finishedAt: Date.now(),
+      error: message,
+    };
+    writeStudioFlowLog("error", "archive_rename_failed", {
+      operationId,
+      completed: archiveRenameRuntime.completed,
+      durationMs: Date.now() - startedAt,
+      error: message,
+    });
     throw error;
   }
-
-  invalidateJobsListCache();
-  return {
-    ok: true,
-    renamed: operations.map((operation) => ({
-      jobId: operation.job.id,
-      previousFolderPath: operation.source,
-      folderPath: operation.target,
-    })),
-  };
 }
 
 export interface Settings {
@@ -1932,15 +2649,22 @@ export interface Settings {
   defaultAutore: string;
   cartellePredefinite: string[];
   archiveHierarchy: ArchiveHierarchyConfig;
+  categoryMappings: CategoryMapping[];
 }
 
 export function loadSettings(): Settings {
+  if (studioFlowStore.getMeta("settings_json_migrated") !== "1") {
+    try {
+      if (!fs.existsSync(SETTINGS_FILE) && fs.existsSync(`${SETTINGS_FILE}.tmp`)) fs.renameSync(`${SETTINGS_FILE}.tmp`, SETTINGS_FILE);
+      if (fs.existsSync(SETTINGS_FILE) && !studioFlowStore.getSettings<Settings>()) {
+        studioFlowStore.setSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")));
+      }
+    } catch { /* malformed legacy settings fall back to defaults */ }
+    studioFlowStore.setMeta("settings_json_migrated", "1");
+  }
   try {
-    if (!fs.existsSync(SETTINGS_FILE) && fs.existsSync(`${SETTINGS_FILE}.tmp`)) {
-      fs.renameSync(`${SETTINGS_FILE}.tmp`, SETTINGS_FILE);
-    }
-    if (fs.existsSync(SETTINGS_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")) as Partial<Settings>;
+    const raw = studioFlowStore.getSettings<Partial<Settings>>();
+    if (raw) {
       const cartellePredefinite = Array.isArray(raw.cartellePredefinite)
         ? raw.cartellePredefinite
             .map((v) => sanitizeFolderSegment(String(v ?? "")))
@@ -1952,6 +2676,7 @@ export function loadSettings(): Settings {
         defaultAutore: typeof raw.defaultAutore === "string" ? raw.defaultAutore : "",
         cartellePredefinite,
         archiveHierarchy: normalizeArchiveHierarchy(raw.archiveHierarchy),
+        categoryMappings: Array.isArray(raw.categoryMappings) ? raw.categoryMappings.filter((item): item is CategoryMapping => Boolean(item && typeof item.categoryKey === "string")) : [],
       };
     }
   } catch { /* ignore */ }
@@ -1961,11 +2686,32 @@ export function loadSettings(): Settings {
     defaultAutore: "",
     cartellePredefinite: [],
     archiveHierarchy: normalizeArchiveHierarchy(undefined),
+    categoryMappings: [],
   };
 }
 
 export function saveSettings(s: Settings): void {
-  writeJsonAtomic(SETTINGS_FILE, s);
+  const previous = loadSettings();
+  studioFlowStore.setSettings(s);
+  const previousRoot = previous.archiveRoot.trim();
+  const nextRoot = s.archiveRoot.trim();
+  const archiveRootChanged = previousRoot.toLowerCase() !== nextRoot.toLowerCase();
+
+  if (nextRoot && fs.existsSync(nextRoot)) {
+    const resolvedRoot = path.resolve(nextRoot);
+    const archiveId = archiveIdForRoot(resolvedRoot);
+    studioFlowStore.upsertArchive(archiveId, resolvedRoot, s.archiveHierarchy);
+  }
+
+  if (archiveRootChanged) {
+    configureArchiveWatcher(s);
+    if (nextRoot && fs.existsSync(nextRoot)) {
+      const archiveId = archiveIdForRoot(path.resolve(nextRoot));
+      if (!studioFlowStore.getArchiveStatus(archiveId).lastFullScanAt) {
+        void rebuildArchiveIndex(s).catch(() => undefined);
+      }
+    }
+  }
 }
 
 function computeEstimatedRemainingSec(snapshot: ImportProgressState): number | null {
@@ -2263,7 +3009,7 @@ app.get("/api/low-quality-progress", getLowQualityProgressHandler);
  * POST /api/settings
  */
 const saveSettingsHandler = (req: Request, res: Response) => {
-  const { archiveRoot, defaultDestinazione, defaultAutore, cartellePredefinite, archiveHierarchy } = req.body as Partial<Settings>;
+  const { archiveRoot, defaultDestinazione, defaultAutore, cartellePredefinite, archiveHierarchy, categoryMappings } = req.body as Partial<Settings>;
   const current = loadSettings();
   const normalizedCartelle = Array.isArray(cartellePredefinite)
     ? Array.from(new Set(cartellePredefinite
@@ -2278,6 +3024,13 @@ const saveSettingsHandler = (req: Request, res: Response) => {
     defaultAutore: typeof defaultAutore === "string" ? defaultAutore.trim() : current.defaultAutore,
     cartellePredefinite: normalizedCartelle,
     archiveHierarchy: normalizedHierarchy,
+    categoryMappings: Array.isArray(categoryMappings)
+      ? categoryMappings.map((item) => ({
+          id:sanitizeFolderSegment(String(item.id || item.categoryKey)), categoryKey:sanitizeFolderSegment(String(item.categoryKey)).toLowerCase(),
+          displayName:sanitizeName(String(item.displayName)), relativePathPattern:String(item.relativePathPattern ?? "").trim(),
+          jobFolderPattern:String(item.jobFolderPattern || "{date} - {client} - {date-dmy}").trim(), enabled:item.enabled !== false,
+        })).filter((item) => item.id && item.categoryKey && item.displayName && item.relativePathPattern)
+      : current.categoryMappings,
   };
   saveSettings(updated);
   invalidateJobsListCache();
@@ -2294,9 +3047,9 @@ const getSdCardsHandler = (_req: Request, res: Response) => {
   const scriptPath = path.join(os.tmpdir(), `archivio-sd-cards-${Date.now()}.ps1`);
   try {
     const script = [
-      '$query = "SELECT DeviceID,VolumeName,Size,FreeSpace FROM Win32_LogicalDisk WHERE DriveType=2"',
+      '$query = "SELECT DeviceID,VolumeName,VolumeSerialNumber,FileSystem,Size,FreeSpace FROM Win32_LogicalDisk WHERE DriveType=2"',
       "Get-WmiObject -Query $query | ForEach-Object {",
-      "  Write-Host ($_.DeviceID + '|' + $_.VolumeName + '|' + $_.Size + '|' + $_.FreeSpace)",
+      "  Write-Host ($_.DeviceID + '|' + $_.VolumeName + '|' + $_.VolumeSerialNumber + '|' + $_.FileSystem + '|' + $_.Size + '|' + $_.FreeSpace)",
       "}",
     ].join("\n");
 
@@ -2311,13 +3064,15 @@ const getSdCardsHandler = (_req: Request, res: Response) => {
       .map((l) => l.trim())
       .filter((l) => l.length > 0 && l.includes("|"))
       .map((line) => {
-        const [deviceId, volumeName, size, freeSpace] = line.split("|");
+        const [deviceId, volumeName, volumeSerial, filesystem, size, freeSpace] = line.split("|");
         return {
           deviceId: (deviceId ?? "").trim(),
           volumeName: (volumeName ?? "").trim(),
           totalSize: parseInt(size ?? "0", 10) || 0,
           freeSpace: parseInt(freeSpace ?? "0", 10) || 0,
           path: (deviceId ?? "").trim() + "\\",
+          volumeSerial: (volumeSerial ?? "").trim(),
+          filesystem: (filesystem ?? "").trim(),
         };
       })
       .filter((c) => c.deviceId.length > 0);
@@ -2360,6 +3115,57 @@ const getSdPreviewHandler = async (req: Request, res: Response) => {
   }
 };
 app.get("/api/sd-preview", getSdPreviewHandler);
+
+const safeToFormatHandler = async (req: Request, res: Response) => {
+  const sdPath = String(req.body?.sdPath ?? "").trim();
+  if (!sdPath) return void res.status(400).json({ error: "Percorso SD mancante" });
+  const settings = loadSettings();
+  if (!settings.archiveRoot.trim()) {
+    return void res.status(409).json({ error: "Archivio non configurato: verifica impossibile" });
+  }
+  try {
+    res.json(await checkSafeToFormat(sdPath, settings.archiveRoot, settings.archiveHierarchy));
+  } catch (error) {
+    res.status(500).json({
+      status: "UNKNOWN", totalFiles: 0, verifiedFiles: 0, unknownFiles: 0, sessions: [],
+      reason: `Verifica non completata: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+};
+app.post("/api/sd/safe-to-format", safeToFormatHandler);
+
+const studioFlowStatusHandler = (_req: Request, res: Response) => {
+  res.json({ health: studioFlowStore.health(), archiveIndex: getArchiveIndexStatus(), sessions: studioFlowStore.listSessions(50), resumable: studioFlowStore.listResumableSessions() });
+};
+app.get("/api/studioflow/status", studioFlowStatusHandler);
+const driveRegistryBatchHandler = (_req: Request, res: Response) => {
+  const outbox = studioFlowStore.listPendingOutbox(200);
+  res.json({
+    schemaVersion: 1,
+    app: "studioflow",
+    generatedAt: new Date().toISOString(),
+    outbox,
+    sessions: studioFlowStore.listSessions(1000).filter((item) => item.status === "COMPLETED").map((item) => ({
+      id:item.id, cardSnapshotId:item.cardSnapshotId, jobId:item.jobId, archiveId:item.archiveId,
+      status:item.status, completedAt:item.completedAt, verifiedAt:item.verifiedAt, plannedFiles:item.plannedFiles,
+      verifiedFiles:item.verifiedFiles, duplicateFiles:item.duplicateFiles, failedFiles:item.failedFiles,
+    })),
+    cardSnapshots: studioFlowStore.listCardSnapshots(1000).map((item) => ({
+      id:item.id, cardId:item.cardId, contentFingerprint:item.contentFingerprint, fileCount:item.fileCount,
+      totalBytes:item.totalBytes, captureSignature:item.captureSignature, createdAt:item.createdAt, lastSeenAt:item.lastSeenAt,
+    })),
+    fingerprintBloom: createBloomFilter(studioFlowStore.listVerifiedFingerprintKeys(), 65_536, 6),
+  });
+};
+app.get("/api/studioflow/drive-registry-batch", driveRegistryBatchHandler);
+const reconcileArchiveIndexHandler = async (_req: Request, res: Response) => {
+  try {
+    res.json(await rebuildArchiveIndex());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+};
+app.post("/api/archive/reconcile", reconcileArchiveIndexHandler);
 
 /**
  * POST /api/filter-preview
@@ -2554,10 +3360,21 @@ const importHandler = async (req: Request, res: Response) => {
     fileNameIncludes,
     mtimeFrom,
     mtimeTo,
+    categoryKey,
+    destinationOverride,
   } = req.body as ImportRequest;
   const requestedExistingJobId = typeof existingJobId === "string" ? existingJobId.trim() : "";
   const settings = loadSettings();
-  const effectiveDestinazione = destinazione?.trim() || settings.defaultDestinazione.trim() || settings.archiveRoot.trim();
+  const configuredDestination = destinazione?.trim() || settings.defaultDestinazione.trim() || settings.archiveRoot.trim();
+  const mappingAvailable = settings.categoryMappings.some((item) => item.enabled && item.categoryKey === categoryKey);
+  const resolvedAutomaticDestination = !requestedExistingJobId && mappingAvailable && settings.archiveRoot.trim()
+    ? resolveDestination({
+        archiveId:archiveIdForRoot(settings.archiveRoot), archiveRoot:settings.archiveRoot, mappings:settings.categoryMappings,
+        categoryKey, eventDate:dataLavoro, jobName:nomeLavoro,
+        overrideParent:destinationOverride ? configuredDestination : undefined,
+      })
+    : null;
+  const effectiveDestinazione = resolvedAutomaticDestination?.absoluteParentPath ?? configuredDestination;
 
   // ── Basic validation ─────────────────────────────────────────────────────────
   if (!sdPath || !dataLavoro || !autore?.trim()) {
@@ -2607,7 +3424,7 @@ const importHandler = async (req: Request, res: Response) => {
 
   const folderName = existingJob
     ? existingJob.nomeCartella
-    : buildFolderName(nomeLavoro.trim(), dataLavoro);
+    : resolvedAutomaticDestination?.folderName ?? buildFolderName(nomeLavoro.trim(), dataLavoro);
   const jobRoot = existingJob
     ? resolveAndValidate(existingJob.percorsoCartella)
     : path.join(destNorm, folderName);
@@ -2646,6 +3463,49 @@ const importHandler = async (req: Request, res: Response) => {
     return void res.status(500).json({ error: "Errore creazione cartelle: " + String(err) });
   }
 
+  let cardSnapshot: CardSnapshot;
+  try {
+    cardSnapshot = await captureCardSnapshot(sdNorm);
+  } catch (error) {
+    return void res.status(500).json({ error: `Impossibile identificare il contenuto della scheda: ${error instanceof Error ? error.message : String(error)}` });
+  }
+
+  // ── Create import session ───────────────────────────────────────────────────
+  const importSessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const archiveRootForSession = path.resolve(settings.archiveRoot.trim() || path.dirname(jobRoot));
+  const archiveId = archiveIdForRoot(archiveRootForSession);
+  studioFlowStore.upsertArchive(archiveId, archiveRootForSession, settings.archiveHierarchy);
+  const importSession: ImportSessionRecord = {
+    id: importSessionId,
+    cardSnapshotId: cardSnapshot.id,
+    jobId: existingJob?.id ?? null,
+    archiveId,
+    sourceRoot: sdNorm,
+    destinationRoot: jobRoot,
+    destinationRelativePath: path.relative(settings.archiveRoot.trim() || path.dirname(jobRoot), targetFotoDir),
+    status: "CREATED",
+    startedAt: Date.now(),
+    updatedAt: Date.now(),
+    completedAt: null,
+    verifiedAt: null,
+    totalFiles: 0,
+    plannedFiles: 0,
+    importedFiles: 0,
+    verifiedFiles: 0,
+    duplicateFiles: 0,
+    skippedFiles: 0,
+    failedFiles: 0,
+    totalBytes: 0,
+    importedBytes: 0,
+    syncStatus: "PENDING",
+    errorCode: null,
+    errorMessage: null,
+  };
+  studioFlowStore.createSession(importSession);
+  studioFlowStore.saveSessionPayload(importSessionId, req.body);
+  writeStudioFlowLog("info", "import_session_created", { correlationId:importSessionId, sourceRoot:sdNorm, destinationRoot:jobRoot });
+  studioFlowStore.updateSession(importSessionId, { status: "ANALYZING" });
+
   const effectiveNomeLavoro = existingJob?.nomeLavoro?.trim() || nomeLavoro.trim();
   const effectiveDataLavoro = existingJob?.dataLavoro || dataLavoro;
   const safeNome = toSafeId(effectiveNomeLavoro);
@@ -2654,6 +3514,7 @@ const importHandler = async (req: Request, res: Response) => {
   const safeContrattoLink = normalizeContractLink(contrattoLink);
   const filter = parseFilterCriteria({ fileNameIncludes, mtimeFrom, mtimeTo });
   if (filter.error) {
+    studioFlowStore.updateSession(importSessionId, { status: "FAILED", completedAt: Date.now(), errorCode: "INVALID_FILTER", errorMessage: filter.error });
     return void res.status(400).json({ error: filter.error });
   }
 
@@ -2671,11 +3532,13 @@ const importHandler = async (req: Request, res: Response) => {
     initialCopyConcurrency
   );
   const sampleMs = Date.now() - scanSampleStartedAt;
+  studioFlowStore.updateSession(importSessionId, { status: "READY" });
 
   let copiedCount = 0;
   let skippedCount = 0;
   let scannedFiles = 0;
   let plannedFiles = 0;
+  let totalPlannedBytes = 0;
   let filteredOutFiles = 0;
   let manifestSkippedFiles = 0;
   const jpgDestPaths = new Set<string>();
@@ -2703,6 +3566,7 @@ const importHandler = async (req: Request, res: Response) => {
     copyConcurrency: copyController.getLimit(),
     currentFileName: null,
   });
+  studioFlowStore.updateSession(importSessionId, { status: "IMPORTING" });
 
   async function maybeFlushManifest(force = false): Promise<void> {
     const now = Date.now();
@@ -2736,13 +3600,38 @@ const importHandler = async (req: Request, res: Response) => {
     sourceRelativePath: string;
     sourceMtimeMs: number;
   }): Promise<void> {
+    studioFlowStore.upsertImportFile({
+      sessionId: importSessionId,
+      sourceRelativePath: task.sourceRelativePath,
+      sourceSize: task.sourceSize,
+      sourceMtimeMs: task.sourceMtimeMs,
+      fastFingerprint: null,
+      fullHash: null,
+      destinationPath: task.destPath,
+      destinationSize: null,
+      destinationFingerprint: null,
+      status: "PLANNED",
+      errorMessage: null,
+      updatedAt: Date.now(),
+    });
     let taskPromise: Promise<void>;
     taskPromise = (async () => {
       try {
         if (importCancelRequested) {
           throw new Error("Importazione annullata");
         }
+        studioFlowStore.upsertImportFile({
+          sessionId: importSessionId, sourceRelativePath: task.sourceRelativePath, sourceSize: task.sourceSize,
+          sourceMtimeMs: task.sourceMtimeMs, fastFingerprint: null, fullHash: null, destinationPath: task.destPath,
+          destinationSize: null, destinationFingerprint: null, status: "COPYING", errorMessage: null, updatedAt: Date.now(),
+        });
         const result = await safeCopyFileVerified(task.srcFile, task.destPath, task.sourceSize);
+        const [sourceFingerprint, destinationFingerprint] = await Promise.all([
+          computeFastFingerprint(task.srcFile), computeFastFingerprint(task.destPath),
+        ]);
+        if (sourceFingerprint !== destinationFingerprint) {
+          throw new Error("Verifica fingerprint post-copia fallita");
+        }
         if (result === "copied") {
           copiedCount += 1;
           updateImportProgress({
@@ -2754,6 +3643,12 @@ const importHandler = async (req: Request, res: Response) => {
           skippedCount += 1;
           updateImportProgress({ skippedFiles: skippedCount });
         }
+        studioFlowStore.upsertImportFile({
+          sessionId: importSessionId, sourceRelativePath: task.sourceRelativePath, sourceSize: task.sourceSize,
+          sourceMtimeMs: task.sourceMtimeMs, fastFingerprint: sourceFingerprint, fullHash: null,
+          destinationPath: task.destPath, destinationSize: task.sourceSize, destinationFingerprint,
+          status: result === "copied" ? "VERIFIED" : "DUPLICATE_ACCEPTED", errorMessage: null, updatedAt: Date.now(),
+        });
         if (JPG_EXT.has(path.extname(task.destPath).toLowerCase())) {
           jpgDestPaths.add(task.destPath);
         }
@@ -2776,6 +3671,11 @@ const importHandler = async (req: Request, res: Response) => {
         });
       } catch (err) {
         errors.push(`${task.originalName}: ${String(err)}`);
+        studioFlowStore.upsertImportFile({
+          sessionId: importSessionId, sourceRelativePath: task.sourceRelativePath, sourceSize: task.sourceSize,
+          sourceMtimeMs: task.sourceMtimeMs, fastFingerprint: null, fullHash: null, destinationPath: task.destPath,
+          destinationSize: null, destinationFingerprint: null, status: "FAILED", errorMessage: String(err), updatedAt: Date.now(),
+        });
         updateImportProgress({ inFlight: inFlight.size });
       }
     })().finally(() => {
@@ -2830,9 +3730,17 @@ const importHandler = async (req: Request, res: Response) => {
           const st = await fs.promises.stat(manifestDestPath);
           // The manifest key already includes source path, size and mtime.
           // Avoid hashing every file again during a normal resume/re-import.
-          if (st.size === sourceSize) {
+          if (st.size === sourceSize && await filesHaveSameContent(srcFile, manifestDestPath)) {
+            const fastFingerprint = await computeFastFingerprint(srcFile);
             skippedCount += 1;
             manifestSkippedFiles += 1;
+            plannedFiles += 1;
+            totalPlannedBytes += sourceSize;
+            studioFlowStore.upsertImportFile({
+              sessionId: importSessionId, sourceRelativePath, sourceSize, sourceMtimeMs,
+              fastFingerprint, fullHash: null, destinationPath: manifestDestPath, destinationSize: sourceSize,
+              destinationFingerprint: fastFingerprint, status: "DUPLICATE_ACCEPTED", errorMessage: null, updatedAt: Date.now(),
+            });
             if (JPG_EXT.has(path.extname(manifestDestPath).toLowerCase())) {
               jpgDestPaths.add(manifestDestPath);
             }
@@ -2884,6 +3792,7 @@ const importHandler = async (req: Request, res: Response) => {
       reservedDestinationNames.set(destName.toLowerCase(), sourceRelativePath);
       const destPath = path.join(targetFotoDir, destName);
       plannedFiles += 1;
+      totalPlannedBytes += sourceSize;
       updateImportProgress({ plannedFiles });
 
       await scheduleCopy({
@@ -2904,6 +3813,22 @@ const importHandler = async (req: Request, res: Response) => {
     queueManifestFlush(true);
     await manifestFlushChain;
   } catch (err) {
+    const cancelled = String(err).includes("annullata");
+    studioFlowStore.updateSession(importSessionId, {
+      status: cancelled ? "CANCELLED" : "FAILED",
+      totalFiles: plannedFiles,
+      plannedFiles,
+      importedFiles: copiedCount,
+      verifiedFiles: copiedCount + skippedCount,
+      duplicateFiles: skippedCount,
+      failedFiles: errors.length,
+      totalBytes: totalPlannedBytes,
+      importedBytes: importProgress.bytesCopied,
+      completedAt: Date.now(),
+      errorCode: cancelled ? "USER_CANCELLED" : "COPY_FAILED",
+      errorMessage: String(err),
+    });
+    writeStudioFlowLog(cancelled ? "warn" : "error", "import_session_stopped", { correlationId:importSessionId, cancelled, error:String(err) });
     updateImportProgress({
       active: false,
       phase: "error",
@@ -2943,6 +3868,12 @@ const importHandler = async (req: Request, res: Response) => {
       }
     });
     if (importCancelRequested) {
+      studioFlowStore.updateSession(importSessionId, {
+        status: "CANCELLED", completedAt: Date.now(), totalFiles: plannedFiles, plannedFiles,
+        importedFiles: copiedCount, verifiedFiles: copiedCount + skippedCount, duplicateFiles: skippedCount,
+        failedFiles: errors.length, totalBytes: totalPlannedBytes, importedBytes: importProgress.bytesCopied,
+        errorCode: "USER_CANCELLED", errorMessage: "Importazione annullata durante la generazione JPG",
+      });
       updateImportProgress({
         active: false,
         phase: "error",
@@ -2989,6 +3920,7 @@ const importHandler = async (req: Request, res: Response) => {
       nomeLavoro: sanitizeName(nomeLavoro.trim()),
       dataLavoro,
       autore: sanitizeName(autore.trim()),
+      categoriaArchivio: settings.categoryMappings.find((item) => item.categoryKey === categoryKey)?.displayName,
       contrattoLink: safeContrattoLink,
       percorsoCartella: jobRoot,
       percorsoSelezione: targetFotoDir,
@@ -3001,9 +3933,56 @@ const importHandler = async (req: Request, res: Response) => {
 
   invalidateCachedJobFileCount(jobRoot);
 
+  studioFlowStore.updateSession(importSessionId, { status: "VERIFYING", jobId: job.id });
+  const verifiedFiles = copiedCount + skippedCount;
+  const completed = errors.length === 0 && verifiedFiles === plannedFiles;
+  const completedAt = Date.now();
+  studioFlowStore.updateSession(importSessionId, {
+    status: completed ? "COMPLETED" : "FAILED",
+    completedAt,
+    verifiedAt: completed ? completedAt : null,
+    totalFiles: plannedFiles,
+    plannedFiles,
+    importedFiles: copiedCount,
+    verifiedFiles,
+    duplicateFiles: skippedCount,
+    skippedFiles: filteredOutFiles,
+    failedFiles: errors.length,
+    totalBytes: totalPlannedBytes,
+    importedBytes: importProgress.bytesCopied,
+    syncStatus: "PENDING",
+    errorCode: completed ? null : "VERIFICATION_INCOMPLETE",
+    errorMessage: completed ? null : `${errors.length} file non verificati`,
+  });
+  if (completed) {
+    studioFlowStore.enqueueOutbox("import_session", importSessionId, "IMPORT_COMPLETED", {
+      sessionId: importSessionId, jobId: job.id, archiveId, verifiedFiles, completedAt,
+    });
+  }
+  writeStudioFlowLog(completed ? "info" : "warn", "import_session_completed", {
+    correlationId:importSessionId, completed, plannedFiles, verifiedFiles, failedFiles:errors.length, durationMs:Date.now() - startedAt,
+  });
+
+  updateImportProgress({
+    active: false,
+    phase: completed ? "done" : "error",
+    inFlight: 0,
+    copiedFiles: copiedCount,
+    skippedFiles: skippedCount,
+    plannedFiles,
+    scannedFiles,
+    manifestSkippedFiles,
+    copyConcurrency: copyController.getLimit(),
+    currentFileName: null,
+    error: completed ? null : "Importazione completata con file non verificati",
+  });
+  importCancelRequested = false;
+  scheduleArchiveReconciliation(jobRoot);
+  invalidateJobsListCache();
+
   res.json({
     ok: true,
-    incomplete: errors.length > 0,
+    incomplete: !completed,
     job,
     reusedExistingJob: Boolean(existingJob),
     copiedFiles: copiedCount,
@@ -3028,38 +4007,49 @@ const importHandler = async (req: Request, res: Response) => {
     failedFiles: errors,
   });
 
-  updateImportProgress({
-    active: false,
-    phase: "done",
-    inFlight: 0,
-    copiedFiles: copiedCount,
-    skippedFiles: skippedCount,
-    plannedFiles,
-    scannedFiles,
-    manifestSkippedFiles,
-    copyConcurrency: copyController.getLimit(),
-    currentFileName: null,
-    error: null,
-  });
-  importCancelRequested = false;
-  invalidateJobsListCache();
 };
 app.post("/api/import", importHandler);
 
+const resumeImportHandler = async (req: Request, res: Response) => {
+  const sessionId = String(req.params.id ?? "").trim();
+  const session = studioFlowStore.listResumableSessions().find((item) => item.id === sessionId);
+  if (!session) return void res.status(404).json({ error: "Sessione recuperabile non trovata" });
+  const payload = studioFlowStore.getSessionPayload<ImportRequest>(sessionId);
+  if (!payload) return void res.status(409).json({ error: "Dati originali della sessione non disponibili" });
+  if (!fs.existsSync(session.sourceRoot)) return void res.status(409).json({ error: "Ricollega la scheda sorgente prima di riprendere" });
+  studioFlowStore.updateSession(sessionId, { status: "CANCELLED", completedAt: Date.now(), errorCode: "SUPERSEDED_BY_RESUME", errorMessage: "Ripresa in una nuova sessione" });
+  await importHandler({ ...req, body: payload } as Request, res);
+};
+app.post("/api/import-sessions/:id/resume", resumeImportHandler);
+
 async function buildJobsList(): Promise<Job[]> {
   const settings = loadSettings();
-  const reconciled = await reconcileDiscoveredArchiveJobs(settings);
-  const registeredJobs = reconciled.jobs
+  ensureInitialArchiveIndex(settings);
+  const registeredJobs = cleanupMissingJobs()
     .map((job) => withArchiveMetadata(job, settings.archiveRoot, settings.archiveHierarchy));
-  const jobsForList = registeredJobs
+  return registeredJobs
     .sort((a, b) => new Date(b.dataCreazione).getTime() - new Date(a.dataCreazione).getTime());
-  const hydratedJobs = new Array<Job>(jobsForList.length);
+}
 
-  await runWithConcurrency(jobsForList, 6, async (job, index) => {
-    hydratedJobs[index] = await hydrateArchiveListJob(job);
-  });
+let archiveBackgroundReconcilePromise: Promise<void> | null = null;
+function ensureInitialArchiveIndex(settings = loadSettings()): void {
+  const rawRoot = settings.archiveRoot.trim();
+  if (!rawRoot || !fs.existsSync(rawRoot) || archiveBackgroundReconcilePromise) return;
+  const resolvedRoot = path.resolve(rawRoot);
+  const archiveId = archiveIdForRoot(resolvedRoot);
+  const persisted = studioFlowStore.getArchiveStatus(archiveId);
 
-  return hydratedJobs;
+  // Un indice completato è persistente: all'avvio lo riutilizziamo senza
+  // attraversare nuovamente l'intero archivio.
+  if (persisted.lastFullScanAt) return;
+
+  archiveBackgroundReconcilePromise = (async () => {
+    await rebuildArchiveIndex(settings);
+    await reconcileDiscoveredArchiveJobs(settings);
+    invalidateJobsListCache();
+  })().catch((error) => {
+    writeStudioFlowLog("warn", "archive_background_reconcile_failed", { error:error instanceof Error ? error.message : String(error) });
+  }).finally(() => { archiveBackgroundReconcilePromise = null; });
 }
 
 async function buildRegisteredJobsList(): Promise<Job[]> {
@@ -3147,6 +4137,9 @@ const renameArchiveJobsHandler = async (req: Request, res: Response) => {
   }
 };
 app.post("/api/archive/rename", renameArchiveJobsHandler);
+app.get("/api/archive/rename/progress", (_req, res) => {
+  res.json(getArchiveRenameProgress());
+});
 
 /**
  * DELETE /api/jobs/:id
@@ -3635,6 +4628,10 @@ export async function renameArchiveJobsService(requests: ArchiveRenameRequest[])
   return unwrapInvocationResult(await invokeHandler(renameArchiveJobsHandler, { body: { requests } }));
 }
 
+export function getArchiveRenameProgressService(): ArchiveRenameProgress {
+  return getArchiveRenameProgress();
+}
+
 export async function deleteJobService(jobId: string): Promise<{ ok: true }> {
   return unwrapInvocationResult(await invokeHandler(deleteJobHandler, { params: { id: jobId } }));
 }
@@ -3687,7 +4684,64 @@ export async function openFolderService(folderPath: string): Promise<{ ok: true 
   return unwrapInvocationResult(await invokeHandler(openFolderHandler, { body: { folderPath } }));
 }
 
+export async function resumeImportService(sessionId: string): Promise<Awaited<ReturnType<typeof importService>>> {
+  importCancelRequested = false;
+  return unwrapInvocationResult(await invokeHandler(resumeImportHandler, { params: { id: sessionId } }));
+}
+
+export async function checkSafeToFormatService(sdPath: string): Promise<{
+  status: "SAFE" | "PARTIAL" | "UNSAFE" | "UNKNOWN";
+  totalFiles: number;
+  verifiedFiles: number;
+  unknownFiles: number;
+  reason?: string;
+  sessions: string[];
+}> {
+  return unwrapInvocationResult(await invokeHandler(safeToFormatHandler, { body: { sdPath } }));
+}
+
+export async function getStudioFlowStatusService(): Promise<{
+  health: ReturnType<StudioFlowStore["health"]>;
+  archiveIndex: ArchiveIndexStatus;
+  sessions: Array<Pick<ImportSessionRecord, "id" | "cardSnapshotId" | "jobId" | "archiveId" | "status" | "completedAt" | "verifiedAt" | "plannedFiles" | "verifiedFiles" | "duplicateFiles" | "failedFiles">>;
+  resumable: ImportSessionRecord[];
+}> {
+  return unwrapInvocationResult(await invokeHandler(studioFlowStatusHandler, {}));
+}
+
+export async function reconcileArchiveIndexService(): Promise<ArchiveIndexStatus> {
+  return unwrapInvocationResult(await invokeHandler(reconcileArchiveIndexHandler, {}));
+}
+
+export async function getDriveRegistryBatchService(): Promise<{
+  schemaVersion: 1;
+  app: "studioflow";
+  generatedAt: string;
+  outbox: ReturnType<StudioFlowStore["listPendingOutbox"]>;
+  sessions: ImportSessionRecord[];
+  cardSnapshots: Array<Pick<ReturnType<StudioFlowStore["listCardSnapshots"]>[number], "id" | "cardId" | "contentFingerprint" | "fileCount" | "totalBytes" | "captureSignature" | "createdAt" | "lastSeenAt">>;
+  fingerprintBloom: ReturnType<typeof createBloomFilter>;
+}> {
+  return unwrapInvocationResult(await invokeHandler(driveRegistryBatchHandler, {}));
+}
+
+export function completeDriveRegistrySyncService(ids: number[], errorMessage?: string): { ok: true } {
+  const safeIds = ids.filter((id) => Number.isInteger(id) && id > 0);
+  if (errorMessage) studioFlowStore.markOutboxRetry(safeIds, errorMessage);
+  else studioFlowStore.markOutboxSynced(safeIds);
+  return { ok: true };
+}
+
+/** Test/controlled-shutdown hook: flush and close the local SQLite store. */
+export function closeStudioFlowStore(): void {
+  archiveWatcher?.close();
+  if (archiveWatchDebounce) clearTimeout(archiveWatchDebounce);
+  if (archiveReconcileInterval) clearInterval(archiveReconcileInterval);
+  studioFlowStore.close();
+}
+
 // ── Start ──────────────────────────────────────────────────────────────────────
+configureArchiveWatcher();
 const isDirectRun = process.argv[1]
   ? pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
   : false;

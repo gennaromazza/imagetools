@@ -30,6 +30,51 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-20 - FileX Backup Guard 0.2.1
+
+- riconosciute le rinomine non ambigue delle cartelle gia' protette: Backup Guard verifica integralmente i contenuti con SHA-256 e rinomina la cartella direttamente sul clone, senza eliminare o ritrasferire le fotografie
+- aggiunto un blocco fail-safe: se struttura, metadati o checksum non corrispondono, la rinomina viene annullata prima di modificare il clone
+
+## 2026-08-20 - FileX Suite 0.1.40
+
+### Affidabilita' dei tool e rilascio
+- inclusa nella Suite la correzione di Archivio Flow per l'indicizzazione incrementale, la rinomina osservabile e il registro Google Drive dei soli manifest
+- aggiornata l'esperienza di FileX Backup Guard con testata compatta e gestione sicura delle cartelle rinominate
+- consolidati controlli e documentazione di release per distinguere gli artefatti locali dai file distribuibili
+
+## 2026-08-20 - FileX Suite 0.1.39
+
+### Google Drive e runtime desktop
+- configurato un client OAuth Google di tipo `Desktop app` condiviso dai tool FileX, con Authorization Code, PKCE e callback loopback dinamico su `127.0.0.1`
+- aggiunti Client ID e Client Secret alla configurazione locale esclusa da Git e ai secret del workflow Windows; le release vengono ora bloccate se una delle due credenziali manca
+- limitato l'accesso allo scope `drive.file`, cifrati i token utente con Electron `safeStorage` e condiviso l'account soltanto fra i tool dello stesso profilo del sistema operativo
+- aggiunta la revoca del refresh token durante lo scollegamento dell'account e corretti i messaggi di configurazione OAuth incompleta
+- integrati nella shell Electron i servizi StudioFlow di Archivio Flow per stato, riconciliazione, ripresa importazioni, verifica SD e sincronizzazione del registro Drive
+
+### Sviluppo e verifiche
+- aggiunta la licenza FileX All Access automatica esclusivamente alle build Electron non pacchettizzate, con override `FILEX_LICENSE_ENFORCEMENT=enforce` per collaudare il percorso commerciale reale
+- consolidata FileX Dev Console come dashboard locale per avvio, arresto, riapertura, log e build dei tool Electron
+- verificata la build TypeScript della shell con configurazione OAuth Desktop completa
+
+## 2026-08-20 - Archivio Flow 0.1.26
+
+### StudioFlow local-first
+- introdotto il database SQLite persistente per lavori, impostazioni, indice archivio, schede, sessioni, prove file e coda di sincronizzazione
+- resa l'importazione riprendibile e fail-closed, con file temporanei, verifica finale, fingerprint, SHA-256 nei casi critici e stato sicuro della SD basato su prove locali
+- aggiunti mapping categorie guidati, anteprima delle destinazioni, registrazione delle cartelle esterne e correzione assistita dei nomi senza rinomina automatica
+- impedita la ricostruzione completa dell'indice a ogni avvio o modifica: un indice SQLite valido viene riutilizzato, mentre importazioni, rinomine e watcher aggiornano soltanto il sottoalbero del lavoro coinvolto
+- mantenuti stato e risultato del controllo nomi quando si cambia sezione, con loading visibile, tempo trascorso e indicazione dell'attività nella barra laterale
+- resa atomica e osservabile la rinomina confermata: una sola operazione alla volta, avanzamento persistente tra le sezioni e nessuna nuova scansione completa prima o dopo la modifica
+
+### Google Drive e interfaccia
+- aggiunta una sezione Google Drive reale per collegare l'account dell'utente, mostrare stato e coda e sincronizzare soltanto manifest StudioFlow, mai fotografie
+- condiviso l'account Google autorizzato con gli altri tool FileX nello stesso profilo del computer
+- resa compatta la testata laterale e letta la versione reale `0.1.26` dal package del tool
+
+### Verifiche
+- completati typecheck, build web, build server e copia del server nella shell Electron
+- superati 9 test automatici, inclusi il riuso dell'indice persistito e il blocco delle richieste di rinomina duplicate
+
 ## 2026-08-19 - FileX Suite 0.1.38
 
 ### Release e aggiornamenti

@@ -13,6 +13,15 @@ set "FEED_URL=https://github.com/gennaromazza/imagetools/releases/download/suite
 set "RELEASE_DONE=0"
 set "TAG_PUSHED=0"
 set "RUN_ID="
+set "NON_INTERACTIVE=0"
+set "PREFLIGHT_ONLY=0"
+set "CONFIRM_TOKEN=%~3"
+
+if /I "%~2"=="--preflight" (
+    set "NON_INTERACTIVE=1"
+    set "PREFLIGHT_ONLY=1"
+)
+if /I "%~2"=="--publish" set "NON_INTERACTIVE=1"
 
 echo.
 echo ============================================================
@@ -206,6 +215,12 @@ if errorlevel 1 (
 
 set "TAG=suite-v%VERSION%"
 
+if "%NON_INTERACTIVE%"=="1" if "%PREFLIGHT_ONLY%"=="0" if /I not "%CONFIRM_TOKEN%"=="PUBBLICA-%TAG%" (
+    echo ERRORE: conferma dashboard non valida.
+    echo Token richiesto: PUBBLICA-%TAG%
+    goto :fail
+)
+
 echo Nuova versione : %VERSION%
 echo Tag Git         : %TAG%
 echo CHANGELOG       : OK
@@ -249,8 +264,14 @@ if defined DIRTY (
     git status --short
     echo ------------------------------------------------------------
     echo.
-    choice /C SN /N /M "Vuoi includere TUTTE queste modifiche? [S/N] "
-    if errorlevel 2 goto :abort
+    if "%NON_INTERACTIVE%"=="1" (
+        echo ERRORE: la release da dashboard richiede una working tree pulita.
+        echo Esegui commit o annulla le modifiche prima di proseguire.
+        goto :fail
+    ) else (
+        choice /C SN /N /M "Vuoi includere TUTTE queste modifiche? [S/N] "
+        if errorlevel 2 goto :abort
+    )
 ) else (
     echo Nessuna modifica locale presente.
 )
@@ -262,6 +283,11 @@ REM 7. Aggiorna versione package
 REM ============================================================
 
 echo [7/16] Aggiornamento versione FileX Suite...
+
+if "%PREFLIGHT_ONLY%"=="1" (
+    echo Preflight: aggiornamento versione non eseguito.
+    goto :version_step_done
+)
 
 if "%CURRENT_VERSION%"=="%VERSION%" (
     echo package.json e gia alla versione %VERSION%.
@@ -281,6 +307,7 @@ if not "%CHECK_VERSION%"=="%VERSION%" (
 )
 
 echo Versione package verificata: %CHECK_VERSION%
+:version_step_done
 echo.
 
 REM ============================================================
@@ -288,6 +315,11 @@ REM 8. Normalizza link download sito
 REM ============================================================
 
 echo [8/16] Controllo link download del sito...
+
+if "%PREFLIGHT_ONLY%"=="1" (
+    echo Preflight: normalizzazione link non eseguita.
+    goto :dependency_step
+)
 
 if not exist website (
     echo ERRORE: cartella website non trovata.
@@ -309,6 +341,7 @@ REM ============================================================
 REM 9. Dipendenze con fingerprint locale
 REM ============================================================
 
+:dependency_step
 echo [9/16] Verifica dipendenze...
 
 set "DEP_HASH="
@@ -385,6 +418,8 @@ echo.
 echo Test e build OK.
 echo.
 
+if "%PREFLIGHT_ONLY%"=="1" goto :preflight_success
+
 REM ============================================================
 REM 11. Revisione finale
 REM ============================================================
@@ -399,8 +434,10 @@ git diff --stat
 echo ------------------------------------------------------------
 echo.
 
-choice /C SN /N /M "Procedo con COMMIT + PUSH + RELEASE %TAG%? [S/N] "
-if errorlevel 2 goto :abort
+if "%NON_INTERACTIVE%"=="0" (
+    choice /C SN /N /M "Procedo con COMMIT + PUSH + RELEASE %TAG%? [S/N] "
+    if errorlevel 2 goto :abort
+)
 
 REM ============================================================
 REM 12. Commit e push main
@@ -631,6 +668,17 @@ echo.
 pause
 exit /b 0
 
+:preflight_success
+echo.
+echo ============================================================
+echo   PREFLIGHT FILEX SUITE COMPLETATO
+echo ============================================================
+echo.
+echo Versione verificata: %VERSION%
+echo Nessun commit, tag, push o deploy e stato eseguito.
+echo.
+exit /b 0
+
 :abort
 
 echo.
@@ -640,7 +688,7 @@ echo ============================================================
 echo.
 echo Nessun nuovo tag di release e stato pubblicato.
 echo.
-pause
+if "%NON_INTERACTIVE%"=="0" pause
 exit /b 2
 
 :fail
@@ -677,5 +725,5 @@ if "%TAG_PUSHED%"=="1" if not "%RELEASE_DONE%"=="1" (
 
 echo Controlla l'errore riportato sopra.
 echo.
-pause
+if "%NON_INTERACTIVE%"=="0" pause
 exit /b 1

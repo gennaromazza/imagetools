@@ -224,6 +224,94 @@ function same(a: EntrySnapshot, b: EntrySnapshot): boolean {
 }
 function isLightroomLock(path: string): boolean { return path.toLowerCase().endsWith(".lrcat.lock"); }
 
+function isAtOrBelow(path: string, root: string): boolean { return path === root || path.startsWith(`${root}/`); }
+function relativeParent(path: string): string { const index = path.lastIndexOf("/"); return index < 0 ? "" : path.slice(0, index); }
+
+function subtreeEntries(tree: Map<string, EntrySnapshot>, root: string): Array<[string, EntrySnapshot]> {
+  return [...tree.entries()]
+    .filter(([path]) => path.startsWith(`${root}/`) && !isLightroomLock(path))
+    .map(([path, entry]) => [path.slice(root.length + 1), entry] as [string, EntrySnapshot])
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
+function subtreeSignature(tree: Map<string, EntrySnapshot>, root: string): string | null {
+  const entries = subtreeEntries(tree, root);
+  if (!entries.some(([, entry]) => entry.type === "file")) return null;
+  return JSON.stringify(entries.map(([path, entry]) => entry.type === "directory"
+    ? [path, entry.type]
+    : [path, entry.type, entry.bytes, Math.round(entry.mtimeMs)]));
+}
+
+function subtreeMatchesReference(tree: Map<string, EntrySnapshot>, reference: Map<string, EntrySnapshot>, root: string): boolean {
+  const current = subtreeEntries(tree, root);
+  const expected = subtreeEntries(reference, root);
+  return current.length === expected.length && current.every(([path, entry], index) => {
+    const referenceEntry = expected[index];
+    return referenceEntry?.[0] === path && same(entry, referenceEntry[1]);
+  });
+}
+
+function topLevelCandidates(paths: string[]): string[] {
+  return paths
+    .sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))
+    .filter((path, index, all) => !all.slice(0, index).some((parent) => path.startsWith(`${parent}/`)));
+}
+
+function inferFolderRenames(
+  differences: BackupGuardDifference[],
+  master: Map<string, EntrySnapshot>,
+  clone: Map<string, EntrySnapshot>,
+  baseline: Map<string, EntrySnapshot> | null,
+): BackupGuardDifference[] {
+  if (!baseline) return differences;
+  const oldCandidates = topLevelCandidates(differences
+    .filter((item) => item.kind === "delete-from-clone" && item.entryType === "directory")
+    .map((item) => item.relativePath))
+    .filter((root) => baseline.get(root)?.type === "directory" && clone.get(root)?.type === "directory" && !master.has(root) && subtreeMatchesReference(clone, baseline, root));
+  const newCandidates = topLevelCandidates(differences
+    .filter((item) => item.kind === "copy-to-clone" && item.entryType === "directory")
+    .map((item) => item.relativePath))
+    .filter((root) => master.get(root)?.type === "directory" && !clone.has(root) && !baseline.has(root));
+
+  const oldByKey = new Map<string, string[]>();
+  const newByKey = new Map<string, string[]>();
+  for (const root of oldCandidates) {
+    const signature = subtreeSignature(baseline, root);
+    if (!signature) continue;
+    const key = `${relativeParent(root)}\n${signature}`;
+    oldByKey.set(key, [...(oldByKey.get(key) ?? []), root]);
+  }
+  for (const root of newCandidates) {
+    const signature = subtreeSignature(master, root);
+    if (!signature) continue;
+    const key = `${relativeParent(root)}\n${signature}`;
+    newByKey.set(key, [...(newByKey.get(key) ?? []), root]);
+  }
+
+  const matches: Array<{ oldRoot: string; newRoot: string; bytes: number }> = [];
+  for (const [key, oldRoots] of oldByKey) {
+    const newRoots = newByKey.get(key) ?? [];
+    if (oldRoots.length !== 1 || newRoots.length !== 1) continue;
+    const oldRoot = oldRoots[0]!; const newRoot = newRoots[0]!;
+    const bytes = subtreeEntries(master, newRoot).reduce((sum, [, entry]) => sum + (entry.type === "file" ? entry.bytes : 0), 0);
+    matches.push({ oldRoot, newRoot, bytes });
+  }
+  if (!matches.length) return differences;
+
+  return [
+    ...differences.filter((item) => !matches.some(({ oldRoot, newRoot }) => isAtOrBelow(item.relativePath, oldRoot) || isAtOrBelow(item.relativePath, newRoot))),
+    ...matches.map(({ oldRoot, newRoot, bytes }): BackupGuardDifference => ({
+      relativePath: newRoot,
+      previousRelativePath: oldRoot,
+      kind: "rename-on-clone",
+      entryType: "directory",
+      masterBytes: bytes,
+      cloneBytes: bytes,
+      reason: "La cartella e' stata rinominata nel principale. Dopo la verifica dei contenuti verra' rinominata direttamente anche sul clone.",
+    })),
+  ].sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+}
+
 export function buildDifferencePlan(master: Map<string, EntrySnapshot>, clone: Map<string, EntrySnapshot>, baseline: Map<string, EntrySnapshot> | null): BackupGuardDifference[] {
   const paths = new Set([...master.keys(), ...clone.keys(), ...(baseline?.keys() ?? [])]);
   const differences: BackupGuardDifference[] = [];
@@ -237,12 +325,12 @@ export function buildDifferencePlan(master: Map<string, EntrySnapshot>, clone: M
       differences.push({ relativePath: path, kind: masterChanged && cloneChanged ? "conflict" : masterChanged ? "copy-to-clone" : "conflict", entryType: m.type, masterBytes: m.bytes, cloneBytes: c.bytes, reason: masterChanged && cloneChanged ? "Le due copie sono diverse: nessuna verra' sovrascritta." : "Il principale contiene una versione aggiornata." });
     }
   }
-  return differences;
+  return inferFolderRenames(differences, master, clone, baseline);
 }
 
 function scanResult(masterPath: string, clonePath: string, master: Map<string, EntrySnapshot>, clone: Map<string, EntrySnapshot>, baseline: Map<string, EntrySnapshot> | null, startedAt: string): BackupGuardScanResult {
   const differences = buildDifferencePlan(master, clone, baseline);
-  const keys = ["copy-to-clone", "import-from-clone", "delete-from-clone", "restore-to-clone", "conflict"] as const;
+  const keys = ["copy-to-clone", "import-from-clone", "delete-from-clone", "restore-to-clone", "rename-on-clone", "conflict"] as const;
   const totals = Object.fromEntries(keys.map((key) => [key, differences.filter((item) => item.kind === key).length])) as BackupGuardScanResult["totals"];
   const files = (map: Map<string, EntrySnapshot>) => [...map.values()].filter((v) => v.type === "file");
   const deleted = differences.filter((item) => item.kind === "delete-from-clone" && item.entryType === "file");
@@ -345,7 +433,7 @@ async function copyVerified(source: string, destination: string): Promise<string
 }
 
 function operationSignature(items: BackupGuardDifference[]): string {
-  return JSON.stringify(items.map(({ relativePath, kind, entryType, masterBytes, cloneBytes }) => ({ relativePath, kind, entryType, masterBytes, cloneBytes })));
+  return JSON.stringify(items.map(({ relativePath, previousRelativePath, kind, entryType, masterBytes, cloneBytes }) => ({ relativePath, previousRelativePath, kind, entryType, masterBytes, cloneBytes })));
 }
 
 function collapseDirectoryOperations(items: BackupGuardDifference[], kind: BackupGuardDifference["kind"]): BackupGuardDifference[] {
@@ -395,17 +483,50 @@ export async function executeBackupGuard(scanId: string, confirmDeletions: boole
   const masterRequired = operations.filter((item) => item.entryType === "file" && item.kind === "import-from-clone").reduce((sum, item) => sum + (item.cloneBytes ?? 0), 0);
   await Promise.all([requireFreeSpace(clonePath, cloneRequired, "Clone esterno"), requireFreeSpace(masterPath, masterRequired, "Archivio principale")]);
   progress.totalOperations = operations.length;
-  progress.totalBytes = operations.reduce((sum, item) => sum + (item.masterBytes ?? item.cloneBytes ?? 0), 0);
+  progress.totalBytes = operations.reduce((sum, item) => sum + (item.kind === "rename-on-clone" ? (item.masterBytes ?? 0) * 2 : (item.masterBytes ?? item.cloneBytes ?? 0)), 0);
   operationStartedAt = Date.now();
   const sessionId = progress.sessionId!;
   const journal: Journal = { sessionId, scanId, startedAt: new Date().toISOString(), status: "running", operations: operations.map((item) => ({ relativePath: item.relativePath, kind: item.kind, status: "pending" })) };
   state = { ...state, journal };
   await writeState(state);
 
-  let copiedToClone = 0, importedToMaster = 0, deletedFromClone = 0, restoredToClone = 0, verifiedFiles = 0, bytesTransferred = 0;
+  let copiedToClone = 0, importedToMaster = 0, deletedFromClone = 0, restoredToClone = 0, renamedOnClone = 0, verifiedFiles = 0, bytesTransferred = 0;
   const trashRoot = join(clonePath, INTERNAL_DIR, "trash", sessionId);
   try {
-    const directoryCreates = operations.filter((item) => item.entryType === "directory" && item.kind !== "delete-from-clone");
+    const renameOperations = operations.filter((item) => item.kind === "rename-on-clone");
+    for (const item of renameOperations) {
+      const oldRoot = item.previousRelativePath;
+      if (!oldRoot) throw new Error(`Piano di rinomina incompleto: ${item.relativePath}`);
+      const masterFiles = subtreeEntries(freshMaster, item.relativePath).filter(([, entry]) => entry.type === "file");
+      progress.phase = "verifying";
+      for (const [innerPath, entry] of masterFiles) {
+        await waitForOperationControl();
+        const masterRelativePath = `${item.relativePath}/${innerPath}`;
+        const cloneRelativePath = `${oldRoot}/${innerPath}`;
+        progress.currentPath = masterRelativePath;
+        progress.currentFileBytes = 0; progress.currentFileTotalBytes = entry.bytes * 2;
+        const masterSha256 = await hashFile(safePath(masterPath, masterRelativePath), updateTransferProgress);
+        const cloneSha256 = await hashFile(safePath(clonePath, cloneRelativePath), updateTransferProgress);
+        if (masterSha256 !== cloneSha256) throw new Error(`Rinomina annullata: il contenuto non corrisponde per ${masterRelativePath}.`);
+        verifiedFiles++;
+      }
+    }
+    for (const item of renameOperations) {
+      await waitForOperationControl();
+      const oldRoot = item.previousRelativePath!;
+      progress.phase = "renaming"; progress.currentPath = `${oldRoot} -> ${item.relativePath}`;
+      progress.currentFileBytes = 0; progress.currentFileTotalBytes = 0;
+      const source = safePath(clonePath, oldRoot); const destination = safePath(clonePath, item.relativePath);
+      try { await fs.lstat(destination); throw new Error(`La destinazione della rinomina esiste gia': ${item.relativePath}`); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      await fs.mkdir(dirname(destination), { recursive: true });
+      await fs.rename(source, destination);
+      journal.operations.find((op) => op.relativePath === item.relativePath && op.kind === item.kind)!.status = "completed";
+      renamedOnClone++; progress.completedOperations++;
+      await writeState({ ...state, journal });
+    }
+
+    const directoryCreates = operations.filter((item) => item.entryType === "directory" && ["copy-to-clone", "restore-to-clone", "import-from-clone"].includes(item.kind));
     for (const item of directoryCreates) {
       await waitForOperationControl();
       progress.currentPath = item.relativePath;
@@ -452,8 +573,8 @@ export async function executeBackupGuard(scanId: string, confirmDeletions: boole
     for (const [path, entry] of afterMaster) { const cloneEntry = afterClone.get(path); if (cloneEntry && same(entry, cloneEntry)) newBaseline[path] = entry; }
     journal.status = "completed";
     const completedAt = new Date().toISOString();
-    const result: BackupGuardExecutionResult = { sessionId, completedAt, copiedToClone, importedToMaster, deletedFromClone, restoredToClone, conflictsSkipped: conflicts.length, verifiedFiles, bytesTransferred, trashPath: deletedFromClone ? trashRoot : null, remainingDifferences: remaining.length };
-    const history: BackupGuardHistoryEntry = { id: sessionId, createdAt: completedAt, status: "executed", summary: `Sincronizzazione completata: ${verifiedFiles} file verificati, ${deletedFromClone} eliminati dal clone`, execution: result };
+    const result: BackupGuardExecutionResult = { sessionId, completedAt, copiedToClone, importedToMaster, deletedFromClone, restoredToClone, renamedOnClone, conflictsSkipped: conflicts.length, verifiedFiles, bytesTransferred, trashPath: deletedFromClone ? trashRoot : null, remainingDifferences: remaining.length };
+    const history: BackupGuardHistoryEntry = { id: sessionId, createdAt: completedAt, status: "executed", summary: `Sincronizzazione completata: ${verifiedFiles} file verificati, ${renamedOnClone} cartelle rinominate, ${deletedFromClone} eliminati dal clone`, execution: result };
     await writeState({ ...state, baseline: newBaseline, pendingPlan: null, journal, history: [history, ...state.history].slice(0, 200) });
     await clearProtectedProjectEvents(masterPath);
     progress = { ...progress, active: false, phase: "completed", currentPath: null, currentFileBytes: 0, currentFileTotalBytes: 0, paused: false, cancelRequested: false, etaSeconds: 0 };

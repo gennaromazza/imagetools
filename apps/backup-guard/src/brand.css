@@ -1,0 +1,41 @@
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-height: 92px;
+  padding: 13px 14px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(115, 215, 161, .10), rgba(43, 49, 45, .96) 58%);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .16);
+}
+
+.brand img {
+  width: 62px;
+  height: 62px;
+  flex: 0 0 62px;
+  object-fit: cover;
+  border-radius: 15px;
+  background: #15261f;
+}
+
+.brand > div { min-width: 0; }
+
+.brand > div > span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--gold);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 19px;
+  line-height: 1.05;
+}
+
+.brand p {
+  margin: 5px 0 0;
+  font-size: 12px;
+}

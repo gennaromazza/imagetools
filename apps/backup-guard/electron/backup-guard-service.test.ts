@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildDifferencePlan, cancelBackupGuard, configureBackupGuardInbox, configureBackupGuardStorage, configureBackupGuardTestMode, deepVerifyBackupGuard, executeBackupGuard, getBackupGuardProgress, listBackupGuardTrash, listPendingBackupGuardProjects, pauseBackupGuard, recoverBackupGuardTrash, resolveBackupGuardConflict, resumeBackupGuard, saveBackupGuardConfiguration, scanBackupGuard, testSnapshot } from "./backup-guard-service.js";
@@ -40,6 +40,91 @@ test("ignora le differenze di timestamp delle cartelle", () => {
   const baseline = new Map([["Cliente", testSnapshot("directory", 0, 1)]]);
   const result = buildDifferencePlan(new Map([["Cliente", testSnapshot("directory", 0, 2)]]), new Map([["Cliente", testSnapshot("directory", 0, 3)]]), baseline);
   assert.equal(result.length, 0);
+});
+
+test("riconosce una cartella rinominata senza pianificare copie o cancellazioni", () => {
+  const directory = testSnapshot("directory", 0, 1);
+  const baseline = new Map([
+    ["2026/Matrimonio Rossi", directory],
+    ["2026/Matrimonio Rossi/foto.raw", file(10, 2)],
+  ]);
+  const clone = new Map(baseline);
+  const master = new Map([
+    ["2026/2026-08-20 - Rossi", directory],
+    ["2026/2026-08-20 - Rossi/foto.raw", file(10, 2)],
+  ]);
+  const result = buildDifferencePlan(master, clone, baseline);
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.kind, "rename-on-clone");
+  assert.equal(result[0]?.previousRelativePath, "2026/Matrimonio Rossi");
+  assert.equal(result[0]?.relativePath, "2026/2026-08-20 - Rossi");
+});
+
+test("non associa automaticamente cartelle rinominate quando la corrispondenza e' ambigua", () => {
+  const directory = testSnapshot("directory", 0, 1);
+  const baseline = new Map([
+    ["Archivio/A", directory], ["Archivio/A/foto.raw", file(10, 2)],
+    ["Archivio/B", directory], ["Archivio/B/foto.raw", file(10, 2)],
+  ]);
+  const master = new Map([
+    ["Archivio/C", directory], ["Archivio/C/foto.raw", file(10, 2)],
+    ["Archivio/D", directory], ["Archivio/D/foto.raw", file(10, 2)],
+  ]);
+  const result = buildDifferencePlan(master, new Map(baseline), baseline);
+  assert.equal(result.some((item) => item.kind === "rename-on-clone"), false);
+  assert.equal(result.some((item) => item.kind === "copy-to-clone"), true);
+  assert.equal(result.some((item) => item.kind === "delete-from-clone"), true);
+});
+
+test("rinomina la cartella sul clone senza ricopiare le fotografie", async () => {
+  const root = await mkdtemp(join(tmpdir(), "filex-backup-guard-rename-"));
+  const master = join(root, "master"); const clone = join(root, "clone");
+  const oldName = "2026-08-20 Matrimonio Rossi"; const newName = "2026-08-20 - Mario e Anna";
+  await Promise.all([mkdir(join(master, oldName, "Selezione"), { recursive: true }), mkdir(clone)]);
+  configureBackupGuardStorage(join(root, "state"));
+  await Promise.all([
+    writeFile(join(master, oldName, "foto-1.raw"), "RAW-ONE"),
+    writeFile(join(master, oldName, "Selezione", "foto-2.jpg"), "JPEG-TWO"),
+  ]);
+  await saveBackupGuardConfiguration(master, clone);
+  await executeBackupGuard((await scanBackupGuard()).id, false);
+  await rename(join(master, oldName), join(master, newName));
+
+  const plan = await scanBackupGuard();
+  assert.equal(plan.totals["rename-on-clone"], 1);
+  assert.equal(plan.totals["copy-to-clone"], 0);
+  assert.equal(plan.totals["delete-from-clone"], 0);
+  assert.equal(plan.deletionFiles, 0);
+  const result = await executeBackupGuard(plan.id, false);
+  assert.equal(result.renamedOnClone, 1);
+  assert.equal(result.bytesTransferred, 0);
+  assert.equal(result.trashPath, null);
+  assert.equal(result.remainingDifferences, 0);
+  assert.equal(await readFile(join(clone, newName, "foto-1.raw"), "utf8"), "RAW-ONE");
+  assert.equal(await readFile(join(clone, newName, "Selezione", "foto-2.jpg"), "utf8"), "JPEG-TWO");
+  await assert.rejects(() => stat(join(clone, oldName)), { code: "ENOENT" });
+  await rm(root, { recursive: true, force: true });
+});
+
+test("annulla la rinomina prima di modificare il clone se il checksum non corrisponde", async () => {
+  const root = await mkdtemp(join(tmpdir(), "filex-backup-guard-rename-checksum-"));
+  const master = join(root, "master"); const clone = join(root, "clone");
+  await Promise.all([mkdir(join(master, "Vecchio"), { recursive: true }), mkdir(clone)]);
+  configureBackupGuardStorage(join(root, "state"));
+  await writeFile(join(master, "Vecchio", "foto.raw"), "AAAA");
+  await saveBackupGuardConfiguration(master, clone);
+  await executeBackupGuard((await scanBackupGuard()).id, false);
+  const originalStat = await stat(join(clone, "Vecchio", "foto.raw"));
+  await rename(join(master, "Vecchio"), join(master, "Nuovo"));
+  await writeFile(join(master, "Nuovo", "foto.raw"), "BBBB");
+  await utimes(join(master, "Nuovo", "foto.raw"), originalStat.atime, originalStat.mtime);
+
+  const plan = await scanBackupGuard();
+  assert.equal(plan.totals["rename-on-clone"], 1);
+  await assert.rejects(() => executeBackupGuard(plan.id, false), /contenuto non corrisponde/);
+  assert.equal(await readFile(join(clone, "Vecchio", "foto.raw"), "utf8"), "AAAA");
+  await assert.rejects(() => stat(join(clone, "Nuovo")), { code: "ENOENT" });
+  await rm(root, { recursive: true, force: true });
 });
 
 test("sincronizza, verifica e sposta nel cestino una cancellazione del master", async () => {

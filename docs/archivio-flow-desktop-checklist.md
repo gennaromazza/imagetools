@@ -1,43 +1,53 @@
-# Archivio Flow Desktop Checklist
+# Archivio Flow — checklist release 0.1.26
 
-## Stato implementazione
+## Ambito
 
-- [x] Renderer `archivio-flow` senza `fetch("/api/...")`
-- [x] Bridge preload + IPC aggiunto per Archivio Flow
-- [x] Runtime desktop usa storage utente nativo via `ARCHIVIO_FLOW_DATA_DIR`
-- [x] Migrazione dati legacy `apps/archivio-flow/server/data` verso storage utente
-- [x] Import SD via shell desktop con progresso
-- [x] Supporto copia file foto, RAW, video, sidecar e contenuti SD generici
-- [x] Apertura cartella finale via shell desktop
-- [x] Gestione autore come cartella sotto `FOTO_SD\<Autore>`
-- [x] Generazione `BASSA_QUALITA` via IPC
-- [x] Archivio lavori, link contratto e delete via IPC
-- [x] Mappatura persistente delle cartelle esterne al software
-- [x] Risanamento manuale nome/data con anteprima, conferma, collision check e rollback
-- [x] Apertura e cambio cartella in Image Select Pro gia' avviato
-- [x] Scrollbar visibile nel modulo di riallineamento
-- [x] Test automatico filesystem per analisi, rinomina, import e BASSA_QUALITA
-- [x] Build desktop Archivio Flow x64 riuscita
-- [x] Build desktop Archivio Flow ia32 riuscita
-- [ ] Build Mac artefatto finale
+Questa release aggiorna Archivio Flow `0.1.26` e richiede separatamente FileX Suite `0.1.39` per distribuire il runtime OAuth condiviso aggiornato. I due componenti mantengono versioni, tag e feed indipendenti.
 
-## Artefatti generati
+## Implementazione completata
 
-- [x] `apps/filex-desktop/release/Archivio-Flow-0.1.0-x64-setup.exe`
-- [x] `apps/filex-desktop/release/Archivio-Flow-0.1.0-ia32-setup.exe`
+- [x] Renderer Archivio Flow integrato con preload e IPC Electron.
+- [x] Storage utente nativo tramite `ARCHIVIO_FLOW_DATA_DIR`.
+- [x] Database SQLite StudioFlow con migrazioni, WAL, recovery e backup.
+- [x] Importazione SD persistente, riprendibile e verificata.
+- [x] Safe to Format fail-closed basato su prove locali.
+- [x] Mapping categorie guidato e anteprima della destinazione.
+- [x] Registrazione delle cartelle esterne e correzione nomi con conferma.
+- [x] Indice SQLite riutilizzato all'avvio senza full rescan della lista lavori.
+- [x] Aggiornamento incrementale dell'indice limitato al lavoro importato, rinominato o modificato dal watcher.
+- [x] Stato dell'analisi nomi conservato durante il cambio sezione.
+- [x] Rinomina cartelle serializzata, con avanzamento interrogabile e blocco dei doppi avvii.
+- [x] Pannello Google Drive con account utente e soli manifest StudioFlow.
+- [x] Client OAuth Google di tipo Desktop app, PKCE, `drive.file` e token cifrato.
+- [x] Versione UI letta da `apps/archivio-flow/package.json`.
 
-## Verifiche tecniche
+## Verifiche locali completate
 
-- [x] `npm --workspace @photo-tools/archivio-flow run typecheck`
-- [x] `npm --workspace @photo-tools/archivio-flow run build`
-- [x] `npm --workspace @photo-tools/archivio-flow run build:server`
-- [x] `npm --workspace @photo-tools/filex-desktop run build:shell`
-- [x] `npm --workspace @photo-tools/filex-desktop run build:archivio-flow`
-- [x] `npm --workspace @photo-tools/filex-desktop run dist:archivio-flow:win64`
-- [x] `npm --workspace @photo-tools/filex-desktop run dist:archivio-flow:win32`
-- [ ] `npm --workspace @photo-tools/filex-desktop run dist:archivio-flow:mac`
+- [x] `npm --workspace @photo-tools/archivio-flow run typecheck`.
+- [x] `npm --workspace @photo-tools/archivio-flow run build`.
+- [x] `npm --workspace @photo-tools/archivio-flow run build:server`.
+- [x] `npm --workspace @photo-tools/archivio-flow run test:archive`: 9 test superati.
+- [x] `npm --workspace @photo-tools/filex-desktop run build:shell`.
+- [x] `npm --workspace @photo-tools/filex-desktop run build:archivio-flow`.
+- [x] `npm run test:filex-independent-releases`.
+- [x] `npm run test:filex-license-coverage`.
+- [x] Server compilato copiato nella build Electron.
+- [x] Secret CI `IMAGE_SELECT_GOOGLE_CLIENT_ID` e `IMAGE_SELECT_GOOGLE_CLIENT_SECRET` presenti.
 
-## Nota Mac
+## Gate prima della pubblicazione stabile
 
-- Il comando Mac fallisce su questo ambiente Windows con errore `Build for macOS is supported only on macOS`.
-- La pipeline e lo script `dist:archivio-flow:mac` sono presenti, ma l'artefatto finale va generato su una macchina macOS.
+- [ ] Generare l'installer Windows x64 di Archivio Flow `0.1.26`.
+- [ ] Installare l'artefatto e verificare avvio con licenza attiva e blocco senza entitlement.
+- [ ] Verificare disinstallazione e reinstallazione anche offline e senza licenza valida.
+- [ ] Collegare un account Google nuovo nell'installer, riavviare e verificare la persistenza cifrata.
+- [ ] Sincronizzare un manifest, verificare che Drive non contenga fotografie o percorsi assoluti.
+- [ ] Verificare coda offline, riconnessione dopo revoca e scollegamento account.
+- [ ] Verificare riavvio con indice persistito senza nuova scansione completa.
+- [ ] Pubblicare `archivio-flow-v0.1.26` e verificare la voce remota in `stable.json`.
+- [ ] Generare e collaudare separatamente FileX Suite `0.1.39` con tag `suite-v0.1.39`.
+
+## macOS
+
+- [ ] Generare e collaudare DMG/ZIP su una macchina macOS.
+
+La build macOS non viene dichiarata verificata da Windows.

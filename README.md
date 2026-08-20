@@ -12,7 +12,7 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 ## Tool principali
 
 - `apps/image-party-frame` — Batch framing, crop live, export eventi
-- `apps/archivio-flow` — Import, archiviazione e organizzazione lavori da SD
+- `apps/archivio-flow` — StudioFlow local-first: import SD verificato, archivio SQLite, mapping lavori e replica opzionale dei manifest su Google Drive
 - `apps/photo-selector-app` — Image Select Pro: selezione e classificazione foto avanzata
 - `apps/cache-sweep` — FileX Adobe Cleaner: utility esclusivamente Adobe per pulire cache supportate e rimuovere vecchie versioni affiancate a quella corrente su Windows
 - `apps/filex-send` — Ricezione locale tramite Wi-Fi/QR e consegna remota con link configurabile, upload a PC spento e recupero automatico
@@ -65,11 +65,12 @@ L’obiettivo è una suite integrata, con:
 
 ## Documentazione
 
-- `docs/00-overview.md`, `docs/01-tech-stack.md`, `docs/02-ui-system.md`: documenti di suite
-- `docs/03-desktop-windows-migration.md`: piano di migrazione desktop Windows condiviso per tutta la suite
 - `docs/GIT_WORKFLOW.md`: policy Git operativa (branch, sync, conflitti, recovery)
+- `docs/desktop-tool-development.md`: modello e comandi di sviluppo Electron per tutti i tool desktop
+- `docs/STUDIOFLOW_ARCHITECTURE.md`: architettura local-first e confini di Archivio Flow
+- `docs/STUDIOFLOW_DRIVE_REGISTRY.md`: contratto della replica manifest e configurazione OAuth Google Drive
+- `docs/archivio-flow-desktop-checklist.md`: stato e gate della release Archivio Flow corrente
 - `docs/18-publish-build-contract.md`: contratto completo per build, pubblicazione, sito e updater
 - `docs/20-licensing-and-payments-mvp.md`: architettura, sicurezza e rollout di licenze e pagamenti
 - `docs/21-licensing-operations-runbook.md`: configurazione e operazioni Lemon Squeezy/Firebase
-- `docs/10-product-vision-suite-desktop.md` .. `docs/17-roadmap-v2.md`: documentazione enterprise per programma EXE Suite
 - `docs/tools/`: documenti specifici dei singoli tool

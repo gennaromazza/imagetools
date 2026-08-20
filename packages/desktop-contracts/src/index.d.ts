@@ -343,6 +343,27 @@ export interface DesktopGraphicsStatus {
     videoDecode: string;
     deviceName: string | null;
 }
+export type DesktopLicenseStatus = "active" | "grace" | "expired" | "revoked" | "unlicensed" | "unavailable";
+export type DesktopLicenseEnforcement = "observe" | "warn" | "enforce";
+export interface DesktopLicenseState {
+    schemaVersion: 1;
+    status: DesktopLicenseStatus;
+    enforcement: DesktopLicenseEnforcement;
+    entitlement: "filex-all-access" | null;
+    validUntil: number | null;
+    offlineUntil: number | null;
+    activation: {
+        current: number;
+        limit: number;
+    };
+    lastCheckedAt: number | null;
+    message: string;
+    canUseTools: boolean;
+}
+export interface DesktopCheckoutConfiguration {
+    monthly: string | null;
+    annual: string | null;
+}
 export interface DesktopPersistedState {
     projectName: string;
     sourceFolderPath: string;
@@ -696,11 +717,42 @@ export interface ArchivioSdCard {
     totalSize: number;
     freeSpace: number;
     path: string;
+    volumeSerial?: string;
+    filesystem?: string;
 }
 export interface ArchivioSdPreview {
     totalFiles: number;
     rawFiles: number;
     jpgFiles: number;
+}
+export interface ArchivioSafeToFormatResult {
+    status: "SAFE" | "PARTIAL" | "UNSAFE" | "UNKNOWN";
+    totalFiles: number;
+    verifiedFiles: number;
+    unknownFiles: number;
+    reason?: string;
+    sessions: string[];
+}
+export interface ArchivioImportSessionSummary {
+    id: string;
+    jobId: string | null;
+    sourceRoot: string;
+    destinationRoot: string;
+    status: "CREATED" | "ANALYZING" | "READY" | "IMPORTING" | "VERIFYING" | "COMPLETED" | "PAUSED" | "FAILED" | "CANCELLED" | "INTERRUPTED";
+    startedAt: number;
+    updatedAt: number;
+    completedAt: number | null;
+    verifiedAt: number | null;
+    plannedFiles: number;
+    verifiedFiles: number;
+    failedFiles: number;
+    errorMessage: string | null;
+}
+export interface ArchivioStudioFlowStatus {
+    health: { schemaVersion: number; integrity: string; databasePath: string; pendingOutbox: number; resumableSessions: number };
+    archiveIndex: { archiveId: string | null; rootPath: string; state: "idle" | "scanning" | "ready" | "error"; entryCount: number; fileCount: number; lastFullScanAt: number | null; lastReconciledAt: number | null; lastError: string | null };
+    sessions: ArchivioImportSessionSummary[];
+    resumable: ArchivioImportSessionSummary[];
 }
 export interface ArchivioJob {
     id: string;
@@ -757,6 +809,20 @@ export interface ArchivioArchiveRenameResult {
         folderPath: string;
     }>;
 }
+export type ArchivioArchiveRenamePhase = "idle" | "preparing" | "renaming" | "counting" | "saving" | "completed" | "error";
+export interface ArchivioArchiveRenameProgress {
+    operationId: string | null;
+    phase: ArchivioArchiveRenamePhase;
+    active: boolean;
+    total: number;
+    completed: number;
+    currentFolderName: string | null;
+    message: string;
+    startedAt: number | null;
+    finishedAt: number | null;
+    renamedCount: number;
+    error: string | null;
+}
 export interface ArchivioSelectionCandidate {
     path: string;
     label: string;
@@ -769,6 +835,7 @@ export interface ArchivioSettings {
     defaultAutore: string;
     cartellePredefinite: string[];
     archiveHierarchy: ArchivioArchiveHierarchyConfig;
+    categoryMappings: Array<{ id: string; categoryKey: string; displayName: string; relativePathPattern: string; jobFolderPattern: string; enabled: boolean }>;
 }
 export interface ArchivioImportRequest {
     sdPath: string;
@@ -784,6 +851,8 @@ export interface ArchivioImportRequest {
     fileNameIncludes?: string;
     mtimeFrom?: string;
     mtimeTo?: string;
+    categoryKey?: string;
+    destinationOverride?: boolean;
 }
 export interface ArchivioImportResult {
     ok: boolean;
@@ -890,6 +959,10 @@ export interface FileXDesktopApi {
     }>;
     getSuiteDockState: () => Promise<DesktopDockState>;
     saveSuiteDockState: (state: Partial<DesktopDockState>) => Promise<DesktopDockState>;
+    getLicenseState: (refresh?: boolean) => Promise<DesktopLicenseState>;
+    activateLicense: (licenseKey: string, deviceLabel?: string) => Promise<DesktopLicenseState>;
+    deactivateLicense: () => Promise<DesktopLicenseState>;
+    openLicenseCheckout: (billingPeriod: "monthly" | "annual") => Promise<void>;
     openFolder: (options?: DesktopFolderOpenOptions) => Promise<DesktopFolderOpenResult | null>;
     reopenFolder: (rootPath: string, options?: DesktopFolderOpenOptions) => Promise<DesktopFolderOpenResult | null>;
     consumePendingOpenFolderPath: () => Promise<string | null>;
@@ -975,6 +1048,11 @@ export interface FileXDesktopApi {
     getArchivioLowQualityProgress: () => Promise<ArchivioLowQualityProgressSnapshot>;
     getArchivioSdCards: () => Promise<ArchivioSdCard[]>;
     getArchivioSdPreview: (sdPath: string) => Promise<ArchivioSdPreview>;
+    checkArchivioSafeToFormat: (sdPath: string) => Promise<ArchivioSafeToFormatResult>;
+    getArchivioStudioFlowStatus: () => Promise<ArchivioStudioFlowStatus>;
+    reconcileArchivioIndex: () => Promise<ArchivioStudioFlowStatus["archiveIndex"]>;
+    resumeArchivioImport: (sessionId: string) => Promise<ArchivioImportResult>;
+    syncArchivioDriveRegistry: () => Promise<{ ok: boolean; syncedEvents: number; message: string }>;
     getArchivioFilterPreview: (input: {
         sdPath: string;
         fileNameIncludes?: string;
@@ -990,6 +1068,7 @@ export interface FileXDesktopApi {
     listArchivioJobs: () => Promise<ArchivioJob[]>;
     analyzeArchivioArchive: () => Promise<ArchivioArchiveAnalysisResult>;
     renameArchivioArchiveJobs: (requests: ArchivioArchiveRenameRequest[]) => Promise<ArchivioArchiveRenameResult>;
+    getArchivioArchiveRenameProgress: () => Promise<ArchivioArchiveRenameProgress>;
     deleteArchivioJob: (jobId: string) => Promise<{
         ok: boolean;
     }>;

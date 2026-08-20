@@ -2,27 +2,19 @@ import * as electron from "electron";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type {
+  DesktopCheckoutConfiguration,
+  DesktopLicenseEnforcement,
+  DesktopLicenseState,
+  DesktopLicenseStatus,
+} from "@photo-tools/desktop-contracts";
 import { verifyOfflineAttestation } from "./license-attestation.js";
 
 const { app, safeStorage } = electron;
 const DEFAULT_API_URL = "https://gen-lang-client-0321087169.web.app/api/licensing";
 const REQUEST_TIMEOUT_MS = 12_000;
 
-export type DesktopLicenseStatus = "active" | "grace" | "expired" | "revoked" | "unlicensed" | "unavailable";
-export type DesktopLicenseEnforcement = "observe" | "warn" | "enforce";
-
-export interface DesktopLicenseState {
-  schemaVersion: 1;
-  status: DesktopLicenseStatus;
-  enforcement: DesktopLicenseEnforcement;
-  entitlement: "filex-all-access" | null;
-  validUntil: number | null;
-  offlineUntil: number | null;
-  activation: { current: number; limit: number };
-  lastCheckedAt: number | null;
-  message: string;
-  canUseTools: boolean;
-}
+export type { DesktopLicenseEnforcement, DesktopLicenseState, DesktopLicenseStatus };
 
 interface StoredLicense {
   schemaVersion: 1;
@@ -46,12 +38,25 @@ interface LicenseApiResponse extends Record<string, unknown> {
   attestation?: string;
 }
 
-export interface DesktopCheckoutConfiguration {
-  monthly: string | null;
-  annual: string | null;
-}
-
 let cachedStore: StoredLicense | null = null;
+
+function developmentLicenseState(): DesktopLicenseState | null {
+  // Una build installata non può mai usare questa licenza. L'override enforce
+  // permette comunque di collaudare intenzionalmente il flusso reale in locale.
+  if (app.isPackaged || process.env.FILEX_LICENSE_ENFORCEMENT === "enforce") return null;
+  return {
+    schemaVersion: 1,
+    status: "active",
+    enforcement: "observe",
+    entitlement: "filex-all-access",
+    validUntil: null,
+    offlineUntil: null,
+    activation: { current: 1, limit: 2 },
+    lastCheckedAt: Date.now(),
+    message: "Licenza sviluppo attiva automaticamente.",
+    canUseTools: true,
+  };
+}
 
 function localEnforcement(): DesktopLicenseEnforcement {
   const requested = app.isPackaged ? undefined : process.env.FILEX_LICENSE_ENFORCEMENT;
@@ -202,6 +207,8 @@ function usableOffline(store: StoredLicense, now = Date.now()): DesktopLicenseSt
 }
 
 export async function getLicenseState(refresh = false): Promise<DesktopLicenseState> {
+  const developmentState = developmentLicenseState();
+  if (developmentState) return developmentState;
   const store = await readStore();
   const token = decryptToken(store.activationTokenEncrypted);
   if (!token) {
@@ -228,6 +235,8 @@ export async function getLicenseState(refresh = false): Promise<DesktopLicenseSt
 }
 
 export async function activateLicense(licenseKey: string, deviceLabel?: string): Promise<DesktopLicenseState> {
+  const developmentState = developmentLicenseState();
+  if (developmentState) return developmentState;
   const store = await readStore();
   const payload = await request("/activate", {
     licenseKey,
@@ -247,6 +256,8 @@ export async function activateLicense(licenseKey: string, deviceLabel?: string):
 }
 
 export async function deactivateLicense(): Promise<DesktopLicenseState> {
+  const developmentState = developmentLicenseState();
+  if (developmentState) return developmentState;
   const store = await readStore();
   const token = decryptToken(store.activationTokenEncrypted);
   if (token) await request("/deactivate", { activationToken: token, installationId: store.installationId });

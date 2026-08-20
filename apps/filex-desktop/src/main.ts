@@ -1,5 +1,5 @@
 import * as electron from "electron";
-import { getLicenseState } from "./license-service.js";
+import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState } from "./license-service.js";
 import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
@@ -138,6 +138,7 @@ import {
   exportPhotoSelectorProjectToDrive,
   getGoogleDriveStatus,
   listPhotoSelectorDriveVersions,
+  uploadStudioFlowRegistryToDrive,
 } from "./google-drive-service.js";
 import {
   cancelImageConverterJobDesktop,
@@ -540,6 +541,8 @@ async function getArchivioSdCardsDesktop(): Promise<Array<{
   totalSize: number;
   freeSpace: number;
   path: string;
+  volumeSerial?: string;
+  filesystem?: string;
 }>> {
   if (process.platform === "darwin") {
     const volumesRoot = "/Volumes";
@@ -572,6 +575,8 @@ async function getArchivioSdCardsDesktop(): Promise<Array<{
           totalSize,
           freeSpace,
           path: volumePath,
+          volumeSerial: entry.name,
+          filesystem: "unknown",
         };
       });
   }
@@ -1198,6 +1203,15 @@ function registerIpcHandlers(): void {
     "filex:open-installed-tool",
     async (_event, toolId: DesktopToolId, launchArgs?: string[]) => openInstalledTool(toolId, launchArgs),
   );
+  ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => getLicenseState(Boolean(refresh)));
+  ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) =>
+    activateLicense(licenseKey, deviceLabel));
+  ipcMain.handle("filex:deactivate-license", () => deactivateLicense());
+  ipcMain.handle("filex:open-license-checkout", async (_event, billingPeriod: "monthly" | "annual") => {
+    const checkout = await getCheckoutConfiguration();
+    const destination = checkout[billingPeriod] ?? "https://filex-suite.web.app/#prezzi";
+    await shell.openExternal(destination);
+  });
   ipcMain.handle("filex:open-folder", (_event, options?: DesktopFolderOpenOptions) => openFolderDesktop(options));
   ipcMain.handle("filex:reopen-folder", (_event, rootPath: string, options?: DesktopFolderOpenOptions) =>
     reopenFolderDesktop(sanitizeDesktopPath(rootPath), options));
@@ -1671,6 +1685,37 @@ function registerIpcHandlers(): void {
     const archivio = await loadArchivioFlowModule();
     return await archivio.getSdPreviewService(sdPath);
   });
+  ipcMain.handle("filex:check-archivio-safe-to-format", async (_event, sdPath: string) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.checkSafeToFormatService(sdPath);
+  });
+  ipcMain.handle("filex:get-archivio-studioflow-status", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.getStudioFlowStatusService();
+  });
+  ipcMain.handle("filex:reconcile-archivio-index", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.reconcileArchiveIndexService();
+  });
+  ipcMain.handle("filex:resume-archivio-import", async (_event, sessionId: string) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.resumeImportService(sessionId);
+  });
+  ipcMain.handle("filex:sync-archivio-drive-registry", async () => {
+    const archivio = await loadArchivioFlowModule();
+    const batch = await archivio.getDriveRegistryBatchService();
+    const ids = batch.outbox.map((item: { id: number }) => item.id);
+    if (ids.length === 0) return { ok: true, syncedEvents: 0, message: "Registro già sincronizzato" };
+    try {
+      const uploaded = await uploadStudioFlowRegistryToDrive(batch);
+      archivio.completeDriveRegistrySyncService(ids);
+      return { ok: true, syncedEvents: ids.length, message: `Registro caricato: ${uploaded.fileName}` };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      archivio.completeDriveRegistrySyncService(ids, message);
+      throw error;
+    }
+  });
   ipcMain.handle("filex:get-archivio-filter-preview", async (_event, input: Record<string, unknown>) => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.getFilterPreviewService(input);
@@ -1700,6 +1745,10 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:rename-archivio-archive-jobs", async (_event, requests: Array<{ jobId: string; nomeLavoro?: string; dataLavoro?: string }>) => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.renameArchiveJobsService(requests);
+  });
+  ipcMain.handle("filex:get-archivio-archive-rename-progress", async () => {
+    const archivio = await loadArchivioFlowModule();
+    return archivio.getArchiveRenameProgressService();
   });
   ipcMain.handle("filex:delete-archivio-job", async (_event, jobId: string) => {
     const archivio = await loadArchivioFlowModule();
@@ -2075,7 +2124,7 @@ if (hasSingleInstanceLock) {
     const savedPreset = await loadRamBudgetPreset();
     configureDesktopImageService(savedPreset);
 
-    if (requestedTool.id === "image-party-frame") {
+    if (requestedTool.id === "image-party-frame" && !shouldUseDevRenderer) {
       await ensureImagePartyFrameServer();
     }
 

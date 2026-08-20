@@ -58,6 +58,8 @@ Aggiungi il descrittore del tool alla costante `desktopToolManifest`:
 - `standalone`: (Es. FileX Send, Backup Guard, Cache Sweep) Il tool si gestisce da solo in modalità freeware, freemium o con un suo meccanismo di licenza indipendente. **La Suite avvierà sempre questi tool senza bloccarne il lancio.**
 - `management`: Riservato al solo `suite-launcher`.
 
+Prima della prima release, la scelta deve essere provata sull'installer con enforcement reale. Per `shared-runtime` verificare blocco senza licenza e avvio con licenza attiva; per `standalone` documentare e testare esplicitamente l'eventuale entitlement nel suo entry point Electron. Verificare inoltre disinstallazione/reinstallazione: la rimozione deve riuscire indipendentemente dallo stato o dalla connettività della licenza.
+
 ---
 
 ## 3. Aggiornamento degli script di FileX Desktop (`package.json`)

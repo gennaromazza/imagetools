@@ -14,6 +14,8 @@ Al termine devono essere disponibili:
 - blockmap e, soltanto per una release Suite, `latest.yml` nel feed Suite dedicato;
 - soltanto per una release tool, aggiornamento della sua voce in `stable.json` o `beta.json`;
 - verifica che FileX Suite mostri `Aggiorna` per ogni tool con versione installata inferiore.
+- matrice licenze verificata sull'artefatto installato: blocco senza entitlement e avvio con entitlement attivo per ogni tool soggetto a licenza;
+- disinstallazione e reinstallazione verificate senza bypass, perdita ingiustificata di dati o blocco della rimozione dovuto alla licenza.
 
 > **Nota per i nuovi tool:** Quando si aggiunge per la prima volta uno strumento all'ecosistema, assicurarsi di aver seguito preventivamente il **[Runbook Creazione e Rilascio (22-new-tool-creation-runbook.md)](./22-new-tool-creation-runbook.md)**. Se il tool non è registrato in `.github/workflows/windows-release.yml` o nel manifesto (`tool-manifest.ts`), non verrà rilasciato o non potrà essere avviato per problemi di licenza.
 
@@ -29,6 +31,28 @@ Al termine devono essere disponibili:
 8. Creare e pushare il tag del componente; il workflow genera soltanto il suo installer e aggiorna il feed pertinente.
 9. Attendere il completamento del workflow `FileX Windows Release` e, se `website/` e' cambiato, pubblicare il target Firebase `filex-website` con `npm run deploy:website`.
 10. Scaricare e validare il manifest remoto e controllare asset, alias download e sito pubblico su `https://filex-suite.web.app`.
+11. Installare il componente in un ambiente di prova con enforcement reale, verificare la sua policy licenze e completare almeno un ciclo disinstallazione/reinstallazione. Le build dev con licenza automatica non soddisfano questo gate.
+
+## Gate Google Drive
+
+Per ogni release di un tool che espone funzioni Drive:
+
+- `IMAGE_SELECT_GOOGLE_CLIENT_ID` e `IMAGE_SELECT_GOOGLE_CLIENT_SECRET` devono essere presenti nei secret CI; il generatore blocca la release se una delle due credenziali manca;
+- il client Google Cloud deve essere di tipo **Desktop app** e il consent screen deve essere pubblicato per utenti esterni;
+- lo scope richiesto dal codice deve restare `drive.file`, salvo una decisione architetturale documentata e una nuova verifica Google;
+- provare collegamento con un account nuovo, riavvio applicazione, sincronizzazione, funzionamento offline, riconnessione dopo revoca e scollegamento;
+- verificare che lo stesso profilo del sistema operativo condivida l'account fra i tool FileX e che un profilo Windows/macOS diverso non erediti il token;
+- controllare sul Drive dell'utente che vengano creati soltanto cartelle e manifest FileX, mai fotografie o percorsi assoluti locali.
+
+## Gate licenze per componente
+
+La policy da verificare è quella dichiarata da `licenseRuntime` nel manifest, non quella dedotta dal nome del prodotto:
+
+- `shared-runtime`: senza licenza valida il tool non si apre; con stato `active` o `grace` si apre.
+- `management`: la Suite resta accessibile per attivazione, disattivazione e aggiornamenti anche senza licenza.
+- `standalone`: il comportamento commerciale deve essere documentato e testato nell'entry point del tool; non va automaticamente equiparato né a gratuito né a FileX All Access.
+
+La disinstallazione deve riuscire anche offline e con licenza assente, scaduta o revocata. Se un prodotto deve liberare uno slot dispositivo durante la rimozione, l'operazione remota deve essere best-effort e non può bloccare l'uninstaller.
 
 ## Verifica updater
 

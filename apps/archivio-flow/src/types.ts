@@ -4,6 +4,7 @@ import type {
   ArchivioArchiveAnalysisResult,
   ArchivioArchiveRenameResult,
   ArchivioArchiveRenameRequest,
+  ArchivioArchiveRenameProgress,
   ArchivioFilterPreviewData,
   ArchivioImportProgressSnapshot,
   ArchivioImportRequest,
@@ -13,11 +14,17 @@ import type {
   ArchivioLowQualityProgressSnapshot,
   ArchivioSdCard,
   ArchivioSdPreview,
+  ArchivioSafeToFormatResult,
+  ArchivioStudioFlowStatus,
+  DesktopGoogleDriveStatus,
   ArchivioSettings,
 } from "@photo-tools/desktop-contracts";
 
 export type SdCard = ArchivioSdCard;
 export type SdPreview = ArchivioSdPreview;
+export type SafeToFormatResult = ArchivioSafeToFormatResult;
+export type StudioFlowStatus = ArchivioStudioFlowStatus;
+export type GoogleDriveStatus = DesktopGoogleDriveStatus;
 export type Job = ArchivioJob;
 export type ImportRequest = ArchivioImportRequest;
 export type ImportResult = ArchivioImportResult;
@@ -31,3 +38,4 @@ export type ArchiveAnalysisItem = ArchivioArchiveAnalysisItem;
 export type ArchiveAnalysisResult = ArchivioArchiveAnalysisResult;
 export type ArchiveRenameResult = ArchivioArchiveRenameResult;
 export type ArchiveRenameRequest = ArchivioArchiveRenameRequest;
+export type ArchiveRenameProgress = ArchivioArchiveRenameProgress;

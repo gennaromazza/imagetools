@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { List as VirtualList, type RowComponentProps } from "react-window";
-import type { ArchiveAnalysisResult, Job, LowQualityProgressSnapshot, SelectionCandidate } from "../types";
+import type { ArchiveAnalysisResult, ArchiveRenameProgress, Job, LowQualityProgressSnapshot, SelectionCandidate } from "../types";
 import {
   analyzeArchivioArchive,
   deleteArchivioJob,
@@ -8,6 +8,7 @@ import {
   generateArchivioLowQuality,
   getArchivioJobSubfolders,
   getArchivioLowQualityProgress,
+  getArchivioArchiveRenameProgress,
   openJobInPhotoSelector,
   openArchivioFolder,
   renameArchivioArchiveJobs,
@@ -18,6 +19,7 @@ interface Props {
   jobs: Job[];
   loading: boolean;
   onRefresh: () => void;
+  onAnalysisStateChange?: (analyzing: boolean) => void;
 }
 
 function formatDate(isoDate: string): string {
@@ -135,7 +137,7 @@ function getContractPreview(link: string): { shortLabel: string; fullLabel: stri
   }
 }
 
-export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
+export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange }: Props) {
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"dettagliata" | "compatta">("dettagliata");
   const [yearFilter, setYearFilter] = useState("");
@@ -169,8 +171,42 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
   const [selectedRenameIds, setSelectedRenameIds] = useState<Set<string>>(new Set());
   const [renameDrafts, setRenameDrafts] = useState<Record<string, RenameDraft>>({});
   const [analyzingArchive, setAnalyzingArchive] = useState(false);
+  const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
   const [renamingArchive, setRenamingArchive] = useState(false);
+  const [archiveRenameProgress, setArchiveRenameProgress] = useState<ArchiveRenameProgress | null>(null);
   const feedbackTimersRef = useRef<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!analyzingArchive) return;
+    const startedAt = Date.now();
+    setAnalysisElapsedSeconds(0);
+    const timer = window.setInterval(() => {
+      setAnalysisElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [analyzingArchive]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function pollRenameProgress() {
+      try {
+        const progress = await getArchivioArchiveRenameProgress();
+        if (alive) setArchiveRenameProgress(progress);
+      } catch {
+        // Il polling riprova: un riavvio momentaneo del runtime non deve interrompere la UI.
+      }
+    }
+
+    void pollRenameProgress();
+    const timer = window.setInterval(() => void pollRenameProgress(), 600);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const renameBusy = renamingArchive || archiveRenameProgress?.active === true;
 
   const availableYears = Array.from(
     new Set(jobs.map((job) => (job.annoArchivio ?? "").trim()).filter((value) => value.length > 0))
@@ -457,6 +493,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
 
   async function handleAnalyzeArchive() {
     setAnalyzingArchive(true);
+    onAnalysisStateChange?.(true);
     setArchiveFeedback(null);
     try {
       const result = await analyzeArchivioArchive();
@@ -476,6 +513,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
       });
     } finally {
       setAnalyzingArchive(false);
+      onAnalysisStateChange?.(false);
     }
   }
 
@@ -506,12 +544,9 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
     setArchiveFeedback(null);
     try {
       const result = await renameArchivioArchiveJobs(requests);
-      const refreshedAnalysis = await analyzeArchivioArchive();
-      setArchiveAnalysis(refreshedAnalysis);
-      setRenameDrafts(Object.fromEntries(refreshedAnalysis.items.map((item) => [item.jobId, {
-        nomeLavoro: item.nomeLavoro,
-        dataLavoro: item.dataLavoro ?? "",
-      }])));
+      setArchiveRenameProgress(await getArchivioArchiveRenameProgress());
+      setArchiveAnalysis(null);
+      setRenameDrafts({});
       setSelectedRenameIds(new Set());
       setArchiveFeedback({
         type: "success",
@@ -794,8 +829,14 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
           </p>
         </div>
         <div className="workspace__header-actions">
-          <button className="secondary-button" onClick={() => void handleAnalyzeArchive()} disabled={loading || analyzingArchive}>
-            {analyzingArchive ? "Analizzo..." : "Sistema nomi cartelle"}
+          <button
+            className="secondary-button"
+            onClick={() => void handleAnalyzeArchive()}
+            disabled={loading || analyzingArchive || renameBusy}
+            title="Controlla i nomi delle cartelle e prepara le eventuali correzioni. Nessuna cartella viene rinominata senza la tua conferma."
+            aria-busy={analyzingArchive}
+          >
+            {analyzingArchive ? "Controllo in corso…" : "Controlla nomi cartelle"}
           </button>
           <button className="ghost-button" onClick={() => setShowMissingFolders((prev) => !prev)}>
             {showMissingFolders ? "Nascondi mancanti" : "Mostra mancanti"}
@@ -805,6 +846,60 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
           </button>
         </div>
       </div>
+
+      {analyzingArchive && (
+        <div className="archive-analysis-progress" role="status" aria-live="polite">
+          <div className="archive-analysis-progress__copy">
+            <strong>Controllo dell’archivio in corso</strong>
+            <span>
+              Leggo l’indice e confronto i nomi delle cartelle. Non modifico nulla senza conferma
+              {analysisElapsedSeconds > 0 ? ` · ${formatDurationSeconds(analysisElapsedSeconds)}` : ""}.
+            </span>
+          </div>
+          <div className="archive-analysis-progress__track" aria-hidden="true">
+            <span />
+          </div>
+          <small>Puoi cambiare sezione: il controllo continuerà in background.</small>
+        </div>
+      )}
+
+      {archiveRenameProgress && archiveRenameProgress.phase !== "idle" && (
+        <div
+          className="archive-analysis-progress"
+          role="status"
+          aria-live="polite"
+          style={archiveRenameProgress.phase === "error" ? { borderColor: "rgba(212, 163, 156, 0.45)" } : undefined}
+        >
+          <div className="archive-analysis-progress__copy">
+            <strong>
+              {archiveRenameProgress.active
+                ? "Rinomina cartelle in corso"
+                : archiveRenameProgress.phase === "completed"
+                  ? "Rinomina completata"
+                  : "Rinomina non completata"}
+            </strong>
+            <span>{archiveRenameProgress.message}</span>
+          </div>
+          {archiveRenameProgress.total > 0 && (
+            <>
+              <div
+                className="archive-analysis-progress__track archive-analysis-progress__track--determinate"
+                role="progressbar"
+                aria-label="Avanzamento rinomina cartelle"
+                aria-valuemin={0}
+                aria-valuemax={archiveRenameProgress.total}
+                aria-valuenow={archiveRenameProgress.completed}
+              >
+                <span style={{ width: `${Math.round((archiveRenameProgress.completed / archiveRenameProgress.total) * 100)}%` }} />
+              </div>
+              <small>
+                {archiveRenameProgress.completed} di {archiveRenameProgress.total} cartelle
+                {archiveRenameProgress.active ? " · puoi cambiare sezione, il lavoro continuerà." : ""}
+              </small>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Search */}
       <label className="field">
@@ -1112,7 +1207,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
                         <input
                           type="checkbox"
                           checked={selectedRenameIds.has(item.jobId)}
-                          disabled={!canRename || renamingArchive}
+                          disabled={!canRename || renameBusy}
                           onChange={() => toggleRenameSelection(item.jobId)}
                           style={{ accentColor: "var(--accent)" }}
                         />
@@ -1124,7 +1219,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
                           <input
                             type="text"
                             value={draft.nomeLavoro}
-                            disabled={renamingArchive}
+                            disabled={renameBusy}
                             onChange={(event) => updateRenameDraft(item.jobId, { nomeLavoro: event.target.value })}
                           />
                         </label>
@@ -1133,7 +1228,7 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
                           <input
                             type="date"
                             value={draft.dataLavoro}
-                            disabled={renamingArchive}
+                            disabled={renameBusy}
                             onChange={(event) => updateRenameDraft(item.jobId, { dataLavoro: event.target.value })}
                           />
                         </label>
@@ -1161,16 +1256,20 @@ export function ArchivioPanel({ jobs, loading, onRefresh }: Props) {
                 <button
                   className="ghost-button"
                   onClick={() => setArchiveAnalysis(null)}
-                  disabled={renamingArchive}
+                  disabled={renameBusy}
                 >
                   Chiudi
                 </button>
                 <button
                   className="secondary-button"
                   onClick={() => void confirmArchiveRename()}
-                  disabled={renamingArchive || selectedRenameIds.size === 0}
+                  disabled={renameBusy || selectedRenameIds.size === 0}
                 >
-                  {renamingArchive ? "Rinomino..." : `Rinomina selezionate (${selectedRenameIds.size})`}
+                  {renameBusy
+                    ? archiveRenameProgress?.total
+                      ? `Rinomino ${archiveRenameProgress.completed}/${archiveRenameProgress.total}...`
+                      : "Avvio rinomina..."
+                    : `Rinomina selezionate (${selectedRenameIds.size})`}
                 </button>
               </div>
             </div>

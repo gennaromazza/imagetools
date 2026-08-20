@@ -1,0 +1,24 @@
+{
+  "name": "@photo-tools/filex-dev-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Dashboard web per sviluppare i tool FileX: avvio dev server, licenze, test.",
+  "scripts": {
+    "start": "tsx server/index.ts",
+    "dev": "tsx server/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@photo-tools/desktop-contracts": "0.1.0",
+    "cors": "^2.8.5",
+    "express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}

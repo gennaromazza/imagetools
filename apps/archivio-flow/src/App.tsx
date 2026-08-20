@@ -3,14 +3,17 @@ import type { Job, ImportResult } from "./types";
 import { getArchivioJobs } from "./archivioDesktopApi";
 import { NuovoLavoroPanel } from "./components/NuovoLavoroPanel";
 import { ArchivioPanel } from "./components/ArchivioPanel";
+import { GoogleDrivePanel } from "./components/GoogleDrivePanel";
 import archivioLogo from "./assets/photo_Archivie.png";
+import archivioPackage from "../package.json";
 
-type Screen = "nuovo" | "archivio" | "impostazioni";
+type Screen = "nuovo" | "archivio" | "drive" | "impostazioni";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("nuovo");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
+  const [archiveAnalyzing, setArchiveAnalyzing] = useState(false);
 
   const refreshJobs = useCallback(async () => {
     setLoadingJobs(true);
@@ -50,15 +53,12 @@ export default function App() {
           <img
             src={archivioLogo}
             alt="Archivio Flow"
-            style={{
-              width: "100%",
-              maxWidth: "172px",
-              borderRadius: "18px",
-              boxShadow: "0 16px 28px rgba(0, 0, 0, 0.18)",
-            }}
+            className="sidebar__brand-logo"
           />
-          <h1>Archivio Flow</h1>
-          <p>Importa e organizza i tuoi scatti</p>
+          <div className="sidebar__brand-copy">
+            <h1>Archivio Flow</h1>
+            <p>Importa e organizza i tuoi scatti</p>
+          </div>
         </div>
 
         <nav className="stack">
@@ -77,7 +77,16 @@ export default function App() {
           >
             <span>2</span>
             <strong>Archivio lavori</strong>
-            <small>{jobs.length > 0 ? `${jobs.length} lavori salvati` : "Nessun lavoro ancora"}</small>
+            <small>{archiveAnalyzing ? "Controllo nomi in corso…" : (jobs.length > 0 ? `${jobs.length} lavori salvati` : "Nessun lavoro ancora")}</small>
+          </button>
+
+          <button
+            className={screen === "drive" ? "workflow-step workflow-step--active" : "workflow-step"}
+            onClick={() => setScreen("drive")}
+          >
+            <span aria-hidden="true">☁</span>
+            <strong>Google Drive</strong>
+            <small>Registro remoto StudioFlow</small>
           </button>
 
           <button
@@ -90,23 +99,29 @@ export default function App() {
           </button>
         </nav>
 
-        <div className="tool-pill" style={{ marginTop: "auto", paddingTop: "2rem" }}>
-          <span>Photo Tools</span>
-          <strong>v1.0</strong>
+        <div className="tool-pill" style={{ marginTop: "auto" }}>
+          <span>Archivio Flow</span>
+          <strong>v{archivioPackage.version}</strong>
         </div>
       </aside>
 
       {/* ── Main workspace ──────────────────────────────────────────── */}
       <main className="workspace">
-        {screen !== "archivio" && (
+        {(screen === "nuovo" || screen === "impostazioni") && (
           <NuovoLavoroPanel
             onImportDone={handleImportDone}
             activeView={screen === "impostazioni" ? "impostazioni" : "nuovo"}
           />
         )}
-        {screen === "archivio" && (
-          <ArchivioPanel jobs={jobs} loading={loadingJobs} onRefresh={refreshJobs} />
-        )}
+        <div style={{ display: screen === "archivio" ? "block" : "none" }} aria-hidden={screen !== "archivio"}>
+          <ArchivioPanel
+            jobs={jobs}
+            loading={loadingJobs}
+            onRefresh={refreshJobs}
+            onAnalysisStateChange={setArchiveAnalyzing}
+          />
+        </div>
+        {screen === "drive" && <GoogleDrivePanel />}
       </main>
     </div>
   );

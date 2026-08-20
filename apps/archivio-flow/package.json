@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/archivio-flow",
   "private": true,
-  "version": "0.1.25",
+  "version": "0.1.26",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:server\"",
     "build": "vite build",
     "build:server": "tsc -p server/tsconfig.json",
-    "test:archive": "tsx --test server/archive-analysis.test.ts",
+    "test:archive": "tsx --test --test-concurrency=1 server/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

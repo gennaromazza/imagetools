@@ -49,6 +49,18 @@ Ogni file segue gli stati:
 
 La copia viene scritta con nome temporaneo nella stessa destinazione finale, sincronizzata, verificata e rinominata atomicamente. Un file incompleto non assume mai il nome definitivo. Il journal consente il recupero dopo crash, perdita alimentazione o disconnessione.
 
+## Rinomina di una cartella gia' protetta
+
+Quando una cartella del master cambia soltanto nome, Backup Guard non deve interpretare l'evento come cancellazione seguita da una nuova copia. La rinomina diretta sul clone e' ammessa esclusivamente quando:
+
+- vecchio e nuovo nome si trovano nella stessa cartella padre;
+- la vecchia cartella esiste nella baseline e sul clone, ma non piu' nel master;
+- struttura, dimensioni e timestamp dei file identificano una sola corrispondenza possibile;
+- tutti i file del nuovo percorso master e del vecchio percorso clone hanno lo stesso checksum SHA-256;
+- il percorso di destinazione sul clone non esiste gia'.
+
+La verifica dei checksum avviene prima di qualsiasi modifica. Se la corrispondenza e' ambigua o un solo contenuto differisce, Backup Guard non rinomina nulla automaticamente e conserva il piano ordinario da sottoporre all'utente. Una rinomina valida trasferisce `0` byte, non usa il cestino e aggiorna la baseline soltanto dopo la verifica finale.
+
 ## Checksum e scansione
 
 - File nuovi o modificati: checksum completo obbligatorio su origine e destinazione.

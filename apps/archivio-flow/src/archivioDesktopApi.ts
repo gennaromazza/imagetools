@@ -2,6 +2,7 @@ import type {
   ArchiveAnalysisResult,
   ArchiveRenameResult,
   ArchiveRenameRequest,
+  ArchiveRenameProgress,
   ArchivioFlowSettings,
   FilterPreviewData,
   ImportRequest,
@@ -12,6 +13,9 @@ import type {
   SelectionCandidate,
   SdCard,
   SdPreview,
+  SafeToFormatResult,
+  StudioFlowStatus,
+  GoogleDriveStatus,
 } from "./types";
 
 function getDesktopApi() {
@@ -131,6 +135,54 @@ export async function getArchivioSdPreview(sdPath: string): Promise<SdPreview> {
     return await desktopApi.getArchivioSdPreview(sdPath);
   }
   return await apiGet<SdPreview>(`/api/sd-preview?path=${encodeURIComponent(sdPath)}`);
+}
+
+export async function getArchivioArchiveRenameProgress(): Promise<ArchiveRenameProgress> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) {
+    return await desktopApi.getArchivioArchiveRenameProgress();
+  }
+  return await apiGet<ArchiveRenameProgress>("/api/archive/rename/progress");
+}
+
+export async function checkArchivioSafeToFormat(sdPath: string): Promise<SafeToFormatResult> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) return await desktopApi.checkArchivioSafeToFormat(sdPath);
+  return await apiPost<SafeToFormatResult>("/api/sd/safe-to-format", { sdPath });
+}
+
+export async function getArchivioStudioFlowStatus(): Promise<StudioFlowStatus> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) return await desktopApi.getArchivioStudioFlowStatus();
+  return await apiGet<StudioFlowStatus>("/api/studioflow/status");
+}
+
+export async function reconcileArchivioIndex(): Promise<StudioFlowStatus["archiveIndex"]> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) return await desktopApi.reconcileArchivioIndex();
+  return await apiPost<StudioFlowStatus["archiveIndex"]>("/api/archive/reconcile");
+}
+
+export async function resumeArchivioImport(sessionId: string): Promise<ImportResult> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) return await desktopApi.resumeArchivioImport(sessionId);
+  return await apiPost<ImportResult>(`/api/import-sessions/${encodeURIComponent(sessionId)}/resume`);
+}
+
+export async function syncArchivioDriveRegistry(): Promise<{ ok: boolean; syncedEvents: number; message: string }> {
+  return await requireDesktopApi().syncArchivioDriveRegistry();
+}
+
+export async function getArchivioGoogleDriveStatus(): Promise<GoogleDriveStatus> {
+  return await requireDesktopApi().getGoogleDriveStatus();
+}
+
+export async function connectArchivioGoogleDrive(): Promise<GoogleDriveStatus> {
+  return await requireDesktopApi().connectGoogleDrive();
+}
+
+export async function disconnectArchivioGoogleDrive(): Promise<GoogleDriveStatus> {
+  return await requireDesktopApi().disconnectGoogleDrive();
 }
 
 export async function getArchivioFilterPreview(input: {

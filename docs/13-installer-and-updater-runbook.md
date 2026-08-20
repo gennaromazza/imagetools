@@ -53,6 +53,9 @@ Le versioni precedenti al passaggio per-user sono installate in `C:\Program File
 - Tool disinstallabili separatamente.
 - Launcher non deve rimuovere tool non selezionati esplicitamente.
 - Disinstallazione launcher non tocca dati operativi tool (cache/progetti) salvo scelta utente.
+- Nessuno stato licenza (`unlicensed`, `expired` o `revoked`) può impedire la disinstallazione.
+- Dopo disinstallazione e reinstallazione, il tool deve ripetere il controllo previsto dalla propria policy e non deve ereditare bypass di sviluppo.
+- L'eventuale chiamata di disattivazione per liberare uno slot dispositivo è best-effort: un PC offline o un backend non disponibile non devono bloccare l'uninstaller.
 
 ## Checklist Post-Install
 
@@ -63,6 +66,8 @@ Le versioni precedenti al passaggio per-user sono installate in `C:\Program File
 - Nessun crash all'avvio nei primi 2 minuti.
 - Dopo l'aggiornamento: Suite ancora aperta, altri tool ancora aperti e tool aggiornato riaperto se era in esecuzione.
 - L'installazione del tool è in `%LOCALAPPDATA%\Programs\<ToolName>` e l'uninstall è visibile in `Impostazioni > App`.
+- Con enforcement reale, ogni tool soggetto a licenza è bloccato senza entitlement e si apre con licenza `active` o `grace`.
+- Dopo un ciclo disinstallazione/reinstallazione, la policy licenze resta applicata e la rimozione completa non dipende dalla raggiungibilità del servizio licenze.
 - Per FileX Send verificare entrambe le modalità: doppio QR sulla rete locale e link remoto con scadenza impostata dal fotografo.
 - Chiudere FileX Send durante un upload remoto di prova, completare l'invio dal telefono e riaprire il tool: il file deve essere scaricato automaticamente nella cartella della sessione e deve comparire la notifica Windows.
 - Dopo la conferma del download il file non deve più comparire nella coda desktop; la risposta API deve indicare una retention residua di circa 60 minuti.
