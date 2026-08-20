@@ -30,6 +30,14 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-20 - FileX Suite 0.1.41
+
+### Dev Console e pubblicazione
+- la FileX Dev Console propone automaticamente la prossima patch e riunisce preflight, commit, tag, pubblicazione e verifica in un solo pulsante
+- le modifiche locali preparate durante lo sviluppo vengono incluse nel commit di release dopo una conferma nel browser, senza richiedere comandi o token manuali
+- mantenuto il blocco di sicurezza: la pubblicazione è consentita esclusivamente dal branch `main` e mostra nel log ogni fase del workflow
+- corretto il controllo delle dipendenze: un semplice incremento di versione non avvia più `npm ci` mentre la Dev Console è aperta, evitando blocchi di `esbuild`
+
 ## 2026-08-20 - FileX Backup Guard 0.2.1
 
 - riconosciute le rinomine non ambigue delle cartelle gia' protette: Backup Guard verifica integralmente i contenuti con SHA-256 e rinomina la cartella direttamente sul clone, senza eliminare o ritrasferire le fotografie

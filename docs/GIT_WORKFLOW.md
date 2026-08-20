@@ -20,6 +20,12 @@ Questa policy evita conflitti tra `main` e `master` e definisce un flusso unico.
 4. Commit piccoli e chiari.
 5. Push del branch feature e PR verso `main`.
 
+## Pubblicazione dalla FileX Dev Console
+
+Quando le modifiche sono state completate e verificate, la pubblicazione ordinaria della Suite avviene dalla sezione **Release FileX Suite** della Dev Console. Il pulsante **Verifica e pubblica** calcola la prossima patch, esegue i controlli locali, include le modifiche presenti nel commit di release, effettua push e tag e attende la verifica di GitHub Actions e dei feed.
+
+La Console accetta la pubblicazione solo dal branch `main`. Prima del click controlla con attenzione l'elenco delle modifiche: il workflow le include tutte nel commit di release.
+
 ## Comandi Sicuri Consigliati
 
 - Verifica stato:

@@ -245,17 +245,23 @@ app.get("/api/release/suite/status", async (_req, res) => {
     const pkg = JSON.parse(await readFile(join(ROOT, "apps", "filex-desktop", "package.json"), "utf8")) as { version?: string };
     const currentVersion = String(pkg.version ?? "0.0.0");
     const [major, minor, patch] = currentVersion.split(".").map(Number);
-    const [{ stdout: branch }, { stdout: changes }] = await Promise.all([
+    const [{ stdout: branch }, { stdout: changes }, currentTag] = await Promise.all([
       execFileP("git", ["branch", "--show-current"], { cwd: ROOT, timeout: 5_000 }),
       execFileP("git", ["status", "--short"], { cwd: ROOT, timeout: 5_000 }),
+      execFileP("git", ["tag", "--list", `suite-v${currentVersion}`], { cwd: ROOT, timeout: 5_000 }),
     ]);
+    const currentVersionAlreadyPublished = currentTag.stdout.trim() === `suite-v${currentVersion}`;
     res.json({
       ok: true,
       currentVersion,
-      suggestedVersion: `${major}.${minor}.${patch + 1}`,
+      // Se il pacchetto è stato già aggiornato da una pubblicazione interrotta,
+      // il tag non esiste ancora: riproponiamo quella stessa versione, senza
+      // saltare una patch e senza obbligare l'utente a intervenire a mano.
+      suggestedVersion: currentVersionAlreadyPublished ? `${major}.${minor}.${patch + 1}` : currentVersion,
       branch: branch.trim(),
       clean: changes.trim().length === 0,
       changedFiles: changes.trim() ? changes.trim().split(/\r?\n/u).length : 0,
+      changesSummary: changes.trim() || "Nessuna modifica in attesa.",
       running: await isRunning(SUITE_RELEASE_ID),
     });
   } catch (error) {
@@ -289,15 +295,14 @@ app.post("/api/release/suite/publish", async (req, res) => {
     res.status(400).json({ ok: false, error: "Versione non valida. Usa il formato X.Y.Z." });
     return;
   }
-  const expectedConfirmation = `PUBBLICA-suite-v${version}`;
-  if (String(req.body?.confirmation ?? "").trim() !== expectedConfirmation) {
-    res.status(400).json({ ok: false, error: `Scrivi esattamente ${expectedConfirmation} per autorizzare la pubblicazione.` });
+  if (req.body?.confirmed !== true) {
+    res.status(400).json({ ok: false, error: "Conferma la pubblicazione dalla dashboard prima di procedere." });
     return;
   }
   const result = await startProcess(
     SUITE_RELEASE_ID,
     `Release FileX Suite ${version}`,
-    { file: SUITE_RELEASE_BAT, args: [version, "--publish", expectedConfirmation] },
+    { file: SUITE_RELEASE_BAT, args: [version, "--publish", `PUBBLICA-suite-v${version}`] },
     { cwd: ROOT },
   );
   res.json({ ...result, id: SUITE_RELEASE_ID });

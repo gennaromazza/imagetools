@@ -265,9 +265,11 @@ if defined DIRTY (
     echo ------------------------------------------------------------
     echo.
     if "%NON_INTERACTIVE%"=="1" (
-        echo ERRORE: la release da dashboard richiede una working tree pulita.
-        echo Esegui commit o annulla le modifiche prima di proseguire.
-        goto :fail
+        if "%PREFLIGHT_ONLY%"=="1" (
+            echo Preflight dashboard: le modifiche saranno incluse nel commit di release dopo la pubblicazione.
+        ) else (
+            echo Pubblicazione dashboard autorizzata: le modifiche elencate saranno incluse nel commit di release.
+        )
     ) else (
         choice /C SN /N /M "Vuoi includere TUTTE queste modifiche? [S/N] "
         if errorlevel 2 goto :abort
@@ -345,35 +347,45 @@ REM ============================================================
 echo [9/16] Verifica dipendenze...
 
 set "DEP_HASH="
-for /f "delims=" %%H in ('node -e "const fs=require('fs'),c=require('crypto');const files=['package-lock.json','package.json','apps/filex-desktop/package.json'];const h=c.createHash('sha256');for(const f of files){if(fs.existsSync(f))h.update(fs.readFileSync(f));}h.update(process.version);console.log(h.digest('hex'))" 2^>nul') do set "DEP_HASH=%%H"
+for /f "delims=" %%H in ('node scripts\release-dependencies-hash.mjs 2^>nul') do set "DEP_HASH=%%H"
 
 if not defined DEP_HASH (
     echo ERRORE: impossibile calcolare fingerprint dipendenze.
     goto :fail
 )
 
-set "DEP_STAMP=node_modules\.filex-dependencies-hash"
+set "DEP_STAMP=node_modules\.filex-dependencies-v2-hash"
 set "CACHED_DEP_HASH="
 if exist "%DEP_STAMP%" set /p "CACHED_DEP_HASH=" < "%DEP_STAMP%"
 
-if exist "node_modules" if "%DEP_HASH%"=="%CACHED_DEP_HASH%" (
+if exist "node_modules\@electron\asar\lib\asar.js" if not defined CACHED_DEP_HASH (
+    > "%DEP_STAMP%" echo %DEP_HASH%
+    echo Dipendenze esistenti validate per la release.
+    echo npm ci saltato: la dashboard resta attiva e le versioni package non richiedono reinstallazione.
+) else if exist "node_modules" if "%DEP_HASH%"=="%CACHED_DEP_HASH%" (
     echo Dipendenze gia sincronizzate.
     echo npm ci saltato.
 ) else (
     echo Dipendenze cambiate o mancanti.
     echo Avvio npm ci...
     call npm ci
-    if errorlevel 1 (
-        echo.
-        echo ============================================================
-        echo ERRORE: npm ci fallito
-        echo ============================================================
-        echo Controlla l'errore npm immediatamente sopra.
-        goto :fail
-    )
+    if errorlevel 1 goto :dependencies_failed
+    if not exist "node_modules\@electron\asar\lib\asar.js" goto :dependencies_failed
     > "%DEP_STAMP%" echo %DEP_HASH%
 )
 
+echo.
+goto :dependencies_done
+
+:dependencies_failed
+        echo.
+        echo ============================================================
+        echo ERRORE: npm ci non ha ripristinato tutte le dipendenze richieste
+        echo ============================================================
+        echo Controlla l'errore npm immediatamente sopra.
+        goto :fail
+
+:dependencies_done
 echo.
 
 REM ============================================================

@@ -22,6 +22,7 @@ Ogni tool mostrato nella dashboard deve avere un workspace esistente e uno scrip
 
 - Le API sono volutamente locali: non cambiare host da `127.0.0.1` né esporre CORS in rete senza una richiesta esplicita.
 - I comandi devono restare basati su una allowlist (`DEV_TOOLS`); non accettare comandi shell arbitrari dal browser.
+- La release Suite usa esclusivamente il workflow allowlistato `release-filex-suite.bat`: dalla dashboard può includere le modifiche locali nel commit di release, ma deve restare limitata al branch `main` e richiedere una conferma esplicita del browser.
 - I log runtime in `.runtime/` sono temporanei e non vanno versionati.
 
 ## Verifica

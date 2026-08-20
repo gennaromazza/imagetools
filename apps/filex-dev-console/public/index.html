@@ -218,18 +218,14 @@
 
     <section id="release-suite">
       <h2>Release FileX Suite</h2>
-      <p class="hint">Workflow controllato: preflight locale, commit e push su main, tag, GitHub Actions, verifica feed e deploy del sito.</p>
+      <p class="hint">Un solo flusso: controlli locali, commit delle modifiche preparate, push su main, tag, GitHub Actions, verifica feed e deploy del sito.</p>
       <div class="feedback" id="releaseStatus">Caricamento stato repository…</div>
       <div class="form" style="margin-top: 12px;">
-        <input id="releaseVersion" placeholder="Versione, es. 0.1.39" aria-label="Versione release Suite" />
-        <button id="releasePreflight" class="secondary">Esegui preflight</button>
+        <input id="releaseVersion" readonly aria-label="Versione release Suite proposta automaticamente" />
+        <button id="releasePublish" class="danger">Verifica e pubblica release</button>
         <button id="releaseStop" class="secondary" disabled>Ferma workflow</button>
       </div>
-      <div class="form">
-        <input id="releaseConfirmation" style="min-width: 270px;" placeholder="PUBBLICA-suite-vX.Y.Z" aria-label="Conferma pubblicazione release" />
-        <button id="releasePublish" class="danger">Pubblica release</button>
-      </div>
-      <p class="hint">La pubblicazione è consentita solo da <code>main</code>, con working tree pulita, CHANGELOG aggiornato e conferma esatta.</p>
+      <p class="hint">La versione patch viene proposta automaticamente. Le modifiche visibili qui sotto saranno incluse nel commit di release; la pubblicazione resta consentita solo dal branch <code>main</code>.</p>
       <pre class="log" id="releaseLog">Nessun workflow release avviato.</pre>
     </section>
   </main>
@@ -473,13 +469,13 @@
     let releaseLogTimer;
     async function refreshReleaseStatus(fillVersion = false) {
       const state = await api("/api/release/suite/status");
-      if (fillVersion && !$("#releaseVersion").value) $("#releaseVersion").value = state.suggestedVersion;
-      const ready = state.branch === "main" && state.clean;
+      if (fillVersion || !$("#releaseVersion").value) $("#releaseVersion").value = state.suggestedVersion;
+      const ready = state.branch === "main";
       $("#releaseStatus").className = `feedback ${ready ? "success" : "error"}`;
-      $("#releaseStatus").textContent = `Versione attuale ${state.currentVersion} · branch ${state.branch || "—"} · ${state.clean ? "working tree pulita" : `${state.changedFiles} file modificati`} · ${state.running ? "workflow in corso" : "workflow fermo"}`;
-      $("#releasePreflight").disabled = state.running;
+      $("#releaseStatus").textContent = `Versione attuale ${state.currentVersion} → ${state.suggestedVersion} · branch ${state.branch || "—"} · ${state.clean ? "nessuna modifica da includere" : `${state.changedFiles} file pronti per il commit di release`} · ${state.running ? "workflow in corso" : "workflow pronto"}`;
       $("#releasePublish").disabled = state.running || !ready;
-      $("#releasePublish").title = ready ? "" : "Per pubblicare servono branch main e working tree pulita.";
+      $("#releasePublish").textContent = state.running ? "Pubblicazione in corso…" : `Verifica e pubblica v${state.suggestedVersion}`;
+      $("#releasePublish").title = ready ? "" : "Per pubblicare devi essere sul branch main.";
       $("#releaseStop").disabled = !state.running;
       return state;
     }
@@ -499,25 +495,12 @@
       releaseLogTimer = setInterval(() => update().catch(() => {}), 1500);
     }
 
-    $("#releasePreflight").onclick = async () => {
-      try {
-        const version = $("#releaseVersion").value.trim();
-        const result = await api("/api/release/suite/preflight", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version }),
-        });
-        if (!result.ok) throw new Error(result.error || "Preflight non avviato.");
-        toast(`Preflight FileX Suite ${version} avviato.`);
-        await watchReleaseLog();
-      } catch (error) { toast(error.message, true); }
-    };
-
     $("#releasePublish").onclick = async () => {
       try {
         const version = $("#releaseVersion").value.trim();
-        const confirmation = $("#releaseConfirmation").value.trim();
-        if (!confirm(`Pubblicare FileX Suite ${version}? Il workflow creerà commit, tag e release remoti.`)) return;
+        if (!confirm(`Avviare la release FileX Suite ${version}? La dashboard eseguirà i controlli, includerà le modifiche locali nel commit di release e pubblicherà tag e installer.`)) return;
         const result = await api("/api/release/suite/publish", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, confirmation }),
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, confirmed: true }),
         });
         if (!result.ok) throw new Error(result.error || "Release non avviata.");
         toast(`Release FileX Suite ${version} avviata.`);
