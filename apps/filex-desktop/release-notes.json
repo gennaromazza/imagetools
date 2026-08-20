@@ -1,5 +1,10 @@
 {
   "backup-guard": {
+    "0.2.1": [
+      "Le cartelle rinominate nel master vengono riconosciute in modo non ambiguo e rinominate direttamente sul clone, senza ricopiare le fotografie.",
+      "Prima della rinomina Backup Guard confronta tutti i contenuti con SHA-256; al minimo dubbio interrompe l'operazione prima di modificare il clone.",
+      "La testata dell'app è stata resa più compatta per lasciare spazio al controllo dell'archivio."
+    ],
     "0.2.0": [
       "Prima versione stabile di FileX Backup Guard, disponibile direttamente nel catalogo ufficiale di FileX Suite.",
       "Sincronizzazione master-clone verificata SHA-256 con propagazione delle cancellazioni, cestino recuperabile e importazione sicura dei nuovi file dal clone.",
@@ -82,6 +87,11 @@
     ]
   },
   "archivio-flow": {
+    "0.1.26": [
+      "StudioFlow conserva l'indice SQLite e aggiorna soltanto i lavori modificati, senza ricostruire l'intero archivio a ogni avvio.",
+      "La rinomina assistita è persistente, osservabile e richiede sempre una conferma prima di modificare una cartella.",
+      "Google Drive salva esclusivamente manifest e metadati del registro remoto, mai le fotografie dell'archivio."
+    ],
     "0.1.25": [
       "Pubblicazione coordinata con FileX Suite 0.1.25 per mantenere allineati installer, manifest e canale stabile.",
       "Aggiornamento Windows distribuito con verifica SHA-256 e installazione per-user."
