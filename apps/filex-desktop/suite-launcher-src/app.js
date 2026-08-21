@@ -335,7 +335,7 @@ async function install(id, button = null) {
     job = await api.getToolUpdateJob(job.id);
   }
   if (!job || job.status !== 'ready-to-apply') throw new Error(job?.error || 'Download non riuscito');
-  if (button) button.textContent = 'Riavvio...';
+  if (button) button.textContent = 'Conferma su Windows...';
   const result = await api.applyToolUpdate(job.id);
   if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
   await new Promise(resolve => setTimeout(resolve, 1200));

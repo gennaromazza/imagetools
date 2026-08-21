@@ -26,6 +26,7 @@ const suiteMain = await read("apps/filex-desktop/src/suite-main.ts");
 const suitePreload = await read("apps/filex-desktop/src/suite-preload.ts");
 const suiteUpdater = await read("apps/filex-desktop/src/suite-updater.ts");
 const toolUpdater = await read("apps/filex-desktop/src/updater.ts");
+const toolProcessCoordinator = await read("apps/filex-desktop/src/filex-process-coordinator.ts");
 const launcher = await read("apps/filex-desktop/suite-launcher-src/app.js");
 const launcherBuilder = await read("apps/filex-desktop/scripts/build-suite-launcher.mjs");
 const releaseWorkflow = await read(".github/workflows/windows-release.yml");
@@ -91,7 +92,20 @@ assert(
 );
 assert(
   builder.includes('forceCodeSigning: process.env.FILEX_CODE_SIGNING === "1"'),
-  "Le release Windows possono pubblicare installer non firmati anche quando la firma e richiesta.",
+  "Electron Builder non rispetta la scelta esplicita della pipeline sulla firma Windows.",
+);
+assert(
+  releaseWorkflow.includes("secrets.FILEX_WINDOWS_CSC_LINK != ''")
+    && releaseWorkflow.includes("secrets.FILEX_WINDOWS_CSC_KEY_PASSWORD != ''")
+    && releaseWorkflow.includes("pubblico un installer non firmato"),
+  "La pipeline non gestisce in modo esplicito le release senza certificato Windows.",
+);
+assert(
+  toolProcessCoordinator.includes('import { shell } from "electron"')
+    && toolProcessCoordinator.includes("shell.openPath(installerPath)")
+    && !toolProcessCoordinator.includes('spawn(installerPath, ["/S"]')
+    && launcher.includes("Conferma su Windows..."),
+  "La Suite non apre visibilmente gli installer per consentire la conferma di SmartScreen.",
 );
 for (const excludedDependency of ["@img", "exiftool-vendored", "exiftool-vendored.exe", "sharp"]) {
   assert(
@@ -117,6 +131,11 @@ assert(
   suiteUpdater.includes("suite-channel-stable")
     && !suiteUpdater.includes("repos/gennaromazza/imagetools/releases/latest"),
   "L'updater Suite dipende ancora dalla release GitHub globale piu recente.",
+);
+assert(
+  suiteUpdater.includes("autoUpdater.autoInstallOnAppQuit = false")
+    && suiteUpdater.includes("autoUpdater.quitAndInstall(false, true)"),
+  "L'aggiornamento Suite non lascia visibile la conferma Windows per gli installer non firmati.",
 );
 assert(
   toolUpdater.includes("update-catalog-${channel}")

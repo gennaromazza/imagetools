@@ -36,7 +36,8 @@
 - corretta la licenza offline firmata: non viene piu mostrata come attiva se non puo' avviare i tool, mentre un'attestazione valida ripristina correttamente l'uso offline
 - la cache degli installer elimina i download FileX conclusi o falliti non piu' in uso, senza toccare aggiornamenti attivi
 - il catalogo incluso conserva le release tool piu' recenti se il catalogo remoto e' temporaneamente arretrato; ripristinati Adobe Cleaner e Image Select Pro aggiornato
-- resa obbligatoria la firma degli installer Windows in CI per impedire la pubblicazione di artefatti bloccabili dal sistema
+- consentita la pubblicazione senza certificato: la firma si abilita automaticamente quando i secret sono configurati e, in alternativa, l'installer viene aperto visibilmente per permettere la conferma di SmartScreen
+- la Suite attende fino a cinque minuti la versione realmente installata e indica chiaramente quando confermare l'avviso di sicurezza di Windows; anche il proprio aggiornamento apre l'installer in modalita visibile
 
 ### Dev Console e release indipendenti
 - aggiunta la pubblicazione controllata di ogni tool dal pannello Dev, con stato del workflow GitHub e stop selettivo
@@ -46,27 +47,27 @@
 
 ## 2026-08-21 - Image Select Pro 0.1.28
 
-- riallineati catalogo stabile, checksum e installer Windows firmato
+- riallineati catalogo stabile e checksum; l'installer non firmato viene confermato tramite l'interfaccia di sicurezza di Windows
 
 ## 2026-08-21 - Image Party Frame 0.1.26
 
-- pubblicazione di manutenzione con installer Windows firmato e catalogo verificato
+- pubblicazione di manutenzione con checksum verificato e installazione visibile su Windows
 
 ## 2026-08-21 - Batch Print Layout 0.1.1
 
-- installer Windows firmato per evitare blocchi di esecuzione dalla Suite
+- installer Windows avviato visibilmente dalla Suite per consentire la conferma di sicurezza
 
 ## 2026-08-21 - Archivio Flow 0.1.27
 
-- pubblicazione di manutenzione con installer Windows firmato e catalogo verificato
+- pubblicazione di manutenzione con checksum verificato e installazione visibile su Windows
 
 ## 2026-08-21 - Image Converter 0.1.1
 
-- installer Windows firmato per evitare blocchi di esecuzione dalla Suite
+- installer Windows avviato visibilmente dalla Suite per consentire la conferma di sicurezza
 
 ## 2026-08-21 - Trova Foto da Lista 0.1.1
 
-- installer Windows firmato per evitare blocchi di esecuzione dalla Suite
+- installer Windows avviato visibilmente dalla Suite per consentire la conferma di sicurezza
 
 ## 2026-08-21 - FileX Adobe Cleaner 0.1.1
 
@@ -74,11 +75,11 @@
 
 ## 2026-08-21 - FileX Send 0.1.4
 
-- pubblicazione di manutenzione con installer Windows firmato e catalogo verificato
+- pubblicazione di manutenzione con checksum verificato e installazione visibile su Windows
 
 ## 2026-08-21 - FileX Backup Guard 0.2.2
 
-- pubblicazione di manutenzione con installer Windows firmato e catalogo verificato
+- pubblicazione di manutenzione con checksum verificato e installazione visibile su Windows
 
 ## 2026-08-20 - FileX Suite 0.1.42
 

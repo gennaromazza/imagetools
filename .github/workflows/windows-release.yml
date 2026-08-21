@@ -59,7 +59,7 @@ jobs:
   build-and-release:
     runs-on: windows-latest
     env:
-      FILEX_CODE_SIGNING: "1"
+      FILEX_CODE_SIGNING: ${{ secrets.FILEX_WINDOWS_CSC_LINK != '' && secrets.FILEX_WINDOWS_CSC_KEY_PASSWORD != '' && '1' || '0' }}
       CSC_LINK: ${{ secrets.FILEX_WINDOWS_CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.FILEX_WINDOWS_CSC_KEY_PASSWORD }}
       IMAGE_SELECT_GOOGLE_CLIENT_ID: ${{ secrets.IMAGE_SELECT_GOOGLE_CLIENT_ID }}
@@ -172,6 +172,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $env:FILEX_OUTPUT_DIR = ".output/releases"
+          if ($env:FILEX_CODE_SIGNING -eq "1") {
+            Write-Host "Firma Authenticode abilitata per questa release."
+          } else {
+            Write-Warning "Certificato non configurato: pubblico un installer non firmato che richiedera conferma visibile su Windows."
+          }
           switch ($env:FILEX_COMPONENT) {
             "suite" { npm.cmd run dist:filex-desktop:suite:win }
             "photo-selector-app" { npm.cmd --workspace @photo-tools/filex-desktop run dist:photo-selector:win64 }

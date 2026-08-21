@@ -58,7 +58,9 @@ export function configureSuiteUpdater(options: {
   if (!enabled || configured) return snapshot();
   configured = true;
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Senza certificato l'utente deve poter vedere e confermare SmartScreen.
+  // L'installazione parte quindi solo dal comando esplicito nella Suite.
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.allowPrerelease = options.allowPrerelease;
   autoUpdater.setFeedURL({
@@ -143,7 +145,7 @@ export function installSuiteUpdate(): DesktopSuiteUpdateState {
   const next = patchState({ status: "installing", error: null });
   setTimeout(() => {
     try {
-      autoUpdater.quitAndInstall(true, true);
+      autoUpdater.quitAndInstall(false, true);
     } catch (error) {
       patchState({
         status: "error",

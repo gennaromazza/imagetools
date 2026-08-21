@@ -35,6 +35,8 @@ const ALLOWED_RELEASE_HOSTS = new Set([
 const UPDATE_RETRY_LIMIT = 2;
 const DOWNLOAD_FINALIZE_RETRY_LIMIT = 12;
 const DOWNLOAD_FINALIZE_RETRY_DELAY_MS = 250;
+const VISIBLE_INSTALLER_TIMEOUT_MS = 5 * 60_000;
+const VISIBLE_INSTALLER_POLL_INTERVAL_MS = 500;
 const updateJobs = new Map<string, DesktopToolUpdateJob>();
 
 function now(): number {
@@ -766,9 +768,9 @@ export async function applyToolUpdate(
   patchJob(jobId, { status: "applying", error: undefined });
   try {
     /*
-     * Installazione NSIS diretta.
-     * Nessun PowerShell. Nessun UAC.
-     * Nessun restart della Suite.
+     * L'installer viene aperto tramite Windows in modo visibile. Questo
+     * consente di confermare SmartScreen con "Esegui comunque" quando il
+     * certificato Authenticode non e' ancora configurato.
      */
     await installFileXToolUpdate(
       job.toolId,
@@ -779,7 +781,7 @@ export async function applyToolUpdate(
      * Aspettiamo che Windows/NSIS abbia
      * reso visibile la nuova installazione.
      */
-    const verificationDeadline = Date.now() + 15_000;
+    const verificationDeadline = Date.now() + VISIBLE_INSTALLER_TIMEOUT_MS;
     let installed = detectInstalledExecutable(job.toolId);
     while (Date.now() < verificationDeadline) {
       const expectedVersion = job.releaseVersion;
@@ -794,14 +796,14 @@ export async function applyToolUpdate(
         break;
       }
       await new Promise<void>((resolve) =>
-        setTimeout(resolve, 300),
+        setTimeout(resolve, VISIBLE_INSTALLER_POLL_INTERVAL_MS),
       );
       installed = detectInstalledExecutable(job.toolId);
     }
 
     if (!installed.path) {
       throw new Error(
-        "Installazione completata ma il nuovo tool non è stato trovato.",
+        "Installazione non rilevata entro 5 minuti. Conferma l'avviso di Windows e completa l'installer visibile.",
       );
     }
     if (job.releaseVersion) {
