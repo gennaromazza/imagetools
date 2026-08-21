@@ -13,15 +13,21 @@ const expectedPackages = {
   suite: { name: "FileX-Suite", main: ".output/electron/suite-main.js" },
   "photo-selector-app": { name: "Image-Select-Pro", main: ".output/electron/main.js" },
   "image-party-frame": { name: "Image-Party-Frame", main: ".output/electron/main.js" },
+  "batch-print-layout": { name: "Batch-Print-Layout", main: ".output/electron/main.js" },
   "archivio-flow": { name: "Archivio-Flow", main: ".output/electron/main.js" },
+  "image-converter": { name: "Image-Converter", main: ".output/electron/main.js" },
+  "image-file-finder": { name: "Trova-Foto-da-Lista", main: ".output/electron/main.js" },
   "cache-sweep": { name: "FileX-Adobe-Cleaner", main: ".output/electron/cache-sweep/electron/main.js" },
   "filex-send": { name: "FileX-Send", main: ".output/electron/filex-send/electron/main.js" },
   "backup-guard": { name: "FileX-Backup-Guard", main: ".output/electron/backup-guard/electron/main.js" },
 };
 
 const expected = expectedPackages[args.component];
-if (!expected || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(args.version ?? "")) {
+if (!args.component || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(args.version ?? "")) {
   throw new Error("Uso: verify-packaged-component.mjs --component=<id> --version=<semver> [--archive=<app.asar>]");
+}
+if (!expected) {
+  throw new Error(`Componente non supportato dal verificatore: ${args.component}`);
 }
 
 const archivePath = resolve(

@@ -216,8 +216,12 @@ assert(
   "Il generatore non aggiorna atomicamente un singolo tool dal catalogo remoto.",
 );
 assert(
-  packagedComponentVerifier.includes("(?:-[0-9A-Za-z.-]+)?"),
-  "Il verificatore degli installer non accetta versioni prerelease.",
+  packagedComponentVerifier.includes("(?:-[0-9A-Za-z.-]+)?")
+    && packagedComponentVerifier.includes('"batch-print-layout": { name: "Batch-Print-Layout"')
+    && packagedComponentVerifier.includes('"image-converter": { name: "Image-Converter"')
+    && packagedComponentVerifier.includes('"image-file-finder": { name: "Trova-Foto-da-Lista"')
+    && packagedComponentVerifier.includes("Componente non supportato dal verificatore"),
+  "Il verificatore degli installer non copre tutti i componenti o non accetta versioni prerelease.",
 );
 assert(
   downloadPage.includes("releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe"),
