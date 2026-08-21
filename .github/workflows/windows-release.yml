@@ -321,13 +321,33 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          function Invoke-FileXDownload {
+            param(
+              [Parameter(Mandatory = $true)][string]$Uri,
+              [Parameter(Mandatory = $true)][string]$OutFile,
+              [int]$MaxAttempts = 6
+            )
+            foreach ($downloadAttempt in 1..$MaxAttempts) {
+              try {
+                Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+                Invoke-WebRequest -Uri $Uri -OutFile $OutFile
+                return
+              } catch {
+                if ($downloadAttempt -ge $MaxAttempts) { throw }
+                $delaySeconds = [Math]::Min(5 * $downloadAttempt, 30)
+                Write-Warning "Download remoto fallito (tentativo $downloadAttempt/$MaxAttempts): $($_.Exception.Message). Nuovo tentativo tra $delaySeconds secondi."
+                Start-Sleep -Seconds $delaySeconds
+              }
+            }
+          }
+
           if ($env:FILEX_COMPONENT -eq "suite") {
             $feedPath = Join-Path $env:RUNNER_TEMP "latest.yml"
             $feedUrl = "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-$env:FILEX_RELEASE_CHANNEL/latest.yml"
             $metadata = ""
             foreach ($attempt in 1..6) {
               $nonce = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-$attempt"
-              Invoke-WebRequest -Uri "${feedUrl}?t=$nonce" -OutFile $feedPath
+              Invoke-FileXDownload -Uri "${feedUrl}?t=$nonce" -OutFile $feedPath
               $metadata = Get-Content $feedPath -Raw
               if ($metadata -match [regex]::Escape($env:FILEX_RELEASE_VERSION)) { break }
               if ($attempt -lt 6) { Start-Sleep -Seconds (5 * $attempt) }
@@ -337,7 +357,7 @@ jobs:
             }
             $remoteInstaller = Join-Path $env:RUNNER_TEMP "FileX-Suite-remote.exe"
             $installerUrl = "https://github.com/gennaromazza/imagetools/releases/download/suite-channel-$env:FILEX_RELEASE_CHANNEL/FileX-Suite-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
-            Invoke-WebRequest -Uri $installerUrl -OutFile $remoteInstaller
+            Invoke-FileXDownload -Uri $installerUrl -OutFile $remoteInstaller
             $localInstaller = Get-ChildItem "apps/filex-desktop/.output/releases/FileX-Suite-$env:FILEX_RELEASE_VERSION-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe" | Select-Object -First 1
             if ((Get-FileHash $remoteInstaller -Algorithm SHA256).Hash -ne (Get-FileHash $localInstaller.FullName -Algorithm SHA256).Hash) {
               throw "Checksum remoto dell'installer Suite non valido"
@@ -348,7 +368,7 @@ jobs:
             $entry = @()
             foreach ($attempt in 1..6) {
               $nonce = "$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())-$attempt"
-              Invoke-WebRequest -Uri "${catalogUrl}?t=$nonce" -OutFile $catalogPath
+              Invoke-FileXDownload -Uri "${catalogUrl}?t=$nonce" -OutFile $catalogPath
               $catalog = Get-Content $catalogPath -Raw | ConvertFrom-Json
               $entry = @($catalog.releases | Where-Object { $_.toolId -eq $env:FILEX_COMPONENT -and $_.channel -eq $env:FILEX_RELEASE_CHANNEL })
               if ($entry.Count -eq 1 -and $entry[0].version -eq $env:FILEX_RELEASE_VERSION) { break }
@@ -358,7 +378,7 @@ jobs:
               throw "Il catalogo remoto non contiene $env:FILEX_COMPONENT $env:FILEX_RELEASE_VERSION"
             }
             $remoteInstaller = Join-Path $env:RUNNER_TEMP "$env:FILEX_COMPONENT-remote.exe"
-            Invoke-WebRequest -Uri "$($entry[0].installerUrl)?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" -OutFile $remoteInstaller
+            Invoke-FileXDownload -Uri "$($entry[0].installerUrl)?t=$([DateTimeOffset]::UtcNow.ToUnixTimeSeconds())" -OutFile $remoteInstaller
             $remoteSha256 = (Get-FileHash $remoteInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($remoteSha256 -ne $entry[0].installerSha256.ToLowerInvariant()) {
               throw "Checksum remoto dell'installer $env:FILEX_COMPONENT non valido"

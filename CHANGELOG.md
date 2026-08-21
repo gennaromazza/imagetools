@@ -49,6 +49,7 @@
 
 - la release Suite viene proposta soltanto quando il changelog contiene una versione piu nuova dell'ultima pubblicata; rimossa la generazione automatica di patch inesistenti
 - campo versione e pulsante di pubblicazione restano disabilitati finche non viene aggiunta una nuova voce FileX Suite al changelog
+- la verifica remota delle release ritenta errori HTTP temporanei come 504, elimina i download parziali e controlla nuovamente feed, catalogo e checksum prima di dichiarare un fallimento
 
 ## 2026-08-21 - Image Select Pro 0.1.28
 
