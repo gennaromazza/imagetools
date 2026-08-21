@@ -45,6 +45,11 @@
 - completata la pipeline per Batch Print Layout, Image Converter e Trova Foto da Lista
 - preparate le nuove patch di tutti i tool con note di release e changelog dedicati
 
+## 2026-08-21 - FileX Dev Console
+
+- la release Suite viene proposta soltanto quando il changelog contiene una versione piu nuova dell'ultima pubblicata; rimossa la generazione automatica di patch inesistenti
+- campo versione e pulsante di pubblicazione restano disabilitati finche non viene aggiunta una nuova voce FileX Suite al changelog
+
 ## 2026-08-21 - Image Select Pro 0.1.28
 
 - riallineati catalogo stabile e checksum; l'installer non firmato viene confermato tramite l'interfaccia di sicurezza di Windows

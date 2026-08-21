@@ -15,6 +15,7 @@ const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
 const SUITE_RELEASE_ID = "release-suite";
 const SUITE_RELEASE_BAT = join(ROOT, "release-filex-suite.bat");
 const PROJECT_AUDIT_ID = "project-health";
+const SUITE_CHANGELOG_PATH = join(ROOT, "CHANGELOG.md");
 
 const COMPONENT_RELEASES = [
   { id: "photo-selector-app", label: "Image Select Pro", packagePath: "apps/photo-selector-app/package.json", artifactPrefix: "Image-Select-Pro", minSuiteVersion: "0.1.26" },
@@ -46,6 +47,22 @@ function componentReleaseById(value: string): typeof COMPONENT_RELEASES[number] 
 function validComponentVersion(value: unknown): string | null {
   const version = String(value ?? "").trim();
   return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version) ? version : null;
+}
+
+async function readLatestSuiteChangelogVersion(): Promise<string | null> {
+  const changelog = await readFile(SUITE_CHANGELOG_PATH, "utf8");
+  const match = changelog.match(/^## \d{4}-\d{2}-\d{2} - FileX Suite (\d+\.\d+\.\d+)\s*$/mu);
+  return match?.[1] ?? null;
+}
+
+function compareSuiteVersions(left: string, right: string): number {
+  const leftParts = left.split(".").map(Number);
+  const rightParts = right.split(".").map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = leftParts[index] - rightParts[index];
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 function releaseBlockingChanges(statusOutput: string): string[] {
@@ -437,25 +454,28 @@ app.get("/api/release/suite/status", async (_req, res) => {
   try {
     const pkg = JSON.parse(await readFile(join(ROOT, "apps", "filex-desktop", "package.json"), "utf8")) as { version?: string };
     const currentVersion = String(pkg.version ?? "0.0.0");
-    const [major, minor, patch] = currentVersion.split(".").map(Number);
-    const [{ stdout: branch }, { stdout: changes }, currentTag, publishedTag] = await Promise.all([
+    const [{ stdout: branch }, { stdout: changes }, currentTag, publishedTag, changelogVersion] = await Promise.all([
       execFileP("git", ["branch", "--show-current"], { cwd: ROOT, timeout: 5_000 }),
       execFileP("git", ["status", "--short"], { cwd: ROOT, timeout: 5_000 }),
       execFileP("git", ["tag", "--list", `suite-v${currentVersion}`], { cwd: ROOT, timeout: 5_000 }),
       execFileP("git", ["tag", "--merged", "HEAD", "--list", "suite-v*", "--sort=-version:refname"], { cwd: ROOT, timeout: 5_000 }),
+      readLatestSuiteChangelogVersion(),
     ]);
     const currentVersionAlreadyPublished = currentTag.stdout.trim() === `suite-v${currentVersion}`;
     const latestPublishedTag = publishedTag.stdout.trim().split(/\r?\n/u).find(Boolean) ?? null;
     const latestPublishedVersion = latestPublishedTag?.replace(/^suite-v/u, "") ?? null;
+    const suggestedVersion = changelogVersion && (
+      !latestPublishedVersion || compareSuiteVersions(changelogVersion, latestPublishedVersion) > 0
+    ) ? changelogVersion : null;
     res.json({
       ok: true,
       currentVersion,
       latestPublishedVersion,
       currentVersionAlreadyPublished,
-      // Se il pacchetto è stato già aggiornato da una pubblicazione interrotta,
-      // il tag non esiste ancora: riproponiamo quella stessa versione, senza
-      // saltare una patch e senza obbligare l'utente a intervenire a mano.
-      suggestedVersion: currentVersionAlreadyPublished ? `${major}.${minor}.${patch + 1}` : currentVersion,
+      changelogVersion,
+      // Il changelog e' la fonte di verita: non inventiamo una patch se non
+      // esiste ancora una voce FileX Suite piu nuova dell'ultima pubblicata.
+      suggestedVersion,
       branch: branch.trim(),
       clean: changes.trim().length === 0,
       changedFiles: changes.trim() ? changes.trim().split(/\r?\n/u).length : 0,

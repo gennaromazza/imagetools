@@ -251,7 +251,7 @@
         <button id="releasePublish" class="danger">Verifica e pubblica release</button>
         <button id="releaseStop" class="secondary" disabled>Ferma workflow</button>
       </div>
-      <p class="hint">La versione patch viene proposta automaticamente. Le modifiche visibili qui sotto saranno incluse nel commit di release; la pubblicazione resta consentita solo dal branch <code>main</code>.</p>
+      <p class="hint">La versione viene letta dall'ultima voce <code>FileX Suite X.Y.Z</code> del changelog. Se non esiste una voce più nuova dell'ultima release, la pubblicazione resta disabilitata.</p>
       <pre class="log" id="releaseLog">Nessun workflow release avviato.</pre>
     </section>
 
@@ -612,16 +612,21 @@
     let releaseLogTimer;
     async function refreshReleaseStatus(fillVersion = false) {
       const state = await api("/api/release/suite/status");
-      if (fillVersion || !$("#releaseVersion").value) $("#releaseVersion").value = state.suggestedVersion;
-      const ready = state.branch === "main";
-      $("#releaseStatus").className = `feedback ${ready ? "success" : "error"}`;
+      $("#releaseVersion").value = state.suggestedVersion || "";
+      const onMain = state.branch === "main";
+      const hasCandidate = Boolean(state.suggestedVersion);
+      const ready = onMain && hasCandidate;
+      $("#releaseStatus").className = `feedback ${onMain ? "success" : "error"}`;
       const versionLabel = state.currentVersionAlreadyPublished
         ? `Versione pubblicata ${state.currentVersion}`
         : `Versione locale non pubblicata ${state.currentVersion}${state.latestPublishedVersion ? ` · ultima pubblicata ${state.latestPublishedVersion}` : ""}`;
-      $("#releaseStatus").textContent = `${versionLabel} → proposta ${state.suggestedVersion} · branch ${state.branch || "—"} · ${state.clean ? "nessuna modifica da includere" : `${state.changedFiles} file pronti per il commit di release`} · ${state.running ? "workflow in corso" : "workflow pronto"}`;
+      const candidateLabel = hasCandidate
+        ? `→ changelog propone ${state.suggestedVersion}`
+        : "· nessuna nuova versione nel changelog";
+      $("#releaseStatus").textContent = `${versionLabel} ${candidateLabel} · branch ${state.branch || "—"} · ${state.clean ? "nessuna modifica da includere" : `${state.changedFiles} file pronti per il commit di release`} · ${state.running ? "workflow in corso" : hasCandidate ? "workflow pronto" : "pubblicazione non necessaria"}`;
       $("#releasePublish").disabled = state.running || !ready;
-      $("#releasePublish").textContent = state.running ? "Pubblicazione in corso…" : `Verifica e pubblica v${state.suggestedVersion}`;
-      $("#releasePublish").title = ready ? "" : "Per pubblicare devi essere sul branch main.";
+      $("#releasePublish").textContent = state.running ? "Pubblicazione in corso…" : hasCandidate ? `Verifica e pubblica v${state.suggestedVersion}` : "Nessuna release da pubblicare";
+      $("#releasePublish").title = !onMain ? "Per pubblicare devi essere sul branch main." : !hasCandidate ? "Aggiungi prima una nuova voce FileX Suite al changelog." : "";
       $("#releaseStop").disabled = !state.running;
       return state;
     }

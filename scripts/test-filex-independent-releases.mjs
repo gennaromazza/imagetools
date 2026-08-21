@@ -30,6 +30,8 @@ const toolProcessCoordinator = await read("apps/filex-desktop/src/filex-process-
 const launcher = await read("apps/filex-desktop/suite-launcher-src/app.js");
 const launcherBuilder = await read("apps/filex-desktop/scripts/build-suite-launcher.mjs");
 const releaseWorkflow = await read(".github/workflows/windows-release.yml");
+const devConsoleServer = await read("apps/filex-dev-console/server/index.ts");
+const devConsolePage = await read("apps/filex-dev-console/public/index.html");
 const ciWorkflow = await read(".github/workflows/ci.yml");
 const manifestGenerator = await read("apps/filex-desktop/scripts/generate-release-manifest.mjs");
 const packagedComponentVerifier = await read("apps/filex-desktop/scripts/verify-packaged-component.mjs");
@@ -136,6 +138,14 @@ assert(
   suiteUpdater.includes("autoUpdater.autoInstallOnAppQuit = false")
     && suiteUpdater.includes("autoUpdater.quitAndInstall(false, true)"),
   "L'aggiornamento Suite non lascia visibile la conferma Windows per gli installer non firmati.",
+);
+assert(
+  devConsoleServer.includes("readLatestSuiteChangelogVersion()")
+    && devConsoleServer.includes("compareSuiteVersions(changelogVersion, latestPublishedVersion) > 0")
+    && !devConsoleServer.includes("currentVersionAlreadyPublished ? `${major}.${minor}.${patch + 1}`")
+    && devConsolePage.includes("Nessuna release da pubblicare")
+    && devConsolePage.includes("nessuna nuova versione nel changelog"),
+  "La Dev Console puo ancora proporre una patch Suite assente dal changelog.",
 );
 assert(
   toolUpdater.includes("update-catalog-${channel}")
