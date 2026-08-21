@@ -17,15 +17,15 @@ const SUITE_RELEASE_BAT = join(ROOT, "release-filex-suite.bat");
 const PROJECT_AUDIT_ID = "project-health";
 
 const COMPONENT_RELEASES = [
-  { id: "photo-selector-app", label: "Image Select Pro", packagePath: "apps/photo-selector-app/package.json", minSuiteVersion: "0.1.26" },
-  { id: "image-party-frame", label: "Image Party Frame", packagePath: "apps/image-party-frame/package.json", minSuiteVersion: "0.1.26" },
-  { id: "batch-print-layout", label: "Batch Print Layout", packagePath: "apps/batch-print-layout/package.json", minSuiteVersion: "0.1.26" },
-  { id: "archivio-flow", label: "Archivio Flow", packagePath: "apps/archivio-flow/package.json", minSuiteVersion: "0.1.26" },
-  { id: "image-converter", label: "Image Converter", packagePath: "apps/image-converter/package.json", minSuiteVersion: "0.1.26" },
-  { id: "image-file-finder", label: "Trova Foto da Lista", packagePath: "apps/image-file-finder/package.json", minSuiteVersion: "0.1.26" },
-  { id: "cache-sweep", label: "FileX Adobe Cleaner", packagePath: "apps/cache-sweep/package.json", minSuiteVersion: "0.1.28" },
-  { id: "filex-send", label: "FileX Send", packagePath: "apps/filex-send/package.json", minSuiteVersion: "0.1.31" },
-  { id: "backup-guard", label: "FileX Backup Guard", packagePath: "apps/backup-guard/package.json", minSuiteVersion: "0.1.33" },
+  { id: "photo-selector-app", label: "Image Select Pro", packagePath: "apps/photo-selector-app/package.json", artifactPrefix: "Image-Select-Pro", minSuiteVersion: "0.1.26" },
+  { id: "image-party-frame", label: "Image Party Frame", packagePath: "apps/image-party-frame/package.json", artifactPrefix: "Image-Party-Frame", minSuiteVersion: "0.1.26" },
+  { id: "batch-print-layout", label: "Batch Print Layout", packagePath: "apps/batch-print-layout/package.json", artifactPrefix: "Batch-Print-Layout", minSuiteVersion: "0.1.26" },
+  { id: "archivio-flow", label: "Archivio Flow", packagePath: "apps/archivio-flow/package.json", artifactPrefix: "Archivio-Flow", minSuiteVersion: "0.1.26" },
+  { id: "image-converter", label: "Image Converter", packagePath: "apps/image-converter/package.json", artifactPrefix: "Image-Converter", minSuiteVersion: "0.1.26" },
+  { id: "image-file-finder", label: "Trova Foto da Lista", packagePath: "apps/image-file-finder/package.json", artifactPrefix: "Trova-Foto-da-Lista", minSuiteVersion: "0.1.26" },
+  { id: "cache-sweep", label: "FileX Adobe Cleaner", packagePath: "apps/cache-sweep/package.json", artifactPrefix: "FileX-Adobe-Cleaner", minSuiteVersion: "0.1.28" },
+  { id: "filex-send", label: "FileX Send", packagePath: "apps/filex-send/package.json", artifactPrefix: "FileX-Send", minSuiteVersion: "0.1.31" },
+  { id: "backup-guard", label: "FileX Backup Guard", packagePath: "apps/backup-guard/package.json", artifactPrefix: "FileX-Backup-Guard", minSuiteVersion: "0.1.33" },
 ] as const;
 
 type ComponentReleaseId = typeof COMPONENT_RELEASES[number]["id"];
@@ -56,6 +56,33 @@ function releaseBlockingChanges(statusOutput: string): string[] {
     // Il pannello locale non viene incluso nell'artefatto di un tool: una sua
     // modifica non deve impedire di distribuire il codice gia' su origin/main.
     .filter((path) => !path.startsWith("apps/filex-dev-console/"));
+}
+
+async function componentVersionAlreadyPublished(
+  component: typeof COMPONENT_RELEASES[number],
+  version: string | null,
+): Promise<boolean> {
+  if (!version) return false;
+  const { stdout: componentTag } = await execFileP(
+    "git",
+    ["ls-remote", "--tags", "origin", `refs/tags/${component.id}-v${version}`],
+    { cwd: ROOT, timeout: 15_000 },
+  );
+  if (componentTag.trim()) return true;
+
+  // Le primissime release usavano tag generici vX.Y.Z. Non basta il nome del
+  // tag: controlliamo l'asset, altrimenti un vecchio tag della Suite blocca un
+  // tool mai pubblicato a quella stessa versione.
+  try {
+    const { stdout: assets } = await execFileP(
+      "gh",
+      ["release", "view", `v${version}`, "--repo", "gennaromazza/imagetools", "--json", "assets", "--jq", ".assets[].name"],
+      { cwd: ROOT, timeout: 15_000 },
+    );
+    return assets.split(/\r?\n/u).some((asset) => asset.startsWith(`${component.artifactPrefix}-${version}-`));
+  } catch {
+    return false;
+  }
 }
 
 async function readComponentWorkflowRun(componentId: ComponentReleaseId): Promise<ComponentWorkflowRun | null> {
@@ -491,14 +518,11 @@ app.get("/api/release/tools", async (_req, res) => {
       Promise.all(COMPONENT_RELEASES.map(async (component) => {
         const pkg = JSON.parse(await readFile(join(ROOT, component.packagePath), "utf8")) as { version?: unknown };
         const version = validComponentVersion(pkg.version);
-        const { stdout: tags } = await execFileP("git", ["tag", "--list", `${component.id}-v${version ?? "invalid"}`, `v${version ?? "invalid"}`], { cwd: ROOT, timeout: 5_000 });
         const workflow = await readComponentWorkflowRun(component.id).catch(() => null);
         return {
           ...component,
           version,
-          versionAlreadyPublished: Boolean(
-            version && tags.split(/\r?\n/u).some((tag) => tag === `${component.id}-v${version}` || tag === `v${version}`),
-          ),
+          versionAlreadyPublished: await componentVersionAlreadyPublished(component, version),
           workflow,
         };
       })),
@@ -543,12 +567,9 @@ app.post("/api/release/tools/:id/publish", async (req, res) => {
       throw new Error("Ci sono modifiche che possono cambiare la release: effettua prima commit e push.");
     }
 
-    const { stdout: existingTags } = await execFileP(
-      "git",
-      ["ls-remote", "--tags", "origin", `refs/tags/${component.id}-v${version}`, `refs/tags/v${version}`],
-      { cwd: ROOT, timeout: 15_000 },
-    );
-    if (existingTags.trim()) throw new Error(`Esiste gia' una release del tool alla versione ${version}. Incrementa la versione prima di pubblicare.`);
+    if (await componentVersionAlreadyPublished(component, version)) {
+      throw new Error(`Esiste gia' una release del tool alla versione ${version}. Incrementa la versione prima di pubblicare.`);
+    }
 
     componentWorkflowRuns.set(component.id, { requestedAt: Date.now(), runId: null });
     await execFileP(
