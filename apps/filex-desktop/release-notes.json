@@ -1,5 +1,9 @@
 {
   "backup-guard": {
+    "0.2.2": [
+      "Release di manutenzione con installer Windows firmato e catalogo stabile verificato prima della pubblicazione.",
+      "La distribuzione resta indipendente dalla Suite e non modifica gli altri tool."
+    ],
     "0.2.1": [
       "Le cartelle rinominate nel master vengono riconosciute in modo non ambiguo e rinominate direttamente sul clone, senza ricopiare le fotografie.",
       "Prima della rinomina Backup Guard confronta tutti i contenuti con SHA-256; al minimo dubbio interrompe l'operazione prima di modificare il clone.",
@@ -19,6 +23,10 @@
     ]
   },
   "filex-send": {
+    "0.1.4": [
+      "Release di manutenzione con installer Windows firmato e catalogo stabile verificato prima della pubblicazione.",
+      "La distribuzione resta indipendente dalla Suite e non modifica gli altri tool."
+    ],
     "0.1.3": [
       "FileX Send ora permette di scegliere tra Ricevi file e Invia file.",
       "La consegna dal PC al cliente funziona tramite QR locale o link remoto temporaneo.",
@@ -41,6 +49,10 @@
     ]
   },
   "cache-sweep": {
+    "0.1.1": [
+      "FileX Adobe Cleaner torna disponibile nel catalogo stabile con installer Windows firmato.",
+      "La pubblicazione verifica checksum e disponibilita dell'artefatto prima di aggiornare il catalogo."
+    ],
     "0.1.0": [
       "Utility dedicata esclusivamente ai programmi Adobe: rilevamento locale delle applicazioni installate e misurazione delle sole cache supportate, senza pulizia generica del PC.",
       "Pulizia guidata con spiegazione delle conseguenze, chiusura coordinata dei processi e protezioni sui percorsi.",
@@ -49,6 +61,10 @@
     ]
   },
   "image-party-frame": {
+    "0.1.26": [
+      "Release di manutenzione con installer Windows firmato e catalogo stabile verificato prima della pubblicazione.",
+      "La distribuzione resta indipendente dalla Suite e non modifica gli altri tool."
+    ],
     "0.1.25": [
       "Pubblicazione coordinata con FileX Suite 0.1.25 per mantenere allineati installer, manifest e canale stabile.",
       "Aggiornamento Windows distribuito con verifica SHA-256 e installazione per-user."
@@ -81,12 +97,20 @@
     ]
   },
   "batch-print-layout": {
+    "0.1.1": [
+      "Installer Windows firmato per evitare blocchi di esecuzione dalla Suite.",
+      "Il catalogo stabile viene aggiornato con checksum verificato dell'artefatto pubblicato."
+    ],
     "0.1.0": [
       "Impaginazione automatica di piu fotografie su fogli pronti per la stampa.",
       "Organizzazione batch delle immagini per ridurre sprechi e operazioni manuali."
     ]
   },
   "archivio-flow": {
+    "0.1.27": [
+      "Release di manutenzione con installer Windows firmato e catalogo stabile verificato prima della pubblicazione.",
+      "La distribuzione resta indipendente dalla Suite e non modifica gli altri tool."
+    ],
     "0.1.26": [
       "StudioFlow conserva l'indice SQLite e aggiorna soltanto i lavori modificati, senza ricostruire l'intero archivio a ogni avvio.",
       "La rinomina assistita è persistente, osservabile e richiede sempre una conferma prima di modificare una cartella.",
@@ -123,6 +147,10 @@
     ]
   },
   "image-converter": {
+    "0.1.1": [
+      "Installer Windows firmato per evitare blocchi di esecuzione dalla Suite.",
+      "Il catalogo stabile viene aggiornato con checksum verificato dell'artefatto pubblicato."
+    ],
     "0.1.0": [
       "Conversione batch in JPG e WebP con preset per web, social, revisione e stampa.",
       "Conversione dei negativi RAW in DNG compresso, conservando originali e sidecar XMP.",
@@ -130,12 +158,20 @@
     ]
   },
   "image-file-finder": {
+    "0.1.1": [
+      "Installer Windows firmato per evitare blocchi di esecuzione dalla Suite.",
+      "Il catalogo stabile viene aggiornato con checksum verificato dell'artefatto pubblicato."
+    ],
     "0.1.0": [
       "Ricerca automatica di fotografie in cartelle e sottocartelle a partire da una lista di nomi.",
       "Raccolta dei file trovati in una destinazione unica con riepilogo degli elementi mancanti."
     ]
   },
   "photo-selector-app": {
+    "0.1.28": [
+      "Image Select Pro viene distribuito con il checksum dell'installer riallineato al catalogo stabile.",
+      "Installer Windows firmato e verifica remota dell'artefatto prima della pubblicazione."
+    ],
     "0.1.27": [
       "Corretto il polling delle modifiche esterne affinche' non prosegua dopo la chiusura o il rinnovo della vista.",
       "Le anteprime non ricevono piu' aggiornamenti asincroni obsoleti quando la selezione cambia rapidamente.",

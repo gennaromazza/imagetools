@@ -30,6 +30,55 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-21 - FileX Suite 0.1.43
+
+### Distribuzione e licenze
+- corretta la licenza offline firmata: non viene piu mostrata come attiva se non puo' avviare i tool, mentre un'attestazione valida ripristina correttamente l'uso offline
+- la cache degli installer elimina i download FileX conclusi o falliti non piu' in uso, senza toccare aggiornamenti attivi
+- il catalogo incluso conserva le release tool piu' recenti se il catalogo remoto e' temporaneamente arretrato; ripristinati Adobe Cleaner e Image Select Pro aggiornato
+- resa obbligatoria la firma degli installer Windows in CI per impedire la pubblicazione di artefatti bloccabili dal sistema
+
+### Dev Console e release indipendenti
+- aggiunta la pubblicazione controllata di ogni tool dal pannello Dev, con stato del workflow GitHub e stop selettivo
+- completata la pipeline per Batch Print Layout, Image Converter e Trova Foto da Lista
+- preparate le nuove patch di tutti i tool con note di release e changelog dedicati
+
+## 2026-08-21 - Image Select Pro 0.1.28
+
+- riallineati catalogo stabile, checksum e installer Windows firmato
+
+## 2026-08-21 - Image Party Frame 0.1.26
+
+- pubblicazione di manutenzione con installer Windows firmato e catalogo verificato
+
+## 2026-08-21 - Batch Print Layout 0.1.1
+
+- installer Windows firmato per evitare blocchi di esecuzione dalla Suite
+
+## 2026-08-21 - Archivio Flow 0.1.27
+
+- pubblicazione di manutenzione con installer Windows firmato e catalogo verificato
+
+## 2026-08-21 - Image Converter 0.1.1
+
+- installer Windows firmato per evitare blocchi di esecuzione dalla Suite
+
+## 2026-08-21 - Trova Foto da Lista 0.1.1
+
+- installer Windows firmato per evitare blocchi di esecuzione dalla Suite
+
+## 2026-08-21 - FileX Adobe Cleaner 0.1.1
+
+- ripristinata la distribuzione nel catalogo stabile con checksum verificato
+
+## 2026-08-21 - FileX Send 0.1.4
+
+- pubblicazione di manutenzione con installer Windows firmato e catalogo verificato
+
+## 2026-08-21 - FileX Backup Guard 0.2.2
+
+- pubblicazione di manutenzione con installer Windows firmato e catalogo verificato
+
 ## 2026-08-20 - FileX Suite 0.1.42
 
 ### Dev Console: test e qualità progetto

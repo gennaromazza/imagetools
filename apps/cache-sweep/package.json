@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/cache-sweep",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "FileX Adobe Cleaner: cache cleanup and safe removal of older Adobe app versions on Windows.",
   "type": "module",
   "main": "../filex-desktop/.output/electron/cache-sweep/electron/main.js",

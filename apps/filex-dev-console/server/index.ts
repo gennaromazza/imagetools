@@ -48,6 +48,16 @@ function validComponentVersion(value: unknown): string | null {
   return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version) ? version : null;
 }
 
+function releaseBlockingChanges(statusOutput: string): string[] {
+  return statusOutput
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => line.slice(3).trim())
+    // Il pannello locale non viene incluso nell'artefatto di un tool: una sua
+    // modifica non deve impedire di distribuire il codice gia' su origin/main.
+    .filter((path) => !path.startsWith("apps/filex-dev-console/"));
+}
+
 async function readComponentWorkflowRun(componentId: ComponentReleaseId): Promise<ComponentWorkflowRun | null> {
   const requested = componentWorkflowRuns.get(componentId);
   if (!requested) return null;
@@ -481,21 +491,26 @@ app.get("/api/release/tools", async (_req, res) => {
       Promise.all(COMPONENT_RELEASES.map(async (component) => {
         const pkg = JSON.parse(await readFile(join(ROOT, component.packagePath), "utf8")) as { version?: unknown };
         const version = validComponentVersion(pkg.version);
-        const { stdout: tag } = await execFileP("git", ["tag", "--list", `${component.id}-v${version ?? "invalid"}`], { cwd: ROOT, timeout: 5_000 });
+        const { stdout: tags } = await execFileP("git", ["tag", "--list", `${component.id}-v${version ?? "invalid"}`, `v${version ?? "invalid"}`], { cwd: ROOT, timeout: 5_000 });
         const workflow = await readComponentWorkflowRun(component.id).catch(() => null);
         return {
           ...component,
           version,
-          versionAlreadyPublished: Boolean(version && tag.trim() === `${component.id}-v${version}`),
+          versionAlreadyPublished: Boolean(
+            version && tags.split(/\r?\n/u).some((tag) => tag === `${component.id}-v${version}` || tag === `v${version}`),
+          ),
           workflow,
         };
       })),
     ]);
+    const blockingChanges = releaseBlockingChanges(changes);
     res.json({
       ok: true,
       branch: branch.trim(),
       clean: changes.trim().length === 0,
       changedFiles: changes.trim() ? changes.trim().split(/\r?\n/u).length : 0,
+      releaseAllowed: blockingChanges.length === 0,
+      blockingChanges,
       tools,
     });
   } catch (error) {
@@ -523,14 +538,17 @@ app.post("/api/release/tools/:id/publish", async (req, res) => {
     const version = validComponentVersion(pkg.version);
     if (!version) throw new Error(`Versione non valida in ${component.packagePath}.`);
     if (branch.trim() !== "main") throw new Error("La release di un tool e' consentita solo dal branch main.");
-    if (changes.trim()) throw new Error("La working tree deve essere pulita: effettua prima commit e push delle modifiche del tool.");
+    const blockingChanges = releaseBlockingChanges(changes);
+    if (blockingChanges.length) {
+      throw new Error("Ci sono modifiche che possono cambiare la release: effettua prima commit e push.");
+    }
 
-    const { stdout: existingTag } = await execFileP(
+    const { stdout: existingTags } = await execFileP(
       "git",
-      ["ls-remote", "--tags", "origin", `refs/tags/${component.id}-v${version}`],
+      ["ls-remote", "--tags", "origin", `refs/tags/${component.id}-v${version}`, `refs/tags/v${version}`],
       { cwd: ROOT, timeout: 15_000 },
     );
-    if (existingTag.trim()) throw new Error(`La release ${component.id}-v${version} e' gia' pubblicata.`);
+    if (existingTags.trim()) throw new Error(`Esiste gia' una release del tool alla versione ${version}. Incrementa la versione prima di pubblicare.`);
 
     componentWorkflowRuns.set(component.id, { requestedAt: Date.now(), runId: null });
     await execFileP(

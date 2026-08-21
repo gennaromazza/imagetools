@@ -675,14 +675,16 @@
         `<option value="${tool.id}">${tool.label}</option>`).join("");
       if (componentReleaseState?.tools?.some((tool) => tool.id === selectedId)) select.value = selectedId;
       const tool = selectedComponentRelease();
-      const ready = componentReleaseState?.branch === "main" && componentReleaseState?.clean && tool?.version && !tool?.versionAlreadyPublished;
+      const ready = componentReleaseState?.branch === "main" && componentReleaseState?.releaseAllowed && tool?.version && !tool?.versionAlreadyPublished;
       $("#toolReleaseVersion").value = tool?.version || "Versione non valida";
       $("#toolReleasePublish").disabled = !ready || tool?.workflow?.status === "in_progress" || tool?.workflow?.status === "queued";
       $("#toolReleaseStop").disabled = !tool?.workflow?.id || !["queued", "in_progress"].includes(tool.workflow.status);
       const repositoryState = componentReleaseState?.branch !== "main"
         ? "Serve il branch main"
-        : !componentReleaseState?.clean
-          ? `Ci sono ${componentReleaseState.changedFiles} modifiche locali da committare e inviare`
+        : !componentReleaseState?.releaseAllowed
+          ? `Ci sono ${componentReleaseState.blockingChanges?.length || componentReleaseState.changedFiles} modifiche da committare e inviare`
+          : !componentReleaseState?.clean
+            ? "Modifiche solo del pannello locale: non bloccano la release del tool"
           : tool?.versionAlreadyPublished
             ? `La versione ${tool.version} è già pubblicata`
             : "Pronto per il workflow GitHub";
