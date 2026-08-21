@@ -40,6 +40,7 @@
 
 ### Dev Console e release indipendenti
 - aggiunta la pubblicazione controllata di ogni tool dal pannello Dev, con stato del workflow GitHub e stop selettivo
+- il pannello riconosce correttamente le release storiche dai loro asset, senza confondere un tag generico della Suite con una versione gia' pubblicata di un tool
 - completata la pipeline per Batch Print Layout, Image Converter e Trova Foto da Lista
 - preparate le nuove patch di tutti i tool con note di release e changelog dedicati
 
