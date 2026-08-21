@@ -124,7 +124,18 @@
       word-break: break-word;
       margin: 0;
     }
+    .log-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+    .copy-log { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; }
     .list { display: flex; flex-direction: column; gap: 8px; }
+    .test-group { display: grid; gap: 8px; }
+    .test-group + .test-group { margin-top: 18px; }
+    .test-group__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
+    .test-group__head::-webkit-details-marker { display: none; }
+    .test-group__title { margin: 0; font-size: 14px; }
+    .test-group__description { color: var(--muted); font-size: 12px; margin: 2px 0 0; }
+    .test-group__count { color: var(--muted); font-size: 11px; white-space: nowrap; }
+    .test-group__info { color: var(--accent); font-size: 14px; cursor: help; margin-left: 5px; }
+    .test-group[hidden], .test-item[hidden] { display: none; }
     .test-item {
       background: var(--panel-2);
       border: 1px solid var(--border);
@@ -176,8 +187,10 @@
     </section>
 
     <section id="logs">
-      <h2>Log processo</h2>
-      <p class="hint">Seleziona “Log” o “Verifica build” su un tool per leggere l'output catturato dalla dashboard.</p>
+      <div class="log-head">
+        <div><h2>Log processo</h2><p class="hint">Seleziona “Log” o “Verifica build” su un tool per leggere l'output catturato dalla dashboard.</p></div>
+        <button class="secondary copy-log" data-copy-target="processLog">Copia</button>
+      </div>
       <pre class="log" id="processLog">Nessun log selezionato.</pre>
     </section>
 
@@ -204,21 +217,34 @@
         <button id="licCreate">Crea licenza</button>
         <button id="licStatus" class="secondary">Stato licenze</button>
       </div>
+      <div class="log-head" style="margin-top: 12px;"><span></span><button class="secondary copy-log" data-copy-target="licOutput">Copia output</button></div>
       <pre class="log" id="licOutput" style="display:none;"></pre>
     </section>
 
     <section id="tests">
       <h2>Test</h2>
-      <p class="hint">Esegui un test alla volta: ogni esecuzione ha un log e un processo separati.</p>
+      <p class="hint">Apri solo il prodotto che ti interessa. Passa sul simbolo ⓘ per capire cosa verifica ciascun test.</p>
+      <div class="form"><input id="testSearch" type="search" placeholder="Cerca un test o un prodotto…" aria-label="Cerca test" /></div>
       <div id="testList" class="list"></div>
       <div class="row" style="margin-top: 12px;">
         <button id="testRun">Esegui test</button>
       </div>
     </section>
 
+    <section id="project-health">
+      <div class="log-head">
+        <div><h2>Qualità del progetto</h2><p class="hint">Analisi in sola lettura di dipendenze probabilmente non usate, TODO/FIXME/HACK e placeholder espliciti. Non elimina né modifica nulla automaticamente.</p></div>
+        <button class="secondary copy-log" data-copy-target="projectHealthLog">Copia output</button>
+      </div>
+      <div class="row"><button id="projectHealthRun" class="secondary">Analizza dipendenze e codice <span class="test-group__info" title="Cerca candidature da controllare: alcune dipendenze Electron o con import dinamici possono risultare falsi positivi.">ⓘ</span></button></div>
+      <pre class="log" id="projectHealthLog">Nessuna analisi eseguita.</pre>
+    </section>
+
     <section id="release-suite">
-      <h2>Release FileX Suite</h2>
-      <p class="hint">Un solo flusso: controlli locali, commit delle modifiche preparate, push su main, tag, GitHub Actions, verifica feed e deploy del sito.</p>
+      <div class="log-head">
+        <div><h2>Release FileX Suite</h2><p class="hint">Un solo flusso: controlli locali, commit delle modifiche preparate, push su main, tag, GitHub Actions, verifica feed e deploy del sito.</p></div>
+        <button class="secondary copy-log" data-copy-target="releaseLog">Copia log</button>
+      </div>
       <div class="feedback" id="releaseStatus">Caricamento stato repository…</div>
       <div class="form" style="margin-top: 12px;">
         <input id="releaseVersion" readonly aria-label="Versione release Suite proposta automaticamente" />
@@ -227,6 +253,20 @@
       </div>
       <p class="hint">La versione patch viene proposta automaticamente. Le modifiche visibili qui sotto saranno incluse nel commit di release; la pubblicazione resta consentita solo dal branch <code>main</code>.</p>
       <pre class="log" id="releaseLog">Nessun workflow release avviato.</pre>
+    </section>
+
+    <section id="release-tools">
+      <div class="log-head">
+        <div><h2>Release singoli tool</h2><p class="hint">Pubblica un solo tool alla volta tramite GitHub Actions. La versione è letta dal suo package e la working tree deve essere già pulita e su <code>main</code>.</p></div>
+      </div>
+      <div class="feedback" id="toolReleaseStatus">Caricamento tool disponibili…</div>
+      <div class="form" style="margin-top: 12px;">
+        <select id="toolReleaseSelect" aria-label="Tool da pubblicare"></select>
+        <input id="toolReleaseVersion" readonly aria-label="Versione del tool selezionato" />
+        <button id="toolReleasePublish" class="danger">Pubblica tool</button>
+        <button id="toolReleaseStop" class="secondary" disabled>Ferma workflow</button>
+      </div>
+      <p class="hint" id="toolReleaseHint"></p>
     </section>
   </main>
 
@@ -257,6 +297,24 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || res.statusText);
       return data;
+    }
+
+    async function copyLogContent(targetId) {
+      const content = $("#" + targetId)?.textContent?.trim();
+      if (!content) throw new Error("Non c'è ancora nessun output da copiare.");
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(content);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = content;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      toast("Output copiato negli appunti.");
     }
 
     async function refreshTools() {
@@ -382,6 +440,8 @@
     document.addEventListener("click", (e) => {
       const btn = e.target.closest("button[data-action]");
       if (btn) runAction(btn.dataset.action, btn.dataset.id);
+      const copyButton = e.target.closest("button[data-copy-target]");
+      if (copyButton) copyLogContent(copyButton.dataset.copyTarget).catch((error) => toast(error.message, true));
     });
 
     $("#stopAllBtn").onclick = async () => {
@@ -440,15 +500,45 @@
       const data = await api("/api/tests");
       const list = $("#testList");
       list.innerHTML = "";
-      for (const test of data.tests) {
-        const item = document.createElement("div");
-        item.className = "test-item";
-        item.innerHTML = `
-          <input type="radio" name="test" value="${test.name}" ${list.children.length === 0 ? 'checked' : ''} />
-          <label>${test.name}</label>
-          <span class="cmd">${test.command}</span>
+      let selected = false;
+      for (const category of data.categories || []) {
+        const group = document.createElement("details");
+        group.className = "test-group";
+        group.innerHTML = `
+          <summary class="test-group__head">
+            <div>
+              <h3 class="test-group__title">${category.title}<span class="test-group__info" title="${category.description}">ⓘ</span></h3>
+              <p class="test-group__description">${category.description}</p>
+            </div>
+            <span class="test-group__count">${category.tests.length} test</span>
+          </summary>
         `;
-        list.appendChild(item);
+        for (const test of category.tests) {
+          const item = document.createElement("div");
+          item.className = "test-item";
+          item.innerHTML = `
+            <input type="radio" name="test" value="${test.name}" ${!selected ? 'checked' : ''} />
+            <label>${test.name}<span class="test-group__info" title="${test.description}">ⓘ</span></label>
+            <span class="cmd">${test.command}</span>
+          `;
+          selected = true;
+          group.appendChild(item);
+        }
+        list.appendChild(group);
+      }
+    }
+
+    function filterTests() {
+      const term = $("#testSearch").value.trim().toLocaleLowerCase();
+      for (const group of document.querySelectorAll("#testList .test-group")) {
+        let visible = 0;
+        for (const item of group.querySelectorAll(".test-item")) {
+          const matches = !term || item.textContent.toLocaleLowerCase().includes(term) || group.textContent.toLocaleLowerCase().includes(term);
+          item.hidden = !matches;
+          if (matches) visible++;
+        }
+        group.hidden = visible === 0;
+        if (term && visible) group.open = true;
       }
     }
 
@@ -456,14 +546,67 @@
       const scripts = [...document.querySelectorAll("#testList input[type=radio]:checked")].map((c) => c.value);
       if (scripts.length === 0) { toast("Seleziona un test", true); return; }
       try {
+        const button = $("#testRun");
+        button.disabled = true;
+        button.textContent = "Test in corso…";
         const res = await api("/api/tests/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ scripts }),
         });
-        toast(res.ok ? "Test avviato: consulta il log per il risultato." : (res.error || "Errore"), !res.ok);
-        if (res.ok) setTimeout(() => showLog(res.id).catch(() => {}), 500);
-      } catch (e) { toast(e.message, true); }
+        if (!res.ok) throw new Error(res.error || "Test non avviato.");
+        $("#processLog").textContent = "Test in corso: attendo l'esito…";
+        let timer;
+        const update = async () => {
+          const [log, status] = await Promise.all([
+            api(`/api/logs/${res.id}`),
+            api(`/api/tests/${res.id}/status`),
+          ]);
+          $("#processLog").textContent = log.log || "Test in corso: attendo il primo output…";
+          if (!status.running) {
+            if (timer) clearInterval(timer);
+            button.disabled = false;
+            button.textContent = "Esegui test";
+            const passed = /Processo terminato \(codice 0,/u.test(log.log || "");
+            toast(passed ? "Test completato: PASS." : "Test terminato: controlla il log.", !passed);
+          }
+        };
+        await update();
+        if ($("#testRun").disabled) timer = setInterval(() => update().catch(() => {}), 700);
+      } catch (e) {
+        $("#testRun").disabled = false;
+        $("#testRun").textContent = "Esegui test";
+        toast(e.message, true);
+      }
+    };
+
+    $("#testSearch").addEventListener("input", filterTests);
+
+    $("#projectHealthRun").onclick = async () => {
+      try {
+        const button = $("#projectHealthRun");
+        button.disabled = true;
+        $("#projectHealthLog").textContent = "Analisi in corso…";
+        const result = await api("/api/project-health/run", { method: "POST" });
+        if (!result.ok) throw new Error(result.error || "Analisi non avviata.");
+        const refresh = async () => {
+          const log = await api(`/api/logs/${result.id}`);
+          $("#projectHealthLog").textContent = log.log || "Analisi in corso…";
+        };
+        await refresh();
+        const timer = setInterval(async () => {
+          await refresh().catch(() => {});
+          const status = await api("/api/project-health/status").catch(() => ({ running: false }));
+          if (!status.running) {
+            clearInterval(timer);
+            button.disabled = false;
+          }
+        }, 900);
+      } catch (error) {
+        $("#projectHealthRun").disabled = false;
+        $("#projectHealthLog").textContent = `Errore: ${error.message}`;
+        toast(error.message, true);
+      }
     };
 
     let releaseLogTimer;
@@ -472,7 +615,10 @@
       if (fillVersion || !$("#releaseVersion").value) $("#releaseVersion").value = state.suggestedVersion;
       const ready = state.branch === "main";
       $("#releaseStatus").className = `feedback ${ready ? "success" : "error"}`;
-      $("#releaseStatus").textContent = `Versione attuale ${state.currentVersion} → ${state.suggestedVersion} · branch ${state.branch || "—"} · ${state.clean ? "nessuna modifica da includere" : `${state.changedFiles} file pronti per il commit di release`} · ${state.running ? "workflow in corso" : "workflow pronto"}`;
+      const versionLabel = state.currentVersionAlreadyPublished
+        ? `Versione pubblicata ${state.currentVersion}`
+        : `Versione locale non pubblicata ${state.currentVersion}${state.latestPublishedVersion ? ` · ultima pubblicata ${state.latestPublishedVersion}` : ""}`;
+      $("#releaseStatus").textContent = `${versionLabel} → proposta ${state.suggestedVersion} · branch ${state.branch || "—"} · ${state.clean ? "nessuna modifica da includere" : `${state.changedFiles} file pronti per il commit di release`} · ${state.running ? "workflow in corso" : "workflow pronto"}`;
       $("#releasePublish").disabled = state.running || !ready;
       $("#releasePublish").textContent = state.running ? "Pubblicazione in corso…" : `Verifica e pubblica v${state.suggestedVersion}`;
       $("#releasePublish").title = ready ? "" : "Per pubblicare devi essere sul branch main.";
@@ -517,8 +663,77 @@
       } catch (error) { toast(error.message, true); }
     };
 
+    let componentReleaseState = null;
+    let componentReleaseTimer;
+    function selectedComponentRelease() {
+      return componentReleaseState?.tools?.find((tool) => tool.id === $("#toolReleaseSelect").value) || null;
+    }
+    function renderComponentRelease() {
+      const select = $("#toolReleaseSelect");
+      const selectedId = select.value;
+      select.innerHTML = (componentReleaseState?.tools || []).map((tool) =>
+        `<option value="${tool.id}">${tool.label}</option>`).join("");
+      if (componentReleaseState?.tools?.some((tool) => tool.id === selectedId)) select.value = selectedId;
+      const tool = selectedComponentRelease();
+      const ready = componentReleaseState?.branch === "main" && componentReleaseState?.clean && tool?.version && !tool?.versionAlreadyPublished;
+      $("#toolReleaseVersion").value = tool?.version || "Versione non valida";
+      $("#toolReleasePublish").disabled = !ready || tool?.workflow?.status === "in_progress" || tool?.workflow?.status === "queued";
+      $("#toolReleaseStop").disabled = !tool?.workflow?.id || !["queued", "in_progress"].includes(tool.workflow.status);
+      const repositoryState = componentReleaseState?.branch !== "main"
+        ? "Serve il branch main"
+        : !componentReleaseState?.clean
+          ? `Ci sono ${componentReleaseState.changedFiles} modifiche locali da committare e inviare`
+          : tool?.versionAlreadyPublished
+            ? `La versione ${tool.version} è già pubblicata`
+            : "Pronto per il workflow GitHub";
+      const workflow = tool?.workflow
+        ? ` · workflow ${workflow.status}${workflow.conclusion ? ` (${workflow.conclusion})` : ""}${workflow.url ? `: ${workflow.url}` : ""}`
+        : "";
+      $("#toolReleaseStatus").className = `feedback ${ready ? "success" : "error"}`;
+      $("#toolReleaseStatus").textContent = `${tool?.label || "Tool"} v${tool?.version || "—"} · ${repositoryState}${workflow}`;
+      $("#toolReleaseHint").textContent = tool
+        ? `Requisito minimo Suite: ${tool.minSuiteVersion}. La pipeline crea e verifica installer, release e catalogo stabile.`
+        : "";
+    }
+    async function refreshComponentReleases() {
+      componentReleaseState = await api("/api/release/tools");
+      renderComponentRelease();
+      const running = componentReleaseState.tools?.some((tool) => ["queued", "in_progress"].includes(tool.workflow?.status));
+      if (running && !componentReleaseTimer) {
+        componentReleaseTimer = setInterval(() => refreshComponentReleases().catch(() => {}), 5000);
+      } else if (!running && componentReleaseTimer) {
+        clearInterval(componentReleaseTimer);
+        componentReleaseTimer = null;
+      }
+    }
+    $("#toolReleaseSelect").onchange = renderComponentRelease;
+    $("#toolReleasePublish").onclick = async () => {
+      try {
+        const tool = selectedComponentRelease();
+        if (!tool) throw new Error("Seleziona un tool.");
+        if (!confirm(`Pubblicare ${tool.label} v${tool.version}? GitHub Actions creerà installer, release e catalogo.`)) return;
+        const result = await api(`/api/release/tools/${tool.id}/publish`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true }),
+        });
+        if (!result.ok) throw new Error(result.error || "Workflow non avviato.");
+        toast(result.message);
+        await refreshComponentReleases();
+      } catch (error) { toast(error.message, true); }
+    };
+    $("#toolReleaseStop").onclick = async () => {
+      try {
+        const tool = selectedComponentRelease();
+        if (!tool) throw new Error("Seleziona un tool.");
+        const result = await api(`/api/release/tools/${tool.id}/stop`, { method: "POST" });
+        if (!result.ok) throw new Error(result.error || "Workflow non arrestato.");
+        toast("Workflow GitHub arrestato.");
+        await refreshComponentReleases();
+      } catch (error) { toast(error.message, true); }
+    };
+
     refreshTools().catch((e) => toast(e.message, true));
     loadTestList().catch((e) => toast(e.message, true));
+    refreshComponentReleases().catch((e) => toast(e.message, true));
     refreshReleaseStatus(true).catch((e) => toast(e.message, true));
     setInterval(() => refreshTools().catch(() => {}), 4000);
     setInterval(() => refreshReleaseStatus().catch(() => {}), 5000);

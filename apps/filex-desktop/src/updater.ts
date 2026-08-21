@@ -2,7 +2,7 @@ import * as electron from "electron";
 import { extractFile } from "@electron/asar";
 import { spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
@@ -181,23 +181,22 @@ function verifyManifestIntegrity(manifest: DesktopReleaseManifest): boolean {
   return true;
 }
 
-export async function loadReleaseManifest(channelInput?: DesktopReleaseChannel): Promise<DesktopReleaseManifest> {
-  const channel = sanitizeChannel(channelInput);
-  const urlValue = getReleaseManifestUrl(channel);
-  if (isAllowedReleaseUrl(urlValue)) {
-    try {
-      const raw = await requestJson(urlValue);
-      // An empty remote manifest is valid JSON but cannot power the Suite
-      // installer. Fall through to the bundled manifest while a release is
-      // being published or when the remote index is temporarily stale.
-      if (isDesktopReleaseManifest(raw) && verifyManifestIntegrity(raw) && raw.releases.length > 0) {
-        return raw;
-      }
-    } catch {
-      // fallback to bundled manifest
+function selectNewestReleaseEntries(
+  remoteManifest: DesktopReleaseManifest,
+  bundledManifest: DesktopReleaseManifest,
+): DesktopReleaseManifest {
+  const releasesByKey = new Map<string, DesktopToolReleaseEntry>();
+  for (const release of [...bundledManifest.releases, ...remoteManifest.releases]) {
+    const key = `${release.channel}:${release.toolId}`;
+    const current = releasesByKey.get(key);
+    if (!current || compareVersions(release.version, current.version) >= 0) {
+      releasesByKey.set(key, release);
     }
   }
+  return { ...remoteManifest, releases: Array.from(releasesByKey.values()) };
+}
 
+async function loadBundledReleaseManifest(channel: DesktopReleaseChannel): Promise<DesktopReleaseManifest> {
   const localManifestPath = app.isPackaged
     ? join(process.resourcesPath, "release-manifests", `${channel}.json`)
     : join(app.getAppPath(), "release-manifests", `${channel}.json`);
@@ -206,6 +205,30 @@ export async function loadReleaseManifest(channelInput?: DesktopReleaseChannel):
     throw new Error("Release manifest non valido");
   }
   return localManifestRaw;
+}
+
+export async function loadReleaseManifest(channelInput?: DesktopReleaseChannel): Promise<DesktopReleaseManifest> {
+  const channel = sanitizeChannel(channelInput);
+  const urlValue = getReleaseManifestUrl(channel);
+  const bundledManifest = await loadBundledReleaseManifest(channel);
+  if (isAllowedReleaseUrl(urlValue)) {
+    try {
+      const raw = await requestJson(urlValue);
+      // An empty remote manifest is valid JSON but cannot power the Suite
+      // installer. Fall through to the bundled manifest while a release is
+      // being published or when the remote index is temporarily stale.
+      if (isDesktopReleaseManifest(raw) && verifyManifestIntegrity(raw) && raw.releases.length > 0) {
+        // Il catalogo remoto e' pubblicato separatamente dagli installer. Se
+        // resta momentaneamente indietro, le voci piu' recenti gia' incluse
+        // nella Suite mantengono scaricabili i tool senza abbassare versioni.
+        return selectNewestReleaseEntries(raw, bundledManifest);
+      }
+    } catch {
+      // fallback to bundled manifest
+    }
+  }
+
+  return bundledManifest;
 }
 
 function resolveExecutableCandidates(toolId: DesktopToolId): string[] {
@@ -424,6 +447,36 @@ function getUpdateCacheDirectory(): string {
   return directory;
 }
 
+function isCachedInstallerFile(fileName: string): boolean {
+  return /(?:-setup\.exe|\.exe\.part)$/i.test(fileName);
+}
+
+/**
+ * Rimuove soltanto i download conclusi o falliti che non appartengono a un
+ * job attivo. Non tocca mai un installer pronto da applicare, quindi due
+ * aggiornamenti avviati in sequenza non si cancellano a vicenda.
+ */
+function cleanStaleUpdateCache(): void {
+  const cacheDirectory = getUpdateCacheDirectory();
+  const protectedPaths = new Set(
+    Array.from(updateJobs.values())
+      .filter((job) => ["downloading", "verifying", "ready-to-apply", "applying"].includes(job.status))
+      .flatMap((job) => job.installerPath ? [job.installerPath, `${job.installerPath}.part`] : []),
+  );
+
+  for (const entry of readdirSync(cacheDirectory, { withFileTypes: true })) {
+    if (!entry.isFile() || !isCachedInstallerFile(entry.name)) continue;
+    const filePath = join(cacheDirectory, entry.name);
+    if (protectedPaths.has(filePath)) continue;
+    try {
+      unlinkSync(filePath);
+    } catch {
+      // Un antivirus puo' tenere il file aperto per pochi istanti: il prossimo
+      // download ritentera la sostituzione senza compromettere il job corrente.
+    }
+  }
+}
+
 function createJob(toolId: DesktopToolId, channel: DesktopReleaseChannel): DesktopToolUpdateJob {
   const timestamp = now();
   const job: DesktopToolUpdateJob = {
@@ -623,6 +676,7 @@ async function runToolUpdateDownload(
       releaseVersion: release.version,
       installerPath: destinationPath,
     });
+    cleanStaleUpdateCache();
 
     let attempt = 0;
     for (;;) {
@@ -786,6 +840,7 @@ export async function applyToolUpdate(
      * L'installer non serve più.
      */
     await unlink(job.installerPath).catch(() => undefined);
+    cleanStaleUpdateCache();
 
     return patchJob(jobId, {
       status: "completed",

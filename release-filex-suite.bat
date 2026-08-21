@@ -358,21 +358,33 @@ set "DEP_STAMP=node_modules\.filex-dependencies-v2-hash"
 set "CACHED_DEP_HASH="
 if exist "%DEP_STAMP%" set /p "CACHED_DEP_HASH=" < "%DEP_STAMP%"
 
-if exist "node_modules\@electron\asar\lib\asar.js" if not defined CACHED_DEP_HASH (
-    > "%DEP_STAMP%" echo %DEP_HASH%
-    echo Dipendenze esistenti validate per la release.
-    echo npm ci saltato: la dashboard resta attiva e le versioni package non richiedono reinstallazione.
-) else if exist "node_modules" if "%DEP_HASH%"=="%CACHED_DEP_HASH%" (
-    echo Dipendenze gia sincronizzate.
-    echo npm ci saltato.
+if not exist "node_modules" goto :dependencies_need_install
+
+if "%DEP_HASH%"=="%CACHED_DEP_HASH%" (
+    echo Fingerprint invariato: verifica runtime locale...
 ) else (
-    echo Dipendenze cambiate o mancanti.
-    echo Avvio npm ci...
-    call npm ci
-    if errorlevel 1 goto :dependencies_failed
-    if not exist "node_modules\@electron\asar\lib\asar.js" goto :dependencies_failed
-    > "%DEP_STAMP%" echo %DEP_HASH%
+    echo Fingerprint dipendenze cambiato: verifica runtime locale non distruttiva...
 )
+call node scripts\verify-release-dependencies.mjs
+if errorlevel 1 goto :dependencies_need_install
+> "%DEP_STAMP%" echo %DEP_HASH%
+echo Dipendenze presenti e runtime Electron verificato.
+echo npm ci saltato.
+goto :dependencies_ready
+
+:dependencies_need_install
+if "%NON_INTERACTIVE%"=="1" goto :dashboard_dependencies_failed
+echo Dipendenze cambiate, mancanti o incomplete.
+echo Avvio npm ci...
+call npm ci
+if errorlevel 1 goto :dependencies_failed
+call node scripts\repair-electron-runtime.mjs
+if errorlevel 1 goto :dependencies_failed
+call node scripts\verify-release-dependencies.mjs
+if errorlevel 1 goto :dependencies_failed
+> "%DEP_STAMP%" echo %DEP_HASH%
+
+:dependencies_ready
 
 echo.
 goto :dependencies_done
@@ -383,6 +395,16 @@ goto :dependencies_done
         echo ERRORE: npm ci non ha ripristinato tutte le dipendenze richieste
         echo ============================================================
         echo Controlla l'errore npm immediatamente sopra.
+        goto :fail
+
+:dashboard_dependencies_failed
+        echo.
+        echo ============================================================
+        echo ERRORE: dipendenze locali incomplete
+        echo ============================================================
+        echo La dashboard non esegue npm ci mentre e in uso, per evitare file bloccati.
+        echo Chiudi la Dev Console, esegui npm ci una volta e riaprila.
+        echo La release NON e stata pubblicata.
         goto :fail
 
 :dependencies_done

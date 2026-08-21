@@ -19,8 +19,16 @@ export interface ResolvedDestination {
   usedOverride: boolean;
 }
 
+const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
+
 function safeSegment(value: string): string {
-  return value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/^\.+|\.+$/g, "").trim();
+  const sanitized = value
+    .normalize("NFC")
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
+    .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
+    .replace(/^\.+|[ .]+$/g, "")
+    .trim();
+  return WINDOWS_RESERVED_NAME.test(sanitized) ? `_${sanitized}` : sanitized;
 }
 
 function render(pattern: string, values: Record<string, string>): string {

@@ -160,9 +160,10 @@ export async function startProcess(
   await writeFile(logFile, `[${new Date().toISOString()}] Avvio: ${command.file} ${command.args.join(" ")}\n`, "utf8");
 
   return new Promise((resolve) => {
-    const executable = process.platform === "win32" ? (process.env.ComSpec ?? "cmd.exe") : command.file;
-    const args = process.platform === "win32"
-      ? ["/d", "/s", "/c", [command.file, ...command.args.map(quoteForCmd)].join(" ")]
+    const runsThroughCmd = process.platform === "win32" && /\.(cmd|bat)$/iu.test(command.file);
+    const executable = runsThroughCmd ? (process.env.ComSpec ?? "cmd.exe") : command.file;
+    const args = runsThroughCmd
+      ? ["/d", "/s", "/c", [quoteForCmd(command.file), ...command.args.map(quoteForCmd)].join(" ")]
       : command.args;
 
     const child = spawn(executable, args, {

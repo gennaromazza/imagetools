@@ -10,6 +10,7 @@
     "build": "vite build",
     "build:server": "tsc -p server/tsconfig.json",
     "test:archive": "tsx --test --test-concurrency=1 server/*.test.ts",
+    "test:bug-hunt": "tsx --test --test-concurrency=1 server/*.bug.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

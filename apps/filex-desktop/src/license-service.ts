@@ -212,10 +212,23 @@ export async function getLicenseState(refresh = false): Promise<DesktopLicenseSt
   const store = await readStore();
   const token = decryptToken(store.activationTokenEncrypted);
   if (!token) {
+    // Un token DPAPI puo' non essere leggibile dopo un ripristino del profilo
+    // Windows, mentre l'attestazione firmata resta valida. In quel caso non
+    // dobbiamo conservare uno stato "active" che blocca comunque i tool.
+    const offline = usableOffline(store);
+    if (offline) return offline;
     const state = store.state ?? emptyState();
     if (!refresh && state.lastCheckedAt && Date.now() - state.lastCheckedAt < 24 * 60 * 60 * 1000) return state;
     const mode = await readRemoteEnforcement();
-    const updated = { ...state, enforcement: mode, lastCheckedAt: Date.now(), canUseTools: mode !== "enforce" };
+    const updated = {
+      ...emptyState(
+        "unavailable",
+        "Impossibile leggere la credenziale locale. Apri FileX Suite e verifica la licenza.",
+      ),
+      enforcement: mode,
+      lastCheckedAt: Date.now(),
+      canUseTools: mode !== "enforce",
+    };
     await saveStore({ ...store, state: updated });
     return updated;
   }

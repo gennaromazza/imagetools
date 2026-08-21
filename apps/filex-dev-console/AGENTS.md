@@ -18,11 +18,20 @@ Ogni tool mostrato nella dashboard deve avere un workspace esistente e uno scrip
 - Mantieni l'allowlist in `server/tools.ts`; se serve un comando, una porta o una modalità non presenti, chiedi prima all'utente invece di esporre esecuzione arbitraria.
 - Per indagare un problema, leggi prima il log e il singolo script interessato; evita di avviare più tool o test non collegati.
 
+## Catalogo test obbligatorio
+
+- Ogni nuovo test del monorepo deve essere raggiungibile dalla sezione Test della Dev Console tramite uno script `test:*` dichiarato nel `package.json` radice.
+- Classifica sempre il test nel prodotto corretto tramite `TEST_CATEGORIES` e `testCategoryId()` in `server/index.ts`; usa `other` soltanto quando non esiste davvero un proprietario.
+- Compila `testDescription()` con una frase concreta che descriva il bug o l'invariante cercata.
+- Quando un test viene rinominato o rimosso, aggiorna nello stesso intervento script radice, categoria e descrizione, evitando voci morte nella dashboard.
+- Dopo l'integrazione esegui il test interessato e `npm --workspace @photo-tools/filex-dev-console run typecheck`.
+
 ## Sicurezza operativa
 
 - Le API sono volutamente locali: non cambiare host da `127.0.0.1` né esporre CORS in rete senza una richiesta esplicita.
 - I comandi devono restare basati su una allowlist (`DEV_TOOLS`); non accettare comandi shell arbitrari dal browser.
 - La release Suite usa esclusivamente il workflow allowlistato `release-filex-suite.bat`: dalla dashboard può includere le modifiche locali nel commit di release, ma deve restare limitata al branch `main` e richiedere una conferma esplicita del browser.
+- L'audit qualità progetto è esclusivamente in lettura: segnala candidature da verificare e non deve rimuovere dipendenze, file o codice automaticamente.
 - I log runtime in `.runtime/` sono temporanei e non vanno versionati.
 
 ## Verifica

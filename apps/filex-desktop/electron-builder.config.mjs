@@ -437,6 +437,12 @@ export default {
      */
     signAndEditExecutable: true,
 
+    // Una release Windows non firmata puo' venire bloccata da SmartScreen o
+    // dalle policy aziendali quando la Suite la esegue dalla propria cache.
+    // In CI la firma e' obbligatoria: meglio fallire la release che pubblicare
+    // un installer che gli utenti non possono avviare.
+    forceCodeSigning: process.env.FILEX_CODE_SIGNING === "1",
+
     target: [
       {
         target: "nsis",

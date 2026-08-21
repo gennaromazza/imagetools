@@ -30,6 +30,21 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-20 - FileX Suite 0.1.42
+
+### Dev Console: test e qualità progetto
+- riorganizzata la sezione Test in pannelli espandibili per prodotto, con ricerca e descrizioni disponibili al passaggio del mouse
+- aggiunto l'audit locale in sola lettura per individuare dipendenze candidate da verificare, TODO/FIXME/HACK e placeholder espliciti
+- aggiunta la categoria `Archivio Flow — Caccia bug` con test avversariali su dataset generati, percorsi ostili, nomi riservati Windows e transizioni SQLite vietate
+- impedite le transizioni impossibili delle sessioni di importazione e neutralizzati nomi Windows o caratteri bidi che potevano produrre destinazioni non valide
+- estesa la Caccia bug a tutti i tool attivi, con sezioni dedicate e comandi eseguibili singolarmente dalla Dev Console
+- corretti il parsing dei nomi con virgole tra virgolette, i conteggi progetto obsoleti di Image Party Frame e il riconoscimento multipiattaforma degli output di Image Converter
+- formalizzata la regola di repository che rende obbligatoria l'integrazione di ogni nuovo test nella categoria corretta della Dev Console
+- resa non distruttiva la verifica dipendenze della release avviata dalla dashboard: non esegue più `npm ci` mentre la Console usa `esbuild` e valida invece workspace, comandi e runtime Electron presenti
+- aggiunto il ripristino deterministico del runtime Electron Windows dopo un'installazione pulita, evitando pacchetti presenti ma privi di `electron.exe`
+- corretto il launcher Windows della Console per eseguire direttamente gli eseguibili con percorsi contenenti spazi
+- rimosso il workspace orfano `AlbumWiew`, non collegato a Suite, dashboard, CI o release
+
 ## 2026-08-20 - FileX Suite 0.1.41
 
 ### Dev Console e pubblicazione

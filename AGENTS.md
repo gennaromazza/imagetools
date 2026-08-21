@@ -47,6 +47,17 @@ Non eseguire comandi di release, packaging o deploy salvo richiesta esplicita de
 - Le porte e gli script di sviluppo sono quelli dichiarati nei `package.json` e, per la Dev Console, in `apps/filex-dev-console/server/tools.ts`.
 - Le policy Git sono in `docs/GIT_WORKFLOW.md`. Non usare comandi distruttivi né modificare branch quando l'albero di lavoro è sporco.
 
+## Test e Dev Console
+
+Ogni nuovo test destinato allo sviluppo locale deve essere eseguibile dalla FileX Dev Console. Nello stesso intervento in cui viene creato o rinominato un test:
+
+- aggiungi uno script `test:*` alla radice del monorepo che lo esegua senza comandi arbitrari ricevuti dal browser;
+- assegna lo script alla categoria del prodotto in `apps/filex-dev-console/server/index.ts`;
+- aggiungi una descrizione comprensibile che spieghi cosa cerca e quali rischi copre;
+- verifica sia il test sia il typecheck di `@photo-tools/filex-dev-console`.
+
+Un test presente soltanto nel `package.json` di un workspace e non raggiungibile dalla Dev Console è considerato incompleto. Mantieni le sezioni per prodotto espandibili e non accorpare test di tool diversi in una categoria generica quando il proprietario è noto.
+
 ## Release
 
 Una release riguarda soltanto il componente richiesto. Prima di pubblicare o creare installer, verifica la procedura e gli script realmente presenti nel relativo `package.json` e in `.github/workflows/`. Non assumere feed, tag o workflow per singolo tool se non esistono nel repository.

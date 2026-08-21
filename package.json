@@ -19,6 +19,14 @@
     "test:photo-selector-workflow": "tsx scripts/test-photo-selector-workflow.ts",
     "test:photo-selector-relocation": "tsx scripts/test-photo-selector-relocation.ts",
     "test:photo-selector-xmp": "tsx scripts/test-photo-selector-xmp.ts",
+    "test:archivio-flow-bug-hunt": "npm --workspace @photo-tools/archivio-flow run test:bug-hunt",
+    "test:image-party-frame-bug-hunt": "tsx --test apps/image-party-frame/src/app/contexts/project-state.bug.test.ts",
+    "test:batch-print-layout-bug-hunt": "npm --workspace @photo-tools/batch-print-layout run test",
+    "test:image-converter-bug-hunt": "tsx --test apps/filex-desktop/src/image-converter-policy.bug.test.ts",
+    "test:image-file-finder-bug-hunt": "tsx --test scripts/test-image-file-finder-bug-hunt.ts",
+    "test:cache-sweep-bug-hunt": "npm --workspace @photo-tools/cache-sweep run test",
+    "test:filex-send-bug-hunt": "npm --workspace @photo-tools/filex-send run test",
+    "test:backup-guard-bug-hunt": "npm --workspace @photo-tools/backup-guard run test",
     "test:filex-updater-lock": "node scripts/test-filex-updater-lock.mjs",
     "test:filex-independent-releases": "node scripts/test-filex-independent-releases.mjs",
     "dev:batch-print-layout": "npm --workspace @photo-tools/filex-desktop run dev:batch-print-layout",
@@ -62,6 +70,13 @@
     "typescript": "^5.8.0"
   },
   "allowScripts": {
-    "electron": true
+    "@firebase/util": true,
+    "@tailwindcss/oxide": true,
+    "core-js": true,
+    "electron": true,
+    "esbuild": true,
+    "protobufjs": true,
+    "re2": true,
+    "sharp": true
   }
 }

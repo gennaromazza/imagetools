@@ -89,6 +89,10 @@ assert(
     && !/requestedTool\.id === "suite-launcher"\s*\?\s*\[\s*"\.output\/electron\/\*\*\/\*"/.test(builder),
   "Il pacchetto Suite puo ancora includere indiscriminatamente l'intero runtime Electron.",
 );
+assert(
+  builder.includes('forceCodeSigning: process.env.FILEX_CODE_SIGNING === "1"'),
+  "Le release Windows possono pubblicare installer non firmati anche quando la firma e richiesta.",
+);
 for (const excludedDependency of ["@img", "exiftool-vendored", "exiftool-vendored.exe", "sharp"]) {
   assert(
     builder.includes(`!node_modules/${excludedDependency}{,/**/*}`),
@@ -151,6 +155,10 @@ assert(
     && releaseWorkflow.includes("Bootstrap dedicated tool catalog")
     && releaseWorkflow.includes("releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json")
     && releaseWorkflow.includes('$component -eq "backup-guard"')
+    && releaseWorkflow.includes("batch-print-layout|image-converter|image-file-finder")
+    && releaseWorkflow.includes('"batch-print-layout" { npm.cmd --workspace @photo-tools/filex-desktop run dist:batch-print-layout:win64 }')
+    && releaseWorkflow.includes('"image-converter" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-converter:win64 }')
+    && releaseWorkflow.includes('"image-file-finder" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-file-finder:win64 }')
     && releaseWorkflow.includes('{ "0.1.33" } elseif ($component -eq "filex-send") { "0.1.31" } elseif ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }')
     && releaseWorkflow.includes("git branch -r --contains $env:GITHUB_SHA")
     && releaseWorkflow.includes('"refs/heads/main"')

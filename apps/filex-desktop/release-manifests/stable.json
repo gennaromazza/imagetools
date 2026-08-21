@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-09T14:16:59.417Z",
+  "generatedAt": "2026-08-11T14:58:32.406Z",
   "generatedBy": "generate-release-manifest.mjs",
   "channels": [
     "stable",
@@ -74,19 +74,34 @@
       ]
     },
     {
-      "toolId": "photo-selector-app",
-      "version": "0.1.26",
+      "toolId": "cache-sweep",
+      "version": "0.1.0",
       "channel": "stable",
-      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/photo-selector-app-v0.1.26/Image-Select-Pro-0.1.26-stable-x64-setup.exe",
-      "installerSha256": "d405e48198020b79b5eec0413e6446a96aaf7b51b5adf7e5413f70d576f794a7",
-      "minLauncherVersion": "0.1.26",
-      "publishedAt": "2026-08-09T14:16:58.634Z",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/cache-sweep-v0.1.0/FileX-Adobe-Cleaner-0.1.0-stable-x64-setup.exe",
+      "installerSha256": "12f21376d30c757c9230fe4a85d49ca2fbf5615e78503eb083b4b267d34932b2",
+      "minLauncherVersion": "0.1.28",
+      "publishedAt": "2026-08-09T15:57:26.306Z",
       "highlights": [
-        "La schermata Sfoglia consente di scorrere tutte le cartelle e i progetti recenti senza spostare la testata.",
-        "Confronta mostra correttamente da due a quattro foto selezionate nella griglia, nello stesso ordine visivo, ed e' disponibile con Ctrl+B.",
-        "Lo scorrimento della griglia e' piu fluido grazie alla sospensione temporanea delle ombre diffuse sulle card."
+        "Utility dedicata esclusivamente ai programmi Adobe: rilevamento locale delle applicazioni installate e misurazione delle sole cache supportate, senza pulizia generica del PC.",
+        "Pulizia guidata con spiegazione delle conseguenze, chiusura coordinata dei processi e protezioni sui percorsi.",
+        "Supporto iniziale per Media Cache Adobe video, Camera Raw, Bridge, anteprime Lightroom e cache InDesign delimitate.",
+        "Nuovo nome FileX Adobe Cleaner e rilevamento delle vecchie versioni principali, rimovibili con il disinstallatore ufficiale Adobe mantenendo le preferenze."
+      ]
+    },
+    {
+      "toolId": "photo-selector-app",
+      "version": "0.1.27",
+      "channel": "stable",
+      "installerUrl": "https://github.com/gennaromazza/imagetools/releases/download/photo-selector-app-v0.1.27/Image-Select-Pro-0.1.27-stable-x64-setup.exe",
+      "installerSha256": "201aa78f0518be98d64da938e5447b6852a9b328bb9d9139e0c5e3931aa57bb1",
+      "minLauncherVersion": "0.1.26",
+      "publishedAt": "2026-08-11T14:58:32.406Z",
+      "highlights": [
+        "Corretto il polling delle modifiche esterne affinche' non prosegua dopo la chiusura o il rinnovo della vista.",
+        "Le anteprime non ricevono piu' aggiornamenti asincroni obsoleti quando la selezione cambia rapidamente.",
+        "Aggiornamento indipendente di Image Select Pro: FileX Suite e gli altri tool restano invariati."
       ]
     }
   ],
-  "payloadSha256": "ba8431daaa849477c0f0e3d90e2737bf33ba5a6db07f3bc74de5ed205b651061"
+  "payloadSha256": "b3a9f4d89b5bd4deafef9f03ad5180bce5e5f9fb4c8f3c180359dacfaeab4264"
 }

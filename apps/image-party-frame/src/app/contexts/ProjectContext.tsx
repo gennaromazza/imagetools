@@ -158,9 +158,9 @@ export function normalizeProjectState(project?: Partial<ProjectState> | null): P
         approval:
           image?.approval === "approved" || image?.approval === "needs-adjustment" ? image.approval : "pending",
         crop: {
-          x: typeof image?.crop?.x === "number" ? image.crop.x : 0,
-          y: typeof image?.crop?.y === "number" ? image.crop.y : 0,
-          zoom: typeof image?.crop?.zoom === "number" ? image.crop.zoom : 100,
+          x: Number.isFinite(image?.crop?.x) ? image!.crop.x : 0,
+          y: Number.isFinite(image?.crop?.y) ? image!.crop.y : 0,
+          zoom: Number.isFinite(image?.crop?.zoom) && image!.crop.zoom > 0 ? image!.crop.zoom : 100,
         },
       }))
     : [];
@@ -173,7 +173,7 @@ export function normalizeProjectState(project?: Partial<ProjectState> | null): P
     ...project,
     customTemplate: project?.customTemplate ?? null,
     images: normalizedImages,
-    imageCount: project?.imageCount ?? {
+    imageCount: {
       total: normalizedImages.length,
       vertical,
       horizontal,

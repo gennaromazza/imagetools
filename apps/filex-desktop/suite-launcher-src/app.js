@@ -104,8 +104,10 @@ function formatLicenseDate(value) {
 
 function renderLicense(state) {
   licenseState = state;
-  const permitted = state?.status === 'active' || state?.status === 'grace';
-  const statusLabel = state?.status === 'active' ? 'Attiva' : state?.status === 'grace' ? 'Da aggiornare' : state?.status === 'unavailable' ? 'Offline' : 'Non attiva';
+  const permitted = state?.canUseTools === true && (state?.status === 'active' || state?.status === 'grace');
+  const statusLabel = permitted
+    ? (state.status === 'grace' ? 'Da aggiornare' : 'Attiva')
+    : (state?.status === 'unavailable' ? 'Verifica richiesta' : 'Non attiva');
   document.querySelector('#license-sidebar-status').textContent = statusLabel;
   document.querySelector('#license-dot').classList.toggle('active', permitted);
   document.querySelector('#license-summary-title').textContent = permitted ? 'FileX All Access' : 'Licenza FileX';

@@ -93,7 +93,7 @@ jobs:
 
           if ("${{ github.event_name }}" -eq "push") {
             $releaseTag = "${{ github.ref_name }}"
-            if ($releaseTag -notmatch "^(suite|photo-selector-app|image-party-frame|archivio-flow|cache-sweep|filex-send|backup-guard)-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$") {
+            if ($releaseTag -notmatch "^(suite|photo-selector-app|image-party-frame|archivio-flow|cache-sweep|filex-send|backup-guard|batch-print-layout|image-converter|image-file-finder)-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$") {
               throw "Tag componente non valido: $releaseTag"
             }
             $component = $Matches[1]
@@ -120,6 +120,9 @@ jobs:
             "cache-sweep" { "apps/cache-sweep/package.json" }
             "filex-send" { "apps/filex-send/package.json" }
             "backup-guard" { "apps/backup-guard/package.json" }
+            "batch-print-layout" { "apps/batch-print-layout/package.json" }
+            "image-converter" { "apps/image-converter/package.json" }
+            "image-file-finder" { "apps/image-file-finder/package.json" }
             default { throw "Componente non supportato: $component" }
           }
           $packageVersion = (Get-Content $packagePath -Raw | ConvertFrom-Json).version
@@ -177,6 +180,9 @@ jobs:
             "cache-sweep" { npm.cmd --workspace @photo-tools/filex-desktop run dist:cache-sweep:win }
             "filex-send" { npm.cmd --workspace @photo-tools/filex-desktop run dist:filex-send:win }
             "backup-guard" { npm.cmd --workspace @photo-tools/filex-desktop run dist:backup-guard:win }
+            "batch-print-layout" { npm.cmd --workspace @photo-tools/filex-desktop run dist:batch-print-layout:win64 }
+            "image-converter" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-converter:win64 }
+            "image-file-finder" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-file-finder:win64 }
             default { throw "Componente non supportato: $env:FILEX_COMPONENT" }
           }
 

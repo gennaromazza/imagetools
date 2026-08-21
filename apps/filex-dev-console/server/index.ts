@@ -14,9 +14,136 @@ const HOST = "127.0.0.1";
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
 const SUITE_RELEASE_ID = "release-suite";
 const SUITE_RELEASE_BAT = join(ROOT, "release-filex-suite.bat");
+const PROJECT_AUDIT_ID = "project-health";
+
+const COMPONENT_RELEASES = [
+  { id: "photo-selector-app", label: "Image Select Pro", packagePath: "apps/photo-selector-app/package.json", minSuiteVersion: "0.1.26" },
+  { id: "image-party-frame", label: "Image Party Frame", packagePath: "apps/image-party-frame/package.json", minSuiteVersion: "0.1.26" },
+  { id: "batch-print-layout", label: "Batch Print Layout", packagePath: "apps/batch-print-layout/package.json", minSuiteVersion: "0.1.26" },
+  { id: "archivio-flow", label: "Archivio Flow", packagePath: "apps/archivio-flow/package.json", minSuiteVersion: "0.1.26" },
+  { id: "image-converter", label: "Image Converter", packagePath: "apps/image-converter/package.json", minSuiteVersion: "0.1.26" },
+  { id: "image-file-finder", label: "Trova Foto da Lista", packagePath: "apps/image-file-finder/package.json", minSuiteVersion: "0.1.26" },
+  { id: "cache-sweep", label: "FileX Adobe Cleaner", packagePath: "apps/cache-sweep/package.json", minSuiteVersion: "0.1.28" },
+  { id: "filex-send", label: "FileX Send", packagePath: "apps/filex-send/package.json", minSuiteVersion: "0.1.31" },
+  { id: "backup-guard", label: "FileX Backup Guard", packagePath: "apps/backup-guard/package.json", minSuiteVersion: "0.1.33" },
+] as const;
+
+type ComponentReleaseId = typeof COMPONENT_RELEASES[number]["id"];
+
+interface ComponentWorkflowRun {
+  id: string;
+  url: string | null;
+  status: string;
+  conclusion: string | null;
+}
+
+const componentWorkflowRuns = new Map<ComponentReleaseId, { requestedAt: number; runId: string | null }>();
+
+function componentReleaseById(value: string): typeof COMPONENT_RELEASES[number] | null {
+  return COMPONENT_RELEASES.find((component) => component.id === value) ?? null;
+}
+
+function validComponentVersion(value: unknown): string | null {
+  const version = String(value ?? "").trim();
+  return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u.test(version) ? version : null;
+}
+
+async function readComponentWorkflowRun(componentId: ComponentReleaseId): Promise<ComponentWorkflowRun | null> {
+  const requested = componentWorkflowRuns.get(componentId);
+  if (!requested) return null;
+  if (!requested.runId) {
+    const { stdout } = await execFileP(
+      "gh",
+      ["run", "list", "--repo", "gennaromazza/imagetools", "--workflow", "windows-release.yml", "--branch", "main", "--event", "workflow_dispatch", "--limit", "10", "--json", "databaseId,createdAt,url,status,conclusion"],
+      { cwd: ROOT, timeout: 15_000 },
+    );
+    const candidates = JSON.parse(stdout) as Array<{ databaseId?: unknown; createdAt?: unknown; url?: unknown; status?: unknown; conclusion?: unknown }>;
+    const found = candidates.find((candidate) => Date.parse(String(candidate.createdAt ?? "")) >= requested.requestedAt - 10_000);
+    if (!found?.databaseId) return null;
+    requested.runId = String(found.databaseId);
+    componentWorkflowRuns.set(componentId, requested);
+    return {
+      id: requested.runId,
+      url: typeof found.url === "string" ? found.url : null,
+      status: String(found.status ?? "queued"),
+      conclusion: typeof found.conclusion === "string" ? found.conclusion : null,
+    };
+  }
+  const { stdout } = await execFileP(
+    "gh",
+    ["run", "view", requested.runId, "--repo", "gennaromazza/imagetools", "--json", "databaseId,url,status,conclusion"],
+    { cwd: ROOT, timeout: 15_000 },
+  );
+  const run = JSON.parse(stdout) as { databaseId: unknown; url?: unknown; status?: unknown; conclusion?: unknown };
+  return {
+    id: String(run.databaseId),
+    url: typeof run.url === "string" ? run.url : null,
+    status: String(run.status ?? "queued"),
+    conclusion: typeof run.conclusion === "string" ? run.conclusion : null,
+  };
+}
 
 function workspaceScript(workspace: string, script: string) {
   return { file: NPM_COMMAND, args: ["--workspace", workspace, "run", script] };
+}
+
+interface TestCategory {
+  id: string;
+  title: string;
+  description: string;
+}
+
+const TEST_CATEGORIES: TestCategory[] = [
+  { id: "photo-selector", title: "Image Select Pro", description: "Flusso lavoro, spostamenti e metadati XMP." },
+  { id: "image-party-frame", title: "Image Party Frame — Caccia bug", description: "Persistenza progetto, immagini, crop e template." },
+  { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Impaginazione, rotazioni, crop e paginazione senza duplicati." },
+  { id: "archivio-flow", title: "Archivio Flow — Caccia bug", description: "Casi avversariali su percorsi, nomi Windows, fingerprint e stati di importazione." },
+  { id: "image-converter", title: "Image Converter — Caccia bug", description: "Limiti export e riconoscimento sicuro delle cartelle generate." },
+  { id: "image-file-finder", title: "Trova Foto da Lista — Caccia bug", description: "Parsing di liste, percorsi, virgolette e duplicati." },
+  { id: "cache-sweep", title: "FileX Adobe Cleaner — Caccia bug", description: "Confini dei percorsi e pulizia sicura delle sole cache." },
+  { id: "filex-send", title: "FileX Send — Caccia bug", description: "Trasferimenti, autenticazione anonima e rilevamento rete locale." },
+  { id: "backup-guard", title: "FileX Backup Guard — Caccia bug", description: "Conflitti, cancellazioni, rinomine, checksum e recupero." },
+  { id: "suite", title: "FileX Suite e aggiornamenti", description: "Protezione updater, cataloghi e release indipendenti." },
+  { id: "licenses", title: "Licenze FileX", description: "Copertura dei controlli licenza nei tool." },
+  { id: "cloud", title: "Servizi cloud", description: "Funzioni Firebase e servizi FileX Cloud." },
+  { id: "other", title: "Altri controlli", description: "Test non ancora associati a una categoria di prodotto." },
+];
+
+function testCategoryId(name: string): TestCategory["id"] {
+  if (name.startsWith("test:photo-selector-")) return "photo-selector";
+  if (name === "test:archivio-flow-bug-hunt") return "archivio-flow";
+  if (name === "test:image-party-frame-bug-hunt") return "image-party-frame";
+  if (name === "test:batch-print-layout-bug-hunt") return "batch-print-layout";
+  if (name === "test:image-converter-bug-hunt") return "image-converter";
+  if (name === "test:image-file-finder-bug-hunt") return "image-file-finder";
+  if (name === "test:cache-sweep-bug-hunt") return "cache-sweep";
+  if (name === "test:filex-send-bug-hunt") return "filex-send";
+  if (name === "test:backup-guard-bug-hunt") return "backup-guard";
+  if (name === "test:filex-updater-lock" || name === "test:filex-independent-releases") return "suite";
+  if (name === "test:filex-license-coverage") return "licenses";
+  if (name === "test:filex-cloud") return "cloud";
+  return "other";
+}
+
+function testDescription(name: string): string {
+  const descriptions: Record<string, string> = {
+    "test:photo-selector-workflow": "Controlla il flusso principale di Image Select Pro.",
+    "test:photo-selector-relocation": "Verifica lo spostamento sicuro dei progetti e delle relative risorse.",
+    "test:photo-selector-xmp": "Controlla lettura e aggiornamento dei metadati XMP.",
+    "test:archivio-flow-bug-hunt": "Cerca regressioni con input generati, percorsi ostili e transizioni di importazione vietate.",
+    "test:image-party-frame-bug-hunt": "Cerca dati progetto obsoleti e valori crop capaci di corrompere il layout.",
+    "test:batch-print-layout-bug-hunt": "Stressa impaginazione, orientamento, crop e ultima pagina.",
+    "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",
+    "test:image-file-finder-bug-hunt": "Stressa il parser con virgolette, separatori, percorsi e duplicati.",
+    "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",
+    "test:filex-send-bug-hunt": "Verifica trasferimenti, autenticazione e rete con casi di errore.",
+    "test:backup-guard-bug-hunt": "Verifica che sincronizzazione e rinomine non perdano o sovrascrivano file.",
+    "test:filex-updater-lock": "Verifica che gli archivi dell'updater non restino bloccati su Windows.",
+    "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
+    "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
+    "test:filex-cloud": "Esegue i test delle funzioni cloud FileX.",
+  };
+  return descriptions[name] ?? "Esegue il controllo dichiarato nello script npm del progetto.";
 }
 
 const app = express();
@@ -203,8 +330,14 @@ app.get("/api/tests", async (_req, res) => {
     const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
     const tests = Object.entries(pkg.scripts ?? {})
       .filter(([name]) => name.startsWith("test:"))
-      .map(([name, value]) => ({ name, command: value }));
-    res.json({ ok: true, tests });
+      .map(([name, value]) => ({ name, command: value, description: testDescription(name) }));
+    const categories = TEST_CATEGORIES
+      .map((category) => ({
+        ...category,
+        tests: tests.filter((test) => testCategoryId(test.name) === category.id),
+      }))
+      .filter((category) => category.tests.length > 0);
+    res.json({ ok: true, categories });
   } catch (error) {
     res.status(500).json({ ok: false, error: String((error as { message?: string })?.message ?? error) });
   }
@@ -235,6 +368,29 @@ app.post("/api/tests/run", async (req, res) => {
   res.json({ ok: result.ok, error: result.error, id });
 });
 
+app.get("/api/tests/:id/status", async (req, res) => {
+  const { id } = req.params;
+  if (!/^tests-\d+$/u.test(id)) {
+    res.status(400).json({ error: "Identificativo test non valido." });
+    return;
+  }
+  res.json({ id, running: await isRunning(id) });
+});
+
+app.post("/api/project-health/run", async (_req, res) => {
+  const result = await startProcess(
+    PROJECT_AUDIT_ID,
+    "Audit qualità progetto",
+    { file: NODE, args: ["scripts/audit-project-health.mjs"] },
+    { cwd: ROOT },
+  );
+  res.json({ ...result, id: PROJECT_AUDIT_ID });
+});
+
+app.get("/api/project-health/status", async (_req, res) => {
+  res.json({ running: await isRunning(PROJECT_AUDIT_ID) });
+});
+
 app.get("/api/processes", async (_req, res) => {
   const running = await listRunning(DEV_TOOLS);
   res.json({ running });
@@ -245,15 +401,20 @@ app.get("/api/release/suite/status", async (_req, res) => {
     const pkg = JSON.parse(await readFile(join(ROOT, "apps", "filex-desktop", "package.json"), "utf8")) as { version?: string };
     const currentVersion = String(pkg.version ?? "0.0.0");
     const [major, minor, patch] = currentVersion.split(".").map(Number);
-    const [{ stdout: branch }, { stdout: changes }, currentTag] = await Promise.all([
+    const [{ stdout: branch }, { stdout: changes }, currentTag, publishedTag] = await Promise.all([
       execFileP("git", ["branch", "--show-current"], { cwd: ROOT, timeout: 5_000 }),
       execFileP("git", ["status", "--short"], { cwd: ROOT, timeout: 5_000 }),
       execFileP("git", ["tag", "--list", `suite-v${currentVersion}`], { cwd: ROOT, timeout: 5_000 }),
+      execFileP("git", ["tag", "--merged", "HEAD", "--list", "suite-v*", "--sort=-version:refname"], { cwd: ROOT, timeout: 5_000 }),
     ]);
     const currentVersionAlreadyPublished = currentTag.stdout.trim() === `suite-v${currentVersion}`;
+    const latestPublishedTag = publishedTag.stdout.trim().split(/\r?\n/u).find(Boolean) ?? null;
+    const latestPublishedVersion = latestPublishedTag?.replace(/^suite-v/u, "") ?? null;
     res.json({
       ok: true,
       currentVersion,
+      latestPublishedVersion,
+      currentVersionAlreadyPublished,
       // Se il pacchetto è stato già aggiornato da una pubblicazione interrotta,
       // il tag non esiste ancora: riproponiamo quella stessa versione, senza
       // saltare una patch e senza obbligare l'utente a intervenire a mano.
@@ -310,6 +471,98 @@ app.post("/api/release/suite/publish", async (req, res) => {
 
 app.post("/api/release/suite/stop", async (_req, res) => {
   res.json(await stopProcess(SUITE_RELEASE_ID));
+});
+
+app.get("/api/release/tools", async (_req, res) => {
+  try {
+    const [{ stdout: branch }, { stdout: changes }, tools] = await Promise.all([
+      execFileP("git", ["branch", "--show-current"], { cwd: ROOT, timeout: 5_000 }),
+      execFileP("git", ["status", "--short"], { cwd: ROOT, timeout: 5_000 }),
+      Promise.all(COMPONENT_RELEASES.map(async (component) => {
+        const pkg = JSON.parse(await readFile(join(ROOT, component.packagePath), "utf8")) as { version?: unknown };
+        const version = validComponentVersion(pkg.version);
+        const { stdout: tag } = await execFileP("git", ["tag", "--list", `${component.id}-v${version ?? "invalid"}`], { cwd: ROOT, timeout: 5_000 });
+        const workflow = await readComponentWorkflowRun(component.id).catch(() => null);
+        return {
+          ...component,
+          version,
+          versionAlreadyPublished: Boolean(version && tag.trim() === `${component.id}-v${version}`),
+          workflow,
+        };
+      })),
+    ]);
+    res.json({
+      ok: true,
+      branch: branch.trim(),
+      clean: changes.trim().length === 0,
+      changedFiles: changes.trim() ? changes.trim().split(/\r?\n/u).length : 0,
+      tools,
+    });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String((error as Error)?.message ?? error) });
+  }
+});
+
+app.post("/api/release/tools/:id/publish", async (req, res) => {
+  const component = componentReleaseById(req.params.id);
+  if (!component) {
+    res.status(404).json({ ok: false, error: "Tool non supportato per la release." });
+    return;
+  }
+  if (req.body?.confirmed !== true) {
+    res.status(400).json({ ok: false, error: "Conferma la pubblicazione dalla dashboard prima di procedere." });
+    return;
+  }
+
+  try {
+    const [{ stdout: branch }, { stdout: changes }, pkg] = await Promise.all([
+      execFileP("git", ["branch", "--show-current"], { cwd: ROOT, timeout: 5_000 }),
+      execFileP("git", ["status", "--short"], { cwd: ROOT, timeout: 5_000 }),
+      readFile(join(ROOT, component.packagePath), "utf8").then((raw) => JSON.parse(raw) as { version?: unknown }),
+    ]);
+    const version = validComponentVersion(pkg.version);
+    if (!version) throw new Error(`Versione non valida in ${component.packagePath}.`);
+    if (branch.trim() !== "main") throw new Error("La release di un tool e' consentita solo dal branch main.");
+    if (changes.trim()) throw new Error("La working tree deve essere pulita: effettua prima commit e push delle modifiche del tool.");
+
+    const { stdout: existingTag } = await execFileP(
+      "git",
+      ["ls-remote", "--tags", "origin", `refs/tags/${component.id}-v${version}`],
+      { cwd: ROOT, timeout: 15_000 },
+    );
+    if (existingTag.trim()) throw new Error(`La release ${component.id}-v${version} e' gia' pubblicata.`);
+
+    componentWorkflowRuns.set(component.id, { requestedAt: Date.now(), runId: null });
+    await execFileP(
+      "gh",
+      [
+        "workflow", "run", "windows-release.yml", "--repo", "gennaromazza/imagetools", "--ref", "main",
+        "-f", `component=${component.id}`,
+        "-f", "channel=stable",
+        "-f", `version=${version}`,
+        "-f", `min_suite_version=${component.minSuiteVersion}`,
+      ],
+      { cwd: ROOT, timeout: 30_000 },
+    );
+    res.json({ ok: true, component: component.id, version, message: "Workflow GitHub avviato: attendi l'aggiornamento dello stato." });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: String((error as Error)?.message ?? error) });
+  }
+});
+
+app.post("/api/release/tools/:id/stop", async (req, res) => {
+  const component = componentReleaseById(req.params.id);
+  const requested = component ? componentWorkflowRuns.get(component.id) : null;
+  if (!component || !requested?.runId) {
+    res.status(400).json({ ok: false, error: "Nessun workflow GitHub del tool individuato da arrestare." });
+    return;
+  }
+  try {
+    await execFileP("gh", ["run", "cancel", requested.runId, "--repo", "gennaromazza/imagetools"], { cwd: ROOT, timeout: 30_000 });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String((error as Error)?.message ?? error) });
+  }
 });
 
 app.use(express.static(join(PKG_DIR, "public")));

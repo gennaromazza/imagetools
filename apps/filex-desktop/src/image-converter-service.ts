@@ -16,6 +16,11 @@ import type {
   ImageConverterProgressSnapshot,
   ImageConverterScanResult,
 } from "@photo-tools/desktop-contracts";
+import {
+  isInsideImageConverterOutput,
+  resolveImageConverterMaxLongEdge,
+  resolveImageConverterTargetMaxBytes,
+} from "./image-converter-policy.js";
 
 const { dialog, shell } = electron;
 
@@ -113,32 +118,12 @@ function getPreset(presetId: ImageConverterPresetId): ImageConverterPreset {
   return PRESETS.find((preset) => preset.id === presetId) ?? PRESETS[0];
 }
 
-function resolveMaxLongEdge(config: ImageConverterJobConfig, preset: ImageConverterPreset): number {
-  const value = Number(config.overrides?.maxLongEdge);
-  if (Number.isFinite(value) && value >= 200 && value <= 12000) {
-    return Math.round(value);
-  }
-  return preset.maxLongEdge;
-}
-
-function resolveTargetMaxBytes(config: ImageConverterJobConfig): number | null {
-  const value = Number(config.overrides?.targetMaxBytesMb);
-  if (!Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-  return Math.round(Math.min(value, 200) * 1024 * 1024);
-}
-
 function isSupportedImage(filePath: string): boolean {
   return SUPPORTED_EXTENSIONS.has(extname(filePath).toLowerCase());
 }
 
 function getSourceKind(filePath: string): "bitmap" | "raw" {
   return RAW_EXTENSIONS.has(extname(filePath).toLowerCase()) ? "raw" : "bitmap";
-}
-
-function isInsideGeneratedOutput(pathValue: string): boolean {
-  return normalizeSlashes(pathValue).split("/").some((part) => part.toLowerCase() === OUTPUT_ROOT_NAME.toLowerCase());
 }
 
 function toOutputFolderName(preset: ImageConverterPreset): string {
@@ -193,7 +178,7 @@ async function scanDirectory(
   entries: ImageConverterInputEntry[],
   issues: ImageConverterInputIssue[],
 ): Promise<void> {
-  if (isInsideGeneratedOutput(relative(sourceRoot, currentPath))) {
+  if (isInsideImageConverterOutput(relative(sourceRoot, currentPath))) {
     return;
   }
 
@@ -272,7 +257,7 @@ export async function scanImageConverterInputsDesktop(paths: string[]): Promise<
     try {
       const stats = await lstat(inputPath);
       if (stats.isDirectory()) {
-        if (isInsideGeneratedOutput(inputPath)) {
+        if (isInsideImageConverterOutput(inputPath)) {
           issues.push({ path: inputPath, message: "Cartella output generata ignorata." });
           continue;
         }
@@ -492,8 +477,8 @@ async function convertOne(
   const buffer = await renderWithSizeLimit(
     entry,
     preset,
-    resolveMaxLongEdge(config, preset),
-    resolveTargetMaxBytes(config),
+    resolveImageConverterMaxLongEdge(config, preset),
+    resolveImageConverterTargetMaxBytes(config),
   );
   await writeFile(targetPath, buffer);
   return targetPath;
@@ -650,8 +635,8 @@ export function startImageConverterJobDesktop(config: ImageConverterJobConfig): 
   if (config.overrides?.maxLongEdge || config.overrides?.targetMaxBytesMb) {
     log(
       "info",
-      `Personalizzazione: lato ${resolveMaxLongEdge(config, preset)}px${
-        resolveTargetMaxBytes(config) ? `, limite ${config.overrides?.targetMaxBytesMb} MB` : ""
+      `Personalizzazione: lato ${resolveImageConverterMaxLongEdge(config, preset)}px${
+        resolveImageConverterTargetMaxBytes(config) ? `, limite ${config.overrides?.targetMaxBytesMb} MB` : ""
       }.`,
     );
   }

@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
+import { assertImportSessionTransition } from "./import-session-state.js";
 
 export type ImportSessionStatus =
   | "CREATED" | "ANALYZING" | "READY" | "IMPORTING" | "VERIFYING"
@@ -483,6 +484,11 @@ export class StudioFlowStore {
   }
 
   updateSession(id: string, patch: Partial<Omit<ImportSessionRecord, "id">>): void {
+    if (patch.status) {
+      const current = this.db.prepare("SELECT status FROM import_sessions WHERE id=?").get(id) as { status: ImportSessionStatus } | undefined;
+      if (!current) throw new Error(`Sessione import non trovata: ${id}`);
+      assertImportSessionTransition(current.status, patch.status);
+    }
     const mapping: Record<string, string> = {
       cardSnapshotId:"card_snapshot_id", jobId:"job_id", archiveId:"archive_id", sourceRoot:"source_root",
       destinationRoot:"destination_root", destinationRelativePath:"destination_relative_path", status:"status",
