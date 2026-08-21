@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/filex-desktop",
   "private": true,
-  "version": "0.1.42",
+  "version": "0.1.43",
   "description": "FileX Suite desktop shell for Windows packaging and native bridge work.",
   "author": "FileX",
   "type": "module",
