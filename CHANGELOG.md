@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-21 - FileX Suite 0.1.44
+
+### Aggiornamento dei tool
+- prima di aggiornare un tool gia installato, la Suite avvisa che chiudera il tool automaticamente e indica di chiudere anche FileX Suite se l'installer rileva ancora un processo aperto
+
 ## 2026-08-21 - FileX Suite 0.1.43
 
 ### Distribuzione e licenze
