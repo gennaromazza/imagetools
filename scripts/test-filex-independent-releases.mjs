@@ -38,6 +38,18 @@ const packagedComponentVerifier = await read("apps/filex-desktop/scripts/verify-
 const downloadPage = await read("website/index.html");
 const installerLicense = await read("apps/filex-desktop/build/license_it.txt");
 
+const workflowReleaseComponents = Array.from(
+  releaseWorkflow.matchAll(/^\s+- "([a-z0-9-]+)-v\*"\s*$/gmu),
+  (match) => match[1],
+).sort();
+const verifierPackagesBlock = packagedComponentVerifier.match(
+  /const expectedPackages = \{([\s\S]*?)\r?\n\};\r?\n\r?\nconst expected/u,
+)?.[1] ?? "";
+const verifiedReleaseComponents = Array.from(
+  verifierPackagesBlock.matchAll(/^\s{2}(?:"([a-z0-9-]+)"|([a-z0-9-]+)):\s*\{/gmu),
+  (match) => match[1] ?? match[2],
+).sort();
+
 for (const [name, packageJson] of [
   ["suite", desktopPackage],
   ["photo-selector-app", photoSelectorPackage],
@@ -217,11 +229,13 @@ assert(
 );
 assert(
   packagedComponentVerifier.includes("(?:-[0-9A-Za-z.-]+)?")
-    && packagedComponentVerifier.includes('"batch-print-layout": { name: "Batch-Print-Layout"')
-    && packagedComponentVerifier.includes('"image-converter": { name: "Image-Converter"')
-    && packagedComponentVerifier.includes('"image-file-finder": { name: "Trova-Foto-da-Lista"')
     && packagedComponentVerifier.includes("Componente non supportato dal verificatore"),
-  "Il verificatore degli installer non copre tutti i componenti o non accetta versioni prerelease.",
+  "Il verificatore degli installer non accetta versioni prerelease o non segnala i componenti sconosciuti.",
+);
+assert(
+  workflowReleaseComponents.length > 0
+    && JSON.stringify(verifiedReleaseComponents) === JSON.stringify(workflowReleaseComponents),
+  `Il verificatore non e' allineato ai componenti pubblicabili. Workflow: ${workflowReleaseComponents.join(", ")}; verificatore: ${verifiedReleaseComponents.join(", ")}.`,
 );
 assert(
   downloadPage.includes("releases/download/suite-channel-stable/FileX-Suite-stable-x64-setup.exe"),

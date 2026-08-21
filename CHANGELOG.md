@@ -35,6 +35,7 @@
 ### Aggiornamento dei tool
 - prima di aggiornare un tool gia installato, la Suite avvisa che chiudera il tool automaticamente e indica di chiudere anche FileX Suite se l'installer rileva ancora un processo aperto
 - la pipeline verifica correttamente gli installer di Batch Print Layout, Image Converter e Trova Foto da Lista, mostrando un errore esplicito per eventuali componenti non supportati
+- aggiunto un controllo automatico che confronta tutti i componenti pubblicabili del workflow con quelli supportati dal verificatore, impedendo di aggiungere nuovi tool senza aggiornare anche la verifica dell'installer
 
 ## 2026-08-21 - FileX Suite 0.1.43
 
