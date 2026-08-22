@@ -159,6 +159,9 @@
     "0.1.0": [
       "Importazione guidata delle fotografie da scheda e creazione automatica del lavoro.",
       "Struttura cartelle, rinomina coerente e archivio consultabile dei servizi fotografici."
+    ],
+    "0.1.28": [
+      "Aggiornamenti e correzioni del componente."
     ]
   },
   "image-converter": {

@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-22 - Archivio Flow 0.1.28
+
+- Aggiornamenti e correzioni del componente.
+
 ## 2026-08-22 - FileX Send 0.1.9
 
 - Aggiornamenti e correzioni del componente.
