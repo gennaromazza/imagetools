@@ -6,10 +6,33 @@ Le regole di licensing descritte in questo documento operano in base alla config
 ## Stato sicuro pre-lancio
 
 - `FILEX_LICENSE_ENFORCEMENT` assente o `observe`: nessun tool viene bloccato.
-- `FILEX_ALLOWED_VARIANT_IDS` assente: i webhook commerciali rispondono 503 e non creano abbonamenti.
-- `LEMONSQUEEZY_WEBHOOK_SECRET` assente: il webhook risponde 503.
-- i pulsanti acquisto puntano alla sezione prezzi finche' non vengono configurati gli URL checkout.
-- storefront ufficiale: `https://xsuite.lemonsqueezy.com/`; portale cliente: `https://xsuite.lemonsqueezy.com/billing`.
+- `paypalClientId`, `paypalWebhookId` o uno dei due plan ID assenti: PayPal non viene caricato nel sito.
+- `PAYPAL_CLIENT_SECRET` o `PAYPAL_LICENSE_KEY_SECRET` assente: webhook e recupero chiave rispondono 503.
+- i pulsanti acquisto restano in modalita' pre-lancio finche' la configurazione PayPal non e' completa.
+- gestione cliente: `https://www.paypal.com/myaccount/autopay/`.
+- area cliente FileX: `/account/`; richiede Firebase Authentication email/password e dominio hosting autorizzato.
+
+## Bootstrap PayPal
+
+1. Creare un'app REST sandbox dal PayPal Developer Dashboard.
+2. Impostare nella sessione terminale `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` e `PAYPAL_ENVIRONMENT=sandbox`.
+3. Eseguire `npm run license:bootstrap-paypal` dalla radice. Lo script crea o riusa prodotto, piani e webhook, configura i secret Firebase e aggiorna solo gli identificatori pubblici generati.
+4. Revisionare `apps/filex-cloud-functions/src/commerce-config.generated.ts` e lanciare `npm run test:filex-cloud` e `npm run build:filex-cloud`.
+5. Eseguire il deploy soltanto dopo il collaudo sandbox esplicito.
+
+Non sostituire `PAYPAL_LICENSE_KEY_SECRET` dopo il lancio: la sua rotazione cambierebbe le chiavi derivate dagli abbonamenti esistenti.
+
+## Area cliente e recupero licenza
+
+- Firebase Authentication deve avere Email/Password attivo, password obbligatoria e protezione anti-enumerazione email.
+- `filex-suite.web.app` deve essere presente tra i domini autorizzati.
+- Il browser invia il token Firebase; il backend accetta solo token con `email_verified=true`.
+- Il primo collegamento recupera l'abbonamento dalla API PayPal e confronta l'email normalizzata. L'abbonamento non puo' essere assegnato a un UID differente.
+- Firestore conserva solo l'HMAC dell'email PayPal sotto `customerEmailHash`; non salvare l'indirizzo PayPal in chiaro.
+- `/licensing/account` restituisce la chiave derivata, lo stato e i dispositivi soltanto al proprietario autenticato.
+- Per un acquisto precedente non ancora indicizzato, il cliente puo' inserire una volta l'ID abbonamento PayPal nella propria area; l'email verificata deve comunque coincidere.
+
+Gli account PayPal Sandbox generati con dominio `personal.example.com` o `business.example.com` non ricevono posta reale. Solo durante il collaudo sandbox si puo' creare o aggiornare il corrispondente account Firebase gia' verificato impostando `FILEX_TEST_EMAIL` e `FILEX_TEST_PASSWORD`, poi eseguendo `npm run license:create-sandbox-account`. Lo script rifiuta ambienti PayPal live e indirizzi diversi dai domini sandbox PayPal; non deve essere usato per clienti reali.
 
 ## Attività pianificata: audit enforcement per tutti i tool
 

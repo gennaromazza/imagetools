@@ -28,11 +28,11 @@ Le sezioni personali possono essere rinominate direttamente nell'interfaccia, co
 
 ## Licenze e pagamenti
 
-FileX usa un solo entitlement, `filex-all-access`, valido per tutti gli strumenti presenti e futuri. La Suite gestisce attivazione, disattivazione, verifica online e attestazione firmata per l'uso offline; il piano prevede due dispositivi e 14 giorni offline dopo una verifica valida. Il backend Firebase non riceve dati carta e traduce esclusivamente gli eventi firmati del Merchant of Record nello stato tecnico della licenza.
+FileX usa un solo entitlement, `filex-all-access`, valido per tutti gli strumenti presenti e futuri. La Suite gestisce attivazione, disattivazione, verifica online e attestazione firmata per l'uso offline; il piano prevede due dispositivi e 14 giorni offline dopo una verifica valida. Il backend Firebase non riceve dati carta e traduce esclusivamente gli eventi firmati del gestore dei pagamenti nello stato tecnico della licenza.
 
 La copertura e' obbligatoria nel manifest desktop: i tool sul runtime condiviso ereditano automaticamente il gate centrale, mentre un'app con entry point Electron autonomo deve dichiarare `licenseRuntime: "standalone"` e invocare il gate prima di creare la finestra. `npm run test:filex-license-coverage` impedisce di aggiungere o pubblicare un tool futuro privo di questo collegamento.
 
-Stato commerciale al 14 agosto 2026: Lemon Squeezy e' configurato in Test mode con prodotto, varianti e webhook; lo store live e' in revisione. L'enforcement remoto e' `enforce`: l'accesso ai tool richiede una licenza attiva, inclusa una licenza prova creata manualmente dall'amministratore.
+Stato commerciale al 22 agosto 2026: PayPal Subscriptions e' configurato in sandbox. Backend, pulsanti, webhook e area cliente Firebase email/password sono implementati; il collegamento della licenza richiede che l'email verificata coincida con quella PayPal. L'enforcement remoto resta attivo e le licenze prova amministrative continuano a funzionare.
 
 Per aggiornare:
 
@@ -72,5 +72,5 @@ L’obiettivo è una suite integrata, con:
 - `docs/archivio-flow-desktop-checklist.md`: stato e gate della release Archivio Flow corrente
 - `docs/18-publish-build-contract.md`: contratto completo per build, pubblicazione, sito e updater
 - `docs/20-licensing-and-payments-mvp.md`: architettura, sicurezza e rollout di licenze e pagamenti
-- `docs/21-licensing-operations-runbook.md`: configurazione e operazioni Lemon Squeezy/Firebase
+- `docs/21-licensing-operations-runbook.md`: configurazione e operazioni PayPal/Firebase
 - `docs/tools/`: documenti specifici dei singoli tool

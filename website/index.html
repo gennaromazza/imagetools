@@ -275,6 +275,8 @@
     .included li::before { content: "✓"; color: var(--green); font-weight: 900; }
     .price-side .button { width: 100%; }
     .price-note { margin-top: 13px; color: #7a8981; text-align: center; font-size: 11px; }
+    #paypal-button-container { min-height: 48px; position: relative; z-index: 1; }
+    #paypal-button-container:empty { min-height: 0; }
 
     .faq-layout { display: grid; grid-template-columns: .7fr 1.3fr; gap: 80px; }
     .faq-layout h2 { font-size: 42px; }
@@ -372,6 +374,7 @@
         <a href="#esempi">Esempi d’uso</a>
         <a href="#prezzi">Prezzi</a>
         <a href="supporto/index.html">Supporto</a>
+        <a href="account/index.html">Area cliente</a>
         <a class="nav-cta" href="#download">Scarica FileX</a>
       </div>
     </nav>
@@ -554,6 +557,7 @@
               <li>FileX Send incluso</li>
               <li>Utilizzo su due PC</li>
             </ul>
+            <div id="paypal-button-container" aria-live="polite"></div>
             <a class="button button-dark" id="checkout-button" href="#download">Scarica la versione disponibile</a>
             <div class="price-note" id="checkout-note">Checkout in preparazione · rinnovo automatico · nessun addebito attivo</div>
           </div>
@@ -605,9 +609,15 @@
     const price = document.querySelector('#price');
     const period = document.querySelector('#period');
     const saving = document.querySelector('#saving');
+    const checkout = document.querySelector('#checkout-button');
+    const checkoutNote = document.querySelector('#checkout-note');
+    let selectedBilling = 'annual';
+    let paypalConfig = null;
+    let paypalLoading = false;
 
     function setBilling(mode) {
       const isAnnual = mode === 'annual';
+      selectedBilling = isAnnual ? 'annual' : 'monthly';
       monthly.classList.toggle('active', !isAnnual);
       annual.classList.toggle('active', isAnnual);
       monthly.setAttribute('aria-pressed', String(!isAnnual));
@@ -615,26 +625,67 @@
       price.textContent = isAnnual ? '100 €' : '12 €';
       period.textContent = isAnnual ? '/anno' : '/mese';
       saving.textContent = isAnnual ? 'Equivale a 8,33 € al mese · risparmi 44 €' : 'Flessibile · interrompi prima del rinnovo';
-      const checkout = document.querySelector('#checkout-button');
       const configuredUrl = isAnnual ? window.filexCheckout?.annual : window.filexCheckout?.monthly;
       if (configuredUrl) {
         checkout.href = configuredUrl;
         checkout.textContent = isAnnual ? 'Scegli annuale' : 'Scegli mensile';
-        document.querySelector('#checkout-note').textContent = 'Pagamento sicuro · due PC inclusi';
+        checkoutNote.textContent = 'Pagamento sicuro con PayPal · due PC inclusi';
       }
+    }
+
+    function loadPayPalSdk(config) {
+      if (paypalLoading || window.paypal?.Buttons) return;
+      paypalLoading = true;
+      checkout.textContent = 'Caricamento PayPal…';
+      checkout.setAttribute('aria-disabled', 'true');
+      const host = config.environment === 'sandbox' ? 'www.sandbox.paypal.com' : 'www.paypal.com';
+      const script = document.createElement('script');
+      script.src = `https://${host}/sdk/js?client-id=${encodeURIComponent(config.clientId)}&components=buttons&vault=true&intent=subscription&currency=EUR&locale=it_IT`;
+      script.onload = () => {
+        if (!window.paypal?.Buttons) throw new Error('SDK PayPal non disponibile');
+        checkout.hidden = true;
+        window.paypal.Buttons({
+          style: { shape: 'rect', color: 'gold', layout: 'vertical', label: 'paypal', height: 48 },
+          createSubscription: (_data, actions) => {
+            const planId = selectedBilling === 'annual' ? config.plans.annual : config.plans.monthly;
+            if (!planId) throw new Error('Piano PayPal non configurato');
+            return actions.subscription.create({ plan_id: planId });
+          },
+          onApprove: (data) => {
+            if (!data.subscriptionID) throw new Error('PayPal non ha restituito l’abbonamento');
+            window.location.assign(`/acquisto/?subscription_id=${encodeURIComponent(data.subscriptionID)}`);
+          },
+          onCancel: () => { checkoutNote.textContent = 'Pagamento annullato · nessun addebito effettuato'; },
+          onError: () => { checkoutNote.textContent = 'PayPal non è disponibile in questo momento. Riprova tra poco.'; },
+        }).render('#paypal-button-container');
+      };
+      script.onerror = () => {
+        paypalLoading = false;
+        checkout.removeAttribute('aria-disabled');
+        checkout.textContent = 'Riprova con PayPal';
+        checkoutNote.textContent = 'Impossibile caricare PayPal. Riprova tra poco.';
+      };
+      document.head.appendChild(script);
     }
 
     monthly.addEventListener('click', () => setBilling('monthly'));
     annual.addEventListener('click', () => setBilling('annual'));
+    checkout.addEventListener('click', (event) => {
+      if (!paypalConfig) return;
+      event.preventDefault();
+      loadPayPalSdk(paypalConfig);
+    });
     window.filexCheckout = { monthly: null, annual: null };
     fetch('/api/licensing/health', { cache: 'no-store' })
       .then(response => response.ok ? response.json() : null)
       .then(payload => {
         if (payload?.checkout) window.filexCheckout = payload.checkout;
+        if (payload?.paypal?.enabled && payload.paypal.clientId && payload.paypal.plans?.monthly && payload.paypal.plans?.annual) paypalConfig = payload.paypal;
         setBilling(annual.classList.contains('active') ? 'annual' : 'monthly');
+        if (paypalConfig) checkout.textContent = 'Continua con PayPal';
       })
       .catch(() => undefined);
-    setBilling('annual');
+    setBilling(new URLSearchParams(window.location.search).get('billing') === 'monthly' ? 'monthly' : 'annual');
     document.querySelector('#year').textContent = new Date().getFullYear();
 
     fetch('https://api.github.com/repos/gennaromazza/imagetools/releases?per_page=30')

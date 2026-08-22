@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Accedi all'area cliente FileX per recuperare la licenza e controllare l'abbonamento.">
+  <meta name="robots" content="noindex,follow">
+  <link rel="canonical" href="https://filex-suite.web.app/account/">
+  <link rel="icon" href="../favicon.ico">
+  <link rel="stylesheet" href="../assets/site.css">
+  <title>Area cliente — FileX</title>
+  <style>
+    .account-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; align-items:start; }
+    .account-panel { padding:24px; border:1px solid #dce5df; border-radius:18px; background:#fff; box-shadow:0 12px 32px rgba(16,32,25,.06); }
+    .account-panel h2,.account-panel h3 { margin-top:0; }
+    .account-form { display:grid; gap:12px; }
+    .account-form label { display:grid; gap:6px; font-weight:700; }
+    .account-form input { width:100%; box-sizing:border-box; padding:12px 14px; border:1px solid #b9c8bf; border-radius:10px; font:inherit; }
+    .account-message { min-height:24px; margin:12px 0 0; color:#315b44; }
+    .account-error { color:#9d251f; }
+    .account-head { display:flex; gap:16px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+    .subscription-list { display:grid; gap:20px; margin-top:22px; }
+    .subscription-card { padding:22px; border:1px solid #cfe2d5; border-radius:16px; background:#fff; }
+    .subscription-meta { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin:18px 0; }
+    .subscription-meta div { padding:12px; border-radius:10px; background:#f2f7f4; }
+    .subscription-meta strong { display:block; margin-top:4px; }
+    .license-key { display:block; margin:12px 0; padding:14px; overflow-wrap:anywhere; border-radius:10px; color:#fff; background:#102019; font:700 clamp(14px,3vw,20px) ui-monospace,monospace; letter-spacing:.04em; }
+    .device-list { display:grid; gap:10px; margin-top:12px; }
+    .device { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px; border:1px solid #dce5df; border-radius:10px; }
+    .button.danger { color:#8d211d; border-color:#e0b8b5; background:#fff; }
+    [hidden] { display:none!important; }
+    @media (max-width:760px) { .account-grid,.subscription-meta { grid-template-columns:1fr; } .device { align-items:flex-start; flex-direction:column; } }
+  </style>
+</head>
+<body>
+<header class="site-header"><nav class="wrap nav"><a class="brand" href="../index.html"><img src="../assets/icons/suite-launcher.png" width="256" height="256" alt="">FileX</a><div class="nav-links"><a href="../strumenti/index.html">Strumenti</a><a href="../supporto/index.html">Supporto</a><a class="nav-cta" href="./">Area cliente</a></div></nav></header>
+<main>
+  <div class="wrap crumbs"><a href="../index.html">FileX</a> / Area cliente</div>
+  <section class="tool-hero"><div class="wrap">
+    <div class="kicker">Licenza e abbonamento</div>
+    <h1>La tua area <span>FileX.</span></h1>
+    <p class="lead">Accedi con la stessa email utilizzata su PayPal per ritrovare la chiave e controllare il tuo piano.</p>
+
+    <div class="account-grid" id="auth-panels">
+      <section class="account-panel">
+        <h2>Accedi</h2>
+        <form class="account-form" id="login-form">
+          <label>Email<input id="login-email" type="email" autocomplete="email" required></label>
+          <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+          <button class="button primary" type="submit">Accedi</button>
+          <button class="button secondary" id="reset-password" type="button">Password dimenticata</button>
+        </form>
+      </section>
+      <section class="account-panel">
+        <h2>Crea account</h2>
+        <form class="account-form" id="register-form">
+          <label>Email usata su PayPal<input id="register-email" type="email" autocomplete="email" required></label>
+          <label>Password<input id="register-password" type="password" autocomplete="new-password" minlength="8" required></label>
+          <button class="button primary" type="submit">Crea account</button>
+        </form>
+        <p>Ti invieremo soltanto l’email tecnica necessaria a verificare l’indirizzo.</p>
+      </section>
+    </div>
+
+    <section class="account-panel" id="verification-panel" hidden>
+      <h2>Verifica la tua email</h2>
+      <p>Abbiamo inviato un collegamento a <strong id="verification-email"></strong>. Aprilo, poi torna qui.</p>
+      <div class="actions"><button class="button primary" id="check-verification" type="button">Ho verificato l’email</button><button class="button secondary" id="resend-verification" type="button">Invia di nuovo</button><button class="button secondary" id="verification-logout" type="button">Esci</button></div>
+    </section>
+
+    <section id="dashboard" hidden>
+      <div class="account-head"><div><h2>Il tuo account</h2><p id="account-email"></p></div><button class="button secondary" id="logout" type="button">Esci</button></div>
+      <p class="account-message" id="dashboard-message" aria-live="polite"></p>
+      <div id="subscriptions" class="subscription-list"></div>
+      <section class="account-panel" id="manual-link" hidden>
+        <h3>Collega un acquisto precedente</h3>
+        <p>Se l’acquisto non appare automaticamente, inserisci l’ID abbonamento presente nei dettagli PayPal.</p>
+        <form class="account-form" id="link-form"><label>ID abbonamento PayPal<input id="subscription-id" autocomplete="off" placeholder="I-XXXXXXXXXXXX" required></label><button class="button primary" type="submit">Collega abbonamento</button></form>
+      </section>
+    </section>
+    <p class="account-message" id="global-message" aria-live="polite"></p>
+  </div></section>
+</main>
+<footer><div class="wrap"><div class="footer-grid"><strong>FileX</strong><div class="footer-links"><a href="../supporto/index.html">Supporto</a><a href="../privacy/index.html">Privacy</a><a href="../termini/index.html">Termini</a></div></div><div class="copyright">© 2026 Gennaro Mazzacane – Image Studio Fotografico · P. IVA IT08039821213</div></div></footer>
+<script type="module">
+  import { accountApi, auth, friendlyAuthError, loginAccount, logoutAccount, observeAccount, refreshAccount, registerAccount, resendVerification, resetAccountPassword } from '../assets/firebase-account.js';
+
+  const $ = (selector) => document.querySelector(selector);
+  const authPanels = $('#auth-panels');
+  const verificationPanel = $('#verification-panel');
+  const dashboard = $('#dashboard');
+  const globalMessage = $('#global-message');
+  const dashboardMessage = $('#dashboard-message');
+  const pendingSubscriptionId = new URLSearchParams(location.search).get('subscription_id') || sessionStorage.getItem('filexPendingSubscriptionId');
+  if (pendingSubscriptionId && /^[A-Z0-9-]{8,80}$/i.test(pendingSubscriptionId)) sessionStorage.setItem('filexPendingSubscriptionId', pendingSubscriptionId);
+
+  function message(text, error = false) {
+    globalMessage.textContent = text;
+    globalMessage.classList.toggle('account-error', error);
+  }
+
+  function formatDate(value) {
+    return value ? new Intl.DateTimeFormat('it-IT', { dateStyle: 'long' }).format(new Date(value)) : 'Non disponibile';
+  }
+
+  function statusLabel(status) {
+    return ({ active: 'Attivo', past_due: 'Pagamento da verificare', cancelled: 'Cancellato', expired: 'Scaduto', refunded: 'Rimborsato', chargeback: 'Revocato' })[status] || status;
+  }
+
+  function makeElement(tag, text, className) {
+    const element = document.createElement(tag);
+    if (text !== undefined) element.textContent = text;
+    if (className) element.className = className;
+    return element;
+  }
+
+  function renderSubscriptions(items) {
+    const container = $('#subscriptions');
+    container.replaceChildren();
+    $('#manual-link').hidden = items.length > 0;
+    if (!items.length) {
+      dashboardMessage.textContent = 'Non abbiamo ancora trovato un abbonamento collegato a questa email.';
+      return;
+    }
+    dashboardMessage.textContent = '';
+    for (const item of items) {
+      const card = makeElement('article', undefined, 'subscription-card');
+      card.append(makeElement('h3', item.plan === 'annual' ? 'FileX All Access — Annuale' : item.plan === 'monthly' ? 'FileX All Access — Mensile' : 'FileX All Access'));
+      const meta = makeElement('div', undefined, 'subscription-meta');
+      for (const [label, value] of [['Stato', statusLabel(item.status)], ['Prossima scadenza', formatDate(item.currentPeriodEnd)], ['Dispositivi', `${item.activation.current} su ${item.activation.limit}`]]) {
+        const cell = makeElement('div'); cell.append(makeElement('span', label), makeElement('strong', value)); meta.append(cell);
+      }
+      card.append(meta, makeElement('strong', 'La tua chiave FileX'));
+      const code = makeElement('code', item.licenseKey, 'license-key');
+      const copy = makeElement('button', 'Copia chiave', 'button secondary'); copy.type = 'button';
+      copy.addEventListener('click', async () => { await navigator.clipboard.writeText(item.licenseKey); copy.textContent = 'Chiave copiata'; });
+      card.append(code, copy);
+      const actions = makeElement('div', undefined, 'actions');
+      const manage = makeElement('a', 'Gestisci su PayPal', 'button secondary'); manage.href = 'https://www.paypal.com/myaccount/autopay/'; manage.target = '_blank'; manage.rel = 'noopener'; actions.append(manage); card.append(actions);
+      const title = makeElement('h4', 'Dispositivi attivi'); card.append(title);
+      const deviceList = makeElement('div', undefined, 'device-list');
+      if (!item.devices.length) deviceList.append(makeElement('p', 'Nessun dispositivo attivo.'));
+      for (const device of item.devices) {
+        const row = makeElement('div', undefined, 'device');
+        const detail = makeElement('div'); detail.append(makeElement('strong', device.label || 'PC FileX'), makeElement('div', `Ultimo controllo: ${formatDate(device.lastValidatedAt)}`));
+        const deactivate = makeElement('button', 'Disattiva', 'button danger'); deactivate.type = 'button';
+        deactivate.addEventListener('click', async () => {
+          if (!confirm(`Disattivare ${device.label || 'questo dispositivo'}?`)) return;
+          deactivate.disabled = true;
+          try { await accountApi('/account/devices/deactivate', { method: 'POST', body: JSON.stringify({ activationId: device.id }) }); await loadDashboard(); }
+          catch (error) { message(error.message, true); deactivate.disabled = false; }
+        });
+        row.append(detail, deactivate); deviceList.append(row);
+      }
+      card.append(deviceList); container.append(card);
+    }
+  }
+
+  async function linkSubscription(subscriptionId) {
+    const payload = await accountApi('/account/link', { method: 'POST', body: JSON.stringify({ subscriptionId }) });
+    sessionStorage.removeItem('filexPendingSubscriptionId');
+    history.replaceState({}, '', '/account/');
+    message('Abbonamento collegato. La licenza è ora disponibile nella tua area cliente.');
+    return payload;
+  }
+
+  async function loadDashboard() {
+    dashboardMessage.textContent = 'Caricamento abbonamento…';
+    const id = sessionStorage.getItem('filexPendingSubscriptionId');
+    if (id) await linkSubscription(id);
+    const payload = await accountApi('/account');
+    $('#account-email').textContent = payload.email;
+    renderSubscriptions(payload.subscriptions || []);
+  }
+
+  observeAccount(async (user) => {
+    message('');
+    authPanels.hidden = Boolean(user);
+    verificationPanel.hidden = !user || user.emailVerified;
+    dashboard.hidden = !user?.emailVerified;
+    if (!user) return;
+    if (!user.emailVerified) { $('#verification-email').textContent = user.email || ''; return; }
+    try { await loadDashboard(); } catch (error) { dashboardMessage.textContent = ''; message(error.message, true); $('#manual-link').hidden = false; }
+  });
+
+  $('#login-form').addEventListener('submit', async (event) => { event.preventDefault(); message('Accesso…'); try { await loginAccount($('#login-email').value, $('#login-password').value); } catch (error) { message(friendlyAuthError(error), true); } });
+  $('#register-form').addEventListener('submit', async (event) => { event.preventDefault(); message('Creazione account…'); try { await registerAccount($('#register-email').value, $('#register-password').value); message('Account creato. Controlla la tua email.'); } catch (error) { message(friendlyAuthError(error), true); } });
+  $('#reset-password').addEventListener('click', async () => { const email = $('#login-email').value.trim(); if (!email) return message('Inserisci prima la tua email.', true); try { await resetAccountPassword(email); message('Se l’account esiste, riceverai le istruzioni per reimpostare la password.'); } catch (error) { message(friendlyAuthError(error), true); } });
+  $('#check-verification').addEventListener('click', async () => { try { const user = await refreshAccount(); if (!user?.emailVerified) return message('L’email non risulta ancora verificata.', true); location.reload(); } catch (error) { message(friendlyAuthError(error), true); } });
+  $('#resend-verification').addEventListener('click', async () => { try { await resendVerification(); message('Email di verifica inviata nuovamente.'); } catch (error) { message(friendlyAuthError(error), true); } });
+  $('#verification-logout').addEventListener('click', logoutAccount);
+  $('#logout').addEventListener('click', logoutAccount);
+  $('#link-form').addEventListener('submit', async (event) => { event.preventDefault(); message('Verifica con PayPal…'); try { await linkSubscription($('#subscription-id').value.trim()); await loadDashboard(); } catch (error) { message(error.message, true); } });
+</script>
+</body>
+</html>

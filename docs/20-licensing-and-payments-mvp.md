@@ -1,6 +1,6 @@
 # FileX licensing e pagamenti — MVP semplice
 
-Stato al 14 agosto 2026: backend, Suite, attestazioni, sito legale e configurazione Lemon Squeezy Test mode implementati. Lo store live e' in revisione; l'enforcement e' `enforce` e durante la revisione l'accesso viene concesso tramite licenze prova create manualmente dall'amministratore.
+Stato al 22 agosto 2026: backend, Suite, attestazioni, PayPal sandbox e area cliente Firebase implementati. Il deploy dell'area cliente resta subordinato al collaudo esplicito.
 
 ## Decisione raccomandata
 
@@ -10,30 +10,30 @@ FileX vende un solo prodotto, **FileX All Access**, in due varianti:
 - annuale: 100 EUR;
 - stesse funzioni e tutti i tool presenti e futuri;
 - una licenza personale, massimo due dispositivi attivi;
-- nessun account FileX e nessuna password nell'MVP.
+- account FileX email/password con email verificata uguale a quella dell'abbonamento PayPal.
 
-Il fornitore raccomandato e' **Lemon Squeezy come Merchant of Record**. Gestisce checkout, rinnovi, imposte, fatture, rimborsi e portale cliente. FileX conserva solo lo stato tecnico necessario ad abilitare il prodotto.
+Il fornitore scelto e' **PayPal Subscriptions come gestore dei pagamenti**. PayPal gestisce checkout, addebiti ricorrenti e strumenti di pagamento; FileX resta il venditore e conserva lo stato tecnico necessario ad abilitare il prodotto. Imposte, documenti fiscali, rimborsi e obblighi del venditore restano in capo al titolare di FileX e devono essere validati con il commercialista.
 
 Non costruire nell'MVP:
 
 - un checkout proprietario;
-- un portale account FileX;
-- fatturazione o calcolo IVA interni;
+- un sistema fiscale proprietario non revisionato dal commercialista;
 - codici coupon gestiti da Firestore;
 - piani distinti per singolo tool;
 - un server licenze separato da Firebase;
-- associazione obbligatoria Google, Microsoft o email/password.
+- provider di login aggiuntivi oltre a email/password.
 
 ## Esperienza cliente
 
 ### Acquisto
 
 1. Il cliente seleziona mensile o annuale sul sito.
-2. Il sito apre il checkout ospitato dal Merchant of Record.
-3. Dopo il pagamento il provider mostra e invia per email la chiave licenza.
-4. FileX riceve un webhook firmato e registra l'abbonamento.
-5. Il cliente apre FileX Suite, sceglie `Attiva FileX` e incolla la chiave.
-6. La Suite attiva il dispositivo e mostra piano, prossimo rinnovo e dispositivi usati.
+2. Il sito apre il checkout PayPal ospitato.
+3. Dopo l'approvazione il cliente accede o crea un account FileX con la stessa email PayPal e la verifica tramite Firebase Authentication.
+4. FileX confronta server-side l'email verificata con i dati PayPal, collega l'abbonamento e mostra la chiave.
+5. FileX riceve webhook firmati e mantiene aggiornato lo stato commerciale.
+6. Il cliente apre FileX Suite, sceglie `Attiva FileX` e incolla la chiave.
+7. L'area cliente mostra piano, scadenza e dispositivi attivi e consente di disattivarli.
 
 ### Uso quotidiano
 
@@ -77,11 +77,17 @@ Firebase Cloud Functions -> Firestore (customer, subscription, activation)
 
 ### Responsabilita'
 
-**Merchant of Record**
+**PayPal**
 
-- pagamento, imposte, fattura/ricevuta e rinnovo;
-- email transazionali e portale cliente;
+- checkout, pagamento e rinnovo automatico;
+- ricevute PayPal e gestione dei pagamenti automatici;
 - fonte degli eventi commerciali.
+
+**Titolare FileX**
+
+- venditore del servizio;
+- imposte, documenti fiscali, termini, recesso e decisioni sui rimborsi;
+- assistenza commerciale e riconciliazione con PayPal.
 
 **Cloud Functions**
 
@@ -101,7 +107,7 @@ Firebase Cloud Functions -> Firestore (customer, subscription, activation)
 **Tool**
 
 - ricevono `active`, `grace`, `expired` o `unlicensed` dal runtime FileX;
-- non conoscono Lemon Squeezy, prezzi, chiavi o webhook;
+- non conoscono PayPal, prezzi, chiavi o webhook;
 - non duplicano logica commerciale.
 
 ### Copertura dei tool presenti e futuri
@@ -121,7 +127,11 @@ Base: Cloud Functions esistenti, con route separate sotto `/licensing`.
 
 | Metodo | Route | Autenticazione | Scopo |
 | --- | --- | --- | --- |
-| POST | `/licensing/webhooks/lemonsqueezy` | firma provider | sincronizza eventi |
+| POST | `/licensing/webhooks/paypal` | firma verificata da PayPal | sincronizza eventi |
+| POST | `/licensing/paypal/license` | token Firebase verificato + confronto email PayPal | collega l'acquisto e restituisce la chiave |
+| POST | `/licensing/account/link` | token Firebase verificato + confronto email PayPal | alias esplicito per collegare un abbonamento |
+| GET | `/licensing/account` | token Firebase con email verificata | restituisce licenze, stati e dispositivi dell'account |
+| POST | `/licensing/account/devices/deactivate` | token Firebase e proprietà abbonamento | libera un dispositivo dall'area cliente |
 | POST | `/licensing/activate` | chiave + installation id | attiva uno dei due dispositivi |
 | POST | `/licensing/validate` | activation token | rinnova attestazione |
 | POST | `/licensing/deactivate` | activation token | libera il dispositivo corrente |
@@ -144,22 +154,17 @@ Risposta normalizzata, senza dati commerciali superflui:
 
 Le collezioni restano server-only, coerenti con le regole attuali.
 
-### `licenseCustomers/{providerCustomerId}`
-
-- `provider`: `lemonsqueezy`;
-- `providerCustomerId`;
-- `emailNormalized` (solo per supporto, accesso amministrativo ristretto);
-- `createdAt`, `updatedAt`.
-
 ### `licenseSubscriptions/{providerSubscriptionId}`
 
 - `providerSubscriptionId`, `providerCustomerId`;
-- `productId`, `variantId`;
+- `planId`;
 - `entitlement`: `filex-all-access`;
 - `status`: `active | grace | expired | revoked`;
 - `currentPeriodEnd`, `graceUntil`;
 - `cancelAtPeriodEnd`;
 - `licenseKeyHash` (mai la chiave in chiaro);
+- `customerEmailHash` (HMAC normalizzato, mai email PayPal in chiaro);
+- `ownerUid` (UID Firebase assegnato soltanto dopo verifica dell'email);
 - `lastEventAt`, `updatedAt`.
 
 ### `licenseActivations/{activationId}`
@@ -209,7 +214,7 @@ Gli eventi webhook sono la fonte di verita'. La chiamata di attivazione del prov
 
 ### 1. Sandbox e backend
 
-- creare store, prodotto e due varianti nel provider;
+- creare prodotto e due piani PayPal in sandbox;
 - configurare checkout di test e portale cliente;
 - implementare webhook, modello dati, mapping stati e test fixture;
 - implementare activate/validate/deactivate e attestazioni firmate;
@@ -227,7 +232,7 @@ Gli eventi webhook sono la fonte di verita'. La chiamata di attivazione del prov
 - sostituire i CTA prezzi con i due checkout reali;
 - pagina successo con istruzioni di attivazione;
 - aggiornare privacy, termini, EULA, rimborsi e cookie;
-- indicare chiaramente Merchant of Record, rinnovo, imposte, prova e recesso;
+- indicare chiaramente venditore, ruolo di PayPal, rinnovo, imposte, prova e recesso;
 - revisione commercialista/legale prima dell'apertura.
 
 ### 4. Lancio controllato
@@ -255,7 +260,7 @@ Il sistema e' pronto quando, in ambiente live:
 
 ## Decisioni da confermare prima del codice live
 
-1. Approvazione dell'account Merchant of Record e disponibilita' del venditore italiano.
+1. Account PayPal Business verificato e applicazione REST abilitata per Subscriptions.
 2. Prezzi finali 12 EUR/mese e 100 EUR/anno e loro trattamento fiscale mostrato nel checkout.
 3. Nessuna prova gratuita al lancio. Si puo' aggiungere dopo senza cambiare architettura.
 4. Cortesia di 7 giorni e offline di 14 giorni.

@@ -1,5 +1,8 @@
 {
   "backup-guard": {
+    "0.2.3": [
+      "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
+    ],
     "0.2.2": [
       "Release di manutenzione con checksum verificato e installazione visibile su Windows.",
       "La distribuzione resta indipendente dalla Suite e non modifica gli altri tool."
@@ -23,6 +26,9 @@
     ]
   },
   "filex-send": {
+    "0.1.10": [
+      "Aggiornati i flussi di licenza, pagamento e gestione account collegati al servizio FileX Send."
+    ],
     "0.1.8": [
       "Corretto il flusso di pubblicazione del catalogo e resa più affidabile la gestione delle release indipendenti.",
       "Migliorata la continuità delle sessioni Internet e del trasferimento dei file."
@@ -64,6 +70,9 @@
     ]
   },
   "cache-sweep": {
+    "0.1.2": [
+      "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
+    ],
     "0.1.1": [
       "FileX Adobe Cleaner torna disponibile nel catalogo stabile con installer verificato tramite checksum.",
       "La pubblicazione verifica checksum e disponibilita dell'artefatto prima di aggiornare il catalogo."
@@ -76,6 +85,9 @@
     ]
   },
   "image-party-frame": {
+    "0.1.27": [
+      "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
+    ],
     "0.1.26": [
       "Release di manutenzione con checksum verificato e installazione visibile su Windows.",
       "La distribuzione resta indipendente dalla Suite e non modifica gli altri tool."
@@ -112,6 +124,9 @@
     ]
   },
   "batch-print-layout": {
+    "0.1.2": [
+      "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
+    ],
     "0.1.1": [
       "Installer Windows aperto visibilmente dalla Suite per consentire la conferma di sicurezza.",
       "Il catalogo stabile viene aggiornato con checksum verificato dell'artefatto pubblicato."
@@ -122,6 +137,9 @@
     ]
   },
   "archivio-flow": {
+    "0.1.30": [
+      "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
+    ],
     "0.1.27": [
       "Release di manutenzione con checksum verificato e installazione visibile su Windows.",
       "La distribuzione resta indipendente dalla Suite e non modifica gli altri tool."
@@ -168,6 +186,9 @@
     ]
   },
   "image-converter": {
+    "0.1.2": [
+      "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
+    ],
     "0.1.1": [
       "Installer Windows aperto visibilmente dalla Suite per consentire la conferma di sicurezza.",
       "Il catalogo stabile viene aggiornato con checksum verificato dell'artefatto pubblicato."
@@ -179,6 +200,9 @@
     ]
   },
   "image-file-finder": {
+    "0.1.2": [
+      "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
+    ],
     "0.1.1": [
       "Installer Windows aperto visibilmente dalla Suite per consentire la conferma di sicurezza.",
       "Il catalogo stabile viene aggiornato con checksum verificato dell'artefatto pubblicato."
@@ -189,6 +213,9 @@
     ]
   },
   "photo-selector-app": {
+    "0.1.29": [
+      "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
+    ],
     "0.1.28": [
       "Image Select Pro viene distribuito con il checksum dell'installer riallineato al catalogo stabile.",
       "Installer Windows verificato da remoto prima della pubblicazione e aperto visibilmente dalla Suite."

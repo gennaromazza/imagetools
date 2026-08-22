@@ -1,2 +1,44 @@
-<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Attiva FileX dopo l'acquisto."><meta name="robots" content="noindex,follow"><link rel="canonical" href="https://filex-suite.web.app/acquisto/"><link rel="icon" href="../favicon.ico"><link rel="stylesheet" href="../assets/site.css"><title>Attiva FileX — acquisto completato</title></head><body>
-<header class="site-header"><nav class="wrap nav"><a class="brand" href="../index.html"><img src="../assets/icons/suite-launcher.png" width="256" height="256" alt="">FileX</a><div class="nav-links"><a href="../strumenti/index.html">Strumenti</a><a href="../supporto/index.html">Supporto</a><a class="nav-cta" href="../index.html#download">Scarica</a></div></nav></header><main><div class="wrap crumbs"><a href="../index.html">FileX</a> / Attivazione</div><section class="tool-hero"><div class="wrap"><div class="kicker">Acquisto completato</div><h1>La tua chiave è <span>nella ricevuta.</span></h1><p class="lead">Lemon Squeezy invia la chiave FileX via email. Non devi creare un account FileX: apri la Suite, incolla la chiave e scegli Attiva.</p><div class="actions"><a class="button primary" href="../index.html#download">Scarica FileX Suite</a><a class="button secondary" href="https://xsuite.lemonsqueezy.com/billing">Gestisci abbonamento</a><a class="button secondary" href="../supporto/index.html">Serve aiuto?</a></div></div></section><section class="section soft"><div class="wrap grid"><article class="card"><h3>1. Controlla la ricevuta</h3><p>Cerca l’email di Lemon Squeezy e copia la chiave di licenza. Se non arriva, controlla anche spam e promozioni.</p></article><article class="card"><h3>2. Apri FileX Suite</h3><p>Nella sezione Licenza incolla la chiave. La licenza vale per tutti gli strumenti FileX inclusi.</p></article><article class="card"><h3>3. Usa fino a 2 PC</h3><p>Puoi disattivare un computer dalla Suite e liberare uno dei due posti quando cambi macchina.</p></article></div></section></main><footer><div class="wrap"><div class="footer-grid"><strong>FileX</strong><div class="footer-links"><a href="../supporto/index.html">Supporto</a><a href="../privacy/index.html">Privacy</a><a href="../termini/index.html">Termini</a></div></div><div class="copyright">© 2026 Gennaro Mazzacane – Image Studio Fotografico · P. IVA IT08039821213</div></div></footer></body></html>
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Attiva FileX dopo l'acquisto.">
+  <meta name="robots" content="noindex,follow">
+  <link rel="canonical" href="https://filex-suite.web.app/acquisto/">
+  <link rel="icon" href="../favicon.ico">
+  <link rel="stylesheet" href="../assets/site.css">
+  <title>Attiva FileX — acquisto completato</title>
+  <style>
+    .license-box { max-width: 720px; margin-top: 24px; padding: 20px; border: 1px solid #cfe2d5; border-radius: 16px; background: #fff; }
+    .license-error { color: #9d251f; }
+  </style>
+</head>
+<body>
+<header class="site-header"><nav class="wrap nav"><a class="brand" href="../index.html"><img src="../assets/icons/suite-launcher.png" width="256" height="256" alt="">FileX</a><div class="nav-links"><a href="../strumenti/index.html">Strumenti</a><a href="../supporto/index.html">Supporto</a><a class="nav-cta" href="../index.html#download">Scarica</a></div></nav></header>
+<main>
+  <div class="wrap crumbs"><a href="../index.html">FileX</a> / Attivazione</div>
+  <section class="tool-hero"><div class="wrap">
+    <div class="kicker">Acquisto completato</div>
+    <h1>Attiva subito <span>FileX.</span></h1>
+    <p class="lead" id="license-status">Pagamento completato. Proteggi ora la licenza nella tua area cliente FileX.</p>
+    <div class="license-box" id="license-box">
+      <strong>Recupera la tua chiave FileX</strong>
+      <p>Accedi o crea un account con la stessa email utilizzata su PayPal. Dopo la verifica troverai qui e in futuro la tua chiave, lo stato del piano e i dispositivi attivi.</p>
+      <a class="button primary" id="account-link" href="../account/">Continua nell’area cliente</a>
+    </div>
+    <div class="actions"><a class="button primary" href="../index.html#download">Scarica FileX Suite</a><a class="button secondary" href="https://www.paypal.com/myaccount/autopay/">Gestisci abbonamento PayPal</a><a class="button secondary" href="../supporto/index.html">Serve aiuto?</a></div>
+  </div></section>
+  <section class="section soft"><div class="wrap grid"><article class="card"><h3>1. Verifica l’email</h3><p>Usa la stessa email del pagamento PayPal per collegare l’acquisto in sicurezza.</p></article><article class="card"><h3>2. Copia la chiave</h3><p>La chiave rimarrà disponibile nell’area cliente anche in futuro.</p></article><article class="card"><h3>3. Usa fino a 2 PC</h3><p>Puoi controllare e disattivare i dispositivi associati alla licenza.</p></article></div></section>
+</main>
+<footer><div class="wrap"><div class="footer-grid"><strong>FileX</strong><div class="footer-links"><a href="../supporto/index.html">Supporto</a><a href="../privacy/index.html">Privacy</a><a href="../termini/index.html">Termini</a></div></div><div class="copyright">© 2026 Gennaro Mazzacane – Image Studio Fotografico · P. IVA IT08039821213</div></div></footer>
+<script>
+  const subscriptionId = new URLSearchParams(window.location.search).get('subscription_id');
+  const accountLink = document.querySelector('#account-link');
+  if (subscriptionId && /^[A-Z0-9-]{8,80}$/i.test(subscriptionId)) accountLink.href = `../account/?subscription_id=${encodeURIComponent(subscriptionId)}`;
+  else {
+    document.querySelector('#license-status').textContent = 'Pagamento completato. Accedi all’area cliente con l’email PayPal; se necessario potrai inserire l’ID dell’abbonamento.';
+  }
+</script>
+</body>
+</html>

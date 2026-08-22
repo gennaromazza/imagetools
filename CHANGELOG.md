@@ -30,6 +30,48 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-22 - FileX Suite 0.1.45
+
+### Piattaforma e distribuzione
+- completata la preparazione coordinata delle nuove release stabili della Suite e di tutti i tool FileX
+- aggiornati i flussi commerciali e l'area account del sito FileX, con test automatici per API, PayPal e rilascio dei componenti
+
+## 2026-08-22 - Image Select Pro 0.1.29
+
+- Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati.
+
+## 2026-08-22 - Image Party Frame 0.1.27
+
+- Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati.
+
+## 2026-08-22 - Batch Print Layout 0.1.2
+
+- Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati.
+
+## 2026-08-22 - Archivio Flow 0.1.30
+
+- Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati.
+
+## 2026-08-22 - Image Converter 0.1.2
+
+- Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati.
+
+## 2026-08-22 - Trova Foto da Lista 0.1.2
+
+- Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati.
+
+## 2026-08-22 - FileX Adobe Cleaner 0.1.2
+
+- Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati.
+
+## 2026-08-22 - FileX Send 0.1.10
+
+- Aggiornati i flussi di licenza, pagamento e gestione account collegati al servizio FileX Send.
+
+## 2026-08-22 - FileX Backup Guard 0.2.3
+
+- Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati.
+
 ## 2026-08-22 - Archivio Flow 0.1.29
 
 - Aggiornamenti e correzioni del componente.
