@@ -7,7 +7,7 @@ import type { FileSendWifiConfig } from "../src/contracts.js";
 import { detectCurrentWifi } from "./wifi-detection.js";
 import { FileSendRemoteClient, type PersistedRemoteSession } from "./remote-client-service.js";
 import type { FirebaseAnonymousAuthState } from "./firebase-anonymous-auth.js";
-import type { FileSendSnapshot } from "../src/contracts.js";
+import type { FileSendSession, FileSendSessionHistoryEntry, FileSendSnapshot } from "../src/contracts.js";
 import { directToolLicenseAllowed } from "./license-gate.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -16,11 +16,16 @@ let service: FileSendService;
 let settings: FileSendSettings;
 let remoteClient: FileSendRemoteClient;
 let currentMode: "local" | "remote" | null = null;
+let currentSessionId: string | null = null;
+let settingsSaveQueue = Promise.resolve();
+let settingsSaveTimer: NodeJS.Timeout | null = null;
 
 interface FileSendSettings {
   outputRoot: string;
   wifi: FileSendWifiConfig;
-  remoteSession: PersistedRemoteSession | null;
+  remoteSessions: PersistedRemoteSession[];
+  activeLocalSessions: FileSendSession[];
+  history: FileSendSessionHistoryEntry[];
   cloudAuth: FirebaseAnonymousAuthState | null;
 }
 
@@ -33,6 +38,9 @@ interface PersistedFileSendSettings {
     password?: string;
   };
   remoteSession?: Omit<PersistedRemoteSession, "desktopToken"> & { desktopTokenEncrypted?: string };
+  remoteSessions?: Array<Omit<PersistedRemoteSession, "desktopToken"> & { desktopTokenEncrypted?: string }>;
+  activeLocalSessions?: FileSendSession[];
+  history?: FileSendSessionHistoryEntry[];
   cloudAuth?: { localId?: string; refreshTokenEncrypted?: string };
 }
 
@@ -57,7 +65,9 @@ async function readSettings(): Promise<FileSendSettings> {
   const defaults: FileSendSettings = {
     outputRoot: join(app.getPath("pictures"), "FileX Send"),
     wifi: { ssid: "", password: "", security: "WPA" },
-    remoteSession: null,
+    remoteSessions: [],
+    activeLocalSessions: [],
+    history: [],
     cloudAuth: null,
   };
   try {
@@ -68,12 +78,14 @@ async function readSettings(): Promise<FileSendSettings> {
     } else if (typeof parsed.wifi?.password === "string") {
       password = parsed.wifi.password;
     }
-    let remoteSession: PersistedRemoteSession | null = null;
-    if (parsed.remoteSession?.desktopTokenEncrypted && safeStorage.isEncryptionAvailable()) {
+    const persistedRemoteSessions = parsed.remoteSessions ?? (parsed.remoteSession ? [parsed.remoteSession] : []);
+    const remoteSessions: PersistedRemoteSession[] = [];
+    if (safeStorage.isEncryptionAvailable()) for (const persisted of persistedRemoteSessions) {
+      if (!persisted.desktopTokenEncrypted) continue;
       try {
-        const desktopToken = safeStorage.decryptString(Buffer.from(parsed.remoteSession.desktopTokenEncrypted, "base64"));
-        remoteSession = { ...parsed.remoteSession, desktopToken };
-      } catch { remoteSession = null; }
+        const desktopToken = safeStorage.decryptString(Buffer.from(persisted.desktopTokenEncrypted, "base64"));
+        remoteSessions.push({ ...persisted, desktopToken });
+      } catch { /* sessione non recuperabile */ }
     }
     let cloudAuth: FirebaseAnonymousAuthState | null = null;
     if (parsed.cloudAuth?.localId && parsed.cloudAuth.refreshTokenEncrypted && safeStorage.isEncryptionAvailable()) {
@@ -84,6 +96,13 @@ async function readSettings(): Promise<FileSendSettings> {
         };
       } catch { cloudAuth = null; }
     }
+    const storedHistory = Array.isArray(parsed.history)
+      ? parsed.history.filter((entry) => entry && typeof entry.closedAt === "number" && typeof entry.session?.id === "string").slice(0, 500)
+      : [];
+    const interruptedLocal = Array.isArray(parsed.activeLocalSessions)
+      ? parsed.activeLocalSessions.filter((session) => session && typeof session.id === "string").map((session) => ({ mode: "local" as const, session, closedAt: Date.now() }))
+      : [];
+    const history = [...interruptedLocal, ...storedHistory].filter((entry, index, entries) => entries.findIndex((candidate) => candidate.session.id === entry.session.id) === index).slice(0, 500);
     return {
       outputRoot: typeof parsed.outputRoot === "string" && parsed.outputRoot.trim() ? parsed.outputRoot : defaults.outputRoot,
       wifi: {
@@ -91,7 +110,9 @@ async function readSettings(): Promise<FileSendSettings> {
         password,
         security: parsed.wifi?.security === "nopass" ? "nopass" : "WPA",
       },
-      remoteSession,
+      remoteSessions,
+      activeLocalSessions: [],
+      history,
       cloudAuth,
     };
   } catch { /* prima apertura */ }
@@ -111,11 +132,13 @@ async function saveSettings(): Promise<void> {
         ? safeStorage.encryptString(settings.wifi.password).toString("base64")
         : "",
     },
-    remoteSession: settings.remoteSession ? {
-      ...settings.remoteSession,
+    remoteSessions: settings.remoteSessions.map((session) => ({
+      ...session,
       desktopToken: undefined,
-      desktopTokenEncrypted: safeStorage.encryptString(settings.remoteSession.desktopToken).toString("base64"),
-    } as PersistedFileSendSettings["remoteSession"] : undefined,
+      desktopTokenEncrypted: safeStorage.encryptString(session.desktopToken).toString("base64"),
+    })) as PersistedFileSendSettings["remoteSessions"],
+    activeLocalSessions: settings.activeLocalSessions,
+    history: settings.history,
     cloudAuth: settings.cloudAuth ? {
       localId: settings.cloudAuth.localId,
       refreshTokenEncrypted: safeStorage.encryptString(settings.cloudAuth.refreshToken).toString("base64"),
@@ -124,16 +147,32 @@ async function saveSettings(): Promise<void> {
   await writeFile(settingsPath(), JSON.stringify(persisted, null, 2), "utf8");
 }
 
+function queueSettingsSave(): Promise<void> {
+  const pending = settingsSaveQueue.then(() => saveSettings());
+  settingsSaveQueue = pending.catch(() => undefined);
+  return pending;
+}
+
+function scheduleSettingsSave(): void {
+  if (settingsSaveTimer) return;
+  settingsSaveTimer = setTimeout(() => {
+    settingsSaveTimer = null;
+    void queueSettingsSave();
+  }, 400);
+}
+
 function registerIpc(): void {
   ipcMain.handle("filex-send:get-snapshot", () => composeSnapshot());
   ipcMain.handle("filex-send:start-session", async (_event, label: unknown) => {
+    const started = await service.startSession(typeof label === "string" ? label : undefined);
     currentMode = "local";
-    await service.startSession(typeof label === "string" ? label : undefined);
+    currentSessionId = started.session!.id;
     return composeSnapshot();
   });
   ipcMain.handle("filex-send:start-remote-session", async (_event, label: unknown, expiresAt: unknown) => {
+    const session = await remoteClient.startSession(typeof label === "string" ? label : undefined, typeof expiresAt === "number" ? expiresAt : undefined);
     currentMode = "remote";
-    await remoteClient.startSession(typeof label === "string" ? label : undefined, typeof expiresAt === "number" ? expiresAt : undefined);
+    currentSessionId = session.id;
     return composeSnapshot();
   });
   ipcMain.handle("filex-send:start-send-session", async (_event, mode: unknown, label: unknown, expiresAt: unknown) => {
@@ -143,15 +182,32 @@ function registerIpc(): void {
       properties: ["openFile", "multiSelections"],
     });
     if (selected.canceled || selected.filePaths.length === 0) return composeSnapshot();
+    const started = mode === "local"
+      ? (await service.startSendSession(selected.filePaths, typeof label === "string" ? label : undefined)).session!
+      : await remoteClient.startSendSession(selected.filePaths, typeof label === "string" ? label : undefined, typeof expiresAt === "number" ? expiresAt : undefined);
     currentMode = mode;
-    if (mode === "local") await service.startSendSession(selected.filePaths, typeof label === "string" ? label : undefined);
-    else await remoteClient.startSendSession(selected.filePaths, typeof label === "string" ? label : undefined, typeof expiresAt === "number" ? expiresAt : undefined);
+    currentSessionId = started.id;
     return composeSnapshot();
   });
-  ipcMain.handle("filex-send:close-session", async () => {
-    if (currentMode === "remote") await remoteClient.closeSession();
-    else service.closeSession();
-    currentMode = null;
+  ipcMain.handle("filex-send:select-session", (_event, mode: unknown, sessionId: unknown) => {
+    if ((mode !== "local" && mode !== "remote") || typeof sessionId !== "string") throw new Error("Sessione non valida.");
+    const session = mode === "local" ? service.getSession(sessionId) : remoteClient.getSession(sessionId);
+    if (!session) throw new Error("Sessione non trovata.");
+    if (mode === "local") service.selectSession(sessionId);
+    currentMode = mode;
+    currentSessionId = sessionId;
+    return composeSnapshot();
+  });
+  ipcMain.handle("filex-send:close-session", async (_event, mode: unknown, sessionId: unknown) => {
+    if ((mode !== "local" && mode !== "remote") || typeof sessionId !== "string") throw new Error("Sessione non valida.");
+    const session = mode === "remote" ? remoteClient.getSession(sessionId) : service.getSession(sessionId);
+    if (!session) throw new Error("Sessione non trovata.");
+    const historyEntry: FileSendSessionHistoryEntry = { mode, session, closedAt: Date.now() };
+    settings.history = [historyEntry, ...settings.history.filter((entry) => entry.session.id !== sessionId)].slice(0, 500);
+    if (mode === "remote") await remoteClient.closeSession(sessionId);
+    else service.closeSession(sessionId);
+    selectFallbackSession();
+    await queueSettingsSave();
     return composeSnapshot();
   });
   ipcMain.handle("filex-send:choose-output-root", async () => {
@@ -160,7 +216,7 @@ function registerIpc(): void {
     await service.setOutputRoot(result.filePaths[0]);
     remoteClient.setOutputRoot(result.filePaths[0]);
     settings.outputRoot = result.filePaths[0];
-    await saveSettings();
+    await queueSettingsSave();
     return composeSnapshot();
   });
   ipcMain.handle("filex-send:save-wifi", async (_event, wifi: unknown) => {
@@ -174,28 +230,54 @@ function registerIpc(): void {
     if (!normalized.ssid) throw new Error("Inserisci il nome della rete Wi-Fi.");
     if (normalized.security === "WPA" && normalized.password.length < 8) throw new Error("La password Wi-Fi deve contenere almeno 8 caratteri.");
     settings.wifi = normalized;
-    await saveSettings();
+    await queueSettingsSave();
     service.setWifi(normalized, "manual");
     return composeSnapshot();
   });
   ipcMain.handle("filex-send:detect-wifi", () => refreshDetectedWifi());
-  ipcMain.handle("filex-send:open-session-folder", async () => {
-    const snapshot = composeSnapshot();
-    const folderPath = snapshot.session?.folderPath ?? snapshot.outputRoot;
+  ipcMain.handle("filex-send:open-session-folder", async (_event, mode: unknown, sessionId: unknown) => {
+    const session = mode === "local" && typeof sessionId === "string"
+      ? service.getSession(sessionId)
+      : mode === "remote" && typeof sessionId === "string" ? remoteClient.getSession(sessionId) : null;
+    const folderPath = session?.folderPath ?? settings.outputRoot;
     const message = await shell.openPath(folderPath);
+    return message ? { ok: false, message } : { ok: true };
+  });
+  ipcMain.handle("filex-send:open-history-folder", async (_event, sessionId: unknown) => {
+    const session = typeof sessionId === "string" ? settings.history.find((entry) => entry.session.id === sessionId)?.session : null;
+    if (!session) return { ok: false, message: "Sessione non trovata nello storico." };
+    const message = await shell.openPath(session.folderPath);
     return message ? { ok: false, message } : { ok: true };
   });
 }
 
 function composeSnapshot(): FileSendSnapshot {
   const local = service.snapshot();
+  const sessions = [
+    ...service.getSessions().map((session) => ({ mode: "local" as const, session })),
+    ...remoteClient.getSessions().map((session) => ({ mode: "remote" as const, session })),
+  ].sort((left, right) => right.session.createdAt - left.session.createdAt);
+  const selected = currentMode === "remote" && currentSessionId
+    ? remoteClient.getSession(currentSessionId)
+    : currentMode === "local" && currentSessionId ? service.getSession(currentSessionId) : null;
   return {
     ...local,
     mode: currentMode,
     remoteAvailable: remoteClient?.isAvailable() ?? false,
     remoteError: remoteClient?.getError() ?? null,
-    session: currentMode === "remote" ? remoteClient.getSession() : currentMode === "local" ? local.session : null,
+    session: selected,
+    sessions,
+    history: settings.history,
   };
+}
+
+function selectFallbackSession(): void {
+  const remote = remoteClient.getSessions()[0];
+  const local = service.getSessions()[0];
+  const fallback = remote ? { mode: "remote" as const, session: remote } : local ? { mode: "local" as const, session: local } : null;
+  currentMode = fallback?.mode ?? null;
+  currentSessionId = fallback?.session.id ?? null;
+  if (fallback?.mode === "local") service.selectSession(fallback.session.id);
 }
 
 function emitSnapshot(): void {
@@ -206,7 +288,7 @@ async function refreshDetectedWifi() {
   const detected = await detectCurrentWifi();
   if (detected.wifi) {
     settings.wifi = detected.wifi;
-    await saveSettings();
+    await queueSettingsSave();
     service.setWifi(detected.wifi, "detected");
     return composeSnapshot();
   }
@@ -259,7 +341,7 @@ if (!hasSingleInstanceLock) {
     const detected = await detectCurrentWifi();
     if (detected.wifi) {
       settings.wifi = detected.wifi;
-      await saveSettings();
+      await queueSettingsSave();
     }
     const hasRememberedWifi = Boolean(settings.wifi.ssid) && (settings.wifi.security === "nopass" || settings.wifi.password.length >= 8);
     service = new FileSendService({
@@ -267,7 +349,11 @@ if (!hasSingleInstanceLock) {
       wifi: settings.wifi,
       wifiSource: detected.wifi ? "detected" : hasRememberedWifi ? "remembered" : "missing",
       wifiError: detected.wifi ? null : detected.error,
-      onChange: () => emitSnapshot(),
+      onChange: () => {
+        settings.activeLocalSessions = service.getSessions();
+        scheduleSettingsSave();
+        emitSnapshot();
+      },
     });
     await service.start();
     remoteClient = new FileSendRemoteClient({
@@ -275,18 +361,21 @@ if (!hasSingleInstanceLock) {
       firebaseApiKey: "AIzaSyAilpdQ7nneAsZ8eKvOMPrEb7wS1axNUkQ",
       authState: settings.cloudAuth,
       outputRoot: settings.outputRoot,
-      restoredSession: settings.remoteSession,
+      restoredSessions: settings.remoteSessions,
       onChange: () => {
-        settings.remoteSession = remoteClient.exportSession();
+        settings.remoteSessions = remoteClient.exportSessions();
         settings.cloudAuth = remoteClient.exportAuthState();
-        void saveSettings();
+        scheduleSettingsSave();
         emitSnapshot();
       },
       onFilesReceived: (count, label) => {
         if (Notification.isSupported()) new Notification({ title: "FileX Send", body: `${count} ${count === 1 ? "file ricevuto" : "file ricevuti"} da ${label}.` }).show();
       },
     });
-    if (settings.remoteSession) currentMode = "remote";
+    if (settings.remoteSessions[0]) {
+      currentMode = "remote";
+      currentSessionId = settings.remoteSessions[0].id;
+    }
     remoteClient.resume();
     void remoteClient.checkAvailability();
     registerIpc();

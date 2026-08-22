@@ -20,8 +20,16 @@ export async function detectCurrentWifi(): Promise<WifiDetectionResult> {
     if (!ssid) return { wifi: null, error: "Il PC non è collegato tramite Wi-Fi. Uso l’ultima rete memorizzata, se disponibile." };
     return { wifi: await readWifiProfile(ssid), error: null };
   } catch (cause) {
-    return { wifi: null, error: `Windows non consente di leggere automaticamente la rete: ${errorMessage(cause)}` };
+    return { wifi: null, error: wifiDetectionError(cause) };
   }
+}
+
+export function wifiDetectionError(cause: unknown): string {
+  const details = errorMessage(cause).toLowerCase();
+  if (details.includes("wireless interface") || details.includes("interfaccia wireless") || details.includes("wlan")) {
+    return "Nessuna connessione Wi‑Fi rilevata. Il PC è probabilmente collegato via Ethernet: l’invio locale può funzionare comunque, ma il QR non può includere automaticamente le credenziali Wi‑Fi.";
+  }
+  return "Non è stato possibile rilevare automaticamente la rete Wi‑Fi. Puoi configurarla manualmente se vuoi includere l’accesso nel QR.";
 }
 
 export function parseConnectedSsid(output: string): string | null {

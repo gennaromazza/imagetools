@@ -1,0 +1,109 @@
+.session-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 10px;
+  background: #081522cc;
+  border: 1px solid #21364b;
+  border-radius: 17px;
+}
+
+.session-tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  flex: 1;
+  padding-bottom: 2px;
+}
+
+.session-tabs button,
+.new-session,
+.overview-button {
+  flex: none;
+  border: 1px solid #294158;
+  border-radius: 12px;
+  background: #0d1d2e;
+  color: #a9bbcc;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.overview-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 150px;
+  color: #dce9f5;
+  font-weight: 850;
+}
+
+.overview-button small { margin-top: 2px; color: #7890a8; font-size: 10px; font-weight: 650; }
+
+.session-tabs button {
+  display: grid;
+  grid-template-columns: 9px auto;
+  column-gap: 8px;
+  text-align: left;
+  min-width: 135px;
+}
+
+.session-tabs button > span {
+  grid-row: 1 / 3;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6b8298;
+}
+
+.session-tabs button > span.busy {
+  background: #efbd57;
+  box-shadow: 0 0 9px #efbd57;
+}
+
+.session-tabs button > span.done { background: #59dcb9; }
+.session-tabs strong {
+  max-width: 160px;
+  overflow: hidden;
+  color: #e5eef7;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-tabs small { margin-top: 2px; font-size: 10px; }
+.session-tabs button.active,
+.new-session.active,
+.overview-button.active { border-color: #55d9b6; background: #12352f; color: #75e2c5; }
+.new-session { padding: 12px 15px; color: #6ee0c1; font-weight: 850; white-space: nowrap; }
+
+.client-dashboard { flex: 1; padding: 34px 2%; }
+.dashboard-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
+.dashboard-heading h1 { margin: 0; font-size: 42px; letter-spacing: -.035em; }
+.dashboard-heading p:last-child { margin: 8px 0 0; color: #8fa5bb; }
+.dashboard-heading > button { border: 0; border-radius: 13px; padding: 14px 18px; background: #53d8b5; color: #082019; font-weight: 900; cursor: pointer; }
+.dashboard-section { margin-top: 30px; }
+.dashboard-section > h2 { display: flex; align-items: center; gap: 9px; margin: 0 0 14px; font-size: 20px; }
+.dashboard-section > h2 span { display: grid; place-items: center; min-width: 25px; height: 25px; padding: 0 7px; border-radius: 99px; background: #183047; color: #8fa9c1; font-size: 12px; }
+.client-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; }
+.client-summary-card { display: flex; flex-direction: column; min-height: 305px; padding: 21px; border: 1px solid #263d54; border-radius: 19px; background: linear-gradient(145deg, #102137, #0a1829); box-shadow: 0 18px 45px #0003; }
+.client-summary-card.active-session { border-color: #286654; }
+.client-card-top { display: flex; justify-content: space-between; gap: 15px; }
+.client-card-top small { color: #5fdcba; font-size: 10px; font-weight: 850; letter-spacing: .13em; }
+.client-card-top h3 { margin: 5px 0 0; font-size: 23px; }
+.client-card-top > span { align-self: flex-start; padding: 6px 9px; border-radius: 99px; background: #173448; color: #9fb5c9; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.active-session .client-card-top > span { background: #104134; color: #72e2c4; }
+.session-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 13px; color: #778da4; font-size: 11px; }
+.session-meta span { color: #e8bd64; font-weight: 800; }
+.session-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin: 17px 0 12px; }
+.session-totals div { padding: 10px 12px; border: 1px solid #1d3349; border-radius: 11px; background: #091624; }
+.session-totals small { display: block; color: #71879d; font-size: 10px; }
+.session-totals strong { display: block; margin-top: 2px; font-size: 18px; }
+.files-heading { margin-bottom: 5px; color: #617b93; font-size: 9px; font-weight: 850; letter-spacing: .12em; }
+.recent-files { flex: 1; min-height: 63px; border-top: 1px solid #21364b; }
+.recent-files > div { display: flex; justify-content: space-between; gap: 10px; padding: 7px 1px; border-bottom: 1px solid #172a3d; color: #becddd; font-size: 11px; }
+.recent-files span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-files time { flex: none; color: #6f859c; }
+.recent-files p { color: #71879d; font-size: 12px; }
+.client-summary-card > button { margin-top: 14px; border: 0; border-radius: 11px; padding: 11px; background: #172d42; color: #8de6ce; font-weight: 850; cursor: pointer; }
+.history-empty { grid-column: 1 / -1; padding: 30px; border: 1px dashed #294158; border-radius: 17px; color: #71879d; text-align: center; }

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { FileSendService } from "./file-send-service.js";
+import { FileSendRemoteClient, type PersistedRemoteSession } from "./remote-client-service.js";
 
 test("crea una sessione, riceve un file e la invalida alla chiusura", async () => {
   const outputRoot = await mkdtemp(join(tmpdir(), "filex-send-"));
@@ -32,12 +33,50 @@ test("crea una sessione, riceve un file e la invalida alla chiusura", async () =
     assert.equal(snapshot.session?.receivedFiles.length, 1);
     assert.equal(await readFile(join(snapshot.session!.folderPath, "foto.jpg"), "utf8"), "file di prova");
 
-    service.closeSession();
+    service.closeSession(started.session.id);
     assert.equal((await fetch(started.session.uploadUrl)).status, 410);
   } finally {
     await service.stop();
     await rm(outputRoot, { recursive: true, force: true });
   }
+});
+
+test("mantiene più sessioni locali e separa le cartelle anche per lo stesso cliente", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "filex-send-multi-"));
+  const service = new FileSendService({ outputRoot, host: "127.0.0.1", publicAddress: "127.0.0.1" });
+  try {
+    await service.start();
+    const first = (await service.startSession("Cliente Ripetuto")).session!;
+    const second = (await service.startSession("Cliente Ripetuto")).session!;
+
+    assert.equal(service.getSessions().length, 2);
+    assert.notEqual(first.folderPath, second.folderPath);
+    assert.equal((await fetch(first.uploadUrl)).status, 200);
+    assert.equal((await fetch(second.uploadUrl)).status, 200);
+
+    service.closeSession(first.id);
+    assert.equal((await fetch(first.uploadUrl)).status, 410);
+    assert.equal((await fetch(second.uploadUrl)).status, 200);
+  } finally {
+    await service.stop();
+    await rm(outputRoot, { recursive: true, force: true });
+  }
+});
+
+test("ripristina e gestisce più sessioni Internet senza sovrascriverle", async () => {
+  const makeSession = (id: string, label: string): PersistedRemoteSession => ({
+    id, label, desktopToken: `token-${id}`, direction: "receive", uploadUrl: `https://example.test/r/${id}`,
+    folderPath: `C:\\FileX\\${id}`, createdAt: Date.now(), receivedBytes: 0, receivedFiles: [],
+    activeUploads: 0, activeUploadBytes: 0, clientCompleted: false,
+  });
+  const client = new FileSendRemoteClient({
+    baseUrl: "http://127.0.0.1:1", firebaseApiKey: "test-key", outputRoot: "C:\\FileX",
+    restoredSessions: [makeSession("uno", "Cliente Uno"), makeSession("due", "Cliente Due")],
+  });
+
+  assert.deepEqual(client.getSessions().map((session) => session.id), ["uno", "due"]);
+  await client.closeSession("uno");
+  assert.deepEqual(client.getSessions().map((session) => session.id), ["due"]);
 });
 
 test("rinomina in sicurezza file duplicati", async () => {

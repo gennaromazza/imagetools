@@ -33,7 +33,7 @@ export interface RemoteClientOptions {
   firebaseApiKey: string;
   authState?: FirebaseAnonymousAuthState | null;
   outputRoot: string;
-  restoredSession?: PersistedRemoteSession | null;
+  restoredSessions?: PersistedRemoteSession[];
   onChange?: () => void;
   onFilesReceived?: (count: number, label: string) => void;
 }
@@ -44,9 +44,9 @@ export class FileSendRemoteClient {
   private readonly auth: FirebaseAnonymousAuth;
   private readonly onChange?: () => void;
   private readonly onFilesReceived?: (count: number, label: string) => void;
-  private session: (FileSendSession & { desktopToken: string }) | null = null;
+  private readonly sessions = new Map<string, FileSendSession & { desktopToken: string }>();
   private timer: NodeJS.Timeout | null = null;
-  private polling = false;
+  private readonly polling = new Set<string>();
   private error: string | null = null;
   private available = false;
   private downloading = new Set<string>();
@@ -57,8 +57,8 @@ export class FileSendRemoteClient {
     this.onChange = options.onChange;
     this.onFilesReceived = options.onFilesReceived;
     this.auth = new FirebaseAnonymousAuth(options.firebaseApiKey, options.authState, this.onChange);
-    if (options.restoredSession) {
-      this.session = { ...options.restoredSession, direction: options.restoredSession.direction ?? "receive", receivedFiles: [...options.restoredSession.receivedFiles] };
+    for (const restored of options.restoredSessions ?? []) {
+      this.sessions.set(restored.id, { ...restored, direction: restored.direction ?? "receive", receivedFiles: [...restored.receivedFiles] });
     }
   }
 
@@ -79,20 +79,22 @@ export class FileSendRemoteClient {
   setOutputRoot(outputRoot: string): void { this.outputRoot = outputRoot; }
   isAvailable(): boolean { return this.available; }
   getError(): string | null { return this.error; }
-  exportSession(): PersistedRemoteSession | null {
-    return this.session ? { ...this.session, receivedFiles: [...this.session.receivedFiles] } : null;
+  exportSessions(): PersistedRemoteSession[] {
+    return [...this.sessions.values()].map((session) => ({ ...session, receivedFiles: [...session.receivedFiles] }));
   }
   exportAuthState(): FirebaseAnonymousAuthState | null { return this.auth.exportState(); }
   resume(): void {
-    if (!this.session || this.timer) return;
-    this.timer = setInterval(() => void this.poll(), 5_000);
-    void this.poll();
+    if (this.sessions.size === 0) return;
+    this.ensureTimer();
+    void this.pollAll();
   }
-  getSession(): FileSendSession | null {
-    if (!this.session) return null;
-    const { desktopToken: _desktopToken, ...session } = this.session;
+  getSession(sessionId: string): FileSendSession | null {
+    const stored = this.sessions.get(sessionId);
+    if (!stored) return null;
+    const { desktopToken: _desktopToken, ...session } = stored;
     return { ...session, receivedFiles: [...session.receivedFiles] };
   }
+  getSessions(): FileSendSession[] { return [...this.sessions.keys()].map((id) => this.getSession(id)!); }
 
   async startSession(label?: string, expiresAt?: number): Promise<FileSendSession> {
     if (!this.available && !await this.checkAvailability()) throw new Error(this.error ?? "Servizio remoto non disponibile.");
@@ -107,7 +109,7 @@ export class FileSendRemoteClient {
     const createdAt = Date.now();
     const safeLabel = sanitizeLabel(label) || `Cliente-${new Date(createdAt).toTimeString().slice(0, 5).replace(":", "")}`;
     const folderPath = await createUniqueDirectory(this.outputRoot, `${formatDate(createdAt)}_${safeLabel}`);
-    this.session = {
+    const session: FileSendSession & { desktopToken: string } = {
       id: created.sessionId,
       direction: "receive",
       desktopToken: created.desktopToken,
@@ -123,10 +125,11 @@ export class FileSendRemoteClient {
       activeUploadBytes: 0,
       clientCompleted: false,
     };
+    this.sessions.set(session.id, session);
     this.error = null;
-    this.timer = setInterval(() => void this.poll(), 5_000);
-    await this.poll();
-    return this.getSession()!;
+    this.ensureTimer();
+    await this.poll(session);
+    return this.getSession(session.id)!;
   }
 
   async startSendSession(filePaths: string[], label?: string, expiresAt?: number): Promise<FileSendSession> {
@@ -141,12 +144,13 @@ export class FileSendRemoteClient {
     const created = await response.json() as CreatedRemoteSession;
     const createdAt = Date.now();
     const safeLabel = sanitizeLabel(label) || `Consegna-${new Date(createdAt).toTimeString().slice(0, 5).replace(":", "")}`;
-    this.session = {
+    const session: FileSendSession & { desktopToken: string } = {
       id: created.sessionId, desktopToken: created.desktopToken, direction: "send",
       label: safeLabel.replaceAll("-", " "), uploadUrl: created.uploadUrl, folderPath: this.outputRoot,
       createdAt, expiresAt: created.expiresAt, retentionExpiresAt: created.retentionExpiresAt,
       receivedBytes: 0, receivedFiles: [], activeUploads: 0, activeUploadBytes: 0, clientCompleted: false,
     };
+    this.sessions.set(session.id, session);
     const credential = created.uploadUrl.split("/r/").pop()!;
     for (const path of filePaths) {
       const info = await stat(path);
@@ -162,20 +166,20 @@ export class FileSendRemoteClient {
       if (!uploaded.ok) throw new Error(`Caricamento di ${name} non riuscito.`);
       const completed = await fetch(`${this.baseUrl}/api/public/${encodeURIComponent(credential)}/uploads/${pending.fileId}/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       if (!completed.ok) throw new Error(`Conferma di ${name} non riuscita.`);
-      this.session.receivedFiles.push({ id: pending.fileId, name, size: info.size, receivedAt: Date.now() });
-      this.session.receivedBytes += info.size;
+      session.receivedFiles.push({ id: pending.fileId, name, size: info.size, receivedAt: Date.now() });
+      session.receivedBytes += info.size;
       this.onChange?.();
     }
-    this.timer = setInterval(() => void this.poll(), 5_000);
+    this.ensureTimer();
     this.onChange?.();
-    return this.getSession()!;
+    return this.getSession(session.id)!;
   }
 
-  async closeSession(): Promise<void> {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-    const session = this.session;
-    this.session = null;
+  async closeSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId) ?? null;
+    this.sessions.delete(sessionId);
+    if (this.sessions.size === 0 && this.timer) clearInterval(this.timer);
+    if (this.sessions.size === 0) this.timer = null;
     this.onChange?.();
     if (!session) return;
     await fetch(`${this.baseUrl}/api/desktop/${session.id}`, { method: "DELETE", headers: auth(session.desktopToken) }).catch(() => undefined);
@@ -186,10 +190,17 @@ export class FileSendRemoteClient {
     this.timer = null;
   }
 
-  private async poll(): Promise<void> {
-    if (!this.session || this.polling) return;
-    this.polling = true;
-    const session = this.session;
+  private ensureTimer(): void {
+    if (!this.timer) this.timer = setInterval(() => void this.pollAll(), 5_000);
+  }
+
+  private async pollAll(): Promise<void> {
+    await Promise.all([...this.sessions.values()].map((session) => this.poll(session)));
+  }
+
+  private async poll(session: FileSendSession & { desktopToken: string }): Promise<void> {
+    if (!this.sessions.has(session.id) || this.polling.has(session.id)) return;
+    this.polling.add(session.id);
     try {
       const response = await fetch(`${this.baseUrl}/api/desktop/${session.id}`, { headers: auth(session.desktopToken), signal: AbortSignal.timeout(10_000) });
       if (!response.ok) throw new Error(`Sessione remota non raggiungibile (${response.status}).`);
@@ -201,7 +212,7 @@ export class FileSendRemoteClient {
       if (session.direction === "send") { this.error = null; return; }
       let downloaded = 0;
       for (const file of status.files) {
-        if (this.downloading.has(file.id)) continue;
+        if (this.downloading.has(`${session.id}:${file.id}`)) continue;
         if (session.receivedFiles.some((item) => item.id === file.id)) {
           await this.acknowledgeFile(session, file.id);
           continue;
@@ -214,13 +225,14 @@ export class FileSendRemoteClient {
     } catch (cause) {
       this.error = cause instanceof Error ? cause.message : String(cause);
     } finally {
-      this.polling = false;
+      this.polling.delete(session.id);
       this.onChange?.();
     }
   }
 
   private async downloadFile(session: FileSendSession & { desktopToken: string }, file: FileSendReceivedFile & { downloadUrl?: string }): Promise<void> {
-    this.downloading.add(file.id);
+    const downloadKey = `${session.id}:${file.id}`;
+    this.downloading.add(downloadKey);
     const { finalPath, partPath, fileName, handle } = await reserveDestination(session.folderPath, file.name);
     try {
       const response = await fetch(file.downloadUrl ?? `${this.baseUrl}/api/desktop/${session.id}/files/${file.id}`, { headers: file.downloadUrl ? undefined : auth(session.desktopToken) });
@@ -236,7 +248,7 @@ export class FileSendRemoteClient {
       await rm(partPath, { force: true });
       throw cause;
     } finally {
-      this.downloading.delete(file.id);
+      this.downloading.delete(downloadKey);
     }
   }
 

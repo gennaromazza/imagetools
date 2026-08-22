@@ -27,6 +27,12 @@ export interface FileSendWifiConfig {
   security: "WPA" | "nopass";
 }
 
+export interface FileSendSessionHistoryEntry {
+  mode: "local" | "remote";
+  session: FileSendSession;
+  closedAt: number;
+}
+
 export type FileSendWifiSource = "detected" | "remembered" | "manual" | "missing";
 
 export interface FileSendSnapshot {
@@ -41,6 +47,8 @@ export interface FileSendSnapshot {
   wifiSource: FileSendWifiSource;
   wifiError: string | null;
   session: FileSendSession | null;
+  sessions: Array<{ mode: "local" | "remote"; session: FileSendSession }>;
+  history: FileSendSessionHistoryEntry[];
   warning: string | null;
 }
 
@@ -49,11 +57,13 @@ export interface FileSendDesktopApi {
   startSession: (label?: string) => Promise<FileSendSnapshot>;
   startRemoteSession: (label?: string, expiresAt?: number) => Promise<FileSendSnapshot>;
   startSendSession: (mode: "local" | "remote", label?: string, expiresAt?: number) => Promise<FileSendSnapshot>;
-  closeSession: () => Promise<FileSendSnapshot>;
+  selectSession: (mode: "local" | "remote", sessionId: string) => Promise<FileSendSnapshot>;
+  closeSession: (mode: "local" | "remote", sessionId: string) => Promise<FileSendSnapshot>;
   chooseOutputRoot: () => Promise<FileSendSnapshot>;
   saveWifi: (wifi: FileSendWifiConfig) => Promise<FileSendSnapshot>;
   detectWifi: () => Promise<FileSendSnapshot>;
-  openSessionFolder: () => Promise<{ ok: boolean; message?: string }>;
+  openSessionFolder: (mode: "local" | "remote", sessionId: string) => Promise<{ ok: boolean; message?: string }>;
+  openHistoryFolder: (sessionId: string) => Promise<{ ok: boolean; message?: string }>;
 }
 
 declare global {

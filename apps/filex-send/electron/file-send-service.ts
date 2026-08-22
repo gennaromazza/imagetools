@@ -38,7 +38,8 @@ export class FileSendService {
   private readonly onChange?: (snapshot: FileSendSnapshot) => void;
   private server: Server | null = null;
   private port: number | null = null;
-  private session: InternalSession | null = null;
+  private readonly sessions = new Map<string, InternalSession>();
+  private selectedSessionId: string | null = null;
   private lastEmitAt = 0;
   private wifi: FileSendWifiConfig;
   private wifiSource: FileSendWifiSource;
@@ -75,7 +76,8 @@ export class FileSendService {
   }
 
   async stop(): Promise<void> {
-    this.session = null;
+    this.sessions.clear();
+    this.selectedSessionId = null;
     if (!this.server) return;
     const server = this.server;
     this.server = null;
@@ -84,7 +86,7 @@ export class FileSendService {
   }
 
   async setOutputRoot(outputRoot: string): Promise<FileSendSnapshot> {
-    if (this.session) throw new Error("Termina il trasferimento prima di cambiare cartella.");
+    if (this.sessions.size > 0) throw new Error("Termina i trasferimenti locali prima di cambiare cartella.");
     await mkdir(outputRoot, { recursive: true });
     this.outputRoot = outputRoot;
     this.emit(true);
@@ -108,7 +110,7 @@ export class FileSendService {
     const token = randomBytes(18).toString("base64url");
     const id = randomUUID();
     const address = this.publicAddress ?? listLanAddresses()[0] ?? "127.0.0.1";
-    this.session = {
+    const session: InternalSession = {
       id,
       token,
       label: safeLabel.replaceAll("-", " "),
@@ -124,6 +126,8 @@ export class FileSendService {
       sharedPaths: new Map(),
       clientCompleted: false,
     };
+    this.sessions.set(id, session);
+    this.selectedSessionId = id;
     this.emit(true);
     return this.snapshot();
   }
@@ -145,27 +149,45 @@ export class FileSendService {
       sharedPaths.set(fileId, path);
       files.push({ id: fileId, name: sanitizeFileName(basename(path)), size: info.size, receivedAt: createdAt });
     }
-    this.session = {
+    const session: InternalSession = {
       id, token, direction: "send", label: safeLabel.replaceAll("-", " "),
       uploadUrl: `http://${address}:${this.port}/s/${token}`,
       folderPath: this.outputRoot, createdAt,
       receivedBytes: files.reduce((sum, file) => sum + file.size, 0), receivedFiles: files,
       activeUploads: 0, activeUploadBytes: 0, active: new Map(), sharedPaths, clientCompleted: false,
     };
+    this.sessions.set(id, session);
+    this.selectedSessionId = id;
     this.emit(true);
     return this.snapshot();
   }
 
-  closeSession(): FileSendSnapshot {
-    this.session = null;
+  selectSession(sessionId: string): FileSendSnapshot {
+    if (!this.sessions.has(sessionId)) throw new Error("Sessione locale non trovata.");
+    this.selectedSessionId = sessionId;
+    return this.snapshot();
+  }
+
+  closeSession(sessionId: string): FileSendSnapshot {
+    this.sessions.delete(sessionId);
+    if (this.selectedSessionId === sessionId) this.selectedSessionId = this.sessions.keys().next().value ?? null;
     this.emit(true);
     return this.snapshot();
+  }
+
+  getSessions(): FileSendSession[] {
+    return [...this.sessions.values()].map(publicSession);
+  }
+
+  getSession(sessionId?: string | null): FileSendSession | null {
+    const session = this.sessions.get(sessionId ?? this.selectedSessionId ?? "");
+    return session ? publicSession(session) : null;
   }
 
   snapshot(): FileSendSnapshot {
     const addresses = this.publicAddress ? [this.publicAddress] : listLanAddresses();
     return {
-      mode: this.session ? "local" : null,
+      mode: this.selectedSessionId ? "local" : null,
       remoteAvailable: false,
       remoteError: null,
       serverRunning: Boolean(this.server),
@@ -175,7 +197,9 @@ export class FileSendService {
       wifi: { ...this.wifi },
       wifiSource: this.wifiSource,
       wifiError: this.wifiError,
-      session: this.session ? publicSession(this.session) : null,
+      session: this.getSession(),
+      sessions: this.getSessions().map((session) => ({ mode: "local" as const, session })),
+      history: [],
       warning: addresses.length === 0
         ? "Nessuna rete locale rilevata. Collega il PC alla rete FileX Send."
         : null,
@@ -201,14 +225,15 @@ export class FileSendService {
       return;
     }
     if (request.method === "GET" && pageMatch) {
-      if (!this.isActiveToken(pageMatch[1])) return this.sendExpired(response);
+      const session = this.sessionForToken(pageMatch[1]);
+      if (!session) return this.sendExpired(response);
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      response.end(this.session!.direction === "send" ? downloadPage(this.session!, pageMatch[1]) : mobilePage(this.session!.label, pageMatch[1]));
+      response.end(session.direction === "send" ? downloadPage(session, pageMatch[1]) : mobilePage(session.label, pageMatch[1]));
       return;
     }
     if (request.method === "GET" && downloadMatch) {
-      if (!this.isActiveToken(downloadMatch[1])) return this.sendExpired(response);
-      const session = this.session!;
+      const session = this.sessionForToken(downloadMatch[1]);
+      if (!session) return this.sendExpired(response);
       const path = session.sharedPaths.get(downloadMatch[2]);
       const file = session.receivedFiles.find((candidate) => candidate.id === downloadMatch[2]);
       if (!path || !file || session.direction !== "send") return this.sendJson(response, 404, { error: "File non trovato." });
@@ -222,13 +247,15 @@ export class FileSendService {
       return;
     }
     if (request.method === "PUT" && uploadMatch) {
-      if (!this.isActiveToken(uploadMatch[1])) return this.sendExpired(response);
-      await this.receiveFile(request, response);
+      const session = this.sessionForToken(uploadMatch[1]);
+      if (!session) return this.sendExpired(response);
+      await this.receiveFile(request, response, session);
       return;
     }
     if (request.method === "POST" && completeMatch) {
-      if (!this.isActiveToken(completeMatch[1])) return this.sendExpired(response);
-      this.session!.clientCompleted = true;
+      const session = this.sessionForToken(completeMatch[1]);
+      if (!session) return this.sendExpired(response);
+      session.clientCompleted = true;
       this.emit(true);
       this.sendJson(response, 200, { ok: true });
       return;
@@ -236,12 +263,11 @@ export class FileSendService {
     this.sendJson(response, 404, { error: "Pagina non trovata." });
   }
 
-  private isActiveToken(token: string): boolean {
-    return Boolean(this.session && this.session.token === token);
+  private sessionForToken(token: string): InternalSession | null {
+    return [...this.sessions.values()].find((session) => session.token === token) ?? null;
   }
 
-  private async receiveFile(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const session = this.session!;
+  private async receiveFile(request: IncomingMessage, response: ServerResponse, session: InternalSession): Promise<void> {
     const encodedName = headerValue(request.headers["x-file-name"]);
     const originalName = decodeHeader(encodedName);
     const contentLength = Number(headerValue(request.headers["content-length"]));
