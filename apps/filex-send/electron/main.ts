@@ -44,8 +44,9 @@ interface PersistedFileSendSettings {
   cloudAuth?: { localId?: string; refreshTokenEncrypted?: string };
 }
 
-app.setName("FileX Send");
-if (process.platform === "win32") app.setAppUserModelId("studio.filex.filex-send");
+const isDevRenderer = process.env.FILEX_RENDERER_MODE === "dev";
+app.setName(isDevRenderer ? "FileX Send Dev" : "FileX Send");
+if (process.platform === "win32") app.setAppUserModelId(isDevRenderer ? "studio.filex.filex-send.dev" : "studio.filex.filex-send");
 
 function rendererEntry(): string {
   if (app.isPackaged) return join(process.resourcesPath, "apps", "filex-send", "web", "index.html");
