@@ -14,6 +14,8 @@ const HOST = "127.0.0.1";
 const NPM_COMMAND = process.platform === "win32" ? "npm.cmd" : "npm";
 const SUITE_RELEASE_ID = "release-suite";
 const SUITE_RELEASE_BAT = join(ROOT, "release-filex-suite.bat");
+const COMPONENT_PREPARE_SCRIPT = join(ROOT, "scripts", "prepare-component-release.mjs");
+const COMPONENT_VALIDATE_SCRIPT = join(ROOT, "scripts", "validate-component-release.mjs");
 const PROJECT_AUDIT_ID = "project-health";
 const SUITE_CHANGELOG_PATH = join(ROOT, "CHANGELOG.md");
 
@@ -39,6 +41,18 @@ interface ComponentWorkflowRun {
 }
 
 const componentWorkflowRuns = new Map<ComponentReleaseId, { requestedAt: number; runId: string | null }>();
+
+interface ReleaseQueueItem {
+  id: string;
+  component: ComponentReleaseId;
+  version: string;
+  status: "pending" | "running" | "success" | "error";
+  workflow: ComponentWorkflowRun | null;
+  error: string | null;
+}
+
+let releaseQueue: ReleaseQueueItem[] = [];
+let releaseQueueRunning = false;
 
 function componentReleaseById(value: string): typeof COMPONENT_RELEASES[number] | null {
   return COMPONENT_RELEASES.find((component) => component.id === value) ?? null;
@@ -75,6 +89,101 @@ function releaseBlockingChanges(statusOutput: string): string[] {
     .filter((path) => !path.startsWith("apps/filex-dev-console/"));
 }
 
+function componentChangedFiles(changes: string[], packagePath: string): string[] {
+  const componentRoot = packagePath.replace(/package\.json$/u, "");
+  return changes.filter((path) => path === packagePath || path.startsWith(componentRoot));
+}
+
+function componentReleaseFiles(
+  changes: string[],
+  componentId: ComponentReleaseId,
+  metadataOwners: ReadonlySet<ComponentReleaseId> = new Set(),
+  includeInfrastructure = false,
+): string[] {
+  const component = componentReleaseById(componentId);
+  if (!component) return [];
+  const own = componentChangedFiles(changes, component.packagePath);
+  if (metadataOwners.has(componentId)) own.push(...changes.filter((path) => path === "CHANGELOG.md" || path === "apps/filex-desktop/release-notes.json"));
+  if (componentId === "filex-send") own.push(...changes.filter((path) => path === "apps/filex-cloud-functions/src/index.ts"));
+  if (includeInfrastructure) own.push(...changes.filter((path) => path.startsWith("apps/filex-dev-console/") || path === ".github/workflows/windows-release.yml" || path === "scripts/prepare-component-release.mjs" || path === "scripts/validate-component-release.mjs"));
+  return [...new Set(own)];
+}
+
+async function readHeadFile(path: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP("git", ["show", `HEAD:${path}`], { cwd: ROOT, timeout: 5_000, maxBuffer: 2_000_000 });
+    return stdout;
+  } catch {
+    return null;
+  }
+}
+
+async function componentMetadataOwners(changes: string[]): Promise<Set<ComponentReleaseId>> {
+  const owners = new Set<ComponentReleaseId>();
+  const notesPath = "apps/filex-desktop/release-notes.json";
+  if (changes.includes(notesPath)) {
+    const [currentRaw, headRaw] = await Promise.all([readFile(join(ROOT, notesPath), "utf8"), readHeadFile(notesPath)]);
+    const current = JSON.parse(currentRaw) as Record<string, unknown>;
+    const head = headRaw ? JSON.parse(headRaw) as Record<string, unknown> : {};
+    for (const component of COMPONENT_RELEASES) {
+      if (JSON.stringify(current[component.id] ?? null) !== JSON.stringify(head[component.id] ?? null)) owners.add(component.id);
+    }
+  }
+  if (changes.includes("CHANGELOG.md")) {
+    const [current, head] = await Promise.all([readFile(SUITE_CHANGELOG_PATH, "utf8"), readHeadFile("CHANGELOG.md")]);
+    for (const component of COMPONENT_RELEASES) {
+      const pkg = JSON.parse(await readFile(join(ROOT, component.packagePath), "utf8")) as { version?: unknown };
+      const version = validComponentVersion(pkg.version);
+      if (version && changelogEntry(current, component.label, version) !== changelogEntry(head ?? "", component.label, version)) owners.add(component.id);
+    }
+  }
+  return owners;
+}
+
+function changelogEntry(changelog: string, label: string, version: string): string | null {
+  const header = new RegExp(`^## \\d{4}-\\d{2}-\\d{2} - ${escapeRegExp(label)} ${escapeRegExp(version)}$`, "mu");
+  const match = header.exec(changelog);
+  if (!match) return null;
+  const next = changelog.indexOf("\n## ", match.index + match[0].length);
+  return changelog.slice(match.index, next < 0 ? undefined : next).trim();
+}
+
+async function readComponentReleasePreparation(component: typeof COMPONENT_RELEASES[number], version: string | null) {
+  if (!version) return { prepared: false, issues: ["Versione non valida."] };
+  const [changelog, releaseNotesRaw] = await Promise.all([
+    readFile(SUITE_CHANGELOG_PATH, "utf8"),
+    readFile(join(ROOT, "apps", "filex-desktop", "release-notes.json"), "utf8"),
+  ]);
+  const issues: string[] = [];
+  const header = new RegExp(`^## \\d{4}-\\d{2}-\\d{2} - ${escapeRegExp(component.label)} ${escapeRegExp(version)}$`, "mu");
+  if (!header.test(changelog)) issues.push(`Changelog mancante per ${component.label} ${version}.`);
+  const releaseNotes = JSON.parse(releaseNotesRaw) as Record<string, Record<string, unknown>>;
+  const notes = releaseNotes?.[component.id]?.[version];
+  if (!Array.isArray(notes) || notes.length === 0 || notes.some((item) => typeof item !== "string" || !item.trim())) issues.push(`Note catalogo mancanti per ${component.label} ${version}.`);
+  return { prepared: issues.length === 0, issues };
+}
+
+function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"); }
+
+async function runComponentPreflight(component: typeof COMPONENT_RELEASES[number], version: string): Promise<string> {
+  const { stdout } = await execFileP(NODE, [COMPONENT_VALIDATE_SCRIPT, component.id, version], { cwd: ROOT, timeout: 15_000 });
+  return stdout.trim();
+}
+
+function parseStatusPaths(statusOutput: string): string[] {
+  return statusOutput.split(/\r?\n/u).filter(Boolean).map((line) => line.slice(3).trim());
+}
+
+function componentFromPath(path: string): ComponentReleaseId | "suite" | null {
+  if (path === "CHANGELOG.md" || path === "apps/filex-desktop/release-notes.json") return null;
+  if (path.startsWith("apps/filex-desktop/")) return "suite";
+  return COMPONENT_RELEASES.find((component) => path === component.packagePath || path.startsWith(component.packagePath.replace(/package\.json$/u, "")))?.id ?? null;
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function componentVersionAlreadyPublished(
   component: typeof COMPONENT_RELEASES[number],
   version: string | null,
@@ -103,16 +212,25 @@ async function componentVersionAlreadyPublished(
 }
 
 async function readComponentWorkflowRun(componentId: ComponentReleaseId): Promise<ComponentWorkflowRun | null> {
-  const requested = componentWorkflowRuns.get(componentId);
-  if (!requested) return null;
+  const requested = componentWorkflowRuns.get(componentId) ?? { requestedAt: 0, runId: null };
   if (!requested.runId) {
     const { stdout } = await execFileP(
       "gh",
-      ["run", "list", "--repo", "gennaromazza/imagetools", "--workflow", "windows-release.yml", "--branch", "main", "--event", "workflow_dispatch", "--limit", "10", "--json", "databaseId,createdAt,url,status,conclusion"],
+      ["run", "list", "--repo", "gennaromazza/imagetools", "--workflow", "windows-release.yml", "--branch", "main", "--event", "workflow_dispatch", "--limit", "20", "--json", "databaseId,createdAt,url,status,conclusion,headSha,displayTitle"],
       { cwd: ROOT, timeout: 15_000 },
     );
-    const candidates = JSON.parse(stdout) as Array<{ databaseId?: unknown; createdAt?: unknown; url?: unknown; status?: unknown; conclusion?: unknown }>;
-    const found = candidates.find((candidate) => Date.parse(String(candidate.createdAt ?? "")) >= requested.requestedAt - 10_000);
+    const candidates = JSON.parse(stdout) as Array<{ databaseId?: unknown; createdAt?: unknown; url?: unknown; status?: unknown; conclusion?: unknown; headSha?: unknown; displayTitle?: unknown }>;
+    let found = candidates.find((candidate) => requested.requestedAt > 0 && Date.parse(String(candidate.createdAt ?? "")) >= requested.requestedAt - 10_000);
+    found ??= candidates.find((candidate) => String(candidate.displayTitle ?? "").startsWith(`Release ${componentId} v`));
+    if (!found) {
+      for (const candidate of candidates) {
+        if (!candidate.headSha) continue;
+        try {
+          const { stdout: files } = await execFileP("gh", ["api", `repos/gennaromazza/imagetools/commits/${candidate.headSha}`, "--jq", ".files[].filename"], { cwd: ROOT, timeout: 15_000 });
+          if (files.split(/\r?\n/u).some((file) => file === componentReleaseById(componentId)?.packagePath)) { found = candidate; break; }
+        } catch { /* il run storico può essere stato eliminato */ }
+      }
+    }
     if (!found?.databaseId) return null;
     requested.runId = String(found.databaseId);
     componentWorkflowRuns.set(componentId, requested);
@@ -173,7 +291,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:cache-sweep-bug-hunt") return "cache-sweep";
   if (name === "test:filex-send-bug-hunt") return "filex-send";
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
-  if (name === "test:filex-updater-lock" || name === "test:filex-independent-releases") return "suite";
+  if (name === "test:filex-updater-lock" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
   if (name === "test:filex-license-coverage") return "licenses";
   if (name === "test:filex-cloud") return "cloud";
   return "other";
@@ -194,6 +312,7 @@ function testDescription(name: string): string {
     "test:backup-guard-bug-hunt": "Verifica che sincronizzazione e rinomine non perdano o sovrascrivano file.",
     "test:filex-updater-lock": "Verifica che gli archivi dell'updater non restino bloccati su Windows.",
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
+    "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
     "test:filex-cloud": "Esegue i test delle funzioni cloud FileX.",
   };
@@ -203,6 +322,23 @@ function testDescription(name: string): string {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+app.get("/api/release/tools/:id/log", async (req, res) => {
+  const component = componentReleaseById(req.params.id);
+  if (!component) return res.status(404).json({ ok: false, error: "Tool non supportato per la release." });
+  try {
+    const workflow = await readComponentWorkflowRun(component.id);
+    if (!workflow) return res.status(404).json({ ok: false, error: "Workflow non ancora individuato." });
+    try {
+      const { stdout } = await execFileP("gh", ["run", "view", workflow.id, "--repo", "gennaromazza/imagetools", "--log"], { cwd: ROOT, timeout: 30_000, maxBuffer: 2_000_000 });
+      return res.json({ ok: true, workflow, log: stdout.slice(-180_000) });
+    } catch (error) {
+      return res.json({ ok: true, workflow, log: `Log non ancora disponibile: ${String((error as Error)?.message ?? error)}` });
+    }
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: String((error as Error)?.message ?? error) });
+  }
+});
 
 app.get("/api/tools", async (_req, res) => {
   const runningList = await listRunning(DEV_TOOLS);
@@ -316,6 +452,12 @@ app.post("/api/tools/stop-all", async (_req, res) => {
     stopped: managed.stopped + externalStopped,
     error: managed.error ?? failure?.error,
   });
+});
+
+app.post("/api/dev/shutdown", async (_req, res) => {
+  const result = await stopAllProcesses();
+  res.json({ ok: result.ok, stopped: result.stopped, error: result.error });
+  setTimeout(() => process.exit(result.ok ? 0 : 1), 250);
 });
 
 app.post("/api/suite/start", async (_req, res) => {
@@ -461,6 +603,7 @@ app.get("/api/release/suite/status", async (_req, res) => {
       execFileP("git", ["tag", "--merged", "HEAD", "--list", "suite-v*", "--sort=-version:refname"], { cwd: ROOT, timeout: 5_000 }),
       readLatestSuiteChangelogVersion(),
     ]);
+    const effectiveChanges = releaseBlockingChanges(changes);
     const currentVersionAlreadyPublished = currentTag.stdout.trim() === `suite-v${currentVersion}`;
     const latestPublishedTag = publishedTag.stdout.trim().split(/\r?\n/u).find(Boolean) ?? null;
     const latestPublishedVersion = latestPublishedTag?.replace(/^suite-v/u, "") ?? null;
@@ -477,9 +620,9 @@ app.get("/api/release/suite/status", async (_req, res) => {
       // esiste ancora una voce FileX Suite piu nuova dell'ultima pubblicata.
       suggestedVersion,
       branch: branch.trim(),
-      clean: changes.trim().length === 0,
-      changedFiles: changes.trim() ? changes.trim().split(/\r?\n/u).length : 0,
-      changesSummary: changes.trim() || "Nessuna modifica in attesa.",
+      clean: effectiveChanges.length === 0,
+      changedFiles: effectiveChanges.length,
+      changesSummary: effectiveChanges.join("\n") || "Nessuna modifica in attesa.",
       running: await isRunning(SUITE_RELEASE_ID),
     });
   } catch (error) {
@@ -539,15 +682,23 @@ app.get("/api/release/tools", async (_req, res) => {
         const pkg = JSON.parse(await readFile(join(ROOT, component.packagePath), "utf8")) as { version?: unknown };
         const version = validComponentVersion(pkg.version);
         const workflow = await readComponentWorkflowRun(component.id).catch(() => null);
+        const preparation = await readComponentReleasePreparation(component, version);
         return {
           ...component,
           version,
           versionAlreadyPublished: await componentVersionAlreadyPublished(component, version),
+          releasePrepared: preparation.prepared,
+          releaseIssues: preparation.issues,
           workflow,
         };
       })),
     ]);
     const blockingChanges = releaseBlockingChanges(changes);
+    const metadataOwners = await componentMetadataOwners(blockingChanges);
+    const toolsWithChanges = tools.map((tool) => ({
+      ...tool,
+      changedFiles: componentReleaseFiles(blockingChanges, tool.id, metadataOwners),
+    }));
     res.json({
       ok: true,
       branch: branch.trim(),
@@ -555,12 +706,154 @@ app.get("/api/release/tools", async (_req, res) => {
       changedFiles: changes.trim() ? changes.trim().split(/\r?\n/u).length : 0,
       releaseAllowed: blockingChanges.length === 0,
       blockingChanges,
-      tools,
+      tools: toolsWithChanges,
     });
   } catch (error) {
     res.status(500).json({ ok: false, error: String((error as Error)?.message ?? error) });
   }
 });
+
+app.post("/api/git/commit-push", async (req, res) => {
+  try {
+    const { stdout: branch } = await execFileP("git", ["branch", "--show-current"], { cwd: ROOT, timeout: 5_000 });
+    if (branch.trim() !== "main") throw new Error("Il commit automatico è consentito solo dal branch main.");
+    const { stdout: status } = await execFileP("git", ["status", "--short"], { cwd: ROOT, timeout: 5_000 });
+    const allPaths = parseStatusPaths(status);
+    const blockingPaths = releaseBlockingChanges(status);
+    if (blockingPaths.length === 0) return res.json({ ok: true, committed: false, message: "Nessuna modifica di release da committare." });
+    const { stdout: preExistingStage } = await execFileP("git", ["diff", "--cached", "--name-only"], { cwd: ROOT, timeout: 5_000 });
+    if (preExistingStage.trim()) throw new Error("Ci sono già file in stage creati fuori dalla Dev Console. Committali o rimuovili dallo stage prima di continuare, così non verranno mescolati.");
+    const metadataOwners = await componentMetadataOwners(allPaths);
+    const requested: string[] = Array.isArray(req.body?.components) ? req.body.components.map((value: unknown) => String(value)) : [];
+    const selected: Array<ComponentReleaseId | "suite"> = requested.length > 0
+      ? requested.filter((value): value is ComponentReleaseId | "suite" => value === "suite" || Boolean(componentReleaseById(value)))
+      : [...new Set([
+        ...blockingPaths.map(componentFromPath).filter((value): value is ComponentReleaseId | "suite" => value !== null),
+        ...metadataOwners,
+      ])];
+    const includeChangelog = req.body?.includeChangelog !== false;
+    const paths = allPaths.filter((path) => {
+      if (includeChangelog && path === "CHANGELOG.md") return selected.includes("suite") || selected.some((componentId) => componentId !== "suite" && metadataOwners.has(componentId));
+      if (selected.includes("suite") && path.startsWith("apps/filex-desktop/")) return true;
+      return selected.some((componentId) => componentId !== "suite" && componentReleaseFiles([path], componentId, metadataOwners, true).length > 0);
+    });
+    if (paths.length === 0) throw new Error("Nessun file autorizzato per i componenti selezionati.");
+    await execFileP("git", ["fetch", "origin", "main"], { cwd: ROOT, timeout: 30_000 });
+    const { stdout: divergence } = await execFileP("git", ["rev-list", "--left-right", "--count", "origin/main...HEAD"], { cwd: ROOT, timeout: 5_000 });
+    const [behind, ahead] = divergence.trim().split(/\s+/u).map(Number);
+    if (behind > 0) throw new Error("Il branch locale è indietro rispetto a origin/main. Sincronizzalo prima del commit automatico.");
+    await execFileP("git", ["add", "--", ...paths], { cwd: ROOT, timeout: 10_000 });
+    const { stdout: staged } = await execFileP("git", ["diff", "--cached", "--name-only"], { cwd: ROOT, timeout: 5_000 });
+    if (!staged.trim()) throw new Error("Nessun file è stato messo in stage.");
+    let defaultMessage = "release: prepare component changes";
+    if (selected.length === 1 && selected[0] !== "suite") {
+      const component = componentReleaseById(selected[0]);
+      const pkg = component ? JSON.parse(await readFile(join(ROOT, component.packagePath), "utf8")) as { version?: unknown } : null;
+      if (component && validComponentVersion(pkg?.version)) defaultMessage = `release: ${component.id} v${pkg!.version}`;
+    }
+    const rawMessage = typeof req.body?.message === "string" ? req.body.message : defaultMessage;
+    const message = rawMessage.replace(/[\r\n]+/gu, " ").trim().slice(0, 120) || "release: prepare component changes";
+    await execFileP("git", ["commit", "-m", message], { cwd: ROOT, timeout: 30_000 });
+    await execFileP("git", ["push", "origin", "main"], { cwd: ROOT, timeout: 120_000 });
+    res.json({ ok: true, committed: true, pushed: true, message, paths: staged.trim().split(/\r?\n/u), aheadBefore: ahead });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: String((error as Error)?.message ?? error) });
+  }
+});
+
+app.post("/api/release/tools/:id/prepare", async (req, res) => {
+  const component = componentReleaseById(req.params.id);
+  if (!component) {
+    res.status(404).json({ ok: false, error: "Tool non supportato per la release." });
+    return;
+  }
+  try {
+    const { stdout: branch } = await execFileP("git", ["branch", "--show-current"], { cwd: ROOT, timeout: 5_000 });
+    if (branch.trim() !== "main") throw new Error("La preparazione automatica è consentita solo dal branch main.");
+    const pkg = JSON.parse(await readFile(join(ROOT, component.packagePath), "utf8")) as { version?: unknown };
+    const currentVersion = validComponentVersion(pkg.version);
+    if (!currentVersion) throw new Error(`Versione non valida in ${component.packagePath}.`);
+    const currentPublished = await componentVersionAlreadyPublished(component, currentVersion);
+    const requestedVersion = validComponentVersion(req.body?.version);
+    const targetVersion = currentPublished ? requestedVersion : currentVersion;
+    if (!targetVersion) throw new Error("Versione non valida. Usa il formato X.Y.Z.");
+    const { stdout } = await execFileP(NODE, [COMPONENT_PREPARE_SCRIPT, component.id, component.packagePath, component.label, targetVersion, String(req.body?.note ?? "")], { cwd: ROOT, timeout: 15_000 });
+    await runComponentPreflight(component, targetVersion);
+    res.json({ ok: true, component: component.id, version: targetVersion, message: stdout.trim() });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: String((error as Error)?.message ?? error) });
+  }
+});
+
+app.get("/api/release/tools/queue", (_req, res) => {
+  res.json({ running: releaseQueueRunning, items: releaseQueue });
+});
+
+app.post("/api/release/tools/queue", async (req, res) => {
+  try {
+    const requested = Array.isArray(req.body?.components) ? req.body.components.map((value: unknown) => String(value)) : [];
+    const components = [...new Set<string>(requested)].map((id: string) => componentReleaseById(id)).filter((component): component is typeof COMPONENT_RELEASES[number] => component !== null);
+    if (components.length === 0) throw new Error("Seleziona almeno un tool da mettere in coda.");
+    const { stdout: branch } = await execFileP("git", ["branch", "--show-current"], { cwd: ROOT, timeout: 5_000 });
+    if (branch.trim() !== "main") throw new Error("La coda release richiede il branch main.");
+    await execFileP("git", ["fetch", "origin", "main"], { cwd: ROOT, timeout: 30_000 });
+    const [{ stdout: head }, { stdout: remoteHead }] = await Promise.all([
+      execFileP("git", ["rev-parse", "HEAD"], { cwd: ROOT, timeout: 5_000 }),
+      execFileP("git", ["rev-parse", "origin/main"], { cwd: ROOT, timeout: 5_000 }),
+    ]);
+    if (head.trim() !== remoteHead.trim()) throw new Error("Il commit locale non coincide con origin/main. Esegui prima Commit + Push.");
+    const { stdout: changes } = await execFileP("git", ["status", "--short"], { cwd: ROOT, timeout: 5_000 });
+    const changedPaths = parseStatusPaths(changes);
+    const metadataOwners = await componentMetadataOwners(changedPaths);
+    const newItems: ReleaseQueueItem[] = [];
+    for (const component of components) {
+      const pkg = JSON.parse(await readFile(join(ROOT, component.packagePath), "utf8")) as { version?: unknown };
+      const version = validComponentVersion(pkg.version);
+      if (!version) throw new Error(`Versione non valida per ${component.label}.`);
+      if (componentReleaseFiles(changedPaths, component.id, metadataOwners).length > 0) throw new Error(`Esegui prima Commit + Push per ${component.label}.`);
+      if (await componentVersionAlreadyPublished(component, version)) throw new Error(`${component.label} ${version} è già pubblicato.`);
+      await runComponentPreflight(component, version);
+      if (releaseQueue.some((item) => item.component === component.id && ["pending", "running"].includes(item.status))) continue;
+      newItems.push({ id: `${component.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, component: component.id, version, status: "pending", workflow: null, error: null });
+    }
+    releaseQueue.push(...newItems);
+    void processReleaseQueue();
+    res.json({ ok: true, items: releaseQueue });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: String((error as Error)?.message ?? error) });
+  }
+});
+
+async function processReleaseQueue(): Promise<void> {
+  if (releaseQueueRunning) return;
+  releaseQueueRunning = true;
+  try {
+    for (const item of releaseQueue.filter((candidate) => candidate.status === "pending")) {
+      item.status = "running";
+      const component = componentReleaseById(item.component)!;
+      const requestedAt = Date.now();
+      componentWorkflowRuns.set(component.id, { requestedAt, runId: null });
+      try {
+        await execFileP("gh", ["workflow", "run", "windows-release.yml", "--repo", "gennaromazza/imagetools", "--ref", "main", "-f", `component=${component.id}`, "-f", "channel=stable", "-f", `version=${item.version}`, "-f", `min_suite_version=${component.minSuiteVersion}`], { cwd: ROOT, timeout: 30_000 });
+        let workflow: ComponentWorkflowRun | null = null;
+        for (let attempt = 0; attempt < 720; attempt += 1) {
+          await sleep(5_000);
+          workflow = await readComponentWorkflowRun(component.id);
+          if (workflow && workflow.status === "completed") break;
+        }
+        item.workflow = workflow;
+        if (!workflow || workflow.status !== "completed" || workflow.conclusion !== "success") throw new Error(workflow?.conclusion ? `Workflow concluso con esito ${workflow.conclusion}.` : "Workflow non rilevato entro il tempo limite.");
+        item.status = "success";
+      } catch (error) {
+        item.status = "error";
+        item.error = String((error as Error)?.message ?? error);
+        break;
+      }
+    }
+  } finally {
+    releaseQueueRunning = false;
+  }
+}
 
 app.post("/api/release/tools/:id/publish", async (req, res) => {
   const component = componentReleaseById(req.params.id);
@@ -582,10 +875,19 @@ app.post("/api/release/tools/:id/publish", async (req, res) => {
     const version = validComponentVersion(pkg.version);
     if (!version) throw new Error(`Versione non valida in ${component.packagePath}.`);
     if (branch.trim() !== "main") throw new Error("La release di un tool e' consentita solo dal branch main.");
-    const blockingChanges = releaseBlockingChanges(changes);
-    if (blockingChanges.length) {
-      throw new Error("Ci sono modifiche che possono cambiare la release: effettua prima commit e push.");
+    const changedPaths = parseStatusPaths(changes);
+    const metadataOwners = await componentMetadataOwners(changedPaths);
+    if (componentReleaseFiles(changedPaths, component.id, metadataOwners).length) {
+      throw new Error("Ci sono modifiche di questo tool: effettua prima Commit + Push.");
     }
+
+    await execFileP("git", ["fetch", "origin", "main"], { cwd: ROOT, timeout: 30_000 });
+    const [{ stdout: head }, { stdout: remoteHead }] = await Promise.all([
+      execFileP("git", ["rev-parse", "HEAD"], { cwd: ROOT, timeout: 5_000 }),
+      execFileP("git", ["rev-parse", "origin/main"], { cwd: ROOT, timeout: 5_000 }),
+    ]);
+    if (head.trim() !== remoteHead.trim()) throw new Error("Il commit locale non coincide con origin/main. Esegui prima Commit + Push.");
+    await runComponentPreflight(component, version);
 
     if (await componentVersionAlreadyPublished(component, version)) {
       throw new Error(`Esiste gia' una release del tool alla versione ${version}. Incrementa la versione prima di pubblicare.`);
@@ -624,7 +926,9 @@ app.post("/api/release/tools/:id/stop", async (req, res) => {
   }
 });
 
-app.use(express.static(join(PKG_DIR, "public")));
+app.use(express.static(join(PKG_DIR, "public"), {
+  setHeaders: (response) => response.setHeader("Cache-Control", "no-store"),
+}));
 
 app.listen(PORT, HOST, () => {
   console.log(`\n  FILEX DEV CONSOLE`);

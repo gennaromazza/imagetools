@@ -13,6 +13,7 @@ const LOG_DIR = join(RUNTIME_DIR, "logs");
 const REGISTRY_FILE = join(RUNTIME_DIR, "processes.json");
 
 const execFileP = promisify(execFile);
+let registryMutation: Promise<void> = Promise.resolve();
 
 export interface ProcessCommand {
   file: string;
@@ -57,6 +58,17 @@ async function writeRegistry(registry: Record<string, ManagedProcess>): Promise<
   await rename(tempFile, REGISTRY_FILE);
 }
 
+async function readStableRegistry(): Promise<Record<string, ManagedProcess>> {
+  await registryMutation;
+  return readRegistry();
+}
+
+async function mutateRegistry<T>(operation: (registry: Record<string, ManagedProcess>) => Promise<T> | T): Promise<T> {
+  const pending = registryMutation.then(async () => operation(await readRegistry()));
+  registryMutation = pending.then(() => undefined, () => undefined);
+  return pending;
+}
+
 function isPidRunning(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -67,13 +79,15 @@ function isPidRunning(pid: number): boolean {
 }
 
 async function currentRecord(id: string): Promise<ManagedProcess | null> {
-  const registry = await readRegistry();
+  const registry = await readStableRegistry();
   const record = registry[id];
   if (!record) return null;
   if (isPidRunning(record.pid)) return record;
 
-  delete registry[id];
-  await writeRegistry(registry);
+  await mutateRegistry((latest) => {
+    if (latest[id]?.pid === record.pid) delete latest[id];
+    return writeRegistry(latest);
+  });
   return null;
 }
 
@@ -190,18 +204,19 @@ export async function startProcess(
     child.stderr?.on("data", append);
     child.once("error", (error) => finish({ ok: false, error: error.message }));
     child.once("spawn", async () => {
-      const registry = await readRegistry();
-      registry[id] = { id, title, pid: child.pid!, startedAt: new Date().toISOString() };
-      await writeRegistry(registry);
+      await mutateRegistry((registry) => {
+        registry[id] = { id, title, pid: child.pid!, startedAt: new Date().toISOString() };
+        return writeRegistry(registry);
+      });
       finish({ ok: true, pid: child.pid });
     });
     child.once("exit", async (code, signal) => {
       await appendFile(logFile, `\n[${new Date().toISOString()}] Processo terminato (codice ${code ?? "n/d"}, segnale ${signal ?? "n/d"}).\n`).catch(() => undefined);
-      const registry = await readRegistry();
-      if (registry[id]?.pid === child.pid) {
+      await mutateRegistry((registry) => {
+        if (registry[id]?.pid !== child.pid) return;
         delete registry[id];
-        await writeRegistry(registry);
-      }
+        return writeRegistry(registry);
+      });
     });
   });
 }
@@ -220,9 +235,10 @@ export async function stopProcess(id: string): Promise<{ ok: boolean; error?: st
     return { ok: false, error: `Impossibile fermare "${record.title}": ${String(error)}` };
   }
 
-  const registry = await readRegistry();
-  delete registry[id];
-  await writeRegistry(registry);
+  await mutateRegistry((registry) => {
+    delete registry[id];
+    return writeRegistry(registry);
+  });
   return { ok: true };
 }
 
@@ -242,7 +258,7 @@ export async function stopPortProcess(port: number): Promise<{ ok: boolean; erro
 }
 
 export async function stopAllProcesses(): Promise<{ ok: boolean; stopped: number; error?: string }> {
-  const registry = await readRegistry();
+  const registry = await readStableRegistry();
   const ids = Object.keys(registry);
   const results = await Promise.all(ids.map((id) => stopProcess(id)));
   const stopped = results.filter((result) => result.ok).length;

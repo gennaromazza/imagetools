@@ -1,4 +1,5 @@
 name: FileX component release
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Release {0} v{1}', inputs.component, inputs.version) || github.ref_name }}
 
 on:
   push:
@@ -137,6 +138,11 @@ jobs:
           "FILEX_RELEASE_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append
           "FILEX_MIN_SUITE_VERSION=$minSuiteVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
           "component=$component" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Validate component release metadata
+        if: steps.release.outputs.component != 'suite'
+        shell: pwsh
+        run: node ./scripts/validate-component-release.mjs $env:FILEX_COMPONENT $env:FILEX_RELEASE_VERSION
 
       - name: Install dependencies
         env:

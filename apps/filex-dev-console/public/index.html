@@ -44,6 +44,11 @@
     header .sub { color: var(--muted); font-size: 12px; }
     main { padding: 24px 28px; display: grid; gap: 24px; max-width: 1200px; margin: 0 auto; padding-bottom: 60px; }
     section { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
+    section.tab-panel { display: none; }
+    section.tab-panel.active { display: block; }
+    .tabbar { max-width: 1200px; margin: 0 auto; padding: 14px 28px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+    .tabbar button { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .tabbar button.active { background: var(--accent); color: white; border-color: var(--accent); }
     section h2 { margin: 0 0 4px; font-size: 15px; }
     section .hint { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
@@ -127,6 +132,11 @@
     .log-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
     .copy-log { flex: 0 0 auto; padding: 6px 10px; font-size: 12px; }
     .list { display: flex; flex-direction: column; gap: 8px; }
+    .release-block { background: rgba(33,43,64,.55); border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-top: 12px; }
+    .release-block h3 { margin: 0 0 4px; font-size: 13px; }
+    .release-block .hint { margin-bottom: 10px; }
+    .release-terminal { margin-top: 12px !important; max-height: 180px !important; color: #b8f7d4; }
+    #testList { max-height: min(58vh, 560px); overflow-y: auto; padding-right: 6px; scroll-behavior: smooth; }
     .test-group { display: grid; gap: 8px; }
     .test-group + .test-group { margin-top: 18px; }
     .test-group__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; cursor: pointer; list-style: none; }
@@ -174,10 +184,22 @@
       <h1>FileX Dev Console</h1>
       <div class="sub">Dashboard locale — avvio e verifica Electron dei tool FileX</div>
     </div>
+    <button id="shutdownConsole" class="danger" style="margin-left: auto;">Ferma tool e chiudi console</button>
   </header>
 
+  <nav class="tabbar" aria-label="Sezioni Dev Console" role="tablist">
+    <button class="active" data-tab="tools" role="tab" aria-selected="true">Tool</button>
+    <button data-tab="logs" role="tab" aria-selected="false">Log</button>
+    <button data-tab="suite" role="tab" aria-selected="false">Suite</button>
+    <button data-tab="licenses" role="tab" aria-selected="false">Licenze</button>
+    <button data-tab="tests" role="tab" aria-selected="false">Test</button>
+    <button data-tab="project-health" role="tab" aria-selected="false">Qualità</button>
+    <button data-tab="release-suite" role="tab" aria-selected="false">Release Suite</button>
+    <button data-tab="release-tools" role="tab" aria-selected="false">Release tool</button>
+  </nav>
+
   <main>
-    <section id="tools">
+    <section id="tools" class="tab-panel active">
       <h2>Tool di sviluppo</h2>
       <p class="hint">Ogni avvio usa il percorso Electron completo. Il renderer web è un dettaglio di sviluppo, non una modalità alternativa del prodotto.</p>
       <div class="row" style="margin-bottom: 14px;">
@@ -186,7 +208,7 @@
       <div class="grid" id="toolGrid"></div>
     </section>
 
-    <section id="logs">
+    <section id="logs" class="tab-panel">
       <div class="log-head">
         <div><h2>Log processo</h2><p class="hint">Seleziona “Log” o “Verifica build” su un tool per leggere l'output catturato dalla dashboard.</p></div>
         <button class="secondary copy-log" data-copy-target="processLog">Copia</button>
@@ -194,7 +216,7 @@
       <pre class="log" id="processLog">Nessun log selezionato.</pre>
     </section>
 
-    <section id="suite">
+    <section id="suite" class="tab-panel">
       <h2>FileX Suite (Electron)</h2>
       <p class="hint">Avvia la suite desktop completa in dev mode (build shell + electron).</p>
       <div class="row">
@@ -203,7 +225,7 @@
       </div>
     </section>
 
-    <section id="licenses">
+    <section id="licenses" class="tab-panel">
       <h2>Licenze</h2>
       <p class="hint"><span class="badge on">DEV ATTIVA</span> I tool avviati dalla dashboard ricevono automaticamente FileX All Access. I comandi seguenti servono solo a collaudare Firebase.</p>
       <div class="form">
@@ -221,7 +243,7 @@
       <pre class="log" id="licOutput" style="display:none;"></pre>
     </section>
 
-    <section id="tests">
+    <section id="tests" class="tab-panel">
       <h2>Test</h2>
       <p class="hint">Apri solo il prodotto che ti interessa. Passa sul simbolo ⓘ per capire cosa verifica ciascun test.</p>
       <div class="form"><input id="testSearch" type="search" placeholder="Cerca un test o un prodotto…" aria-label="Cerca test" /></div>
@@ -231,7 +253,7 @@
       </div>
     </section>
 
-    <section id="project-health">
+    <section id="project-health" class="tab-panel">
       <div class="log-head">
         <div><h2>Qualità del progetto</h2><p class="hint">Analisi in sola lettura di dipendenze probabilmente non usate, TODO/FIXME/HACK e placeholder espliciti. Non elimina né modifica nulla automaticamente.</p></div>
         <button class="secondary copy-log" data-copy-target="projectHealthLog">Copia output</button>
@@ -240,7 +262,7 @@
       <pre class="log" id="projectHealthLog">Nessuna analisi eseguita.</pre>
     </section>
 
-    <section id="release-suite">
+    <section id="release-suite" class="tab-panel">
       <div class="log-head">
         <div><h2>Release FileX Suite</h2><p class="hint">Un solo flusso: controlli locali, commit delle modifiche preparate, push su main, tag, GitHub Actions, verifica feed e deploy del sito.</p></div>
         <button class="secondary copy-log" data-copy-target="releaseLog">Copia log</button>
@@ -248,6 +270,7 @@
       <div class="feedback" id="releaseStatus">Caricamento stato repository…</div>
       <div class="form" style="margin-top: 12px;">
         <input id="releaseVersion" readonly aria-label="Versione release Suite proposta automaticamente" />
+        <button id="commitPush" class="secondary">Commit + Push modifiche</button>
         <button id="releasePublish" class="danger">Verifica e pubblica release</button>
         <button id="releaseStop" class="secondary" disabled>Ferma workflow</button>
       </div>
@@ -255,17 +278,34 @@
       <pre class="log" id="releaseLog">Nessun workflow release avviato.</pre>
     </section>
 
-    <section id="release-tools">
+    <section id="release-tools" class="tab-panel">
       <div class="log-head">
-        <div><h2>Release singoli tool</h2><p class="hint">Pubblica un solo tool alla volta tramite GitHub Actions. La versione è letta dal suo package e la working tree deve essere già pulita e su <code>main</code>.</p></div>
+        <div><h2>Release tool</h2><p class="hint">Gestisci una release singola oppure prepara più release in coda. I tool con modifiche pronte per il commit vengono mostrati per primi.</p></div>
       </div>
       <div class="feedback" id="toolReleaseStatus">Caricamento tool disponibili…</div>
-      <div class="form" style="margin-top: 12px;">
+      <div class="release-block">
+        <h3>Release singola</h3>
+        <p class="hint">Seleziona un tool per fare Commit + Push, pubblicarlo subito o fermare il workflow.</p>
+        <div class="form">
         <select id="toolReleaseSelect" aria-label="Tool da pubblicare"></select>
         <input id="toolReleaseVersion" readonly aria-label="Versione del tool selezionato" />
+        <button id="toolPrepareRelease" class="secondary">Prepara versione + changelog</button>
+        <button id="toolCommitPush" class="secondary">Commit + Push tool</button>
         <button id="toolReleasePublish" class="danger">Pubblica tool</button>
         <button id="toolReleaseStop" class="secondary" disabled>Ferma workflow</button>
+        </div>
       </div>
+      <div class="release-block">
+        <h3>Release multiple</h3>
+        <p class="hint">Seleziona più tool e avvia una coda sequenziale. Quelli modificati sono già preselezionati.</p>
+        <div class="form">
+          <select id="toolReleaseQueue" multiple size="5" aria-label="Tool da mettere in coda"></select>
+          <button id="toolReleaseQueueStart" class="secondary">Accoda release selezionate</button>
+        </div>
+      </div>
+      <pre class="log" id="toolReleaseQueueLog">Nessuna coda release attiva.</pre>
+      <pre class="log release-terminal" id="toolReleaseActivity" aria-live="polite">Terminale release: nessuna operazione avviata.</pre>
+      <pre class="log release-terminal" id="toolGithubLog" aria-live="polite">GitHub Actions: seleziona un tool con workflow attivo.</pre>
       <p class="hint" id="toolReleaseHint"></p>
     </section>
   </main>
@@ -297,6 +337,20 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || res.statusText);
       return data;
+    }
+
+    function activateTab(tabId, { scroll = false } = {}) {
+      for (const button of document.querySelectorAll(".tabbar [data-tab]")) {
+        const active = button.dataset.tab === tabId;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+      }
+      for (const panel of document.querySelectorAll("main .tab-panel")) panel.classList.toggle("active", panel.id === tabId);
+      if (scroll) document.getElementById(tabId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+
+    for (const tabButton of document.querySelectorAll(".tabbar [data-tab]")) {
+      tabButton.addEventListener("click", () => activateTab(tabButton.dataset.tab));
     }
 
     async function copyLogContent(targetId) {
@@ -372,6 +426,8 @@
     async function showLog(id) {
       const data = await api(`/api/logs/${id}`);
       $("#processLog").textContent = data.log || "Nessun output disponibile per questo processo.";
+      $("#processLog").scrollTop = $("#processLog").scrollHeight;
+      activateTab("logs");
     }
 
     function setOperation(id, value) {
@@ -529,23 +585,28 @@
     }
 
     function filterTests() {
-      const term = $("#testSearch").value.trim().toLocaleLowerCase();
+      const normalize = (value) => value.normalize("NFD").replace(/[\u0300-\u036f]/gu, "").replace(/[^a-z0-9]/giu, "").toLocaleLowerCase();
+      const rawTerm = $("#testSearch").value.trim();
+      const term = normalize(rawTerm);
+      let firstMatch = null;
       for (const group of document.querySelectorAll("#testList .test-group")) {
         let visible = 0;
         for (const item of group.querySelectorAll(".test-item")) {
-          const matches = !term || item.textContent.toLocaleLowerCase().includes(term) || group.textContent.toLocaleLowerCase().includes(term);
+          const matches = !term || normalize(item.textContent).includes(term) || normalize(group.querySelector(".test-group__title")?.textContent || "").includes(term);
           item.hidden = !matches;
-          if (matches) visible++;
+          if (matches) { visible++; firstMatch ||= item; }
         }
         group.hidden = visible === 0;
         if (term && visible) group.open = true;
       }
+      if (rawTerm.length >= 3 && firstMatch) requestAnimationFrame(() => firstMatch.scrollIntoView({ behavior: "smooth", block: "nearest" }));
     }
 
     $("#testRun").onclick = async () => {
       const scripts = [...document.querySelectorAll("#testList input[type=radio]:checked")].map((c) => c.value);
       if (scripts.length === 0) { toast("Seleziona un test", true); return; }
       try {
+        activateTab("logs");
         const button = $("#testRun");
         button.disabled = true;
         button.textContent = "Test in corso…";
@@ -563,6 +624,7 @@
             api(`/api/tests/${res.id}/status`),
           ]);
           $("#processLog").textContent = log.log || "Test in corso: attendo il primo output…";
+          $("#processLog").scrollTop = $("#processLog").scrollHeight;
           if (!status.running) {
             if (timer) clearInterval(timer);
             button.disabled = false;
@@ -584,6 +646,7 @@
 
     $("#projectHealthRun").onclick = async () => {
       try {
+        activateTab("project-health");
         const button = $("#projectHealthRun");
         button.disabled = true;
         $("#projectHealthLog").textContent = "Analisi in corso…";
@@ -592,6 +655,7 @@
         const refresh = async () => {
           const log = await api(`/api/logs/${result.id}`);
           $("#projectHealthLog").textContent = log.log || "Analisi in corso…";
+          $("#projectHealthLog").scrollTop = $("#projectHealthLog").scrollHeight;
         };
         await refresh();
         const timer = setInterval(async () => {
@@ -625,6 +689,7 @@
         : "· nessuna nuova versione nel changelog";
       $("#releaseStatus").textContent = `${versionLabel} ${candidateLabel} · branch ${state.branch || "—"} · ${state.clean ? "nessuna modifica da includere" : `${state.changedFiles} file pronti per il commit di release`} · ${state.running ? "workflow in corso" : hasCandidate ? "workflow pronto" : "pubblicazione non necessaria"}`;
       $("#releasePublish").disabled = state.running || !ready;
+      $("#commitPush").disabled = state.clean;
       $("#releasePublish").textContent = state.running ? "Pubblicazione in corso…" : hasCandidate ? `Verifica e pubblica v${state.suggestedVersion}` : "Nessuna release da pubblicare";
       $("#releasePublish").title = !onMain ? "Per pubblicare devi essere sul branch main." : !hasCandidate ? "Aggiungi prima una nuova voce FileX Suite al changelog." : "";
       $("#releaseStop").disabled = !state.running;
@@ -673,31 +738,46 @@
     function selectedComponentRelease() {
       return componentReleaseState?.tools?.find((tool) => tool.id === $("#toolReleaseSelect").value) || null;
     }
+    function orderedReleaseTools() {
+      return [...(componentReleaseState?.tools || [])].sort((left, right) => {
+        const changedDifference = Number(Boolean(right.changedFiles?.length)) - Number(Boolean(left.changedFiles?.length));
+        return changedDifference || left.label.localeCompare(right.label, "it");
+      });
+    }
     function renderComponentRelease() {
       const select = $("#toolReleaseSelect");
       const selectedId = select.value;
-      select.innerHTML = (componentReleaseState?.tools || []).map((tool) =>
+      const orderedTools = orderedReleaseTools();
+      select.innerHTML = orderedTools.map((tool) =>
         `<option value="${tool.id}">${tool.label}</option>`).join("");
-      if (componentReleaseState?.tools?.some((tool) => tool.id === selectedId)) select.value = selectedId;
+      if (orderedTools.some((tool) => tool.id === selectedId)) select.value = selectedId;
       const tool = selectedComponentRelease();
-      const ready = componentReleaseState?.branch === "main" && componentReleaseState?.releaseAllowed && tool?.version && !tool?.versionAlreadyPublished;
+      const ready = componentReleaseState?.branch === "main" && tool?.version && tool?.releasePrepared && !tool?.versionAlreadyPublished && !tool?.changedFiles?.length;
       $("#toolReleaseVersion").value = tool?.version || "Versione non valida";
+      $("#toolPrepareRelease").disabled = componentReleaseState?.branch !== "main" || !tool?.version || (!tool.versionAlreadyPublished && tool.releasePrepared);
+      $("#toolPrepareRelease").textContent = tool?.versionAlreadyPublished ? "Prepara prossima versione" : tool?.releasePrepared ? "Versione + changelog pronti" : "Completa versione + changelog";
+      $("#toolCommitPush").disabled = componentReleaseState?.branch !== "main" || !tool?.changedFiles?.length;
       $("#toolReleasePublish").disabled = !ready || tool?.workflow?.status === "in_progress" || tool?.workflow?.status === "queued";
       $("#toolReleaseStop").disabled = !tool?.workflow?.id || !["queued", "in_progress"].includes(tool.workflow.status);
       const repositoryState = componentReleaseState?.branch !== "main"
         ? "Serve il branch main"
+        : tool?.changedFiles?.length
+          ? `Ci sono ${tool.changedFiles.length} modifiche di questo tool da committare e inviare`
         : !componentReleaseState?.releaseAllowed
-          ? `Ci sono ${componentReleaseState.blockingChanges?.length || componentReleaseState.changedFiles} modifiche da committare e inviare`
+          ? `Repository con ${componentReleaseState.blockingChanges?.length || componentReleaseState.changedFiles} modifiche in altri componenti da committare e inviare`
           : !componentReleaseState?.clean
             ? "Modifiche solo del pannello locale: non bloccano la release del tool"
+          : !tool?.releasePrepared
+            ? (tool?.releaseIssues?.join(" ") || "Preparazione release incompleta")
           : tool?.versionAlreadyPublished
             ? `La versione ${tool.version} è già pubblicata`
             : "Pronto per il workflow GitHub";
-      const workflow = tool?.workflow
-        ? ` · workflow ${workflow.status}${workflow.conclusion ? ` (${workflow.conclusion})` : ""}${workflow.url ? `: ${workflow.url}` : ""}`
+      const workflowInfo = tool?.workflow
+        ? ` · workflow ${tool.workflow.status}${tool.workflow.conclusion ? ` (${tool.workflow.conclusion})` : ""}${tool.workflow.url ? `: ${tool.workflow.url}` : ""}`
         : "";
-      $("#toolReleaseStatus").className = `feedback ${ready ? "success" : "error"}`;
-      $("#toolReleaseStatus").textContent = `${tool?.label || "Tool"} v${tool?.version || "—"} · ${repositoryState}${workflow}`;
+      const informational = repositoryState.startsWith("Modifiche solo pannello locale");
+      $("#toolReleaseStatus").className = `feedback ${ready || informational ? "success" : "error"}`;
+      $("#toolReleaseStatus").textContent = `${tool?.label || "Tool"} v${tool?.version || "—"} · ${repositoryState}${workflowInfo}`;
       $("#toolReleaseHint").textContent = tool
         ? `Requisito minimo Suite: ${tool.minSuiteVersion}. La pipeline crea e verifica installer, release e catalogo stabile.`
         : "";
@@ -705,27 +785,125 @@
     async function refreshComponentReleases() {
       componentReleaseState = await api("/api/release/tools");
       renderComponentRelease();
+      const queueSelect = $("#toolReleaseQueue");
+      const selectedQueue = new Set([...queueSelect.selectedOptions].map((option) => option.value));
+      queueSelect.innerHTML = orderedReleaseTools().map((tool) => `<option value="${tool.id}" ${tool.changedFiles?.length ? "selected" : ""}>${tool.label} v${tool.version || "—"}${tool.changedFiles?.length ? " · pronto per commit" : ""}</option>`).join("");
+      for (const option of queueSelect.options) if (selectedQueue.has(option.value)) option.selected = true;
+      const queue = await api("/api/release/tools/queue");
+      $("#toolReleaseQueueLog").textContent = queue.items.length
+        ? queue.items.map((item) => `${item.status.toUpperCase()} · ${item.component} v${item.version}${item.error ? ` · ${item.error}` : ""}`).join("\n")
+        : "Nessuna coda release attiva.";
+      $("#toolReleaseQueueLog").scrollTop = $("#toolReleaseQueueLog").scrollHeight;
+      $("#toolReleaseQueueStart").disabled = queue.running;
       const running = componentReleaseState.tools?.some((tool) => ["queued", "in_progress"].includes(tool.workflow?.status));
-      if (running && !componentReleaseTimer) {
+      if ((running || queue.running) && !componentReleaseTimer) {
         componentReleaseTimer = setInterval(() => refreshComponentReleases().catch(() => {}), 5000);
-      } else if (!running && componentReleaseTimer) {
+      } else if (!running && !queue.running && componentReleaseTimer) {
         clearInterval(componentReleaseTimer);
         componentReleaseTimer = null;
       }
+      void refreshGithubLog();
     }
-    $("#toolReleaseSelect").onchange = renderComponentRelease;
+    $("#toolReleaseSelect").onchange = () => { renderComponentRelease(); void refreshGithubLog(); };
+    function nextPatchVersion(version) {
+      const match = String(version || "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+      return match ? `${match[1]}.${match[2]}.${Number(match[3]) + 1}` : "";
+    }
+    function releaseActivity(message, append = true) {
+      const terminal = $("#toolReleaseActivity");
+      const line = `[${new Date().toLocaleTimeString()}] ${message}`;
+      terminal.textContent = append && terminal.textContent && !terminal.textContent.startsWith("Terminale release:")
+        ? `${terminal.textContent}\n${line}`
+        : line;
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+    async function refreshGithubLog() {
+      const tool = selectedComponentRelease();
+      if (!tool?.workflow) {
+        $("#toolGithubLog").textContent = "GitHub Actions: nessun workflow individuato per questo tool.";
+        return;
+      }
+      try {
+        const result = await api(`/api/release/tools/${tool.id}/log`);
+        $("#toolGithubLog").textContent = result.log || "Log GitHub vuoto.";
+        $("#toolGithubLog").scrollTop = $("#toolGithubLog").scrollHeight;
+      } catch (error) {
+        $("#toolGithubLog").textContent = `Log GitHub non disponibile: ${error.message}`;
+      }
+    }
+    $("#toolCommitPush").onclick = async () => {
+      const tool = selectedComponentRelease();
+      if (!tool) return;
+      if (!confirm(`Creare il commit e fare push delle modifiche di ${tool.label}?`)) return;
+      const button = $("#toolCommitPush");
+      button.disabled = true;
+      releaseActivity(`Avvio Commit + Push per ${tool.label}…`, false);
+      try {
+        const result = await api("/api/git/commit-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ components: [tool.id], includeChangelog: true }) });
+        releaseActivity(`Commit creato e push completato: ${result.paths?.join(", ") || "modifiche del tool"}.`);
+        toast(result.message || "Commit e push del tool completati.");
+        await refreshComponentReleases();
+        await refreshGithubLog();
+      } catch (error) { releaseActivity(`ERRORE Commit + Push: ${error.message}`); button.disabled = false; toast(error.message, true); }
+    };
+    $("#toolPrepareRelease").onclick = async () => {
+      const tool = selectedComponentRelease();
+      if (!tool) return;
+      const version = tool.versionAlreadyPublished ? nextPatchVersion(tool.version) : tool.version;
+      if (!version) return toast("Versione corrente non valida.", true);
+      const note = prompt(`Nota changelog e catalogo per ${tool.label} ${version}:`, "Aggiornamenti e correzioni del componente.");
+      if (note === null) return;
+      const button = $("#toolPrepareRelease");
+      button.disabled = true;
+      releaseActivity(`Preparo ${tool.label} ${version}: package.json e changelog…`, false);
+      try {
+        const result = await api(`/api/release/tools/${tool.id}/prepare`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version, note }) });
+        if (!result.ok) throw new Error(result.error || "Preparazione release non riuscita.");
+        releaseActivity(result.message || `Preparato ${tool.label} ${version}.`);
+        toast(`Preparati ${tool.label} ${version}: ora puoi fare Commit + Push.`);
+        await refreshComponentReleases();
+      } catch (error) { releaseActivity(`ERRORE preparazione: ${error.message}`); toast(error.message, true); }
+      finally { button.disabled = false; }
+    };
+    $("#commitPush").onclick = async () => {
+      if (!confirm("Creare il commit e fare push delle modifiche di release rilevate? I file non appartenenti ai componenti resteranno fuori.")) return;
+      const button = $("#commitPush");
+      button.disabled = true;
+      try {
+        const result = await api("/api/git/commit-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ includeChangelog: true }) });
+        toast(result.message || "Commit e push completati.");
+        await Promise.all([refreshReleaseStatus(), refreshComponentReleases()]);
+      } catch (error) { button.disabled = false; toast(error.message, true); }
+    };
+    $("#toolReleaseQueueStart").onclick = async () => {
+      const components = [...$("#toolReleaseQueue").selectedOptions].map((option) => option.value);
+      if (!components.length) return toast("Seleziona almeno un tool.", true);
+      const button = $("#toolReleaseQueueStart");
+      button.disabled = true;
+      releaseActivity(`Invio in coda ${components.length} release…`, false);
+      try {
+        const result = await api("/api/release/tools/queue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ components }) });
+        releaseActivity("Coda creata. Le release verranno eseguite una alla volta; controlla il log qui sopra.");
+        toast("Release inserite in coda.");
+        await refreshComponentReleases();
+      } catch (error) { releaseActivity(`ERRORE coda release: ${error.message}`); toast(error.message, true); }
+      finally { button.disabled = false; }
+    };
     $("#toolReleasePublish").onclick = async () => {
       try {
         const tool = selectedComponentRelease();
         if (!tool) throw new Error("Seleziona un tool.");
         if (!confirm(`Pubblicare ${tool.label} v${tool.version}? GitHub Actions creerà installer, release e catalogo.`)) return;
+        releaseActivity(`Avvio workflow GitHub per ${tool.label} v${tool.version}…`, false);
         const result = await api(`/api/release/tools/${tool.id}/publish`, {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirmed: true }),
         });
         if (!result.ok) throw new Error(result.error || "Workflow non avviato.");
+        releaseActivity("Workflow avviato. Attendo lo stato di GitHub Actions…");
         toast(result.message);
-        await refreshComponentReleases();
-      } catch (error) { toast(error.message, true); }
+        try { await refreshComponentReleases(); }
+        catch (refreshError) { releaseActivity(`Workflow avviato; aggiornamento pannello non riuscito: ${refreshError.message}`); }
+      } catch (error) { releaseActivity(`ERRORE avvio workflow: ${error.message}`); toast(error.message, true); }
     };
     $("#toolReleaseStop").onclick = async () => {
       try {
@@ -736,6 +914,25 @@
         toast("Workflow GitHub arrestato.");
         await refreshComponentReleases();
       } catch (error) { toast(error.message, true); }
+    };
+
+    $("#shutdownConsole").onclick = async () => {
+      if (!confirm("Fermare tutti i tool gestiti e chiudere la Dev Console? Dovrai riavviarla dal terminale.")) return;
+      const button = $("#shutdownConsole");
+      button.disabled = true;
+      button.textContent = "Arresto e pulizia…";
+      try {
+        if ("caches" in window) {
+          for (const key of await caches.keys()) await caches.delete(key);
+        }
+        const result = await api("/api/dev/shutdown", { method: "POST" });
+        if (!result.ok) throw new Error(result.error || "Arresto non completato.");
+        document.body.innerHTML = "<main style=\"max-width:640px;margin:20vh auto;text-align:center;color:#e6ebf5;font-family:'Segoe UI',system-ui,sans-serif\"><h1>Dev Console chiusa</h1><p>Cache browser pulita e tool arrestati. Puoi riavviare con <code>npm run dev:console</code>.</p></main>";
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Ferma tool e chiudi console";
+        toast(error.message, true);
+      }
     };
 
     refreshTools().catch((e) => toast(e.message, true));
