@@ -23,6 +23,13 @@
     ]
   },
   "filex-send": {
+    "0.1.8": [
+      "Corretto il flusso di pubblicazione del catalogo e resa più affidabile la gestione delle release indipendenti.",
+      "Migliorata la continuità delle sessioni Internet e del trasferimento dei file."
+    ],
+    "0.1.7": [
+      "Aggiornamento di manutenzione con miglioramenti alla gestione delle sessioni e dei trasferimenti."
+    ],
     "0.1.6": [
       "Recupero automatico delle sessioni Internet attive dopo il riavvio di FileX Send.",
       "Supporto per l'invio e la ricezione di qualsiasi tipo di file, oltre a foto e video.",
