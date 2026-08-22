@@ -23,6 +23,11 @@
     ]
   },
   "filex-send": {
+    "0.1.6": [
+      "Recupero automatico delle sessioni Internet attive dopo il riavvio di FileX Send.",
+      "Supporto per l'invio e la ricezione di qualsiasi tipo di file, oltre a foto e video.",
+      "La sessione recuperata mantiene il collegamento del cliente e continua a scaricare i file nella cartella corretta."
+    ],
     "0.1.4": [
       "Release di manutenzione con checksum verificato e installazione visibile su Windows.",
       "La distribuzione resta indipendente dalla Suite e non modifica gli altri tool."

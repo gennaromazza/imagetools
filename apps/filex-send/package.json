@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/filex-send",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "FileX Send: invio e ricezione locale o remota tramite QR e link temporanei.",
   "type": "module",
   "main": "../filex-desktop/.output/electron/filex-send/electron/main.js",
