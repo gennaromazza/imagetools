@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Job, ImportResult } from "./types";
-import { getArchivioJobs } from "./archivioDesktopApi";
+import { getArchivioJobs, getArchivioSdCards } from "./archivioDesktopApi";
 import { NuovoLavoroPanel } from "./components/NuovoLavoroPanel";
 import { ArchivioPanel } from "./components/ArchivioPanel";
 import { GoogleDrivePanel } from "./components/GoogleDrivePanel";
@@ -10,10 +10,12 @@ import archivioPackage from "../package.json";
 type Screen = "nuovo" | "archivio" | "drive" | "impostazioni";
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("nuovo");
+  const [screen, setScreen] = useState<Screen>("archivio");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [archiveAnalyzing, setArchiveAnalyzing] = useState(false);
+  const [existingJobImportId, setExistingJobImportId] = useState<string | null>(null);
+  const knownSdPathsRef = useRef<Set<string> | null>(null);
 
   const refreshJobs = useCallback(async () => {
     setLoadingJobs(true);
@@ -29,6 +31,33 @@ export default function App() {
   useEffect(() => {
     refreshJobs();
   }, [refreshJobs]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function detectInsertedSd() {
+      try {
+        const cards = await getArchivioSdCards();
+        if (!active) return;
+        const paths = new Set(cards.map((card) => card.path));
+        const previousPaths = knownSdPathsRef.current;
+        const hasNewCard = previousPaths === null
+          ? paths.size > 0
+          : [...paths].some((path) => !previousPaths.has(path));
+        knownSdPathsRef.current = paths;
+        if (hasNewCard) setScreen("nuovo");
+      } catch {
+        // Il controllo periodico riproverà: non interrompere la navigazione dell'archivio.
+      }
+    }
+
+    void detectInsertedSd();
+    const timer = window.setInterval(() => { void detectInsertedSd(); }, 2500);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   function handleImportDone(result: ImportResult) {
     setJobs((prev) => {
@@ -111,6 +140,7 @@ export default function App() {
           <NuovoLavoroPanel
             onImportDone={handleImportDone}
             activeView={screen === "impostazioni" ? "impostazioni" : "nuovo"}
+            existingJobImportId={existingJobImportId}
           />
         )}
         <div style={{ display: screen === "archivio" ? "block" : "none" }} aria-hidden={screen !== "archivio"}>
@@ -119,6 +149,14 @@ export default function App() {
             loading={loadingJobs}
             onRefresh={refreshJobs}
             onAnalysisStateChange={setArchiveAnalyzing}
+            onAddFiles={(job) => {
+              setExistingJobImportId(job.id);
+              setScreen("nuovo");
+            }}
+            onNewJob={() => {
+              setExistingJobImportId(null);
+              setScreen("nuovo");
+            }}
           />
         </div>
         {screen === "drive" && <GoogleDrivePanel />}

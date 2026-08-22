@@ -183,6 +183,9 @@
     ],
     "0.1.29": [
       "Aggiornamenti e correzioni del componente."
+    ],
+    "0.1.31": [
+      "Riorganizzato il flusso di importazione: archivio iniziale, import guidato, aggiunta rapida dei file e cronologia delle ultime importazioni."
     ]
   },
   "image-converter": {

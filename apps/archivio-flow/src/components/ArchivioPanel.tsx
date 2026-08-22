@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { List as VirtualList, type RowComponentProps } from "react-window";
 import type { ArchiveAnalysisResult, ArchiveRenameProgress, Job, LowQualityProgressSnapshot, SelectionCandidate } from "../types";
 import {
@@ -20,6 +20,8 @@ interface Props {
   loading: boolean;
   onRefresh: () => void;
   onAnalysisStateChange?: (analyzing: boolean) => void;
+  onAddFiles?: (job: Job) => void;
+  onNewJob?: () => void;
 }
 
 function formatDate(isoDate: string): string {
@@ -137,7 +139,7 @@ function getContractPreview(link: string): { shortLabel: string; fullLabel: stri
   }
 }
 
-export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange }: Props) {
+export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange, onAddFiles, onNewJob }: Props) {
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"dettagliata" | "compatta">("dettagliata");
   const [yearFilter, setYearFilter] = useState("");
@@ -170,6 +172,12 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange 
   const [archiveAnalysis, setArchiveAnalysis] = useState<ArchiveAnalysisResult | null>(null);
   const [selectedRenameIds, setSelectedRenameIds] = useState<Set<string>>(new Set());
   const [renameDrafts, setRenameDrafts] = useState<Record<string, RenameDraft>>({});
+  const recentImports = useMemo(
+    () => [...jobs]
+      .sort((left, right) => Date.parse(right.dataCreazione) - Date.parse(left.dataCreazione))
+      .slice(0, 5),
+    [jobs],
+  );
   const [analyzingArchive, setAnalyzingArchive] = useState(false);
   const [analysisElapsedSeconds, setAnalysisElapsedSeconds] = useState(0);
   const [renamingArchive, setRenamingArchive] = useState(false);
@@ -674,6 +682,15 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange 
           <button
             className="secondary-button"
             style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
+            onClick={() => onAddFiles?.(job)}
+            disabled={job.folderExists === false}
+            title="Importa altri file in questo lavoro"
+          >
+            + File
+          </button>
+          <button
+            className="secondary-button"
+            style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
             onClick={() => void handleOpenFolder(job)}
             title="Apri cartella in Explorer"
             disabled={job.folderExists === false}
@@ -689,31 +706,6 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange 
           >
             {openingSelectionJobId === job.id ? "Apro..." : "Seleziona"}
           </button>
-          <button
-            className="ghost-button"
-            style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
-            onClick={() => void handleCopyPath(job)}
-            title="Copia percorso"
-          >
-            {copiedPath === job.percorsoCartella ? "Copiato" : "Percorso"}
-          </button>
-          {hasContract && (
-            <button
-              className="secondary-button"
-              style={{
-                padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem",
-                fontSize: "0.84rem",
-                borderColor: "rgba(142, 178, 142, 0.55)",
-                background: "rgba(142, 178, 142, 0.16)",
-                color: "var(--success)",
-              }}
-              onClick={() => handleOpenContract(job)}
-              title="Apri contratto"
-            >
-              Contratto
-            </button>
-          )}
-
           <details style={{ position: "relative" }}>
             <summary
               className="ghost-button"
@@ -737,6 +729,22 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange 
                 boxShadow: "var(--shadow)",
               }}
             >
+              <button
+                className="ghost-button"
+                style={{ padding: "0.5rem 0.7rem", fontSize: "0.84rem", textAlign: "left", justifyContent: "flex-start" }}
+                onClick={() => void handleCopyPath(job)}
+              >
+                {copiedPath === job.percorsoCartella ? "Percorso copiato" : "Copia percorso"}
+              </button>
+              {hasContract && (
+                <button
+                  className="ghost-button"
+                  style={{ padding: "0.5rem 0.7rem", fontSize: "0.84rem", textAlign: "left", justifyContent: "flex-start", color: "var(--success)" }}
+                  onClick={() => handleOpenContract(job)}
+                >
+                  Apri contratto
+                </button>
+              )}
               <button
                 className="ghost-button"
                 style={{ padding: "0.5rem 0.7rem", fontSize: "0.84rem", textAlign: "left", justifyContent: "flex-start" }}
@@ -829,8 +837,17 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange 
           </p>
         </div>
         <div className="workspace__header-actions">
+          <button className="primary-button archive-primary-action" onClick={onNewJob}>
+            + Nuovo lavoro
+          </button>
+          <button className="ghost-button" onClick={onRefresh} disabled={loading}>
+            {loading ? "Aggiorno…" : "⟳ Aggiorna"}
+          </button>
+          <details className="archive-maintenance-menu">
+            <summary className="ghost-button">Gestione archivio</summary>
+            <div className="archive-maintenance-menu__content">
           <button
-            className="secondary-button"
+            className="ghost-button"
             onClick={() => void handleAnalyzeArchive()}
             disabled={loading || analyzingArchive || renameBusy}
             title="Controlla i nomi delle cartelle e prepara le eventuali correzioni. Nessuna cartella viene rinominata senza la tua conferma."
@@ -841,11 +858,31 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange 
           <button className="ghost-button" onClick={() => setShowMissingFolders((prev) => !prev)}>
             {showMissingFolders ? "Nascondi mancanti" : "Mostra mancanti"}
           </button>
-          <button className="ghost-button" onClick={onRefresh} disabled={loading}>
-            {loading ? "Aggiorno…" : "⟳ Aggiorna"}
-          </button>
+            </div>
+          </details>
         </div>
       </div>
+
+      {recentImports.length > 0 && (
+        <section className="recent-imports" aria-labelledby="recent-imports-title">
+          <div className="recent-imports__heading">
+            <div>
+              <span className="import-step__eyebrow">Attività recente</span>
+              <h3 id="recent-imports-title">Ultime importazioni</h3>
+            </div>
+            <span>{recentImports.length} mostrate</span>
+          </div>
+          <div className="recent-imports__list">
+            {recentImports.map((job) => (
+              <button key={job.id} type="button" onClick={() => void handleOpenFolder(job)} disabled={job.folderExists === false} title="Apri la cartella del lavoro">
+                <span className="recent-imports__icon" aria-hidden="true">↗</span>
+                <span className="recent-imports__copy"><strong>{job.nomeLavoro}</strong><small>{formatDateTime(job.dataCreazione)} · {job.numeroFile} file</small></span>
+                <span className="recent-imports__state">{job.folderExists === false ? "Non disponibile" : "Apri"}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {analyzingArchive && (
         <div className="archive-analysis-progress" role="status" aria-live="polite">
