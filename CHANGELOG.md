@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-22 - Archivio Flow 0.1.31
+
+- Riorganizzato il flusso di importazione: archivio iniziale, import guidato, aggiunta rapida dei file e cronologia delle ultime importazioni.
+
 ## 2026-08-22 - FileX Suite 0.1.45
 
 ### Piattaforma e distribuzione

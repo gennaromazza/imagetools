@@ -21,10 +21,12 @@ import {
 } from "../archivioDesktopApi";
 import { DesktopPreviewImage } from "./DesktopPreviewImage";
 import { FilterRangePickerModal } from "./FilterRangePickerModal";
+import { DateFilterPicker } from "./DateFilterPicker";
 
 interface Props {
   onImportDone: (result: ImportResult) => void;
   activeView?: "nuovo" | "impostazioni";
+  existingJobImportId?: string | null;
 }
 
 type CategoryLayout = "year-category" | "category-year" | "category-only" | "custom";
@@ -87,6 +89,31 @@ type ImportValidationField =
 interface ImportValidationIssue {
   field: ImportValidationField;
   message: string;
+}
+
+interface ImportUiPreferences {
+  autore: string;
+  sottoCartella: string;
+  rinominaFile: boolean;
+  generaJpg: boolean;
+  openFolderOnFinish: boolean;
+  desktopNotifyOnFinish: boolean;
+  soundNotifyOnFinish: boolean;
+}
+
+const IMPORT_UI_PREFERENCES_KEY = "filex.archivio-flow.import-ui-preferences";
+
+function readImportUiPreferences(): ImportUiPreferences {
+  const fallback: ImportUiPreferences = {
+    autore: "", sottoCartella: "", rinominaFile: true, generaJpg: false,
+    openFolderOnFinish: true, desktopNotifyOnFinish: true, soundNotifyOnFinish: true,
+  };
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(IMPORT_UI_PREFERENCES_KEY) ?? "{}") as Partial<ImportUiPreferences>;
+    return { ...fallback, ...stored };
+  } catch {
+    return fallback;
+  }
 }
 
 function formatBytes(bytes: number): string {
@@ -190,7 +217,8 @@ async function showCompletionDesktopNotification(title: string, body: string) {
   }
 }
 
-export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) {
+export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJobImportId = null }: Props) {
+  const initialImportPreferencesRef = useRef(readImportUiPreferences());
   // ── SD detection ────────────────────────────────────────────────────────────
   const [sdCards, setSdCards] = useState<SdCard[]>([]);
   const [sdPath, setSdPath] = useState("");
@@ -223,12 +251,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   // ── Form fields ─────────────────────────────────────────────────────────────
   const [nomeLavoro, setNomeLavoro] = useState("");
   const [dataLavoro, setDataLavoro] = useState(todayIso());
-  const [autore, setAutore] = useState("");
+  const [autore, setAutore] = useState(() => initialImportPreferencesRef.current.autore);
   const [contrattoLink, setContrattoLink] = useState("");
   const [destinazione, setDestinazione] = useState("");
-  const [sottoCartella, setSottoCartella] = useState("");
-  const [rinominaFile, setRinominaFile] = useState(true);
-  const [generaJpg, setGeneraJpg] = useState(false);
+  const [sottoCartella, setSottoCartella] = useState(() => initialImportPreferencesRef.current.sottoCartella);
+  const [rinominaFile, setRinominaFile] = useState(() => initialImportPreferencesRef.current.rinominaFile);
+  const [generaJpg, setGeneraJpg] = useState(() => initialImportPreferencesRef.current.generaJpg);
   const [usaLavoroEsistente, setUsaLavoroEsistente] = useState(false);
   const [jobsEsistenti, setJobsEsistenti] = useState<Job[]>([]);
   const [existingJobId, setExistingJobId] = useState("");
@@ -243,11 +271,16 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const [importProgress, setImportProgress] = useState<ImportProgressSnapshot | null>(null);
   const [importValidationIssues, setImportValidationIssues] = useState<ImportValidationIssue[]>([]);
   const [invalidImportFields, setInvalidImportFields] = useState<Partial<Record<ImportValidationField, true>>>({});
-  const [openFolderOnFinish, setOpenFolderOnFinish] = useState(true);
-  const [desktopNotifyOnFinish, setDesktopNotifyOnFinish] = useState(true);
-  const [soundNotifyOnFinish, setSoundNotifyOnFinish] = useState(true);
+  const [openFolderOnFinish, setOpenFolderOnFinish] = useState(() => initialImportPreferencesRef.current.openFolderOnFinish);
+  const [desktopNotifyOnFinish, setDesktopNotifyOnFinish] = useState(() => initialImportPreferencesRef.current.desktopNotifyOnFinish);
+  const [soundNotifyOnFinish, setSoundNotifyOnFinish] = useState(() => initialImportPreferencesRef.current.soundNotifyOnFinish);
+  const [showAdvancedImportOptions, setShowAdvancedImportOptions] = useState(false);
+  const [showQuickAddSetup, setShowQuickAddSetup] = useState(false);
   const autoOpenedJobRef = useRef<string | null>(null);
   const notifiedJobRef = useRef<string | null>(null);
+  const sourceStepRef = useRef<HTMLDivElement | null>(null);
+  const destinationStepRef = useRef<HTMLDivElement | null>(null);
+  const confirmStepRef = useRef<HTMLDivElement | null>(null);
 
   // ── Settings ─────────────────────────────────────────────────────────────────
   const [savedDestinazione, setSavedDestinazione] = useState("");
@@ -423,8 +456,30 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
     if (!selected) return;
     setNomeLavoro(selected.nomeLavoro);
     setDataLavoro(selected.dataLavoro);
+    setAutore(selected.autore);
     setContrattoLink(selected.contrattoLink ?? "");
   }, [usaLavoroEsistente, existingJobId, jobsEsistenti]);
+
+  useEffect(() => {
+    if (!existingJobImportId) return;
+    setUsaLavoroEsistente(true);
+    setExistingJobId(existingJobImportId);
+    setExistingJobSearch("");
+    setImportValidationState([]);
+    setShowQuickAddSetup(true);
+  }, [existingJobImportId]);
+
+  useEffect(() => {
+    const preferences: ImportUiPreferences = {
+      autore, sottoCartella, rinominaFile, generaJpg,
+      openFolderOnFinish, desktopNotifyOnFinish, soundNotifyOnFinish,
+    };
+    try {
+      window.localStorage.setItem(IMPORT_UI_PREFERENCES_KEY, JSON.stringify(preferences));
+    } catch {
+      /* local storage non disponibile: l'importazione continua normalmente */
+    }
+  }, [autore, sottoCartella, rinominaFile, generaJpg, openFolderOnFinish, desktopNotifyOnFinish, soundNotifyOnFinish]);
 
   const fetchSdCards = useCallback(async () => {
     setRefreshingSd(true);
@@ -1060,6 +1115,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
   const progressPhaseLabel = importProgress?.currentPhaseLabel
     ?? (progressPhase === "compressing" ? "Compressione JPG" : "Copia in corso");
 
+  function scrollToImportStep(target: React.RefObject<HTMLDivElement | null>) {
+    target.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="stack">
@@ -1070,10 +1129,26 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           <p style={{ margin: 0, color: "var(--text-muted)" }}>
             {activeView === "impostazioni"
               ? "Configura la radice archivio e i preset rapidi usati durante l'importazione."
-              : "Importa foto da SD card, organizza automaticamente le cartelle e registra il lavoro."}
+              : existingJobImportId
+                ? "Aggiungi nuovi file al lavoro selezionato: scegli una cartella rapida o inseriscine una nuova, poi avvia l'importazione."
+                : "Importa foto da SD card, organizza automaticamente le cartelle e registra il lavoro."}
           </p>
         </div>
       </div>
+
+      {activeView === "nuovo" && (
+        <nav className="import-flow-nav" aria-label="Percorso di importazione">
+          <button type="button" onClick={() => scrollToImportStep(sourceStepRef)}>
+            <span>1</span><strong>Origine</strong><small>SD e filtro</small>
+          </button>
+          <button type="button" onClick={() => scrollToImportStep(destinationStepRef)}>
+            <span>2</span><strong>Destinazione</strong><small>Lavoro e cartella</small>
+          </button>
+          <button type="button" onClick={() => scrollToImportStep(confirmStepRef)}>
+            <span>3</span><strong>Conferma</strong><small>Riepilogo e import</small>
+          </button>
+        </nav>
+      )}
 
       {activeView === "impostazioni" && (
         <div className="panel-section" style={{ padding: "var(--space-4)" }}>
@@ -1427,10 +1502,14 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
       {activeView === "nuovo" && (
         <>
       {/* SD Card section */}
-      <div className="panel-section" style={{ padding: "var(--space-4)" }}>
+      <div ref={sourceStepRef} className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
         <div className="stack">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <strong>SD Card</strong>
+            <div>
+              <span className="import-step__eyebrow">Passo 1</span>
+              <strong>Da dove importare</strong>
+              <p className="import-step__description">Scegli la SD e, solo se necessario, limita i file da copiare.</p>
+            </div>
             <button
               className="ghost-button"
               onClick={fetchSdCards}
@@ -1511,7 +1590,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           )}
 
           {sdPath.trim() && (
-            <div className="message-box" style={{
+            <details className="import-advanced-panel">
+              <summary>Verifica sicurezza della SD</summary>
+              <div className="message-box" style={{
               borderColor: safeCheck?.status === "SAFE" ? "var(--success)" : safeCheck ? "#d4a35c" : "var(--line)",
             }}>
               <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
@@ -1527,7 +1608,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                   {checkingSafe ? "Verifica in corso…" : "Verifica SD"}
                 </button>
               </div>
-            </div>
+              </div>
+            </details>
           )}
 
           {sdPath.trim() && (
@@ -1591,32 +1673,28 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                   </label>
 
                   <div className="inline-grid inline-grid--2">
-                    <label className="field">
-                      <span>Data/ora inizio (opzionale)</span>
-                      <input
-                        type="datetime-local"
-                        value={mtimeFromFilter}
-                        onChange={(e) => {
-                          setMtimeFromFilter(e.target.value);
-                          clearImportValidationField("filters");
-                          clearImportValidationField("rangeOverlap");
-                        }}
-                        style={getInvalidInputStyle("filters")}
-                      />
-                    </label>
-                    <label className="field">
-                      <span>Data/ora fine (opzionale)</span>
-                      <input
-                        type="datetime-local"
-                        value={mtimeToFilter}
-                        onChange={(e) => {
-                          setMtimeToFilter(e.target.value);
-                          clearImportValidationField("filters");
-                          clearImportValidationField("rangeOverlap");
-                        }}
-                        style={getInvalidInputStyle("filters")}
-                      />
-                    </label>
+                    <DateFilterPicker
+                      label="Data iniziale (opzionale)"
+                      value={mtimeFromFilter}
+                      boundary="start"
+                      invalid={Boolean(invalidImportFields.filters)}
+                      onChange={(value) => {
+                        setMtimeFromFilter(value);
+                        clearImportValidationField("filters");
+                        clearImportValidationField("rangeOverlap");
+                      }}
+                    />
+                    <DateFilterPicker
+                      label="Data finale (opzionale)"
+                      value={mtimeToFilter}
+                      boundary="end"
+                      invalid={Boolean(invalidImportFields.filters)}
+                      onChange={(value) => {
+                        setMtimeToFilter(value);
+                        clearImportValidationField("filters");
+                        clearImportValidationField("rangeOverlap");
+                      }}
+                    />
                   </div>
 
                   <label className="check-row" style={{ cursor: "pointer" }}>
@@ -1812,9 +1890,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
       </div>
 
       {/* Job data */}
-      <div className="panel-section" style={{ padding: "var(--space-4)" }}>
+      <div ref={destinationStepRef} className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
         <div className="stack">
-          <strong>Dati lavoro</strong>
+          <div>
+            <span className="import-step__eyebrow">Passo 2</span>
+            <strong>Dove salvare i file</strong>
+            <p className="import-step__description">Crea un lavoro o aggiungi gli scatti a un lavoro già presente.</p>
+          </div>
 
           <label className="check-row" style={{ cursor: "pointer" }}>
             <input
@@ -1966,24 +2048,39 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
           </div>
 
           {usaLavoroEsistente && selectedExistingJob && (
-            <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>
-              Cartella principale riutilizzata: <strong>{selectedExistingJob.percorsoCartella}</strong>
-            </p>
+            <div className="message-box" style={{ background: "rgba(184, 154, 99, 0.08)", borderColor: "var(--line-strong)" }}>
+              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>
+                Stai aggiungendo file a <strong>{selectedExistingJob.nomeLavoro}</strong>. Cartella principale riutilizzata: <strong>{selectedExistingJob.percorsoCartella}</strong>
+              </p>
+            </div>
           )}
 
-          <label className="field">
-            <span>Sottocartella dentro autore (opzionale)</span>
-            <input
-              type="text"
-              value={sottoCartella}
-              onChange={(e) => setSottoCartella(e.target.value)}
-              placeholder="es. Promessa"
-            />
-          </label>
+          <div className="stack" style={{ gap: "0.45rem" }}>
+            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Scegli dove mettere questi file:</span>
+            <div className="import-folder-choices">
+              <button
+                type="button"
+                className={sottoCartella ? "ghost-button" : "secondary-button"}
+                onClick={() => setSottoCartella("")}
+              >
+                <strong>Cartella principale</strong>
+                <small>{usaLavoroEsistente ? "Aggiungi senza creare una sottocartella" : "Usa direttamente la cartella dell'autore"}</small>
+              </button>
+              <label className="import-folder-choices__new">
+                <span>Nuova cartella</span>
+                <input
+                  type="text"
+                  value={sottoCartella}
+                  onChange={(e) => setSottoCartella(e.target.value)}
+                  placeholder="es. Promessa"
+                />
+              </label>
+            </div>
+          </div>
 
           {cartellePredefinite.length > 0 && (
             <div className="stack" style={{ gap: "0.45rem" }}>
-              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Cartelle predefinite:</span>
+              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>{usaLavoroEsistente ? "Oppure scegli una cartella predefinita:" : "Cartelle predefinite:"}</span>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
                 {cartellePredefinite.map((cartella) => (
                   <button
@@ -2018,8 +2115,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             </div>
           )}
 
-          {/* Options */}
-          <div className="stack" style={{ gap: "0.6rem" }}>
+          <details className="import-advanced-panel" open={showAdvancedImportOptions} onToggle={(event) => setShowAdvancedImportOptions((event.currentTarget as HTMLDetailsElement).open)}>
+            <summary>Opzioni avanzate di importazione</summary>
+            <div className="stack" style={{ gap: "0.6rem", marginTop: "0.75rem" }}>
             <label className="check-row" style={{ cursor: "pointer" }}>
               <input
                 type="checkbox"
@@ -2047,7 +2145,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                 <small style={{ color: "var(--text-muted)" }}>max 1920px, qualità 70%</small>
               </span>
             </label>
-          </div>
+            </div>
+          </details>
         </div>
       </div>
 
@@ -2252,13 +2351,20 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
       )}
 
       {/* Import CTA */}
-      <div className="setup-footer">
+      <div ref={confirmStepRef} className="setup-footer import-step import-step--confirm">
         <div>
-          <strong>Pronto per importare?</strong>
+          <span className="import-step__eyebrow">Passo 3</span>
+          <strong>Controlla e importa</strong>
           <p>
             Tutti i file verranno copiati nella cartella{" "}
             <code style={{ fontSize: "0.88rem" }}>{fotoDestPreview}</code> del lavoro.
           </p>
+          <div className="import-summary" aria-label="Riepilogo importazione">
+            <div><span>Origine</span><strong>{sdPath.trim() || "SD da selezionare"}</strong></div>
+            <div><span>File</span><strong>{filterPreview ? `${filterPreview.matchedFiles} filtrati` : sdPreview ? `${sdPreview.totalFiles} totali · ${sdPreview.rawFiles} RAW · ${sdPreview.jpgFiles} JPG` : "Da rilevare"}</strong></div>
+            <div><span>Destinazione</span><strong>{usaLavoroEsistente ? (selectedExistingJob?.nomeLavoro ?? "Lavoro esistente da selezionare") : (nomeLavoro.trim() || "Nuovo lavoro da nominare")}</strong></div>
+            <div><span>Opzioni</span><strong>{rinominaFile ? "Rinomina attiva" : "Nessuna rinomina"}{generaJpg ? " · JPG BQ" : ""}</strong></div>
+          </div>
           {!canImport && !importing && (
             <p style={{ marginTop: "0.45rem", color: "var(--danger)", fontSize: "0.85rem" }}>
               Mancano campi obbligatori. Premi IMPORTA per vedere esattamente cosa completare.
@@ -2291,6 +2397,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
             />
             <span>Riproduci suono a fine import</span>
           </label>
+          <p className="import-preferences-note">Le opzioni di importazione vengono ricordate su questo computer.</p>
         </div>
         <div className="setup-footer__action">
           <button
@@ -2350,6 +2457,51 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo" }: Props) 
                 >
                   Conferma e importa
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showQuickAddSetup && selectedExistingJob && (
+        <div className="quick-add-modal__backdrop" role="presentation">
+          <div className="panel-section quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
+            <div className="stack" style={{ gap: "0.85rem" }}>
+              <div>
+                <span className="import-step__eyebrow">Aggiungi file</span>
+                <h3 id="quick-add-title">{selectedExistingJob.nomeLavoro}</h3>
+                <p>Gli scatti verranno aggiunti a questo lavoro. Scegli ora la cartella, poi seleziona la SD.</p>
+              </div>
+              <button
+                type="button"
+                className={sottoCartella ? "ghost-button" : "secondary-button"}
+                onClick={() => setSottoCartella("")}
+              >
+                Cartella principale
+              </button>
+              {cartellePredefinite.length > 0 && (
+                <div className="stack" style={{ gap: "0.4rem" }}>
+                  <span className="quick-add-modal__label">Cartelle predefinite</span>
+                  <div className="button-row">
+                    {cartellePredefinite.map((cartella) => (
+                      <button type="button" key={cartella} className={sottoCartella === cartella ? "secondary-button" : "ghost-button"} onClick={() => setSottoCartella(cartella)}>
+                        {cartella}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <label className="field">
+                <span>Oppure crea una nuova cartella</span>
+                <input value={sottoCartella} onChange={(event) => setSottoCartella(event.target.value)} placeholder="es. Cerimonia" />
+              </label>
+              <p className="quick-add-modal__destination">Destinazione: <strong>{fotoDestPreview}</strong></p>
+              <div className="button-row" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="ghost-button" onClick={() => setShowQuickAddSetup(false)}>Apri flusso completo</button>
+                <button type="button" className="primary-button" onClick={() => {
+                  setShowQuickAddSetup(false);
+                  window.setTimeout(() => scrollToImportStep(sourceStepRef), 0);
+                }}>Continua: scegli SD</button>
               </div>
             </div>
           </div>
