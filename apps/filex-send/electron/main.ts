@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { FileSendService } from "./file-send-service.js";
 import type { FileSendWifiConfig } from "../src/contracts.js";
 import { detectCurrentWifi } from "./wifi-detection.js";
+import { FIREBASE_API_KEY } from "./firebase-config.generated.js";
 import { FileSendRemoteClient, type PersistedRemoteSession } from "./remote-client-service.js";
 import type { FirebaseAnonymousAuthState } from "./firebase-anonymous-auth.js";
 import type { FileSendSession, FileSendSessionHistoryEntry, FileSendSnapshot } from "../src/contracts.js";
@@ -359,7 +360,7 @@ if (!hasSingleInstanceLock) {
     await service.start();
     remoteClient = new FileSendRemoteClient({
       baseUrl: process.env.FILEX_SEND_REMOTE_URL ?? "https://gen-lang-client-0321087169.web.app",
-      firebaseApiKey: "AIzaSyAilpdQ7nneAsZ8eKvOMPrEb7wS1axNUkQ",
+      firebaseApiKey: FIREBASE_API_KEY,
       authState: settings.cloudAuth,
       outputRoot: settings.outputRoot,
       restoredSessions: settings.remoteSessions,

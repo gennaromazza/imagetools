@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { getApps, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 import { logger } from "firebase-functions";
@@ -14,8 +15,9 @@ if (!getApps().length) initializeApp({ storageBucket: "filex-cloud-391620173227-
 const db = getFirestore();
 const bucket = getStorage().bucket();
 const publicBaseUrl = "https://gen-lang-client-0321087169.web.app";
-const firebaseWebApiKey = "AIzaSyAilpdQ7nneAsZ8eKvOMPrEb7wS1axNUkQ";
 const lemonSqueezyWebhookSecret = defineSecret("LEMONSQUEEZY_WEBHOOK_SECRET");
+const paypalClientSecret = defineSecret("PAYPAL_CLIENT_SECRET");
+const paypalLicenseKeySecret = defineSecret("PAYPAL_LICENSE_KEY_SECRET");
 const licenseSigningPrivateKey = defineSecret("FILEX_LICENSE_SIGNING_PRIVATE_KEY");
 
 interface SessionRecord {
@@ -47,17 +49,26 @@ interface HttpResponse {
   status(code: number): { json(value: unknown): unknown };
 }
 
-export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memory: "256MiB", secrets: [lemonSqueezyWebhookSecret, licenseSigningPrivateKey] }, async (request, response) => {
+export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memory: "256MiB", secrets: [lemonSqueezyWebhookSecret, paypalClientSecret, paypalLicenseKeySecret, licenseSigningPrivateKey] }, async (request, response) => {
   response.set("Cache-Control", "no-store");
   try {
     const rawPath = request.path.replace(/\/+$/, "") || "/";
     const path = rawPath.replace(/^\/api(?=\/|$)/, "") || "/";
     if (path === "/licensing" || path.startsWith("/licensing/")) {
-      await handleLicensingRequest(db, request, response, lemonSqueezyWebhookSecret.value(), licenseSigningPrivateKey.value());
+      await handleLicensingRequest(db, request, response, {
+        lemonSqueezyWebhookSecret: lemonSqueezyWebhookSecret.value(),
+        paypalClientSecret: paypalClientSecret.value(),
+        paypalLicenseKeySecret: paypalLicenseKeySecret.value(),
+        signingPrivateKey: licenseSigningPrivateKey.value(),
+      });
       return;
     }
     if (request.method === "GET" && path === "/health") return json(response, 200, { ok: true, service: "FileX Cloud" });
     if (request.method === "POST" && path === "/sessions") return createSession(request, response);
+    if (request.method === "GET" && path === "/sessions") return listSessions(request, response);
+
+    const restoreMatch = path.match(/^\/sessions\/([0-9a-f-]{36})\/restore$/i);
+    if (request.method === "POST" && restoreMatch) return restoreSession(restoreMatch[1], request, response);
 
     const publicMatch = path.match(/^\/public\/([^/]+)$/);
     const uploadMatch = path.match(/^\/public\/([^/]+)\/uploads$/);
@@ -90,7 +101,7 @@ async function createSession(request: Request, response: HttpResponse) {
     return json(response, 401, { error: "Installazione FileX non autorizzata." });
   }
   const owned = await db.collection("filexSendSessions").where("ownerUid", "==", ownerUid).limit(10).get();
-  const activeCount = owned.size;
+  const activeCount = owned.docs.filter((doc) => (doc.data() as SessionRecord).expiresAt.toMillis() > Date.now()).length;
   if (activeCount >= 3) return json(response, 429, { error: "Hai già tre invii cloud in attesa. Completa o archivia un invio prima di crearne un altro." });
   const identity = createSessionIdentity(Date.now(), request.body?.expiresAt);
   const label = sanitizeLabel(request.body?.label);
@@ -309,16 +320,60 @@ function bearer(request: Request): string {
 
 async function verifyInstallationToken(idToken: string): Promise<string> {
   if (!idToken) throw new Error("Missing installation token");
-  const response = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseWebApiKey}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ idToken }),
-  });
-  if (!response.ok) throw new Error(`Identity Toolkit rejected the installation (${response.status})`);
-  const payload = await response.json() as { users?: Array<{ localId?: string }> };
-  const uid = payload.users?.[0]?.localId?.trim();
-  if (!uid) throw new Error("Identity Toolkit returned no installation identity");
+  const decoded = await getAuth().verifyIdToken(idToken);
+  const uid = decoded.uid?.trim();
+  if (!uid) throw new Error("Firebase Admin returned no installation identity");
   return uid;
+}
+
+async function listSessions(request: Request, response: HttpResponse) {
+  let ownerUid: string;
+  try { ownerUid = await verifyInstallationToken(bearer(request)); }
+  catch { return json(response, 401, { error: "Installazione FileX non autorizzata." }); }
+  const snapshot = await db.collection("filexSendSessions").where("ownerUid", "==", ownerUid).limit(20).get();
+  const sessions = snapshot.docs
+    .map((doc) => ({ id: doc.id, data: doc.data() as SessionRecord }))
+    .filter(({ data }) => data.expiresAt.toMillis() > Date.now())
+    .sort((a, b) => b.data.createdAt.toMillis() - a.data.createdAt.toMillis())
+    .map(({ id, data }) => ({
+      sessionId: id,
+      direction: data.direction ?? "receive",
+      label: data.label,
+      createdAt: data.createdAt.toMillis(),
+      expiresAt: data.expiresAt.toMillis(),
+      retentionExpiresAt: (data.retentionExpiresAt ?? data.expiresAt).toMillis(),
+      clientCompleted: data.clientCompleted,
+      activeUploads: data.activeUploads,
+      receivedBytes: data.receivedBytes,
+      receivedFiles: data.receivedFiles,
+    }));
+  return json(response, 200, { sessions });
+}
+
+async function restoreSession(id: string, request: Request, response: HttpResponse) {
+  let ownerUid: string;
+  try { ownerUid = await verifyInstallationToken(bearer(request)); }
+  catch { return json(response, 401, { error: "Installazione FileX non autorizzata." }); }
+  const ref = db.collection("filexSendSessions").doc(id);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) return json(response, 404, { error: "Sessione non trovata." });
+  const data = snapshot.data() as SessionRecord;
+  if (data.ownerUid !== ownerUid || data.expiresAt.toMillis() <= Date.now()) return json(response, 404, { error: "Sessione non disponibile." });
+  const desktopToken = createToken();
+  await ref.update({ desktopTokenHash: hashToken(desktopToken) });
+  return json(response, 200, {
+    sessionId: id,
+    desktopToken,
+    direction: data.direction ?? "receive",
+    label: data.label,
+    createdAt: data.createdAt.toMillis(),
+    expiresAt: data.expiresAt.toMillis(),
+    retentionExpiresAt: (data.retentionExpiresAt ?? data.expiresAt).toMillis(),
+    clientCompleted: data.clientCompleted,
+    activeUploads: data.activeUploads,
+    receivedBytes: data.receivedBytes,
+    receivedFiles: data.receivedFiles,
+  });
 }
 
 function json(response: HttpResponse, status: number, value: unknown) {

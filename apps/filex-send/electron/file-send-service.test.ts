@@ -17,7 +17,7 @@ test("crea una sessione, riceve un file e la invalida alla chiusura", async () =
     assert.equal(pageResponse.status, 200);
     const page = await pageResponse.text();
     assert.match(page, /Scegli dalla galleria/);
-    assert.match(page, /id="mediaFiles"[^>]+accept="image\/\*,video\/\*"[^>]+multiple/);
+    assert.match(page, /id="mediaFiles"[^>]+accept="\*\/\*"[^>]+multiple/);
     assert.match(page, /Sfoglia altri file/);
     assert.match(page, /id="otherFiles"[^>]+multiple/);
     assert.match(page, /id="previews"/);

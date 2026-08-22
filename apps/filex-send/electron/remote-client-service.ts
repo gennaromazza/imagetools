@@ -24,6 +24,23 @@ interface RemoteStatus {
   files: Array<FileSendReceivedFile & { downloadUrl?: string }>;
 }
 
+interface RemoteOwnedSession {
+  sessionId: string;
+  direction: "receive" | "send";
+  label: string;
+  createdAt: number;
+  expiresAt: number;
+  retentionExpiresAt: number;
+  clientCompleted: boolean;
+  activeUploads: number;
+  receivedBytes: number;
+  receivedFiles: number;
+}
+
+interface RestoredRemoteSession extends RemoteOwnedSession {
+  desktopToken: string;
+}
+
 export interface PersistedRemoteSession extends FileSendSession {
   desktopToken: string;
 }
@@ -84,9 +101,8 @@ export class FileSendRemoteClient {
   }
   exportAuthState(): FirebaseAnonymousAuthState | null { return this.auth.exportState(); }
   resume(): void {
-    if (this.sessions.size === 0) return;
     this.ensureTimer();
-    void this.pollAll();
+    void this.restoreAndPoll();
   }
   getSession(sessionId: string): FileSendSession | null {
     const stored = this.sessions.get(sessionId);
@@ -95,6 +111,52 @@ export class FileSendRemoteClient {
     return { ...session, receivedFiles: [...session.receivedFiles] };
   }
   getSessions(): FileSendSession[] { return [...this.sessions.keys()].map((id) => this.getSession(id)!); }
+
+  private async restoreAndPoll(): Promise<void> {
+    await this.restoreSessions();
+    await this.pollAll();
+  }
+
+  private async restoreSessions(): Promise<void> {
+    try {
+      const idToken = await this.auth.getIdToken();
+      const listed = await fetch(`${this.baseUrl}/api/sessions`, { headers: auth(idToken), signal: AbortSignal.timeout(10_000) });
+      if (!listed.ok) throw new Error(`Recupero sessioni non riuscito (${listed.status}).`);
+      const payload = await listed.json() as { sessions?: RemoteOwnedSession[] };
+      for (const remote of payload.sessions ?? []) {
+        if (this.sessions.has(remote.sessionId)) continue;
+        const restoredResponse = await fetch(`${this.baseUrl}/api/sessions/${remote.sessionId}/restore`, { method: "POST", headers: auth(idToken), signal: AbortSignal.timeout(10_000) });
+        if (!restoredResponse.ok) continue;
+        const restored = await restoredResponse.json() as RestoredRemoteSession;
+        const createdAt = restored.createdAt || Date.now();
+        const safeLabel = sanitizeLabel(restored.label) || `Cliente-${new Date(createdAt).toTimeString().slice(0, 5).replace(":", "")}`;
+        const folderPath = restored.direction === "receive"
+          ? await createUniqueDirectory(this.outputRoot, `${formatDate(createdAt)}_${safeLabel}`)
+          : this.outputRoot;
+        this.sessions.set(restored.sessionId, {
+          id: restored.sessionId,
+          direction: restored.direction,
+          desktopToken: restored.desktopToken,
+          label: safeLabel.replaceAll("-", " "),
+          uploadUrl: "",
+          folderPath,
+          createdAt,
+          expiresAt: restored.expiresAt,
+          retentionExpiresAt: restored.retentionExpiresAt,
+          receivedBytes: restored.receivedBytes ?? 0,
+          receivedFiles: [],
+          activeUploads: restored.activeUploads ?? 0,
+          activeUploadBytes: 0,
+          clientCompleted: restored.clientCompleted,
+        });
+      }
+      this.error = null;
+      this.onChange?.();
+    } catch (cause) {
+      this.error = cause instanceof Error ? cause.message : String(cause);
+      this.onChange?.();
+    }
+  }
 
   async startSession(label?: string, expiresAt?: number): Promise<FileSendSession> {
     if (!this.available && !await this.checkAvailability()) throw new Error(this.error ?? "Servizio remoto non disponibile.");
@@ -209,7 +271,12 @@ export class FileSendRemoteClient {
       session.activeUploads = status.activeUploads;
       session.expiresAt = status.expiresAt;
       session.retentionExpiresAt = status.retentionExpiresAt;
-      if (session.direction === "send") { this.error = null; return; }
+      if (session.direction === "send") {
+        session.receivedFiles = status.files.map(({ id, name, size, receivedAt }) => ({ id, name, size, receivedAt }));
+        session.receivedBytes = session.receivedFiles.reduce((total, file) => total + file.size, 0);
+        this.error = null;
+        return;
+      }
       let downloaded = 0;
       for (const file of status.files) {
         if (this.downloading.has(`${session.id}:${file.id}`)) continue;

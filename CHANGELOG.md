@@ -30,6 +30,14 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-22 - FileX Send 0.1.6
+
+- Aggiornamenti e correzioni del componente.
+
+## 2026-08-22 - FileX Send 0.1.5
+
+- recupero automatico delle sessioni Internet attive e supporto per qualsiasi tipo di file
+
 ## 2026-08-21 - FileX Suite 0.1.44
 
 ### Aggiornamento dei tool
