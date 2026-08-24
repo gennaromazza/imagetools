@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-24 - FileX Suite 0.1.48
+
+### Correzione aggiornamenti tool
+- Corretto l'errore `toolName is not defined` che poteva interrompere l'aggiornamento di un tool dalla Suite quando era necessario mostrare la finestra di chiusura forzata.
+
 ## 2026-08-24 - FileX Send 0.1.12
 
 - Corretto il percorso del logo nell’app pubblicata per garantirne la visualizzazione anche nel pacchetto installato.

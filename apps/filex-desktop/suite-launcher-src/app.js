@@ -368,8 +368,8 @@ async function install(id, button = null) {
   }
   if (!job || job.status !== 'ready-to-apply') throw new Error(job?.error || 'Download non riuscito');
   const installedState = states.find(item => item.toolId === id);
+  const toolName = installedState?.toolName || 'il tool';
   if (installedState?.installed) {
-    const toolName = installedState.toolName || 'il tool';
     alert(`Aggiornamento di ${toolName} pronto.\n\nFileX proverà a chiudere il tool automaticamente. Se non riesce, potrai premere “Forza chiusura” nella schermata successiva.`);
   }
   if (button) button.textContent = 'Conferma su Windows...';
