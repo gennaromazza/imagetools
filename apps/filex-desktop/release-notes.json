@@ -67,6 +67,9 @@
     ],
     "0.1.9": [
       "Recupero automatico delle sessioni Internet attive e supporto completo a tutti i tipi di file."
+    ],
+    "0.1.11": [
+      "Drag and drop e selezione ricorsiva di file e cartelle, storico ricercabile e cancellabile, modifica della scadenza dei link e interfaccia aggiornata."
     ]
   },
   "cache-sweep": {

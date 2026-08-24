@@ -5,14 +5,17 @@ const download = document.querySelector("#download");
 const done = document.querySelector("#done");
 const errorCard = document.querySelector("#error");
 const errorText = document.querySelector("#errorText");
-const inputs = [...document.querySelectorAll("#mediaFiles, #otherFiles")];
+const inputs = [...document.querySelectorAll("#mediaFiles, #otherFiles, #folderFiles")];
 const send = document.querySelector("#send");
 const summary = document.querySelector("#summary");
 const status = document.querySelector("#status");
 const bar = document.querySelector("#bar");
 const previews = document.querySelector("#previews");
+const fileList = document.querySelector("#fileList");
+const dropZone = document.querySelector("#dropZone");
 const again = document.querySelector("#again");
 let files = [];
+const relativePaths = new WeakMap();
 
 const formatBytes = (bytes) => bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
 const api = async (path, init) => {
@@ -48,8 +51,18 @@ async function initialize() {
   } catch (cause) { showError(cause.message); }
 }
 
-function showSelection(input) {
-  files = [...input.files];
+function relativeName(file) {
+  return relativePaths.get(file) || file.webkitRelativePath || file.name;
+}
+
+function setFiles(selected) {
+  const known = new Set();
+  files = selected.filter((file) => {
+    const key = `${relativeName(file)}:${file.size}:${file.lastModified}`;
+    if (known.has(key)) return false;
+    known.add(key);
+    return true;
+  });
   const total = files.reduce((sum, file) => sum + file.size, 0);
   summary.textContent = files.length ? `${files.length} file · ${formatBytes(total)}` : "Nessun file selezionato";
   send.disabled = files.length === 0;
@@ -77,10 +90,60 @@ function showSelection(input) {
     more.textContent = `+${files.length - 7}`;
     previews.append(more);
   }
-  inputs.forEach((candidate) => { if (candidate !== input) candidate.value = ""; });
+  renderFileList();
 }
 
-inputs.forEach((input) => input.addEventListener("change", () => showSelection(input)));
+function renderFileList() {
+  fileList.replaceChildren(...files.map((file, index) => {
+    const row = document.createElement("div"); row.className = "file-row"; row.dataset.index = String(index);
+    const details = document.createElement("div");
+    const name = document.createElement("strong"); name.className = "file-row__name"; name.textContent = file.name;
+    const path = document.createElement("small"); path.className = "file-row__path"; path.textContent = relativeName(file) === file.name ? formatBytes(file.size) : `${relativeName(file)} · ${formatBytes(file.size)}`;
+    const state = document.createElement("span"); state.className = "file-row__status"; state.textContent = "In attesa";
+    const progress = document.createElement("div"); progress.className = "file-row__progress"; progress.append(document.createElement("div"));
+    details.append(name, path); row.append(details, state, progress);
+    return row;
+  }));
+}
+
+function updateFileProgress(index, loaded, total) {
+  const row = fileList.querySelector(`[data-index="${index}"]`);
+  if (!row) return;
+  row.classList.add("is-uploading");
+  row.querySelector(".file-row__status").textContent = `${Math.round((loaded / total) * 100)}%`;
+  row.querySelector(".file-row__progress div").style.width = `${(loaded / total) * 100}%`;
+}
+
+function markFileComplete(index) {
+  const row = fileList.querySelector(`[data-index="${index}"]`);
+  if (!row) return;
+  row.classList.remove("is-uploading"); row.classList.add("is-complete");
+  row.querySelector(".file-row__status").textContent = "Caricato ✓";
+  row.querySelector(".file-row__progress div").style.width = "100%";
+}
+
+async function readEntry(entry, prefix = "") {
+  if (entry.isFile) return new Promise((resolve, reject) => entry.file((file) => {
+    relativePaths.set(file, `${prefix}${file.name}`);
+    resolve([file]);
+  }, reject));
+  const reader = entry.createReader(); const children = [];
+  while (true) { const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject)); if (!batch.length) break; children.push(...batch); }
+  return (await Promise.all(children.map((child) => readEntry(child, `${prefix}${entry.name}/`)))).flat();
+}
+
+async function filesFromDrop(dataTransfer) {
+  const entries = [...dataTransfer.items].map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
+  if (entries.length) return (await Promise.all(entries.map((entry) => readEntry(entry)))).flat();
+  return [...dataTransfer.files];
+}
+
+inputs.forEach((input) => input.addEventListener("change", () => setFiles([...input.files])));
+dropZone.addEventListener("click", () => document.querySelector("#otherFiles").click());
+dropZone.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); document.querySelector("#otherFiles").click(); } });
+["dragenter", "dragover"].forEach((type) => dropZone.addEventListener(type, (event) => { event.preventDefault(); dropZone.classList.add("dragging"); }));
+["dragleave", "drop"].forEach((type) => dropZone.addEventListener(type, (event) => { event.preventDefault(); dropZone.classList.remove("dragging"); }));
+dropZone.addEventListener("drop", async (event) => { try { setFiles(await filesFromDrop(event.dataTransfer)); } catch { status.textContent = "Non riesco a leggere uno degli elementi trascinati."; } });
 
 function uploadFile(url, file, onProgress) {
   return new Promise((resolve, reject) => {
@@ -105,15 +168,18 @@ send.addEventListener("click", async () => {
       const file = files[index];
       status.textContent = `Invio ${index + 1} di ${files.length} · ${file.name}`;
       const pending = await api(`/public/${encodeURIComponent(credential)}/uploads`, { method: "POST", body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }) });
-      await uploadFile(pending.uploadUrl, file, (loaded) => { bar.style.width = `${((completed + loaded) / total) * 100}%`; });
+      await uploadFile(pending.uploadUrl, file, (loaded) => { bar.style.width = `${((completed + loaded) / total) * 100}%`; updateFileProgress(index, loaded, file.size); });
       await api(`/public/${encodeURIComponent(credential)}/uploads/${pending.fileId}/complete`, { method: "POST", body: "{}" });
       completed += file.size;
+      markFileComplete(index);
     }
     await api(`/public/${encodeURIComponent(credential)}/complete`, { method: "POST", body: "{}" });
     upload.hidden = true;
     done.hidden = false;
   } catch (cause) {
     status.textContent = cause.message;
+    const row = fileList.querySelector(".is-uploading");
+    if (row) { row.classList.remove("is-uploading"); row.classList.add("is-error"); row.querySelector(".file-row__status").textContent = "Da riprovare"; }
     send.disabled = false;
     inputs.forEach((input) => { input.disabled = false; });
   }

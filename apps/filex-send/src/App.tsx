@@ -146,18 +146,30 @@ export function App() {
     setChoice("home"); setDirection(null); setCreatingSession(true); setShowDashboard(false); setError(null);
   };
 
+  const deleteHistoryEntry = async (sessionId: string) => {
+    setBusy(true); setError(null);
+    try {
+      if (typeof window.fileXSend.deleteHistoryEntry !== "function") {
+        throw new Error("FileX Send è stato aggiornato. Chiudi e riapri l’applicazione per attivare la cancellazione dello storico.");
+      }
+      setSnapshot(await window.fileXSend.deleteHistoryEntry(sessionId));
+    }
+    catch (cause) { setError(message(cause)); }
+    finally { setBusy(false); }
+  };
+
   if (!snapshot) return <main className="loading">Avvio di FileX Send…</main>;
   const viewingSession = Boolean(snapshot.session) && !creatingSession && !showDashboard;
 
   return <main className="app-shell">
     <header className="topbar">
-      <div className="brand"><span className="brand-mark">FX</span><div><strong>FileX Send</strong><small>Consegna semplice di foto e video</small></div></div>
+      <div className="brand"><img className="brand-mark" src="/filex-send-logo.png" alt="Logo FileX Send" /><div><strong>FileX Send</strong><small>Consegna semplice di foto e video</small></div></div>
       <div className={`network-pill ${snapshot.warning ? "warning" : ""}`}><span />{snapshot.mode === "remote" ? "Sessione Internet" : snapshot.warning ? "Rete da verificare" : "Sistema pronto"}</div>
     </header>
     {(snapshot.sessions.length > 0 || snapshot.history.length > 0) && <SessionBar snapshot={snapshot} creating={creatingSession} dashboard={showDashboard} selectSession={selectSession} showOverview={() => { setShowDashboard(true); setCreatingSession(false); }} newSession={newSession} />}
     {error && <div className="notice error">{error}</div>}
 
-    {showDashboard && !creatingSession && <ClientDashboard snapshot={snapshot} selectSession={selectSession} newSession={newSession} />}
+    {showDashboard && !creatingSession && <ClientDashboard snapshot={snapshot} selectSession={selectSession} newSession={newSession} deleteHistoryEntry={deleteHistoryEntry} deleting={busy} />}
     {!viewingSession && !showDashboard && choice === "home" && !direction && <DirectionChoice onChoose={setDirection} />}
     {!viewingSession && !showDashboard && choice === "home" && direction && <ModeChoice onChoose={setChoice} remoteAvailable={snapshot.remoteAvailable} direction={direction} onBack={() => setDirection(null)} />}
 
@@ -165,11 +177,11 @@ export function App() {
       <div className="welcome-copy">
         <button className="back-button" onClick={() => setChoice("home")}>← Indietro</button>
         <p className="eyebrow">{choice === "local" ? "CLIENTE QUI CON TE" : "CLIENTE A DISTANZA"}</p>
-        <h1>{direction === "send" ? (choice === "local" ? <>Condividi direttamente<br />nella rete locale.</> : <>Carica i file.<br />Invia un solo link.</>) : choice === "local" ? <>Ricevi direttamente<br />nella rete locale.</> : <>Crea un link.<br />Al resto pensa FileX.</>}</h1>
-        <p className="lead">{direction === "send" ? "Scegli i file dal PC: il cliente li scaricherà dal QR o dal link temporaneo." : choice === "local" ? "Il cliente si collega al Wi-Fi, scansiona il QR e invia." : "Invia il link via WhatsApp o email. Le foto arriveranno automaticamente nella cartella."}</p>
+        <h1>{direction === "send" ? (choice === "local" ? <>Condividi direttamente<br />nella rete locale.</> : <>Crea il link.<br />Aggiungi i file dopo.</>) : choice === "local" ? <>Ricevi direttamente<br />nella rete locale.</> : <>Crea un link.<br />Al resto pensa FileX.</>}</h1>
+        <p className="lead">{direction === "send" ? "Crea prima la condivisione, poi trascina file e cartelle o aggiungili dal pulsante dedicato." : choice === "local" ? "Il cliente si collega al Wi-Fi, scansiona il QR e invia." : "Invia il link via WhatsApp o email. Le foto arriveranno automaticamente nella cartella."}</p>
         <label className="client-label"><span>Nome cliente <em>facoltativo</em></span><input value={label} onChange={(event) => setLabel(event.target.value)} placeholder="Es. Famiglia Rossi" maxLength={60} /></label>
         {choice === "remote" && <label className="client-label"><span>Il cliente può inviare fino a</span><input type="datetime-local" value={remoteExpiresAt} min={localDateTimeValue(Date.now() + 15 * 60 * 1000)} max={localDateTimeValue(Date.now() + 7 * 24 * 60 * 60 * 1000)} onChange={(event) => setRemoteExpiresAt(event.target.value)} /><small>Da 15 minuti a 7 giorni. I file già inviati restano in attesa del tuo PC.</small></label>}
-        <button className="primary-action" onClick={() => void start()} disabled={busy || (choice === "local" ? !wifiReady || Boolean(snapshot.warning) : !snapshot.remoteAvailable || !expiryValid)}>{busy ? "Preparazione…" : direction === "send" ? "Scegli file e crea collegamento" : choice === "local" ? "Nuovo trasferimento locale" : "Crea link temporaneo"}<span>→</span></button>
+        <button className="primary-action" onClick={() => void start()} disabled={busy || (choice === "local" ? !wifiReady || Boolean(snapshot.warning) : !snapshot.remoteAvailable || !expiryValid)}>{busy ? "Creazione link…" : direction === "send" ? "Crea collegamento" : choice === "local" ? "Nuovo trasferimento locale" : "Crea link temporaneo"}<span>→</span></button>
       </div>
       {choice === "local"
         ? <WifiCard snapshot={snapshot} wifiReady={wifiReady} wifiSsid={wifiSsid} wifiPassword={wifiPassword} showPassword={showPassword} detecting={detectingWifi} draftValid={wifiDraftValid} setWifiSsid={setWifiSsid} setWifiPassword={setWifiPassword} setShowPassword={setShowPassword} detectWifi={detectWifi} saveWifi={saveWifi} chooseFolder={chooseFolder} />
@@ -187,18 +199,38 @@ function SessionBar({ snapshot, creating, dashboard, selectSession, showOverview
   return <nav className="session-bar" aria-label="Sessioni clienti"><button className={`overview-button ${dashboard ? "active" : ""}`} onClick={showOverview}>Panoramica <small>{snapshot.sessions.length} attive · {snapshot.history.length} concluse</small></button><div className="session-tabs">{snapshot.sessions.map(({ mode, session }) => <button key={`${mode}-${session.id}`} className={!creating && !dashboard && snapshot.mode === mode && snapshot.session?.id === session.id ? "active" : ""} onClick={() => void selectSession(mode, session.id)}><span className={session.activeUploads > 0 ? "busy" : session.clientCompleted ? "done" : ""} /><strong>{session.label}</strong><small>{mode === "remote" ? "Internet" : "Locale"}</small></button>)}</div><button className={`new-session ${creating ? "active" : ""}`} onClick={newSession}>＋ Nuovo cliente</button></nav>;
 }
 
-function ClientDashboard({ snapshot, selectSession, newSession }: { snapshot: FileSendSnapshot; selectSession: (mode: "local" | "remote", sessionId: string) => Promise<void>; newSession: () => void }) {
-  return <section className="client-dashboard"><div className="dashboard-heading"><div><p className="eyebrow">CLIENTI E CONSEGNE</p><h1>Panoramica trasferimenti</h1><p>Ogni sessione conserva cliente, file, orari e cartella di destinazione.</p></div><button onClick={newSession}>＋ Nuovo cliente</button></div>{snapshot.sessions.length > 0 && <DashboardSection title="Sessioni attive" count={snapshot.sessions.length}>{snapshot.sessions.map(({ mode, session }) => <SessionSummaryCard key={`${mode}-${session.id}`} mode={mode} session={session} active onOpen={() => void selectSession(mode, session.id)} />)}</DashboardSection>}<DashboardSection title="Storico" count={snapshot.history.length}>{snapshot.history.length > 0 ? snapshot.history.map(({ mode, session, closedAt }) => <SessionSummaryCard key={`history-${session.id}`} mode={mode} session={session} closedAt={closedAt} onOpen={() => void window.fileXSend.openHistoryFolder(session.id)} />) : <div className="history-empty">Le sessioni archiviate compariranno qui.</div>}</DashboardSection></section>;
+function ClientDashboard({ snapshot, selectSession, newSession, deleteHistoryEntry, deleting }: { snapshot: FileSendSnapshot; selectSession: (mode: "local" | "remote", sessionId: string) => Promise<void>; newSession: () => void; deleteHistoryEntry: (sessionId: string) => Promise<void>; deleting: boolean }) {
+  const [historySearch, setHistorySearch] = useState("");
+  const normalizedSearch = historySearch.trim().toLocaleLowerCase("it-IT");
+  const filteredHistory = useMemo(() => snapshot.history.filter(({ mode, session, closedAt }) => {
+    if (!normalizedSearch) return true;
+    const searchable = [
+      session.label,
+      mode === "remote" ? "internet remoto" : "locale",
+      session.direction === "receive" ? "ricevuto ricezione" : "inviato condivisione",
+      formatDateTime(session.createdAt),
+      formatDateTime(closedAt),
+      ...session.receivedFiles.map((file) => file.name),
+    ].join(" ").toLocaleLowerCase("it-IT");
+    return searchable.includes(normalizedSearch);
+  }), [snapshot.history, normalizedSearch]);
+
+  const confirmDelete = async (session: FileSendSession) => {
+    const confirmed = window.confirm(`Eliminare definitivamente “${session.label}” dallo storico?\n\nI file presenti sul disco non verranno cancellati.`);
+    if (confirmed) await deleteHistoryEntry(session.id);
+  };
+
+  return <section className="client-dashboard"><div className="dashboard-heading"><div><p className="eyebrow">CLIENTI E CONSEGNE</p><h1>Panoramica trasferimenti</h1><p>Ogni sessione conserva cliente, file, orari e cartella di destinazione.</p></div><button onClick={newSession}>＋ Nuovo cliente</button></div>{snapshot.sessions.length > 0 && <DashboardSection title="Sessioni attive" count={snapshot.sessions.length}>{snapshot.sessions.map(({ mode, session }) => <SessionSummaryCard key={`${mode}-${session.id}`} mode={mode} session={session} active onOpen={() => void selectSession(mode, session.id)} />)}</DashboardSection>}<div className="dashboard-section history-section"><div className="history-toolbar"><h2>Storico <span>{snapshot.history.length}</span></h2><label className="history-search"><span aria-hidden="true">⌕</span><input type="search" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="Cerca cliente o file…" aria-label="Cerca nello storico" /></label></div><div className="client-card-grid">{filteredHistory.length > 0 ? filteredHistory.map(({ mode, session, closedAt }) => <SessionSummaryCard key={`history-${session.id}`} mode={mode} session={session} closedAt={closedAt} onOpen={session.direction === "receive" ? () => void window.fileXSend.openHistoryFolder(session.id) : undefined} onDelete={() => void confirmDelete(session)} deleting={deleting} />) : <div className="history-empty">{snapshot.history.length === 0 ? "Le sessioni archiviate compariranno qui." : `Nessun risultato per “${historySearch.trim()}”.`}</div>}</div></div></section>;
 }
 
 function DashboardSection({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   return <div className="dashboard-section"><h2>{title}<span>{count}</span></h2><div className="client-card-grid">{children}</div></div>;
 }
 
-function SessionSummaryCard({ mode, session, active = false, closedAt, onOpen }: { mode: "local" | "remote"; session: FileSendSession; active?: boolean; closedAt?: number; onOpen: () => void }) {
+function SessionSummaryCard({ mode, session, active = false, closedAt, onOpen, onDelete, deleting = false }: { mode: "local" | "remote"; session: FileSendSession; active?: boolean; closedAt?: number; onOpen?: () => void; onDelete?: () => void; deleting?: boolean }) {
   const files = session.receivedFiles.slice(-3).reverse();
   const total = session.receivedBytes + session.activeUploadBytes;
-  return <article className={`client-summary-card ${active ? "active-session" : ""}`}><div className="client-card-top"><div><small>{session.direction === "receive" ? "RICEVUTO DA" : "INVIATO A"}</small><h3>{session.label}</h3></div><span>{active ? session.activeUploads ? "Invio in corso" : "In attesa" : "Conclusa"}</span></div><div className="session-meta"><span>{mode === "remote" ? "Internet" : "Locale"}</span><time>{formatDateTime(session.createdAt)}</time>{closedAt && <time>Chiusa {formatDateTime(closedAt)}</time>}</div><div className="session-totals"><div><small>File</small><strong>{session.receivedFiles.length}</strong></div><div><small>Dimensione</small><strong>{formatBytes(total)}</strong></div></div><small className="files-heading">ULTIMI FILE</small><div className="recent-files">{files.length > 0 ? <>{files.map((file) => <div key={file.id}><span>{file.name}</span><time>{new Date(file.receivedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</time></div>)}{session.receivedFiles.length > files.length && <p>＋ altri {session.receivedFiles.length - files.length} file nella cartella</p>}</> : <p>Nessun file ancora ricevuto.</p>}</div>{(active || session.direction === "receive") && <button onClick={onOpen}>{active ? "Apri sessione" : "Apri cartella cliente"} →</button>}</article>;
+  return <article className={`client-summary-card ${active ? "active-session" : ""}`}><div className="client-card-top"><div><small>{session.direction === "receive" ? "RICEVUTO DA" : "INVIATO A"}</small><h3>{session.label}</h3></div><span>{active ? session.activeUploads ? "Invio in corso" : "In attesa" : "Conclusa"}</span></div><div className="session-meta"><span>{mode === "remote" ? "Internet" : "Locale"}</span><time>{formatDateTime(session.createdAt)}</time>{closedAt && <time>Chiusa {formatDateTime(closedAt)}</time>}</div><div className="session-totals"><div><small>File</small><strong>{session.receivedFiles.length}</strong></div><div><small>Dimensione</small><strong>{formatBytes(total)}</strong></div></div><small className="files-heading">ULTIMI FILE</small><div className="recent-files">{files.length > 0 ? <>{files.map((file) => <div key={file.id}><span>{file.name}</span><time>{new Date(file.receivedAt).toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</time></div>)}{session.receivedFiles.length > files.length && <p>＋ altri {session.receivedFiles.length - files.length} file nella cartella</p>}</> : <p>Nessun file ancora ricevuto.</p>}</div>{(onOpen || onDelete) && <div className="card-actions">{onOpen && <button className="open-card" onClick={onOpen}>{active ? "Apri sessione" : "Apri cartella cliente"} →</button>}{onDelete && <button className="delete-history" onClick={onDelete} disabled={deleting} aria-label={`Elimina ${session.label} dallo storico`}>Elimina</button>}</div>}</article>;
 }
 
 function formatDateTime(timestamp: number): string {
@@ -243,10 +275,17 @@ function QrCard({ step, eyebrow, title, qr, help }: { step: string; eyebrow: str
 
 function TransferPanel({ session, mode, busy, close, remote }: { session: FileSendSession; mode: "local" | "remote"; busy: boolean; close: () => Promise<void>; remote: boolean }) {
   const sending = session.direction === "send";
+  const [expiryDraft, setExpiryDraft] = useState(() => session.expiresAt ? localDateTimeValue(session.expiresAt) : "");
+  const [addingFiles, setAddingFiles] = useState(false);
   const total = useMemo(() => session.receivedBytes + session.activeUploadBytes, [session]);
   const linkExpired = Boolean(session.expiresAt && session.expiresAt <= Date.now());
   const canClose = sending || (session.activeUploads === 0 && (!remote || session.clientCompleted || linkExpired));
-  return <article className="transfer-card"><div className="session-heading"><div><p className="eyebrow">{sending ? "CONDIVISIONE" : "RICEZIONE"}</p><h2>{session.label}</h2></div><span className="status live">{linkExpired ? "Link scaduto" : sending ? "Disponibile" : session.activeUploads ? "Invio in corso" : "In attesa"}</span></div><div className="metrics"><div><small>{sending ? "File condivisi" : "File ricevuti"}</small><strong>{session.receivedFiles.length}</strong></div><div><small>{sending ? "Dati condivisi" : "Dati ricevuti"}</small><strong>{formatBytes(total)}</strong></div></div><div className="file-list">{session.receivedFiles.length === 0 ? <div className="empty"><span>⇩</span><strong>In attesa delle foto</strong></div> : session.receivedFiles.slice().reverse().map((file) => <div className="file-row" key={file.id}><span className="file-check">✓</span><div><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></div></div>)}</div><div className="session-actions">{!sending && <button className="secondary" onClick={() => void window.fileXSend.openSessionFolder(mode, session.id)}>Apri cartella</button>}<button className="finish" onClick={() => void close()} disabled={busy || !canClose}>{sending ? "Termina condivisione" : session.activeUploads ? "Invio in corso…" : remote && !canClose ? "In attesa del cliente" : remote ? "Archivia invio" : "Termina sessione"}</button></div></article>;
+  useEffect(() => { if (session.expiresAt) setExpiryDraft(localDateTimeValue(session.expiresAt)); }, [session.id, session.expiresAt]);
+  const addFiles = async () => { setAddingFiles(true); try { await window.fileXSend.addSendFiles(mode, session.id); } finally { setAddingFiles(false); } };
+  const dropFiles = async (event: React.DragEvent<HTMLDivElement>) => { event.preventDefault(); if (!event.dataTransfer.files.length) return; setAddingFiles(true); try { await window.fileXSend.addDroppedSendFiles(mode, session.id, Array.from(event.dataTransfer.files)); } finally { setAddingFiles(false); } };
+  const saveExpiry = async () => { const expiresAt = new Date(expiryDraft).getTime(); if (!Number.isFinite(expiresAt)) return; await window.fileXSend.updateRemoteExpiry(session.id, expiresAt); };
+  const expiryValid = Number.isFinite(new Date(expiryDraft).getTime()) && new Date(expiryDraft).getTime() >= Date.now() + 15 * 60 * 1000 && new Date(expiryDraft).getTime() <= Date.now() + 7 * 24 * 60 * 60 * 1000;
+  return <article className="transfer-card"><div className="session-heading"><div><p className="eyebrow">{sending ? "CONDIVISIONE" : "RICEZIONE"}</p><h2>{session.label}</h2></div><span className="status live">{linkExpired ? "Link scaduto" : addingFiles ? "Caricamento in corso" : sending ? "Disponibile" : session.activeUploads ? "Invio in corso" : "In attesa"}</span></div><div className="metrics"><div><small>{sending ? "File condivisi" : "File ricevuti"}</small><strong>{session.receivedFiles.length}</strong></div><div><small>{sending ? "Dati condivisi" : "Dati ricevuti"}</small><strong>{formatBytes(total)}</strong></div></div>{remote && <div className="expiry-editor"><label>Scadenza del link<input type="datetime-local" value={expiryDraft} min={localDateTimeValue(Date.now() + 15 * 60 * 1000)} max={localDateTimeValue(Date.now() + 7 * 24 * 60 * 60 * 1000)} onChange={(event) => setExpiryDraft(event.target.value)} /></label><button className="secondary" onClick={() => void saveExpiry()} disabled={busy || !expiryValid}>Salva scadenza</button></div>}{sending && <div className={`send-drop-zone ${addingFiles ? "is-uploading" : ""}`} onDragOver={(event) => event.preventDefault()} onDrop={(event) => void dropFiles(event)}><strong>{addingFiles ? "Caricamento dei file in corso…" : "Trascina qui file o cartelle"}</strong><small>{addingFiles ? "I file compariranno nell’elenco uno alla volta." : "Le sottocartelle vengono incluse automaticamente."}</small><button className="secondary" onClick={() => void addFiles()} disabled={busy || addingFiles}>{addingFiles ? "Caricamento…" : "＋ Aggiungi file o cartella"}</button></div>}<div className="file-list">{session.receivedFiles.length === 0 ? <div className="empty"><span>⇩</span><strong>{sending ? "Aggiungi i file da condividere" : "In attesa delle foto"}</strong></div> : session.receivedFiles.slice().reverse().map((file) => <div className="file-row" key={file.id}><span className="file-check">✓</span><div><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></div></div>)}</div><div className="session-actions">{!sending && <button className="secondary" onClick={() => void window.fileXSend.openSessionFolder(mode, session.id)}>Apri cartella</button>}<button className="finish" onClick={() => void close()} disabled={busy || !canClose}>{sending ? "Termina condivisione" : session.activeUploads ? "Invio in corso…" : remote && !canClose ? "In attesa del cliente" : remote ? "Archivia invio" : "Termina sessione"}</button></div></article>;
 }
 
 function message(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause); }

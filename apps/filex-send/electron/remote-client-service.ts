@@ -213,10 +213,20 @@ export class FileSendRemoteClient {
       receivedBytes: 0, receivedFiles: [], activeUploads: 0, activeUploadBytes: 0, clientCompleted: false,
     };
     this.sessions.set(session.id, session);
-    const credential = created.uploadUrl.split("/r/").pop()!;
+    await this.addSendFiles(session.id, filePaths, false);
+    this.ensureTimer();
+    this.onChange?.();
+    return this.getSession(session.id)!;
+  }
+
+  async addSendFiles(sessionId: string, filePaths: string[], notify = true): Promise<FileSendSession> {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.direction !== "send") throw new Error("Condivisione Internet non trovata.");
+    const credential = session.uploadUrl.split("/r/").pop()!;
     for (const path of filePaths) {
       const info = await stat(path);
       const name = sanitizeFileName(basename(path));
+      if (!info.isFile() || info.size > 25 * 1024 * 1024 * 1024) throw new Error(`File non valido o troppo grande: ${name}`);
       const pendingResponse = await fetch(`${this.baseUrl}/api/public/${encodeURIComponent(credential)}/uploads`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, size: info.size, contentType: "application/octet-stream" }),
@@ -230,9 +240,20 @@ export class FileSendRemoteClient {
       if (!completed.ok) throw new Error(`Conferma di ${name} non riuscita.`);
       session.receivedFiles.push({ id: pending.fileId, name, size: info.size, receivedAt: Date.now() });
       session.receivedBytes += info.size;
-      this.onChange?.();
+      if (notify) this.onChange?.();
     }
-    this.ensureTimer();
+    return this.getSession(session.id)!;
+  }
+
+  async updateExpiry(sessionId: string, expiresAt: number): Promise<FileSendSession> {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error("Sessione Internet non trovata.");
+    const response = await fetch(`${this.baseUrl}/api/desktop/${session.id}`, { method: "PATCH", headers: { ...auth(session.desktopToken), "content-type": "application/json" }, body: JSON.stringify({ expiresAt }) });
+    if (!response.ok) throw new Error("Aggiornamento della scadenza non riuscito.");
+    const updated = await response.json() as { expiresAt: number; retentionExpiresAt: number };
+    session.expiresAt = updated.expiresAt;
+    session.retentionExpiresAt = updated.retentionExpiresAt;
+    session.clientCompleted = false;
     this.onChange?.();
     return this.getSession(session.id)!;
   }

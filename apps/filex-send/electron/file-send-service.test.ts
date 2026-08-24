@@ -101,7 +101,9 @@ test("rinomina in sicurezza file duplicati", async () => {
 test("condivide file dal PC tramite un link locale protetto", async () => {
   const outputRoot = await mkdtemp(join(tmpdir(), "filex-send-share-"));
   const source = join(outputRoot, "listino estate.pdf");
+  const additionalSource = join(outputRoot, "catalogo autunno.pdf");
   await writeFile(source, "contenuto da consegnare", "utf8");
+  await writeFile(additionalSource, "secondo contenuto", "utf8");
   const service = new FileSendService({ outputRoot, host: "127.0.0.1", publicAddress: "127.0.0.1" });
   try {
     await service.start();
@@ -111,6 +113,9 @@ test("condivide file dal PC tramite un link locale protetto", async () => {
     const page = await (await fetch(session.uploadUrl)).text();
     assert.match(page, /File pronti per te/);
     assert.match(page, /listino estate\.pdf/);
+    await service.addSendFiles(session.id, [additionalSource]);
+    assert.equal(service.getSession(session.id)?.receivedFiles.length, 2);
+    assert.equal(service.getSession(session.id)?.receivedFiles.find((file) => file.name === "catalogo autunno.pdf")?.size, Buffer.byteLength("secondo contenuto"));
     const token = new URL(session.uploadUrl).pathname.split("/").pop();
     const base = session.uploadUrl.replace(/\/s\/[^/]+$/, "");
     const response = await fetch(`${base}/api/session/${token}/downloads/${session.receivedFiles[0].id}`);

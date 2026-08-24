@@ -11,6 +11,8 @@ const repoRoot = resolve(desktopRoot, "..", "..");
 const sourceDir = join(repoRoot, "ICONE E LOGHI");
 const targetDir = join(desktopRoot, ".output", "branding");
 const photoSelectorAssetsDir = join(repoRoot, "apps", "photo-selector-app", "src", "assets");
+const filexSendAssetsDir = join(repoRoot, "apps", "filex-send", "public");
+const filexSendWebAssetsDir = join(repoRoot, "apps", "filex-send-web", "public");
 const photoSelectorLogoPath = join(sourceDir, "photo_selector.png");
 const photoSelectorIconPath = join(sourceDir, "photo_selector_icon.png");
 
@@ -84,6 +86,8 @@ const coordinatedRendererCopies = [
   ["image-party-frame.png", join(repoRoot, "apps", "image-party-frame", "logo.png")],
   ["archivio-flow.png", join(repoRoot, "apps", "archivio-flow", "src", "assets", "photo_Archivie.png")],
   ["backup-guard.png", join(repoRoot, "apps", "backup-guard", "src", "assets", "backup-guard.png")],
+  ["filex-send.png", join(filexSendAssetsDir, "filex-send-logo.png")],
+  ["filex-send.png", join(filexSendWebAssetsDir, "filex-send-logo.png")],
 ];
 for (const [sourceName, destination] of coordinatedRendererCopies) {
   await mkdir(dirname(destination), { recursive: true });

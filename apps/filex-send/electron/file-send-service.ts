@@ -134,29 +134,20 @@ export class FileSendService {
 
   async startSendSession(filePaths: string[], label?: string): Promise<FileSendSnapshot> {
     if (!this.server || !this.port) await this.start();
-    if (filePaths.length === 0) throw new Error("Scegli almeno un file da inviare.");
     const createdAt = Date.now();
     const safeLabel = sanitizeLabel(label) || `Consegna-${String(new Date(createdAt).getHours()).padStart(2, "0")}${String(new Date(createdAt).getMinutes()).padStart(2, "0")}`;
     const token = randomBytes(18).toString("base64url");
     const id = randomUUID();
     const address = this.publicAddress ?? listLanAddresses()[0] ?? "127.0.0.1";
-    const sharedPaths = new Map<string, string>();
-    const files: FileSendReceivedFile[] = [];
-    for (const path of filePaths) {
-      const info = await stat(path);
-      if (!info.isFile() || info.size > MAX_FILE_BYTES) throw new Error(`File non valido o troppo grande: ${basename(path)}`);
-      const fileId = randomUUID();
-      sharedPaths.set(fileId, path);
-      files.push({ id: fileId, name: sanitizeFileName(basename(path)), size: info.size, receivedAt: createdAt });
-    }
     const session: InternalSession = {
       id, token, direction: "send", label: safeLabel.replaceAll("-", " "),
       uploadUrl: `http://${address}:${this.port}/s/${token}`,
       folderPath: this.outputRoot, createdAt,
-      receivedBytes: files.reduce((sum, file) => sum + file.size, 0), receivedFiles: files,
-      activeUploads: 0, activeUploadBytes: 0, active: new Map(), sharedPaths, clientCompleted: false,
+      receivedBytes: 0, receivedFiles: [],
+      activeUploads: 0, activeUploadBytes: 0, active: new Map(), sharedPaths: new Map(), clientCompleted: false,
     };
     this.sessions.set(id, session);
+    await this.addSendFiles(id, filePaths, false);
     this.selectedSessionId = id;
     this.emit(true);
     return this.snapshot();
@@ -165,6 +156,22 @@ export class FileSendService {
   selectSession(sessionId: string): FileSendSnapshot {
     if (!this.sessions.has(sessionId)) throw new Error("Sessione locale non trovata.");
     this.selectedSessionId = sessionId;
+    return this.snapshot();
+  }
+
+  async addSendFiles(sessionId: string, filePaths: string[], emit = true): Promise<FileSendSnapshot> {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.direction !== "send") throw new Error("Condivisione locale non trovata.");
+    const existing = new Set(session.sharedPaths.values());
+    const additions: Array<{ path: string; file: FileSendReceivedFile }> = [];
+    for (const path of filePaths) {
+      if (existing.has(path)) continue;
+      const info = await stat(path);
+      if (!info.isFile() || info.size > MAX_FILE_BYTES) throw new Error(`File non valido o troppo grande: ${basename(path)}`);
+      additions.push({ path, file: { id: randomUUID(), name: sanitizeFileName(basename(path)), size: info.size, receivedAt: Date.now() } });
+    }
+    for (const { path, file } of additions) { session.sharedPaths.set(file.id, path); session.receivedFiles.push(file); session.receivedBytes += file.size; }
+    if (emit && additions.length) this.emit(true);
     return this.snapshot();
   }
 

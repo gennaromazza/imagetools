@@ -7,7 +7,7 @@ import { logger } from "firebase-functions";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest, type Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, hashToken, publicUploadAllowed, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
+import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, hashToken, normalizeLinkExpiry, publicUploadAllowed, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
 import { handleLicensingRequest } from "./licensing-api.js";
 
 if (!getApps().length) initializeApp({ storageBucket: "filex-cloud-391620173227-eu" });
@@ -82,6 +82,7 @@ export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memor
     if (request.method === "POST" && uploadCompleteMatch) return finishUpload(uploadCompleteMatch[1], uploadCompleteMatch[2], request, response);
     if (request.method === "POST" && publicCompleteMatch) return finishSession(publicCompleteMatch[1], response);
     if (request.method === "GET" && desktopMatch) return desktopStatus(desktopMatch[1], request, response);
+    if (request.method === "PATCH" && desktopMatch) return updateSessionExpiry(desktopMatch[1], request, response);
     if (request.method === "DELETE" && desktopMatch) return deleteSession(desktopMatch[1], request, response);
     if (request.method === "DELETE" && desktopFileMatch) return deleteFile(desktopFileMatch[1], desktopFileMatch[2], request, response);
     return json(response, 404, { error: "Risorsa non trovata." });
@@ -324,6 +325,15 @@ async function verifyInstallationToken(idToken: string): Promise<string> {
   const uid = decoded.uid?.trim();
   if (!uid) throw new Error("Firebase Admin returned no installation identity");
   return uid;
+}
+
+async function updateSessionExpiry(id: string, request: Request, response: HttpResponse) {
+  const authorized = await authorizeDesktop(id, bearer(request));
+  if (!authorized) return json(response, 401, { error: "Non autorizzato." });
+  const expiresAt = normalizeLinkExpiry(request.body?.expiresAt);
+  const retentionExpiresAt = expiresAt + DOWNLOADED_RETENTION_MS;
+  await authorized.ref.update({ expiresAt: Timestamp.fromMillis(expiresAt), retentionExpiresAt: Timestamp.fromMillis(retentionExpiresAt), clientCompleted: false });
+  return json(response, 200, { expiresAt, retentionExpiresAt });
 }
 
 async function listSessions(request: Request, response: HttpResponse) {

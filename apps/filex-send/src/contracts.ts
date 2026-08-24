@@ -57,8 +57,12 @@ export interface FileSendDesktopApi {
   startSession: (label?: string) => Promise<FileSendSnapshot>;
   startRemoteSession: (label?: string, expiresAt?: number) => Promise<FileSendSnapshot>;
   startSendSession: (mode: "local" | "remote", label?: string, expiresAt?: number) => Promise<FileSendSnapshot>;
+  addSendFiles: (mode: "local" | "remote", sessionId: string) => Promise<FileSendSnapshot>;
+  addDroppedSendFiles: (mode: "local" | "remote", sessionId: string, files: File[]) => Promise<FileSendSnapshot>;
+  updateRemoteExpiry: (sessionId: string, expiresAt: number) => Promise<FileSendSnapshot>;
   selectSession: (mode: "local" | "remote", sessionId: string) => Promise<FileSendSnapshot>;
   closeSession: (mode: "local" | "remote", sessionId: string) => Promise<FileSendSnapshot>;
+  deleteHistoryEntry: (sessionId: string) => Promise<FileSendSnapshot>;
   chooseOutputRoot: () => Promise<FileSendSnapshot>;
   saveWifi: (wifi: FileSendWifiConfig) => Promise<FileSendSnapshot>;
   detectWifi: () => Promise<FileSendSnapshot>;

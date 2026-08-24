@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } from "electron";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FileSendService } from "./file-send-service.js";
@@ -179,16 +179,34 @@ function registerIpc(): void {
   });
   ipcMain.handle("filex-send:start-send-session", async (_event, mode: unknown, label: unknown, expiresAt: unknown) => {
     if (mode !== "local" && mode !== "remote") throw new Error("Modalità di invio non valida.");
-    const selected = await dialog.showOpenDialog(mainWindow!, {
-      title: "Scegli i file da inviare",
-      properties: ["openFile", "multiSelections"],
-    });
-    if (selected.canceled || selected.filePaths.length === 0) return composeSnapshot();
     const started = mode === "local"
-      ? (await service.startSendSession(selected.filePaths, typeof label === "string" ? label : undefined)).session!
-      : await remoteClient.startSendSession(selected.filePaths, typeof label === "string" ? label : undefined, typeof expiresAt === "number" ? expiresAt : undefined);
+      ? (await service.startSendSession([], typeof label === "string" ? label : undefined)).session!
+      : await remoteClient.startSendSession([], typeof label === "string" ? label : undefined, typeof expiresAt === "number" ? expiresAt : undefined);
     currentMode = mode;
     currentSessionId = started.id;
+    return composeSnapshot();
+  });
+  ipcMain.handle("filex-send:add-send-files", async (_event, mode: unknown, sessionId: unknown) => {
+    if ((mode !== "local" && mode !== "remote") || typeof sessionId !== "string") throw new Error("Sessione non valida.");
+    const selected = await dialog.showOpenDialog(mainWindow!, { title: "Aggiungi file o cartelle alla condivisione", properties: ["openFile", "openDirectory", "multiSelections"] });
+    if (selected.canceled || selected.filePaths.length === 0) return composeSnapshot();
+    const filePaths = await collectFiles(selected.filePaths);
+    if (filePaths.length === 0) throw new Error("La selezione non contiene file inviabili.");
+    if (mode === "local") await service.addSendFiles(sessionId, filePaths);
+    else await remoteClient.addSendFiles(sessionId, filePaths);
+    return composeSnapshot();
+  });
+  ipcMain.handle("filex-send:add-dropped-send-files", async (_event, mode: unknown, sessionId: unknown, paths: unknown) => {
+    if ((mode !== "local" && mode !== "remote") || typeof sessionId !== "string" || !Array.isArray(paths) || !paths.every((path) => typeof path === "string")) throw new Error("File trascinati non validi.");
+    const filePaths = await collectFiles(paths);
+    if (filePaths.length === 0) throw new Error("Il trascinamento non contiene file inviabili.");
+    if (mode === "local") await service.addSendFiles(sessionId, filePaths);
+    else await remoteClient.addSendFiles(sessionId, filePaths);
+    return composeSnapshot();
+  });
+  ipcMain.handle("filex-send:update-remote-expiry", async (_event, sessionId: unknown, expiresAt: unknown) => {
+    if (typeof sessionId !== "string" || typeof expiresAt !== "number") throw new Error("Scadenza non valida.");
+    await remoteClient.updateExpiry(sessionId, expiresAt);
     return composeSnapshot();
   });
   ipcMain.handle("filex-send:select-session", (_event, mode: unknown, sessionId: unknown) => {
@@ -209,6 +227,14 @@ function registerIpc(): void {
     if (mode === "remote") await remoteClient.closeSession(sessionId);
     else service.closeSession(sessionId);
     selectFallbackSession();
+    await queueSettingsSave();
+    return composeSnapshot();
+  });
+  ipcMain.handle("filex-send:delete-history-entry", async (_event, sessionId: unknown) => {
+    if (typeof sessionId !== "string") throw new Error("Voce dello storico non valida.");
+    const nextHistory = settings.history.filter((entry) => entry.session.id !== sessionId);
+    if (nextHistory.length === settings.history.length) throw new Error("Sessione non trovata nello storico.");
+    settings.history = nextHistory;
     await queueSettingsSave();
     return composeSnapshot();
   });
@@ -271,6 +297,18 @@ function composeSnapshot(): FileSendSnapshot {
     sessions,
     history: settings.history,
   };
+}
+
+async function collectFiles(paths: string[]): Promise<string[]> {
+  const files: string[] = [];
+  const visit = async (path: string): Promise<void> => {
+    const info = await stat(path);
+    if (info.isFile()) { files.push(path); return; }
+    if (!info.isDirectory()) return;
+    for (const entry of await readdir(path, { withFileTypes: true })) await visit(join(path, entry.name));
+  };
+  for (const path of paths) await visit(path);
+  return [...new Set(files)];
 }
 
 function selectFallbackSession(): void {

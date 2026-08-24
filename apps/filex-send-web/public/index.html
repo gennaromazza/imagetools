@@ -10,7 +10,7 @@
   </head>
   <body>
     <main>
-      <div class="brand"><span>FX</span><strong>FileX Send</strong></div>
+      <div class="brand"><img src="/filex-send-logo.png" alt="Logo FileX Send" style="width:48px;height:48px;object-fit:cover;border-radius:15px;box-shadow:0 8px 20px #0005" /><strong>FileX Send</strong></div>
       <section class="card" id="loading"><div class="spinner"></div><p>Preparazione dell’invio…</p></section>
       <section class="card" id="upload" hidden>
         <p class="eyebrow">CONSEGNA PRIVATA</p>
@@ -19,10 +19,13 @@
         <div class="pickers">
           <label class="picker picker--primary"><span class="picker-icon" aria-hidden="true">▦</span><span>Scegli dalla galleria<small>Foto e video del telefono</small></span><input id="mediaFiles" type="file" accept="image/*,video/*" multiple /></label>
           <label class="picker picker--secondary"><span class="picker-icon" aria-hidden="true">⌕</span><span>Sfoglia altri file<small>Download, cartelle e documenti</small></span><input id="otherFiles" type="file" multiple /></label>
+          <label class="picker picker--secondary"><span class="picker-icon" aria-hidden="true">▣</span><span>Scegli una cartella<small>Include automaticamente tutte le sottocartelle</small></span><input id="folderFiles" type="file" webkitdirectory multiple /></label>
         </div>
+        <div class="drop-zone" id="dropZone" tabindex="0" role="button" aria-label="Trascina qui file o cartelle, oppure premi Invio per sceglierli">Trascina qui file o cartelle<small>Puoi aggiungere anche intere cartelle con le sottocartelle.</small></div>
         <p class="picker-help">Puoi selezionare più elementi insieme. Su alcuni telefoni devi tenere premuta la prima foto.</p>
         <div class="summary" id="summary">Nessun file selezionato</div>
         <div class="previews" id="previews" aria-live="polite"></div>
+        <div class="file-list" id="fileList" aria-live="polite"></div>
         <button class="send" id="send" disabled>Invia ora</button>
         <div class="progress"><div id="bar"></div></div>
         <div class="status" id="status"></div>
