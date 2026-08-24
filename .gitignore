@@ -23,6 +23,7 @@ apps/archivio-flow/server/data/settings.json
 apps/archivio-flow/server/data/file-count-cache.json
 apps/archivio-flow/server/data/*.sqlite*
 apps/archivio-flow/server/data/*.log.jsonl
+apps/archivio-flow/server/data/video-thumbnails/
 apps/archivio-flow/.runtime-test-data/
 apps/filex-send-remote-server/.data/
 apps/filex-cloud-functions/lib/

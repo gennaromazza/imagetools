@@ -1,11 +1,13 @@
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import { execFileSync, execSync } from "child_process";
+import { execFile, execFileSync, execSync } from "child_process";
+import { promisify } from "util";
 import { createHash, randomUUID } from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import sharp from "sharp";
+import { createRequire } from "module";
 import { fileURLToPath, pathToFileURL } from "url";
 import { StudioFlowStore, type ImportSessionRecord } from "./studioflow-store.js";
 import { resolveDestination, type CategoryMapping } from "./destination-resolver.js";
@@ -18,6 +20,8 @@ app.use(express.json({ limit: "1mb" }));
 
 const PORT = parseInt(process.env.PORT ?? "3003", 10);
 const SERVER_DIR = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const ffmpegPath = require("ffmpeg-static") as string | null;
 
 // Jobs registry — stored next to this server file
 const LEGACY_DATA_DIR = path.join(SERVER_DIR, "data");
@@ -28,8 +32,26 @@ const JOBS_FILE = path.join(DATA_DIR, "jobs.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const FILE_COUNT_CACHE_FILE = path.join(DATA_DIR, "file-count-cache.json");
 const LOG_FILE = path.join(DATA_DIR, "studioflow.log.jsonl");
+const VIDEO_THUMBNAIL_CACHE_DIR = path.join(DATA_DIR, "video-thumbnails");
 fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(VIDEO_THUMBNAIL_CACHE_DIR, { recursive: true });
 const studioFlowStore = new StudioFlowStore(DATA_DIR);
+const execFileAsync = promisify(execFile);
+let activeVideoThumbnailTasks = 0;
+const videoThumbnailQueue: Array<() => void> = [];
+
+async function withVideoThumbnailSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (activeVideoThumbnailTasks >= 2) {
+    await new Promise<void>((resolve) => videoThumbnailQueue.push(resolve));
+  }
+  activeVideoThumbnailTasks += 1;
+  try {
+    return await task();
+  } finally {
+    activeVideoThumbnailTasks -= 1;
+    videoThumbnailQueue.shift()?.();
+  }
+}
 
 function writeStudioFlowLog(level: "info" | "warn" | "error", event: string, details: Record<string, unknown> = {}): void {
   try {
@@ -258,6 +280,9 @@ const RAW_EXT = new Set([
   ".dng", ".orf", ".rw2", ".pef", ".srw", ".3fr", ".x3f", ".gpr",
 ]);
 const JPG_EXT = new Set([".jpg", ".jpeg"]);
+const VIDEO_EXT = new Set([
+  ".mp4", ".mov", ".m4v", ".avi", ".mkv", ".mts", ".m2ts", ".mpg", ".mpeg", ".3gp", ".webm",
+]);
 const PHOTO_SELECTOR_STANDARD_EXT = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 const PHOTO_SELECTOR_RAW_EXT = new Set([
   ".cr2", ".cr3", ".crw",
@@ -845,6 +870,14 @@ function isCopyableFile(filePath: string): boolean {
   return !COPY_EXCLUDED_BASENAMES.has(path.basename(filePath).toLowerCase());
 }
 
+function sanitizeRelativeFolderPath(value: string): string {
+  return value.split(/[\\/]+/).map(sanitizeFolderSegment).filter(Boolean).join(path.sep);
+}
+
+function isVideoFile(filePath: string): boolean {
+  return VIDEO_EXT.has(path.extname(filePath).toLowerCase());
+}
+
 function parseFilterCriteria(criteria: FilterCriteria): {
   normalizedNameFilter: string;
   hasFromFilter: boolean;
@@ -1262,9 +1295,13 @@ async function countImportableFilesInDirectory(rootPath: string, applyJobRootSki
 
 async function resolveJobFileCount(jobFolderPath: string): Promise<number> {
   const fotoSdDir = path.join(jobFolderPath, "FOTO_SD");
-  if (fs.existsSync(fotoSdDir)) {
-    const fotoSdCount = await countImportableFilesInDirectory(fotoSdDir);
-    if (fotoSdCount > 0) return fotoSdCount;
+  const videoSdDir = path.join(jobFolderPath, "VIDEO_SD");
+  const [fotoSdCount, videoSdCount] = await Promise.all([
+    countImportableFilesInDirectory(fotoSdDir),
+    countImportableFilesInDirectory(videoSdDir),
+  ]);
+  if (fotoSdCount + videoSdCount > 0) {
+    return fotoSdCount + videoSdCount;
   }
 
   return countImportableFilesInDirectory(jobFolderPath, true);
@@ -3102,14 +3139,15 @@ const getSdPreviewHandler = async (req: Request, res: Response) => {
   }
 
   if (!fs.existsSync(normalized)) {
-    return void res.json({ totalFiles: 0, rawFiles: 0, jpgFiles: 0 });
+    return void res.json({ totalFiles: 0, rawFiles: 0, jpgFiles: 0, videoFiles: 0, otherFiles: 0 });
   }
 
   try {
     const allFiles = await collectFiles(normalized);
     const rawFiles = allFiles.filter((f) => RAW_EXT.has(path.extname(f).toLowerCase())).length;
     const jpgFiles = allFiles.filter((f) => JPG_EXT.has(path.extname(f).toLowerCase())).length;
-    res.json({ totalFiles: allFiles.length, rawFiles, jpgFiles });
+    const videoFiles = allFiles.filter((f) => isVideoFile(f)).length;
+    res.json({ totalFiles: allFiles.length, rawFiles, jpgFiles, videoFiles, otherFiles: allFiles.length - rawFiles - jpgFiles - videoFiles });
   } catch {
     res.status(500).json({ error: "Impossibile leggere la SD" });
   }
@@ -3211,10 +3249,21 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
   let matchedFiles = 0;
   let matchedRawFiles = 0;
   let matchedJpgFiles = 0;
+  let matchedVideoFiles = 0;
+  let matchedOtherFiles = 0;
   let minMtimeMs: number | null = null;
   let maxMtimeMsValue: number | null = null;
-  const sampleRawFiles: Array<{ filePath: string; fileName: string; mtimeMs: number; size: number; ext: string; isJpg: boolean }> = [];
-  const sampleJpgFiles: Array<{ filePath: string; fileName: string; mtimeMs: number; size: number; ext: string; isJpg: boolean }> = [];
+  type FilterPreviewSample = {
+    filePath: string;
+    fileName: string;
+    mtimeMs: number;
+    size: number;
+    ext: string;
+    isJpg: boolean;
+    mediaType: "photo" | "video" | "other";
+  };
+  const sampleRawFiles: FilterPreviewSample[] = [];
+  const sampleJpgFiles: FilterPreviewSample[] = [];
 
   for await (const srcFile of walkFiles(sdNorm)) {
     scannedFiles += 1;
@@ -3237,8 +3286,11 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
     const ext = path.extname(fileName).toLowerCase();
     const isRaw = RAW_EXT.has(ext);
     const isJpg = JPG_EXT.has(ext);
+    const isVideo = VIDEO_EXT.has(ext);
     if (isRaw) matchedRawFiles += 1;
     if (isJpg) matchedJpgFiles += 1;
+    if (isVideo) matchedVideoFiles += 1;
+    if (!isRaw && !isJpg && !isVideo) matchedOtherFiles += 1;
 
     minMtimeMs = minMtimeMs === null ? sourceMtimeMs : Math.min(minMtimeMs, sourceMtimeMs);
     maxMtimeMsValue = maxMtimeMsValue === null ? sourceMtimeMs : Math.max(maxMtimeMsValue, sourceMtimeMs);
@@ -3251,6 +3303,7 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
         size: sourceStat.size,
         ext,
         isJpg: false,
+        mediaType: "photo",
       });
     }
     if (isJpg && sampleJpgFiles.length < sampleLimit) {
@@ -3261,11 +3314,23 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
         size: sourceStat.size,
         ext,
         isJpg: true,
+        mediaType: "photo",
+      });
+    }
+    if (isVideo && sampleJpgFiles.length < sampleLimit) {
+      sampleJpgFiles.push({
+        filePath: srcFile,
+        fileName,
+        mtimeMs: sourceMtimeMs,
+        size: sourceStat.size,
+        ext,
+        isJpg: false,
+        mediaType: "video",
       });
     }
   }
 
-  const sampleFiles: Array<{ filePath: string; fileName: string; mtimeMs: number; size: number; ext: string; isJpg: boolean }> = [];
+  const sampleFiles: FilterPreviewSample[] = [];
   let rawIdx = 0;
   let jpgIdx = 0;
   while (sampleFiles.length < sampleLimit && (rawIdx < sampleRawFiles.length || jpgIdx < sampleJpgFiles.length)) {
@@ -3288,12 +3353,47 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
     matchedFiles,
     matchedRawFiles,
     matchedJpgFiles,
+    matchedVideoFiles,
+    matchedOtherFiles,
     minMtimeMs,
     maxMtimeMs: maxMtimeMsValue,
     sampleFiles,
   });
 };
 app.post("/api/filter-preview", getFilterPreviewHandler);
+
+async function getVideoThumbnail(filePath: string): Promise<Buffer> {
+  if (!ffmpegPath) throw new Error("Motore anteprime video non disponibile");
+  const stat = await fs.promises.stat(filePath);
+  const cacheKey = createHash("sha256").update(`${filePath}\0${stat.size}\0${stat.mtimeMs}`).digest("hex");
+  const cachePath = path.join(VIDEO_THUMBNAIL_CACHE_DIR, `${cacheKey}.jpg`);
+  try {
+    return await fs.promises.readFile(cachePath);
+  } catch { /* genera una nuova miniatura */ }
+
+  return await withVideoThumbnailSlot(async () => {
+    try {
+      return await fs.promises.readFile(cachePath);
+    } catch { /* un'altra richiesta non l'ha ancora completata */ }
+    const temporaryPath = `${cachePath}.${process.pid}.${randomUUID()}.tmp.jpg`;
+    try {
+      await execFileAsync(ffmpegPath, [
+        "-hide_banner", "-loglevel", "error", "-ss", "00:00:01", "-i", filePath,
+        "-frames:v", "1", "-vf", "scale=280:180:force_original_aspect_ratio=decrease",
+        "-q:v", "5", "-y", temporaryPath,
+      ], { windowsHide: true, timeout: 20_000 });
+      const buffer = await fs.promises.readFile(temporaryPath);
+      await fs.promises.rename(temporaryPath, cachePath).catch(async () => {
+        await fs.promises.copyFile(temporaryPath, cachePath);
+        await fs.promises.unlink(temporaryPath).catch(() => undefined);
+      });
+      return buffer;
+    } catch {
+      await fs.promises.unlink(temporaryPath).catch(() => undefined);
+      throw new Error("Impossibile estrarre la miniatura dal video");
+    }
+  });
+}
 
 /**
  * GET /api/preview-image
@@ -3326,14 +3426,17 @@ const getPreviewImageHandler = async (req: Request, res: Response) => {
   }
 
   try {
-    const buffer = await sharp(fileNorm)
-      .resize({ width: 280, height: 180, fit: "inside", withoutEnlargement: true })
-      .jpeg({ quality: 72 })
-      .toBuffer();
+    const buffer = isVideoFile(fileNorm)
+      ? await getVideoThumbnail(fileNorm)
+      : await sharp(fileNorm)
+        .resize({ width: 280, height: 180, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 72 })
+        .toBuffer();
     res.setHeader("Content-Type", "image/jpeg");
     res.send(buffer);
-  } catch {
-    res.status(415).json({ error: "Impossibile generare anteprima" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Impossibile generare anteprima";
+    res.status(415).json({ error: message });
   }
 };
 app.get("/api/preview-image", getPreviewImageHandler);
@@ -3441,15 +3544,20 @@ const importHandler = async (req: Request, res: Response) => {
 
   // ── Create folder structure ──────────────────────────────────────────────────
   const fotoSdDir = path.join(jobRoot, "FOTO_SD");
+  const videoSdDir = path.join(jobRoot, "VIDEO_SD");
   const autoreFolder = sanitizeFolderSegment(autore ?? "");
   if (!autoreFolder) {
     return void res.status(400).json({ error: "Nome autore non valido per creare la cartella" });
   }
   const autoreFotoDir = path.join(fotoSdDir, autoreFolder);
-  const sottoCartellaPulita = sanitizeFolderSegment(sottoCartella ?? "");
+  const autoreVideoDir = path.join(videoSdDir, autoreFolder);
+  const sottoCartellaPulita = sanitizeRelativeFolderPath(sottoCartella ?? "");
   const targetFotoDir = sottoCartellaPulita
     ? path.join(autoreFotoDir, sottoCartellaPulita)
     : autoreFotoDir;
+  const targetVideoDir = sottoCartellaPulita
+    ? path.join(autoreVideoDir, sottoCartellaPulita)
+    : autoreVideoDir;
   const bassaQualitaDir = path.join(jobRoot, "BASSA_QUALITA");
   const exportDir = path.join(jobRoot, "EXPORT");
 
@@ -3457,6 +3565,9 @@ const importHandler = async (req: Request, res: Response) => {
     fs.mkdirSync(fotoSdDir, { recursive: true });
     fs.mkdirSync(autoreFotoDir, { recursive: true });
     fs.mkdirSync(targetFotoDir, { recursive: true });
+    fs.mkdirSync(videoSdDir, { recursive: true });
+    fs.mkdirSync(autoreVideoDir, { recursive: true });
+    fs.mkdirSync(targetVideoDir, { recursive: true });
     fs.mkdirSync(bassaQualitaDir, { recursive: true });
     fs.mkdirSync(exportDir, { recursive: true });
   } catch (err) {
@@ -3691,6 +3802,16 @@ const importHandler = async (req: Request, res: Response) => {
   }
 
   try {
+    const plannedSources: Array<{
+      srcFile: string;
+      originalName: string;
+      sourceRelativePath: string;
+      sourceSize: number;
+      sourceMtimeMs: number;
+    }> = [];
+
+    // Determina l'intero piano prima di copiare: il totale mostrato all'utente
+    // resta stabile per tutta l'importazione, anche con SD molto grandi.
     for await (const srcFile of walkFiles(sdNorm)) {
       if (importCancelRequested) {
         throw new Error("Importazione annullata");
@@ -3702,7 +3823,6 @@ const importHandler = async (req: Request, res: Response) => {
       }
 
       const originalName = path.basename(srcFile);
-      updateImportProgress({ currentFileName: originalName });
       const sourceRelativePath = path.relative(sdNorm, srcFile).replace(/\\/g, "/");
 
       let sourceStat: fs.Stats;
@@ -3721,11 +3841,25 @@ const importHandler = async (req: Request, res: Response) => {
         continue;
       }
 
+      plannedSources.push({ srcFile, originalName, sourceRelativePath, sourceSize, sourceMtimeMs });
+      totalPlannedBytes += sourceSize;
+    }
+
+    plannedFiles = plannedSources.length;
+    updateImportProgress({ plannedFiles, scannedFiles, currentFileName: null });
+
+    for (const { srcFile, originalName, sourceRelativePath, sourceSize, sourceMtimeMs } of plannedSources) {
+      if (importCancelRequested) {
+        throw new Error("Importazione annullata");
+      }
+      updateImportProgress({ currentFileName: originalName });
+
       const manifestKey = buildManifestKey(sourceRelativePath, sourceSize, sourceMtimeMs);
       const manifestEntry = manifest[manifestKey];
 
+      const targetMediaDir = isVideoFile(srcFile) ? targetVideoDir : targetFotoDir;
       if (manifestEntry?.status === "done") {
-        const manifestDestPath = path.join(targetFotoDir, path.basename(manifestEntry.destFileName));
+        const manifestDestPath = path.join(targetMediaDir, path.basename(manifestEntry.destFileName));
         try {
           const st = await fs.promises.stat(manifestDestPath);
           // The manifest key already includes source path, size and mtime.
@@ -3734,8 +3868,6 @@ const importHandler = async (req: Request, res: Response) => {
             const fastFingerprint = await computeFastFingerprint(srcFile);
             skippedCount += 1;
             manifestSkippedFiles += 1;
-            plannedFiles += 1;
-            totalPlannedBytes += sourceSize;
             studioFlowStore.upsertImportFile({
               sessionId: importSessionId, sourceRelativePath, sourceSize, sourceMtimeMs,
               fastFingerprint, fullHash: null, destinationPath: manifestDestPath, destinationSize: sourceSize,
@@ -3770,7 +3902,7 @@ const importHandler = async (req: Request, res: Response) => {
         const candidateKey = destName.toLowerCase();
         const reservedFor = reservedDestinationNames.get(candidateKey);
         let needsCollisionSuffix = Boolean(reservedFor && reservedFor !== sourceRelativePath);
-        const candidatePath = path.join(targetFotoDir, destName);
+        const candidatePath = path.join(targetMediaDir, destName);
 
         if (!reservedFor && fs.existsSync(candidatePath)) {
           try {
@@ -3790,10 +3922,7 @@ const importHandler = async (req: Request, res: Response) => {
       }
 
       reservedDestinationNames.set(destName.toLowerCase(), sourceRelativePath);
-      const destPath = path.join(targetFotoDir, destName);
-      plannedFiles += 1;
-      totalPlannedBytes += sourceSize;
-      updateImportProgress({ plannedFiles });
+      const destPath = path.join(targetMediaDir, destName);
 
       await scheduleCopy({
         srcFile,

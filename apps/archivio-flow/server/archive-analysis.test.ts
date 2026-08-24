@@ -169,6 +169,24 @@ test("maps an external job and renames it only after explicit confirmation", asy
     assert.equal(safeAfterImport.status, "SAFE");
     assert.equal(safeAfterImport.verifiedFiles, 1);
 
+    const videoSdPath = join(testRoot, "video-sd");
+    await mkdir(videoSdPath, { recursive: true });
+    await writeFile(join(videoSdPath, "clip.mov"), "video-test-content", "utf8");
+    const videoImport = await archivio.importService({
+      sdPath: videoSdPath,
+      nomeLavoro: "Prova video",
+      dataLavoro: "2026-08-04",
+      autore: "Tester",
+      destinazione: archiveRoot,
+      sottoCartella: "Cerimonia",
+      rinominaFile: false,
+      generaJpg: false,
+    });
+    assert.equal(existsSync(join(videoImport.job.percorsoCartella, "VIDEO_SD", "Tester", "Cerimonia", "clip.mov")), true);
+    assert.equal(videoImport.job.numeroFile, 1);
+    const safeAfterVideoImport = await archivio.checkSafeToFormatService(videoSdPath);
+    assert.equal(safeAfterVideoImport.status, "SAFE");
+
     const secondImport = await archivio.importService({
       sdPath,
       nomeLavoro: "",

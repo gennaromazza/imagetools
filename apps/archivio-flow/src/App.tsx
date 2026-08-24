@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Job, ImportResult } from "./types";
-import { getArchivioJobs, getArchivioSdCards } from "./archivioDesktopApi";
+import { getArchivioJobs, getArchivioSdCards, openBackupGuard } from "./archivioDesktopApi";
 import { NuovoLavoroPanel } from "./components/NuovoLavoroPanel";
+import { SdCardPreviewPanel } from "./components/SdCardPreviewPanel";
 import { ArchivioPanel } from "./components/ArchivioPanel";
 import { GoogleDrivePanel } from "./components/GoogleDrivePanel";
 import archivioLogo from "./assets/photo_Archivie.png";
 import archivioPackage from "../package.json";
 
-type Screen = "nuovo" | "archivio" | "drive" | "impostazioni";
+type Screen = "sd" | "nuovo" | "archivio" | "drive" | "impostazioni";
+const SIDEBAR_COLLAPSED_KEY = "filex.archivio-flow.sidebar-collapsed";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("archivio");
@@ -15,6 +17,10 @@ export default function App() {
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [archiveAnalyzing, setArchiveAnalyzing] = useState(false);
   const [existingJobImportId, setExistingJobImportId] = useState<string | null>(null);
+  const [detectedSdPath, setDetectedSdPath] = useState<string | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
+  const [backupGuardFeedback, setBackupGuardFeedback] = useState<string | null>(null);
+  const [openingBackupGuard, setOpeningBackupGuard] = useState(false);
   const knownSdPathsRef = useRef<Set<string> | null>(null);
 
   const refreshJobs = useCallback(async () => {
@@ -33,6 +39,10 @@ export default function App() {
   }, [refreshJobs]);
 
   useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
     let active = true;
 
     async function detectInsertedSd() {
@@ -45,7 +55,11 @@ export default function App() {
           ? paths.size > 0
           : [...paths].some((path) => !previousPaths.has(path));
         knownSdPathsRef.current = paths;
-        if (hasNewCard) setScreen("nuovo");
+        if (hasNewCard) {
+          setDetectedSdPath([...paths].find((path) => !previousPaths?.has(path)) ?? [...paths][0] ?? null);
+          setExistingJobImportId(null);
+          setScreen("sd");
+        }
       } catch {
         // Il controllo periodico riproverà: non interrompere la navigazione dell'archivio.
       }
@@ -74,28 +88,39 @@ export default function App() {
     }
   }
 
+  async function handleOpenBackupGuard() {
+    setOpeningBackupGuard(true);
+    setBackupGuardFeedback(null);
+    try {
+      const result = await openBackupGuard();
+      setBackupGuardFeedback(result.ok ? "Backup Guard è stato avviato." : "Backup Guard non è installato. Installalo dalla FileX Suite per creare la seconda copia dei file.");
+    } catch {
+      setBackupGuardFeedback("Non è stato possibile avviare Backup Guard. Verifica che sia installato.");
+    } finally {
+      setOpeningBackupGuard(false);
+    }
+  }
+
   return (
-    <div className="app-shell app-shell--with-sidebar">
+    <div className={`app-shell app-shell--with-sidebar${sidebarCollapsed ? " app-shell--sidebar-collapsed" : ""}`}>
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
       <aside className="sidebar">
-        <div className="sidebar__brand">
+        <button className="sidebar__brand" onClick={() => setSidebarCollapsed((value) => !value)} aria-label={sidebarCollapsed ? "Espandi barra laterale" : "Riduci barra laterale"}>
           <img
             src={archivioLogo}
             alt="Archivio Flow"
             className="sidebar__brand-logo"
           />
-          <div className="sidebar__brand-copy">
-            <h1>Archivio Flow</h1>
-            <p>Importa e organizza i tuoi scatti</p>
-          </div>
-        </div>
+          <span className="sidebar__toggle" aria-hidden="true">{sidebarCollapsed ? "›" : "‹"}</span>
+        </button>
 
         <nav className="stack">
           <button
             className={screen === "nuovo" ? "workflow-step workflow-step--active" : "workflow-step"}
             onClick={() => setScreen("nuovo")}
+            title="Nuovo lavoro"
           >
-            <span>1</span>
+            <span aria-hidden="true">＋</span>
             <strong>Nuovo lavoro</strong>
             <small>Importa da SD card</small>
           </button>
@@ -103,8 +128,9 @@ export default function App() {
           <button
             className={screen === "archivio" ? "workflow-step workflow-step--active" : "workflow-step"}
             onClick={() => setScreen("archivio")}
+            title="Archivio lavori"
           >
-            <span>2</span>
+            <span aria-hidden="true">▦</span>
             <strong>Archivio lavori</strong>
             <small>{archiveAnalyzing ? "Controllo nomi in corso…" : (jobs.length > 0 ? `${jobs.length} lavori salvati` : "Nessun lavoro ancora")}</small>
           </button>
@@ -112,6 +138,7 @@ export default function App() {
           <button
             className={screen === "drive" ? "workflow-step workflow-step--active" : "workflow-step"}
             onClick={() => setScreen("drive")}
+            title="Google Drive"
           >
             <span aria-hidden="true">☁</span>
             <strong>Google Drive</strong>
@@ -119,8 +146,20 @@ export default function App() {
           </button>
 
           <button
+            className="workflow-step"
+            onClick={() => { void handleOpenBackupGuard(); }}
+            title="Apri Backup Guard"
+            disabled={openingBackupGuard}
+          >
+            <span aria-hidden="true">⧉</span>
+            <strong>{openingBackupGuard ? "Apro Backup Guard…" : "Backup Guard"}</strong>
+            <small>Seconda copia di sicurezza</small>
+          </button>
+
+          <button
             className={screen === "impostazioni" ? "workflow-step workflow-step--active" : "workflow-step"}
             onClick={() => setScreen("impostazioni")}
+            title="Impostazioni"
           >
             <span aria-hidden="true">⚙</span>
             <strong>Impostazioni</strong>
@@ -136,11 +175,23 @@ export default function App() {
 
       {/* ── Main workspace ──────────────────────────────────────────── */}
       <main className="workspace">
+        {backupGuardFeedback && (
+          <div className="message-box" role="status" style={{ marginBottom: "0.9rem" }}>
+            <p style={{ margin: 0 }}>{backupGuardFeedback}</p>
+          </div>
+        )}
+        {screen === "sd" && detectedSdPath && (
+          <SdCardPreviewPanel
+            sdPath={detectedSdPath}
+            onStartImport={() => setScreen("nuovo")}
+          />
+        )}
         {(screen === "nuovo" || screen === "impostazioni") && (
           <NuovoLavoroPanel
             onImportDone={handleImportDone}
             activeView={screen === "impostazioni" ? "impostazioni" : "nuovo"}
             existingJobImportId={existingJobImportId}
+            initialSdPath={screen === "nuovo" ? detectedSdPath : null}
           />
         )}
         <div style={{ display: screen === "archivio" ? "block" : "none" }} aria-hidden={screen !== "archivio"}>

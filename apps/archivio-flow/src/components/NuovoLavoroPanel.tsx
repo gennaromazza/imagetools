@@ -18,6 +18,8 @@ import {
   syncArchivioDriveRegistry,
   startArchivioImport,
   notifyBackupGuardProject,
+  getArchivioStartAtLogin,
+  setArchivioStartAtLogin,
 } from "../archivioDesktopApi";
 import { DesktopPreviewImage } from "./DesktopPreviewImage";
 import { FilterRangePickerModal } from "./FilterRangePickerModal";
@@ -27,6 +29,7 @@ interface Props {
   onImportDone: (result: ImportResult) => void;
   activeView?: "nuovo" | "impostazioni";
   existingJobImportId?: string | null;
+  initialSdPath?: string | null;
 }
 
 type CategoryLayout = "year-category" | "category-year" | "category-only" | "custom";
@@ -102,6 +105,7 @@ interface ImportUiPreferences {
 }
 
 const IMPORT_UI_PREFERENCES_KEY = "filex.archivio-flow.import-ui-preferences";
+const SETTINGS_OPEN_SECTION_KEY = "filex.archivio-flow.settings-open-section";
 
 function readImportUiPreferences(): ImportUiPreferences {
   const fallback: ImportUiPreferences = {
@@ -135,12 +139,7 @@ function buildFolderPreview(nomeLavoro: string, dataLavoro: string): string {
 }
 
 function buildSafeFolderSegment(value: string): string {
-  return value
-    .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
-    .replace(/[\\/]/g, "")
-    .replace(/\.+/g, ".")
-    .replace(/^\.+|\.+$/g, "");
+  return value.split(/[\\/]+/).map((segment) => segment.trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/\.+/g, ".").replace(/^\.+|\.+$/g, "")).filter(Boolean).join("\\");
 }
 
 function formatDurationSeconds(seconds: number): string {
@@ -217,11 +216,11 @@ async function showCompletionDesktopNotification(title: string, body: string) {
   }
 }
 
-export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJobImportId = null }: Props) {
+export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJobImportId = null, initialSdPath = null }: Props) {
   const initialImportPreferencesRef = useRef(readImportUiPreferences());
   // ── SD detection ────────────────────────────────────────────────────────────
   const [sdCards, setSdCards] = useState<SdCard[]>([]);
-  const [sdPath, setSdPath] = useState("");
+  const [sdPath, setSdPath] = useState(() => initialSdPath ?? "");
   const [sdPreview, setSdPreview] = useState<SdPreview | null>(null);
   const [loadingSd, setLoadingSd] = useState(false);
   const [refreshingSd, setRefreshingSd] = useState(false);
@@ -231,6 +230,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const [studioFlowStatus, setStudioFlowStatus] = useState<StudioFlowStatus | null>(null);
   const [studioFlowBusy, setStudioFlowBusy] = useState(false);
   const [studioFlowError, setStudioFlowError] = useState<string | null>(null);
+  const [startupAtLogin, setStartupAtLogin] = useState<boolean | null>(null);
+  const [savingStartupAtLogin, setSavingStartupAtLogin] = useState(false);
+  const [openSettingsSection, setOpenSettingsSection] = useState<"studioflow" | "categorie" | null>(() => {
+    const stored = window.localStorage.getItem(SETTINGS_OPEN_SECTION_KEY);
+    return stored === "studioflow" || stored === "categorie" ? stored : null;
+  });
   const [hasMultipleJobsOnSd, setHasMultipleJobsOnSd] = useState<boolean | null>(null);
   const [showMultiJobConfirm, setShowMultiJobConfirm] = useState(false);
   const [fileNameIncludesFilter, setFileNameIncludesFilter] = useState("");
@@ -269,6 +274,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<ImportResult | null>(null);
   const [importProgress, setImportProgress] = useState<ImportProgressSnapshot | null>(null);
+  const [importStartedAt, setImportStartedAt] = useState<number | null>(null);
   const [importValidationIssues, setImportValidationIssues] = useState<ImportValidationIssue[]>([]);
   const [invalidImportFields, setInvalidImportFields] = useState<Partial<Record<ImportValidationField, true>>>({});
   const [openFolderOnFinish, setOpenFolderOnFinish] = useState(() => initialImportPreferencesRef.current.openFolderOnFinish);
@@ -276,6 +282,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const [soundNotifyOnFinish, setSoundNotifyOnFinish] = useState(() => initialImportPreferencesRef.current.soundNotifyOnFinish);
   const [showAdvancedImportOptions, setShowAdvancedImportOptions] = useState(false);
   const [showQuickAddSetup, setShowQuickAddSetup] = useState(false);
+  const [pendingSubfolderParent, setPendingSubfolderParent] = useState<string | null>(null);
+  const [newNestedSubfolder, setNewNestedSubfolder] = useState("");
   const autoOpenedJobRef = useRef<string | null>(null);
   const notifiedJobRef = useRef<string | null>(null);
   const sourceStepRef = useRef<HTMLDivElement | null>(null);
@@ -451,6 +459,19 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   }, [refreshExistingJobs]);
 
   useEffect(() => {
+    void getArchivioStartAtLogin().then(setStartupAtLogin).catch(() => setStartupAtLogin(null));
+  }, []);
+
+  useEffect(() => {
+    if (openSettingsSection) window.localStorage.setItem(SETTINGS_OPEN_SECTION_KEY, openSettingsSection);
+    else window.localStorage.removeItem(SETTINGS_OPEN_SECTION_KEY);
+  }, [openSettingsSection]);
+
+  useEffect(() => {
+    if (initialSdPath?.trim()) setSdPath(initialSdPath);
+  }, [initialSdPath]);
+
+  useEffect(() => {
     if (!usaLavoroEsistente || !existingJobId) return;
     const selected = jobsEsistenti.find((j) => j.id === existingJobId);
     if (!selected) return;
@@ -465,6 +486,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     setUsaLavoroEsistente(true);
     setExistingJobId(existingJobImportId);
     setExistingJobSearch("");
+    setSottoCartella("");
     setImportValidationState([]);
     setShowQuickAddSetup(true);
   }, [existingJobImportId]);
@@ -669,6 +691,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     setImportError(null);
     setImportSuccess(null);
     setImportProgress(null);
+    setImportStartedAt(null);
 
     const validationIssues = collectImportValidationIssues(effectiveDestinazione);
     if (validationIssues.length > 0) {
@@ -686,6 +709,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       return;
     }
 
+    setImportStartedAt(Date.now());
     setImporting(true);
     try {
       const importResult = await startArchivioImport({
@@ -755,6 +779,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       setImportError(message);
     } finally {
       setImporting(false);
+      setImportStartedAt(null);
     }
   }
 
@@ -804,7 +829,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const mappedFolderPreview = selectedCategoryMapping && !usaLavoroEsistente
     ? renderPreviewPattern(selectedCategoryMapping.jobFolderPattern || "{date} - {client} - {date-dmy}")
     : baseFolderPreview;
-  const folderPreview = mappedFolderPreview === "—" ? "—" : [mappedParentPreview, mappedFolderPreview].filter(Boolean).join("\\");
+  const folderPreview = usaLavoroEsistente
+    ? (selectedExistingJob?.percorsoCartella ?? "—")
+    : (mappedFolderPreview === "—" ? "—" : [mappedParentPreview, mappedFolderPreview].filter(Boolean).join("\\"));
   const safeAutoreFolder = buildSafeFolderSegment(autore);
   const safeSottoCartella = buildSafeFolderSegment(sottoCartella);
   const fotoDestPreview = safeAutoreFolder
@@ -812,6 +839,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       ? `FOTO_SD\\${safeAutoreFolder}\\${safeSottoCartella}`
       : `FOTO_SD\\${safeAutoreFolder}`)
     : "FOTO_SD\\(autore)";
+  const videoDestPreview = safeAutoreFolder
+    ? (safeSottoCartella
+      ? `VIDEO_SD\\${safeAutoreFolder}\\${safeSottoCartella}`
+      : `VIDEO_SD\\${safeAutoreFolder}`)
+    : "VIDEO_SD\\(autore)";
   const categoryFolderPreview = normalizeFolderName(newCategoryName) || "Categoria";
   const proposedCategoryPattern = newCategoryLayout === "custom"
     ? newCategoryPath.trim()
@@ -1105,15 +1137,22 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const bqStepDone = !bqStepVisible || progressPhase === "done";
   const copyProgressPct = (importProgress?.plannedFiles ?? 0) > 0
     ? Math.min(100, Math.round(((importProgress?.completedScheduled ?? 0) / Math.max(importProgress?.plannedFiles ?? 1, 1)) * 100))
-    : (copyStepDone ? 100 : Math.max(3, importProgress?.progressPct ?? 3));
+    : (copyStepDone ? 100 : 0);
   const bqProgressPct = bqStepVisible
     ? (importProgress?.jpgPlanned ?? 0) > 0
       ? Math.min(100, Math.round(((importProgress?.jpgDone ?? 0) / Math.max(importProgress?.jpgPlanned ?? 1, 1)) * 100))
       : (progressPhase === "done" ? 100 : 0)
     : 100;
-  const overallProgressPct = importProgress?.overallProgressPct ?? Math.max(3, importProgress?.progressPct ?? 3);
+  const initialPlannedFiles = filterPreview?.matchedFiles ?? sdPreview?.totalFiles ?? 0;
+  const displayedPlannedFiles = importProgress?.plannedFiles || initialPlannedFiles;
+  const displayedCompletedFiles = importProgress?.completedScheduled ?? 0;
+  const displayedElapsedMs = Math.max(importProgress?.elapsedMs ?? 0, importStartedAt ? Date.now() - importStartedAt : 0);
+  const initialImportTargetFolder = usaLavoroEsistente && selectedExistingJob
+    ? [selectedExistingJob.percorsoCartella, fotoDestPreview].join("\\")
+    : "";
+  const overallProgressPct = importProgress?.overallProgressPct ?? 0;
   const progressPhaseLabel = importProgress?.currentPhaseLabel
-    ?? (progressPhase === "compressing" ? "Compressione JPG" : "Copia in corso");
+    ?? (progressPhase === "compressing" ? "Compressione JPG" : "Preparazione importazione");
 
   function scrollToImportStep(target: React.RefObject<HTMLDivElement | null>) {
     target.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1354,6 +1393,27 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
               Salvataggio automatico impostazioni attivo.
             </span>
 
+            {startupAtLogin !== null && (
+              <label className="message-box" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap", cursor: savingStartupAtLogin ? "wait" : "pointer" }}>
+                <span>
+                  <strong>Avvia Archivio Flow all'accensione di Windows</strong>
+                  <small style={{ display: "block", marginTop: "0.25rem", color: "var(--text-muted)" }}>Resta in background e rileva le SD inserite.</small>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={startupAtLogin}
+                  disabled={savingStartupAtLogin}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    setSavingStartupAtLogin(true);
+                    void setArchivioStartAtLogin(enabled)
+                      .then((result) => { if (result !== null) setStartupAtLogin(result); })
+                      .finally(() => setSavingStartupAtLogin(false));
+                  }}
+                />
+              </label>
+            )}
+
             {settingsFeedback && (
               <div
                 className="message-box"
@@ -1391,11 +1451,20 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       )}
 
       {activeView === "impostazioni" && (
-        <div className="panel-section" style={{ padding: "var(--space-4)" }}>
+        <details
+          className="panel-section settings-disclosure"
+          style={{ padding: "var(--space-4)" }}
+          open={openSettingsSection !== null}
+          onToggle={(event) => {
+            if (event.target !== event.currentTarget) return;
+            if ((event.currentTarget as HTMLDetailsElement).open) setOpenSettingsSection("studioflow");
+            else setOpenSettingsSection(null);
+          }}
+        >
+          <summary><strong>Motore locale StudioFlow</strong><span>›</span></summary>
           <div className="stack">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
               <div>
-                <strong>Motore locale StudioFlow</strong>
                 <p style={{ margin: "0.35rem 0 0", color: "var(--text-muted)" }}>
                   Database {studioFlowStatus?.health.integrity ?? "…"} · schema {studioFlowStatus?.health.schemaVersion ?? "…"} · {archiveIndexLabel}
                 </p>
@@ -1418,10 +1487,16 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             {studioFlowError && <div className="message-box"><p style={{ color: "var(--danger)" }}>{studioFlowError}</p></div>}
             {studioFlowStatus?.archiveIndex.lastError && <div className="message-box"><p style={{ color: "var(--danger)" }}>{studioFlowStatus.archiveIndex.lastError}</p></div>}
 
-            <div className="stack" style={{ gap: "0.85rem" }}>
-              <div>
-                <strong>Dove salvare ogni tipo di lavoro</strong>
-                <p style={{ margin: "0.35rem 0 0", fontSize: "0.86rem", color: "var(--text-muted)" }}>
+            <details className="settings-disclosure settings-disclosure--nested" open={openSettingsSection === "categorie"} onToggle={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if ((event.currentTarget as HTMLDetailsElement).open) setOpenSettingsSection("categorie");
+              else setOpenSettingsSection("studioflow");
+            }}>
+              <summary><strong>Regole categorie</strong><span>›</span></summary>
+              <div className="stack" style={{ gap: "0.85rem", marginTop: "0.85rem" }}>
+                <div>
+                  <strong>Dove salvare ogni tipo di lavoro</strong>
+                  <p style={{ margin: "0.35rem 0 0", fontSize: "0.86rem", color: "var(--text-muted)" }}>
                   Crea una regola per Matrimoni, Battesimi, Shooting o qualsiasi altra categoria. Durante un nuovo lavoro ti basterà scegliere la categoria: Archivio Flow preparerà la destinazione.
                 </p>
               </div>
@@ -1464,7 +1539,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
               </div>
 
               {categoryMappings.length > 0 && <strong style={{ marginTop: "0.35rem" }}>Regole attive</strong>}
-              {categoryMappings.map((mapping) => (
+                {categoryMappings.map((mapping) => (
                 <div key={mapping.id} className="message-box" style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
                   <div>
                     <strong>{mapping.displayName}</strong>
@@ -1477,8 +1552,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                     <button className="ghost-button" onClick={() => setCategoryMappings((items) => items.filter((item) => item.id !== mapping.id))}>Rimuovi</button>
                   </div>
                 </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </details>
             {(studioFlowStatus?.resumable.length ?? 0) > 0 && (
               <div className="stack" style={{ gap: "0.55rem" }}>
                 <strong>Importazioni recuperabili</strong>
@@ -1496,7 +1572,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
               </div>
             )}
           </div>
-        </div>
+        </details>
       )}
 
       {activeView === "nuovo" && (
@@ -1586,26 +1662,49 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                 <span>File JPG</span>
                 <strong>{loadingSd ? "…" : (sdPreview?.jpgFiles ?? "—")}</strong>
               </div>
+              <div className="stat-card">
+                <span>File video</span>
+                <strong>{loadingSd ? "…" : (sdPreview?.videoFiles ?? "—")}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Altri file</span>
+                <strong>{loadingSd ? "…" : (sdPreview?.otherFiles ?? "—")}</strong>
+              </div>
             </div>
           )}
 
           {sdPath.trim() && (
-            <details className="import-advanced-panel">
+            <details
+              className="import-advanced-panel"
+              onToggle={(event) => {
+                if ((event.currentTarget as HTMLDetailsElement).open && !checkingSafe && !safeCheck) {
+                  void handleSafeCheck();
+                }
+              }}
+            >
               <summary>Verifica sicurezza della SD</summary>
               <div className="message-box" style={{
-              borderColor: safeCheck?.status === "SAFE" ? "var(--success)" : safeCheck ? "#d4a35c" : "var(--line)",
-            }}>
+                borderColor: safeCheck?.status === "SAFE" ? "var(--success)" : safeCheck ? "#d4a35c" : "var(--line)",
+              }}>
               <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
                 <div>
                   <strong>Sicurezza formattazione</strong>
                   <p style={{ margin: "0.35rem 0 0", color: "var(--text-muted)" }}>
-                    {safeCheck
-                      ? `${safeCheck.status}: ${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file verificati. ${safeCheck.reason ?? "Tutti i file hanno una copia verificata nell’archivio."}`
-                      : safeCheckError ?? "Controllo fail-closed basato sul contenuto. Nessuna formattazione viene eseguita da questa schermata."}
+                    {checkingSafe
+                      ? "Scansione e confronto con l’archivio in corso: attendi l’esito prima di formattare la SD."
+                      : safeCheck?.status === "SAFE"
+                        ? `Tutto a posto: ${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file hanno una copia identica e verificata nell’archivio.`
+                        : safeCheck?.status === "PARTIAL"
+                          ? `Attenzione: ${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file verificati. ${safeCheck.reason ?? "Non formattare ancora la SD."}`
+                          : safeCheck?.status === "UNSAFE"
+                            ? `Non formattare la SD: ${safeCheck.reason ?? "non risulta alcuna copia verificata nell’archivio."}`
+                            : safeCheck?.status === "UNKNOWN"
+                              ? `Esito non disponibile: ${safeCheck.reason ?? "non è possibile stabilire se la SD sia al sicuro."}`
+                              : safeCheckError ?? "Aprendo questa sezione parte automaticamente il controllo. Nessuna formattazione viene eseguita da qui."}
                   </p>
                 </div>
                 <button className="secondary-button" onClick={handleSafeCheck} disabled={checkingSafe || importing}>
-                  {checkingSafe ? "Verifica in corso…" : "Verifica SD"}
+                  {checkingSafe ? "Verifica in corso…" : safeCheck ? "Ripeti verifica" : "Verifica SD"}
                 </button>
               </div>
               </div>
@@ -1725,7 +1824,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                       disabled={loadingVisualPicker || (!filterPreview && !sdPath.trim())}
                       style={{ padding: "0.45rem 0.8rem", fontSize: "0.84rem" }}
                     >
-                      {loadingVisualPicker ? "Carico tutte le foto..." : "Selettore visuale"}
+                      {loadingVisualPicker ? "Carico i file multimediali..." : "Selettore visuale"}
                     </button>
                   </div>
 
@@ -1745,7 +1844,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                     <div className="message-box" style={{ background: "rgba(255,255,255,0.03)", borderColor: "var(--line)" }}>
                       <p style={{ margin: 0 }}>
                         Match filtro: <strong>{filterPreview.matchedFiles}</strong> file
-                        (RAW {filterPreview.matchedRawFiles}, JPG {filterPreview.matchedJpgFiles})
+                        (foto {filterPreview.matchedRawFiles + filterPreview.matchedJpgFiles}, video {filterPreview.matchedVideoFiles}, altri {filterPreview.matchedOtherFiles})
                       </p>
                       <p style={{ margin: "0.35rem 0 0", fontSize: "0.82rem", color: "var(--text-muted)" }}>
                         Scansionati: {filterPreview.scannedFiles}
@@ -1848,7 +1947,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                               onClick={() => selectPreviewPoint(f.mtimeMs)}
                               title="Clicca per impostare inizio/fine range"
                             >
-                              {f.isJpg ? (
+                              {f.mediaType === "video" || f.isJpg ? (
                                 <DesktopPreviewImage
                                   sdPath={sdPath.trim()}
                                   filePath={f.filePath}
@@ -1869,7 +1968,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                                     fontSize: "0.8rem",
                                   }}
                                 >
-                                  RAW {f.ext.toUpperCase()}
+                                  {f.mediaType === "photo" ? "RAW" : "ALTRO"} {f.ext.toUpperCase()}
                                 </div>
                               )}
                               <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", wordBreak: "break-all" }}>{f.fileName}</div>
@@ -1910,6 +2009,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                   setExistingJobSearch("");
                   clearImportValidationField("nomeLavoro");
                 } else {
+                  setSottoCartella("");
                   clearImportValidationField("existingJobId");
                 }
               }}
@@ -2021,31 +2121,33 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             />
           </label>
 
-          <div className="field">
-            <span>{categoryKey && !destinationOverride ? "Destinazione automatica (override opzionale)" : "Cartella di destinazione"}</span>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <input
-                type="text"
-                value={destinazione}
-                onChange={(e) => {
-                  setDestinazione(e.target.value);
-                  setDestinationOverride(true);
-                  clearImportValidationField("destinazione");
-                }}
-                placeholder="C:\\Foto\\Lavori"
-                style={{ flex: 1, ...getInvalidInputStyle("destinazione") }}
-                disabled={usaLavoroEsistente || (Boolean(categoryKey) && !destinationOverride)}
-              />
-              <button
-                className="secondary-button"
-                onClick={() => handleBrowse("dest")}
-                disabled={browsingField === "dest" || usaLavoroEsistente}
-                style={{ flexShrink: 0, padding: "0.7rem 1rem", whiteSpace: "nowrap" }}
-              >
-                {browsingField === "dest" ? "…" : categoryKey && !destinationOverride ? "Modifica destinazione" : "Sfoglia"}
-              </button>
+          {!usaLavoroEsistente && (
+            <div className="field">
+              <span>{categoryKey && !destinationOverride ? "Destinazione automatica (override opzionale)" : "Cartella di destinazione"}</span>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <input
+                  type="text"
+                  value={destinazione}
+                  onChange={(e) => {
+                    setDestinazione(e.target.value);
+                    setDestinationOverride(true);
+                    clearImportValidationField("destinazione");
+                  }}
+                  placeholder="C:\\Foto\\Lavori"
+                  style={{ flex: 1, ...getInvalidInputStyle("destinazione") }}
+                  disabled={Boolean(categoryKey) && !destinationOverride}
+                />
+                <button
+                  className="secondary-button"
+                  onClick={() => handleBrowse("dest")}
+                  disabled={browsingField === "dest"}
+                  style={{ flexShrink: 0, padding: "0.7rem 1rem", whiteSpace: "nowrap" }}
+                >
+                  {browsingField === "dest" ? "…" : categoryKey && !destinationOverride ? "Modifica destinazione" : "Sfoglia"}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {usaLavoroEsistente && selectedExistingJob && (
             <div className="message-box" style={{ background: "rgba(184, 154, 99, 0.08)", borderColor: "var(--line-strong)" }}>
@@ -2086,7 +2188,14 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                   <button
                     key={cartella}
                     className={sottoCartella === cartella ? "secondary-button" : "ghost-button"}
-                    onClick={() => setSottoCartella(cartella)}
+                    onClick={() => {
+                      if (usaLavoroEsistente) {
+                        setNewNestedSubfolder("");
+                        setPendingSubfolderParent(cartella);
+                      } else {
+                        setSottoCartella(cartella);
+                      }
+                    }}
                     style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}
                   >
                     {cartella}
@@ -2097,19 +2206,23 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
           )}
 
           <p style={{ margin: 0, fontSize: "0.86rem", color: "var(--text-muted)" }}>
-            I file verranno copiati in: <strong>{fotoDestPreview}</strong>
+            Foto in: <strong>{fotoDestPreview}</strong> · Video in: <strong>{videoDestPreview}</strong>
           </p>
 
-          <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)" }}>
-            Predefiniti correnti: <strong>{savedDestinazione || savedArchiveRoot || "(destinazione non impostata)"}</strong>
-            {savedAutore && <> · autore: <strong>{savedAutore}</strong></>}
-          </p>
+          {!usaLavoroEsistente && (
+            <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)" }}>
+              Predefiniti correnti: <strong>{savedDestinazione || savedArchiveRoot || "(destinazione non impostata)"}</strong>
+              {savedAutore && <> · autore: <strong>{savedAutore}</strong></>}
+            </p>
+          )}
 
           {/* Folder name preview */}
           {folderPreview !== "—" && (
             <div className="message-box">
               <p>
-                <span style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>Cartella che verrà creata:  </span>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>
+                  {usaLavoroEsistente ? "Cartella del lavoro esistente:  " : "Cartella che verrà creata:  "}
+                </span>
                 <strong style={{ fontFamily: "monospace", fontSize: "0.9rem" }}>{folderPreview}</strong>
               </p>
             </div>
@@ -2186,7 +2299,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                 <div style={{ width: "100%", height: 12, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
                   <div
                     style={{
-                      width: `${Math.max(3, overallProgressPct)}%`,
+                      width: `${overallProgressPct}%`,
                       height: "100%",
                       background: "linear-gradient(90deg, #b89a63, #9ac69a)",
                       transition: "width 220ms ease",
@@ -2195,9 +2308,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", color: "var(--text-muted)", fontSize: "0.82rem" }}>
                   <span>
-                    {(importProgress?.completedWorkItems ?? 0)}/{Math.max(importProgress?.totalWorkItems ?? 0, 0)} operazioni completate
+                    {displayedCompletedFiles}/{displayedPlannedFiles} file completati
                   </span>
-                  <span>Restano {importProgress?.remainingWorkItems ?? 0}</span>
+                  <span>Restano {Math.max(0, displayedPlannedFiles - displayedCompletedFiles)}</span>
                 </div>
               </div>
 
@@ -2247,7 +2360,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                 <div className="stat-card">
                   <span>File totali</span>
                   <strong style={{ fontSize: "1.05rem" }}>
-                    {(importProgress?.completedScheduled ?? 0)}/{Math.max(importProgress?.plannedFiles ?? 0, 0)}
+                    {displayedCompletedFiles}/{displayedPlannedFiles}
                   </strong>
                 </div>
                 <div className="stat-card">
@@ -2261,19 +2374,19 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                   <strong style={{ fontSize: "1.05rem" }}>
                     {importProgress?.estimatedRemainingSec !== null
                       ? formatDurationSeconds(importProgress?.estimatedRemainingSec ?? 0)
-                      : "calcolo..."}
+                      : "in attesa dati reali"}
                   </strong>
                 </div>
               </div>
 
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
-                Trascorso {formatDurationSeconds((importProgress?.elapsedMs ?? 0) / 1000)} · Copiati {importProgress?.copiedFiles ?? 0} · Saltati {importProgress?.skippedFiles ?? 0}
+                Trascorso {formatDurationSeconds(displayedElapsedMs / 1000)} · Copiati {importProgress?.copiedFiles ?? 0} · Saltati {importProgress?.skippedFiles ?? 0}
               </p>
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
                 Velocita trasferimento {formatTransferRate(importProgress?.currentSpeedBytesPerSec)} | File corrente {(importProgress?.currentFileName ?? "").trim() || "calcolo file corrente..."} | JPG BQ {importProgress?.jpgDone ?? 0}/{Math.max(importProgress?.jpgPlanned ?? 0, 0)}
               </p>
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", wordBreak: "break-all" }}>
-                Destinazione: {importProgress?.targetFolder || effectiveDestinazione}
+                Destinazione: {importProgress?.targetFolder || initialImportTargetFolder || effectiveDestinazione}
               </p>
               <div className="button-row" style={{ marginTop: "0.5rem" }}>
                 <button
@@ -2356,8 +2469,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
           <span className="import-step__eyebrow">Passo 3</span>
           <strong>Controlla e importa</strong>
           <p>
-            Tutti i file verranno copiati nella cartella{" "}
-            <code style={{ fontSize: "0.88rem" }}>{fotoDestPreview}</code> del lavoro.
+            Foto in <code style={{ fontSize: "0.88rem" }}>{fotoDestPreview}</code> e video in <code style={{ fontSize: "0.88rem" }}>{videoDestPreview}</code>.
           </p>
           <div className="import-summary" aria-label="Riepilogo importazione">
             <div><span>Origine</span><strong>{sdPath.trim() || "SD da selezionare"}</strong></div>
@@ -2463,6 +2575,42 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
         </div>
       )}
 
+      {pendingSubfolderParent && (
+        <div className="quick-add-modal__backdrop" role="presentation">
+          <div className="panel-section quick-add-modal" role="dialog" aria-modal="true">
+            <div className="stack" style={{ gap: "0.8rem" }}>
+              <div>
+                <span className="import-step__eyebrow">Cartella esistente</span>
+                <h3>{pendingSubfolderParent}</h3>
+                <p>Vuoi aggiungere i file qui oppure creare una sottocartella?</p>
+              </div>
+              <div className="button-row">
+                <button type="button" className="secondary-button" onClick={() => { setSottoCartella(pendingSubfolderParent); setPendingSubfolderParent(null); }}>
+                  Aggiungi in {pendingSubfolderParent}
+                </button>
+              </div>
+              <label className="field">
+                <span>Sottocartella predefinita o personalizzata</span>
+                <input value={newNestedSubfolder} onChange={(event) => setNewNestedSubfolder(event.target.value)} placeholder="es. Camera 2 o Drone" />
+              </label>
+              {cartellePredefinite.length > 0 && (
+                <div className="button-row">
+                  {cartellePredefinite.filter((item) => item !== pendingSubfolderParent).map((item) => (
+                    <button type="button" key={item} className={newNestedSubfolder === item ? "secondary-button" : "ghost-button"} onClick={() => setNewNestedSubfolder(item)}>{item}</button>
+                  ))}
+                </div>
+              )}
+              <div className="button-row" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="ghost-button" onClick={() => setPendingSubfolderParent(null)}>Annulla</button>
+                <button type="button" className="secondary-button" disabled={!newNestedSubfolder.trim()} onClick={() => { setSottoCartella(`${pendingSubfolderParent}\\${newNestedSubfolder}`); setPendingSubfolderParent(null); }}>
+                  Crea sottocartella
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showQuickAddSetup && selectedExistingJob && (
         <div className="quick-add-modal__backdrop" role="presentation">
           <div className="panel-section quick-add-modal" role="dialog" aria-modal="true" aria-labelledby="quick-add-title">
@@ -2495,7 +2643,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                 <span>Oppure crea una nuova cartella</span>
                 <input value={sottoCartella} onChange={(event) => setSottoCartella(event.target.value)} placeholder="es. Cerimonia" />
               </label>
-              <p className="quick-add-modal__destination">Destinazione: <strong>{fotoDestPreview}</strong></p>
+              <p className="quick-add-modal__destination">Foto: <strong>{fotoDestPreview}</strong> · Video: <strong>{videoDestPreview}</strong></p>
               <div className="button-row" style={{ justifyContent: "flex-end" }}>
                 <button type="button" className="ghost-button" onClick={() => setShowQuickAddSetup(false)}>Apri flusso completo</button>
                 <button type="button" className="primary-button" onClick={() => {

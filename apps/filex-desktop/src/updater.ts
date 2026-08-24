@@ -892,6 +892,11 @@ export function openInstalledTool(
 
   const launchEnv: NodeJS.ProcessEnv = { ...process.env, FILEX_TOOL: toolId };
   delete launchEnv.ELECTRON_RUN_AS_NODE;
+  // Un tool installato non deve ereditare il renderer di sviluppo del tool
+  // che l'ha aperto: ad esempio Archivio Flow su :4175 farebbe visualizzare
+  // la sua interfaccia dentro la finestra di Backup Guard.
+  delete launchEnv.FILEX_RENDERER_MODE;
+  delete launchEnv.FILEX_RENDERER_URL;
 
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;

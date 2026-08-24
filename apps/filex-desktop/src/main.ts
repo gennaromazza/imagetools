@@ -337,6 +337,30 @@ const archivioFlowWatchMode = requestedTool.id === "archivio-flow" && process.ar
 let archivioFlowModulePromise: Promise<any> | null = null;
 let imagePartyFrameServerModulePromise: Promise<any> | null = null;
 
+function getArchivioFlowStartupPreferencePath(): string {
+  return join(app.getPath("userData"), "archivio-flow-startup.json");
+}
+
+async function getArchivioFlowStartupPreference(): Promise<boolean | null> {
+  try {
+    const raw = await readFileAsync(getArchivioFlowStartupPreferencePath(), "utf8");
+    const value = JSON.parse(raw) as { enabled?: unknown };
+    return typeof value.enabled === "boolean" ? value.enabled : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setArchivioFlowStartupPreference(enabled: boolean): Promise<boolean> {
+  await writeFileAsync(getArchivioFlowStartupPreferencePath(), `${JSON.stringify({ enabled })}\n`, "utf8");
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    openAsHidden: true,
+    args: enabled ? ["--archivio-flow-watch"] : [],
+  });
+  return app.getLoginItemSettings().openAtLogin;
+}
+
 function resolveReleaseChannel(): DesktopReleaseChannel {
   return process.env.FILEX_RELEASE_CHANNEL === "beta" ? "beta" : "stable";
 }
@@ -1730,6 +1754,14 @@ function registerIpcHandlers(): void {
       height: 0,
     };
   });
+  ipcMain.handle("filex:get-archivio-start-at-login", async () => {
+    const preference = await getArchivioFlowStartupPreference();
+    return preference ?? app.getLoginItemSettings().openAtLogin;
+  });
+  ipcMain.handle("filex:set-archivio-start-at-login", async (_event, enabled: boolean) => {
+    if (typeof enabled !== "boolean") throw new Error("Valore avvio automatico non valido");
+    return await setArchivioFlowStartupPreference(enabled);
+  });
   ipcMain.handle("filex:start-archivio-import", async (_event, input: Record<string, unknown>) => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.importService(input);
@@ -2143,12 +2175,18 @@ if (hasSingleInstanceLock) {
       },
     });
     if (requestedTool.id === "archivio-flow" && process.platform === "win32") {
-      app.setLoginItemSettings({
-        openAtLogin: true,
-        openAsHidden: true,
-        args: ["--archivio-flow-watch"],
-      });
-      writeBootLog(`Archivio Flow SD watcher ${archivioFlowWatchMode ? "started in background" : "startup registration enabled"}`);
+      const startupPreference = await getArchivioFlowStartupPreference();
+      const startupEnabled = startupPreference ?? true;
+      if (startupPreference === null) {
+        await setArchivioFlowStartupPreference(true);
+      } else {
+        app.setLoginItemSettings({
+          openAtLogin: startupEnabled,
+          openAsHidden: true,
+          args: startupEnabled ? ["--archivio-flow-watch"] : [],
+        });
+      }
+      writeBootLog(`Archivio Flow SD watcher ${archivioFlowWatchMode ? "started in background" : startupEnabled ? "startup registration enabled" : "startup registration disabled"}`);
     }
     if (requestedTool.id === "archivio-flow" && archivioFlowWatchMode) {
       createArchivioFlowTray();

@@ -137,6 +137,11 @@
     ]
   },
   "archivio-flow": {
+    "0.1.32": [
+      "Nuova schermata Photo First all'inserimento della SD: mostra subito contenuto, conteggi di foto e video, verifica sicurezza e accesso diretto all'importazione.",
+      "Miniature reali per MP4, MOV e altri video con generazione graduale, feedback di caricamento e cache locale; foto e video vengono archiviati in destinazioni separate.",
+      "Importazione su lavori esistenti più chiara, conteggio dei file prima della copia, avvio automatico con Windows configurabile e collegamento diretto a Backup Guard."
+    ],
     "0.1.30": [
       "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
     ],

@@ -345,6 +345,7 @@ export default {
         "**/node_modules/exiftool-vendored.pl/**",
         "**/node_modules/sharp/**",
         "**/node_modules/@img/**",
+        "**/node_modules/ffmpeg-static/**",
       ],
 
   npmRebuild: false,

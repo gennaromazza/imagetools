@@ -10,19 +10,27 @@ interface Props {
 
 export function DesktopPreviewImage({ sdPath, filePath, alt, style }: Props) {
   const [src, setSrc] = useState<string | null>(null);
+  const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+  const isVideo = /\.(mp4|mov|m4v|avi|mkv|mts|m2ts|mpg|mpeg|3gp|webm)$/i.test(filePath);
 
   useEffect(() => {
     let alive = true;
     let objectUrl: string | null = null;
+    setSrc(null);
+    setStatus("loading");
 
     void getArchivioPreviewImageUrl(sdPath, filePath)
       .then((nextUrl) => {
         if (!alive || !nextUrl) return;
         objectUrl = nextUrl;
         setSrc(nextUrl);
+        setStatus("ready");
       })
       .catch(() => {
-        if (alive) setSrc(null);
+        if (alive) {
+          setSrc(null);
+          setStatus("error");
+        }
       });
 
     return () => {
@@ -49,7 +57,12 @@ export function DesktopPreviewImage({ sdPath, filePath, alt, style }: Props) {
           ...style,
         }}
       >
-        Anteprima
+        {status === "error" ? "Anteprima non disponibile" : (
+          <span className="media-preview-loading">
+            <span className="media-preview-loading__spinner" aria-hidden="true" />
+            {isVideo ? "Genero miniatura video…" : "Carico anteprima foto…"}
+          </span>
+        )}
       </div>
     );
   }

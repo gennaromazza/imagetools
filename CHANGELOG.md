@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-24 - Archivio Flow 0.1.32
+
+- Aggiunta la schermata Photo First alla lettura della SD, con conteggi distinti di foto e video, verifica di sicurezza e avvio del flusso di importazione.
+- Le miniature dei video vengono generate progressivamente con FFmpeg e cache locale; importazione foto e video è organizzata in destinazioni separate.
+- Migliorati importazione su lavori esistenti, conteggio preventivo dei file, avanzamento, impostazioni richiudibili, avvio con Windows e collegamento diretto a Backup Guard.
+
 ## 2026-08-22 - Archivio Flow 0.1.31
 
 - Riorganizzato il flusso di importazione: archivio iniziale, import guidato, aggiunta rapida dei file e cronologia delle ultime importazioni.

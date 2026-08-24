@@ -347,3 +347,19 @@ export async function getArchivioPreviewImageUrl(sdPath: string, filePath: strin
   });
   return URL.createObjectURL(blob);
 }
+
+export async function openBackupGuard(): Promise<{ ok: boolean; message: string }> {
+  const desktopApi = getDesktopApi();
+  if (!desktopApi) return { ok: false, message: "Backup Guard può essere aperto solo dall'app FileX installata." };
+  return await desktopApi.openInstalledTool("backup-guard");
+}
+
+export async function getArchivioStartAtLogin(): Promise<boolean | null> {
+  const desktopApi = getDesktopApi();
+  return desktopApi ? await desktopApi.getArchivioStartAtLogin() : null;
+}
+
+export async function setArchivioStartAtLogin(enabled: boolean): Promise<boolean | null> {
+  const desktopApi = getDesktopApi();
+  return desktopApi ? await desktopApi.setArchivioStartAtLogin(enabled) : null;
+}

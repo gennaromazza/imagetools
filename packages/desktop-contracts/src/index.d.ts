@@ -724,6 +724,8 @@ export interface ArchivioSdPreview {
     totalFiles: number;
     rawFiles: number;
     jpgFiles: number;
+    videoFiles: number;
+    otherFiles: number;
 }
 export interface ArchivioSafeToFormatResult {
     status: "SAFE" | "PARTIAL" | "UNSAFE" | "UNKNOWN";
@@ -930,6 +932,8 @@ export interface ArchivioFilterPreviewData {
     matchedFiles: number;
     matchedRawFiles: number;
     matchedJpgFiles: number;
+    matchedVideoFiles: number;
+    matchedOtherFiles: number;
     minMtimeMs: number | null;
     maxMtimeMs: number | null;
     sampleFiles: Array<{
@@ -939,6 +943,7 @@ export interface ArchivioFilterPreviewData {
         size: number;
         ext: string;
         isJpg: boolean;
+        mediaType: "photo" | "video" | "other";
     }>;
 }
 export interface FileXDesktopApi {
@@ -1061,6 +1066,8 @@ export interface FileXDesktopApi {
         maxSamples?: number;
     }) => Promise<ArchivioFilterPreviewData>;
     getArchivioPreviewImage: (sdPath: string, filePath: string) => Promise<DesktopRenderedImage | null>;
+    getArchivioStartAtLogin: () => Promise<boolean>;
+    setArchivioStartAtLogin: (enabled: boolean) => Promise<boolean>;
     startArchivioImport: (input: ArchivioImportRequest) => Promise<ArchivioImportResult>;
     notifyBackupGuardProject: (notification: BackupGuardProjectNotification) => Promise<{
         ok: boolean;
