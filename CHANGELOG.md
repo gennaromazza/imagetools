@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-24 - FileX Send 0.1.13
+
+- Download multipli diretti per i clienti, con supporto a file di grandi dimensioni e sessioni attive preservate.
+
 ## 2026-08-24 - FileX Suite 0.1.48
 
 ### Correzione aggiornamenti tool

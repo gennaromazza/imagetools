@@ -2,6 +2,8 @@ const credential = decodeURIComponent(location.pathname.replace(/^\/r\//, "").sp
 const loading = document.querySelector("#loading");
 const upload = document.querySelector("#upload");
 const download = document.querySelector("#download");
+const downloadAll = document.querySelector("#downloadAll");
+const downloadAllStatus = document.querySelector("#downloadAllStatus");
 const done = document.querySelector("#done");
 const errorCard = document.querySelector("#error");
 const errorText = document.querySelector("#errorText");
@@ -15,6 +17,7 @@ const fileList = document.querySelector("#fileList");
 const dropZone = document.querySelector("#dropZone");
 const again = document.querySelector("#again");
 let files = [];
+let sharedFiles = [];
 const relativePaths = new WeakMap();
 
 const formatBytes = (bytes) => bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
@@ -26,11 +29,33 @@ const api = async (path, init) => {
 };
 const showError = (message) => { loading.hidden = true; upload.hidden = true; errorText.textContent = message; errorCard.hidden = false; };
 
+function triggerDownload(file) {
+  const link = document.createElement("a");
+  link.href = file.downloadUrl;
+  link.download = file.name;
+  link.rel = "noreferrer";
+  link.style.display = "none";
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+async function downloadAllFiles() {
+  if (!sharedFiles.length || !downloadAll) return;
+  downloadAll.disabled = true;
+  downloadAll.textContent = "Avvio download…";
+  downloadAllStatus.textContent = "Avvio dei download in corso…";
+  sharedFiles.forEach((file) => triggerDownload(file));
+  downloadAll.textContent = `Download avviati · ${sharedFiles.length}`;
+  downloadAllStatus.textContent = "I file vengono scaricati separatamente e senza creare archivi temporanei. Se il browser lo chiede, autorizza i download multipli.";
+}
+
 async function initialize() {
   if (!credential) return showError("Il collegamento non è valido.");
   try {
     const session = await api(`/public/${encodeURIComponent(credential)}`);
     if (session.direction === "send") {
+      sharedFiles = session.files || [];
       document.querySelector("#downloadLabel").textContent = session.label;
       document.querySelector("#downloadExpiry").textContent = `Link valido fino al ${new Date(session.expiresAt).toLocaleString("it-IT")}`;
       const list = document.querySelector("#downloadList");
@@ -39,9 +64,13 @@ async function initialize() {
         const info = document.createElement("div");
         const name = document.createElement("strong"); name.textContent = file.name;
         const size = document.createElement("small"); size.textContent = formatBytes(file.size);
-        const link = document.createElement("a"); link.href = file.downloadUrl; link.textContent = "Scarica"; link.setAttribute("download", file.name);
+        const link = document.createElement("a"); link.href = file.downloadUrl; link.textContent = "Scarica"; link.setAttribute("download", file.name); link.rel = "noreferrer";
         info.append(name, size); row.append(info, link); list.append(row);
       });
+      if (downloadAll) {
+        downloadAll.disabled = sharedFiles.length === 0;
+        downloadAll.textContent = sharedFiles.length ? `Scarica tutti · ${sharedFiles.length}` : "Nessun file disponibile";
+      }
       loading.hidden = true; download.hidden = false; return;
     }
     document.querySelector("#label").textContent = session.label;
@@ -54,6 +83,8 @@ async function initialize() {
 function relativeName(file) {
   return relativePaths.get(file) || file.webkitRelativePath || file.name;
 }
+
+downloadAll?.addEventListener("click", () => { void downloadAllFiles(); });
 
 function setFiles(selected) {
   const known = new Set();

@@ -73,6 +73,9 @@
     ],
     "0.1.12": [
       "Corretto il percorso del logo nell’app pubblicata per garantirne la visualizzazione anche nel pacchetto installato."
+    ],
+    "0.1.13": [
+      "Download multipli diretti per i clienti, con supporto a file di grandi dimensioni e sessioni attive preservate."
     ]
   },
   "cache-sweep": {

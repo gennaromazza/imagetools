@@ -112,16 +112,18 @@ test("condivide file dal PC tramite un link locale protetto", async () => {
     assert.equal(session.receivedFiles.length, 1);
     const page = await (await fetch(session.uploadUrl)).text();
     assert.match(page, /File pronti per te/);
+    assert.match(page, /Scarica tutti/);
     assert.match(page, /listino estate\.pdf/);
     await service.addSendFiles(session.id, [additionalSource]);
     assert.equal(service.getSession(session.id)?.receivedFiles.length, 2);
     assert.equal(service.getSession(session.id)?.receivedFiles.find((file) => file.name === "catalogo autunno.pdf")?.size, Buffer.byteLength("secondo contenuto"));
     const token = new URL(session.uploadUrl).pathname.split("/").pop();
     const base = session.uploadUrl.replace(/\/s\/[^/]+$/, "");
-    const response = await fetch(`${base}/api/session/${token}/downloads/${session.receivedFiles[0].id}`);
-    assert.equal(response.status, 200);
-    assert.equal(await response.text(), "contenuto da consegnare");
-    assert.match(response.headers.get("content-disposition") ?? "", /attachment/);
+    const sharedFiles = service.getSession(session.id)!.receivedFiles;
+    const responses = await Promise.all(sharedFiles.map((file) => fetch(`${base}/api/session/${token}/downloads/${file.id}`)));
+    assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+    assert.deepEqual(await Promise.all(responses.map((response) => response.text())), ["contenuto da consegnare", "secondo contenuto"]);
+    assert.ok(responses.every((response) => /attachment/.test(response.headers.get("content-disposition") ?? "")));
   } finally {
     await service.stop();
     await rm(outputRoot, { recursive: true, force: true });
