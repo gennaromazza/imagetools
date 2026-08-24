@@ -167,7 +167,7 @@ function startSuiteInstallCountdown(version) {
     stopSuiteInstallCountdown();
     suiteUpdateTitle.textContent = `Installazione FileX ${version}`;
     suiteUpdateMessage.textContent = 'FileX e tutti i tool aperti verranno chiusi e riavviati automaticamente.';
-    void api.installSuiteUpdate();
+    void requestSuiteInstall();
   }, 1000);
 }
 
@@ -269,6 +269,22 @@ function renderTools() {
   }).join('') : '<div class="empty">Nessuno strumento in questa sezione.</div>';
 }
 
+async function requestSuiteInstall() {
+  try {
+    const stillOpen = await api.prepareSuiteUpdate();
+    if (stillOpen.length) {
+      const names = stillOpen.map(id => states.find(tool => tool.toolId === id)?.toolName || id).join(', ');
+      pendingForceClose = { kind: 'suite', toolIds: stillOpen };
+      forceCloseMessage.textContent = `Non sono stati chiusi automaticamente: ${names}. Premi “Forza chiusura” per continuare l’aggiornamento di FileX Suite.`;
+      forceCloseDialog.showModal();
+      return;
+    }
+    await api.installSuiteUpdate();
+  } catch (error) {
+    alert(error.message || String(error));
+  }
+}
+
 function renderToolUpdatesSummary() {
   const updates = states.filter(state => state.status === 'update-available');
   toolUpdatesPanel.hidden = updates.length === 0;
@@ -354,7 +370,7 @@ async function install(id, button = null) {
   const installedState = states.find(item => item.toolId === id);
   if (installedState?.installed) {
     const toolName = installedState.toolName || 'il tool';
-    alert(`Aggiornamento di ${toolName} pronto.\n\nFileX proverà a chiudere il tool automaticamente. Se l'installer segnala ancora un processo aperto, chiudi anche FileX Suite per procedere con l'installazione.`);
+    alert(`Aggiornamento di ${toolName} pronto.\n\nFileX proverà a chiudere il tool automaticamente. Se non riesce, potrai premere “Forza chiusura” nella schermata successiva.`);
   }
   if (button) button.textContent = 'Conferma su Windows...';
   const result = await api.applyToolUpdate(job.id);
@@ -404,14 +420,21 @@ document.querySelector('#force-close-confirm').addEventListener('click', async e
   button.disabled = true;
   button.textContent = 'Chiusura...';
   try {
-    await api.forceCloseToolForUpdate(pending.toolId);
-    const result = await api.applyToolUpdate(pending.jobId);
-    if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
-    const reopened = await api.openInstalledTool(pending.toolId);
-    completed = true;
-    forceCloseDialog.close();
-    await refresh();
-    if (!reopened.ok) showToast(`Aggiornamento completato. Apri di nuovo il tool dalla Suite.`);
+    if (pending.kind === 'suite') {
+      await Promise.all(pending.toolIds.map(toolId => api.forceCloseToolForUpdate(toolId)));
+      completed = true;
+      forceCloseDialog.close();
+      await api.installSuiteUpdate();
+    } else {
+      await api.forceCloseToolForUpdate(pending.toolId);
+      const result = await api.applyToolUpdate(pending.jobId);
+      if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
+      const reopened = await api.openInstalledTool(pending.toolId);
+      completed = true;
+      forceCloseDialog.close();
+      await refresh();
+      if (!reopened.ok) showToast(`Aggiornamento completato. Apri di nuovo il tool dalla Suite.`);
+    }
   } catch (error) {
     alert(error.message || String(error));
   } finally {
@@ -626,7 +649,7 @@ suiteUpdateLater.addEventListener('click', () => {
 });
 suiteUpdateInstall.addEventListener('click', () => {
   stopSuiteInstallCountdown();
-  void api.installSuiteUpdate();
+  void requestSuiteInstall();
 });
 suiteUpdateDismiss.addEventListener('click', () => {
   suiteUpdateDeferred = true;

@@ -132,6 +132,7 @@ import {
   getSuiteUpdateState,
   installSuiteUpdate,
 } from "./suite-updater.js";
+import { prepareFileXSuiteUpdate } from "./filex-process-coordinator.js";
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
@@ -1145,6 +1146,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:get-suite-update-state", () => getSuiteUpdateState());
   ipcMain.handle("filex:check-suite-update", () => checkSuiteUpdate());
   ipcMain.handle("filex:install-suite-update", () => installSuiteUpdate());
+  ipcMain.handle("filex:prepare-suite-update", () => prepareFileXSuiteUpdate());
   ipcMain.handle("filex:get-runtime-info", async () => {
     let installedTools: DesktopToolInstallState[] = [];
     try {

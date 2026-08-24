@@ -10,6 +10,7 @@ const api: FileXDesktopApi = {
   getSuiteUpdateState: () => ipcRenderer.invoke("filex:get-suite-update-state"),
   checkSuiteUpdate: () => ipcRenderer.invoke("filex:check-suite-update"),
   installSuiteUpdate: () => ipcRenderer.invoke("filex:install-suite-update"),
+  prepareSuiteUpdate: () => ipcRenderer.invoke("filex:prepare-suite-update"),
   onSuiteUpdateState: (listener) => {
     const wrappedListener = (_event: IpcRendererEvent, state: Parameters<typeof listener>[0]) => {
       listener(state);

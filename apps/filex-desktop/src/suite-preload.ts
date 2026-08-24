@@ -13,6 +13,7 @@ const suiteApi = {
   getSuiteUpdateState: () => ipcRenderer.invoke("filex:get-suite-update-state"),
   checkSuiteUpdate: () => ipcRenderer.invoke("filex:check-suite-update"),
   installSuiteUpdate: () => ipcRenderer.invoke("filex:install-suite-update"),
+  prepareSuiteUpdate: (): Promise<DesktopToolId[]> => ipcRenderer.invoke("filex:prepare-suite-update"),
   onSuiteUpdateState: (listener: (state: DesktopSuiteUpdateState) => void) => {
     const wrappedListener = (_event: electron.IpcRendererEvent, state: DesktopSuiteUpdateState) => listener(state);
     ipcRenderer.on("filex:suite-update-state", wrappedListener);

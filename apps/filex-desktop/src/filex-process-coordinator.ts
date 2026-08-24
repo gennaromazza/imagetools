@@ -4,6 +4,7 @@ import { shell } from "electron";
 import type { DesktopToolId } from "@photo-tools/desktop-contracts";
 import {
   desktopToolManifest,
+  getSuiteManagedTools,
   type DesktopToolDescriptor,
 } from "./tool-manifest.js";
 
@@ -169,4 +170,19 @@ export async function forceCloseFileXTool(toolId: DesktopToolId): Promise<void> 
   if (!(await waitUntilProcessesExit(processNames, TOOL_FORCE_SHUTDOWN_TIMEOUT_MS))) {
     throw new Error(`Non è stato possibile chiudere ${desktopToolManifest[toolId].displayName}.`);
   }
+}
+
+/** Tenta la chiusura ordinata dei tool prima dell'aggiornamento della Suite. */
+export async function prepareFileXSuiteUpdate(): Promise<DesktopToolId[]> {
+  const stillOpen = await Promise.all(
+    getSuiteManagedTools().map(async (tool) => {
+      try {
+        await stopFileXTool(tool.id);
+        return null;
+      } catch {
+        return tool.id;
+      }
+    }),
+  );
+  return stillOpen.filter((toolId): toolId is DesktopToolId => toolId !== null);
 }

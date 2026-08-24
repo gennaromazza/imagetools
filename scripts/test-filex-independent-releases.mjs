@@ -119,7 +119,7 @@ assert(
     && toolProcessCoordinator.includes("shell.openPath(installerPath)")
     && !toolProcessCoordinator.includes('spawn(installerPath, ["/S"]')
     && launcher.includes("Conferma su Windows...")
-    && launcher.includes("Se l'installer segnala ancora un processo aperto, chiudi anche FileX Suite"),
+    && launcher.includes("potrai premere “Forza chiusura” nella schermata successiva."),
   "La Suite non apre visibilmente gli installer per consentire la conferma di SmartScreen.",
 );
 for (const excludedDependency of ["@img", "exiftool-vendored", "exiftool-vendored.exe", "sharp"]) {

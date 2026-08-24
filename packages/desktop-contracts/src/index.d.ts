@@ -952,6 +952,7 @@ export interface FileXDesktopApi {
     getSuiteUpdateState: () => Promise<DesktopSuiteUpdateState>;
     checkSuiteUpdate: () => Promise<DesktopSuiteUpdateState>;
     installSuiteUpdate: () => Promise<DesktopSuiteUpdateState>;
+    prepareSuiteUpdate: () => Promise<DesktopToolId[]>;
     onSuiteUpdateState: (listener: (state: DesktopSuiteUpdateState) => void) => () => void;
     listAvailableTools: (channel?: DesktopReleaseChannel) => Promise<DesktopToolInstallState[]>;
     checkToolUpdate: (toolId: DesktopToolId, currentVersion?: string | null, channel?: DesktopReleaseChannel) => Promise<DesktopToolUpdateCheckResult>;

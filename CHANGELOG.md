@@ -30,6 +30,13 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-24 - FileX Suite 0.1.47
+
+### Aggiornamento della Suite
+- Esteso il controllo di chiusura dei processi anche all'aggiornamento di FileX Suite.
+- Se un tool impedisce l'installazione della Suite, viene mostrato il pulsante “Forza chiusura” direttamente nella Suite, senza richiedere operazioni manuali in Windows.
+- Aggiornato il messaggio degli update dei tool per indirizzare l'utente al pulsante di chiusura assistita.
+
 ## 2026-08-24 - FileX Suite 0.1.46
 
 ### Aggiornamenti e affidabilità

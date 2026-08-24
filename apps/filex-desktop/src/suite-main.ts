@@ -29,6 +29,7 @@ import {
   installSuiteUpdate,
 } from "./suite-updater.js";
 import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
+import { prepareFileXSuiteUpdate } from "./filex-process-coordinator.js";
 import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState } from "./license-service.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, shell, Tray } = electron;
@@ -302,6 +303,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:get-suite-update-state", () => getSuiteUpdateState());
   ipcMain.handle("filex:check-suite-update", () => checkSuiteUpdate());
   ipcMain.handle("filex:install-suite-update", () => installSuiteUpdate());
+  ipcMain.handle("filex:prepare-suite-update", () => prepareFileXSuiteUpdate());
   ipcMain.handle("filex:get-runtime-info", async () => {
     const installedTools = await listAvailableTools(releaseChannel()).catch(() => []);
     const runtime: DesktopRuntimeInfo = {
