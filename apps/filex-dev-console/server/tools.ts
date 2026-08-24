@@ -5,6 +5,7 @@ export interface DevTool {
   displayName: string;
   workspace: "@photo-tools/filex-desktop";
   devScript: string;
+  buildScript: string;
   port: number;
   kind: "electron";
   rendererUrl: string;
@@ -34,6 +35,10 @@ export const DEV_TOOLS: DevTool[] = getSuiteManagedTools().map((tool) => {
     displayName: tool.displayName,
     workspace: "@photo-tools/filex-desktop",
     devScript: `dev:${tool.id}`,
+    // Image Select Pro è l'unico tool il cui script di build storico non
+    // coincide con l'id del manifest. La dashboard deve usare il nome
+    // effettivamente dichiarato nel package del desktop.
+    buildScript: tool.id === "photo-selector-app" ? "build:photo-selector" : `build:${tool.id}`,
     port,
     kind: "electron",
     rendererUrl,

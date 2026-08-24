@@ -112,20 +112,10 @@ async function stopFileXTool(toolId: DesktopToolId): Promise<void> {
   if (await waitUntilProcessesExit(processNames, TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS)) {
     return;
   }
-
-  const stillRunning = listRunningProcessNames();
-  await Promise.all(
-    processNames
-      .filter((name) => stillRunning.has(name))
-      .map((name) => terminateProcess(name, true)),
+  throw new Error(
+    `${desktopToolManifest[toolId].displayName} non si è chiuso in tempo. ` +
+      "Premi ‘Forza chiusura’ per chiuderlo qui e continuare l’aggiornamento.",
   );
-
-  if (!(await waitUntilProcessesExit(processNames, TOOL_FORCE_SHUTDOWN_TIMEOUT_MS))) {
-    throw new Error(
-      `Impossibile chiudere ${desktopToolManifest[toolId].displayName}. ` +
-        "Chiudi il tool manualmente e riprova.",
-    );
-  }
 }
 
 async function openInstallerWithWindows(installerPath: string): Promise<void> {
@@ -164,4 +154,19 @@ export async function installFileXToolUpdate(
   // ShellExecute mostra SmartScreen/UAC e permette all'utente di scegliere
   // "Esegui comunque" anche quando l'installer non e' firmato.
   await openInstallerWithWindows(installerPath);
+}
+
+/** Chiude soltanto il tool scelto dall'utente, inclusi i suoi processi figli. */
+export async function forceCloseFileXTool(toolId: DesktopToolId): Promise<void> {
+  if (process.platform !== "win32" || toolId === "suite-launcher") return;
+  const processNames = executableNamesForTool(toolId);
+  const runningNames = listRunningProcessNames();
+  await Promise.all(
+    processNames
+      .filter((name) => runningNames.has(name))
+      .map((name) => terminateProcess(name, true)),
+  );
+  if (!(await waitUntilProcessesExit(processNames, TOOL_FORCE_SHUTDOWN_TIMEOUT_MS))) {
+    throw new Error(`Non è stato possibile chiudere ${desktopToolManifest[toolId].displayName}.`);
+  }
 }

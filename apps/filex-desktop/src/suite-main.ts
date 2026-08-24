@@ -17,6 +17,7 @@ import {
   applyToolUpdate,
   checkToolUpdate,
   downloadToolUpdate,
+  forceCloseToolForUpdate,
   getUpdateJob,
   listAvailableTools,
   openInstalledTool,
@@ -30,12 +31,16 @@ import {
 import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
 import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState } from "./license-service.js";
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell, Tray } = electron;
+const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, shell, Tray } = electron;
 const suite = desktopToolManifest["suite-launcher"];
 const appUserModelId = `studio.filex.${suite.id}`;
 let mainWindow: BrowserWindowInstance | null = null;
 let dockWindow: BrowserWindowInstance | null = null;
 let tray: TrayInstance | null = null;
+let toolUpdateTimer: NodeJS.Timeout | null = null;
+let lastNotifiedToolUpdateCount: number | null = null;
+const TOOL_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const startsInBackground = process.argv.includes("--filex-background");
 
 const defaultDockState: DesktopDockState = {
   schemaVersion: 2,
@@ -272,6 +277,27 @@ function createTray(): void {
   tray.on("double-click", () => { void createMainWindow(); });
 }
 
+async function checkToolUpdatesInBackground(): Promise<void> {
+  const tools = await listAvailableTools(releaseChannel()).catch(() => []);
+  const count = tools.filter((tool) => tool.status === "update-available").length;
+  if (count > 0 && count !== lastNotifiedToolUpdateCount && Notification.isSupported()) {
+    const notification = new Notification({
+      title: "FileX Suite",
+      body: `${count} ${count === 1 ? "aggiornamento è disponibile" : "aggiornamenti sono disponibili"}. Apri FileX Suite per installarli.`,
+    });
+    notification.on("click", () => { void createMainWindow(); });
+    notification.show();
+  }
+  lastNotifiedToolUpdateCount = count;
+}
+
+function startToolUpdateChecks(): void {
+  void checkToolUpdatesInBackground();
+  if (!toolUpdateTimer) {
+    toolUpdateTimer = setInterval(() => { void checkToolUpdatesInBackground(); }, TOOL_UPDATE_CHECK_INTERVAL_MS);
+  }
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle("filex:get-suite-update-state", () => getSuiteUpdateState());
   ipcMain.handle("filex:check-suite-update", () => checkSuiteUpdate());
@@ -302,6 +328,8 @@ function registerIpcHandlers(): void {
     downloadToolUpdate(toolId, channel ?? releaseChannel()));
   ipcMain.handle("filex:get-tool-update-job", (_event, jobId: string) => getUpdateJob(jobId));
   ipcMain.handle("filex:apply-tool-update", (_event, jobId: string) => applyToolUpdate(jobId));
+  ipcMain.handle("filex:force-close-tool-for-update", (_event, toolId: DesktopToolId) =>
+    forceCloseToolForUpdate(toolId));
   ipcMain.handle("filex:open-installed-tool", (_event, toolId: DesktopToolId, launchArgs?: string[]) => {
     const requiresLicense = desktopToolManifest[toolId]?.licenseRuntime !== "standalone";
     return getLicenseState().then((license) => !requiresLicense || license.canUseTools
@@ -327,7 +355,7 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => focusMainWindow());
+  app.on("second-instance", () => { void createMainWindow(); });
   app.whenReady().then(async () => {
     registerIpcHandlers();
     configureSuiteUpdater({
@@ -340,9 +368,17 @@ if (!hasSingleInstanceLock) {
         }
       },
     });
-    await createMainWindow();
+    if (app.isPackaged && process.platform === "win32") {
+      app.setLoginItemSettings({
+        openAtLogin: true,
+        openAsHidden: true,
+        args: ["--filex-background"],
+      });
+    }
+    if (!startsInBackground) await createMainWindow();
     createTray();
-    await createDock();
+    if (!startsInBackground) await createDock();
+    startToolUpdateChecks();
     if (app.isPackaged) setTimeout(() => { void checkSuiteUpdate(); }, 3500);
   }).catch((error) => {
     console.error("FileX Suite failed to start", error);
@@ -353,6 +389,8 @@ if (!hasSingleInstanceLock) {
 app.on("activate", () => { void createMainWindow(); });
 app.on("window-all-closed", () => undefined);
 app.on("before-quit", () => {
+  if (toolUpdateTimer) clearInterval(toolUpdateTimer);
+  toolUpdateTimer = null;
   tray?.destroy();
   tray = null;
   dockWindow?.destroy();

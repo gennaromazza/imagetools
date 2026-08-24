@@ -18,6 +18,7 @@ import type {
   DesktopToolUpdateJob,
 } from "@photo-tools/desktop-contracts";
 import {
+  forceCloseFileXTool,
   installFileXToolUpdate,
   isFileXToolRunning,
 } from "./filex-process-coordinator.js";
@@ -862,6 +863,10 @@ export async function applyToolUpdate(
 
 export function getUpdateJob(jobId: string): DesktopToolUpdateJob | null {
   return updateJobs.get(jobId) ?? null;
+}
+
+export async function forceCloseToolForUpdate(toolId: DesktopToolId): Promise<void> {
+  await forceCloseFileXTool(toolId);
 }
 
 export function openInstalledTool(

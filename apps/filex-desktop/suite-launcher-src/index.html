@@ -43,12 +43,28 @@
           <button id="suite-update-dismiss" type="button" hidden aria-label="Chiudi">×</button>
         </div>
       </section>
+      <section id="tool-updates-panel" class="suite-update-panel" hidden aria-live="polite">
+        <div class="suite-update-copy">
+          <span class="suite-update-badge">AGGIORNAMENTI TOOL</span>
+          <strong id="tool-updates-title">Aggiornamenti disponibili</strong>
+          <span id="tool-updates-message"></span>
+        </div>
+        <div class="suite-update-actions"><button id="tool-updates-show" type="button">Vedi aggiornamenti</button></div>
+      </section>
       <section class="hero-card"><div><span class="hero-kicker">FILEX SUITE</span><h2>Tutto il tuo studio.<br>Da un solo posto.</h2><p>Seleziona, impagina, stampa, archivia e consegna senza riempire il desktop di collegamenti.</p></div><div class="hero-orbit"><span></span><svg><use href="#i-suite"/></svg></div></section>
       <section class="section-head"><div><h2 id="grid-title">Strumenti</h2><p id="grid-subtitle">Accesso rapido ai tuoi workflow fotografici.</p></div><button id="install-missing-btn" class="secondary-action">Installa mancanti</button></section>
       <section id="tools-grid" class="tools-grid"></section>
       <section class="suite-status"><div><strong>Stato Suite</strong><span id="runtime-info">Caricamento...</span></div><div class="license-summary"><strong id="license-summary-title">Licenza FileX</strong><span id="license-summary-copy">Verifica in corso...</span><button id="license-summary-button" class="secondary-action" type="button">Gestisci</button></div><button id="check-suite-update-btn" class="secondary-action" type="button">Aggiorna FileX Suite</button></section>
     </main>
   </div>
+  <dialog id="force-close-dialog" class="sections-dialog">
+    <div class="sections-dialog-card">
+      <header><div><p class="eyebrow">AGGIORNAMENTO IN ATTESA</p><h2>Il tool è ancora aperto</h2></div></header>
+      <p id="force-close-message">Per proseguire, chiudi il tool.</p>
+      <p class="dialog-help">Forza chiusura termina soltanto questo tool e i suoi processi collegati. Eventuali modifiche non salvate potrebbero andare perse.</p>
+      <footer><button id="force-close-cancel" class="secondary-action" type="button">Annulla</button><button id="force-close-confirm" class="danger-action" type="button">Forza chiusura</button></footer>
+    </div>
+  </dialog>
   <dialog id="sections-dialog" class="sections-dialog">
     <form method="dialog" class="sections-dialog-card">
       <header><div><p class="eyebrow">ORGANIZZAZIONE</p><h2 id="sections-dialog-title">Le tue sezioni</h2></div><button class="dialog-close" value="cancel" aria-label="Chiudi">×</button></header>

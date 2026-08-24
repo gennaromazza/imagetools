@@ -120,6 +120,7 @@ import {
   applyToolUpdate,
   checkToolUpdate,
   downloadToolUpdate,
+  forceCloseToolForUpdate,
   getUpdateJob,
   listAvailableTools,
   openInstalledTool,
@@ -1223,6 +1224,8 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("filex:get-tool-update-job", (_event, jobId: string) => getUpdateJob(jobId));
   ipcMain.handle("filex:apply-tool-update", async (_event, jobId: string) => applyToolUpdate(jobId));
+  ipcMain.handle("filex:force-close-tool-for-update", async (_event, toolId: DesktopToolId) =>
+    forceCloseToolForUpdate(toolId));
   ipcMain.handle(
     "filex:open-installed-tool",
     async (_event, toolId: DesktopToolId, launchArgs?: string[]) => openInstalledTool(toolId, launchArgs),

@@ -30,6 +30,14 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-24 - FileX Suite 0.1.46
+
+### Aggiornamenti e affidabilità
+- FileX Suite controlla periodicamente gli aggiornamenti dei tool anche in background e mostra una notifica Windows quando sono disponibili nuove versioni.
+- Aggiunto un riepilogo centrale degli aggiornamenti nella Suite, con accesso diretto ai tool da aggiornare.
+- Se un tool non si chiude automaticamente prima dell'installazione, la Suite propone il pulsante “Forza chiusura”, senza richiedere Gestione attività o la tray di Windows.
+- Dopo una chiusura forzata e l'aggiornamento riuscito, la Suite prova a riaprire automaticamente il tool.
+
 ## 2026-08-24 - Archivio Flow 0.1.32
 
 - Aggiunta la schermata Photo First alla lettura della SD, con conteggi distinti di foto e video, verifica di sicurezza e avvio del flusso di importazione.

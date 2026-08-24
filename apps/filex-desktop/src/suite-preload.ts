@@ -26,6 +26,8 @@ const suiteApi = {
     ipcRenderer.invoke("filex:download-tool-update", toolId, channel),
   getToolUpdateJob: (jobId: string) => ipcRenderer.invoke("filex:get-tool-update-job", jobId),
   applyToolUpdate: (jobId: string) => ipcRenderer.invoke("filex:apply-tool-update", jobId),
+  forceCloseToolForUpdate: (toolId: DesktopToolId) =>
+    ipcRenderer.invoke("filex:force-close-tool-for-update", toolId),
   openInstalledTool: (toolId: DesktopToolId, launchArgs?: string[]) =>
     ipcRenderer.invoke("filex:open-installed-tool", toolId, launchArgs),
   getSuiteDockState: (): Promise<DesktopDockState> => ipcRenderer.invoke("filex:get-suite-dock-state"),

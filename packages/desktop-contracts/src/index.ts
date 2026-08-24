@@ -1164,6 +1164,7 @@ export interface FileXDesktopApi {
   ) => Promise<DesktopToolUpdateJob>;
   getToolUpdateJob: (jobId: string) => Promise<DesktopToolUpdateJob | null>;
   applyToolUpdate: (jobId: string) => Promise<DesktopToolUpdateJob>;
+  forceCloseToolForUpdate: (toolId: DesktopToolId) => Promise<void>;
   openInstalledTool: (
     toolId: DesktopToolId,
     launchArgs?: string[],

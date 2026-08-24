@@ -14,6 +14,11 @@ const suiteUpdateRetry = document.querySelector('#suite-update-retry');
 const suiteUpdateLater = document.querySelector('#suite-update-later');
 const suiteUpdateInstall = document.querySelector('#suite-update-install');
 const suiteUpdateDismiss = document.querySelector('#suite-update-dismiss');
+const toolUpdatesPanel = document.querySelector('#tool-updates-panel');
+const toolUpdatesTitle = document.querySelector('#tool-updates-title');
+const toolUpdatesMessage = document.querySelector('#tool-updates-message');
+const forceCloseDialog = document.querySelector('#force-close-dialog');
+const forceCloseMessage = document.querySelector('#force-close-message');
 const sectionsDialog = document.querySelector('#sections-dialog');
 const sectionsDialogTitle = document.querySelector('#sections-dialog-title');
 const sectionsDialogContent = document.querySelector('#sections-dialog-content');
@@ -49,6 +54,7 @@ let suiteInstallTimer = null;
 let suiteInstallSeconds = 0;
 let toastTimer = null;
 let renamingCategoryIndex = null;
+let pendingForceClose = null;
 
 function readStoredOrganization() {
   try {
@@ -263,6 +269,14 @@ function renderTools() {
   }).join('') : '<div class="empty">Nessuno strumento in questa sezione.</div>';
 }
 
+function renderToolUpdatesSummary() {
+  const updates = states.filter(state => state.status === 'update-available');
+  toolUpdatesPanel.hidden = updates.length === 0;
+  if (!updates.length) return;
+  toolUpdatesTitle.textContent = `${updates.length} ${updates.length === 1 ? 'aggiornamento disponibile' : 'aggiornamenti disponibili'}`;
+  toolUpdatesMessage.textContent = updates.map(state => state.toolName).join(' · ');
+}
+
 function normalizeCategoryName(value) {
   return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 32);
 }
@@ -314,6 +328,7 @@ function refreshOrganizationViews() {
   if (!allCategories().includes(activeCategory)) activeCategory = 'Tutti';
   renderNav();
   renderTools();
+  renderToolUpdatesSummary();
 }
 async function refresh() {
   const [runtime, tools] = await Promise.all([api.getRuntimeInfo(), api.listAvailableTools()]);
@@ -321,6 +336,7 @@ async function refresh() {
   document.querySelector('#suite-version').textContent = `FileX ${runtime.appVersion}`;
   document.querySelector('#runtime-info').textContent = `${tools.filter(x=>x.installed).length}/${tools.length} tool installati · canale ${runtime.releaseChannel}`;
   renderTools();
+  renderToolUpdatesSummary();
 }
 async function install(id, button = null) {
   const originalLabel = button?.textContent;
@@ -342,7 +358,15 @@ async function install(id, button = null) {
   }
   if (button) button.textContent = 'Conferma su Windows...';
   const result = await api.applyToolUpdate(job.id);
-  if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
+  if (result.status !== 'completed') {
+    if (result.error?.includes('Forza chiusura')) {
+      pendingForceClose = { toolId: id, jobId: job.id, button, originalLabel };
+      forceCloseMessage.textContent = `${toolName} non si è chiuso automaticamente. Premi “Forza chiusura” e FileX completerà l’aggiornamento.`;
+      forceCloseDialog.showModal();
+      return;
+    }
+    throw new Error(result.error || 'Installazione non riuscita');
+  }
   await new Promise(resolve => setTimeout(resolve, 1200));
   await refresh();
   if (button) { button.disabled = false; button.textContent = originalLabel || 'Aggiorna'; }
@@ -351,6 +375,52 @@ nav.addEventListener('click', e => { const b=e.target.closest('[data-category]')
 search.addEventListener('input', renderTools);
 toolsGrid.addEventListener('click', async e => { const b=e.target.closest('[data-action]'); if(!b)return; const {action,id}=b.dataset; if(action==='favorite'){ favorites.has(id)?favorites.delete(id):favorites.add(id); localStorage.setItem('filex-favorites',JSON.stringify([...favorites])); renderTools(); return; } if(action==='sections'){ openToolSectionsDialog(id); return; } try { if(action==='open'){ b.disabled=true; const result=await api.openInstalledTool(id); if(!result.ok) throw new Error(result.message); recent=[id,...recent.filter(x=>x!==id)].slice(0,6); localStorage.setItem('filex-recent',JSON.stringify(recent)); b.disabled=false; } else await install(id,b); } catch(error){ b.disabled=false; alert(error.message||String(error)); } });
 document.querySelector('#manage-sections-btn').addEventListener('click', openManageSectionsDialog);
+document.querySelector('#tool-updates-show').addEventListener('click', () => {
+  activeCategory = 'Tutti';
+  title.textContent = 'Aggiornamenti disponibili';
+  gridTitle.textContent = 'Aggiornamenti disponibili';
+  gridSubtitle.textContent = 'Aggiorna i tool contrassegnati con “Aggiornamento”.';
+  search.value = '';
+  renderNav();
+  toolsGrid.innerHTML = '';
+  const currentStates = states;
+  states = currentStates.filter(state => state.status === 'update-available');
+  renderTools();
+  states = currentStates;
+});
+document.querySelector('#force-close-cancel').addEventListener('click', () => {
+  if (pendingForceClose?.button) {
+    pendingForceClose.button.disabled = false;
+    pendingForceClose.button.textContent = pendingForceClose.originalLabel || 'Aggiorna';
+  }
+  pendingForceClose = null;
+  forceCloseDialog.close();
+});
+document.querySelector('#force-close-confirm').addEventListener('click', async event => {
+  const pending = pendingForceClose;
+  if (!pending) return;
+  const button = event.currentTarget;
+  let completed = false;
+  button.disabled = true;
+  button.textContent = 'Chiusura...';
+  try {
+    await api.forceCloseToolForUpdate(pending.toolId);
+    const result = await api.applyToolUpdate(pending.jobId);
+    if (result.status !== 'completed') throw new Error(result.error || 'Installazione non riuscita');
+    const reopened = await api.openInstalledTool(pending.toolId);
+    completed = true;
+    forceCloseDialog.close();
+    await refresh();
+    if (!reopened.ok) showToast(`Aggiornamento completato. Apri di nuovo il tool dalla Suite.`);
+  } catch (error) {
+    alert(error.message || String(error));
+  } finally {
+    if (completed) pendingForceClose = null;
+    button.disabled = false;
+    button.textContent = 'Forza chiusura';
+    if (completed && pending.button) { pending.button.disabled = false; pending.button.textContent = pending.originalLabel || 'Aggiorna'; }
+  }
+});
 document.querySelector('#license-btn').addEventListener('click', openLicenseDialog);
 document.querySelector('#license-summary-button').addEventListener('click', openLicenseDialog);
 document.querySelector('#license-refresh').addEventListener('click', async event => {

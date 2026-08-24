@@ -23,6 +23,7 @@ const api: FileXDesktopApi = {
   downloadToolUpdate: (toolId, channel) => ipcRenderer.invoke("filex:download-tool-update", toolId, channel),
   getToolUpdateJob: (jobId) => ipcRenderer.invoke("filex:get-tool-update-job", jobId),
   applyToolUpdate: (jobId) => ipcRenderer.invoke("filex:apply-tool-update", jobId),
+  forceCloseToolForUpdate: (toolId) => ipcRenderer.invoke("filex:force-close-tool-for-update", toolId),
   openInstalledTool: (toolId, launchArgs) => ipcRenderer.invoke("filex:open-installed-tool", toolId, launchArgs),
   getSuiteDockState: () => ipcRenderer.invoke("filex:get-suite-dock-state"),
   saveSuiteDockState: (state) => ipcRenderer.invoke("filex:save-suite-dock-state", state),

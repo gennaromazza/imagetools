@@ -428,7 +428,7 @@ app.post("/api/tools/:id/check", async (req, res) => {
   const result = await startProcess(
     logId,
     `Verifica ${tool.displayName}`,
-    workspaceScript(tool.workspace, `build:${tool.id}`),
+    workspaceScript(tool.workspace, tool.buildScript),
     { cwd: ROOT },
   );
   res.json({ ok: result.ok, error: result.error, id: logId, toolId: tool.id });
