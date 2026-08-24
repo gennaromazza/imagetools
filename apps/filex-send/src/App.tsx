@@ -163,7 +163,7 @@ export function App() {
 
   return <main className="app-shell">
     <header className="topbar">
-      <div className="brand"><img className="brand-mark" src="/filex-send-logo.png" alt="Logo FileX Send" /><div><strong>FileX Send</strong><small>Consegna semplice di foto e video</small></div></div>
+      <div className="brand"><img className="brand-mark" src="./filex-send-logo.png" alt="Logo FileX Send" /><div><strong>FileX Send</strong><small>Consegna semplice di foto e video</small></div></div>
       <div className={`network-pill ${snapshot.warning ? "warning" : ""}`}><span />{snapshot.mode === "remote" ? "Sessione Internet" : snapshot.warning ? "Rete da verificare" : "Sistema pronto"}</div>
     </header>
     {(snapshot.sessions.length > 0 || snapshot.history.length > 0) && <SessionBar snapshot={snapshot} creating={creatingSession} dashboard={showDashboard} selectSession={selectSession} showOverview={() => { setShowDashboard(true); setCreatingSession(false); }} newSession={newSession} />}

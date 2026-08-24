@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-24 - FileX Send 0.1.12
+
+- Corretto il percorso del logo nell’app pubblicata per garantirne la visualizzazione anche nel pacchetto installato.
+
 ## 2026-08-24 - FileX Send 0.1.11
 
 - Drag and drop e selezione ricorsiva di file e cartelle, storico ricercabile e cancellabile, modifica della scadenza dei link e interfaccia aggiornata.
