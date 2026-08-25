@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - FileX Suite 0.1.53
+
+### Chiusura parallela più leggera e robusta
+- I tool chiusi in parallelo condividono gli snapshot di `tasklist.exe`, evitando process-listing duplicati durante l'aggiornamento.
+- I nomi processo non validi vengono segnalati nei log e l'apertura dell'installer ritenta automaticamente in caso di errore temporaneo.
+
 ## 2026-08-25 - FileX Suite 0.1.52
 
 ### Chiusura tool senza bloccare Electron

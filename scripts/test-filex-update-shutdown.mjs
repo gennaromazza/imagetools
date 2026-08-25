@@ -29,6 +29,9 @@ assert(
     && coordinator.includes('const execFileAsync = promisify(execFile)')
     && !coordinator.includes("execFileSync")
     && coordinator.includes("SAFE_PROCESS_NAME = /^[a-z0-9_.-]+$/i")
+    && coordinator.includes("class ProcessSnapshotCache")
+    && coordinator.includes("processSnapshotCache.get()")
+    && coordinator.includes("openInstallerWithRetry")
     && coordinator.includes("taskkill non riuscito"),
   "Il coordinatore usa ancora chiamate sincrone o non protegge il fallback taskkill.",
 );

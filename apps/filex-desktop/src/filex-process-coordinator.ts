@@ -36,7 +36,13 @@ function executableNamesForTool(toolId: DesktopToolId): string[] {
         ...(descriptor.legacyExecutableNames ?? []),
       ]
         .map(normalizeProcessName)
-        .filter((name) => SAFE_PROCESS_NAME.test(name)),
+        .filter((name) => {
+          const valid = SAFE_PROCESS_NAME.test(name);
+          if (!valid) {
+            console.warn(`Nome processo non valido ignorato per ${toolId}: "${name}"`);
+          }
+          return valid;
+        }),
     ),
   );
 }
@@ -68,8 +74,26 @@ async function listRunningProcessNames(): Promise<Set<string>> {
   }
 }
 
+/** Condivide uno snapshot del tasklist tra tutti i tool chiusi in parallelo. */
+class ProcessSnapshotCache {
+  private pending: Promise<Set<string>> | null = null;
+  private lastFetch = 0;
+
+  async get(): Promise<Set<string>> {
+    const now = Date.now();
+    if (this.pending && now - this.lastFetch < TOOL_SHUTDOWN_POLL_INTERVAL_MS) {
+      return this.pending;
+    }
+    this.lastFetch = now;
+    this.pending = listRunningProcessNames();
+    return this.pending;
+  }
+}
+
+const processSnapshotCache = new ProcessSnapshotCache();
+
 async function isAnyProcessRunning(processNames: readonly string[]): Promise<boolean> {
-  const runningNames = await listRunningProcessNames();
+  const runningNames = await processSnapshotCache.get();
   return processNames.some((name) => runningNames.has(name));
 }
 
@@ -193,6 +217,20 @@ async function openInstallerWithWindows(installerPath: string): Promise<void> {
   }
 }
 
+async function openInstallerWithRetry(installerPath: string): Promise<void> {
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await openInstallerWithWindows(installerPath);
+      return;
+    } catch (error) {
+      if (attempt === attempts) throw error;
+      console.warn(`Apertura installer fallita (tentativo ${attempt}/${attempts}); nuovo tentativo.`);
+      await delay(1_500);
+    }
+  }
+}
+
 export async function isFileXToolRunning(toolId: DesktopToolId): Promise<boolean> {
   if (process.platform !== "win32" || toolId === "suite-launcher") {
     return false;
@@ -221,7 +259,7 @@ export async function installFileXToolUpdate(
 
   // ShellExecute mostra SmartScreen/UAC e permette all'utente di scegliere
   // "Esegui comunque" anche quando l'installer non e' firmato.
-  await openInstallerWithWindows(installerPath);
+  await openInstallerWithRetry(installerPath);
 }
 
 /** Chiude soltanto il tool scelto dall'utente, inclusi i suoi processi figli. */
