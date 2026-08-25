@@ -13,6 +13,7 @@ import {
 } from "node:url";
 import {
   getDesktopToolOrDefault,
+  getSuiteManagedTools,
 } from "./.output/electron/tool-manifest.js";
 
 const __dirname = dirname(
@@ -175,6 +176,50 @@ function buildNsisIncludeContent(tool) {
       : `  ; Nessun menu contestuale Explorer da rimuovere.
 `;
 
+  const suiteInstallCacheCleanupLines = tool.id === "suite-launcher"
+    ? `  ; Elimina payload incompleti o obsoleti senza toccare profilo e licenza.
+  RMDir /r "$LOCALAPPDATA\\filex-suite-updater\\pending"
+  RMDir /r "$APPDATA\\FileX Suite\\updates"
+  ClearErrors
+`
+    : "";
+
+  const suiteUninstallCacheCleanupLines = tool.id === "suite-launcher"
+    ? `  ; La disinstallazione rimuove le sole cache rigenerabili della Suite.
+  RMDir /r "$LOCALAPPDATA\\filex-suite-updater"
+  RMDir /r "$APPDATA\\FileX Suite\\updates"
+  ClearErrors
+`
+    : "";
+
+  const suiteManagedToolUninstallLines = tool.id === "suite-launcher"
+    ? getSuiteManagedTools()
+        .map((managedTool) => {
+          const executableName = escapeNsisString(managedTool.executableName);
+          const productName = escapeNsisString(managedTool.productName);
+          const uninstaller = `$LOCALAPPDATA\\Programs\\${executableName}\\Uninstall ${executableName}.exe`;
+          return `  IfFileExists "${uninstaller}" 0 +6
+  DetailPrint "Disinstallazione ${productName}..."
+  ClearErrors
+  ExecWait '\"${uninstaller}\" /S /KEEP_APP_DATA /currentuser' $R0
+  StrCmp $R0 "0" +2
+  StrCpy $R9 "1"`;
+        })
+        .join("\n")
+    : "  ; Nessun tool gestito dalla Suite.";
+
+  const suiteUninstallChoiceLines = tool.id === "suite-launcher"
+    ? `  \${IfNot} \${Silent}
+    MessageBox MB_YESNO|MB_ICONQUESTION "Vuoi rimuovere anche tutti gli strumenti FileX installati?$$\\r$$\\n$$\\r$$\\nProgetti, profili e stato licenza resteranno conservati." IDNO suite_keep_tools
+    StrCpy $R9 "0"
+${suiteManagedToolUninstallLines}
+    StrCmp $R9 "0" +2
+    MessageBox MB_OK|MB_ICONEXCLAMATION "Uno o piu strumenti FileX non sono stati rimossi. La Suite verra comunque disinstallata; riprova da Impostazioni > App installate."
+    suite_keep_tools:
+  \${EndIf}
+`
+    : "";
+
   return `!ifndef BUILD_UNINSTALLER
 
 ; In modalita' silenziosa un errore dell'uninstaller precedente deve tornare
@@ -268,6 +313,8 @@ FunctionEnd
 
 ${contextMenuInstallLines}
 
+${suiteInstallCacheCleanupLines}
+
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
 
 
@@ -279,6 +326,10 @@ ${contextMenuInstallLines}
 !macro customUnInstall
 
 ${contextMenuUninstallLines}
+
+${suiteUninstallCacheCleanupLines}
+
+${suiteUninstallChoiceLines}
 
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
 
@@ -366,6 +417,8 @@ export default {
         ".output/electron/updater.js",
         ".output/electron/filex-process-coordinator.js",
         ".output/electron/process-snapshot-cache.js",
+        ".output/electron/windows-installer-runner.js",
+        ".output/electron/cooperative-process-signal.js",
         ".output/electron/tool-manifest.js",
         ".output/electron/license-service.js",
         ".output/electron/license-attestation.js",

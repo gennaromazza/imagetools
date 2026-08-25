@@ -372,7 +372,7 @@ async function install(id, button = null) {
   if (installedState?.installed) {
     alert(`Aggiornamento di ${toolName} pronto.\n\nFileX proverà a chiudere il tool automaticamente. Se non riesce, potrai premere “Forza chiusura” nella schermata successiva.`);
   }
-  if (button) button.textContent = 'Conferma su Windows...';
+  if (button) button.textContent = 'Installazione...';
   const result = await api.applyToolUpdate(job.id);
   if (result.status !== 'completed') {
     if (result.error?.includes('Forza chiusura')) {

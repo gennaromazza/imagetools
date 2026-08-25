@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { promisify } from "node:util";
-import { shell } from "electron";
 import type { DesktopToolId } from "@photo-tools/desktop-contracts";
 import {
   desktopToolManifest,
@@ -10,6 +9,8 @@ import {
   type DesktopToolDescriptor,
 } from "./tool-manifest.js";
 import { ProcessSnapshotCache } from "./process-snapshot-cache.js";
+import { InstallerLaunchError, runWindowsInstaller } from "./windows-installer-runner.js";
+import { sendBoundedProcessSignal } from "./cooperative-process-signal.js";
 
 const TOOL_COOPERATIVE_SHUTDOWN_TIMEOUT_MS = 9_000;
 const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 3_000;
@@ -162,7 +163,7 @@ async function requestCooperativeShutdown(processNames: readonly string[]): Prom
   const executablePaths = await listRunningExecutablePaths(processNames);
   await Promise.all(executablePaths.map(async (executablePath) => {
     try {
-      await execFileAsync(executablePath, [UPDATE_SHUTDOWN_ARGUMENT], { windowsHide: true });
+      await sendBoundedProcessSignal(executablePath, [UPDATE_SHUTDOWN_ARGUMENT]);
     } catch (error) {
       console.warn(
         `Chiusura cooperativa non riuscita per ${executablePath}:`,
@@ -197,10 +198,7 @@ async function stopFileXTool(toolId: DesktopToolId): Promise<void> {
 }
 
 async function openInstallerWithWindows(installerPath: string): Promise<void> {
-  const errorMessage = await shell.openPath(installerPath);
-  if (errorMessage) {
-    throw new Error(`Windows non ha potuto aprire l'installer FileX: ${errorMessage}`);
-  }
+  await runWindowsInstaller(installerPath);
 }
 
 async function openInstallerWithRetry(installerPath: string): Promise<void> {
@@ -210,7 +208,7 @@ async function openInstallerWithRetry(installerPath: string): Promise<void> {
       await openInstallerWithWindows(installerPath);
       return;
     } catch (error) {
-      if (attempt === attempts) throw error;
+      if (!(error instanceof InstallerLaunchError) || attempt === attempts) throw error;
       console.warn(`Apertura installer fallita (tentativo ${attempt}/${attempts}); nuovo tentativo.`);
       await delay(1_500);
     }
@@ -243,8 +241,8 @@ export async function installFileXToolUpdate(
   // helper nativi stanno ancora rilasciando handle dentro la cartella app.
   await delay(TOOL_POST_SHUTDOWN_SETTLE_MS);
 
-  // ShellExecute mostra SmartScreen/UAC e permette all'utente di scegliere
-  // "Esegui comunque" anche quando l'installer non e' firmato.
+  // L'installer NSIS viene eseguito con /S e atteso fino all'exit code: non
+  // consideriamo piu' riuscito un semplice inoltro a ShellExecute.
   await openInstallerWithRetry(installerPath);
 }
 

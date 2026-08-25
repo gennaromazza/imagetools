@@ -30,6 +30,20 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - FileX Suite 0.1.56
+
+### Installazioni tool controllate fino alla conclusione
+- Gli installer NSIS dei tool vengono avviati direttamente con `/S`, attesi fino alla chiusura e convalidati tramite exit code e versione realmente installata.
+- Rimossa l'attesa indefinita su `shell.openPath` che poteva lasciare la Suite bloccata su “Conferma su Windows” senza alcun installer attivo.
+- La Suite riprova soltanto gli errori di avvio: un installer già partito e terminato con errore non viene eseguito nuovamente alla cieca.
+- Il segnale di chiusura cooperativa ha un timeout rigoroso: le versioni legacy non possono più impedire l'accesso al fallback controllato.
+
+### Ciclo pulito e ripetibile
+- Installazione e disinstallazione eliminano le sole cache rigenerabili degli aggiornamenti, preservando profilo, licenza e preferenze.
+- Aggiunto un preflight protetto per rimuovere cache e residui verificati della legacy 0.1.14 prima delle prove locali di ogni release.
+- L'uninstaller della Suite permette di scegliere esplicitamente se conservare i tool indipendenti oppure rimuoverli tutti; la modalità silenziosa li conserva sempre.
+- Aggiunti test comportamentali, controllo ASAR e smoke test del main process impacchettato alla procedura di rilascio.
+
 ## 2026-08-25 - FileX Suite 0.1.55
 
 ### Avvio Suite ripristinato
