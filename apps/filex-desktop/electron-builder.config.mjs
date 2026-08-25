@@ -365,6 +365,7 @@ export default {
         ".output/electron/suite-updater.js",
         ".output/electron/updater.js",
         ".output/electron/filex-process-coordinator.js",
+        ".output/electron/process-snapshot-cache.js",
         ".output/electron/tool-manifest.js",
         ".output/electron/license-service.js",
         ".output/electron/license-attestation.js",

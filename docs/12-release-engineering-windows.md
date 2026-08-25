@@ -119,3 +119,7 @@ Non aggiungere aggiornamenti tool-specifici nella barra dell'aggiornamento della
 ### Sito ufficiale e link Suite
 
 La homepage usa il link stabile dell'installer Suite. Dopo una release `suite-vX.Y.Z`, il workflow `website-suite-sync.yml` aggiorna automaticamente il fallback della versione e pubblica il sito Firebase. Prima di considerare conclusa la release verificare il run del workflow, la secret `FIREBASE_TOKEN` e la versione mostrata su `https://filex-suite.web.app/`.
+
+### Smoke test obbligatorio del pacchetto Electron
+
+Prima del tag eseguire la build NSIS reale, non soltanto TypeScript. Verificare nell'ASAR/output che tutti gli import del main process siano presenti e avviare il main process impacchettato. L'aggiunta di un file in `src/` richiede anche l'aggiornamento della whitelist `files` di `electron-builder.config.mjs` quando la Suite usa una lista esplicita. Se lo smoke test produce `ERR_MODULE_NOT_FOUND`, la release è bloccata.

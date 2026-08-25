@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - FileX Suite 0.1.55
+
+### Avvio Suite ripristinato
+- Incluso nel pacchetto Electron il nuovo modulo `process-snapshot-cache.js`, necessario al coordinatore degli aggiornamenti.
+- Aggiunta verifica sul pacchetto reale per impedire release con dipendenze runtime mancanti.
+
 ## 2026-08-25 - FileX Suite 0.1.54
 
 ### Test comportamentali dell'updater

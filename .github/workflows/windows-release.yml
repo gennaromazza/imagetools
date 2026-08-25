@@ -198,6 +198,10 @@ jobs:
             default { throw "Componente non supportato: $env:FILEX_COMPONENT" }
           }
 
+      - name: Verify packaged Suite runtime imports
+        if: steps.release.outputs.component == 'suite'
+        run: npm run test:filex-suite-package-imports
+
       - name: Generate selected tool catalog entry
         if: steps.release.outputs.component != 'suite'
         shell: pwsh
