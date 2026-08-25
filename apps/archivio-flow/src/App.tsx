@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Job, ImportResult } from "./types";
+import type { Job, ImportResult, SdCard } from "./types";
 import { getArchivioJobs, getArchivioSdCards, openBackupGuard } from "./archivioDesktopApi";
 import { NuovoLavoroPanel } from "./components/NuovoLavoroPanel";
 import { SdCardPreviewPanel } from "./components/SdCardPreviewPanel";
@@ -18,10 +18,14 @@ export default function App() {
   const [archiveAnalyzing, setArchiveAnalyzing] = useState(false);
   const [existingJobImportId, setExistingJobImportId] = useState<string | null>(null);
   const [detectedSdPath, setDetectedSdPath] = useState<string | null>(null);
+  const [pendingImportDateFilter, setPendingImportDateFilter] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
   const [backupGuardFeedback, setBackupGuardFeedback] = useState<string | null>(null);
   const [openingBackupGuard, setOpeningBackupGuard] = useState(false);
-  const knownSdPathsRef = useRef<Set<string> | null>(null);
+  const knownSdIdentitiesRef = useRef<Map<string, string> | null>(null);
+  const detectedSdIdentityRef = useRef<string | null>(null);
+
+  const sdIdentity = (card: SdCard) => `${card.path.toLowerCase()}|${card.volumeSerial ?? ""}|${card.deviceId}|${card.volumeName}`;
 
   const refreshJobs = useCallback(async () => {
     setLoadingJobs(true);
@@ -49,14 +53,20 @@ export default function App() {
       try {
         const cards = await getArchivioSdCards();
         if (!active) return;
-        const paths = new Set(cards.map((card) => card.path));
-        const previousPaths = knownSdPathsRef.current;
-        const hasNewCard = previousPaths === null
-          ? paths.size > 0
-          : [...paths].some((path) => !previousPaths.has(path));
-        knownSdPathsRef.current = paths;
-        if (hasNewCard) {
-          setDetectedSdPath([...paths].find((path) => !previousPaths?.has(path)) ?? [...paths][0] ?? null);
+        const previousIdentities = knownSdIdentitiesRef.current;
+        const detectedCard = cards.find((card) => sdIdentity(card) === detectedSdIdentityRef.current);
+        const newCard = previousIdentities === null
+          ? cards[0]
+          : cards.find((card) => previousIdentities.get(card.path) !== sdIdentity(card));
+        knownSdIdentitiesRef.current = new Map(cards.map((card) => [card.path, sdIdentity(card)]));
+        if (!detectedCard && detectedSdIdentityRef.current) {
+          detectedSdIdentityRef.current = null;
+          setDetectedSdPath(null);
+          setScreen((current) => current === "sd" || current === "nuovo" ? "archivio" : current);
+        }
+        if (newCard) {
+          detectedSdIdentityRef.current = sdIdentity(newCard);
+          setDetectedSdPath(newCard.path);
           setExistingJobImportId(null);
           setScreen("sd");
         }
@@ -183,7 +193,10 @@ export default function App() {
         {screen === "sd" && detectedSdPath && (
           <SdCardPreviewPanel
             sdPath={detectedSdPath}
-            onStartImport={() => setScreen("nuovo")}
+            onStartImport={(dateFilter) => {
+              setPendingImportDateFilter(dateFilter);
+              setScreen("nuovo");
+            }}
           />
         )}
         {(screen === "nuovo" || screen === "impostazioni") && (
@@ -192,6 +205,7 @@ export default function App() {
             activeView={screen === "impostazioni" ? "impostazioni" : "nuovo"}
             existingJobImportId={existingJobImportId}
             initialSdPath={screen === "nuovo" ? detectedSdPath : null}
+            initialDateFilter={screen === "nuovo" ? pendingImportDateFilter : null}
           />
         )}
         <div style={{ display: screen === "archivio" ? "block" : "none" }} aria-hidden={screen !== "archivio"}>

@@ -3365,7 +3365,7 @@ app.post("/api/filter-preview", getFilterPreviewHandler);
 async function getVideoThumbnail(filePath: string): Promise<Buffer> {
   if (!ffmpegPath) throw new Error("Motore anteprime video non disponibile");
   const stat = await fs.promises.stat(filePath);
-  const cacheKey = createHash("sha256").update(`${filePath}\0${stat.size}\0${stat.mtimeMs}`).digest("hex");
+  const cacheKey = createHash("sha256").update(`archivio-preview-v2\0${filePath}\0${stat.size}\0${stat.mtimeMs}`).digest("hex");
   const cachePath = path.join(VIDEO_THUMBNAIL_CACHE_DIR, `${cacheKey}.jpg`);
   try {
     return await fs.promises.readFile(cachePath);
@@ -3379,8 +3379,8 @@ async function getVideoThumbnail(filePath: string): Promise<Buffer> {
     try {
       await execFileAsync(ffmpegPath, [
         "-hide_banner", "-loglevel", "error", "-ss", "00:00:01", "-i", filePath,
-        "-frames:v", "1", "-vf", "scale=280:180:force_original_aspect_ratio=decrease",
-        "-q:v", "5", "-y", temporaryPath,
+        "-frames:v", "1", "-vf", "scale=180:120:force_original_aspect_ratio=decrease",
+        "-q:v", "10", "-y", temporaryPath,
       ], { windowsHide: true, timeout: 20_000 });
       const buffer = await fs.promises.readFile(temporaryPath);
       await fs.promises.rename(temporaryPath, cachePath).catch(async () => {
@@ -3429,8 +3429,8 @@ const getPreviewImageHandler = async (req: Request, res: Response) => {
     const buffer = isVideoFile(fileNorm)
       ? await getVideoThumbnail(fileNorm)
       : await sharp(fileNorm)
-        .resize({ width: 280, height: 180, fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 72 })
+        .resize({ width: 180, height: 120, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality: 58 })
         .toBuffer();
     res.setHeader("Content-Type", "image/jpeg");
     res.send(buffer);

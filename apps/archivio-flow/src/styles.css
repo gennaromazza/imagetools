@@ -30,6 +30,7 @@
 }
 
 html, body, #root {
+  height: 100%;
   min-height: 100%;
   margin: 0;
   font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
@@ -53,7 +54,9 @@ img { display: block; max-width: 100%; }
 .app-shell--with-sidebar {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
+  height: 100vh;
   min-height: 100vh;
+  overflow: hidden;
   transition: grid-template-columns 240ms ease;
 }
 
@@ -63,6 +66,7 @@ img { display: block; max-width: 100%; }
 
 /* ─── Sidebar ────────────────────────────────────────────────────────────────── */
 .sidebar {
+  min-height: 0;
   padding: var(--space-4) var(--space-3);
   border-right: 1px solid var(--line);
   background:
@@ -71,6 +75,7 @@ img { display: block; max-width: 100%; }
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  overflow-y: auto;
   transition: padding 240ms ease;
 }
 
@@ -131,8 +136,10 @@ img { display: block; max-width: 100%; }
 
 /* ─── Workspace ──────────────────────────────────────────────────────────────── */
 .workspace {
+  min-height: 0;
   padding: var(--space-4);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ─── Layout utilities ───────────────────────────────────────────────────────── */

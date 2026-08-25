@@ -8,6 +8,7 @@ import {
   getArchivioImportProgress,
   getArchivioJobs,
   getArchivioSdCards,
+  ejectArchivioSdCard,
   getArchivioSdPreview,
   getArchivioSettings,
   getArchivioStudioFlowStatus,
@@ -30,6 +31,7 @@ interface Props {
   activeView?: "nuovo" | "impostazioni";
   existingJobImportId?: string | null;
   initialSdPath?: string | null;
+  initialDateFilter?: string | null;
 }
 
 type CategoryLayout = "year-category" | "category-year" | "category-only" | "custom";
@@ -216,7 +218,7 @@ async function showCompletionDesktopNotification(title: string, body: string) {
   }
 }
 
-export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJobImportId = null, initialSdPath = null }: Props) {
+export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJobImportId = null, initialSdPath = null, initialDateFilter = null }: Props) {
   const initialImportPreferencesRef = useRef(readImportUiPreferences());
   // ── SD detection ────────────────────────────────────────────────────────────
   const [sdCards, setSdCards] = useState<SdCard[]>([]);
@@ -224,6 +226,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const [sdPreview, setSdPreview] = useState<SdPreview | null>(null);
   const [loadingSd, setLoadingSd] = useState(false);
   const [refreshingSd, setRefreshingSd] = useState(false);
+  const [ejectingSd, setEjectingSd] = useState(false);
+  const [sdFeedback, setSdFeedback] = useState<string | null>(null);
   const [safeCheck, setSafeCheck] = useState<SafeToFormatResult | null>(null);
   const [checkingSafe, setCheckingSafe] = useState(false);
   const [safeCheckError, setSafeCheckError] = useState<string | null>(null);
@@ -239,8 +243,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const [hasMultipleJobsOnSd, setHasMultipleJobsOnSd] = useState<boolean | null>(null);
   const [showMultiJobConfirm, setShowMultiJobConfirm] = useState(false);
   const [fileNameIncludesFilter, setFileNameIncludesFilter] = useState("");
-  const [mtimeFromFilter, setMtimeFromFilter] = useState("");
-  const [mtimeToFilter, setMtimeToFilter] = useState("");
+  const [mtimeFromFilter, setMtimeFromFilter] = useState(() => initialDateFilter ? `${initialDateFilter}T00:00` : "");
+  const [mtimeToFilter, setMtimeToFilter] = useState(() => initialDateFilter ? `${initialDateFilter}T23:59:59.999` : "");
   const [filterPreview, setFilterPreview] = useState<FilterPreviewData | null>(null);
   const [loadingFilterPreview, setLoadingFilterPreview] = useState(false);
   const [filterPreviewError, setFilterPreviewError] = useState<string | null>(null);
@@ -255,7 +259,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
 
   // ── Form fields ─────────────────────────────────────────────────────────────
   const [nomeLavoro, setNomeLavoro] = useState("");
-  const [dataLavoro, setDataLavoro] = useState(todayIso());
+  const [dataLavoro, setDataLavoro] = useState(() => initialDateFilter ?? todayIso());
   const [autore, setAutore] = useState(() => initialImportPreferencesRef.current.autore);
   const [contrattoLink, setContrattoLink] = useState("");
   const [destinazione, setDestinazione] = useState("");
@@ -472,6 +476,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   }, [initialSdPath]);
 
   useEffect(() => {
+    if (!initialDateFilter) return;
+    setDataLavoro(initialDateFilter);
+    setMtimeFromFilter(`${initialDateFilter}T00:00`);
+    setMtimeToFilter(`${initialDateFilter}T23:59:59.999`);
+  }, [initialDateFilter]);
+
+  useEffect(() => {
     if (!usaLavoroEsistente || !existingJobId) return;
     const selected = jobsEsistenti.find((j) => j.id === existingJobId);
     if (!selected) return;
@@ -508,7 +519,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     try {
       const cards = await getArchivioSdCards();
       setSdCards(cards);
-      if (cards.length > 0 && !sdPath) {
+      const selectedCardStillPresent = cards.some((card) => card.path === sdPath);
+      if (sdPath && !selectedCardStillPresent) {
+        setSdPath(cards[0]?.path ?? "");
+      } else if (cards.length > 0 && !sdPath) {
         setSdPath(cards[0]!.path);
       }
     } catch {
@@ -517,6 +531,27 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       setRefreshingSd(false);
     }
   }, [sdPath]);
+
+  useEffect(() => {
+    if (activeView !== "nuovo") return;
+    const timer = window.setInterval(() => void fetchSdCards(), 2500);
+    return () => window.clearInterval(timer);
+  }, [activeView, fetchSdCards]);
+
+  async function handleEjectSd() {
+    if (!sdPath.trim()) return;
+    setEjectingSd(true);
+    setSdFeedback(null);
+    try {
+      const result = await ejectArchivioSdCard(sdPath.trim());
+      setSdFeedback(result.message);
+      await fetchSdCards();
+    } catch (error) {
+      setSdFeedback(error instanceof Error ? error.message : "Non è stato possibile espellere la SD.");
+    } finally {
+      setEjectingSd(false);
+    }
+  }
 
   async function handleSafeCheck() {
     if (!sdPath.trim()) return;
@@ -1175,6 +1210,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
         </div>
       </div>
 
+      {activeView === "nuovo" && initialDateFilter && (
+        <div className="message-box" role="status" style={{ borderColor: "var(--accent)", margin: 0 }}>
+          Importazione filtrata: verranno copiati soltanto i file del {new Date(`${initialDateFilter}T12:00`).toLocaleDateString("it-IT")}.
+        </div>
+      )}
+
       {activeView === "nuovo" && (
         <nav className="import-flow-nav" aria-label="Percorso di importazione">
           <button type="button" onClick={() => scrollToImportStep(sourceStepRef)}>
@@ -1594,7 +1635,17 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             >
               {refreshingSd ? "Aggiorno..." : "⟳ Aggiorna"}
             </button>
+            <button
+              className="ghost-button"
+              onClick={() => void handleEjectSd()}
+              disabled={ejectingSd || !sdCards.some((card) => card.path === sdPath)}
+              style={{ padding: "0.5rem 0.9rem", fontSize: "0.88rem" }}
+            >
+              {ejectingSd ? "Espulsione…" : "⏏ Espelli"}
+            </button>
           </div>
+
+          {sdFeedback && <p role="status" style={{ color: "var(--text-muted)", margin: 0, fontSize: "0.9rem" }}>{sdFeedback}</p>}
 
           {sdCards.length > 0 && (
             <div className="stats-grid">

@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - Archivio Flow 0.1.33
+
+- Rilevamento automatico della sostituzione delle SD, aggiornamento della schermata, pulsanti di aggiornamento ed espulsione sicura.
+- Anteprime SD scorrevoli con caricamento graduale e miniature più leggere per foto e video.
+- Importazione dell'intera SD oppure per data rilevata automaticamente, con il filtro trasferito alla copia dei file.
+
 ## 2026-08-24 - FileX Send 0.1.13
 
 - Download multipli diretti per i clienti, con supporto a file di grandi dimensioni e sessioni attive preservate.

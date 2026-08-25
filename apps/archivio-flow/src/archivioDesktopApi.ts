@@ -137,6 +137,10 @@ export async function getArchivioSdPreview(sdPath: string): Promise<SdPreview> {
   return await apiGet<SdPreview>(`/api/sd-preview?path=${encodeURIComponent(sdPath)}`);
 }
 
+export async function ejectArchivioSdCard(sdPath: string): Promise<{ ok: boolean; message: string }> {
+  return await requireDesktopApi().ejectArchivioSdCard(sdPath);
+}
+
 export async function getArchivioArchiveRenameProgress(): Promise<ArchiveRenameProgress> {
   const desktopApi = getDesktopApi();
   if (desktopApi) {

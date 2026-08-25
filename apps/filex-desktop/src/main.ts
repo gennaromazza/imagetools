@@ -612,6 +612,41 @@ async function getArchivioSdCardsDesktop(): Promise<Array<{
   return result.sdCards;
 }
 
+async function ejectArchivioSdCardDesktop(sdPath: unknown): Promise<{ ok: boolean; message: string }> {
+  if (typeof sdPath !== "string") {
+    throw new Error("Percorso della SD non valido.");
+  }
+
+  const cards = await getArchivioSdCardsDesktop();
+  const card = cards.find((candidate) => candidate.path.toLowerCase() === sdPath.toLowerCase());
+  if (!card) {
+    throw new Error("La SD da espellere non è più disponibile.");
+  }
+
+  if (process.platform !== "win32") {
+    throw new Error("L'espulsione sicura è disponibile in questa versione solo su Windows.");
+  }
+
+  const driveLetter = /^[a-zA-Z]:[\\\\/]?$/.exec(card.path.trim())?.[0]?.slice(0, 1);
+  if (!driveLetter) {
+    throw new Error("La SD non usa un'unità Windows espellibile.");
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$shell = New-Object -ComObject Shell.Application; $item = $shell.Namespace(17).ParseName($args[0]); if ($null -eq $item) { exit 2 }; $item.InvokeVerb('Eject')",
+      `${driveLetter}:`,
+    ], { windowsHide: true, stdio: "ignore" });
+    child.once("error", reject);
+    child.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`Windows non ha espulso la SD (codice ${code ?? "sconosciuto"}).`)));
+  });
+
+  return { ok: true, message: "SD espulsa. Ora puoi rimuoverla." };
+}
+
 function extractOpenFolderPathFromArgv(argv: string[], workingDirectory?: string | null): string | null {
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -1710,6 +1745,7 @@ function registerIpcHandlers(): void {
     return await archivio.getLowQualityProgressService();
   });
   ipcMain.handle("filex:get-archivio-sd-cards", async () => await getArchivioSdCardsDesktop());
+  ipcMain.handle("filex:eject-archivio-sd-card", async (_event, sdPath: unknown) => await ejectArchivioSdCardDesktop(sdPath));
   ipcMain.handle("filex:get-archivio-sd-preview", async (_event, sdPath: string) => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.getSdPreviewService(sdPath);

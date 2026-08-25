@@ -1054,6 +1054,10 @@ export interface FileXDesktopApi {
     }>;
     getArchivioLowQualityProgress: () => Promise<ArchivioLowQualityProgressSnapshot>;
     getArchivioSdCards: () => Promise<ArchivioSdCard[]>;
+    ejectArchivioSdCard: (sdPath: string) => Promise<{
+        ok: boolean;
+        message: string;
+    }>;
     getArchivioSdPreview: (sdPath: string) => Promise<ArchivioSdPreview>;
     checkArchivioSafeToFormat: (sdPath: string) => Promise<ArchivioSafeToFormatResult>;
     getArchivioStudioFlowStatus: () => Promise<ArchivioStudioFlowStatus>;

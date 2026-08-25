@@ -146,6 +146,11 @@
     ]
   },
   "archivio-flow": {
+    "0.1.33": [
+      "Archivio Flow riconosce automaticamente la sostituzione della SD, aggiorna la schermata e consente l'espulsione sicura della scheda rilevata.",
+      "Le anteprime della SD scorrono con caricamento graduale e miniature più leggere per rendere più fluida la consultazione di foto e video.",
+      "Puoi importare tutta la scheda oppure selezionare una data già rilevata: vengono copiati soltanto i file del lavoro scelto."
+    ],
     "0.1.32": [
       "Nuova schermata Photo First all'inserimento della SD: mostra subito contenuto, conteggi di foto e video, verifica sicurezza e accesso diretto all'importazione.",
       "Miniature reali per MP4, MOV e altri video con generazione graduale, feedback di caricamento e cache locale; foto e video vengono archiviati in destinazioni separate.",
