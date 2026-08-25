@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - FileX Suite 0.1.51
+
+### Aggiornamento Windows senza falsi blocchi
+- La Suite non considera più fallita l'installazione solo perché il processo NSIS elevato non è visibile a Electron.
+- La riuscita viene determinata dalla versione realmente installata, anche quando UAC o SmartScreen eseguono l'installer su un processo separato.
+
 ## 2026-08-25 - FileX Suite 0.1.50
 
 ### Installer Windows più affidabili
