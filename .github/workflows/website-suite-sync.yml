@@ -1,8 +1,15 @@
 name: Sync FileX website after Suite release
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["FileX component release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      suite_version:
+        description: "Versione Suite da pubblicare sul sito (X.Y.Z)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -13,11 +20,15 @@ concurrency:
 
 jobs:
   sync:
-    if: startsWith(github.event.release.tag_name, 'suite-v')
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.workflow_run.conclusion == 'success' && startsWith(github.event.workflow_run.head_branch, 'suite-v'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.event.workflow_run.head_branch }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -26,7 +37,7 @@ jobs:
 
       - name: Update website Suite download
         env:
-          SUITE_VERSION: ${{ github.event.release.tag_name }}
+          SUITE_VERSION: ${{ github.event_name == 'workflow_dispatch' && format('suite-v{0}', inputs.suite_version) || github.event.workflow_run.head_branch }}
         shell: bash
         run: |
           version="${SUITE_VERSION#suite-v}"
@@ -39,7 +50,7 @@ jobs:
 
       - name: Verify public Suite download
         env:
-          EXPECTED_VERSION: ${{ github.event.release.tag_name }}
+          EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && format('suite-v{0}', inputs.suite_version) || github.event.workflow_run.head_branch }}
         shell: bash
         run: |
           html="$(curl --fail --silent --show-error --location https://filex-suite.web.app/)"
