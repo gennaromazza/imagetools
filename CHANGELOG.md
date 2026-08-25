@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - FileX Suite 0.1.52
+
+### Chiusura tool senza bloccare Electron
+- Le verifiche dei processi Windows durante la preparazione degli aggiornamenti sono ora asincrone e non bloccano più il main process Electron.
+- Aggiunta protezione sui nomi processo e logging del fallback `taskkill` per rendere il flusso più diagnostico e sicuro.
+
 ## 2026-08-25 - FileX Suite 0.1.51
 
 ### Aggiornamento Windows senza falsi blocchi

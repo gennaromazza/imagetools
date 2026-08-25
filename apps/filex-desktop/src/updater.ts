@@ -764,7 +764,7 @@ export async function applyToolUpdate(
    * Ricordiamo se QUESTO tool era aperto
    * prima di chiuderlo per l'installazione.
    */
-  const wasRunning = isFileXToolRunning(job.toolId);
+  const wasRunning = await isFileXToolRunning(job.toolId);
 
   patchJob(jobId, { status: "applying", error: undefined });
   try {

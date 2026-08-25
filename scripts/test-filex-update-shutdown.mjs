@@ -25,6 +25,14 @@ assert(
   "L'updater non tenta prima la chiusura cooperativa del solo tool selezionato.",
 );
 assert(
+  coordinator.includes('promisify(execFile)')
+    && coordinator.includes('const execFileAsync = promisify(execFile)')
+    && !coordinator.includes("execFileSync")
+    && coordinator.includes("SAFE_PROCESS_NAME = /^[a-z0-9_.-]+$/i")
+    && coordinator.includes("taskkill non riuscito"),
+  "Il coordinatore usa ancora chiamate sincrone o non protegge il fallback taskkill.",
+);
+assert(
   coordinator.includes("processNames.includes(normalizeProcessName(basename(executablePath)))")
     && coordinator.includes("mai FileX Suite o altri prodotti FileX"),
   "La chiusura cooperativa non e' limitata all'eseguibile atteso del tool.",

@@ -1,6 +1,7 @@
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { basename } from "node:path";
+import { promisify } from "node:util";
 import { shell } from "electron";
 import type { DesktopToolId } from "@photo-tools/desktop-contracts";
 import {
@@ -15,6 +16,8 @@ const TOOL_FORCE_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TOOL_SHUTDOWN_POLL_INTERVAL_MS = 250;
 const TOOL_POST_SHUTDOWN_SETTLE_MS = 2_500;
 const UPDATE_SHUTDOWN_ARGUMENT = "--filex-update-shutdown";
+const SAFE_PROCESS_NAME = /^[a-z0-9_.-]+$/i;
+const execFileAsync = promisify(execFile);
 
 function normalizeProcessName(value: string): string {
   return value
@@ -33,29 +36,27 @@ function executableNamesForTool(toolId: DesktopToolId): string[] {
         ...(descriptor.legacyExecutableNames ?? []),
       ]
         .map(normalizeProcessName)
-        .filter(Boolean),
+        .filter((name) => SAFE_PROCESS_NAME.test(name)),
     ),
   );
 }
 
-function listRunningProcessNames(): Set<string> {
+async function listRunningProcessNames(): Promise<Set<string>> {
   if (process.platform !== "win32") {
     return new Set();
   }
 
   try {
-    const output = execFileSync(
+    const { stdout } = await execFileAsync(
       "tasklist.exe",
       ["/FO", "CSV", "/NH"],
       {
-        encoding: "utf8",
         windowsHide: true,
-        stdio: ["ignore", "pipe", "ignore"],
       },
     );
 
     const names = new Set<string>();
-    for (const line of output.split(/\r?\n/)) {
+    for (const line of stdout.split(/\r?\n/)) {
       const match = line.match(/^"((?:[^"]|"")+)"/);
       if (match?.[1]) {
         names.add(normalizeProcessName(match[1].replace(/""/g, '"')));
@@ -67,14 +68,15 @@ function listRunningProcessNames(): Set<string> {
   }
 }
 
-function isAnyProcessRunning(processNames: readonly string[]): boolean {
-  const runningNames = listRunningProcessNames();
+async function isAnyProcessRunning(processNames: readonly string[]): Promise<boolean> {
+  const runningNames = await listRunningProcessNames();
   return processNames.some((name) => runningNames.has(name));
 }
 
 /** Restituisce solo gli eseguibili FileX effettivamente in esecuzione. */
-function listRunningExecutablePaths(processNames: readonly string[]): string[] {
+async function listRunningExecutablePaths(processNames: readonly string[]): Promise<string[]> {
   if (process.platform !== "win32" || processNames.length === 0) return [];
+  if (processNames.some((name) => !SAFE_PROCESS_NAME.test(name))) return [];
 
   const quotedNames = processNames
     .map((name) => `'${name.replace(/'/g, "''")}'`)
@@ -87,11 +89,12 @@ function listRunningExecutablePaths(processNames: readonly string[]): string[] {
   ].join(" ");
 
   try {
-    const output = execFileSync(
+    const { stdout } = await execFileAsync(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-Command", command],
-      { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
+      { windowsHide: true },
+    );
+    const output = stdout.trim();
     if (!output) return [];
     const parsed: unknown = JSON.parse(output);
     const paths = Array.isArray(parsed) ? parsed : [parsed];
@@ -117,47 +120,55 @@ async function waitUntilProcessesExit(
 ): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (!isAnyProcessRunning(processNames)) {
+    if (!(await isAnyProcessRunning(processNames))) {
       return true;
     }
     await delay(TOOL_SHUTDOWN_POLL_INTERVAL_MS);
   }
-  return !isAnyProcessRunning(processNames);
+  return !(await isAnyProcessRunning(processNames));
 }
 
-function terminateProcess(processName: string, force: boolean): Promise<void> {
+async function terminateProcess(processName: string, force: boolean): Promise<void> {
   const args = ["/IM", `${processName}.exe`, "/T"];
   if (force) {
     args.push("/F");
   }
 
-  return new Promise((resolve) => {
-    execFile(
-      "taskkill.exe",
-      args,
-      { windowsHide: true },
-      () => resolve(),
+  try {
+    await execFileAsync("taskkill.exe", args, { windowsHide: true });
+  } catch (error) {
+    console.warn(
+      `taskkill non riuscito per ${processName} (${force ? "forzato" : "ordinato"}):`,
+      error instanceof Error ? error.message : String(error),
     );
-  });
+  }
 }
 
 /**
  * Le versioni correnti riconoscono questo argomento nel rispettivo handler
  * single-instance e invocano app.quit(), rilasciando prima le risorse native.
  */
-function requestCooperativeShutdown(processNames: readonly string[]): void {
-  for (const executablePath of listRunningExecutablePaths(processNames)) {
-    execFile(executablePath, [UPDATE_SHUTDOWN_ARGUMENT], { windowsHide: true }, () => undefined);
-  }
+async function requestCooperativeShutdown(processNames: readonly string[]): Promise<void> {
+  const executablePaths = await listRunningExecutablePaths(processNames);
+  await Promise.all(executablePaths.map(async (executablePath) => {
+    try {
+      await execFileAsync(executablePath, [UPDATE_SHUTDOWN_ARGUMENT], { windowsHide: true });
+    } catch (error) {
+      console.warn(
+        `Chiusura cooperativa non riuscita per ${executablePath}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }));
 }
 
 async function stopFileXTool(toolId: DesktopToolId): Promise<void> {
   const processNames = executableNamesForTool(toolId);
-  if (!isAnyProcessRunning(processNames)) {
+  if (!(await isAnyProcessRunning(processNames))) {
     return;
   }
 
-  requestCooperativeShutdown(processNames);
+  await requestCooperativeShutdown(processNames);
   if (await waitUntilProcessesExit(processNames, TOOL_COOPERATIVE_SHUTDOWN_TIMEOUT_MS)) {
     return;
   }
@@ -182,7 +193,7 @@ async function openInstallerWithWindows(installerPath: string): Promise<void> {
   }
 }
 
-export function isFileXToolRunning(toolId: DesktopToolId): boolean {
+export async function isFileXToolRunning(toolId: DesktopToolId): Promise<boolean> {
   if (process.platform !== "win32" || toolId === "suite-launcher") {
     return false;
   }
@@ -217,7 +228,7 @@ export async function installFileXToolUpdate(
 export async function forceCloseFileXTool(toolId: DesktopToolId): Promise<void> {
   if (process.platform !== "win32" || toolId === "suite-launcher") return;
   const processNames = executableNamesForTool(toolId);
-  const runningNames = listRunningProcessNames();
+  const runningNames = await listRunningProcessNames();
   await Promise.all(
     processNames
       .filter((name) => runningNames.has(name))
