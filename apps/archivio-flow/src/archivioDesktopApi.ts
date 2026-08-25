@@ -141,6 +141,11 @@ export async function ejectArchivioSdCard(sdPath: string): Promise<{ ok: boolean
   return await requireDesktopApi().ejectArchivioSdCard(sdPath);
 }
 
+export async function showArchivioFlowWindow(): Promise<void> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) await desktopApi.showArchivioFlowWindow();
+}
+
 export async function getArchivioArchiveRenameProgress(): Promise<ArchiveRenameProgress> {
   const desktopApi = getDesktopApi();
   if (desktopApi) {

@@ -146,6 +146,11 @@
     ]
   },
   "archivio-flow": {
+    "0.1.34": [
+      "La rimozione della SD non chiude più Archivio Flow: l'app resta disponibile nell'area di notifica e torna automaticamente alla schermata archivio.",
+      "Il conteggio dei file filtrati per data viene calcolato subito, senza mostrare temporaneamente il totale errato della scheda.",
+      "Destinazione automatica, riepilogo e avanzamento mostrano ora lo stesso percorso effettivo, evitando indicazioni discordanti tra categorie."
+    ],
     "0.1.33": [
       "Archivio Flow riconosce automaticamente la sostituzione della SD, aggiorna la schermata e consente l'espulsione sicura della scheda rilevata.",
       "Le anteprime della SD scorrono con caricamento graduale e miniature più leggere per rendere più fluida la consultazione di foto e video.",

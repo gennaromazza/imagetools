@@ -157,6 +157,7 @@ const api: FileXDesktopApi = {
   getArchivioLowQualityProgress: () => ipcRenderer.invoke("filex:get-archivio-low-quality-progress"),
   getArchivioSdCards: () => ipcRenderer.invoke("filex:get-archivio-sd-cards"),
   ejectArchivioSdCard: (sdPath) => ipcRenderer.invoke("filex:eject-archivio-sd-card", sdPath),
+  showArchivioFlowWindow: () => ipcRenderer.invoke("filex:show-archivio-flow-window"),
   getArchivioSdPreview: (sdPath) => ipcRenderer.invoke("filex:get-archivio-sd-preview", sdPath),
   checkArchivioSafeToFormat: (sdPath) => ipcRenderer.invoke("filex:check-archivio-safe-to-format", sdPath),
   getArchivioStudioFlowStatus: () => ipcRenderer.invoke("filex:get-archivio-studioflow-status"),

@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - Archivio Flow 0.1.34
+
+- La rimozione della SD non chiude più Archivio Flow: l'app resta disponibile nell'area di notifica e torna automaticamente alla schermata archivio.
+- Il conteggio dei file filtrati per data viene calcolato subito, senza mostrare temporaneamente il totale errato della scheda.
+- Destinazione automatica, riepilogo e avanzamento mostrano ora lo stesso percorso effettivo, evitando indicazioni discordanti tra categorie.
+
 ## 2026-08-25 - Archivio Flow 0.1.33
 
 - Rilevamento automatico della sostituzione delle SD, aggiornamento della schermata, pulsanti di aggiornamento ed espulsione sicura.

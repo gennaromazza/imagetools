@@ -1058,6 +1058,9 @@ export interface FileXDesktopApi {
         ok: boolean;
         message: string;
     }>;
+    showArchivioFlowWindow: () => Promise<{
+        ok: true;
+    }>;
     getArchivioSdPreview: (sdPath: string) => Promise<ArchivioSdPreview>;
     checkArchivioSafeToFormat: (sdPath: string) => Promise<ArchivioSafeToFormatResult>;
     getArchivioStudioFlowStatus: () => Promise<ArchivioStudioFlowStatus>;

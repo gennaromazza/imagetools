@@ -722,6 +722,54 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     return () => { alive = false; };
   }, [sdPath]);
 
+  // Calcola subito il numero reale dei file quando il flusso arriva dalla
+  // selezione per data. Evita di mostrare temporaneamente il totale della SD.
+  useEffect(() => {
+    const source = sdPath.trim();
+    const fileNameIncludes = fileNameIncludesFilter.trim();
+    const mtimeFrom = mtimeFromFilter.trim();
+    const mtimeTo = mtimeToFilter.trim();
+    const hasActiveFilter = Boolean(fileNameIncludes || mtimeFrom || mtimeTo);
+
+    if (!source || !hasActiveFilter) {
+      setFilterPreview(null);
+      setFilterPreviewError(null);
+      setLoadingFilterPreview(false);
+      return;
+    }
+
+    let alive = true;
+    const timer = window.setTimeout(() => {
+      setFilterPreview(null);
+      setFilterPreviewError(null);
+      setLoadingFilterPreview(true);
+      void getArchivioFilterPreview({
+        sdPath: source,
+        fileNameIncludes: fileNameIncludes || undefined,
+        mtimeFrom: mtimeFrom || undefined,
+        mtimeTo: mtimeTo || undefined,
+        maxSamples: 36,
+      })
+        .then((data) => {
+          if (!alive) return;
+          setFilterPreview(data as FilterPreviewData);
+          setPreviewRangeStartMs(null);
+          setPreviewRangeEndMs(null);
+        })
+        .catch((error) => {
+          if (alive) setFilterPreviewError(error instanceof Error ? error.message : "Anteprima filtro non riuscita");
+        })
+        .finally(() => {
+          if (alive) setLoadingFilterPreview(false);
+        });
+    }, 180);
+
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [sdPath, fileNameIncludesFilter, mtimeFromFilter, mtimeToFilter]);
+
   async function handleImport(forceProceed = false) {
     setImportError(null);
     setImportSuccess(null);
@@ -879,6 +927,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       ? `VIDEO_SD\\${safeAutoreFolder}\\${safeSottoCartella}`
       : `VIDEO_SD\\${safeAutoreFolder}`)
     : "VIDEO_SD\\(autore)";
+  const fotoDestFullPreview = folderPreview === "—"
+    ? fotoDestPreview
+    : [folderPreview, fotoDestPreview].filter(Boolean).join("\\");
+  const videoDestFullPreview = folderPreview === "—"
+    ? videoDestPreview
+    : [folderPreview, videoDestPreview].filter(Boolean).join("\\");
   const categoryFolderPreview = normalizeFolderName(newCategoryName) || "Categoria";
   const proposedCategoryPattern = newCategoryLayout === "custom"
     ? newCategoryPath.trim()
@@ -1178,13 +1232,18 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       ? Math.min(100, Math.round(((importProgress?.jpgDone ?? 0) / Math.max(importProgress?.jpgPlanned ?? 1, 1)) * 100))
       : (progressPhase === "done" ? 100 : 0)
     : 100;
-  const initialPlannedFiles = filterPreview?.matchedFiles ?? sdPreview?.totalFiles ?? 0;
+  const hasActiveImportFilter = Boolean(
+    fileNameIncludesFilter.trim() || mtimeFromFilter.trim() || mtimeToFilter.trim(),
+  );
+  const initialPlannedFiles = hasActiveImportFilter
+    ? (filterPreview?.matchedFiles ?? 0)
+    : (sdPreview?.totalFiles ?? 0);
   const displayedPlannedFiles = importProgress?.plannedFiles || initialPlannedFiles;
   const displayedCompletedFiles = importProgress?.completedScheduled ?? 0;
   const displayedElapsedMs = Math.max(importProgress?.elapsedMs ?? 0, importStartedAt ? Date.now() - importStartedAt : 0);
   const initialImportTargetFolder = usaLavoroEsistente && selectedExistingJob
     ? [selectedExistingJob.percorsoCartella, fotoDestPreview].join("\\")
-    : "";
+    : fotoDestFullPreview;
   const overallProgressPct = importProgress?.overallProgressPct ?? 0;
   const progressPhaseLabel = importProgress?.currentPhaseLabel
     ?? (progressPhase === "compressing" ? "Compressione JPG" : "Preparazione importazione");
@@ -2178,7 +2237,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 <input
                   type="text"
-                  value={destinazione}
+                  value={categoryKey && !destinationOverride ? mappedParentPreview : destinazione}
                   onChange={(e) => {
                     setDestinazione(e.target.value);
                     setDestinationOverride(true);
@@ -2257,12 +2316,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
           )}
 
           <p style={{ margin: 0, fontSize: "0.86rem", color: "var(--text-muted)" }}>
-            Foto in: <strong>{fotoDestPreview}</strong> · Video in: <strong>{videoDestPreview}</strong>
+            Foto in: <strong>{fotoDestFullPreview}</strong> · Video in: <strong>{videoDestFullPreview}</strong>
           </p>
 
           {!usaLavoroEsistente && (
             <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)" }}>
-              Predefiniti correnti: <strong>{savedDestinazione || savedArchiveRoot || "(destinazione non impostata)"}</strong>
+              Destinazione effettiva: <strong>{folderPreview}</strong>
               {savedAutore && <> · autore: <strong>{savedAutore}</strong></>}
             </p>
           )}
@@ -2437,7 +2496,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                 Velocita trasferimento {formatTransferRate(importProgress?.currentSpeedBytesPerSec)} | File corrente {(importProgress?.currentFileName ?? "").trim() || "calcolo file corrente..."} | JPG BQ {importProgress?.jpgDone ?? 0}/{Math.max(importProgress?.jpgPlanned ?? 0, 0)}
               </p>
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", wordBreak: "break-all" }}>
-                Destinazione: {importProgress?.targetFolder || initialImportTargetFolder || effectiveDestinazione}
+                Destinazione: {importProgress?.targetFolder || initialImportTargetFolder}
               </p>
               <div className="button-row" style={{ marginTop: "0.5rem" }}>
                 <button
@@ -2520,12 +2579,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
           <span className="import-step__eyebrow">Passo 3</span>
           <strong>Controlla e importa</strong>
           <p>
-            Foto in <code style={{ fontSize: "0.88rem" }}>{fotoDestPreview}</code> e video in <code style={{ fontSize: "0.88rem" }}>{videoDestPreview}</code>.
+            Foto in <code style={{ fontSize: "0.88rem" }}>{fotoDestFullPreview}</code> e video in <code style={{ fontSize: "0.88rem" }}>{videoDestFullPreview}</code>.
           </p>
           <div className="import-summary" aria-label="Riepilogo importazione">
             <div><span>Origine</span><strong>{sdPath.trim() || "SD da selezionare"}</strong></div>
-            <div><span>File</span><strong>{filterPreview ? `${filterPreview.matchedFiles} filtrati` : sdPreview ? `${sdPreview.totalFiles} totali · ${sdPreview.rawFiles} RAW · ${sdPreview.jpgFiles} JPG` : "Da rilevare"}</strong></div>
-            <div><span>Destinazione</span><strong>{usaLavoroEsistente ? (selectedExistingJob?.nomeLavoro ?? "Lavoro esistente da selezionare") : (nomeLavoro.trim() || "Nuovo lavoro da nominare")}</strong></div>
+            <div><span>File</span><strong>{hasActiveImportFilter && loadingFilterPreview ? "Calcolo selezione…" : filterPreview ? `${filterPreview.matchedFiles} filtrati` : hasActiveImportFilter ? "Selezione da calcolare" : sdPreview ? `${sdPreview.totalFiles} totali · ${sdPreview.rawFiles} RAW · ${sdPreview.jpgFiles} JPG` : "Da rilevare"}</strong></div>
+            <div><span>Destinazione</span><strong>{folderPreview}</strong></div>
             <div><span>Opzioni</span><strong>{rinominaFile ? "Rinomina attiva" : "Nessuna rinomina"}{generaJpg ? " · JPG BQ" : ""}</strong></div>
           </div>
           {!canImport && !importing && (

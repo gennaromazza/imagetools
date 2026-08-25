@@ -333,7 +333,7 @@ async function saveSuiteDockState(partial: Partial<DesktopDockState>): Promise<D
 }
 let archivioFlowTray: TrayInstance | null = null;
 let archivioFlowSdWatchTimer: NodeJS.Timeout | null = null;
-let archivioFlowKnownSdPaths = new Set<string>();
+let archivioFlowKnownSdIdentities = new Map<string, string>();
 let archivioFlowIsQuitting = false;
 const archivioFlowWatchMode = requestedTool.id === "archivio-flow" && process.argv.includes("--archivio-flow-watch");
 let archivioFlowModulePromise: Promise<any> | null = null;
@@ -1746,6 +1746,11 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle("filex:get-archivio-sd-cards", async () => await getArchivioSdCardsDesktop());
   ipcMain.handle("filex:eject-archivio-sd-card", async (_event, sdPath: unknown) => await ejectArchivioSdCardDesktop(sdPath));
+  ipcMain.handle("filex:show-archivio-flow-window", async () => {
+    await ensureMainWindow();
+    focusMainWindow();
+    return { ok: true as const };
+  });
   ipcMain.handle("filex:get-archivio-sd-preview", async (_event, sdPath: string) => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.getSdPreviewService(sdPath);
@@ -2000,7 +2005,7 @@ function stopArchivioFlowSdWatcher(): void {
 }
 
 function createArchivioFlowTray(): void {
-  if (!archivioFlowWatchMode || archivioFlowTray) return;
+  if (requestedTool.id !== "archivio-flow" || archivioFlowTray) return;
 
   archivioFlowTray = new Tray(resolveWindowIcon());
   archivioFlowTray.setToolTip("Archivio Flow — rilevamento SD attivo");
@@ -2023,14 +2028,17 @@ function createArchivioFlowTray(): void {
 }
 
 function startArchivioFlowSdWatcher(): void {
-  if (!archivioFlowWatchMode || archivioFlowSdWatchTimer) return;
+  if (requestedTool.id !== "archivio-flow" || archivioFlowSdWatchTimer) return;
 
   const checkForNewSd = async () => {
     try {
       const cards = await getArchivioSdCardsDesktop();
-      const paths = new Set(cards.map((card) => card.path));
-      const hasNewCard = [...paths].some((cardPath) => !archivioFlowKnownSdPaths.has(cardPath));
-      archivioFlowKnownSdPaths = paths;
+      const identities = new Map(cards.map((card) => [
+        card.path,
+        `${card.path.toLowerCase()}|${card.volumeSerial ?? ""}|${card.deviceId}|${card.volumeName}`,
+      ]));
+      const hasNewCard = [...identities].some(([cardPath, identity]) => archivioFlowKnownSdIdentities.get(cardPath) !== identity);
+      archivioFlowKnownSdIdentities = identities;
       if (hasNewCard) {
         await ensureMainWindow();
         focusMainWindow();
@@ -2110,7 +2118,7 @@ async function createMainWindow(): Promise<void> {
     isOpenFolderRequestRendererReady = false;
   });
 
-  if (archivioFlowWatchMode) {
+  if (requestedTool.id === "archivio-flow") {
     windowInstance.on("close", (event) => {
       if (archivioFlowIsQuitting) return;
       event.preventDefault();
@@ -2235,6 +2243,10 @@ if (hasSingleInstanceLock) {
     } else {
       await ensureMainWindow();
     }
+    if (requestedTool.id === "archivio-flow") {
+      createArchivioFlowTray();
+      startArchivioFlowSdWatcher();
+    }
     createSuiteTray();
     await createSuiteDock();
     if (requestedTool.id === "suite-launcher" && app.isPackaged) {
@@ -2262,7 +2274,7 @@ if (hasSingleInstanceLock) {
 
 app.on("window-all-closed", () => {
   if (requestedTool.id === "suite-launcher") return;
-  if (requestedTool.id === "archivio-flow" && archivioFlowWatchMode) return;
+  if (requestedTool.id === "archivio-flow") return;
   if (process.platform !== "darwin") {
     app.quit();
   }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Job, ImportResult, SdCard } from "./types";
-import { getArchivioJobs, getArchivioSdCards, openBackupGuard } from "./archivioDesktopApi";
+import { getArchivioJobs, getArchivioSdCards, openBackupGuard, showArchivioFlowWindow } from "./archivioDesktopApi";
 import { NuovoLavoroPanel } from "./components/NuovoLavoroPanel";
 import { SdCardPreviewPanel } from "./components/SdCardPreviewPanel";
 import { ArchivioPanel } from "./components/ArchivioPanel";
@@ -63,6 +63,7 @@ export default function App() {
           detectedSdIdentityRef.current = null;
           setDetectedSdPath(null);
           setScreen((current) => current === "sd" || current === "nuovo" ? "archivio" : current);
+          void showArchivioFlowWindow().catch(() => undefined);
         }
         if (newCard) {
           detectedSdIdentityRef.current = sdIdentity(newCard);
