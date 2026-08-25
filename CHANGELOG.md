@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - FileX Suite 0.1.50
+
+### Installer Windows più affidabili
+- La Suite verifica che l'installer del tool sia stato realmente avviato da Windows dopo la richiesta a SmartScreen/UAC.
+- Se Windows non apre l'installer, l'aggiornamento termina entro 30 secondi con un messaggio operativo invece di restare bloccato su "Conferma su Windows...".
+
 ## 2026-08-25 - FileX Suite 0.1.49
 
 ### Aggiornamenti affidabili dei tool
