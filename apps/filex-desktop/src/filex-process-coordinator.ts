@@ -14,6 +14,7 @@ const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TOOL_FORCE_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TOOL_SHUTDOWN_POLL_INTERVAL_MS = 250;
 const TOOL_POST_SHUTDOWN_SETTLE_MS = 2_500;
+const INSTALLER_LAUNCH_TIMEOUT_MS = 30_000;
 const UPDATE_SHUTDOWN_ARGUMENT = "--filex-update-shutdown";
 
 function normalizeProcessName(value: string): string {
@@ -180,6 +181,26 @@ async function openInstallerWithWindows(installerPath: string): Promise<void> {
   if (errorMessage) {
     throw new Error(`Windows non ha potuto aprire l'installer FileX: ${errorMessage}`);
   }
+
+  // shell.openPath() segnala solo che ShellExecute ha accettato la richiesta:
+  // non garantisce che SmartScreen/UAC abbia davvero avviato l'installer.
+  // Aspettiamo quindi il processo concreto, evitando che la Suite resti nello
+  // stato "Conferma su Windows" per cinque minuti quando Windows non ha aperto
+  // alcuna finestra.
+  const installerName = normalizeProcessName(basename(installerPath));
+  const deadline = Date.now() + INSTALLER_LAUNCH_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (listRunningExecutablePaths([installerName]).some((path) =>
+      path.toLowerCase() === installerPath.toLowerCase(),
+    )) {
+      return;
+    }
+    await delay(500);
+  }
+  throw new Error(
+    "Windows non ha avviato l'installer. Controlla SmartScreen/UAC o una finestra " +
+      "FileX Setup nascosta, quindi riprova.",
+  );
 }
 
 export function isFileXToolRunning(toolId: DesktopToolId): boolean {
