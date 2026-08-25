@@ -177,8 +177,8 @@ const api: FileXDesktopApi = {
   deleteArchivioJob: (jobId) => ipcRenderer.invoke("filex:delete-archivio-job", jobId),
   updateArchivioJobContractLink: (jobId, contrattoLink) =>
     ipcRenderer.invoke("filex:update-archivio-job-contract-link", jobId, contrattoLink),
-  listArchivioJobSubfolders: (jobId) =>
-    ipcRenderer.invoke("filex:list-archivio-job-subfolders", jobId),
+  listArchivioJobSubfolders: (jobId, author) =>
+    ipcRenderer.invoke("filex:list-archivio-job-subfolders", jobId, author),
   listArchivioJobSelectionCandidates: (jobId) =>
     ipcRenderer.invoke("filex:list-archivio-job-selection-candidates", jobId),
   generateArchivioLowQuality: (jobId, overwrite, sourceSubfolder) =>

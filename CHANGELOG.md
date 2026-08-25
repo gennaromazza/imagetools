@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - Archivio Flow 0.1.35
+
+- Miniature ricaricate correttamente al cambio data, con coda annullabile, cache più veloce e anteprime incorporate per i file RAW.
+- Durante l'aggiunta a un lavoro esistente vengono mostrate le cartelle foto/video già presenti, con suggerimenti contro la creazione di nomi duplicati o molto simili.
+- Al termine di un'importazione con foto e video si aprono automaticamente entrambe le cartelle di destinazione per consentire una verifica immediata.
+
 ## 2026-08-25 - Archivio Flow 0.1.34
 
 - La rimozione della SD non chiude più Archivio Flow: l'app resta disponibile nell'area di notifica e torna automaticamente alla schermata archivio.

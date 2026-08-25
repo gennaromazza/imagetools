@@ -3649,6 +3649,7 @@ const importHandler = async (req: Request, res: Response) => {
   let skippedCount = 0;
   let scannedFiles = 0;
   let plannedFiles = 0;
+  let plannedVideoFiles = 0;
   let totalPlannedBytes = 0;
   let filteredOutFiles = 0;
   let manifestSkippedFiles = 0;
@@ -3846,6 +3847,7 @@ const importHandler = async (req: Request, res: Response) => {
     }
 
     plannedFiles = plannedSources.length;
+    plannedVideoFiles = plannedSources.filter((source) => isVideoFile(source.srcFile)).length;
     updateImportProgress({ plannedFiles, scannedFiles, currentFileName: null });
 
     for (const { srcFile, originalName, sourceRelativePath, sourceSize, sourceMtimeMs } of plannedSources) {
@@ -4118,6 +4120,8 @@ const importHandler = async (req: Request, res: Response) => {
     skippedFiles: skippedCount,
     jpgGenerati,
     cartellaFotoFinale: targetFotoDir,
+    cartellaVideoFinale: targetVideoDir,
+    videoFiles: plannedVideoFiles,
     performance: {
       totalMs: Date.now() - startedAt,
       sampleMs,
@@ -4326,7 +4330,7 @@ app.post("/api/jobs/:id/contract-link", updateJobContractLinkHandler);
 
 /**
  * GET /api/jobs/:id/subfolders
- * Returns the immediate subfolders of the job folder (excluding BASSA_QUALITA and EXPORT).
+ * Returns the existing import subfolders below FOTO_SD/VIDEO_SD for the selected author.
  */
 const listJobSubfoldersHandler = async (req: Request, res: Response) => {
   const paramId = req.params["id"];
@@ -4346,17 +4350,32 @@ const listJobSubfoldersHandler = async (req: Request, res: Response) => {
   }
   if (!job) return void res.status(404).json({ error: "Lavoro non trovato" });
 
-  let entries: fs.Dirent[];
-  try {
-    entries = await fs.promises.readdir(job.percorsoCartella, { withFileTypes: true });
-  } catch {
-    return void res.status(500).json({ error: "Impossibile leggere la cartella del lavoro" });
+  const requestedAuthor = typeof req.query["author"] === "string" ? req.query["author"].trim() : "";
+  const authorFolder = sanitizeFolderSegment(requestedAuthor || job.autore || "");
+  const found = new Set<string>();
+
+  const collectFolders = async (root: string, relative = "", depth = 0): Promise<void> => {
+    if (depth >= 4) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(root, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || isLowQualityDirName(entry.name) || isExportDirName(entry.name)) continue;
+      const nextRelative = relative ? `${relative}\\${entry.name}` : entry.name;
+      found.add(nextRelative);
+      await collectFolders(path.join(root, entry.name), nextRelative, depth + 1);
+    }
+  };
+
+  if (authorFolder) {
+    await collectFolders(path.join(job.percorsoCartella, "FOTO_SD", authorFolder));
+    await collectFolders(path.join(job.percorsoCartella, "VIDEO_SD", authorFolder));
   }
 
-  const subfolders = entries
-    .filter((e) => e.isDirectory() && !isLowQualityDirName(e.name) && !isExportDirName(e.name))
-    .map((e) => e.name)
-    .sort((a, b) => a.localeCompare(b, "it"));
+  const subfolders = [...found].sort((a, b) => a.localeCompare(b, "it", { sensitivity: "base" }));
 
   res.json({ subfolders });
 };
@@ -4737,6 +4756,8 @@ export async function importService(input: ImportRequest): Promise<{
   skippedFiles: number;
   jpgGenerati: number;
   cartellaFotoFinale: string;
+  cartellaVideoFinale: string;
+  videoFiles: number;
   performance: Record<string, number>;
   errors: string[];
   failedFiles: string[];
@@ -4765,8 +4786,8 @@ export async function deleteJobService(jobId: string): Promise<{ ok: true }> {
   return unwrapInvocationResult(await invokeHandler(deleteJobHandler, { params: { id: jobId } }));
 }
 
-export async function listJobSubfoldersService(jobId: string): Promise<{ subfolders: string[] }> {
-  return unwrapInvocationResult(await invokeHandler(listJobSubfoldersHandler, { params: { id: jobId } }));
+export async function listJobSubfoldersService(jobId: string, author?: string): Promise<{ subfolders: string[] }> {
+  return unwrapInvocationResult(await invokeHandler(listJobSubfoldersHandler, { params: { id: jobId }, query: { author } }));
 }
 
 export async function listJobSelectionCandidatesService(jobId: string): Promise<{

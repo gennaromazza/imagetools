@@ -303,30 +303,13 @@ export function FilterRangePickerModal({
                       {marker}
                     </div>
                   )}
-                  {f.isJpg ? (
-                    <DesktopPreviewImage
-                      sdPath={sdPath}
-                      filePath={f.filePath}
-                      alt={f.fileName}
-                      style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 7, marginBottom: "0.35rem" }}
-                    />
-                  ) : (
-                    <div
-                      style={{
-                        width: "100%",
-                        height: 90,
-                        borderRadius: 7,
-                        marginBottom: "0.35rem",
-                        background: "rgba(255,255,255,0.05)",
-                        display: "grid",
-                        placeItems: "center",
-                        color: "var(--text-muted)",
-                        fontSize: "0.8rem",
-                      }}
-                    >
-                      RAW {f.ext.toUpperCase()}
-                    </div>
-                  )}
+                  <DesktopPreviewImage
+                    sdPath={sdPath}
+                    filePath={f.filePath}
+                    sourceFileKey={`${f.size}:${Math.trunc(f.mtimeMs)}`}
+                    alt={f.fileName}
+                    style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 7, marginBottom: "0.35rem" }}
+                  />
                   <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", wordBreak: "break-all" }}>{f.fileName}</div>
                   <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>
                     {formatBytes(f.size)} | {formatDateTime(f.mtimeMs)}

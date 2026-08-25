@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { FilterPreviewData, SafeToFormatResult, SdPreview } from "../types";
 import { checkArchivioSafeToFormat, getArchivioFilterPreview, getArchivioSdPreview } from "../archivioDesktopApi";
 import { DesktopPreviewImage } from "./DesktopPreviewImage";
+import { buildPreviewSourceKey, filterMediaForDate, isPreviewableMedia, localIsoDate } from "../previewPolicy";
 
 interface Props {
   sdPath: string;
@@ -14,12 +15,6 @@ function todayIso(): string {
   const now = new Date();
   const offset = now.getTimezoneOffset() * 60_000;
   return new Date(now.getTime() - offset).toISOString().slice(0, 10);
-}
-
-function localIsoDate(timestamp: number): string {
-  const value = new Date(timestamp);
-  const offset = value.getTimezoneOffset() * 60_000;
-  return new Date(value.getTime() - offset).toISOString().slice(0, 10);
 }
 
 function formatBytes(bytes: number): string {
@@ -41,7 +36,7 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
 
   const media = useMemo(() => {
     if (!allMedia || filterMode === "all") return allMedia;
-    const sampleFiles = allMedia.sampleFiles.filter((file) => localIsoDate(file.mtimeMs) === selectedDate);
+    const sampleFiles = filterMediaForDate(allMedia.sampleFiles, selectedDate);
     return {
       ...allMedia,
       matchedFiles: sampleFiles.length,
@@ -186,10 +181,10 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
           )}
           {media && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: "0.5rem" }}>
-              {media.sampleFiles.slice(0, visibleMediaCount).map((file, index) => (
-                <div key={`${file.filePath}-${index}`} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "0.35rem", background: "rgba(0,0,0,0.15)" }}>
-                  {file.mediaType === "video" || file.isJpg ? (
-                    <DesktopPreviewImage sdPath={sdPath} filePath={file.filePath} alt={file.fileName} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 7 }} />
+              {media.sampleFiles.slice(0, visibleMediaCount).map((file) => (
+                <div key={`${selectedDate}:${file.filePath}:${buildPreviewSourceKey(file)}`} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "0.35rem", background: "rgba(0,0,0,0.15)" }}>
+                  {isPreviewableMedia(file) ? (
+                    <DesktopPreviewImage sdPath={sdPath} filePath={file.filePath} sourceFileKey={buildPreviewSourceKey(file)} alt={file.fileName} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 7 }} />
                   ) : (
                     <div style={{ width: "100%", height: 100, borderRadius: 7, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.05)", color: "var(--text-muted)" }}>
                       FOTO {file.ext.toUpperCase()}

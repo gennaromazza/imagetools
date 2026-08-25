@@ -7,6 +7,7 @@ import {
   getArchivioFilterPreview,
   getArchivioImportProgress,
   getArchivioJobs,
+  getArchivioJobSubfolders,
   getArchivioSdCards,
   ejectArchivioSdCard,
   getArchivioSdPreview,
@@ -25,6 +26,8 @@ import {
 import { DesktopPreviewImage } from "./DesktopPreviewImage";
 import { FilterRangePickerModal } from "./FilterRangePickerModal";
 import { DateFilterPicker } from "./DateFilterPicker";
+import { buildPreviewSourceKey, isPreviewableMedia } from "../previewPolicy";
+import { findSimilarFolderNames } from "../folderSuggestions";
 
 interface Props {
   onImportDone: (result: ImportResult) => void;
@@ -178,6 +181,16 @@ async function openFolderInExplorer(folderPath: string) {
   }
 }
 
+async function openImportDestinationFolders(result: ImportResult) {
+  const folders = [
+    result.cartellaFotoFinale || result.job.percorsoCartella,
+    result.videoFiles > 0 ? result.cartellaVideoFinale : "",
+  ].filter((folder, index, all): folder is string => Boolean(folder) && all.indexOf(folder) === index);
+  for (const folder of folders) {
+    await openFolderInExplorer(folder);
+  }
+}
+
 function playCompletionTone() {
   try {
     const audioCtx = new window.AudioContext();
@@ -270,6 +283,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const [jobsEsistenti, setJobsEsistenti] = useState<Job[]>([]);
   const [existingJobId, setExistingJobId] = useState("");
   const [existingJobSearch, setExistingJobSearch] = useState("");
+  const [existingJobFolders, setExistingJobFolders] = useState<string[]>([]);
+  const [loadingExistingJobFolders, setLoadingExistingJobFolders] = useState(false);
+  const [existingJobFoldersError, setExistingJobFoldersError] = useState<string | null>(null);
   const [categoryKey, setCategoryKey] = useState("");
   const [destinationOverride, setDestinationOverride] = useState(false);
 
@@ -501,6 +517,31 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     setImportValidationState([]);
     setShowQuickAddSetup(true);
   }, [existingJobImportId]);
+
+  useEffect(() => {
+    if (!usaLavoroEsistente || !existingJobId || !autore.trim()) {
+      setExistingJobFolders([]);
+      setExistingJobFoldersError(null);
+      setLoadingExistingJobFolders(false);
+      return;
+    }
+    let active = true;
+    setLoadingExistingJobFolders(true);
+    setExistingJobFoldersError(null);
+    void getArchivioJobSubfolders(existingJobId, autore.trim())
+      .then((result) => {
+        if (active) setExistingJobFolders(result.subfolders);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setExistingJobFolders([]);
+        setExistingJobFoldersError(error instanceof Error ? error.message : "Impossibile leggere le cartelle esistenti");
+      })
+      .finally(() => {
+        if (active) setLoadingExistingJobFolders(false);
+      });
+    return () => { active = false; };
+  }, [usaLavoroEsistente, existingJobId, autore]);
 
   useEffect(() => {
     const preferences: ImportUiPreferences = {
@@ -843,7 +884,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
         if (openFolderOnFinish) {
           autoOpenedJobRef.current = importResult.job.id;
           try {
-            await openFolderInExplorer(importResult.cartellaFotoFinale || importResult.job.percorsoCartella);
+            await openImportDestinationFolders(importResult);
           } catch {
             // Import is already complete; Explorer failures must not turn it into a failed import.
           }
@@ -876,6 +917,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   }
 
   const selectedExistingJob = jobsEsistenti.find((j) => j.id === existingJobId) ?? null;
+  const similarExistingFolders = usaLavoroEsistente
+    ? findSimilarFolderNames(sottoCartella, existingJobFolders)
+    : [];
   const normalizedExistingJobSearch = existingJobSearch.trim().toLowerCase();
   const filteredExistingJobs = normalizedExistingJobSearch
     ? jobsEsistenti.filter((job) => {
@@ -1200,7 +1244,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     if (!importSuccess || !openFolderOnFinish) return;
     if (autoOpenedJobRef.current === importSuccess.job.id) return;
     autoOpenedJobRef.current = importSuccess.job.id;
-    void openFolderInExplorer(importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella);
+    void openImportDestinationFolders(importSuccess);
   }, [importSuccess, openFolderOnFinish]);
 
   useEffect(() => {
@@ -2057,10 +2101,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                               onClick={() => selectPreviewPoint(f.mtimeMs)}
                               title="Clicca per impostare inizio/fine range"
                             >
-                              {f.mediaType === "video" || f.isJpg ? (
+                              {isPreviewableMedia(f) ? (
                                 <DesktopPreviewImage
                                   sdPath={sdPath.trim()}
                                   filePath={f.filePath}
+                                  sourceFileKey={buildPreviewSourceKey(f)}
                                   alt={f.fileName}
                                   style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 7, marginBottom: "0.35rem" }}
                                 />
@@ -2288,7 +2333,38 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                 />
               </label>
             </div>
+            {usaLavoroEsistente && similarExistingFolders.length > 0 && !existingJobFolders.includes(sottoCartella) && (
+              <div className="message-box" style={{ background: "rgba(184,154,99,0.1)", borderColor: "var(--line-strong)" }}>
+                <p style={{ margin: 0, fontSize: "0.84rem" }}>Esiste già una cartella con nome simile. Puoi riutilizzarla:</p>
+                <div className="button-row" style={{ marginTop: "0.45rem" }}>
+                  {similarExistingFolders.map((folder) => (
+                    <button type="button" key={folder} className="secondary-button" onClick={() => setSottoCartella(folder)}>Usa “{folder}”</button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
+
+          {usaLavoroEsistente && selectedExistingJob && (
+            <div className="stack" style={{ gap: "0.45rem" }}>
+              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Cartelle già presenti nel lavoro:</span>
+              {loadingExistingJobFolders ? (
+                <span style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>Lettura cartelle…</span>
+              ) : existingJobFoldersError ? (
+                <span style={{ fontSize: "0.84rem", color: "var(--danger)" }}>{existingJobFoldersError}</span>
+              ) : existingJobFolders.length > 0 ? (
+                <div className="button-row" style={{ flexWrap: "wrap" }}>
+                  {existingJobFolders.map((folder) => (
+                    <button type="button" key={folder} className={sottoCartella === folder ? "secondary-button" : "ghost-button"} onClick={() => setSottoCartella(folder)} style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}>
+                      📁 {folder}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <span style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>Nessuna sottocartella presente per {autore || "questo autore"}.</span>
+              )}
+            </div>
+          )}
 
           {cartellePredefinite.length > 0 && (
             <div className="stack" style={{ gap: "0.45rem" }}>
@@ -2547,7 +2623,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             </ul>
           )}
           <p style={{ margin: "0.4rem 0 0", fontSize: "0.88rem", color: "var(--text-muted)" }}>
-            {importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella}
+            Foto: {importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella}
+            {importSuccess.videoFiles > 0 && <> · Video: {importSuccess.cartellaVideoFinale}</>}
           </p>
           {importSuccess.job.contrattoLink && (
             <p style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
@@ -2565,9 +2642,9 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             <button
               className="secondary-button"
               style={{ padding: "0.5rem 0.8rem", fontSize: "0.86rem" }}
-              onClick={() => { void openFolderInExplorer(importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella); }}
+              onClick={() => { void openImportDestinationFolders(importSuccess); }}
             >
-              📂 Apri cartella lavoro
+              📂 Apri cartelle importate
             </button>
           </div>
         </div>
@@ -2749,10 +2826,27 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
                   </div>
                 </div>
               )}
+              {existingJobFolders.length > 0 && (
+                <div className="stack" style={{ gap: "0.4rem" }}>
+                  <span className="quick-add-modal__label">Cartelle già presenti nel lavoro</span>
+                  <div className="button-row" style={{ flexWrap: "wrap" }}>
+                    {existingJobFolders.map((folder) => (
+                      <button type="button" key={folder} className={sottoCartella === folder ? "secondary-button" : "ghost-button"} onClick={() => setSottoCartella(folder)}>
+                        📁 {folder}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <label className="field">
                 <span>Oppure crea una nuova cartella</span>
                 <input value={sottoCartella} onChange={(event) => setSottoCartella(event.target.value)} placeholder="es. Cerimonia" />
               </label>
+              {similarExistingFolders.length > 0 && !existingJobFolders.includes(sottoCartella) && (
+                <p style={{ margin: 0, color: "var(--accent-strong)", fontSize: "0.84rem" }}>
+                  Nome simile già presente: {similarExistingFolders.map((folder) => `“${folder}”`).join(", ")}.
+                </p>
+              )}
               <p className="quick-add-modal__destination">Foto: <strong>{fotoDestPreview}</strong> · Video: <strong>{videoDestPreview}</strong></p>
               <div className="button-row" style={{ justifyContent: "flex-end" }}>
                 <button type="button" className="ghost-button" onClick={() => setShowQuickAddSetup(false)}>Apri flusso completo</button>

@@ -865,6 +865,8 @@ export interface ArchivioImportResult {
     skippedFiles: number;
     jpgGenerati: number;
     cartellaFotoFinale: string;
+    cartellaVideoFinale: string;
+    videoFiles: number;
     errors: string[];
     failedFiles?: string[];
     duplicateFiles?: string[];
@@ -1089,7 +1091,7 @@ export interface FileXDesktopApi {
         ok: boolean;
     }>;
     updateArchivioJobContractLink: (jobId: string, contrattoLink: string) => Promise<ArchivioJob>;
-    listArchivioJobSubfolders: (jobId: string) => Promise<{
+    listArchivioJobSubfolders: (jobId: string, author?: string) => Promise<{
         subfolders: string[];
     }>;
     listArchivioJobSelectionCandidates: (jobId: string) => Promise<{

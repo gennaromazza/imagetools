@@ -300,12 +300,13 @@ export async function generateArchivioLowQuality(jobId: string, overwrite: boole
   }>(`/api/jobs/${encodeURIComponent(jobId)}/generate-low-quality`, { overwrite, sourceSubfolder });
 }
 
-export async function getArchivioJobSubfolders(jobId: string): Promise<{ subfolders: string[] }> {
+export async function getArchivioJobSubfolders(jobId: string, author?: string): Promise<{ subfolders: string[] }> {
   const desktopApi = getDesktopApi();
   if (desktopApi) {
-    return await desktopApi.listArchivioJobSubfolders(jobId);
+    return await desktopApi.listArchivioJobSubfolders(jobId, author);
   }
-  return await apiGet<{ subfolders: string[] }>(`/api/jobs/${encodeURIComponent(jobId)}/subfolders`);
+  const query = author?.trim() ? `?author=${encodeURIComponent(author.trim())}` : "";
+  return await apiGet<{ subfolders: string[] }>(`/api/jobs/${encodeURIComponent(jobId)}/subfolders${query}`);
 }
 
 export async function getArchivioJobSelectionCandidates(jobId: string): Promise<{
@@ -330,31 +331,94 @@ export async function deleteArchivioJob(jobId: string) {
   return await apiDelete<{ ok: true }>(`/api/jobs/${encodeURIComponent(jobId)}`);
 }
 
-export async function getArchivioPreviewImageUrl(sdPath: string, filePath: string): Promise<string | null> {
-  const desktopApi = getDesktopApi();
-  if (desktopApi) {
-    const payload = await desktopApi.getArchivioPreviewImage(sdPath, filePath);
-    if (!payload) return null;
-    const bytes = payload.bytes;
-    const ownedBytes = new Uint8Array(bytes.byteLength);
-    ownedBytes.set(bytes);
-    const blob = new Blob([ownedBytes], { type: payload.mimeType || "image/jpeg" });
-    return URL.createObjectURL(blob);
-  }
+const PREVIEW_CACHE_LIMIT = 240;
+const PREVIEW_CONCURRENCY = 6;
+const previewBlobCache = new Map<string, Blob>();
+const previewBlobRequests = new Map<string, Promise<Blob | null>>();
+const previewTaskQueue: Array<() => void> = [];
+let activePreviewTasks = 0;
 
-  const query = new URLSearchParams({
-    sdPath,
-    filePath,
+function runPreviewTask<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = () => {
+      if (signal?.aborted) {
+        reject(new Error("Richiesta anteprima annullata"));
+        previewTaskQueue.shift()?.();
+        return;
+      }
+      activePreviewTasks += 1;
+      void task().then(resolve, reject).finally(() => {
+        activePreviewTasks -= 1;
+        previewTaskQueue.shift()?.();
+      });
+    };
+    if (activePreviewTasks < PREVIEW_CONCURRENCY) start();
+    else previewTaskQueue.push(start);
   });
-  const response = await fetch(`/api/preview-image?${query.toString()}`);
-  if (!response.ok) {
-    throw new Error(await readErrorMessage(response));
+}
+
+function rememberPreviewBlob(cacheKey: string, blob: Blob): void {
+  previewBlobCache.delete(cacheKey);
+  previewBlobCache.set(cacheKey, blob);
+  while (previewBlobCache.size > PREVIEW_CACHE_LIMIT) {
+    const oldestKey = previewBlobCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    previewBlobCache.delete(oldestKey);
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  const blob = new Blob([bytes], {
-    type: response.headers.get("content-type") || "image/jpeg",
-  });
-  return URL.createObjectURL(blob);
+}
+
+async function loadArchivioPreviewBlob(sdPath: string, filePath: string, sourceFileKey?: string, signal?: AbortSignal): Promise<Blob | null> {
+  const cacheKey = `${sdPath}\0${filePath}\0${sourceFileKey ?? ""}`;
+  const cached = previewBlobCache.get(cacheKey);
+  if (cached) {
+    previewBlobCache.delete(cacheKey);
+    previewBlobCache.set(cacheKey, cached);
+    return cached;
+  }
+  const pending = previewBlobRequests.get(cacheKey);
+  if (pending) return await pending;
+
+  const request = runPreviewTask(async () => {
+    const desktopApi = getDesktopApi();
+    const isVideo = /\.(mp4|mov|m4v|avi|mkv|mts|m2ts|mpg|mpeg|3gp|webm)$/i.test(filePath);
+    if (desktopApi && !isVideo) {
+      const rendered = await desktopApi.getThumbnail(filePath, 220, 54, sourceFileKey, {
+          profile: "fast",
+          preferEmbeddedPreview: true,
+          allowDirectEmbeddedJpeg: true,
+        }).catch(() => null);
+      if (rendered) {
+        const ownedBytes = new Uint8Array(rendered.bytes.byteLength);
+        ownedBytes.set(rendered.bytes);
+        return new Blob([ownedBytes], { type: rendered.mimeType || "image/jpeg" });
+      }
+    }
+    if (desktopApi) {
+      const payload = await desktopApi.getArchivioPreviewImage(sdPath, filePath);
+      if (!payload) return null;
+      const ownedBytes = new Uint8Array(payload.bytes.byteLength);
+      ownedBytes.set(payload.bytes);
+      return new Blob([ownedBytes], { type: payload.mimeType || "image/jpeg" });
+    }
+
+    const query = new URLSearchParams({ sdPath, filePath });
+    const response = await fetch(`/api/preview-image?${query.toString()}`);
+    if (!response.ok) throw new Error(await readErrorMessage(response));
+    return await response.blob();
+  }, signal);
+  previewBlobRequests.set(cacheKey, request);
+  try {
+    const blob = await request;
+    if (blob) rememberPreviewBlob(cacheKey, blob);
+    return blob;
+  } finally {
+    previewBlobRequests.delete(cacheKey);
+  }
+}
+
+export async function getArchivioPreviewImageUrl(sdPath: string, filePath: string, sourceFileKey?: string, signal?: AbortSignal): Promise<string | null> {
+  const blob = await loadArchivioPreviewBlob(sdPath, filePath, sourceFileKey, signal);
+  return blob ? URL.createObjectURL(blob) : null;
 }
 
 export async function openBackupGuard(): Promise<{ ok: boolean; message: string }> {

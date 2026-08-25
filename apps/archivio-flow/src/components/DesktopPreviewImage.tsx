@@ -4,11 +4,12 @@ import { getArchivioPreviewImageUrl } from "../archivioDesktopApi";
 interface Props {
   sdPath: string;
   filePath: string;
+  sourceFileKey?: string;
   alt: string;
   style?: React.CSSProperties;
 }
 
-export function DesktopPreviewImage({ sdPath, filePath, alt, style }: Props) {
+export function DesktopPreviewImage({ sdPath, filePath, sourceFileKey, alt, style }: Props) {
   const [src, setSrc] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
   const isVideo = /\.(mp4|mov|m4v|avi|mkv|mts|m2ts|mpg|mpeg|3gp|webm)$/i.test(filePath);
@@ -16,10 +17,11 @@ export function DesktopPreviewImage({ sdPath, filePath, alt, style }: Props) {
   useEffect(() => {
     let alive = true;
     let objectUrl: string | null = null;
+    const controller = new AbortController();
     setSrc(null);
     setStatus("loading");
 
-    void getArchivioPreviewImageUrl(sdPath, filePath)
+    void getArchivioPreviewImageUrl(sdPath, filePath, sourceFileKey, controller.signal)
       .then((nextUrl) => {
         if (!alive || !nextUrl) return;
         objectUrl = nextUrl;
@@ -35,11 +37,12 @@ export function DesktopPreviewImage({ sdPath, filePath, alt, style }: Props) {
 
     return () => {
       alive = false;
+      controller.abort();
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [filePath, sdPath]);
+  }, [filePath, sdPath, sourceFileKey]);
 
   if (!src) {
     return (
@@ -67,5 +70,5 @@ export function DesktopPreviewImage({ sdPath, filePath, alt, style }: Props) {
     );
   }
 
-  return <img src={src} alt={alt} style={style} loading="lazy" />;
+  return <img src={src} alt={alt} style={style} decoding="async" />;
 }

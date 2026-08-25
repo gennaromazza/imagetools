@@ -1837,9 +1837,9 @@ function registerIpcHandlers(): void {
     const result = await archivio.updateJobContractLinkService(jobId, contrattoLink);
     return result.job;
   });
-  ipcMain.handle("filex:list-archivio-job-subfolders", async (_event, jobId: string) => {
+  ipcMain.handle("filex:list-archivio-job-subfolders", async (_event, jobId: string, author?: string) => {
     const archivio = await loadArchivioFlowModule();
-    return await archivio.listJobSubfoldersService(jobId);
+    return await archivio.listJobSubfoldersService(jobId, author);
   });
   ipcMain.handle("filex:list-archivio-job-selection-candidates", async (_event, jobId: string) => {
     const archivio = await loadArchivioFlowModule();
