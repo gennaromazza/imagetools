@@ -53,7 +53,14 @@ jobs:
           EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && format('suite-v{0}', inputs.suite_version) || github.event.workflow_run.head_branch }}
         shell: bash
         run: |
-          html="$(curl --fail --silent --show-error --location https://filex-suite.web.app/)"
           version="${EXPECTED_VERSION#suite-v}"
-          grep -Fq "FileX Suite $version" <<< "$html"
-          grep -Fq "suite-channel-stable/FileX-Suite-stable-x64-setup.exe" <<< "$html"
+          for attempt in 1 2 3 4 5 6; do
+            nonce="$(date +%s%N)-$attempt"
+            html="$(curl --fail --silent --show-error --location "https://filex-suite.web.app/?release-check=$nonce")"
+            if grep -Fq "FileX Suite $version" <<< "$html" && grep -Fq "suite-channel-stable/FileX-Suite-stable-x64-setup.exe" <<< "$html"; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "La homepage pubblica non mostra FileX Suite $version dopo i retry." >&2
+          exit 1
