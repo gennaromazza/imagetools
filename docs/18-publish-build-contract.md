@@ -69,3 +69,8 @@ Per ogni tool modificato il manifest deve avere:
 
 FileX Suite confronta questa versione con quella installata. Se la versione remota e' superiore, nella scheda del tool deve comparire `Aggiorna` dopo il refresh.
 
+## Sincronizzazione automatica del sito dopo una release Suite
+
+Ogni release con tag `suite-vX.Y.Z` attiva `.github/workflows/website-suite-sync.yml`. Il workflow esegue lo script `scripts/update-website-suite-download.mjs`, aggiorna la versione mostrata nella homepage, pubblica `website/` sul target Firebase Hosting `filex-website` e verifica che `https://filex-suite.web.app/` mostri la versione appena rilasciata e il link stabile `suite-channel-stable/FileX-Suite-stable-x64-setup.exe`.
+
+La repository deve avere la secret Actions `FIREBASE_TOKEN`. Il valore non va mai committato né inserito nei log. Se la secret manca o il deploy/verifica fallisce, la sincronizzazione del sito non è completata e va ripetuta dopo aver corretto la configurazione.

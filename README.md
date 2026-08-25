@@ -9,6 +9,8 @@ Repository principale della suite **FileX** (ex ImageTools): strumenti professio
 - `docs/`: documentazione di suite e dei singoli tool
 - `website/`: sito pubblico e landing page di FileX, pubblicati sul target Firebase Hosting `filex-website`
 
+Il sito viene sincronizzato automaticamente dopo ogni release `suite-vX.Y.Z` dal workflow `Sync FileX website after Suite release`. Il workflow aggiorna il fallback della versione nella homepage, mantiene il link stabile dell'installer Suite e fa il deploy su Firebase Hosting. È necessaria la secret GitHub Actions `FIREBASE_TOKEN` autorizzata al progetto Firebase `gen-lang-client-0321087169`.
+
 ## Tool principali
 
 - `apps/image-party-frame` — Batch framing, crop live, export eventi

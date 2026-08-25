@@ -116,3 +116,6 @@ Tutti i tool devono rispettare lo stesso contratto:
 La definizione completa della richiesta "pubblica e builda" e' in `docs/18-publish-build-contract.md`.
 
 Non aggiungere aggiornamenti tool-specifici nella barra dell'aggiornamento della Suite: Suite e tool sono distribuiti separatamente.
+### Sito ufficiale e link Suite
+
+La homepage usa il link stabile dell'installer Suite. Dopo una release `suite-vX.Y.Z`, il workflow `website-suite-sync.yml` aggiorna automaticamente il fallback della versione e pubblica il sito Firebase. Prima di considerare conclusa la release verificare il run del workflow, la secret `FIREBASE_TOKEN` e la versione mostrata su `https://filex-suite.web.app/`.
