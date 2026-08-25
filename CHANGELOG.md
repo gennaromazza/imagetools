@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - FileX Suite 0.1.54
+
+### Test comportamentali dell'updater
+- La cache degli snapshot mantiene un solo fetch condiviso fino alla risoluzione, anche quando `tasklist.exe` è lento.
+- Aggiunto un test comportamentale eseguibile dalla Dev Console per verificare la deduplicazione delle chiamate concorrenti.
+
 ## 2026-08-25 - FileX Suite 0.1.53
 
 ### Chiusura parallela più leggera e robusta

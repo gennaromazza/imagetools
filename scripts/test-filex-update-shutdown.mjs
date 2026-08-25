@@ -12,6 +12,7 @@ function assert(condition, message) {
 }
 
 const coordinator = await source("apps/filex-desktop/src/filex-process-coordinator.ts");
+const snapshotCache = await source("apps/filex-desktop/src/process-snapshot-cache.ts");
 const builder = await source("apps/filex-desktop/electron-builder.config.mjs");
 const shutdownArgument = "--filex-update-shutdown";
 
@@ -29,8 +30,8 @@ assert(
     && coordinator.includes('const execFileAsync = promisify(execFile)')
     && !coordinator.includes("execFileSync")
     && coordinator.includes("SAFE_PROCESS_NAME = /^[a-z0-9_.-]+$/i")
-    && coordinator.includes("class ProcessSnapshotCache")
-    && coordinator.includes("processSnapshotCache.get()")
+    && snapshotCache.includes("export class ProcessSnapshotCache")
+    && coordinator.includes("processSnapshotCache.get(listRunningProcessNames)")
     && coordinator.includes("openInstallerWithRetry")
     && coordinator.includes("taskkill non riuscito"),
   "Il coordinatore usa ancora chiamate sincrone o non protegge il fallback taskkill.",

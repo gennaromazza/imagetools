@@ -9,6 +9,7 @@ import {
   getSuiteManagedTools,
   type DesktopToolDescriptor,
 } from "./tool-manifest.js";
+import { ProcessSnapshotCache } from "./process-snapshot-cache.js";
 
 const TOOL_COOPERATIVE_SHUTDOWN_TIMEOUT_MS = 9_000;
 const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 3_000;
@@ -75,25 +76,10 @@ async function listRunningProcessNames(): Promise<Set<string>> {
 }
 
 /** Condivide uno snapshot del tasklist tra tutti i tool chiusi in parallelo. */
-class ProcessSnapshotCache {
-  private pending: Promise<Set<string>> | null = null;
-  private lastFetch = 0;
-
-  async get(): Promise<Set<string>> {
-    const now = Date.now();
-    if (this.pending && now - this.lastFetch < TOOL_SHUTDOWN_POLL_INTERVAL_MS) {
-      return this.pending;
-    }
-    this.lastFetch = now;
-    this.pending = listRunningProcessNames();
-    return this.pending;
-  }
-}
-
-const processSnapshotCache = new ProcessSnapshotCache();
+const processSnapshotCache = new ProcessSnapshotCache(TOOL_SHUTDOWN_POLL_INTERVAL_MS);
 
 async function isAnyProcessRunning(processNames: readonly string[]): Promise<boolean> {
-  const runningNames = await processSnapshotCache.get();
+  const runningNames = await processSnapshotCache.get(listRunningProcessNames);
   return processNames.some((name) => runningNames.has(name));
 }
 
