@@ -776,6 +776,8 @@ function queueOpenProjectPath(projectPath: string | null): void {
 
 const initialOpenFolderPath = extractOpenFolderPathFromArgv(process.argv, process.cwd());
 const initialOpenProjectPath = extractOpenProjectPathFromArgv(process.argv);
+const isUpdateShutdownRequest = (argv: readonly string[]): boolean =>
+  argv.includes("--filex-update-shutdown");
 const hasSingleInstanceLock = app.requestSingleInstanceLock({
   requestedToolId: requestedTool.id,
   openFolderPath: initialOpenFolderPath,
@@ -790,6 +792,13 @@ if (!hasSingleInstanceLock) {
   pendingOpenProjectPath = initialOpenProjectPath;
 
   app.on("second-instance", (_event, argv, workingDirectory, additionalData) => {
+    // La Suite usa questo comando solo dopo avere verificato che il tool e'
+    // gia' in esecuzione. E' una chiusura cooperativa: l'app puo' eseguire il
+    // proprio before-quit e rilasciare file e processi figli prima dell'update.
+    if (isUpdateShutdownRequest(argv)) {
+      app.quit();
+      return;
+    }
     const launchData = additionalData && typeof additionalData === "object"
       ? additionalData as { openFolderPath?: unknown; openProjectPath?: unknown }
       : null;

@@ -1,5 +1,6 @@
 import { execFile, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { basename } from "node:path";
 import { shell } from "electron";
 import type { DesktopToolId } from "@photo-tools/desktop-contracts";
 import {
@@ -8,10 +9,12 @@ import {
   type DesktopToolDescriptor,
 } from "./tool-manifest.js";
 
-const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 12_000;
+const TOOL_COOPERATIVE_SHUTDOWN_TIMEOUT_MS = 9_000;
+const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TOOL_FORCE_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TOOL_SHUTDOWN_POLL_INTERVAL_MS = 250;
 const TOOL_POST_SHUTDOWN_SETTLE_MS = 2_500;
+const UPDATE_SHUTDOWN_ARGUMENT = "--filex-update-shutdown";
 
 function normalizeProcessName(value: string): string {
   return value
@@ -69,6 +72,41 @@ function isAnyProcessRunning(processNames: readonly string[]): boolean {
   return processNames.some((name) => runningNames.has(name));
 }
 
+/** Restituisce solo gli eseguibili FileX effettivamente in esecuzione. */
+function listRunningExecutablePaths(processNames: readonly string[]): string[] {
+  if (process.platform !== "win32" || processNames.length === 0) return [];
+
+  const quotedNames = processNames
+    .map((name) => `'${name.replace(/'/g, "''")}'`)
+    .join(", ");
+  const command = [
+    `$names = @(${quotedNames})`,
+    "Get-Process -Name $names -ErrorAction SilentlyContinue",
+    "| Select-Object -ExpandProperty Path",
+    "| ConvertTo-Json -Compress",
+  ].join(" ");
+
+  try {
+    const output = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", command],
+      { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    if (!output) return [];
+    const parsed: unknown = JSON.parse(output);
+    const paths = Array.isArray(parsed) ? parsed : [parsed];
+    return Array.from(new Set(
+      paths
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+        .filter((executablePath) => processNames.includes(normalizeProcessName(basename(executablePath)))),
+    ));
+  } catch {
+    // PowerShell puo' essere disabilitato da policy aziendali: taskkill resta
+    // il fallback per le installazioni precedenti.
+    return [];
+  }
+}
+
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -103,12 +141,30 @@ function terminateProcess(processName: string, force: boolean): Promise<void> {
   });
 }
 
+/**
+ * Le versioni correnti riconoscono questo argomento nel rispettivo handler
+ * single-instance e invocano app.quit(), rilasciando prima le risorse native.
+ */
+function requestCooperativeShutdown(processNames: readonly string[]): void {
+  for (const executablePath of listRunningExecutablePaths(processNames)) {
+    execFile(executablePath, [UPDATE_SHUTDOWN_ARGUMENT], { windowsHide: true }, () => undefined);
+  }
+}
+
 async function stopFileXTool(toolId: DesktopToolId): Promise<void> {
   const processNames = executableNamesForTool(toolId);
   if (!isAnyProcessRunning(processNames)) {
     return;
   }
 
+  requestCooperativeShutdown(processNames);
+  if (await waitUntilProcessesExit(processNames, TOOL_COOPERATIVE_SHUTDOWN_TIMEOUT_MS)) {
+    return;
+  }
+
+  // Compatibilita' con le versioni che non conoscono ancora il comando
+  // cooperativo. Sono terminati solo il tool selezionato e i suoi nomi legacy,
+  // mai FileX Suite o altri prodotti FileX.
   await Promise.all(processNames.map((name) => terminateProcess(name, false)));
   if (await waitUntilProcessesExit(processNames, TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS)) {
     return;

@@ -291,7 +291,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:cache-sweep-bug-hunt") return "cache-sweep";
   if (name === "test:filex-send-bug-hunt") return "filex-send";
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
-  if (name === "test:filex-updater-lock" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
+  if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
   if (name === "test:filex-license-coverage") return "licenses";
   if (name === "test:filex-cloud") return "cloud";
   return "other";
@@ -312,6 +312,7 @@ function testDescription(name: string): string {
     "test:backup-guard-bug-hunt": "Verifica che sincronizzazione e rinomine non perdano o sovrascrivano file.",
     "test:filex-updater-lock": "Verifica che gli archivi dell'updater non restino bloccati su Windows.",
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
+    "test:filex-update-shutdown": "Verifica chiusura cooperativa dei tool e isolamento degli installer dalla Suite.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
     "test:filex-cloud": "Esegue i test delle funzioni cloud FileX.",

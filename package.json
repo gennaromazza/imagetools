@@ -27,6 +27,7 @@
     "test:cache-sweep-bug-hunt": "npm --workspace @photo-tools/cache-sweep run test",
     "test:filex-send-bug-hunt": "npm --workspace @photo-tools/filex-send run test",
     "test:backup-guard-bug-hunt": "npm --workspace @photo-tools/backup-guard run test",
+    "test:filex-update-shutdown": "node scripts/test-filex-update-shutdown.mjs",
     "test:filex-updater-lock": "node scripts/test-filex-updater-lock.mjs",
     "test:filex-independent-releases": "node scripts/test-filex-independent-releases.mjs",
     "test:filex-component-release-flow": "node scripts/test-component-release-flow.mjs",

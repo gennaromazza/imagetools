@@ -23,6 +23,9 @@
       "Sincronizzazione verificata SHA-256 con cancellazioni propagate dal master, cestino recuperabile, controllo spazio, velocita, ETA, pausa e annullamento sicuro.",
       "Verifica profonda byte-per-byte, gestione esplicita dei conflitti e snapshot dedicati per i cataloghi Lightroom.",
       "Integrazione con Archivio Flow e cronologia ricercabile ed esportabile per rendere ogni operazione controllabile dai beta tester."
+    ],
+    "0.2.4": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   },
   "filex-send": {
@@ -76,6 +79,9 @@
     ],
     "0.1.13": [
       "Download multipli diretti per i clienti, con supporto a file di grandi dimensioni e sessioni attive preservate."
+    ],
+    "0.1.14": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   },
   "cache-sweep": {
@@ -91,6 +97,9 @@
       "Pulizia guidata con spiegazione delle conseguenze, chiusura coordinata dei processi e protezioni sui percorsi.",
       "Supporto iniziale per Media Cache Adobe video, Camera Raw, Bridge, anteprime Lightroom e cache InDesign delimitate.",
       "Nuovo nome FileX Adobe Cleaner e rilevamento delle vecchie versioni principali, rimovibili con il disinstallatore ufficiale Adobe mantenendo le preferenze."
+    ],
+    "0.1.3": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   },
   "image-party-frame": {
@@ -130,6 +139,9 @@
       "Creazione di progetti fotografici con template predefiniti o personalizzati.",
       "Regolazione visuale di ritaglio e zoom, confronto del risultato ed esportazione in batch.",
       "Importazione ed esportazione di pacchetti portabili per progetti e librerie di template."
+    ],
+    "0.1.28": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   },
   "batch-print-layout": {
@@ -143,6 +155,9 @@
     "0.1.0": [
       "Impaginazione automatica di piu fotografie su fogli pronti per la stampa.",
       "Organizzazione batch delle immagini per ridurre sprechi e operazioni manuali."
+    ],
+    "0.1.3": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   },
   "archivio-flow": {
@@ -215,6 +230,9 @@
     ],
     "0.1.31": [
       "Riorganizzato il flusso di importazione: archivio iniziale, import guidato, aggiunta rapida dei file e cronologia delle ultime importazioni."
+    ],
+    "0.1.36": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   },
   "image-converter": {
@@ -229,6 +247,9 @@
       "Conversione batch in JPG e WebP con preset per web, social, revisione e stampa.",
       "Conversione dei negativi RAW in DNG compresso, conservando originali e sidecar XMP.",
       "Controllo di dimensioni e peso del file con cartelle di output separate."
+    ],
+    "0.1.3": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   },
   "image-file-finder": {
@@ -242,6 +263,9 @@
     "0.1.0": [
       "Ricerca automatica di fotografie in cartelle e sottocartelle a partire da una lista di nomi.",
       "Raccolta dei file trovati in una destinazione unica con riepilogo degli elementi mancanti."
+    ],
+    "0.1.3": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   },
   "photo-selector-app": {
@@ -294,6 +318,9 @@
       "Selezione e classificazione rapida di grandi servizi fotografici, inclusi i file RAW.",
       "Confronto, anteprima veloce, valutazioni, etichette colore e sincronizzazione XMP.",
       "Salvataggio dei progetti e trasferimento delle selezioni tramite Google Drive."
+    ],
+    "0.1.30": [
+      "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ]
   }
 }

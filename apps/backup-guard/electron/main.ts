@@ -57,7 +57,10 @@ async function createWindow(): Promise<void> {
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
-  app.on("second-instance", () => { if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); } });
+  app.on("second-instance", (_event, argv) => {
+    if (argv.includes("--filex-update-shutdown")) { app.quit(); return; }
+    if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
+  });
   app.whenReady().then(async () => {
     if (!(await directToolLicenseAllowed())) { app.quit(); return; }
     configureBackupGuardStorage(app.getPath("userData")); configureBackupGuardInbox(app.getPath("appData")); configureBackupGuardTestMode(testMode);

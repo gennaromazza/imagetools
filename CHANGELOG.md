@@ -30,6 +30,49 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-25 - FileX Suite 0.1.49
+
+### Aggiornamenti affidabili dei tool
+- La Suite chiede ora al solo tool selezionato di chiudersi in modo cooperativo, lasciandogli il tempo di rilasciare file e processi figli prima dell'installazione.
+- Se il tool è una versione precedente, resta disponibile il fallback compatibile limitato al suo eseguibile e ai nomi legacy dichiarati, senza chiudere FileX Suite.
+- Gli installer Windows hanno un'identità NSIS separata per componente: un aggiornamento tool non può più usare il disinstallatore storico della Suite.
+
+## 2026-08-25 - FileX Backup Guard 0.2.4
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
+## 2026-08-25 - FileX Send 0.1.14
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
+## 2026-08-25 - FileX Adobe Cleaner 0.1.3
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
+## 2026-08-25 - Trova Foto da Lista 0.1.3
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
+## 2026-08-25 - Image Converter 0.1.3
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
+## 2026-08-25 - Archivio Flow 0.1.36
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
+## 2026-08-25 - Batch Print Layout 0.1.3
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
+## 2026-08-25 - Image Party Frame 0.1.28
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
+## 2026-08-25 - Image Select Pro 0.1.30
+
+- Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti.
+
 ## 2026-08-25 - Archivio Flow 0.1.35
 
 - Miniature ricaricate correttamente al cambio data, con coda annullabile, cache più veloce e anteprime incorporate per i file RAW.

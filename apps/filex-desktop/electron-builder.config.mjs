@@ -3,6 +3,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import {
   dirname,
   join,
@@ -486,6 +487,11 @@ export default {
   },
 
   nsis: {
+    // Identita' NSIS stabile e separata per ogni componente. Evita che un
+    // installer di un tool trovi il disinstallatore storico della Suite e
+    // tenti di aggiornare o chiudere il prodotto sbagliato.
+    guid: `2D3D396A-2B09-4B4E-9C18-${createHash("sha256").update(requestedTool.id).digest("hex").slice(0, 12).toUpperCase()}`,
+
     /*
      * Installer moderno one-click per-user.
      *
