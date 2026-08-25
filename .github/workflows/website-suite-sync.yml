@@ -1,0 +1,48 @@
+name: Sync FileX website after Suite release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: filex-website-suite-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: startsWith(github.event.release.tag_name, 'suite-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Update website Suite download
+        env:
+          SUITE_VERSION: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          version="${SUITE_VERSION#suite-v}"
+          node scripts/update-website-suite-download.mjs "$version"
+
+      - name: Deploy website to Firebase Hosting
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+        run: npx firebase-tools deploy --project gen-lang-client-0321087169 --only hosting:filex-website --token "$FIREBASE_TOKEN" --non-interactive
+
+      - name: Verify public Suite download
+        env:
+          EXPECTED_VERSION: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          html="$(curl --fail --silent --show-error --location https://filex-suite.web.app/)"
+          version="${EXPECTED_VERSION#suite-v}"
+          grep -Fq "FileX Suite $version" <<< "$html"
+          grep -Fq "suite-channel-stable/FileX-Suite-stable-x64-setup.exe" <<< "$html"
