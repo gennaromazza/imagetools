@@ -512,7 +512,7 @@ async function loadArchivioFlowModule(): Promise<any> {
   archivioFlowModulePromise = (async () => {
     try {
       process.env.ARCHIVIO_FLOW_DATA_DIR = getArchivioFlowDataDir();
-      const modulePath = resolve(app.getAppPath(), ".output", "electron", "archivio-flow-server", "index.js");
+      const modulePath = resolve(app.getAppPath(), ".output", "electron", "archivio-flow-server", "server", "index.js");
       return await import(pathToFileURL(modulePath).href);
     } catch (error) {
       archivioFlowModulePromise = null;

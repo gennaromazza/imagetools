@@ -233,6 +233,9 @@
     ],
     "0.1.36": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.1.37": [
+      "Corretto il caricamento del server IPC nell'installer: il percorso compilato e le dipendenze locali vengono ora verificati prima della pubblicazione."
     ]
   },
   "image-converter": {

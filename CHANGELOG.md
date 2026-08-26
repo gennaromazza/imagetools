@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-26 - Archivio Flow 0.1.37
+
+- Corretto il caricamento del server IPC nell'installer: il percorso compilato e le dipendenze locali vengono ora verificati prima della pubblicazione.
+
 ## 2026-08-26 - FileX Suite 0.1.56
 
 ### Installazioni tool controllate fino alla conclusione

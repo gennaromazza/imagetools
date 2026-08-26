@@ -36,6 +36,9 @@ jobs:
       - name: Validate independent release contract
         run: npm.cmd run test:filex-independent-releases
 
+      - name: Validate Archivio Flow packaged runtime
+        run: npm.cmd run test:archivio-flow-package-runtime
+
       - name: Validate updater file locking
         run: npm.cmd run test:filex-updater-lock
 

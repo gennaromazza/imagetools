@@ -1,6 +1,6 @@
 import { extractFile, listPackage } from "@electron/asar";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { posix, resolve } from "node:path";
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((argument) => {
@@ -44,6 +44,39 @@ if (packageJson.version !== args.version) {
 }
 if (packageJson.main !== expected.main) {
   throw new Error(`Entrypoint inattesa: ${packageJson.main}; attesa ${expected.main}`);
+}
+
+function verifyRelativeImportClosure(archivePath, entries, entryPath) {
+  const pendingEntries = [entryPath];
+  const visitedEntries = new Set();
+  const relativeImportPattern = /(?:from\s*|import\s*(?:\(\s*)?)["'](\.{1,2}\/[^"']+)["']/g;
+
+  while (pendingEntries.length > 0) {
+    const currentEntry = pendingEntries.pop();
+    if (!currentEntry || visitedEntries.has(currentEntry)) continue;
+    visitedEntries.add(currentEntry);
+
+    const source = extractFile(
+      archivePath,
+      currentEntry.slice(1).replaceAll("/", "\\"),
+    ).toString("utf8");
+    for (const match of source.matchAll(relativeImportPattern)) {
+      const importedEntry = posix.normalize(posix.join(posix.dirname(currentEntry), match[1]));
+      if (!entries.has(importedEntry)) {
+        throw new Error(`${currentEntry} importa ${importedEntry}, assente dall'ASAR.`);
+      }
+      pendingEntries.push(importedEntry);
+    }
+  }
+}
+
+if (args.component === "archivio-flow") {
+  const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+  const serverEntry = "/.output/electron/archivio-flow-server/server/index.js";
+  if (!entries.has(serverEntry)) {
+    throw new Error(`Archivio Flow non contiene ${serverEntry}`);
+  }
+  verifyRelativeImportClosure(archivePath, entries, serverEntry);
 }
 
 if (args.component === "suite") {

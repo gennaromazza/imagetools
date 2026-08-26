@@ -158,6 +158,7 @@ jobs:
           npm.cmd run test:filex-installer-runner
           npm.cmd run test:filex-cooperative-signal
           npm.cmd run test:filex-independent-releases
+          npm.cmd run test:archivio-flow-package-runtime
           npm.cmd --workspace @photo-tools/filex-desktop run build:shell
 
       - name: Download current catalog snapshot

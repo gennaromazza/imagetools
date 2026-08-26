@@ -283,7 +283,7 @@ const TEST_CATEGORIES: TestCategory[] = [
 
 function testCategoryId(name: string): TestCategory["id"] {
   if (name.startsWith("test:photo-selector-")) return "photo-selector";
-  if (name === "test:archivio-flow-bug-hunt") return "archivio-flow";
+  if (name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-package-runtime") return "archivio-flow";
   if (name === "test:image-party-frame-bug-hunt") return "image-party-frame";
   if (name === "test:batch-print-layout-bug-hunt") return "batch-print-layout";
   if (name === "test:image-converter-bug-hunt") return "image-converter";
@@ -304,6 +304,7 @@ function testDescription(name: string): string {
     "test:photo-selector-relocation": "Verifica lo spostamento sicuro dei progetti e delle relative risorse.",
     "test:photo-selector-xmp": "Controlla lettura e aggiornamento dei metadati XMP.",
     "test:archivio-flow-bug-hunt": "Cerca regressioni con input generati, percorsi ostili e transizioni di importazione vietate.",
+    "test:archivio-flow-package-runtime": "Verifica che il server IPC e tutti i suoi import locali siano presenti nell'ASAR di Archivio Flow.",
     "test:image-party-frame-bug-hunt": "Cerca dati progetto obsoleti e valori crop capaci di corrompere il layout.",
     "test:batch-print-layout-bug-hunt": "Stressa impaginazione, orientamento, crop e ultima pagina.",
     "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",

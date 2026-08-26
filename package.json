@@ -20,6 +20,7 @@
     "test:photo-selector-relocation": "tsx scripts/test-photo-selector-relocation.ts",
     "test:photo-selector-xmp": "tsx scripts/test-photo-selector-xmp.ts",
     "test:archivio-flow-bug-hunt": "npm --workspace @photo-tools/archivio-flow run test:bug-hunt",
+    "test:archivio-flow-package-runtime": "node scripts/test-archivio-flow-package-runtime.mjs",
     "test:image-party-frame-bug-hunt": "tsx --test apps/image-party-frame/src/app/contexts/project-state.bug.test.ts",
     "test:batch-print-layout-bug-hunt": "npm --workspace @photo-tools/batch-print-layout run test",
     "test:image-converter-bug-hunt": "tsx --test apps/filex-desktop/src/image-converter-policy.bug.test.ts",
