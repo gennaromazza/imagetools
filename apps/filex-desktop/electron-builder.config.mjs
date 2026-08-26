@@ -209,14 +209,19 @@ function buildNsisIncludeContent(tool) {
     : "  ; Nessun tool gestito dalla Suite.";
 
   const suiteUninstallChoiceLines = tool.id === "suite-launcher"
-    ? `  \${IfNot} \${Silent}
-    MessageBox MB_YESNO|MB_ICONQUESTION "Vuoi rimuovere anche tutti gli strumenti FileX installati?$$\\r$$\\n$$\\r$$\\nProgetti, profili e stato licenza resteranno conservati." IDNO suite_keep_tools
+    ? `  IfFileExists "$APPDATA\\FileX\\release-test-remove-tools.flag" 0 +3
+  Delete "$APPDATA\\FileX\\release-test-remove-tools.flag"
+  Goto suite_remove_tools
+  \${If} \${Silent}
+    Goto suite_keep_tools
+  \${EndIf}
+  MessageBox MB_YESNO|MB_ICONQUESTION "Vuoi rimuovere anche tutti gli strumenti FileX installati? Progetti, profili e stato licenza resteranno conservati." IDYES suite_remove_tools IDNO suite_keep_tools
+    suite_remove_tools:
     StrCpy $R9 "0"
 ${suiteManagedToolUninstallLines}
     StrCmp $R9 "0" +2
     MessageBox MB_OK|MB_ICONEXCLAMATION "Uno o piu strumenti FileX non sono stati rimossi. La Suite verra comunque disinstallata; riprova da Impostazioni > App installate."
     suite_keep_tools:
-  \${EndIf}
 `
     : "";
 
@@ -323,6 +328,9 @@ ${suiteInstallCacheCleanupLines}
 !macroend
 
 
+!endif
+
+
 !macro customUnInstall
 
 ${contextMenuUninstallLines}
@@ -334,9 +342,6 @@ ${suiteUninstallChoiceLines}
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
 
 !macroend
-
-
-!endif
 `;
 }
 

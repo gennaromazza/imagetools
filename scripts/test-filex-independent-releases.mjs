@@ -27,6 +27,7 @@ const suitePreload = await read("apps/filex-desktop/src/suite-preload.ts");
 const suiteUpdater = await read("apps/filex-desktop/src/suite-updater.ts");
 const toolUpdater = await read("apps/filex-desktop/src/updater.ts");
 const toolProcessCoordinator = await read("apps/filex-desktop/src/filex-process-coordinator.ts");
+const windowsInstallerRunner = await read("apps/filex-desktop/src/windows-installer-runner.ts");
 const launcher = await read("apps/filex-desktop/suite-launcher-src/app.js");
 const launcherBuilder = await read("apps/filex-desktop/scripts/build-suite-launcher.mjs");
 const releaseWorkflow = await read(".github/workflows/windows-release.yml");
@@ -115,12 +116,13 @@ assert(
   "La pipeline non gestisce in modo esplicito le release senza certificato Windows.",
 );
 assert(
-  toolProcessCoordinator.includes('import { shell } from "electron"')
-    && toolProcessCoordinator.includes("shell.openPath(installerPath)")
-    && !toolProcessCoordinator.includes('spawn(installerPath, ["/S"]')
-    && launcher.includes("Conferma su Windows...")
-    && launcher.includes("potrai premere “Forza chiusura” nella schermata successiva."),
-  "La Suite non apre visibilmente gli installer per consentire la conferma di SmartScreen.",
+  toolProcessCoordinator.includes('runWindowsInstaller(installerPath)')
+    && windowsInstallerRunner.includes('spawnProcess(installerPath, ["/S"])')
+    && windowsInstallerRunner.includes('child.once("close"')
+    && windowsInstallerRunner.includes("if (code === 0)")
+    && windowsInstallerRunner.includes("InstallerExitError")
+    && !toolProcessCoordinator.includes("shell.openPath(installerPath)"),
+  "La Suite non avvia e attende in modo controllato l'installer NSIS silenzioso.",
 );
 for (const excludedDependency of ["@img", "exiftool-vendored", "exiftool-vendored.exe", "sharp"]) {
   assert(

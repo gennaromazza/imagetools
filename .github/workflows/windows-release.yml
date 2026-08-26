@@ -153,6 +153,10 @@ jobs:
         shell: pwsh
         run: |
           npm.cmd run test:filex-updater-lock
+          npm.cmd run test:filex-update-shutdown
+          npm.cmd run test:filex-process-snapshot-cache
+          npm.cmd run test:filex-installer-runner
+          npm.cmd run test:filex-cooperative-signal
           npm.cmd run test:filex-independent-releases
           npm.cmd --workspace @photo-tools/filex-desktop run build:shell
 

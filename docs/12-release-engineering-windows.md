@@ -123,3 +123,13 @@ La homepage usa il link stabile dell'installer Suite. Dopo una release `suite-vX
 ### Smoke test obbligatorio del pacchetto Electron
 
 Prima del tag eseguire la build NSIS reale, non soltanto TypeScript. Verificare nell'ASAR/output che tutti gli import del main process siano presenti e avviare il main process impacchettato. L'aggiunta di un file in `src/` richiede anche l'aggiornamento della whitelist `files` di `electron-builder.config.mjs` quando la Suite usa una lista esplicita. Se lo smoke test produce `ERR_MODULE_NOT_FOUND`, la release è bloccata.
+
+Se cambia il coordinamento degli aggiornamenti dei tool, eseguire anche un aggiornamento reale da una versione precedente. La Suite deve avviare NSIS con `/S`, attendere la chiusura del processo con exit code `0` e rilevare sul disco la versione attesa. Non è sufficiente che Windows accetti una richiesta `shell.openPath`: se il processo installer non parte o termina con errore, il job deve fallire subito senza restare per minuti su una richiesta di conferma inesistente.
+
+Prima di installare il pacchetto locale candidato, disinstallare la Suite corrente ed eseguire `npm run release:prepare-filex-suite-clean-install`. Il comando rimuove cache updater, download tool incompleti e soltanto l'eventuale residuo verificato della legacy 0.1.14; non elimina licenza, preferenze o build di sviluppo. Il preflight `release-filex-suite.bat X.Y.Z --preflight` esegue lo stesso passaggio e deve interrompersi se la pulizia non può essere completata in sicurezza.
+
+Per il ciclo completo usare `npm run release:prepare-filex-full-clean-test`. Il comando disinstalla Suite e tool da percorsi per-utente e legacy amministrativi, elimina registrazioni uninstall duplicate e conserva profili, progetti e stato licenza. La policy prodotto resta intenzionale: la disinstallazione standard della sola Suite preserva i tool indipendenti e la loro licenza; una rimozione dell'intero ecosistema deve essere una scelta esplicita dell'utente e non puo' essere imposta silenziosamente.
+
+L'uninstaller interattivo della Suite domanda se rimuovere anche tutti i tool moderni rilevati. Rispondendo “No” elimina soltanto la Suite; rispondendo “Sì” richiama ogni uninstaller tool con conservazione dei dati applicativi. In modalità `/S` il comportamento sicuro è sempre “solo Suite”, per evitare rimozioni massive non presidiate.
+
+Il test automatico della scelta completa crea il marker monouso `%APPDATA%\FileX\release-test-remove-tools.flag` e usa `/S /KEEP_APP_DATA`. L'uninstaller consuma e cancella subito il marker; senza questo trigger riservato al test, `/S` conserva obbligatoriamente tutti i tool.

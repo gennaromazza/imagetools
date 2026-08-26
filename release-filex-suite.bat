@@ -417,6 +417,14 @@ REM ============================================================
 echo [10/16] Test e build pre-release...
 
 echo.
+echo Preparazione macchina per installazione pulita...
+call npm run release:prepare-filex-suite-clean-install
+if errorlevel 1 (
+    echo ERRORE nella pulizia controllata dei residui FileX Suite.
+    goto :fail
+)
+
+echo.
 echo Test updater...
 call npm run test:filex-updater-lock
 if errorlevel 1 (
@@ -472,6 +480,17 @@ if "%NON_INTERACTIVE%"=="0" (
     choice /C SN /N /M "Procedo con COMMIT + PUSH + RELEASE %TAG%? [S/N] "
     if errorlevel 2 goto :abort
 )
+
+echo.
+echo Test coordinamento aggiornamenti...
+call npm run test:filex-update-shutdown
+if errorlevel 1 goto :fail
+call npm run test:filex-process-snapshot-cache
+if errorlevel 1 goto :fail
+call npm run test:filex-installer-runner
+if errorlevel 1 goto :fail
+call npm run test:filex-cooperative-signal
+if errorlevel 1 goto :fail
 
 REM ============================================================
 REM 12. Commit e push main
