@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-27 - FileX Send 0.1.17
+
+### Correzione workflow di release
+- Aggiunte le release notes mancanti in `release-notes.json` che impedivano al workflow di completare la pubblicazione.
+- L'installer ora include correttamente `archiver` e tutte le sue sottodipendenze.
+
 ## 2026-08-27 - FileX Send 0.1.16
 
 ### Chiusura dipendenze runtime
