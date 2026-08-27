@@ -6,11 +6,12 @@
     <meta name="theme-color" content="#0c2d27" />
     <title>FileX Send</title>
     <link rel="stylesheet" href="/styles.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
   </head>
   <body>
     <main>
       <div class="brand"><img src="/filex-send-logo.png" alt="Logo FileX Send" style="width:48px;height:48px;object-fit:cover;border-radius:15px;box-shadow:0 8px 20px #0005" /><strong>FileX Send</strong></div>
-      <section class="card" id="loading"><div class="spinner"></div><p>Preparazione dell’invio…</p></section>
+      <section class="card" id="loading"><div class="spinner"></div><p>Preparazione dell'invio…</p></section>
       <section class="card" id="upload" hidden>
         <p class="eyebrow">CONSEGNA PRIVATA</p>
         <h1>Invia foto e video</h1>
@@ -30,7 +31,7 @@
         <div class="status" id="status"></div>
         <small id="expiry"></small>
       </section>
-      <section class="card download-card" id="download" hidden><p class="eyebrow">FILE PER TE</p><h1>Scarica i file condivisi</h1><p><strong id="downloadLabel">FileX Send</strong> ha preparato questi file.</p><div class="download-actions"><button class="download-all" id="downloadAll" type="button">Scarica tutti</button><small id="downloadAllStatus">Ogni file viene scaricato separatamente, anche quando è molto grande.</small></div><div class="download-list" id="downloadList"></div><small id="downloadExpiry"></small></section>
+      <section class="card download-card" id="download" hidden><p class="eyebrow">FILE PER TE</p><h1>Scarica i file condivisi</h1><p><strong id="downloadLabel">FileX Send</strong> ha preparato questi file.</p><div class="download-actions"><button class="download-all" id="downloadAll" type="button">Scarica tutti</button><small id="downloadAllStatus">I file verranno scaricati come archivio ZIP unico.</small></div><div class="download-list" id="downloadList"></div><small id="downloadExpiry"></small></section>
       <section class="card done" id="done" hidden><div class="check">✓</div><h1>Invio completato</h1><p>Puoi chiudere questa pagina oppure inviare altri file con lo stesso link fino alla scadenza.</p><button class="send" id="again">Invia altri file</button></section>
       <section class="card error" id="error" hidden><h1>Link non disponibile</h1><p id="errorText">La sessione è scaduta.</p></section>
       <footer>FileX Cloud · Trasferimento temporaneo</footer>

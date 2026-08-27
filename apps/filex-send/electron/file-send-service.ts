@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { basename, extname, join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
+import archiver from "archiver";
 import type { FileSendReceivedFile, FileSendSession, FileSendSnapshot, FileSendWifiConfig, FileSendWifiSource } from "../src/contracts.js";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024 * 1024;
@@ -253,6 +254,13 @@ export class FileSendService {
       createReadStream(path).pipe(response);
       return;
     }
+    if (request.method === "GET" && url.pathname.match(/^\/api\/session\/([A-Za-z0-9_-]+)\/zip$/)) {
+      const zipMatch = url.pathname.match(/^\/api\/session\/([A-Za-z0-9_-]+)\/zip$/);
+      const session = this.sessionForToken(zipMatch![1]);
+      if (!session || session.direction !== "send") return this.sendExpired(response);
+      if (session.receivedFiles.length === 0) return this.sendJson(response, 404, { error: "Nessun file disponibile." });
+      return this.streamZip(response, session);
+    }
     if (request.method === "PUT" && uploadMatch) {
       const session = this.sessionForToken(uploadMatch[1]);
       if (!session) return this.sendExpired(response);
@@ -326,6 +334,46 @@ export class FileSendService {
   private syncActiveTotals(session: InternalSession): void {
     session.activeUploads = session.active.size;
     session.activeUploadBytes = [...session.active.values()].reduce((sum, upload) => sum + upload.bytes, 0);
+  }
+
+  private streamZip(response: ServerResponse, session: InternalSession): void {
+    const archive = archiver("zip", { zlib: { level: 0 } }); // No compression for speed
+    const usedNames = new Map<string, number>();
+
+    response.writeHead(200, {
+      "content-type": "application/zip",
+      "content-disposition": "attachment; filename*=UTF-8''filex-send.zip",
+      "cache-control": "no-store",
+    });
+
+    archive.on("error", () => {
+      if (!response.headersSent) {
+        this.sendJson(response, 500, { error: "Errore nella creazione dell'archivio." });
+      }
+    });
+
+    archive.pipe(response);
+
+    for (const file of session.receivedFiles) {
+      const path = session.sharedPaths.get(file.id);
+      if (!path) continue;
+
+      // Handle duplicate filenames
+      let name = file.name;
+      if (usedNames.has(name)) {
+        const count = usedNames.get(name)!;
+        const ext = name.includes(".") ? `.${name.split(".").pop()}` : "";
+        const base = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
+        name = `${base} (${count})${ext}`;
+        usedNames.set(name, count + 1);
+      } else {
+        usedNames.set(name, 1);
+      }
+
+      archive.file(path, { name });
+    }
+
+    archive.finalize();
   }
 
   private sendExpired(response: ServerResponse): void {
@@ -467,9 +515,10 @@ function expiredPage(): string {
 
 function downloadPage(session: InternalSession, token: string): string {
   const links = session.receivedFiles.map((file) => `/api/session/${token}/downloads/${file.id}`);
+  const zipUrl = `/api/session/${token}/zip`;
   const files = session.receivedFiles.map((file, index) => `<li><div><strong>${escapeHtml(file.name)}</strong><small>${formatFileSize(file.size)}</small></div><a href="${links[index]}" download>Scarica</a></li>`).join("");
   const scriptData = JSON.stringify(links).replace(/</g, "\\u003c");
-  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101b2d"><title>File da FileX Send</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(155deg,#0b1423,#142a43);font-family:system-ui,-apple-system,sans-serif;color:#fff;padding:24px 18px}main{max-width:560px;margin:auto}.brand{font-weight:900;letter-spacing:.08em;color:#63e6be;margin:10px 0 30px}.card{background:#fff;color:#122033;border-radius:28px;padding:28px 23px;box-shadow:0 24px 70px #0007}h1{font-size:30px;line-height:1.08;margin:0 0 10px}p{color:#637086;line-height:1.5}.all{width:100%;border:0;border-radius:12px;background:#139c79;color:#fff;font-weight:900;padding:13px;font-size:16px;cursor:pointer}.note{font-size:12px;margin:8px 0 0}ul{list-style:none;padding:0;margin:24px 0 0}li{display:flex;align-items:center;gap:12px;padding:15px 0;border-top:1px solid #e2e9ef}li div{min-width:0;flex:1}strong,small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}small{color:#75869a;margin-top:4px}a{background:#1167d8;color:#fff;text-decoration:none;font-weight:850;padding:11px 14px;border-radius:12px}</style></head><body><main><div class="brand">FILEX SEND</div><section class="card"><h1>File pronti per te</h1><p><strong>${escapeHtml(session.label)}</strong> ha condiviso ${session.receivedFiles.length} file.</p><button class="all" id="all" type="button">Scarica tutti · ${session.receivedFiles.length}</button><p class="note" id="note">I file vengono scaricati separatamente, senza creare archivi temporanei.</p><ul>${files}</ul></section></main><script>const urls=${scriptData};const button=document.querySelector('#all');button.addEventListener('click',()=>{button.disabled=true;button.textContent='Download avviati';urls.forEach((url)=>{const a=document.createElement('a');a.href=url;a.download='';a.style.display='none';document.body.append(a);a.click();a.remove()});document.querySelector('#note').textContent='Se richiesto, autorizza i download multipli nel browser.'});</script></body></html>`;
+  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101b2d"><title>File da FileX Send</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;background:linear-gradient(155deg,#0b1423,#142a43);font-family:system-ui,-apple-system,sans-serif;color:#fff;padding:24px 18px}main{max-width:560px;margin:auto}.brand{font-weight:900;letter-spacing:.08em;color:#63e6be;margin:10px 0 30px}.card{background:#fff;color:#122033;border-radius:28px;padding:28px 23px;box-shadow:0 24px 70px #0007}h1{font-size:30px;line-height:1.08;margin:0 0 10px}p{color:#637086;line-height:1.5}.all{width:100%;border:0;border-radius:12px;background:#139c79;color:#fff;font-weight:900;padding:13px;font-size:16px;cursor:pointer;margin-bottom:8px}.zip{width:100%;border:0;border-radius:12px;background:#1167d8;color:#fff;font-weight:900;padding:13px;font-size:16px;cursor:pointer}.note{font-size:12px;margin:8px 0 0}ul{list-style:none;padding:0;margin:24px 0 0}li{display:flex;align-items:center;gap:12px;padding:15px 0;border-top:1px solid #e2e9ef}li div{min-width:0;flex:1}strong,small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}small{color:#75869a;margin-top:4px}a{background:#1167d8;color:#fff;text-decoration:none;font-weight:850;padding:11px 14px;border-radius:12px}</style></head><body><main><div class="brand">FILEX SEND</div><section class="card"><h1>File pronti per te</h1><p><strong>${escapeHtml(session.label)}</strong> ha condiviso ${session.receivedFiles.length} file.</p><a class="zip" href="${zipUrl}" download>Scarica ZIP · tutti i file insieme</a><button class="all" id="all" type="button">Scarica tutti · ${session.receivedFiles.length}</button><p class="note" id="note">I singoli file vengono scaricati separatamente, senza creare archivi temporanei.</p><ul>${files}</ul></section></main><script>const urls=${scriptData};const button=document.querySelector('#all');button.addEventListener('click',()=>{button.disabled=true;button.textContent='Download avviati';urls.forEach((url)=>{const a=document.createElement('a');a.href=url;a.download='';a.style.display='none';document.body.append(a);a.click();a.remove()});document.querySelector('#note').textContent='Se richiesto, autorizza i download multipli nel browser.'});</script></body></html>`;
 }
 
 function formatFileSize(bytes: number): string {

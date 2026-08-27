@@ -129,3 +129,34 @@ test("condivide file dal PC tramite un link locale protetto", async () => {
     await rm(outputRoot, { recursive: true, force: true });
   }
 });
+
+test("l'endpoint ZIP restituisce un archivio con tutti i file condivisi", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "filex-send-zip-"));
+  const sourceA = join(outputRoot, "foto-001.jpg");
+  const sourceB = join(outputRoot, "video-002.mp4");
+  await writeFile(sourceA, "contenuto immagine jpeg", "utf8");
+  await writeFile(sourceB, "contenuto video mp4", "utf8");
+  const service = new FileSendService({ outputRoot, host: "127.0.0.1", publicAddress: "127.0.0.1" });
+  try {
+    await service.start();
+    const session = (await service.startSendSession([sourceA, sourceB], "Cliente ZIP")).session!;
+    assert.equal(session.receivedFiles.length, 2);
+    const token = new URL(session.uploadUrl).pathname.split("/").pop();
+    const base = session.uploadUrl.replace(/\/s\/[^/]+$/, "");
+
+    const zipResponse = await fetch(`${base}/api/session/${token}/zip`);
+    assert.equal(zipResponse.status, 200);
+    assert.equal(zipResponse.headers.get("content-type"), "application/zip");
+    assert.match(zipResponse.headers.get("content-disposition") ?? "", /filex-send\.zip/);
+
+    const zipBuffer = await zipResponse.arrayBuffer();
+    assert.ok(zipBuffer.byteLength > 0);
+
+    const page = await (await fetch(session.uploadUrl)).text();
+    assert.match(page, /Scarica ZIP/);
+    assert.match(page, /tutti i file insieme/);
+  } finally {
+    await service.stop();
+    await rm(outputRoot, { recursive: true, force: true });
+  }
+});

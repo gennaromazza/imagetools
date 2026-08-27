@@ -43,11 +43,77 @@ function triggerDownload(file) {
 async function downloadAllFiles() {
   if (!sharedFiles.length || !downloadAll) return;
   downloadAll.disabled = true;
+
+  // Try ZIP download first
+  if (typeof JSZip !== "undefined") {
+    try {
+      await downloadAllAsZip();
+      return;
+    } catch {
+      // ZIP failed, fall back to sequential downloads
+    }
+  }
+
+  // Fallback: sequential downloads with delays
+  await downloadAllSequential();
+}
+
+async function downloadAllAsZip() {
+  downloadAll.textContent = "Creazione archivio…";
+  downloadAllStatus.textContent = "Preparazione del file ZIP in corso…";
+
+  const zip = new JSZip();
+  const usedNames = new Map();
+
+  for (const file of sharedFiles) {
+    const response = await fetch(file.downloadUrl);
+    if (!response.ok) throw new Error(`Download fallito per ${file.name}`);
+    const blob = await response.blob();
+
+    // Handle duplicate filenames
+    let name = file.name;
+    if (usedNames.has(name)) {
+      const count = usedNames.get(name);
+      const ext = name.includes(".") ? `.${name.split(".").pop()}` : "";
+      const base = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
+      name = `${base} (${count})${ext}`;
+      usedNames.set(name, count + 1);
+    } else {
+      usedNames.set(name, 1);
+    }
+    zip.file(name, blob);
+  }
+
+  downloadAllStatus.textContent = "Compressione in corso…";
+  const content = await zip.generateAsync({ type: "blob" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(content);
+  link.download = `filex-send-${Date.now()}.zip`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(link.href);
+
+  downloadAll.textContent = `ZIP scaricato · ${sharedFiles.length} file`;
+  downloadAllStatus.textContent = "Archivio scaricato con successo.";
+}
+
+async function downloadAllSequential() {
   downloadAll.textContent = "Avvio download…";
-  downloadAllStatus.textContent = "Avvio dei download in corso…";
-  sharedFiles.forEach((file) => triggerDownload(file));
+  downloadAllStatus.textContent = "Download uno alla volta in corso…";
+
+  for (let i = 0; i < sharedFiles.length; i++) {
+    const file = sharedFiles[i];
+    downloadAll.textContent = `Scaricando ${i + 1} di ${sharedFiles.length}…`;
+    triggerDownload(file);
+    // Wait between downloads to avoid browser blocking
+    if (i < sharedFiles.length - 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
   downloadAll.textContent = `Download avviati · ${sharedFiles.length}`;
-  downloadAllStatus.textContent = "I file vengono scaricati separatamente e senza creare archivi temporanei. Se il browser lo chiede, autorizza i download multipli.";
+  downloadAllStatus.textContent = "I file vengono scaricati separatamente. Se il browser blocca qualche download, riprova con il pulsante.";
 }
 
 async function initialize() {
