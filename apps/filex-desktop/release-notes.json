@@ -29,6 +29,12 @@
     ]
   },
   "filex-send": {
+    "0.1.21": [
+      "I file scaricati mantengono nome, estensione e tipo corretto, evitando clip o documenti visualizzati come file bianchi.",
+      "Ripristinato il logo FileX Send corretto nelle pagine di invio e download.",
+      "Aggiunti download ZIP e download progressivo di tutti i file con un solo comando e avanzamento visibile.",
+      "Corretta la generazione delle pagine di trasferimento e completati i controlli automatici prima della pubblicazione."
+    ],
     "0.1.10": [
       "Aggiornati i flussi di licenza, pagamento e gestione account collegati al servizio FileX Send."
     ],
