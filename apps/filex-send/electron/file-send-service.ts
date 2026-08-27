@@ -4,7 +4,8 @@ import { createReadStream } from "node:fs";
 import { networkInterfaces } from "node:os";
 import { basename, extname, join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
-import archiver from "archiver";
+import { Readable } from "node:stream";
+import { ZipFile } from "yazl";
 import type { FileSendReceivedFile, FileSendSession, FileSendSnapshot, FileSendWifiConfig, FileSendWifiSource } from "../src/contracts.js";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024 * 1024;
@@ -337,8 +338,25 @@ export class FileSendService {
   }
 
   private streamZip(response: ServerResponse, session: InternalSession): void {
-    const archive = archiver("zip", { zlib: { level: 0 } }); // No compression for speed
-    const usedNames = new Map<string, number>();
+    const archive = new ZipFile();
+    const outputStream = archive.outputStream as unknown as Readable;
+    const entries = session.receivedFiles.map((file) => ({ file, path: session.sharedPaths.get(file.id) })).filter((entry): entry is { file: FileSendReceivedFile; path: string } => Boolean(entry.path));
+    const reservedNames = new Set(entries.map(({ file }) => file.name));
+    const usedNames = new Set<string>();
+
+    if (entries.length !== session.receivedFiles.length) {
+      this.sendJson(response, 404, { error: "Uno o più file non sono più disponibili." });
+      return;
+    }
+
+    try {
+      for (const entry of entries) {
+        archive.addFile(entry.path, uniqueArchiveName(entry.file.name, usedNames, reservedNames), { compress: false });
+      }
+    } catch {
+      this.sendJson(response, 500, { error: "Errore nella preparazione dell'archivio." });
+      return;
+    }
 
     response.writeHead(200, {
       "content-type": "application/zip",
@@ -346,34 +364,24 @@ export class FileSendService {
       "cache-control": "no-store",
     });
 
-    archive.on("error", () => {
-      if (!response.headersSent) {
-        this.sendJson(response, 500, { error: "Errore nella creazione dell'archivio." });
-      }
-    });
-
-    archive.pipe(response);
-
-    for (const file of session.receivedFiles) {
-      const path = session.sharedPaths.get(file.id);
-      if (!path) continue;
-
-      // Handle duplicate filenames
-      let name = file.name;
-      if (usedNames.has(name)) {
-        const count = usedNames.get(name)!;
-        const ext = name.includes(".") ? `.${name.split(".").pop()}` : "";
-        const base = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
-        name = `${base} (${count})${ext}`;
-        usedNames.set(name, count + 1);
-      } else {
-        usedNames.set(name, 1);
-      }
-
-      archive.file(path, { name });
-    }
-
-    archive.finalize();
+    let archiveFailed = false;
+    const stopArchive = () => {
+      if (!response.writableEnded && !outputStream.destroyed) outputStream.destroy();
+    };
+    const releaseListeners = () => response.off("close", stopArchive);
+    const failArchive = (error: Error) => {
+      if (archiveFailed) return;
+      archiveFailed = true;
+      releaseListeners();
+      if (!outputStream.destroyed) outputStream.destroy();
+      if (!response.destroyed) response.destroy(error);
+    };
+    archive.once("error", failArchive);
+    outputStream.once("error", failArchive);
+    response.once("close", stopArchive);
+    response.once("finish", releaseListeners);
+    outputStream.pipe(response);
+    archive.end();
   }
 
   private sendExpired(response: ServerResponse): void {
@@ -437,6 +445,23 @@ function sanitizeFileName(value: string): string {
     .trim()
     .slice(0, MAX_FILE_NAME_LENGTH - extension.length);
   return `${stem || "foto"}${extension}`;
+}
+
+function uniqueArchiveName(fileName: string, usedNames: Set<string>, reservedNames: Set<string>): string {
+  if (!usedNames.has(fileName)) {
+    usedNames.add(fileName);
+    return fileName;
+  }
+  const extension = extname(fileName);
+  const stem = basename(fileName, extension);
+  let occurrence = 1;
+  let candidate = `${stem} (${occurrence})${extension}`;
+  while (usedNames.has(candidate) || reservedNames.has(candidate)) {
+    occurrence += 1;
+    candidate = `${stem} (${occurrence})${extension}`;
+  }
+  usedNames.add(candidate);
+  return candidate;
 }
 
 async function createUniqueDirectory(root: string, preferredName: string): Promise<string> {

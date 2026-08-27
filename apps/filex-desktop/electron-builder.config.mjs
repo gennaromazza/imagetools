@@ -176,6 +176,10 @@ function buildNsisIncludeContent(tool) {
       : `  ; Nessun menu contestuale Explorer da rimuovere.
 `;
 
+  const shellAssociationRefreshLine = shouldInstallExplorerContextMenu
+    ? "  System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'"
+    : "  ; Nessuna associazione shell da aggiornare.";
+
   const suiteInstallCacheCleanupLines = tool.id === "suite-launcher"
     ? `  ; Elimina payload incompleti o obsoleti senza toccare profilo e licenza.
   RMDir /r "$LOCALAPPDATA\\filex-suite-updater\\pending"
@@ -225,7 +229,19 @@ ${suiteManagedToolUninstallLines}
 `
     : "";
 
+  const filexSendPerUserInstallSeed = tool.id === "filex-send"
+    ? `!macro preInit
+  ; Conserva la destinazione storica per-user ed evita il resolver NSIS della
+  ; Known Folder, che su alcune build Windows puo arrestarsi in System.dll.
+  WriteRegStr HKCU "Software\\\${APP_GUID}" "InstallLocation" "$LOCALAPPDATA\\Programs\\FileX-Send"
+!macroend
+
+`
+    : "";
+
   return `!ifndef BUILD_UNINSTALLER
+
+${filexSendPerUserInstallSeed}
 
 ; In modalita' silenziosa un errore dell'uninstaller precedente deve tornare
 ; alla Suite come exit code, non aprire una MessageBox invisibile che lascia
@@ -320,7 +336,7 @@ ${contextMenuInstallLines}
 
 ${suiteInstallCacheCleanupLines}
 
-  System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+${shellAssociationRefreshLine}
 
 
   customInstall_done:
@@ -339,7 +355,7 @@ ${suiteUninstallCacheCleanupLines}
 
 ${suiteUninstallChoiceLines}
 
-  System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+${shellAssociationRefreshLine}
 
 !macroend
 `;
@@ -395,24 +411,8 @@ export default {
 
   asar: true,
 
-  asarUnpack: requestedTool.id === "suite-launcher" || requestedTool.id === "cache-sweep"
+  asarUnpack: requestedTool.id === "suite-launcher" || requestedTool.id === "cache-sweep" || requestedTool.id === "filex-send"
     ? []
-    : requestedTool.id === "filex-send"
-    ? [
-        "**/node_modules/archiver/**",
-        "**/node_modules/archiver-utils/**",
-        "**/node_modules/async/**",
-        "**/node_modules/buffer-crc32/**",
-        "**/node_modules/compress-commons/**",
-        "**/node_modules/crc-32/**",
-        "**/node_modules/crc32-stream/**",
-        "**/node_modules/lodash/**",
-        "**/node_modules/normalize-path/**",
-        "**/node_modules/readable-stream/**",
-        "**/node_modules/readdir-glob/**",
-        "**/node_modules/tar-stream/**",
-        "**/node_modules/zip-stream/**",
-      ]
     : [
         "**/node_modules/exiftool-vendored.exe/**",
         "**/node_modules/exiftool-vendored.pl/**",
@@ -455,32 +455,19 @@ export default {
         "!node_modules/multer{,/**/*}",
         "!node_modules/sharp{,/**/*}",
       ]
-    : requestedTool.id === "cache-sweep" || requestedTool.id === "filex-send"
+    : requestedTool.id === "cache-sweep"
     ? [
-        `.output/electron/${requestedTool.id}/**/*`,
+        ".output/electron/cache-sweep/**/*",
         "package.json",
-        "node_modules/archiver{,/**/*}",
-        "node_modules/archiver-utils{,/**/*}",
-        "node_modules/async{,/**/*}",
+        "!node_modules{,/**/*}",
+      ]
+    : requestedTool.id === "filex-send"
+    ? [
+        ".output/electron/filex-send/**/*",
+        "package.json",
+        "!node_modules{,/**/*}",
+        "node_modules/yazl{,/**/*}",
         "node_modules/buffer-crc32{,/**/*}",
-        "node_modules/compress-commons{,/**/*}",
-        "node_modules/crc-32{,/**/*}",
-        "node_modules/crc32-stream{,/**/*}",
-        "node_modules/lodash{,/**/*}",
-        "node_modules/normalize-path{,/**/*}",
-        "node_modules/readable-stream{,/**/*}",
-        "node_modules/readdir-glob{,/**/*}",
-        "node_modules/tar-stream{,/**/*}",
-        "node_modules/zip-stream{,/**/*}",
-        "!node_modules/@img{,/**/*}",
-        "!node_modules/cors{,/**/*}",
-        "!node_modules/dotenv{,/**/*}",
-        "!node_modules/exiftool-vendored{,/**/*}",
-        "!node_modules/exiftool-vendored.exe{,/**/*}",
-        "!node_modules/exiftool-vendored.pl{,/**/*}",
-        "!node_modules/express{,/**/*}",
-        "!node_modules/multer{,/**/*}",
-        "!node_modules/sharp{,/**/*}",
       ]
     : [
         ".output/electron/**/*",
@@ -583,10 +570,12 @@ export default {
   },
 
   nsis: {
-    // Identita' NSIS stabile e separata per ogni componente. Evita che un
-    // installer di un tool trovi il disinstallatore storico della Suite e
-    // tenti di aggiornare o chiudere il prodotto sbagliato.
-    guid: `2D3D396A-2B09-4B4E-9C18-${createHash("sha256").update(requestedTool.id).digest("hex").slice(0, 12).toUpperCase()}`,
+    // FileX Send 0.1.13 e precedenti usano l'identita' derivata da appId di
+    // electron-builder. Cambiarla impedisce l'aggiornamento delle installazioni
+    // esistenti; gli altri componenti conservano invece il GUID gia' pubblicato.
+    guid: requestedTool.id === "filex-send"
+      ? undefined
+      : `2D3D396A-2B09-4B4E-9C18-${createHash("sha256").update(requestedTool.id).digest("hex").slice(0, 12).toUpperCase()}`,
 
     /*
      * Installer moderno one-click per-user.

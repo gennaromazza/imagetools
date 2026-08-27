@@ -1,8 +1,8 @@
 import * as electron from "electron";
-import { extractFile } from "@electron/asar";
+import { extractFile, uncache } from "@electron/asar";
 import { spawn } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, statSync, unlinkSync } from "node:fs";
 import { readFile, unlink } from "node:fs/promises";
 import http from "node:http";
 import https from "node:https";
@@ -289,12 +289,13 @@ function readExecutableVersion(
   );
 
   try {
-    // In Electron, node:fs espone app.asar come filesystem virtuale. Leggere
-    // direttamente il file interno evita che @electron/asar tenti di aprire
-    // l'archivio attraverso lo stesso layer virtuale e restituisca un falso
-    // negativo dopo un aggiornamento riuscito.
+    // Il filesystem ASAR virtuale di Electron mantiene l'archivio aperto fino
+    // alla chiusura della Suite e impedisce a un installer di sostituire il
+    // tool. @electron/asar usa original-fs e chiude il descriptor dopo ogni
+    // lettura; la cache dell'header va invalidata per rilevare gli aggiornamenti.
+    uncache(archivePath);
     const packageJson = JSON.parse(
-      readFileSync(join(archivePath, "package.json"), "utf8"),
+      extractFile(archivePath, "package.json").toString("utf8"),
     ) as { version?: unknown };
     if (
       typeof packageJson.version === "string" &&
@@ -303,21 +304,9 @@ function readExecutableVersion(
       return packageJson.version.trim();
     }
   } catch {
-    // In Node puro (test e strumenti di verifica) app.asar non viene montato
-    // come directory virtuale. Manteniamo quindi il reader ASAR esplicito.
-    try {
-      const packageJson = JSON.parse(
-        extractFile(archivePath, "package.json").toString("utf8"),
-      ) as { version?: unknown };
-      if (
-        typeof packageJson.version === "string" &&
-        packageJson.version.trim()
-      ) {
-        return packageJson.version.trim();
-      }
-    } catch {
-      // Installazioni legacy potrebbero non contenere un ASAR leggibile.
-    }
+    // Installazioni legacy potrebbero non contenere un ASAR leggibile.
+  } finally {
+    uncache(archivePath);
   }
   return null;
 }

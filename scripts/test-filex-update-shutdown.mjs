@@ -42,9 +42,21 @@ assert(
   "La chiusura cooperativa non e' limitata all'eseguibile atteso del tool.",
 );
 assert(
-  builder.includes("guid: `2D3D396A-2B09-4B4E-9C18-${createHash")
+  builder.includes('guid: requestedTool.id === "filex-send"')
+    && builder.includes("? undefined")
+    && builder.includes(': `2D3D396A-2B09-4B4E-9C18-${createHash')
     && builder.includes('update(requestedTool.id).digest("hex").slice(0, 12).toUpperCase()'),
-  "Gli installer non hanno un'identita' NSIS stabile e distinta per tool.",
+  "Gli installer non preservano l'identita' NSIS storica di FileX Send e quella distinta degli altri tool.",
+);
+assert(
+  builder.includes("const shellAssociationRefreshLine = shouldInstallExplorerContextMenu")
+    && builder.includes("${shellAssociationRefreshLine}"),
+  "Gli installer senza associazioni Explorer possono ancora invocare il plugin NSIS System.dll non necessario.",
+);
+assert(
+  builder.includes('const filexSendPerUserInstallSeed = tool.id === "filex-send"')
+    && builder.includes('WriteRegStr HKCU "Software\\\\\\${APP_GUID}" "InstallLocation" "$LOCALAPPDATA\\\\Programs\\\\FileX-Send"'),
+  "La prima installazione FileX Send non evita il resolver Known Folder incompatibile.",
 );
 
 for (const relativePath of [

@@ -207,6 +207,10 @@ jobs:
         if: steps.release.outputs.component == 'suite'
         run: npm run test:filex-suite-package-imports
 
+      - name: Smoke test packaged FileX Send runtime
+        if: steps.release.outputs.component == 'filex-send'
+        run: npm run verify:filex-send-packaged-runtime
+
       - name: Generate selected tool catalog entry
         if: steps.release.outputs.component != 'suite'
         shell: pwsh

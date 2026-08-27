@@ -95,6 +95,13 @@
     ],
     "0.1.18": [
       "Estratti i moduli archiver dall'ASAR per risolvere l'errore MODULE_NOT_FOUND a runtime."
+    ],
+    "0.1.19": [
+      "Ripristinato l'avvio dell'app installata includendo una dipendenza ZIP streaming minima e verificata.",
+      "Ripristinata la compatibilità dell'installer con le installazioni FileX Send 0.1.13 già presenti e corretto il crash System.dll nei cicli puliti.",
+      "Corretto il blocco con cui la Suite manteneva aperto app.asar durante aggiornamento e disinstallazione dei tool.",
+      "Aggiunti controllo transitivo dell'ASAR e smoke test del main process impacchettato prima della pubblicazione.",
+      "Verificati contenuti e nomi duplicati negli ZIP; le consegne cloud grandi evitano l'uso eccessivo di memoria nel browser."
     ]
   },
   "cache-sweep": {

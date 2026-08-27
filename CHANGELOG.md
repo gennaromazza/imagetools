@@ -30,6 +30,25 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-27 - FileX Suite 0.1.57
+
+### Aggiornamenti tool senza file bloccati
+- La Suite legge ora le versioni installate tramite `original-fs`, invalidando la cache ASAR prima e dopo ogni controllo.
+- Corretto il lock con cui la 0.1.56 manteneva aperti gli `app.asar` dei tool e impediva a installer e uninstaller di completare la sostituzione dei binari.
+- Il test del pacchetto Suite verifica ora anche l'avvio effettivo del main process impacchettato.
+- Verificato localmente il ciclo FileX Send: aggiornamento dalla 0.1.13, rimozione completa dei soli binari, reinstallazione 0.1.19 e conservazione integrale della licenza.
+
+## 2026-08-27 - FileX Send 0.1.19
+
+### Ripristino del runtime e ZIP verificati
+- Sostituito `archiver` con lo ZIP streaming `yazl`, includendo nell'installer soltanto le due dipendenze runtime effettive.
+- Aggiunta la verifica transitiva dell'ASAR e uno smoke test che avvia il main process realmente impacchettato prima della pubblicazione.
+- Ripristinata l'identità NSIS storica di FileX Send: l'aggiornamento silenzioso dalla 0.1.13 alla 0.1.19 termina con codice `0` senza perdere licenza o profilo.
+- Resa esplicita la destinazione NSIS per-utente di FileX Send ed eliminato il refresh Explorer non utilizzato, evitando i percorsi `System.dll` che potevano interrompere installazione o disinstallazione.
+- La Suite non mantiene più aperti gli `app.asar` dei tool mentre ne legge la versione: installazione, aggiornamento e disinstallazione possono quindi sostituire davvero i binari.
+- Il test ZIP ora apre l'archivio, verifica contenuti e nomi duplicati; nel browser le consegne grandi evitano la creazione dello ZIP in memoria e usano i download singoli.
+- Corretto il catalogo introdotto dalla 0.1.18, che poteva distribuire un installer privo della dipendenza ZIP richiesta all'avvio.
+
 ## 2026-08-27 - FileX Send 0.1.18
 
 ### Correzione asarUnpack per archiver

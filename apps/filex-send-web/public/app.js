@@ -19,6 +19,7 @@ const again = document.querySelector("#again");
 let files = [];
 let sharedFiles = [];
 const relativePaths = new WeakMap();
+const MAX_BROWSER_ZIP_BYTES = 128 * 1024 * 1024;
 
 const formatBytes = (bytes) => bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
 const api = async (path, init) => {
@@ -44,17 +45,18 @@ async function downloadAllFiles() {
   if (!sharedFiles.length || !downloadAll) return;
   downloadAll.disabled = true;
 
-  // Try ZIP download first
-  if (typeof JSZip !== "undefined") {
+  const total = sharedFiles.reduce((sum, file) => sum + Number(file.size || 0), 0);
+  if (typeof JSZip !== "undefined" && total <= MAX_BROWSER_ZIP_BYTES) {
     try {
       await downloadAllAsZip();
       return;
     } catch {
-      // ZIP failed, fall back to sequential downloads
+      downloadAllStatus.textContent = "Archivio non disponibile: continuo con i download singoli.";
     }
+  } else if (total > MAX_BROWSER_ZIP_BYTES) {
+    downloadAllStatus.textContent = "Consegna troppo grande per creare lo ZIP nel browser: scarico i file uno alla volta.";
   }
 
-  // Fallback: sequential downloads with delays
   await downloadAllSequential();
 }
 
@@ -63,25 +65,15 @@ async function downloadAllAsZip() {
   downloadAllStatus.textContent = "Preparazione del file ZIP in corso…";
 
   const zip = new JSZip();
-  const usedNames = new Map();
+  const reservedNames = new Set(sharedFiles.map((file) => file.name));
+  const usedNames = new Set();
 
   for (const file of sharedFiles) {
     const response = await fetch(file.downloadUrl);
     if (!response.ok) throw new Error(`Download fallito per ${file.name}`);
     const blob = await response.blob();
 
-    // Handle duplicate filenames
-    let name = file.name;
-    if (usedNames.has(name)) {
-      const count = usedNames.get(name);
-      const ext = name.includes(".") ? `.${name.split(".").pop()}` : "";
-      const base = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
-      name = `${base} (${count})${ext}`;
-      usedNames.set(name, count + 1);
-    } else {
-      usedNames.set(name, 1);
-    }
-    zip.file(name, blob);
+    zip.file(uniqueDownloadName(file.name, usedNames, reservedNames), blob);
   }
 
   downloadAllStatus.textContent = "Compressione in corso…";
@@ -92,10 +84,28 @@ async function downloadAllAsZip() {
   document.body.append(link);
   link.click();
   link.remove();
-  URL.revokeObjectURL(link.href);
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
 
   downloadAll.textContent = `ZIP scaricato · ${sharedFiles.length} file`;
   downloadAllStatus.textContent = "Archivio scaricato con successo.";
+}
+
+function uniqueDownloadName(fileName, usedNames, reservedNames) {
+  if (!usedNames.has(fileName)) {
+    usedNames.add(fileName);
+    return fileName;
+  }
+  const dot = fileName.lastIndexOf(".");
+  const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+  const extension = dot > 0 ? fileName.slice(dot) : "";
+  let occurrence = 1;
+  let candidate = `${base} (${occurrence})${extension}`;
+  while (usedNames.has(candidate) || reservedNames.has(candidate)) {
+    occurrence += 1;
+    candidate = `${base} (${occurrence})${extension}`;
+  }
+  usedNames.add(candidate);
+  return candidate;
 }
 
 async function downloadAllSequential() {

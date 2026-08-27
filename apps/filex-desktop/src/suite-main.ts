@@ -42,6 +42,7 @@ let toolUpdateTimer: NodeJS.Timeout | null = null;
 let lastNotifiedToolUpdateCount: number | null = null;
 const TOOL_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const startsInBackground = process.argv.includes("--filex-background");
+const isPackagedSmokeTest = process.argv.includes("--filex-suite-packaged-smoke-test");
 
 const defaultDockState: DesktopDockState = {
   schemaVersion: 2,
@@ -359,6 +360,7 @@ if (!hasSingleInstanceLock) {
 } else {
   app.on("second-instance", () => { void createMainWindow(); });
   app.whenReady().then(async () => {
+    if (isPackagedSmokeTest) { app.exit(0); return; }
     registerIpcHandlers();
     configureSuiteUpdater({
       currentVersion: app.getVersion(),

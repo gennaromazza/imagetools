@@ -52,11 +52,11 @@ try {
   const explicitAsarFallback = 'extractFile(archivePath, "package.json")';
   const virtualReadIndex = updaterSource.indexOf(virtualAsarRead);
   const fallbackIndex = updaterSource.indexOf(explicitAsarFallback);
-  if (virtualReadIndex < 0) {
-    throw new Error("L'updater non usa il filesystem ASAR virtuale di Electron.");
+  if (virtualReadIndex >= 0) {
+    throw new Error("L'updater usa ancora il filesystem ASAR virtuale che mantiene aperti i tool installati.");
   }
-  if (fallbackIndex < 0 || fallbackIndex < virtualReadIndex) {
-    throw new Error("L'updater non mantiene il reader ASAR esplicito come fallback.");
+  if (fallbackIndex < 0 || !updaterSource.includes("uncache(archivePath);")) {
+    throw new Error("L'updater non usa il reader ASAR esplicito con invalidazione della cache.");
   }
   if (!mainSource.includes("Promise.allSettled([")) {
     throw new Error("La chiusura desktop non attende i servizi nativi.");

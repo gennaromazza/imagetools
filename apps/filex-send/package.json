@@ -1,7 +1,7 @@
 {
   "name": "@photo-tools/filex-send",
   "private": true,
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "FileX Send: invio e ricezione locale o remota tramite QR e link temporanei.",
   "type": "module",
   "main": "../filex-desktop/.output/electron/filex-send/electron/main.js",
@@ -15,17 +15,17 @@
     "test": "tsx --test electron/file-send-service.test.ts electron/firebase-anonymous-auth.test.ts electron/wifi-detection.test.ts"
   },
   "dependencies": {
-    "archiver": "^7.0.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "yazl": "^3.3.1"
   },
   "devDependencies": {
-    "@types/archiver": "^6.0.0",
     "@types/node": "^24.0.0",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@types/yazl": "^3.3.1",
     "@vitejs/plugin-react": "^5.0.0",
     "electron": "41.0.4",
     "tsx": "^4.19.0",

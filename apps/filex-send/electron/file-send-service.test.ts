@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { inflateRawSync } from "node:zlib";
 import { FileSendService } from "./file-send-service.js";
 import { FileSendRemoteClient, type PersistedRemoteSession } from "./remote-client-service.js";
 
@@ -130,17 +131,21 @@ test("condivide file dal PC tramite un link locale protetto", async () => {
   }
 });
 
-test("l'endpoint ZIP restituisce un archivio con tutti i file condivisi", async () => {
+test("l'endpoint ZIP restituisce file integri e rinomina correttamente i duplicati", async () => {
   const outputRoot = await mkdtemp(join(tmpdir(), "filex-send-zip-"));
-  const sourceA = join(outputRoot, "foto-001.jpg");
-  const sourceB = join(outputRoot, "video-002.mp4");
-  await writeFile(sourceA, "contenuto immagine jpeg", "utf8");
-  await writeFile(sourceB, "contenuto video mp4", "utf8");
+  const sourceNames = ["foto.jpg", "foto.jpg", "foto (1).jpg"];
+  const sources = await Promise.all(["a", "b", "c"].map(async (folder, index) => {
+    const directory = join(outputRoot, folder);
+    await mkdir(directory);
+    const source = join(directory, sourceNames[index]);
+    await writeFile(source, `contenuto-${index + 1}`, "utf8");
+    return source;
+  }));
   const service = new FileSendService({ outputRoot, host: "127.0.0.1", publicAddress: "127.0.0.1" });
   try {
     await service.start();
-    const session = (await service.startSendSession([sourceA, sourceB], "Cliente ZIP")).session!;
-    assert.equal(session.receivedFiles.length, 2);
+    const session = (await service.startSendSession(sources, "Cliente ZIP")).session!;
+    assert.equal(session.receivedFiles.length, 3);
     const token = new URL(session.uploadUrl).pathname.split("/").pop();
     const base = session.uploadUrl.replace(/\/s\/[^/]+$/, "");
 
@@ -149,8 +154,9 @@ test("l'endpoint ZIP restituisce un archivio con tutti i file condivisi", async 
     assert.equal(zipResponse.headers.get("content-type"), "application/zip");
     assert.match(zipResponse.headers.get("content-disposition") ?? "", /filex-send\.zip/);
 
-    const zipBuffer = await zipResponse.arrayBuffer();
-    assert.ok(zipBuffer.byteLength > 0);
+    const zipEntries = readZipEntries(Buffer.from(await zipResponse.arrayBuffer()));
+    assert.deepEqual([...zipEntries.keys()], ["foto.jpg", "foto (2).jpg", "foto (1).jpg"]);
+    assert.deepEqual([...zipEntries.values()].map((content) => content.toString("utf8")), ["contenuto-1", "contenuto-2", "contenuto-3"]);
 
     const page = await (await fetch(session.uploadUrl)).text();
     assert.match(page, /Scarica ZIP/);
@@ -160,3 +166,58 @@ test("l'endpoint ZIP restituisce un archivio con tutti i file condivisi", async 
     await rm(outputRoot, { recursive: true, force: true });
   }
 });
+
+test("un file rimosso durante la preparazione dello ZIP non arresta il servizio", async () => {
+  const outputRoot = await mkdtemp(join(tmpdir(), "filex-send-zip-missing-"));
+  const source = join(outputRoot, "temporaneo.jpg");
+  await writeFile(source, "contenuto temporaneo", "utf8");
+  const service = new FileSendService({ outputRoot, host: "127.0.0.1", publicAddress: "127.0.0.1" });
+  try {
+    await service.start();
+    const session = (await service.startSendSession([source], "Cliente ZIP interrotto")).session!;
+    const token = new URL(session.uploadUrl).pathname.split("/").pop();
+    const base = session.uploadUrl.replace(/\/s\/[^/]+$/, "");
+    await rm(source, { force: true });
+
+    await assert.rejects(async () => {
+      const response = await fetch(`${base}/api/session/${token}/zip`);
+      await response.arrayBuffer();
+    });
+    assert.equal((await fetch(session.uploadUrl)).status, 200);
+  } finally {
+    await service.stop();
+    await rm(outputRoot, { recursive: true, force: true });
+  }
+});
+
+function readZipEntries(buffer: Buffer): Map<string, Buffer> {
+  const endSignature = 0x06054b50;
+  let endOffset = -1;
+  for (let offset = buffer.length - 22; offset >= Math.max(0, buffer.length - 65_557); offset -= 1) {
+    if (buffer.readUInt32LE(offset) === endSignature) { endOffset = offset; break; }
+  }
+  assert.notEqual(endOffset, -1, "Directory centrale ZIP assente");
+  const entryCount = buffer.readUInt16LE(endOffset + 10);
+  let centralOffset = buffer.readUInt32LE(endOffset + 16);
+  const entries = new Map<string, Buffer>();
+
+  for (let index = 0; index < entryCount; index += 1) {
+    assert.equal(buffer.readUInt32LE(centralOffset), 0x02014b50, "Entry centrale ZIP non valida");
+    const method = buffer.readUInt16LE(centralOffset + 10);
+    const compressedSize = buffer.readUInt32LE(centralOffset + 20);
+    const fileNameLength = buffer.readUInt16LE(centralOffset + 28);
+    const extraLength = buffer.readUInt16LE(centralOffset + 30);
+    const commentLength = buffer.readUInt16LE(centralOffset + 32);
+    const localOffset = buffer.readUInt32LE(centralOffset + 42);
+    const fileName = buffer.subarray(centralOffset + 46, centralOffset + 46 + fileNameLength).toString("utf8");
+    assert.equal(buffer.readUInt32LE(localOffset), 0x04034b50, "Header locale ZIP non valido");
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = buffer.subarray(dataOffset, dataOffset + compressedSize);
+    const content = method === 0 ? compressed : method === 8 ? inflateRawSync(compressed) : assert.fail(`Metodo ZIP non supportato nel test: ${method}`);
+    entries.set(fileName, content);
+    centralOffset += 46 + fileNameLength + extraLength + commentLength;
+  }
+  return entries;
+}

@@ -46,6 +46,9 @@ interface PersistedFileSendSettings {
 }
 
 const isDevRenderer = process.env.FILEX_RENDERER_MODE === "dev";
+const isPackagedSmokeTest = process.argv.includes("--filex-packaged-smoke-test");
+const forceLicenseSmokeEnforcement = process.argv.includes("--filex-license-smoke-test=enforce");
+const isPackagedLicenseSmokeTest = forceLicenseSmokeEnforcement || process.argv.includes("--filex-license-smoke-test");
 app.setName(isDevRenderer ? "FileX Send Dev" : "FileX Send");
 if (process.platform === "win32") app.setAppUserModelId(isDevRenderer ? "studio.filex.filex-send.dev" : "studio.filex.filex-send");
 
@@ -380,7 +383,10 @@ if (!hasSingleInstanceLock) {
     mainWindow.focus();
   });
   app.whenReady().then(async () => {
-    if (!(await directToolLicenseAllowed())) { app.quit(); return; }
+    if (isPackagedSmokeTest) { app.exit(0); return; }
+    const licenseAllowed = await directToolLicenseAllowed({ forceEnforcement: forceLicenseSmokeEnforcement });
+    if (isPackagedLicenseSmokeTest) { app.exit(licenseAllowed ? 0 : 3); return; }
+    if (!licenseAllowed) { app.quit(); return; }
     settings = await readSettings();
     const detected = await detectCurrentWifi();
     if (detected.wifi) {

@@ -27,6 +27,7 @@
     "test:image-file-finder-bug-hunt": "tsx --test scripts/test-image-file-finder-bug-hunt.ts",
     "test:cache-sweep-bug-hunt": "npm --workspace @photo-tools/cache-sweep run test",
     "test:filex-send-bug-hunt": "npm --workspace @photo-tools/filex-send run test",
+    "test:filex-send-packaged-runtime": "npm --workspace @photo-tools/filex-desktop run dist:filex-send:win && npm run verify:filex-send-packaged-runtime",
     "test:filex-send-upload": "tsx --test apps/filex-send-web/upload-protocol.test.ts",
     "test:backup-guard-bug-hunt": "npm --workspace @photo-tools/backup-guard run test",
     "test:filex-updater-lock": "node scripts/test-filex-updater-lock.mjs",
@@ -75,11 +76,11 @@
     "dist:filex-desktop:batch-print-layout:win": "npm --workspace @photo-tools/filex-desktop run dist:batch-print-layout:win",
     "dist:filex-desktop:suite:win": "npm --workspace @photo-tools/filex-desktop run dist:suite:win",
     "dist:filex-desktop:all-tools:win": "npm --workspace @photo-tools/filex-desktop run dist:all-tools:win",
+    "verify:filex-send-packaged-runtime": "node scripts/test-filex-send-packaged-runtime.mjs",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {
-    "@types/archiver": "^8.0.0",
     "@types/node": "^24.0.0",
     "firebase-tools": "^15.27.0",
     "typescript": "^5.8.0"

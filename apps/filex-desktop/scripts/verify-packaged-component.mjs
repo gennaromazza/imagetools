@@ -68,6 +68,45 @@ function verifyRelativeImportClosure(archivePath, entries, entryPath) {
       pendingEntries.push(importedEntry);
     }
   }
+  return visitedEntries;
+}
+
+function readArchiveJson(archivePath, entryPath) {
+  return JSON.parse(extractFile(archivePath, entryPath.slice(1).replaceAll("/", "\\")).toString("utf8"));
+}
+
+function packageNameFromSpecifier(specifier) {
+  const parts = specifier.split("/");
+  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+}
+
+function verifyPackagedDependencyClosure(archivePath, entries, rootPackages) {
+  const pending = rootPackages.map((name) => `/node_modules/${name}/package.json`);
+  const visitedPackageEntries = new Set();
+
+  while (pending.length > 0) {
+    const packageEntry = pending.pop();
+    if (!packageEntry || visitedPackageEntries.has(packageEntry)) continue;
+    if (!entries.has(packageEntry)) throw new Error(`Dipendenza runtime mancante nell'ASAR: ${packageEntry}`);
+    visitedPackageEntries.add(packageEntry);
+    const packageJson = readArchiveJson(archivePath, packageEntry);
+    const packageDirectory = posix.dirname(packageEntry);
+    for (const dependency of Object.keys({ ...packageJson.dependencies, ...packageJson.optionalDependencies })) {
+      const nestedEntry = `${packageDirectory}/node_modules/${dependency}/package.json`;
+      const rootEntry = `/node_modules/${dependency}/package.json`;
+      const resolvedEntry = entries.has(nestedEntry) ? nestedEntry : entries.has(rootEntry) ? rootEntry : null;
+      if (!resolvedEntry) throw new Error(`${packageEntry} dipende da ${dependency}, assente dall'ASAR.`);
+      pending.push(resolvedEntry);
+    }
+  }
+
+  const allowedPackageDirectories = [...visitedPackageEntries].map((entry) => posix.dirname(entry));
+  const unexpectedEntries = [...entries].filter((entry) => entry.startsWith("/node_modules/")
+    && !allowedPackageDirectories.some((directory) => entry === directory || entry.startsWith(`${directory}/`)));
+  if (unexpectedEntries.length > 0) {
+    throw new Error(`Il pacchetto contiene dipendenze runtime estranee:\n${unexpectedEntries.slice(0, 20).join("\n")}`);
+  }
+  return visitedPackageEntries;
 }
 
 if (args.component === "archivio-flow") {
@@ -133,19 +172,37 @@ if (args.component === "cache-sweep") {
 }
 
 if (args.component === "filex-send") {
-  const entries = listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/"));
+  const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+  const mainEntry = "/.output/electron/filex-send/electron/main.js";
   for (const requiredEntry of [
-    "/.output/electron/filex-send/electron/main.js",
+    mainEntry,
     "/.output/electron/filex-send/electron/preload.cjs",
     "/.output/electron/filex-send/electron/file-send-service.js",
     "/.output/electron/filex-send/electron/firebase-anonymous-auth.js",
     "/.output/electron/filex-send/electron/remote-client-service.js",
     "/.output/electron/filex-send/electron/license-gate.js",
   ]) {
-    if (!entries.includes(requiredEntry)) throw new Error(`FileX Send non contiene ${requiredEntry}`);
+    if (!entries.has(requiredEntry)) throw new Error(`FileX Send non contiene ${requiredEntry}`);
   }
-  const forbiddenEntries = entries.filter((entry) => entry.startsWith("/node_modules/") || entry === "/.output/electron/main.js");
-  if (forbiddenEntries.length > 0) throw new Error(`FileX Send contiene runtime estranei:\n${forbiddenEntries.slice(0, 20).join("\n")}`);
+  if (entries.has("/.output/electron/main.js")) throw new Error("FileX Send contiene il main process generico della Suite.");
+
+  const localRuntimeEntries = verifyRelativeImportClosure(archivePath, entries, mainEntry);
+  const rootPackages = new Set();
+  const bareImportPattern = /(?:from\s*|import\s*(?:\(\s*)?)["']([^./][^"']*)["']/g;
+  for (const runtimeEntry of localRuntimeEntries) {
+    const source = extractFile(archivePath, runtimeEntry.slice(1).replaceAll("/", "\\")).toString("utf8");
+    for (const match of source.matchAll(bareImportPattern)) {
+      const specifier = match[1];
+      if (specifier === "electron" || specifier.startsWith("node:")) continue;
+      rootPackages.add(packageNameFromSpecifier(specifier));
+    }
+  }
+  const expectedRootPackages = ["yazl"];
+  if ([...rootPackages].sort().join("\n") !== expectedRootPackages.join("\n")) {
+    throw new Error(`Import runtime FileX Send inattesi: ${[...rootPackages].sort().join(", ") || "nessuno"}; atteso yazl.`);
+  }
+  const packageEntries = verifyPackagedDependencyClosure(archivePath, entries, expectedRootPackages);
+  console.log(`FileX Send runtime closure: ${[...packageEntries].map((entry) => readArchiveJson(archivePath, entry).name).sort().join(", ")}.`);
 }
 
 if (args.component === "backup-guard") {

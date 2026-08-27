@@ -289,7 +289,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:image-converter-bug-hunt") return "image-converter";
   if (name === "test:image-file-finder-bug-hunt") return "image-file-finder";
   if (name === "test:cache-sweep-bug-hunt") return "cache-sweep";
-  if (name === "test:filex-send-bug-hunt") return "filex-send";
+  if (name === "test:filex-send-bug-hunt" || name === "test:filex-send-packaged-runtime") return "filex-send";
   if (name === "test:filex-send-upload") return "filex-send";
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
   if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
@@ -311,6 +311,7 @@ function testDescription(name: string): string {
     "test:image-file-finder-bug-hunt": "Stressa il parser con virgolette, separatori, percorsi e duplicati.",
     "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",
     "test:filex-send-bug-hunt": "Verifica trasferimenti, autenticazione e rete con casi di errore.",
+    "test:filex-send-packaged-runtime": "Costruisce l'installer, controlla la chiusura delle dipendenze ZIP e avvia il main process impacchettato.",
     "test:filex-send-upload": "Esegue 12 test sul caricamento a blocchi, retry, timeout e ripresa degli offset.",
     "test:backup-guard-bug-hunt": "Verifica che sincronizzazione e rinomine non perdano o sovrascrivano file.",
     "test:filex-updater-lock": "Verifica che gli archivi dell'updater non restino bloccati su Windows.",
@@ -318,7 +319,7 @@ function testDescription(name: string): string {
     "test:filex-process-snapshot-cache": "Verifica che la chiusura parallela condivida il rilevamento processi senza duplicare tasklist.exe durante un fetch lento.",
     "test:filex-installer-runner": "Verifica che la Suite avvii NSIS con /S, attenda la conclusione reale e intercetti errori di avvio o exit code.",
     "test:filex-cooperative-signal": "Verifica che una versione legacy non possa bloccare indefinitamente il comando di chiusura cooperativa prima del fallback.",
-    "test:filex-suite-package-imports": "Controlla nel pacchetto ASAR reale che tutti gli import runtime transitivi del main process Suite siano presenti.",
+    "test:filex-suite-package-imports": "Controlla gli import runtime nel pacchetto ASAR reale e avvia il main process della Suite impacchettata.",
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
