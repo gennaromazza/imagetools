@@ -8,6 +8,7 @@ import { logger } from "firebase-functions";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest, type Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { writeZipArchive } from "./archive.js";
 import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, hashToken, normalizeLinkExpiry, publicUploadAllowed, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
 import { handleLicensingRequest } from "./licensing-api.js";
 
@@ -46,11 +47,22 @@ interface FileRecord {
   downloadedAt?: Timestamp;
 }
 
+interface ArchiveRecord {
+  status: "building" | "ready" | "failed";
+  signature: string;
+  buildId: string;
+  objectPath: string;
+  downloadToken: string;
+  name: string;
+  size?: number;
+  updatedAt: Timestamp;
+}
+
 interface HttpResponse {
   status(code: number): { json(value: unknown): unknown };
 }
 
-export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memory: "256MiB", secrets: [lemonSqueezyWebhookSecret, paypalClientSecret, paypalLicenseKeySecret, licenseSigningPrivateKey] }, async (request, response) => {
+export const api = onRequest({ region: "europe-west1", timeoutSeconds: 3600, memory: "512MiB", cors: [publicBaseUrl], secrets: [lemonSqueezyWebhookSecret, paypalClientSecret, paypalLicenseKeySecret, licenseSigningPrivateKey] }, async (request, response) => {
   response.set("Cache-Control", "no-store");
   try {
     const rawPath = request.path.replace(/\/+$/, "") || "/";
@@ -75,6 +87,7 @@ export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memor
     const uploadMatch = path.match(/^\/public\/([^/]+)\/uploads$/);
     const uploadCompleteMatch = path.match(/^\/public\/([^/]+)\/uploads\/([0-9a-f-]{36})\/complete$/i);
     const publicCompleteMatch = path.match(/^\/public\/([^/]+)\/complete$/);
+    const publicArchiveMatch = path.match(/^\/public\/([^/]+)\/archive$/);
     const desktopMatch = path.match(/^\/desktop\/([0-9a-f-]{36})$/i);
     const desktopFileMatch = path.match(/^\/desktop\/([0-9a-f-]{36})\/files\/([0-9a-f-]{36})$/i);
 
@@ -82,6 +95,7 @@ export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memor
     if (request.method === "POST" && uploadMatch) return beginUpload(uploadMatch[1], request, response);
     if (request.method === "POST" && uploadCompleteMatch) return finishUpload(uploadCompleteMatch[1], uploadCompleteMatch[2], request, response);
     if (request.method === "POST" && publicCompleteMatch) return finishSession(publicCompleteMatch[1], response);
+    if (request.method === "GET" && publicArchiveMatch) return publicArchive(publicArchiveMatch[1], response);
     if (request.method === "GET" && desktopMatch) return desktopStatus(desktopMatch[1], request, response);
     if (request.method === "PATCH" && desktopMatch) return updateSessionExpiry(desktopMatch[1], request, response);
     if (request.method === "DELETE" && desktopMatch) return deleteSession(desktopMatch[1], request, response);
@@ -151,6 +165,76 @@ async function publicSession(rawCredential: string, response: HttpResponse) {
       };
     }) ?? [],
   });
+}
+
+async function publicArchive(rawCredential: string, response: HttpResponse) {
+  const authorized = await authorizePublic(rawCredential);
+  if (!authorized) return json(response, 410, { error: "Sessione scaduta." });
+  if ((authorized.data.direction ?? "receive") !== "send") return json(response, 400, { error: "Questa sessione non contiene file da scaricare." });
+
+  const snapshot = await authorized.ref.collection("files").orderBy("receivedAt").get();
+  if (snapshot.empty) return json(response, 404, { error: "Nessun file disponibile." });
+  const files = snapshot.docs.map((doc) => ({ id: doc.id, data: doc.data() as FileRecord }));
+  const signature = hashToken(files.map(({ id, data }) => `${id}:${data.size}`).join("|"));
+  const archiveRef = authorized.ref.collection("archives").doc("current");
+  const currentSnapshot = await archiveRef.get();
+  const current = currentSnapshot.exists ? currentSnapshot.data() as ArchiveRecord : null;
+
+  if (current?.status === "ready" && current.signature === signature) {
+    const [exists] = await bucket.file(current.objectPath).exists();
+    if (exists) return json(response, 200, archiveResponse(current));
+  }
+
+  const buildId = randomUUID();
+  const objectPath = `filex-send/${authorized.id}/archives/${signature}.zip`;
+  const name = `FileX-Send-${authorized.id.slice(0, 8)}.zip`;
+  const downloadToken = createToken();
+  const acquired = await db.runTransaction(async (transaction) => {
+    const stateSnapshot = await transaction.get(archiveRef);
+    const state = stateSnapshot.exists ? stateSnapshot.data() as ArchiveRecord : null;
+    const leaseIsActive = state?.status === "building"
+      && state.signature === signature
+      && state.updatedAt.toMillis() > Date.now() - 65 * 60 * 1000;
+    if (leaseIsActive) return false;
+    transaction.set(archiveRef, { status: "building", signature, buildId, objectPath, downloadToken, name, updatedAt: Timestamp.now() } satisfies ArchiveRecord);
+    return true;
+  });
+  if (!acquired) return json(response, 202, { status: "building" });
+
+  const archiveObject = bucket.file(objectPath);
+  try {
+    await writeZipArchive(files.map(({ data }) => ({
+      name: data.name,
+      size: data.size,
+      mtime: data.receivedAt.toDate(),
+      createReadStream: () => bucket.file(data.objectPath).createReadStream(),
+    })), archiveObject.createWriteStream({
+      resumable: true,
+      metadata: {
+        contentType: "application/zip",
+        contentDisposition: `attachment; filename="${name}"`,
+        cacheControl: "private, no-store",
+        metadata: { filexSessionId: authorized.id, firebaseStorageDownloadTokens: downloadToken },
+      },
+    }));
+    const [metadata] = await archiveObject.getMetadata();
+    const ready: ArchiveRecord = { status: "ready", signature, buildId, objectPath, downloadToken, name, size: Number(metadata.size), updatedAt: Timestamp.now() };
+    await archiveRef.set(ready);
+    return json(response, 200, archiveResponse(ready));
+  } catch (cause) {
+    await archiveObject.delete({ ignoreNotFound: true }).catch(() => undefined);
+    await archiveRef.set({ status: "failed", signature, buildId, objectPath, downloadToken, name, updatedAt: Timestamp.now() } satisfies ArchiveRecord);
+    throw cause;
+  }
+}
+
+function archiveResponse(archive: ArchiveRecord) {
+  return {
+    status: "ready",
+    name: archive.name,
+    size: archive.size ?? 0,
+    downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(archive.objectPath)}?alt=media&token=${encodeURIComponent(archive.downloadToken)}`,
+  };
 }
 
 async function beginUpload(rawCredential: string, request: Request, response: HttpResponse) {

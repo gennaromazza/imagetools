@@ -22,6 +22,7 @@ let files = [];
 let sharedFiles = [];
 const relativePaths = new WeakMap();
 const MAX_BROWSER_ZIP_BYTES = 128 * 1024 * 1024;
+const ARCHIVE_API_BASE_URL = "https://europe-west1-gen-lang-client-0321087169.cloudfunctions.net/api";
 
 const formatBytes = (bytes) => bytes < 1048576 ? `${(bytes / 1024).toFixed(1)} KB` : bytes < 1073741824 ? `${(bytes / 1048576).toFixed(1)} MB` : `${(bytes / 1073741824).toFixed(1)} GB`;
 const api = async (path, init) => {
@@ -43,23 +44,39 @@ function triggerDownload(file) {
   link.remove();
 }
 
+async function requestDownloadArchive() {
+  const response = await fetch(`${ARCHIVE_API_BASE_URL}/public/${encodeURIComponent(credential)}/archive`, { cache: "no-store" });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok && response.status !== 202) throw new Error(body.error || "Non riesco a preparare lo ZIP.");
+  return body;
+}
+
 async function downloadAllFiles() {
   if (!sharedFiles.length || !downloadAll) return;
   downloadAll.disabled = true;
+  downloadAll.textContent = `Preparo lo ZIP · ${sharedFiles.length} file`;
+  const startedAt = Date.now();
+  const timer = window.setInterval(() => {
+    const elapsed = Math.max(1, Math.floor((Date.now() - startedAt) / 1000));
+    downloadAllStatus.textContent = `Creazione dello ZIP sul server in corso · ${elapsed}s. Non chiudere questa pagina.`;
+  }, 1000);
 
-  const total = sharedFiles.reduce((sum, file) => sum + Number(file.size || 0), 0);
-  if (typeof JSZip !== "undefined" && total <= MAX_BROWSER_ZIP_BYTES) {
-    try {
-      await downloadAllAsZip();
-      return;
-    } catch {
-      downloadAllStatus.textContent = "Archivio non disponibile: continuo con i download singoli.";
-    }
-  } else if (total > MAX_BROWSER_ZIP_BYTES) {
-    downloadAllStatus.textContent = "Consegna troppo grande per creare lo ZIP nel browser: scarico i file uno alla volta.";
+  try {
+    let archive;
+    do {
+      archive = await requestDownloadArchive();
+      if (archive.status === "building") await new Promise((resolve) => setTimeout(resolve, 3000));
+    } while (archive.status === "building");
+    triggerDownload({ downloadUrl: archive.downloadUrl, name: archive.name });
+    downloadAll.textContent = `Download ZIP avviato · ${sharedFiles.length} file`;
+    downloadAllStatus.textContent = "Un unico archivio ZIP e pronto nel pannello Download del browser.";
+  } catch (cause) {
+    downloadAll.disabled = false;
+    downloadAll.textContent = `Scarica tutti · ${sharedFiles.length}`;
+    downloadAllStatus.textContent = cause.message || "Non riesco a preparare lo ZIP. Riprova tra poco.";
+  } finally {
+    window.clearInterval(timer);
   }
-
-  await downloadAllSequential();
 }
 
 async function downloadAllAsZip() {
