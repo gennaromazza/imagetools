@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-27 - FileX Send 0.1.21
+
+- Corretta la generazione della pagina mobile che impediva la compilazione del servizio di trasferimento.
+- Completati i dati dei file usati dalla pagina di download, inclusa la dimensione mostrata al cliente.
+- Inclusi i miglioramenti della sessione reale: tipo file preservato, logo FileX Send corretto e download di tutti i file progressivo e controllato.
+
 ## 2026-08-27 - FileX Send 0.1.20
 
 - Aggiunta la gestione del `content-type` per i file condivisi in locale e remoto, così i download mantengono il tipo originale.
