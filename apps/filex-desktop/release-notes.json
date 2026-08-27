@@ -60,13 +60,13 @@
     ],
     "0.1.1": [
       "Lo stesso link remoto può ricevere più gruppi di foto e video fino alla scadenza impostata.",
-      "Corretto l’errore che indicava una sessione scaduta dopo il primo invio completato.",
+      "Corretto l'errore che indicava una sessione scaduta dopo il primo invio completato.",
       "Aggiunto il pulsante Invia altri file nella conferma mostrata al cliente."
     ],
     "0.1.0": [
       "Ricezione locale di foto e video dal telefono del cliente tramite QR code, senza account o cloud.",
       "Link remoto con scadenza configurabile: il cliente può caricare anche a PC spento e FileX Send recupera tutto automaticamente alla riapertura.",
-      "I file non scaricati restano protetti nello storage; dopo il download verificato vengono eliminati automaticamente entro un’ora."
+      "I file non scaricati restano protetti nello storage; dopo il download verificato vengono eliminati automaticamente entro un'ora."
     ],
     "0.1.9": [
       "Recupero automatico delle sessioni Internet attive e supporto completo a tutti i tipi di file."
@@ -75,13 +75,20 @@
       "Drag and drop e selezione ricorsiva di file e cartelle, storico ricercabile e cancellabile, modifica della scadenza dei link e interfaccia aggiornata."
     ],
     "0.1.12": [
-      "Corretto il percorso del logo nell’app pubblicata per garantirne la visualizzazione anche nel pacchetto installato."
+      "Corretto il percorso del logo nell'app pubblicata per garantirne la visualizzazione anche nel pacchetto installato."
     ],
     "0.1.13": [
       "Download multipli diretti per i clienti, con supporto a file di grandi dimensioni e sessioni attive preservate."
     ],
     "0.1.14": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.1.15": [
+      "Download ZIP per i clienti: tutti i file in un unico archivio, evitando i blocchi del browser sui download multipli.",
+      "Fallback migliorato con download sequenziali distanziati per maggiore affidabilità."
+    ],
+    "0.1.16": [
+      "Corretta la chiusura delle dipendenze runtime: archiver e le sue sottodipendenze sono ora incluse nell'installer."
     ]
   },
   "cache-sweep": {
