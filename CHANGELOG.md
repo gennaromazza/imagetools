@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-27 - FileX Send 0.1.18
+
+### Correzione asarUnpack per archiver
+- Estratti i moduli archiver e dipendenze dall'ASAR per consentire a Node.js di risolverli correttamente a runtime.
+
 ## 2026-08-27 - FileX Send 0.1.17
 
 ### Correzione workflow di release

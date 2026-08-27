@@ -89,6 +89,12 @@
     ],
     "0.1.16": [
       "Corretta la chiusura delle dipendenze runtime: archiver e le sue sottodipendenze sono ora incluse nell'installer."
+    ],
+    "0.1.17": [
+      "Correzioni al workflow di release e aggiunta delle release notes mancanti."
+    ],
+    "0.1.18": [
+      "Estratti i moduli archiver dall'ASAR per risolvere l'errore MODULE_NOT_FOUND a runtime."
     ]
   },
   "cache-sweep": {

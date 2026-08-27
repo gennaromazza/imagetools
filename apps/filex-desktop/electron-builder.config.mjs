@@ -395,8 +395,24 @@ export default {
 
   asar: true,
 
-  asarUnpack: requestedTool.id === "suite-launcher" || requestedTool.id === "cache-sweep" || requestedTool.id === "filex-send"
+  asarUnpack: requestedTool.id === "suite-launcher" || requestedTool.id === "cache-sweep"
     ? []
+    : requestedTool.id === "filex-send"
+    ? [
+        "**/node_modules/archiver/**",
+        "**/node_modules/archiver-utils/**",
+        "**/node_modules/async/**",
+        "**/node_modules/buffer-crc32/**",
+        "**/node_modules/compress-commons/**",
+        "**/node_modules/crc-32/**",
+        "**/node_modules/crc32-stream/**",
+        "**/node_modules/lodash/**",
+        "**/node_modules/normalize-path/**",
+        "**/node_modules/readable-stream/**",
+        "**/node_modules/readdir-glob/**",
+        "**/node_modules/tar-stream/**",
+        "**/node_modules/zip-stream/**",
+      ]
     : [
         "**/node_modules/exiftool-vendored.exe/**",
         "**/node_modules/exiftool-vendored.pl/**",
