@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-27 - FileX Send 0.1.20
+
+- Aggiunta la gestione del `content-type` per i file condivisi in locale e remoto, così i download mantengono il tipo originale.
+- Corretto il logo mostrato nelle pagine FileX Send (locale e remoto) puntando al logo applicativo corretto.
+- Aggiunta una funzione "Scarica tutti" progressiva e controllata nel client remoto, con feedback per file e intervallo tra i download.
+
 ## 2026-08-27 - FileX Suite 0.1.57
 
 ### Aggiornamenti tool senza file bloccati
@@ -71,6 +77,7 @@
 - I clienti che ricevono il link per scaricare i file possono ora scaricare un unico archivio ZIP contenente tutti i file, evitando i blocchi del browser sui download multipli.
 - Il fallback con download sequenziali distanziati migliora l'affidabilità quando ZIP non è disponibile o fallisce.
 - Aggiunto test automatico per l'endpoint ZIP sul server desktop LAN.
+ 
 
 ## 2026-08-26 - Archivio Flow 0.1.37
 

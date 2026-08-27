@@ -3,6 +3,7 @@ import { getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, Timestamp, getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
+import { extname } from "node:path";
 import { logger } from "firebase-functions";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest, type Request } from "firebase-functions/v2/https";
@@ -38,7 +39,7 @@ interface SessionRecord {
 interface FileRecord {
   name: string;
   size: number;
-  contentType: string;
+  contentType?: string;
   objectPath: string;
   downloadToken: string;
   receivedAt: Timestamp;
@@ -141,7 +142,13 @@ async function publicSession(rawCredential: string, response: HttpResponse) {
     expiresAt: authorized.data.expiresAt.toMillis(),
     files: files?.docs.map((doc) => {
       const file = doc.data() as FileRecord;
-      return { id: doc.id, name: file.name, size: file.size, downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(file.objectPath)}?alt=media&token=${encodeURIComponent(file.downloadToken)}` };
+      return {
+        id: doc.id,
+        name: file.name,
+        size: file.size,
+        contentType: file.contentType ?? inferContentType(file.name),
+        downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(file.objectPath)}?alt=media&token=${encodeURIComponent(file.downloadToken)}`,
+      };
     }) ?? [],
   });
 }
@@ -222,6 +229,7 @@ async function desktopStatus(id: string, request: Request, response: HttpRespons
         id: doc.id,
         name: file.name,
         size: file.size,
+        contentType: file.contentType ?? inferContentType(file.name),
         receivedAt: file.receivedAt.toMillis(),
         downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(file.objectPath)}?alt=media&token=${encodeURIComponent(file.downloadToken)}`,
       };
@@ -389,3 +397,33 @@ async function restoreSession(id: string, request: Request, response: HttpRespon
 function json(response: HttpResponse, status: number, value: unknown) {
   response.status(status).json(value);
 }
+
+function inferContentType(fileName: string): string {
+  return MIME_TYPES[extname(fileName).toLowerCase()] ?? "application/octet-stream";
+}
+
+const MIME_TYPES: Record<string, string> = {
+  ".3gp": "video/3gpp",
+  ".avi": "video/x-msvideo",
+  ".bmp": "image/bmp",
+  ".gif": "image/gif",
+  ".heic": "image/heic",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".m4v": "video/x-m4v",
+  ".mkv": "video/x-matroska",
+  ".mov": "video/quicktime",
+  ".mp4": "video/mp4",
+  ".mp3": "audio/mpeg",
+  ".mpeg": "video/mpeg",
+  ".mpg": "video/mpeg",
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".txt": "text/plain; charset=utf-8",
+  ".webp": "image/webp",
+  ".wav": "audio/wav",
+  ".webm": "video/webm",
+  ".wma": "audio/x-ms-wma",
+  ".wmv": "video/x-ms-wmv",
+  ".zip": "application/zip",
+};

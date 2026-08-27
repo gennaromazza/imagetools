@@ -223,22 +223,23 @@ export class FileSendRemoteClient {
     const session = this.sessions.get(sessionId);
     if (!session || session.direction !== "send") throw new Error("Condivisione Internet non trovata.");
     const credential = session.uploadUrl.split("/r/").pop()!;
-    for (const path of filePaths) {
+      for (const path of filePaths) {
       const info = await stat(path);
       const name = sanitizeFileName(basename(path));
       if (!info.isFile() || info.size > 25 * 1024 * 1024 * 1024) throw new Error(`File non valido o troppo grande: ${name}`);
+      const contentType = inferContentType(name);
       const pendingResponse = await fetch(`${this.baseUrl}/api/public/${encodeURIComponent(credential)}/uploads`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, size: info.size, contentType: "application/octet-stream" }),
+        body: JSON.stringify({ name, size: info.size, contentType }),
       });
       if (!pendingResponse.ok) throw new Error(`Preparazione di ${name} non riuscita.`);
       const pending = await pendingResponse.json() as { fileId: string; uploadUrl: string };
       const body = Readable.toWeb(createReadStream(path)) as BodyInit;
-      const uploaded = await fetch(pending.uploadUrl, { method: "PUT", headers: { "content-type": "application/octet-stream", "content-range": `bytes 0-${info.size - 1}/${info.size}` }, body, duplex: "half" } as RequestInit & { duplex: "half" });
+      const uploaded = await fetch(pending.uploadUrl, { method: "PUT", headers: { "content-type": contentType, "content-range": `bytes 0-${info.size - 1}/${info.size}` }, body, duplex: "half" } as RequestInit & { duplex: "half" });
       if (!uploaded.ok) throw new Error(`Caricamento di ${name} non riuscito.`);
       const completed = await fetch(`${this.baseUrl}/api/public/${encodeURIComponent(credential)}/uploads/${pending.fileId}/complete`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       if (!completed.ok) throw new Error(`Conferma di ${name} non riuscita.`);
-      session.receivedFiles.push({ id: pending.fileId, name, size: info.size, receivedAt: Date.now() });
+      session.receivedFiles.push({ id: pending.fileId, name, size: info.size, receivedAt: Date.now(), contentType });
       session.receivedBytes += info.size;
       if (notify) this.onChange?.();
     }
@@ -293,7 +294,13 @@ export class FileSendRemoteClient {
       session.expiresAt = status.expiresAt;
       session.retentionExpiresAt = status.retentionExpiresAt;
       if (session.direction === "send") {
-        session.receivedFiles = status.files.map(({ id, name, size, receivedAt }) => ({ id, name, size, receivedAt }));
+        session.receivedFiles = status.files.map(({ id, name, size, receivedAt, contentType }) => ({
+          id,
+          name,
+          size,
+          receivedAt,
+          contentType,
+        }));
         session.receivedBytes = session.receivedFiles.reduce((total, file) => total + file.size, 0);
         this.error = null;
         return;
@@ -329,7 +336,13 @@ export class FileSendRemoteClient {
       const receivedSize = (await stat(partPath)).size;
       if (receivedSize !== file.size) throw new Error(`Dimensione non valida per ${file.name}.`);
       await rename(partPath, finalPath);
-      session.receivedFiles.push({ id: file.id, name: fileName, size: file.size, receivedAt: file.receivedAt });
+      session.receivedFiles.push({
+        id: file.id,
+        name: fileName,
+        size: file.size,
+        receivedAt: file.receivedAt,
+        contentType: file.contentType,
+      });
       session.receivedBytes += file.size;
       await this.acknowledgeFile(session, file.id);
     } catch (cause) {
@@ -349,6 +362,36 @@ export class FileSendRemoteClient {
 function auth(token: string): Record<string, string> { return { authorization: `Bearer ${token}` }; }
 function sanitizeLabel(value?: string): string { return (value ?? "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9 _-]/g, "").trim().replace(/\s+/g, "-").slice(0, 60); }
 function sanitizeFileName(value: string): string { const extension = extname(basename(value)).slice(0, 16); const stem = basename(value, extname(basename(value))).replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim().slice(0, 160); return `${stem || "foto"}${extension}`; }
+function inferContentType(fileName: string): string {
+  const extension = extname(fileName).toLowerCase();
+  return MIME_TYPES[extension] ?? "application/octet-stream";
+}
 function formatDate(timestamp: number): string { const date = new Date(timestamp); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}_${String(date.getHours()).padStart(2, "0")}-${String(date.getMinutes()).padStart(2, "0")}`; }
 async function createUniqueDirectory(root: string, name: string): Promise<string> { await mkdir(root, { recursive: true }); for (let index = 1; index <= 999; index += 1) { const candidate = join(root, index === 1 ? name : `${name}-${index}`); try { await mkdir(candidate); return candidate; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; } } throw new Error("Impossibile creare la cartella."); }
 async function reserveDestination(folderPath: string, originalName: string) { const safeName = sanitizeFileName(originalName); const extension = extname(safeName); const stem = basename(safeName, extension); for (let index = 1; index <= 9999; index += 1) { const fileName = index === 1 ? safeName : `${stem} (${index})${extension}`; const finalPath = join(folderPath, fileName); const partPath = `${finalPath}.filex-remote-part`; try { await access(finalPath); continue; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } try { const handle = await open(partPath, "wx"); return { finalPath, partPath, fileName, handle }; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; } } throw new Error("Troppi file duplicati."); }
+
+const MIME_TYPES: Record<string, string> = {
+  ".3gp": "video/3gpp",
+  ".avi": "video/x-msvideo",
+  ".bmp": "image/bmp",
+  ".gif": "image/gif",
+  ".heic": "image/heic",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".m4v": "video/x-m4v",
+  ".mkv": "video/x-matroska",
+  ".mov": "video/quicktime",
+  ".mp4": "video/mp4",
+  ".mp3": "audio/mpeg",
+  ".mpeg": "video/mpeg",
+  ".mpg": "video/mpeg",
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".txt": "text/plain; charset=utf-8",
+  ".webp": "image/webp",
+  ".wav": "audio/wav",
+  ".webm": "video/webm",
+  ".wma": "audio/x-ms-wma",
+  ".wmv": "video/x-ms-wmv",
+  ".zip": "application/zip",
+};

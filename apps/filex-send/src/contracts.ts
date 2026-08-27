@@ -3,6 +3,7 @@ export interface FileSendReceivedFile {
   name: string;
   size: number;
   receivedAt: number;
+  contentType?: string;
 }
 
 export interface FileSendSession {

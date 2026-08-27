@@ -16,13 +16,23 @@ test("crea una sessione, riceve e consegna un file una sola volta", async () => 
     assert.equal((await fetch(created.uploadUrl)).status, 200);
     const publicToken = new URL(created.uploadUrl).pathname.split("/").pop();
     const bytes = new TextEncoder().encode("foto remota");
-    const uploaded = await fetch(`${baseUrl}/api/public/${publicToken}/files`, { method: "PUT", headers: { "x-file-name": encodeURIComponent("vacanza.jpg"), "content-length": String(bytes.length) }, body: bytes });
+    const uploaded = await fetch(`${baseUrl}/api/public/${publicToken}/files`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/custom-file",
+        "x-file-name": encodeURIComponent("vacanza.jpg"),
+        "content-length": String(bytes.length),
+      },
+      body: bytes,
+    });
     assert.equal(uploaded.status, 201);
 
     const auth = { authorization: `Bearer ${created.desktopToken}` };
     const status = await (await fetch(`${baseUrl}/api/desktop/${created.sessionId}`, { headers: auth })).json() as { files: Array<{ id: string; name: string }> };
     assert.equal(status.files[0]?.name, "vacanza.jpg");
     const fileResponse = await fetch(`${baseUrl}/api/desktop/${created.sessionId}/files/${status.files[0].id}`, { headers: auth });
+    assert.equal(fileResponse.headers.get("content-type"), "application/custom-file");
+    assert.ok(/vacanza\.jpg/.test(fileResponse.headers.get("content-disposition") ?? ""));
     assert.equal(await fileResponse.text(), "foto remota");
     assert.equal((await fetch(`${baseUrl}/api/desktop/${created.sessionId}/files/${status.files[0].id}`, { method: "DELETE", headers: auth })).status, 200);
     const afterDelete = await (await fetch(`${baseUrl}/api/desktop/${created.sessionId}`, { headers: auth })).json() as { files: unknown[] };
