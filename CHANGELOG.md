@@ -36,6 +36,7 @@
 - Completati i dati dei file usati dalla pagina di download, inclusa la dimensione mostrata al cliente.
 - Inclusi i miglioramenti della sessione reale: tipo file preservato, logo FileX Send corretto e download di tutti i file progressivo e controllato.
 - Corretta la guardia del workflow di release quando il commit e presente sia in `main` sia in un branch di preparazione.
+- Ripristinato nel deploy Firebase il modulo del protocollo di upload richiesto dal nuovo client cloud.
 
 ## 2026-08-27 - FileX Send 0.1.20
 
