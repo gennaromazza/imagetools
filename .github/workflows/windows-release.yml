@@ -86,7 +86,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           git fetch origin main:refs/remotes/origin/main --no-tags
           $mainBranches = @(git branch -r --contains $env:GITHUB_SHA)
-          if ($mainBranches -notmatch "origin/main") {
+          if (-not ($mainBranches -match "origin/main")) {
             throw "La release deve puntare a un commit gia integrato in main: $env:GITHUB_SHA"
           }
           if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.ref }}" -ne "refs/heads/main") {
