@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-27 - FileX Send 0.1.16
+
+### Chiusura dipendenze runtime
+- Aggiunta la dipendenza `archiver` e le relative sottodipendenze al pacchetto installer di FileX Send, evitando errori `MODULE_NOT_FOUND` a runtime.
+
 ## 2026-08-27 - FileX Send 0.1.15
 
 ### Download ZIP per i clienti
