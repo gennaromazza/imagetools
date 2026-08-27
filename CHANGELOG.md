@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-27 - FileX Send 0.1.15
+
+- Aggiunta la gestione del `content-type` per i file condivisi in locale e remoto, così i download mantengono il tipo originale.
+- Corretto il logo mostrato nelle pagine FileX Send (locale e remoto) puntando al logo applicativo corretto.
+- Aggiunta una funzione "Scarica tutti" nel client remoto che avvia i download progressivi di tutti i file da una singola azione.
+
 ## 2026-08-26 - Archivio Flow 0.1.37
 
 - Corretto il caricamento del server IPC nell'installer: il percorso compilato e le dipendenze locali vengono ora verificati prima della pubblicazione.

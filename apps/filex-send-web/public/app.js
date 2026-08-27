@@ -1,3 +1,5 @@
+import { UPLOAD_MAX_RETRIES, UPLOAD_REQUEST_TIMEOUT_MS, chunkEnd, isRetryableStatus, nextOffset, retryDelay, totalBytes } from "./upload-protocol.js";
+
 const credential = decodeURIComponent(location.pathname.replace(/^\/r\//, "").split("/")[0] || "");
 const loading = document.querySelector("#loading");
 const upload = document.querySelector("#upload");
@@ -94,7 +96,7 @@ function setFiles(selected) {
     known.add(key);
     return true;
   });
-  const total = files.reduce((sum, file) => sum + file.size, 0);
+  const total = totalBytes(files);
   summary.textContent = files.length ? `${files.length} file · ${formatBytes(total)}` : "Nessun file selezionato";
   send.disabled = files.length === 0;
   previews.replaceChildren(...files.slice(0, 7).map((file) => {
@@ -176,17 +178,67 @@ dropZone.addEventListener("keydown", (event) => { if (event.key === "Enter" || e
 ["dragleave", "drop"].forEach((type) => dropZone.addEventListener(type, (event) => { event.preventDefault(); dropZone.classList.remove("dragging"); }));
 dropZone.addEventListener("drop", async (event) => { try { setFiles(await filesFromDrop(event.dataTransfer)); } catch { status.textContent = "Non riesco a leggere uno degli elementi trascinati."; } });
 
-function uploadFile(url, file, onProgress) {
+function requestUploadChunk(url, chunk, start, end, total, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-    xhr.setRequestHeader("Content-Range", `bytes 0-${file.size - 1}/${file.size}`);
-    xhr.upload.onprogress = (event) => onProgress(event.loaded);
-    xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error("Caricamento non riuscito."));
-    xhr.onerror = () => reject(new Error("Connessione interrotta."));
-    xhr.send(file);
+    xhr.timeout = UPLOAD_REQUEST_TIMEOUT_MS;
+    xhr.setRequestHeader("Content-Type", chunk.type || "application/octet-stream");
+    xhr.setRequestHeader("Content-Range", `bytes ${start}-${end}/${total}`);
+    xhr.upload.onprogress = (event) => onProgress(start + event.loaded);
+    xhr.onload = () => {
+      const offset = nextOffset(xhr.status, xhr.getResponseHeader("Range"), end + 1);
+      if (offset !== null) resolve(offset);
+      else { const error = new Error(xhr.status >= 500 ? "Server temporaneamente non disponibile." : "Caricamento non riuscito."); error.status = xhr.status; reject(error); }
+    };
+    xhr.onerror = () => { const error = new Error("Connessione interrotta."); error.status = 0; reject(error); };
+    xhr.ontimeout = () => { const error = new Error("La richiesta è scaduta."); error.status = 408; reject(error); };
+    xhr.send(chunk);
   });
+}
+
+function queryUploadOffset(url, total) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.timeout = UPLOAD_REQUEST_TIMEOUT_MS;
+    xhr.setRequestHeader("Content-Range", `bytes */${total}`);
+    xhr.onload = () => {
+      const offset = offsetFromResponse(xhr);
+      if (offset !== null) resolve(offset);
+      else reject(Object.assign(new Error("Impossibile riprendere il caricamento."), { status: xhr.status }));
+    };
+    xhr.onerror = () => reject(Object.assign(new Error("Connessione interrotta."), { status: 0 }));
+    xhr.ontimeout = () => reject(Object.assign(new Error("La richiesta è scaduta."), { status: 408 }));
+    xhr.send();
+  });
+}
+
+function offsetFromResponse(xhr) {
+  if (xhr.status === 200 || xhr.status === 201) return Number(xhr.getResponseHeader("Content-Length") || 0) || null;
+  return xhr.status === 308 ? (Number((/^bytes=0-(\d+)$/i.exec(xhr.getResponseHeader("Range") || "") || [])[1]) + 1 || 0) : null;
+}
+
+const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+async function uploadFile(url, file, onProgress, onRetry) {
+  let offset = 0;
+  while (offset < file.size) {
+    const end = chunkEnd(offset, file.size);
+    let attempt = 0;
+    while (true) {
+      try {
+        offset = await requestUploadChunk(url, file.slice(offset, end + 1), offset, end, file.size, onProgress);
+        break;
+      } catch (cause) {
+        if (attempt >= UPLOAD_MAX_RETRIES || !isRetryableStatus(cause.status ?? 0)) throw cause;
+        attempt += 1;
+        onRetry?.(attempt, UPLOAD_MAX_RETRIES);
+        await wait(retryDelay(attempt - 1));
+        try { offset = await queryUploadOffset(url, file.size); } catch { /* il retry successivo riprova anche il recupero offset */ }
+      }
+    }
+  }
 }
 
 send.addEventListener("click", async () => {
@@ -199,7 +251,7 @@ send.addEventListener("click", async () => {
       const file = files[index];
       status.textContent = `Invio ${index + 1} di ${files.length} · ${file.name}`;
       const pending = await api(`/public/${encodeURIComponent(credential)}/uploads`, { method: "POST", body: JSON.stringify({ name: file.name, size: file.size, contentType: file.type }) });
-      await uploadFile(pending.uploadUrl, file, (loaded) => { bar.style.width = `${((completed + loaded) / total) * 100}%`; updateFileProgress(index, loaded, file.size); });
+      await uploadFile(pending.uploadUrl, file, (loaded) => { bar.style.width = `${((completed + loaded) / total) * 100}%`; updateFileProgress(index, loaded, file.size); status.textContent = `Invio ${index + 1} di ${files.length} · ${file.name} · ${Math.round((loaded / file.size) * 100)}%`; }, (attempt, max) => { status.textContent = `Rete instabile: riprovo ${file.name} (${attempt}/${max})…`; });
       await api(`/public/${encodeURIComponent(credential)}/uploads/${pending.fileId}/complete`, { method: "POST", body: "{}" });
       completed += file.size;
       markFileComplete(index);

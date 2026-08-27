@@ -122,6 +122,8 @@ test("condivide file dal PC tramite un link locale protetto", async () => {
     const sharedFiles = service.getSession(session.id)!.receivedFiles;
     const responses = await Promise.all(sharedFiles.map((file) => fetch(`${base}/api/session/${token}/downloads/${file.id}`)));
     assert.deepEqual(responses.map((response) => response.status), [200, 200]);
+    assert.equal(responses[0]?.headers.get("content-type"), "application/pdf");
+    assert.equal(responses[1]?.headers.get("content-type"), "application/pdf");
     assert.deepEqual(await Promise.all(responses.map((response) => response.text())), ["contenuto da consegnare", "secondo contenuto"]);
     assert.ok(responses.every((response) => /attachment/.test(response.headers.get("content-disposition") ?? "")));
   } finally {
