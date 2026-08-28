@@ -30,6 +30,14 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-28 - FileX Suite 0.1.57
+
+### Nuova FileX Dock laterale e interattiva
+- Aggiunti ancoraggio a sinistra, destra o in basso, reveal al passaggio del mouse e riordino coerente con l'orientamento scelto.
+- La Dock conserva posizione e centro verticale, resta nell'area utile del monitor e recupera una posizione valida dopo cambi di schermo.
+- Integrato un centro notifiche per aggiornamenti Suite e tool, stato licenza e azioni contestuali.
+- Pubblicata la pagina tecnica e marketing dedicata alla FileX Dock nel sito ufficiale.
+
 ## 2026-08-28 - Image Select Pro 0.1.31
 
 ### Quick Preview e RAW piu fluidi
