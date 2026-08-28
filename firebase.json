@@ -31,6 +31,18 @@
       "public": "website",
       "cleanUrls": true,
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "redirects": [
+        {
+          "source": "/strumenti/polaroid-go",
+          "destination": "/strumenti/batch-print-layout/polaroid-go/",
+          "type": 301
+        },
+        {
+          "source": "/strumenti/polaroid-go/**",
+          "destination": "/strumenti/batch-print-layout/polaroid-go/",
+          "type": 301
+        }
+      ],
       "rewrites": [
         { "source": "/api/licensing/**", "function": { "functionId": "api", "region": "europe-west1" } }
       ],
