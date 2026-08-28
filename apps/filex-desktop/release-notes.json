@@ -184,6 +184,13 @@
     ],
     "0.1.3": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.1.4": [
+      "Nuovo preset Polaroid Go con cornice bianca nelle dimensioni reali, finestra immagine protetta e impaginazione automatica su 15×20 cm.",
+      "Importazione desktop estesa a HEIC, HEIF e TIFF con gestione isolata dei file non leggibili e indicazioni sui codec Windows.",
+      "Corretti crop, rotazioni, pagine parziali, guide di taglio ed export JPEG, PNG, PDF, TIFF e ZIP multipagina.",
+      "Interfaccia, accessibilità e stabilità migliorate attraverso un audit completo con test automatici dedicati.",
+      "Pacchetto verificato con chiusura transitiva ASAR, blocco senza licenza, accesso con licenza attiva e ciclo aggiornamento-disinstallazione-reinstallazione."
     ]
   },
   "archivio-flow": {

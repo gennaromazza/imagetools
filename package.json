@@ -23,6 +23,7 @@
     "test:archivio-flow-package-runtime": "node scripts/test-archivio-flow-package-runtime.mjs",
     "test:image-party-frame-bug-hunt": "tsx --test apps/image-party-frame/src/app/contexts/project-state.bug.test.ts",
     "test:batch-print-layout-bug-hunt": "npm --workspace @photo-tools/batch-print-layout run test",
+    "test:batch-print-layout-desktop-images": "tsx --test scripts/test-batch-print-layout-desktop-images.ts",
     "test:image-converter-bug-hunt": "tsx --test apps/filex-desktop/src/image-converter-policy.bug.test.ts",
     "test:image-file-finder-bug-hunt": "tsx --test scripts/test-image-file-finder-bug-hunt.ts",
     "test:cache-sweep-bug-hunt": "npm --workspace @photo-tools/cache-sweep run test",

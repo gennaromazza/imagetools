@@ -59,12 +59,20 @@ function developmentLicenseState(): DesktopLicenseState | null {
 }
 
 function localEnforcement(): DesktopLicenseEnforcement {
-  const requested = app.isPackaged ? undefined : process.env.FILEX_LICENSE_ENFORCEMENT;
+  if (app.isPackaged) return "enforce";
+  const requested = process.env.FILEX_LICENSE_ENFORCEMENT;
   return requested === "warn" || requested === "enforce" ? requested : "observe";
 }
 
+function licenseDirectory(): string {
+  if (app.isPackaged && process.argv.includes("--filex-license-smoke-test=unlicensed")) {
+    return join(app.getPath("temp"), `filex-license-smoke-unlicensed-${process.pid}`);
+  }
+  return join(app.getPath("appData"), "FileX");
+}
+
 function licensePath(): string {
-  return join(app.getPath("appData"), "FileX", "filex-license.json");
+  return join(licenseDirectory(), "filex-license.json");
 }
 
 function emptyState(status: DesktopLicenseStatus = "unlicensed", message = "FileX non e' ancora attivato."): DesktopLicenseState {
@@ -102,7 +110,7 @@ async function readStore(): Promise<StoredLicense> {
 async function saveStore(store: StoredLicense): Promise<void> {
   cachedStore = store;
   const { mkdir } = await import("node:fs/promises");
-  await mkdir(join(app.getPath("appData"), "FileX"), { recursive: true });
+  await mkdir(licenseDirectory(), { recursive: true });
   await writeFile(licensePath(), `${JSON.stringify(store, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
 

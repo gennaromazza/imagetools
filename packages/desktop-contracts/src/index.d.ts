@@ -127,6 +127,7 @@ export interface DesktopFolderOpenDiagnostics {
 export interface DesktopFolderOpenOptions {
     recursive?: boolean;
     relativePathMode?: "legacy" | "project-relative";
+    includeExtendedImages?: boolean;
 }
 export interface DesktopFolderOpenResult {
     name: string;

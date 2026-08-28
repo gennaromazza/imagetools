@@ -180,6 +180,7 @@ export interface DesktopSuiteUpdateState {
 export interface DesktopFolderOpenOptions {
   recursive?: boolean;
   relativePathMode?: "legacy" | "project-relative";
+  includeExtendedImages?: boolean;
 }
 
 export interface DesktopFolderOpenResult {

@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { calculateGridLayout, createDefaultCrop, paginateAssets, type PhotoAsset } from "./print-engine";
+import {
+  calculateGridLayout,
+  createDefaultCrop,
+  getCenteredPagePositions,
+  getPhotoContentRectCm,
+  getPreviewRenderDpi,
+  getRenderSafetyError,
+  mmToPx,
+  paginateAssets,
+  PHOTO_PRESETS,
+  type PhotoAsset,
+} from "./print-engine";
+import { buildPageFileName, sanitizeFileNamePrefix } from "./render-export";
 
 function fakeAssets(count: number): PhotoAsset[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -13,10 +25,76 @@ function fakeAssets(count: number): PhotoAsset[] {
 }
 
 describe("batch print layout engine", () => {
+  it("exposes the supported instant photo formats", () => {
+    expect(PHOTO_PRESETS.map((preset) => preset.presetId)).toEqual([
+      "polaroid-integral",
+      "polaroid-round-frame",
+      "polaroid-go",
+      "instax-mini",
+      "instax-square",
+      "instax-wide",
+      "polaroid-hi-print-2x3",
+      "polaroid-hi-print-3x3",
+      "polaroid-hi-print-4x6",
+    ]);
+  });
+
+  it("converts millimetres to output pixels using the selected DPI", () => {
+    expect(mmToPx(25.4, 300)).toBe(300);
+  });
+
+  it("configures the Polaroid Go preset with its real white frame", () => {
+    const preset = PHOTO_PRESETS.find((item) => item.presetId === "polaroid-go");
+    expect(preset).toMatchObject({
+      widthCm: 5.39,
+      heightCm: 6.66,
+      frameStyle: "polaroid-go",
+      description: expect.stringContaining("53,9 × 66,6 mm"),
+    });
+  });
+
+  it("crops Polaroid Go photos to the 47 x 46 mm image window", () => {
+    const crop = createDefaultCrop({
+      id: "go-photo",
+      fileName: "go.jpg",
+      sourceUrl: "",
+      previewUrl: "",
+      width: 3000,
+      height: 2000,
+    }, { widthCm: 5.39, heightCm: 6.66, dpi: 300, frameStyle: "polaroid-go" }, "cover");
+
+    expect(crop.cropWidth / crop.cropHeight).toBeCloseTo((4.7 / 4.6) / (3000 / 2000), 5);
+  });
+
+  it("returns one canonical Polaroid Go image rectangle", () => {
+    expect(getPhotoContentRectCm({
+      widthCm: 5.39,
+      heightCm: 6.66,
+      dpi: 300,
+      frameStyle: "polaroid-go",
+    })).toEqual({ x: 0.345, y: 0.32, width: 4.7, height: 4.6 });
+  });
+
+  it("keeps the physical sheet dimensions and every slot inside the sheet", () => {
+    const layout = calculateGridLayout(
+      { widthCm: 8, heightCm: 3, dpi: 300 },
+      { presetId: "15x20", label: "15x20 cm", widthCm: 15, heightCm: 20, marginMm: 10, gapMm: 2 },
+    );
+
+    expect(layout.sheetWidthCm).toBe(20);
+    expect(layout.sheetHeightCm).toBe(15);
+    for (const position of layout.positions) {
+      expect(position.x).toBeGreaterThanOrEqual(0);
+      expect(position.y).toBeGreaterThanOrEqual(0);
+      expect(position.x + layout.photoWidthPx).toBeLessThanOrEqual(layout.sheetWidthPx);
+      expect(position.y + layout.photoHeightPx).toBeLessThanOrEqual(layout.sheetHeightPx);
+    }
+  });
+
   it("fits two 6x7 cm photos on a 10x15 cm sheet", () => {
     const layout = calculateGridLayout(
       { widthCm: 6, heightCm: 7, dpi: 300 },
-      { presetId: "10x15", label: "10x15 cm", widthCm: 10, heightCm: 15, marginCm: 0.3, gapCm: 0.1 },
+      { presetId: "10x15", label: "10x15 cm", widthCm: 10, heightCm: 15, marginMm: 3, gapMm: 1 },
     );
 
     expect(layout.photosPerSheet).toBe(2);
@@ -25,7 +103,7 @@ describe("batch print layout engine", () => {
   it("keeps landscape photos unrotated when that already maximizes yield", () => {
     const layout = calculateGridLayout(
       { widthCm: 10, heightCm: 5, dpi: 300 },
-      { presetId: "test", label: "test", widthCm: 10, heightCm: 15, marginCm: 0, gapCm: 0 },
+      { presetId: "test", label: "test", widthCm: 10, heightCm: 15, marginMm: 0, gapMm: 0 },
     );
 
     expect(layout.photosPerSheet).toBe(3);
@@ -35,7 +113,7 @@ describe("batch print layout engine", () => {
   it("uses orientation strategy to increase yield on the sheet", () => {
     const layout = calculateGridLayout(
       { widthCm: 5, heightCm: 10, dpi: 300 },
-      { presetId: "test", label: "test", widthCm: 10, heightCm: 15, marginCm: 0, gapCm: 0 },
+      { presetId: "test", label: "test", widthCm: 10, heightCm: 15, marginMm: 0, gapMm: 0 },
     );
 
     expect(layout.photosPerSheet).toBe(3);
@@ -45,7 +123,7 @@ describe("batch print layout engine", () => {
   it("creates 74 sheets for 148 photos when two fit per sheet", () => {
     const layout = calculateGridLayout(
       { widthCm: 6, heightCm: 7, dpi: 300 },
-      { presetId: "10x15", label: "10x15 cm", widthCm: 10, heightCm: 15, marginCm: 0.3, gapCm: 0.1 },
+      { presetId: "10x15", label: "10x15 cm", widthCm: 10, heightCm: 15, marginMm: 3, gapMm: 1 },
     );
     const pages = paginateAssets(fakeAssets(148), layout);
 
@@ -56,13 +134,38 @@ describe("batch print layout engine", () => {
   it("does not duplicate photos on the last partial sheet", () => {
     const layout = calculateGridLayout(
       { widthCm: 6, heightCm: 7, dpi: 300 },
-      { presetId: "10x15", label: "10x15 cm", widthCm: 10, heightCm: 15, marginCm: 0.3, gapCm: 0.1 },
+      { presetId: "10x15", label: "10x15 cm", widthCm: 10, heightCm: 15, marginMm: 3, gapMm: 1 },
     );
     const pages = paginateAssets(fakeAssets(149), layout);
 
     expect(pages).toHaveLength(75);
     expect(pages.at(-1)?.slots).toHaveLength(1);
     expect(new Set(pages.flatMap((page) => page.slots.map((slot) => slot.assetId))).size).toBe(149);
+  });
+
+  it("centres a single photo on the last partial sheet", () => {
+    const layout = calculateGridLayout(
+      { widthCm: 5.39, heightCm: 6.66, dpi: 300, frameStyle: "polaroid-go" },
+      { presetId: "15x20", label: "15x20 cm", widthCm: 15, heightCm: 20, marginMm: 3, gapMm: 1 },
+    );
+    const [position] = getCenteredPagePositions(layout, 1);
+
+    expect(position.x + layout.photoWidthPx / 2).toBeCloseTo(layout.sheetWidthPx / 2, 5);
+    expect(position.y + layout.photoHeightPx / 2).toBeCloseTo(layout.sheetHeightPx / 2, 5);
+  });
+
+  it("uses a balanced centred grid for four photos on a 3x2 layout", () => {
+    const layout = calculateGridLayout(
+      { widthCm: 5.39, heightCm: 6.66, dpi: 300, frameStyle: "polaroid-go" },
+      { presetId: "15x20", label: "15x20 cm", widthCm: 15, heightCm: 20, marginMm: 3, gapMm: 1 },
+    );
+    const positions = getCenteredPagePositions(layout, 4);
+    const distinctColumns = new Set(positions.map((position) => position.x.toFixed(3)));
+    const distinctRows = new Set(positions.map((position) => position.y.toFixed(3)));
+
+    expect(positions).toHaveLength(4);
+    expect(distinctColumns.size).toBe(2);
+    expect(distinctRows.size).toBe(2);
   });
 
   it("keeps the full source image as default crop in contain mode", () => {
@@ -122,6 +225,8 @@ describe("batch print layout engine", () => {
     }, { widthCm: 15, heightCm: 20, dpi: 300 }, "cover", true);
 
     expect(crop.rotation).toBe(90);
+    const effectiveRotatedAspect = (crop.cropHeight * 2000) / (crop.cropWidth * 3000);
+    expect(effectiveRotatedAspect).toBeCloseTo(15 / 20, 5);
   });
 
   it("does not auto-rotate when source and print orientations match", () => {
@@ -135,5 +240,41 @@ describe("batch print layout engine", () => {
     }, { widthCm: 15, heightCm: 20, dpi: 300 }, "cover", true);
 
     expect(crop.rotation).toBe(0);
+  });
+
+  it("returns a safe empty layout for invalid numeric input", () => {
+    const layout = calculateGridLayout(
+      { widthCm: Number.NaN, heightCm: -5, dpi: Number.POSITIVE_INFINITY },
+      { presetId: "bad", label: "bad", widthCm: 15, heightCm: 20, marginMm: -2, gapMm: Number.NaN },
+    );
+
+    expect(layout.photosPerSheet).toBe(0);
+    expect(Number.isFinite(layout.sheetWidthPx)).toBe(true);
+    expect(Number.isFinite(layout.sheetHeightPx)).toBe(true);
+  });
+
+  it("caps preview rendering independently from print DPI", () => {
+    const layout = calculateGridLayout(
+      { widthCm: 5.39, heightCm: 6.66, dpi: 600 },
+      { presetId: "15x20", label: "15x20 cm", widthCm: 15, heightCm: 20, marginMm: 3, gapMm: 1 },
+    );
+    const previewDpi = getPreviewRenderDpi(layout, 600, 1200);
+
+    expect(previewDpi).toBeLessThan(600);
+    expect(Math.max(layout.sheetWidthCm, layout.sheetHeightCm) / 2.54 * previewDpi).toBeLessThanOrEqual(1200.5);
+  });
+
+  it("rejects render allocations above the safe canvas budget", () => {
+    const layout = calculateGridLayout(
+      { widthCm: 5, heightCm: 5, dpi: 600 },
+      { presetId: "huge", label: "huge", widthCm: 120, heightCm: 120, marginMm: 0, gapMm: 0 },
+    );
+    expect(getRenderSafetyError(layout, 600)).toMatch(/limite|supera/i);
+  });
+
+  it("sanitizes hostile and reserved Windows export names", () => {
+    expect(sanitizeFileNamePrefix(" ../CON:<foto>?* ")).toBe("-CON-foto-");
+    expect(sanitizeFileNamePrefix("CON")).toBe("batch-print");
+    expect(buildPageFileName("album/clienti", 2, ".JPG")).toBe("album-clienti-002.jpg");
   });
 });

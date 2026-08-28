@@ -209,6 +209,9 @@ function resolveRequestedTool() {
 const requestedTool = resolveRequestedTool();
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
+const isPackagedSmokeTest = process.argv.includes("--filex-packaged-smoke-test");
+const isPackagedLicenseSmokeTest = process.argv.some((argument) =>
+  argument === "--filex-license-smoke-test" || argument === "--filex-license-smoke-test=unlicensed");
 const appUserModelId = `studio.filex.${requestedTool.id}`;
 let mainWindow: BrowserWindowInstance | null = null;
 let isOpenFolderRequestRendererReady = false;
@@ -1563,7 +1566,7 @@ function registerIpcHandlers(): void {
       buttonLabel: "Usa questo file",
       properties: ["openFile"],
       filters: [
-        { name: "Immagini", extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff", "psd"] },
+        { name: "Immagini", extensions: ["jpg", "jpeg", "png", "webp", "heic", "heif", "tif", "tiff", "psd"] },
         { name: "Tutti i file", extensions: ["*"] },
       ],
     });
@@ -2201,8 +2204,16 @@ process.on("uncaughtException", (error) => {
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     writeBootLog(`App ready for tool ${requestedTool.id}`);
+    if (isPackagedSmokeTest) {
+      app.exit(0);
+      return;
+    }
     if (requestedTool.id !== "suite-launcher") {
       const license = await getLicenseState();
+      if (isPackagedLicenseSmokeTest) {
+        app.exit(license.canUseTools ? 0 : 3);
+        return;
+      }
       if (!license.canUseTools) {
         dialog.showErrorBox("FileX All Access", "La licenza FileX non e' attiva. Apri FileX Suite per attivarla o aggiornare il pagamento.");
         app.quit();

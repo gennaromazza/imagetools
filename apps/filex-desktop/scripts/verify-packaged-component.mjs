@@ -109,8 +109,13 @@ function verifyPackagedDependencyClosure(archivePath, entries, rootPackages) {
   return visitedPackageEntries;
 }
 
+const packageEntries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+if (expected.main === ".output/electron/main.js") {
+  verifyRelativeImportClosure(archivePath, packageEntries, `/${expected.main}`);
+}
+
 if (args.component === "archivio-flow") {
-  const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+  const entries = packageEntries;
   const serverEntry = "/.output/electron/archivio-flow-server/server/index.js";
   if (!entries.has(serverEntry)) {
     throw new Error(`Archivio Flow non contiene ${serverEntry}`);
