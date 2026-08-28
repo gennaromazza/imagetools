@@ -30,6 +30,25 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-28 - Batch Print Layout 0.1.4
+
+### Preset Polaroid Go pronto per la stampa
+- Aggiunto il flusso rapido Polaroid Go con formato esterno 53,9 × 66,6 mm, finestra immagine 47 × 46 mm, cornice bianca asimmetrica e 300 DPI.
+- Il preset configura automaticamente il foglio 15×20 cm, l'orientamento utile a disporre fino a 6 foto e le guide di taglio.
+- Crop, zoom, spostamento e rotazione lavorano soltanto dentro la finestra fotografica, senza deformare o perdere il bianco tipico della cornice.
+
+### Importazione ed export più affidabili
+- Estesa l'importazione desktop a HEIC, HEIF e TIFF, con fallback nativi e indicazione chiara quando in Windows manca il codec necessario.
+- Un file illeggibile non interrompe più l'intero ordine: viene ignorato e contato nel riepilogo di importazione.
+- Migliorati export JPEG, PNG, PDF e TIFF, generazione ZIP multipagina, nomi file compatibili con Windows e gestione della memoria alle alte risoluzioni.
+
+### Impaginazione e interfaccia corrette
+- Corrette geometria fisica, rotazioni, pagina parziale centrata, margini effettivi, bordi, guide di taglio e anteprima coerente con il file esportato.
+- Migliorati stato di revisione, navigazione da tastiera, messaggi operativi, validazione numerica e comportamento durante export o annullamento.
+- Completato un audit di 31 interventi con test automatici dedicati al motore di stampa e alla policy dei formati desktop.
+- Rafforzato il runtime installato: fallback licenza in modalità bloccante, smoke test con e senza attivazione e controllo transitivo degli import nell'ASAR.
+- Pubblicata una pagina FileX dedicata al flusso Polaroid Go, collegata a Batch Print Layout.
+
 ## 2026-08-27 - FileX Send 0.1.21
 
 - Corretta la generazione della pagina mobile che impediva la compilazione del servizio di trasferimento.

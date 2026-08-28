@@ -268,7 +268,7 @@ interface TestCategory {
 const TEST_CATEGORIES: TestCategory[] = [
   { id: "photo-selector", title: "Image Select Pro", description: "Flusso lavoro, spostamenti e metadati XMP." },
   { id: "image-party-frame", title: "Image Party Frame — Caccia bug", description: "Persistenza progetto, immagini, crop e template." },
-  { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Impaginazione, rotazioni, crop e paginazione senza duplicati." },
+  { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Geometria fisica, frame, rotazioni, crop, paginazione, memoria e nomi export sicuri." },
   { id: "archivio-flow", title: "Archivio Flow — Caccia bug", description: "Casi avversariali su percorsi, nomi Windows, fingerprint e stati di importazione." },
   { id: "image-converter", title: "Image Converter — Caccia bug", description: "Limiti export e riconoscimento sicuro delle cartelle generate." },
   { id: "image-file-finder", title: "Trova Foto da Lista — Caccia bug", description: "Parsing di liste, percorsi, virgolette e duplicati." },
@@ -285,7 +285,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name.startsWith("test:photo-selector-")) return "photo-selector";
   if (name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-package-runtime") return "archivio-flow";
   if (name === "test:image-party-frame-bug-hunt") return "image-party-frame";
-  if (name === "test:batch-print-layout-bug-hunt") return "batch-print-layout";
+  if (name === "test:batch-print-layout-bug-hunt" || name === "test:batch-print-layout-desktop-images") return "batch-print-layout";
   if (name === "test:image-converter-bug-hunt") return "image-converter";
   if (name === "test:image-file-finder-bug-hunt") return "image-file-finder";
   if (name === "test:cache-sweep-bug-hunt") return "cache-sweep";
@@ -306,7 +306,8 @@ function testDescription(name: string): string {
     "test:archivio-flow-bug-hunt": "Cerca regressioni con input generati, percorsi ostili e transizioni di importazione vietate.",
     "test:archivio-flow-package-runtime": "Verifica che il server IPC e tutti i suoi import locali siano presenti nell'ASAR di Archivio Flow.",
     "test:image-party-frame-bug-hunt": "Cerca dati progetto obsoleti e valori crop capaci di corrompere il layout.",
-    "test:batch-print-layout-bug-hunt": "Stressa impaginazione, orientamento, crop e ultima pagina.",
+    "test:batch-print-layout-bug-hunt": "Stressa geometria frame, impaginazione, rotazioni, crop, ultima pagina, memoria e nomi export Windows.",
+    "test:batch-print-layout-desktop-images": "Verifica la policy desktop per JPG/RAW e l'abilitazione esplicita di HEIC, HEIF e TIFF.",
     "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",
     "test:image-file-finder-bug-hunt": "Stressa il parser con virgolette, separatori, percorsi e duplicati.",
     "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",

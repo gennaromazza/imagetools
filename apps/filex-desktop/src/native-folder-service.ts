@@ -1,5 +1,5 @@
 import * as electron from "electron";
-import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
+import { copyFile, lstat, readFile, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import type {
   DesktopCopyFilesResult,
@@ -17,10 +17,11 @@ import type {
   DesktopSaveFileAsResult,
 } from "@photo-tools/desktop-contracts";
 
-const { app, dialog } = electron;
+const { dialog } = electron;
 
 const FOLDER_SCAN_STAT_CONCURRENCY = 32;
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const EXTENDED_IMAGE_EXTENSIONS = new Set([".heic", ".heif", ".tif", ".tiff"]);
 const PHOTO_SELECTOR_PROJECT_FILE_NAME = ".image-select-pro.json";
 let projectFileWriteQueue: Promise<void> = Promise.resolve();
 const RAW_EXTENSIONS = new Set([
@@ -53,13 +54,15 @@ function normalizeSlashes(value: string): string {
   return value.split(sep).join("/");
 }
 
-function isImageFile(fileName: string): boolean {
+export function isNativeFolderImageFile(fileName: string, includeExtendedImages = false): boolean {
   if (fileName.startsWith("._")) {
     return false;
   }
 
-  const ext = extname(fileName).toLowerCase();
-  return STANDARD_EXTENSIONS.has(ext) || RAW_EXTENSIONS.has(ext);
+  const extension = extname(fileName).toLowerCase();
+  return STANDARD_EXTENSIONS.has(extension)
+    || RAW_EXTENSIONS.has(extension)
+    || (includeExtendedImages && EXTENDED_IMAGE_EXTENSIONS.has(extension));
 }
 
 function toRelativeAssetPath(
@@ -83,11 +86,6 @@ function sidecarPathForAsset(absolutePath: string): string {
 
 function projectFilePathForFolder(rootPath: string): string {
   return join(rootPath, PHOTO_SELECTOR_PROJECT_FILE_NAME);
-}
-
-function sanitizeTempFileName(fileName: string): string {
-  const normalized = fileName.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-");
-  return normalized || `handoff-${Date.now()}.imagetool`;
 }
 
 function resolveCreatedAtMs(birthtimeMs: number, modifiedMs: number): number {
@@ -168,7 +166,7 @@ async function scanFolderByPath(
         continue;
       }
 
-      if (!dirEntry.isFile() || !isImageFile(dirEntry.name)) {
+      if (!dirEntry.isFile() || !isNativeFolderImageFile(dirEntry.name, options.includeExtendedImages === true)) {
         continue;
       }
 

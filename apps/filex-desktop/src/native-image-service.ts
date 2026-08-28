@@ -41,6 +41,7 @@ import {
 } from "./thumbnail-disk-cache.js";
 
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const EXTENDED_STANDARD_EXTENSIONS = new Set([".heic", ".heif", ".tif", ".tiff"]);
 const RAW_EXTENSIONS = new Set([
   ".cr2", ".cr3", ".crw",
   ".nef", ".nrw",
@@ -960,6 +961,10 @@ function isBrowserDecodablePath(absolutePath: string): boolean {
   return STANDARD_EXTENSIONS.has(extname(absolutePath).toLowerCase());
 }
 
+function isExtendedStandardPath(absolutePath: string): boolean {
+  return EXTENDED_STANDARD_EXTENSIONS.has(extname(absolutePath).toLowerCase());
+}
+
 function isRawPath(absolutePath: string): boolean {
   return RAW_EXTENSIONS.has(extname(absolutePath).toLowerCase());
 }
@@ -968,6 +973,9 @@ function getMimeTypeForPath(absolutePath: string): string {
   const ext = extname(absolutePath).toLowerCase();
   if (ext === ".png") return "image/png";
   if (ext === ".webp") return "image/webp";
+  if (ext === ".tif" || ext === ".tiff") return "image/tiff";
+  if (ext === ".heic") return "image/heic";
+  if (ext === ".heif") return "image/heif";
   return "image/jpeg";
 }
 
@@ -1100,25 +1108,23 @@ async function resolvePreviewSourceFromBuffer(
   buffer: Buffer,
   mimeType: string,
 ): Promise<ResolvedPreviewSource | null> {
-  if (mimeType === "image/jpeg") {
-    const sharpMod = await getSharp();
-    if (sharpMod) {
-      try {
-        const { data, info } = await sharpMod(buffer, { failOn: "none" })
-          .rotate()
-          .jpeg({ quality: 90 })
-          .toBuffer({ resolveWithObject: true });
-        if ((info.width ?? 0) > 0 && (info.height ?? 0) > 0) {
-          return {
-            buffer: Buffer.from(data),
-            mimeType: "image/jpeg",
-            width: info.width,
-            height: info.height,
-          };
-        }
-      } catch {
-        // Fall back to nativeImage decode below.
+  const sharpMod = await getSharp();
+  if (sharpMod) {
+    try {
+      const { data, info } = await sharpMod(buffer, { failOn: "none" })
+        .rotate()
+        .jpeg({ quality: 90 })
+        .toBuffer({ resolveWithObject: true });
+      if ((info.width ?? 0) > 0 && (info.height ?? 0) > 0) {
+        return {
+          buffer: Buffer.from(data),
+          mimeType: "image/jpeg",
+          width: info.width,
+          height: info.height,
+        };
       }
+    } catch {
+      // Fall back to nativeImage decode below.
     }
   }
 
@@ -1219,7 +1225,7 @@ async function resolvePreviewBuffer(
 
     try {
       handle = await open(absolutePath, "r");
-      if (isBrowserDecodablePath(absolutePath)) {
+      if (isBrowserDecodablePath(absolutePath) || isExtendedStandardPath(absolutePath)) {
         const fileBuffer = await handle.readFile();
         recordDesktopBytesRead("standard", fileBuffer.byteLength);
         const resolved = await resolvePreviewSourceFromBufferWithBudget(

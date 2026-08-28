@@ -1,6 +1,3 @@
-import { jsPDF } from "jspdf";
-import JSZip from "jszip";
-import * as UTIF from "utif";
 import type {
   BatchCropState,
   BatchPrintPage,
@@ -10,9 +7,9 @@ import type {
   LogoOverlaySpec,
   PhotoAsset,
   PhotoPrintSpec,
-  PrintSheetSpec,
+  PrintFinishingSpec,
 } from "./print-engine";
-import { cmToPx } from "./print-engine";
+import { cmToPx, getPhotoContentRectCm, getRenderSafetyError, mmToPx } from "./print-engine";
 
 export interface RenderInputs {
   assetsById: Map<string, PhotoAsset>;
@@ -21,16 +18,21 @@ export interface RenderInputs {
   layout: GridLayout;
   logo: LogoOverlaySpec;
   adjustments: ImageAdjustmentSpec;
+  finishing: PrintFinishingSpec;
+  renderDpi?: number;
 }
 
 interface ExportOptions extends RenderInputs {
   pages: BatchPrintPage[];
-  sheetSpec: PrintSheetSpec;
   format: ExportFormat;
   outputDirectoryPath?: string | null;
   fileNamePrefix: string;
   quality: number;
   onProgress?: (completed: number, total: number, label: string) => void;
+  resolveAssetForExport?: (
+    asset: PhotoAsset,
+    requiredMaxDimension: number,
+  ) => Promise<{ asset: PhotoAsset; release?: () => void }>;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -67,14 +69,39 @@ function joinOutputPath(directoryPath: string, fileName: string): string {
   return directoryPath.endsWith(separator) ? `${directoryPath}${fileName}` : `${directoryPath}${separator}${fileName}`;
 }
 
-async function saveBytes(fileName: string, bytes: Uint8Array, outputDirectoryPath?: string | null): Promise<string | null> {
+function splitFileName(fileName: string): { stem: string; extension: string } {
+  const dotIndex = fileName.lastIndexOf(".");
+  return dotIndex > 0
+    ? { stem: fileName.slice(0, dotIndex), extension: fileName.slice(dotIndex) }
+    : { stem: fileName, extension: "" };
+}
+
+async function resolveAvailableDesktopFileName(directoryPath: string, requestedFileName: string): Promise<string> {
+  if (typeof window.filexDesktop?.statFiles !== "function") {
+    return requestedFileName;
+  }
+
+  const { stem, extension } = splitFileName(requestedFileName);
+  for (let suffix = 1; suffix <= 9999; suffix += 1) {
+    const candidate = suffix === 1 ? requestedFileName : `${stem}-${suffix}${extension}`;
+    const absolutePath = joinOutputPath(directoryPath, candidate);
+    const existing = await window.filexDesktop.statFiles([absolutePath]);
+    if (existing.length === 0) {
+      return candidate;
+    }
+  }
+  throw new Error(`Troppi file omonimi per ${requestedFileName}. Cambia il nome dell'export.`);
+}
+
+async function saveBytes(fileName: string, bytes: Uint8Array, outputDirectoryPath?: string | null): Promise<string> {
   if (outputDirectoryPath && typeof window.filexDesktop?.writeFile === "function") {
-    const absolutePath = joinOutputPath(outputDirectoryPath, fileName);
+    const availableFileName = await resolveAvailableDesktopFileName(outputDirectoryPath, fileName);
+    const absolutePath = joinOutputPath(outputDirectoryPath, availableFileName);
     const ok = await window.filexDesktop.writeFile(absolutePath, bytes);
     if (!ok) {
       throw new Error(`Impossibile salvare ${absolutePath}`);
     }
-    return absolutePath;
+    return availableFileName;
   }
 
   const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -85,15 +112,16 @@ async function saveBytes(fileName: string, bytes: Uint8Array, outputDirectoryPat
   link.download = fileName;
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  return null;
+  return fileName;
 }
 
 async function downloadZip(fileName: string, files: Array<{ name: string; bytes: Uint8Array }>): Promise<void> {
+  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   for (const file of files) {
     zip.file(file.name, file.bytes);
   }
-  const blob = await zip.generateAsync({ type: "blob" });
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -157,6 +185,63 @@ function drawLogoFollowingPhotoRotation(
   ctx.rotate((rotation * Math.PI) / 180);
   ctx.translate(-logoBoxWidth / 2, -logoBoxHeight / 2);
   drawLogo(ctx, logoImage, logo, logoBoxWidth, logoBoxHeight);
+  ctx.restore();
+}
+
+function patchJpegDpi(bytes: Uint8Array, dpi: number): Uint8Array {
+  if (bytes.length < 20 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || !Number.isFinite(dpi) || dpi <= 0) {
+    return bytes;
+  }
+
+  const next = new Uint8Array(bytes);
+  const density = Math.max(1, Math.min(65535, Math.round(dpi)));
+  let offset = 2;
+
+  while (offset + 4 < next.length && next[offset] === 0xff) {
+    const marker = next[offset + 1];
+    if (marker === 0xda || marker === 0xd9) break;
+
+    const segmentLength = (next[offset + 2] << 8) | next[offset + 3];
+    if (segmentLength < 2 || offset + 2 + segmentLength > next.length) break;
+
+    if (
+      marker === 0xe0 &&
+      segmentLength >= 16 &&
+      next[offset + 4] === 0x4a &&
+      next[offset + 5] === 0x46 &&
+      next[offset + 6] === 0x49 &&
+      next[offset + 7] === 0x46 &&
+      next[offset + 8] === 0x00
+    ) {
+      next[offset + 11] = 1;
+      next[offset + 12] = (density >> 8) & 0xff;
+      next[offset + 13] = density & 0xff;
+      next[offset + 14] = (density >> 8) & 0xff;
+      next[offset + 15] = density & 0xff;
+      return next;
+    }
+
+    offset += 2 + segmentLength;
+  }
+
+  return bytes;
+}
+
+function drawPhotoBorder(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  adjustments: ImageAdjustmentSpec,
+): void {
+  if (!adjustments.borderEnabled || adjustments.borderWidthPx <= 0) {
+    return;
+  }
+
+  const lineWidth = Math.min(adjustments.borderWidthPx, width, height);
+  ctx.save();
+  ctx.strokeStyle = adjustments.borderColor;
+  ctx.lineWidth = lineWidth;
+  ctx.strokeRect(lineWidth / 2, lineWidth / 2, width - lineWidth, height - lineWidth);
   ctx.restore();
 }
 
@@ -254,28 +339,43 @@ async function renderPhotoCanvas(
   };
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
+
+  const contentRect = getPhotoContentRectCm(printSpec);
+  const contentX = cmToPx(contentRect.x, printSpec.dpi);
+  const contentY = cmToPx(contentRect.y, printSpec.dpi);
+  const contentWidth = cmToPx(contentRect.width, printSpec.dpi);
+  const contentHeight = cmToPx(contentRect.height, printSpec.dpi);
+
   ctx.save();
+  ctx.translate(contentX, contentY);
   if (adjustments.blackAndWhiteEnabled) {
     ctx.filter = "grayscale(1)";
   }
   if (adjustments.fitMode === "contain") {
-    drawCroppedImageContain(ctx, image, effectiveCrop, width, height);
+    drawCroppedImageContain(ctx, image, effectiveCrop, contentWidth, contentHeight);
   } else {
-    drawCroppedImageCover(ctx, image, effectiveCrop, width, height);
+    drawCroppedImageCover(ctx, image, effectiveCrop, contentWidth, contentHeight);
   }
   ctx.restore();
 
   if (logoImage) {
-    drawLogoFollowingPhotoRotation(ctx, logoImage, logo, width, height, effectiveCrop.rotation);
+    ctx.save();
+    ctx.translate(contentX, contentY);
+    drawLogoFollowingPhotoRotation(ctx, logoImage, logo, contentWidth, contentHeight, effectiveCrop.rotation);
+    ctx.restore();
   }
+
+  drawPhotoBorder(ctx, width, height, adjustments);
 
   return canvas;
 }
 
 export async function renderPageCanvas(page: BatchPrintPage, inputs: RenderInputs): Promise<HTMLCanvasElement> {
+  const renderDpi = inputs.renderDpi && inputs.renderDpi > 0 ? inputs.renderDpi : inputs.printSpec.dpi;
+  const renderPrintSpec: PhotoPrintSpec = { ...inputs.printSpec, dpi: renderDpi };
   const canvas = document.createElement("canvas");
-  canvas.width = inputs.layout.sheetWidthPx;
-  canvas.height = inputs.layout.sheetHeightPx;
+  canvas.width = cmToPx(inputs.layout.sheetWidthCm, renderDpi);
+  canvas.height = cmToPx(inputs.layout.sheetHeightCm, renderDpi);
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     throw new Error("Canvas 2D non disponibile.");
@@ -285,6 +385,8 @@ export async function renderPageCanvas(page: BatchPrintPage, inputs: RenderInput
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const logoImage = inputs.logo.enabled && inputs.logo.imageUrl ? await loadImage(inputs.logo.imageUrl) : null;
+  const scaleX = canvas.width / Math.max(1, inputs.layout.sheetWidthPx);
+  const scaleY = canvas.height / Math.max(1, inputs.layout.sheetHeightPx);
 
   for (const slot of page.slots) {
     const asset = inputs.assetsById.get(slot.assetId);
@@ -295,32 +397,115 @@ export async function renderPageCanvas(page: BatchPrintPage, inputs: RenderInput
     const photoCanvas = await renderPhotoCanvas(
       asset,
       inputs.cropsById.get(asset.id),
-      inputs.printSpec,
+      renderPrintSpec,
       logoImage,
       inputs.logo,
       inputs.adjustments,
     );
 
+    const slotX = slot.x * scaleX;
+    const slotY = slot.y * scaleY;
+    const slotWidth = slot.width * scaleX;
+    const slotHeight = slot.height * scaleY;
+
     if (inputs.layout.photoRotated) {
       ctx.save();
-      ctx.translate(slot.x + slot.width / 2, slot.y + slot.height / 2);
+      ctx.translate(slotX + slotWidth / 2, slotY + slotHeight / 2);
       ctx.rotate(Math.PI / 2);
-      ctx.drawImage(photoCanvas, -slot.height / 2, -slot.width / 2, slot.height, slot.width);
+      ctx.drawImage(photoCanvas, -slotHeight / 2, -slotWidth / 2, slotHeight, slotWidth);
       ctx.restore();
     } else {
-      ctx.drawImage(photoCanvas, slot.x, slot.y, slot.width, slot.height);
+      ctx.drawImage(photoCanvas, slotX, slotY, slotWidth, slotHeight);
     }
+  }
+
+  if (inputs.finishing.cutGuidesEnabled) {
+    drawCutGuides(ctx, page, inputs.layout, renderDpi, scaleX, scaleY, inputs.finishing);
   }
 
   return canvas;
 }
 
-function buildPageFileName(prefix: string, pageNumber: number, ext: string): string {
-  return `${prefix || "batch-print"}-${String(pageNumber).padStart(3, "0")}.${ext}`;
+const WINDOWS_RESERVED_FILE_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+export function sanitizeFileNamePrefix(value: string): string {
+  const normalized = String(value ?? "")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
+    .replace(/\.\.+/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/-+/g, "-")
+    .trim()
+    .replace(/[. ]+$/g, "")
+    .slice(0, 80);
+  if (!normalized || WINDOWS_RESERVED_FILE_NAMES.test(normalized)) {
+    return "batch-print";
+  }
+  return normalized;
 }
 
-async function exportRasterPage(canvas: HTMLCanvasElement, format: Exclude<ExportFormat, "pdf">, quality: number): Promise<Uint8Array> {
+export function buildPageFileName(prefix: string, pageNumber: number, ext: string): string {
+  const safePrefix = sanitizeFileNamePrefix(prefix);
+  const safePage = Math.max(1, Math.floor(Number.isFinite(pageNumber) ? pageNumber : 1));
+  const safeExtension = String(ext).toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  return `${safePrefix}-${String(safePage).padStart(3, "0")}.${safeExtension}`;
+}
+
+function drawCutGuides(
+  ctx: CanvasRenderingContext2D,
+  page: BatchPrintPage,
+  layout: GridLayout,
+  renderDpi: number,
+  scaleX: number,
+  scaleY: number,
+  finishing: PrintFinishingSpec,
+): void {
+  const lineWidth = Math.max(1, mmToPx(finishing.cutGuideWidthMm, renderDpi));
+  const offset = Math.max(lineWidth, mmToPx(0.1, renderDpi));
+  const gapAllowance = Math.max(1, (layout.gapPx * Math.min(scaleX, scaleY)) / 2 - offset);
+  const markLength = Math.max(1, Math.min(mmToPx(2, renderDpi), gapAllowance));
+
+  ctx.save();
+  ctx.strokeStyle = finishing.cutGuideColor;
+  ctx.lineWidth = lineWidth;
+  ctx.beginPath();
+  for (const slot of page.slots) {
+    const left = slot.x * scaleX;
+    const top = slot.y * scaleY;
+    const right = (slot.x + slot.width) * scaleX;
+    const bottom = (slot.y + slot.height) * scaleY;
+
+    ctx.moveTo(left - offset - markLength, top);
+    ctx.lineTo(left - offset, top);
+    ctx.moveTo(left, top - offset - markLength);
+    ctx.lineTo(left, top - offset);
+
+    ctx.moveTo(right + offset, top);
+    ctx.lineTo(right + offset + markLength, top);
+    ctx.moveTo(right, top - offset - markLength);
+    ctx.lineTo(right, top - offset);
+
+    ctx.moveTo(left - offset - markLength, bottom);
+    ctx.lineTo(left - offset, bottom);
+    ctx.moveTo(left, bottom + offset);
+    ctx.lineTo(left, bottom + offset + markLength);
+
+    ctx.moveTo(right + offset, bottom);
+    ctx.lineTo(right + offset + markLength, bottom);
+    ctx.moveTo(right, bottom + offset);
+    ctx.lineTo(right, bottom + offset + markLength);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+async function exportRasterPage(
+  canvas: HTMLCanvasElement,
+  format: Exclude<ExportFormat, "pdf">,
+  quality: number,
+  dpi: number,
+): Promise<Uint8Array> {
   if (format === "tif") {
+    const UTIF = await import("utif");
     const ctx = canvas.getContext("2d");
     if (!ctx) {
       throw new Error("Canvas 2D non disponibile.");
@@ -331,64 +516,105 @@ async function exportRasterPage(canvas: HTMLCanvasElement, format: Exclude<Expor
 
   const mimeType = format === "jpg" ? "image/jpeg" : "image/png";
   const blob = await canvasToBlob(canvas, mimeType, format === "jpg" ? quality : undefined);
-  return blobToBytes(blob);
+  const bytes = await blobToBytes(blob);
+  return format === "jpg" ? patchJpegDpi(bytes, dpi) : bytes;
+}
+
+async function renderExportPage(page: BatchPrintPage, options: ExportOptions): Promise<HTMLCanvasElement> {
+  if (!options.resolveAssetForExport) {
+    return renderPageCanvas(page, { ...options, renderDpi: options.printSpec.dpi });
+  }
+
+  const contentRect = getPhotoContentRectCm(options.printSpec);
+  const requiredMaxDimension = Math.max(
+    cmToPx(contentRect.width, options.printSpec.dpi),
+    cmToPx(contentRect.height, options.printSpec.dpi),
+  );
+  const pageAssets = page.slots
+    .map((slot) => options.assetsById.get(slot.assetId))
+    .filter((asset): asset is PhotoAsset => Boolean(asset));
+  const resolvedAssets = await Promise.all(
+    pageAssets.map((asset) => options.resolveAssetForExport!(asset, requiredMaxDimension)),
+  );
+  const renderAssetsById = new Map(options.assetsById);
+  for (const resolved of resolvedAssets) {
+    renderAssetsById.set(resolved.asset.id, resolved.asset);
+  }
+
+  try {
+    return await renderPageCanvas(page, {
+      ...options,
+      assetsById: renderAssetsById,
+      renderDpi: options.printSpec.dpi,
+    });
+  } finally {
+    for (const resolved of resolvedAssets) {
+      resolved.release?.();
+    }
+  }
 }
 
 export async function exportBatch(options: ExportOptions): Promise<string[]> {
   const exportedFiles: string[] = [];
+  const renderSafetyError = getRenderSafetyError(options.layout, options.printSpec.dpi);
+  if (renderSafetyError) {
+    throw new Error(renderSafetyError);
+  }
+  const safePrefix = sanitizeFileNamePrefix(options.fileNamePrefix);
 
   if (options.format === "pdf") {
+    const { jsPDF } = await import("jspdf");
     const orientation = options.layout.sheetWidthPx >= options.layout.sheetHeightPx ? "l" : "p";
     const pdf = new jsPDF({
       orientation,
       unit: "cm",
-      format: [options.sheetSpec.widthCm, options.sheetSpec.heightCm],
+      format: [options.layout.sheetWidthCm, options.layout.sheetHeightCm],
       compress: false,
     });
 
     for (let index = 0; index < options.pages.length; index += 1) {
       const page = options.pages[index];
       options.onProgress?.(index, options.pages.length, `Foglio ${page.pageNumber}`);
-      const canvas = await renderPageCanvas(page, options);
+      const canvas = await renderExportPage(page, options);
       if (index > 0) {
-        pdf.addPage([options.sheetSpec.widthCm, options.sheetSpec.heightCm], orientation);
+        pdf.addPage([options.layout.sheetWidthCm, options.layout.sheetHeightCm], orientation);
       }
-      pdf.addImage(canvas.toDataURL("image/jpeg", 1), "JPEG", 0, 0, options.sheetSpec.widthCm, options.sheetSpec.heightCm, undefined, "NONE");
+      pdf.addImage(canvas.toDataURL("image/jpeg", options.quality), "JPEG", 0, 0, options.layout.sheetWidthCm, options.layout.sheetHeightCm, undefined, "NONE");
     }
 
     const bytes = new Uint8Array(pdf.output("arraybuffer"));
-    const fileName = `${options.fileNamePrefix || "batch-print"}.pdf`;
-    await saveBytes(fileName, bytes, options.outputDirectoryPath);
-    options.onProgress?.(options.pages.length, options.pages.length, fileName);
-    return [fileName];
+    const fileName = `${safePrefix}.pdf`;
+    const savedFileName = await saveBytes(fileName, bytes, options.outputDirectoryPath);
+    options.onProgress?.(options.pages.length, options.pages.length, savedFileName);
+    return [savedFileName];
   }
 
   if (!options.outputDirectoryPath && options.pages.length > 1) {
     const zipFiles: Array<{ name: string; bytes: Uint8Array }> = [];
     for (let index = 0; index < options.pages.length; index += 1) {
       const page = options.pages[index];
-      const fileName = buildPageFileName(options.fileNamePrefix, page.pageNumber, options.format);
+      const fileName = buildPageFileName(safePrefix, page.pageNumber, options.format);
       options.onProgress?.(index, options.pages.length, fileName);
-      const canvas = await renderPageCanvas(page, options);
-      const bytes = await exportRasterPage(canvas, options.format, options.quality);
+      const canvas = await renderExportPage(page, options);
+      const bytes = await exportRasterPage(canvas, options.format, options.quality, options.printSpec.dpi);
       zipFiles.push({ name: fileName, bytes });
       exportedFiles.push(fileName);
       options.onProgress?.(index + 1, options.pages.length, fileName);
     }
-    const zipName = `${options.fileNamePrefix || "batch-print"}.zip`;
+    const zipName = `${safePrefix}.zip`;
     await downloadZip(zipName, zipFiles);
     return [zipName];
   }
 
   for (let index = 0; index < options.pages.length; index += 1) {
     const page = options.pages[index];
-    const fileName = buildPageFileName(options.fileNamePrefix, page.pageNumber, options.format);
+    const fileName = buildPageFileName(safePrefix, page.pageNumber, options.format);
     options.onProgress?.(index, options.pages.length, fileName);
-    const canvas = await renderPageCanvas(page, options);
-    const bytes = await exportRasterPage(canvas, options.format, options.quality);
-    await saveBytes(fileName, bytes, options.outputDirectoryPath);
-    exportedFiles.push(fileName);
-    options.onProgress?.(index + 1, options.pages.length, fileName);
+    const canvas = await renderExportPage(page, options);
+    const bytes = await exportRasterPage(canvas, options.format, options.quality, options.printSpec.dpi);
+    const savedFileName = await saveBytes(fileName, bytes, options.outputDirectoryPath);
+    exportedFiles.push(savedFileName);
+    options.onProgress?.(index + 1, options.pages.length, savedFileName);
   }
 
   return exportedFiles;
