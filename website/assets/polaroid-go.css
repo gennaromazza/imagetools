@@ -80,6 +80,16 @@
 }
 
 .workflow-grid { grid-template-columns: repeat(4, 1fr); }
+.use-case-grid { grid-template-columns: repeat(2, 1fr); }
+
+.client-label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--green);
+  font: 800 12px var(--display);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
 
 .comparison {
   display: grid;
@@ -108,7 +118,7 @@
 @media (max-width: 560px) {
   .sheet-demo { gap: 4px; padding: 10px; }
   .mini-polaroid { padding: 3px 3px 0; }
-  .workflow-grid, .comparison { grid-template-columns: 1fr; }
+  .workflow-grid, .use-case-grid, .comparison { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
