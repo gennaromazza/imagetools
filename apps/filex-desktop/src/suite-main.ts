@@ -54,6 +54,8 @@ const defaultDockState: DesktopDockState = {
   toolOrder: getSuiteManagedTools().map((tool) => tool.id),
   visibleToolCount: 0,
   settingsOpen: false,
+  notificationCenterOpen: false,
+  edgeAnchor: "bottom",
 };
 
 function releaseChannel(): DesktopReleaseChannel {
@@ -92,6 +94,10 @@ function sanitizeDockState(value: Partial<DesktopDockState> | null | undefined):
   const y = Number(value?.y);
   const opacity = Number(value?.opacity);
   const visibleToolCount = Number(value?.visibleToolCount);
+  const nextEdgeAnchor = typeof value?.edgeAnchor === "string"
+    && (value.edgeAnchor === "left" || value.edgeAnchor === "right" || value.edgeAnchor === "bottom")
+      ? value.edgeAnchor
+      : defaultDockState.edgeAnchor;
   return {
     schemaVersion: 2,
     x: Number.isFinite(x) ? Math.round(x) : 0,
@@ -104,6 +110,8 @@ function sanitizeDockState(value: Partial<DesktopDockState> | null | undefined):
       ? Math.min(getSuiteManagedTools().length, Math.max(0, Math.round(visibleToolCount)))
       : 0,
     settingsOpen: value?.settingsOpen ?? false,
+    notificationCenterOpen: value?.notificationCenterOpen ?? false,
+    edgeAnchor: nextEdgeAnchor,
   };
 }
 
@@ -116,24 +124,44 @@ async function readDockState(): Promise<DesktopDockState> {
   }
 }
 
-function applyDockLayout(state: DesktopDockState, animate: boolean): void {
+function applyDockLayout(state: DesktopDockState, animate: boolean, resetPosition = false): void {
   if (!dockWindow || dockWindow.isDestroyed()) return;
   const currentBounds = dockWindow.getBounds();
   const display = screen.getDisplayMatching(currentBounds);
+  const isBottomAnchor = state.edgeAnchor === "bottom";
+  const isLeftAnchor = state.edgeAnchor === "left";
   const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, state.visibleToolCount));
-  const width = state.collapsed
-    ? 88
-    : Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + itemCount * 62));
-  const height = state.settingsOpen && !state.collapsed ? 190 : 100;
-  const centerX = currentBounds.x + currentBounds.width / 2;
-  const bottom = currentBounds.y + currentBounds.height;
+  const collapsedSize = isBottomAnchor ? 88 : 76;
+  const expandedWidth = isBottomAnchor
+    ? Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + itemCount * 62))
+    : state.settingsOpen || state.notificationCenterOpen ? 380 : 82;
+  const expandedHeight = isBottomAnchor
+    ? state.notificationCenterOpen && !state.collapsed ? 420 : state.settingsOpen && !state.collapsed ? 220 : 100
+    : Math.min(display.workAreaSize.height - 30, Math.max(state.notificationCenterOpen ? 340 : 220, 132 + itemCount * 62 + (state.settingsOpen && !state.collapsed ? 70 : 0)));
+  const width = state.collapsed ? collapsedSize : expandedWidth;
+  const height = state.collapsed ? collapsedSize : expandedHeight;
+  const centerY = resetPosition
+    ? display.workArea.y + display.workAreaSize.height / 2
+    : currentBounds.y + currentBounds.height / 2;
+  const centerX = resetPosition
+    ? display.workArea.x + display.workAreaSize.width / 2
+    : currentBounds.x + currentBounds.width / 2;
+  const bottom = resetPosition
+    ? display.workArea.y + display.workAreaSize.height - 18
+    : currentBounds.y + currentBounds.height;
+  const defaultX = isBottomAnchor
+    ? Math.round(centerX - width / 2)
+    : isLeftAnchor
+      ? display.workArea.x
+      : display.workArea.x + display.workAreaSize.width - width;
+  const defaultY = isBottomAnchor ? Math.round(bottom - height) : Math.round(centerY - height / 2);
   const x = Math.min(
     display.workArea.x + display.workAreaSize.width - width,
-    Math.max(display.workArea.x, Math.round(centerX - width / 2)),
+    Math.max(display.workArea.x, defaultX),
   );
   const y = Math.min(
     display.workArea.y + display.workAreaSize.height - height,
-    Math.max(display.workArea.y, Math.round(bottom - height)),
+    Math.max(display.workArea.y, defaultY),
   );
   dockWindow.setBounds({ x, y, width, height }, animate);
 }
@@ -152,8 +180,11 @@ async function saveDockState(partial: Partial<DesktopDockState>): Promise<Deskto
       typeof partial.collapsed === "boolean"
       || typeof partial.visibleToolCount === "number"
       || typeof partial.settingsOpen === "boolean"
+      || typeof partial.notificationCenterOpen === "boolean"
+      || typeof partial.edgeAnchor === "string"
     ) {
-      applyDockLayout(next, true);
+      const edgeChanged = typeof partial.edgeAnchor === "string" && partial.edgeAnchor !== current.edgeAnchor;
+      applyDockLayout(next, true, edgeChanged);
       const resizedBounds = dockWindow.getBounds();
       next.x = resizedBounds.x;
       next.y = resizedBounds.y;
@@ -217,15 +248,28 @@ async function createDock(): Promise<void> {
   if (dockWindow && !dockWindow.isDestroyed()) return;
   const display = screen.getPrimaryDisplay();
   const state = await readDockState();
-  const width = state.collapsed
-    ? 88
-    : Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + state.visibleToolCount * 62));
-  const height = state.settingsOpen && !state.collapsed ? 190 : 100;
+  const isBottomAnchor = state.edgeAnchor === "bottom";
+  const isLeftAnchor = state.edgeAnchor === "left";
+  const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, state.visibleToolCount));
+  const width = state.collapsed ? (isBottomAnchor ? 88 : 76) : isBottomAnchor
+    ? Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + itemCount * 62))
+    : state.settingsOpen || state.notificationCenterOpen ? 380 : 82;
+  const height = state.collapsed ? (isBottomAnchor ? 88 : 76) : isBottomAnchor
+    ? (state.notificationCenterOpen ? 420 : state.settingsOpen ? 220 : 100)
+    : Math.min(display.workAreaSize.height - 30, Math.max(state.notificationCenterOpen ? 340 : 220, 132 + itemCount * 62 + (state.settingsOpen ? 70 : 0)));
+  const defaultX = isBottomAnchor
+    ? Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2)
+    : isLeftAnchor
+      ? display.workArea.x
+      : display.workArea.x + display.workAreaSize.width - width;
+  const defaultY = isBottomAnchor
+    ? display.workArea.y + display.workAreaSize.height - height - 18
+    : Math.round(display.workArea.y + (display.workAreaSize.height - height) / 2);
   dockWindow = new BrowserWindow({
     width,
     height,
-    x: state.x || Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2),
-    y: state.y || display.workArea.y + display.workAreaSize.height - height - 18,
+    x: isBottomAnchor ? state.x || defaultX : defaultX,
+    y: state.y || defaultY,
     frame: false,
     transparent: true,
     hasShadow: false,

@@ -64,13 +64,21 @@
 - Corretto il logo mostrato nelle pagine FileX Send (locale e remoto) puntando al logo applicativo corretto.
 - Aggiunta una funzione "Scarica tutti" progressiva e controllata nel client remoto, con feedback per file e intervallo tra i download.
 
-## 2026-08-27 - FileX Suite 0.1.57
+## 2026-08-28 - FileX Suite 0.1.57
 
 ### Aggiornamenti tool senza file bloccati
 - La Suite legge ora le versioni installate tramite `original-fs`, invalidando la cache ASAR prima e dopo ogni controllo.
 - Corretto il lock con cui la 0.1.56 manteneva aperti gli `app.asar` dei tool e impediva a installer e uninstaller di completare la sostituzione dei binari.
 - Il test del pacchetto Suite verifica ora anche l'avvio effettivo del main process impacchettato.
 - Verificato localmente il ciclo FileX Send: aggiornamento dalla 0.1.13, rimozione completa dei soli binari, reinstallazione 0.1.19 e conservazione integrale della licenza.
+
+### Nuova FileX Dock laterale e interattiva
+- Aggiunti ancoraggio a sinistra, destra o in basso, reveal verticale al passaggio del mouse e riordino coerente con l'orientamento scelto.
+- La dock conserva posizione e centro verticale durante apertura e chiusura, resta nella `workArea` del monitor e recupera una posizione valida dopo cambi di schermo.
+- Integrato un centro notifiche per aggiornamenti Suite e tool, stato licenza e azioni contestuali, con deduplica e limite di 20 elementi.
+- Corretti dimensionamento dei pannelli impostazioni e notifiche, margini, ombre e clipping nelle modalita' laterale e inferiore.
+- Aggiunti controlli accessibili per posizione, trasparenza, auto-riduzione e ripristino, mantenendo compatibile lo stato delle installazioni precedenti.
+- Pubblicata la pagina tecnica e marketing dedicata alla FileX Dock nel sito ufficiale.
 
 ## 2026-08-27 - FileX Send 0.1.19
 

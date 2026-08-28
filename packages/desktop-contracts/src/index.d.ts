@@ -27,6 +27,8 @@ export interface DesktopDockState {
     toolOrder: DesktopToolId[];
     visibleToolCount: number;
     settingsOpen: boolean;
+    notificationCenterOpen: boolean;
+    edgeAnchor: "bottom" | "left" | "right";
 }
 export type DesktopSuiteUpdateStatus = "idle" | "disabled" | "checking" | "up-to-date" | "available" | "downloading" | "ready" | "installing" | "error";
 export interface DesktopSuiteUpdateState {
