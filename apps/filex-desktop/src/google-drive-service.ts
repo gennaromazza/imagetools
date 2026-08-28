@@ -12,6 +12,7 @@ import {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
 } from "./google-drive-config.generated.js";
+import { googleDriveApiDisabledMessage, googleDriveFileUrl } from "./google-drive-link.js";
 
 const { app, safeStorage, shell } = electron;
 
@@ -38,6 +39,7 @@ interface DriveFile {
   name?: string;
   createdTime?: string;
   size?: string;
+  webViewLink?: string;
   appProperties?: Record<string, string>;
 }
 
@@ -186,6 +188,10 @@ async function ensureResponse(response: Response): Promise<Response> {
       "I permessi Google Drive del collegamento sono insufficienti. Premi nuovamente «Collega Drive» per autorizzare l'accesso ai progetti.",
     );
   }
+  const apiDisabledMessage = googleDriveApiDisabledMessage(message);
+  if (response.status === 403 && apiDisabledMessage) {
+    throw new Error(apiDisabledMessage);
+  }
   throw new Error(`Google Drive error (${response.status})${message ? `: ${message.slice(0, 300)}` : ""}`);
 }
 
@@ -198,7 +204,7 @@ async function listFiles(query: string): Promise<DriveFile[]> {
     q: query,
     spaces: "drive",
     pageSize: "1000",
-    fields: "files(id,name,createdTime,size,appProperties)",
+    fields: "files(id,name,createdTime,size,webViewLink,appProperties)",
     orderBy: "createdTime desc",
   });
   const response = await ensureResponse(await driveFetch(`/files?${params.toString()}`));
@@ -333,7 +339,7 @@ async function uploadManifest(
     `--${boundary}--\r\n`,
   ].join("");
   const response = await ensureResponse(await fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,createdTime,size",
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,createdTime,size,webViewLink",
     {
       method: "POST",
       headers: {
@@ -347,7 +353,7 @@ async function uploadManifest(
   return await response.json() as DriveFile;
 }
 
-export async function uploadStudioFlowRegistryToDrive(registry: unknown): Promise<{ fileId: string; fileName: string; createdAt: string }> {
+export async function uploadStudioFlowRegistryToDrive(registry: unknown): Promise<{ fileId: string; fileName: string; createdAt: string; driveUrl: string }> {
   const status = await getGoogleDriveStatus();
   if (!status.connected) throw new Error("Google Drive non è collegato.");
   const folder = await ensureFolder("FileX StudioFlow Registry");
@@ -358,9 +364,19 @@ export async function uploadStudioFlowRegistryToDrive(registry: unknown): Promis
   const checksum = createHash("sha256").update(JSON.stringify(checksumSource)).digest("hex").slice(0, 24);
   const fileName = `studioflow-registry-${checksum}.json`;
   const existing = await listFiles(`name = '${escapeDriveQuery(fileName)}' and '${escapeDriveQuery(folder.id)}' in parents and trashed = false`);
-  if (existing[0]) return { fileId:existing[0].id, fileName, createdAt:existing[0].createdTime ?? createdAt };
+  if (existing[0]) return {
+    fileId: existing[0].id,
+    fileName,
+    createdAt: existing[0].createdTime ?? createdAt,
+    driveUrl: googleDriveFileUrl(existing[0].id, existing[0].webViewLink),
+  };
   const file = await uploadManifest(folder.id, fileName, registry);
-  return { fileId: file.id, fileName, createdAt: file.createdTime ?? createdAt };
+  return {
+    fileId: file.id,
+    fileName,
+    createdAt: file.createdTime ?? createdAt,
+    driveUrl: googleDriveFileUrl(file.id, file.webViewLink),
+  };
 }
 
 async function readDriveFile(fileId: string): Promise<DesktopCloudProjectManifest> {

@@ -1,3 +1,4 @@
+import type { DesktopArchivioDriveRegistrySyncResult } from "@photo-tools/desktop-contracts";
 import type {
   ArchiveAnalysisResult,
   ArchiveRenameResult,
@@ -178,7 +179,7 @@ export async function resumeArchivioImport(sessionId: string): Promise<ImportRes
   return await apiPost<ImportResult>(`/api/import-sessions/${encodeURIComponent(sessionId)}/resume`);
 }
 
-export async function syncArchivioDriveRegistry(): Promise<{ ok: boolean; syncedEvents: number; message: string }> {
+export async function syncArchivioDriveRegistry(): Promise<DesktopArchivioDriveRegistrySyncResult> {
   return await requireDesktopApi().syncArchivioDriveRegistry();
 }
 

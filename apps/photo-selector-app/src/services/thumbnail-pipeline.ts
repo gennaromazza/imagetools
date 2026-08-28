@@ -1,5 +1,11 @@
 import { perfLog } from "./performance-utils";
 import type { DesktopThumbnailRequestOptions } from "@photo-tools/desktop-contracts";
+import { IndexedPriorityQueue } from "./indexed-priority-queue";
+import {
+  createPerformanceWorkKey,
+  performanceWorkCoordinator,
+  schedulePerformanceWork,
+} from "./performance-work-coordinator";
 
 const DEFAULT_THUMBNAIL_MAX = 320;
 const DEFAULT_THUMBNAIL_QUALITY = 0.72;
@@ -38,10 +44,12 @@ interface QueueItem {
   skipDiskCacheRead?: boolean;
   createSourceFileKey?: (file: File) => string;
   priority: number;
+  basePriority: number;
 }
 
 interface ActiveTask extends QueueItem {
   version: number;
+  workKey: string;
 }
 
 function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
@@ -51,8 +59,7 @@ function toOwnedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 export class ThumbnailPipeline {
-  private queue: QueueItem[] = [];
-  private queuedItems = new Map<string, QueueItem>();
+  private readonly queue = new IndexedPriorityQueue<QueueItem>(4);
   private activeDesktopTasks = new Map<string, ActiveTask>();
   private completed = new Set<string>();
   private failedIds = new Set<string>();
@@ -69,6 +76,10 @@ export class ThumbnailPipeline {
   private shouldDefer: ((priority: number) => boolean) | undefined;
   private deferDelayMs = 260;
   private deferTimer: ReturnType<typeof setTimeout> | null = null;
+  private visibleIds = new Set<string>();
+  private prioritizedIds = new Set<string>();
+  private viewportSensitiveQueuedIds = new Set<string>();
+  private hasViewportSnapshot = false;
 
   constructor(onBatch: BatchCallback, onError?: ErrorCallback, options?: ThumbnailPipelineOptions) {
     this.onBatch = onBatch;
@@ -85,17 +96,29 @@ export class ThumbnailPipeline {
   }
 
   enqueue(
-    items: Array<Omit<QueueItem, "priority">>,
+    items: Array<Omit<QueueItem, "priority" | "basePriority">>,
     priority = 2,
   ): void {
     for (const item of items) {
-      if (this.completed.has(item.id) || this.activeDesktopTasks.has(item.id)) {
+      if (this.completed.has(item.id)) {
         continue;
       }
 
-      const existing = this.queuedItems.get(item.id);
+      const active = this.activeDesktopTasks.get(item.id);
+      if (active) {
+        active.basePriority = Math.min(active.basePriority, priority);
+        const nextPriority = this.resolveViewportPriority(active);
+        if (nextPriority !== active.priority) {
+          active.priority = nextPriority;
+          performanceWorkCoordinator.reprioritize(active.workKey, nextPriority);
+        }
+        continue;
+      }
+
+      const existing = this.queue.get(item.id);
       if (existing) {
-        existing.priority = Math.min(existing.priority, priority);
+        existing.basePriority = Math.min(existing.basePriority, priority);
+        existing.priority = this.resolveViewportPriority(existing);
         if (!existing.absolutePath && item.absolutePath) existing.absolutePath = item.absolutePath;
         if (!existing.sourceFileKey && item.sourceFileKey) existing.sourceFileKey = item.sourceFileKey;
         if (!existing.file && item.file) existing.file = item.file;
@@ -103,45 +126,57 @@ export class ThumbnailPipeline {
         if (!existing.createSourceFileKey && item.createSourceFileKey) {
           existing.createSourceFileKey = item.createSourceFileKey;
         }
+        this.queue.set(existing.id, existing, existing.priority);
+        this.trackViewportSensitiveItem(existing);
         continue;
       }
 
       const queuedItem = {
         ...item,
-        priority,
+        basePriority: priority,
+        priority: this.resolveViewportPriority({ id: item.id, basePriority: priority }),
       };
-      this.queue.push(queuedItem);
-      this.queuedItems.set(queuedItem.id, queuedItem);
+      this.queue.set(queuedItem.id, queuedItem, queuedItem.priority);
+      this.trackViewportSensitiveItem(queuedItem);
     }
 
-    this.sortQueue();
     this.schedule();
   }
 
   updateViewport(visibleIds: Set<string>, prioritizedIds?: Set<string>): void {
-    let changed = false;
-    for (const item of this.queue) {
-      const nextPriority = visibleIds.has(item.id)
-        ? 0
-        : prioritizedIds?.has(item.id)
-          ? 1
-          : item.priority <= 1
-            ? 2
-            : item.priority;
-      if (item.priority !== nextPriority) {
-        item.priority = nextPriority;
-        changed = true;
-      }
+    const nextPrioritizedIds = prioritizedIds ?? new Set<string>();
+    const candidateIds = new Set([
+      ...this.visibleIds,
+      ...this.prioritizedIds,
+      ...visibleIds,
+      ...nextPrioritizedIds,
+      ...this.viewportSensitiveQueuedIds,
+    ]);
+    this.visibleIds = new Set(visibleIds);
+    this.prioritizedIds = new Set(nextPrioritizedIds);
+    this.hasViewportSnapshot = true;
+
+    for (const id of candidateIds) {
+      const item = this.queue.get(id);
+      if (!item) continue;
+      const nextPriority = this.resolveViewportPriority(item);
+      item.priority = nextPriority;
+      this.queue.set(id, item, nextPriority);
+      this.trackViewportSensitiveItem(item);
     }
 
-    if (changed) {
-      this.sortQueue();
-      this.schedule();
+    for (const task of this.activeDesktopTasks.values()) {
+      const nextPriority = this.resolveViewportPriority(task);
+      if (nextPriority !== task.priority) {
+        task.priority = nextPriority;
+        performanceWorkCoordinator.reprioritize(task.workKey, nextPriority);
+      }
     }
+    this.schedule();
   }
 
   get pendingCount(): number {
-    return this.queue.length + this.activeDesktopTasks.size;
+    return this.queue.size + this.activeDesktopTasks.size;
   }
 
   get completedCount(): number {
@@ -167,18 +202,20 @@ export class ThumbnailPipeline {
     this.optionsVersion += 1;
 
     const activeItems = Array.from(this.activeDesktopTasks.values())
-      .map(({ version: _version, ...item }) => item);
+      .map(({ version: _version, workKey, ...item }) => {
+        performanceWorkCoordinator.cancel(workKey);
+        return item;
+      });
     this.activeDesktopTasks.clear();
 
     for (const item of activeItems) {
-      if (this.completed.has(item.id) || this.queuedItems.has(item.id)) {
+      if (this.completed.has(item.id) || this.queue.get(item.id)) {
         continue;
       }
-      this.queue.push(item);
-      this.queuedItems.set(item.id, item);
+      this.queue.set(item.id, item, item.priority);
+      this.trackViewportSensitiveItem(item);
     }
 
-    this.sortQueue();
     this.schedule();
   }
 
@@ -200,13 +237,12 @@ export class ThumbnailPipeline {
       this.deferTimer = null;
     }
     this.flushBatch();
+    for (const task of this.activeDesktopTasks.values()) {
+      performanceWorkCoordinator.cancel(task.workKey);
+    }
     this.activeDesktopTasks.clear();
-    this.queue = [];
-    this.queuedItems.clear();
-  }
-
-  private sortQueue(): void {
-    this.queue.sort((left, right) => left.priority - right.priority);
+    this.queue.clear();
+    this.viewportSensitiveQueuedIds.clear();
   }
 
   private schedule(): void {
@@ -214,20 +250,18 @@ export class ThumbnailPipeline {
       return;
     }
 
-    while (this.queue.length > 0 && this.activeDesktopTasks.size < this.desktopTaskLimit) {
-      const nextItem = this.queue.shift();
+    while (this.queue.size > 0 && this.activeDesktopTasks.size < this.desktopTaskLimit) {
+      const nextItem = this.queue.peek();
       if (!nextItem) {
         return;
       }
 
-      this.queuedItems.delete(nextItem.id);
       if (this.completed.has(nextItem.id) || this.activeDesktopTasks.has(nextItem.id)) {
+        this.queue.dequeue();
         continue;
       }
 
       if (this.shouldDefer?.(nextItem.priority)) {
-        this.queue.unshift(nextItem);
-        this.queuedItems.set(nextItem.id, nextItem);
         if (!this.deferTimer) {
           this.deferTimer = setTimeout(() => {
             this.deferTimer = null;
@@ -237,15 +271,20 @@ export class ThumbnailPipeline {
         return;
       }
 
+      this.queue.dequeue();
+      this.viewportSensitiveQueuedIds.delete(nextItem.id);
+      const workKey = createPerformanceWorkKey(`thumbnail:${nextItem.id}`);
+
       this.activeDesktopTasks.set(nextItem.id, {
         ...nextItem,
         version: this.optionsVersion,
+        workKey,
       });
-      void this.dispatchDesktop(nextItem, this.optionsVersion);
+      void this.dispatchDesktop(nextItem, this.optionsVersion, workKey);
     }
   }
 
-  private async dispatchDesktop(item: QueueItem, version: number): Promise<void> {
+  private async dispatchDesktop(item: QueueItem, version: number, workKey: string): Promise<void> {
     if (!item.absolutePath || typeof window === "undefined" || typeof window.filexDesktop?.getThumbnail !== "function") {
       if (version !== this.optionsVersion) {
         return;
@@ -256,15 +295,19 @@ export class ThumbnailPipeline {
     }
 
     try {
-      const rendered = await window.filexDesktop.getThumbnail(
-        item.absolutePath,
-        this.maxDimension,
-        this.quality,
-        item.sourceFileKey,
-        {
-          ...this.desktopOptions,
-          skipDiskCacheRead: item.skipDiskCacheRead,
-        },
+      const rendered = await schedulePerformanceWork(
+        workKey,
+        item.priority,
+        () => window.filexDesktop!.getThumbnail(
+          item.absolutePath!,
+          this.maxDimension,
+          this.quality,
+          item.sourceFileKey,
+          {
+            ...this.desktopOptions,
+            skipDiskCacheRead: item.skipDiskCacheRead,
+          },
+        ),
       );
       if (version !== this.optionsVersion) {
         return;
@@ -296,6 +339,20 @@ export class ThumbnailPipeline {
     this.activeDesktopTasks.delete(id);
     this.schedule();
     return task;
+  }
+
+  private resolveViewportPriority(item: Pick<QueueItem, "id" | "basePriority">): number {
+    if (this.visibleIds.has(item.id)) return 0;
+    if (this.prioritizedIds.has(item.id)) return 1;
+    return this.hasViewportSnapshot ? Math.max(2, item.basePriority) : item.basePriority;
+  }
+
+  private trackViewportSensitiveItem(item: Pick<QueueItem, "id" | "priority">): void {
+    if (item.priority <= 1) {
+      this.viewportSensitiveQueuedIds.add(item.id);
+    } else {
+      this.viewportSensitiveQueuedIds.delete(item.id);
+    }
   }
 
   private markCompleted(result: { id: string; thumbnailBlob: Blob; width: number; height: number }, sourceFileKey?: string): void {

@@ -3,6 +3,7 @@ import type {
   DesktopCloudProjectManifest,
   DesktopCloudProjectVersion,
   DesktopCacheLocationRecommendation,
+  DesktopDiskCacheBudgetPreset,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
   DesktopGraphicsStatus,
@@ -33,6 +34,7 @@ import {
   migrateDesktopThumbnailCacheDirectory,
   resetDesktopThumbnailCacheDirectory,
   setDesktopRamBudgetPreset,
+  setDesktopDiskCacheBudgetPreset,
   setDesktopThumbnailCacheDirectory,
 } from "./services/desktop-thumbnail-cache";
 import { clearImageCache } from "./services/image-cache";
@@ -103,6 +105,10 @@ import {
   updatePhotoSelectorProjectFile,
 } from "./services/desktop-store";
 import { PreviewWarmupPipeline } from "./services/preview-warmup-pipeline";
+import {
+  createPerformanceWorkKey,
+  schedulePerformanceWork,
+} from "./services/performance-work-coordinator";
 import { useUndoRedo } from "./hooks/useUndoRedo";
 import { buildSelectionResult } from "./types/selection";
 import { useToast } from "./components/ToastProvider";
@@ -613,7 +619,6 @@ export function App() {
   const pipelineRef = useRef<ThumbnailPipeline | null>(null);
   const previewWarmupPipelineRef = useRef<PreviewWarmupPipeline | null>(null);
   const [thumbnailProgress, setThumbnailProgress] = useState({ done: 0, total: 0 });
-  const [thumbnailViewVersion, setThumbnailViewVersion] = useState(0);
   const [thumbnailProfile, setThumbnailProfile] = useState<ThumbnailProfile>(
     initialPreferencesRef.current.thumbnailProfile,
   );
@@ -671,6 +676,10 @@ export function App() {
   const [folderDiagnostics, setFolderDiagnostics] = useState<FolderOpenDiagnostics | null>(null);
   const [isFolderDiagnosticsExpanded, setIsFolderDiagnosticsExpanded] = useState(false);
   const [desktopThumbnailCacheInfo, setDesktopThumbnailCacheInfo] = useState<DesktopThumbnailCacheInfo | null>(null);
+  const [desktopPerformanceFeedback, setDesktopPerformanceFeedback] = useState<{
+    message: string;
+    tone: "success" | "error" | "warning";
+  } | null>(null);
   const [desktopCacheLocationRecommendation, setDesktopCacheLocationRecommendation] =
     useState<DesktopCacheLocationRecommendation | null>(null);
   const [isDesktopThumbnailCacheBusy, setIsDesktopThumbnailCacheBusy] = useState(false);
@@ -713,7 +722,6 @@ export function App() {
       return;
     }
     applyThumbnailViews(entries);
-    setThumbnailViewVersion((current) => current + 1);
   }, []);
   const catalogPersistTimerRef = useRef<number | null>(null);
   const catalogIdentitySignatureRef = useRef<string>("");
@@ -1132,23 +1140,27 @@ export function App() {
       const task = mapWithConcurrency(
         idsToSync,
         XMP_WRITE_CONCURRENCY,
-        async (assetId) => {
-          const asset = assetMap.get(assetId);
-          if (!asset) {
-            return true;
-          }
-
-          try {
-            const existingXml = await readSidecarXmp(asset.id);
-            const nextXml = upsertXmpState(existingXml, asset, activeSet.has(asset.id));
-            if (existingXml === nextXml) {
+        async (assetId) => schedulePerformanceWork(
+          createPerformanceWorkKey(`xmp-write:${assetId}`),
+          3,
+          async () => {
+            const asset = assetMap.get(assetId);
+            if (!asset) {
               return true;
             }
-            return await writeSidecarXmp(asset.id, nextXml);
-          } catch {
-            return false;
-          }
-        },
+
+            try {
+              const existingXml = await readSidecarXmp(asset.id);
+              const nextXml = upsertXmpState(existingXml, asset, activeSet.has(asset.id));
+              if (existingXml === nextXml) {
+                return true;
+              }
+              return await writeSidecarXmp(asset.id, nextXml);
+            } catch {
+              return false;
+            }
+          },
+        ),
       ).then((results) => {
         const failed = results.filter((result) => result === false).length;
         if (failed > 0) {
@@ -2417,15 +2429,19 @@ export function App() {
         void mapWithConcurrency(
           chunk,
           XMP_IMPORT_CONCURRENCY,
-          async (asset) => {
-            if (folderLoadSessionRef.current !== folderLoadSession) {
-              return null;
-            }
+          async (asset) => schedulePerformanceWork(
+            createPerformanceWorkKey(`xmp-read:${asset.id}`),
+            4,
+            async () => {
+              if (folderLoadSessionRef.current !== folderLoadSession) {
+                return null;
+              }
 
-            const xml = await readSidecarXmp(asset.id);
-            if (!xml) return null;
-            return { id: asset.id, state: parseXmpState(xml) };
-          },
+              const xml = await readSidecarXmp(asset.id);
+              if (!xml) return null;
+              return { id: asset.id, state: parseXmpState(xml) };
+            },
+          ),
         ).then((records) => {
           if (folderLoadSessionRef.current !== folderLoadSession) {
             return;
@@ -3816,6 +3832,8 @@ export function App() {
         setDesktopThumbnailCacheInfo(info);
         await refreshDesktopCacheLocationRecommendation();
         addToast("Cache riportata al percorso predefinito.", "success");
+      } else {
+        addToast("Non sono riuscito a ripristinare il percorso predefinito.", "error");
       }
     } finally {
       setIsDesktopThumbnailCacheBusy(false);
@@ -3827,6 +3845,8 @@ export function App() {
     try {
       const cleared = await clearDesktopThumbnailCache();
       if (cleared) {
+        clearImageCache();
+        clearDesktopQuickPreviewFrameCache();
         addToast("Cache thumbnail svuotata.", "success");
         await Promise.all([
           refreshDesktopThumbnailCacheInfo(),
@@ -3864,12 +3884,51 @@ export function App() {
   }, [addToast, refreshDesktopCacheLocationRecommendation]);
 
   const handleRamBudgetPresetChange = useCallback(async (preset: DesktopRamBudgetPreset) => {
-    const info = await setDesktopRamBudgetPreset(preset);
-    if (info) {
-      noteActiveRamBudgetPreset(info.ramBudgetPreset ?? preset);
-      setDesktopThumbnailCacheInfo(info);
+    setIsDesktopThumbnailCacheBusy(true);
+    try {
+      const info = await setDesktopRamBudgetPreset(preset);
+      if (info) {
+        noteActiveRamBudgetPreset(info.ramBudgetPreset ?? preset);
+        setDesktopThumbnailCacheInfo(info);
+        const appliedPreset = info.ramBudgetPreset ?? preset;
+        const appliedGigabytes = typeof info.ramBudgetBytes === "number"
+          ? `${(info.ramBudgetBytes / (1024 ** 3)).toFixed(1)} GB`
+          : "valore automatico";
+        const message = `Budget RAM applicato: ${appliedPreset} (${appliedGigabytes}). Attivo subito, non serve riavviare.`;
+        setDesktopPerformanceFeedback({ message, tone: "success" });
+        addToast(message, "success", 5200);
+      } else {
+        const message = "Non sono riuscito ad applicare il budget RAM.";
+        setDesktopPerformanceFeedback({ message, tone: "error" });
+        addToast(message, "error");
+      }
+    } finally {
+      setIsDesktopThumbnailCacheBusy(false);
     }
-  }, []);
+  }, [addToast]);
+
+  const handleDiskCacheBudgetPresetChange = useCallback(async (preset: DesktopDiskCacheBudgetPreset) => {
+    setIsDesktopThumbnailCacheBusy(true);
+    try {
+      const info = await setDesktopDiskCacheBudgetPreset(preset);
+      if (info) {
+        setDesktopThumbnailCacheInfo(info);
+        const appliedPreset = info.diskBudgetPreset ?? preset;
+        const appliedLimit = info.diskBudgetBytes == null
+          ? "senza limite"
+          : `${Math.round(info.diskBudgetBytes / (1024 ** 3))} GB`;
+        const message = `Limite cache su disco applicato: ${appliedPreset} (${appliedLimit}). Attivo subito, non serve riavviare.`;
+        setDesktopPerformanceFeedback({ message, tone: "success" });
+        addToast(message, "success", 5200);
+      } else {
+        const message = "Non sono riuscito ad aggiornare il limite della cache.";
+        setDesktopPerformanceFeedback({ message, tone: "error" });
+        addToast(message, "error");
+      }
+    } finally {
+      setIsDesktopThumbnailCacheBusy(false);
+    }
+  }, [addToast]);
 
   const handleExportSelection = useCallback(() => {
     const result = buildSelectionResult(
@@ -4108,14 +4167,6 @@ export function App() {
 
   // ── Computed values ──────────────────────────────────────────────────
 
-  const assetsWithThumbnailViews = useMemo(
-    () => allAssets.map((asset) => {
-      const thumbnailView = getThumbnailView(asset.id);
-      return thumbnailView ? { ...asset, ...thumbnailView } : asset;
-    }),
-    [allAssets, thumbnailViewVersion],
-  );
-
   const isGeneratingThumbnails =
     thumbnailProgress.total > 0 && thumbnailProgress.done < thumbnailProgress.total;
   const initialThumbnailReadyTarget = Math.min(thumbnailProgress.total, 12);
@@ -4280,7 +4331,7 @@ export function App() {
           {currentScreen === "selection" ? (
             <div className="app-section app-section--full">
               <PhotoSelector
-                photos={assetsWithThumbnailViews}
+                photos={allAssets}
                 metadataVersion={photoMetadataVersion}
                 sourceFolderPath={sourceFolderPath}
                 initialFolderFilter={projectFolderFocus}
@@ -4304,6 +4355,7 @@ export function App() {
                 onThumbnailProfileChange={setThumbnailProfile}
                 onSortCacheEnabledChange={setSortCacheEnabled}
                 desktopThumbnailCacheInfo={desktopThumbnailCacheInfo}
+                desktopPerformanceFeedback={desktopPerformanceFeedback}
                 desktopCacheLocationRecommendation={desktopCacheLocationRecommendation}
                 isDesktopThumbnailCacheBusy={isDesktopThumbnailCacheBusy}
                 isDesktopCacheRecommendationModalOpen={isDesktopCacheRecommendationModalOpen}
@@ -4315,6 +4367,8 @@ export function App() {
                 onSnoozeDesktopCacheRecommendation={handleSnoozeDesktopCacheRecommendation}
                 onDismissDesktopCacheRecommendation={handleDismissDesktopCacheRecommendation}
                 onRamBudgetPresetChange={handleRamBudgetPresetChange}
+                onDiskCacheBudgetPresetChange={handleDiskCacheBudgetPresetChange}
+                onRefreshDesktopThumbnailCacheInfo={refreshDesktopThumbnailCacheInfo}
                 />
             </div>
           ) : null}

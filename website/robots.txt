@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://filex-suite.web.app/sitemap-filex.xml
+Sitemap: https://filex-suite.web.app/sitemap.xml

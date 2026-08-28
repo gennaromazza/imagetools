@@ -10,8 +10,18 @@
   <div class="dock-window">
     <button id="suite-toggle" class="suite-toggle" title="Espandi FileX Suite"><img src="./icons/suite-launcher.png" alt="FileX Suite" /></button>
     <div id="dock-tools" class="dock-tools"></div>
-    <button id="dock-settings" class="dock-settings" title="Impostazioni dock">&#9881;</button>
+    <button id="dock-notifications" class="dock-notifications" title="Notifiche FileX" aria-expanded="false" aria-controls="dock-notification-center">
+      <span id="dock-notification-count" aria-live="polite">0</span>
+    </button>
+    <button id="dock-settings" class="dock-settings" title="Impostazioni dock" aria-expanded="false" aria-controls="dock-controls">&#9881;</button>
     <div id="dock-controls" class="dock-controls" hidden>
+      <label class="dock-select">Posizione
+        <select id="dock-edge-anchor">
+          <option value="left">Sinistra</option>
+          <option value="right">Destra</option>
+          <option value="bottom">In basso</option>
+        </select>
+      </label>
       <label>Trasparenza <input id="dock-opacity" type="range" min="45" max="100" value="94" /></label>
       <label class="dock-check"><input id="dock-autohide" type="checkbox" /> Riduci automaticamente</label>
       <span class="dock-hint">Trascina le icone per riordinarle</span>
@@ -20,6 +30,14 @@
       <button id="dock-close-settings" type="button" aria-label="Chiudi impostazioni">×</button>
     </div>
   </div>
+  <section id="dock-notification-center" class="dock-notification-center" hidden>
+    <header class="dock-notification-header">
+      <strong>Notifiche</strong>
+      <button id="dock-notification-close" type="button" aria-label="Chiudi notifiche">×</button>
+    </header>
+    <div id="dock-notification-list" class="dock-notification-list"></div>
+    <button id="dock-notifications-clear" type="button">Pulisci tutte</button>
+  </section>
   <script type="module" src="./dock-window.js"></script>
 </body>
 </html>

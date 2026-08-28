@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Manuale di Archivio Flow per fotografi: catalogare, rinominare e ritrovare ogni lavoro senza gestire l'archivio a mano da Esplora file.">
+  <meta name="robots" content="index,follow,max-image-preview:large">
+  <link rel="canonical" href="https://filex-suite.web.app/guide/software-gestione-archivio-fotografico/">
+  <link rel="icon" href="../../favicon.ico">
+  <link rel="stylesheet" href="../../assets/site.css">
+  <link rel="stylesheet" href="../../assets/guides.css">
+  <title>Come organizzare un archivio fotografico con Archivio Flow | FileX</title>
+  <meta property="og:title" content="Come organizzare un archivio fotografico con Archivio Flow">
+  <meta property="og:description" content="Il manuale per catalogare lavori fotografici, importare schede, separare foto e video e mantenere un registro leggero su Google Drive.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://filex-suite.web.app/guide/software-gestione-archivio-fotografico/">
+  <meta property="og:image" content="https://filex-suite.web.app/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","headline":"Come organizzare un archivio fotografico con Archivio Flow","description":"Manuale operativo per organizzare, indicizzare e proteggere un archivio fotografico con Archivio Flow.","dateModified":"2026-08-25","author":{"@type":"Person","name":"Gennaro Mazzacane"},"about":{"@type":"SoftwareApplication","name":"Archivio Flow","operatingSystem":"Windows","applicationCategory":"MultimediaApplication"}},{"@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Archivio Flow carica tutte le fotografie su Google Drive?","acceptedAnswer":{"@type":"Answer","text":"No. Su Google Drive viene sincronizzata una copia versionata del registro dell'archivio; le fotografie restano nelle unità scelte dal fotografo."}},{"@type":"Question","name":"Archivio Flow sostituisce il backup fotografico?","acceptedAnswer":{"@type":"Answer","text":"No. Archivio Flow organizza, indicizza e verifica l'importazione. Backup Guard sincronizza l'archivio principale con una copia fisica esterna."}},{"@type":"Question","name":"Posso importare più lavori presenti sulla stessa scheda?","acceptedAnswer":{"@type":"Answer","text":"Sì. Il filtro per data permette di scegliere i file del lavoro interessato quando una scheda contiene fotografie e video realizzati in giornate diverse."}},{"@type":"Question","name":"Archivio Flow separa fotografie e video?","acceptedAnswer":{"@type":"Answer","text":"Sì. Durante l'importazione riconosce i diversi media e può collocare fotografie e video nelle rispettive cartelle mantenendo ordinato il lavoro."}}]}]}</script>
+</head>
+<body>
+  <header class="site-header"><nav class="wrap nav"><a class="brand" href="../../index.html"><img src="../../assets/icons/suite-launcher.png" width="256" height="256" alt="">FileX</a><div class="nav-links"><a href="../index.html">Guide</a><a href="../../strumenti/index.html">Strumenti</a><a class="nav-cta" href="../../index.html#download">Scarica</a></div></nav></header>
+  <main>
+    <div class="wrap crumbs"><a href="../../index.html">FileX</a> / <a href="../index.html">Guide</a> / Archivio fotografico</div>
+    <section class="tool-hero"><div class="wrap">
+      <div class="kicker">Manuale Archivio Flow</div>
+      <h1>Come organizzare un archivio fotografico con Archivio Flow</h1>
+      <p class="lead">Un archivio non è davvero ordinato solo perché le foto sono dentro alcune cartelle. Deve permetterti di sapere quali lavori hai salvato, dove si trovano e se l'importazione è stata completata, anche dopo anni.</p>
+      <div class="manual-summary"><div><small>Software</small><strong>Archivio Flow</strong></div><div><small>Problema risolto</small><strong>Catalogare, rinominare e ritrovare ogni lavoro senza gestire l'archivio a mano da Esplora file.</strong></div><div><small>Quando usarlo</small><strong>Dall'importazione della scheda alla consultazione e al backup dell'archivio.</strong></div></div>
+    </div></section>
+
+    <section class="manual-body soft"><div class="wrap prose">
+      <h2>Il problema: migliaia di file non formano un archivio</h2>
+      <p>Nel lavoro quotidiano di un fotografo è facile accumulare cartelle con nomi diversi, schede contenenti più servizi, fotografie e video mescolati e copie di cui non si ricorda più lo stato. Usare soltanto gli strumenti nativi di Windows obbliga a controllare manualmente percorsi, nomi e date. Più cresce l'archivio, più aumentano tempo perso e possibilità di errore.</p>
+      <p>Archivio Flow nasce per trasformare questo insieme di cartelle in un sistema coerente. Il software crea un indice dei lavori, applica sempre la struttura scelta dallo studio e conserva le informazioni necessarie per ritrovare rapidamente ogni servizio.</p>
+
+      <h2>Cosa fa Archivio Flow</h2>
+      <ul>
+        <li><strong>Crea e indicizza l'archivio:</strong> mostra un elenco dei lavori registrati senza costringerti a cercarli cartella per cartella.</li>
+        <li><strong>Mantiene una struttura uniforme:</strong> anno, categoria e lavoro possono essere organizzati secondo una gerarchia configurabile.</li>
+        <li><strong>Importa dalla scheda:</strong> conta i file, copia il contenuto e registra una sessione verificabile.</li>
+        <li><strong>Filtra per data:</strong> aiuta a dividere più lavori presenti sulla stessa scheda senza copiarli tutti nello stesso progetto.</li>
+        <li><strong>Rinomina file e lavori:</strong> applica nomi coerenti, utili quando devi cercare una fotografia mesi o anni dopo.</li>
+        <li><strong>Separa fotografie e video:</strong> riconosce i media e li dispone nelle cartelle previste dal flusso.</li>
+        <li><strong>Crea cartelle personalizzate:</strong> puoi preparare una struttura ricorrente per selezione, lavorazione, esportazioni o consegna.</li>
+        <li><strong>Genera copie JPG a bassa risoluzione:</strong> le salva nella cartella BASSA_QUALITA, mantenendo la struttura, così puoi usarle per una copia cloud più leggera.</li>
+        <li><strong>Analizza archivi già esistenti:</strong> individua lavori allineati, cartelle rinominabili, casi da controllare e conflitti.</li>
+      </ul>
+
+      <div class="manual-note"><strong>In parole semplici:</strong> invece di ricordare ogni volta come chiamare e dove mettere un lavoro, definisci il metodo una volta e lo riutilizzi per tutto l'archivio.</div>
+
+      <h2>1. Configura il metodo dello studio</h2>
+      <p>Scegli la cartella principale dell'archivio e definisci la gerarchia che vuoi mantenere. Una struttura possibile è <em>Anno → Categoria → Lavoro</em>, ma il livello dedicato ad anno e categoria è configurabile. Puoi inoltre preparare cartelle standard che verranno usate nei nuovi lavori.</p>
+      <p>La regola migliore è quella che rimane comprensibile anche a distanza di tempo. Un nome come “2026-08-25 - Matrimonio Rossi” è più utile di “Nuova cartella 12”, soprattutto quando la ricerca non viene fatta dalla stessa persona che ha importato il servizio.</p>
+
+      <h2>2. Importa una scheda che contiene uno o più lavori</h2>
+      <p>Dopo aver inserito la scheda, Archivio Flow mostra quanti file ha rilevato e distingue RAW, JPEG, video e altri formati. Inserisci nome, data, autore e destinazione del lavoro, quindi controlla l'anteprima prima di avviare la copia.</p>
+      <p>Se la scheda contiene più servizi realizzati in date diverse, usa il filtro per data. Importa prima il lavoro interessato, controlla il risultato e ripeti l'operazione per l'altro intervallo. In questo modo i file non finiscono in un'unica cartella indistinta.</p>
+      <p>Per la procedura passo per passo puoi consultare anche la <a href="../importare-scheda-sd/index.html">guida specifica all'importazione della scheda SD</a>.</p>
+
+      <h2>3. Separa foto e video e applica nomi ricercabili</h2>
+      <p>Durante l'importazione il programma riconosce i video e li colloca nella destinazione dedicata. La rinomina può invece rendere i file immediatamente associabili al lavoro, evitando sequenze generiche come DSC_0001 o IMG_0001 ripetute da fotocamere diverse.</p>
+      <p>La rinomina non serve solo all'ordine visivo: riduce le ambiguità quando cerchi un file, prepari una consegna o ricevi dal cliente un elenco di fotografie da recuperare.</p>
+
+      <h2>4. Verifica l'importazione prima di liberare la scheda</h2>
+      <p>Archivio Flow registra le sessioni di importazione e distingue file pianificati, verificati e non riconosciuti. Il controllo “sicuro da formattare” può indicare se tutti i file della scheda risultano associati a importazioni verificate.</p>
+      <div class="manual-note"><strong>Attenzione:</strong> l'indicazione di importazione completata non sostituisce una seconda copia. Prima di formattare una scheda importante, verifica anche il backup su un'altra unità fisica.</div>
+
+      <h2>5. Metti ordine anche in un archivio già esistente</h2>
+      <p>Non è necessario partire da zero. L'analisi dell'archivio confronta le cartelle presenti con la struttura impostata e le divide in quattro situazioni: già allineate, pronte per essere rinominate, da controllare manualmente oppure in conflitto. In questo modo puoi sistemare progressivamente l'archivio senza spostare cartelle alla cieca.</p>
+      <p>L'indice viene riconciliato con il contenuto reale del disco e tiene conto anche dei lavori scoperti direttamente nell'archivio. È utile quando aggiungi un disco esistente o quando alcune cartelle sono state create in passato fuori da Archivio Flow.</p>
+
+      <h2>6. Prepara una copia cloud leggera</h2>
+      <p>Per ogni lavoro puoi generare JPG compressi nella cartella BASSA_QUALITA. Archivio Flow conserva la struttura delle sottocartelle e può evitare di rigenerare file già presenti. Queste copie occupano meno spazio degli originali e sono più pratiche da sincronizzare con il servizio cloud scelto.</p>
+      <p>Il software prepara i file a bassa risoluzione localmente: non promette di sostituire un sistema completo di sincronizzazione cloud e non carica automaticamente l'intero archivio fotografico su Google Drive.</p>
+
+      <h2>7. Consulta il registro remoto senza caricare migliaia di foto</h2>
+      <p>Collegando il proprio account Google, Archivio Flow sincronizza su Google Drive una copia versionata del registro StudioFlow. Il registro contiene i manifest necessari a ricostruire lo stato delle importazioni, mentre le fotografie e i percorsi assoluti locali non vengono caricati.</p>
+      <p>Questo crea una traccia online molto leggera dei lavori archiviati. Se la connessione non è disponibile, gli eventi restano in coda sul computer e possono essere sincronizzati in seguito. È un registro dell'archivio, non una copia cloud delle immagini.</p>
+
+      <h2>8. Completa il flusso con Backup Guard</h2>
+      <p>Archivio Flow organizza l'archivio principale; <a href="../backup-archivio-fotografico/index.html">FileX Backup Guard</a> mantiene allineata una copia fisica esterna. Al termine di un'importazione Archivio Flow può notificare il nuovo progetto a Backup Guard, così il lavoro appena creato entra nel flusso di sincronizzazione senza dover ricostruire manualmente il percorso.</p>
+      <p>I due strumenti svolgono quindi compiti diversi e complementari: il primo crea ordine e un indice affidabile, il secondo confronta master e clone e verifica le operazioni di copia.</p>
+
+      <h2>Un esempio reale di utilizzo</h2>
+      <ol>
+        <li>Torni da due servizi presenti sulla stessa scheda.</li>
+        <li>Filtri i file per data e crei due lavori distinti.</li>
+        <li>Archivio Flow rinomina i file e separa fotografie e video.</li>
+        <li>Controlli che l'importazione risulti verificata.</li>
+        <li>Generi, se ti servono, le copie a bassa risoluzione per il cloud.</li>
+        <li>Sincronizzi il registro leggero su Google Drive.</li>
+        <li>Apri Backup Guard e aggiorni la copia fisica dell'archivio.</li>
+      </ol>
+      <p>Il vantaggio non è soltanto risparmiare alcuni clic: è poter ripetere lo stesso metodo su ogni lavoro e sapere cosa è stato archiviato, senza affidarsi alla memoria.</p>
+
+      <h2>Domande frequenti</h2>
+      <h3>Archivio Flow sostituisce Esplora file di Windows?</h3>
+      <p>Le cartelle restano normali cartelle Windows, ma Archivio Flow aggiunge il metodo: catalogo, regole di nomenclatura, indice, importazioni verificate e strumenti per controllare l'archivio.</p>
+      <h3>Le fotografie vengono caricate su Google Drive?</h3>
+      <p>No. L'integrazione Google Drive replica il registro StudioFlow e non le fotografie. Per una copia cloud delle immagini puoi usare i JPG a bassa risoluzione generati localmente e il servizio di sincronizzazione che preferisci.</p>
+      <h3>Posso usarlo su un archivio già pieno di lavori?</h3>
+      <p>Sì. La funzione di analisi individua cartelle già coerenti, lavori rinominabili e situazioni che richiedono una decisione prima di applicare modifiche.</p>
+      <h3>È anche un programma di backup?</h3>
+      <p>No. Per sincronizzare l'archivio principale con una seconda unità si usa Backup Guard. Archivio Flow prepara e cataloga il lavoro; Backup Guard protegge la copia fisica.</p>
+
+      <div class="actions"><a class="button primary" href="../../strumenti/archivio-flow/index.html">Scopri Archivio Flow</a><a class="button secondary" href="../importare-scheda-sd/index.html">Importare una scheda SD</a></div>
+      <div class="meta-box">Manuale FileX · Revisionato il 25 agosto 2026 · Funzioni verificate sulla versione attuale del prodotto.</div>
+    </div></section>
+  </main>
+  <footer><div class="wrap"><div class="footer-links"><a href="../../supporto/index.html">Supporto</a><a href="../../sicurezza/index.html">Sicurezza</a></div></div></footer>
+</body>
+</html>

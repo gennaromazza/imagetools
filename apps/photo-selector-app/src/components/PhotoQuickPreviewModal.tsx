@@ -259,6 +259,7 @@ export function PhotoQuickPreviewModal({
   const classificationMutationRef = useRef(false);
   const lastExternalFeedbackTokenRef = useRef<number>(0);
   const previewWarmupTimeoutRef = useRef<number | null>(null);
+  const lastPreviewWarmupIndexRef = useRef(-1);
   const detailPreviewTimeoutRef = useRef<number | null>(null);
   const fallbackPreviewTimeoutRef = useRef<number | null>(null);
   const pendingSelectionReasonRef = useRef<"navigate" | "jump" | null>(null);
@@ -315,6 +316,7 @@ export function PhotoQuickPreviewModal({
   const [zoomLevel, setZoomLevel] = useState(startZoomed ? 2.2 : 1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+  const panOffsetRef = useRef({ x: 0, y: 0 });
   const [dockViewport, setDockViewport] = useState<VirtualStripViewport>({
     scrollOffset: 0,
     viewportSize: 0,
@@ -780,7 +782,7 @@ export function PhotoQuickPreviewModal({
         window.removeEventListener("resize", sync);
       }
     };
-  }, [compareMode]);
+  }, [asset?.id, compareMode]);
 
   // Preload only prev/current/next thumbnails or lightweight previews.
   useEffect(() => {
@@ -986,12 +988,18 @@ export function PhotoQuickPreviewModal({
     }
 
     if (currentIndex < 0) {
+      lastPreviewWarmupIndexRef.current = -1;
       return;
     }
 
     if (desktopQuickPreviewEnabled) {
-      const warmCandidates = navigationAssets
-        .slice(Math.max(0, currentIndex - 3), Math.min(navigationAssets.length, currentIndex + 4))
+      const previousWarmupIndex = lastPreviewWarmupIndexRef.current;
+      const navigationDirection = previousWarmupIndex >= 0 && currentIndex < previousWarmupIndex ? -1 : 1;
+      lastPreviewWarmupIndexRef.current = currentIndex;
+      const warmOffsets = navigationDirection < 0 ? [-1, -2, 1] : [1, 2, -1];
+      const warmCandidates = warmOffsets
+        .map((offset) => navigationAssets[currentIndex + offset] ?? null)
+        .filter((candidate): candidate is ImageAsset => candidate !== null)
         .map((candidate) => {
           const absolutePath = getAssetAbsolutePath(candidate.id);
           if (!absolutePath) {
@@ -1256,6 +1264,14 @@ export function PhotoQuickPreviewModal({
       return;
     }
 
+    if (isPanning) {
+      if (detailPreviewTimeoutRef.current !== null) {
+        window.clearTimeout(detailPreviewTimeoutRef.current);
+        detailPreviewTimeoutRef.current = null;
+      }
+      return;
+    }
+
     let active = true;
 
     if (desktopDetailPreviewRequest) {
@@ -1390,6 +1406,7 @@ export function PhotoQuickPreviewModal({
     compareMode,
     desktopDetailPreviewRequest,
     detailPreviewMaxDimension,
+    isPanning,
     recordPreviewFrameMetric,
     zoomLevel,
   ]);
@@ -1612,24 +1629,25 @@ export function PhotoQuickPreviewModal({
   }, []);
 
   const clampPan = useCallback((x: number, y: number, zoom = zoomLevel) => {
-    const stage = stageRef.current;
-    if (!stage || zoom <= 1 || !asset) {
+    const stageWidth = stageViewport.width;
+    const stageHeight = stageViewport.height;
+    if (stageWidth <= 0 || stageHeight <= 0 || zoom <= 1 || !asset) {
       return { x: 0, y: 0 };
     }
 
     const safeWidth = Math.max(1, asset.width);
     const safeHeight = Math.max(1, asset.height);
-    const fitScale = Math.min(stage.clientWidth / safeWidth, stage.clientHeight / safeHeight);
+    const fitScale = Math.min(stageWidth / safeWidth, stageHeight / safeHeight);
     const renderedWidth = safeWidth * fitScale;
     const renderedHeight = safeHeight * fitScale;
-    const maxX = Math.max(0, (renderedWidth * zoom - stage.clientWidth) / 2);
-    const maxY = Math.max(0, (renderedHeight * zoom - stage.clientHeight) / 2);
+    const maxX = Math.max(0, (renderedWidth * zoom - stageWidth) / 2);
+    const maxY = Math.max(0, (renderedHeight * zoom - stageHeight) / 2);
 
     return {
       x: Math.max(-maxX, Math.min(maxX, x)),
       y: Math.max(-maxY, Math.min(maxY, y)),
     };
-  }, [asset, zoomLevel]);
+  }, [asset, stageViewport.height, stageViewport.width, zoomLevel]);
 
   const commitPanOffset = useCallback((nextPanOffset: { x: number; y: number }) => {
     pendingPanOffsetRef.current = nextPanOffset;
@@ -1645,19 +1663,38 @@ export function PhotoQuickPreviewModal({
       }
 
       pendingPanOffsetRef.current = null;
-      setPanOffset(pendingPanOffset);
+      panOffsetRef.current = pendingPanOffset;
+      if (mainImageRef.current) {
+        mainImageRef.current.style.transform = `translate3d(${pendingPanOffset.x}px, ${pendingPanOffset.y}px, 0) scale(${zoomLevel})`;
+      }
     });
-  }, []);
+  }, [zoomLevel]);
+
+  const persistPanOffset = useCallback((nextPanOffset: { x: number; y: number }, zoom = zoomLevel) => {
+    if (panAnimationFrameRef.current !== null) {
+      window.cancelAnimationFrame(panAnimationFrameRef.current);
+      panAnimationFrameRef.current = null;
+    }
+    pendingPanOffsetRef.current = null;
+    panOffsetRef.current = nextPanOffset;
+    if (mainImageRef.current) {
+      mainImageRef.current.style.transform = `translate3d(${nextPanOffset.x}px, ${nextPanOffset.y}px, 0) scale(${zoom})`;
+    }
+    setPanOffset(nextPanOffset);
+  }, [zoomLevel]);
+
+  const persistPendingPanOffset = useCallback(() => {
+    persistPanOffset(pendingPanOffsetRef.current ?? panOffsetRef.current);
+  }, [persistPanOffset]);
 
   const applyZoom = useCallback((nextZoom: number) => {
     // Cap massimo alzato a 12x per supportare zoom 1:1 pixel-perfect
     // su RAW ad alta risoluzione (es. 6000px su viewport da 1500px = 4x).
     const clampedZoom = Math.max(1, Math.min(12, Number(nextZoom.toFixed(2))));
     setZoomLevel(clampedZoom);
-    const nextPanOffset = clampPan(panOffset.x, panOffset.y, clampedZoom);
-    pendingPanOffsetRef.current = nextPanOffset;
-    setPanOffset(nextPanOffset);
-  }, [clampPan, panOffset.x, panOffset.y]);
+    const nextPanOffset = clampPan(panOffsetRef.current.x, panOffsetRef.current.y, clampedZoom);
+    persistPanOffset(nextPanOffset, clampedZoom);
+  }, [clampPan, persistPanOffset]);
 
   const computeOneToOneZoom = useCallback((): number | null => {
     // Calcola lo zoom necessario per visualizzare l'immagine al 100% pixel:
@@ -1701,10 +1738,9 @@ export function PhotoQuickPreviewModal({
         nextZoom = target;
       }
     }
-    pendingPanOffsetRef.current = { x: 0, y: 0 };
-    setPanOffset({ x: 0, y: 0 });
+    persistPanOffset({ x: 0, y: 0 });
     applyZoom(nextZoom);
-  }, [applyZoom, computeOneToOneZoom, zoomLevel]);
+  }, [applyZoom, computeOneToOneZoom, persistPanOffset, zoomLevel]);
 
   const panBy = useCallback((deltaX: number, deltaY: number) => {
     if (compareMode || zoomLevel <= 1.05) {
@@ -1712,16 +1748,17 @@ export function PhotoQuickPreviewModal({
     }
 
     const nextPanOffset = clampPan(
-      (pendingPanOffsetRef.current?.x ?? panOffset.x) + deltaX,
-      (pendingPanOffsetRef.current?.y ?? panOffset.y) + deltaY,
+      panOffsetRef.current.x + deltaX,
+      panOffsetRef.current.y + deltaY,
     );
-    commitPanOffset(nextPanOffset);
-  }, [clampPan, commitPanOffset, compareMode, panOffset.x, panOffset.y, zoomLevel]);
+    persistPanOffset(nextPanOffset);
+  }, [clampPan, compareMode, persistPanOffset, zoomLevel]);
 
   useEffect(() => {
     pendingOneToOneZoomRef.current = startZoomed;
     preCompareZoomRef.current = startZoomed ? QUICK_PREVIEW_INTERACTIVE_ZOOM : 1;
     setZoomLevel(startZoomed ? QUICK_PREVIEW_INTERACTIVE_ZOOM : 1);
+    panOffsetRef.current = { x: 0, y: 0 };
     setPanOffset({ x: 0, y: 0 });
     pendingPanOffsetRef.current = { x: 0, y: 0 };
     setIsPanning(false);
@@ -1735,6 +1772,7 @@ export function PhotoQuickPreviewModal({
         preCompareZoomRef.current = current;
         return 1;
       });
+      panOffsetRef.current = { x: 0, y: 0 };
       setPanOffset({ x: 0, y: 0 });
       setIsPanning(false);
       panDragRef.current = null;
@@ -2743,6 +2781,7 @@ export function PhotoQuickPreviewModal({
             event.preventDefault();
             const nextZoom = zoomLevel + (event.deltaY < 0 ? 0.25 : -0.25);
             if (nextZoom <= 1) {
+              panOffsetRef.current = { x: 0, y: 0 };
               setPanOffset({ x: 0, y: 0 });
             }
             applyZoom(nextZoom);
@@ -2773,12 +2812,13 @@ export function PhotoQuickPreviewModal({
               return;
             }
 
+            event.preventDefault();
             panDragRef.current = {
               pointerId: event.pointerId,
               startX: event.clientX,
               startY: event.clientY,
-              originX: panOffset.x,
-              originY: panOffset.y,
+              originX: panOffsetRef.current.x,
+              originY: panOffsetRef.current.y,
             };
             setIsPanning(true);
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -2788,12 +2828,14 @@ export function PhotoQuickPreviewModal({
             if (!drag || drag.pointerId !== event.pointerId || compareMode || zoomLevel <= 1.05) {
               return;
             }
+            event.preventDefault();
             const deltaX = event.clientX - drag.startX;
             const deltaY = event.clientY - drag.startY;
             commitPanOffset(clampPan(drag.originX + deltaX, drag.originY + deltaY));
           }}
           onPointerUp={(event) => {
             if (panDragRef.current?.pointerId === event.pointerId) {
+              persistPendingPanOffset();
               panDragRef.current = null;
               setIsPanning(false);
               if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -2819,6 +2861,7 @@ export function PhotoQuickPreviewModal({
           }}
           onPointerCancel={(event) => {
             if (panDragRef.current?.pointerId === event.pointerId) {
+              persistPendingPanOffset();
               panDragRef.current = null;
               setIsPanning(false);
               if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -2833,6 +2876,9 @@ export function PhotoQuickPreviewModal({
             }
           }}
           onLostPointerCapture={() => {
+            if (panDragRef.current) {
+              persistPendingPanOffset();
+            }
             panDragRef.current = null;
             setIsPanning(false);
             swipeDragRef.current = null;
@@ -2920,14 +2966,20 @@ export function PhotoQuickPreviewModal({
                     : "quick-preview__image quick-preview__image--zoomed"
                   : "quick-preview__image"
               }
-              draggable={canExternalDrag}
-              decoding="sync"
+              draggable={canExternalDrag && zoomLevel <= 1.05}
+              decoding="async"
               onLoad={handleMainPreviewLoad}
               onError={handleMainPreviewError}
               onDoubleClick={toggleNativeFullscreen}
-              onDragStart={(event) => handleExternalDragStart(asset.id, event)}
+              onDragStart={(event) => {
+                if (zoomLevel > 1.05) {
+                  event.preventDefault();
+                  return;
+                }
+                handleExternalDragStart(asset.id, event);
+              }}
               style={{
-                transform: `translate3d(${panOffset.x}px, ${panOffset.y}px, 0) scale(${zoomLevel})`,
+                transform: `translate3d(${isPanning ? panOffsetRef.current.x : panOffset.x}px, ${isPanning ? panOffsetRef.current.y : panOffset.y}px, 0) scale(${zoomLevel})`,
               }}
             />
           ) : (

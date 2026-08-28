@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState, type DragEvent } from "react";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
+import { useThumbnailView } from "../services/use-thumbnail-view";
 import { preloadImageUrls } from "../services/image-cache";
 import { notePhotoCardRender } from "../services/performance-utils";
 import {
@@ -116,6 +117,10 @@ export const PhotoCard = memo(
     externalFeedback = null,
     editable,
   }: PhotoCardProps) {
+    const thumbnailView = useThumbnailView(photo.id);
+    if (thumbnailView) {
+      photo = { ...photo, ...thumbnailView };
+    }
     notePhotoCardRender(photo.id);
 
     const previewUrl = photo.thumbnailUrl ?? photo.previewUrl ?? photo.sourceUrl;
@@ -130,6 +135,7 @@ export const PhotoCard = memo(
     const cardRef = useRef<HTMLDivElement>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const feedbackTimeoutRef = useRef<number | null>(null);
+    const hoverIntentTimeoutRef = useRef<number | null>(null);
     const feedbackTokenRef = useRef(0);
     const [feedback, setFeedback] = useState<CardFeedback | null>(null);
     const batchPulseTimeoutRef = useRef<number | null>(null);
@@ -210,8 +216,9 @@ export const PhotoCard = memo(
       if (wrapperRef.current) {
         const el = wrapperRef.current;
         el.classList.remove("photo-card__image-wrapper--flash");
-        void el.offsetWidth;
-        el.classList.add("photo-card__image-wrapper--flash");
+        window.requestAnimationFrame(() => {
+          if (el.isConnected) el.classList.add("photo-card__image-wrapper--flash");
+        });
       }
 
       feedbackTimeoutRef.current = window.setTimeout(() => {
@@ -232,12 +239,12 @@ export const PhotoCard = memo(
         const el = wrapperRef.current;
         el.classList.remove("photo-card__image-wrapper--batch-pulse");
         el.classList.remove("photo-card__image-wrapper--batch-pulse-lite");
-        void el.offsetWidth;
-        el.classList.add(
-          disableNonEssentialUi
-            ? "photo-card__image-wrapper--batch-pulse-lite"
-            : "photo-card__image-wrapper--batch-pulse",
-        );
+        const pulseClass = disableNonEssentialUi
+          ? "photo-card__image-wrapper--batch-pulse-lite"
+          : "photo-card__image-wrapper--batch-pulse";
+        window.requestAnimationFrame(() => {
+          if (el.isConnected) el.classList.add(pulseClass);
+        });
       }
 
       if (batchPulseTimeoutRef.current !== null) {
@@ -275,8 +282,9 @@ export const PhotoCard = memo(
       if (wrapperRef.current) {
         const el = wrapperRef.current;
         el.classList.remove("photo-card__image-wrapper--flash");
-        void el.offsetWidth;
-        el.classList.add("photo-card__image-wrapper--flash");
+        window.requestAnimationFrame(() => {
+          if (el.isConnected) el.classList.add("photo-card__image-wrapper--flash");
+        });
       }
 
       if (feedbackTimeoutRef.current !== null) {
@@ -299,6 +307,10 @@ export const PhotoCard = memo(
         return;
       }
 
+      if (hoverIntentTimeoutRef.current !== null) {
+        window.clearTimeout(hoverIntentTimeoutRef.current);
+        hoverIntentTimeoutRef.current = null;
+      }
       if (!isSelected) {
         setIsToolbarVisible(false);
       }
@@ -311,6 +323,9 @@ export const PhotoCard = memo(
         }
         if (batchPulseTimeoutRef.current !== null) {
           window.clearTimeout(batchPulseTimeoutRef.current);
+        }
+        if (hoverIntentTimeoutRef.current !== null) {
+          window.clearTimeout(hoverIntentTimeoutRef.current);
         }
       };
     }, []);
@@ -337,6 +352,10 @@ export const PhotoCard = memo(
           onExternalDragStart(photo.id, event);
         }}
         onFocus={() => {
+          if (hoverIntentTimeoutRef.current !== null) {
+            window.clearTimeout(hoverIntentTimeoutRef.current);
+            hoverIntentTimeoutRef.current = null;
+          }
           setIsToolbarVisible(true);
           onFocus(photo.id);
         }}
@@ -344,9 +363,20 @@ export const PhotoCard = memo(
           if (disableNonEssentialUi) {
             return;
           }
-          if (photo.previewUrl) preloadImageUrls([photo.previewUrl]);
+          if (hoverIntentTimeoutRef.current !== null) {
+            window.clearTimeout(hoverIntentTimeoutRef.current);
+          }
+          hoverIntentTimeoutRef.current = window.setTimeout(() => {
+            setIsToolbarVisible(true);
+            if (photo.previewUrl) preloadImageUrls([photo.previewUrl]);
+            hoverIntentTimeoutRef.current = null;
+          }, 90);
         }}
         onMouseLeave={() => {
+          if (hoverIntentTimeoutRef.current !== null) {
+            window.clearTimeout(hoverIntentTimeoutRef.current);
+            hoverIntentTimeoutRef.current = null;
+          }
           if (!isSelected) {
             setIsToolbarVisible(false);
           }

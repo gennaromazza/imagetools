@@ -1,3 +1,10 @@
+import { IndexedPriorityQueue } from "./indexed-priority-queue";
+import {
+  createPerformanceWorkKey,
+  performanceWorkCoordinator,
+  schedulePerformanceWork,
+} from "./performance-work-coordinator";
+
 interface PreviewWarmupTask {
   cacheKey: string;
   assetId: string;
@@ -13,9 +20,8 @@ interface PreviewWarmupPipelineOptions {
 }
 
 export class PreviewWarmupPipeline {
-  private queue: PreviewWarmupTask[] = [];
-  private queued = new Map<string, PreviewWarmupTask>();
-  private active = new Set<string>();
+  private readonly queue = new IndexedPriorityQueue<PreviewWarmupTask>(4);
+  private active = new Map<string, { workKey: string; priority: number }>();
   private destroyed = false;
   private readonly concurrency: number;
   private readonly warmPreview: WarmPreviewFn;
@@ -37,13 +43,20 @@ export class PreviewWarmupPipeline {
   ): void {
     for (const item of items) {
       const cacheKey = `${item.assetId}::${Math.max(0, Math.round(item.maxDimension))}`;
-      if (this.active.has(cacheKey)) {
+      const active = this.active.get(cacheKey);
+      if (active) {
+        const nextPriority = Math.min(active.priority, priority);
+        if (nextPriority !== active.priority) {
+          active.priority = nextPriority;
+          performanceWorkCoordinator.reprioritize(active.workKey, nextPriority);
+        }
         continue;
       }
 
-      const existing = this.queued.get(cacheKey);
+      const existing = this.queue.get(cacheKey);
       if (existing) {
         existing.priority = Math.min(existing.priority, priority);
+        this.queue.set(cacheKey, existing, existing.priority);
         continue;
       }
 
@@ -53,18 +66,18 @@ export class PreviewWarmupPipeline {
         maxDimension: item.maxDimension,
         priority,
       };
-      this.queue.push(queuedTask);
-      this.queued.set(cacheKey, queuedTask);
+      this.queue.set(cacheKey, queuedTask, priority);
     }
 
-    this.sortQueue();
     this.schedule();
   }
 
   destroy(): void {
     this.destroyed = true;
-    this.queue = [];
-    this.queued.clear();
+    this.queue.clear();
+    for (const task of this.active.values()) {
+      performanceWorkCoordinator.cancel(task.workKey);
+    }
     this.active.clear();
     if (this.deferTimer) {
       clearTimeout(this.deferTimer);
@@ -72,25 +85,18 @@ export class PreviewWarmupPipeline {
     }
   }
 
-  private sortQueue(): void {
-    this.queue.sort((left, right) => left.priority - right.priority);
-  }
-
   private schedule(): void {
     if (this.destroyed) {
       return;
     }
 
-    while (this.active.size < this.concurrency && this.queue.length > 0) {
-      const task = this.queue.shift();
+    while (this.active.size < this.concurrency && this.queue.size > 0) {
+      const task = this.queue.peek();
       if (!task) {
         return;
       }
 
-      this.queued.delete(task.cacheKey);
       if (this.shouldDefer?.(task.priority)) {
-        this.queue.unshift(task);
-        this.queued.set(task.cacheKey, task);
         if (!this.deferTimer) {
           this.deferTimer = setTimeout(() => {
             this.deferTimer = null;
@@ -99,9 +105,15 @@ export class PreviewWarmupPipeline {
         }
         return;
       }
-      this.active.add(task.cacheKey);
+      this.queue.dequeue();
+      const workKey = createPerformanceWorkKey(`preview:${task.cacheKey}`);
+      this.active.set(task.cacheKey, { workKey, priority: task.priority });
 
-      void this.warmPreview(task.assetId, task.maxDimension, task.priority)
+      void schedulePerformanceWork(
+        workKey,
+        task.priority,
+        () => this.warmPreview(task.assetId, task.maxDimension, task.priority),
+      )
         .catch(() => false)
         .finally(() => {
           this.active.delete(task.cacheKey);

@@ -272,6 +272,12 @@
     ]
   },
   "photo-selector-app": {
+    "0.1.31": [
+      "Quick Preview piu fluida: il pan della foto ingrandita segue il puntatore senza scatti e il caricamento asincrono evita aggiornamenti obsoleti.",
+      "Navigazione RAW piu rapida grazie al pre-caricamento direzionale e sequenziale delle immagini vicine.",
+      "Cache RAM e disco applicate subito senza riavvio, con ambiente di sviluppo isolato, budget configurabili e pulizia coordinata.",
+      "Code a priorita, slot riservati alle immagini visibili e rendering per singola card riducono i micro-lag sui cataloghi estesi."
+    ],
     "0.1.29": [
       "Pubblicazione coordinata di manutenzione con catalogo stabile e checksum dell'installer verificati."
     ],

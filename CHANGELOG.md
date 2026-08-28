@@ -30,6 +30,22 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-28 - Image Select Pro 0.1.31
+
+### Quick Preview e RAW piu fluidi
+- Lo spostamento della foto ingrandita segue il puntatore tramite aggiornamenti sincronizzati al rendering, eliminando gli scatti e il blocco del pan dopo lo zoom.
+- Il pre-caricamento delle anteprime privilegia la direzione di navigazione e prepara in sequenza soltanto le foto vicine, riducendo l'attesa tra file RAW consecutivi.
+- Il caricamento asincrono evita che decodifiche obsolete o trascinamenti nativi interferiscano con la foto attualmente visibile.
+
+### Cache e prestazioni controllabili
+- Le impostazioni RAM e cache disco vengono applicate subito e mostrano chiaramente che non richiedono il riavvio del software.
+- La cache di sviluppo e' isolata da quella di produzione; pulizia, migrazione, budget e pruning su disco sono coordinati con le cache in memoria.
+- Code a priorita indicizzate, slot riservati al viewport e aggiornamenti per singola card riducono lavoro in background e micro-lag su cataloghi estesi.
+
+### Verifiche e documentazione
+- Aggiunti test automatici per coordinatore prestazioni, cache, store delle miniature e regressioni della Quick Preview.
+- Aggiornati audit tecnico, Dev Console e pagina prodotto con le nuove caratteristiche prestazionali.
+
 ## 2026-08-27 - FileX Send 0.1.15
 
 - Aggiunta la gestione del `content-type` per i file condivisi in locale e remoto, così i download mantengono il tipo originale.

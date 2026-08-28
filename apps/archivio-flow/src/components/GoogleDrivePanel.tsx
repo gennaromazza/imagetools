@@ -8,7 +8,9 @@ import {
   syncArchivioDriveRegistry,
 } from "../archivioDesktopApi";
 
-type Feedback = { type: "success" | "error"; message: string } | null;
+const GOOGLE_DRIVE_API_CONSOLE_URL = "https://console.developers.google.com/apis/api/drive.googleapis.com/overview?project=391620173227";
+
+type Feedback = { type: "success" | "error"; message: string; actionUrl?: string } | null;
 
 export function GoogleDrivePanel() {
   const [driveStatus, setDriveStatus] = useState<GoogleDriveStatus | null>(null);
@@ -16,6 +18,7 @@ export function GoogleDrivePanel() {
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<"connect" | "disconnect" | "sync" | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
+  const [lastRegistryUrl, setLastRegistryUrl] = useState<string | null>(null);
   const [webPreview, setWebPreview] = useState(() => !window.filexDesktop);
 
   const refresh = useCallback(async () => {
@@ -83,9 +86,15 @@ export function GoogleDrivePanel() {
     try {
       const result = await syncArchivioDriveRegistry();
       setFeedback({ type: "success", message: result.message });
+      setLastRegistryUrl(result.driveUrl ?? null);
       setStudioFlowStatus(await getArchivioStudioFlowStatus());
     } catch (error) {
-      setFeedback({ type: "error", message: error instanceof Error ? error.message : "Sincronizzazione non riuscita." });
+      const message = error instanceof Error ? error.message : "Sincronizzazione non riuscita.";
+      setFeedback({
+        type: "error",
+        message,
+        actionUrl: /Google Drive API non è attiva/i.test(message) ? GOOGLE_DRIVE_API_CONSOLE_URL : undefined,
+      });
     } finally {
       setBusyAction(null);
     }
@@ -146,6 +155,20 @@ export function GoogleDrivePanel() {
           {feedback && (
             <div className="message-box" style={{ borderColor: feedback.type === "success" ? "var(--success)" : "var(--danger)" }}>
               <p style={{ color: feedback.type === "success" ? "var(--success)" : "var(--danger)" }}>{feedback.message}</p>
+              {feedback.actionUrl && (
+                <p style={{ marginTop: "var(--space-2)" }}>
+                  <a href={feedback.actionUrl} target="_blank" rel="noreferrer">Apri Google Cloud Console</a>
+                </p>
+              )}
+            </div>
+          )}
+
+          {lastRegistryUrl && (
+            <div className="message-box" style={{ borderColor: "var(--success)" }}>
+              <p>Il registro è disponibile nel tuo Drive. Da lì puoi aprirlo e condividerlo con gli strumenti di Google Drive.</p>
+              <p style={{ marginTop: "var(--space-2)" }}>
+                <a href={lastRegistryUrl} target="_blank" rel="noreferrer">Apri registro in Google Drive</a>
+              </p>
             </div>
           )}
 

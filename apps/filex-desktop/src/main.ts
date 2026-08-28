@@ -31,6 +31,7 @@ import type {
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
+  DesktopDiskCacheBudgetPreset,
   DesktopRamBudgetPreset,
   DesktopReleaseChannel,
   DesktopPhotoSelectorPreferences,
@@ -68,6 +69,7 @@ import {
 } from "./native-folder-service.js";
 import {
   configureDesktopImageService,
+  clearDesktopImageMemoryCaches,
   getDesktopImageCacheLimits,
   getDesktopQuickPreviewFrame,
   getDesktopPreview,
@@ -94,6 +96,7 @@ import {
   migrateThumbnailCacheDirectory,
   resetThumbnailCacheDirectory,
   saveRamBudgetPreset,
+  setDiskCacheBudgetPreset,
   setThumbnailCacheDirectory,
 } from "./thumbnail-disk-cache.js";
 import {
@@ -229,6 +232,8 @@ const defaultSuiteDockState: DesktopDockState = {
   toolOrder: getSuiteManagedTools().map((tool) => tool.id),
   visibleToolCount: 0,
   settingsOpen: false,
+  notificationCenterOpen: false,
+  edgeAnchor: "bottom",
 };
 
 function getSuiteDockStatePath(): string {
@@ -246,6 +251,10 @@ function sanitizeSuiteDockState(value: Partial<DesktopDockState> | null | undefi
   for (const tool of getSuiteManagedTools()) {
     if (!toolOrder.includes(tool.id)) toolOrder.push(tool.id);
   }
+  const nextEdgeAnchor = typeof value?.edgeAnchor === "string"
+    && (value.edgeAnchor === "left" || value.edgeAnchor === "right" || value.edgeAnchor === "bottom")
+      ? value.edgeAnchor
+      : defaultSuiteDockState.edgeAnchor;
   return {
     schemaVersion: 2,
     x: Number.isFinite(x) ? Math.round(x) : defaultSuiteDockState.x,
@@ -258,6 +267,8 @@ function sanitizeSuiteDockState(value: Partial<DesktopDockState> | null | undefi
       ? Math.min(getSuiteManagedTools().length, Math.max(0, Math.round(visibleToolCount)))
       : defaultSuiteDockState.visibleToolCount,
     settingsOpen: Boolean(value?.settingsOpen),
+    notificationCenterOpen: Boolean(value?.notificationCenterOpen),
+    edgeAnchor: nextEdgeAnchor,
   };
 }
 
@@ -279,25 +290,48 @@ async function readSuiteDockState(): Promise<DesktopDockState> {
   }
 }
 
-function applySuiteDockWindowLayout(state: DesktopDockState, animate: boolean): void {
+function applySuiteDockWindowLayout(state: DesktopDockState, animate: boolean, resetPosition = false): void {
   if (!suiteDockWindow || suiteDockWindow.isDestroyed()) return;
   const currentBounds = suiteDockWindow.getBounds();
   const display = screen.getDisplayMatching(currentBounds);
+  const isBottomAnchor = state.edgeAnchor === "bottom";
+  const isLeftAnchor = state.edgeAnchor === "left";
   const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, state.visibleToolCount));
-  const expandedWidth = Math.min(
-    display.workAreaSize.width - 24,
-    Math.max(220, 142 + itemCount * 62),
-  );
-  const width = state.collapsed ? 88 : expandedWidth;
-  const height = state.settingsOpen && !state.collapsed ? 190 : 100;
-  const centerX = currentBounds.x + currentBounds.width / 2;
-  const bottom = currentBounds.y + currentBounds.height;
+  const collapsedSize = isBottomAnchor ? 88 : 76;
+  const expandedWidth = isBottomAnchor
+    ? Math.min(
+      display.workAreaSize.width - 24,
+      Math.max(220, 142 + itemCount * 62),
+    )
+    : state.settingsOpen || state.notificationCenterOpen ? 380 : 82;
+  const expandedHeight = isBottomAnchor
+    ? state.notificationCenterOpen && !state.collapsed ? 420 : state.settingsOpen && !state.collapsed ? 220 : 100
+    : Math.min(display.workAreaSize.height - 30, Math.max(state.notificationCenterOpen ? 340 : 220, 132 + itemCount * 62 + (state.settingsOpen && !state.collapsed ? 70 : 0)));
+  const width = state.collapsed ? collapsedSize : expandedWidth;
+  const height = state.collapsed ? collapsedSize : expandedHeight;
+  const centerY = resetPosition
+    ? display.workArea.y + display.workAreaSize.height / 2
+    : currentBounds.y + currentBounds.height / 2;
+  const centerX = resetPosition
+    ? display.workArea.x + display.workAreaSize.width / 2
+    : currentBounds.x + currentBounds.width / 2;
+  const bottom = resetPosition
+    ? display.workArea.y + display.workAreaSize.height - 18
+    : currentBounds.y + currentBounds.height;
+  const defaultX = isBottomAnchor
+    ? Math.round(centerX - width / 2)
+    : isLeftAnchor
+      ? display.workArea.x
+      : display.workArea.x + display.workAreaSize.width - width;
+  const defaultY = isBottomAnchor ? Math.round(bottom - height) : Math.round(centerY - height / 2);
   const minX = display.workArea.x;
   const maxX = display.workArea.x + display.workAreaSize.width - width;
   const minY = display.workArea.y;
   const maxY = display.workArea.y + display.workAreaSize.height - height;
-  const x = Math.min(maxX, Math.max(minX, Math.round(centerX - width / 2)));
-  const y = Math.min(maxY, Math.max(minY, Math.round(bottom - height)));
+  const x = isBottomAnchor
+    ? Math.min(maxX, Math.max(minX, defaultX))
+    : defaultX;
+  const y = Math.min(maxY, Math.max(minY, defaultY));
   suiteDockWindow.setBounds({ x, y, width, height }, animate);
 }
 
@@ -315,9 +349,12 @@ async function saveSuiteDockState(partial: Partial<DesktopDockState>): Promise<D
     !suiteDockWindow.isDestroyed() &&
     (typeof partial.collapsed === "boolean" ||
       typeof partial.visibleToolCount === "number" ||
-      typeof partial.settingsOpen === "boolean")
+      typeof partial.settingsOpen === "boolean" ||
+      typeof partial.notificationCenterOpen === "boolean" ||
+      typeof partial.edgeAnchor === "string")
   ) {
-    applySuiteDockWindowLayout(next, true);
+    const edgeChanged = typeof partial.edgeAnchor === "string" && partial.edgeAnchor !== current.edgeAnchor;
+    applySuiteDockWindowLayout(next, true, edgeChanged);
     const resizedBounds = suiteDockWindow.getBounds();
     next.x = resizedBounds.x;
     next.y = resizedBounds.y;
@@ -1457,12 +1494,25 @@ function registerIpcHandlers(): void {
       ...getDesktopImageCacheLimits(),
     };
   });
-  ipcMain.handle("filex:choose-thumbnail-cache-directory", () => chooseThumbnailCacheDirectory());
-  ipcMain.handle("filex:set-thumbnail-cache-directory", (_event, directoryPath: string) =>
-    setThumbnailCacheDirectory(directoryPath),
-  );
-  ipcMain.handle("filex:reset-thumbnail-cache-directory", () => resetThumbnailCacheDirectory());
-  ipcMain.handle("filex:clear-thumbnail-cache", () => clearThumbnailCacheDirectory());
+  ipcMain.handle("filex:choose-thumbnail-cache-directory", async () => {
+    const info = await chooseThumbnailCacheDirectory();
+    return info ? { ...info, ...getDesktopImageCacheLimits() } : null;
+  });
+  ipcMain.handle("filex:set-thumbnail-cache-directory", async (_event, directoryPath: string) => ({
+    ...await setThumbnailCacheDirectory(directoryPath),
+    ...getDesktopImageCacheLimits(),
+  }));
+  ipcMain.handle("filex:reset-thumbnail-cache-directory", async () => ({
+    ...await resetThumbnailCacheDirectory(),
+    ...getDesktopImageCacheLimits(),
+  }));
+  ipcMain.handle("filex:clear-thumbnail-cache", async () => {
+    const cleared = await clearThumbnailCacheDirectory();
+    if (cleared) {
+      clearDesktopImageMemoryCaches();
+    }
+    return cleared;
+  });
   ipcMain.handle("filex:get-ram-budget-info", async () => {
     const limits = getDesktopImageCacheLimits();
     return getRamBudgetInfo(limits.systemTotalMemoryBytes, limits.ramBudgetBytes, {
@@ -1487,14 +1537,21 @@ function registerIpcHandlers(): void {
       effectivePreviewSourceMaxBytes: limits.effectivePreviewSourceMaxBytes,
     });
   });
+  ipcMain.handle("filex:set-disk-cache-budget-preset", async (_event, preset: DesktopDiskCacheBudgetPreset) => ({
+    ...await setDiskCacheBudgetPreset(preset),
+    ...getDesktopImageCacheLimits(),
+  }));
   ipcMain.handle("filex:relaunch", () => {
     app.relaunch();
     app.quit();
   });
   ipcMain.handle("filex:get-cache-location-recommendation", () => getCacheLocationRecommendation());
-  ipcMain.handle("filex:migrate-thumbnail-cache-directory", (_event, directoryPath: string) =>
-    migrateThumbnailCacheDirectory(directoryPath),
-  );
+  ipcMain.handle("filex:migrate-thumbnail-cache-directory", async (_event, directoryPath: string) => {
+    const result = await migrateThumbnailCacheDirectory(directoryPath);
+    return result.cacheInfo
+      ? { ...result, cacheInfo: { ...result.cacheInfo, ...getDesktopImageCacheLimits() } }
+      : result;
+  });
   ipcMain.handle("filex:dismiss-cache-location-recommendation", () =>
     dismissCacheLocationRecommendation(),
   );
@@ -1563,7 +1620,7 @@ function registerIpcHandlers(): void {
       buttonLabel: "Usa questo file",
       properties: ["openFile"],
       filters: [
-        { name: "Immagini", extensions: ["jpg", "jpeg", "png", "webp", "tif", "tiff", "psd"] },
+        { name: "Immagini", extensions: ["jpg", "jpeg", "png", "webp", "heic", "heif", "tif", "tiff", "psd"] },
         { name: "Tutti i file", extensions: ["*"] },
       ],
     });
@@ -1788,7 +1845,12 @@ function registerIpcHandlers(): void {
     try {
       const uploaded = await uploadStudioFlowRegistryToDrive(batch);
       archivio.completeDriveRegistrySyncService(ids);
-      return { ok: true, syncedEvents: ids.length, message: `Registro caricato: ${uploaded.fileName}` };
+      return {
+        ok: true,
+        syncedEvents: ids.length,
+        message: `Registro caricato: ${uploaded.fileName}`,
+        driveUrl: uploaded.driveUrl,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       archivio.completeDriveRegistrySyncService(ids, message);
@@ -1965,16 +2027,27 @@ async function createSuiteDock(): Promise<void> {
 
   const display = screen.getPrimaryDisplay();
   const dockState = await readSuiteDockState();
-  const width = dockState.collapsed
-    ? 88
-    : Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + dockState.visibleToolCount * 62));
-  const height = dockState.settingsOpen && !dockState.collapsed ? 190 : 100;
-  const defaultX = Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2);
-  const defaultY = display.workArea.y + display.workAreaSize.height - height - 18;
+  const isBottomAnchor = dockState.edgeAnchor === "bottom";
+  const isLeftAnchor = dockState.edgeAnchor === "left";
+  const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, dockState.visibleToolCount));
+  const width = dockState.collapsed ? (isBottomAnchor ? 88 : 76) : isBottomAnchor
+    ? Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + itemCount * 62))
+    : dockState.settingsOpen || dockState.notificationCenterOpen ? 380 : 82;
+  const height = dockState.collapsed ? (isBottomAnchor ? 88 : 76) : isBottomAnchor
+    ? (dockState.notificationCenterOpen ? 420 : dockState.settingsOpen ? 220 : 100)
+    : Math.min(display.workAreaSize.height - 30, Math.max(dockState.notificationCenterOpen ? 340 : 220, 132 + itemCount * 62 + (dockState.settingsOpen ? 70 : 0)));
+  const defaultX = isBottomAnchor
+    ? Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2)
+    : isLeftAnchor
+      ? display.workArea.x
+      : display.workArea.x + display.workAreaSize.width - width;
+  const defaultY = isBottomAnchor
+    ? display.workArea.y + display.workAreaSize.height - height - 18
+    : Math.round(display.workArea.y + (display.workAreaSize.height - height) / 2);
   suiteDockWindow = new BrowserWindow({
     width,
     height,
-    x: dockState.x || defaultX,
+    x: isBottomAnchor ? dockState.x || defaultX : defaultX,
     y: dockState.y || defaultY,
     frame: false,
     transparent: true,

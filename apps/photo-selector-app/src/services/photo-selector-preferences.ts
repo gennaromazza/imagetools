@@ -55,7 +55,18 @@ export const DEFAULT_PHOTO_SELECTOR_PREFERENCES: PhotoSelectorPreferences = {
 };
 
 let preferencesCache: PhotoSelectorPreferences = { ...DEFAULT_PHOTO_SELECTOR_PREFERENCES };
+let confirmedPreferences: PhotoSelectorPreferences = preferencesCache;
 let activeRamBudgetPreset: DesktopRamBudgetPreset = "default";
+let preferenceSaveSequence = 0;
+let preferenceSaveQueue: Promise<void> = Promise.resolve();
+const preferenceSaveFailureListeners = new Set<(preferences: PhotoSelectorPreferences) => void>();
+
+export function subscribePhotoSelectorPreferenceSaveFailures(
+  listener: (preferences: PhotoSelectorPreferences) => void,
+): () => void {
+  preferenceSaveFailureListeners.add(listener);
+  return () => preferenceSaveFailureListeners.delete(listener);
+}
 
 export function normalizeCustomLabelName(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 48);
@@ -267,6 +278,7 @@ export async function hydratePhotoSelectorPreferences(): Promise<PhotoSelectorPr
   const nativePreferences = await getDesktopPreferences();
   activeRamBudgetPreset = nativePreferences?.ramBudgetPreset ?? "default";
   preferencesCache = parseStoredPreferences(nativePreferences);
+  confirmedPreferences = preferencesCache;
   return preferencesCache;
 }
 
@@ -328,6 +340,21 @@ export function savePhotoSelectorPreferences(preferences: Partial<PhotoSelectorP
   preferencesCache = next;
 
   if (hasDesktopStateApi()) {
-    void saveDesktopPreferencesNative(toDesktopPreferences(next));
+    preferenceSaveSequence += 1;
+    const saveSequence = preferenceSaveSequence;
+    preferenceSaveQueue = preferenceSaveQueue.then(async () => {
+      const saved = await saveDesktopPreferencesNative(toDesktopPreferences(next));
+      if (saved) {
+        confirmedPreferences = next;
+        return;
+      }
+      if (saveSequence !== preferenceSaveSequence) {
+        return;
+      }
+      preferencesCache = confirmedPreferences;
+      for (const listener of Array.from(preferenceSaveFailureListeners)) {
+        listener(clonePreferences(confirmedPreferences));
+      }
+    });
   }
 }

@@ -2,6 +2,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, ty
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   DesktopCacheLocationRecommendation,
+  DesktopDiskCacheBudgetPreset,
   DesktopDragOutCheck,
   DesktopEditorCandidate,
   DesktopGraphicsStatus,
@@ -53,6 +54,7 @@ import {
   normalizeCustomLabelShortcut,
   normalizeCustomLabelShortcuts,
   savePhotoSelectorPreferences,
+  subscribePhotoSelectorPreferenceSaveFailures,
   type CustomLabelShortcut,
   type CustomLabelTone,
   type PhotoFilterPreset,
@@ -68,6 +70,8 @@ import { logDesktopEvent } from "../services/desktop-store";
 import { useToast } from "./ToastProvider";
 import { DockableWorkspace } from "./workspace/DockableWorkspace";
 import { useWorkspacePanelLayout } from "./workspace/useWorkspacePanelLayout";
+import { getThumbnailView } from "../services/thumbnail-view-store";
+import { useThumbnailView } from "../services/use-thumbnail-view";
 import { PhotoFilterPanel } from "./selector/PhotoFilterPanel";
 import { QuickStatsPanel } from "./selector/QuickStatsPanel";
 import { SelectionActionsPanel } from "./selector/SelectionActionsPanel";
@@ -108,6 +112,10 @@ interface PhotoSelectorProps {
   onThumbnailProfileChange?: (profile: ThumbnailProfile) => void;
   onSortCacheEnabledChange?: (enabled: boolean) => void;
   desktopThumbnailCacheInfo?: DesktopThumbnailCacheInfo | null;
+  desktopPerformanceFeedback?: {
+    message: string;
+    tone: "success" | "error" | "warning";
+  } | null;
   desktopCacheLocationRecommendation?: DesktopCacheLocationRecommendation | null;
   isDesktopThumbnailCacheBusy?: boolean;
   isDesktopCacheRecommendationModalOpen?: boolean;
@@ -119,6 +127,8 @@ interface PhotoSelectorProps {
   onSnoozeDesktopCacheRecommendation?: () => void | Promise<void>;
   onDismissDesktopCacheRecommendation?: () => void | Promise<void>;
   onRamBudgetPresetChange?: (preset: DesktopRamBudgetPreset) => void | Promise<void>;
+  onDiskCacheBudgetPresetChange?: (preset: DesktopDiskCacheBudgetPreset) => void | Promise<void>;
+  onRefreshDesktopThumbnailCacheInfo?: () => void | Promise<void>;
 }
 
 type SortMode = "name" | "orientation" | "rating" | "createdAt";
@@ -458,6 +468,7 @@ export function PhotoSelector({
   onThumbnailProfileChange,
   onSortCacheEnabledChange,
   desktopThumbnailCacheInfo = null,
+  desktopPerformanceFeedback = null,
   desktopCacheLocationRecommendation = null,
   isDesktopThumbnailCacheBusy = false,
   isDesktopCacheRecommendationModalOpen = false,
@@ -469,6 +480,8 @@ export function PhotoSelector({
   onSnoozeDesktopCacheRecommendation,
   onDismissDesktopCacheRecommendation,
   onRamBudgetPresetChange,
+  onDiskCacheBudgetPresetChange,
+  onRefreshDesktopThumbnailCacheInfo,
 }: PhotoSelectorProps) {
   const { addToast } = useToast();
   const [sortBy, setSortBy] = useState<SortMode>("name");
@@ -587,11 +600,29 @@ export function PhotoSelector({
   // Thumbnail batches replace the photo array many times per second. Metadata
   // only needs rebuilding for actual metadata changes and once at pipeline end,
   // when orientation-based sorting can consume the final thumbnail dimensions.
-  const metadataPhotos = useMemo(() => photos, [metadataVersion, isThumbnailLoading]);
-  const metadataAssetById = useMemo(
-    () => new Map(metadataPhotos.map((photo) => [photo.id, photo])),
-    [metadataPhotos],
-  );
+  const metadataPhotos = photos;
+  const metadataIndex = useMemo(() => {
+    const assetById = new Map<string, ImageAsset>();
+    const searchTextById = new Map<string, string>();
+    const seriesCounts = new Map<string, number>();
+    const timeClusterCounts = new Map<string, number>();
+    const customLabelCounts = new Map<string, number>();
+
+    for (const photo of metadataPhotos) {
+      assetById.set(photo.id, photo);
+      searchTextById.set(photo.id, photo.fileName.toLocaleLowerCase());
+      const seriesKey = getSeriesKey(photo);
+      seriesCounts.set(seriesKey, (seriesCounts.get(seriesKey) ?? 0) + 1);
+      const timeClusterKey = getTimeClusterKey(photo);
+      timeClusterCounts.set(timeClusterKey, (timeClusterCounts.get(timeClusterKey) ?? 0) + 1);
+      for (const label of normalizeAssetCustomLabels(photo.customLabels)) {
+        customLabelCounts.set(label, (customLabelCounts.get(label) ?? 0) + 1);
+      }
+    }
+
+    return { assetById, searchTextById, seriesCounts, timeClusterCounts, customLabelCounts };
+  }, [metadataPhotos]);
+  const metadataAssetById = metadataIndex.assetById;
   const currentFolderPhotos = useMemo(
     () => folderFilter === "all"
       ? metadataPhotos
@@ -606,7 +637,7 @@ export function PhotoSelector({
     () => selectedIds.filter((photoId) => currentFolderPhotoIdSet.has(photoId)),
     [currentFolderPhotoIdSet, selectedIds],
   );
-  const assetById = useMemo(() => new Map(photos.map((photo) => [photo.id, photo])), [photos]);
+  const assetById = metadataAssetById;
   const photosRef = useRef(photos);
   useEffect(() => {
     photosRef.current = photos;
@@ -822,6 +853,35 @@ export function PhotoSelector({
       active = false;
     };
   }, []);
+
+  useEffect(() => subscribePhotoSelectorPreferenceSaveFailures((preferences) => {
+    setCustomColorNames(preferences.colorNames);
+    setFilterPresets(preferences.filterPresets);
+    setCustomLabelsCatalog(preferences.customLabelsCatalog);
+    setCustomLabelColors(preferences.customLabelColors);
+    setCustomLabelShortcuts(preferences.customLabelShortcuts);
+    setSelectedThumbnailProfile(preferences.thumbnailProfile);
+    setIsSortCacheEnabled(preferences.sortCacheEnabled);
+    setAutoAdvanceOnAction(preferences.autoAdvanceOnAction);
+    setCardSize(preferences.cardSize);
+    setRootFolderPathOverride(preferences.rootFolderPathOverride);
+    setPreferredEditorPath(sanitizeEditorExecutablePath(preferences.preferredEditorPath));
+    addToast("Salvataggio impostazioni non riuscito: valori precedenti ripristinati.", "error", 5000);
+  }), [addToast]);
+
+  useEffect(() => {
+    if (!isSettingsPanelOpen || !onRefreshDesktopThumbnailCacheInfo) {
+      return;
+    }
+
+    void onRefreshDesktopThumbnailCacheInfo();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void onRefreshDesktopThumbnailCacheInfo();
+      }
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [isSettingsPanelOpen, onRefreshDesktopThumbnailCacheInfo]);
 
   useEffect(() => {
     let active = true;
@@ -1354,47 +1414,30 @@ export function PhotoSelector({
   // Extract unique subfolders for the folder filter dropdown
   const subfolders = useMemo(() => extractSubfolders(metadataPhotos), [metadataPhotos]);
   const seriesGroups = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const photo of metadataPhotos) {
-      const key = getSeriesKey(photo);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
+    return Array.from(metadataIndex.seriesCounts.entries())
       .map(([key, count]) => ({ key, count }))
       .sort((left, right) => right.count - left.count || left.key.localeCompare(right.key));
-  }, [metadataPhotos]);
+  }, [metadataIndex]);
   const timeClusters = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const photo of metadataPhotos) {
-      const key = getTimeClusterKey(photo);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return Array.from(counts.entries())
+    return Array.from(metadataIndex.timeClusterCounts.entries())
       .map(([key, count]) => ({ key, count }))
       .sort((left, right) => left.key.localeCompare(right.key));
-  }, [metadataPhotos]);
+  }, [metadataIndex]);
   const customLabelFilterOptions = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const photo of metadataPhotos) {
-      for (const label of normalizeAssetCustomLabels(photo.customLabels)) {
-        counts.set(label, (counts.get(label) ?? 0) + 1);
-      }
-    }
-
     // Also discover labels already present in the project. This keeps the
     // filter available when a project/XMP was opened on another computer and
     // its local preferences do not yet contain the label catalog.
     const labels = [...customLabelsCatalog];
-    for (const label of counts.keys()) {
+    for (const label of metadataIndex.customLabelCounts.keys()) {
       if (!labels.some((knownLabel) => knownLabel.toLocaleLowerCase() === label.toLocaleLowerCase())) {
         labels.push(label);
       }
     }
 
     return labels
-      .map((label) => ({ label, count: counts.get(label) ?? 0 }))
+      .map((label) => ({ label, count: metadataIndex.customLabelCounts.get(label) ?? 0 }))
       .filter(({ count }) => count > 0);
-  }, [customLabelsCatalog, metadataPhotos]);
+  }, [customLabelsCatalog, metadataIndex]);
 
   const sortedPhotoIds = useMemo(() => {
     const isDynamicSort = sortBy === "orientation" || sortBy === "rating";
@@ -1532,7 +1575,7 @@ export function PhotoSelector({
       if (timeClusterFilter !== "all" && getTimeClusterKey(photo) !== timeClusterFilter) {
         continue;
       }
-      if (lowerSearch && !photo.fileName.toLowerCase().includes(lowerSearch)) {
+      if (lowerSearch && !metadataIndex.searchTextById.get(photo.id)?.includes(lowerSearch)) {
         continue;
       }
 
@@ -1547,6 +1590,7 @@ export function PhotoSelector({
     folderFilter,
     formatFilter,
     metadataAssetById,
+    metadataIndex,
     pickFilter,
     ratingFilter,
     seriesFilter,
@@ -1567,11 +1611,15 @@ export function PhotoSelector({
   );
   const visiblePhotoIdSet = useMemo(() => new Set(visiblePhotoIds), [visiblePhotoIds]);
   const comparePhotos = useMemo(
-    () => visiblePhotoIds
-      .filter((photoId) => selectedSet.has(photoId))
+    () => selectedIds
+      .filter((photoId) => visiblePhotoIdSet.has(photoId))
+      .sort((left, right) => (
+        (visiblePhotoIndexById.get(left) ?? Number.MAX_SAFE_INTEGER)
+        - (visiblePhotoIndexById.get(right) ?? Number.MAX_SAFE_INTEGER)
+      ))
       .map((photoId) => assetById.get(photoId))
       .filter((photo): photo is ImageAsset => Boolean(photo)),
-    [assetById, selectedSet, visiblePhotoIds],
+    [assetById, selectedIds, visiblePhotoIdSet, visiblePhotoIndexById],
   );
   const canComparePhotos = comparePhotos.length >= 2 && comparePhotos.length <= 4;
   const openCompare = useCallback(() => {
@@ -1800,7 +1848,11 @@ export function PhotoSelector({
   }, [gridColumnCount, gridRowHeight, rowVirtualizer, totalVirtualRows]);
 
   // Search in all photos so preview doesn't close when filters change
-  const previewAsset = previewAssetId ? (assetById.get(previewAssetId) ?? null) : null;
+  const previewThumbnailView = useThumbnailView(previewAssetId);
+  const previewAssetBase = previewAssetId ? (assetById.get(previewAssetId) ?? null) : null;
+  const previewAsset = previewAssetBase && previewThumbnailView
+    ? { ...previewAssetBase, ...previewThumbnailView }
+    : previewAssetBase;
   const previewPriorityIds = useMemo(() => {
     const anchorId = previewAssetId ?? focusedPhotoId;
     if (!anchorId) {
@@ -2801,19 +2853,27 @@ export function PhotoSelector({
     return previewAsset; // Until async finishes, use what we have (thumbnailUrl usually)
   }, [previewAsset, asyncPreviewUrl]);
 
+  const isPreviewOpen = Boolean(previewAssetId);
   const visiblePreviewAssets = useMemo(() => {
-    if (!previewAssetId) {
+    if (!isPreviewOpen) {
       return [] as ImageAsset[];
     }
-
     return visiblePhotoIds
-      .map((photoId) => assetById.get(photoId))
+      .map((photoId) => {
+        const photo = assetById.get(photoId);
+        if (!photo) return null;
+        const thumbnailView = getThumbnailView(photoId);
+        return thumbnailView ? { ...photo, ...thumbnailView } : photo;
+      })
       .filter((photo): photo is ImageAsset => Boolean(photo));
-  }, [assetById, previewAssetId, visiblePhotoIds]);
+  }, [assetById, isPreviewOpen, visiblePhotoIds]);
 
   const visibleSelectedCount = useMemo(
-    () => visiblePhotoIds.filter((photoId) => selectedSet.has(photoId)).length,
-    [selectedSet, visiblePhotoIds],
+    () => selectedIds.reduce(
+      (count, photoId) => count + (visiblePhotoIdSet.has(photoId) ? 1 : 0),
+      0,
+    ),
+    [selectedIds, visiblePhotoIdSet],
   );
   const allVisibleSelected = visiblePhotoIds.length > 0 && visibleSelectedCount === visiblePhotoIds.length;
   const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected;
@@ -3825,6 +3885,16 @@ export function PhotoSelector({
             </button>
           </div>
 
+          {desktopPerformanceFeedback ? (
+            <div
+              className={`photo-selector__settings-feedback photo-selector__settings-feedback--${desktopPerformanceFeedback.tone}`}
+              role="status"
+              aria-live="polite"
+            >
+              {desktopPerformanceFeedback.message}
+            </div>
+          ) : null}
+
           <div className="photo-selector__settings-section">
             <h4 className="photo-selector__settings-section-title">Nomi etichette colore</h4>
             {COLOR_LABELS.map((label) => (
@@ -4110,6 +4180,9 @@ export function PhotoSelector({
                 ?
               </button>
             </h4>
+            <p className="photo-selector__settings-empty" style={{ marginTop: "0.1rem" }}>
+              Budget RAM, profilo anteprime e limite cache si applicano subito: non serve riavviare il software.
+            </p>
             <label className="photo-selector__settings-color-row">
               <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Anteprime</span>
               <select
@@ -4215,7 +4288,7 @@ export function PhotoSelector({
                 </button>
               </h4>
               <p className="photo-selector__settings-empty" style={{ marginTop: "0.1rem" }}>
-                Spostiamo le cache pesanti gestite da Selezione Foto, non i percorsi di sistema di Windows.
+                Spostiamo le cache pesanti gestite da Selezione Foto, non i percorsi di sistema di Windows. Anche il nuovo percorso diventa attivo subito, senza riavvio.
               </p>
               <label className="photo-selector__settings-color-row">
                 <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Percorso</span>
@@ -4232,6 +4305,23 @@ export function PhotoSelector({
                 </div>
               </label>
               <div className="photo-selector__settings-preset-row">
+                {onDiskCacheBudgetPresetChange ? (
+                  <label className="photo-selector__settings-inline-select">
+                    <span>Limite disco</span>
+                    <select
+                      value={desktopThumbnailCacheInfo.diskBudgetPreset ?? "balanced"}
+                      onChange={(event) => void onDiskCacheBudgetPresetChange(
+                        event.target.value as DesktopDiskCacheBudgetPreset,
+                      )}
+                      disabled={isDesktopThumbnailCacheBusy}
+                    >
+                      <option value="compact">Compatta · 2 GB</option>
+                      <option value="balanced">Bilanciata · 8 GB</option>
+                      <option value="performance">Performance · 24 GB</option>
+                      <option value="unlimited">Senza limite</option>
+                    </select>
+                  </label>
+                ) : null}
                 <button
                   type="button"
                   className="ghost-button ghost-button--small"
@@ -4276,6 +4366,14 @@ export function PhotoSelector({
                 >
                   Svuota cache
                 </button>
+                <button
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={() => void onRefreshDesktopThumbnailCacheInfo?.()}
+                  disabled={isDesktopThumbnailCacheBusy || !onRefreshDesktopThumbnailCacheInfo}
+                >
+                  Aggiorna dati
+                </button>
               </div>
               {desktopThumbnailCacheStatus ? (
                 <p
@@ -4292,7 +4390,10 @@ export function PhotoSelector({
                 </p>
               ) : null}
               <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
-                {desktopThumbnailCacheInfo.entryCount} anteprime, {formatBytes(desktopThumbnailCacheInfo.totalBytes)} su disco.
+                {desktopThumbnailCacheInfo.entryCount} anteprime, {formatBytes(desktopThumbnailCacheInfo.totalBytes)} su disco
+                {desktopThumbnailCacheInfo.diskBudgetBytes == null
+                  ? " (nessun limite)."
+                  : ` su ${formatBytes(desktopThumbnailCacheInfo.diskBudgetBytes)}.`}
               </p>
               {typeof desktopThumbnailCacheInfo.rawRenderCacheHit === "number" ? (
                 <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>

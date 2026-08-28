@@ -1,6 +1,7 @@
 import type {
   DesktopCacheLocationRecommendation,
   DesktopCacheMigrationResult,
+  DesktopDiskCacheBudgetPreset,
   DesktopRamBudgetPreset,
   DesktopThumbnailCacheInfo,
 } from "@photo-tools/desktop-contracts";
@@ -145,6 +146,21 @@ export async function setDesktopRamBudgetPreset(
 
   try {
     return await api.setRamBudgetPreset(preset);
+  } catch {
+    return null;
+  }
+}
+
+export async function setDesktopDiskCacheBudgetPreset(
+  preset: DesktopDiskCacheBudgetPreset,
+): Promise<DesktopThumbnailCacheInfo | null> {
+  const api = getDesktopApi();
+  if (!api?.setDiskCacheBudgetPreset) {
+    return null;
+  }
+
+  try {
+    return await api.setDiskCacheBudgetPreset(preset);
   } catch {
     return null;
   }

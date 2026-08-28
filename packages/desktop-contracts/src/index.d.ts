@@ -2,6 +2,7 @@ export type DesktopToolId = "suite-launcher" | "image-party-frame" | "batch-prin
 export type DesktopReleaseChannel = "stable" | "beta";
 export type DesktopThumbnailProfile = "ultra-fast" | "fast" | "balanced";
 export type DesktopRamBudgetPreset = "conservative" | "default" | "performance" | "maximum";
+export type DesktopDiskCacheBudgetPreset = "compact" | "balanced" | "performance" | "unlimited";
 export type DesktopPhotoSortMode = "name" | "orientation" | "rating" | "createdAt";
 export type DesktopCustomLabelTone = "sand" | "rose" | "green" | "blue" | "purple" | "slate";
 export type DesktopColorLabel = "red" | "yellow" | "green" | "blue" | "purple";
@@ -27,6 +28,8 @@ export interface DesktopDockState {
     toolOrder: DesktopToolId[];
     visibleToolCount: number;
     settingsOpen: boolean;
+    notificationCenterOpen: boolean;
+    edgeAnchor: "bottom" | "left" | "right";
 }
 export type DesktopSuiteUpdateStatus = "idle" | "disabled" | "checking" | "up-to-date" | "available" | "downloading" | "ready" | "installing" | "error";
 export interface DesktopSuiteUpdateState {
@@ -127,6 +130,7 @@ export interface DesktopFolderOpenDiagnostics {
 export interface DesktopFolderOpenOptions {
     recursive?: boolean;
     relativePathMode?: "legacy" | "project-relative";
+    includeExtendedImages?: boolean;
 }
 export interface DesktopFolderOpenResult {
     name: string;
@@ -218,6 +222,8 @@ export interface DesktopThumbnailCacheInfo {
     systemTotalMemoryBytes?: number;
     ramBudgetPreset?: DesktopRamBudgetPreset;
     ramBudgetBytes?: number;
+    diskBudgetPreset?: DesktopDiskCacheBudgetPreset;
+    diskBudgetBytes?: number | null;
 }
 export interface DesktopStorageVolumeInfo {
     mountPath: string;
@@ -334,6 +340,12 @@ export interface DesktopGoogleDriveStatus {
     connected: boolean;
     accountEmail: string | null;
     requiresReconnect?: boolean;
+}
+export interface DesktopArchivioDriveRegistrySyncResult {
+    ok: boolean;
+    syncedEvents: number;
+    message: string;
+    driveUrl?: string;
 }
 export interface DesktopGraphicsStatus {
     hardwareAccelerationEnabled: boolean;
@@ -997,6 +1009,7 @@ export interface FileXDesktopApi {
     clearThumbnailCache: () => Promise<boolean>;
     getRamBudgetInfo: () => Promise<DesktopThumbnailCacheInfo>;
     setRamBudgetPreset: (preset: DesktopRamBudgetPreset) => Promise<DesktopThumbnailCacheInfo>;
+    setDiskCacheBudgetPreset: (preset: DesktopDiskCacheBudgetPreset) => Promise<DesktopThumbnailCacheInfo>;
     relaunch: () => Promise<void>;
     getCacheLocationRecommendation: () => Promise<DesktopCacheLocationRecommendation>;
     migrateThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopCacheMigrationResult>;
@@ -1068,7 +1081,7 @@ export interface FileXDesktopApi {
     getArchivioStudioFlowStatus: () => Promise<ArchivioStudioFlowStatus>;
     reconcileArchivioIndex: () => Promise<ArchivioStudioFlowStatus["archiveIndex"]>;
     resumeArchivioImport: (sessionId: string) => Promise<ArchivioImportResult>;
-    syncArchivioDriveRegistry: () => Promise<{ ok: boolean; syncedEvents: number; message: string }>;
+    syncArchivioDriveRegistry: () => Promise<DesktopArchivioDriveRegistrySyncResult>;
     getArchivioFilterPreview: (input: {
         sdPath: string;
         fileNameIncludes?: string;

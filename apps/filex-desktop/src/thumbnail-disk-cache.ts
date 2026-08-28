@@ -10,6 +10,7 @@ import {
   readFile,
   readdir,
   rm,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { join, parse, relative, resolve } from "node:path";
@@ -18,12 +19,20 @@ import type {
   DesktopCachedThumbnail,
   DesktopCacheLocationRecommendation,
   DesktopCacheMigrationResult,
+  DesktopDiskCacheBudgetPreset,
   DesktopRamBudgetPreset,
   DesktopRenderedImage,
   DesktopStorageVolumeInfo,
   DesktopThumbnailCacheInfo,
   DesktopThumbnailCacheLookupEntry,
 } from "@photo-tools/desktop-contracts";
+import {
+  AsyncReadWriteGate,
+  getDiskCacheBudgetBytes,
+  normalizeDiskCacheBudgetPreset,
+  selectDiskCacheEntriesToPrune,
+  type DiskCacheEntryStat,
+} from "./thumbnail-cache-policy.js";
 
 const { app, dialog } = electron;
 
@@ -33,6 +42,7 @@ interface DesktopShellSettings {
   cacheLocationRecommendationDismissedAt?: string;
   cacheLocationRecommendationLastPromptedAt?: string;
   ramBudgetPreset?: DesktopRamBudgetPreset;
+  diskCacheBudgetPreset?: DesktopDiskCacheBudgetPreset;
 }
 
 interface WindowsLogicalDiskRow {
@@ -44,6 +54,7 @@ interface WindowsLogicalDiskRow {
 }
 
 const SETTINGS_FILE_NAME = "desktop-settings.json";
+const DEVELOPMENT_SETTINGS_FILE_NAME = "desktop-settings.dev.json";
 const CACHE_FILE_EXTENSION = ".thumb";
 const PREVIEW_CACHE_FILE_EXTENSION = ".preview";
 const CACHE_VERSION = "v2";
@@ -55,6 +66,13 @@ const RECOMMENDED_TARGET_FREE_BYTES_THRESHOLD = 50 * 1024 * 1024 * 1024;
 const RECOMMENDED_FREE_SPACE_MULTIPLIER = 3;
 const POWERSHELL_MAX_BUFFER_BYTES = 1024 * 1024;
 const CACHE_WRITE_CONCURRENCY = 2;
+const CACHE_STATS_CONCURRENCY = 16;
+const CACHE_PRUNE_CONCURRENCY = 4;
+const CACHE_PRUNE_MIN_INTERVAL_MS = 60_000;
+const CACHE_PRUNE_IDLE_DELAY_MS = 5_000;
+const CACHE_PRUNE_TARGET_RATIO = 0.9;
+const CACHE_SUMMARY_MAX_AGE_MS = 5_000;
+const CACHE_ACCESS_TOUCH_MIN_INTERVAL_MS = 250;
 const execFileAsync = promisify(execFile);
 
 let settingsCache: DesktopShellSettings | null = null;
@@ -63,6 +81,19 @@ let activeCacheDirectoryPromise: Promise<{
   defaultPath: string;
   usesCustomPath: boolean;
 }> | null = null;
+let cacheSummaryCache: {
+  directoryPath: string;
+  entryCount: number;
+  totalBytes: number;
+  cachedAt: number;
+} | null = null;
+let cachePruneTimer: NodeJS.Timeout | null = null;
+let lastCachePruneAt = 0;
+let lastCacheEntryTouchAt = 0;
+
+function usesDevelopmentCache(): boolean {
+  return !app.isPackaged && process.env.FILEX_RENDERER_MODE === "dev";
+}
 
 class AsyncSemaphore {
   private active = 0;
@@ -92,18 +123,26 @@ class AsyncSemaphore {
 }
 
 const cacheWriteSemaphore = new AsyncSemaphore(CACHE_WRITE_CONCURRENCY);
+const cacheMutationGate = new AsyncReadWriteGate();
 
 function getSettingsFilePath(): string {
-  return join(app.getPath("userData"), SETTINGS_FILE_NAME);
+  return join(
+    app.getPath("userData"),
+    usesDevelopmentCache() ? DEVELOPMENT_SETTINGS_FILE_NAME : SETTINGS_FILE_NAME,
+  );
 }
 
 function getDefaultThumbnailCacheDirectory(): string {
   const localAppDataPath = process.env.LOCALAPPDATA;
   if (localAppDataPath) {
-    return join(localAppDataPath, "FileX", "ThumbnailCache");
+    return usesDevelopmentCache()
+      ? join(localAppDataPath, "FileX", "Development", "ThumbnailCache")
+      : join(localAppDataPath, "FileX", "ThumbnailCache");
   }
 
-  return join(app.getPath("userData"), "ThumbnailCache");
+  return usesDevelopmentCache()
+    ? join(app.getPath("userData"), "Development", "ThumbnailCache")
+    : join(app.getPath("userData"), "ThumbnailCache");
 }
 
 function toOwnedUint8Array(buffer: Buffer): Uint8Array {
@@ -184,6 +223,21 @@ async function ensureDirectory(directoryPath: string): Promise<string> {
 
 function invalidateActiveCacheDirectory(): void {
   activeCacheDirectoryPromise = null;
+  cacheSummaryCache = null;
+}
+
+function invalidateCacheSummary(): void {
+  cacheSummaryCache = null;
+}
+
+function touchCacheEntry(cacheFilePath: string): void {
+  const timestamp = Date.now();
+  if (timestamp - lastCacheEntryTouchAt < CACHE_ACCESS_TOUCH_MIN_INTERVAL_MS) {
+    return;
+  }
+  lastCacheEntryTouchAt = timestamp;
+  const now = new Date(timestamp);
+  void utimes(cacheFilePath, now, now).catch(() => {});
 }
 
 async function resolveActiveCacheDirectory(): Promise<{
@@ -354,19 +408,90 @@ async function summarizeCacheDirectory(directoryPath: string): Promise<{
   entryCount: number;
   totalBytes: number;
 }> {
-  const cacheEntries = await listCacheEntries(directoryPath);
-  let totalBytes = 0;
-
-  for (const entryName of cacheEntries) {
-    try {
-      const stats = await lstat(join(directoryPath, entryName));
-      totalBytes += stats.size;
-    } catch {
-      // Ignore unreadable entries in the summary.
-    }
+  if (
+    cacheSummaryCache
+    && pathsEqual(cacheSummaryCache.directoryPath, directoryPath)
+    && Date.now() - cacheSummaryCache.cachedAt <= CACHE_SUMMARY_MAX_AGE_MS
+  ) {
+    return {
+      entryCount: cacheSummaryCache.entryCount,
+      totalBytes: cacheSummaryCache.totalBytes,
+    };
   }
 
+  const cacheEntries = await listCacheEntries(directoryPath);
+  const stats = await mapWithConcurrency(cacheEntries, CACHE_STATS_CONCURRENCY, async (entryName) => {
+    try {
+      const entryStats = await lstat(join(directoryPath, entryName));
+      return entryStats.size;
+    } catch {
+      return 0;
+    }
+  });
+  const totalBytes = stats.reduce((total, size) => total + size, 0);
+  cacheSummaryCache = {
+    directoryPath,
+    entryCount: cacheEntries.length,
+    totalBytes,
+    cachedAt: Date.now(),
+  };
+
   return { entryCount: cacheEntries.length, totalBytes };
+}
+
+async function listCacheEntryStats(directoryPath: string): Promise<DiskCacheEntryStat[]> {
+  const cacheEntries = await listCacheEntries(directoryPath);
+  const stats = await mapWithConcurrency(cacheEntries, CACHE_STATS_CONCURRENCY, async (entryName) => {
+    try {
+      const entryStats = await lstat(join(directoryPath, entryName));
+      return {
+        name: entryName,
+        size: entryStats.size,
+        mtimeMs: entryStats.mtimeMs,
+      } satisfies DiskCacheEntryStat;
+    } catch {
+      return null;
+    }
+  });
+  return stats.filter((entry): entry is DiskCacheEntryStat => entry !== null);
+}
+
+async function pruneThumbnailCacheToBudget(): Promise<void> {
+  await cacheMutationGate.runExclusive(async () => {
+    const settings = await loadSettings();
+    const preset = normalizeDiskCacheBudgetPreset(settings.diskCacheBudgetPreset);
+    const budgetBytes = getDiskCacheBudgetBytes(preset);
+    if (budgetBytes === null) {
+      return;
+    }
+
+    const { currentPath } = await getActiveCacheDirectory();
+    const entries = await listCacheEntryStats(currentPath);
+    const entriesToRemove = selectDiskCacheEntriesToPrune(
+      entries,
+      budgetBytes,
+      CACHE_PRUNE_TARGET_RATIO,
+    );
+    await mapWithConcurrency(entriesToRemove, CACHE_PRUNE_CONCURRENCY, async (entry) => {
+      await rm(join(currentPath, entry.name), { force: true }).catch(() => {});
+    });
+    lastCachePruneAt = Date.now();
+    invalidateCacheSummary();
+  });
+}
+
+function scheduleThumbnailCachePrune(): void {
+  if (cachePruneTimer) {
+    return;
+  }
+
+  const elapsed = Date.now() - lastCachePruneAt;
+  const delay = Math.max(CACHE_PRUNE_IDLE_DELAY_MS, CACHE_PRUNE_MIN_INTERVAL_MS - elapsed);
+  cachePruneTimer = setTimeout(() => {
+    cachePruneTimer = null;
+    void pruneThumbnailCacheToBudget();
+  }, delay);
+  cachePruneTimer.unref?.();
 }
 
 async function getWindowsStorageVolumes(): Promise<DesktopStorageVolumeInfo[]> {
@@ -514,6 +639,7 @@ export async function getThumbnailCacheInfo(): Promise<DesktopThumbnailCacheInfo
   const directoryInfo = await getActiveCacheDirectory();
   const summary = await summarizeCacheDirectory(directoryInfo.currentPath);
   const settings = await loadSettings();
+  const diskBudgetPreset = normalizeDiskCacheBudgetPreset(settings.diskCacheBudgetPreset);
 
   return {
     currentPath: directoryInfo.currentPath,
@@ -522,6 +648,8 @@ export async function getThumbnailCacheInfo(): Promise<DesktopThumbnailCacheInfo
     entryCount: summary.entryCount,
     totalBytes: summary.totalBytes,
     ramBudgetPreset: settings.ramBudgetPreset ?? "default",
+    diskBudgetPreset,
+    diskBudgetBytes: getDiskCacheBudgetBytes(diskBudgetPreset),
   };
 }
 
@@ -540,6 +668,7 @@ export async function getRamBudgetInfo(
   const directoryInfo = await getActiveCacheDirectory();
   const summary = await summarizeCacheDirectory(directoryInfo.currentPath);
   const settings = await loadSettings();
+  const diskBudgetPreset = normalizeDiskCacheBudgetPreset(settings.diskCacheBudgetPreset);
 
   return {
     currentPath: directoryInfo.currentPath,
@@ -548,6 +677,8 @@ export async function getRamBudgetInfo(
     entryCount: summary.entryCount,
     totalBytes: summary.totalBytes,
     ramBudgetPreset: settings.ramBudgetPreset ?? "default",
+    diskBudgetPreset,
+    diskBudgetBytes: getDiskCacheBudgetBytes(diskBudgetPreset),
     systemTotalMemoryBytes,
     ramBudgetBytes,
     ...effectiveLimits,
@@ -562,6 +693,18 @@ export async function saveRamBudgetPreset(preset: DesktopRamBudgetPreset): Promi
 export async function loadRamBudgetPreset(): Promise<DesktopRamBudgetPreset> {
   const settings = await loadSettings();
   return settings.ramBudgetPreset ?? "default";
+}
+
+export async function setDiskCacheBudgetPreset(
+  preset: DesktopDiskCacheBudgetPreset,
+): Promise<DesktopThumbnailCacheInfo> {
+  const normalizedPreset = normalizeDiskCacheBudgetPreset(preset);
+  await saveSettings({
+    ...(await loadSettings()),
+    diskCacheBudgetPreset: normalizedPreset,
+  });
+  await pruneThumbnailCacheToBudget();
+  return getThumbnailCacheInfo();
 }
 
 export async function getCacheLocationRecommendation(): Promise<DesktopCacheLocationRecommendation> {
@@ -644,22 +787,21 @@ export async function chooseThumbnailCacheDirectory(): Promise<DesktopThumbnailC
 }
 
 export async function setThumbnailCacheDirectory(directoryPath: string): Promise<DesktopThumbnailCacheInfo> {
-  const normalizedPath = await ensureDirectory(directoryPath);
-  await saveSettings({
-    ...(await loadSettings()),
-    thumbnailCacheDirectory: normalizedPath,
-  });
-  invalidateActiveCacheDirectory();
-  return getThumbnailCacheInfo();
+  const result = await migrateThumbnailCacheDirectory(directoryPath);
+  if (!result.ok || !result.cacheInfo) {
+    throw new Error(result.error ?? "Non sono riuscito a spostare la cache thumbnail.");
+  }
+  return result.cacheInfo;
 }
 
 export async function migrateThumbnailCacheDirectory(
   directoryPath: string,
 ): Promise<DesktopCacheMigrationResult> {
-  const sourceInfo = await getActiveCacheDirectory();
-  const sourcePath = sourceInfo.currentPath;
+  return cacheMutationGate.runExclusive(async () => {
+    const sourceInfo = await getActiveCacheDirectory();
+    const sourcePath = sourceInfo.currentPath;
 
-  try {
+    try {
     const normalizedTargetPath = await ensureDirectory(directoryPath);
 
     if (pathsEqual(sourcePath, normalizedTargetPath)) {
@@ -681,24 +823,23 @@ export async function migrateThumbnailCacheDirectory(
     }
 
     const sourceEntries = await listCacheEntries(sourcePath);
-    let copiedEntries = 0;
-
-    for (const entryName of sourceEntries) {
+    const copyResults = await mapWithConcurrency(sourceEntries, CACHE_PRUNE_CONCURRENCY, async (entryName) => {
       try {
         await copyFile(
           join(sourcePath, entryName),
           join(normalizedTargetPath, entryName),
           fsConstants.COPYFILE_EXCL,
         );
-        copiedEntries += 1;
+        return true;
       } catch (error) {
         const code = (error as NodeJS.ErrnoException | undefined)?.code;
         if (code === "EEXIST") {
-          continue;
+          return false;
         }
         throw error;
       }
-    }
+    });
+    const copiedEntries = copyResults.filter(Boolean).length;
 
     await access(normalizedTargetPath, fsConstants.R_OK | fsConstants.W_OK);
 
@@ -728,7 +869,7 @@ export async function migrateThumbnailCacheDirectory(
       removedSourceEntries,
       error: cleanupError,
     };
-  } catch (error) {
+    } catch (error) {
     return {
       ok: false,
       copiedEntries: 0,
@@ -738,7 +879,8 @@ export async function migrateThumbnailCacheDirectory(
         "Non sono riuscito a migrare la cache nel nuovo percorso.",
       ),
     };
-  }
+    }
+  });
 }
 
 export async function dismissCacheLocationRecommendation(): Promise<void> {
@@ -750,6 +892,7 @@ export async function dismissCacheLocationRecommendation(): Promise<void> {
 }
 
 export async function resetThumbnailCacheDirectory(): Promise<DesktopThumbnailCacheInfo> {
+  await setThumbnailCacheDirectory(getDefaultThumbnailCacheDirectory());
   const settings = await loadSettings();
   delete settings.thumbnailCacheDirectory;
   await saveSettings(settings);
@@ -759,9 +902,12 @@ export async function resetThumbnailCacheDirectory(): Promise<DesktopThumbnailCa
 
 export async function clearThumbnailCacheDirectory(): Promise<boolean> {
   try {
-    const { currentPath } = await getActiveCacheDirectory();
-    await rm(currentPath, { recursive: true, force: true });
-    await mkdir(currentPath, { recursive: true });
+    await cacheMutationGate.runExclusive(async () => {
+      const { currentPath } = await getActiveCacheDirectory();
+      await rm(currentPath, { recursive: true, force: true });
+      await mkdir(currentPath, { recursive: true });
+      invalidateCacheSummary();
+    });
     return true;
   } catch {
     return false;
@@ -780,9 +926,15 @@ export async function getCachedThumbnailsFromDisk(
   const { currentPath } = await getActiveCacheDirectory();
   const hits = await mapWithConcurrency(entries, CACHE_LOOKUP_CONCURRENCY, async (entry) => {
     try {
-      const fileBuffer = await readFile(
-        getCacheFilePath(currentPath, entry.absolutePath, entry.sourceFileKey, maxDimension, quality),
+      const cacheFilePath = getCacheFilePath(
+        currentPath,
+        entry.absolutePath,
+        entry.sourceFileKey,
+        maxDimension,
+        quality,
       );
+      const fileBuffer = await readFile(cacheFilePath);
+      touchCacheEntry(cacheFilePath);
       return decodeThumbnailFile(entry.id, fileBuffer);
     } catch {
       return null;
@@ -800,13 +952,17 @@ export async function storeThumbnailInDiskCache(
   rendered: DesktopRenderedImage,
 ): Promise<void> {
   try {
-    await cacheWriteSemaphore.run(async () => {
-      const { currentPath } = await getActiveCacheDirectory();
-      await writeFile(
-        getCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension, quality),
-        encodeThumbnailFile(rendered),
-      );
+    await cacheMutationGate.runShared(async () => {
+      await cacheWriteSemaphore.run(async () => {
+        const { currentPath } = await getActiveCacheDirectory();
+        await writeFile(
+          getCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension, quality),
+          encodeThumbnailFile(rendered),
+        );
+        invalidateCacheSummary();
+      });
     });
+    scheduleThumbnailCachePrune();
   } catch {
     // The disk cache is best-effort and should never block thumbnail delivery.
   }
@@ -823,9 +979,9 @@ export async function getCachedPreviewFromDisk(
 
   try {
     const { currentPath } = await getActiveCacheDirectory();
-    const fileBuffer = await readFile(
-      getPreviewCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension),
-    );
+    const cacheFilePath = getPreviewCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension);
+    const fileBuffer = await readFile(cacheFilePath);
+    touchCacheEntry(cacheFilePath);
     const decoded = decodeThumbnailFile(absolutePath, fileBuffer);
     if (!decoded) {
       return null;
@@ -853,13 +1009,17 @@ export async function storePreviewInDiskCache(
   }
 
   try {
-    await cacheWriteSemaphore.run(async () => {
-      const { currentPath } = await getActiveCacheDirectory();
-      await writeFile(
-        getPreviewCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension),
-        encodeThumbnailFile(rendered),
-      );
+    await cacheMutationGate.runShared(async () => {
+      await cacheWriteSemaphore.run(async () => {
+        const { currentPath } = await getActiveCacheDirectory();
+        await writeFile(
+          getPreviewCacheFilePath(currentPath, absolutePath, sourceFileKey, maxDimension),
+          encodeThumbnailFile(rendered),
+        );
+        invalidateCacheSummary();
+      });
     });
+    scheduleThumbnailCachePrune();
   } catch {
     // The disk cache is best-effort and should never block preview delivery.
   }

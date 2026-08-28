@@ -29,6 +29,7 @@ const REQUIRED_DESKTOP_METHODS: Array<keyof FileXDesktopApi> = [
   "dismissCacheLocationRecommendation",
   "getRamBudgetInfo",
   "setRamBudgetPreset",
+  "setDiskCacheBudgetPreset",
   "relaunch",
   "getPreview",
   "warmPreview",

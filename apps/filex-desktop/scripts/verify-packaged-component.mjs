@@ -77,6 +77,7 @@ if (args.component === "archivio-flow") {
     throw new Error(`Archivio Flow non contiene ${serverEntry}`);
   }
   verifyRelativeImportClosure(archivePath, entries, serverEntry);
+  verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
 }
 
 if (args.component === "suite") {

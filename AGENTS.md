@@ -80,3 +80,7 @@ Per ogni release di Suite o tool, verifica sul manufatto installato la policy `l
 
 - Non modificare `node_modules`, output di build o `apps/filex-dev-console/.runtime/`.
 - La cartella `mnt/` è una copia importata di dati esterni e non fa parte del workspace operativo; non usarla come fonte di verità.
+
+## Aggiornamenti del sito
+
+- **Aggiornamento della Documentazione e Marketing**: Per ogni tool che subisce modifiche significative o integrazioni di nuove funzionalità, è obbligatorio aggiornare il sito ufficiale con una pagina dedicata contenente le specifiche tecniche. Ogni nuova implementazione deve essere concepita anche come elemento di *Page Marketing* per promuovere il software.

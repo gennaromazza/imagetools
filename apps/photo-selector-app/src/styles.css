@@ -2127,15 +2127,8 @@ img {
   border-radius: 6px;
   overflow: hidden;
   transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
-  /* Paint isolation: contain repaints (image decode, badge updates, flash
-     animations) within the card so neighbouring cards never re-render in
-     response. Combined with translateZ(0) the wrapper is promoted to its
-     own GPU layer, eliminating the diffuse "shimmer" perceived on dense
-     grids with many photos. The wrapper has a fixed height, so containing
-     layout/paint is safe (no impact on virtualizer row math). */
-  contain: layout paint;
-  transform: translateZ(0);
-  backface-visibility: hidden;
+  /* Isolate repaint without promoting every card to a permanent GPU layer. */
+  contain: paint;
 }
 
 .photo-card:hover .photo-card__image-wrapper {
@@ -2538,8 +2531,8 @@ img {
 /* ── Classification change feedback animations ───────────────────────── */
 
 @keyframes flash-border {
-  0%   { box-shadow: 0 0 0 1px rgba(208, 165, 98, 0.7); transform: translateZ(0) scale(1.004); }
-  100% { box-shadow: 0 0 0 0 rgba(208, 165, 98, 0); transform: translateZ(0) scale(1); }
+  0%   { box-shadow: 0 0 0 1px rgba(208, 165, 98, 0.7); transform: scale(1.004); }
+  100% { box-shadow: 0 0 0 0 rgba(208, 165, 98, 0); transform: scale(1); }
 }
 
 @keyframes flash-star {
@@ -2560,15 +2553,15 @@ img {
 @keyframes flash-border-batch {
   0% {
     box-shadow: 0 0 0 1px rgba(226, 155, 88, 0.54);
-    transform: translateZ(0) scale(1);
+    transform: scale(1);
   }
   45% {
     box-shadow: 0 0 0 1px rgba(226, 155, 88, 0.4);
-    transform: translateZ(0) scale(1.003);
+    transform: scale(1.003);
   }
   100% {
     box-shadow: 0 0 0 0 rgba(226, 155, 88, 0);
-    transform: translateZ(0) scale(1);
+    transform: scale(1);
   }
 }
 
@@ -3065,26 +3058,26 @@ img {
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 0;
   padding: 0;
-  background: rgba(5, 5, 5, 0.9);
-  backdrop-filter: blur(6px);
+  background: rgba(5, 5, 5, 0.975);
 }
 
 .quick-preview--focus-mode {
   grid-template-columns: 0px minmax(0, 1fr);
-  transition: grid-template-columns 280ms ease;
 }
 
 .quick-preview--focus-mode .quick-preview__sidebar {
   overflow: hidden;
   opacity: 0;
+  transform: translateX(-12px);
   pointer-events: none;
-  transition: opacity 200ms ease;
+  transition: opacity 160ms ease, transform 160ms ease;
 }
 
 .quick-preview:not(.quick-preview--focus-mode) .quick-preview__sidebar {
   opacity: 1;
+  transform: translateX(0);
   pointer-events: auto;
-  transition: opacity 200ms ease;
+  transition: opacity 160ms ease, transform 160ms ease;
 }
 
 .quick-preview--focus-mode .quick-preview__main {
@@ -3098,7 +3091,6 @@ img {
 
 .quick-preview:not(.quick-preview--focus-mode) {
   grid-template-columns: 220px minmax(0, 1fr);
-  transition: grid-template-columns 280ms ease;
 }
 
 .quick-preview:not(.quick-preview--focus-mode) .quick-preview__main {
@@ -5389,6 +5381,53 @@ img {
   flex-wrap: wrap;
 }
 
+.photo-selector__settings-feedback {
+  position: sticky;
+  top: 0.25rem;
+  z-index: 2;
+  margin: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(184, 154, 99, 0.34);
+  border-radius: 10px;
+  background: rgba(31, 36, 33, 0.97);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.photo-selector__settings-feedback--success {
+  border-color: rgba(116, 184, 132, 0.48);
+  color: #d8f4de;
+}
+
+.photo-selector__settings-feedback--error {
+  border-color: rgba(220, 111, 99, 0.52);
+  color: #ffd8d3;
+}
+
+.photo-selector__settings-feedback--warning {
+  border-color: rgba(218, 174, 91, 0.52);
+  color: #ffe7b8;
+}
+
+.photo-selector__settings-inline-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.photo-selector__settings-inline-select select {
+  min-height: 30px;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(17, 21, 18, 0.92);
+  color: var(--text);
+}
+
 .photo-selector__settings-preset-item {
   display: flex;
   align-items: center;
@@ -5507,11 +5546,10 @@ img {
   position: fixed;
   inset: 0;
   z-index: 7000;
-  background: rgba(0, 0, 0, 0.78);
+  background: rgba(0, 0, 0, 0.92);
   display: flex;
   align-items: stretch;
   justify-content: stretch;
-  backdrop-filter: blur(6px);
 }
 
 .compare-modal {

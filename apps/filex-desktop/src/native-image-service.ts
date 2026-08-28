@@ -41,6 +41,7 @@ import {
 } from "./thumbnail-disk-cache.js";
 
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const EXTENDED_STANDARD_EXTENSIONS = new Set([".heic", ".heif", ".tif", ".tiff"]);
 const RAW_EXTENSIONS = new Set([
   ".cr2", ".cr3", ".crw",
   ".nef", ".nrw",
@@ -302,6 +303,7 @@ let jpegExifRangeCachePersistTimer: ReturnType<typeof setTimeout> | null = null;
 let jpegExifRangeCachePersistInFlight: Promise<void> | null = null;
 const quickPreviewFrameStore = new Map<string, QuickPreviewFrameEntry>();
 const quickPreviewFrameTokenByCacheKey = new Map<string, string>();
+let quickPreviewWarmGeneration = 0;
 const thumbnailBatchQueue = new Map<string, BatchedThumbnailRequest>();
 const thumbnailBatchOrder: string[] = [];
 const inFlightThumbnailSingleFlight = new Map<string, Promise<DesktopRenderedImage | null>>();
@@ -960,6 +962,10 @@ function isBrowserDecodablePath(absolutePath: string): boolean {
   return STANDARD_EXTENSIONS.has(extname(absolutePath).toLowerCase());
 }
 
+function isExtendedStandardPath(absolutePath: string): boolean {
+  return EXTENDED_STANDARD_EXTENSIONS.has(extname(absolutePath).toLowerCase());
+}
+
 function isRawPath(absolutePath: string): boolean {
   return RAW_EXTENSIONS.has(extname(absolutePath).toLowerCase());
 }
@@ -968,6 +974,9 @@ function getMimeTypeForPath(absolutePath: string): string {
   const ext = extname(absolutePath).toLowerCase();
   if (ext === ".png") return "image/png";
   if (ext === ".webp") return "image/webp";
+  if (ext === ".tif" || ext === ".tiff") return "image/tiff";
+  if (ext === ".heic") return "image/heic";
+  if (ext === ".heif") return "image/heif";
   return "image/jpeg";
 }
 
@@ -1100,25 +1109,23 @@ async function resolvePreviewSourceFromBuffer(
   buffer: Buffer,
   mimeType: string,
 ): Promise<ResolvedPreviewSource | null> {
-  if (mimeType === "image/jpeg") {
-    const sharpMod = await getSharp();
-    if (sharpMod) {
-      try {
-        const { data, info } = await sharpMod(buffer, { failOn: "none" })
-          .rotate()
-          .jpeg({ quality: 90 })
-          .toBuffer({ resolveWithObject: true });
-        if ((info.width ?? 0) > 0 && (info.height ?? 0) > 0) {
-          return {
-            buffer: Buffer.from(data),
-            mimeType: "image/jpeg",
-            width: info.width,
-            height: info.height,
-          };
-        }
-      } catch {
-        // Fall back to nativeImage decode below.
+  const sharpMod = await getSharp();
+  if (sharpMod) {
+    try {
+      const { data, info } = await sharpMod(buffer, { failOn: "none" })
+        .rotate()
+        .jpeg({ quality: 90 })
+        .toBuffer({ resolveWithObject: true });
+      if ((info.width ?? 0) > 0 && (info.height ?? 0) > 0) {
+        return {
+          buffer: Buffer.from(data),
+          mimeType: "image/jpeg",
+          width: info.width,
+          height: info.height,
+        };
       }
+    } catch {
+      // Fall back to nativeImage decode below.
     }
   }
 
@@ -1219,7 +1226,7 @@ async function resolvePreviewBuffer(
 
     try {
       handle = await open(absolutePath, "r");
-      if (isBrowserDecodablePath(absolutePath)) {
+      if (isBrowserDecodablePath(absolutePath) || isExtendedStandardPath(absolutePath)) {
         const fileBuffer = await handle.readFile();
         recordDesktopBytesRead("standard", fileBuffer.byteLength);
         const resolved = await resolvePreviewSourceFromBufferWithBudget(
@@ -1785,6 +1792,7 @@ export async function getDesktopCachedThumbnailFrames(
 export async function warmDesktopQuickPreviewFrames(
   requests: DesktopQuickPreviewRequest[],
 ): Promise<DesktopQuickPreviewWarmResult> {
+  const warmGeneration = ++quickPreviewWarmGeneration;
   const uniqueRequests = requests.filter((request, index, current) =>
     current.findIndex((candidate) =>
       candidate.absolutePath === request.absolutePath
@@ -1796,28 +1804,33 @@ export async function warmDesktopQuickPreviewFrames(
 
   let warmedCount = 0;
   let cacheHitCount = 0;
+  let failedCount = 0;
 
-  const settled = await Promise.allSettled(
-    uniqueRequests.map(async (request) => {
+  for (const request of uniqueRequests) {
+    if (warmGeneration !== quickPreviewWarmGeneration) {
+      break;
+    }
+
+    try {
       const result = await getDesktopPreviewInternal(
         request.absolutePath,
         request.maxDimension,
         request.sourceFileKey,
       );
       if (!result) {
-        return null;
+        failedCount += 1;
+        continue;
       }
 
       warmedCount += 1;
       if (result.cacheHit) {
         cacheHitCount += 1;
       }
+    } catch {
+      failedCount += 1;
+    }
+  }
 
-      return result;
-    }),
-  );
-
-  const failedCount = settled.filter((entry) => entry.status === "rejected" || entry.value === null).length;
   return {
     requestedCount: uniqueRequests.length,
     warmedCount,
@@ -2170,6 +2183,20 @@ export function getDesktopDisplayName(absolutePath: string): string {
   return basename(absolutePath);
 }
 
+export function clearDesktopImageMemoryCaches(): void {
+  quickPreviewWarmGeneration += 1;
+  previewSourcePromiseCache.clear();
+  previewSourceCache.clear();
+  previewSourceCacheTotalBytes = 0;
+  renderedPreviewPromiseCache.clear();
+  renderedPreviewCache.clear();
+  renderedPreviewCacheTotalBytes = 0;
+  thumbnailMemoryCache.clear();
+  thumbnailMemoryCacheTotalBytes = 0;
+  quickPreviewFrameStore.clear();
+  quickPreviewFrameTokenByCacheKey.clear();
+}
+
 export async function shutdownDesktopImageService(): Promise<void> {
   if (thumbnailBatchTimer !== null) {
     clearTimeout(thumbnailBatchTimer);
@@ -2186,20 +2213,11 @@ export async function shutdownDesktopImageService(): Promise<void> {
   await persistRawEmbeddedRangeCache().catch(() => {});
   await persistJpegExifRangeCache().catch(() => {});
 
-  previewSourcePromiseCache.clear();
-  previewSourceCache.clear();
-  previewSourceCacheTotalBytes = 0;
-  renderedPreviewPromiseCache.clear();
-  renderedPreviewCache.clear();
-  renderedPreviewCacheTotalBytes = 0;
-  thumbnailMemoryCache.clear();
-  thumbnailMemoryCacheTotalBytes = 0;
+  clearDesktopImageMemoryCaches();
   rawEmbeddedRangeCache.clear();
   jpegExifRangeCache.clear();
   thumbnailBatchQueue.clear();
   thumbnailBatchOrder.splice(0, thumbnailBatchOrder.length);
   inFlightThumbnailSingleFlight.clear();
-  quickPreviewFrameStore.clear();
-  quickPreviewFrameTokenByCacheKey.clear();
   await rawPreviewExifTool.end().catch(() => {});
 }

@@ -17,8 +17,11 @@ import {
 import {
   calculateGridLayout,
   createDefaultCrop,
+  getPhotoContentRectCm,
+  getPreviewRenderDpi,
   normalizeCrop,
   paginateAssets,
+  PHOTO_PRESETS,
   SHEET_PRESETS,
   type BatchCropState,
   type ExportFormat,
@@ -27,6 +30,7 @@ import {
   type PhotoAsset,
   type PhotoFitMode,
   type PhotoPrintSpec,
+  type PrintFinishingSpec,
   type PrintSheetSpec,
 } from "./print-engine";
 import { exportBatch, renderPageCanvas } from "./render-export";
@@ -43,7 +47,15 @@ const DEFAULT_LOGO: LogoOverlaySpec = {
 const DEFAULT_ADJUSTMENTS: ImageAdjustmentSpec = {
   blackAndWhiteEnabled: false,
   fitMode: "cover",
-  autoRotateBySourceOrientation: true,
+  autoRotateBySourceOrientation: false,
+  borderEnabled: false,
+  borderWidthPx: 2,
+  borderColor: "#000000",
+};
+const DEFAULT_FINISHING: PrintFinishingSpec = {
+  cutGuidesEnabled: false,
+  cutGuideColor: "#777777",
+  cutGuideWidthMm: 0.1,
 };
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const KEYBOARD_STEP = 0.01;
@@ -84,6 +96,10 @@ function fileNameFromPath(value: string): string {
   return value.split(/[\\/]/).filter(Boolean).pop() || value;
 }
 
+function isExtendedDesktopImageName(fileName: string): boolean {
+  return /\.(?:heic|heif|tif|tiff)$/i.test(fileName);
+}
+
 function revokeBlobUrl(value: string | null | undefined): void {
   if (value?.startsWith("blob:")) {
     URL.revokeObjectURL(value);
@@ -102,21 +118,27 @@ async function fileToAsset(file: File): Promise<PhotoAsset | null> {
     return null;
   }
   const sourceUrl = URL.createObjectURL(file);
-  const image = await loadBrowserImage(sourceUrl);
-  const absolutePath = window.filexDesktop?.getPathForFile?.(file) || undefined;
-  const key = `${absolutePath || file.name}:${file.size}:${file.lastModified}`;
-  return {
-    id: `asset-${hashString(key)}`,
-    fileName: file.name,
-    relativePath: (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name,
-    absolutePath,
-    size: file.size,
-    lastModified: file.lastModified,
-    sourceUrl,
-    previewUrl: sourceUrl,
-    width: image.naturalWidth,
-    height: image.naturalHeight,
-  };
+  try {
+    const image = await loadBrowserImage(sourceUrl);
+    const absolutePath = window.filexDesktop?.getPathForFile?.(file) || undefined;
+    const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+    const key = `${absolutePath || relativePath}:${file.size}:${file.lastModified}`;
+    return {
+      id: `asset-${hashString(key)}`,
+      fileName: file.name,
+      relativePath,
+      absolutePath,
+      size: file.size,
+      lastModified: file.lastModified,
+      sourceUrl,
+      previewUrl: sourceUrl,
+      width: image.naturalWidth,
+      height: image.naturalHeight,
+    };
+  } catch (error) {
+    URL.revokeObjectURL(sourceUrl);
+    throw error;
+  }
 }
 
 async function importDesktopFolder(onProgress?: (completed: number, total: number) => void): Promise<{
@@ -124,41 +146,64 @@ async function importDesktopFolder(onProgress?: (completed: number, total: numbe
   folderName: string;
   nestedDirectoriesSeen: number;
   scannedDirectoryCount: number;
+  failedPreviewCount: number;
+  failedExtendedPreviewCount: number;
+  cancelled: boolean;
 }> {
-  const folder = await window.filexDesktop?.openFolder?.();
+  const folder = await window.filexDesktop?.openFolder?.({ includeExtendedImages: true });
   if (!folder) {
-    return { assets: [], folderName: "", nestedDirectoriesSeen: 0, scannedDirectoryCount: 0 };
+    return {
+      assets: [],
+      folderName: "",
+      nestedDirectoriesSeen: 0,
+      scannedDirectoryCount: 0,
+      failedPreviewCount: 0,
+      failedExtendedPreviewCount: 0,
+      cancelled: true,
+    };
   }
 
   const assets: Array<PhotoAsset | null> = new Array(folder.entries.length).fill(null);
   let nextIndex = 0;
   let completed = 0;
+  let failedPreviewCount = 0;
+  let failedExtendedPreviewCount = 0;
 
   const loadNextPreview = async () => {
     while (nextIndex < folder.entries.length) {
       const entryIndex = nextIndex;
       nextIndex += 1;
       const entry = folder.entries[entryIndex];
-      const preview = await window.filexDesktop?.getPreview?.(entry.absolutePath, { maxDimension: 2400 });
-      completed += 1;
-      onProgress?.(completed, folder.entries.length);
-
-      if (!preview) {
-        continue;
+      try {
+        const preview = await window.filexDesktop?.getPreview?.(entry.absolutePath, {
+          maxDimension: 2400,
+          sourceFileKey: `${entry.size}:${entry.lastModified}`,
+        });
+        if (!preview) {
+          failedPreviewCount += 1;
+          if (isExtendedDesktopImageName(entry.name)) failedExtendedPreviewCount += 1;
+          continue;
+        }
+        const previewUrl = bytesToObjectUrl(preview.bytes, preview.mimeType);
+        assets[entryIndex] = {
+          id: `asset-${hashString(`${entry.absolutePath}:${entry.size}:${entry.lastModified}`)}`,
+          fileName: entry.name,
+          relativePath: entry.relativePath,
+          absolutePath: entry.absolutePath,
+          size: entry.size,
+          lastModified: entry.lastModified,
+          sourceUrl: previewUrl,
+          previewUrl,
+          width: preview.width,
+          height: preview.height,
+        };
+      } catch {
+        failedPreviewCount += 1;
+        if (isExtendedDesktopImageName(entry.name)) failedExtendedPreviewCount += 1;
+      } finally {
+        completed += 1;
+        onProgress?.(completed, folder.entries.length);
       }
-      const previewUrl = bytesToObjectUrl(preview.bytes, preview.mimeType);
-      assets[entryIndex] = {
-        id: `asset-${hashString(`${entry.absolutePath}:${entry.size}:${entry.lastModified}`)}`,
-        fileName: entry.name,
-        relativePath: entry.relativePath,
-        absolutePath: entry.absolutePath,
-        size: entry.size,
-        lastModified: entry.lastModified,
-        sourceUrl: previewUrl,
-        previewUrl,
-        width: preview.width,
-        height: preview.height,
-      };
     }
   };
 
@@ -170,6 +215,9 @@ async function importDesktopFolder(onProgress?: (completed: number, total: numbe
     folderName: folder.name,
     nestedDirectoriesSeen: folder.diagnostics?.nestedDirectoriesSeen ?? 0,
     scannedDirectoryCount: folder.diagnostics?.scannedDirectoryCount ?? 1,
+    failedPreviewCount,
+    failedExtendedPreviewCount,
+    cancelled: false,
   };
 }
 
@@ -215,11 +263,17 @@ function normalizeRotationDegrees(value: number): number {
   return next;
 }
 
+function cropGeometryKey(spec: PhotoPrintSpec): string {
+  const content = getPhotoContentRectCm(spec);
+  const contentAspect = content.width / Math.max(0.001, content.height);
+  const outerLandscape = spec.widthCm > spec.heightCm;
+  return `${contentAspect.toFixed(6)}:${outerLandscape ? "landscape" : "portrait"}`;
+}
+
 export function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const cropWrapRef = useRef<HTMLDivElement | null>(null);
   const assetsRef = useRef<PhotoAsset[]>([]);
   const logoUrlRef = useRef<string | null>(null);
   const previewRenderIdRef = useRef(0);
@@ -235,9 +289,11 @@ export function App() {
   const [assets, setAssets] = useState<PhotoAsset[]>([]);
   const [crops, setCrops] = useState<Record<string, BatchCropState>>({});
   const [printSpec, setPrintSpec] = useState<PhotoPrintSpec>(DEFAULT_PRINT_SPEC);
+  const [photoPresetId, setPhotoPresetId] = useState("custom");
   const [sheetSpec, setSheetSpec] = useState<PrintSheetSpec>(SHEET_PRESETS[0]);
   const [logo, setLogo] = useState<LogoOverlaySpec>(DEFAULT_LOGO);
   const [adjustments, setAdjustments] = useState<ImageAdjustmentSpec>(DEFAULT_ADJUSTMENTS);
+  const [finishing, setFinishing] = useState<PrintFinishingSpec>(DEFAULT_FINISHING);
   const [format, setFormat] = useState<ExportFormat>("jpg");
   const [quality, setQuality] = useState(1);
   const [fileNamePrefix, setFileNamePrefix] = useState("batch-print");
@@ -247,10 +303,11 @@ export function App() {
   const [previewSize, setPreviewSize] = useState<{ width: number; height: number } | null>(null);
   const [status, setStatus] = useState("Pronto");
   const [interactionHint, setInteractionHint] = useState("Doppio clic su una foto del foglio per modificarla.");
-  const [photoshopPath, setPhotoshopPath] = useState<string | null>(null);
+  const [editorPath, setEditorPath] = useState<string | null>(null);
   const [editingWatch, setEditingWatch] = useState<EditingWatchState | null>(null);
   const [isDraggingCrop, setIsDraggingCrop] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const layout = useMemo(() => calculateGridLayout(printSpec, sheetSpec), [printSpec, sheetSpec]);
   const pages = useMemo(() => paginateAssets(assets, layout), [assets, layout]);
@@ -263,6 +320,10 @@ export function App() {
     ? getZoomFromCrop(activeCrop, activeAsset, printSpec, adjustments.fitMode, adjustments.autoRotateBySourceOrientation)
     : 1;
   const reviewedCount = Object.values(crops).filter((crop) => crop.reviewed).length;
+
+  useEffect(() => {
+    setPreviewPageIndex((current) => Math.max(0, Math.min(current, Math.max(0, pages.length - 1))));
+  }, [pages.length]);
 
   useEffect(() => {
     if (!fileInputRef.current) return;
@@ -296,9 +357,9 @@ export function App() {
     void window.filexDesktop.getInstalledEditorCandidates().then((candidates) => {
       if (!active) return;
       const photoshop = candidates.find((candidate) => /photoshop/i.test(`${candidate.label} ${candidate.path}`));
-      setPhotoshopPath(photoshop?.path ?? candidates[0]?.path ?? null);
+      setEditorPath(photoshop?.path ?? null);
     }).catch(() => {
-      if (active) setPhotoshopPath(null);
+      if (active) setEditorPath(null);
     });
 
     return () => {
@@ -338,11 +399,26 @@ export function App() {
         const result = await importDesktopFolder((completed, total) => {
           setStatus(`Anteprime desktop ${completed}/${total}...`);
         });
+        if (result.cancelled) {
+          setStatus("Importazione annullata. Le foto già caricate sono rimaste invariate.");
+          return;
+        }
         handleAssetsImported(result.assets);
         if (result.assets.length > 0) {
+          const failureMessage = result.failedPreviewCount > 0
+            ? ` ${result.failedPreviewCount} file non leggibili sono stati ignorati.`
+            : "";
+          const extendedDecoderHint = result.failedExtendedPreviewCount > 0
+            ? " Per HEIC/HEIF/TIFF verifica la disponibilità dei codec immagini di Windows."
+            : "";
           setStatus(
-            `${result.assets.length} foto importate da ${result.folderName}. Scansione ricorsiva: ${result.scannedDirectoryCount} cartelle, ${result.nestedDirectoriesSeen} sottocartelle.`,
+            `${result.assets.length} foto importate da ${result.folderName}.${failureMessage}${extendedDecoderHint} Scansione ricorsiva: ${result.scannedDirectoryCount} cartelle, ${result.nestedDirectoriesSeen} sottocartelle.`,
           );
+        } else if (result.failedPreviewCount > 0) {
+          const extendedDecoderHint = result.failedExtendedPreviewCount > 0
+            ? " Per HEIC/HEIF/TIFF verifica la disponibilità dei codec immagini di Windows."
+            : "";
+          setStatus(`Nessuna foto leggibile: ${result.failedPreviewCount} file non sono stati decodificati.${extendedDecoderHint}`);
         }
       } else {
         fileInputRef.current?.click();
@@ -362,8 +438,16 @@ export function App() {
     setIsBusy(true);
     setStatus("Preparazione anteprime...");
     try {
-      const nextAssets = (await Promise.all(files.map(fileToAsset))).filter((asset): asset is PhotoAsset => Boolean(asset));
+      const settled = await Promise.allSettled(files.map(fileToAsset));
+      const nextAssets = settled
+        .filter((result): result is PromiseFulfilledResult<PhotoAsset | null> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter((asset): asset is PhotoAsset => Boolean(asset));
+      const skippedCount = files.length - nextAssets.length;
       handleAssetsImported(nextAssets);
+      if (skippedCount > 0) {
+        setStatus(`${nextAssets.length} foto importate; ${skippedCount} file non supportati o non leggibili ignorati.`);
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Errore durante lettura immagini.");
     } finally {
@@ -454,7 +538,12 @@ export function App() {
       }
       return nextIndex;
     });
-    setInteractionHint(delta >= 0 ? "Foto confermata. Passo alla successiva." : "Torno alla foto precedente.");
+    const isLastPhoto = activeIndex >= assets.length - 1;
+    setInteractionHint(
+      delta >= 0
+        ? (isLastPhoto ? "Ultima foto confermata. Il lavoro è pronto per l'export." : "Foto confermata. Passo alla successiva.")
+        : "Torno alla foto precedente.",
+    );
   };
 
   const selectSheetAsset = useCallback((assetId: string) => {
@@ -470,8 +559,38 @@ export function App() {
   const handlePrintSpecChange = (changes: Partial<PhotoPrintSpec>) => {
     const next = { ...printSpec, ...changes };
     setPrintSpec(next);
-    resetCropsForAssets(assets, next);
+    if (cropGeometryKey(next) !== cropGeometryKey(printSpec)) {
+      resetCropsForAssets(assets, next);
+    }
     setPreviewPageIndex(0);
+  };
+
+  const applyPolaroidGoWorkflow = () => {
+    const preset = PHOTO_PRESETS.find((item) => item.presetId === "polaroid-go");
+    const sheet = SHEET_PRESETS.find((item) => item.presetId === "15x20");
+    if (!preset || !sheet) {
+      setStatus("Preset Polaroid Go 15×20 non disponibile.");
+      return;
+    }
+    const nextPrintSpec: PhotoPrintSpec = {
+      widthCm: preset.widthCm,
+      heightCm: preset.heightCm,
+      dpi: 300,
+      frameStyle: "polaroid-go",
+    };
+    setPhotoPresetId(preset.presetId);
+    setPrintSpec(nextPrintSpec);
+    setSheetSpec(sheet);
+    setAdjustments((current) => ({
+      ...current,
+      fitMode: "cover",
+      autoRotateBySourceOrientation: false,
+    }));
+    setFinishing((current) => ({ ...current, cutGuidesEnabled: true }));
+    setFileNamePrefix("polaroid-go-15x20");
+    resetCropsForAssets(assets, nextPrintSpec, "cover", false);
+    setPreviewPageIndex(0);
+    setStatus("Preset rapido applicato: Polaroid Go su foglio 15×20 cm, 300 DPI.");
   };
 
   const handleLogoSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -543,32 +662,32 @@ export function App() {
     return true;
   }, [assets]);
 
-  const openActiveInPhotoshop = async () => {
+  const openActiveInEditor = async () => {
     if (!activeAsset?.absolutePath) {
-      setStatus("Per aprire in Photoshop serve una foto importata da cartella desktop.");
+      setStatus("Per aprire nell'editor serve una foto importata da cartella desktop.");
       return;
     }
     if (typeof window.filexDesktop?.openWithEditor !== "function") {
-      setStatus("Bridge desktop non disponibile per aprire Photoshop.");
+      setStatus("Bridge desktop non disponibile per aprire un editor esterno.");
       return;
     }
 
-    let editorPath = photoshopPath;
-    if (!editorPath && typeof window.filexDesktop.chooseEditorExecutable === "function") {
-      editorPath = await window.filexDesktop.chooseEditorExecutable();
-      setPhotoshopPath(editorPath);
+    let selectedEditorPath = editorPath;
+    if (!selectedEditorPath && typeof window.filexDesktop.chooseEditorExecutable === "function") {
+      selectedEditorPath = await window.filexDesktop.chooseEditorExecutable();
+      setEditorPath(selectedEditorPath);
     }
-    if (!editorPath) {
-      setStatus("Photoshop non trovato. Seleziona Photoshop.exe e riprova.");
+    if (!selectedEditorPath) {
+      setStatus("Nessun editor selezionato.");
       return;
     }
 
     const stat = typeof window.filexDesktop.statFiles === "function"
       ? (await window.filexDesktop.statFiles([activeAsset.absolutePath]))[0]
       : null;
-    const result = await window.filexDesktop.openWithEditor(editorPath, [activeAsset.absolutePath]);
+    const result = await window.filexDesktop.openWithEditor(selectedEditorPath, [activeAsset.absolutePath]);
     if (!result?.ok) {
-      setStatus(result?.error || "Impossibile aprire la foto in Photoshop.");
+      setStatus(result?.error || "Impossibile aprire la foto nell'editor esterno.");
       return;
     }
 
@@ -578,7 +697,7 @@ export function App() {
       size: stat?.size ?? activeAsset.size ?? 0,
       lastModified: stat?.lastModified ?? activeAsset.lastModified ?? 0,
     });
-    setStatus(`Aperta in Photoshop: ${activeAsset.absolutePath}. Se Photoshop salva una copia, usa "Usa file salvato".`);
+    setStatus(`Aperta nell'editor: ${activeAsset.absolutePath}. Se salvi una copia, usa "Usa file salvato".`);
   };
 
   const relinkActiveAssetFromSavedFile = async () => {
@@ -600,7 +719,7 @@ export function App() {
     const sourceFileKey = stat ? `${stat.size}:${stat.lastModified}` : String(Date.now());
     const preview = await window.filexDesktop.getPreview(selectedPath, { maxDimension: 2400, sourceFileKey });
     if (!preview) {
-      setStatus("Impossibile leggere il file salvato da Photoshop.");
+      setStatus("Impossibile leggere il file salvato dall'editor.");
       return;
     }
 
@@ -639,7 +758,7 @@ export function App() {
       lastModified: stat?.lastModified ?? updatedAsset.lastModified ?? 0,
     });
     setStatus(`Foto selezionata collegata al file salvato: ${selectedPath}`);
-    setInteractionHint("File salvato da Photoshop collegato alla foto selezionata.");
+    setInteractionHint("File salvato dall'editor collegato alla foto selezionata.");
   };
 
   useEffect(() => {
@@ -657,7 +776,16 @@ export function App() {
       }
 
       try {
-        const rendered = await renderPageCanvas(page, { assetsById, cropsById, printSpec, layout, logo, adjustments });
+        const rendered = await renderPageCanvas(page, {
+          assetsById,
+          cropsById,
+          printSpec,
+          layout,
+          logo,
+          adjustments,
+          finishing,
+          renderDpi: getPreviewRenderDpi(layout, printSpec.dpi),
+        });
         if (cancelled || previewRenderIdRef.current !== renderId) return;
         const ctx = target.getContext("2d");
         if (!ctx) return;
@@ -668,8 +796,10 @@ export function App() {
         target.height = Math.round(rendered.height * scale);
         setPreviewSize({ width: target.width, height: target.height });
         ctx.drawImage(rendered, 0, 0, target.width, target.height);
-      } catch {
-        // Preview failures should not block editing controls.
+      } catch (error) {
+        if (!cancelled && previewRenderIdRef.current === renderId) {
+          setStatus(error instanceof Error ? `Anteprima non disponibile: ${error.message}` : "Anteprima non disponibile.");
+        }
       }
     };
 
@@ -690,7 +820,7 @@ export function App() {
       if (frameId) window.cancelAnimationFrame(frameId);
       if (timerId) window.clearTimeout(timerId);
     };
-  }, [adjustments, assetsById, cropsById, isDraggingCrop, layout, logo, pages, previewPageIndex, printSpec]);
+  }, [adjustments, assetsById, cropsById, finishing, isDraggingCrop, layout, logo, pages, previewPageIndex, printSpec]);
 
   useEffect(() => {
     if (!editingWatch || typeof window.filexDesktop?.statFiles !== "function") {
@@ -711,7 +841,7 @@ export function App() {
             lastModified: stat.lastModified,
             size: stat.size,
           });
-          setInteractionHint("File salvato in Photoshop: preview aggiornata.");
+          setInteractionHint("File salvato nell'editor: anteprima aggiornata.");
         }
       }).catch(() => undefined);
     }, 2000);
@@ -824,51 +954,23 @@ export function App() {
     setInteractionHint("Foto riposizionata sul foglio. Premi Enter per confermare e andare avanti.");
   };
 
-  const startCropDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!activeAsset || !activeCrop || !cropWrapRef.current) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const rect = cropWrapRef.current.getBoundingClientRect();
-    dragStateRef.current = {
-      assetId: activeAsset.id,
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      initialCrop: activeCrop,
-      imageWidth: Math.max(1, rect.width),
-      imageHeight: Math.max(1, rect.height),
-    };
-    setIsDraggingCrop(true);
-  };
-
-  const moveCropDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    const dragState = dragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const deltaX = (event.clientX - dragState.startX) / dragState.imageWidth;
-    const deltaY = (event.clientY - dragState.startY) / dragState.imageHeight;
-    setCrops((current) => ({
-      ...current,
-      [dragState.assetId]: normalizeCrop({
-        ...dragState.initialCrop,
-        cropLeft: dragState.initialCrop.cropLeft + deltaX,
-        cropTop: dragState.initialCrop.cropTop + deltaY,
-      }),
-    }));
-  };
-
-  const stopCropDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    const dragState = dragStateRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    dragStateRef.current = null;
-    setIsDraggingCrop(false);
-  };
-
   const handleExport = async () => {
     if (pages.length === 0 || layout.photosPerSheet === 0) {
       setStatus("Nessun foglio esportabile.");
       return;
     }
+    const unreviewedCount = Math.max(0, assets.length - reviewedCount);
+    if (unreviewedCount > 0) {
+      const shouldContinue = window.confirm(
+        `${unreviewedCount} foto non risultano ancora controllate. Vuoi esportare comunque?`,
+      );
+      if (!shouldContinue) {
+        setStatus("Export annullato: completa il controllo dei crop.");
+        return;
+      }
+    }
     setIsBusy(true);
+    setIsExporting(true);
     setStatus("Export in corso...");
     try {
       const exported = await exportBatch({
@@ -876,14 +978,37 @@ export function App() {
         assetsById,
         cropsById,
         printSpec,
-        sheetSpec,
         layout,
         logo,
         adjustments,
+        finishing,
         format,
         outputDirectoryPath,
         fileNamePrefix,
         quality,
+        resolveAssetForExport: async (asset, requiredMaxDimension) => {
+          if (!asset.absolutePath || typeof window.filexDesktop?.getPreview !== "function") {
+            return { asset };
+          }
+          const sourceFileKey = `${asset.size ?? 0}:${asset.lastModified ?? 0}`;
+          const preview = await window.filexDesktop.getPreview(asset.absolutePath, {
+            maxDimension: requiredMaxDimension,
+            sourceFileKey,
+          });
+          if (!preview) {
+            throw new Error(`Impossibile preparare la sorgente ad alta risoluzione: ${asset.fileName}`);
+          }
+          const sourceUrl = bytesToObjectUrl(preview.bytes, preview.mimeType);
+          return {
+            asset: {
+              ...asset,
+              sourceUrl,
+              width: preview.width,
+              height: preview.height,
+            },
+            release: () => revokeBlobUrl(sourceUrl),
+          };
+        },
         onProgress: (completed, total, label) => setStatus(`${completed}/${total} ${label}`),
       });
       setStatus(`Export completato: ${exported.length} file.`);
@@ -891,6 +1016,7 @@ export function App() {
       setStatus(error instanceof Error ? error.message : "Errore durante export.");
     } finally {
       setIsBusy(false);
+      setIsExporting(false);
     }
   };
 
@@ -904,13 +1030,17 @@ export function App() {
           <span>Crop, logo, bianco e nero e fogli pronti per stampa</span>
         </div>
         <div className="topbar__actions">
+          <button type="button" className="secondary-button" onClick={applyPolaroidGoWorkflow} disabled={isBusy}>
+            <Printer size={16} />
+            Polaroid Go 15×20
+          </button>
           <button type="button" className="secondary-button" onClick={handleBrowseFolder} disabled={isBusy}>
             <FolderOpen size={16} />
-            Sfoglia
+            Sfoglia cartella
           </button>
           <button type="button" className="primary-button" onClick={handleExport} disabled={isBusy || pages.length === 0}>
             <Download size={16} />
-            Esporta
+            {isExporting ? "Esportazione..." : "Esporta"}
           </button>
         </div>
       </header>
@@ -924,7 +1054,7 @@ export function App() {
             <h2>Foto</h2>
             <button type="button" className="wide-button" onClick={handleBrowseFolder} disabled={isBusy}>
               <ImagePlus size={16} />
-              Seleziona foto/cartella
+              Seleziona cartella foto
             </button>
             <div className="metric-row">
               <span>Foto</span>
@@ -939,8 +1069,38 @@ export function App() {
           <section className="panel-section">
             <h2>Formato foto</h2>
             <div className="grid-two">
-              <NumberField label="Larghezza cm" value={printSpec.widthCm} min={1} max={50} step={0.1} onChange={(widthCm) => handlePrintSpecChange({ widthCm })} />
-              <NumberField label="Altezza cm" value={printSpec.heightCm} min={1} max={50} step={0.1} onChange={(heightCm) => handlePrintSpecChange({ heightCm })} />
+              <SelectField
+                label="Preset formato foto"
+                value={photoPresetId}
+                onChange={(value) => {
+                  setPhotoPresetId(value);
+                  if (value === "custom") {
+                    handlePrintSpecChange({ frameStyle: "none" });
+                    return;
+                  }
+                  const preset = PHOTO_PRESETS.find((item) => item.presetId === value);
+                  if (preset) {
+                    const nextSpec = {
+                      ...printSpec,
+                      widthCm: preset.widthCm,
+                      heightCm: preset.heightCm,
+                      frameStyle: preset.frameStyle ?? "none",
+                    };
+                    handlePrintSpecChange(nextSpec);
+                    if (preset.frameStyle === "polaroid-go") {
+                      setAdjustments((current) => ({ ...current, fitMode: "cover", autoRotateBySourceOrientation: false }));
+                      setFinishing((current) => ({ ...current, cutGuidesEnabled: true }));
+                      resetCropsForAssets(assets, nextSpec, "cover", false);
+                    }
+                  }
+                }}
+                options={[{ value: "custom", label: "Personalizzato" }, ...PHOTO_PRESETS.map((preset) => ({ value: preset.presetId, label: preset.label }))]}
+              />
+              {PHOTO_PRESETS.find((preset) => preset.presetId === photoPresetId) ? (
+                <p className="field-help">{PHOTO_PRESETS.find((preset) => preset.presetId === photoPresetId)?.description}</p>
+              ) : null}
+              <NumberField label="Larghezza cm" value={printSpec.widthCm} min={1} max={50} step={0.1} onChange={(widthCm) => { setPhotoPresetId("custom"); handlePrintSpecChange({ widthCm, frameStyle: "none" }); }} />
+              <NumberField label="Altezza cm" value={printSpec.heightCm} min={1} max={50} step={0.1} onChange={(heightCm) => { setPhotoPresetId("custom"); handlePrintSpecChange({ heightCm, frameStyle: "none" }); }} />
             </div>
             <SelectField
               label="DPI"
@@ -957,14 +1117,16 @@ export function App() {
                 { value: "contain", label: "Adatta con bordo bianco" },
               ]}
             />
+            <p className="field-help">“Riempi” taglia l’eccedenza per riempire tutta la foto. “Adatta” conserva tutta l’immagine e aggiunge bianco quando serve.</p>
             <label className="check-row">
               <input
                 type="checkbox"
                 checked={adjustments.autoRotateBySourceOrientation}
                 onChange={(event) => handleAutoRotateChange(event.target.checked)}
               />
-              <span>Auto ruota orientamento</span>
+              <span>Ruota foto per seguire il formato</span>
             </label>
+            <p className="field-help">Normalmente lascialo disattivato: l'orientamento EXIF è già applicato durante l'import.</p>
           </section>
 
           <section className="panel-section">
@@ -973,6 +1135,10 @@ export function App() {
               label="Formato"
               value={sheetSpec.presetId}
               onChange={(value) => {
+                if (value === "custom") {
+                  setSheetSpec((current) => ({ ...current, presetId: "custom", label: "Personalizzato" }));
+                  return;
+                }
                 const preset = SHEET_PRESETS.find((item) => item.presetId === value);
                 if (preset) setSheetSpec(preset);
               }}
@@ -981,9 +1147,13 @@ export function App() {
             <div className="grid-two">
               <NumberField label="Larghezza cm" value={sheetSpec.widthCm} min={2} max={120} step={0.1} disabled={selectedSheetPreset.presetId !== "custom"} onChange={(widthCm) => setSheetSpec((current) => ({ ...current, widthCm }))} />
               <NumberField label="Altezza cm" value={sheetSpec.heightCm} min={2} max={120} step={0.1} disabled={selectedSheetPreset.presetId !== "custom"} onChange={(heightCm) => setSheetSpec((current) => ({ ...current, heightCm }))} />
-              <NumberField label="Margine cm" value={sheetSpec.marginCm} min={0} max={5} step={0.1} onChange={(marginCm) => setSheetSpec((current) => ({ ...current, marginCm }))} />
-              <NumberField label="Spazio cm" value={sheetSpec.gapCm} min={0} max={5} step={0.1} onChange={(gapCm) => setSheetSpec((current) => ({ ...current, gapCm }))} />
+              <NumberField label="Margine esterno mm" value={sheetSpec.marginMm} min={0} max={100} step={0.1} onChange={(marginMm) => setSheetSpec((current) => ({ ...current, marginMm }))} />
+              <NumberField label="Distanza tra foto mm" value={sheetSpec.gapMm} min={0} max={100} step={0.1} onChange={(gapMm) => setSheetSpec((current) => ({ ...current, gapMm }))} />
             </div>
+            <p className="field-help">Il margine è la distanza minima dal bordo del foglio; la griglia viene centrata. La distanza è lo spazio vuoto tra due foto.</p>
+            {layout.photosPerSheet > 0 ? (
+              <p className="field-help">Margine effettivo: sinistra/destra {((layout.outerMarginLeftPx * 25.4) / printSpec.dpi).toFixed(1)} / {((layout.outerMarginRightPx * 25.4) / printSpec.dpi).toFixed(1)} mm · alto/basso {((layout.outerMarginTopPx * 25.4) / printSpec.dpi).toFixed(1)} / {((layout.outerMarginBottomPx * 25.4) / printSpec.dpi).toFixed(1)} mm.</p>
+            ) : null}
           </section>
 
           <section className="panel-section">
@@ -1003,6 +1173,7 @@ export function App() {
             <SelectField
               label="Posizione"
               value={logo.position}
+              disabled={!logo.enabled || !logo.imageUrl}
               onChange={(position) => setLogo((current) => ({ ...current, position: position as LogoOverlaySpec["position"] }))}
               options={[
                 { value: "bottom-right", label: "Basso destra" },
@@ -1012,8 +1183,50 @@ export function App() {
                 { value: "center", label: "Centro" },
               ]}
             />
-            <RangeField label="Scala logo" value={logo.scalePct} min={5} max={80} step={1} suffix="%" onChange={(scalePct) => setLogo((current) => ({ ...current, scalePct }))} />
-            <RangeField label="Opacità" value={Math.round(logo.opacity * 100)} min={5} max={100} step={1} suffix="%" onChange={(opacity) => setLogo((current) => ({ ...current, opacity: opacity / 100 }))} />
+            <RangeField label="Scala logo" value={logo.scalePct} min={5} max={80} step={1} suffix="%" disabled={!logo.enabled || !logo.imageUrl} onChange={(scalePct) => setLogo((current) => ({ ...current, scalePct }))} />
+            <RangeField label="Opacità" value={Math.round(logo.opacity * 100)} min={5} max={100} step={1} suffix="%" disabled={!logo.enabled || !logo.imageUrl} onChange={(opacity) => setLogo((current) => ({ ...current, opacity: opacity / 100 }))} />
+          </section>
+
+          <section className="panel-section">
+            <h2>Bordi e taglio</h2>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={finishing.cutGuidesEnabled}
+                onChange={(event) => setFinishing((current) => ({ ...current, cutGuidesEnabled: event.target.checked }))}
+              />
+              <span>Segni di taglio</span>
+            </label>
+            <p className="field-help">Aggiunge piccoli riferimenti fuori dagli angoli, utili con cornici bianche su foglio bianco.</p>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={adjustments.borderEnabled}
+                onChange={(event) => setAdjustments((current) => ({ ...current, borderEnabled: event.target.checked }))}
+              />
+              <span>Mostra bordo</span>
+            </label>
+            <div className="grid-two">
+              <NumberField
+                label="Spessore px"
+                value={adjustments.borderWidthPx}
+                min={1}
+                max={50}
+                step={1}
+                disabled={!adjustments.borderEnabled}
+                onChange={(borderWidthPx) => setAdjustments((current) => ({ ...current, borderWidthPx }))}
+              />
+              <label className="field">
+                <span>Colore</span>
+                <input
+                  type="color"
+                  value={adjustments.borderColor}
+                  disabled={!adjustments.borderEnabled}
+                  onChange={(event) => setAdjustments((current) => ({ ...current, borderColor: event.target.value }))}
+                />
+              </label>
+            </div>
+            <p className="field-help">Il bordo è stampato dentro il formato della foto e non ne aumenta la dimensione.</p>
           </section>
 
           <section className="panel-section">
@@ -1030,7 +1243,7 @@ export function App() {
               ]}
             />
             <TextField label="Nome file" value={fileNamePrefix} onChange={setFileNamePrefix} />
-            <RangeField label="Qualità JPG" value={Math.round(quality * 100)} min={50} max={100} step={1} suffix="%" onChange={(value) => setQuality(value / 100)} />
+            <RangeField label="Qualità JPG/PDF" value={Math.round(quality * 100)} min={50} max={100} step={1} suffix="%" disabled={format === "png" || format === "tif"} onChange={(value) => setQuality(value / 100)} />
             <button type="button" className="wide-button" onClick={chooseOutputFolder} disabled={!window.filexDesktop?.chooseOutputFolder}>
               <FolderOpen size={16} />
               Cartella output
@@ -1038,113 +1251,6 @@ export function App() {
             {outputDirectoryPath ? <p className="path-label">{outputDirectoryPath}</p> : <p className="path-label">Browser: export multiplo in un file ZIP.</p>}
           </section>
         </aside>
-
-        <section className="crop-panel">
-          <div className="section-head">
-            <div>
-              <h2>Controllo crop</h2>
-              <p>{activeAsset ? `${activeIndex + 1}/${assets.length} · ${activeAsset.fileName}` : "Importa le foto per iniziare."}</p>
-            </div>
-            <div className="segmented-actions">
-              <button type="button" onClick={() => markReviewedAndMove(-1)} disabled={activeIndex === 0}>
-                <ChevronLeft size={16} />
-              </button>
-              <button type="button" onClick={() => markReviewedAndMove(1)} disabled={activeIndex >= assets.length - 1}>
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
-
-          <div className="crop-stage">
-            {activeAsset && activeCrop ? (
-              <div
-                ref={cropWrapRef}
-                className={isDraggingCrop ? "crop-image-wrap crop-image-wrap--dragging" : "crop-image-wrap"}
-                style={{ "--source-aspect": String(activeAsset.width / Math.max(1, activeAsset.height)) } as React.CSSProperties}
-              >
-                <img src={activeAsset.previewUrl} alt={activeAsset.fileName} />
-                <div
-                  className={isDraggingCrop ? "crop-box crop-box--dragging" : "crop-box"}
-                  style={{
-                    left: `${activeCrop.cropLeft * 100}%`,
-                    top: `${activeCrop.cropTop * 100}%`,
-                    width: `${activeCrop.cropWidth * 100}%`,
-                    height: `${activeCrop.cropHeight * 100}%`,
-                  }}
-                  onPointerDown={startCropDrag}
-                  onPointerMove={moveCropDrag}
-                  onPointerUp={stopCropDrag}
-                  onPointerCancel={stopCropDrag}
-                  role="button"
-                  tabIndex={0}
-                  aria-label="Trascina per riposizionare il ritaglio"
-                />
-              </div>
-            ) : (
-              <div className="empty-state">
-                <Printer size={42} />
-                <strong>Nessuna foto caricata</strong>
-                <span>Usa Sfoglia per importare una cartella o una selezione di immagini.</span>
-              </div>
-            )}
-          </div>
-
-          {activeAsset && activeCrop ? (
-            <div className={isDraggingCrop ? "interaction-feedback interaction-feedback--active" : "interaction-feedback"}>
-              <Info size={16} />
-              <span>{interactionHint}</span>
-            </div>
-          ) : null}
-
-          {activeAsset && activeCrop ? (
-            <div className="crop-controls">
-              <RangeField label="Orizzontale" value={Math.round((activeCrop.cropLeft + activeCrop.cropWidth / 2) * 100)} min={Math.round((activeCrop.cropWidth / 2) * 100)} max={Math.round((1 - activeCrop.cropWidth / 2) * 100)} step={1} suffix="%" onChange={(value) => updateActiveCrop({ cropLeft: value / 100 - activeCrop.cropWidth / 2 })} />
-              <RangeField label="Verticale" value={Math.round((activeCrop.cropTop + activeCrop.cropHeight / 2) * 100)} min={Math.round((activeCrop.cropHeight / 2) * 100)} max={Math.round((1 - activeCrop.cropHeight / 2) * 100)} step={1} suffix="%" onChange={(value) => updateActiveCrop({ cropTop: value / 100 - activeCrop.cropHeight / 2 })} />
-              <RangeField label="Zoom" value={Number(zoom.toFixed(2))} min={1} max={4} step={0.05} suffix="x" onChange={setActiveZoom} />
-              <RangeField label="Rotazione" value={activeCrop.rotation} min={-180} max={180} step={1} suffix="deg" onChange={(rotation) => updateActiveCrop({ rotation })} />
-              <div className="crop-button-row">
-                <button type="button" className="secondary-button" onClick={openActiveInPhotoshop} disabled={!activeAsset.absolutePath}>
-                  <ExternalLink size={16} />
-                  Apri in Photoshop
-                </button>
-                <button type="button" className="secondary-button" onClick={() => refreshAssetFromDisk(activeAsset.id)} disabled={!activeAsset.absolutePath}>
-                  <RefreshCw size={16} />
-                  Aggiorna da file
-                </button>
-                <button type="button" className="secondary-button" onClick={relinkActiveAssetFromSavedFile}>
-                  <FolderOpen size={16} />
-                  Usa file salvato
-                </button>
-                <button type="button" className="secondary-button" onClick={resetActiveCrop}>
-                  <RotateCcw size={16} />
-                  Reset
-                </button>
-                <button type="button" className="primary-button" onClick={() => markReviewedAndMove(1)}>
-                  Conferma e avanti
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {activeAsset && activeCrop ? (
-            <div className="shortcut-panel">
-              <div className="shortcut-panel__head">
-                <Keyboard size={16} />
-                <strong>Scorciatoie e drag</strong>
-              </div>
-              <div className="shortcut-grid">
-                <Shortcut label="Trascina box" value="Centra crop" icon={<MousePointer2 size={14} />} />
-                <Shortcut label="Frecce" value="Sposta fine" />
-                <Shortcut label="Shift + frecce" value="Sposta veloce" />
-                <Shortcut label="+ / -" value="Zoom" />
-                <Shortcut label="R" value="Reset crop" />
-                <Shortcut label="X" value="Ruota 90 deg" />
-                <Shortcut label="Enter" value="Conferma avanti" />
-                <Shortcut label="B" value="Bianco e nero" />
-              </div>
-            </div>
-          ) : null}
-        </section>
 
         <section className="preview-panel sheet-workbench">
           <div className="section-head">
@@ -1157,10 +1263,11 @@ export function App() {
               </p>
             </div>
             <div className="segmented-actions">
-              <button type="button" onClick={() => setPreviewPageIndex((value) => Math.max(0, value - 1))} disabled={previewPageIndex === 0}>
+              <span className="page-indicator">{pages.length ? `${previewPageIndex + 1}/${pages.length}` : "0/0"}</span>
+              <button type="button" aria-label="Pagina precedente" title="Pagina precedente" onClick={() => setPreviewPageIndex((value) => Math.max(0, value - 1))} disabled={previewPageIndex === 0}>
                 <ChevronLeft size={16} />
               </button>
-              <button type="button" onClick={() => setPreviewPageIndex((value) => Math.min(pages.length - 1, value + 1))} disabled={previewPageIndex >= pages.length - 1}>
+              <button type="button" aria-label="Pagina successiva" title="Pagina successiva" onClick={() => setPreviewPageIndex((value) => Math.min(pages.length - 1, value + 1))} disabled={previewPageIndex >= pages.length - 1}>
                 <ChevronRight size={16} />
               </button>
             </div>
@@ -1191,13 +1298,14 @@ export function App() {
                           width: `${(slot.width / layout.sheetWidthPx) * 100}%`,
                           height: `${(slot.height / layout.sheetHeightPx) * 100}%`,
                         }}
-                        onDoubleClick={() => selectSheetAsset(slot.assetId)}
+                        onClick={() => selectSheetAsset(slot.assetId)}
                         onPointerDown={(event) => startSheetSlotDrag(event, slot.assetId)}
                         onPointerMove={moveSheetSlotDrag}
                         onPointerUp={stopSheetSlotDrag}
                         onPointerCancel={stopSheetSlotDrag}
                         aria-label={`Modifica ${asset?.relativePath || asset?.fileName || "foto"}`}
-                        title="Doppio clic o trascina per riposizionare"
+                        aria-pressed={isActive}
+                        title="Clicca o trascina per riposizionare"
                       />
                     );
                   })}
@@ -1218,13 +1326,17 @@ export function App() {
               <RangeField label="Zoom" value={Number(zoom.toFixed(2))} min={1} max={4} step={0.05} suffix="x" onChange={setActiveZoom} />
               <RangeField label="Rotazione" value={activeCrop.rotation} min={-180} max={180} step={1} suffix="deg" onChange={(rotation) => updateActiveCrop({ rotation })} />
               <div className="crop-button-row">
-                <button type="button" className="secondary-button" onClick={openActiveInPhotoshop} disabled={!activeAsset.absolutePath}>
+                <button type="button" className="secondary-button" onClick={openActiveInEditor} disabled={!activeAsset.absolutePath || !window.filexDesktop?.openWithEditor}>
                   <ExternalLink size={16} />
-                  Apri in Photoshop
+                  Apri in editor
                 </button>
                 <button type="button" className="secondary-button" onClick={() => refreshAssetFromDisk(activeAsset.id)} disabled={!activeAsset.absolutePath}>
                   <RefreshCw size={16} />
                   Aggiorna da file
+                </button>
+                <button type="button" className="secondary-button" onClick={relinkActiveAssetFromSavedFile} disabled={!window.filexDesktop?.chooseImageFile}>
+                  <FolderOpen size={16} />
+                  Usa file salvato
                 </button>
                 <button type="button" className="secondary-button" onClick={rotateActiveCrop}>
                   <RotateCcw size={16} />
@@ -1240,13 +1352,13 @@ export function App() {
               </div>
             </div>
           ) : null}
-          <div className="shortcut-panel">
+          {activeAsset && activeCrop ? <div className="shortcut-panel">
             <div className="shortcut-panel__head">
               <Keyboard size={16} />
               <strong>Scorciatoie e drag sul foglio</strong>
             </div>
             <div className="shortcut-grid">
-              <Shortcut label="Doppio clic" value="Seleziona foto" icon={<MousePointer2 size={14} />} />
+              <Shortcut label="Clic" value="Seleziona foto" icon={<MousePointer2 size={14} />} />
               <Shortcut label="Trascina foto" value="Centra sul foglio" />
               <Shortcut label="Frecce" value="Sposta fine" />
               <Shortcut label="Shift + frecce" value="Sposta veloce" />
@@ -1256,15 +1368,19 @@ export function App() {
               <Shortcut label="Enter" value="Conferma avanti" />
               <Shortcut label="B" value="Bianco e nero" />
             </div>
-          </div>
+          </div> : null}
           <div className="preview-stats">
             <div><span>Griglia</span><strong>{layout.cols} x {layout.rows}</strong></div>
             <div><span>Orientamento</span><strong>{layout.sheetLandscape ? "Orizzontale" : "Verticale"}</strong></div>
             <div><span>Foto ruotata</span><strong>{layout.photoRotated ? "Si" : "No"}</strong></div>
             <div><span>Pagina</span><strong>{pages.length ? `${previewPageIndex + 1}/${pages.length}` : "0/0"}</strong></div>
+            <div><span>Formato stampa</span><strong>{layout.sheetWidthCm} × {layout.sheetHeightCm} cm</strong></div>
+            <div><span>Risoluzione</span><strong>{printSpec.dpi} DPI</strong></div>
+            <div><span>Controllate</span><strong>{reviewedCount}/{assets.length}</strong></div>
+            <div><span>Output</span><strong>{format.toUpperCase()}</strong></div>
           </div>
           {layout.photosPerSheet === 0 ? <p className="warning">Il formato foto non entra nel foglio con questi margini.</p> : null}
-          <p className="status-line">{status}</p>
+          <p className="status-line" role="status" aria-live="polite">{status}</p>
         </section>
       </main>
     </div>
@@ -1283,38 +1399,51 @@ function NumberField({ label, value, min, max, step, disabled, onChange }: {
   return (
     <label className="field">
       <span>{label}</span>
-      <input type="number" value={value} min={min} max={max} step={step} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} />
+      <input
+        type="number"
+        value={Number.isFinite(value) ? value : ""}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = event.currentTarget.valueAsNumber;
+          if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next)));
+        }}
+      />
     </label>
   );
 }
 
-function RangeField({ label, value, min, max, step, suffix, onChange }: {
+function RangeField({ label, value, min, max, step, suffix, disabled, onChange }: {
   label: string;
   value: number;
   min: number;
   max: number;
   step: number;
   suffix: string;
+  disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   return (
     <label className="field range-field">
       <span>{label}<strong>{value}{suffix}</strong></span>
-      <input type="range" value={value} min={min} max={max} step={step} onChange={(event) => onChange(Number(event.target.value))} />
+      <input type="range" value={value} min={min} max={max} step={step} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} />
     </label>
   );
 }
 
-function SelectField({ label, value, options, onChange }: {
+function SelectField({ label, value, options, disabled, onChange }: {
   label: string;
   value: string;
   options: Array<{ value: string; label: string }>;
+  disabled?: boolean;
   onChange: (value: string) => void;
 }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
         {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
     </label>

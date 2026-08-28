@@ -80,6 +80,7 @@ const api: FileXDesktopApi = {
   clearThumbnailCache: () => ipcRenderer.invoke("filex:clear-thumbnail-cache"),
   getRamBudgetInfo: () => ipcRenderer.invoke("filex:get-ram-budget-info"),
   setRamBudgetPreset: (preset) => ipcRenderer.invoke("filex:set-ram-budget-preset", preset),
+  setDiskCacheBudgetPreset: (preset) => ipcRenderer.invoke("filex:set-disk-cache-budget-preset", preset),
   relaunch: () => ipcRenderer.invoke("filex:relaunch"),
   getCacheLocationRecommendation: () => ipcRenderer.invoke("filex:get-cache-location-recommendation"),
   migrateThumbnailCacheDirectory: (directoryPath) =>

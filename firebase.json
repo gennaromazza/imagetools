@@ -31,6 +31,9 @@
       "public": "website",
       "cleanUrls": true,
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "redirects": [
+        { "source": "/guide/applicare-cornici-a-molte-foto", "destination": "/guide/software-photo-booth-matrimoni-eventi", "type": 301 }
+      ],
       "rewrites": [
         { "source": "/api/licensing/**", "function": { "functionId": "api", "region": "europe-west1" } }
       ],
