@@ -80,6 +80,21 @@ if (args.component === "archivio-flow") {
   verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
 }
 
+if (args.component === "image-party-frame") {
+  const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+  const serverEntry = "/.output/electron/image-party-frame-server/server/index.js";
+  if (!entries.has(serverEntry)) {
+    throw new Error(`Image Party Frame non contiene ${serverEntry}`);
+  }
+  verifyRelativeImportClosure(archivePath, entries, serverEntry);
+  verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
+}
+
+if (args.component === "photo-selector-app") {
+  const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+  verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
+}
+
 if (args.component === "suite") {
   const entries = listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/"));
   for (const requiredEntry of [

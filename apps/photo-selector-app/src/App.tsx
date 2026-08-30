@@ -6,6 +6,8 @@ import type {
   DesktopDiskCacheBudgetPreset,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
+  DesktopSelectionMode,
+  DesktopSourceIdentity,
   DesktopGraphicsStatus,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
@@ -40,12 +42,13 @@ import {
 import { clearImageCache } from "./services/image-cache";
 import {
   buildPlaceholderAssets,
+  buildDetachedPlaceholderAssets,
   addRecentFolder,
   getAssetAbsolutePath,
-  buildSourceFileKeyFromStats,
   isRawFile,
   openProjectFolderNative,
   readSidecarXmp,
+  readSidecarXmpInfo,
   reopenProjectFolder,
   warmOnDemandPreviewCache,
   writeSidecarXmp,
@@ -90,6 +93,7 @@ import {
 } from "./services/photo-selector-preferences";
 import {
   getDesktopFolderCatalogState,
+  getFreeSelectionSnapshot,
   getDesktopSessionState,
   hasDesktopStateApi,
   logDesktopEvent,
@@ -101,6 +105,7 @@ import {
   saveDesktopFolderAssetStates,
   saveDesktopFolderAssetStatesDelta,
   saveDesktopFolderCatalogState,
+  saveFreeSelectionSnapshot,
   saveDesktopSessionState,
   updatePhotoSelectorProjectFile,
 } from "./services/desktop-store";
@@ -114,7 +119,7 @@ import { buildSelectionResult } from "./types/selection";
 import { useToast } from "./components/ToastProvider";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { DismissibleBanner } from "./components/DismissibleBanner";
-import { FolderBrowser } from "./components/FolderBrowser";
+import { FolderBrowser, type FolderOpenIntent } from "./components/FolderBrowser";
 import { ImportProgressModal } from "./components/ImportProgressModal";
 import { PhotoLoadingOverlay } from "./components/PhotoLoadingOverlay";
 import {
@@ -141,6 +146,13 @@ import {
 } from "./services/google-drive-projects";
 import { buildMasterProject } from "./services/project-workflow";
 import { mapCloudProjectToAssets, normalizeCloudPath } from "./services/cloud-project-mapping";
+import {
+  buildFallbackSourceIdentity,
+  buildFreeSelectionSnapshot,
+  buildWorkspaceAssetStates,
+  getWorkspaceCatalogKey,
+  shouldWriteProjectFile,
+} from "./services/workspace-mode";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Constants
@@ -180,6 +192,7 @@ function buildCloudManifest(
   activeAssetIds: string[],
   exportedFrom?: string,
   projectId = PROJECT_ID,
+  workspaceMode: DesktopSelectionMode = "project",
 ): DesktopCloudProjectManifest {
   const byId = new Map(assets.map((asset) => [asset.id, asset]));
   return {
@@ -188,6 +201,15 @@ function buildCloudManifest(
     projectId,
     projectName: projectName.trim() || "Senza nome",
     sourceFolderName: sourceFolderPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? "Cartella",
+    kind: workspaceMode,
+    workspaceMode,
+    ...(workspaceMode === "free"
+      ? {
+          selectionId: projectId,
+          workspaceId: projectId,
+          displayName: projectName.trim() || "Selezione libera",
+        }
+      : {}),
     exportedAt: new Date().toISOString(),
     exportedFrom,
     activeRelativePaths: activeAssetIds
@@ -401,6 +423,9 @@ function buildCatalogAssetStateSignature(assetState: DesktopFolderCatalogAssetSt
     assetState.pickStatus,
     assetState.colorLabel ?? null,
     assetState.customLabels ?? [],
+    assetState.active ?? false,
+    assetState.classificationUpdatedAt ?? assetState.updatedAt,
+    assetState.selectionUpdatedAt ?? assetState.updatedAt,
   ]);
 }
 
@@ -524,6 +549,13 @@ function mergeUndoableSnapshotAssets(
 
 type Screen = "browse" | "selection" | "review";
 
+interface FolderWorkspaceContext {
+  mode: DesktopSelectionMode;
+  projectId?: string;
+  projectName?: string;
+  outgoingWorkspacePersisted?: boolean;
+}
+
 type XmpSyncState =
   | { phase: "idle"; pending: number; failed: number; lastSyncedAt: number | null }
   | { phase: "pending"; pending: number; failed: number; lastSyncedAt: number | null }
@@ -572,6 +604,10 @@ export function App() {
 
   // ── Persisted state ──────────────────────────────────────────────────
   const [projectName, setProjectName] = useState("Image Select Pro");
+  const [workspaceMode, setWorkspaceMode] = useState<DesktopSelectionMode | null>(null);
+  const [workspaceId, setWorkspaceId] = useState("");
+  const [sourceIdentity, setSourceIdentity] = useState<DesktopSourceIdentity | null>(null);
+  const [lastDriveUrl, setLastDriveUrl] = useState<string | null>(null);
   const [desktopRuntime, setDesktopRuntime] = useState<DesktopRuntimeInfo | null>(null);
   const [desktopGraphicsStatus, setDesktopGraphicsStatus] = useState<DesktopGraphicsStatus | null>(null);
   const [googleDriveStatus, setGoogleDriveStatus] = useState({
@@ -605,6 +641,29 @@ export function App() {
   const [isRenameProjectOpen, setIsRenameProjectOpen] = useState(false);
   const [sourceFolderPath, setSourceFolderPath] = useState("");
   const [projectFolderFocus, setProjectFolderFocus] = useState<string | null>(null);
+  const freeSelectionCreatedAtRef = useRef(Date.now());
+  const freePersistenceFailureNotifiedRef = useRef(false);
+  const reportFreePersistenceResult = useCallback((saved: boolean) => {
+    if (saved) {
+      freePersistenceFailureNotifiedRef.current = false;
+      return;
+    }
+    if (freePersistenceFailureNotifiedRef.current) {
+      return;
+    }
+    freePersistenceFailureNotifiedRef.current = true;
+    addToast(
+      "Il salvataggio automatico locale della selezione libera non è riuscito. Le modifiche già scritte negli XMP restano valide; evita di chiudere l'app e riprova dopo aver riaperto la cartella.",
+      "error",
+      9000,
+    );
+  }, [addToast]);
+  const workspaceCatalogKey = useMemo(
+    () => workspaceMode && sourceFolderPath
+      ? getWorkspaceCatalogKey(workspaceMode, sourceFolderPath, sourceIdentity?.sourceId)
+      : sourceFolderPath,
+    [sourceFolderPath, sourceIdentity?.sourceId, workspaceMode],
+  );
 
   // ── Asset catalog ────────────────────────────────────────────────────
   const [allAssets, setAllAssets] = useState<ImageAsset[]>([]);
@@ -696,8 +755,10 @@ export function App() {
   const previewPriorityIdsRef = useRef(new Set<string>());
   const interactiveThumbnailIdsRef = useRef(new Set<string>());
   const folderLoadSessionRef = useRef(0);
+  const folderOpenIntentRef = useRef(0);
   const folderOpenRequestRef = useRef(0);
-  const persistedStateHydrationRef = useRef<{ folderPath: string; session: number } | null>(null);
+  const persistedStateHydrationRef = useRef<{ storageKey: string; session: number } | null>(null);
+  const workspaceHydrationSettledRef = useRef<Promise<void>>(Promise.resolve());
   const xmpImportStartTimerRef = useRef<number | null>(null);
   const backgroundThumbnailEnqueueTimerRef = useRef<number | null>(null);
   const backgroundCacheLookupTimerRef = useRef<number | null>(null);
@@ -730,6 +791,7 @@ export function App() {
   const catalogAssetStatesRef = useRef<DesktopFolderCatalogAssetState[]>([]);
   const catalogProjectActiveSignatureRef = useRef("");
   const catalogProjectNameRef = useRef("");
+  const flushWorkspacePersistenceRef = useRef<() => Promise<boolean>>(async () => true);
   const performanceSnapshotPersistTimerRef = useRef<number | null>(null);
   const performanceMetricsUiTimerRef = useRef<number | null>(null);
   const scrollLiteActiveMsRef = useRef(0);
@@ -743,6 +805,66 @@ export function App() {
     thumbnailProgressStateRef.current = next;
     setThumbnailProgress(next);
   }, []);
+
+  const workspacePersistenceStateRef = useRef({
+    workspaceMode,
+    sourceFolderPath,
+    allAssets,
+    activeAssetIds,
+    projectName,
+    sourceIdentity,
+  });
+  workspacePersistenceStateRef.current = {
+    workspaceMode,
+    sourceFolderPath,
+    allAssets,
+    activeAssetIds,
+    projectName,
+    sourceIdentity,
+  };
+
+  flushWorkspacePersistenceRef.current = async () => {
+    await workspaceHydrationSettledRef.current.catch(() => {});
+    const current = workspacePersistenceStateRef.current;
+    if (!current.workspaceMode || !current.sourceFolderPath.trim() || current.allAssets.length === 0) {
+      return true;
+    }
+    const timestamp = Date.now();
+    const assetStates = buildWorkspaceAssetStates(current.allAssets, timestamp, getAssetAbsolutePath, {
+      activeAssetIds: current.activeAssetIds,
+      previousStates: catalogAssetStatesRef.current,
+    });
+    if (current.workspaceMode === "project") {
+      const saved = await updatePhotoSelectorProjectFile(current.sourceFolderPath, (existingProject) => ({
+        ...existingProject,
+        schemaVersion: 1,
+        app: "image-select-pro",
+        updatedAt: timestamp,
+        projectName: current.projectName,
+        folderState: { activeAssetIds: current.activeAssetIds, assetStates },
+      })).catch(() => false);
+      if (saved) {
+        catalogAssetStatesRef.current = assetStates;
+      }
+      return saved;
+    }
+    if (current.sourceIdentity) {
+      const saved = await saveFreeSelectionSnapshot(buildFreeSelectionSnapshot({
+        source: current.sourceIdentity,
+        displayName: current.projectName,
+        createdAt: freeSelectionCreatedAtRef.current,
+        updatedAt: timestamp,
+        activeAssetIds: current.activeAssetIds,
+        assetStates,
+      }));
+      reportFreePersistenceResult(saved);
+      if (saved) {
+        catalogAssetStatesRef.current = assetStates;
+      }
+      return saved;
+    }
+    return false;
+  };
 
   // ── Restore from IndexedDB on mount ──────────────────────────────────
   useEffect(() => {
@@ -778,10 +900,12 @@ export function App() {
       sourceFolderPath,
       activeAssetIds,
       usesMockData: false,
+      selectionMode: workspaceMode ?? undefined,
+      sourceId: workspaceMode === "free" ? (sourceIdentity?.sourceId ?? workspaceId) || undefined : undefined,
     };
 
     void saveDesktopSessionState(nextState);
-  }, [projectName, sourceFolderPath, activeAssetIds]);
+  }, [activeAssetIds, projectName, sourceFolderPath, sourceIdentity?.sourceId, workspaceId, workspaceMode]);
 
   useEffect(() => {
     let active = true;
@@ -880,14 +1004,19 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!hasDesktopStateApi() || !sourceFolderPath.trim() || allAssets.length === 0) {
+    if (
+      !hasDesktopStateApi()
+      || !sourceFolderPath.trim()
+      || !workspaceMode
+      || allAssets.length === 0
+    ) {
       return;
     }
 
     const pendingHydration = persistedStateHydrationRef.current;
     if (
       pendingHydration &&
-      pendingHydration.folderPath === sourceFolderPath &&
+      pendingHydration.storageKey === workspaceCatalogKey &&
       pendingHydration.session === folderLoadSessionRef.current
     ) {
       return;
@@ -898,6 +1027,9 @@ export function App() {
     }
 
     const scheduledFolderPath = sourceFolderPath;
+    const scheduledCatalogKey = workspaceCatalogKey;
+    const scheduledMode = workspaceMode;
+    const scheduledSourceIdentity = sourceIdentity;
     const scheduledSession = folderLoadSessionRef.current;
 
     catalogPersistTimerRef.current = window.setTimeout(() => {
@@ -912,7 +1044,7 @@ export function App() {
       const timestamp = Date.now();
       const folderName = sourceFolderPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? sourceFolderPath;
       const catalogState: DesktopFolderCatalogState = {
-        folderPath: sourceFolderPath,
+        folderPath: scheduledCatalogKey,
         folderName,
         imageCount: allAssets.length,
         activeAssetIds,
@@ -920,23 +1052,18 @@ export function App() {
         updatedAt: timestamp,
       };
       const assetsReferenceChanged = catalogPersistedAssetsRef.current !== allAssets;
-      const assetStates = assetsReferenceChanged
-        ? allAssets.map((asset): DesktopFolderCatalogAssetState => ({
-          assetId: asset.id,
-          fileName: asset.fileName,
-          relativePath: asset.path,
-          absolutePath: getAssetAbsolutePath(asset.id) ?? undefined,
-          sourceFileKey: asset.sourceFileKey,
-          rating: asset.rating ?? 0,
-          pickStatus: asset.pickStatus ?? "unmarked",
-          colorLabel: asset.colorLabel ?? null,
-          customLabels: asset.customLabels ?? [],
-          updatedAt: timestamp,
-        }))
+      const activeSignature = activeAssetIds.join("|");
+      const activeSelectionChanged = catalogProjectActiveSignatureRef.current !== activeSignature;
+      const assetStateRefreshRequired = assetsReferenceChanged || activeSelectionChanged;
+      const assetStates = assetStateRefreshRequired
+        ? buildWorkspaceAssetStates(allAssets, timestamp, getAssetAbsolutePath, {
+          activeAssetIds,
+          previousStates: catalogAssetStatesRef.current,
+        })
         : catalogAssetStatesRef.current;
 
       const identitySignature = assetsReferenceChanged
-        ? `${sourceFolderPath}::${allAssets.length}::${allAssets
+        ? `${scheduledCatalogKey}::${allAssets.length}::${allAssets
           .map((asset) => `${asset.id}:${asset.sourceFileKey ?? ""}`)
           .join("|")}`
         : catalogIdentitySignatureRef.current;
@@ -944,7 +1071,7 @@ export function App() {
         && catalogIdentitySignatureRef.current !== identitySignature;
       const changedAssetStates = requiresFullAssetSave
         ? assetStates
-        : assetsReferenceChanged
+        : assetStateRefreshRequired
           ? assetStates.filter((assetState) => (
           catalogAssetStateSignatureRef.current.get(assetState.assetId) !== buildCatalogAssetStateSignature(assetState)
           ))
@@ -952,13 +1079,14 @@ export function App() {
 
       void saveDesktopFolderCatalogState(catalogState);
       if (requiresFullAssetSave) {
-        void saveDesktopFolderAssetStates(sourceFolderPath, assetStates);
+        void saveDesktopFolderAssetStates(scheduledCatalogKey, assetStates);
         catalogIdentitySignatureRef.current = identitySignature;
+        catalogAssetStateSignatureRef.current.clear();
       } else if (changedAssetStates.length > 0) {
-        void saveDesktopFolderAssetStatesDelta(sourceFolderPath, changedAssetStates);
+        void saveDesktopFolderAssetStatesDelta(scheduledCatalogKey, changedAssetStates);
       }
 
-      if (assetsReferenceChanged) {
+      if (assetStateRefreshRequired) {
         catalogPersistedAssetsRef.current = allAssets;
         catalogAssetStatesRef.current = assetStates;
       }
@@ -969,33 +1097,50 @@ export function App() {
         );
       }
 
-      const activeSignature = activeAssetIds.join("|");
-      const shouldWriteProject = assetsReferenceChanged
-        || catalogProjectActiveSignatureRef.current !== activeSignature
+      const shouldPersistWorkspace = assetStateRefreshRequired
         || catalogProjectNameRef.current !== projectName;
-      if (shouldWriteProject) {
+      if (shouldPersistWorkspace) {
         catalogProjectActiveSignatureRef.current = activeSignature;
         catalogProjectNameRef.current = projectName;
-        void updatePhotoSelectorProjectFile(sourceFolderPath, (existingProject) => ({
-          ...existingProject,
-          schemaVersion: 1,
-          app: "image-select-pro",
-          updatedAt: Date.now(),
-          projectName,
-          folderState: {
+        if (shouldWriteProjectFile(scheduledMode)) {
+          void updatePhotoSelectorProjectFile(scheduledFolderPath, (existingProject) => ({
+            ...existingProject,
+            schemaVersion: 1,
+            app: "image-select-pro",
+            updatedAt: Date.now(),
+            projectName,
+            folderState: {
+              activeAssetIds,
+              assetStates,
+            },
+          })).catch(() => false);
+        } else if (scheduledSourceIdentity) {
+          void saveFreeSelectionSnapshot(buildFreeSelectionSnapshot({
+            source: scheduledSourceIdentity,
+            displayName: projectName,
+            createdAt: freeSelectionCreatedAtRef.current,
+            updatedAt: timestamp,
             activeAssetIds,
-            // The desktop project format accepts the same catalog state and
-            // avoids allocating a second array for the shared file.
             assetStates,
-          },
-        })).catch(() => false);
+          })).then(reportFreePersistenceResult);
+        }
       }
     }, CATALOG_PERSIST_DEBOUNCE_MS);
-  }, [activeAssetIds, allAssets, projectName, sourceFolderPath]);
+  }, [
+    activeAssetIds,
+    allAssets,
+    projectName,
+    sourceFolderPath,
+    sourceIdentity,
+    reportFreePersistenceResult,
+    workspaceCatalogKey,
+    workspaceMode,
+  ]);
 
   // ── Cleanup pipeline on unmount ──────────────────────────────────────
   useEffect(() => {
     return () => {
+      void flushWorkspacePersistenceRef.current().catch(() => {});
       folderLoadSessionRef.current += 1;
       if (xmpImportStartTimerRef.current !== null) {
         window.clearTimeout(xmpImportStartTimerRef.current);
@@ -1205,6 +1350,39 @@ export function App() {
       hadFailures = hadFailures || result.failed > 0;
     }
   }, [addToast, hasWritableFolderAccess, usesMockData]);
+
+  useEffect(() => {
+    const desktopApi = window.filexDesktop;
+    if (
+      typeof desktopApi?.onPrepareClose !== "function"
+      || typeof desktopApi.completeClosePreparation !== "function"
+    ) {
+      return;
+    }
+
+    let closePreparationStarted = false;
+    return desktopApi.onPrepareClose(() => {
+      if (closePreparationStarted) {
+        return;
+      }
+      closePreparationStarted = true;
+
+      void (async () => {
+        await workspaceHydrationSettledRef.current.catch(() => {});
+        await flushPendingXmpSync().catch(() => false);
+        const workspaceSaved = await flushWorkspacePersistenceRef.current().catch(() => false);
+        if (!workspaceSaved) {
+          await logDesktopEvent({
+            channel: "workspace-persistence",
+            level: "error",
+            message: "Chiusura proseguita dopo un errore nel salvataggio dello stato corrente",
+          }).catch(() => {});
+        }
+      })().finally(() => {
+        void desktopApi.completeClosePreparation().catch(() => {});
+      });
+    });
+  }, [flushPendingXmpSync]);
 
   const suspendActiveFolderWork = useCallback(() => {
     folderLoadSessionRef.current += 1;
@@ -2062,6 +2240,7 @@ export function App() {
   const stopCurrentImport = useCallback(() => {
     suspendActiveFolderWork();
     resetThumbnailPatchPipeline();
+    folderOpenIntentRef.current += 1;
     folderOpenRequestRef.current += 1;
     setIsFolderTransitionBusy(false);
     setFolderTransitionLabel("");
@@ -2097,6 +2276,20 @@ export function App() {
     bumpPhotoMetadataVersion();
     setActiveAssetIds([]);
     setSourceFolderPath("");
+    setWorkspaceMode(null);
+    setWorkspaceId("");
+    setSourceIdentity(null);
+    setProjectName("Image Select Pro");
+    setProjectFolderFocus(null);
+    setLastDriveUrl(null);
+    workspacePersistenceStateRef.current = {
+      workspaceMode: null,
+      sourceFolderPath: "",
+      allAssets: [],
+      activeAssetIds: [],
+      projectName: "Image Select Pro",
+      sourceIdentity: null,
+    };
     setHasWritableFolderAccess(false);
     setFolderDiagnostics(null);
     setIsFolderDiagnosticsExpanded(false);
@@ -2138,20 +2331,80 @@ export function App() {
 
   // ── Open folder (instant grid + streaming thumbnails) ────────────────
   const handleFolderOpened = useCallback(
-    async ({ name: folderName, entries, rootPath, diagnostics }: FolderOpenResult) => {
+    async (
+      {
+        name: folderName,
+        entries,
+        rootPath,
+        diagnostics,
+        sourceIdentity: openedSourceIdentity,
+      }: FolderOpenResult,
+      context: FolderWorkspaceContext,
+    ) => {
+      const openIntentId = folderOpenIntentRef.current + 1;
+      folderOpenIntentRef.current = openIntentId;
+      // A workspace already visible may still be applying its local/project
+      // snapshot after the first paint. Let that finish before reading React
+      // state for the outgoing save, otherwise rapid navigation could replace
+      // a valid selection with the temporary empty placeholder state.
+      if (!context.outgoingWorkspacePersisted) {
+        await workspaceHydrationSettledRef.current.catch(() => {});
+        if (folderOpenIntentRef.current !== openIntentId) {
+          return;
+        }
+        await flushPendingXmpSync().catch(() => false);
+        if (folderOpenIntentRef.current !== openIntentId) {
+          return;
+        }
+        const outgoingWorkspaceSaved = await flushWorkspacePersistenceRef.current().catch(() => false);
+        if (folderOpenIntentRef.current !== openIntentId) {
+          return;
+        }
+        if (!outgoingWorkspaceSaved) {
+          addToast(
+            "Cambio cartella annullato: non sono riuscito a mettere al sicuro lo stato corrente. Riprova senza chiudere l'app.",
+            "error",
+            8500,
+          );
+          return;
+        }
+      }
+
       const openRequestId = folderOpenRequestRef.current + 1;
       folderOpenRequestRef.current = openRequestId;
       setIsFolderTransitionBusy(true);
       setFolderTransitionLabel(rootPath ?? folderName);
-      suspendActiveFolderWork();
 
       try {
-        // Pending sidecar writes must finish before the new folder snapshot
-        // clears the old asset map, including when the user reopens the same
-        // folder. Otherwise the queued IDs are discarded below.
-        await flushPendingXmpSync().catch(() => false);
         if (folderOpenRequestRef.current !== openRequestId) {
           return;
+        }
+        suspendActiveFolderWork();
+
+        const resolvedSourceIdentity = openedSourceIdentity ?? buildFallbackSourceIdentity(
+          folderName,
+          rootPath ?? folderName,
+          entries,
+        );
+        const nextWorkspaceId = context.mode === "free"
+          ? resolvedSourceIdentity.sourceId
+          : context.projectId ?? "";
+        const openedCatalogKey = getWorkspaceCatalogKey(
+          context.mode,
+          rootPath ?? folderName,
+          resolvedSourceIdentity.sourceId,
+        );
+        setWorkspaceMode(context.mode);
+        setWorkspaceId(nextWorkspaceId);
+        setSourceIdentity(resolvedSourceIdentity);
+        freePersistenceFailureNotifiedRef.current = false;
+        setLastDriveUrl(null);
+        if (context.mode === "free") {
+          setProjectName(resolvedSourceIdentity.volume?.label?.trim() || folderName);
+          freeSelectionCreatedAtRef.current = Date.now();
+          setProjectFolderFocus(null);
+        } else if (context.projectName?.trim()) {
+          setProjectName(context.projectName.trim());
         }
 
         const thumbnailOptions = getThumbnailPipelineOptions(thumbnailProfile);
@@ -2169,8 +2422,17 @@ export function App() {
           nestedSupportedDiscardedCount: 0,
           totalSupportedSeen: entries.length,
           nestedDirectoriesSeen: 0,
+          unreadableDirectoryCount: 0,
         };
         setFolderDiagnostics(nextDiagnostics);
+        if ((nextDiagnostics.unreadableDirectoryCount ?? 0) > 0) {
+          const skippedCount = nextDiagnostics.unreadableDirectoryCount ?? 0;
+          addToast(
+            `${skippedCount} ${skippedCount === 1 ? "sottocartella non accessibile è stata saltata" : "sottocartelle non accessibili sono state saltate"}. Le altre foto restano disponibili.`,
+            "warning",
+            7500,
+          );
+        }
         setIsImportPanelDismissed(true);
         hasLoggedFirstThumbnailRef.current = false;
         hasLoggedGridCompleteRef.current = false;
@@ -2209,7 +2471,20 @@ export function App() {
           bumpPhotoMetadataVersion();
           setActiveAssetIds([]);
           setSourceFolderPath(rootPath ?? folderName);
-          setHasWritableFolderAccess(false);
+          setWorkspaceMode(null);
+          setWorkspaceId("");
+          setSourceIdentity(null);
+          setProjectName("Image Select Pro");
+          setProjectFolderFocus(null);
+          workspacePersistenceStateRef.current = {
+            workspaceMode: null,
+            sourceFolderPath: rootPath ?? folderName,
+            allAssets: [],
+            activeAssetIds: [],
+            projectName: "Image Select Pro",
+            sourceIdentity: null,
+          };
+          setHasWritableFolderAccess(resolvedSourceIdentity.isWritable);
           setIsFolderDiagnosticsExpanded(false);
           setCurrentScreen("browse");
           setXmpSyncState({
@@ -2237,7 +2512,7 @@ export function App() {
         // 1. Reset session for the new folder load
         const folderLoadSession = folderLoadSessionRef.current;
         persistedStateHydrationRef.current = rootPath
-          ? { folderPath: rootPath, session: folderLoadSession }
+          ? { storageKey: openedCatalogKey, session: folderLoadSession }
           : null;
 
       // 2. Clean up previous blob URLs
@@ -2245,25 +2520,50 @@ export function App() {
       clearImageCache();
 
       // 3. Create placeholder assets INSTANTLY (no file reading)
-      const placeholderAssets = buildPlaceholderAssets(entries);
+      const placeholderAssets = buildPlaceholderAssets(
+        entries,
+        context.mode === "free" ? resolvedSourceIdentity.sourceId : undefined,
+      );
       const groupedAssetCount = placeholderAssets.length;
       setFolderDiagnostics((current) =>
         current ? { ...current, groupedAssetCount } : current,
       );
       const assets = placeholderAssets;
       const assetIdSet = new Set(assets.map((asset) => asset.id));
-      const hydratePersistedStateAfterPaint = () => {
+      const persistedAssetStateById = new Map<string, DesktopFolderCatalogAssetState>();
+      const openedDisplayName = context.mode === "free"
+        ? resolvedSourceIdentity.volume?.label?.trim() || folderName
+        : context.projectName?.trim() || projectName;
+      workspacePersistenceStateRef.current = {
+        workspaceMode: context.mode,
+        sourceFolderPath: rootPath ?? folderName,
+        allAssets: assets,
+        activeAssetIds: [],
+        projectName: openedDisplayName,
+        sourceIdentity: resolvedSourceIdentity,
+      };
+      const hydratePersistedStateAfterPaint = (): Promise<void> => {
         if (!rootPath) {
-          return;
+          return Promise.resolve();
         }
 
+        let resolveHydration = () => {};
+        const hydrationSettled = new Promise<void>((resolve) => {
+          resolveHydration = resolve;
+        });
+        workspaceHydrationSettledRef.current = hydrationSettled;
         afterNextPaint(() => {
           void (async () => {
             try {
-              const [sharedProjectFile, cachedCatalogState] = await Promise.all([
-                readPhotoSelectorProjectFile(rootPath).catch(() => null),
+              const [sharedProjectFile, freeSnapshot, cachedCatalogState] = await Promise.all([
+                context.mode === "project"
+                  ? readPhotoSelectorProjectFile(rootPath).catch(() => null)
+                  : Promise.resolve(null),
+                context.mode === "free"
+                  ? getFreeSelectionSnapshot(resolvedSourceIdentity.sourceId).catch(() => null)
+                  : Promise.resolve(null),
                 hasDesktopStateApi()
-                  ? getDesktopFolderCatalogState(rootPath).catch(() => null)
+                  ? getDesktopFolderCatalogState(openedCatalogKey).catch(() => null)
                   : Promise.resolve(null),
               ]);
 
@@ -2276,9 +2576,71 @@ export function App() {
 
               if (sharedProjectFile?.projectName) {
                 setProjectName(sharedProjectFile.projectName);
+                setWorkspaceId(sharedProjectFile.projectId ?? context.projectId ?? "");
+                workspacePersistenceStateRef.current = {
+                  ...workspacePersistenceStateRef.current,
+                  projectName: sharedProjectFile.projectName,
+                };
+              } else if (freeSnapshot) {
+                setProjectName(freeSnapshot.displayName || folderName);
+                freeSelectionCreatedAtRef.current = freeSnapshot.createdAt;
+                workspacePersistenceStateRef.current = {
+                  ...workspacePersistenceStateRef.current,
+                  projectName: freeSnapshot.displayName || folderName,
+                };
               }
 
-              const cachedStates = sharedProjectFile?.folderState?.assetStates ?? cachedCatalogState?.assetStates ?? [];
+              const freeInventoryChanged = context.mode === "free"
+                && Boolean(freeSnapshot)
+                && freeSnapshot!.source.inventoryFingerprint !== resolvedSourceIdentity.inventoryFingerprint;
+              const preferredFreeState = context.mode === "free"
+                ? freeSnapshot && freeSnapshot.updatedAt >= (cachedCatalogState?.updatedAt ?? Number.NEGATIVE_INFINITY)
+                  ? freeSnapshot
+                  : cachedCatalogState
+                : null;
+              const rawPersistedActiveAssetIds = (
+                sharedProjectFile?.folderState?.activeAssetIds ??
+                (context.mode === "free" ? preferredFreeState?.activeAssetIds : cachedCatalogState?.activeAssetIds) ??
+                []
+              );
+              const rawPersistedActiveSet = new Set(rawPersistedActiveAssetIds);
+              const persistedContainerUpdatedAt = sharedProjectFile?.updatedAt
+                ?? preferredFreeState?.updatedAt
+                ?? cachedCatalogState?.updatedAt;
+              const rawCachedStates = (sharedProjectFile?.folderState?.assetStates
+                ?? (context.mode === "free" ? preferredFreeState?.assetStates : cachedCatalogState?.assetStates)
+                ?? []).map((assetState) => ({
+                  ...assetState,
+                  active: rawPersistedActiveSet.has(assetState.assetId),
+                  classificationUpdatedAt: assetState.classificationUpdatedAt ?? assetState.updatedAt,
+                  selectionUpdatedAt: assetState.selectionUpdatedAt
+                    ?? persistedContainerUpdatedAt
+                    ?? assetState.updatedAt,
+                }));
+              const currentAssetByPath = new Map(
+                assets.map((asset) => [asset.path.toLocaleLowerCase(), asset]),
+              );
+              const cachedStates = freeInventoryChanged
+                ? rawCachedStates.filter((assetState) => {
+                    const currentAsset = currentAssetByPath.get(assetState.relativePath.toLocaleLowerCase());
+                    return Boolean(
+                      currentAsset
+                      && assetState.sourceFileKey
+                      && assetState.sourceFileKey === currentAsset.sourceFileKey,
+                    );
+                  })
+                : rawCachedStates;
+              const compatibleAssetIds = new Set(
+                cachedStates
+                  .map((state) => currentAssetByPath.get(state.relativePath.toLocaleLowerCase())?.id)
+                  .filter((assetId): assetId is string => Boolean(assetId)),
+              );
+              for (const assetState of cachedStates) {
+                const currentAsset = currentAssetByPath.get(assetState.relativePath.toLocaleLowerCase());
+                if (currentAsset) {
+                  persistedAssetStateById.set(currentAsset.id, assetState);
+                }
+              }
               if (cachedStates.length > 0) {
                 const cachedStateByPath = new Map(
                   cachedStates.map((assetState) => [
@@ -2287,56 +2649,97 @@ export function App() {
                   ]),
                 );
 
-                startTransition(() => {
-                  setAllAssets((prev) => {
-                    if (prev.length === 0) {
-                      return prev;
+                const applyPersistedMetadata = (previousAssets: ImageAsset[]) => {
+                  if (previousAssets.length === 0) {
+                    return previousAssets;
+                  }
+
+                  let changed = false;
+                  const next = previousAssets.map((asset) => {
+                    const cachedState = cachedStateByPath.get(asset.path.toLocaleLowerCase());
+                    if (!cachedState) {
+                      return asset;
                     }
 
-                    let changed = false;
-                    const next = prev.map((asset) => {
-                      const cachedState = cachedStateByPath.get(asset.path.toLocaleLowerCase());
-                      if (!cachedState) {
-                        return asset;
-                      }
-
-                      changed = true;
-                      return {
-                        ...asset,
-                        rating: cachedState.rating,
-                        pickStatus: cachedState.pickStatus,
-                        colorLabel: cachedState.colorLabel,
-                        customLabels: cachedState.customLabels,
-                      };
-                    });
-
-                    return changed ? next : prev;
+                    changed = true;
+                    return {
+                      ...asset,
+                      rating: cachedState.rating,
+                      pickStatus: cachedState.pickStatus,
+                      colorLabel: cachedState.colorLabel,
+                      customLabels: cachedState.customLabels,
+                    };
                   });
+                  return changed ? next : previousAssets;
+                };
+                workspacePersistenceStateRef.current = {
+                  ...workspacePersistenceStateRef.current,
+                  allAssets: applyPersistedMetadata(workspacePersistenceStateRef.current.allAssets),
+                };
+
+                startTransition(() => {
+                  setAllAssets((prev) => applyPersistedMetadata(prev));
                 });
                 bumpPhotoMetadataVersion();
               }
 
-              const persistedActiveAssetIds = (
-                sharedProjectFile?.folderState?.activeAssetIds ??
-                cachedCatalogState?.activeAssetIds ??
-                []
-              ).filter((assetId) => assetIdSet.has(assetId));
+              const persistedActiveAssetIds = rawPersistedActiveAssetIds.filter((assetId) => (
+                assetIdSet.has(assetId)
+                && (!freeInventoryChanged || compatibleAssetIds.has(assetId))
+              ));
+              const persistedActiveSet = new Set(persistedActiveAssetIds);
+              const hydratedCatalogStates = cachedStates.map((assetState) => {
+                const currentAsset = currentAssetByPath.get(assetState.relativePath.toLocaleLowerCase());
+                return {
+                  ...assetState,
+                  assetId: currentAsset?.id ?? assetState.assetId,
+                  active: currentAsset ? persistedActiveSet.has(currentAsset.id) : Boolean(assetState.active),
+                  classificationUpdatedAt: assetState.classificationUpdatedAt ?? assetState.updatedAt,
+                  selectionUpdatedAt: assetState.selectionUpdatedAt ?? assetState.updatedAt,
+                };
+              });
+              catalogAssetStatesRef.current = hydratedCatalogStates;
+              catalogAssetStateSignatureRef.current = new Map(
+                hydratedCatalogStates.map((assetState) => [
+                  assetState.assetId,
+                  buildCatalogAssetStateSignature(assetState),
+                ]),
+              );
+              catalogProjectActiveSignatureRef.current = persistedActiveAssetIds.join("|");
 
+              workspacePersistenceStateRef.current = {
+                ...workspacePersistenceStateRef.current,
+                activeAssetIds: persistedActiveAssetIds,
+              };
               if (persistedActiveAssetIds.length > 0) {
                 setActiveAssetIds(persistedActiveAssetIds);
+              }
+              if (freeInventoryChanged) {
+                addToast(
+                  cachedStates.length > 0
+                    ? `Il contenuto della sorgente è cambiato: ripristinati in sicurezza ${cachedStates.length} file rimasti invariati.`
+                    : "La sorgente è stata riutilizzata con fotografie diverse: la vecchia selezione non è stata applicata.",
+                  "warning",
+                  7500,
+                );
               }
             } finally {
               const pendingHydration = persistedStateHydrationRef.current;
               if (
                 pendingHydration &&
-                pendingHydration.folderPath === rootPath &&
+                pendingHydration.storageKey === openedCatalogKey &&
                 pendingHydration.session === folderLoadSession
               ) {
                 persistedStateHydrationRef.current = null;
               }
+              if (workspaceHydrationSettledRef.current === hydrationSettled) {
+                workspaceHydrationSettledRef.current = Promise.resolve();
+              }
+              resolveHydration();
             }
           })();
         });
+        return hydrationSettled;
       };
       const rawPreviewBootstrapIds = assets
         .filter((asset) => isRawFile(asset.fileName))
@@ -2344,7 +2747,7 @@ export function App() {
         .map((asset) => asset.id);
       assetNameByIdRef.current = new Map(assets.map((asset) => [asset.id, asset.fileName]));
       assetIndexByIdRef.current = new Map(assets.map((asset, index) => [asset.id, index]));
-      const writableAccess = entries.some((entry) => !!entry.absolutePath);
+      const writableAccess = resolvedSourceIdentity.isWritable;
 
       setAllAssets(assets);
       bumpPhotoMetadataVersion();
@@ -2355,7 +2758,7 @@ export function App() {
       setIsXmpBannerDismissed(false);
       setCurrentScreen("selection"); // instant — grid shows immediately
       markInteractiveWork(2200);
-      hydratePersistedStateAfterPaint();
+      const workspaceHydration = hydratePersistedStateAfterPaint();
       undoRedo.reset();
       pendingXmpSyncIdsRef.current.clear();
       setXmpSyncState({
@@ -2365,7 +2768,13 @@ export function App() {
         lastSyncedAt: null,
       });
 
-      addRecentFolder(folderName, entries.length, rootPath);
+      addRecentFolder(
+        folderName,
+        entries.length,
+        rootPath,
+        context.mode,
+        context.mode === "free" ? resolvedSourceIdentity.sourceId : undefined,
+      );
       if (!writableAccess) {
         addToast(
           "Cartella aperta senza accesso completo ai sidecar XMP. Le modifiche restano locali finché non riapri la cartella con accesso scrivibile.",
@@ -2383,7 +2792,13 @@ export function App() {
         currentFile: entries[0]?.name ?? null,
         folderLabel: folderName,
       });
-      addToast(`${entries.length} foto trovate in "${folderName}".`, "info");
+      addToast(
+        context.mode === "free"
+          ? `Modalità libera attiva: ${entries.length} foto trovate in "${folderName}", senza creare un progetto.`
+          : `Progetto master aperto: ${entries.length} foto trovate in "${folderName}".`,
+        "info",
+        5500,
+      );
       if (hasDesktopStateApi() && rootPath) {
         void logDesktopEvent({
           channel: "folder-open",
@@ -2437,9 +2852,13 @@ export function App() {
                 return null;
               }
 
-              const xml = await readSidecarXmp(asset.id);
-              if (!xml) return null;
-              return { id: asset.id, state: parseXmpState(xml) };
+              const info = await readSidecarXmpInfo(asset.id);
+              if (!info) return null;
+              return {
+                id: asset.id,
+                state: parseXmpState(info.xml),
+                lastModified: info.lastModified,
+              };
             },
           ),
         ).then((records) => {
@@ -2447,10 +2866,21 @@ export function App() {
             return;
           }
 
-          const valid = records.filter((r): r is { id: string; state: ReturnType<typeof parseXmpState> } => r !== null);
-          const selectedByXmp = valid
-            .filter((r) => r.state.selected === true)
-            .map((r) => r.id);
+          const valid = records.filter((r): r is {
+            id: string;
+            state: ReturnType<typeof parseXmpState>;
+            lastModified: number;
+          } => r !== null);
+          const shouldApplyXmpClassification = (record: typeof valid[number]) => {
+            const localState = persistedAssetStateById.get(record.id);
+            const locallyUpdatedAt = localState?.classificationUpdatedAt ?? localState?.updatedAt;
+            return locallyUpdatedAt === undefined || record.lastModified > locallyUpdatedAt;
+          };
+          const shouldApplyXmpSelection = (record: typeof valid[number]) => {
+            const localState = persistedAssetStateById.get(record.id);
+            const locallyUpdatedAt = localState?.selectionUpdatedAt ?? localState?.updatedAt;
+            return locallyUpdatedAt === undefined || record.lastModified > locallyUpdatedAt;
+          };
           const recordsToApply = valid.filter((record) => {
             const index = assetIndexByIdRef.current.get(record.id);
             const asset = index === undefined ? null : allAssetsRef.current[index] ?? null;
@@ -2466,12 +2896,13 @@ export function App() {
                 : record.state.hasPhotoshopAdjustments
                   ? "Photoshop"
                   : undefined;
-            const nextRating = record.state.rating ?? asset.rating;
-            const nextPickStatus = record.state.pickStatus ?? asset.pickStatus;
-            const nextColorLabel = record.state.colorLabel !== undefined
+            const applyClassification = shouldApplyXmpClassification(record);
+            const nextRating = applyClassification ? record.state.rating ?? asset.rating : asset.rating;
+            const nextPickStatus = applyClassification ? record.state.pickStatus ?? asset.pickStatus : asset.pickStatus;
+            const nextColorLabel = applyClassification && record.state.colorLabel !== undefined
               ? record.state.colorLabel
               : asset.colorLabel;
-            const nextCustomLabels = record.state.customLabels !== undefined
+            const nextCustomLabels = applyClassification && record.state.customLabels !== undefined
               ? record.state.customLabels
               : asset.customLabels;
 
@@ -2512,13 +2943,18 @@ export function App() {
                       : record.state.hasPhotoshopAdjustments
                         ? "Photoshop"
                         : undefined;
+                  const applyClassification = shouldApplyXmpClassification(record);
 
                   next[index] = {
                     ...asset,
-                    rating: record.state.rating ?? asset.rating,
-                    pickStatus: record.state.pickStatus ?? asset.pickStatus,
-                    colorLabel: record.state.colorLabel !== undefined ? record.state.colorLabel : asset.colorLabel,
-                    customLabels: record.state.customLabels !== undefined ? record.state.customLabels : asset.customLabels,
+                    rating: applyClassification ? record.state.rating ?? asset.rating : asset.rating,
+                    pickStatus: applyClassification ? record.state.pickStatus ?? asset.pickStatus : asset.pickStatus,
+                    colorLabel: applyClassification && record.state.colorLabel !== undefined
+                      ? record.state.colorLabel
+                      : asset.colorLabel,
+                    customLabels: applyClassification && record.state.customLabels !== undefined
+                      ? record.state.customLabels
+                      : asset.customLabels,
                     xmpHasEdits: hasEdits,
                     xmpEditInfo,
                   };
@@ -2531,8 +2967,21 @@ export function App() {
             bumpPhotoMetadataVersion();
           }
 
-          if (selectedByXmp.length > 0) {
-            setActiveAssetIds((current) => Array.from(new Set([...current, ...selectedByXmp])));
+          const xmpSelectionUpdates = valid.filter((record) => (
+            record.state.selected !== undefined && shouldApplyXmpSelection(record)
+          ));
+          if (xmpSelectionUpdates.length > 0) {
+            setActiveAssetIds((current) => {
+              const next = new Set(current);
+              for (const record of xmpSelectionUpdates) {
+                if (record.state.selected === true) {
+                  next.add(record.id);
+                } else {
+                  next.delete(record.id);
+                }
+              }
+              return Array.from(next);
+            });
           }
 
           editedBySidecarTotal += valid.filter(
@@ -2560,29 +3009,35 @@ export function App() {
         });
       };
 
+      const startXmpImportAfterHydration = () => {
+        void workspaceHydration.then(() => {
+          if (folderLoadSessionRef.current === folderLoadSession) {
+            runXmpImport();
+          }
+        });
+      };
       if (XMP_IMPORT_START_DELAY_MS > 0) {
-        xmpImportStartTimerRef.current = window.setTimeout(runXmpImport, XMP_IMPORT_START_DELAY_MS);
+        xmpImportStartTimerRef.current = window.setTimeout(
+          startXmpImportAfterHydration,
+          XMP_IMPORT_START_DELAY_MS,
+        );
       } else {
-        runXmpImport();
+        startXmpImportAfterHydration();
       }
 
       // 5. Check thumbnail cache, then start pipeline for ALL images (including RAW)
-      const assetIdByPath = new Map(assets.map((asset) => [asset.path, asset.id]));
+      const assetByPath = new Map(assets.map((asset) => [asset.path, asset]));
       const pipelineEntries: ThumbnailPipelineEntry[] = [];
       for (const entry of entries) {
-        const id = assetIdByPath.get(entry.relativePath);
-        if (!id) {
+        const asset = assetByPath.get(entry.relativePath);
+        if (!asset) {
           continue;
         }
 
         pipelineEntries.push({
-          id,
+          id: asset.id,
           absolutePath: entry.absolutePath,
-          sourceFileKey: buildSourceFileKeyFromStats(
-            entry.relativePath,
-            entry.size,
-            entry.lastModified,
-          ),
+          sourceFileKey: asset.sourceFileKey,
         });
       }
 
@@ -2937,7 +3392,10 @@ export function App() {
   );
 
   const openExistingMasterProject = useCallback(async (rootPath: string, requestedFolderPath?: string) => {
-    const projectFolder = await reopenProjectFolder(rootPath);
+    const [projectFolder, localProject] = await Promise.all([
+      reopenProjectFolder(rootPath),
+      readPhotoSelectorProjectFile(rootPath),
+    ]);
     if (!projectFolder) {
       addToast("Non sono riuscito ad aprire la cartella master del progetto.", "error");
       return false;
@@ -2949,7 +3407,11 @@ export function App() {
       ? normalizedRequested.slice(rootPath.replace(/[\\/]+$/, "").length + 1).replace(/\\/g, "/")
       : "";
     setProjectFolderFocus(relativeFocus || null);
-    await handleFolderOpened(projectFolder);
+    await handleFolderOpened(projectFolder, {
+      mode: "project",
+      projectId: localProject?.projectId,
+      projectName: localProject?.projectName,
+    });
     return true;
   }, [addToast, handleFolderOpened]);
 
@@ -2960,6 +3422,11 @@ export function App() {
     }
 
     await flushPendingXmpSync().catch(() => false);
+    const workspaceSaved = await flushWorkspacePersistenceRef.current().catch(() => false);
+    if (!workspaceSaved) {
+      addToast("Creazione progetto annullata: il lavoro aperto non è stato salvato in sicurezza.", "error", 8000);
+      return false;
+    }
     const legacyProjects = await listPhotoSelectorLegacyProjects(projectFolder.rootPath);
     const normalizedProjectRoot = projectFolder.rootPath.replace(/[\\/]+$/, "").toLocaleLowerCase();
     const nestedMasterProjects = legacyProjects.filter((location) => (
@@ -2974,18 +3441,45 @@ export function App() {
       );
       return false;
     }
-    const assets = buildPlaceholderAssets(projectFolder.entries);
+    const assets = buildDetachedPlaceholderAssets(projectFolder.entries);
+    const projectEntryByPath = new Map(
+      projectFolder.entries.map((entry) => [entry.relativePath, entry.absolutePath]),
+    );
+    const projectAbsolutePathByAssetId = new Map(
+      assets.map((asset) => [asset.id, projectEntryByPath.get(asset.path)]),
+    );
     const pathSegments = projectFolder.rootPath.split(/[\\/]+/).filter(Boolean);
     const parentFolderName = pathSegments.at(-2);
     const suggestedName = projectFolder.name.toLocaleUpperCase() === "FOTO_SD" && parentFolderName
       ? parentFolderName
       : projectFolder.name;
+    const freeSnapshot = projectFolder.sourceIdentity
+      ? await getFreeSelectionSnapshot(projectFolder.sourceIdentity.sourceId)
+      : null;
     const merge = buildMasterProject(
       projectFolder.name,
       suggestedName,
       assets,
-      getAssetAbsolutePath,
-      legacyProjects,
+      (assetId) => projectAbsolutePathByAssetId.get(assetId),
+      freeSnapshot
+        ? [
+            ...legacyProjects,
+            {
+              rootPath: projectFolder.rootPath,
+              project: {
+                schemaVersion: 1,
+                app: "image-select-pro",
+                updatedAt: freeSnapshot.updatedAt,
+                createdAt: freeSnapshot.createdAt,
+                projectName: freeSnapshot.displayName,
+                folderState: {
+                  activeAssetIds: freeSnapshot.activeAssetIds,
+                  assetStates: freeSnapshot.assetStates,
+                },
+              },
+            },
+          ]
+        : legacyProjects,
     );
     const topLevelPhotos = Math.min(
       projectFolder.entries.length,
@@ -3015,7 +3509,12 @@ export function App() {
 
     setProjectName(merge.project.projectName ?? suggestedName);
     setProjectFolderFocus(null);
-    await handleFolderOpened(projectFolder);
+    await handleFolderOpened(projectFolder, {
+      mode: "project",
+      projectId: merge.project.projectId,
+      projectName: merge.project.projectName,
+      outgoingWorkspacePersisted: true,
+    });
     addToast(
       `Progetto master creato: ${projectFolder.entries.length} foto, ${merge.migratedSelectionCount} selezioni recuperate da ${merge.legacyProjectCount} progetto/i esistenti.`,
       "success",
@@ -3098,13 +3597,24 @@ export function App() {
     }
 
     await flushPendingXmpSync().catch(() => false);
+    const workspaceSaved = await flushWorkspacePersistenceRef.current().catch(() => false);
+    if (!workspaceSaved) {
+      addToast("Correzione master annullata: il lavoro aperto non è stato salvato in sicurezza.", "error", 8000);
+      return;
+    }
     const targetLegacyProjects = await listPhotoSelectorLegacyProjects(targetFolder.rootPath);
-    const assets = buildPlaceholderAssets(targetFolder.entries);
+    const assets = buildDetachedPlaceholderAssets(targetFolder.entries);
+    const targetEntryByPath = new Map(
+      targetFolder.entries.map((entry) => [entry.relativePath, entry.absolutePath]),
+    );
+    const targetAbsolutePathByAssetId = new Map(
+      assets.map((asset) => [asset.id, targetEntryByPath.get(asset.path)]),
+    );
     const merge = buildMasterProject(
       targetFolder.name,
       currentProject.projectName ?? projectName,
       assets,
-      getAssetAbsolutePath,
+      (assetId) => targetAbsolutePathByAssetId.get(assetId),
       [
         ...targetLegacyProjects,
         { rootPath: sourceFolderPath, project: currentProject },
@@ -3157,7 +3667,12 @@ export function App() {
     }
 
     setProjectFolderFocus(null);
-    await handleFolderOpened(targetFolder);
+    await handleFolderOpened(targetFolder, {
+      mode: "project",
+      projectId: relocatedProject.projectId,
+      projectName: relocatedProject.projectName,
+      outgoingWorkspacePersisted: true,
+    });
     addToast(
       `Master corretto: ${assets.length} foto e ${merge.migratedSelectionCount} selezioni recuperate. Il master precedente è stato conservato come backup.`,
       "success",
@@ -3174,15 +3689,30 @@ export function App() {
     sourceFolderPath,
   ]);
 
-  const handleFolderCandidateOpened = useCallback(async (folder: FolderOpenResult) => {
+  const handleFolderCandidateOpened = useCallback(async (
+    folder: FolderOpenResult,
+    intent: FolderOpenIntent,
+  ) => {
+    if (intent === "free") {
+      setProjectFolderFocus(null);
+      await handleFolderOpened(folder, { mode: "free" });
+      return;
+    }
+
     const projectLocation = await resolvePhotoSelectorProject(folder.rootPath);
     if (projectLocation) {
       await openExistingMasterProject(projectLocation.rootPath, folder.rootPath);
       return;
     }
+
+    if (intent === "project") {
+      await createMasterProject(folder);
+      return;
+    }
+
     setProjectFolderFocus(null);
-    await handleFolderOpened(folder);
-  }, [handleFolderOpened, openExistingMasterProject]);
+    await handleFolderOpened(folder, { mode: "free" });
+  }, [createMasterProject, handleFolderOpened, openExistingMasterProject]);
 
   const handleDesktopRequestedFolderOpen = useCallback(async (folderPath: string) => {
     if (
@@ -3221,6 +3751,16 @@ export function App() {
         await handleCreateProject();
         return;
       }
+      if (unassignedChoice === "open-free") {
+        const freeFolder = await window.filexDesktop.reopenFolder(normalizedPath, {
+          recursive: true,
+          relativePathMode: "project-relative",
+        });
+        if (freeFolder) {
+          await handleFolderOpened(freeFolder, { mode: "free" });
+        }
+        return;
+      }
       const projectFolder = await reopenProjectFolder(normalizedPath);
       if (projectFolder) {
         await createMasterProject(projectFolder);
@@ -3236,7 +3776,7 @@ export function App() {
           await new Promise((resolve) => window.setTimeout(resolve, delayMs));
         }
 
-        reopenedFolder = await window.filexDesktop.reopenFolder(normalizedPath, { recursive: false });
+        reopenedFolder = await reopenProjectFolder(normalizedPath);
         if (reopenedFolder) {
           break;
         }
@@ -3255,7 +3795,10 @@ export function App() {
         return;
       }
 
-      await handleFolderOpened(reopenedFolder);
+      const created = await createMasterProject(reopenedFolder);
+      if (!created) {
+        return;
+      }
       if (hasDesktopStateApi()) {
         void logDesktopEvent({
           channel: "folder-open",
@@ -3484,17 +4027,26 @@ export function App() {
   );
 
   const handleGoogleDriveExport = useCallback(async () => {
-    if (allAssets.length === 0) {
+    if (allAssets.length === 0 || !workspaceMode) {
       addToast("Apri prima una cartella di foto.", "warning");
       return;
     }
 
     setIsGoogleDriveBusy(true);
     try {
-      const localProject = await readPhotoSelectorProjectFile(sourceFolderPath);
-      if (localProject?.projectMode !== "master") {
-        addToast("Prima crea o apri un progetto master. Le cartelle singole non vengono esportate su Drive.", "warning", 7000);
-        return;
+      let exportWorkspaceId = workspaceId;
+      if (workspaceMode === "project") {
+        const localProject = await readPhotoSelectorProjectFile(sourceFolderPath);
+        if (localProject?.projectMode !== "master") {
+          addToast("Il progetto master non è disponibile: riaprilo prima di creare il backup Drive.", "warning", 7000);
+          return;
+        }
+        exportWorkspaceId = localProject.projectId ?? exportWorkspaceId;
+      } else {
+        exportWorkspaceId = sourceIdentity?.sourceId ?? exportWorkspaceId;
+        if (!exportWorkspaceId) {
+          throw new Error("Non riesco a identificare questa sorgente per il backup libero.");
+        }
       }
       let status = googleDriveStatus;
       if (!status.connected) {
@@ -3508,13 +4060,17 @@ export function App() {
         allAssets,
         activeAssetIds,
         desktopRuntime?.appVersion,
-        localProject.projectId,
+        exportWorkspaceId || PROJECT_ID,
+        workspaceMode,
       );
       const version = await exportProjectToGoogleDrive(manifest);
+      setLastDriveUrl(version.driveUrl ?? version.webViewLink ?? null);
       addToast(
-        `Selezione esportata su Google Drive: ${new Date(version.createdAt).toLocaleString("it-IT")}`,
+        workspaceMode === "free"
+          ? `Backup manuale della selezione libera creato su Google Drive: ${new Date(version.createdAt).toLocaleString("it-IT")}`
+          : `Selezione del progetto esportata su Google Drive: ${new Date(version.createdAt).toLocaleString("it-IT")}`,
         "success",
-        5000,
+        6000,
       );
     } catch (error) {
       const authenticationExpired = isGoogleDriveAuthenticationError(error);
@@ -3527,15 +4083,26 @@ export function App() {
     } finally {
       setIsGoogleDriveBusy(false);
     }
-  }, [activeAssetIds, addToast, allAssets, desktopRuntime?.appVersion, googleDriveStatus, projectName, sourceFolderPath]);
+  }, [
+    activeAssetIds,
+    addToast,
+    allAssets,
+    desktopRuntime?.appVersion,
+    googleDriveStatus,
+    projectName,
+    sourceFolderPath,
+    sourceIdentity?.sourceId,
+    workspaceId,
+    workspaceMode,
+  ]);
 
   const handleGoogleDriveImport = useCallback(async () => {
     setIsGoogleDriveBusy(true);
     try {
-      if (allAssets.length > 0) {
+      if (allAssets.length > 0 && workspaceMode === "project") {
         const localProject = await readPhotoSelectorProjectFile(sourceFolderPath);
         if (localProject?.projectMode !== "master") {
-          addToast("Questa è una cartella singola. Crea o apri il progetto master prima di continuare da Drive.", "warning", 7000);
+          addToast("Il progetto master locale non è disponibile. Riaprilo prima di continuare da Drive.", "warning", 7000);
           return;
         }
       }
@@ -3545,9 +4112,31 @@ export function App() {
         setGoogleDriveStatus(status);
       }
 
-      const versions = await listGoogleDriveVersions();
+      const listedVersions = await listGoogleDriveVersions();
+      const versions = listedVersions.filter((candidate) => {
+        const candidateMode = candidate.workspaceMode ?? candidate.kind ?? "project";
+        if (allAssets.length === 0) {
+          return candidateMode === "project";
+        }
+        if (workspaceMode === "free") {
+          const candidateId = candidate.selectionId ?? candidate.workspaceId;
+          return candidateMode === "free" && candidateId === (sourceIdentity?.sourceId ?? workspaceId);
+        }
+        if (candidateMode !== "project") {
+          return false;
+        }
+        return workspaceId
+          ? candidate.workspaceId === workspaceId
+          : candidate.projectName === projectName;
+      });
       if (versions.length === 0) {
-        addToast("Non ho trovato selezioni PhotoSelector su Google Drive.", "warning", 5000);
+        addToast(
+          workspaceMode === "free" && allAssets.length > 0
+            ? "Non ho trovato backup Drive per questa selezione libera. Il confronto usa l’identità della sorgente, non il suo nome."
+            : "Non ho trovato selezioni Image Select Pro compatibili su Google Drive.",
+          "warning",
+          6500,
+        );
         return;
       }
 
@@ -3557,6 +4146,18 @@ export function App() {
       }
 
       const manifest = await downloadGoogleDriveVersion(version.id);
+      const manifestMode = manifest.workspaceMode ?? manifest.kind ?? "project";
+      const manifestWorkspaceId = manifest.selectionId ?? manifest.workspaceId ?? manifest.projectId;
+      if (allAssets.length > 0 && manifestMode !== workspaceMode) {
+        throw new Error("Il backup scelto appartiene a una modalità diversa da quella aperta.");
+      }
+      if (
+        workspaceMode === "free"
+        && manifestWorkspaceId !== (sourceIdentity?.sourceId ?? workspaceId)
+      ) {
+        throw new Error("Il backup libero scelto appartiene a un’altra sorgente.");
+      }
+      setLastDriveUrl(version.driveUrl ?? version.webViewLink ?? null);
 
       if (allAssets.length === 0) {
         addToast(`Scegli la cartella master locale per “${manifest.sourceFolderName}”.`, "info", 6000);
@@ -3636,7 +4237,16 @@ export function App() {
         if (!saved) {
           throw new Error("Non sono riuscito a salvare la selezione nel progetto master locale.");
         }
-        await handleFolderOpened(projectFolder);
+        await handleFolderOpened(projectFolder, {
+          mode: "project",
+          projectId: createdForDriveImport
+            ? manifest.projectId
+            : localProject?.projectId ?? manifest.projectId,
+          projectName: createdForDriveImport
+            ? manifest.projectName
+            : localProject?.projectName ?? manifest.projectName,
+          outgoingWorkspacePersisted: true,
+        });
         setProjectName(createdForDriveImport ? manifest.projectName : localProject?.projectName ?? manifest.projectName);
         addToast(
           `Selezione recuperata: ${activeAssetIds.length} foto da “${manifest.sourceFolderName}”.`,
@@ -3651,9 +4261,18 @@ export function App() {
       if (mappingIssueCount > 0) {
         const manualRoot = await chooseGoogleDriveManualRoot(sourceFolderPath, mappingIssueCount);
         if (manualRoot?.trim() && window.filexDesktop?.reopenFolder) {
-          const reopened = await window.filexDesktop.reopenFolder(manualRoot.trim(), { recursive: true });
+          const reopened = await window.filexDesktop.reopenFolder(manualRoot.trim(), {
+            recursive: true,
+            relativePathMode: (workspaceMode ?? manifestMode) === "free"
+              ? "project-relative"
+              : "legacy",
+          });
           if (reopened) {
-            await handleFolderOpened(reopened);
+            await handleFolderOpened(reopened, {
+              mode: workspaceMode ?? manifestMode,
+              projectId: manifestMode === "project" ? manifest.projectId : undefined,
+              projectName: manifestMode === "project" ? manifest.projectName : undefined,
+            });
             addToast("Cartella backup riaperta. Premi di nuovo Continua da Drive per completare la mappatura.", "info", 6000);
             return;
           }
@@ -3672,9 +4291,11 @@ export function App() {
         allAssets,
         activeAssetIds,
         desktopRuntime?.appVersion,
+        workspaceId || PROJECT_ID,
+        workspaceMode ?? "project",
       );
       const desktopApi = typeof window === "undefined" ? null : window.filexDesktop;
-      if (desktopApi?.writeFile && sourceFolderPath) {
+      if (workspaceMode === "project" && desktopApi?.writeFile && sourceFolderPath) {
         const backupPath = `${sourceFolderPath.replace(/[\\/]+$/, "")}\\.image-select-pro.backup-${Date.now()}.json`;
         await desktopApi.writeFile(backupPath, new TextEncoder().encode(JSON.stringify(localBackup, null, 2)));
       }
@@ -3700,9 +4321,9 @@ export function App() {
         .filter(([, state]) => state.active === true)
         .map(([assetId]) => assetId);
       handleSelectionChange([...retainedActiveIds, ...importedActiveIds]);
-      setProjectName(manifest.projectName);
+      setProjectName(manifest.displayName ?? manifest.projectName);
       addToast(
-        `Selezione importata: versione del ${new Date(manifest.exportedAt).toLocaleString("it-IT")}. XMP in aggiornamento.`,
+        `${workspaceMode === "free" ? "Selezione libera" : "Selezione del progetto"} importata: versione del ${new Date(manifest.exportedAt).toLocaleString("it-IT")}. XMP in aggiornamento.`,
         "success",
         6000,
       );
@@ -3717,7 +4338,24 @@ export function App() {
     } finally {
       setIsGoogleDriveBusy(false);
     }
-  }, [activeAssetIds, addToast, allAssets, chooseGoogleDriveManualRoot, chooseGoogleDriveVersion, createMasterProject, desktopRuntime?.appVersion, googleDriveStatus, handleFolderOpened, handlePhotosChange, handleSelectionChange, projectName, sourceFolderPath]);
+  }, [
+    activeAssetIds,
+    addToast,
+    allAssets,
+    chooseGoogleDriveManualRoot,
+    chooseGoogleDriveVersion,
+    createMasterProject,
+    desktopRuntime?.appVersion,
+    googleDriveStatus,
+    handleFolderOpened,
+    handlePhotosChange,
+    handleSelectionChange,
+    projectName,
+    sourceFolderPath,
+    sourceIdentity?.sourceId,
+    workspaceId,
+    workspaceMode,
+  ]);
 
   const refreshDesktopThumbnailCacheInfo = useCallback(async () => {
     const info = await getDesktopThumbnailCacheInfo();
@@ -3932,7 +4570,7 @@ export function App() {
 
   const handleExportSelection = useCallback(() => {
     const result = buildSelectionResult(
-      PROJECT_ID,
+      workspaceId || PROJECT_ID,
       projectName,
       allAssets,
       activeAssetIds
@@ -3953,7 +4591,7 @@ export function App() {
       `Selezione esportata: ${activeAssetIds.length} foto in "${a.download}".`,
       "success"
     );
-  }, [activeAssetIds, addToast, allAssets, projectName]);
+  }, [activeAssetIds, addToast, allAssets, projectName, workspaceId]);
 
   // ── Viewport tracking for pipeline priority ──────────────────────────
   const handleVisibleIdsChange = useCallback((ids: Set<string>) => {
@@ -4205,9 +4843,9 @@ export function App() {
           assetCount={allAssets.length}
           selectedCount={activeAssetIds.length}
           projectName={projectName}
+          workspaceMode={workspaceMode}
           folderPath={folderDiagnostics?.selectedPath ?? null}
           folderPhotoCount={folderDiagnostics?.groupedAssetCount ?? folderDiagnostics?.topLevelSupportedCount ?? null}
-          ignoredNestedPhotoCount={folderDiagnostics?.nestedSupportedDiscardedCount ?? 0}
           isFolderDetailsOpen={isFolderDiagnosticsExpanded}
           isFolderTransitionBusy={isFolderTransitionBusy}
           folderTransitionLabel={folderTransitionLabel}
@@ -4216,6 +4854,7 @@ export function App() {
           driveConnected={googleDriveStatus.connected}
           driveNeedsReconnect={googleDriveNeedsReconnect}
           driveAccountEmail={googleDriveStatus.accountEmail}
+          lastDriveUrl={lastDriveUrl}
           isGeneratingThumbnails={isGeneratingThumbnails}
           thumbnailDone={thumbnailProgress.done}
           thumbnailTotal={thumbnailProgress.total}
@@ -4268,9 +4907,9 @@ export function App() {
                   <span className="folder-diagnostics-panel__badge">
                     {folderDiagnostics.groupedAssetCount ?? folderDiagnostics.topLevelSupportedCount} foto
                   </span>
-                  {folderDiagnostics.nestedSupportedDiscardedCount > 0 ? (
-                    <span className="folder-diagnostics-panel__warning">
-                      {folderDiagnostics.nestedSupportedDiscardedCount} annidate ignorate
+                  {folderDiagnostics.totalSupportedSeen > folderDiagnostics.topLevelSupportedCount ? (
+                    <span className="folder-diagnostics-panel__badge">
+                      {folderDiagnostics.totalSupportedSeen - folderDiagnostics.topLevelSupportedCount} da sottocartelle
                     </span>
                   ) : null}
                   <button
@@ -4303,8 +4942,8 @@ export function App() {
                     </div>
                   ) : null}
                   <div className="folder-diagnostics-panel__item">
-                    <span>File nelle sottocartelle ignorati</span>
-                    <strong>{folderDiagnostics.nestedSupportedDiscardedCount}</strong>
+                    <span>File nelle sottocartelle inclusi</span>
+                    <strong>{Math.max(0, folderDiagnostics.totalSupportedSeen - folderDiagnostics.topLevelSupportedCount)}</strong>
                   </div>
                   <div className="folder-diagnostics-panel__item">
                     <span>Totale file supportati rilevati</span>
@@ -4314,6 +4953,12 @@ export function App() {
                     <span>Sottocartelle analizzate</span>
                     <strong>{folderDiagnostics.nestedDirectoriesSeen ?? 0}</strong>
                   </div>
+                  {(folderDiagnostics.unreadableDirectoryCount ?? 0) > 0 ? (
+                    <div className="folder-diagnostics-panel__item">
+                      <span>Sottocartelle non accessibili saltate</span>
+                      <strong>{folderDiagnostics.unreadableDirectoryCount ?? 0}</strong>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -4335,6 +4980,7 @@ export function App() {
                 metadataVersion={photoMetadataVersion}
                 sourceFolderPath={sourceFolderPath}
                 initialFolderFilter={projectFolderFocus}
+                workspaceMode={workspaceMode}
                 selectedIds={activeAssetIds}
                 onSelectionChange={handleSelectionChange}
                 onPhotosChange={handlePhotosChange}

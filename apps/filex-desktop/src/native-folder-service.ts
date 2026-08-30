@@ -1,6 +1,6 @@
 import * as electron from "electron";
 import { copyFile, lstat, readFile, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, relative, sep } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import type {
   DesktopCopyFilesResult,
   DesktopFileStat,
@@ -15,7 +15,9 @@ import type {
   DesktopPhotoSelectorProjectLocation,
   DesktopPhotoSelectorProjectRelocationResult,
   DesktopSaveFileAsResult,
+  DesktopSidecarXmpInfo,
 } from "@photo-tools/desktop-contracts";
+import { createDesktopSourceIdentity, probeDesktopSourceVolume } from "./source-identity.js";
 
 const { dialog } = electron;
 
@@ -136,18 +138,29 @@ async function scanFolderByPath(
   }
 
   const recursiveScanEnabled = options.recursive !== false;
-  const normalizedRootPath = rootPath.replace(/[\\/]+$/, "");
+  const normalizedRootPath = resolve(rootPath);
+  const sourceProbePromise = probeDesktopSourceVolume(normalizedRootPath);
   const rootName = basename(normalizedRootPath) || normalizedRootPath;
 
   const scanStartedAt = nowMs();
   const candidates: string[] = [];
   let nestedDirectoriesSeen = 0;
   let scannedDirectoryCount = 0;
+  let unreadableDirectoryCount = 0;
   let topLevelSupportedCount = 0;
 
   async function collectImagePaths(directoryPath: string, depth: number): Promise<void> {
     scannedDirectoryCount += 1;
-    const dirEntries = await readdir(directoryPath, { withFileTypes: true });
+    let dirEntries;
+    try {
+      dirEntries = await readdir(directoryPath, { withFileTypes: true });
+    } catch (error) {
+      if (depth === 0) {
+        throw error;
+      }
+      unreadableDirectoryCount += 1;
+      return;
+    }
     dirEntries.sort((a, b) => a.name.localeCompare(b.name));
 
     for (const dirEntry of dirEntries) {
@@ -222,12 +235,19 @@ async function scanFolderByPath(
     nestedScanSkipped: !recursiveScanEnabled && nestedDirectoriesSeen > 0,
     recursiveScanEnabled,
     scannedDirectoryCount,
+    unreadableDirectoryCount,
   };
+  const sourceIdentity = await createDesktopSourceIdentity(
+    normalizedRootPath,
+    entries,
+    await sourceProbePromise,
+  );
 
   return {
     name: rootName,
     rootPath: normalizedRootPath,
     entries,
+    sourceIdentity,
     diagnostics,
   };
 }
@@ -525,12 +545,26 @@ export async function statFilesFromDisk(absolutePaths: string[]): Promise<Deskto
   return stats.filter((stat): stat is DesktopFileStat => stat !== null);
 }
 
-export async function readSidecarXmpFromAssetPath(absolutePath: string): Promise<string | null> {
+export async function readSidecarXmpInfoFromAssetPath(
+  absolutePath: string,
+): Promise<DesktopSidecarXmpInfo | null> {
   try {
-    return await readFile(sidecarPathForAsset(absolutePath), "utf8");
+    const sidecarPath = sidecarPathForAsset(absolutePath);
+    const [xml, stats] = await Promise.all([
+      readFile(sidecarPath, "utf8"),
+      lstat(sidecarPath),
+    ]);
+    return {
+      xml,
+      lastModified: Math.round(stats.mtimeMs),
+    };
   } catch {
     return null;
   }
+}
+
+export async function readSidecarXmpFromAssetPath(absolutePath: string): Promise<string | null> {
+  return (await readSidecarXmpInfoFromAssetPath(absolutePath))?.xml ?? null;
 }
 
 export async function writeSidecarXmpForAssetPath(

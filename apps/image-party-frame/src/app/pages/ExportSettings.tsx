@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Slider } from "../components/ui/slider";
 import { useState } from "react";
 import { defaultProjectExportSettings, useProject } from "../contexts/ProjectContext";
-import { pickExportFolder } from "../hooks/useApi";
+import { createExportIntent, pickExportFolder } from "../hooks/useApi";
 
 export default function ExportSettings() {
   const navigate = useNavigate();
@@ -15,28 +15,36 @@ export default function ExportSettings() {
   const exportSettings = project.exportSettings ?? defaultProjectExportSettings;
   const [quality, setQuality] = useState([exportSettings.quality]);
   const [format, setFormat] = useState(exportSettings.format);
-  const [colorProfile, setColorProfile] = useState(exportSettings.colorProfile);
   const [namingPattern, setNamingPattern] = useState(exportSettings.namingPattern);
   const [onlyApproved, setOnlyApproved] = useState(exportSettings.onlyApproved);
-  const [embedColorProfile, setEmbedColorProfile] = useState(exportSettings.embedColorProfile);
   const [createSubfolder, setCreateSubfolder] = useState(exportSettings.createSubfolder);
   const [overwrite, setOverwrite] = useState(exportSettings.overwrite);
   const [outputPath, setOutputPath] = useState(project.outputPath);
   const [pickingFolder, setPickingFolder] = useState(false);
+  const [startingExport, setStartingExport] = useState(false);
 
   const images = Array.isArray(project.images) ? project.images : [];
   const approvedImages = images.filter((img) => img.approval === "approved");
-  const imagesToExportCount = onlyApproved ? approvedImages.length : images.length;
+  const imagesToExport = onlyApproved ? approvedImages : images;
+  const imagesToExportCount = imagesToExport.length;
 
   const handleStartExport = () => {
+    if (startingExport || imagesToExport.length === 0) return;
+    setStartingExport(true);
+    createExportIntent(
+      project.projectId,
+      Object.fromEntries(
+        imagesToExport.map((image) => [image.id, image.relativePath || image.path || image.id])
+      )
+    );
     updateOutputPath(outputPath.trim());
     updateExportSettings({
       quality: quality[0],
       format,
-      colorProfile,
+      colorProfile: "sRGB",
       namingPattern,
       onlyApproved,
-      embedColorProfile,
+      embedColorProfile: true,
       createSubfolder,
       overwrite,
     });
@@ -58,12 +66,12 @@ export default function ExportSettings() {
     <div className="h-screen bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col">
       <div className="h-16 bg-[var(--app-topbar)] border-b border-[var(--app-border)] backdrop-blur-xl flex items-center px-6 justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/workspace">
-            <Button variant="ghost" size="sm" className="text-[var(--app-text-muted)] hover:text-[var(--app-text)]">
+          <Button asChild variant="ghost" size="sm" className="text-[var(--app-text-muted)] hover:text-[var(--app-text)]">
+            <Link to="/workspace">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Torna all'Area di Lavoro
-            </Button>
-          </Link>
+            </Link>
+          </Button>
           <div className="flex items-center gap-3">
             <FileImage className="w-6 h-6 text-[var(--brand-accent)]" />
             <span className="font-semibold">Impostazioni Esportazione</span>
@@ -111,17 +119,11 @@ export default function ExportSettings() {
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="color-profile">Profilo Colore</Label>
-                <Select value={colorProfile} onValueChange={(value) => setColorProfile(value as "sRGB" | "AdobeRGB")}>
-                  <SelectTrigger className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent className="bg-[var(--app-surface)] border-[var(--app-border)] text-[var(--app-text)]">
-                    <SelectItem value="sRGB">sRGB (Standard)</SelectItem>
-                    <SelectItem value="AdobeRGB">Adobe RGB (Ampia Gamma)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-field)] p-4">
+                <Label>Gestione colore</Label>
+                <p className="text-sm text-[var(--app-text-muted)]">
+                  L'output incorpora il profilo sRGB verificato. Adobe RGB non è disponibile in questa versione.
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -202,15 +204,6 @@ export default function ExportSettings() {
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      checked={embedColorProfile}
-                      onChange={(e) => setEmbedColorProfile(e.target.checked)}
-                      className="w-4 h-4 rounded border-[var(--app-border)] bg-[var(--app-field)]"
-                    />
-                    <span className="text-sm">Incorpora profilo colore nelle immagini esportate</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
                       checked={createSubfolder}
                       onChange={(e) => setCreateSubfolder(e.target.checked)}
                       className="w-4 h-4 rounded border-[var(--app-border)] bg-[var(--app-field)]"
@@ -231,14 +224,19 @@ export default function ExportSettings() {
             </div>
 
             <div className="flex gap-4 mt-8 justify-end">
-              <Link to="/workspace">
-                <Button variant="outline" className="border-[var(--app-border-strong)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]">
+              <Button asChild variant="outline" className="border-[var(--app-border-strong)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]">
+                <Link to="/workspace">
                   Annulla
-                </Button>
-              </Link>
-              <Button onClick={handleStartExport} size="lg" className="bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] hover:bg-[var(--brand-primary-strong)]" disabled={imagesToExportCount === 0}>
+                </Link>
+              </Button>
+              <Button
+                onClick={handleStartExport}
+                size="lg"
+                className="bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] hover:bg-[var(--brand-primary-strong)]"
+                disabled={imagesToExportCount === 0 || startingExport}
+              >
                 <Download className="w-5 h-5 mr-2" />
-                Avvia Esportazione
+                {startingExport ? "Avvio..." : "Avvia Esportazione"}
               </Button>
             </div>
           </div>

@@ -45,6 +45,15 @@ jobs:
       - name: Validate licensing coverage
         run: npm.cmd run test:filex-license-coverage
 
+      - name: Test Image Party Frame bug hunt
+        run: npm.cmd run test:image-party-frame-bug-hunt
+
+      - name: Test Image Party Frame export server
+        run: npm.cmd run test:image-party-frame-server
+
+      - name: Validate Image Party Frame packaged runtime
+        run: npm.cmd run test:image-party-frame-package-runtime
+
       - name: Typecheck workspaces
         run: npm.cmd run typecheck
 

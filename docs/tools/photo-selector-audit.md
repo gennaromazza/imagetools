@@ -4,12 +4,36 @@ Questo documento definisce il contratto UX del tool e la matrice minima da ripet
 
 ## Flusso canonico
 
-1. **Sfoglia**: apertura di una cartella nuova o recente.
+1. **Sfoglia**: scelta esplicita tra Selezione libera e Progetto master, oppure ripresa di una cartella recente.
 2. **Selezione**: scelta, classificazione e revisione delle foto.
 3. **Riepilogo**: vista rapida dello stato della selezione.
 4. **Esporta**: export della selezione o di formati secondari.
 
 La diagnostica cartella è un contesto persistente compatto. I dettagli si aprono solo su richiesta. Impostazioni, cache, editor esterno e scorciatoie sono funzioni secondarie.
+
+## Modalità operative
+
+Image Select Pro distingue il modo di aprire le fotografie dal lavoro eseguito sulla selezione. Griglia, confronto, rating, pick, etichette, riepilogo ed export restano disponibili in entrambe le modalità.
+
+| Modalità | Quando usarla | Ambito e persistenza |
+|---|---|---|
+| **Selezione libera** | Cartelle locali, schede SD, dischi rimovibili o selezioni rapide che non devono diventare un progetto | Non crea né associa un progetto master. La selezione e le classificazioni vengono conservate automaticamente nell’archivio locale dell’app e possono essere salvate e ripristinate manualmente tramite Google Drive; il backup non contiene le fotografie. Gli XMP restano disponibili quando la sorgente è scrivibile. |
+| **Progetto master** | Matrimoni, servizi strutturati, lavori con sottocartelle e attività avviate da Archivio Flow | Mantiene un’identità stabile del lavoro, comprende la gerarchia prevista dal master e conserva il flusso progetto esistente. Archivio Flow apre sempre questa modalità. |
+
+### Contratto UX
+
+- La schermata Sfoglia presenta le due modalità come scelte separate, con esempi d’uso e CTA non ambigue.
+- “Modalità libera” non significa soltanto scheda SD: è valida per qualsiasi cartella o disco che non debba essere associato a un progetto.
+- L’header mostra sempre un badge `Modalità libera` o `Progetto master` quando un lavoro è aperto.
+- Rinomina e correzione del master compaiono soltanto per un progetto; Selezione e Riepilogo dipendono invece dall’esistenza di un workspace aperto.
+- Il dialogo “Cartella senza progetto” espone l’azione libera soltanto quando il chiamante passa `allowFreeMode=true`. Il percorso proveniente da Archivio Flow mantiene il valore predefinito `false`.
+- Le cartelle recenti vengono riaperte con la modalità salvata (`free` o `project`); per i record precedenti privi del campo viene emesso l’intento di compatibilità `resume`.
+
+### Contratto dei componenti
+
+- `FolderBrowser.onFolderOpened(result, intent)` riceve `intent: "free" | "project" | "resume"`. La CTA Selezione libera emette `free`; una cartella recente emette la modalità salvata oppure `resume` per i record legacy.
+- `AppHeader.workspaceMode` riceve `"free" | "project" | null`. `lastDriveUrl` è opzionale e, quando presente, rende disponibile il link all’ultimo backup Drive.
+- `UnassignedFolderChoice` include `open-free`; `UnassignedFolderModal.allowFreeMode` è opzionale e vale `false` per default.
 
 ## Audit automatico
 
@@ -43,6 +67,7 @@ Il controllo statico verifica:
 | NAV-06 | Riepilogo con zero selezioni | Mostra stato vuoto e invito a tornare alla Selezione. |
 | FOLDER-01 | Diagnostica chiusa | Mostra solo cartella, numero foto, eventuale avviso e Dettagli. |
 | FOLDER-02 | Diagnostica aperta | Mostra i conteggi senza duplicare il pannello di caricamento. |
+| FOLDER-03 | Disco con una sottocartella protetta o non leggibile | La sola sottocartella viene saltata; le altre foto si aprono e diagnostica e toast indicano quante cartelle non sono state lette. |
 | FILTER-01 | Nessun risultato filtro | Mostra azione evidente per azzerare i filtri. |
 | FILTER-02 | Filtri avanzati chiusi/aperti | La riga base resta leggibile; i filtri secondari compaiono solo su richiesta. |
 | SELECT-01 | Selezione parziale | Conteggi header, toolbar e fondo pagina coincidono. |
@@ -51,10 +76,20 @@ Il controllo statico verifica:
 | SELECT-04 | `Ctrl+B` nella griglia | Apre e richiude Confronta; con meno di 2 o più di 4 foto visibili mostra un messaggio operativo. |
 | SELECT-05 | Scroll con foto selezionate o colorate | I bordi restano visibili e le ombre diffuse vengono sospese fino al termine dello scroll. |
 | BROWSE-01 | Elenco cartelle recenti più alto della finestra | La pagina scorre fino all'ultima cartella mantenendo visibile la testata. |
+| MODE-01 | Avvio senza cartella | Selezione libera e Progetto master sono presentati come percorsi distinti, leggibili da tastiera e screen reader. |
+| MODE-02 | Apertura con CTA Selezione libera | Il callback riceve intento `free`; l’header mostra `Modalità libera` e non propone rinomina o correzione master. |
+| MODE-03 | Creazione o apertura master | L’header mostra `Progetto master`; sottocartelle e azioni progetto restano disponibili. |
+| MODE-04 | Apertura proveniente da Archivio Flow | La modalità resta progetto e il dialogo cartella non assegnata non mostra l’azione libera. |
+| MODE-05 | Ripresa di una cartella recente | Il callback riceve la modalità salvata; un record legacy riceve `resume` e viene risolto senza perdere il master esistente. |
+| MODE-06 | Riuso della stessa scheda con un inventario differente | Lo stato precedente viene riapplicato soltanto ai file invariati verificati tramite chiave sorgente; le altre foto restano senza vecchie classificazioni. |
+| MODE-07 | Errore del salvataggio locale libero | L’app non crea file progetto nella sorgente e mostra un solo avviso operativo, senza bloccare la selezione o gli XMP già riusciti. |
 | EXPORT-01 | Export principale | Scarica un JSON con il numero corretto di foto attive. |
 | EXPORT-02 | Export secondari | Sono disponibili senza occupare la prima riga delle CTA. |
+| DRIVE-01 | Backup Drive in modalità libera | Salva selezione e classificazioni, non le fotografie; il link all’ultimo backup compare quando disponibile. |
+| DRIVE-02 | Ripristino Drive in modalità libera | Richiede una scelta manuale della versione e non converte la cartella in progetto. |
 | LOAD-01 | Anteprime ancora in caricamento | L’utente può continuare a selezionare e può riaprire lo stato caricamento. |
 | XMP-01 | Cartella senza scrittura | L’avviso è comprensibile e non blocca la selezione. |
+| XMP-02 | Modalità libera su sorgente scrivibile | Rating, pick ed etichette continuano a usare gli XMP secondo la policy esistente. |
 
 ## Scheda evidenze
 

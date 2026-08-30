@@ -59,6 +59,16 @@ const api: FileXDesktopApi = {
       ipcRenderer.removeListener("filex:open-project-request", wrappedListener);
     };
   },
+  onPrepareClose: (listener) => {
+    const wrappedListener = () => {
+      listener();
+    };
+    ipcRenderer.on("filex:prepare-close", wrappedListener);
+    return () => {
+      ipcRenderer.removeListener("filex:prepare-close", wrappedListener);
+    };
+  },
+  completeClosePreparation: () => ipcRenderer.invoke("filex:complete-close-preparation"),
   canStartDragOut: (absolutePaths) => ipcRenderer.invoke("filex:can-start-drag-out", absolutePaths),
   startDragOut: (absolutePaths) => ipcRenderer.send("filex:start-drag-out", absolutePaths),
   readFile: (absolutePath) => ipcRenderer.invoke("filex:read-file", absolutePath),
@@ -128,6 +138,9 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:download-photo-selector-drive-version", versionId),
   getDesktopSessionState: () => ipcRenderer.invoke("filex:get-desktop-session-state"),
   saveDesktopSessionState: (state) => ipcRenderer.invoke("filex:save-desktop-session-state", state),
+  getPartyFrameSessionToken: () => ipcRenderer.invoke("filex:get-party-frame-session-token"),
+  getFreeSelectionSnapshot: (sourceId) => ipcRenderer.invoke("filex:get-free-selection-snapshot", sourceId),
+  saveFreeSelectionSnapshot: (snapshot) => ipcRenderer.invoke("filex:save-free-selection-snapshot", snapshot),
   chooseOutputFolder: () => ipcRenderer.invoke("filex:choose-output-folder"),
   saveNewFileAs: (suggestedName: string, bytes: Uint8Array) =>
     ipcRenderer.invoke("filex:save-new-file-as", suggestedName, bytes),
@@ -149,6 +162,7 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:record-desktop-performance-snapshot", snapshot),
   logDesktopEvent: (event) => ipcRenderer.invoke("filex:log-desktop-event", event),
   readSidecarXmp: (absolutePath) => ipcRenderer.invoke("filex:read-sidecar-xmp", absolutePath),
+  readSidecarXmpInfo: (absolutePath) => ipcRenderer.invoke("filex:read-sidecar-xmp-info", absolutePath),
   writeSidecarXmp: (absolutePath, xml) => ipcRenderer.invoke("filex:write-sidecar-xmp", absolutePath, xml),
   browseArchivioFolder: () => ipcRenderer.invoke("filex:browse-archivio-folder"),
   getArchivioSettings: () => ipcRenderer.invoke("filex:get-archivio-settings"),

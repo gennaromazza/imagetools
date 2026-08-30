@@ -127,16 +127,39 @@ export interface DesktopFolderOpenDiagnostics {
     nestedScanSkipped?: boolean;
     recursiveScanEnabled?: boolean;
     scannedDirectoryCount?: number;
+    unreadableDirectoryCount?: number;
 }
 export interface DesktopFolderOpenOptions {
     recursive?: boolean;
     relativePathMode?: "legacy" | "project-relative";
     includeExtendedImages?: boolean;
 }
+export type DesktopSelectionMode = "project" | "free";
+export interface DesktopSourceVolumeInfo {
+    mountPath: string;
+    label?: string;
+    serialNumber?: string;
+    filesystem?: string;
+    totalBytes?: number;
+    isRemovable?: boolean;
+}
+export interface DesktopSourceIdentity {
+    schemaVersion: 1;
+    sourceId: string;
+    inventoryFingerprint: string;
+    rootPath: string;
+    rootFolderName: string;
+    rootRelativePath: string;
+    fileCount: number;
+    totalBytes: number;
+    isWritable: boolean;
+    volume?: DesktopSourceVolumeInfo;
+}
 export interface DesktopFolderOpenResult {
     name: string;
     rootPath: string;
     entries: DesktopFolderEntry[];
+    sourceIdentity?: DesktopSourceIdentity;
     diagnostics?: DesktopFolderOpenDiagnostics;
 }
 export interface DesktopFilePayload {
@@ -321,6 +344,11 @@ export interface DesktopCloudProjectManifest {
     projectId: string;
     projectName: string;
     sourceFolderName: string;
+    kind?: DesktopSelectionMode;
+    workspaceMode?: DesktopSelectionMode;
+    selectionId?: string;
+    workspaceId?: string;
+    displayName?: string;
     exportedAt: string;
     exportedFrom?: string;
     activeRelativePaths: string[];
@@ -331,6 +359,13 @@ export interface DesktopCloudProjectVersion {
     name: string;
     createdAt: string;
     size: number;
+    kind?: DesktopSelectionMode;
+    workspaceMode?: DesktopSelectionMode;
+    selectionId?: string;
+    workspaceId?: string;
+    displayName?: string;
+    webViewLink?: string;
+    driveUrl?: string;
     projectName?: string;
     sourceFolderName?: string;
     totalAssets?: number;
@@ -382,6 +417,12 @@ export interface DesktopPersistedState {
     sourceFolderPath: string;
     activeAssetIds: string[];
     usesMockData?: boolean;
+    selectionMode?: DesktopSelectionMode;
+    sourceId?: string;
+}
+export interface DesktopSidecarXmpInfo {
+    xml: string;
+    lastModified: number;
 }
 export interface DesktopAutoLayoutHandoffFile {
     fileName: string;
@@ -392,6 +433,8 @@ export interface DesktopRecentFolder {
     path?: string;
     imageCount: number;
     openedAt: number;
+    mode?: DesktopSelectionMode;
+    sourceId?: string;
 }
 export interface DesktopSortCacheEntry {
     folderPath: string;
@@ -410,7 +453,21 @@ export interface DesktopFolderCatalogAssetState {
     pickStatus: DesktopPickStatus;
     colorLabel: DesktopColorLabel | null;
     customLabels: string[];
+    active?: boolean;
+    classificationUpdatedAt?: number;
+    selectionUpdatedAt?: number;
     updatedAt: number;
+}
+export interface DesktopFreeSelectionSnapshot {
+    schemaVersion: 1;
+    app: "image-select-pro";
+    mode: "free";
+    source: DesktopSourceIdentity;
+    displayName: string;
+    createdAt: number;
+    updatedAt: number;
+    activeAssetIds: string[];
+    assetStates: DesktopFolderCatalogAssetState[];
 }
 export interface DesktopFolderCatalogState {
     folderPath: string;
@@ -995,6 +1052,8 @@ export interface FileXDesktopApi {
     consumePendingOpenProjectPath: () => Promise<string | null>;
     markOpenProjectRequestReady: () => Promise<void>;
     onOpenProjectRequest: (listener: (projectPath: string) => void) => () => void;
+    onPrepareClose: (listener: () => void) => () => void;
+    completeClosePreparation: () => Promise<void>;
     canStartDragOut: (absolutePaths: string[]) => Promise<DesktopDragOutCheck>;
     startDragOut: (absolutePaths: string[]) => void;
     readFile: (absolutePath: string) => Promise<DesktopFilePayload | null>;
@@ -1044,6 +1103,9 @@ export interface FileXDesktopApi {
     downloadPhotoSelectorDriveVersion: (versionId: string) => Promise<DesktopCloudProjectManifest>;
     getDesktopSessionState: () => Promise<DesktopPersistedState | null>;
     saveDesktopSessionState: (state: DesktopPersistedState) => Promise<void>;
+    getPartyFrameSessionToken: () => Promise<string | null>;
+    getFreeSelectionSnapshot: (sourceId: string) => Promise<DesktopFreeSelectionSnapshot | null>;
+    saveFreeSelectionSnapshot: (snapshot: DesktopFreeSelectionSnapshot) => Promise<DesktopFreeSelectionSnapshot>;
     chooseOutputFolder: () => Promise<string | null>;
     saveNewFileAs: (suggestedName: string, bytes: Uint8Array) => Promise<string | null>;
     writeFile: (absolutePath: string, bytes: Uint8Array) => Promise<boolean>;
@@ -1060,6 +1122,7 @@ export interface FileXDesktopApi {
     recordDesktopPerformanceSnapshot: (snapshot: DesktopPerformanceSnapshot) => Promise<void>;
     logDesktopEvent: (event: DesktopLogEvent) => Promise<void>;
     readSidecarXmp: (absolutePath: string) => Promise<string | null>;
+    readSidecarXmpInfo: (absolutePath: string) => Promise<DesktopSidecarXmpInfo | null>;
     writeSidecarXmp: (absolutePath: string, xml: string) => Promise<boolean>;
     browseArchivioFolder: () => Promise<string | null>;
     getArchivioSettings: () => Promise<ArchivioSettings>;

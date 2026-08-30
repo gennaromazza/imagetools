@@ -54,6 +54,11 @@ $workspacePanelPath = Join-Path $sourceRoot "components\workspace\WorkspacePanel
 $projectDialogsPath = Join-Path $sourceRoot "components\ProjectDialogs.tsx"
 $projectWorkflowPath = Join-Path $sourceRoot "services\project-workflow.ts"
 $cloudMappingPath = Join-Path $sourceRoot "services\cloud-project-mapping.ts"
+$workspaceModePath = Join-Path $sourceRoot "services\workspace-mode.ts"
+$folderAccessPath = Join-Path $sourceRoot "services\folder-access.ts"
+$folderBrowserPath = Join-Path $sourceRoot "components\FolderBrowser.tsx"
+$driveServicePath = Join-Path $repoRoot 'apps\filex-desktop\src\google-drive-service.ts'
+$sourceIdentityPath = Join-Path $repoRoot 'apps\filex-desktop\src\source-identity.ts'
 
 Assert-Contains $appHeaderPath 'Riepilogo.*selectedCount' 'NAV-001' 'Il Riepilogo espone il conteggio e resta una vista rapida.'
 Assert-Contains $appPath 'folder-diagnostics-panel' 'FOLDER-001' 'La diagnostica cartella ha un contenitore persistente.'
@@ -91,10 +96,17 @@ Assert-Contains $appHeaderPath 'Correggi master' 'PROJECT-007' 'Un master creato
 Assert-Contains $appPath 'relocatePhotoSelectorProjectFile' 'PROJECT-008' 'La correzione trasferisce il progetto tramite il bridge desktop.'
 Assert-Contains (Join-Path $repoRoot 'apps\filex-desktop\src\native-folder-service.ts') 'previous-master' 'PROJECT-009' 'Il vecchio master viene conservato come backup recuperabile.'
 Assert-Contains $projectWorkflowPath 'selectedLegacyPaths' 'MIGRATE-001' 'La migrazione conserva l’unione delle selezioni precedenti.'
-Assert-Contains $appPath 'localProject\?\.projectMode !== "master"' 'DRIVE-001' 'Drive opera solo su un progetto master esplicito.'
+Assert-Contains $appPath 'workspaceMode === "free"[\s\S]*Backup manuale della selezione libera creato su Google Drive' 'DRIVE-001' 'Il backup manuale Drive supporta esplicitamente la modalita libera.'
 Assert-Contains $cloudMappingPath 'UniqueAssetIndex' 'DRIVE-002' 'La mappatura Drive rileva chiavi locali duplicate.'
 Assert-Contains $cloudMappingPath 'claimedAssetIds' 'DRIVE-003' 'Una foto locale non può ricevere due record Drive.'
-Assert-Contains (Join-Path $repoRoot 'apps\filex-desktop\src\google-drive-service.ts') 'PROJECT_ID_PROPERTY' 'DRIVE-004' 'La cartella Drive è associata all’identità stabile del progetto.'
+Assert-Contains $driveServicePath 'PROJECT_ID_PROPERTY' 'DRIVE-004' 'La cartella Drive è associata all’identità stabile del progetto.'
+Assert-Contains $driveServicePath 'Selezioni libere' 'DRIVE-007' 'I backup liberi hanno uno spazio Drive dedicato.'
+Assert-Contains $driveServicePath 'selectionId[\s\S]*workspaceId' 'DRIVE-008' 'Le selezioni libere usano una identita e non il solo nome cartella.'
+Assert-Contains $workspaceModePath 'return mode === "project"' 'MODE-001' 'Soltanto la modalita progetto autorizza la scrittura del file progetto.'
+Assert-Contains $appPath 'if \(shouldWriteProjectFile\(scheduledMode\)\)[\s\S]*updatePhotoSelectorProjectFile[\s\S]*else if \(scheduledSourceIdentity\)[\s\S]*saveFreeSelectionSnapshot' 'MODE-002' 'La persistenza separa file progetto e snapshot libero locale.'
+Assert-Contains $folderAccessPath 'openFolder\(\{[\s\S]*recursive: true[\s\S]*relativePathMode: "project-relative"' 'MODE-003' 'La modalita libera scansiona ricorsivamente la sorgente scelta.'
+Assert-Contains $sourceIdentityPath 'serialNumber[\s\S]*rootRelativePath' 'MODE-004' 'L’identita della sorgente rimane indipendente dalla lettera del volume.'
+Assert-Contains $folderBrowserPath 'Selezione libera[\s\S]*Progetto master' 'MODE-005' 'La schermata iniziale spiega entrambe le modalita al fotografo.'
 
 Assert-Contains $appHeaderPath 'Riconnetti Drive' 'DRIVE-005' 'Una sessione Google scaduta espone la riconnessione direttamente nell header.'
 Assert-Contains (Join-Path $repoRoot 'apps\filex-desktop\src\google-drive-service.ts') 'await clearToken\(\)[\s\S]*Riconnetti Google Drive' 'DRIVE-006' 'Un refresh token rifiutato invalida la sessione locale e richiede un nuovo OAuth.'
@@ -102,7 +114,7 @@ Assert-NotContains $stylePath 'margin-top:\s*-1\.5rem' 'LAYOUT-001' 'Il workspac
 Assert-Contains $stylePath '\.app-header[\s\S]*z-index:\s*1000' 'LAYOUT-002' 'I menu della testata restano sopra il workspace.'
 Assert-Contains $stylePath '\.quick-preview\s*\{[\s\S]{0,320}z-index:\s*6000' 'LAYOUT-003' 'La quick preview copre la testata senza lasciare titolo e comandi nascosti sotto l header.'
 Assert-Contains $filterPanelPath 'minimumRatingCount[\s\S]*esattamente' 'COUNT-001' 'Il filtro stelle mostra sia il totale minimo sia il conteggio esatto.'
-Assert-Contains $selectionActionsPath 'nella cartella[\s\S]*nel progetto' 'COUNT-002' 'La selezione distingue esplicitamente cartella corrente e progetto.'
+Assert-Contains $selectionActionsPath 'nella cartella[\s\S]*nel progetto[\s\S]*nella selezione libera' 'COUNT-002' 'La selezione distingue esplicitamente cartella corrente, progetto e selezione libera.'
 Assert-Contains $selectorPath 'visibili con i filtri' 'COUNT-003' 'La barra inferiore distingue foto visibili e selezionate.'
 Assert-Contains $selectorPath 'const comparePhotos = useMemo[\s\S]*visiblePhotoIds[\s\S]*selectedSet\.has' 'COMPARE-001' 'Confronta usa le foto selezionate e visibili nell ordine della griglia.'
 Assert-Contains $selectionActionsPath 'compareCount >= 2 && props\.compareCount <= 4' 'COMPARE-002' 'Il comando Confronta compare soltanto per due, tre o quattro foto della griglia.'

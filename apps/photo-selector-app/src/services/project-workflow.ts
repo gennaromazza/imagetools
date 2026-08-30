@@ -56,19 +56,31 @@ export function buildMasterProject(
 ): MasterProjectMergeResult {
   const legacyStateByPath = new Map<string, DesktopFolderCatalogAssetState>();
   const selectedLegacyPaths = new Set<string>();
+  const selectionUpdatedAtByPath = new Map<string, number>();
 
   for (const location of legacyProjects) {
     const states = location.project.folderState?.assetStates ?? [];
     const activeIds = new Set(location.project.folderState?.activeAssetIds ?? []);
     for (const state of states) {
+      const selected = activeIds.has(state.assetId);
+      const normalizedState: DesktopFolderCatalogAssetState = {
+        ...state,
+        active: selected,
+        classificationUpdatedAt: state.classificationUpdatedAt ?? state.updatedAt,
+        selectionUpdatedAt: state.selectionUpdatedAt ?? location.project.updatedAt ?? state.updatedAt,
+      };
       const keys = new Set([
         ...pathSuffixes(state.relativePath),
         ...pathSuffixes(state.absolutePath),
       ]);
       for (const key of keys) {
-        legacyStateByPath.set(key, chooseState(legacyStateByPath.get(key), state));
-        if (activeIds.has(state.assetId)) {
+        legacyStateByPath.set(key, chooseState(legacyStateByPath.get(key), normalizedState));
+        if (selected) {
           selectedLegacyPaths.add(key);
+          selectionUpdatedAtByPath.set(
+            key,
+            Math.max(selectionUpdatedAtByPath.get(key) ?? 0, normalizedState.selectionUpdatedAt ?? 0),
+          );
         }
       }
     }
@@ -85,6 +97,7 @@ export function buildMasterProject(
     ]);
     let legacyState: DesktopFolderCatalogAssetState | undefined;
     let selected = false;
+    let selectedAt = 0;
     for (const key of keys) {
       legacyState = chooseState(legacyState, legacyStateByPath.get(key) ?? {
         assetId: asset.id,
@@ -97,6 +110,7 @@ export function buildMasterProject(
         updatedAt: 0,
       });
       selected ||= selectedLegacyPaths.has(key);
+      selectedAt = Math.max(selectedAt, selectionUpdatedAtByPath.get(key) ?? 0);
     }
     if (selected) {
       activeAssetIds.push(asset.id);
@@ -109,6 +123,11 @@ export function buildMasterProject(
     if (hasMigratedMetadata) {
       migratedMetadataCount += 1;
     }
+    const classificationUpdatedAt = legacyState?.classificationUpdatedAt ?? legacyState?.updatedAt ?? now;
+    const selectionUpdatedAt = Math.max(
+      selectedAt,
+      legacyState?.selectionUpdatedAt ?? legacyState?.updatedAt ?? now,
+    );
     return {
       assetId: asset.id,
       fileName: asset.fileName,
@@ -119,7 +138,10 @@ export function buildMasterProject(
       pickStatus: legacyState?.pickStatus ?? "unmarked",
       colorLabel: legacyState?.colorLabel ?? null,
       customLabels: legacyState?.customLabels ?? [],
-      updatedAt: legacyState?.updatedAt ?? now,
+      active: selected,
+      classificationUpdatedAt,
+      selectionUpdatedAt,
+      updatedAt: Math.max(classificationUpdatedAt, selectionUpdatedAt),
     };
   });
 

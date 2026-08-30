@@ -2,163 +2,95 @@
 
 ## Product Scope
 
-Image Party Frame is a local-first photo framing workflow with a browser frontend and a local processing server. The app is optimized for event-photo style batch work: choose a template, validate the layout, adjust crop image by image, then export final framed outputs.
+PartyFrame is a local-first FileX desktop workflow for event-photo framing. It imports a source folder, applies one preset or custom template, lets the operator approve a consistent crop and exports a bounded batch with observable progress and recoverable failures.
 
-## Application Architecture
+## Runtime Topology
 
-### Frontend
+### FileX Desktop Shell
 
-- React application under [`src/app`](../src/app)
-- Routing handled with React Router in [`src/app/routes.ts`](../src/app/routes.ts)
-- Global project state handled by [`src/app/contexts/ProjectContext.tsx`](../src/app/contexts/ProjectContext.tsx)
-- API integration handled by [`src/app/hooks/useApi.ts`](../src/app/hooks/useApi.ts)
+- Electron owns the application window, native folder/file access and component startup.
+- A random PartyFrame session token is generated for each launch.
+- The preload bridge exposes only the typed methods declared by `@photo-tools/desktop-contracts`.
+- The renderer requests thumbnails and file metadata through the desktop bridge instead of loading every original into browser memory.
+- The packaged main process starts the loopback image engine before the renderer is shown.
 
-### Backend
+### React Renderer
 
-- Local Express API in [`server/index.ts`](../server/index.ts)
-- `multer` handles uploads
-- `sharp` handles crop, resize, compositing and output generation
-- Preset templates are exposed by `GET /api/templates`
+- React 19 and React Router provide the page workflow.
+- `ProjectContext.tsx` owns normalized, serializable project state while source `File` handles remain in project-scoped maps.
+- `cropGeometry.ts` is the sole crop coordinate contract shared by workspace and comparison views.
+- `templateGeometry.ts` consumes the same preset catalog used by the server, preventing preview/export geometry drift.
+- `useApi.ts` owns network requests, cancellation and health state; `exportSession.ts` owns validated refresh recovery.
+- Route guards reject incomplete projects while still allowing a detached export job to be monitored after refresh.
 
-### Local Persistence
+### Local Processing Engine
 
-- `localStorage` stores:
-  - recent project snapshots
-  - template library ordering and hidden preset preferences
-  - saved custom template metadata
-- `IndexedDB` stores custom template background assets
-- portable JSON packages provide machine-transferable project and template-library snapshots
+- `server/app.ts` defines the HTTP boundary, upload limits, authentication and routes.
+- `server/jobs.ts` provides a bounded queue, cancellation, idempotency, progress snapshots and retention.
+- `server/pipeline.ts` validates sources/templates/paths and performs EXIF-aware Sharp rendering.
+- `server/templateCatalog.ts` is the shared source of truth for presets and frame artwork.
+- The engine binds to `127.0.0.1`; sensitive routes require the desktop session token when configured.
 
-## Core UI Flows
+## Core UI Flow
 
-### 1. Home
+1. **Home** — create/import projects, reopen verified recents and manage the local template library.
+2. **New project** — scan supported files with bounded concurrency, select/reorder a template and relink missing sources.
+3. **Custom template** — edit vertical and horizontal drafts, validate geometry/assets and commit atomically on Save.
+4. **Validation** — show explicit project, source and template checks before workspace entry.
+5. **Workspace** — generate bounded thumbnails, edit crop locally during gestures, process previews and approve images.
+6. **Comparison** — show the original against the real processed result or a geometrically equivalent local fallback.
+7. **Export settings** — validate format, destination, naming and approved-only selection.
+8. **Export progress** — show transfer, queue, rendering, writing and cleanup states; cancel, reconnect or retry failures.
 
-- Opens new projects
-- Shows recent project snapshots
-- Shows saved template library
-- Imports project packages and template-library packages
-- Exports the saved template library as a portable package
+## State And Persistence
 
-### 2. New Project
+- Every project has a stable ID; image identities and in-memory file handles are scoped to it.
+- Crop is stored as normalized horizontal/vertical offsets plus zoom, with migration for legacy pixel offsets.
+- Recent snapshots retain metadata and native paths. Reopen verifies the files before making the project editable.
+- Custom-template metadata is stored in `localStorage`; validated background blobs are stored in IndexedDB.
+- Portable JSON packages are versioned, size-bounded and schema-validated before committing state.
+- Imported asset keys and preview URLs are never trusted; runtime values are regenerated locally.
+- An active export intent and its last validated job snapshot are stored in `sessionStorage` so a page refresh does not create duplicate work.
 
-- Reads preset templates from the backend
-- Merges preset templates and saved custom templates into one ordered library
-- Supports drag-and-drop reordering of templates
-- Supports hiding preset templates from the project UI
-- Supports loading saved custom templates into the project
+## Rendering Contract
 
-### 3. Custom Template Builder
+- EXIF orientation is applied before orientation selection and crop calculations.
+- Workspace, comparison and server use the same cover-crop model.
+- The workspace measures its preview host and contains the entire composition against both available width and height; resizing the UI never changes normalized crop data or export geometry.
+- Image and adjustment panels become overlay controls below the desktop breakpoint so the composition remains the primary surface.
+- Preset artwork is produced from the shared catalog; custom artwork is validated for both orientations.
+- Output supports JPEG and PNG, uses sRGB and writes requested DPI metadata.
+- Output files are first written as partial files and atomically renamed after success.
+- Collision-safe naming preserves existing files unless overwrite is explicitly enabled.
 
-- Defines vertical and horizontal variants
-- Supports background upload with optimization
-- Supports border settings and photo area editing
-- Saves to project or to library
+## Performance And Backpressure
 
-### 4. Template Validation
+- Native imports keep lightweight placeholders and request thumbnails only when needed.
+- Browser imports and preview generation use small worker pools rather than unbounded `Promise.all`.
+- Crop gestures update a local draft and commit at gesture boundaries, avoiding whole-project renders for every pointer event.
+- The server caps file count, per-file bytes, aggregate bytes, pixel dimensions, concurrent jobs and pending jobs.
+- Job responses include real completed/total counts and the current phase instead of simulated progress.
 
-- Previews the selected layout before editing begins
+## Failure And Recovery Model
 
-### 5. Workspace
-
-- Live crop and zoom per image
-- Single-image processing through the backend
-- Approval workflow
-- Comparison page entry point
-- Project package export entry point
-
-### 6. Image Comparison
-
-- Compares original source preview with framed result or live framed preview
-
-### 7. Export
-
-- Export settings page configures format, quality, naming and destination
-- Export progress page runs batch export and reports success/failure summary
-
-## State Model
-
-The project context stores:
-
-- project identity and paths
-- selected template id
-- optional active custom template
-- image list and crop state
-- export settings
-
-Session-only browser `File` objects are kept outside serializable state in in-memory maps. This is why a restored recent project can recover metadata and UI state, but not always the original file binaries after a browser restart.
-
-Portable project packages embed the serializable project snapshot plus custom-template background assets. They are intended as the migration path toward true desktop-style save/import behavior across Windows and macOS.
-
-## Template System
-
-### Preset Templates
-
-- Defined server-side for processing
-- Exposed to the frontend via `/api/templates`
-- Can be hidden from the project UI without being deleted from server definitions
-
-### Custom Templates
-
-- Built inside the app
-- Store geometry for vertical and horizontal variants
-- Can include background assets per orientation
-- Persist through metadata in `localStorage` and binaries in `IndexedDB`
-
-### Template Ordering
-
-- The project template library keeps a user-defined preferred order
-- Ordering is persisted locally and reused in the creation/edit flow
-
-### Portable Packages
-
-- Project packages capture normalized project state for transfer or backup
-- Template-library packages capture saved custom templates and embedded background assets
-- The current package format is JSON-based so it stays inspectable and easy to migrate later into desktop-native save flows
+- An application error boundary preserves persisted project data and offers a safe route back to Home.
+- Health checks have timeout, cancellation and explicit checking/online/offline states.
+- API errors carry stable codes and retryability; a full queue returns HTTP 429.
+- Export cancellation is cooperative and cleans temporary uploads and partial outputs.
+- Idempotency keys make reconnect and refresh safe.
+- Per-file failures remain visible without hiding successful outputs.
 
 ## Technology Choices
 
-## Frontend
+- React 19, TypeScript, Vite and React Router
+- Tailwind CSS, Radix primitives, Lucide icons and Sonner
+- Electron and `@photo-tools/desktop-contracts`
+- Node.js, Express, Multer and Sharp
+- `localStorage`, `sessionStorage`, IndexedDB, object URLs and `ResizeObserver`
 
-- React 18
-- TypeScript
-- Vite
-- React Router
-- Tailwind CSS
-- Radix UI primitives
-- Lucide icons
-- Sonner for toast notifications
+## Verification Boundaries
 
-## Backend
-
-- Node.js
-- Express
-- Multer
-- Sharp
-- dotenv
-
-## Browser APIs
-
-- `localStorage`
-- `IndexedDB`
-- `File` and `FormData`
-- `ResizeObserver`
-- object URLs via `URL.createObjectURL`
-
-## Reusable Patterns For Similar Software
-
-The current codebase already contains patterns that are reusable in other desktop-like media tools:
-
-- local-first project state with React Context
-- hybrid persistence using `localStorage` + `IndexedDB`
-- portable JSON package import/export for user data transfer
-- backend-backed image processing through multipart uploads
-- session file-object maps for browser-based editing tools
-- merged libraries combining presets and user-generated templates
-- drag-and-drop ordering of reusable assets/templates
-
-## Current Constraints
-
-- Source image binaries are session-bound in the browser
-- Preset template rendering metadata still exists server-side and is not user-editable
-- Recent-project persistence is machine-local convenience, not the long-term cross-device storage model
-- The app is local-environment oriented and assumes a reachable local API server
+- State, crop, responsive workspace layout, source-import, export-session and portable-data regressions run through the PartyFrame bug-hunt script.
+- Rendering, security and job behavior run through the server test suite.
+- The FileX package-runtime check ensures the compiled server import closure is present in the desktop component output.
+- These checks are registered in CI and in the FileX Dev Console.

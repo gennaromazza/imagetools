@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, appendFileSync, renameSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type {
+  DesktopFreeSelectionSnapshot,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
   DesktopLogEvent,
@@ -155,7 +156,15 @@ function getDatabase(): DatabaseSync {
       name TEXT NOT NULL,
       path TEXT,
       image_count INTEGER NOT NULL,
-      opened_at INTEGER NOT NULL
+      opened_at INTEGER NOT NULL,
+      mode TEXT,
+      source_id TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS free_selection_snapshot (
+      source_id TEXT PRIMARY KEY,
+      snapshot_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS sort_cache (
@@ -187,6 +196,9 @@ function getDatabase(): DatabaseSync {
       pick_status TEXT NOT NULL,
       color_label TEXT,
       custom_labels_json TEXT NOT NULL,
+      active INTEGER,
+      classification_updated_at INTEGER,
+      selection_updated_at INTEGER,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (folder_path, asset_id)
     );
@@ -206,6 +218,32 @@ function getDatabase(): DatabaseSync {
       created_at INTEGER NOT NULL
     );
   `);
+
+  const recentFolderColumns = new Set(
+    (db.prepare("PRAGMA table_info(recent_folders)").all() as Array<{ name: string }>).map((column) => column.name),
+  );
+  if (!recentFolderColumns.has("mode")) {
+    // Existing rows predate workspace modes and must remain unresolved: the
+    // renderer will check whether they belong to a master project before
+    // falling back to a free selection.
+    db.exec("ALTER TABLE recent_folders ADD COLUMN mode TEXT");
+  }
+  if (!recentFolderColumns.has("source_id")) {
+    db.exec("ALTER TABLE recent_folders ADD COLUMN source_id TEXT");
+  }
+
+  const folderAssetStateColumns = new Set(
+    (db.prepare("PRAGMA table_info(folder_asset_state)").all() as Array<{ name: string }>).map((column) => column.name),
+  );
+  if (!folderAssetStateColumns.has("active")) {
+    db.exec("ALTER TABLE folder_asset_state ADD COLUMN active INTEGER");
+  }
+  if (!folderAssetStateColumns.has("classification_updated_at")) {
+    db.exec("ALTER TABLE folder_asset_state ADD COLUMN classification_updated_at INTEGER");
+  }
+  if (!folderAssetStateColumns.has("selection_updated_at")) {
+    db.exec("ALTER TABLE folder_asset_state ADD COLUMN selection_updated_at INTEGER");
+  }
 
   database = db;
   return db;
@@ -357,10 +395,74 @@ export function saveDesktopSessionState(state: DesktopPersistedState): void {
   writeKv("photo-selector-session", state);
 }
 
+function isFreeSelectionSnapshot(value: unknown, expectedSourceId: string): value is DesktopFreeSelectionSnapshot {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const snapshot = value as Partial<DesktopFreeSelectionSnapshot>;
+  return snapshot.schemaVersion === 1
+    && snapshot.app === "image-select-pro"
+    && snapshot.mode === "free"
+    && Boolean(snapshot.source)
+    && snapshot.source?.sourceId === expectedSourceId
+    && Array.isArray(snapshot.activeAssetIds)
+    && Array.isArray(snapshot.assetStates);
+}
+
+export function getFreeSelectionSnapshot(sourceId: string): DesktopFreeSelectionSnapshot | null {
+  const normalizedSourceId = typeof sourceId === "string" ? sourceId.trim() : "";
+  if (!normalizedSourceId) {
+    return null;
+  }
+  const db = getDatabase();
+  const row = db.prepare(`
+    SELECT snapshot_json
+    FROM free_selection_snapshot
+    WHERE source_id = ?
+  `).get(normalizedSourceId) as { snapshot_json: string } | undefined;
+  const snapshot = parseJson<unknown>(row?.snapshot_json, null);
+  return isFreeSelectionSnapshot(snapshot, normalizedSourceId) ? snapshot : null;
+}
+
+export function saveFreeSelectionSnapshot(
+  snapshot: DesktopFreeSelectionSnapshot,
+): DesktopFreeSelectionSnapshot {
+  const sourceId = snapshot?.source?.sourceId?.trim();
+  if (!sourceId || snapshot.schemaVersion !== 1 || snapshot.app !== "image-select-pro" || snapshot.mode !== "free") {
+    throw new Error("Invalid free selection snapshot");
+  }
+
+  const timestamp = Number.isFinite(snapshot.updatedAt) ? snapshot.updatedAt : now();
+  const normalized: DesktopFreeSelectionSnapshot = {
+    ...snapshot,
+    source: {
+      ...snapshot.source,
+      sourceId,
+    },
+    displayName: snapshot.displayName.trim() || snapshot.source.rootFolderName,
+    createdAt: Number.isFinite(snapshot.createdAt) ? snapshot.createdAt : timestamp,
+    updatedAt: timestamp,
+    activeAssetIds: Array.isArray(snapshot.activeAssetIds) ? [...snapshot.activeAssetIds] : [],
+    assetStates: Array.isArray(snapshot.assetStates) ? [...snapshot.assetStates] : [],
+  };
+  const db = getDatabase();
+  const upsert = db.prepare(`
+    INSERT INTO free_selection_snapshot (source_id, snapshot_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(source_id) DO UPDATE SET
+      snapshot_json = excluded.snapshot_json,
+      updated_at = excluded.updated_at
+  `);
+  runInTransaction(() => {
+    upsert.run(sourceId, serialize(normalized), timestamp);
+  });
+  return normalized;
+}
+
 export function getRecentFolders(): DesktopRecentFolder[] {
   const db = getDatabase();
   const rows = db.prepare(`
-    SELECT name, path, image_count, opened_at
+    SELECT name, path, image_count, opened_at, mode, source_id
     FROM recent_folders
     ORDER BY opened_at DESC
   `).all() as Array<{
@@ -368,6 +470,8 @@ export function getRecentFolders(): DesktopRecentFolder[] {
     path: string | null;
     image_count: number;
     opened_at: number;
+    mode: string | null;
+    source_id: string | null;
   }>;
 
   return rows.map((row) => ({
@@ -375,25 +479,31 @@ export function getRecentFolders(): DesktopRecentFolder[] {
     path: row.path ?? undefined,
     imageCount: row.image_count,
     openedAt: row.opened_at,
+    mode: row.mode === "project" ? "project" : row.mode === "free" ? "free" : undefined,
+    sourceId: row.source_id ?? undefined,
   }));
 }
 
 export function saveRecentFolder(folder: DesktopRecentFolder): DesktopRecentFolder[] {
   const db = getDatabase();
   db.prepare(`
-    INSERT INTO recent_folders (folder_key, name, path, image_count, opened_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO recent_folders (folder_key, name, path, image_count, opened_at, mode, source_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(folder_key) DO UPDATE SET
       name = excluded.name,
       path = excluded.path,
       image_count = excluded.image_count,
-      opened_at = excluded.opened_at
+      opened_at = excluded.opened_at,
+      mode = excluded.mode,
+      source_id = excluded.source_id
   `).run(
     normalizeRecentFolderKey(folder),
     folder.name,
     folder.path ?? null,
     folder.imageCount,
     folder.openedAt,
+    folder.mode === "project" ? "project" : folder.mode === "free" ? "free" : null,
+    folder.sourceId?.trim() || null,
   );
   pruneRecentFolders();
   return getRecentFolders();
@@ -481,7 +591,8 @@ export function getFolderCatalogState(folderPath: string): DesktopFolderCatalogS
   }
 
   const assetRows = db.prepare(`
-    SELECT asset_id, file_name, relative_path, absolute_path, source_file_key, rating, pick_status, color_label, custom_labels_json, updated_at
+    SELECT asset_id, file_name, relative_path, absolute_path, source_file_key, rating, pick_status, color_label,
+      custom_labels_json, active, classification_updated_at, selection_updated_at, updated_at
     FROM folder_asset_state
     WHERE folder_path = ?
     ORDER BY updated_at DESC
@@ -495,14 +606,20 @@ export function getFolderCatalogState(folderPath: string): DesktopFolderCatalogS
     pick_status: DesktopFolderCatalogAssetState["pickStatus"];
     color_label: DesktopFolderCatalogAssetState["colorLabel"];
     custom_labels_json: string;
+    active: number | null;
+    classification_updated_at: number | null;
+    selection_updated_at: number | null;
     updated_at: number;
   }>;
+
+  const activeAssetIds = parseJson<string[]>(row.active_asset_ids_json, []);
+  const activeAssetIdSet = new Set(activeAssetIds);
 
   return {
     folderPath,
     folderName: row.folder_name,
     imageCount: row.image_count,
-    activeAssetIds: parseJson<string[]>(row.active_asset_ids_json, []),
+    activeAssetIds,
     lastOpenedAt: row.last_opened_at,
     updatedAt: row.updated_at,
     assetStates: assetRows.map((assetRow) => ({
@@ -515,6 +632,9 @@ export function getFolderCatalogState(folderPath: string): DesktopFolderCatalogS
       pickStatus: assetRow.pick_status,
       colorLabel: assetRow.color_label ?? null,
       customLabels: parseJson<string[]>(assetRow.custom_labels_json, []),
+      active: assetRow.active === null ? activeAssetIdSet.has(assetRow.asset_id) : assetRow.active !== 0,
+      classificationUpdatedAt: assetRow.classification_updated_at ?? assetRow.updated_at,
+      selectionUpdatedAt: assetRow.selection_updated_at ?? row.updated_at,
       updatedAt: assetRow.updated_at,
     })),
   };
@@ -579,9 +699,12 @@ export function saveFolderAssetStates(
       pick_status,
       color_label,
       custom_labels_json,
+      active,
+      classification_updated_at,
+      selection_updated_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   runInTransaction(() => {
     deleteStatement.run(folderPath);
@@ -597,6 +720,9 @@ export function saveFolderAssetStates(
         assetState.pickStatus,
         assetState.colorLabel ?? null,
         serialize(assetState.customLabels),
+        assetState.active === undefined ? null : assetState.active ? 1 : 0,
+        assetState.classificationUpdatedAt ?? assetState.updatedAt,
+        assetState.selectionUpdatedAt ?? assetState.updatedAt,
         assetState.updatedAt,
       );
     }
@@ -624,9 +750,12 @@ export function saveFolderAssetStatesDelta(
       pick_status,
       color_label,
       custom_labels_json,
+      active,
+      classification_updated_at,
+      selection_updated_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(folder_path, asset_id) DO UPDATE SET
       file_name = excluded.file_name,
       relative_path = excluded.relative_path,
@@ -636,6 +765,9 @@ export function saveFolderAssetStatesDelta(
       pick_status = excluded.pick_status,
       color_label = excluded.color_label,
       custom_labels_json = excluded.custom_labels_json,
+      active = excluded.active,
+      classification_updated_at = excluded.classification_updated_at,
+      selection_updated_at = excluded.selection_updated_at,
       updated_at = excluded.updated_at
   `);
 
@@ -652,6 +784,9 @@ export function saveFolderAssetStatesDelta(
         assetState.pickStatus,
         assetState.colorLabel ?? null,
         serialize(assetState.customLabels),
+        assetState.active === undefined ? null : assetState.active ? 1 : 0,
+        assetState.classificationUpdatedAt ?? assetState.updatedAt,
+        assetState.selectionUpdatedAt ?? assetState.updatedAt,
         assetState.updatedAt,
       );
     }

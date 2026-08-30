@@ -2,135 +2,121 @@
 
 ## Prerequisites
 
-- Node.js 18+
-- npm
-- Windows-friendly local environment recommended because folder picking and local workflow were built with Windows in mind
+- Node.js 20 or newer
+- npm, run from the monorepo root
+- Windows for the native folder picker; image processing and automated tests are otherwise platform-neutral
 
-## Install
+## Development Commands
 
-```bash
-npm install
-```
-
-## Run In Development
+Run the renderer and local engine together:
 
 ```bash
-npm run dev:all
+npm --workspace @photo-tools/image-party-frame-app run dev:all
 ```
 
-Or run separately:
+Or run the real FileX desktop integration:
 
 ```bash
-npm run dev
-npm run dev:server
+npm run dev:image-party-frame
 ```
 
-## Default Endpoints
+Default development endpoints:
 
-- Frontend: `http://localhost:5173` or next available Vite port
-- Backend: `http://localhost:3001`
+- Renderer: `http://127.0.0.1:4170`
+- Local API: `http://127.0.0.1:3001`
 
-## Build
+Both services bind to loopback. Development uses the same token value in renderer and server; the packaged desktop app generates a random token for each launch and passes it through the preload contract.
+
+## Build And Automated Checks
 
 ```bash
-npm run build
+npm --workspace @photo-tools/image-party-frame-app run typecheck
+npm run test:image-party-frame-bug-hunt
+npm run test:image-party-frame-server
+npm run test:image-party-frame-package-runtime
+npm --workspace @photo-tools/filex-desktop run build:image-party-frame
 ```
+
+The focused bug-hunt tests cover project isolation and migration, normalized crop geometry, route validation, native source import and portable-data validation. Server tests cover rendering, EXIF orientation, input and path limits, authentication, cancellation, idempotency, collisions and partial-file cleanup. The package-runtime check guards the compiled Electron import closure.
+
+All three PartyFrame tests are also exposed in the FileX Dev Console under the PartyFrame category.
 
 ## Main Source Areas
 
-- Frontend entry: [`src/app/App.tsx`](../src/app/App.tsx)
-- Routes: [`src/app/routes.ts`](../src/app/routes.ts)
+- App shell and error boundary: [`src/app/App.tsx`](../src/app/App.tsx)
+- Route protection: [`src/app/components/ProjectRouteGuard.tsx`](../src/app/components/ProjectRouteGuard.tsx)
 - Project state: [`src/app/contexts/ProjectContext.tsx`](../src/app/contexts/ProjectContext.tsx)
-- API hooks: [`src/app/hooks/useApi.ts`](../src/app/hooks/useApi.ts)
+- API client and export-session recovery: [`src/app/hooks/useApi.ts`](../src/app/hooks/useApi.ts)
+- Crop contract: [`src/app/lib/cropGeometry.ts`](../src/app/lib/cropGeometry.ts)
+- Source import: [`src/app/lib/sourceImport.ts`](../src/app/lib/sourceImport.ts)
 - Template persistence: [`src/app/lib/savedTemplates.ts`](../src/app/lib/savedTemplates.ts)
-- Portable import/export: [`src/app/lib/portablePackages.ts`](../src/app/lib/portablePackages.ts)
-- Template library ordering: [`src/app/lib/templateLibrary.ts`](../src/app/lib/templateLibrary.ts)
-- Backend API: [`server/index.ts`](../server/index.ts)
+- Portable packages: [`src/app/lib/portablePackages.ts`](../src/app/lib/portablePackages.ts)
+- HTTP application and security boundary: [`server/app.ts`](../server/app.ts)
+- Export job manager: [`server/jobs.ts`](../server/jobs.ts)
+- Rendering and validation pipeline: [`server/pipeline.ts`](../server/pipeline.ts)
+- Shared preset catalog: [`server/templateCatalog.ts`](../server/templateCatalog.ts)
 
-## Important Runtime Behavior
+## Project And Source Lifecycle
 
-### Recent Projects
+- Each project owns an isolated image list and stable image identifiers.
+- Desktop imports validate supported source files and keep lightweight placeholders instead of loading all originals into memory.
+- Recent-project snapshots retain native paths. Reopen verifies that those paths still identify the expected files; otherwise the user is sent through relinking.
+- Crop is stored as normalized offsets plus zoom. Preview, comparison and server rendering use the same geometry contract.
+- A portable project package restores project and custom-template state, but intentionally does not copy the source photographs.
 
-- Recent projects store a project snapshot in `localStorage`
-- Reopening a project restores project metadata and UI state
-- Original source files may still be unavailable after a browser restart because browser `File` objects are not durable across sessions
-- Treat recent projects as local convenience only, not as the cross-machine storage format
+## Custom Templates And Portable Data
 
-### Portable Project And Template Packages
+- Template metadata lives in local storage and background binaries in IndexedDB.
+- Builder changes are drafts until Save, so cancelling cannot mutate an existing template.
+- Imported project/template packages are schema-checked, size-limited and migrated only from supported versions before any state is committed.
+- Removing a saved template also attempts to remove unreferenced background assets.
 
-- Project packages are exported from the workspace and imported from the home screen
-- Template-library packages are imported/exported from the template library section on the home screen
-- Package files are JSON so they can be versioned, migrated, and eventually mapped to a desktop-native save flow
-- On another PC, package import restores project/template metadata and embedded custom-template assets; source image folders may still need relinking if the files are not bundled
+## Export Job Lifecycle
 
-### Custom Templates
+1. The renderer validates project, template, sources and destination.
+2. It creates an export job with an idempotency key and reports real upload progress.
+3. The local engine queues bounded work and exposes job snapshots through polling.
+4. Each output is rendered to a partial file and atomically renamed only after success.
+5. The UI shows queued, processing, cancelling, completed and failed states with per-file results.
+6. The active job identifier is stored for refresh recovery; cancellation remains available while the job exists.
 
-- Template metadata lives in `localStorage`
-- Background binaries live in `IndexedDB`
-- Deleting a saved template also attempts cleanup of unreferenced background assets
-
-### Export
-
-- Single-image processing and batch export both use the local API server
-- Batch export is driven from the export progress page and reports per-file failures
+Output uses sRGB, embeds a compatible profile and writes the requested DPI. Adobe RGB is deliberately rejected because the pipeline does not perform a real color-space conversion.
 
 ## API Summary
 
-### `GET /api/health`
+Public endpoints:
 
-- Used by the server status badge
+- `GET /api/health`
+- `GET /api/templates`
 
-### `GET /api/templates`
+Desktop-session endpoints (require `X-PartyFrame-Token` when a token is configured):
 
-- Returns preset template metadata for the project selection flow
+- `POST /api/process-image`
+- `POST /api/export-jobs`
+- `GET /api/export-jobs/:id`
+- `DELETE /api/export-jobs/:id`
+- `POST /api/export-jobs/:id/cancel`
+- `POST /api/open-folder`
+- `POST /api/pick-folder`
 
-### `POST /api/process-image`
+`POST /api/batch-export` is retained as a compatibility endpoint; new UI work should use the export-job API. Native `absolutePath` input is accepted only in an authenticated desktop session.
 
-- Accepts one source image plus crop/template parameters
-- Returns the processed output path for preview use
+## Manual Acceptance Pass
 
-### `POST /api/batch-export`
+1. Import a mixed folder and confirm unsupported files are skipped without freezing the UI.
+2. Create a project, switch template and adjust several vertical and horizontal crops.
+3. Confirm workspace, before/after comparison and final output show the same framing.
+4. Save, reopen and edit a custom template; cancel once and confirm the saved version is unchanged.
+5. Start an export, refresh during processing and confirm progress resumes.
+6. Cancel another export and confirm partial outputs are not presented as complete files.
+7. Export twice to the same destination and confirm existing files are not overwritten.
+8. Reopen a recent project; then move one source and verify the relink flow.
+9. Export/import project and template packages and verify malformed or oversized packages are rejected without changing current state.
+10. Stop the local engine and confirm the interface reports it as unavailable instead of appearing idle.
 
-- Accepts a batch of source images and export settings
-- Returns `success`, `failed`, `totalTime`, `outputDir`
+## Maintenance Rules
 
-### `POST /api/open-folder`
-
-- Opens the export folder on the local machine
-
-### `POST /api/pick-folder`
-
-- Opens a Windows folder picker for export destination selection
-
-## Recommended Manual Checks
-
-1. Create a new project from an image folder
-2. Reorder templates and verify the order persists
-3. Hide a preset template and verify it disappears from the project UI
-4. Build and save a custom template with both orientations
-5. Reload the saved custom template into a project
-6. Adjust crop in workspace and process at least one image
-7. Open the comparison page from the workspace
-8. Run a batch export
-9. Export a portable project package and import it back
-10. Export the template library package and import it on a clean browser profile
-11. Return home and reopen the recent project snapshot
-
-## Known Non-Issues / Expected Behavior
-
-- If a recent project is restored after a browser restart, previews can be unavailable until images are re-imported
-- Hidden preset templates are only hidden from the UI, not deleted from backend definitions
-- Portable packages improve transferability, but the app still runs inside a browser shell and is not yet packaged as a desktop binary
-
-## Maintenance Notes
-
-- If template-related behavior changes, update:
-  - `savedTemplates.ts`
-  - `templateLibrary.ts`
-  - `NewProject.tsx`
-  - `CustomTemplateBuilder.tsx`
-- If export behavior changes, update:
-  - `useApi.ts`
-  - `ExportSettings.tsx`
-  - `ExportProgress.tsx`
-  - `server/index.ts`
+- Keep preset metadata and server rendering definitions in the shared template catalog.
+- Keep crop changes synchronized through `cropGeometry.ts`; do not add page-specific crop math.
+- Add every new local test to a root `test:*` script and to the PartyFrame section of the FileX Dev Console.
+- If the server main-process import graph changes, update the Electron builder whitelist and package-runtime test in the same change.

@@ -9,8 +9,10 @@ import {
   type RecentFolder,
 } from "../services/folder-access";
 
-interface FolderBrowserProps {
-  onFolderOpened: (result: FolderOpenResult) => void | Promise<void>;
+export type FolderOpenIntent = NonNullable<RecentFolder["mode"]> | "resume";
+
+export interface FolderBrowserProps {
+  onFolderOpened: (result: FolderOpenResult, intent: FolderOpenIntent) => void | Promise<void>;
   onCreateProject: () => void | Promise<void>;
   isBusy?: boolean;
 }
@@ -25,6 +27,12 @@ function formatRelativeTime(timestamp: number): string {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days} giorn${days === 1 ? "o" : "i"} fa`;
   return new Date(timestamp).toLocaleDateString("it-IT");
+}
+
+function formatRecentMode(mode: RecentFolder["mode"]): string {
+  if (mode === "project") return "Progetto master";
+  if (mode === "free") return "Modalità libera";
+  return "Modalità da rilevare";
 }
 
 export function FolderBrowser({ onFolderOpened, onCreateProject, isBusy = false }: FolderBrowserProps) {
@@ -45,14 +53,14 @@ export function FolderBrowser({ onFolderOpened, onCreateProject, isBusy = false 
     };
   }, []);
 
-  async function handleBrowse() {
+  async function handleBrowse(intent: FolderOpenIntent) {
     if (isBusy) {
       return;
     }
 
     const result = await openFolderNative();
     if (result) {
-      await onFolderOpened(result);
+      await onFolderOpened(result, intent);
     }
   }
 
@@ -65,13 +73,13 @@ export function FolderBrowser({ onFolderOpened, onCreateProject, isBusy = false 
     try {
       const result = await reopenRecentFolder(folder);
       if (result) {
-        await onFolderOpened(result);
+        await onFolderOpened(result, folder.mode ?? "resume");
         return;
       }
 
       const nextRecentFolders = await removeRecentFolder(folder.path ?? folder.name);
       setRecentFolders(nextRecentFolders);
-      await handleBrowse();
+      await handleBrowse("resume");
     } finally {
       setOpeningRecentFolder(null);
     }
@@ -79,21 +87,59 @@ export function FolderBrowser({ onFolderOpened, onCreateProject, isBusy = false 
 
   return (
     <div className="folder-browser">
-      <div className="folder-browser__hero">
+      <section className="folder-browser__hero" aria-labelledby="folder-browser-title" aria-busy={isBusy}>
         <div className="folder-browser__icon" aria-hidden="true">{heroIcon}</div>
-        <h2 className="folder-browser__title">Apri o crea un progetto</h2>
+        <h2 id="folder-browser-title" className="folder-browser__title">Come vuoi iniziare?</h2>
         <p className="folder-browser__subtitle">
-          Un progetto master mantiene unite tutte le sottocartelle e rende stabili le selezioni.
+          Scegli la modalità in base al lavoro di oggi. Potrai tornare qui e aprire un altro spazio in qualsiasi momento.
         </p>
 
-        <div className="folder-browser__actions">
-          <button type="button" className="primary-button" onClick={() => void onCreateProject()} disabled={isBusy}>
-            {isBusy ? "Apertura in corso..." : "Nuovo progetto master..."}
-          </button>
-          <button type="button" className="secondary-button" onClick={handleBrowse} disabled={isBusy}>
-            Apri progetto o cartella...
-          </button>
+        <div className="folder-browser__mode-grid">
+          <article className="folder-browser__mode-card folder-browser__mode-card--free">
+            <div className="folder-browser__mode-heading">
+              <span className="folder-browser__mode-icon" aria-hidden="true">⚡</span>
+              <div>
+                <span className="folder-browser__mode-kicker">Rapida e flessibile</span>
+                <h3>Selezione libera</h3>
+              </div>
+            </div>
+            <p>
+              Apri una cartella, una scheda SD o un disco e inizia subito, senza creare o associare un progetto.
+            </p>
+            <ul className="folder-browser__mode-benefits">
+              <li>Ideale per selezioni veloci e lavori occasionali</li>
+              <li>Scelte e classificazioni salvate automaticamente nell’app</li>
+              <li>Backup e ripristino manuale della selezione su Google Drive</li>
+            </ul>
+            <button type="button" className="primary-button" onClick={() => void handleBrowse("free")} disabled={isBusy}>
+              {isBusy ? "Apertura in corso..." : "Apri in modalità libera..."}
+            </button>
+          </article>
+
+          <article className="folder-browser__mode-card folder-browser__mode-card--project">
+            <div className="folder-browser__mode-heading">
+              <span className="folder-browser__mode-icon" aria-hidden="true">🗂️</span>
+              <div>
+                <span className="folder-browser__mode-kicker">Strutturata e continuativa</span>
+                <h3>Progetto master</h3>
+              </div>
+            </div>
+            <p>
+              Riunisce il lavoro e le sue sottocartelle sotto un’identità stabile, pronta per un flusso organizzato.
+            </p>
+            <ul className="folder-browser__mode-benefits">
+              <li>Consigliato per matrimoni, servizi e lavori articolati</li>
+              <li>È la modalità usata quando arrivi da Archivio Flow</li>
+            </ul>
+            <button type="button" className="secondary-button" onClick={() => void onCreateProject()} disabled={isBusy}>
+              {isBusy ? "Apertura in corso..." : "Crea o apri un progetto master..."}
+            </button>
+          </article>
         </div>
+
+        <p className="folder-browser__shared-capabilities" role="note">
+          <strong>In entrambe le modalità:</strong> lavori con RAW e JPEG, mantieni gli XMP quando la sorgente è scrivibile e scegli tu quando creare un backup manuale su Drive. La differenza è l’organizzazione come progetto.
+        </p>
 
         <div className="folder-browser__formats">
           <span className="folder-browser__formats-label">Formati supportati</span>
@@ -107,14 +153,19 @@ export function FolderBrowser({ onFolderOpened, onCreateProject, isBusy = false 
             )}
           </div>
         </div>
-      </div>
+      </section>
 
       {recentFolders.length > 0 ? (
-        <div className="folder-browser__recent">
-          <h3 className="folder-browser__recent-title">Cartelle recenti</h3>
+        <section className="folder-browser__recent" aria-labelledby="recent-folders-title">
+          <div>
+            <h3 id="recent-folders-title" className="folder-browser__recent-title">Cartelle recenti</h3>
+            <p className="folder-browser__recent-helper">
+              Riprendi con la modalità salvata; se la cartella appartiene a un progetto master, verrà riaperto il progetto.
+            </p>
+          </div>
           <ul className="folder-browser__recent-list">
             {recentFolders.map((folder) => (
-              <li key={folder.name} className="folder-browser__recent-item">
+              <li key={folder.path ?? folder.name} className="folder-browser__recent-item">
                 <button
                   type="button"
                   className="folder-browser__recent-button"
@@ -127,14 +178,14 @@ export function FolderBrowser({ onFolderOpened, onCreateProject, isBusy = false 
                     <span className="folder-browser__recent-meta">
                       {openingRecentFolder === folder.name
                         ? "Riapertura in corso..."
-                        : `${folder.imageCount} foto - ${formatRelativeTime(folder.openedAt)}`}
+                        : `${formatRecentMode(folder.mode)} · ${folder.imageCount} foto · ${formatRelativeTime(folder.openedAt)}`}
                     </span>
                   </div>
                 </button>
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       ) : null}
     </div>
   );

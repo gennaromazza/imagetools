@@ -1,6 +1,8 @@
 import type {
   DesktopFolderOpenResult,
   DesktopNativeFileOpStatus,
+  DesktopSourceIdentity,
+  DesktopSidecarXmpInfo,
 } from "@photo-tools/desktop-contracts";
 import type { ImageAsset } from "@photo-tools/shared-types";
 import { preloadImageUrls } from "./image-cache";
@@ -47,6 +49,7 @@ const filePromiseStore = new Map<string, Promise<File | null>>();
 const assetPathStore = new Map<string, string>();
 const assetAbsolutePathStore = new Map<string, string>();
 const assetSourceFileKeyStore = new Map<string, string>();
+const assetSourceNamespaceStore = new Map<string, string>();
 const assetCompanionAbsolutePathStore = new Map<string, string>();
 const assetCompanionRelativePathStore = new Map<string, string>();
 const assetCompanionSourceFileKeyStore = new Map<string, string>();
@@ -55,6 +58,7 @@ const livePreviewStore = new Map<string, string>();
 const onDemandPreviewStore = new Map<string, string>();
 const onDemandPreviewPromiseStore = new Map<string, Promise<string | null>>();
 let previewGeneration = 0;
+let currentAssetRelativePathMode: "legacy" | "project-relative" = "legacy";
 
 function hasDesktopFolderBridge(): boolean {
   return typeof window !== "undefined" && typeof window.filexDesktop?.openFolder === "function";
@@ -180,6 +184,11 @@ function buildPlaceholderSourceFileKey(relativePath: string): string {
   return `${relativePath}::0::0`;
 }
 
+function namespaceSourceFileKey(sourceFileKey: string, sourceNamespace?: string): string {
+  const normalizedNamespace = sourceNamespace?.trim();
+  return normalizedNamespace ? `${normalizedNamespace}::${sourceFileKey}` : sourceFileKey;
+}
+
 export function buildAssetId(relativePath: string): string {
   const normalizedPath = relativePath.replace(/\\/g, "/");
   return `asset-${hashString(normalizedPath.toLowerCase())}-${sanitizeId(normalizedPath)}`;
@@ -198,6 +207,7 @@ export interface FolderOpenResult {
   name: string;
   entries: FolderEntry[];
   rootPath: string;
+  sourceIdentity?: DesktopSourceIdentity;
   diagnostics?: FolderOpenDiagnostics;
 }
 
@@ -208,16 +218,8 @@ export interface FolderOpenDiagnostics {
   nestedSupportedDiscardedCount: number;
   totalSupportedSeen: number;
   nestedDirectoriesSeen: number;
+  unreadableDirectoryCount?: number;
   groupedAssetCount?: number;
-}
-
-function isTopLevelRelativePath(relativePath: string): boolean {
-  const segments = relativePath.split("/").filter(Boolean);
-  return segments.length <= 2;
-}
-
-function keepTopLevelEntries(entries: FolderEntry[]): FolderEntry[] {
-  return entries.filter((entry) => isTopLevelRelativePath(entry.relativePath));
 }
 
 function buildFolderDiagnostics(
@@ -241,12 +243,14 @@ function toFolderOpenResult(
   rootPath: string,
   entries: FolderEntry[],
   diagnostics?: FolderOpenDiagnostics,
+  sourceIdentity?: DesktopSourceIdentity,
 ): FolderOpenResult {
   return {
     name,
     rootPath,
     entries,
     diagnostics,
+    sourceIdentity,
   };
 }
 
@@ -259,7 +263,10 @@ export async function openFolderNative(): Promise<FolderOpenResult | null> {
     return null;
   }
 
-  const result = await window.filexDesktop!.openFolder();
+  const result = await window.filexDesktop!.openFolder({
+    recursive: true,
+    relativePathMode: "project-relative",
+  });
   if (!result) {
     return null;
   }
@@ -272,19 +279,21 @@ export async function openFolderNative(): Promise<FolderOpenResult | null> {
     lastModified: entry.lastModified,
     createdAt: entry.createdAt,
   }));
-  const entries = keepTopLevelEntries(mappedEntries);
   const diagnostics = buildFolderDiagnostics(
     result.diagnostics?.selectedPath ?? result.rootPath,
-    entries.length,
-    result.diagnostics?.nestedSupportedDiscardedCount ?? Math.max(0, mappedEntries.length - entries.length),
+    result.diagnostics?.topLevelSupportedCount ?? mappedEntries.length,
+    0,
     result.diagnostics?.nestedDirectoriesSeen ?? 0,
   );
+  diagnostics.totalSupportedSeen = mappedEntries.length;
+  diagnostics.unreadableDirectoryCount = result.diagnostics?.unreadableDirectoryCount ?? 0;
 
   return toFolderOpenResult(
     result.name,
     result.rootPath,
-    entries,
+    mappedEntries,
     diagnostics,
+    result.sourceIdentity,
   );
 }
 
@@ -312,8 +321,10 @@ function mapProjectFolderResult(result: DesktopFolderOpenResult | null): FolderO
           nestedSupportedDiscardedCount: result.diagnostics.nestedSupportedDiscardedCount,
           totalSupportedSeen: result.diagnostics.totalSupportedSeen,
           nestedDirectoriesSeen: result.diagnostics.nestedDirectoriesSeen ?? 0,
+          unreadableDirectoryCount: result.diagnostics.unreadableDirectoryCount ?? 0,
         }
       : buildFolderDiagnostics(result.rootPath, entries.length, 0),
+    result.sourceIdentity,
   );
 }
 
@@ -344,7 +355,10 @@ export async function reopenRecentFolder(folder: RecentFolder): Promise<FolderOp
     return null;
   }
 
-  const result = await window.filexDesktop!.reopenFolder(folder.path);
+  const result = await window.filexDesktop!.reopenFolder(folder.path, {
+    recursive: true,
+    relativePathMode: folder.mode === "project" ? "legacy" : "project-relative",
+  });
   if (!result) {
     return null;
   }
@@ -357,54 +371,73 @@ export async function reopenRecentFolder(folder: RecentFolder): Promise<FolderOp
     lastModified: entry.lastModified,
     createdAt: entry.createdAt,
   }));
-  const entries = keepTopLevelEntries(mappedEntries);
   const diagnostics = buildFolderDiagnostics(
     result.diagnostics?.selectedPath ?? result.rootPath,
-    entries.length,
-    result.diagnostics?.nestedSupportedDiscardedCount ?? Math.max(0, mappedEntries.length - entries.length),
+    result.diagnostics?.topLevelSupportedCount ?? mappedEntries.length,
+    0,
     result.diagnostics?.nestedDirectoriesSeen ?? 0,
   );
+  diagnostics.totalSupportedSeen = mappedEntries.length;
+  diagnostics.unreadableDirectoryCount = result.diagnostics?.unreadableDirectoryCount ?? 0;
 
   return toFolderOpenResult(
     result.name,
     result.rootPath,
-    entries,
+    mappedEntries,
     diagnostics,
+    result.sourceIdentity && folder.mode === "free" && folder.sourceId
+      ? { ...result.sourceIdentity, sourceId: folder.sourceId }
+      : result.sourceIdentity,
   );
 }
 
-export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
-  previewGeneration += 1;
-  for (const url of onDemandPreviewStore.values()) {
-    URL.revokeObjectURL(url);
+function createPlaceholderAssets(
+  entries: FolderEntry[],
+  sourceNamespace: string | undefined,
+  registerStores: boolean,
+): ImageAsset[] {
+  if (registerStores) {
+    currentAssetRelativePathMode = sourceNamespace?.trim() ? "project-relative" : "legacy";
+    previewGeneration += 1;
+    for (const url of onDemandPreviewStore.values()) {
+      URL.revokeObjectURL(url);
+    }
+    for (const url of livePreviewStore.values()) {
+      URL.revokeObjectURL(url);
+    }
+    onDemandPreviewStore.clear();
+    onDemandPreviewPromiseStore.clear();
+    livePreviewStore.clear();
+    filePromiseStore.clear();
+    assetPathStore.clear();
+    assetAbsolutePathStore.clear();
+    assetSourceFileKeyStore.clear();
+    assetSourceNamespaceStore.clear();
+    assetCompanionAbsolutePathStore.clear();
+    assetCompanionRelativePathStore.clear();
+    assetCompanionSourceFileKeyStore.clear();
+    assetCompanionFileNameStore.clear();
+    fileStore.clear();
   }
-  for (const url of livePreviewStore.values()) {
-    URL.revokeObjectURL(url);
-  }
-  onDemandPreviewStore.clear();
-  onDemandPreviewPromiseStore.clear();
-  livePreviewStore.clear();
-  filePromiseStore.clear();
-  assetPathStore.clear();
-  assetAbsolutePathStore.clear();
-  assetSourceFileKeyStore.clear();
-  assetCompanionAbsolutePathStore.clear();
-  assetCompanionRelativePathStore.clear();
-  assetCompanionSourceFileKeyStore.clear();
-  assetCompanionFileNameStore.clear();
-  fileStore.clear();
 
   const groups = groupEntriesByBaseName(entries);
 
   return groups.map(({ primary, companion }) => {
     const id = buildAssetId(primary.relativePath);
-    const sourceFileKey =
+    const sourceFileKey = namespaceSourceFileKey(
       buildSourceFileKeyFromStats(primary.relativePath, primary.size, primary.lastModified)
-      || buildPlaceholderSourceFileKey(primary.relativePath);
+      || buildPlaceholderSourceFileKey(primary.relativePath),
+      sourceNamespace,
+    );
 
-    assetPathStore.set(id, primary.relativePath);
-    assetAbsolutePathStore.set(id, primary.absolutePath);
-    assetSourceFileKeyStore.set(id, sourceFileKey);
+    if (registerStores) {
+      assetPathStore.set(id, primary.relativePath);
+      assetAbsolutePathStore.set(id, primary.absolutePath);
+      assetSourceFileKeyStore.set(id, sourceFileKey);
+      if (sourceNamespace?.trim()) {
+        assetSourceNamespaceStore.set(id, sourceNamespace.trim());
+      }
+    }
 
     let companionFileName: string | undefined;
     let companionPath: string | undefined;
@@ -415,15 +448,19 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
     if (companion) {
       companionFileName = companion.name;
       companionPath = companion.relativePath;
-      companionSourceFileKey =
+      companionSourceFileKey = namespaceSourceFileKey(
         buildSourceFileKeyFromStats(companion.relativePath, companion.size, companion.lastModified)
-        || buildPlaceholderSourceFileKey(companion.relativePath);
+        || buildPlaceholderSourceFileKey(companion.relativePath),
+        sourceNamespace,
+      );
       companionSize = companion.size;
       groupKind = "raw+jpg";
-      assetCompanionAbsolutePathStore.set(id, companion.absolutePath);
-      assetCompanionRelativePathStore.set(id, companion.relativePath);
-      assetCompanionSourceFileKeyStore.set(id, companionSourceFileKey);
-      assetCompanionFileNameStore.set(id, companion.name);
+      if (registerStores) {
+        assetCompanionAbsolutePathStore.set(id, companion.absolutePath);
+        assetCompanionRelativePathStore.set(id, companion.relativePath);
+        assetCompanionSourceFileKeyStore.set(id, companionSourceFileKey);
+        assetCompanionFileNameStore.set(id, companion.name);
+      }
     }
 
     return {
@@ -451,6 +488,14 @@ export function buildPlaceholderAssets(entries: FolderEntry[]): ImageAsset[] {
       companionSize,
     };
   });
+}
+
+export function buildPlaceholderAssets(entries: FolderEntry[], sourceNamespace?: string): ImageAsset[] {
+  return createPlaceholderAssets(entries, sourceNamespace, true);
+}
+
+export function buildDetachedPlaceholderAssets(entries: FolderEntry[], sourceNamespace?: string): ImageAsset[] {
+  return createPlaceholderAssets(entries, sourceNamespace, false);
 }
 
 function getEntryParentPath(relativePath: string): string {
@@ -591,10 +636,15 @@ export async function getFileForAsset(assetId: string): Promise<File | null> {
   if (!absolutePath || !hasDesktopFileBridge()) {
     return null;
   }
+  const generation = previewGeneration;
+  const isCurrentAsset = () => (
+    generation === previewGeneration
+    && assetAbsolutePathStore.get(assetId) === absolutePath
+  );
 
   const task = window.filexDesktop!.readFile(absolutePath)
     .then((payload) => {
-      if (!payload) {
+      if (!payload || !isCurrentAsset()) {
         return null;
       }
 
@@ -616,26 +666,7 @@ export async function getFileForAsset(assetId: string): Promise<File | null> {
 }
 
 export async function readSidecarXmp(assetId: string): Promise<string | null> {
-  if (!hasDesktopSidecarBridge()) {
-    return null;
-  }
-
-  const absolutePath = assetAbsolutePathStore.get(assetId);
-  if (absolutePath) {
-    const xml = await window.filexDesktop!.readSidecarXmp(absolutePath);
-    if (xml) {
-      return xml;
-    }
-  }
-
-  // Fall back to the companion sidecar (e.g. RAW xmp written by Camera Raw)
-  // when the primary JPG has no sidecar yet.
-  const companionAbsolutePath = assetCompanionAbsolutePathStore.get(assetId);
-  if (companionAbsolutePath) {
-    return window.filexDesktop!.readSidecarXmp(companionAbsolutePath);
-  }
-
-  return null;
+  return (await readSidecarXmpInfo(assetId))?.xml ?? null;
 }
 
 export async function writeSidecarXmp(assetId: string, xml: string): Promise<boolean> {
@@ -789,22 +820,30 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
 
   const changes: AssetDiskChange[] = [];
   const uniqueIds = Array.from(new Set(assetIds));
+  const detectionGeneration = previewGeneration;
 
   for (const assetId of uniqueIds) {
     const absolutePath = assetAbsolutePathStore.get(assetId);
     if (!absolutePath || !hasDesktopFileBridge()) continue;
+    const isCurrentAsset = () => (
+      detectionGeneration === previewGeneration
+      && assetAbsolutePathStore.get(assetId) === absolutePath
+    );
 
     try {
       const payload = await window.filexDesktop!.readFile(absolutePath);
-      if (!payload) {
+      if (!payload || !isCurrentAsset()) {
         continue;
       }
 
       const relativePath = assetPathStore.get(assetId) ?? payload.name;
-      const nextSourceFileKey = buildSourceFileKeyFromStats(
-        relativePath,
-        payload.size,
-        payload.lastModified,
+      const nextSourceFileKey = namespaceSourceFileKey(
+        buildSourceFileKeyFromStats(
+          relativePath,
+          payload.size,
+          payload.lastModified,
+        ),
+        assetSourceNamespaceStore.get(assetId),
       );
       const currentSourceFileKey = assetSourceFileKeyStore.get(assetId);
       const currentFile = fileStore.get(assetId);
@@ -834,6 +873,9 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
         const preview = await window.filexDesktop!.getPreview(absolutePath, {
           sourceFileKey: nextSourceFileKey,
         });
+        if (!isCurrentAsset()) {
+          continue;
+        }
         if (preview) {
           const liveUrl = URL.createObjectURL(
             new Blob([toOwnedArrayBuffer(preview.bytes)], { type: preview.mimeType }),
@@ -860,6 +902,9 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
           0.72,
           nextSourceFileKey,
         );
+        if (!isCurrentAsset()) {
+          continue;
+        }
         if (thumbnail) {
           const liveUrl = URL.createObjectURL(
             new Blob([toOwnedArrayBuffer(thumbnail.bytes)], { type: thumbnail.mimeType }),
@@ -878,6 +923,9 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
         }
       }
 
+      if (!isCurrentAsset()) {
+        continue;
+      }
       changes.push(next);
     } catch {
       // Ignore single-file read failures.
@@ -887,10 +935,41 @@ export async function detectChangedAssetsOnDisk(assetIds: string[]): Promise<Ass
   return changes;
 }
 
-export function getSubfolder(assetPath: string): string {
+export function getSubfolder(
+  assetPath: string,
+  relativePathMode: "legacy" | "project-relative" = currentAssetRelativePathMode,
+): string {
   const parts = assetPath.split("/");
-  if (parts.length <= 2) return "";
-  return parts.slice(1, -1).join("/");
+  const parentSegments = relativePathMode === "project-relative"
+    ? parts.slice(0, -1)
+    : parts.slice(1, -1);
+  return parentSegments.join("/");
+}
+
+export async function readSidecarXmpInfo(assetId: string): Promise<DesktopSidecarXmpInfo | null> {
+  if (!hasDesktopSidecarBridge()) {
+    return null;
+  }
+
+  const readInfo = async (absolutePath: string): Promise<DesktopSidecarXmpInfo | null> => {
+    if (typeof window.filexDesktop?.readSidecarXmpInfo === "function") {
+      return window.filexDesktop.readSidecarXmpInfo(absolutePath);
+    }
+    const xml = await window.filexDesktop!.readSidecarXmp(absolutePath);
+    return xml ? { xml, lastModified: 0 } : null;
+  };
+
+  const absolutePath = assetAbsolutePathStore.get(assetId);
+  const companionAbsolutePath = assetCompanionAbsolutePathStore.get(assetId);
+  const candidates = await Promise.all(
+    Array.from(
+      new Set([absolutePath, companionAbsolutePath].filter((path): path is string => Boolean(path))),
+      (path) => readInfo(path).catch(() => null),
+    ),
+  );
+  return candidates
+    .filter((candidate): candidate is DesktopSidecarXmpInfo => candidate !== null)
+    .sort((left, right) => right.lastModified - left.lastModified)[0] ?? null;
 }
 
 export function extractSubfolders(
@@ -993,6 +1072,7 @@ export async function moveAssetsToFolder(assetIds: string[]): Promise<{ result: 
       assetPathStore.delete(assetId);
       assetAbsolutePathStore.delete(assetId);
       assetSourceFileKeyStore.delete(assetId);
+      assetSourceNamespaceStore.delete(assetId);
       assetCompanionAbsolutePathStore.delete(assetId);
       assetCompanionRelativePathStore.delete(assetId);
       assetCompanionSourceFileKeyStore.delete(assetId);
@@ -1031,14 +1111,22 @@ export interface RecentFolder {
   path?: string;
   imageCount: number;
   openedAt: number;
+  mode?: "project" | "free";
+  sourceId?: string;
 }
 
 export function getRecentFolders(): RecentFolder[] {
   return recentFoldersCache;
 }
 
-export function addRecentFolder(name: string, imageCount: number, path?: string): void {
-  const nextFolder: RecentFolder = { name, path, imageCount, openedAt: Date.now() };
+export function addRecentFolder(
+  name: string,
+  imageCount: number,
+  path?: string,
+  mode: "project" | "free" = "free",
+  sourceId?: string,
+): void {
+  const nextFolder: RecentFolder = { name, path, imageCount, openedAt: Date.now(), mode, sourceId };
 
   recentFoldersCache = [nextFolder, ...recentFoldersCache.filter((folder) => folder.path !== path || folder.name !== name)]
     .slice(0, MAX_RECENT);

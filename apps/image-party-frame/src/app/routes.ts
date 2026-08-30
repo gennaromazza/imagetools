@@ -1,45 +1,69 @@
 import { createBrowserRouter, createHashRouter } from "react-router";
-import Home from "./pages/Home";
-import NewProject from "./pages/NewProject";
-import TemplateValidation from "./pages/TemplateValidation";
-import Workspace from "./pages/Workspace";
-import ImageComparison from "./pages/ImageComparison";
-import ExportSettings from "./pages/ExportSettings";
-import ExportProgress from "./pages/ExportProgress";
-import CustomTemplateBuilder from "./pages/CustomTemplateBuilder";
+import { Suspense, createElement, lazy, type ComponentType, type ReactNode } from "react";
+import { ProjectRouteGuard } from "./components/ProjectRouteGuard";
+
+const Home = lazy(() => import("./pages/Home"));
+const NewProject = lazy(() => import("./pages/NewProject"));
+const TemplateValidation = lazy(() => import("./pages/TemplateValidation"));
+const Workspace = lazy(() => import("./pages/Workspace"));
+const ImageComparison = lazy(() => import("./pages/ImageComparison"));
+const ExportSettings = lazy(() => import("./pages/ExportSettings"));
+const ExportProgress = lazy(() => import("./pages/ExportProgress"));
+const CustomTemplateBuilder = lazy(() => import("./pages/CustomTemplateBuilder"));
+
+function RouteLoading() {
+  return createElement(
+    "main",
+    {
+      className: "min-h-screen bg-[var(--app-bg)] text-[var(--app-text)] flex items-center justify-center",
+    },
+    createElement(
+      "div",
+      { role: "status", className: "rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-6 py-4 text-sm text-[var(--app-text-muted)]" },
+      "Caricamento della schermata…"
+    )
+  );
+}
+
+const page = (Component: ComponentType) => createElement(
+  Suspense,
+  { fallback: createElement(RouteLoading) },
+  createElement(Component)
+);
+const guarded = (element: ReactNode) => createElement(ProjectRouteGuard, null, element);
 
 const routeConfig = [
   {
     path: "/",
-    Component: Home,
+    element: page(Home),
   },
   {
     path: "/new-project",
-    Component: NewProject,
+    element: page(NewProject),
   },
   {
     path: "/template-validation",
-    Component: TemplateValidation,
+    element: page(TemplateValidation),
   },
   {
     path: "/workspace",
-    Component: Workspace,
+    element: guarded(page(Workspace)),
   },
   {
     path: "/image-comparison",
-    Component: ImageComparison,
+    element: guarded(page(ImageComparison)),
   },
   {
     path: "/export-settings",
-    Component: ExportSettings,
+    element: guarded(page(ExportSettings)),
   },
   {
     path: "/export-progress",
-    Component: ExportProgress,
+    element: guarded(page(ExportProgress)),
   },
   {
     path: "/custom-template",
-    Component: CustomTemplateBuilder,
+    element: page(CustomTemplateBuilder),
   },
 ];
 

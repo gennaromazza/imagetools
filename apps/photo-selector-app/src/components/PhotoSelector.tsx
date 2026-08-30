@@ -7,6 +7,7 @@ import type {
   DesktopEditorCandidate,
   DesktopGraphicsStatus,
   DesktopRamBudgetPreset,
+  DesktopSelectionMode,
   DesktopThumbnailCacheInfo,
 } from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
@@ -82,6 +83,7 @@ interface PhotoSelectorProps {
   metadataVersion: number;
   sourceFolderPath?: string;
   initialFolderFilter?: string | null;
+  workspaceMode: DesktopSelectionMode | null;
   selectedIds: string[];
   onSelectionChange: (selectedIds: string[]) => void;
   onPhotosChange?: (photos: ImageAsset[]) => void;
@@ -448,6 +450,7 @@ export function PhotoSelector({
   metadataVersion,
   sourceFolderPath = "",
   initialFolderFilter = null,
+  workspaceMode,
   selectedIds,
   onSelectionChange,
   onPhotosChange,
@@ -3398,6 +3401,7 @@ export function PhotoSelector({
                 visibleSelectedCount={visibleSelectedCount}
                 currentFolderSelectedCount={currentFolderSelectedIds.length}
                 selectedCount={selectedIds.length}
+                workspaceMode={workspaceMode}
                 compareCount={comparePhotos.length}
                 isMenuOpen={isSelectionActionsOpen}
                 onUndo={handleUndoClick}

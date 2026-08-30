@@ -3,21 +3,33 @@ function trimTrailingSlash(value: string): string {
 }
 
 function getDefaultApiOrigin(): string {
-  if (typeof window === "undefined") {
-    return "http://localhost:3001";
-  }
-
-  if (window.location.protocol === "file:") {
-    return "http://localhost:3001";
-  }
-
-  return `${window.location.protocol}//${window.location.hostname}:3001`;
+  return "http://127.0.0.1:3001";
 }
 
 const configuredApiOrigin = import.meta.env.VITE_IMAGE_PARTY_FRAME_API_BASE_URL?.trim();
+const configuredSessionToken = import.meta.env.VITE_IMAGE_PARTY_FRAME_SESSION_TOKEN?.trim();
 
 export const API_ORIGIN = trimTrailingSlash(configuredApiOrigin || getDefaultApiOrigin());
 export const API_URL = `${API_ORIGIN}/api`;
+
+let desktopSessionTokenPromise: Promise<string | null> | null = null;
+
+export async function getPartyFrameApiHeaders(
+  headers: HeadersInit = {}
+): Promise<Headers> {
+  const result = new Headers(headers);
+  let token = configuredSessionToken || null;
+
+  if (!token && window.filexDesktop?.getPartyFrameSessionToken) {
+    desktopSessionTokenPromise ??= window.filexDesktop.getPartyFrameSessionToken().catch(() => null);
+    token = await desktopSessionTokenPromise;
+  }
+
+  if (token) {
+    result.set("X-PartyFrame-Token", token);
+  }
+  return result;
+}
 
 export function resolveApiAssetUrl(assetPath: string | null | undefined): string | null {
   if (!assetPath) {

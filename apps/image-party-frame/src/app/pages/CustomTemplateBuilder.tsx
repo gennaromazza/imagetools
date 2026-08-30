@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { ArrowLeft, Crop, ImagePlus, Move, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
@@ -13,7 +13,8 @@ import {
   useProject,
 } from "../contexts/ProjectContext";
 import { cmToPx } from "../lib/templateGeometry";
-import { hydrateSavedTemplate, saveTemplateToLibrary } from "../lib/savedTemplates";
+import { saveTemplateToLibrary } from "../lib/savedTemplates";
+import { preserveCustomTemplateLibraryIdentity } from "../lib/templateLibrary";
 
 type Orientation = "vertical" | "horizontal";
 
@@ -45,13 +46,44 @@ type BackgroundFeedback = {
 
 type DragState = {
   pointerId: number;
+  orientation: Orientation;
   startX: number;
   startY: number;
   origin: Rect;
   mode: "move" | "resize";
 };
 
+type PreviewGeometry = {
+  widthPx: number;
+  heightPx: number;
+  ratio: number;
+  photoArea: Rect;
+  borderSizePx: number;
+};
+
+type VariantValidationResult =
+  | { ok: true; variant: CustomTemplateVariant }
+  | { ok: false; errors: string[] };
+
+type TemplateBuildResult =
+  | { ok: true; template: CustomTemplate }
+  | { ok: false; errors: string[] };
+
 const DEFAULT_DPI = 300;
+const MIN_SIZE_CM = 1;
+const MAX_SIZE_CM = 100;
+const MIN_DPI = 72;
+const MAX_DPI = 600;
+const MIN_CANVAS_SIDE_PX = 64;
+const MAX_CANVAS_SIDE_PX = 12_000;
+const MAX_CANVAS_PIXELS = 50_000_000;
+const MIN_PHOTO_AREA_SIDE_PX = 40;
+const MIN_RATIO_PART = 0.1;
+const MAX_RATIO_PART = 100;
+const MIN_PHOTO_ASPECT_RATIO = 0.1;
+const MAX_PHOTO_ASPECT_RATIO = 10;
+const MAX_BORDER_SIZE_PX = 2_000;
+const MAX_CLIENT_OPTIMIZATION_PIXELS = 24_000_000;
 const SOFT_WARNING_BYTES = 12 * 1024 * 1024;
 const AUTO_OPTIMIZE_BYTES = 18 * 1024 * 1024;
 const HARD_LIMIT_BYTES = 35 * 1024 * 1024;
@@ -110,12 +142,15 @@ async function optimizeTemplateBackground(
   feedback: BackgroundFeedback;
 }> {
   if (file.size > HARD_LIMIT_BYTES) {
-    throw new Error(`"${file.name}" pesa ${formatFileSize(file.size)}. Il limite per gli sfondi template e 35 MB.`);
+    throw new Error(`"${file.name}" pesa ${formatFileSize(file.size)}. Il limite per gli sfondi template è 35 MB.`);
   }
 
   const image = await loadImageElement(file);
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
+  if (sourceWidth < 1 || sourceHeight < 1) {
+    throw new Error(`"${file.name}" non contiene un'immagine con dimensioni valide.`);
+  }
   const boundedWidth = Math.max(targetWidth, Math.round(targetWidth * 1.15));
   const boundedHeight = Math.max(targetHeight, Math.round(targetHeight * 1.15));
   const scale = Math.min(1, boundedWidth / sourceWidth, boundedHeight / sourceHeight);
@@ -145,6 +180,16 @@ async function optimizeTemplateBackground(
 
   const outputWidth = Math.max(1, Math.round(sourceWidth * scale));
   const outputHeight = Math.max(1, Math.round(sourceHeight * scale));
+  if (outputWidth * outputHeight > MAX_CLIENT_OPTIMIZATION_PIXELS) {
+    return {
+      file,
+      feedback: {
+        tone: "warning",
+        message: `Sfondo ad alta risoluzione mantenuto originale (${formatFileSize(file.size)}) per evitare un'elaborazione troppo pesante nel browser.`,
+      },
+    };
+  }
+
   const canvas = document.createElement("canvas");
   canvas.width = outputWidth;
   canvas.height = outputHeight;
@@ -178,11 +223,43 @@ async function optimizeTemplateBackground(
   };
 }
 
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+function finiteNumberOr(value: string | number, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function createCenteredPhotoArea(widthPx: number, heightPx: number, ratio: number): Rect {
+  const maximumWidth = Math.max(MIN_PHOTO_AREA_SIDE_PX, Math.round(widthPx * 0.8));
+  const maximumHeight = Math.max(MIN_PHOTO_AREA_SIDE_PX, Math.round(heightPx * 0.8));
+  let width = maximumWidth;
+  let height = Math.round(width / ratio);
+
+  if (height > maximumHeight) {
+    height = maximumHeight;
+    width = Math.round(height * ratio);
+  }
+
+  width = clampNumber(width, MIN_PHOTO_AREA_SIDE_PX, widthPx);
+  height = clampNumber(height, MIN_PHOTO_AREA_SIDE_PX, heightPx);
+
+  return {
+    x: Math.round((widthPx - width) / 2),
+    y: Math.round((heightPx - height) / 2),
+    width,
+    height,
+  };
+}
+
 function createDefaultVariant(orientation: Orientation): VariantDraft {
   const widthCm = orientation === "vertical" ? "10" : "15";
   const heightCm = orientation === "vertical" ? "15" : "10";
   const widthPx = cmToPx(Number(widthCm), DEFAULT_DPI);
   const heightPx = cmToPx(Number(heightCm), DEFAULT_DPI);
+  const ratio = orientation === "vertical" ? 3 / 4 : 4 / 3;
 
   return {
     widthCm,
@@ -191,12 +268,7 @@ function createDefaultVariant(orientation: Orientation): VariantDraft {
     photoRatioX: orientation === "vertical" ? "3" : "4",
     photoRatioY: orientation === "vertical" ? "4" : "3",
     lockAspectRatio: true,
-    photoArea: {
-      x: Math.round(widthPx * 0.1),
-      y: Math.round(heightPx * 0.1),
-      width: Math.round(widthPx * 0.8),
-      height: Math.round(heightPx * 0.8),
-    },
+    photoArea: createCenteredPhotoArea(widthPx, heightPx, ratio),
     backgroundPreviewUrl: "",
     backgroundFileName: "",
     borderSizePx: "0",
@@ -213,8 +285,8 @@ function variantToDraft(variant: CustomTemplateVariant | undefined): VariantDraf
     widthCm: String(variant.widthCm),
     heightCm: String(variant.heightCm),
     dpi: String(variant.dpi),
-    photoRatioX: String(Math.round(variant.photoAspectRatio * 100)),
-    photoRatioY: "100",
+    photoRatioX: String(variant.photoAspectRatio),
+    photoRatioY: "1",
     lockAspectRatio: variant.lockAspectRatio,
     photoArea: {
       x: variant.photoAreaX,
@@ -230,54 +302,203 @@ function variantToDraft(variant: CustomTemplateVariant | undefined): VariantDraf
 }
 
 function clampRect(rect: Rect, bounds: { width: number; height: number }, lockAspectRatio: boolean, ratio: number): Rect {
-  let next = { ...rect };
-
-  next.width = Math.max(40, Math.min(bounds.width, next.width));
-  next.height = Math.max(40, Math.min(bounds.height, next.height));
+  const safeRatio = Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+  let width = clampNumber(Math.round(rect.width), MIN_PHOTO_AREA_SIDE_PX, bounds.width);
+  let height = clampNumber(Math.round(rect.height), MIN_PHOTO_AREA_SIDE_PX, bounds.height);
 
   if (lockAspectRatio) {
-    next.height = Math.max(40, Math.min(bounds.height, Math.round(next.width / ratio)));
-    if (next.y + next.height > bounds.height) {
-      next.height = bounds.height - next.y;
-      next.width = Math.max(40, Math.min(bounds.width, Math.round(next.height * ratio)));
+    height = Math.round(width / safeRatio);
+    if (height > bounds.height) {
+      height = bounds.height;
+      width = Math.round(height * safeRatio);
     }
+    width = clampNumber(width, MIN_PHOTO_AREA_SIDE_PX, bounds.width);
+    height = clampNumber(height, MIN_PHOTO_AREA_SIDE_PX, bounds.height);
   }
 
-  next.x = Math.max(0, Math.min(bounds.width - next.width, next.x));
-  next.y = Math.max(0, Math.min(bounds.height - next.height, next.y));
-  next.width = Math.min(next.width, bounds.width - next.x);
-  next.height = Math.min(next.height, bounds.height - next.y);
-
-  return next;
+  return {
+    x: clampNumber(Math.round(rect.x), 0, Math.max(0, bounds.width - width)),
+    y: clampNumber(Math.round(rect.y), 0, Math.max(0, bounds.height - height)),
+    width,
+    height,
+  };
 }
 
-function draftToVariant(draft: VariantDraft): CustomTemplateVariant {
-  const widthCm = Number(draft.widthCm) || 10;
-  const heightCm = Number(draft.heightCm) || 15;
-  const dpi = Number(draft.dpi) || DEFAULT_DPI;
+function orientationLabel(orientation: Orientation): string {
+  return orientation === "vertical" ? "Verticale" : "Orizzontale";
+}
+
+function getPreviewGeometry(draft: VariantDraft): PreviewGeometry {
+  const widthCm = clampNumber(finiteNumberOr(draft.widthCm, 10), MIN_SIZE_CM, MAX_SIZE_CM);
+  const heightCm = clampNumber(finiteNumberOr(draft.heightCm, 15), MIN_SIZE_CM, MAX_SIZE_CM);
+  const dpi = clampNumber(finiteNumberOr(draft.dpi, DEFAULT_DPI), MIN_DPI, MAX_DPI);
+  const rawWidthPx = Math.max(MIN_CANVAS_SIDE_PX, cmToPx(widthCm, dpi));
+  const rawHeightPx = Math.max(MIN_CANVAS_SIDE_PX, cmToPx(heightCm, dpi));
+  const pixelScale = Math.min(
+    1,
+    MAX_CANVAS_SIDE_PX / rawWidthPx,
+    MAX_CANVAS_SIDE_PX / rawHeightPx,
+    Math.sqrt(MAX_CANVAS_PIXELS / (rawWidthPx * rawHeightPx))
+  );
+  const widthPx = Math.max(MIN_CANVAS_SIDE_PX, Math.round(rawWidthPx * pixelScale));
+  const heightPx = Math.max(MIN_CANVAS_SIDE_PX, Math.round(rawHeightPx * pixelScale));
+  const ratioX = clampNumber(finiteNumberOr(draft.photoRatioX, 4), MIN_RATIO_PART, MAX_RATIO_PART);
+  const ratioY = clampNumber(finiteNumberOr(draft.photoRatioY, 3), MIN_RATIO_PART, MAX_RATIO_PART);
+  const ratio = ratioX / ratioY;
+  const rawPhotoArea = {
+    x: finiteNumberOr(draft.photoArea.x, 0),
+    y: finiteNumberOr(draft.photoArea.y, 0),
+    width: finiteNumberOr(draft.photoArea.width, MIN_PHOTO_AREA_SIDE_PX),
+    height: finiteNumberOr(draft.photoArea.height, MIN_PHOTO_AREA_SIDE_PX),
+  };
+  const photoArea = clampRect(rawPhotoArea, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio);
+  const maximumBorder = Math.max(0, Math.floor(Math.min(photoArea.width, photoArea.height) / 2) - 1);
+  const borderSizePx = clampNumber(
+    Math.round(finiteNumberOr(draft.borderSizePx, 0)),
+    0,
+    Math.min(MAX_BORDER_SIZE_PX, maximumBorder)
+  );
+
+  return { widthPx, heightPx, ratio, photoArea, borderSizePx };
+}
+
+function validateVariantDraft(draft: VariantDraft, orientation: Orientation): VariantValidationResult {
+  const label = orientationLabel(orientation);
+  const errors: string[] = [];
+  const widthCm = Number(draft.widthCm);
+  const heightCm = Number(draft.heightCm);
+  const dpi = Number(draft.dpi);
+  const ratioX = Number(draft.photoRatioX);
+  const ratioY = Number(draft.photoRatioY);
+  const borderSizePx = Number(draft.borderSizePx);
+
+  if (!Number.isFinite(widthCm) || widthCm < MIN_SIZE_CM || widthCm > MAX_SIZE_CM) {
+    errors.push(`${label}: la larghezza deve essere tra ${MIN_SIZE_CM} e ${MAX_SIZE_CM} cm.`);
+  }
+  if (!Number.isFinite(heightCm) || heightCm < MIN_SIZE_CM || heightCm > MAX_SIZE_CM) {
+    errors.push(`${label}: l'altezza deve essere tra ${MIN_SIZE_CM} e ${MAX_SIZE_CM} cm.`);
+  }
+  if (!Number.isInteger(dpi) || dpi < MIN_DPI || dpi > MAX_DPI) {
+    errors.push(`${label}: i DPI devono essere un intero tra ${MIN_DPI} e ${MAX_DPI}.`);
+  }
+  if (!Number.isFinite(ratioX) || ratioX < MIN_RATIO_PART || ratioX > MAX_RATIO_PART) {
+    errors.push(`${label}: Rapporto X deve essere tra ${MIN_RATIO_PART} e ${MAX_RATIO_PART}.`);
+  }
+  if (!Number.isFinite(ratioY) || ratioY < MIN_RATIO_PART || ratioY > MAX_RATIO_PART) {
+    errors.push(`${label}: Rapporto Y deve essere tra ${MIN_RATIO_PART} e ${MAX_RATIO_PART}.`);
+  }
+  if (
+    Number.isFinite(ratioX) &&
+    Number.isFinite(ratioY) &&
+    ratioY !== 0 &&
+    (ratioX / ratioY < MIN_PHOTO_ASPECT_RATIO || ratioX / ratioY > MAX_PHOTO_ASPECT_RATIO)
+  ) {
+    errors.push(`${label}: il rapporto foto finale deve essere compreso tra 1:10 e 10:1.`);
+  }
+  if (!Number.isInteger(borderSizePx) || borderSizePx < 0 || borderSizePx > MAX_BORDER_SIZE_PX) {
+    errors.push(`${label}: il bordo deve essere un intero tra 0 e ${MAX_BORDER_SIZE_PX} px.`);
+  }
+  if (!/^#([0-9a-fA-F]{6})$/.test(draft.borderColor)) {
+    errors.push(`${label}: il colore bordo deve essere nel formato #RRGGBB.`);
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
+
   const widthPx = cmToPx(widthCm, dpi);
   const heightPx = cmToPx(heightCm, dpi);
-  const ratio = Math.max(0.1, (Number(draft.photoRatioX) || 4) / Math.max(0.1, Number(draft.photoRatioY) || 3));
-  const photoArea = clampRect(draft.photoArea, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio);
-  const maxBorder = Math.max(0, Math.floor(Math.min(photoArea.width, photoArea.height) / 2) - 1);
-  const borderSizePx = Math.max(0, Math.min(maxBorder, Number(draft.borderSizePx) || 0));
+  if (
+    widthPx < MIN_CANVAS_SIDE_PX ||
+    heightPx < MIN_CANVAS_SIDE_PX ||
+    widthPx > MAX_CANVAS_SIDE_PX ||
+    heightPx > MAX_CANVAS_SIDE_PX
+  ) {
+    errors.push(
+      `${label}: ogni lato del canvas deve essere tra ${MIN_CANVAS_SIDE_PX} e ${MAX_CANVAS_SIDE_PX.toLocaleString("it-IT")} px (ora ${widthPx} x ${heightPx} px).`
+    );
+  }
+  if (widthPx * heightPx > MAX_CANVAS_PIXELS) {
+    errors.push(
+      `${label}: il canvas supera ${MAX_CANVAS_PIXELS.toLocaleString("it-IT")} pixel totali (ora ${(widthPx * heightPx).toLocaleString("it-IT")}).`
+    );
+  }
+
+  const ratio = ratioX / ratioY;
+  if (
+    draft.lockAspectRatio &&
+    (ratio > widthPx / MIN_PHOTO_AREA_SIDE_PX || ratio < MIN_PHOTO_AREA_SIDE_PX / heightPx)
+  ) {
+    errors.push(`${label}: il rapporto foto non è compatibile con le dimensioni del canvas.`);
+  }
+  const area = draft.photoArea;
+  if (![area.x, area.y, area.width, area.height].every(Number.isInteger)) {
+    errors.push(`${label}: posizione e dimensioni dell'area foto devono essere pixel interi.`);
+  }
+  if (area.x < 0 || area.y < 0) {
+    errors.push(`${label}: X e Y dell'area foto non possono essere negativi.`);
+  }
+  if (area.width < MIN_PHOTO_AREA_SIDE_PX || area.height < MIN_PHOTO_AREA_SIDE_PX) {
+    errors.push(`${label}: l'area foto deve misurare almeno ${MIN_PHOTO_AREA_SIDE_PX} px per lato.`);
+  }
+  if (area.x + area.width > widthPx || area.y + area.height > heightPx) {
+    errors.push(`${label}: l'area foto deve rimanere interamente dentro il canvas.`);
+  }
+
+  const photoArea = clampRect(area, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio);
+  const maximumBorder = Math.max(0, Math.floor(Math.min(photoArea.width, photoArea.height) / 2) - 1);
+  if (borderSizePx > maximumBorder) {
+    errors.push(`${label}: il bordo non puo superare ${maximumBorder} px con l'area foto corrente.`);
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors };
+  }
 
   return {
-    widthCm,
-    heightCm,
-    dpi,
-    widthPx,
-    heightPx,
-    photoAreaX: photoArea.x,
-    photoAreaY: photoArea.y,
-    photoAreaWidth: photoArea.width,
-    photoAreaHeight: photoArea.height,
-    lockAspectRatio: draft.lockAspectRatio,
-    photoAspectRatio: ratio,
-    backgroundPreviewUrl: draft.backgroundPreviewUrl || undefined,
-    backgroundFileName: draft.backgroundFileName || undefined,
-    borderSizePx,
-    borderColor: /^#([0-9a-fA-F]{6})$/.test(draft.borderColor) ? draft.borderColor : "#ffffff",
+    ok: true,
+    variant: {
+      widthCm,
+      heightCm,
+      dpi,
+      widthPx,
+      heightPx,
+      photoAreaX: photoArea.x,
+      photoAreaY: photoArea.y,
+      photoAreaWidth: photoArea.width,
+      photoAreaHeight: photoArea.height,
+      lockAspectRatio: draft.lockAspectRatio,
+      photoAspectRatio: ratio,
+      backgroundPreviewUrl: draft.backgroundPreviewUrl || undefined,
+      backgroundFileName: draft.backgroundFileName || undefined,
+      borderSizePx,
+      borderColor: draft.borderColor,
+    },
+  };
+}
+
+function buildTemplate(name: string, variants: Record<Orientation, VariantDraft>): TemplateBuildResult {
+  const vertical = validateVariantDraft(variants.vertical, "vertical");
+  const horizontal = validateVariantDraft(variants.horizontal, "horizontal");
+  const errors = [
+    ...(vertical.ok ? [] : vertical.errors),
+    ...(horizontal.ok ? [] : horizontal.errors),
+  ];
+
+  if (!vertical.ok || !horizontal.ok) {
+    return { ok: false, errors };
+  }
+
+  return {
+    ok: true,
+    template: {
+      id: "custom",
+      name,
+      variants: {
+        vertical: vertical.variant,
+        horizontal: horizontal.variant,
+      },
+    },
   };
 }
 
@@ -306,40 +527,61 @@ export default function CustomTemplateBuilder() {
       tone: "muted",
     },
   });
+  const [draftBackgroundFiles] = useState(() => getCustomTemplateBackgroundFiles());
 
   const fileInputRefs = {
     vertical: useRef<HTMLInputElement | null>(null),
     horizontal: useRef<HTMLInputElement | null>(null),
   };
   const dragStateRef = useRef<DragState | null>(null);
+  const savingLibraryRef = useRef(false);
   const [savingLibrary, setSavingLibrary] = useState(false);
-  const variantsRef = useRef(variants);
+  const [uploadBusy, setUploadBusy] = useState<Record<Orientation, boolean>>({
+    vertical: false,
+    horizontal: false,
+  });
+  const uploadBusyRef = useRef<Record<Orientation, boolean>>({ vertical: false, horizontal: false });
+  const [saveErrors, setSaveErrors] = useState<string[]>([]);
+  const draftBackgroundFilesRef = useRef<Record<Orientation, File | null>>(draftBackgroundFiles);
+  const previewUrlsRef = useRef<Record<Orientation, string>>({
+    vertical: variants.vertical.backgroundPreviewUrl,
+    horizontal: variants.horizontal.backgroundPreviewUrl,
+  });
+  const uploadSequenceRef = useRef<Record<Orientation, number>>({ vertical: 0, horizontal: 0 });
+  const ownedPreviewUrlsRef = useRef(new Set<string>());
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    variantsRef.current = variants;
-  }, [variants]);
+    mountedRef.current = true;
 
-  useEffect(() => {
     return () => {
-      for (const orientation of ["vertical", "horizontal"] as const) {
-        const previewUrl = variantsRef.current[orientation].backgroundPreviewUrl;
-        if (previewUrl.startsWith("blob:")) {
-          URL.revokeObjectURL(previewUrl);
-        }
+      mountedRef.current = false;
+      uploadSequenceRef.current.vertical += 1;
+      uploadSequenceRef.current.horizontal += 1;
+      for (const previewUrl of ownedPreviewUrlsRef.current) {
+        URL.revokeObjectURL(previewUrl);
       }
+      ownedPreviewUrlsRef.current.clear();
     };
   }, []);
 
   const activeDraft = variants[activeOrientation];
-  const widthPx = cmToPx(Number(activeDraft.widthCm) || 10, Number(activeDraft.dpi) || DEFAULT_DPI);
-  const heightPx = cmToPx(Number(activeDraft.heightCm) || 15, Number(activeDraft.dpi) || DEFAULT_DPI);
-  const ratio = Math.max(0.1, (Number(activeDraft.photoRatioX) || 4) / Math.max(0.1, Number(activeDraft.photoRatioY) || 3));
-  const safeBorderSize = Math.max(
-    0,
-    Math.min(Math.floor(Math.min(activeDraft.photoArea.width, activeDraft.photoArea.height) / 2) - 1, Number(activeDraft.borderSizePx) || 0)
+  const previewGeometry = useMemo(() => getPreviewGeometry(activeDraft), [activeDraft]);
+  const { widthPx, heightPx, ratio, photoArea: previewPhotoArea, borderSizePx: safeBorderSize } = previewGeometry;
+  const activeValidation = useMemo(
+    () => validateVariantDraft(activeDraft, activeOrientation),
+    [activeDraft, activeOrientation]
   );
+  const activeValidationErrors = activeValidation.ok ? [] : activeValidation.errors;
+  const anyUploadBusy = uploadBusy.vertical || uploadBusy.horizontal;
+  const saveBusy = savingLibrary || anyUploadBusy;
+  const fieldPrefix = `custom-template-${activeOrientation}`;
+  const previewBorderColor = /^#([0-9a-fA-F]{6})$/.test(activeDraft.borderColor)
+    ? activeDraft.borderColor
+    : "#ffffff";
 
   const updateActiveDraft = (updater: (draft: VariantDraft) => VariantDraft) => {
+    setSaveErrors([]);
     setVariants((prev) => ({
       ...prev,
       [activeOrientation]: updater(prev[activeOrientation]),
@@ -348,43 +590,65 @@ export default function CustomTemplateBuilder() {
 
   const photoAreaStyle = useMemo(
     () => ({
-      left: `${(activeDraft.photoArea.x / widthPx) * 100}%`,
-      top: `${(activeDraft.photoArea.y / heightPx) * 100}%`,
-      width: `${(activeDraft.photoArea.width / widthPx) * 100}%`,
-      height: `${(activeDraft.photoArea.height / heightPx) * 100}%`,
+      left: `${(previewPhotoArea.x / widthPx) * 100}%`,
+      top: `${(previewPhotoArea.y / heightPx) * 100}%`,
+      width: `${(previewPhotoArea.width / widthPx) * 100}%`,
+      height: `${(previewPhotoArea.height / heightPx) * 100}%`,
     }),
-    [activeDraft.photoArea, widthPx, heightPx]
+    [previewPhotoArea, widthPx, heightPx]
   );
 
   const innerPhotoAreaStyle = useMemo(
     () => ({
-      left: safeBorderSize,
-      top: safeBorderSize,
-      right: safeBorderSize,
-      bottom: safeBorderSize,
+      left: `${(safeBorderSize / previewPhotoArea.width) * 100}%`,
+      top: `${(safeBorderSize / previewPhotoArea.height) * 100}%`,
+      right: `${(safeBorderSize / previewPhotoArea.width) * 100}%`,
+      bottom: `${(safeBorderSize / previewPhotoArea.height) * 100}%`,
       borderRadius: 12,
     }),
-    [safeBorderSize]
+    [safeBorderSize, previewPhotoArea.height, previewPhotoArea.width]
   );
 
   const handleBackgroundSelected = async (orientation: Orientation, event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
-    const file = event.currentTarget.files?.[0];
+    const file = input.files?.[0];
     if (!file) {
       return;
     }
 
-    const targetWidth = cmToPx(Number(variants[orientation].widthCm) || 10, Number(variants[orientation].dpi) || DEFAULT_DPI);
-    const targetHeight = cmToPx(Number(variants[orientation].heightCm) || 15, Number(variants[orientation].dpi) || DEFAULT_DPI);
+    if (savingLibraryRef.current) {
+      input.value = "";
+      return;
+    }
+
+    const requestId = uploadSequenceRef.current[orientation] + 1;
+    uploadSequenceRef.current[orientation] = requestId;
+    const targetGeometry = getPreviewGeometry(variants[orientation]);
+    uploadBusyRef.current[orientation] = true;
+    setUploadBusy((previous) => ({ ...previous, [orientation]: true }));
+    setBackgroundFeedbacks((previous) => ({
+      ...previous,
+      [orientation]: {
+        message: `Elaborazione di ${file.name} in corso...`,
+        tone: "muted",
+      },
+    }));
 
     try {
-      const result = await optimizeTemplateBackground(file, targetWidth, targetHeight);
+      const result = await optimizeTemplateBackground(file, targetGeometry.widthPx, targetGeometry.heightPx);
+      if (!mountedRef.current || uploadSequenceRef.current[orientation] !== requestId) {
+        return;
+      }
+
       const previewUrl = URL.createObjectURL(result.file);
-      const previousPreviewUrl = variants[orientation].backgroundPreviewUrl;
-      if (previousPreviewUrl.startsWith("blob:")) {
+      const previousPreviewUrl = previewUrlsRef.current[orientation];
+      ownedPreviewUrlsRef.current.add(previewUrl);
+      if (ownedPreviewUrlsRef.current.delete(previousPreviewUrl)) {
         URL.revokeObjectURL(previousPreviewUrl);
       }
-      setCustomTemplateBackgroundFile(orientation, result.file);
+      previewUrlsRef.current[orientation] = previewUrl;
+      draftBackgroundFilesRef.current[orientation] = result.file;
+      setSaveErrors([]);
       setVariants((prev) => ({
         ...prev,
         [orientation]: {
@@ -399,15 +663,23 @@ export default function CustomTemplateBuilder() {
       }));
 
       if (file.size > SOFT_WARNING_BYTES && file.size <= AUTO_OPTIMIZE_BYTES) {
-        toast.warning(`${orientation === "vertical" ? "Sfondo verticale" : "Sfondo orizzontale"} pesante`, {
-          description: "L'immagine e stata accettata, ma conviene tenerla piu leggera se possibile.",
+        toast.warning(`Sfondo ${orientationLabel(orientation).toLocaleLowerCase("it-IT")} pesante`, {
+          description: "L'immagine è stata accettata, ma conviene mantenerla più leggera se possibile.",
         });
       } else if (result.file !== file) {
-        toast.success(`${orientation === "vertical" ? "Sfondo verticale" : "Sfondo orizzontale"} ottimizzato`, {
+        toast.success(`Sfondo ${orientationLabel(orientation).toLocaleLowerCase("it-IT")} ottimizzato`, {
+          description: result.feedback.message,
+        });
+      } else if (result.feedback.tone === "warning") {
+        toast.warning(`Sfondo ${orientationLabel(orientation).toLocaleLowerCase("it-IT")} mantenuto originale`, {
           description: result.feedback.message,
         });
       }
     } catch (error) {
+      if (!mountedRef.current || uploadSequenceRef.current[orientation] !== requestId) {
+        return;
+      }
+
       const message = error instanceof Error ? error.message : "Impossibile usare questa immagine come sfondo template.";
       setBackgroundFeedbacks((prev) => ({
         ...prev,
@@ -419,15 +691,20 @@ export default function CustomTemplateBuilder() {
       toast.error("Upload sfondo non riuscito", { description: message });
     } finally {
       input.value = "";
+      if (mountedRef.current && uploadSequenceRef.current[orientation] === requestId) {
+        uploadBusyRef.current[orientation] = false;
+        setUploadBusy((previous) => ({ ...previous, [orientation]: false }));
+      }
     }
   };
 
   const beginDrag = (event: React.PointerEvent<HTMLDivElement>, mode: "move" | "resize") => {
     dragStateRef.current = {
       pointerId: event.pointerId,
+      orientation: activeOrientation,
       startX: event.clientX,
       startY: event.clientY,
-      origin: activeDraft.photoArea,
+      origin: previewPhotoArea,
       mode,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -435,7 +712,7 @@ export default function CustomTemplateBuilder() {
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragStateRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
+    if (!drag || drag.pointerId !== event.pointerId || drag.orientation !== activeOrientation) {
       return;
     }
 
@@ -475,74 +752,152 @@ export default function CustomTemplateBuilder() {
     }
   };
 
+  const commitTemplateToProject = (
+    template: CustomTemplate,
+    backgroundFiles: Record<Orientation, File | null> = draftBackgroundFilesRef.current
+  ) => {
+    const previousBackgroundFiles = getCustomTemplateBackgroundFiles();
+
+    try {
+      setCustomTemplateBackgroundFile("vertical", backgroundFiles.vertical);
+      setCustomTemplateBackgroundFile("horizontal", backgroundFiles.horizontal);
+      setCustomTemplate(template);
+    } catch (error) {
+      setCustomTemplateBackgroundFile("vertical", previousBackgroundFiles.vertical);
+      setCustomTemplateBackgroundFile("horizontal", previousBackgroundFiles.horizontal);
+      throw error;
+    }
+
+    for (const orientation of ["vertical", "horizontal"] as const) {
+      const previewUrl = template.variants[orientation].backgroundPreviewUrl;
+      if (previewUrl) {
+        ownedPreviewUrlsRef.current.delete(previewUrl);
+      }
+    }
+  };
+
+  const reportBuildErrors = (errors: string[]) => {
+    setSaveErrors(errors);
+    if (errors.some((error) => error.startsWith("Verticale:"))) {
+      setActiveOrientation("vertical");
+    } else if (errors.some((error) => error.startsWith("Orizzontale:"))) {
+      setActiveOrientation("horizontal");
+    }
+    toast.error("Controlla i dati del template", {
+      description: errors[0] ?? "Correggi i campi non validi prima di salvare.",
+    });
+  };
+
   const handleSaveTemplate = () => {
+    if (savingLibraryRef.current || uploadBusyRef.current.vertical || uploadBusyRef.current.horizontal) {
+      return;
+    }
+
     const cleanedName = templateName.trim();
     if (!cleanedName) {
       setTemplateNameError("Inserisci un nome template prima di salvarlo.");
       return;
     }
 
-    const nextTemplate: CustomTemplate = {
-      id: "custom",
-      name: cleanedName,
-      variants: {
-        vertical: draftToVariant(variants.vertical),
-        horizontal: draftToVariant(variants.horizontal),
-      },
-    };
+    const result = buildTemplate(cleanedName, variants);
+    if (!result.ok) {
+      reportBuildErrors(result.errors);
+      return;
+    }
 
-    setCustomTemplate(nextTemplate);
+    setSaveErrors([]);
+    commitTemplateToProject(preserveCustomTemplateLibraryIdentity(result.template, project.customTemplate));
     navigate("/new-project");
   };
 
   const handleSaveTemplateToLibrary = async () => {
+    if (savingLibraryRef.current || uploadBusyRef.current.vertical || uploadBusyRef.current.horizontal) {
+      return;
+    }
+
     const cleanedName = templateName.trim();
     if (!cleanedName) {
       setTemplateNameError("Il nome template e obbligatorio per salvarlo nella libreria.");
       return;
     }
 
+    const result = buildTemplate(cleanedName, variants);
+    if (!result.ok) {
+      reportBuildErrors(result.errors);
+      return;
+    }
+
+    const backgroundFiles = { ...draftBackgroundFilesRef.current };
+    savingLibraryRef.current = true;
     setSavingLibrary(true);
+    setSaveErrors([]);
 
     try {
-      const backgroundFiles = getCustomTemplateBackgroundFiles();
-      const nextTemplate: CustomTemplate = {
-        id: "custom",
-        name: cleanedName,
+      const savedRecord = await saveTemplateToLibrary(result.template, backgroundFiles);
+      if (!mountedRef.current) {
+        return;
+      }
+
+      const committedTemplate: CustomTemplate = {
+        ...savedRecord.template,
+        libraryTemplateId: savedRecord.id,
         variants: {
-          vertical: draftToVariant(variants.vertical),
-          horizontal: draftToVariant(variants.horizontal),
+          vertical: {
+            ...savedRecord.template.variants.vertical,
+            backgroundPreviewUrl: result.template.variants.vertical.backgroundPreviewUrl,
+          },
+          horizontal: {
+            ...savedRecord.template.variants.horizontal,
+            backgroundPreviewUrl: result.template.variants.horizontal.backgroundPreviewUrl,
+          },
         },
       };
 
-      const savedRecord = await saveTemplateToLibrary(nextTemplate, backgroundFiles);
-      setCustomTemplate(await hydrateSavedTemplate(savedRecord));
+      commitTemplateToProject(committedTemplate, backgroundFiles);
       toast.success("Template salvato in libreria", {
         description: `${cleanedName} e ora disponibile nei template salvati.`,
       });
     } catch (error) {
+      if (!mountedRef.current) {
+        return;
+      }
       console.error("Failed to save template to library", error);
       toast.error("Salvataggio non riuscito", {
         description: "Impossibile salvare il template nella libreria. Riprova.",
       });
     } finally {
-      setSavingLibrary(false);
+      savingLibraryRef.current = false;
+      if (mountedRef.current) {
+        setSavingLibrary(false);
+      }
     }
+  };
+
+  const handleCancel = () => {
+    if (savingLibraryRef.current) {
+      return;
+    }
+    navigate("/new-project");
   };
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col">
       <div className="h-16 bg-[var(--app-topbar)] border-b border-[var(--app-border)] backdrop-blur-xl flex items-center px-6 justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/new-project">
-            <Button variant="ghost" size="sm" className="text-[var(--app-text-muted)] hover:text-[var(--app-text)]">
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Torna al progetto
-            </Button>
-          </Link>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-[var(--app-text-muted)] hover:text-[var(--app-text)]"
+            onClick={handleCancel}
+            disabled={savingLibrary}
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Torna al progetto
+          </Button>
           <div>
-            <div className="text-xl font-semibold tracking-tight">Template Custom</div>
-            <div className="text-xs text-[var(--app-text-subtle)]">Una variante verticale e una orizzontale, scelte automaticamente dal sistema</div>
+            <div className="text-xl font-semibold tracking-tight">Template personalizzato</div>
+            <div className="text-xs text-[var(--app-text-subtle)]">Una variante verticale e una orizzontale, selezionate automaticamente dal sistema</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -551,14 +906,19 @@ export default function CustomTemplateBuilder() {
             variant="outline"
             className="border-[var(--app-border-strong)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]"
             onClick={handleSaveTemplateToLibrary}
-            disabled={savingLibrary}
+            disabled={saveBusy}
           >
             <Save className="w-4 h-4 mr-2" />
-            {savingLibrary ? "Salvo..." : "Salva nella Libreria"}
+            {savingLibrary ? "Salvo..." : anyUploadBusy ? "Attendi lo sfondo..." : "Salva nella Libreria"}
           </Button>
-          <Button onClick={handleSaveTemplate} className="bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] hover:bg-[var(--brand-primary-strong)]">
+          <Button
+            type="button"
+            onClick={handleSaveTemplate}
+            disabled={saveBusy}
+            className="bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] hover:bg-[var(--brand-primary-strong)]"
+          >
             <Save className="w-4 h-4 mr-2" />
-            Usa nel Progetto
+            {anyUploadBusy ? "Attendi lo sfondo..." : "Usa nel Progetto"}
           </Button>
         </div>
       </div>
@@ -572,6 +932,7 @@ export default function CustomTemplateBuilder() {
               value={templateName}
               onChange={(event) => {
                 setTemplateName(event.target.value);
+                setSaveErrors([]);
                 if (event.target.value.trim()) {
                   setTemplateNameError("");
                 }
@@ -582,6 +943,20 @@ export default function CustomTemplateBuilder() {
             />
             {templateNameError ? <p className="text-xs text-[var(--danger)]">{templateNameError}</p> : null}
           </div>
+
+          {saveErrors.length > 0 ? (
+            <div
+              role="alert"
+              className="rounded-xl border border-[var(--danger)] bg-[var(--app-surface)] p-3 text-xs text-[var(--danger)]"
+            >
+              <div className="font-medium">Il template non puo essere salvato:</div>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {saveErrors.map((error) => (
+                  <li key={error}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div className="space-y-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.16)]">
             <div className="text-sm font-medium">Varianti Layout</div>
@@ -605,19 +980,55 @@ export default function CustomTemplateBuilder() {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
-              <Label>Larghezza cm</Label>
-              <Input value={activeDraft.widthCm} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, widthCm: event.target.value }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+              <Label htmlFor={`${fieldPrefix}-width-cm`}>Larghezza cm</Label>
+              <Input
+                id={`${fieldPrefix}-width-cm`}
+                type="number"
+                min={MIN_SIZE_CM}
+                max={MAX_SIZE_CM}
+                step="0.1"
+                inputMode="decimal"
+                value={activeDraft.widthCm}
+                onChange={(event) => updateActiveDraft((draft) => ({ ...draft, widthCm: event.target.value }))}
+                className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+              />
             </div>
             <div className="space-y-2">
-              <Label>Altezza cm</Label>
-              <Input value={activeDraft.heightCm} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, heightCm: event.target.value }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+              <Label htmlFor={`${fieldPrefix}-height-cm`}>Altezza cm</Label>
+              <Input
+                id={`${fieldPrefix}-height-cm`}
+                type="number"
+                min={MIN_SIZE_CM}
+                max={MAX_SIZE_CM}
+                step="0.1"
+                inputMode="decimal"
+                value={activeDraft.heightCm}
+                onChange={(event) => updateActiveDraft((draft) => ({ ...draft, heightCm: event.target.value }))}
+                className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+              />
             </div>
           </div>
+          <p className="-mt-4 text-[11px] text-[var(--app-text-subtle)]">
+            Formato consentito: {MIN_SIZE_CM}-{MAX_SIZE_CM} cm per lato.
+          </p>
 
           <div className="space-y-2">
-            <Label>DPI</Label>
-            <Input value={activeDraft.dpi} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, dpi: event.target.value }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+            <Label htmlFor={`${fieldPrefix}-dpi`}>DPI</Label>
+            <Input
+              id={`${fieldPrefix}-dpi`}
+              type="number"
+              min={MIN_DPI}
+              max={MAX_DPI}
+              step="1"
+              inputMode="numeric"
+              value={activeDraft.dpi}
+              onChange={(event) => updateActiveDraft((draft) => ({ ...draft, dpi: event.target.value }))}
+              className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+            />
             <p className="text-xs text-[var(--app-text-subtle)]">Canvas: {widthPx} x {heightPx}px</p>
+            <p className="text-[11px] text-[var(--app-text-subtle)]">
+              {MIN_DPI}-{MAX_DPI} DPI; massimo {MAX_CANVAS_SIDE_PX.toLocaleString("it-IT")} px per lato e {MAX_CANVAS_PIXELS.toLocaleString("it-IT")} pixel totali.
+            </p>
           </div>
 
           <div className="space-y-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.16)]">
@@ -626,9 +1037,22 @@ export default function CustomTemplateBuilder() {
                 <div className="text-sm font-medium">Sfondo {activeOrientation === "vertical" ? "Verticale" : "Orizzontale"}</div>
                 <div className="text-xs text-[var(--app-text-subtle)]">Carica il template dedicato a questo orientamento</div>
               </div>
-              <Button type="button" variant="outline" className="border-[var(--app-border)] bg-[var(--app-field)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]" onClick={() => fileInputRefs[activeOrientation].current?.click()}>
+              <Button
+                type="button"
+                variant="outline"
+                className="border-[var(--app-border)] bg-[var(--app-field)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]"
+                onClick={() => {
+                  const input = fileInputRefs[activeOrientation].current;
+                  if (input) {
+                    input.value = "";
+                    input.click();
+                  }
+                }}
+                disabled={savingLibrary}
+                aria-busy={uploadBusy[activeOrientation]}
+              >
                 <ImagePlus className="w-4 h-4 mr-2" />
-                Carica
+                {uploadBusy[activeOrientation] ? "Elaborazione..." : "Carica"}
               </Button>
             </div>
             <input
@@ -636,15 +1060,19 @@ export default function CustomTemplateBuilder() {
               type="file"
               accept="image/*"
               hidden
+              aria-label={`Scegli lo sfondo ${orientationLabel(activeOrientation).toLocaleLowerCase("it-IT")}`}
               onChange={(event) => handleBackgroundSelected(activeOrientation, event)}
             />
             <div className="space-y-1">
               <div className="text-xs text-[var(--app-text-muted)]">{activeDraft.backgroundFileName || "Nessun file selezionato"}</div>
-              <div className={`text-xs ${getFeedbackToneClass(backgroundFeedbacks[activeOrientation].tone)}`}>
+              <div
+                aria-live="polite"
+                className={`text-xs ${getFeedbackToneClass(backgroundFeedbacks[activeOrientation].tone)}`}
+              >
                 {backgroundFeedbacks[activeOrientation].message}
               </div>
               <div className="text-[11px] text-[var(--app-text-subtle)]">
-                Warning oltre 12 MB, ottimizzazione oltre 18 MB, limite 35 MB.
+                Avviso oltre 12 MB, ottimizzazione sicura oltre 18 MB, limite 35 MB.
               </div>
             </div>
           </div>
@@ -658,29 +1086,49 @@ export default function CustomTemplateBuilder() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Spessore px</Label>
-                <Input value={activeDraft.borderSizePx} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, borderSizePx: event.target.value }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+                <Label htmlFor={`${fieldPrefix}-border-size`}>Spessore px</Label>
+                <Input
+                  id={`${fieldPrefix}-border-size`}
+                  type="number"
+                  min="0"
+                  max={MAX_BORDER_SIZE_PX}
+                  step="1"
+                  inputMode="numeric"
+                  value={activeDraft.borderSizePx}
+                  onChange={(event) => updateActiveDraft((draft) => ({ ...draft, borderSizePx: event.target.value }))}
+                  className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+                />
               </div>
               <div className="space-y-2">
-                <Label>Colore bordo</Label>
+                <Label htmlFor={`${fieldPrefix}-border-color-text`}>Colore bordo</Label>
                 <div className="flex items-center gap-2">
                   <input
+                    id={`${fieldPrefix}-border-color-picker`}
                     type="color"
-                    value={activeDraft.borderColor}
+                    value={previewBorderColor}
                     onChange={(event) => updateActiveDraft((draft) => ({ ...draft, borderColor: event.target.value }))}
                     className="h-10 w-12 rounded-xl border border-[var(--app-border)] bg-transparent"
+                    aria-label="Seleziona colore bordo"
                   />
-                  <Input value={activeDraft.borderColor} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, borderColor: event.target.value }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+                  <Input
+                    id={`${fieldPrefix}-border-color-text`}
+                    value={activeDraft.borderColor}
+                    onChange={(event) => updateActiveDraft((draft) => ({ ...draft, borderColor: event.target.value }))}
+                    className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+                  />
                 </div>
               </div>
             </div>
+            <p className="text-[11px] text-[var(--app-text-subtle)]">
+              Bordo: 0-{MAX_BORDER_SIZE_PX} px e comunque meno della metà del lato corto dell'area foto.
+            </p>
           </div>
 
           <div className="space-y-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.16)]">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium">Area Foto</div>
-                <div className="text-xs text-[var(--app-text-subtle)]">Drag diretto nel canvas o valori manuali</div>
+                <div className="text-xs text-[var(--app-text-subtle)]">Trascinamento diretto nel canvas o valori manuali</div>
               </div>
               <div className="flex items-center gap-2 text-xs text-[var(--app-text-muted)]">
                 <Crop className="w-4 h-4" />
@@ -688,40 +1136,163 @@ export default function CustomTemplateBuilder() {
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" checked={activeDraft.lockAspectRatio} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, lockAspectRatio: event.target.checked }))} className="w-4 h-4" />
-              Mantieni proporzioni
-            </label>
+            <div className="flex items-center gap-2 text-sm">
+              <input
+                id={`${fieldPrefix}-lock-ratio`}
+                type="checkbox"
+                checked={activeDraft.lockAspectRatio}
+                onChange={(event) => updateActiveDraft((draft) => ({ ...draft, lockAspectRatio: event.target.checked }))}
+                className="w-4 h-4"
+              />
+              <Label htmlFor={`${fieldPrefix}-lock-ratio`} className="cursor-pointer">Mantieni proporzioni</Label>
+            </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>Rapporto X</Label>
-                <Input value={activeDraft.photoRatioX} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoRatioX: event.target.value }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+                <Label htmlFor={`${fieldPrefix}-ratio-x`}>Rapporto X</Label>
+                <Input
+                  id={`${fieldPrefix}-ratio-x`}
+                  type="number"
+                  min={MIN_RATIO_PART}
+                  max={MAX_RATIO_PART}
+                  step="0.1"
+                  inputMode="decimal"
+                  value={activeDraft.photoRatioX}
+                  onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoRatioX: event.target.value }))}
+                  className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+                />
               </div>
               <div className="space-y-2">
-                <Label>Rapporto Y</Label>
-                <Input value={activeDraft.photoRatioY} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoRatioY: event.target.value }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+                <Label htmlFor={`${fieldPrefix}-ratio-y`}>Rapporto Y</Label>
+                <Input
+                  id={`${fieldPrefix}-ratio-y`}
+                  type="number"
+                  min={MIN_RATIO_PART}
+                  max={MAX_RATIO_PART}
+                  step="0.1"
+                  inputMode="decimal"
+                  value={activeDraft.photoRatioY}
+                  onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoRatioY: event.target.value }))}
+                  className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+                />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
-                <Label>X</Label>
-                <Input value={String(activeDraft.photoArea.x)} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoArea: clampRect({ ...draft.photoArea, x: Number(event.target.value) || 0 }, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio) }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+                <Label htmlFor={`${fieldPrefix}-photo-x`}>X</Label>
+                <Input
+                  id={`${fieldPrefix}-photo-x`}
+                  type="number"
+                  min="0"
+                  max={Math.max(0, widthPx - MIN_PHOTO_AREA_SIDE_PX)}
+                  step="1"
+                  inputMode="numeric"
+                  value={String(activeDraft.photoArea.x)}
+                  onChange={(event) => updateActiveDraft((draft) => ({
+                    ...draft,
+                    photoArea: clampRect(
+                      { ...draft.photoArea, x: Number(event.target.value) || 0 },
+                      { width: widthPx, height: heightPx },
+                      draft.lockAspectRatio,
+                      ratio
+                    ),
+                  }))}
+                  className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+                />
               </div>
               <div className="space-y-2">
-                <Label>Y</Label>
-                <Input value={String(activeDraft.photoArea.y)} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoArea: clampRect({ ...draft.photoArea, y: Number(event.target.value) || 0 }, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio) }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+                <Label htmlFor={`${fieldPrefix}-photo-y`}>Y</Label>
+                <Input
+                  id={`${fieldPrefix}-photo-y`}
+                  type="number"
+                  min="0"
+                  max={Math.max(0, heightPx - MIN_PHOTO_AREA_SIDE_PX)}
+                  step="1"
+                  inputMode="numeric"
+                  value={String(activeDraft.photoArea.y)}
+                  onChange={(event) => updateActiveDraft((draft) => ({
+                    ...draft,
+                    photoArea: clampRect(
+                      { ...draft.photoArea, y: Number(event.target.value) || 0 },
+                      { width: widthPx, height: heightPx },
+                      draft.lockAspectRatio,
+                      ratio
+                    ),
+                  }))}
+                  className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+                />
               </div>
               <div className="space-y-2">
-                <Label>Larghezza</Label>
-                <Input value={String(activeDraft.photoArea.width)} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoArea: clampRect({ ...draft.photoArea, width: Number(event.target.value) || 40, height: draft.lockAspectRatio ? Math.round((Number(event.target.value) || 40) / ratio) : draft.photoArea.height }, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio) }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+                <Label htmlFor={`${fieldPrefix}-photo-width`}>Larghezza</Label>
+                <Input
+                  id={`${fieldPrefix}-photo-width`}
+                  type="number"
+                  min={MIN_PHOTO_AREA_SIDE_PX}
+                  max={widthPx}
+                  step="1"
+                  inputMode="numeric"
+                  value={String(activeDraft.photoArea.width)}
+                  onChange={(event) => updateActiveDraft((draft) => {
+                    const nextWidth = Number(event.target.value) || MIN_PHOTO_AREA_SIDE_PX;
+                    return {
+                      ...draft,
+                      photoArea: clampRect(
+                        {
+                          ...draft.photoArea,
+                          width: nextWidth,
+                          height: draft.lockAspectRatio ? Math.round(nextWidth / ratio) : draft.photoArea.height,
+                        },
+                        { width: widthPx, height: heightPx },
+                        draft.lockAspectRatio,
+                        ratio
+                      ),
+                    };
+                  })}
+                  className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+                />
               </div>
               <div className="space-y-2">
-                <Label>Altezza</Label>
-                <Input value={String(activeDraft.photoArea.height)} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoArea: clampRect({ ...draft.photoArea, height: Number(event.target.value) || 40 }, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio) }))} className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]" />
+                <Label htmlFor={`${fieldPrefix}-photo-height`}>Altezza</Label>
+                <Input
+                  id={`${fieldPrefix}-photo-height`}
+                  type="number"
+                  min={MIN_PHOTO_AREA_SIDE_PX}
+                  max={heightPx}
+                  step="1"
+                  inputMode="numeric"
+                  value={String(activeDraft.photoArea.height)}
+                  onChange={(event) => updateActiveDraft((draft) => {
+                    const nextHeight = Number(event.target.value) || MIN_PHOTO_AREA_SIDE_PX;
+                    return {
+                      ...draft,
+                      photoArea: clampRect(
+                        {
+                          ...draft.photoArea,
+                          width: draft.lockAspectRatio ? Math.round(nextHeight * ratio) : draft.photoArea.width,
+                          height: nextHeight,
+                        },
+                        { width: widthPx, height: heightPx },
+                        draft.lockAspectRatio,
+                        ratio
+                      ),
+                    };
+                  })}
+                  className="bg-[var(--app-field)] border-[var(--app-border)] text-[var(--app-text)]"
+                />
               </div>
             </div>
+
+            {activeValidationErrors.length > 0 ? (
+              <div aria-live="polite" className="rounded-lg border border-[var(--danger)] p-3 text-xs text-[var(--danger)]">
+                <div className="font-medium">Correggi la variante {orientationLabel(activeOrientation).toLocaleLowerCase("it-IT")}:</div>
+                <ul className="mt-2 list-disc space-y-1 pl-4">
+                  {activeValidationErrors.map((error) => (
+                    <li key={error}>{error.replace(`${orientationLabel(activeOrientation)}: `, "")}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         </aside>
 
@@ -756,7 +1327,7 @@ export default function CustomTemplateBuilder() {
                 className="absolute rounded-[18px] shadow-[0_0_0_9999px_rgba(0,0,0,0.18)]"
                 style={{
                   ...photoAreaStyle,
-                  backgroundColor: activeDraft.borderColor,
+                  backgroundColor: previewBorderColor,
                   border: "2px dashed rgba(212, 193, 170, 0.95)",
                 }}
                 onPointerDown={(event) => beginDrag(event, "move")}

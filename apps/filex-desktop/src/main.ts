@@ -4,6 +4,7 @@ import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } fro
 import { execSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { readFile as readFileAsync, writeFile as writeFileAsync } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -24,6 +25,7 @@ import type {
   DesktopDragOutCheck,
   DesktopDockState,
   DesktopEditorCandidate,
+  DesktopFreeSelectionSnapshot,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
   DesktopFolderOpenOptions,
@@ -58,6 +60,7 @@ import {
   readFileFromDisk,
   readPhotoSelectorProjectFileDesktop,
   readSidecarXmpFromAssetPath,
+  readSidecarXmpInfoFromAssetPath,
   relocatePhotoSelectorProjectFileDesktop,
   resolvePhotoSelectorProjectDesktop,
   reopenFolderDesktop,
@@ -103,6 +106,7 @@ import {
   getDesktopPreferences,
   getDesktopSessionState,
   getDesktopPerformanceSnapshot,
+  getFreeSelectionSnapshot,
   getFolderCatalogState,
   listFolderCatalogStatesUnderRoot,
   getRecentFolders,
@@ -112,6 +116,7 @@ import {
   removeRecentFolder,
   saveDesktopPreferences,
   saveDesktopSessionState,
+  saveFreeSelectionSnapshot,
   saveFolderAssetStates,
   saveFolderAssetStatesDelta,
   saveFolderCatalogState,
@@ -210,10 +215,21 @@ function resolveRequestedTool() {
 }
 
 const requestedTool = resolveRequestedTool();
+const imagePartyFrameSessionToken = requestedTool.id === "image-party-frame"
+  ? process.env.IMAGE_PARTY_FRAME_SESSION_TOKEN || randomBytes(32).toString("hex")
+  : null;
+if (imagePartyFrameSessionToken) {
+  process.env.IMAGE_PARTY_FRAME_SESSION_TOKEN = imagePartyFrameSessionToken;
+}
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
 const appUserModelId = `studio.filex.${requestedTool.id}`;
 let mainWindow: BrowserWindowInstance | null = null;
+const PHOTO_SELECTOR_CLOSE_PREPARATION_TIMEOUT_MS = 20_000;
+type PhotoSelectorClosePreparationState = "idle" | "pending" | "ready";
+let photoSelectorClosePreparationState: PhotoSelectorClosePreparationState = "idle";
+let photoSelectorClosePreparationTimer: ReturnType<typeof setTimeout> | null = null;
+let photoSelectorQuitAfterPreparation = false;
 let isOpenFolderRequestRendererReady = false;
 let pendingOpenFolderPath: string | null = null;
 let deliveredOpenFolderPath: string | null = null;
@@ -222,6 +238,77 @@ let pendingOpenProjectPath: string | null = null;
 let mainWindowCreationPromise: Promise<void> | null = null;
 let suiteTray: TrayInstance | null = null;
 let suiteDockWindow: BrowserWindowInstance | null = null;
+
+function resetPhotoSelectorClosePreparation(): void {
+  if (photoSelectorClosePreparationTimer) {
+    clearTimeout(photoSelectorClosePreparationTimer);
+    photoSelectorClosePreparationTimer = null;
+  }
+  photoSelectorClosePreparationState = "idle";
+  photoSelectorQuitAfterPreparation = false;
+}
+
+function finishPhotoSelectorClosePreparation(reason: "renderer" | "timeout" | "send-failed"): void {
+  if (requestedTool.id !== "photo-selector-app" || photoSelectorClosePreparationState !== "pending") {
+    return;
+  }
+
+  if (photoSelectorClosePreparationTimer) {
+    clearTimeout(photoSelectorClosePreparationTimer);
+    photoSelectorClosePreparationTimer = null;
+  }
+  photoSelectorClosePreparationState = "ready";
+  const shouldQuit = photoSelectorQuitAfterPreparation;
+  const windowToClose = mainWindow;
+  if (reason !== "renderer") {
+    writeBootLog(`Photo Selector close preparation continued after ${reason}`);
+  }
+
+  // Let the IPC response reach the renderer before closing its WebContents.
+  setTimeout(() => {
+    if (shouldQuit) {
+      app.quit();
+      return;
+    }
+    if (windowToClose && !windowToClose.isDestroyed()) {
+      windowToClose.destroy();
+    }
+  }, 0);
+}
+
+function requestPhotoSelectorClosePreparation(
+  windowInstance: BrowserWindowInstance,
+  quitAfterPreparation: boolean,
+): boolean {
+  if (
+    requestedTool.id !== "photo-selector-app"
+    || windowInstance !== mainWindow
+    || windowInstance.isDestroyed()
+    || windowInstance.webContents.isDestroyed()
+  ) {
+    return false;
+  }
+
+  photoSelectorQuitAfterPreparation ||= quitAfterPreparation;
+  if (photoSelectorClosePreparationState === "ready") {
+    return true;
+  }
+  if (photoSelectorClosePreparationState === "pending") {
+    return true;
+  }
+
+  photoSelectorClosePreparationState = "pending";
+  photoSelectorClosePreparationTimer = setTimeout(() => {
+    finishPhotoSelectorClosePreparation("timeout");
+  }, PHOTO_SELECTOR_CLOSE_PREPARATION_TIMEOUT_MS);
+  try {
+    windowInstance.webContents.send("filex:prepare-close");
+  } catch {
+    finishPhotoSelectorClosePreparation("send-failed");
+  }
+  return true;
+}
+
 const defaultSuiteDockState: DesktopDockState = {
   schemaVersion: 2,
   x: 0,
@@ -1224,6 +1311,17 @@ function buildMissingRendererHtml(entryPath: string): string {
 }
 
 function registerIpcHandlers(): void {
+  ipcMain.handle("filex:get-party-frame-session-token", () => imagePartyFrameSessionToken);
+  ipcMain.handle("filex:complete-close-preparation", (event) => {
+    if (requestedTool.id !== "photo-selector-app" || photoSelectorClosePreparationState !== "pending") {
+      return;
+    }
+    const windowForEvent = BrowserWindow.fromWebContents(event.sender);
+    if (!windowForEvent || windowForEvent !== mainWindow) {
+      return;
+    }
+    finishPhotoSelectorClosePreparation("renderer");
+  });
   ipcMain.handle("filex:get-suite-update-state", () => getSuiteUpdateState());
   ipcMain.handle("filex:check-suite-update", () => checkSuiteUpdate());
   ipcMain.handle("filex:install-suite-update", () => installSuiteUpdate());
@@ -1706,6 +1804,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:save-desktop-session-state", (_event, state: DesktopPersistedState) =>
     saveDesktopSessionState(state),
   );
+  ipcMain.handle("filex:get-free-selection-snapshot", (_event, sourceId: string) =>
+    getFreeSelectionSnapshot(sourceId),
+  );
+  ipcMain.handle("filex:save-free-selection-snapshot", (_event, snapshot: DesktopFreeSelectionSnapshot) =>
+    saveFreeSelectionSnapshot(snapshot),
+  );
   ipcMain.handle("filex:choose-output-folder", async () => {
     const result = await dialog.showOpenDialog({
       title: "Seleziona cartella output",
@@ -1775,6 +1879,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:log-desktop-event", (_event, event: DesktopLogEvent) => logDesktopEvent(event));
   ipcMain.handle("filex:read-sidecar-xmp", (_event, absolutePath: string) =>
     readSidecarXmpFromAssetPath(absolutePath),
+  );
+  ipcMain.handle("filex:read-sidecar-xmp-info", (_event, absolutePath: string) =>
+    readSidecarXmpInfoFromAssetPath(absolutePath),
   );
   ipcMain.handle("filex:write-sidecar-xmp", (_event, absolutePath: string, xml: string) =>
     writeSidecarXmpForAssetPath(absolutePath, xml),
@@ -2155,6 +2262,9 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow = windowInstance;
+  if (requestedTool.id === "photo-selector-app") {
+    resetPhotoSelectorClosePreparation();
+  }
   isOpenFolderRequestRendererReady = false;
   deliveredOpenFolderPath = null;
 
@@ -2169,6 +2279,17 @@ async function createMainWindow(): Promise<void> {
   });
 
   windowInstance.webContents.on("will-prevent-unload", (event) => {
+    if (requestedTool.id === "photo-selector-app") {
+      if (photoSelectorClosePreparationState === "ready") {
+        // Electron otherwise honours the renderer's beforeunload cancellation.
+        event.preventDefault();
+        return;
+      }
+      if (requestPhotoSelectorClosePreparation(windowInstance, false)) {
+        // Keep the window alive while the renderer flushes XMP and local state.
+        return;
+      }
+    }
     event.preventDefault();
     windowInstance.destroy();
   });
@@ -2194,8 +2315,11 @@ async function createMainWindow(): Promise<void> {
 
   windowInstance.on("closed", () => {
     writeBootLog("Main window closed");
-    if (mainWindow) {
+    if (mainWindow === windowInstance) {
       mainWindow = null;
+    }
+    if (requestedTool.id === "photo-selector-app") {
+      resetPhotoSelectorClosePreparation();
     }
     isOpenFolderRequestRendererReady = false;
   });
@@ -2368,6 +2492,17 @@ let nativeShutdownCompleted = false;
 
 app.on("before-quit", (event) => {
   if (nativeShutdownCompleted) {
+    return;
+  }
+
+  if (
+    requestedTool.id === "photo-selector-app"
+    && mainWindow
+    && !mainWindow.isDestroyed()
+    && photoSelectorClosePreparationState !== "ready"
+    && requestPhotoSelectorClosePreparation(mainWindow, true)
+  ) {
+    event.preventDefault();
     return;
   }
 

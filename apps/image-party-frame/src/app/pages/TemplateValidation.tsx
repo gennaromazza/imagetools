@@ -1,25 +1,35 @@
 import { Link, useNavigate } from "react-router";
 import { ArrowLeft, AlertCircle, CheckCircle2, FileImage } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { useProject } from "../contexts/ProjectContext";
-import { getCustomTemplateVariant, getProjectTemplateGeometry } from "../lib/templateGeometry";
+import { getImageFile, useProject } from "../contexts/ProjectContext";
+import { getCustomTemplateVariant, getPresetFrameDataUrl, getProjectTemplateGeometry } from "../lib/templateGeometry";
+import { validateProjectForWorkspace } from "../lib/projectValidation";
 
 export default function TemplateValidation() {
   const navigate = useNavigate();
   const { project } = useProject();
+  const projectOrientations = Array.from(new Set(project.images.map((image) => image.orientation)));
   const previewOrientations: Array<"vertical" | "horizontal"> =
-    project.template === "custom" ? ["vertical", "horizontal"] : [project.images[0]?.orientation ?? "horizontal"];
+    project.template === "custom"
+      ? ["vertical", "horizontal"]
+      : projectOrientations.length > 0
+        ? projectOrientations
+        : ["horizontal"];
+  const validation = validateProjectForWorkspace(
+    project,
+    (imageId) => Boolean(getImageFile(imageId, project.projectId))
+  );
 
   return (
     <div className="h-screen bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col">
       <div className="h-16 bg-[var(--app-topbar)] border-b border-[var(--app-border)] backdrop-blur-xl flex items-center px-6 justify-between">
         <div className="flex items-center gap-4">
-          <Link to="/new-project">
-            <Button variant="ghost" size="sm" className="text-[var(--app-text-muted)] hover:text-[var(--app-text)]">
+          <Button asChild variant="ghost" size="sm" className="text-[var(--app-text-muted)] hover:text-[var(--app-text)]">
+            <Link to="/new-project">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Indietro
-            </Button>
-          </Link>
+            </Link>
+          </Button>
           <div className="flex items-center gap-3">
             <FileImage className="w-6 h-6 text-[var(--brand-accent)]" />
             <span className="font-semibold text-lg">Validazione Modello</span>
@@ -35,6 +45,9 @@ export default function TemplateValidation() {
               {previewOrientations.map((orientation) => {
                 const geometry = getProjectTemplateGeometry(project.template, orientation, project.customTemplate);
                 const variant = getCustomTemplateVariant(project.customTemplate, orientation);
+                const framePreviewUrl = project.template === "custom"
+                  ? variant?.backgroundPreviewUrl
+                  : getPresetFrameDataUrl(project.template, orientation);
 
                 return (
                   <div key={orientation} className="bg-[var(--app-surface)] border border-[var(--app-border)] rounded-2xl p-6 shadow-[0_18px_42px_rgba(0,0,0,0.16)]">
@@ -45,12 +58,12 @@ export default function TemplateValidation() {
                       className="relative mx-auto w-full max-w-[420px] overflow-hidden rounded-[24px] border border-[var(--app-border)] bg-[var(--app-surface-strong)]"
                       style={{
                         aspectRatio: `${geometry.width} / ${geometry.height}`,
-                        backgroundImage: variant?.backgroundPreviewUrl ? `url(${variant.backgroundPreviewUrl})` : undefined,
+                        backgroundImage: framePreviewUrl ? `url(${framePreviewUrl})` : undefined,
                         backgroundSize: "cover",
                         backgroundPosition: "center",
                       }}
                     >
-                      {!variant?.backgroundPreviewUrl ? (
+                      {!framePreviewUrl ? (
                         <div className="absolute inset-0 bg-[linear-gradient(135deg,#4b5750,#66756b_42%,#2b312d)] opacity-95" />
                       ) : null}
                       <div
@@ -66,10 +79,10 @@ export default function TemplateValidation() {
                         <div
                           className="absolute bg-[rgba(31,36,33,0.18)] rounded-[12px]"
                           style={{
-                            left: geometry.borderSizePx ?? 0,
-                            top: geometry.borderSizePx ?? 0,
-                            right: geometry.borderSizePx ?? 0,
-                            bottom: geometry.borderSizePx ?? 0,
+                            left: `${((geometry.borderSizePx ?? 0) / geometry.photoAreaWidth) * 100}%`,
+                            top: `${((geometry.borderSizePx ?? 0) / geometry.photoAreaHeight) * 100}%`,
+                            right: `${((geometry.borderSizePx ?? 0) / geometry.photoAreaWidth) * 100}%`,
+                            bottom: `${((geometry.borderSizePx ?? 0) / geometry.photoAreaHeight) * 100}%`,
                           }}
                         />
                       </div>
@@ -128,34 +141,60 @@ export default function TemplateValidation() {
               ) : null}
 
               <div className="border-t border-[var(--app-border)] pt-4">
-                <h3 className="text-sm mb-3">Lista Controlli</h3>
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <h3 className="text-sm">Controlli reali</h3>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-xs ${
+                      validation.canContinue
+                        ? "bg-[rgba(142,178,142,0.12)] text-[var(--success)]"
+                        : "bg-[var(--danger-soft)] text-[var(--danger)]"
+                    }`}
+                    aria-live="polite"
+                  >
+                    {validation.canContinue
+                      ? validation.warningCount > 0
+                        ? `Pronto con ${validation.warningCount} avvisi`
+                        : "Pronto"
+                      : `${validation.errorCount} errori bloccanti`}
+                  </span>
+                </div>
                 <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-[var(--success)]">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span className="text-sm">Template assegnato al progetto</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-[var(--success)]">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span className="text-sm">Area foto definita per l'impaginazione</span>
-                  </div>
-                  <div className={`flex items-center gap-2 ${project.template === "custom" ? "text-[var(--success)]" : "text-[var(--brand-accent)]"}`}>
-                    {project.template === "custom" ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                    <span className="text-sm">
-                      {project.template === "custom"
-                        ? "Varianti verticale/orizzontale presenti"
-                        : "Il preset usera la propria logica interna di orientamento"}
-                    </span>
-                  </div>
+                  {validation.checks.map((check) => (
+                    <div
+                      key={check.code}
+                      className={`flex items-start gap-2 rounded-xl px-3 py-2 ${
+                        check.severity === "ok"
+                          ? "bg-[rgba(142,178,142,0.07)] text-[var(--success)]"
+                          : check.severity === "warning"
+                            ? "bg-[rgba(184,154,99,0.08)] text-[var(--brand-accent)]"
+                            : "bg-[var(--danger-soft)] text-[var(--danger)]"
+                      }`}
+                    >
+                      {check.severity === "ok" ? (
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      ) : (
+                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      )}
+                      <div>
+                        <div className="text-sm">{check.label}</div>
+                        {check.detail ? <div className="mt-0.5 text-xs opacity-75">{check.detail}</div> : null}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
               <div className="flex gap-4 pt-4">
-                <Link to={project.template === "custom" ? "/custom-template" : "/new-project"} className="flex-1">
-                  <Button variant="outline" className="w-full border-[var(--app-border-strong)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]">
+                <Button asChild variant="outline" className="flex-1 border-[var(--app-border-strong)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]">
+                  <Link to={project.template === "custom" ? "/custom-template" : "/new-project"}>
                     {project.template === "custom" ? "Modifica Template" : "Cambia Modello"}
-                  </Button>
-                </Link>
-                <Button onClick={() => navigate("/workspace")} className="flex-1 bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] hover:bg-[var(--brand-primary-strong)]">
+                  </Link>
+                </Button>
+                <Button
+                  onClick={() => navigate("/workspace")}
+                  disabled={!validation.canContinue}
+                  className="flex-1 bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] hover:bg-[var(--brand-primary-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
                   Vai all'Area di Lavoro
                 </Button>
               </div>

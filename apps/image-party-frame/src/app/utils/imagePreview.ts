@@ -3,6 +3,12 @@ export interface PreviewOptions {
   quality?: number;
 }
 
+export interface ImagePreview {
+  url: string;
+  width: number;
+  height: number;
+}
+
 async function loadImage(file: File): Promise<HTMLImageElement> {
   const objectUrl = URL.createObjectURL(file);
 
@@ -24,10 +30,10 @@ async function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
-export async function createCompressedPreviewUrl(
+export async function createCompressedPreview(
   file: File,
   options: PreviewOptions = {}
-): Promise<string> {
+): Promise<ImagePreview> {
   const { maxDimension = 1800, quality = 0.76 } = options;
   const image = await loadImage(file);
   const largestSide = Math.max(image.naturalWidth, image.naturalHeight);
@@ -56,5 +62,16 @@ export async function createCompressedPreviewUrl(
     throw new Error(`Unable to create preview for ${file.name}`);
   }
 
-  return URL.createObjectURL(blob);
+  return {
+    url: URL.createObjectURL(blob),
+    width: image.naturalWidth,
+    height: image.naturalHeight,
+  };
+}
+
+export async function createCompressedPreviewUrl(
+  file: File,
+  options: PreviewOptions = {}
+): Promise<string> {
+  return (await createCompressedPreview(file, options)).url;
 }

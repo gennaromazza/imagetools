@@ -1,4 +1,9 @@
 import type { CustomTemplate, CustomTemplateVariant } from "../contexts/ProjectContext";
+import {
+  getPartyFramePreset,
+  orientPartyFramePreset,
+  presetFrameDataUrl,
+} from "../../../server/templateCatalog";
 
 export type ImageOrientation = "vertical" | "horizontal";
 
@@ -13,52 +18,20 @@ export type TemplateGeometry = {
   borderColor?: string;
 };
 
-const baseTemplates: Record<string, TemplateGeometry> = {
-  "classic-gold": {
-    width: 1772,
-    height: 1181,
-    photoAreaX: 120,
-    photoAreaY: 95,
-    photoAreaWidth: 1530,
-    photoAreaHeight: 990,
-  },
-  "modern-blue": {
-    width: 1959,
-    height: 1307,
-    photoAreaX: 150,
-    photoAreaY: 120,
-    photoAreaWidth: 1659,
-    photoAreaHeight: 1067,
-  },
-  floral: {
-    width: 1772,
-    height: 1181,
-    photoAreaX: 140,
-    photoAreaY: 105,
-    photoAreaWidth: 1492,
-    photoAreaHeight: 971,
-  },
-};
-
-function rotateTemplateClockwise(template: TemplateGeometry): TemplateGeometry {
+export function getTemplateGeometry(templateId: string, orientation: ImageOrientation): TemplateGeometry {
+  const preset = orientPartyFramePreset(getPartyFramePreset(templateId), orientation);
   return {
-    width: template.height,
-    height: template.width,
-    photoAreaX: template.height - (template.photoAreaY + template.photoAreaHeight),
-    photoAreaY: template.photoAreaX,
-    photoAreaWidth: template.photoAreaHeight,
-    photoAreaHeight: template.photoAreaWidth,
+    width: preset.width,
+    height: preset.height,
+    photoAreaX: preset.photoAreaX,
+    photoAreaY: preset.photoAreaY,
+    photoAreaWidth: preset.photoAreaWidth,
+    photoAreaHeight: preset.photoAreaHeight,
   };
 }
 
-export function getTemplateGeometry(templateId: string, orientation: ImageOrientation): TemplateGeometry {
-  const baseTemplate = baseTemplates[templateId] ?? baseTemplates["classic-gold"];
-
-  if (orientation === "vertical") {
-    return rotateTemplateClockwise(baseTemplate);
-  }
-
-  return baseTemplate;
+export function getPresetFrameDataUrl(templateId: string, orientation: ImageOrientation): string {
+  return presetFrameDataUrl(orientPartyFramePreset(getPartyFramePreset(templateId), orientation));
 }
 
 export function getProjectTemplateGeometry(

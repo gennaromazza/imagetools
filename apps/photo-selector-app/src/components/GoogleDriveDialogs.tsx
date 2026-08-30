@@ -52,7 +52,11 @@ export function DriveVersionPickerModal({
               <span className="drive-version-picker__details">
                 <strong>{new Date(version.createdAt).toLocaleString("it-IT")}</strong>
                 <span>
-                  {[version.projectName, version.sourceFolderName].filter(Boolean).join(" — ") || version.name}
+                  {version.workspaceMode === "free" || version.kind === "free"
+                    ? "Selezione libera"
+                    : "Progetto master"}
+                  {" · "}
+                  {[version.displayName ?? version.projectName, version.sourceFolderName].filter(Boolean).join(" — ") || version.name}
                 </span>
                 {typeof version.totalAssets === "number" ? (
                   <span>

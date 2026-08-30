@@ -1,3 +1,5 @@
+import type { DesktopSelectionMode } from "@photo-tools/desktop-contracts";
+
 interface SelectionActionsPanelProps {
   canUndo: boolean;
   canRedo: boolean;
@@ -10,6 +12,7 @@ interface SelectionActionsPanelProps {
   visibleSelectedCount: number;
   currentFolderSelectedCount: number;
   selectedCount: number;
+  workspaceMode: DesktopSelectionMode | null;
   compareCount: number;
   isMenuOpen: boolean;
   onUndo: () => void;
@@ -37,7 +40,7 @@ export function SelectionActionsPanel(props: SelectionActionsPanelProps) {
       <span className="command-bar__selection-count">
         {props.currentFolderSelectedCount} nella cartella
         {props.selectedCount !== props.currentFolderSelectedCount
-          ? ` · ${props.selectedCount} nel progetto`
+          ? ` · ${props.selectedCount} ${props.workspaceMode === "project" ? "nel progetto" : "nella selezione libera"}`
           : ""}
       </span>
       <div className="command-bar__group command-bar__group--primary">

@@ -266,8 +266,8 @@ interface TestCategory {
 }
 
 const TEST_CATEGORIES: TestCategory[] = [
-  { id: "photo-selector", title: "Image Select Pro", description: "Flusso lavoro, prestazioni, cache, spostamenti e metadati XMP." },
-  { id: "image-party-frame", title: "Image Party Frame — Caccia bug", description: "Persistenza progetto, immagini, crop e template." },
+  { id: "photo-selector", title: "Image Select Pro", description: "Modalità libera e progetto, prestazioni, cache, Drive, spostamenti e metadati XMP." },
+  { id: "image-party-frame", title: "Image Party Frame — Affidabilità", description: "Progetti, crop, rendering, job export e completezza del pacchetto installato." },
   { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Geometria fisica, frame, rotazioni, crop, paginazione, memoria e nomi export sicuri." },
   { id: "archivio-flow", title: "Archivio Flow — Caccia bug", description: "Casi avversariali su percorsi, nomi Windows, fingerprint e stati di importazione." },
   { id: "image-converter", title: "Image Converter — Caccia bug", description: "Limiti export e riconoscimento sicuro delle cartelle generate." },
@@ -284,7 +284,7 @@ const TEST_CATEGORIES: TestCategory[] = [
 function testCategoryId(name: string): TestCategory["id"] {
   if (name.startsWith("test:photo-selector-")) return "photo-selector";
   if (name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-drive-link" || name === "test:archivio-flow-package-runtime") return "archivio-flow";
-  if (name === "test:image-party-frame-bug-hunt") return "image-party-frame";
+  if (name === "test:image-party-frame-bug-hunt" || name === "test:image-party-frame-server" || name === "test:image-party-frame-package-runtime") return "image-party-frame";
   if (name === "test:batch-print-layout-bug-hunt" || name === "test:batch-print-layout-desktop-images") return "batch-print-layout";
   if (name === "test:image-converter-bug-hunt") return "image-converter";
   if (name === "test:image-file-finder-bug-hunt") return "image-file-finder";
@@ -301,13 +301,17 @@ function testCategoryId(name: string): TestCategory["id"] {
 function testDescription(name: string): string {
   const descriptions: Record<string, string> = {
     "test:photo-selector-workflow": "Controlla il flusso principale di Image Select Pro.",
+    "test:photo-selector-free-mode": "Verifica che la modalità libera resti indipendente dai progetti, riconosca la sorgente anche se cambia lettera e mantenga XMP e backup Drive separati.",
+    "test:photo-selector-package-runtime": "Controlla che il main process di Image Select Pro includa nell’ASAR tutte le dipendenze locali, compresa l’identità delle sorgenti.",
     "test:photo-selector-relocation": "Verifica lo spostamento sicuro dei progetti e delle relative risorse.",
     "test:photo-selector-xmp": "Controlla lettura e aggiornamento dei metadati XMP.",
     "test:photo-selector-performance": "Verifica code prioritarie, budget cache, aggiornamenti thumbnail per-ID e invarianti CSS anti-lag.",
     "test:archivio-flow-bug-hunt": "Cerca regressioni con input generati, percorsi ostili e transizioni di importazione vietate.",
     "test:archivio-flow-drive-link": "Verifica il link al registro Drive e il messaggio guidato quando l’API Google è disabilitata.",
     "test:archivio-flow-package-runtime": "Verifica che il server IPC e tutti i suoi import locali siano presenti nell'ASAR di Archivio Flow.",
-    "test:image-party-frame-bug-hunt": "Cerca dati progetto obsoleti e valori crop capaci di corrompere il layout.",
+    "test:image-party-frame-bug-hunt": "Verifica isolamento progetto, crop, import cartelle, ripresa export, identita bozza/libreria, canvas responsive e pacchetti template ostili.",
+    "test:image-party-frame-server": "Verifica job, avanzamento, cancellazione, idempotenza, coda satura/429, crop EXIF, auth desktop, sorgenti native protette, collisioni, scrittura atomica, pulizia upload e CORS locale.",
+    "test:image-party-frame-package-runtime": "Controlla che il server PartyFrame e tutti i suoi import runtime locali siano inclusi nel pacchetto Electron.",
     "test:batch-print-layout-bug-hunt": "Stressa geometria frame, impaginazione, rotazioni, crop, ultima pagina, memoria e nomi export Windows.",
     "test:batch-print-layout-desktop-images": "Verifica la policy desktop per JPG/RAW e l'abilitazione esplicita di HEIC, HEIF e TIFF.",
     "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",

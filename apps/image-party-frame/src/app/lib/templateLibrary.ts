@@ -13,6 +13,10 @@ export type TemplateLibraryItem = {
   locked?: boolean;
 };
 
+type TemplateComparisonOptions = {
+  includePreviewUrls?: boolean;
+};
+
 const ORDER_STORAGE_KEY = "desktop-frame-composer.template-library-order";
 const HIDDEN_PRESET_STORAGE_KEY = "desktop-frame-composer.hidden-preset-templates";
 
@@ -67,6 +71,90 @@ function formatPresetMeta(template: Template): string {
   return `${widthCm}x${heightCm} cm • ${template.dpi} DPI`;
 }
 
+export function areCustomTemplatesEquivalent(
+  left: CustomTemplate | null | undefined,
+  right: CustomTemplate | null | undefined,
+  options: TemplateComparisonOptions = {}
+): boolean {
+  if (!left || !right || left.id !== "custom" || right.id !== "custom" || left.name !== right.name) {
+    return false;
+  }
+
+  const comparableFields = [
+    "widthCm",
+    "heightCm",
+    "dpi",
+    "widthPx",
+    "heightPx",
+    "photoAreaX",
+    "photoAreaY",
+    "photoAreaWidth",
+    "photoAreaHeight",
+    "lockAspectRatio",
+    "photoAspectRatio",
+    "backgroundFileName",
+    "borderSizePx",
+    "borderColor",
+  ] as const;
+
+  return (["vertical", "horizontal"] as const).every((orientation) => {
+    const leftVariant = left.variants[orientation];
+    const rightVariant = right.variants[orientation];
+    if (!leftVariant || !rightVariant) {
+      return false;
+    }
+    if (comparableFields.some((field) => leftVariant[field] !== rightVariant[field])) {
+      return false;
+    }
+    return !options.includePreviewUrls
+      || leftVariant.backgroundPreviewUrl === rightVariant.backgroundPreviewUrl;
+  });
+}
+
+export function preserveCustomTemplateLibraryIdentity(
+  draft: CustomTemplate,
+  currentTemplate: CustomTemplate | null | undefined
+): CustomTemplate {
+  const linkedId = currentTemplate?.libraryTemplateId;
+  if (
+    currentTemplate
+    && typeof linkedId === "string"
+    && linkedId.length > 0
+    && areCustomTemplatesEquivalent(draft, currentTemplate, { includePreviewUrls: true })
+  ) {
+    return {
+      ...currentTemplate,
+      ...draft,
+      libraryTemplateId: linkedId,
+      variants: {
+        vertical: {
+          ...currentTemplate.variants.vertical,
+          ...draft.variants.vertical,
+        },
+        horizontal: {
+          ...currentTemplate.variants.horizontal,
+          ...draft.variants.horizontal,
+        },
+      },
+    };
+  }
+
+  const { libraryTemplateId: _staleLibraryId, ...unlinkedDraft } = draft;
+  return unlinkedDraft;
+}
+
+export function resolveCustomTemplateSelectionValue(
+  currentTemplate: CustomTemplate | null | undefined,
+  savedTemplates: SavedTemplateRecord[]
+): string {
+  const linkedRecord = typeof currentTemplate?.libraryTemplateId === "string"
+    ? savedTemplates.find((record) => record.id === currentTemplate.libraryTemplateId)
+    : undefined;
+  return linkedRecord && areCustomTemplatesEquivalent(currentTemplate, linkedRecord.template)
+    ? `custom:${linkedRecord.id}`
+    : "custom-draft";
+}
+
 export function buildTemplateLibrary(
   presets: Template[],
   savedTemplates: SavedTemplateRecord[],
@@ -119,10 +207,10 @@ export function buildTemplateLibrary(
     return orderedItems;
   }
 
-  const draftExistsInLibrary =
-    typeof currentCustomTemplate.libraryTemplateId === "string" &&
-    savedTemplates.some((record) => record.id === currentCustomTemplate.libraryTemplateId);
-  if (draftExistsInLibrary) {
+  const linkedSavedTemplate = typeof currentCustomTemplate.libraryTemplateId === "string"
+    ? savedTemplates.find((record) => record.id === currentCustomTemplate.libraryTemplateId)
+    : undefined;
+  if (linkedSavedTemplate && areCustomTemplatesEquivalent(currentCustomTemplate, linkedSavedTemplate.template)) {
     return orderedItems;
   }
 
@@ -132,7 +220,9 @@ export function buildTemplateLibrary(
       value: "custom-draft",
       kind: "custom-draft",
       label: currentCustomTemplate.name || "Template Custom corrente",
-      meta: "Template corrente non ancora salvato nella libreria",
+      meta: linkedSavedTemplate
+        ? "Modifiche correnti non ancora salvate nella libreria"
+        : "Template corrente non ancora salvato nella libreria",
       locked: true,
     },
     ...orderedItems,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export type UnassignedFolderChoice = "create-here" | "choose-master" | "cancel";
+export type UnassignedFolderChoice = "open-free" | "create-here" | "choose-master" | "cancel";
 
 export interface ProjectCreationPreview {
   folderPath: string;
@@ -21,12 +21,13 @@ export interface MasterCorrectionPreview {
   excludedSelections: number;
 }
 
-interface UnassignedFolderModalProps {
+export interface UnassignedFolderModalProps {
   folderPath: string;
   onChoose: (choice: UnassignedFolderChoice) => void;
+  allowFreeMode?: boolean;
 }
 
-export function UnassignedFolderModal({ folderPath, onChoose }: UnassignedFolderModalProps) {
+export function UnassignedFolderModal({ folderPath, onChoose, allowFreeMode = false }: UnassignedFolderModalProps) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -46,27 +47,48 @@ export function UnassignedFolderModal({ folderPath, onChoose }: UnassignedFolder
         role="dialog"
         aria-modal="true"
         aria-labelledby="unassigned-folder-title"
+        aria-describedby="unassigned-folder-description"
       >
         <div className="modal-panel__header">
           <div>
             <h2 id="unassigned-folder-title">Cartella senza progetto</h2>
-            <p>Questa cartella non appartiene ancora a un progetto master PhotoSelector.</p>
+            <p id="unassigned-folder-description">
+              Questa cartella non appartiene ancora a un progetto master di Image Select Pro.
+            </p>
           </div>
         </div>
         <div className="modal-panel__body">
           <div className="drive-manual-root-picker__label">Cartella richiesta</div>
           <div className="drive-manual-root-picker__input" title={folderPath}>{folderPath}</div>
-          <p>
-            Se fa parte di un matrimonio con altre sottocartelle, scegli la cartella master che le contiene tutte.
-          </p>
+          {allowFreeMode ? (
+            <div className="unassigned-folder-options">
+              <div className="unassigned-folder-option">
+                <strong>Selezione libera</strong>
+                <span>Per una scelta rapida su questa cartella, una scheda SD o un disco, senza creare un progetto.</span>
+              </div>
+              <div className="unassigned-folder-option">
+                <strong>Progetto master</strong>
+                <span>Per lavori strutturati con più sottocartelle o collegati ad Archivio Flow.</span>
+              </div>
+            </div>
+          ) : (
+            <p>
+              Questo flusso usa i progetti master. Scegli la cartella che contiene l’intero lavoro oppure crea qui il master.
+            </p>
+          )}
         </div>
         <div className="modal-panel__footer">
           <button type="button" className="ghost-button" onClick={() => onChoose("cancel")}>Annulla</button>
+          {allowFreeMode ? (
+            <button type="button" className="primary-button" onClick={() => onChoose("open-free")}>
+              Apri in modalità libera
+            </button>
+          ) : null}
           <button type="button" className="secondary-button" onClick={() => onChoose("create-here")}>
-            Crea da questa cartella
+            Crea progetto qui
           </button>
-          <button type="button" className="primary-button" onClick={() => onChoose("choose-master")}>
-            Scegli cartella master
+          <button type="button" className={allowFreeMode ? "secondary-button" : "primary-button"} onClick={() => onChoose("choose-master")}>
+            Scegli master esistente
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import type {
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
+  DesktopFreeSelectionSnapshot,
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
@@ -28,6 +29,45 @@ export function hasDesktopStateApi(): boolean {
     && typeof api?.getRecentFolders === "function"
     && typeof api?.getSortCache === "function",
   );
+}
+
+export function hasDesktopFreeSelectionApi(): boolean {
+  const api = getDesktopApi();
+  return Boolean(
+    typeof api?.getFreeSelectionSnapshot === "function"
+    && typeof api?.saveFreeSelectionSnapshot === "function",
+  );
+}
+
+export async function getFreeSelectionSnapshot(
+  sourceId: string,
+): Promise<DesktopFreeSelectionSnapshot | null> {
+  const api = getDesktopApi();
+  if (!api?.getFreeSelectionSnapshot) {
+    return null;
+  }
+
+  try {
+    return await api.getFreeSelectionSnapshot(sourceId);
+  } catch {
+    return null;
+  }
+}
+
+export async function saveFreeSelectionSnapshot(
+  snapshot: DesktopFreeSelectionSnapshot,
+): Promise<boolean> {
+  const api = getDesktopApi();
+  if (!api?.saveFreeSelectionSnapshot) {
+    return false;
+  }
+
+  try {
+    await api.saveFreeSelectionSnapshot(snapshot);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function getDesktopPreferences(): Promise<DesktopPhotoSelectorPreferences | null> {
