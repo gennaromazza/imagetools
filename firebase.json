@@ -32,6 +32,9 @@
       "cleanUrls": true,
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
       "redirects": [
+        { "source": "/sitemap-filex.xml", "destination": "/sitemap.xml", "type": 301 },
+        { "source": "/strumenti/polaroid-go", "destination": "/strumenti/batch-print-layout/polaroid-go/", "type": 301 },
+        { "source": "/strumenti/polaroid-go/**", "destination": "/strumenti/batch-print-layout/polaroid-go/", "type": 301 },
         { "source": "/guide/applicare-cornici-a-molte-foto", "destination": "/guide/software-photo-booth-matrimoni-eventi", "type": 301 }
       ],
       "rewrites": [
