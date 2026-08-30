@@ -30,6 +30,21 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-30 - FileX Suite 0.1.58
+
+### Dock disponibile anche all'avvio di Windows
+- La Dock viene ora creata anche quando la Suite parte in background con Windows, senza aprire forzatamente la finestra principale.
+- Avvii successivi, riattivazione dal tray e notifiche non creano finestre Dock duplicate.
+
+### Dock sempre facoltativa
+- Aggiunto il comando **Disattiva Dock** nelle impostazioni della Dock, con conferma esplicita.
+- La preferenza viene salvata nel profilo dell'utente; chi aggiorna mantiene la Dock attiva per impostazione predefinita.
+- La Dock può essere riattivata in qualsiasi momento dal menu della Suite nell'area di notifica di Windows.
+
+### Controlli sul pacchetto reale
+- Aggiunto un test dedicato alla policy di avvio e alla preferenza della Dock, disponibile anche dalla FileX Dev Console.
+- Il controllo pre-release verifica la chiusura transitiva degli import nell'ASAR e avvia realmente il main process impacchettato con una Dock di prova.
+
 ## 2026-08-28 - FileX Suite 0.1.57
 
 ### Nuova FileX Dock laterale e interattiva

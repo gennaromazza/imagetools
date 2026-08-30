@@ -47,6 +47,7 @@ let toolUpdateTimer: NodeJS.Timeout | null = null;
 let lastNotifiedToolUpdateCount: number | null = null;
 const TOOL_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const startsInBackground = process.argv.includes("--filex-background");
+const isPackagedSmokeTest = process.argv.includes("--filex-suite-packaged-smoke-test");
 
 const defaultDockState: DesktopDockState = {
   schemaVersion: 2,

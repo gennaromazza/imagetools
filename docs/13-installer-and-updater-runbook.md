@@ -198,7 +198,7 @@ La release `suite-v0.1.35` deve contenere esclusivamente l'installer Windows x64
 
 Ridurre la dock sopra una superficie chiara e verificare che attorno all'icona non compaiano rettangoli grigi o aree sfocate corrispondenti ai limiti della finestra Electron. In stato ridotto devono essere disattivati sfondo, bordo, ombra e `backdrop-filter` del contenitore; l'espansione deve ripristinare normalmente l'effetto vetro e tutti i controlli.
 
-## Verifica hotfix FileX Suite successiva alla 0.1.57 — avvio Dock opzionale
+## Verifica hotfix FileX Suite 0.1.58 — avvio Dock opzionale
 
 Partire da FileX Suite 0.1.57 installata e mantenere attiva la Dock Station. Chiudere completamente la Suite, quindi avviarla con `--filex-background` come avviene all'accesso di Windows: la finestra principale deve restare nascosta e la Dock deve comparire. Aprire poi normalmente la Suite e verificare che venga mostrata una sola Dock, senza duplicati.
 
