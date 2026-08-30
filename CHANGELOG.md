@@ -30,6 +30,55 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-30 - FileX Suite 0.1.59
+
+### Integrazioni native piu affidabili
+- Il bridge desktop distingue in modo stabile sorgenti locali, supporti rimovibili e cartelle Google Drive per i nuovi flussi di Image Select Pro.
+- Persistenza SQLite e contratti condivisi gestiscono selezioni libere, progetti master, stato delle singole foto e backup senza confondere identita o percorsi.
+- Party Frame riceve cartelle native verificate, token di sessione e controlli di compatibilita del server prima di avviare import ed export.
+- Le build installate applicano sempre il blocco FileX All Access ai tool `shared-runtime` quando la licenza manca, anche se il servizio remoto non e raggiungibile.
+
+### Pacchetti e diagnostica di release
+- Le verifiche del pacchetto reale includono ora i moduli runtime e i server richiesti da Party Frame e Image Select Pro.
+- Nuovi test automatici sono disponibili nella Dev Console e nella CI per impedire regressioni di packaging, modalita libera ed export.
+
+## 2026-08-30 - Image Party Frame 0.1.29
+
+### Anteprima e controllo del progetto
+- Il canvas verticale e orizzontale si adatta allo spazio disponibile senza tagliare la composizione, con pannelli e comandi piu compatti e leggibili.
+- Crop, zoom, orientamento EXIF e geometria cover condividono lo stesso modello tra anteprima ed export.
+- Progetti recenti, file spostati e pacchetti portabili vengono validati e possono essere ricollegati senza perdere regolazioni e approvazioni.
+
+### Template senza duplicati
+- Un template appena salvato conserva la propria identita quando viene usato in un progetto e non compare piu una seconda volta come bozza non salvata.
+- Modifiche reali al template separano correttamente la bozza dalla versione in libreria; import e sostituzione degli sfondi non generano falsi duplicati.
+
+### Export professionale e osservabile
+- Il server verifica realmente la scrivibilita della cartella scelta, accetta percorsi Windows validi e restituisce errori operativi coerenti.
+- L'esportazione usa job monitorabili con avanzamento per file, annullamento, ripresa del monitoraggio e scrittura atomica dei risultati.
+- Stati di caricamento, incompatibilita del server e riepilogo finale rendono sempre visibile se il software sta lavorando.
+
+### Robustezza e verifiche
+- Aggiunti limiti espliciti, validazione dei file, protezioni CORS e token desktop, prenotazione dei nomi e pulizia dei file parziali.
+- La suite di regressione copre stato progetto, crop, template, pacchetti portabili, import, canvas adattivo ed export server.
+
+## 2026-08-30 - Image Select Pro 0.1.32
+
+### Selezione libera e progetto master
+- Ogni cartella, scheda SD o disco puo essere aperto in modalita libera senza creare un progetto, mantenendo selezioni e classificazioni tra una sessione e l'altra.
+- I progetti master restano separati e riconoscibili, con identita stabili e integrazione dedicata con Archivio Flow.
+- L'interfaccia mostra chiaramente la modalita attiva e propone azioni coerenti con il flusso scelto.
+
+### Backup Google Drive sicuro
+- Selezioni libere e progetti possono essere salvati e ripristinati manualmente su Google Drive senza caricare le fotografie originali.
+- I manifest vengono validati, i percorsi non sicuri vengono rifiutati e il matching usa identita della sorgente e metadati verificabili.
+- La lettura dei backup e paginata e coordinata, evitando duplicati e attese inutili su raccolte estese.
+
+### Persistenza e compatibilita
+- Database locale, cartelle recenti e stato foto distinguono selezione, classificazione e appartenenza alla sorgente.
+- I metadati XMP restano disponibili sulle sorgenti scrivibili e le migrazioni preservano i cataloghi creati dalle versioni precedenti.
+- Aggiunti test automatici per modalita libera, workflow progetto, spostamento cartelle, XMP, prestazioni e runtime impacchettato.
+
 ## 2026-08-30 - FileX Suite 0.1.58
 
 ### Dock disponibile anche all'avvio di Windows

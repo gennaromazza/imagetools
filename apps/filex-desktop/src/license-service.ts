@@ -59,8 +59,29 @@ function developmentLicenseState(): DesktopLicenseState | null {
 }
 
 function localEnforcement(): DesktopLicenseEnforcement {
-  const requested = app.isPackaged ? undefined : process.env.FILEX_LICENSE_ENFORCEMENT;
+  // Una build distribuita non deve mai trasformare un errore di rete o una
+  // risposta incompleta del servizio in un bypass della licenza. Le modalita
+  // observe/warn restano strumenti esclusivamente di sviluppo.
+  if (app.isPackaged) return "enforce";
+  const requested = process.env.FILEX_LICENSE_ENFORCEMENT;
   return requested === "warn" || requested === "enforce" ? requested : "observe";
+}
+
+function resolveEnforcement(remoteEnforcement?: unknown): DesktopLicenseEnforcement {
+  if (app.isPackaged) return "enforce";
+  return remoteEnforcement === "warn" || remoteEnforcement === "enforce"
+    ? remoteEnforcement
+    : localEnforcement();
+}
+
+function applyCurrentEnforcement(state: DesktopLicenseState): DesktopLicenseState {
+  const enforcement = resolveEnforcement(state.enforcement);
+  const entitled = state.status === "active" || state.status === "grace";
+  return {
+    ...state,
+    enforcement,
+    canUseTools: entitled || enforcement !== "enforce",
+  };
 }
 
 function licensePath(): string {
@@ -142,7 +163,7 @@ async function readRemoteEnforcement(): Promise<DesktopLicenseEnforcement> {
     const response = await fetch(`${process.env.FILEX_LICENSE_API_URL ?? DEFAULT_API_URL}/health`, { signal: controller.signal });
     if (!response.ok) return localEnforcement();
     const payload = await response.json() as { enforcement?: unknown };
-    return payload.enforcement === "warn" || payload.enforcement === "enforce" ? payload.enforcement : "observe";
+    return resolveEnforcement(payload.enforcement);
   } catch {
     return localEnforcement();
   } finally {
@@ -174,9 +195,7 @@ function normalizeEntitlement(value: unknown, checkedAt = Date.now(), remoteEnfo
   if (!source || !["active", "grace", "expired", "revoked", "unlicensed"].includes(String(status))) {
     return emptyState("unavailable", "Risposta del servizio licenze non valida.");
   }
-  const mode = remoteEnforcement === "warn" || remoteEnforcement === "enforce"
-    ? remoteEnforcement
-    : localEnforcement();
+  const mode = resolveEnforcement(remoteEnforcement);
   const permitted = status === "active" || status === "grace";
   return {
     schemaVersion: 1,
@@ -218,7 +237,9 @@ export async function getLicenseState(refresh = false): Promise<DesktopLicenseSt
     const offline = usableOffline(store);
     if (offline) return offline;
     const state = store.state ?? emptyState();
-    if (!refresh && state.lastCheckedAt && Date.now() - state.lastCheckedAt < 24 * 60 * 60 * 1000) return state;
+    if (!refresh && state.lastCheckedAt && Date.now() - state.lastCheckedAt < 24 * 60 * 60 * 1000) {
+      return applyCurrentEnforcement(state);
+    }
     const mode = await readRemoteEnforcement();
     const updated = {
       ...emptyState(
@@ -233,7 +254,7 @@ export async function getLicenseState(refresh = false): Promise<DesktopLicenseSt
     return updated;
   }
   if (!refresh && store.state?.lastCheckedAt && Date.now() - store.state.lastCheckedAt < 24 * 60 * 60 * 1000) {
-    return store.state;
+    return applyCurrentEnforcement(store.state);
   }
   try {
     const payload = await request("/validate", { activationToken: token, installationId: store.installationId, appVersion: app.getVersion() }) as LicenseApiResponse;

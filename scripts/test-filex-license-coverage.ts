@@ -5,7 +5,12 @@ import { desktopToolManifest } from "../apps/filex-desktop/src/tool-manifest.js"
 
 const root = resolve(import.meta.dirname, "..");
 const sharedMain = await readFile(resolve(root, "apps/filex-desktop/src/main.ts"), "utf8");
+const sharedLicenseService = await readFile(resolve(root, "apps/filex-desktop/src/license-service.ts"), "utf8");
 assert.match(sharedMain, /requestedTool\.id !== "suite-launcher"[\s\S]*getLicenseState\(\)[\s\S]*!license\.canUseTools/);
+assert.match(sharedLicenseService, /if \(app\.isPackaged\) return "enforce";/);
+assert.match(sharedLicenseService, /function resolveEnforcement[\s\S]*if \(app\.isPackaged\) return "enforce";/);
+assert.match(sharedLicenseService, /function applyCurrentEnforcement[\s\S]*status === "active" \|\| state\.status === "grace"/);
+assert.match(sharedLicenseService, /return applyCurrentEnforcement\(store\.state\);/);
 
 const standaloneEntries: Record<string, string> = {
   "cache-sweep": "apps/cache-sweep/electron/main.ts",
