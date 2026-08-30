@@ -28,6 +28,7 @@ const NOTIFICATION_LIMIT = 20;
 let states = [];
 let dockState = {
   schemaVersion: 2,
+  enabled: true,
   x: 0,
   y: 0,
   opacity: 0.94,
@@ -629,6 +630,21 @@ document.querySelector('#dock-collapse').addEventListener('click', () => { void 
 document.querySelector('#dock-reset').addEventListener('click', async () => {
   dockState = await api.saveSuiteDockState({ x: 0, y: 0 });
   window.location.reload();
+});
+document.querySelector('#dock-disable').addEventListener('click', async () => {
+  const shouldDisable = window.confirm(
+    "Disattivare la Dock Station? Potrai riattivarla dal menu FileX vicino all'orologio di Windows.",
+  );
+  if (!shouldDisable) return;
+  if (typeof api.setSuiteDockEnabled !== 'function') {
+    window.alert('Questa versione della Suite non permette di disattivare la Dock Station.');
+    return;
+  }
+  try {
+    await api.setSuiteDockEnabled(false);
+  } catch (error) {
+    window.alert(`Impossibile disattivare la Dock Station: ${error?.message || error}`);
+  }
 });
 document.querySelector('#dock-close-settings').addEventListener('click', () => { void setSettingsOpen(false); });
 

@@ -20,6 +20,7 @@ export interface DesktopRuntimeInfo {
 }
 export interface DesktopDockState {
     schemaVersion: 2;
+    enabled?: boolean;
     x: number;
     y: number;
     opacity: number;
@@ -980,6 +981,7 @@ export interface FileXDesktopApi {
     }>;
     getSuiteDockState: () => Promise<DesktopDockState>;
     saveSuiteDockState: (state: Partial<DesktopDockState>) => Promise<DesktopDockState>;
+    setSuiteDockEnabled?: (enabled: boolean) => Promise<DesktopDockState>;
     getLicenseState: (refresh?: boolean) => Promise<DesktopLicenseState>;
     activateLicense: (licenseKey: string, deviceLabel?: string) => Promise<DesktopLicenseState>;
     deactivateLicense: () => Promise<DesktopLicenseState>;

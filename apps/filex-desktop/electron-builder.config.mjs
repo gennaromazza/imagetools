@@ -418,6 +418,7 @@ export default {
     ? [
         ".output/electron/suite-main.js",
         ".output/electron/suite-preload.js",
+        ".output/electron/suite-startup-policy.js",
         ".output/electron/suite-updater.js",
         ".output/electron/updater.js",
         ".output/electron/filex-process-coordinator.js",

@@ -38,6 +38,7 @@
     "test:filex-installer-runner": "tsx --test apps/filex-desktop/src/windows-installer-runner.test.ts",
     "test:filex-cooperative-signal": "tsx --test apps/filex-desktop/src/cooperative-process-signal.test.ts",
     "test:filex-suite-package-imports": "node scripts/test-filex-suite-package-imports.mjs",
+    "test:filex-suite-dock-startup": "tsx --test apps/filex-desktop/src/suite-startup-policy.test.ts",
     "test:filex-independent-releases": "node scripts/test-filex-independent-releases.mjs",
     "test:filex-component-release-flow": "node scripts/test-component-release-flow.mjs",
     "release:prepare-filex-suite-clean-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-filex-suite-clean-install.ps1 -Apply",

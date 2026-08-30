@@ -292,7 +292,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:filex-send-bug-hunt") return "filex-send";
   if (name === "test:filex-send-upload") return "filex-send";
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
-  if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
+  if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-suite-dock-startup" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
   if (name === "test:filex-license-coverage") return "licenses";
   if (name === "test:filex-cloud") return "cloud";
   return "other";
@@ -321,7 +321,8 @@ function testDescription(name: string): string {
     "test:filex-process-snapshot-cache": "Verifica che la chiusura parallela condivida il rilevamento processi senza duplicare tasklist.exe durante un fetch lento.",
     "test:filex-installer-runner": "Verifica che la Suite avvii NSIS con /S, attenda la conclusione reale e intercetti errori di avvio o exit code.",
     "test:filex-cooperative-signal": "Verifica che una versione legacy non possa bloccare indefinitamente il comando di chiusura cooperativa prima del fallback.",
-    "test:filex-suite-package-imports": "Controlla nel pacchetto ASAR reale che tutti gli import runtime transitivi del main process Suite siano presenti.",
+    "test:filex-suite-package-imports": "Controlla gli import runtime nel pacchetto ASAR reale e avvia il main process della Suite impacchettata.",
+    "test:filex-suite-dock-startup": "Verifica che la Dock parta anche con Windows, rispetti la preferenza dell'utente e non apra forzatamente la finestra principale.",
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",

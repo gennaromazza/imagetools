@@ -197,3 +197,9 @@ Ripetere il collaudo della beta con volumi fisici distinti e verificare inoltre 
 La release `suite-v0.1.35` deve contenere esclusivamente l'installer Windows x64 della Suite, la relativa blockmap e `latest.yml`. Il feed `suite-channel-stable` deve proporre 0.1.35 senza cambiare le versioni del catalogo tool.
 
 Ridurre la dock sopra una superficie chiara e verificare che attorno all'icona non compaiano rettangoli grigi o aree sfocate corrispondenti ai limiti della finestra Electron. In stato ridotto devono essere disattivati sfondo, bordo, ombra e `backdrop-filter` del contenitore; l'espansione deve ripristinare normalmente l'effetto vetro e tutti i controlli.
+
+## Verifica hotfix FileX Suite successiva alla 0.1.57 — avvio Dock opzionale
+
+Partire da FileX Suite 0.1.57 installata e mantenere attiva la Dock Station. Chiudere completamente la Suite, quindi avviarla con `--filex-background` come avviene all'accesso di Windows: la finestra principale deve restare nascosta e la Dock deve comparire. Aprire poi normalmente la Suite e verificare che venga mostrata una sola Dock, senza duplicati.
+
+Dalle impostazioni della Dock scegliere **Disattiva Dock** e confermare. La finestra Dock deve chiudersi e non deve ricomparire né all'avvio automatico né aprendo manualmente la Suite. Dal menu dell'icona FileX vicino all'orologio riattivare **Dock Station** e verificare che la finestra venga ricreata immediatamente, conservando posizione, opacità, ordine e riduzione automatica. La preferenza deve persistere dopo riavvio, aggiornamento e reinstallazione della sola Suite; licenza, profilo e tool installati devono restare invariati.

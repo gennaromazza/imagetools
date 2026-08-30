@@ -31,6 +31,10 @@ import {
 import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
 import { prepareFileXSuiteUpdate } from "./filex-process-coordinator.js";
 import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState } from "./license-service.js";
+import {
+  resolveSuiteDockEnabled,
+  resolveSuiteStartupPolicy,
+} from "./suite-startup-policy.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, shell, Tray } = electron;
 const suite = desktopToolManifest["suite-launcher"];
@@ -38,6 +42,7 @@ const appUserModelId = `studio.filex.${suite.id}`;
 let mainWindow: BrowserWindowInstance | null = null;
 let dockWindow: BrowserWindowInstance | null = null;
 let tray: TrayInstance | null = null;
+let dockEnabled = true;
 let toolUpdateTimer: NodeJS.Timeout | null = null;
 let lastNotifiedToolUpdateCount: number | null = null;
 const TOOL_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -45,6 +50,7 @@ const startsInBackground = process.argv.includes("--filex-background");
 
 const defaultDockState: DesktopDockState = {
   schemaVersion: 2,
+  enabled: true,
   x: 0,
   y: 0,
   opacity: 0.94,
@@ -99,6 +105,7 @@ function sanitizeDockState(value: Partial<DesktopDockState> | null | undefined):
       : defaultDockState.edgeAnchor;
   return {
     schemaVersion: 2,
+    enabled: resolveSuiteDockEnabled(value),
     x: Number.isFinite(x) ? Math.round(x) : 0,
     y: Number.isFinite(y) ? Math.round(y) : 0,
     opacity: Number.isFinite(opacity) ? Math.min(1, Math.max(0.45, opacity)) : defaultDockState.opacity,
@@ -246,9 +253,14 @@ async function createMainWindow(): Promise<void> {
 }
 
 async function createDock(): Promise<void> {
-  if (dockWindow && !dockWindow.isDestroyed()) return;
+  if (!dockEnabled || (dockWindow && !dockWindow.isDestroyed())) return;
   const display = screen.getPrimaryDisplay();
   const state = await readDockState();
+  if (!resolveSuiteDockEnabled(state)) {
+    dockEnabled = false;
+    updateTrayMenu();
+    return;
+  }
   const isBottomAnchor = state.edgeAnchor === "bottom";
   const isLeftAnchor = state.edgeAnchor === "left";
   const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, state.visibleToolCount));
@@ -299,12 +311,55 @@ async function createDock(): Promise<void> {
   }
 }
 
-function createTray(): void {
-  if (tray) return;
-  tray = new Tray(iconPath());
-  tray.setToolTip("FileX Suite");
+async function setDockEnabled(enabled: boolean): Promise<DesktopDockState> {
+  const previousDockEnabled = dockEnabled;
+  dockEnabled = enabled;
+  let state: DesktopDockState;
+  try {
+    state = await saveDockState({
+      enabled,
+      settingsOpen: false,
+      notificationCenterOpen: false,
+    });
+  } catch (error) {
+    dockEnabled = previousDockEnabled;
+    updateTrayMenu();
+    throw error;
+  }
+  updateTrayMenu();
+  if (enabled) {
+    await createDock();
+  } else {
+    const windowToClose = dockWindow;
+    setTimeout(() => {
+      if (windowToClose && !windowToClose.isDestroyed()) windowToClose.destroy();
+    }, 75);
+  }
+  return state;
+}
+
+async function openSuiteExperience(): Promise<void> {
+  await createMainWindow();
+  await createDock();
+}
+
+function updateTrayMenu(): void {
+  if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Apri FileX Suite", click: () => { void createMainWindow(); } },
+    { label: "Apri FileX Suite", click: () => { void openSuiteExperience(); } },
+    {
+      label: "Dock Station",
+      type: "checkbox",
+      checked: dockEnabled,
+      click: (menuItem) => {
+        void setDockEnabled(menuItem.checked).catch((error) => {
+          dialog.showErrorBox(
+            "FileX Suite",
+            `Impossibile aggiornare la Dock Station: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      },
+    },
     { type: "separator" },
     ...getSuiteManagedTools().map((tool) => ({
       label: tool.displayName,
@@ -321,7 +376,14 @@ function createTray(): void {
     { type: "separator" },
     { label: "Esci", click: () => app.quit() },
   ]));
-  tray.on("double-click", () => { void createMainWindow(); });
+}
+
+function createTray(): void {
+  if (tray) return;
+  tray = new Tray(iconPath());
+  tray.setToolTip("FileX Suite");
+  updateTrayMenu();
+  tray.on("double-click", () => { void openSuiteExperience(); });
 }
 
 async function checkToolUpdatesInBackground(): Promise<void> {
@@ -332,7 +394,7 @@ async function checkToolUpdatesInBackground(): Promise<void> {
       title: "FileX Suite",
       body: `${count} ${count === 1 ? "aggiornamento è disponibile" : "aggiornamenti sono disponibili"}. Apri FileX Suite per installarli.`,
     });
-    notification.on("click", () => { void createMainWindow(); });
+    notification.on("click", () => { void openSuiteExperience(); });
     notification.show();
   }
   lastNotifiedToolUpdateCount = count;
@@ -386,6 +448,7 @@ function registerIpcHandlers(): void {
   });
   ipcMain.handle("filex:get-suite-dock-state", () => readDockState());
   ipcMain.handle("filex:save-suite-dock-state", (_event, state: Partial<DesktopDockState>) => saveDockState(state));
+  ipcMain.handle("filex:set-suite-dock-enabled", (_event, enabled: boolean) => setDockEnabled(enabled !== false));
   ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => getLicenseState(Boolean(refresh)));
   ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) => activateLicense(licenseKey, deviceLabel));
   ipcMain.handle("filex:deactivate-license", () => deactivateLicense());
@@ -403,9 +466,21 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => { void createMainWindow(); });
+  app.on("second-instance", () => { void openSuiteExperience(); });
   app.whenReady().then(async () => {
     registerIpcHandlers();
+    const initialDockState = await readDockState();
+    dockEnabled = resolveSuiteDockEnabled(initialDockState);
+    const startupPolicy = resolveSuiteStartupPolicy({ startsInBackground, dockEnabled });
+    if (isPackagedSmokeTest) {
+      if (!startupPolicy.createDock) throw new Error("La Dock deve essere attiva nel profilo smoke test.");
+      await createDock();
+      if (!dockWindow || dockWindow.isDestroyed() || dockWindow.getTitle() !== "FileX Suite Dock") {
+        throw new Error("La Dock impacchettata non e' stata creata correttamente.");
+      }
+      app.exit(0);
+      return;
+    }
     configureSuiteUpdater({
       currentVersion: app.getVersion(),
       enabled: app.isPackaged && process.platform === "win32",
@@ -423,9 +498,9 @@ if (!hasSingleInstanceLock) {
         args: ["--filex-background"],
       });
     }
-    if (!startsInBackground) await createMainWindow();
+    if (startupPolicy.createMainWindow) await createMainWindow();
     createTray();
-    if (!startsInBackground) await createDock();
+    if (startupPolicy.createDock) await createDock();
     startToolUpdateChecks();
     if (app.isPackaged) setTimeout(() => { void checkSuiteUpdate(); }, 3500);
   }).catch((error) => {
@@ -434,7 +509,7 @@ if (!hasSingleInstanceLock) {
   });
 }
 
-app.on("activate", () => { void createMainWindow(); });
+app.on("activate", () => { void openSuiteExperience(); });
 app.on("window-all-closed", () => undefined);
 app.on("before-quit", () => {
   if (toolUpdateTimer) clearInterval(toolUpdateTimer);
