@@ -450,9 +450,13 @@ function reservationKey(filePath: string): string {
   const resolved = path.resolve(filePath);
   let canonical = resolved;
   try {
-    canonical = path.join(fs.realpathSync(path.dirname(resolved)), path.basename(resolved));
+    canonical = fs.realpathSync(resolved);
   } catch {
-    // The output parent can legitimately be absent until the validated job starts.
+    try {
+      canonical = path.join(fs.realpathSync(path.dirname(resolved)), path.basename(resolved));
+    } catch {
+      // The output parent can legitimately be absent until the validated job starts.
+    }
   }
   return process.platform === "win32" || process.platform === "darwin" ? canonical.toLowerCase() : canonical;
 }
