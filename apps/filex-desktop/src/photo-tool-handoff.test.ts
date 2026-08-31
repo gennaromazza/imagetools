@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -149,7 +149,7 @@ test("scrive soli riferimenti, avvia il target e attende una ricevuta autenticat
   }]);
   const manifest = JSON.parse(rawManifest) as Record<string, unknown>;
   assert.equal(manifest.schemaVersion, 2);
-  assert.equal(manifest.sourceRoot, fixture.sourceRoot);
+  assert.equal(manifest.sourceRoot, await realpath(fixture.sourceRoot));
   assert.equal(manifest.targetToolId, "batch-print-layout");
   assert.equal((manifest.files as unknown[]).length, 2);
   assert.match(String(manifest.acknowledgementSecret), /^[0-9a-f]{64}$/);

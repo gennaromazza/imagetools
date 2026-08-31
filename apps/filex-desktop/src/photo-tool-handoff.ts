@@ -20,6 +20,7 @@ import {
   dirname,
   isAbsolute,
   join,
+  parse,
   relative,
   resolve,
   sep,
@@ -222,8 +223,24 @@ async function assertRealPathWithoutLinks(
     throw new Error(`Il percorso non esiste o non è accessibile: ${inputPath}`);
   }
 
-  if (pathStat.isSymbolicLink() || !pathsMatch(inputPath, canonicalPath)) {
-    throw new Error(`I collegamenti simbolici non sono ammessi nell'handoff: ${inputPath}`);
+  const resolvedInputPath = resolve(inputPath);
+  const rootPath = parse(resolvedInputPath).root;
+  const pathSegments = resolvedInputPath
+    .slice(rootPath.length)
+    .split(sep)
+    .filter(Boolean);
+  let currentPath = rootPath;
+  for (const segment of pathSegments) {
+    currentPath = join(currentPath, segment);
+    let segmentStat;
+    try {
+      segmentStat = await lstat(currentPath);
+    } catch {
+      throw new Error(`Il percorso non esiste o non è accessibile: ${inputPath}`);
+    }
+    if (segmentStat.isSymbolicLink()) {
+      throw new Error(`I collegamenti simbolici non sono ammessi nell'handoff: ${inputPath}`);
+    }
   }
   if (expectedType === "directory" && !pathStat.isDirectory()) {
     throw new Error(`La radice sorgente non è una cartella: ${inputPath}`);
