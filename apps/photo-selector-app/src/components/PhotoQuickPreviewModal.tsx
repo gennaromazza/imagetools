@@ -44,6 +44,11 @@ import {
   resolvePhotoClassificationShortcut
 } from "../services/photo-classification";
 import type { ThumbnailProfile } from "../services/photo-selector-preferences";
+import {
+  getAssetRotation,
+  getRotatedContentFitScale,
+  type RotationDirection,
+} from "../services/photo-rotation";
 
 interface PreviewPageTarget {
   id: string;
@@ -79,11 +84,12 @@ interface PhotoQuickPreviewModalProps {
   onAutoAdvanceOnActionChange?: (enabled: boolean) => void;
   onClose: () => void;
   onSelectAsset?: (assetId: string) => void;
+  onRotateAsset?: (assetId: string, direction: RotationDirection) => void;
   onAddToPage?: (pageId: string, assetId: string) => void;
   onJumpToPage?: (pageId: string) => void;
   onUpdateAsset?: (
     assetId: string,
-    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>
+    changes: Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels" | "rotationDegrees">>
   ) => void;
 }
 
@@ -243,6 +249,7 @@ export function PhotoQuickPreviewModal({
   onAutoAdvanceOnActionChange,
   onClose,
   onSelectAsset,
+  onRotateAsset,
   onAddToPage,
   onJumpToPage,
   onUpdateAsset
@@ -514,6 +521,30 @@ export function PhotoQuickPreviewModal({
     }
     return summary;
   }, [asset, groupSummaryByKey]);
+  const rotationDegrees = asset ? getAssetRotation(asset) : 0;
+  const compareRotationDegrees = compareAsset ? getAssetRotation(compareAsset) : 0;
+  const rotationFitScale = getRotatedContentFitScale(
+    stageViewport.width,
+    stageViewport.height,
+    asset?.width ?? 0,
+    asset?.height ?? 0,
+    rotationDegrees,
+  );
+  const comparePanelWidth = Math.max(0, (stageViewport.width - 48) / 2);
+  const currentCompareRotationFitScale = getRotatedContentFitScale(
+    comparePanelWidth,
+    Math.max(0, stageViewport.height - 32),
+    asset?.width ?? 0,
+    asset?.height ?? 0,
+    rotationDegrees,
+  );
+  const compareRotationFitScale = getRotatedContentFitScale(
+    comparePanelWidth,
+    Math.max(0, stageViewport.height - 32),
+    compareAsset?.width ?? 0,
+    compareAsset?.height ?? 0,
+    compareRotationDegrees,
+  );
   const assetAbsolutePath = asset ? getAssetAbsolutePath(asset.id) : undefined;
   const compareAssetAbsolutePath = compareAsset ? getAssetAbsolutePath(compareAsset.id) : undefined;
   const canUseDesktopQuickPreview = Boolean(desktopQuickPreviewEnabled && assetAbsolutePath);
@@ -1637,9 +1668,12 @@ export function PhotoQuickPreviewModal({
 
     const safeWidth = Math.max(1, asset.width);
     const safeHeight = Math.max(1, asset.height);
-    const fitScale = Math.min(stageWidth / safeWidth, stageHeight / safeHeight);
-    const renderedWidth = safeWidth * fitScale;
-    const renderedHeight = safeHeight * fitScale;
+    const quarterTurn = rotationDegrees === 90 || rotationDegrees === 270;
+    const rotatedWidth = quarterTurn ? safeHeight : safeWidth;
+    const rotatedHeight = quarterTurn ? safeWidth : safeHeight;
+    const fitScale = Math.min(stageWidth / rotatedWidth, stageHeight / rotatedHeight);
+    const renderedWidth = rotatedWidth * fitScale;
+    const renderedHeight = rotatedHeight * fitScale;
     const maxX = Math.max(0, (renderedWidth * zoom - stageWidth) / 2);
     const maxY = Math.max(0, (renderedHeight * zoom - stageHeight) / 2);
 
@@ -1647,7 +1681,11 @@ export function PhotoQuickPreviewModal({
       x: Math.max(-maxX, Math.min(maxX, x)),
       y: Math.max(-maxY, Math.min(maxY, y)),
     };
-  }, [asset, stageViewport.height, stageViewport.width, zoomLevel]);
+  }, [asset, rotationDegrees, stageViewport.height, stageViewport.width, zoomLevel]);
+
+  const buildImageTransform = useCallback((offset: { x: number; y: number }, zoom: number) => (
+    `translate3d(${offset.x}px, ${offset.y}px, 0) rotate(${rotationDegrees}deg) scale(${zoom * rotationFitScale})`
+  ), [rotationDegrees, rotationFitScale]);
 
   const commitPanOffset = useCallback((nextPanOffset: { x: number; y: number }) => {
     pendingPanOffsetRef.current = nextPanOffset;
@@ -1665,10 +1703,10 @@ export function PhotoQuickPreviewModal({
       pendingPanOffsetRef.current = null;
       panOffsetRef.current = pendingPanOffset;
       if (mainImageRef.current) {
-        mainImageRef.current.style.transform = `translate3d(${pendingPanOffset.x}px, ${pendingPanOffset.y}px, 0) scale(${zoomLevel})`;
+        mainImageRef.current.style.transform = buildImageTransform(pendingPanOffset, zoomLevel);
       }
     });
-  }, [zoomLevel]);
+  }, [buildImageTransform, zoomLevel]);
 
   const persistPanOffset = useCallback((nextPanOffset: { x: number; y: number }, zoom = zoomLevel) => {
     if (panAnimationFrameRef.current !== null) {
@@ -1678,14 +1716,22 @@ export function PhotoQuickPreviewModal({
     pendingPanOffsetRef.current = null;
     panOffsetRef.current = nextPanOffset;
     if (mainImageRef.current) {
-      mainImageRef.current.style.transform = `translate3d(${nextPanOffset.x}px, ${nextPanOffset.y}px, 0) scale(${zoom})`;
+      mainImageRef.current.style.transform = buildImageTransform(nextPanOffset, zoom);
     }
     setPanOffset(nextPanOffset);
-  }, [zoomLevel]);
+  }, [buildImageTransform, zoomLevel]);
 
   const persistPendingPanOffset = useCallback(() => {
     persistPanOffset(pendingPanOffsetRef.current ?? panOffsetRef.current);
   }, [persistPanOffset]);
+
+  const updateRotation = useCallback((direction: RotationDirection) => {
+    if (!asset || !onRotateAsset) {
+      return;
+    }
+    persistPanOffset({ x: 0, y: 0 });
+    onRotateAsset(asset.id, direction);
+  }, [asset, onRotateAsset, persistPanOffset]);
 
   const applyZoom = useCallback((nextZoom: number) => {
     // Cap massimo alzato a 12x per supportare zoom 1:1 pixel-perfect
@@ -1837,6 +1883,20 @@ export function PhotoQuickPreviewModal({
         return;
       }
 
+      if (
+        (event.ctrlKey || event.metaKey)
+        && !event.shiftKey
+        && !event.altKey
+        && event.key.toLowerCase() === "r"
+        && onRotateAsset
+      ) {
+        event.preventDefault();
+        if (!event.repeat) {
+          updateRotation("right");
+        }
+        return;
+      }
+
       if (!event.ctrlKey && !event.metaKey && !event.altKey) {
         const shortcutLabel = customLabelByShortcut.get(event.key.toUpperCase() as CustomLabelShortcut);
         if (shortcutLabel) {
@@ -1943,11 +2003,13 @@ export function PhotoQuickPreviewModal({
     onAddToPage,
     onClose,
     onUpdateAsset,
+    onRotateAsset,
     announceClassificationFeedback,
     panBy,
     toggleCustomLabel,
     toggleNativeFullscreen,
     toggleZoom,
+    updateRotation,
     zoomLevel,
   ]);
 
@@ -2616,6 +2678,27 @@ export function PhotoQuickPreviewModal({
             >
               {zoomLevel > 1.05 ? "Adatta" : "Zoom 220%"}
             </button>
+            {onRotateAsset ? (
+              <div className="quick-preview__rotation-actions" aria-label="Rotazione foto">
+                <button
+                  type="button"
+                  className="ghost-button quick-preview__action"
+                  onClick={() => updateRotation("left")}
+                  title="Ruota 90° a sinistra"
+                >
+                  ↶ Sinistra
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button quick-preview__action"
+                  onClick={() => updateRotation("right")}
+                  title="Ruota 90° a destra · Ctrl+R"
+                  aria-keyshortcuts="Control+R"
+                >
+                  ↷ Destra
+                </button>
+              </div>
+            ) : null}
             <button
               type="button"
               className="ghost-button quick-preview__action"
@@ -2917,6 +3000,9 @@ export function PhotoQuickPreviewModal({
                     onError={handleMainPreviewError}
                     onDoubleClick={toggleNativeFullscreen}
                     onDragStart={(event) => handleExternalDragStart(asset.id, event)}
+                    style={{
+                      transform: `rotate(${rotationDegrees}deg) scale(${currentCompareRotationFitScale})`,
+                    }}
                   />
                 ) : (
                   <div className="quick-preview__placeholder">
@@ -2941,6 +3027,9 @@ export function PhotoQuickPreviewModal({
                     onError={handleComparePreviewError}
                     onDoubleClick={toggleNativeFullscreen}
                     onDragStart={(event) => handleExternalDragStart(compareAsset.id, event)}
+                    style={{
+                      transform: `rotate(${compareRotationDegrees}deg) scale(${compareRotationFitScale})`,
+                    }}
                   />
                 ) : (
                   <div className="quick-preview__placeholder">
@@ -2979,7 +3068,7 @@ export function PhotoQuickPreviewModal({
                 handleExternalDragStart(asset.id, event);
               }}
               style={{
-                transform: `translate3d(${isPanning ? panOffsetRef.current.x : panOffset.x}px, ${isPanning ? panOffsetRef.current.y : panOffset.y}px, 0) scale(${zoomLevel})`,
+                transform: buildImageTransform(isPanning ? panOffsetRef.current : panOffset, zoomLevel),
               }}
             />
           ) : (

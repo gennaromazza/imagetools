@@ -16,6 +16,7 @@ import {
 } from "../services/photo-classification";
 import { isRawFile } from "../services/folder-access";
 import type { CustomLabelShortcut, CustomLabelTone } from "../services/photo-selector-preferences";
+import { getAssetRotation, getRotatedContentFitScale, type RotationDirection } from "../services/photo-rotation";
 
 function formatFileSize(bytes: number): string {
   if (!bytes || bytes <= 0) return "0 B";
@@ -47,6 +48,7 @@ interface PhotoCardProps {
   onAfterShortcutClassification?: (id: string) => void;
   onFocus: (id: string) => void;
   onPreview: (id: string) => void;
+  onRotate: (id: string, direction: RotationDirection) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
   onExternalDragStart?: (id: string, event: DragEvent<HTMLDivElement>) => void;
   canExternalDrag?: boolean;
@@ -106,6 +108,7 @@ export const PhotoCard = memo(
     onAfterShortcutClassification,
     onFocus,
     onPreview,
+    onRotate,
     onContextMenu,
     onExternalDragStart,
     canExternalDrag = false,
@@ -130,6 +133,14 @@ export const PhotoCard = memo(
     const customLabels = photo.customLabels ?? [];
     const raw = isRawFile(photo.fileName);
     const isRawJpgGroup = photo.groupKind === "raw+jpg";
+    const rotationDegrees = getAssetRotation(photo);
+    const rotationFitScale = getRotatedContentFitScale(
+      4,
+      3,
+      photo.width,
+      photo.height,
+      rotationDegrees,
+    );
 
     const prevClassRef = useRef({ rating, pickStatus, colorLabel, customLabels });
     const cardRef = useRef<HTMLDivElement>(null);
@@ -339,7 +350,7 @@ export const PhotoCard = memo(
         tabIndex={0}
         aria-selected={isSelected}
         aria-label={`${photo.fileName}${isSelected ? ", selezionata" : ", non selezionata"}`}
-        aria-keyshortcuts="Enter Space 1 2 3 4 5 P X U"
+        aria-keyshortcuts="Enter Space Control+R 1 2 3 4 5 P X U"
         ref={cardRef}
         data-preview-asset-id={photo.id}
         draggable={canExternalDrag}
@@ -407,6 +418,20 @@ export const PhotoCard = memo(
             onPreview(photo.id);
             return;
           }
+          if (
+            editable
+            && (event.ctrlKey || event.metaKey)
+            && !event.shiftKey
+            && !event.altKey
+            && event.key.toLowerCase() === "r"
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!event.repeat) {
+              onRotate(photo.id, "right");
+            }
+            return;
+          }
           if (editable) {
             const changes = resolvePhotoClassificationShortcut({
               key: event.key,
@@ -437,6 +462,9 @@ export const PhotoCard = memo(
               className="photo-card__image"
               loading="lazy"
               decoding="async"
+              style={{
+                transform: `rotate(${rotationDegrees}deg) scale(${rotationFitScale})`,
+              }}
             />
           ) : (
             <div
@@ -447,6 +475,29 @@ export const PhotoCard = memo(
               <span className="photo-card__placeholder-icon">{raw ? "📷" : orientationIcon}</span>
             </div>
           )}
+
+          {editable ? (
+            <div className="photo-card__rotation-actions" onClick={(event) => event.stopPropagation()}>
+              <button
+                type="button"
+                className="photo-card__rotate-button"
+                onClick={() => onRotate(photo.id, "left")}
+                title="Ruota 90° a sinistra"
+                aria-label={`Ruota ${photo.fileName} a sinistra`}
+              >
+                ↶
+              </button>
+              <button
+                type="button"
+                className="photo-card__rotate-button"
+                onClick={() => onRotate(photo.id, "right")}
+                title="Ruota 90° a destra · Ctrl+R"
+                aria-label={`Ruota ${photo.fileName} a destra`}
+              >
+                ↷
+              </button>
+            </div>
+          ) : null}
 
           <div className="photo-card__top-badges">
             <span className={`asset-pick-badge asset-pick-badge--${pickStatus}`}>
@@ -659,6 +710,7 @@ export const PhotoCard = memo(
     prev.photo.width === next.photo.width &&
     prev.photo.height === next.photo.height &&
     prev.photo.orientation === next.photo.orientation &&
+    getAssetRotation(prev.photo) === getAssetRotation(next.photo) &&
     areLabelArraysEqual(prev.photo.customLabels, next.photo.customLabels) &&
     getAssetRating(prev.photo) === getAssetRating(next.photo) &&
     getAssetPickStatus(prev.photo) === getAssetPickStatus(next.photo) &&

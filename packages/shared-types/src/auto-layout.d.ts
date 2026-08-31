@@ -11,6 +11,7 @@ export type PageSide = "left" | "right" | "single";
 export type TemplateVariantRole = "base" | "mirror-left" | "mirror-right" | "companion-left" | "companion-right";
 export type TemplateStyle = "hero" | "paired" | "balanced-grid" | "editorial" | "collage";
 export type TemplateAffinity = "portrait-heavy" | "landscape-heavy" | "mixed" | "any";
+export type ImageRotation = 0 | 90 | 180 | 270;
 export interface ImageAsset {
     id: string;
     fileName: string;
@@ -23,6 +24,7 @@ export interface ImageAsset {
     pickStatus?: PickStatus;
     colorLabel?: ColorLabel | null;
     customLabels?: string[];
+    rotationDegrees?: ImageRotation;
     width: number;
     height: number;
     orientation: ImageOrientation;

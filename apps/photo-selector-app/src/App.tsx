@@ -57,6 +57,7 @@ import {
   type FolderOpenResult,
 } from "./services/folder-access";
 import { parseXmpState, upsertXmpState } from "./services/xmp-sidecar";
+import { getAssetRotation, normalizeImageRotation } from "./services/photo-rotation";
 import {
   ThumbnailPipeline,
   type ThumbnailPipelineOptions,
@@ -226,6 +227,7 @@ function buildCloudManifest(
       pickStatus: asset.pickStatus ?? "unmarked",
       colorLabel: asset.colorLabel ?? null,
       customLabels: asset.customLabels ?? [],
+      rotationDegrees: getAssetRotation(asset),
       active: activeAssetIds.includes(asset.id),
     })),
   };
@@ -424,6 +426,7 @@ function buildCatalogAssetStateSignature(assetState: DesktopFolderCatalogAssetSt
     assetState.pickStatus,
     assetState.colorLabel ?? null,
     assetState.customLabels ?? [],
+    normalizeImageRotation(assetState.rotationDegrees),
     assetState.active ?? false,
     assetState.classificationUpdatedAt ?? assetState.updatedAt,
     assetState.selectionUpdatedAt ?? assetState.updatedAt,
@@ -498,6 +501,18 @@ function hasUndoableAssetChange(previous: ImageAsset | undefined, next: ImageAss
   return previous.rating !== next.rating
     || previous.pickStatus !== next.pickStatus
     || previous.colorLabel !== next.colorLabel
+    || getAssetRotation(previous) !== getAssetRotation(next)
+    || !areStringArraysEqual(previous.customLabels, next.customLabels);
+}
+
+function hasXmpAssetChange(previous: ImageAsset | undefined, next: ImageAsset): boolean {
+  if (!previous || previous.id !== next.id) {
+    return false;
+  }
+
+  return previous.rating !== next.rating
+    || previous.pickStatus !== next.pickStatus
+    || previous.colorLabel !== next.colorLabel
     || !areStringArraysEqual(previous.customLabels, next.customLabels);
 }
 
@@ -513,6 +528,7 @@ function hasAssetRuntimeStateChange(previous: ImageAsset, next: ImageAsset): boo
     || previous.rating !== next.rating
     || previous.pickStatus !== next.pickStatus
     || previous.colorLabel !== next.colorLabel
+    || getAssetRotation(previous) !== getAssetRotation(next)
     || !areStringArraysEqual(previous.customLabels, next.customLabels);
 }
 
@@ -535,6 +551,7 @@ function mergeUndoableSnapshotAssets(
       pickStatus: snapshotAsset.pickStatus,
       colorLabel: snapshotAsset.colorLabel,
       customLabels: snapshotAsset.customLabels ?? [],
+      rotationDegrees: getAssetRotation(snapshotAsset),
     };
   });
 
@@ -2669,6 +2686,7 @@ export function App() {
                       pickStatus: cachedState.pickStatus,
                       colorLabel: cachedState.colorLabel,
                       customLabels: cachedState.customLabels,
+                      rotationDegrees: normalizeImageRotation(cachedState.rotationDegrees),
                     };
                   });
                   return changed ? next : previousAssets;
@@ -3861,6 +3879,7 @@ export function App() {
     const previousAssets = allAssetsRef.current;
     let hasChanges = false;
     const undoableChangedIds = new Set<string>();
+    const xmpChangedIds = new Set<string>();
 
     const maxLength = Math.max(photos.length, previousAssets.length);
     for (let index = 0; index < maxLength; index += 1) {
@@ -3870,6 +3889,9 @@ export function App() {
         hasChanges = true;
         if (nextAsset && previousAsset && hasUndoableAssetChange(previousAsset, nextAsset)) {
           undoableChangedIds.add(nextAsset.id);
+        }
+        if (nextAsset && previousAsset && hasXmpAssetChange(previousAsset, nextAsset)) {
+          xmpChangedIds.add(nextAsset.id);
         }
       }
     }
@@ -3889,7 +3911,7 @@ export function App() {
       // thumbnail-pipeline's urgent updates and the border change would never commit.
       setAllAssets(photos);
       bumpPhotoMetadataVersion();
-      queueXmpSync(Array.from(undoableChangedIds));
+      queueXmpSync(Array.from(xmpChangedIds));
     } else {
       startTransition(() => {
         setAllAssets(photos);
@@ -3905,6 +3927,7 @@ export function App() {
     const previousAssets = allAssetsRef.current;
     const nextAssets = previousAssets.slice();
     const undoableChangedIds = new Set<string>();
+    const xmpChangedIds = new Set<string>();
     const thumbnailUpdates = new Map<string, ThumbnailViewState>();
     const thumbnailRemovals = new Set<string>();
     let hasChanges = false;
@@ -3949,6 +3972,9 @@ export function App() {
       if (hasUndoableAssetChange(previousAsset, metadataAsset)) {
         undoableChangedIds.add(update.id);
       }
+      if (hasXmpAssetChange(previousAsset, metadataAsset)) {
+        xmpChangedIds.add(update.id);
+      }
     }
 
     if (thumbnailUpdates.size > 0 || thumbnailRemovals.size > 0) {
@@ -3986,7 +4012,7 @@ export function App() {
 
     if (undoableChangedIds.size > 0) {
       bumpPhotoMetadataVersion();
-      queueXmpSync(Array.from(undoableChangedIds));
+      queueXmpSync(Array.from(xmpChangedIds));
     }
   }, [bumpPhotoMetadataVersion, queueXmpSync, undoRedo]);
 
@@ -4237,6 +4263,9 @@ export function App() {
             pickStatus: cloudState?.pickStatus ?? localState?.pickStatus ?? asset.pickStatus ?? "unmarked",
             colorLabel: cloudState?.colorLabel ?? localState?.colorLabel ?? asset.colorLabel ?? null,
             customLabels: cloudState?.customLabels ?? localState?.customLabels ?? asset.customLabels ?? [],
+            rotationDegrees: normalizeImageRotation(
+              cloudState?.rotationDegrees ?? localState?.rotationDegrees ?? asset.rotationDegrees,
+            ),
             updatedAt: now,
           };
         });
@@ -4333,6 +4362,7 @@ export function App() {
           pickStatus: state.pickStatus,
           colorLabel: state.colorLabel,
           customLabels: state.customLabels,
+          rotationDegrees: normalizeImageRotation(state.rotationDegrees),
         };
       });
       handlePhotosChange(nextAssets);

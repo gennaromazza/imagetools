@@ -81,6 +81,7 @@ import { DockableWorkspace } from "./workspace/DockableWorkspace";
 import { useWorkspacePanelLayout } from "./workspace/useWorkspacePanelLayout";
 import { getThumbnailView } from "../services/thumbnail-view-store";
 import { useThumbnailView } from "../services/use-thumbnail-view";
+import { getAssetRotation, rotateImage, type RotationDirection } from "../services/photo-rotation";
 import { PhotoFilterPanel } from "./selector/PhotoFilterPanel";
 import { QuickStatsPanel } from "./selector/QuickStatsPanel";
 import { SelectionActionsPanel } from "./selector/SelectionActionsPanel";
@@ -147,7 +148,7 @@ type CreatedAtSortDirection = "asc" | "desc";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
 type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg" | "psd";
-type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>;
+type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels" | "rotationDegrees">>;
 type BatchPulseKind = "dot" | "label";
 type PreviewFeedbackKind = "star" | "pill" | "dot" | "label";
 type PreviewSyncFeedback = {
@@ -283,6 +284,9 @@ function describeMetadataChanges(
     return changes.customLabels.length > 0
       ? `${subject}: etichette ${changes.customLabels.join(", ")}`
       : `${subject}: etichette personalizzate rimosse`;
+  }
+  if (changes.rotationDegrees !== undefined) {
+    return `${subject}: rotazione ${changes.rotationDegrees}°`;
   }
   return `${subject}: metadati aggiornati`;
 }
@@ -966,11 +970,15 @@ export function PhotoSelector({
       const nextCustomLabels = changes.customLabels !== undefined
         ? normalizeAssetCustomLabels(changes.customLabels)
         : normalizeAssetCustomLabels(photo.customLabels);
+      const nextRotation = changes.rotationDegrees !== undefined
+        ? changes.rotationDegrees
+        : getAssetRotation(photo);
 
       if (
         nextRating === photo.rating &&
         nextPickStatus === photo.pickStatus &&
         nextColorLabel === photo.colorLabel &&
+        nextRotation === getAssetRotation(photo) &&
         areStringArraysEqual(nextCustomLabels, normalizeAssetCustomLabels(photo.customLabels))
       ) {
         return photo;
@@ -981,6 +989,7 @@ export function PhotoSelector({
         ...photo,
         ...changes,
         customLabels: nextCustomLabels,
+        rotationDegrees: nextRotation,
       };
     });
 
@@ -2178,6 +2187,36 @@ export function PhotoSelector({
   // Sposta il focus alla foto successiva (o alla precedente se in fondo).
   // Usato dall'auto-advance dopo una classificazione tramite scorciatoia,
   // per replicare il flusso "Photo Mechanic" — un tasto = una decisione + avanti.
+  const rotatePhotos = useCallback((targetIds: string[], direction: RotationDirection) => {
+    if (!onPhotosChange || targetIds.length === 0) {
+      return;
+    }
+
+    const idSet = new Set(targetIds);
+    const changedIds: string[] = [];
+    const nextPhotos = photos.map((photo) => {
+      if (!idSet.has(photo.id)) {
+        return photo;
+      }
+      changedIds.push(photo.id);
+      return {
+        ...photo,
+        rotationDegrees: rotateImage(photo.rotationDegrees, direction),
+      };
+    });
+
+    if (changedIds.length === 0) {
+      return;
+    }
+
+    onPhotosChange(nextPhotos);
+    const subject = changedIds.length === 1 ? "1 foto" : `${changedIds.length} foto`;
+    const directionLabel = direction === "left" ? "a sinistra" : "a destra";
+    const message = `${subject}: ruotata ${directionLabel}`;
+    pushTimelineEntry(message);
+    addToast(message, "success", 1800);
+  }, [addToast, onPhotosChange, photos, pushTimelineEntry]);
+
   const advanceFocusToNext = useCallback(
     (currentId: string) => {
       if (!autoAdvanceOnAction || visiblePhotoIds.length === 0) return;
@@ -2233,6 +2272,21 @@ export function PhotoSelector({
           } else {
             openCompare();
           }
+          return;
+        }
+        if (normalizedKey === "r") {
+          event.preventDefault();
+          if (event.repeat) {
+            return;
+          }
+          const targetIds = selectedIds.length > 0
+            ? selectedIds
+            : focusedPhotoId
+              ? [focusedPhotoId]
+              : visiblePhotoIds[0]
+                ? [visiblePhotoIds[0]]
+                : [];
+          rotatePhotos(targetIds, "right");
           return;
         }
       }
@@ -2335,6 +2389,7 @@ export function PhotoSelector({
       photos,
       previewAssetId,
       pushTimelineEntry,
+      rotatePhotos,
       scrollPhotoIntoView,
       selectedIds,
       toggleCustomLabelForIds,
@@ -2463,11 +2518,15 @@ export function PhotoSelector({
       const nextCustomLabels = changes.customLabels !== undefined
         ? normalizeAssetCustomLabels(changes.customLabels)
         : currentCustomLabels;
+      const nextRotation = changes.rotationDegrees !== undefined
+        ? changes.rotationDegrees
+        : getAssetRotation(photo);
 
       if (
         nextRating === photo.rating &&
         nextPickStatus === photo.pickStatus &&
         nextColorLabel === photo.colorLabel &&
+        nextRotation === getAssetRotation(photo) &&
         areStringArraysEqual(currentCustomLabels, nextCustomLabels)
       ) {
         return photo;
@@ -2479,6 +2538,7 @@ export function PhotoSelector({
         ...photo,
         ...changes,
         customLabels: nextCustomLabels,
+        rotationDegrees: nextRotation,
       };
     });
 
@@ -2791,6 +2851,13 @@ export function PhotoSelector({
   const handlePreview = useCallback((id: string) => {
     openPreview(id, false);
   }, [openPreview]);
+
+  const handleRotatePhoto = useCallback((id: string, direction: RotationDirection) => {
+    const targetIds = selectedSet.has(id) && selectedIds.length > 1
+      ? selectedIds
+      : [id];
+    rotatePhotos(targetIds, direction);
+  }, [rotatePhotos, selectedIds, selectedSet]);
 
   const handlePreviewAssetSelection = useCallback((assetId: string) => {
     lastPreviewAssetIdRef.current = assetId;
@@ -3697,6 +3764,7 @@ export function PhotoSelector({
                 onAfterShortcutClassification={advanceFocusToNext}
                 onFocus={handleFocus}
                 onPreview={handlePreview}
+                onRotate={handleRotatePhoto}
                 onContextMenu={handleContextMenu}
                 onExternalDragStart={handleCardExternalDragStart}
                 customLabelColors={customLabelColors}
@@ -4004,6 +4072,7 @@ export function PhotoSelector({
         onAutoAdvanceOnActionChange={handleAutoAdvanceChange}
         onClose={closePreview}
         onSelectAsset={handlePreviewAssetSelection}
+        onRotateAsset={handleRotatePhoto}
         onUpdateAsset={handleModalAssetUpdate}
       />
 

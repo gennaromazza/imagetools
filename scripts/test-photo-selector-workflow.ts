@@ -7,6 +7,11 @@ import type {
 import type { ImageAsset } from "@photo-tools/shared-types";
 import { mapCloudProjectToAssets } from "../apps/photo-selector-app/src/services/cloud-project-mapping";
 import { buildMasterProject } from "../apps/photo-selector-app/src/services/project-workflow";
+import {
+  getRotatedContentFitScale,
+  normalizeImageRotation,
+  rotateImage,
+} from "../apps/photo-selector-app/src/services/photo-rotation";
 
 function asset(id: string, path: string, size = 100): ImageAsset {
   return {
@@ -118,5 +123,16 @@ const duplicateCloudRecords = mapCloudProjectToAssets(
 );
 assert.equal(duplicateCloudRecords.stateByAssetId.size, 1);
 assert.equal(duplicateCloudRecords.ambiguousCount, 1);
+
+assert.equal(normalizeImageRotation(undefined), 0);
+assert.equal(normalizeImageRotation(-90), 270);
+assert.equal(rotateImage(0, "right"), 90);
+assert.equal(rotateImage(0, "left"), 270);
+assert.equal(rotateImage(270, "right"), 0);
+assert.equal(getRotatedContentFitScale(1600, 900, 1200, 800, 0), 1);
+assert.ok(
+  Math.abs(getRotatedContentFitScale(1600, 900, 1200, 800, 90) - (2 / 3)) < 0.0001,
+  "La rotazione a quarto di giro deve riadattare l'immagine al contenitore senza tagliarla.",
+);
 
 console.log("PhotoSelector workflow cases: PASS");

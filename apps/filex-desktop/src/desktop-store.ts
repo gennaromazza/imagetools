@@ -196,6 +196,7 @@ function getDatabase(): DatabaseSync {
       pick_status TEXT NOT NULL,
       color_label TEXT,
       custom_labels_json TEXT NOT NULL,
+      rotation_degrees INTEGER NOT NULL DEFAULT 0,
       active INTEGER,
       classification_updated_at INTEGER,
       selection_updated_at INTEGER,
@@ -243,6 +244,9 @@ function getDatabase(): DatabaseSync {
   }
   if (!folderAssetStateColumns.has("selection_updated_at")) {
     db.exec("ALTER TABLE folder_asset_state ADD COLUMN selection_updated_at INTEGER");
+  }
+  if (!folderAssetStateColumns.has("rotation_degrees")) {
+    db.exec("ALTER TABLE folder_asset_state ADD COLUMN rotation_degrees INTEGER NOT NULL DEFAULT 0");
   }
 
   database = db;
@@ -592,7 +596,7 @@ export function getFolderCatalogState(folderPath: string): DesktopFolderCatalogS
 
   const assetRows = db.prepare(`
     SELECT asset_id, file_name, relative_path, absolute_path, source_file_key, rating, pick_status, color_label,
-      custom_labels_json, active, classification_updated_at, selection_updated_at, updated_at
+      custom_labels_json, rotation_degrees, active, classification_updated_at, selection_updated_at, updated_at
     FROM folder_asset_state
     WHERE folder_path = ?
     ORDER BY updated_at DESC
@@ -606,6 +610,7 @@ export function getFolderCatalogState(folderPath: string): DesktopFolderCatalogS
     pick_status: DesktopFolderCatalogAssetState["pickStatus"];
     color_label: DesktopFolderCatalogAssetState["colorLabel"];
     custom_labels_json: string;
+    rotation_degrees: number;
     active: number | null;
     classification_updated_at: number | null;
     selection_updated_at: number | null;
@@ -632,6 +637,7 @@ export function getFolderCatalogState(folderPath: string): DesktopFolderCatalogS
       pickStatus: assetRow.pick_status,
       colorLabel: assetRow.color_label ?? null,
       customLabels: parseJson<string[]>(assetRow.custom_labels_json, []),
+      rotationDegrees: assetRow.rotation_degrees,
       active: assetRow.active === null ? activeAssetIdSet.has(assetRow.asset_id) : assetRow.active !== 0,
       classificationUpdatedAt: assetRow.classification_updated_at ?? assetRow.updated_at,
       selectionUpdatedAt: assetRow.selection_updated_at ?? row.updated_at,
@@ -699,12 +705,13 @@ export function saveFolderAssetStates(
       pick_status,
       color_label,
       custom_labels_json,
+      rotation_degrees,
       active,
       classification_updated_at,
       selection_updated_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   runInTransaction(() => {
     deleteStatement.run(folderPath);
@@ -720,6 +727,7 @@ export function saveFolderAssetStates(
         assetState.pickStatus,
         assetState.colorLabel ?? null,
         serialize(assetState.customLabels),
+        assetState.rotationDegrees ?? 0,
         assetState.active === undefined ? null : assetState.active ? 1 : 0,
         assetState.classificationUpdatedAt ?? assetState.updatedAt,
         assetState.selectionUpdatedAt ?? assetState.updatedAt,
@@ -750,12 +758,13 @@ export function saveFolderAssetStatesDelta(
       pick_status,
       color_label,
       custom_labels_json,
+      rotation_degrees,
       active,
       classification_updated_at,
       selection_updated_at,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(folder_path, asset_id) DO UPDATE SET
       file_name = excluded.file_name,
       relative_path = excluded.relative_path,
@@ -765,6 +774,7 @@ export function saveFolderAssetStatesDelta(
       pick_status = excluded.pick_status,
       color_label = excluded.color_label,
       custom_labels_json = excluded.custom_labels_json,
+      rotation_degrees = excluded.rotation_degrees,
       active = excluded.active,
       classification_updated_at = excluded.classification_updated_at,
       selection_updated_at = excluded.selection_updated_at,
@@ -784,6 +794,7 @@ export function saveFolderAssetStatesDelta(
         assetState.pickStatus,
         assetState.colorLabel ?? null,
         serialize(assetState.customLabels),
+        assetState.rotationDegrees ?? 0,
         assetState.active === undefined ? null : assetState.active ? 1 : 0,
         assetState.classificationUpdatedAt ?? assetState.updatedAt,
         assetState.selectionUpdatedAt ?? assetState.updatedAt,

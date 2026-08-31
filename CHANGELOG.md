@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-31 - Image Select Pro 0.1.35
+
+- Aggiunta la rotazione non distruttiva a sinistra e a destra direttamente dalla griglia principale e dalla Quick Preview.
+- Aggiunta la scorciatoia `Ctrl+R` per ruotare di 90° a destra la foto corrente o tutte le foto selezionate.
+- La rotazione partecipa a undo/redo e viene salvata nei progetti, nelle selezioni libere e nei backup Google Drive senza modificare gli originali o i sidecar XMP.
+
 ## 2026-08-31 - FileX ID Photo 0.1.0
 
 - Prima release del flusso professionale Commessa, Prepara, Verifica, Impagina ed Esporta per fototessere CIE, passaporto italiano e formato studio generico.

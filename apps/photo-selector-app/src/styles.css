@@ -2220,6 +2220,50 @@ img {
   height: 100%;
   object-fit: contain;
   display: block;
+  transform-origin: center center;
+  transition: transform 140ms ease-out;
+}
+
+.photo-card__rotation-actions {
+  position: absolute;
+  top: 0.35rem;
+  right: 2.55rem;
+  z-index: 4;
+  display: inline-flex;
+  gap: 0.25rem;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity 100ms ease-out, transform 100ms ease-out;
+}
+
+.photo-card:hover .photo-card__rotation-actions,
+.photo-card:focus-within .photo-card__rotation-actions,
+.photo-card--selected .photo-card__rotation-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.photo-card__rotate-button {
+  display: grid;
+  place-items: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(12, 14, 13, 0.82);
+  color: #fff7eb;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.photo-card__rotate-button:hover,
+.photo-card__rotate-button:focus-visible {
+  border-color: rgba(226, 155, 88, 0.72);
+  background: rgba(96, 67, 42, 0.9);
+  outline: none;
 }
 
 .photo-card__image--placeholder {
@@ -3358,6 +3402,12 @@ img {
   border-color: rgba(226, 155, 88, 0.4);
   background: rgba(226, 155, 88, 0.14);
   color: #fff5e8;
+}
+
+.quick-preview__rotation-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
 }
 
 .quick-preview__auto-advance {

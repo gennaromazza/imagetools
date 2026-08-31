@@ -108,6 +108,7 @@ const asset: ImageAsset = {
   pickStatus: "picked",
   colorLabel: "green",
   customLabels: ["portfolio"],
+  rotationDegrees: 90,
 };
 const assetStates = buildWorkspaceAssetStates(
   [asset],
@@ -118,6 +119,7 @@ const assetStates = buildWorkspaceAssetStates(
 assert.equal(assetStates[0]?.active, false);
 assert.equal(assetStates[0]?.classificationUpdatedAt, 123);
 assert.equal(assetStates[0]?.selectionUpdatedAt, 123);
+assert.equal(assetStates[0]?.rotationDegrees, 90);
 const unchangedAssetStates = buildWorkspaceAssetStates(
   [asset],
   200,
@@ -142,6 +144,15 @@ const reclassifiedAssetStates = buildWorkspaceAssetStates(
 );
 assert.equal(reclassifiedAssetStates[0]?.classificationUpdatedAt, 400);
 assert.equal(reclassifiedAssetStates[0]?.selectionUpdatedAt, 300);
+const rotatedAssetStates = buildWorkspaceAssetStates(
+  [{ ...asset, rotationDegrees: 180 }],
+  500,
+  () => "E:\\DCIM\\100CANON\\IMG_0001.CR3",
+  { activeAssetIds: [asset.id], previousStates: selectedAssetStates },
+);
+assert.equal(rotatedAssetStates[0]?.rotationDegrees, 180);
+assert.equal(rotatedAssetStates[0]?.classificationUpdatedAt, 500);
+assert.equal(rotatedAssetStates[0]?.selectionUpdatedAt, 300);
 const emptySelectionSnapshot = buildFreeSelectionSnapshot({
   source: fallbackE,
   displayName: "Selezione sul campo",
@@ -208,6 +219,9 @@ assert.match(headerSource, /Modalità libera/);
 assert.doesNotMatch(desktopStoreSource, /ALTER TABLE recent_folders ADD COLUMN mode TEXT DEFAULT 'free'/);
 assert.match(desktopStoreSource, /row\.mode === "free" \? "free" : undefined/);
 assert.match(desktopStoreSource, /classification_updated_at/);
+assert.match(desktopStoreSource, /rotation_degrees INTEGER NOT NULL DEFAULT 0/);
+assert.match(desktopStoreSource, /rotationDegrees: assetRow\.rotation_degrees/);
+assert.match(appSource, /rotationDegrees: normalizeImageRotation\(cachedState\.rotationDegrees\)/);
 assert.match(desktopStoreSource, /selectionUpdatedAt: assetRow\.selection_updated_at \?\? row\.updated_at/);
 assert.match(nativeFolderSource, /if \(depth === 0\) \{\s*throw error;/);
 assert.match(nativeFolderSource, /unreadableDirectoryCount \+= 1;\s*return;/);

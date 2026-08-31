@@ -4,6 +4,7 @@ import type {
   DesktopPhotoSelectorProjectLocation,
 } from "@photo-tools/desktop-contracts";
 import type { ImageAsset } from "@photo-tools/shared-types";
+import { getAssetRotation, normalizeImageRotation } from "./photo-rotation";
 
 function normalizePath(value: string | undefined): string {
   return (value ?? "").replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+|\/+$/g, "").toLocaleLowerCase();
@@ -23,7 +24,8 @@ function stateEditScore(state: DesktopFolderCatalogAssetState): number {
   return (state.rating > 0 ? 8 : 0)
     + (state.pickStatus !== "unmarked" ? 4 : 0)
     + (state.colorLabel ? 2 : 0)
-    + (state.customLabels.length > 0 ? 1 : 0);
+    + (state.customLabels.length > 0 ? 1 : 0)
+    + (normalizeImageRotation(state.rotationDegrees) !== 0 ? 1 : 0);
 }
 
 function chooseState(
@@ -107,6 +109,7 @@ export function buildMasterProject(
         pickStatus: "unmarked",
         colorLabel: null,
         customLabels: [],
+        rotationDegrees: 0,
         updatedAt: 0,
       });
       selected ||= selectedLegacyPaths.has(key);
@@ -119,7 +122,8 @@ export function buildMasterProject(
       && (legacyState.rating > 0
         || legacyState.pickStatus !== "unmarked"
         || legacyState.colorLabel !== null
-        || legacyState.customLabels.length > 0);
+        || legacyState.customLabels.length > 0
+        || normalizeImageRotation(legacyState.rotationDegrees) !== 0);
     if (hasMigratedMetadata) {
       migratedMetadataCount += 1;
     }
@@ -138,6 +142,9 @@ export function buildMasterProject(
       pickStatus: legacyState?.pickStatus ?? "unmarked",
       colorLabel: legacyState?.colorLabel ?? null,
       customLabels: legacyState?.customLabels ?? [],
+      rotationDegrees: legacyState
+        ? normalizeImageRotation(legacyState.rotationDegrees)
+        : getAssetRotation(asset),
       active: selected,
       classificationUpdatedAt,
       selectionUpdatedAt,

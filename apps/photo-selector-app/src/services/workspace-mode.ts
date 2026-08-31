@@ -6,6 +6,7 @@ import type {
 } from "@photo-tools/desktop-contracts";
 import type { ImageAsset } from "@photo-tools/shared-types";
 import type { FolderEntry } from "./folder-access";
+import { getAssetRotation, normalizeImageRotation } from "./photo-rotation";
 
 function hashString(value: string): string {
   let hash = 2166136261;
@@ -81,12 +82,14 @@ export function buildWorkspaceAssetStates(
     const pickStatus = asset.pickStatus ?? "unmarked";
     const colorLabel = asset.colorLabel ?? null;
     const customLabels = asset.customLabels ?? [];
+    const rotationDegrees = getAssetRotation(asset);
     const previous = previousByPath.get(normalizeInventoryPath(asset.path));
     const classificationUnchanged = Boolean(
       previous
       && previous.rating === rating
       && previous.pickStatus === pickStatus
       && previous.colorLabel === colorLabel
+      && normalizeImageRotation(previous.rotationDegrees) === rotationDegrees
       && previous.customLabels.length === customLabels.length
       && previous.customLabels.every((label, index) => label === customLabels[index]),
     );
@@ -108,6 +111,7 @@ export function buildWorkspaceAssetStates(
       pickStatus,
       colorLabel,
       customLabels,
+      rotationDegrees,
       active,
       classificationUpdatedAt,
       selectionUpdatedAt,

@@ -32,6 +32,8 @@ export type TemplateAffinity =
   | "mixed"
   | "any";
 
+export type ImageRotation = 0 | 90 | 180 | 270;
+
 export interface ImageAsset {
   id: string;
   fileName: string;
@@ -44,6 +46,7 @@ export interface ImageAsset {
   pickStatus?: PickStatus;
   colorLabel?: ColorLabel | null;
   customLabels?: string[];
+  rotationDegrees?: ImageRotation;
   width: number;
   height: number;
   orientation: ImageOrientation;
