@@ -2,9 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const root = resolve("website", "guide");
-const idPhotoProductHtml = await readFile(resolve("website", "strumenti", "id-photo", "index.html"), "utf8");
-const idPhotoUpcomingMatch = idPhotoProductHtml.match(/in arrivo con (?:FileX )?Suite\s+([0-9]+\.[0-9]+\.[0-9]+)/i);
-const idPhotoUpcomingVersion = idPhotoUpcomingMatch?.[1] ?? null;
+const idPhotoUpcomingVersion = null;
 const idPhotoUpcomingLabel = idPhotoUpcomingVersion ? ` · In arrivo con Suite ${idPhotoUpcomingVersion}` : "";
 const guides = [
   ["selezionare-foto-raw", "Image Select Pro", "Selezione e classificazione", "Come selezionare foto RAW e JPEG con Image Select Pro", "Selezionare un servizio senza perdere tempo tra raffiche e scatti quasi uguali.", "Dopo l'importazione, prima di ritocco e consegna."],
@@ -13,7 +11,7 @@ const guides = [
   ["software-invio-file-clienti-qr", "FileX Send", "Invio e ricezione", "Come ricevere foto dai clienti con QR e link usando FileX Send", "Ricevere o consegnare foto e altri file in studio e a distanza, senza chiedere al cliente di installare un'app.", "Al banco dello studio, durante un evento o per uno scambio di file a distanza."],
   ["software-photo-booth-matrimoni-eventi", "Image Party Frame", "Photo booth per eventi", "Software per photo booth a matrimoni ed eventi: Image Party Frame", "Automatizzare il passaggio dalle foto scattate alle immagini incorniciate, pronte per stampa o pubblicazione online.", "Durante matrimoni ed eventi, dopo aver scaricato le fotografie sul PC."],
   ["impaginare-foto-per-la-stampa", "Batch Print Layout", "Impaginazione e stampa", "Come stampare più foto su un unico foglio con Batch Print Layout", "Ottimizzare carta, tempi e formati impaginando automaticamente più fotografie su ogni stampa.", "Quando il formato della stampante è più grande delle singole fotografie da consegnare."],
-  ["preparare-fototessere-documenti", "FileX ID Photo", "Fototessere professionali", "Come preparare fototessere per documenti con FileX ID Photo", "Gestire crop, controlli tecnici, passaggio Photoshop e fogli 10×15 o 15×20 senza modificare l’originale.", "Quando lo studio deve preparare e impaginare fotografie per documenti d’identità."],
+  ["preparare-fototessere-documenti", "FileX ID Photo", "Fototessere e passaporti", "Come preparare fototessere e foto passaporto con FileX ID Photo", "Preparare e stampare più velocemente fototessere per carte d’identità e passaporti.", "Quando lo studio deve creare foto per documenti e fogli pronti da stampare."],
   ["convertire-foto-per-web-stampa-archivio", "Image Converter", "Conversione fotografica", "Come convertire foto in JPG, WebP e DNG con Image Converter", "Creare copie coerenti per web, social, stampa, revisione o archivio senza modificare gli originali.", "Dopo selezione e sviluppo, prima della pubblicazione, consegna o archiviazione."],
   ["ritrovare-foto-in-archivio", "Trova Foto da Lista", "Ricerca nell'archivio", "Come trovare le foto scelte dal cliente da un elenco", "Trasformare l'elenco scelto nella gallery online in una cartella pronta per Lightroom.", "Dopo la selezione del cliente, prima di sviluppo, ritocco o stampa."],
   ["pulire-cache-adobe-in-sicurezza", "FileX Adobe Cleaner", "Manutenzione Adobe", "Come pulire cache Adobe con FileX Adobe Cleaner", "Liberare spazio distinguendo cache ricreabili, anteprime delicate e vecchie installazioni Adobe.", "Quando il disco si riempie o durante la manutenzione della postazione Adobe."]
@@ -67,13 +65,13 @@ for (const guide of guides) {
   if (guide.slug === "preparare-fototessere-documenti") {
     const idPhotoDescription = idPhotoUpcomingVersion
       ? `Anteprima del manuale di FileX ID Photo, in arrivo con Suite ${idPhotoUpcomingVersion}: crop, Photoshop, fogli 10×15 o 15×20 e verifica SHA-256 degli output.`
-      : "Manuale di FileX ID Photo per fotografi: crop, Photoshop, fogli 10×15 o 15×20 e verifica SHA-256 degli output.";
+      : "Manuale di FileX ID Photo per fotografi: fototessere, carte d’identità, passaporti e fogli pronti da stampare.";
     const lead = idPhotoUpcomingVersion
       ? `<p class="lead"><strong>Anteprima:</strong> FileX ID Photo non è ancora incluso nella Suite stabile ed è previsto con FileX Suite ${idPhotoUpcomingVersion}. Il flusso separa preparazione, verifica ed export, così ogni decisione resta visibile all’operatore.</p>`
-      : '<p class="lead">Il flusso separa preparazione, verifica ed export, così ogni decisione resta visibile all’operatore.</p>';
+      : '<p class="lead">Dalla foto del cliente al foglio pronto da stampare: FileX ID Photo guida il fotografo nella preparazione di fototessere per carte d’identità e passaporti.</p>';
     const note = idPhotoUpcomingVersion
       ? '<p class="note">Questa guida anticipa il flusso della prima release. La verifica SHA-256 riguarda l’integrità dell’output: l’esito documentale resta responsabilità dell’ente e del fotografo, mentre la resa fisica va controllata con una stampa al 100%. FileX ID Photo non è ancora scaricabile dalla Suite stabile e non effettua stampa diretta.</p>'
-      : '<p class="note">La verifica SHA-256 riguarda l’integrità dell’output: l’esito documentale resta responsabilità dell’ente e del fotografo, mentre la resa fisica va controllata con una stampa al 100%. FileX ID Photo non effettua stampa diretta.</p>';
+      : '<p class="note">FileX aiuta a preparare il lavoro e crea fogli pronti per la stampante. Il fotografo deve comunque controllare le richieste dell’ente e stampare al 100%, senza adattamento pagina.</p>';
     html = html
       .replace(/<meta name="description" content=".*?">/s, `<meta name="description" content="${idPhotoDescription}">`)
       .replace(/<meta property="og:description" content=".*?">/s, `<meta property="og:description" content="${idPhotoDescription}">`)
