@@ -15,7 +15,7 @@ await cp(sourceDir, outputDir, { recursive: true });
 await mkdir(iconsDir, { recursive: true });
 for (const toolId of [
   "suite-launcher",
-  "photo-selector-app", "image-party-frame", "batch-print-layout", "archivio-flow",
+  "photo-selector-app", "image-party-frame", "batch-print-layout", "id-photo", "archivio-flow",
   "image-converter", "image-file-finder",
   "cache-sweep",
   "filex-send",

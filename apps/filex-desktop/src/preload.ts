@@ -26,6 +26,10 @@ const api: FileXDesktopApi = {
   applyToolUpdate: (jobId) => ipcRenderer.invoke("filex:apply-tool-update", jobId),
   forceCloseToolForUpdate: (toolId) => ipcRenderer.invoke("filex:force-close-tool-for-update", toolId),
   openInstalledTool: (toolId, launchArgs) => ipcRenderer.invoke("filex:open-installed-tool", toolId, launchArgs),
+  sendPhotoSelectionToTool: (request) =>
+    ipcRenderer.invoke("filex:send-photo-selection-to-tool", request),
+  consumePhotoSelectionHandoff: (projectPath) =>
+    ipcRenderer.invoke("filex:consume-photo-selection-handoff", projectPath),
   getSuiteDockState: () => ipcRenderer.invoke("filex:get-suite-dock-state"),
   saveSuiteDockState: (state) => ipcRenderer.invoke("filex:save-suite-dock-state", state),
   getLicenseState: (refresh) => ipcRenderer.invoke("filex:get-license-state", refresh),
@@ -49,6 +53,8 @@ const api: FileXDesktopApi = {
     };
   },
   consumePendingOpenProjectPath: () => ipcRenderer.invoke("filex:consume-pending-open-project-path"),
+  acknowledgeOpenProjectRequest: (projectPath) =>
+    ipcRenderer.invoke("filex:acknowledge-open-project-request", projectPath),
   markOpenProjectRequestReady: () => ipcRenderer.invoke("filex:mark-open-project-request-ready"),
   onOpenProjectRequest: (listener) => {
     const wrappedListener = (_event: IpcRendererEvent, projectPath: string) => {
@@ -72,7 +78,12 @@ const api: FileXDesktopApi = {
   canStartDragOut: (absolutePaths) => ipcRenderer.invoke("filex:can-start-drag-out", absolutePaths),
   startDragOut: (absolutePaths) => ipcRenderer.send("filex:start-drag-out", absolutePaths),
   readFile: (absolutePath) => ipcRenderer.invoke("filex:read-file", absolutePath),
+  createIdPhotoWorkingCopy: (request) =>
+    ipcRenderer.invoke("filex:create-id-photo-working-copy", request),
+  cleanupIdPhotoWorkingFiles: (jobId) =>
+    ipcRenderer.invoke("filex:cleanup-id-photo-working-files", jobId),
   statFiles: (absolutePaths) => ipcRenderer.invoke("filex:stat-files", absolutePaths),
+  fingerprintFiles: (absolutePaths) => ipcRenderer.invoke("filex:fingerprint-files", absolutePaths),
   getThumbnail: (absolutePath, maxDimension, quality, sourceFileKey, options) =>
     ipcRenderer.invoke("filex:get-thumbnail", absolutePath, maxDimension, quality, sourceFileKey, options),
   getThumbnailFrame: (absolutePath, maxDimension, quality, sourceFileKey, options) =>
@@ -149,6 +160,18 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:save-new-file-as", suggestedName, bytes),
   writeFile: (absolutePath: string, bytes: Uint8Array) =>
     ipcRenderer.invoke("filex:write-file", absolutePath, bytes),
+  writeFilesAtomically: (directoryPath, files) =>
+    ipcRenderer.invoke("filex:write-files-atomically", directoryPath, files),
+  beginAtomicWriteTransaction: (directoryPath) =>
+    ipcRenderer.invoke("filex:begin-atomic-write-transaction", directoryPath),
+  stageAtomicWriteTransactionFile: (transactionId, file) =>
+    ipcRenderer.invoke("filex:stage-atomic-write-transaction-file", transactionId, file),
+  commitAtomicWriteTransaction: (transactionId) =>
+    ipcRenderer.invoke("filex:commit-atomic-write-transaction", transactionId),
+  finalizeAtomicWriteTransaction: (transactionId, recovery) =>
+    ipcRenderer.invoke("filex:finalize-atomic-write-transaction", transactionId, recovery),
+  rollbackAtomicWriteTransaction: (transactionId) =>
+    ipcRenderer.invoke("filex:rollback-atomic-write-transaction", transactionId),
   getRecentFolders: () => ipcRenderer.invoke("filex:get-recent-folders"),
   saveRecentFolder: (folder) => ipcRenderer.invoke("filex:save-recent-folder", folder),
   removeRecentFolder: (folderPathOrName) => ipcRenderer.invoke("filex:remove-recent-folder", folderPathOrName),

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import type { DesktopPhotoToolHandoff } from "@photo-tools/desktop-contracts";
 import {
   ChevronLeft,
   ChevronRight,
@@ -263,6 +264,57 @@ function normalizeRotationDegrees(value: number): number {
   return next;
 }
 
+async function importDesktopHandoffFiles(
+  files: DesktopPhotoToolHandoff["files"],
+  onProgress?: (completed: number, total: number) => void,
+): Promise<{ assets: PhotoAsset[]; failedPreviewCount: number }> {
+  const assets: Array<PhotoAsset | null> = new Array(files.length).fill(null);
+  let nextIndex = 0;
+  let completed = 0;
+  let failedPreviewCount = 0;
+  const loadNextPreview = async () => {
+    while (nextIndex < files.length) {
+      const entryIndex = nextIndex;
+      nextIndex += 1;
+      const entry = files[entryIndex];
+      try {
+        const preview = await window.filexDesktop?.getPreview?.(entry.absolutePath, {
+          maxDimension: 2400,
+          sourceFileKey: `${entry.size}:${entry.lastModified}`,
+        });
+        if (!preview) {
+          failedPreviewCount += 1;
+          continue;
+        }
+        const previewUrl = bytesToObjectUrl(preview.bytes, preview.mimeType);
+        assets[entryIndex] = {
+          id: `asset-${hashString(`${entry.absolutePath}:${entry.size}:${entry.lastModified}`)}`,
+          fileName: entry.fileName,
+          relativePath: entry.relativePath,
+          absolutePath: entry.absolutePath,
+          size: entry.size,
+          lastModified: entry.lastModified,
+          sourceUrl: previewUrl,
+          previewUrl,
+          width: preview.width,
+          height: preview.height,
+        };
+      } catch {
+        failedPreviewCount += 1;
+      } finally {
+        completed += 1;
+        onProgress?.(completed, files.length);
+      }
+    }
+  };
+  const workerCount = Math.min(DESKTOP_PREVIEW_CONCURRENCY, Math.max(1, files.length));
+  await Promise.all(Array.from({ length: workerCount }, () => loadNextPreview()));
+  return {
+    assets: assets.filter((asset): asset is PhotoAsset => Boolean(asset)),
+    failedPreviewCount,
+  };
+}
+
 function cropGeometryKey(spec: PhotoPrintSpec): string {
   const content = getPhotoContentRectCm(spec);
   const contentAspect = content.width / Math.max(0.001, content.height);
@@ -275,6 +327,7 @@ export function App() {
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const assetsRef = useRef<PhotoAsset[]>([]);
+  const handleAssetsImportedRef = useRef<(nextAssets: PhotoAsset[]) => void>(() => undefined);
   const logoUrlRef = useRef<string | null>(null);
   const previewRenderIdRef = useRef(0);
   const dragStateRef = useRef<{
@@ -390,6 +443,92 @@ export function App() {
     setPreviewPageIndex(0);
     setStatus(nextAssets.length ? `${nextAssets.length} foto importate.` : "Nessuna foto importata.");
   }, [resetCropsForAssets]);
+  handleAssetsImportedRef.current = handleAssetsImported;
+
+  useEffect(() => {
+    const api = window.filexDesktop;
+    if (!api?.consumePendingOpenProjectPath
+      || !api.consumePhotoSelectionHandoff
+      || !api.acknowledgeOpenProjectRequest
+      || !api.markOpenProjectRequestReady
+      || !api.onOpenProjectRequest) return;
+    let active = true;
+    let draining = false;
+    let drainAgain = false;
+
+    const acceptHandoff = async (handoff: DesktopPhotoToolHandoff) => {
+      try {
+        if (assetsRef.current.length > 0 && !window.confirm(
+          "Sostituire le foto già presenti con la selezione ricevuta da Archivio Flow?",
+        )) {
+          setStatus("Selezione da Archivio Flow non importata: il lavoro corrente è rimasto invariato.");
+          return;
+        }
+        setIsBusy(true);
+        setStatus(`Importazione da Archivio Flow 0/${handoff.files.length}…`);
+        const result = await importDesktopHandoffFiles(handoff.files, (completed, total) => {
+          if (active) setStatus(`Importazione da Archivio Flow ${completed}/${total}…`);
+        });
+        if (!active) {
+          result.assets.forEach(revokeAssetUrls);
+          return;
+        }
+        handleAssetsImportedRef.current(result.assets);
+        setStatus(result.assets.length > 0
+          ? `${result.assets.length} foto ricevute da Archivio Flow.${result.failedPreviewCount ? ` ${result.failedPreviewCount} non leggibili ignorate.` : ""} Non rimuovere la scheda finché non hai esportato.`
+          : "La selezione di Archivio Flow non contiene foto ancora leggibili.");
+      } catch (error) {
+        if (active) setStatus(error instanceof Error ? error.message : "Importazione da Archivio Flow non riuscita.");
+      } finally {
+        if (active) setIsBusy(false);
+      }
+    };
+
+    const drainHandoffs = async () => {
+      if (draining) {
+        drainAgain = true;
+        return;
+      }
+      draining = true;
+      try {
+        do {
+          drainAgain = false;
+          while (active) {
+            const projectPath = await api.consumePendingOpenProjectPath();
+            if (!active || !projectPath) break;
+            try {
+              const handoff = await api.consumePhotoSelectionHandoff(projectPath);
+              if (active && handoff) await acceptHandoff(handoff);
+            } catch (error) {
+              if (active) setStatus(error instanceof Error ? error.message : "Handoff Archivio Flow non valido.");
+            } finally {
+              await api.acknowledgeOpenProjectRequest(projectPath).catch(() => undefined);
+            }
+          }
+        } while (active && drainAgain);
+      } finally {
+        draining = false;
+      }
+    };
+
+    const removeListener = api.onOpenProjectRequest(() => {
+      void drainHandoffs();
+    });
+    // Il rinvio al task successivo evita che il primo setup di React
+    // StrictMode reclami il manifest prima del cleanup simulato.
+    const startTimer = window.setTimeout(() => {
+      void api.markOpenProjectRequestReady()
+        .then(() => drainHandoffs())
+        .catch((error: unknown) => {
+          if (active) setStatus(error instanceof Error ? error.message : "Collegamento Archivio Flow non disponibile.");
+        });
+    }, 0);
+    return () => {
+      active = false;
+      window.clearTimeout(startTimer);
+      removeListener();
+    };
+  }, []);
 
   const handleBrowseFolder = async () => {
     setIsBusy(true);

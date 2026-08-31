@@ -8,6 +8,8 @@ import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
 import {
+  clearImageFiles,
+  createEmptyProjectState,
   getImageFile,
   normalizeImageRelativePath,
   normalizeProjectState,
@@ -43,6 +45,10 @@ import {
   isPartyFrameSourceName,
   mapWithConcurrency,
 } from "../lib/sourceImport";
+import type { DesktopPhotoToolHandoff } from "@photo-tools/desktop-contracts";
+import {
+  onPhotoSelectionHandoff,
+} from "../lib/photoSelectionHandoff";
 
 const SOURCE_SCAN_CONCURRENCY = 6;
 
@@ -326,6 +332,130 @@ export default function NewProject() {
     setValidationErrors([]);
   };
 
+  const handoffHandlerRef = useRef<((handoff: DesktopPhotoToolHandoff) => Promise<void>) | null>(null);
+  handoffHandlerRef.current = async (handoff) => {
+    const supportedEntries = handoff.files.filter((entry) => isPartyFrameSourceName(entry.fileName));
+    if (supportedEntries.length === 0) {
+      setValidationErrors(["La selezione di Archivio Flow non contiene immagini compatibili con Party Frame."]);
+      return;
+    }
+    if ((sourceImages.length > 0 || project.images.length > 0) && !window.confirm(
+      "Creare un nuovo progetto con la selezione ricevuta da Archivio Flow? Il progetto corrente verrà conservato nei progetti recenti.",
+    )) {
+      toast.info("Selezione non importata", { description: "Il progetto corrente è rimasto invariato." });
+      return;
+    }
+
+    const requestId = ++sourceLoadGenerationRef.current;
+    setLoadingSourceFolder(true);
+    setSourceLoadProgress({ requestId, completed: 0, total: supportedEntries.length });
+    try {
+      const loadedImages = await mapWithConcurrency(
+        supportedEntries,
+        SOURCE_SCAN_CONCURRENCY,
+        async (entry): Promise<SelectedSourceImage | null> => {
+          if (requestId !== sourceLoadGenerationRef.current) {
+            throw new DOMException("Importazione sostituita", "AbortError");
+          }
+          try {
+            const preview = await window.filexDesktop!.getThumbnail(
+              entry.absolutePath,
+              96,
+              0.62,
+              `${entry.size}:${entry.lastModified}`,
+            );
+            if (!preview) return null;
+            return {
+              file: createNativeFilePlaceholder(entry.fileName, entry.lastModified),
+              relativePath: normalizeImageRelativePath(entry.relativePath || entry.fileName),
+              absolutePath: entry.absolutePath,
+              size: entry.size,
+              lastModified: entry.lastModified,
+              orientation: preview.height >= preview.width ? "vertical" : "horizontal",
+            };
+          } catch {
+            return null;
+          } finally {
+            setSourceLoadProgress((current) => current?.requestId === requestId
+              ? { ...current, completed: Math.min(current.total, current.completed + 1) }
+              : current);
+          }
+        },
+      );
+      const selectedImages = loadedImages.filter((image): image is SelectedSourceImage => Boolean(image));
+      const unreadableCount = supportedEntries.length - selectedImages.length;
+      if (selectedImages.length === 0) {
+        throw new Error("Le foto ricevute da Archivio Flow non sono decodificabili da Party Frame.");
+      }
+
+      if (sourceImages.length > 0 || project.images.length > 0) {
+        const currentTemplateId = selectedTemplate
+          ? selectedTemplate.kind === "preset"
+            ? selectedTemplate.presetId || "classic-gold"
+            : "custom"
+          : project.template || "classic-gold";
+        const currentImages = sourceImages.length > 0
+          ? planProjectImageRelink(
+            project,
+            sourceImages.map((sourceImage, index) => ({
+              path: sourceImage.relativePath,
+              relativePath: sourceImage.relativePath,
+              absolutePath: sourceImage.absolutePath,
+              size: sourceImage.size,
+              lastModified: sourceImage.lastModified,
+              orientation: imageOrientations[index] ?? ("vertical" as const),
+            })),
+          ).images
+          : project.images;
+        const currentDraft = normalizeProjectState({
+          ...project,
+          name: projectName.trim() || project.name,
+          template: currentTemplateId,
+          sourcePath: sourcePath || project.sourcePath,
+          customTemplate: currentTemplateId === "custom" ? project.customTemplate : null,
+          images: currentImages,
+        });
+        if (sourceImages.length > 0) {
+          storeImageFiles(
+            sourceImages.map((sourceImage) => sourceImage.file),
+            currentDraft.images.map((image) => image.id),
+            project.projectId,
+          );
+        }
+        const savedDraft = saveRecentProject(currentDraft, selectedTemplate?.label);
+        if (!savedDraft.ok) {
+          throw new Error(`Il progetto corrente non è stato sostituito: ${savedDraft.message}`);
+        }
+        savedDraft.evictedProjectIds.forEach((evictedProjectId) => clearImageFiles(evictedProjectId));
+      }
+      setProject(createEmptyProjectState());
+      setProjectName("Progetto da Archivio Flow");
+      setSelectedTemplateValue("preset:classic-gold");
+      setCustomTemplate(null);
+      await applySelectedFiles(selectedImages, handoff.sourceRoot, requestId);
+      toast.success("Foto ricevute da Archivio Flow", {
+        description: `${selectedImages.length} immagini pronte.${unreadableCount ? ` ${unreadableCount} non leggibili ignorate.` : ""} Non rimuovere la scheda fino all’esportazione.`,
+      });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) {
+        setValidationErrors([error instanceof Error ? error.message : "Importazione da Archivio Flow non riuscita."]);
+      }
+    } finally {
+      if (requestId === sourceLoadGenerationRef.current) {
+        setLoadingSourceFolder(false);
+        setSourceLoadProgress(null);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const accept = async (handoff: DesktopPhotoToolHandoff) => {
+      await handoffHandlerRef.current?.(handoff);
+    };
+    const unsubscribe = onPhotoSelectionHandoff(accept);
+    return unsubscribe;
+  }, []);
+
   const handleSourceFolderClick = async () => {
     if (window.filexDesktop) {
       const requestId = ++sourceLoadGenerationRef.current;
@@ -501,7 +631,12 @@ export default function NewProject() {
     );
     setProject(nextProjectSnapshot);
     setValidationErrors([]);
-    saveRecentProject(nextProjectSnapshot, selectedTemplate?.label);
+    const savedProject = saveRecentProject(nextProjectSnapshot, selectedTemplate?.label);
+    if (savedProject.ok) {
+      savedProject.evictedProjectIds.forEach((evictedProjectId) => clearImageFiles(evictedProjectId));
+    } else {
+      toast.error("Progetto non aggiunto ai recenti", { description: savedProject.message });
+    }
 
     navigate("/template-validation");
   };

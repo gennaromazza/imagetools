@@ -3,6 +3,10 @@
   "version": "0.1.5",
   "private": true,
   "type": "module",
+  "exports": {
+    "./print-engine": "./src/print-engine.ts",
+    "./render-export": "./src/render-export.ts"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

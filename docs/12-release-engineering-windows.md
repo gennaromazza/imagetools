@@ -52,6 +52,8 @@ FileX Adobe Cleaner è pubblicato come componente `cache-sweep`, tag `cache-swee
 
 FileX Send è pubblicato come componente `filex-send`, tag `filex-send-vX.Y.Z` e installer `FileX-Send-X.Y.Z-stable-x64-setup.exe`. La prima release richiede FileX Suite 0.1.31 o successiva.
 
+FileX ID Photo è pubblicabile come componente `id-photo`, tag `id-photo-vX.Y.Z` e installer `FileX-ID-Photo-X.Y.Z-stable-x64-setup.exe`. La prima release richiede FileX Suite 0.1.61 o successiva e deve superare lo smoke test del main process impacchettato.
+
 Una release ordinaria deve costruire un solo componente. Batch Print Layout, Image Converter e Trova Foto da Lista restano nel manifest storico, ma non sono pubblicabili finche' i relativi workspace non vengono ripristinati.
 
 ## Manifest Release

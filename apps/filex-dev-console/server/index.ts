@@ -23,6 +23,7 @@ const COMPONENT_RELEASES = [
   { id: "photo-selector-app", label: "Image Select Pro", packagePath: "apps/photo-selector-app/package.json", artifactPrefix: "Image-Select-Pro", minSuiteVersion: "0.1.26" },
   { id: "image-party-frame", label: "Image Party Frame", packagePath: "apps/image-party-frame/package.json", artifactPrefix: "Image-Party-Frame", minSuiteVersion: "0.1.26" },
   { id: "batch-print-layout", label: "Batch Print Layout", packagePath: "apps/batch-print-layout/package.json", artifactPrefix: "Batch-Print-Layout", minSuiteVersion: "0.1.26" },
+  { id: "id-photo", label: "FileX ID Photo", packagePath: "apps/id-photo/package.json", artifactPrefix: "FileX-ID-Photo", minSuiteVersion: "0.1.61" },
   { id: "archivio-flow", label: "Archivio Flow", packagePath: "apps/archivio-flow/package.json", artifactPrefix: "Archivio-Flow", minSuiteVersion: "0.1.26" },
   { id: "image-converter", label: "Image Converter", packagePath: "apps/image-converter/package.json", artifactPrefix: "Image-Converter", minSuiteVersion: "0.1.26" },
   { id: "image-file-finder", label: "Trova Foto da Lista", packagePath: "apps/image-file-finder/package.json", artifactPrefix: "Trova-Foto-da-Lista", minSuiteVersion: "0.1.26" },
@@ -268,7 +269,8 @@ interface TestCategory {
 const TEST_CATEGORIES: TestCategory[] = [
   { id: "photo-selector", title: "Image Select Pro", description: "Modalità libera e progetto, prestazioni, cache, Drive, spostamenti e metadati XMP." },
   { id: "image-party-frame", title: "Image Party Frame — Affidabilità", description: "Progetti, crop, rendering, job export e completezza del pacchetto installato." },
-  { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Geometria fisica, frame, rotazioni, crop, paginazione, memoria e nomi export sicuri." },
+  { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Geometria, memoria, export progressivo no-overwrite, rollback protetto dall’identità dei file e recovery sicuro degli staging." },
+  { id: "id-photo", title: "FileX ID Photo — Workflow e integrità", description: "Profili, persistenza, copie Photoshop e output pending ancorato a size/SHA dei byte preparati, con promozione verificata e retry single-flight senza duplicati." },
   { id: "archivio-flow", title: "Archivio Flow — Caccia bug", description: "Casi avversariali su percorsi, nomi Windows, fingerprint e stati di importazione." },
   { id: "image-converter", title: "Image Converter — Caccia bug", description: "Limiti export e riconoscimento sicuro delle cartelle generate." },
   { id: "image-file-finder", title: "Trova Foto da Lista — Caccia bug", description: "Parsing di liste, percorsi, virgolette e duplicati." },
@@ -283,9 +285,10 @@ const TEST_CATEGORIES: TestCategory[] = [
 
 function testCategoryId(name: string): TestCategory["id"] {
   if (name.startsWith("test:photo-selector-")) return "photo-selector";
-  if (name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-drive-link" || name === "test:archivio-flow-package-runtime") return "archivio-flow";
+  if (name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-drive-link" || name === "test:archivio-flow-package-runtime" || name === "test:archivio-flow-photo-routing" || name === "test:photo-tool-handoff") return "archivio-flow";
   if (name === "test:image-party-frame-bug-hunt" || name === "test:image-party-frame-server" || name === "test:image-party-frame-package-runtime") return "image-party-frame";
   if (name === "test:batch-print-layout-bug-hunt" || name === "test:batch-print-layout-desktop-images") return "batch-print-layout";
+  if (name === "test:id-photo" || name === "test:id-photo-working-files" || name === "test:id-photo-file-fingerprint" || name === "test:id-photo-unload-guard" || name === "test:id-photo-package-runtime") return "id-photo";
   if (name === "test:image-converter-bug-hunt") return "image-converter";
   if (name === "test:image-file-finder-bug-hunt") return "image-file-finder";
   if (name === "test:cache-sweep-bug-hunt") return "cache-sweep";
@@ -310,11 +313,18 @@ function testDescription(name: string): string {
     "test:archivio-flow-bug-hunt": "Cerca regressioni con input generati, percorsi ostili e transizioni di importazione vietate.",
     "test:archivio-flow-drive-link": "Verifica il link al registro Drive e il messaggio guidato quando l’API Google è disabilitata.",
     "test:archivio-flow-package-runtime": "Verifica che il server IPC e tutti i suoi import locali siano presenti nell'ASAR di Archivio Flow.",
-    "test:image-party-frame-bug-hunt": "Verifica isolamento progetto, crop, import cartelle, ripresa export, identita bozza/libreria, canvas responsive e pacchetti template ostili.",
+    "test:archivio-flow-photo-routing": "Verifica selezione persistente, limiti e compatibilità delle foto inviate dalla SD a Party Frame, Batch Layout e ID Photo.",
+    "test:photo-tool-handoff": "Verifica il passaggio sicuro delle selezioni da Archivio Flow: coda FIFO, ricevuta autenticata, cardinalità, TTL, confini della radice e blocco di symlink o file modificati.",
+    "test:image-party-frame-bug-hunt": "Verifica isolamento progetto, crop, import cartelle, coda FIFO da Archivio Flow, ripresa export, identità bozza/libreria, canvas responsive e pacchetti template ostili.",
     "test:image-party-frame-server": "Verifica job, avanzamento, cancellazione, idempotenza, coda satura/429, crop EXIF, auth desktop, sorgenti native protette, collisioni, scrittura atomica, pulizia upload e CORS locale.",
     "test:image-party-frame-package-runtime": "Controlla che il server PartyFrame e tutti i suoi import runtime locali siano inclusi nel pacchetto Electron.",
-    "test:batch-print-layout-bug-hunt": "Stressa geometria frame, impaginazione, rotazioni, crop, ultima pagina, memoria e nomi export Windows.",
+    "test:batch-print-layout-bug-hunt": "Stressa geometria, memoria e nomi export; verifica 501 file, collisioni senza overwrite, journal e acknowledgement, rollback dopo crash, sostituzioni concorrenti preservate e recovery conservativo di staging stale, attivi, recenti o symlink.",
     "test:batch-print-layout-desktop-images": "Verifica la policy desktop per JPG/RAW e l'abilitazione esplicita di HEIC, HEIF e TIFF.",
+    "test:id-photo": "Verifica profili, persistenza e contesto export; prova il pending scritto prima della rilettura, l'ancoraggio a size/SHA dei byte preparati, il rifiuto dei file sostituiti e il retry single-flight senza riesportazione.",
+    "test:id-photo-working-files": "Verifica che le copie per Photoshop siano atomiche, separate dagli originali e pulite solo dentro la commessa autorizzata.",
+    "test:id-photo-file-fingerprint": "Calcola davvero SHA-256 e metadati degli output, verificando deduplica, file mancanti, percorsi non sicuri e timeout asincrono dell’intero batch.",
+    "test:id-photo-unload-guard": "Verifica che una commessa non salvata resti aperta per impostazione predefinita, che la chiusura richieda conferma esplicita e che non si aprano dialoghi sovrapposti.",
+    "test:id-photo-package-runtime": "Controlla chiusura degli import ASAR di main e preload, assenza di artefatti di sviluppo e smoke reale delle API IPC fingerprint e transazioni.",
     "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",
     "test:image-file-finder-bug-hunt": "Stressa il parser con virgolette, separatori, percorsi e duplicati.",
     "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",

@@ -36,8 +36,29 @@ jobs:
       - name: Validate independent release contract
         run: npm.cmd run test:filex-independent-releases
 
+      - name: Validate FileX ID Photo packaged runtime
+        run: npm.cmd run test:id-photo-package-runtime
+
+      - name: Validate FileX ID Photo non-destructive working files
+        run: npm.cmd run test:id-photo-working-files
+
+      - name: Validate FileX ID Photo output fingerprints
+        run: npm.cmd run test:id-photo-file-fingerprint
+
+      - name: Validate FileX ID Photo unsaved-close guard
+        run: npm.cmd run test:id-photo-unload-guard
+
+      - name: Validate Batch Print Layout and atomic output transactions
+        run: npm.cmd run test:batch-print-layout-bug-hunt
+
       - name: Validate Archivio Flow packaged runtime
         run: npm.cmd run test:archivio-flow-package-runtime
+
+      - name: Validate cross-tool photo handoff
+        run: npm.cmd run test:photo-tool-handoff
+
+      - name: Validate Archivio Flow photo routing
+        run: npm.cmd run test:archivio-flow-photo-routing
 
       - name: Validate updater file locking
         run: npm.cmd run test:filex-updater-lock
@@ -66,6 +87,9 @@ jobs:
           $ErrorActionPreference = "Stop"
           npm.cmd --workspace @photo-tools/photo-selector-app run build
           npm.cmd --workspace @photo-tools/image-party-frame-app run build
+          npm.cmd --workspace @photo-tools/batch-print-layout run build
+          npm.cmd --workspace @photo-tools/id-photo run test
+          npm.cmd --workspace @photo-tools/id-photo run build
           npm.cmd --workspace @photo-tools/archivio-flow run build
           npm.cmd --workspace @photo-tools/cache-sweep run test
           npm.cmd --workspace @photo-tools/cache-sweep run build

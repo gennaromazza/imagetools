@@ -1,8 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FilterPreviewData, SafeToFormatResult, SdPreview } from "../types";
-import { checkArchivioSafeToFormat, getArchivioFilterPreview, getArchivioSdPreview } from "../archivioDesktopApi";
+import {
+  checkArchivioSafeToFormat,
+  getArchivioFilterPreview,
+  getArchivioSdPreview,
+  sendArchivioPhotoSelectionToTool,
+} from "../archivioDesktopApi";
 import { DesktopPreviewImage } from "./DesktopPreviewImage";
 import { buildPreviewSourceKey, filterMediaForDate, isPreviewableMedia, localIsoDate } from "../previewPolicy";
+import {
+  PHOTO_TOOL_SELECTION_LIMIT,
+  PHOTO_TOOL_TARGETS,
+  addVisibleCompatiblePhotos,
+  isPhotoToolCompatible,
+  togglePhotoSelection,
+  validatePhotoToolSelection,
+  type PhotoToolTargetId,
+} from "../photoToolRouting";
 
 interface Props {
   sdPath: string;
@@ -32,7 +46,11 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
   const [visibleMediaCount, setVisibleMediaCount] = useState(PREVIEW_PAGE_SIZE);
   const [filterMode, setFilterMode] = useState<"all" | "date">("date");
   const [selectedDate, setSelectedDate] = useState(todayIso);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
+  const [sendingTarget, setSendingTarget] = useState<PhotoToolTargetId | null>(null);
+  const [routingFeedback, setRoutingFeedback] = useState<string | null>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
+  const routingRequestIdRef = useRef(0);
 
   const media = useMemo(() => {
     if (!allMedia || filterMode === "all") return allMedia;
@@ -57,10 +75,24 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
     return [...counts.entries()].sort(([left], [right]) => right.localeCompare(left));
   }, [allMedia]);
 
+  const visibleFiles = useMemo(
+    () => media?.sampleFiles.slice(0, visibleMediaCount) ?? [],
+    [media, visibleMediaCount],
+  );
+  const visibleCompatibleCount = useMemo(
+    () => visibleFiles.filter(isPhotoToolCompatible).length,
+    [visibleFiles],
+  );
+  const previewIsTruncated = Boolean(allMedia && allMedia.matchedFiles > allMedia.sampleFiles.length);
+
   useEffect(() => {
     let active = true;
     setLoading(true);
     setSafeCheck(null);
+    setSelectedPaths(new Set());
+    setSendingTarget(null);
+    setRoutingFeedback(null);
+    routingRequestIdRef.current += 1;
     Promise.all([
       getArchivioSdPreview(sdPath),
       getArchivioFilterPreview({ sdPath, maxSamples: 5000 }),
@@ -110,6 +142,57 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
     }
   }
 
+  function handlePhotoToggle(filePath: string) {
+    const update = togglePhotoSelection(selectedPaths, filePath);
+    setSelectedPaths(update.selectedPaths);
+    setRoutingFeedback(update.limitReached
+      ? `Limite raggiunto: puoi inviare al massimo ${PHOTO_TOOL_SELECTION_LIMIT} foto alla volta.`
+      : null);
+  }
+
+  function handleSelectVisible() {
+    const update = addVisibleCompatiblePhotos(selectedPaths, visibleFiles);
+    setSelectedPaths(update.selectedPaths);
+    if (update.limitReached) {
+      setRoutingFeedback(`Selezionate ${update.selectedPaths.size} foto. Raggiunto il limite di ${PHOTO_TOOL_SELECTION_LIMIT}.`);
+    } else if (update.addedCount > 0) {
+      setRoutingFeedback(`Aggiunte ${update.addedCount} foto visibili alla selezione.`);
+    } else {
+      setRoutingFeedback("Le foto compatibili visibili sono già selezionate.");
+    }
+  }
+
+  async function handleSendToTool(targetToolId: PhotoToolTargetId) {
+    const validation = validatePhotoToolSelection(targetToolId, selectedPaths.size);
+    if (!validation.valid) {
+      setRoutingFeedback(validation.message);
+      return;
+    }
+    const target = PHOTO_TOOL_TARGETS.find((item) => item.id === targetToolId);
+    const requestId = routingRequestIdRef.current + 1;
+    routingRequestIdRef.current = requestId;
+    setSendingTarget(targetToolId);
+    setRoutingFeedback(`Invio di ${selectedPaths.size} foto a ${target?.label ?? targetToolId}…`);
+    try {
+      const result = await sendArchivioPhotoSelectionToTool({
+        targetToolId,
+        sourceRoot: sdPath,
+        absolutePaths: [...selectedPaths],
+      });
+      if (routingRequestIdRef.current !== requestId) return;
+      setRoutingFeedback(result.ok
+        ? (result.message || `${target?.label ?? "Il tool"} è stato aperto con ${selectedPaths.size} foto.`)
+        : (result.message || `Non è stato possibile aprire ${target?.label ?? "il tool"}.`));
+    } catch (error) {
+      if (routingRequestIdRef.current !== requestId) return;
+      setRoutingFeedback(error instanceof Error
+        ? error.message
+        : `Non è stato possibile aprire ${target?.label ?? "il tool"}.`);
+    } finally {
+      if (routingRequestIdRef.current === requestId) setSendingTarget(null);
+    }
+  }
+
   const statusCopy = checkingSafe
     ? "Verifica in corso…"
     : safeCheck?.status === "SAFE"
@@ -149,7 +232,11 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
         <div className="stack" style={{ gap: "0.8rem" }}>
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "end", justifyContent: "space-between", flexWrap: "wrap" }}>
             <div>
-              <strong>{media ? `${media.matchedFiles} file multimediali · visualizzati ${Math.min(visibleMediaCount, media.sampleFiles.length)} di ${media.sampleFiles.length}` : "Carico contenuto…"}</strong>
+              <strong>{media
+                ? filterMode === "date"
+                  ? `${media.sampleFiles.length} elementi disponibili per questa data · visualizzati ${Math.min(visibleMediaCount, media.sampleFiles.length)}`
+                  : `${media.matchedFiles} file filtrati · ${media.sampleFiles.length} disponibili in griglia · visualizzati ${Math.min(visibleMediaCount, media.sampleFiles.length)}`
+                : "Carico contenuto…"}</strong>
               <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.84rem" }}>Scegli se importare tutta la scheda oppure solo un giorno.</p>
             </div>
             <div className="button-row" role="group" aria-label="Filtro importazione SD">
@@ -179,21 +266,103 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
               ))}
             </div>
           )}
+          {previewIsTruncated && (
+            <div className="message-box sd-preview-limit-note" role="note">
+              <strong>Vista parziale · massimo 5.000 elementi</strong>
+              <p>
+                La scansione ha trovato {allMedia?.matchedFiles ?? 0} file filtrati. Questa schermata rende disponibili
+                soltanto i {allMedia?.sampleFiles.length ?? 0} elementi restituiti dall’anteprima; gli altri non sono
+                selezionabili da questa griglia.
+              </p>
+            </div>
+          )}
+          <div className="sd-tool-routing" aria-label="Invia foto selezionate ai tool FileX">
+            <div className="sd-tool-routing__header">
+              <div>
+                <strong>Continua il lavoro in FileX</strong>
+                <p>
+                  {selectedPaths.size} foto selezionate. La selezione resta attiva cambiando filtro o data e si azzera
+                  quando inserisci un’altra SD.
+                </p>
+              </div>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={handleSelectVisible}
+                  disabled={loading || sendingTarget !== null || visibleCompatibleCount === 0 || selectedPaths.size >= PHOTO_TOOL_SELECTION_LIMIT}
+                >
+                  Seleziona visibili ({visibleCompatibleCount})
+                </button>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => {
+                    setSelectedPaths(new Set());
+                    setRoutingFeedback("Selezione azzerata.");
+                  }}
+                  disabled={sendingTarget !== null || selectedPaths.size === 0}
+                >
+                  Azzera
+                </button>
+              </div>
+            </div>
+            <div className="sd-tool-routing__actions" role="group" aria-label="Tool di destinazione">
+              {PHOTO_TOOL_TARGETS.map((target) => {
+                const validation = validatePhotoToolSelection(target.id, selectedPaths.size);
+                const isSending = sendingTarget === target.id;
+                return (
+                  <button
+                    key={target.id}
+                    type="button"
+                    className="primary-button"
+                    onClick={() => { void handleSendToTool(target.id); }}
+                    disabled={sendingTarget !== null || !validation.valid}
+                    title={validation.valid
+                      ? `Apri ${target.label} con la selezione corrente`
+                      : validation.message}
+                  >
+                    {isSending ? `Apro ${target.label}…` : `Apri in ${target.label}`}
+                  </button>
+                );
+              })}
+              <small>Party Frame e Batch Layout accettano fino a 500 foto. Photo ID richiede una sola foto.</small>
+            </div>
+            {routingFeedback && <p className="sd-tool-routing__feedback" role="status" aria-live="polite">{routingFeedback}</p>}
+          </div>
           {media && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: "0.5rem" }}>
-              {media.sampleFiles.slice(0, visibleMediaCount).map((file) => (
-                <div key={`${selectedDate}:${file.filePath}:${buildPreviewSourceKey(file)}`} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "0.35rem", background: "rgba(0,0,0,0.15)" }}>
-                  {isPreviewableMedia(file) ? (
-                    <DesktopPreviewImage sdPath={sdPath} filePath={file.filePath} sourceFileKey={buildPreviewSourceKey(file)} alt={file.fileName} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 7 }} />
-                  ) : (
-                    <div style={{ width: "100%", height: 100, borderRadius: 7, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.05)", color: "var(--text-muted)" }}>
-                      FOTO {file.ext.toUpperCase()}
+            <div className="sd-media-grid">
+              {visibleFiles.map((file) => {
+                const compatible = isPhotoToolCompatible(file);
+                const selected = selectedPaths.has(file.filePath);
+                return (
+                  <label
+                    key={`${file.filePath}:${buildPreviewSourceKey(file)}`}
+                    className={`sd-media-card${selected ? " sd-media-card--selected" : ""}${compatible ? "" : " sd-media-card--incompatible"}`}
+                    title={compatible ? `Seleziona ${file.fileName}` : "Formato non inviabile direttamente ai tool foto"}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      disabled={!compatible || sendingTarget !== null}
+                      onChange={() => handlePhotoToggle(file.filePath)}
+                      aria-label={compatible ? `Seleziona ${file.fileName}` : `${file.fileName}: formato non inviabile direttamente`}
+                    />
+                    {isPreviewableMedia(file) ? (
+                      <DesktopPreviewImage sdPath={sdPath} filePath={file.filePath} sourceFileKey={buildPreviewSourceKey(file)} alt={file.fileName} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 7 }} />
+                    ) : (
+                      <div style={{ width: "100%", height: 100, borderRadius: 7, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.05)", color: "var(--text-muted)" }}>
+                        FOTO {file.ext.toUpperCase()}
+                      </div>
+                    )}
+                    <div style={{ marginTop: "0.4rem", fontSize: "0.8rem", wordBreak: "break-all" }}>{file.fileName}</div>
+                    <div className="sd-media-card__meta">
+                      <span>{formatBytes(file.size)}</span>
+                      <span>{compatible ? (selected ? "Selezionata" : "Pronta per i tool") : "Da sviluppare/convertire"}</span>
                     </div>
-                  )}
-                  <div style={{ marginTop: "0.4rem", fontSize: "0.8rem", wordBreak: "break-all" }}>{file.fileName}</div>
-                  <div style={{ marginTop: "0.2rem", fontSize: "0.76rem", color: "var(--text-muted)" }}>{formatBytes(file.size)}</div>
-                </div>
-              ))}
+                  </label>
+                );
+              })}
             </div>
           )}
           {media && visibleMediaCount < media.sampleFiles.length && (

@@ -55,6 +55,7 @@ try {
 const toolConfig = [
   { toolId: "image-party-frame", executableName: "Image-Party-Frame" },
   { toolId: "batch-print-layout", executableName: "Batch-Print-Layout" },
+  { toolId: "id-photo", executableName: "FileX-ID-Photo" },
   { toolId: "archivio-flow", executableName: "Archivio-Flow" },
   { toolId: "image-converter", executableName: "Image-Converter" },
   { toolId: "image-file-finder", executableName: "Trova-Foto-da-Lista" },

@@ -24,6 +24,7 @@ Non duplicare questo catalogo in altri tool. I consumer, inclusa FileX Dev Conso
 | `image-converter` | 4185 | `npm --workspace @photo-tools/filex-desktop run dev:image-converter` |
 | `batch-print-layout` | 4205 | `npm --workspace @photo-tools/filex-desktop run dev:batch-print-layout` |
 | `image-file-finder` | 4215 | `npm --workspace @photo-tools/filex-desktop run dev:image-file-finder` |
+| `id-photo` | 4225 | `npm --workspace @photo-tools/filex-desktop run dev:id-photo` |
 | `cache-sweep` | 4235 | `npm --workspace @photo-tools/filex-desktop run dev:cache-sweep` |
 | `filex-send` | 4245 | `npm --workspace @photo-tools/filex-desktop run dev:filex-send` |
 | `backup-guard` | 4255 | `npm --workspace @photo-tools/filex-desktop run dev:backup-guard` |

@@ -1,3 +1,4 @@
+import type { DesktopAtomicWriteFile, FileXDesktopApi } from "@photo-tools/desktop-contracts";
 import type {
   BatchCropState,
   BatchPrintPage,
@@ -22,7 +23,22 @@ export interface RenderInputs {
   renderDpi?: number;
 }
 
-interface ExportOptions extends RenderInputs {
+export interface ExportCommittedFile {
+  fileName: string;
+  size: number;
+  sha256: string;
+}
+
+export interface ExportBatchResult {
+  files: string[];
+  committedFiles: ExportCommittedFile[];
+}
+
+export interface ExportCommitContext {
+  atomicTransactionId: string | null;
+}
+
+export interface ExportOptions extends RenderInputs {
   pages: BatchPrintPage[];
   format: ExportFormat;
   outputDirectoryPath?: string | null;
@@ -33,7 +49,33 @@ interface ExportOptions extends RenderInputs {
     asset: PhotoAsset,
     requiredMaxDimension: number,
   ) => Promise<{ asset: PhotoAsset; release?: () => void }>;
+  validateBeforeSave?: () => Promise<void> | void;
+  requireDesktopAtomicTransaction?: boolean;
+  onCommittedFiles?: (
+    files: ExportCommittedFile[],
+    context: ExportCommitContext,
+  ) => void | Promise<void>;
 }
+
+type AssetExportResolver = NonNullable<ExportOptions["resolveAssetForExport"]>;
+
+interface PageAssetResolutionGroup {
+  representative: PhotoAsset;
+  slotAssetIds: string[];
+}
+
+type DesktopAtomicWriteTransactionApi = Pick<
+  FileXDesktopApi,
+  | "beginAtomicWriteTransaction"
+  | "stageAtomicWriteTransactionFile"
+  | "commitAtomicWriteTransaction"
+  | "finalizeAtomicWriteTransaction"
+  | "rollbackAtomicWriteTransaction"
+>;
+
+type AtomicOutputProducer = (
+  stageFile: (file: DesktopAtomicWriteFile) => Promise<void>,
+) => Promise<void>;
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -62,6 +104,54 @@ function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: num
 
 function blobToBytes(blob: Blob): Promise<Uint8Array> {
   return blob.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+}
+
+export async function fingerprintPreparedOutput(
+  fileName: string,
+  bytes: Uint8Array,
+): Promise<ExportCommittedFile> {
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
+  const sha256 = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return { fileName, size: bytes.byteLength, sha256 };
+}
+
+function assertPreparedOutputMetadata(
+  preparedFiles: ExportCommittedFile[],
+  expectedCount: number,
+): void {
+  if (preparedFiles.length !== expectedCount || preparedFiles.some((file) => (
+    !file.fileName
+    || !Number.isSafeInteger(file.size)
+    || file.size < 0
+    || !/^[a-f0-9]{64}$/i.test(file.sha256)
+  ))) {
+    throw new Error("Le impronte dei file preparati sono incomplete o non valide.");
+  }
+}
+
+export function mapCommittedOutputMetadata(
+  preparedFiles: ExportCommittedFile[],
+  savedFileNames: string[],
+): ExportCommittedFile[] {
+  assertPreparedOutputMetadata(preparedFiles, savedFileNames.length);
+  if (savedFileNames.some((fileName) => !fileName)) {
+    throw new Error("I nomi dei file pubblicati non sono validi.");
+  }
+  return preparedFiles.map((file, index) => ({
+    ...file,
+    fileName: savedFileNames[index],
+  }));
+}
+
+async function notifyCommittedFiles(
+  options: ExportOptions,
+  preparedFiles: ExportCommittedFile[],
+  savedFileNames: string[],
+  context: ExportCommitContext = { atomicTransactionId: null },
+): Promise<void> {
+  if (!options.onCommittedFiles) return;
+  await options.onCommittedFiles(mapCommittedOutputMetadata(preparedFiles, savedFileNames), context);
 }
 
 function joinOutputPath(directoryPath: string, fileName: string): string {
@@ -113,6 +203,66 @@ async function saveBytes(fileName: string, bytes: Uint8Array, outputDirectoryPat
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   return fileName;
+}
+
+async function savePreparedFiles(
+  files: Array<{ fileName: string; bytes: Uint8Array }>,
+  outputDirectoryPath?: string | null,
+): Promise<string[]> {
+  if (outputDirectoryPath && typeof window.filexDesktop?.writeFilesAtomically === "function") {
+    return window.filexDesktop.writeFilesAtomically(outputDirectoryPath, files);
+  }
+  const savedFileNames: string[] = [];
+  for (const file of files) {
+    savedFileNames.push(await saveBytes(file.fileName, file.bytes, outputDirectoryPath));
+  }
+  return savedFileNames;
+}
+
+function getDesktopAtomicWriteTransactionApi(): DesktopAtomicWriteTransactionApi | null {
+  const api = window.filexDesktop;
+  if (
+    typeof api?.beginAtomicWriteTransaction !== "function"
+    || typeof api.stageAtomicWriteTransactionFile !== "function"
+    || typeof api.commitAtomicWriteTransaction !== "function"
+    || typeof api.finalizeAtomicWriteTransaction !== "function"
+    || typeof api.rollbackAtomicWriteTransaction !== "function"
+  ) {
+    return null;
+  }
+  return api;
+}
+
+export async function runDesktopAtomicWriteTransaction(
+  api: DesktopAtomicWriteTransactionApi,
+  directoryPath: string,
+  produceFiles: AtomicOutputProducer,
+  validateBeforeCommit?: () => Promise<void> | void,
+  afterPublishBeforeFinalize?: (savedFileNames: string[], transactionId: string) => Promise<void> | void,
+): Promise<string[]> {
+  const transactionId = await api.beginAtomicWriteTransaction(directoryPath);
+  let finalized = false;
+  try {
+    await produceFiles((file) => api.stageAtomicWriteTransactionFile(transactionId, file));
+    await validateBeforeCommit?.();
+    const savedFileNames = await api.commitAtomicWriteTransaction(transactionId);
+    await afterPublishBeforeFinalize?.(savedFileNames, transactionId);
+    await api.finalizeAtomicWriteTransaction(transactionId);
+    finalized = true;
+    return savedFileNames;
+  } catch (error) {
+    if (!finalized) {
+      try {
+        await api.rollbackAtomicWriteTransaction(transactionId);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "Export fallito e rollback dei file incompleto.",
+        );
+      }
+    }
+    throw error;
+  }
 }
 
 async function downloadZip(fileName: string, files: Array<{ name: string; bytes: Uint8Array }>): Promise<void> {
@@ -309,7 +459,7 @@ function drawCroppedImageContain(
   ctx.restore();
 }
 
-async function renderPhotoCanvas(
+export async function renderPhotoCanvas(
   asset: PhotoAsset,
   crop: BatchCropState | undefined,
   printSpec: PhotoPrintSpec,
@@ -530,37 +680,144 @@ async function renderExportPage(page: BatchPrintPage, options: ExportOptions): P
     cmToPx(contentRect.width, options.printSpec.dpi),
     cmToPx(contentRect.height, options.printSpec.dpi),
   );
-  const pageAssets = page.slots
-    .map((slot) => options.assetsById.get(slot.assetId))
-    .filter((asset): asset is PhotoAsset => Boolean(asset));
-  const resolvedAssets = await Promise.all(
-    pageAssets.map((asset) => options.resolveAssetForExport!(asset, requiredMaxDimension)),
+  const resolvedPage = await resolvePageAssetsForExport(
+    page,
+    options.assetsById,
+    options.cropsById,
+    requiredMaxDimension,
+    options.resolveAssetForExport,
   );
-  const renderAssetsById = new Map(options.assetsById);
-  for (const resolved of resolvedAssets) {
-    renderAssetsById.set(resolved.asset.id, resolved.asset);
-  }
 
   try {
     return await renderPageCanvas(page, {
       ...options,
-      assetsById: renderAssetsById,
+      assetsById: resolvedPage.assetsById,
       renderDpi: options.printSpec.dpi,
     });
   } finally {
-    for (const resolved of resolvedAssets) {
-      resolved.release?.();
-    }
+    resolvedPage.release();
   }
 }
 
+function comparableSourcePath(absolutePath: string | undefined): string | null {
+  if (!absolutePath) return null;
+  return /^[a-z]:[\\/]/i.test(absolutePath) || absolutePath.startsWith("\\\\")
+    ? absolutePath.replaceAll("/", "\\").toLocaleLowerCase("en-US")
+    : absolutePath;
+}
+
+function assetResolutionIdentity(
+  asset: PhotoAsset,
+  crop: BatchCropState | undefined,
+  requiredMaxDimension: number,
+): string {
+  // Exclude only the logical asset/crop ids: ID Photo deliberately creates
+  // photo-copy-1...N aliases for the same source and transformation.
+  // Every field that can distinguish the effective input stays in the key so
+  // unrelated files or differently transformed instances never share bytes.
+  return JSON.stringify({
+    source: {
+      absolutePath: comparableSourcePath(asset.absolutePath),
+      fileName: asset.fileName,
+      relativePath: asset.relativePath ?? null,
+      size: asset.size ?? null,
+      lastModified: asset.lastModified ?? null,
+      sourceUrl: asset.sourceUrl,
+      previewUrl: asset.previewUrl,
+      width: asset.width,
+      height: asset.height,
+    },
+    transform: crop ? {
+      cropLeft: crop.cropLeft,
+      cropTop: crop.cropTop,
+      cropWidth: crop.cropWidth,
+      cropHeight: crop.cropHeight,
+      rotation: crop.rotation,
+    } : null,
+    requiredMaxDimension,
+  });
+}
+
+function buildPageAssetResolutionGroups(
+  page: BatchPrintPage,
+  assetsById: Map<string, PhotoAsset>,
+  cropsById: Map<string, BatchCropState>,
+  requiredMaxDimension: number,
+): PageAssetResolutionGroup[] {
+  const groups = new Map<string, PageAssetResolutionGroup>();
+  for (const slot of page.slots) {
+    const asset = assetsById.get(slot.assetId);
+    if (!asset) continue;
+    const identity = assetResolutionIdentity(
+      asset,
+      cropsById.get(slot.assetId) ?? cropsById.get(asset.id),
+      requiredMaxDimension,
+    );
+    const existing = groups.get(identity);
+    if (existing) {
+      if (!existing.slotAssetIds.includes(slot.assetId)) existing.slotAssetIds.push(slot.assetId);
+    } else {
+      groups.set(identity, { representative: asset, slotAssetIds: [slot.assetId] });
+    }
+  }
+  return Array.from(groups.values());
+}
+
+export async function resolvePageAssetsForExport(
+  page: BatchPrintPage,
+  assetsById: Map<string, PhotoAsset>,
+  cropsById: Map<string, BatchCropState>,
+  requiredMaxDimension: number,
+  resolveAsset: AssetExportResolver,
+): Promise<{ assetsById: Map<string, PhotoAsset>; release: () => void }> {
+  const groups = buildPageAssetResolutionGroups(page, assetsById, cropsById, requiredMaxDimension);
+  const outcomes = await Promise.allSettled(
+    groups.map(async (group) => ({ group, resolved: await resolveAsset(group.representative, requiredMaxDimension) })),
+  );
+  const fulfilled = outcomes
+    .filter((outcome): outcome is PromiseFulfilledResult<{
+      group: PageAssetResolutionGroup;
+      resolved: Awaited<ReturnType<AssetExportResolver>>;
+    }> => outcome.status === "fulfilled")
+    .map((outcome) => outcome.value);
+  const rejected = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === "rejected");
+  if (rejected) {
+    for (const { resolved } of fulfilled) resolved.release?.();
+    throw rejected.reason;
+  }
+
+  const renderAssetsById = new Map(assetsById);
+  for (const { group, resolved } of fulfilled) {
+    for (const assetId of group.slotAssetIds) {
+      renderAssetsById.set(assetId, { ...resolved.asset, id: assetId });
+    }
+  }
+
+  let released = false;
+  return {
+    assetsById: renderAssetsById,
+    release: () => {
+      if (released) return;
+      released = true;
+      for (const { resolved } of fulfilled) resolved.release?.();
+    },
+  };
+}
+
 export async function exportBatch(options: ExportOptions): Promise<string[]> {
-  const exportedFiles: string[] = [];
   const renderSafetyError = getRenderSafetyError(options.layout, options.printSpec.dpi);
   if (renderSafetyError) {
     throw new Error(renderSafetyError);
   }
   const safePrefix = sanitizeFileNamePrefix(options.fileNamePrefix);
+  const desktopTransactionApi = options.outputDirectoryPath
+    ? getDesktopAtomicWriteTransactionApi()
+    : null;
+  if (options.outputDirectoryPath && options.requireDesktopAtomicTransaction && !desktopTransactionApi) {
+    throw new Error(
+      "Questa funzione richiede una versione aggiornata della FileX Suite con export transazionale. Aggiorna la Suite e riprova.",
+    );
+  }
 
   if (options.format === "pdf") {
     const { jsPDF } = await import("jspdf");
@@ -576,18 +833,49 @@ export async function exportBatch(options: ExportOptions): Promise<string[]> {
       const page = options.pages[index];
       options.onProgress?.(index, options.pages.length, `Foglio ${page.pageNumber}`);
       const canvas = await renderExportPage(page, options);
-      if (index > 0) {
-        pdf.addPage([options.layout.sheetWidthCm, options.layout.sheetHeightCm], orientation);
+      try {
+        if (index > 0) {
+          pdf.addPage([options.layout.sheetWidthCm, options.layout.sheetHeightCm], orientation);
+        }
+        pdf.addImage(canvas.toDataURL("image/jpeg", options.quality), "JPEG", 0, 0, options.layout.sheetWidthCm, options.layout.sheetHeightCm, undefined, "NONE");
+      } finally {
+        // jsPDF conserva i byte incorporati: il backing store del foglio può
+        // essere rilasciato subito, prima di renderizzare la pagina seguente.
+        canvas.width = 1;
+        canvas.height = 1;
       }
-      pdf.addImage(canvas.toDataURL("image/jpeg", options.quality), "JPEG", 0, 0, options.layout.sheetWidthCm, options.layout.sheetHeightCm, undefined, "NONE");
     }
 
     const bytes = new Uint8Array(pdf.output("arraybuffer"));
     const fileName = `${safePrefix}.pdf`;
-    const savedFileName = await saveBytes(fileName, bytes, options.outputDirectoryPath);
+    const preparedFiles = options.onCommittedFiles
+      ? [await fingerprintPreparedOutput(fileName, bytes)]
+      : [];
+    if (options.onCommittedFiles) assertPreparedOutputMetadata(preparedFiles, 1);
+    let savedFileName: string;
+    if (options.outputDirectoryPath && desktopTransactionApi) {
+      const [committedFileName] = await runDesktopAtomicWriteTransaction(
+        desktopTransactionApi,
+        options.outputDirectoryPath,
+        async (stageFile) => stageFile({ fileName, bytes }),
+        options.validateBeforeSave,
+        async (savedFileNames, transactionId) => notifyCommittedFiles(
+          options,
+          preparedFiles,
+          savedFileNames,
+          { atomicTransactionId: transactionId },
+        ),
+      );
+      savedFileName = committedFileName;
+    } else {
+      await options.validateBeforeSave?.();
+      [savedFileName] = await savePreparedFiles([{ fileName, bytes }], options.outputDirectoryPath);
+      await notifyCommittedFiles(options, preparedFiles, [savedFileName]);
+    }
     options.onProgress?.(options.pages.length, options.pages.length, savedFileName);
     return [savedFileName];
   }
+  const rasterFormat: Exclude<ExportFormat, "pdf"> = options.format;
 
   if (!options.outputDirectoryPath && options.pages.length > 1) {
     const zipFiles: Array<{ name: string; bytes: Uint8Array }> = [];
@@ -596,26 +884,110 @@ export async function exportBatch(options: ExportOptions): Promise<string[]> {
       const fileName = buildPageFileName(safePrefix, page.pageNumber, options.format);
       options.onProgress?.(index, options.pages.length, fileName);
       const canvas = await renderExportPage(page, options);
-      const bytes = await exportRasterPage(canvas, options.format, options.quality, options.printSpec.dpi);
+      let bytes: Uint8Array;
+      try {
+        bytes = await exportRasterPage(canvas, options.format, options.quality, options.printSpec.dpi);
+      } finally {
+        canvas.width = 1;
+        canvas.height = 1;
+      }
       zipFiles.push({ name: fileName, bytes });
-      exportedFiles.push(fileName);
       options.onProgress?.(index + 1, options.pages.length, fileName);
     }
     const zipName = `${safePrefix}.zip`;
+    await options.validateBeforeSave?.();
     await downloadZip(zipName, zipFiles);
     return [zipName];
   }
 
-  for (let index = 0; index < options.pages.length; index += 1) {
-    const page = options.pages[index];
-    const fileName = buildPageFileName(safePrefix, page.pageNumber, options.format);
-    options.onProgress?.(index, options.pages.length, fileName);
-    const canvas = await renderExportPage(page, options);
-    const bytes = await exportRasterPage(canvas, options.format, options.quality, options.printSpec.dpi);
-    const savedFileName = await saveBytes(fileName, bytes, options.outputDirectoryPath);
-    exportedFiles.push(savedFileName);
-    options.onProgress?.(index + 1, options.pages.length, savedFileName);
+  if (options.outputDirectoryPath && desktopTransactionApi) {
+    const preparedFiles: ExportCommittedFile[] = [];
+    const savedFileNames = await runDesktopAtomicWriteTransaction(
+      desktopTransactionApi,
+      options.outputDirectoryPath,
+      async (stageFile) => {
+        for (let index = 0; index < options.pages.length; index += 1) {
+          const page = options.pages[index];
+          const fileName = buildPageFileName(safePrefix, page.pageNumber, rasterFormat);
+          options.onProgress?.(index, options.pages.length, fileName);
+          const canvas = await renderExportPage(page, options);
+          try {
+            const bytes = await exportRasterPage(canvas, rasterFormat, options.quality, options.printSpec.dpi);
+            if (options.onCommittedFiles) {
+              preparedFiles.push(await fingerprintPreparedOutput(fileName, bytes));
+            }
+            await stageFile({ fileName, bytes });
+          } finally {
+            // Release the large backing store before rendering the next sheet;
+            // the encoded bytes have already crossed IPC and reached staging.
+            canvas.width = 1;
+            canvas.height = 1;
+          }
+          options.onProgress?.(index + 1, options.pages.length, `${fileName} preparato`);
+        }
+        if (options.onCommittedFiles) {
+          // Questa verifica avviene ancora nello staging: un errore impedisce il
+          // commit, quindi non può lasciare file pubblicati privi di impronta.
+          assertPreparedOutputMetadata(preparedFiles, options.pages.length);
+        }
+      },
+      options.validateBeforeSave,
+      async (committedFileNames, transactionId) => notifyCommittedFiles(
+        options,
+        preparedFiles,
+        committedFileNames,
+        { atomicTransactionId: transactionId },
+      ),
+    );
+    for (let index = 0; index < savedFileNames.length; index += 1) {
+      options.onProgress?.(index + 1, savedFileNames.length, savedFileNames[index]);
+    }
+    return savedFileNames;
   }
 
-  return exportedFiles;
+  if (options.outputDirectoryPath && options.pages.length > 1) {
+    throw new Error(
+      "La shell FileX in uso non supporta l'export progressivo. Aggiorna la Suite prima di esportare piu' fogli.",
+    );
+  }
+
+  const page = options.pages[0];
+  if (!page) return [];
+  const fileName = buildPageFileName(safePrefix, page.pageNumber, rasterFormat);
+  options.onProgress?.(0, 1, fileName);
+  const canvas = await renderExportPage(page, options);
+  let bytes: Uint8Array;
+  try {
+    bytes = await exportRasterPage(canvas, rasterFormat, options.quality, options.printSpec.dpi);
+  } finally {
+    canvas.width = 1;
+    canvas.height = 1;
+  }
+  await options.validateBeforeSave?.();
+  const preparedFiles = options.onCommittedFiles
+    ? [await fingerprintPreparedOutput(fileName, bytes)]
+    : [];
+  if (options.onCommittedFiles) assertPreparedOutputMetadata(preparedFiles, 1);
+  const [savedFileName] = await savePreparedFiles([{ fileName, bytes }], options.outputDirectoryPath);
+  await notifyCommittedFiles(options, preparedFiles, [savedFileName]);
+  options.onProgress?.(1, 1, savedFileName);
+  return [savedFileName];
+}
+
+export async function exportBatchWithMetadata(
+  options: ExportOptions,
+): Promise<ExportBatchResult> {
+  let committedFiles: ExportCommittedFile[] = [];
+  const persistCommittedFiles = options.onCommittedFiles;
+  const files = await exportBatch({
+    ...options,
+    onCommittedFiles: async (nextFiles, context) => {
+      committedFiles = nextFiles;
+      await persistCommittedFiles?.(nextFiles, context);
+    },
+  });
+  if (options.outputDirectoryPath) {
+    assertPreparedOutputMetadata(committedFiles, files.length);
+  }
+  return { files, committedFiles };
 }

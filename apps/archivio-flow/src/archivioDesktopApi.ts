@@ -1,4 +1,5 @@
 import type { DesktopArchivioDriveRegistrySyncResult } from "@photo-tools/desktop-contracts";
+import type { PhotoToolTargetId } from "./photoToolRouting";
 import type {
   ArchiveAnalysisResult,
   ArchiveRenameResult,
@@ -207,6 +208,18 @@ export async function getArchivioFilterPreview(input: {
     return await desktopApi.getArchivioFilterPreview(input);
   }
   return await apiPost<FilterPreviewData>("/api/filter-preview", input);
+}
+
+export async function sendArchivioPhotoSelectionToTool(input: {
+  targetToolId: PhotoToolTargetId;
+  sourceRoot: string;
+  absolutePaths: string[];
+}): Promise<{ ok: boolean; message: string }> {
+  const desktopApi = requireDesktopApi();
+  if (typeof desktopApi.sendPhotoSelectionToTool !== "function") {
+    throw new Error("Aggiorna FileX Suite per inviare le foto agli altri tool.");
+  }
+  return await desktopApi.sendPhotoSelectionToTool(input);
 }
 
 export async function startArchivioImport(input: ImportRequest): Promise<ImportResult> {

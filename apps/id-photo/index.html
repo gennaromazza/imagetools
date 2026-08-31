@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#1f2421" />
+    <title>FileX ID Photo</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #1f2421; }
+      .boot-splash {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 12px;
+        color: #f2ece5;
+        font: 600 14px Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+      .boot-splash__mark {
+        width: 44px;
+        height: 44px;
+        display: grid;
+        place-items: center;
+        border: 1px solid #b89a63;
+        border-radius: 12px;
+        color: #d8bd88;
+        font-weight: 900;
+      }
+      .boot-splash small { color: #9fa7a1; font-weight: 400; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot-splash" role="status" aria-live="polite">
+        <div class="boot-splash__mark">FX</div>
+        <div>Avvio FileX ID Photo…</div>
+        <small>Preparazione della commessa locale</small>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

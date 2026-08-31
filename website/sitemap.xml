@@ -1,27 +1,29 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
-  <url><loc>https://filex-suite.web.app/</loc><lastmod>2026-08-14</lastmod><changefreq>weekly</changefreq><priority>1.0</priority><image:image><image:loc>https://filex-suite.web.app/og.png</image:loc><image:title>FileX — ogni lavoro, lo strumento giusto</image:title></image:image><image:image><image:loc>https://filex-suite.web.app/assets/story/gennaro-mazzacane.jpg</image:loc><image:title>Gennaro Mazzacane, fotografo e ideatore di FileX</image:title></image:image></url>
-  <url><loc>https://filex-suite.web.app/strumenti/</loc><lastmod>2026-08-14</lastmod><priority>0.9</priority></url>
+  <url><loc>https://filex-suite.web.app/</loc><lastmod>2026-08-31</lastmod><changefreq>weekly</changefreq><priority>1.0</priority><image:image><image:loc>https://filex-suite.web.app/og.png</image:loc><image:title>FileX — ogni lavoro, lo strumento giusto</image:title></image:image><image:image><image:loc>https://filex-suite.web.app/assets/story/gennaro-mazzacane.jpg</image:loc><image:title>Gennaro Mazzacane, fotografo e ideatore di FileX</image:title></image:image></url>
+  <url><loc>https://filex-suite.web.app/strumenti/</loc><lastmod>2026-08-31</lastmod><priority>0.9</priority></url>
   <url><loc>https://filex-suite.web.app/strumenti/filex-dock/</loc><lastmod>2026-08-28</lastmod><priority>0.9</priority></url>
   <url><loc>https://filex-suite.web.app/strumenti/image-select-pro/</loc><lastmod>2026-08-12</lastmod><priority>0.8</priority></url>
-  <url><loc>https://filex-suite.web.app/strumenti/archivio-flow/</loc><lastmod>2026-08-12</lastmod><priority>0.8</priority></url>
+  <url><loc>https://filex-suite.web.app/strumenti/archivio-flow/</loc><lastmod>2026-08-31</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/strumenti/backup-guard/</loc><lastmod>2026-08-14</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/strumenti/filex-send/</loc><lastmod>2026-08-12</lastmod><priority>0.8</priority></url>
-  <url><loc>https://filex-suite.web.app/strumenti/image-party-frame/</loc><lastmod>2026-08-12</lastmod><priority>0.8</priority></url>
-  <url><loc>https://filex-suite.web.app/strumenti/batch-print-layout/</loc><lastmod>2026-08-28</lastmod><priority>0.8</priority></url>
+  <url><loc>https://filex-suite.web.app/strumenti/image-party-frame/</loc><lastmod>2026-08-31</lastmod><priority>0.8</priority></url>
+  <url><loc>https://filex-suite.web.app/strumenti/batch-print-layout/</loc><lastmod>2026-08-31</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/strumenti/batch-print-layout/polaroid-go/</loc><lastmod>2026-08-28</lastmod><priority>0.9</priority></url>
+  <url><loc>https://filex-suite.web.app/strumenti/id-photo/</loc><lastmod>2026-08-31</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/strumenti/image-converter/</loc><lastmod>2026-08-12</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/strumenti/trova-foto/</loc><lastmod>2026-08-12</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/strumenti/adobe-cleaner/</loc><lastmod>2026-08-12</lastmod><priority>0.8</priority></url>
-  <url><loc>https://filex-suite.web.app/guide/</loc><lastmod>2026-08-25</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://filex-suite.web.app/guide/</loc><lastmod>2026-08-31</lastmod><changefreq>weekly</changefreq><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/guide/selezionare-foto-raw/</loc><lastmod>2026-08-25</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/guide/importare-scheda-sd/</loc><lastmod>2026-08-25</lastmod><priority>0.8</priority></url>
-  <url><loc>https://filex-suite.web.app/guide/software-gestione-archivio-fotografico/</loc><lastmod>2026-08-25</lastmod><priority>0.9</priority></url>
+  <url><loc>https://filex-suite.web.app/guide/software-gestione-archivio-fotografico/</loc><lastmod>2026-08-31</lastmod><priority>0.9</priority></url>
   <url><loc>https://filex-suite.web.app/guide/backup-archivio-fotografico/</loc><lastmod>2026-08-25</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/guide/ricevere-foto-con-qr/</loc><lastmod>2026-08-25</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/guide/software-invio-file-clienti-qr/</loc><lastmod>2026-08-25</lastmod><priority>0.9</priority></url>
-  <url><loc>https://filex-suite.web.app/guide/software-photo-booth-matrimoni-eventi/</loc><lastmod>2026-08-25</lastmod><priority>0.8</priority></url>
-  <url><loc>https://filex-suite.web.app/guide/impaginare-foto-per-la-stampa/</loc><lastmod>2026-08-25</lastmod><priority>0.7</priority></url>
+  <url><loc>https://filex-suite.web.app/guide/software-photo-booth-matrimoni-eventi/</loc><lastmod>2026-08-31</lastmod><priority>0.8</priority></url>
+  <url><loc>https://filex-suite.web.app/guide/impaginare-foto-per-la-stampa/</loc><lastmod>2026-08-31</lastmod><priority>0.7</priority></url>
+  <url><loc>https://filex-suite.web.app/guide/preparare-fototessere-documenti/</loc><lastmod>2026-08-31</lastmod><priority>0.7</priority></url>
   <url><loc>https://filex-suite.web.app/guide/convertire-foto-per-web-stampa-archivio/</loc><lastmod>2026-08-25</lastmod><priority>0.8</priority></url>
   <url><loc>https://filex-suite.web.app/guide/ritrovare-foto-in-archivio/</loc><lastmod>2026-08-25</lastmod><priority>0.7</priority></url>
   <url><loc>https://filex-suite.web.app/guide/pulire-cache-adobe-in-sicurezza/</loc><lastmod>2026-08-25</lastmod><priority>0.7</priority></url>

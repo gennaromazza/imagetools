@@ -448,6 +448,9 @@ export default {
       ]
     : [
         ".output/electron/**/*",
+        "!.output/electron/**/*.test.js",
+        "!.output/electron/**/*.d.ts",
+        "!.output/electron/**/*.map",
         "package.json",
       ],
 

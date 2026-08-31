@@ -14,6 +14,7 @@ const expectedPackages = {
   "photo-selector-app": { name: "Image-Select-Pro", main: ".output/electron/main.js" },
   "image-party-frame": { name: "Image-Party-Frame", main: ".output/electron/main.js" },
   "batch-print-layout": { name: "Batch-Print-Layout", main: ".output/electron/main.js" },
+  "id-photo": { name: "FileX-ID-Photo", main: ".output/electron/main.js" },
   "archivio-flow": { name: "Archivio-Flow", main: ".output/electron/main.js" },
   "image-converter": { name: "Image-Converter", main: ".output/electron/main.js" },
   "image-file-finder": { name: "Trova-Foto-da-Lista", main: ".output/electron/main.js" },
@@ -100,6 +101,24 @@ if (args.component === "photo-selector-app") {
     if (!entries.has(requiredEntry)) {
       throw new Error(`Image Select Pro non contiene ${requiredEntry}, richiesto per le anteprime PSD.`);
     }
+  }
+}
+
+if (args.component === "id-photo") {
+  const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+  const preloadEntry = "/.output/electron/preload.js";
+  if (!entries.has(preloadEntry)) {
+    throw new Error(`FileX ID Photo non contiene ${preloadEntry}, necessario per il bridge IPC.`);
+  }
+  verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
+  verifyRelativeImportClosure(archivePath, entries, preloadEntry);
+  const forbiddenDevelopmentEntries = Array.from(entries).filter((entry) =>
+    entry.startsWith("/.output/electron/")
+    && (entry.endsWith(".test.js") || entry.endsWith(".d.ts") || entry.endsWith(".map")));
+  if (forbiddenDevelopmentEntries.length > 0) {
+    throw new Error(
+      `FileX ID Photo contiene artefatti di sviluppo non ammessi:\n${forbiddenDevelopmentEntries.slice(0, 20).join("\n")}`,
+    );
   }
 }
 

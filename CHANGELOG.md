@@ -30,6 +30,15 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-31 - FileX ID Photo 0.1.0
+
+- Prima release del flusso professionale Commessa, Prepara, Verifica, Impagina ed Esporta per fototessere CIE, passaporto italiano e formato studio generico.
+- Aggiunto il tutorial operativo sempre raggiungibile in ogni schermata, con istruzioni contestuali per tutti gli step e per il passaggio Photoshop.
+- Integrato il ritocco Photoshop su copie di lavoro gestite, con rientro controllato, revisioni ripristinabili e originali invariati.
+- Aggiunti fogli 10×15 e 15×20 in PDF o JPG, scrittura senza sovrascritture e verifica persistente SHA-256 degli output.
+- Collegato Archivio Flow a FileX ID Photo con invio locale di una singola foto; esteso lo stesso flusso a Image Party Frame e Batch Print Layout per selezioni multiple.
+- Aggiunte integrazione Suite e licenza, Dev Console, test, installer indipendente, pagina prodotto e manuale ufficiale per fotografi.
+
 ## 2026-08-31 - Image Select Pro 0.1.34
 
 - Supporto nativo ai PSD: miniature e anteprime leggono il composito salvato senza modificare il file originale.

@@ -9,7 +9,7 @@ import {
   planProjectImageRelink,
   setImageFiles,
 } from "./ProjectContext.js";
-import { upsertRecentProjectList, type RecentProject } from "../lib/recentProjects.js";
+import { saveRecentProject, upsertRecentProjectList, type RecentProject } from "../lib/recentProjects.js";
 
 test("bug hunt: il conteggio immagini viene ricostruito e non usa dati salvati obsoleti", () => {
   const normalized = normalizeProjectState({
@@ -194,4 +194,32 @@ test("regressione recenti: il salvataggio sostituisce per projectId e non per no
   assert.equal(replaced.length, 2);
   assert.equal(replaced[0]?.name, "Festa rinominata");
   assert.equal(replaced.filter((item) => item.projectId === firstProject.projectId).length, 1);
+});
+
+test("regressione recenti: un errore localStorage viene restituito al chiamante", () => {
+  const previousWindow = globalThis.window;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      localStorage: {
+        getItem: () => null,
+        setItem: () => { throw new Error("quota esaurita"); },
+      },
+      dispatchEvent: () => true,
+    },
+  });
+  try {
+    const result = saveRecentProject(normalizeProjectState({
+      projectId: "project_unsaved",
+      name: "Da conservare",
+      template: "classic-gold",
+    }));
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.message, /quota esaurita/);
+  } finally {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: previousWindow,
+    });
+  }
 });

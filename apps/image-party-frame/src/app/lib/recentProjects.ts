@@ -10,6 +10,10 @@ export type RecentProject = {
   snapshot: ProjectState;
 };
 
+export type SaveRecentProjectResult =
+  | { ok: true; evictedProjectIds: string[] }
+  | { ok: false; evictedProjectIds: []; message: string };
+
 const STORAGE_KEY = "desktop-frame-composer.recent-projects";
 const STORAGE_EVENT = "desktop-frame-composer:recent-projects-updated";
 const MAX_RECENT_PROJECTS = 8;
@@ -155,9 +159,9 @@ export function onRecentProjectsUpdated(listener: () => void): () => void {
   return () => window.removeEventListener(STORAGE_EVENT, listener);
 }
 
-export function saveRecentProject(project: ProjectState, templateLabel?: string): void {
+export function saveRecentProject(project: ProjectState, templateLabel?: string): SaveRecentProjectResult {
   if (typeof window === "undefined") {
-    return;
+    return { ok: false, evictedProjectIds: [], message: "Archivio progetti recenti non disponibile." };
   }
 
   const normalizedProject = normalizeProjectState(project);
@@ -166,7 +170,7 @@ export function saveRecentProject(project: ProjectState, templateLabel?: string)
     : null;
   if (normalizedProject.template === "custom" && !normalizedCustomTemplate) {
     console.warn("Skipped recent project with an invalid custom template");
-    return;
+    return { ok: false, evictedProjectIds: [], message: "Il template custom del progetto non è valido." };
   }
   const snapshot: ProjectState = {
     ...normalizedProject,
@@ -186,7 +190,12 @@ export function saveRecentProject(project: ProjectState, templateLabel?: string)
     snapshot,
   };
 
-  const next = upsertRecentProjectList(loadRecentProjects(), nextProject);
+  const current = loadRecentProjects();
+  const next = upsertRecentProjectList(current, nextProject);
+  const nextProjectIds = new Set(next.map((item) => item.projectId));
+  const evictedProjectIds = current
+    .map((item) => item.projectId)
+    .filter((projectId) => !nextProjectIds.has(projectId));
   try {
     const serialized = JSON.stringify(next);
     if (serialized.length > MAX_RECENT_STORAGE_CHARS) {
@@ -198,8 +207,14 @@ export function saveRecentProject(project: ProjectState, templateLabel?: string)
     } catch (error) {
       console.warn("Recent project update listener failed", error);
     }
+    return { ok: true, evictedProjectIds };
   } catch (error) {
     console.warn("Failed to save recent project", error);
+    return {
+      ok: false,
+      evictedProjectIds: [],
+      message: error instanceof Error ? error.message : "Impossibile conservare il progetto corrente.",
+    };
   }
 }
 

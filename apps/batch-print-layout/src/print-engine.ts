@@ -399,8 +399,11 @@ export function createDefaultCrop(
   printSpec: PhotoPrintSpec,
   fitMode: PhotoFitMode = "cover",
   autoRotateBySourceOrientation = false,
+  rotationOverride?: number,
 ): BatchCropState {
-  const rotation = shouldAutoRotateSource(asset, printSpec, autoRotateBySourceOrientation) ? 90 : 0;
+  const rotation = Number.isFinite(rotationOverride)
+    ? ((rotationOverride! % 360) + 360) % 360
+    : shouldAutoRotateSource(asset, printSpec, autoRotateBySourceOrientation) ? 90 : 0;
 
   if (fitMode === "contain") {
     return {

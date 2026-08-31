@@ -16,6 +16,7 @@ const toolNames = {
   'photo-selector-app': 'Image Select Pro',
   'image-party-frame': 'Image Party Frame',
   'batch-print-layout': 'Batch Print Layout',
+  'id-photo': 'FileX ID Photo',
   'archivio-flow': 'Archivio Flow',
   'image-converter': 'Image Converter',
   'image-file-finder': 'Trova Foto da Lista',

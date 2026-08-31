@@ -387,6 +387,14 @@
       "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
+  "id-photo": {
+    "0.1.0": [
+      "Prima release professionale per preparare, verificare e impaginare fototessere CIE, passaporto italiano e formato studio generico.",
+      "Tutorial operativo sempre disponibile in ogni schermata, con istruzioni contestuali per i cinque step e per il passaggio Photoshop.",
+      "Ritocco Photoshop su copie gestite, originali invariati, revisioni ripristinabili ed export PDF o JPG su fogli 10×15 e 15×20.",
+      "Apertura diretta di una singola foto da Archivio Flow e verifica persistente SHA-256 dei file esportati."
+    ]
+  },
   "suite": {
     "0.1.60": [
       "Uniformate le icone di tutti gli strumenti al linguaggio grafico FileX Suite, con copie coerenti in finestre, tray, installer e catalogo web."

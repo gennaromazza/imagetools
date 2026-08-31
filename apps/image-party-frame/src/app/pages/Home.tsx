@@ -7,6 +7,7 @@ import { ServerStatus } from "../components/ServerStatus";
 import { ConfirmActionDialog, TextInputDialog } from "../components/ActionDialogs";
 import {
   clearCustomTemplateBackgroundFiles,
+  clearImageFiles,
   getImageFile,
   normalizeProjectState,
   setImageFiles,
@@ -195,7 +196,13 @@ export default function Home() {
     if (!confirmAction) return;
     if (confirmAction.kind === "delete-project") {
       const currentIndex = recentProjects.findIndex((project) => project.projectId === confirmAction.projectId);
-      if (currentIndex >= 0) setRecentProjects(removeRecentProjectAt(currentIndex));
+      if (currentIndex >= 0) {
+        const nextProjects = removeRecentProjectAt(currentIndex);
+        setRecentProjects(nextProjects);
+        if (!nextProjects.some((project) => project.projectId === confirmAction.projectId)) {
+          clearImageFiles(confirmAction.projectId);
+        }
+      }
       return;
     }
     if (confirmAction.kind === "delete-template") {

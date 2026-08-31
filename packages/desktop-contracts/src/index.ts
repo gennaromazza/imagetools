@@ -2,6 +2,7 @@ export type DesktopToolId =
   | "suite-launcher"
   | "image-party-frame"
   | "batch-print-layout"
+  | "id-photo"
   | "archivio-flow"
   | "image-converter"
   | "image-file-finder"
@@ -9,6 +10,44 @@ export type DesktopToolId =
   | "filex-send"
   | "backup-guard"
   | "photo-selector-app";
+
+export type DesktopPhotoToolHandoffTargetToolId =
+  | "image-party-frame"
+  | "batch-print-layout"
+  | "id-photo";
+
+export interface DesktopPhotoToolHandoffRequest {
+  targetToolId: DesktopPhotoToolHandoffTargetToolId;
+  sourceRoot: string;
+  absolutePaths: string[];
+}
+
+export interface DesktopPhotoToolHandoffFile {
+  absolutePath: string;
+  relativePath: string;
+  fileName: string;
+  size: number;
+  lastModified: number;
+}
+
+export interface DesktopPhotoToolHandoff {
+  schemaVersion: 1;
+  handoffId: string;
+  sourceToolId: DesktopToolId;
+  targetToolId: DesktopPhotoToolHandoffTargetToolId;
+  sourceRoot: string;
+  files: DesktopPhotoToolHandoffFile[];
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface DesktopPhotoToolHandoffSendResult {
+  ok: boolean;
+  message: string;
+  fileCount: number;
+  targetToolId: DesktopPhotoToolHandoffTargetToolId;
+  handoffPath?: string;
+}
 
 export type DesktopReleaseChannel = "stable" | "beta";
 
@@ -228,11 +267,42 @@ export interface DesktopFilePayload {
   lastModified: number;
 }
 
+export interface DesktopIdPhotoWorkingCopyRequest {
+  jobId: string;
+  sourcePath: string;
+}
+
+export interface DesktopIdPhotoWorkingCopyResult {
+  jobId: string;
+  sourcePath: string;
+  workingPath: string;
+  createdAt: number;
+}
+
+export interface DesktopIdPhotoWorkingCleanupResult {
+  jobId: string;
+  removed: boolean;
+}
+
+export interface DesktopAtomicWriteFile {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+export interface DesktopAtomicWriteFinalizeRecovery {
+  directoryPath: string;
+  expectedFileNames: string[];
+}
+
 export interface DesktopFileStat {
   name: string;
   absolutePath: string;
   size: number;
   lastModified: number;
+}
+
+export interface DesktopFileFingerprint extends DesktopFileStat {
+  sha256: string;
 }
 
 export interface DesktopRenderedImage {
@@ -451,6 +521,7 @@ export interface DesktopCloudPhotoState {
   pickStatus: DesktopPickStatus;
   colorLabel: DesktopColorLabel | null;
   customLabels: string[];
+  rotationDegrees?: number;
   active?: boolean;
 }
 
@@ -579,6 +650,7 @@ export interface DesktopFolderCatalogAssetState {
   pickStatus: DesktopPickStatus;
   colorLabel: DesktopColorLabel | null;
   customLabels: string[];
+  rotationDegrees?: number;
   active?: boolean;
   classificationUpdatedAt?: number;
   selectionUpdatedAt?: number;
@@ -1277,6 +1349,12 @@ export interface FileXDesktopApi {
     toolId: DesktopToolId,
     launchArgs?: string[],
   ) => Promise<{ ok: boolean; message: string }>;
+  sendPhotoSelectionToTool: (
+    request: DesktopPhotoToolHandoffRequest,
+  ) => Promise<DesktopPhotoToolHandoffSendResult>;
+  consumePhotoSelectionHandoff: (
+    projectPath: string,
+  ) => Promise<DesktopPhotoToolHandoff | null>;
   getSuiteDockState: () => Promise<DesktopDockState>;
   saveSuiteDockState: (state: Partial<DesktopDockState>) => Promise<DesktopDockState>;
   setSuiteDockEnabled?: (enabled: boolean) => Promise<DesktopDockState>;
@@ -1291,6 +1369,7 @@ export interface FileXDesktopApi {
   markOpenFolderRequestReady: () => Promise<void>;
   onOpenFolderRequest: (listener: (folderPath: string) => void) => () => void;
   consumePendingOpenProjectPath: () => Promise<string | null>;
+  acknowledgeOpenProjectRequest: (projectPath: string) => Promise<void>;
   markOpenProjectRequestReady: () => Promise<void>;
   onOpenProjectRequest: (listener: (projectPath: string) => void) => () => void;
   onPrepareClose: (listener: () => void) => () => void;
@@ -1298,7 +1377,14 @@ export interface FileXDesktopApi {
   canStartDragOut: (absolutePaths: string[]) => Promise<DesktopDragOutCheck>;
   startDragOut: (absolutePaths: string[]) => void;
   readFile: (absolutePath: string) => Promise<DesktopFilePayload | null>;
+  createIdPhotoWorkingCopy: (
+    request: DesktopIdPhotoWorkingCopyRequest,
+  ) => Promise<DesktopIdPhotoWorkingCopyResult>;
+  cleanupIdPhotoWorkingFiles: (
+    jobId: string,
+  ) => Promise<DesktopIdPhotoWorkingCleanupResult>;
   statFiles: (absolutePaths: string[]) => Promise<DesktopFileStat[]>;
+  fingerprintFiles: (absolutePaths: string[]) => Promise<DesktopFileFingerprint[]>;
   getThumbnail: (
     absolutePath: string,
     maxDimension: number,
@@ -1412,6 +1498,15 @@ export interface FileXDesktopApi {
   chooseOutputFolder: () => Promise<string | null>;
   saveNewFileAs: (suggestedName: string, bytes: Uint8Array) => Promise<string | null>;
   writeFile: (absolutePath: string, bytes: Uint8Array) => Promise<boolean>;
+  writeFilesAtomically: (directoryPath: string, files: DesktopAtomicWriteFile[]) => Promise<string[]>;
+  beginAtomicWriteTransaction: (directoryPath: string) => Promise<string>;
+  stageAtomicWriteTransactionFile: (transactionId: string, file: DesktopAtomicWriteFile) => Promise<void>;
+  commitAtomicWriteTransaction: (transactionId: string) => Promise<string[]>;
+  finalizeAtomicWriteTransaction: (
+    transactionId: string,
+    recovery?: DesktopAtomicWriteFinalizeRecovery,
+  ) => Promise<boolean>;
+  rollbackAtomicWriteTransaction: (transactionId: string) => Promise<boolean>;
   getRecentFolders: () => Promise<DesktopRecentFolder[]>;
   saveRecentFolder: (folder: DesktopRecentFolder) => Promise<DesktopRecentFolder[]>;
   removeRecentFolder: (folderPathOrName: string) => Promise<DesktopRecentFolder[]>;

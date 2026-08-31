@@ -12,6 +12,7 @@ on:
       - "filex-send-v*"
       - "backup-guard-v*"
       - "batch-print-layout-v*"
+      - "id-photo-v*"
       - "image-converter-v*"
       - "image-file-finder-v*"
   workflow_dispatch:
@@ -29,6 +30,7 @@ on:
           - filex-send
           - backup-guard
           - batch-print-layout
+          - id-photo
           - image-converter
           - image-file-finder
       channel:
@@ -95,18 +97,19 @@ jobs:
 
           if ("${{ github.event_name }}" -eq "push") {
             $releaseTag = "${{ github.ref_name }}"
-            if ($releaseTag -notmatch "^(suite|photo-selector-app|image-party-frame|archivio-flow|cache-sweep|filex-send|backup-guard|batch-print-layout|image-converter|image-file-finder)-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$") {
+            if ($releaseTag -notmatch "^(suite|photo-selector-app|image-party-frame|archivio-flow|cache-sweep|filex-send|backup-guard|batch-print-layout|id-photo|image-converter|image-file-finder)-v([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)$") {
               throw "Tag componente non valido: $releaseTag"
             }
             $component = $Matches[1]
             $version = $Matches[2]
             $channel = if ($version.Contains("-")) { "beta" } else { "stable" }
-            $minSuiteVersion = if ($component -eq "backup-guard") { "0.1.33" } elseif ($component -eq "filex-send") { "0.1.31" } elseif ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }
+            $minSuiteVersion = if ($component -eq "id-photo") { "0.1.61" } elseif ($component -eq "backup-guard") { "0.1.33" } elseif ($component -eq "filex-send") { "0.1.31" } elseif ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }
           } else {
             $component = "${{ inputs.component }}"
             $version = "${{ inputs.version }}".TrimStart("v")
             $channel = "${{ inputs.channel }}"
-            $minSuiteVersion = "${{ inputs.min_suite_version }}".TrimStart("v")
+            $requestedMinSuiteVersion = "${{ inputs.min_suite_version }}".TrimStart("v")
+            $minSuiteVersion = if ($component -eq "id-photo") { "0.1.61" } else { $requestedMinSuiteVersion }
             $releaseTag = "$component-v$version"
           }
 
@@ -123,6 +126,7 @@ jobs:
             "filex-send" { "apps/filex-send/package.json" }
             "backup-guard" { "apps/backup-guard/package.json" }
             "batch-print-layout" { "apps/batch-print-layout/package.json" }
+            "id-photo" { "apps/id-photo/package.json" }
             "image-converter" { "apps/image-converter/package.json" }
             "image-file-finder" { "apps/image-file-finder/package.json" }
             default { throw "Componente non supportato: $component" }
@@ -158,8 +162,20 @@ jobs:
           npm.cmd run test:filex-installer-runner
           npm.cmd run test:filex-cooperative-signal
           npm.cmd run test:filex-independent-releases
+          npm.cmd run test:id-photo-package-runtime
+          npm.cmd run test:id-photo-working-files
+          npm.cmd run test:id-photo-file-fingerprint
+          npm.cmd run test:id-photo-unload-guard
           npm.cmd run test:archivio-flow-package-runtime
           npm.cmd --workspace @photo-tools/filex-desktop run build:shell
+
+      - name: Test FileX ID Photo domain and job persistence
+        if: steps.release.outputs.component == 'id-photo'
+        run: npm.cmd run test:id-photo
+
+      - name: Test atomic output transactions for ID Photo and Batch Print Layout
+        if: steps.release.outputs.component == 'id-photo' || steps.release.outputs.component == 'batch-print-layout'
+        run: npm.cmd run test:batch-print-layout-bug-hunt
 
       - name: Download current catalog snapshot
         if: steps.release.outputs.component == 'suite'
@@ -198,6 +214,7 @@ jobs:
             "filex-send" { npm.cmd --workspace @photo-tools/filex-desktop run dist:filex-send:win }
             "backup-guard" { npm.cmd --workspace @photo-tools/filex-desktop run dist:backup-guard:win }
             "batch-print-layout" { npm.cmd --workspace @photo-tools/filex-desktop run dist:batch-print-layout:win64 }
+            "id-photo" { npm.cmd --workspace @photo-tools/filex-desktop run dist:id-photo:win64 }
             "image-converter" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-converter:win64 }
             "image-file-finder" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-file-finder:win64 }
             default { throw "Componente non supportato: $env:FILEX_COMPONENT" }
@@ -238,12 +255,23 @@ jobs:
             "filex-send" { "FileX-Send" }
             "backup-guard" { "FileX-Backup-Guard" }
             "batch-print-layout" { "Batch-Print-Layout" }
+            "id-photo" { "FileX-ID-Photo" }
             "image-converter" { "Image-Converter" }
             "image-file-finder" { "Trova-Foto-da-Lista" }
           }
           $installers = @(Get-ChildItem "apps/filex-desktop/.output/releases/$expectedPrefix-$env:FILEX_RELEASE_VERSION-$env:FILEX_RELEASE_CHANNEL-x64-setup.exe")
           if ($installers.Count -ne 1) {
             throw "Atteso un installer x64 per $env:FILEX_COMPONENT $env:FILEX_RELEASE_VERSION, trovati $($installers.Count)"
+          }
+          if ($env:FILEX_COMPONENT -eq "id-photo") {
+            $smokeExecutable = "apps/filex-desktop/.output/releases/win-unpacked/FileX-ID-Photo.exe"
+            if (-not (Test-Path -LiteralPath $smokeExecutable)) {
+              throw "Eseguibile ID Photo impacchettato non trovato: $smokeExecutable"
+            }
+            $smoke = Start-Process -FilePath $smokeExecutable -ArgumentList "--filex-id-photo-packaged-smoke-test" -WindowStyle Hidden -Wait -PassThru
+            if ($smoke.ExitCode -ne 0) {
+              throw "Smoke test main process ID Photo fallito con codice $($smoke.ExitCode)"
+            }
           }
 
       - name: Generate Suite release notes from changelog

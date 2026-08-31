@@ -75,4 +75,5 @@ L’obiettivo è una suite integrata, con:
 - `docs/18-publish-build-contract.md`: contratto completo per build, pubblicazione, sito e updater
 - `docs/20-licensing-and-payments-mvp.md`: architettura, sicurezza e rollout di licenze e pagamenti
 - `docs/21-licensing-operations-runbook.md`: configurazione e operazioni PayPal/Firebase
+- `docs/tools/filex-id-photo/README.md`: specifica ufficiale di FileX ID Photo, workflow professionale, Photoshop, stampa e gate di release
 - `docs/tools/`: documenti specifici dei singoli tool

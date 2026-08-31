@@ -3,9 +3,15 @@ import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicens
 import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
-import { readFile as readFileAsync, writeFile as writeFileAsync } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
-import { basename, dirname, join, parse, resolve } from "node:path";
+import {
+  mkdtemp,
+  readFile as readFileAsync,
+  rm as rmAsync,
+  stat as statAsync,
+  writeFile as writeFileAsync,
+} from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { basename, dirname, extname, join, parse, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 // When the app is launched from a terminal that is later closed, Node can
@@ -22,6 +28,8 @@ for (const output of [process.stdout, process.stderr]) {
 }
 
 import type {
+  DesktopAtomicWriteFinalizeRecovery,
+  DesktopAtomicWriteFile,
   DesktopDragOutCheck,
   DesktopDockState,
   DesktopEditorCandidate,
@@ -30,9 +38,11 @@ import type {
   DesktopFolderCatalogState,
   DesktopFolderOpenOptions,
   DesktopGraphicsStatus,
+  DesktopIdPhotoWorkingCopyRequest,
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
+  DesktopPhotoToolHandoffRequest,
   DesktopDiskCacheBudgetPreset,
   DesktopRamBudgetPreset,
   DesktopReleaseChannel,
@@ -71,6 +81,7 @@ import {
   writePhotoSelectorProjectFileDesktop,
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
+import { AtomicOutputTransactionManager } from "./atomic-output-transaction.js";
 import {
   configureDesktopImageService,
   clearDesktopImageMemoryCaches,
@@ -174,6 +185,14 @@ import {
   getPsdJpegConversionProgressDesktop,
   startPsdJpegConversionDesktop,
 } from "./psd-jpeg-conversion-service.js";
+import {
+  cleanupIdPhotoWorkingFiles,
+  createIdPhotoWorkingCopy,
+  resolveIdPhotoDataRoot,
+} from "./id-photo-working-files.js";
+import { fingerprintFilesDesktop } from "./id-photo-file-fingerprint.js";
+import { createIdPhotoQuitCoordinator, createIdPhotoUnloadGuard } from "./id-photo-unload-guard.js";
+import { OpenProjectRequestQueue, PhotoToolHandoffManager } from "./photo-tool-handoff.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, Tray } = electron;
 
@@ -231,6 +250,7 @@ const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
 const appUserModelId = `studio.filex.${requestedTool.id}`;
 let mainWindow: BrowserWindowInstance | null = null;
+const idPhotoQuitCoordinator = createIdPhotoQuitCoordinator();
 const PHOTO_SELECTOR_CLOSE_PREPARATION_TIMEOUT_MS = 20_000;
 type PhotoSelectorClosePreparationState = "idle" | "pending" | "ready";
 let photoSelectorClosePreparationState: PhotoSelectorClosePreparationState = "idle";
@@ -239,11 +259,22 @@ let photoSelectorQuitAfterPreparation = false;
 let isOpenFolderRequestRendererReady = false;
 let pendingOpenFolderPath: string | null = null;
 let deliveredOpenFolderPath: string | null = null;
-let isOpenProjectRequestRendererReady = false;
-let pendingOpenProjectPath: string | null = null;
+const openProjectRequests = new OpenProjectRequestQueue();
 let mainWindowCreationPromise: Promise<void> | null = null;
 let suiteTray: TrayInstance | null = null;
 let suiteDockWindow: BrowserWindowInstance | null = null;
+let photoToolHandoffManager: PhotoToolHandoffManager | null = null;
+
+function getPhotoToolHandoffManager(): PhotoToolHandoffManager {
+  if (!photoToolHandoffManager) {
+    photoToolHandoffManager = new PhotoToolHandoffManager({
+      storageRoot: join(app.getPath("appData"), "FileX", "photo-tool-handoffs"),
+      currentToolId: requestedTool.id,
+      launchTool: (toolId, launchArgs) => openInstalledTool(toolId, launchArgs),
+    });
+  }
+  return photoToolHandoffManager;
+}
 
 function resetPhotoSelectorClosePreparation(): void {
   if (photoSelectorClosePreparationTimer) {
@@ -331,6 +362,19 @@ const defaultSuiteDockState: DesktopDockState = {
 
 function getSuiteDockStatePath(): string {
   return join(app.getPath("userData"), "suite-dock-state.json");
+}
+
+function getIdPhotoWorkingBasePath(): string {
+  // Photoshop 2026 on Windows can reject otherwise valid files stored below
+  // Electron's roaming userData and Local AppData directories. Keep the
+  // guarded subtree directly in the local user profile: unlike Pictures,
+  // this path is not redirected by the common OneDrive Known Folder Backup
+  // policy, and it has been verified with Photoshop's Windows file access.
+  return resolveIdPhotoDataRoot(
+    process.platform,
+    app.getPath("home"),
+    app.getPath("userData"),
+  );
 }
 
 function sanitizeSuiteDockState(value: Partial<DesktopDockState> | null | undefined): DesktopDockState {
@@ -618,6 +662,42 @@ function normalizeUint8Array(payload: unknown): Uint8Array {
   return new Uint8Array();
 }
 
+const atomicOutputTransactions = new AtomicOutputTransactionManager();
+
+async function writeFilesAtomicallyDesktop(
+  directoryPathInput: string,
+  filesInput: DesktopAtomicWriteFile[],
+  ownerId: number,
+): Promise<string[]> {
+  const directoryPath = resolveValidDirectoryPath(directoryPathInput);
+  if (!directoryPath) throw new Error("Cartella di output non valida o non disponibile.");
+  if (!Array.isArray(filesInput) || filesInput.length === 0) {
+    throw new Error("Il batch di output deve contenere almeno un file.");
+  }
+
+  const transactionId = await atomicOutputTransactions.begin(directoryPath, ownerId);
+  try {
+    for (const input of filesInput) {
+      await atomicOutputTransactions.stage(
+        ownerId,
+        transactionId,
+        input?.fileName,
+        normalizeUint8Array(input?.bytes),
+      );
+    }
+    const savedFileNames = await atomicOutputTransactions.commit(ownerId, transactionId);
+    await atomicOutputTransactions.finalize(ownerId, transactionId);
+    return savedFileNames;
+  } catch (error) {
+    try {
+      await atomicOutputTransactions.rollback(ownerId, transactionId);
+    } catch (rollbackError) {
+      throw new AggregateError([error, rollbackError], "Scrittura output fallita e rollback incompleto.");
+    }
+    throw error;
+  }
+}
+
 function getArchivioFlowDataDir(): string {
   return join(app.getPath("userData"), "archivio-flow");
 }
@@ -866,14 +946,22 @@ function deliverOpenFolderRequest(folderPath: string): void {
   });
 }
 
-function deliverOpenProjectRequest(projectPath: string): void {
+function deliverNextOpenProjectRequest(): void {
   if (!mainWindow || mainWindow.isDestroyed()) {
-    pendingOpenProjectPath = projectPath;
+    openProjectRequests.resetRenderer();
     return;
   }
 
-  mainWindow.webContents.send("filex:open-project-request", projectPath);
-  pendingOpenProjectPath = null;
+  const projectPath = openProjectRequests.takeForDelivery();
+  if (!projectPath) {
+    return;
+  }
+  try {
+    mainWindow.webContents.send("filex:open-project-request", projectPath);
+  } catch (error) {
+    openProjectRequests.resetRenderer();
+    writeBootLog(`Invio open-project al renderer fallito: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function queueOpenFolderPath(folderPath: string | null): void {
@@ -898,10 +986,8 @@ function queueOpenProjectPath(projectPath: string | null): void {
     return;
   }
 
-  pendingOpenProjectPath = projectPath;
-  if (isOpenProjectRequestRendererReady) {
-    deliverOpenProjectRequest(projectPath);
-  }
+  openProjectRequests.enqueue(projectPath);
+  deliverNextOpenProjectRequest();
 }
 
 const initialOpenFolderPath = extractOpenFolderPathFromArgv(process.argv, process.cwd());
@@ -911,6 +997,9 @@ const isUpdateShutdownRequest = (argv: readonly string[]): boolean =>
 const isPhotoSelectorPackagedSmokeTest =
   requestedTool.id === "photo-selector-app"
   && process.argv.includes("--filex-photo-selector-packaged-smoke-test");
+const isIdPhotoPackagedSmokeTest =
+  requestedTool.id === "id-photo"
+  && process.argv.includes("--filex-id-photo-packaged-smoke-test");
 const hasSingleInstanceLock = app.requestSingleInstanceLock({
   requestedToolId: requestedTool.id,
   openFolderPath: initialOpenFolderPath,
@@ -918,11 +1007,18 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock({
 });
 if (!hasSingleInstanceLock) {
   writeEarlyBootLog("Single instance lock denied, quitting");
-  app.quit();
+  if (isIdPhotoPackagedSmokeTest) {
+    writeEarlyBootLog("FileX ID Photo packaged smoke test aborted: single instance lock denied");
+    app.exit(3);
+  } else {
+    app.quit();
+  }
 } else {
   writeEarlyBootLog("Single instance lock acquired");
   pendingOpenFolderPath = initialOpenFolderPath;
-  pendingOpenProjectPath = initialOpenProjectPath;
+  if (initialOpenProjectPath) {
+    openProjectRequests.enqueue(initialOpenProjectPath);
+  }
 
   app.on("second-instance", (_event, argv, workingDirectory, additionalData) => {
     // La Suite usa questo comando solo dopo avere verificato che il tool e'
@@ -955,9 +1051,7 @@ if (!hasSingleInstanceLock) {
     ) {
       deliverOpenFolderRequest(pendingOpenFolderPath);
     }
-    if (pendingOpenProjectPath && isOpenProjectRequestRendererReady) {
-      deliverOpenProjectRequest(pendingOpenProjectPath);
-    }
+    deliverNextOpenProjectRequest();
   });
 }
 
@@ -1033,14 +1127,28 @@ function validateDesktopDragOut(absolutePaths: unknown): DesktopDragOutCheck {
   };
 }
 
-function launchEditorProcess(
+async function launchEditorProcess(
   editorPath: string,
   absolutePaths: string[],
-): DesktopSendToEditorResult {
+): Promise<DesktopSendToEditorResult> {
   const normalizedEditorPath = sanitizeDesktopPath(editorPath);
   const targetPaths = normalizeExistingAbsolutePaths(absolutePaths);
 
-  if (!normalizedEditorPath || !existsSync(normalizedEditorPath)) {
+  const windowsEditorIsExecutable = process.platform !== "win32"
+    || extname(normalizedEditorPath).toLocaleLowerCase() === ".exe";
+  let editorPathIsUsable = false;
+  try {
+    if (normalizedEditorPath) {
+      const editorStat = await statAsync(normalizedEditorPath);
+      editorPathIsUsable = process.platform === "darwin" || editorStat.isFile();
+    }
+  } catch {
+    editorPathIsUsable = false;
+  }
+  if (!normalizedEditorPath
+    || !editorPathIsUsable
+    || !windowsEditorIsExecutable
+  ) {
     const installedEditors = getInstalledEditorCandidates();
     const installedHint = installedEditors[0]
       ? ` Editor rilevato: ${installedEditors[0].path}`
@@ -1065,20 +1173,21 @@ function launchEditorProcess(
   }
 
   try {
-    if (process.platform === "darwin") {
-      const child = spawn("open", ["-a", normalizedEditorPath, ...targetPaths], {
+    const child = process.platform === "darwin"
+      ? spawn("open", ["-a", normalizedEditorPath, ...targetPaths], {
         detached: true,
         stdio: "ignore",
-      });
-      child.unref();
-    } else {
-      const child = spawn(normalizedEditorPath, targetPaths, {
+      })
+      : spawn(normalizedEditorPath, targetPaths, {
         detached: true,
         stdio: "ignore",
         windowsHide: false,
       });
-      child.unref();
-    }
+    await new Promise<void>((resolveSpawn, rejectSpawn) => {
+      child.once("spawn", resolveSpawn);
+      child.once("error", rejectSpawn);
+    });
+    child.unref();
 
     return {
       ok: true,
@@ -1420,6 +1529,16 @@ function registerIpcHandlers(): void {
     "filex:open-installed-tool",
     async (_event, toolId: DesktopToolId, launchArgs?: string[]) => openInstalledTool(toolId, launchArgs),
   );
+  ipcMain.handle(
+    "filex:send-photo-selection-to-tool",
+    async (_event, request: DesktopPhotoToolHandoffRequest) =>
+      getPhotoToolHandoffManager().sendPhotoSelectionToTool(request),
+  );
+  ipcMain.handle(
+    "filex:consume-photo-selection-handoff",
+    async (_event, projectPath: string) =>
+      getPhotoToolHandoffManager().consumePhotoSelectionHandoff(projectPath),
+  );
   ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => getLicenseState(Boolean(refresh)));
   ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) =>
     activateLicense(licenseKey, deviceLabel));
@@ -1472,10 +1591,21 @@ function registerIpcHandlers(): void {
       deliverOpenFolderRequest(pendingOpenFolderPath);
     }
   });
-  ipcMain.handle("filex:consume-pending-open-project-path", () => {
-    const projectPath = pendingOpenProjectPath;
-    pendingOpenProjectPath = null;
-    return projectPath;
+  ipcMain.handle("filex:consume-pending-open-project-path", (event) => {
+    const windowForEvent = BrowserWindow.fromWebContents(event.sender);
+    if (!windowForEvent || windowForEvent !== mainWindow) {
+      return null;
+    }
+    return openProjectRequests.consumePending();
+  });
+  ipcMain.handle("filex:acknowledge-open-project-request", (event, projectPath: string) => {
+    const windowForEvent = BrowserWindow.fromWebContents(event.sender);
+    if (!windowForEvent || windowForEvent !== mainWindow || typeof projectPath !== "string") {
+      return;
+    }
+    if (openProjectRequests.acknowledge(sanitizeDesktopPath(projectPath))) {
+      deliverNextOpenProjectRequest();
+    }
   });
   ipcMain.handle("filex:mark-open-project-request-ready", (event) => {
     const windowForEvent = BrowserWindow.fromWebContents(event.sender);
@@ -1483,10 +1613,8 @@ function registerIpcHandlers(): void {
       return;
     }
 
-    isOpenProjectRequestRendererReady = true;
-    if (pendingOpenProjectPath) {
-      deliverOpenProjectRequest(pendingOpenProjectPath);
-    }
+    openProjectRequests.markRendererReady();
+    deliverNextOpenProjectRequest();
   });
   ipcMain.handle("filex:can-start-drag-out", (_event, absolutePaths: unknown) =>
     validateDesktopDragOut(absolutePaths),
@@ -1553,7 +1681,17 @@ function registerIpcHandlers(): void {
     }
   });
   ipcMain.handle("filex:read-file", (_event, absolutePath: string) => readFileFromDisk(absolutePath));
+  ipcMain.handle(
+    "filex:create-id-photo-working-copy",
+    (_event, request: DesktopIdPhotoWorkingCopyRequest) =>
+      createIdPhotoWorkingCopy(getIdPhotoWorkingBasePath(), request),
+  );
+  ipcMain.handle(
+    "filex:cleanup-id-photo-working-files",
+    (_event, jobId: string) => cleanupIdPhotoWorkingFiles(getIdPhotoWorkingBasePath(), jobId),
+  );
   ipcMain.handle("filex:stat-files", (_event, absolutePaths: string[]) => statFilesFromDisk(absolutePaths));
+  ipcMain.handle("filex:fingerprint-files", (_event, absolutePaths: string[]) => fingerprintFilesDesktop(absolutePaths));
   ipcMain.handle(
     "filex:get-thumbnail",
     (
@@ -1672,10 +1810,9 @@ function registerIpcHandlers(): void {
       defaultPath: defaultPath || undefined,
       buttonLabel: "Usa questo editor",
       properties: ["openFile"],
-      filters: [
-        { name: "Eseguibili Windows", extensions: ["exe", "bat", "cmd"] },
-        { name: "Tutti i file", extensions: ["*"] },
-      ],
+      filters: process.platform === "win32"
+        ? [{ name: "Applicazioni Windows", extensions: ["exe"] }]
+        : [{ name: "Applicazioni", extensions: ["app"] }, { name: "Tutti i file", extensions: ["*"] }],
     });
 
     if (result.canceled || result.filePaths.length === 0) {
@@ -1714,7 +1851,7 @@ function registerIpcHandlers(): void {
     releaseDesktopQuickPreviewFrames(Array.isArray(tokens) ? tokens : []);
   });
   ipcMain.handle("filex:send-to-editor", async (_event, editorPath: string, absolutePaths: string[]) => {
-    const result = launchEditorProcess(editorPath, absolutePaths);
+    const result = await launchEditorProcess(editorPath, absolutePaths);
     logDesktopEvent({
       channel: "editor",
       level: result.ok ? "info" : "error",
@@ -1869,6 +2006,37 @@ function registerIpcHandlers(): void {
       return false;
     }
   });
+  ipcMain.handle(
+    "filex:write-files-atomically",
+    (event, directoryPath: string, files: DesktopAtomicWriteFile[]) =>
+      writeFilesAtomicallyDesktop(directoryPath, files, event.sender.id),
+  );
+  ipcMain.handle("filex:begin-atomic-write-transaction", async (event, directoryPathInput: string) => {
+    const directoryPath = resolveValidDirectoryPath(directoryPathInput);
+    if (!directoryPath) throw new Error("Cartella di output non valida o non disponibile.");
+    return atomicOutputTransactions.begin(directoryPath, event.sender.id);
+  });
+  ipcMain.handle(
+    "filex:stage-atomic-write-transaction-file",
+    (event, transactionId: string, file: DesktopAtomicWriteFile) =>
+      atomicOutputTransactions.stage(
+        event.sender.id,
+        transactionId,
+        file?.fileName,
+        normalizeUint8Array(file?.bytes),
+      ),
+  );
+  ipcMain.handle("filex:commit-atomic-write-transaction", (event, transactionId: string) =>
+    atomicOutputTransactions.commit(event.sender.id, transactionId),
+  );
+  ipcMain.handle(
+    "filex:finalize-atomic-write-transaction",
+    (event, transactionId: string, recovery?: DesktopAtomicWriteFinalizeRecovery) =>
+      atomicOutputTransactions.finalize(event.sender.id, transactionId, recovery),
+  );
+  ipcMain.handle("filex:rollback-atomic-write-transaction", (event, transactionId: string) =>
+    atomicOutputTransactions.rollback(event.sender.id, transactionId),
+  );
   ipcMain.handle("filex:get-recent-folders", () => getRecentFolders());
   ipcMain.handle("filex:save-recent-folder", (_event, folder: DesktopRecentFolder) => saveRecentFolder(folder));
   ipcMain.handle("filex:remove-recent-folder", (_event, folderPathOrName: string) =>
@@ -2110,6 +2278,149 @@ async function loadRenderer(window: BrowserWindowInstance): Promise<void> {
   writeBootLog("Renderer loadFile completed");
 }
 
+type IdPhotoPackagedSmokeResult = {
+  fingerprints?: Array<{
+    absolutePath?: unknown;
+    size?: unknown;
+    sha256?: unknown;
+  }>;
+  committedPaths?: unknown;
+  rollbackResult?: unknown;
+};
+
+async function runIdPhotoPackagedSmokeTest(): Promise<void> {
+  const smokeRoot = await mkdtemp(join(app.getPath("temp"), "filex-id-photo-packaged-smoke-"));
+  const fingerprintBytes = Buffer.from("FileX ID Photo packaged preload fingerprint smoke\n", "utf8");
+  const transactionBytes = Buffer.from("FileX ID Photo packaged IPC transaction smoke\n", "utf8");
+  const fingerprintPath = join(smokeRoot, "fingerprint-source.bin");
+  const committedFileName = "transaction-committed.bin";
+  const rolledBackFileName = "transaction-rolled-back.bin";
+  const preloadPath = join(app.getAppPath(), ".output", "electron", "preload.js");
+  let smokeWindow: BrowserWindowInstance | null = null;
+  let smokeTimeout: ReturnType<typeof setTimeout> | null = null;
+  let rendererOwnerId: number | null = null;
+
+  try {
+    if (!existsSync(preloadPath)) {
+      throw new Error(`Preload ID Photo impacchettato non trovato: ${preloadPath}`);
+    }
+    const rendererEntryPath = resolveRendererEntry();
+    if (!existsSync(rendererEntryPath)) {
+      throw new Error(`Renderer ID Photo impacchettato non trovato: ${rendererEntryPath}`);
+    }
+    await writeFileAsync(fingerprintPath, fingerprintBytes);
+
+    smokeWindow = new BrowserWindow({
+      show: false,
+      width: 320,
+      height: 240,
+      webPreferences: {
+        preload: preloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+      },
+    });
+    rendererOwnerId = smokeWindow.webContents.id;
+
+    const smokeScript = `
+      (async () => {
+        const api = window.filexDesktop;
+        const requiredMethods = [
+          "fingerprintFiles",
+          "beginAtomicWriteTransaction",
+          "stageAtomicWriteTransactionFile",
+          "commitAtomicWriteTransaction",
+          "finalizeAtomicWriteTransaction",
+          "rollbackAtomicWriteTransaction",
+        ];
+        const missingMethods = requiredMethods.filter((name) => typeof api?.[name] !== "function");
+        if (missingMethods.length > 0) {
+          throw new Error(\`Preload API mancanti: \${missingMethods.join(", ")}\`);
+        }
+
+        const fingerprints = await api.fingerprintFiles([${JSON.stringify(fingerprintPath)}]);
+        const commitTransactionId = await api.beginAtomicWriteTransaction(${JSON.stringify(smokeRoot)});
+        await api.stageAtomicWriteTransactionFile(commitTransactionId, {
+          fileName: ${JSON.stringify(committedFileName)},
+          bytes: new Uint8Array(${JSON.stringify(Array.from(transactionBytes))}),
+        });
+        const committedPaths = await api.commitAtomicWriteTransaction(commitTransactionId);
+        await api.finalizeAtomicWriteTransaction(commitTransactionId);
+
+        const rollbackTransactionId = await api.beginAtomicWriteTransaction(${JSON.stringify(smokeRoot)});
+        await api.stageAtomicWriteTransactionFile(rollbackTransactionId, {
+          fileName: ${JSON.stringify(rolledBackFileName)},
+          bytes: new Uint8Array([1, 2, 3, 4]),
+        });
+        const rollbackResult = await api.rollbackAtomicWriteTransaction(rollbackTransactionId);
+        return { fingerprints, committedPaths, rollbackResult };
+      })()
+    `;
+
+    const smokeOperation = (async () => {
+      await loadRenderer(smokeWindow!);
+      const rendererReady = await smokeWindow!.webContents.executeJavaScript(`
+        Boolean(
+          document.getElementById("root")?.children.length
+          && Array.from(document.querySelectorAll("strong")).some((node) => node.textContent?.includes("FileX ID Photo"))
+        )
+      `, true);
+      if (!rendererReady) {
+        throw new Error("Il renderer distribuito di FileX ID Photo non ha completato il bootstrap.");
+      }
+      return smokeWindow!.webContents.executeJavaScript(smokeScript, true);
+    })();
+    const timeoutOperation = new Promise<never>((_resolve, reject) => {
+      smokeTimeout = setTimeout(() => {
+        reject(new Error("Timeout durante lo smoke test packaged di preload e IPC ID Photo."));
+      }, 20_000);
+    });
+    const result = await Promise.race([smokeOperation, timeoutOperation]) as IdPhotoPackagedSmokeResult;
+
+    const fingerprint = Array.isArray(result.fingerprints) ? result.fingerprints[0] : null;
+    const expectedSha256 = createHash("sha256").update(fingerprintBytes).digest("hex");
+    if (
+      result.fingerprints?.length !== 1
+      || fingerprint?.absolutePath !== resolve(fingerprintPath)
+      || fingerprint?.size !== fingerprintBytes.byteLength
+      || fingerprint?.sha256 !== expectedSha256
+    ) {
+      throw new Error("Lo smoke packaged non ha verificato correttamente fingerprint e SHA-256 via preload IPC.");
+    }
+
+    if (!Array.isArray(result.committedPaths) || result.committedPaths.length !== 1) {
+      throw new Error("Lo smoke packaged non ha confermato la transazione atomica via preload IPC.");
+    }
+    if (result.committedPaths[0] !== committedFileName) {
+      throw new Error("La transazione smoke ha restituito un nome finale inatteso.");
+    }
+    const committedPath = resolve(smokeRoot, committedFileName);
+    const committedBytes = await readFileAsync(committedPath);
+    if (!committedBytes.equals(transactionBytes)) {
+      throw new Error("La transazione smoke ha pubblicato byte diversi da quelli inviati dal preload.");
+    }
+    if (result.rollbackResult !== true || existsSync(join(smokeRoot, rolledBackFileName))) {
+      throw new Error("Lo smoke packaged non ha completato il rollback della transazione via preload IPC.");
+    }
+  } finally {
+    if (smokeTimeout) clearTimeout(smokeTimeout);
+    if (rendererOwnerId !== null) {
+      try {
+        await atomicOutputTransactions.rollbackOwner(rendererOwnerId);
+      } catch (error) {
+        writeBootLog(`ID Photo packaged smoke rollback cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    if (smokeWindow && !smokeWindow.isDestroyed()) {
+      smokeWindow.destroy();
+    }
+    await rmAsync(smokeRoot, { recursive: true, force: true }).catch((error) => {
+      writeBootLog(`ID Photo packaged smoke temp cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+}
+
 async function ensureMainWindow(): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
     return;
@@ -2285,10 +2596,36 @@ async function createMainWindow(): Promise<void> {
   }
   isOpenFolderRequestRendererReady = false;
   deliveredOpenFolderPath = null;
+  openProjectRequests.resetRenderer();
+  const rendererOwnerId = windowInstance.webContents.id;
+  const idPhotoUnloadGuard = createIdPhotoUnloadGuard();
 
   windowInstance.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url);
     return { action: "deny" };
+  });
+
+  windowInstance.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+      if (!isMainFrame) return;
+      writeBootLog(
+        `Renderer load failed: ${errorDescription} (code ${errorCode}) url=${validatedURL}`,
+      );
+    },
+  );
+  windowInstance.webContents.on("preload-error", (_event, preloadPath, error) => {
+    writeBootLog(`Preload failed ${preloadPath}: ${error.message}`);
+  });
+  windowInstance.on("unresponsive", () => {
+    writeBootLog("Main window became unresponsive");
+  });
+  windowInstance.webContents.on("console-message", (details) => {
+    if (details.level !== "warning" && details.level !== "error") return;
+    writeBootLog(
+      `Renderer console ${details.level}: ${details.message}`
+      + `${details.sourceId ? ` (${details.sourceId}:${details.lineNumber})` : ""}`,
+    );
   });
 
   windowInstance.on("page-title-updated", (event) => {
@@ -2308,11 +2645,44 @@ async function createMainWindow(): Promise<void> {
         return;
       }
     }
+    if (requestedTool.id === "id-photo") {
+      // Do not call preventDefault here: in Electron that would override the
+      // renderer's cancellation and discard the unsaved local state.
+      idPhotoUnloadGuard.handlePreventedUnload({
+        requestDecision: async () => {
+          const { response } = await dialog.showMessageBox(windowInstance, {
+            type: "warning",
+            title: "Modifiche non salvate",
+            message: "FileX ID Photo non è riuscito a salvare tutte le modifiche.",
+            detail: "Resta nell’app e usa “Riprova salvataggio”. Se chiudi comunque, le modifiche non ancora salvate andranno perse.",
+            buttons: ["Resta e salva", "Chiudi comunque"],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+          });
+          if (response !== 1) {
+            idPhotoQuitCoordinator.cancelPendingQuit();
+          }
+          return response === 1 ? "close-anyway" : "stay";
+        },
+        closeAnyway: () => {
+          if (!windowInstance.isDestroyed()) {
+            windowInstance.destroy();
+          }
+        },
+        onError: (error) => {
+          idPhotoQuitCoordinator.cancelPendingQuit();
+          writeBootLog(`ID Photo unsaved changes dialog error: ${error instanceof Error ? error.message : String(error)}`);
+        },
+      });
+      return;
+    }
     event.preventDefault();
     windowInstance.destroy();
   });
 
   windowInstance.webContents.on("render-process-gone", (_event, details) => {
+    openProjectRequests.resetRenderer();
     writeBootLog(`Renderer process gone: ${details.reason}${details.exitCode ? ` (code ${details.exitCode})` : ""}`);
     logDesktopEvent({
       channel: "renderer",
@@ -2320,9 +2690,40 @@ async function createMainWindow(): Promise<void> {
       message: "Renderer process terminato",
       details: `${details.reason}${details.exitCode ? ` (code ${details.exitCode})` : ""}`,
     });
+    void atomicOutputTransactions.rollbackOwner(rendererOwnerId).catch((error) => {
+      writeBootLog(`Rollback output renderer incompleto: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
+
+  windowInstance.webContents.on("did-start-loading", () => {
+    if (mainWindow === windowInstance) {
+      openProjectRequests.resetRenderer();
+    }
   });
 
   await loadRenderer(windowInstance);
+
+  if (!app.isPackaged) {
+    try {
+      const rendererState = await windowInstance.webContents.executeJavaScript(`({
+        href: window.location.href,
+        readyState: document.readyState,
+        rootChildren: document.getElementById("root")?.children.length ?? -1,
+        bodyChildren: document.body?.children.length ?? -1,
+      })`, true) as {
+        href?: unknown;
+        readyState?: unknown;
+        rootChildren?: unknown;
+        bodyChildren?: unknown;
+      };
+      writeBootLog(
+        `Renderer ready href=${String(rendererState.href)} state=${String(rendererState.readyState)}`
+        + ` rootChildren=${String(rendererState.rootChildren)} bodyChildren=${String(rendererState.bodyChildren)}`,
+      );
+    } catch (error) {
+      writeBootLog(`Renderer readiness probe failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
 
   windowInstance.setTitle(windowTitle);
   writeBootLog("Main window created");
@@ -2333,13 +2734,24 @@ async function createMainWindow(): Promise<void> {
 
   windowInstance.on("closed", () => {
     writeBootLog("Main window closed");
+    void atomicOutputTransactions.rollbackOwner(rendererOwnerId).catch((error) => {
+      writeBootLog(`Rollback output finestra incompleto: ${error instanceof Error ? error.message : String(error)}`);
+    });
     if (mainWindow === windowInstance) {
       mainWindow = null;
     }
     if (requestedTool.id === "photo-selector-app") {
       resetPhotoSelectorClosePreparation();
     }
+    if (requestedTool.id === "id-photo" && idPhotoQuitCoordinator.hasPendingQuit()) {
+      setTimeout(() => {
+        if (idPhotoQuitCoordinator.consumePendingQuitAfterWindowClosed()) {
+          app.quit();
+        }
+      }, 0);
+    }
     isOpenFolderRequestRendererReady = false;
+    openProjectRequests.resetRenderer();
   });
 
   if (requestedTool.id === "archivio-flow") {
@@ -2350,7 +2762,7 @@ async function createMainWindow(): Promise<void> {
     });
   }
 
-  if (pendingOpenFolderPath) {
+  if (pendingOpenFolderPath || openProjectRequests.peek()) {
     focusMainWindow();
   }
 }
@@ -2421,7 +2833,7 @@ if (hasSingleInstanceLock) {
       app.exit(0);
       return;
     }
-    if (requestedTool.id !== "suite-launcher") {
+    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest) {
       const license = await getLicenseState();
       if (!license.canUseTools) {
         dialog.showErrorBox("FileX All Access", "La licenza FileX non e' attiva. Apri FileX Suite per attivarla o aggiornare il pagamento.");
@@ -2442,6 +2854,12 @@ if (hasSingleInstanceLock) {
     registerPreviewProtocol();
     registerCrashTelemetryHandlers();
     registerIpcHandlers();
+    if (isIdPhotoPackagedSmokeTest) {
+      await runIdPhotoPackagedSmokeTest();
+      writeBootLog("FileX ID Photo packaged preload and IPC smoke test passed");
+      app.exit(0);
+      return;
+    }
     configureSuiteUpdater({
       currentVersion: app.getVersion(),
       enabled: requestedTool.id === "suite-launcher" && app.isPackaged && process.platform === "win32",
@@ -2504,6 +2922,8 @@ if (hasSingleInstanceLock) {
 app.on("window-all-closed", () => {
   if (requestedTool.id === "suite-launcher") return;
   if (requestedTool.id === "archivio-flow") return;
+  if (isIdPhotoPackagedSmokeTest) return;
+  if (requestedTool.id === "id-photo" && idPhotoQuitCoordinator.hasPendingQuit()) return;
   if (process.platform !== "darwin") {
     app.quit();
   }
@@ -2529,6 +2949,20 @@ app.on("before-quit", (event) => {
     return;
   }
 
+  if (requestedTool.id === "id-photo") {
+    const hasOpenWindow = Boolean(mainWindow && !mainWindow.isDestroyed());
+    if (idPhotoQuitCoordinator.handleBeforeQuit(hasOpenWindow) === "close-window-first") {
+      event.preventDefault();
+      try {
+        mainWindow?.close();
+      } catch (error) {
+        idPhotoQuitCoordinator.cancelPendingQuit();
+        writeBootLog(`ID Photo close before native shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      return;
+    }
+  }
+
   event.preventDefault();
   if (nativeShutdownStarted) {
     return;
@@ -2545,6 +2979,7 @@ app.on("before-quit", (event) => {
   suiteDockWindow = null;
 
   const nativeShutdown = Promise.allSettled([
+    atomicOutputTransactions.rollbackAll(),
     shutdownDesktopImageService(),
     shutdownNativeFolderService(),
   ]);

@@ -242,6 +242,23 @@ describe("batch print layout engine", () => {
     expect(crop.rotation).toBe(0);
   });
 
+  it("ricalcola il crop sugli assi originali quando la rotazione è imposta", () => {
+    const asset = {
+      id: "asset-landscape-manual",
+      fileName: "landscape.jpg",
+      sourceUrl: "",
+      previewUrl: "",
+      width: 3000,
+      height: 2000,
+    };
+    const printSpec = { widthCm: 3.5, heightCm: 4.5, dpi: 300 };
+    const crop = createDefaultCrop(asset, printSpec, "cover", false, 90);
+
+    expect(crop.rotation).toBe(90);
+    const effectiveRotatedAspect = (crop.cropHeight * asset.height) / (crop.cropWidth * asset.width);
+    expect(effectiveRotatedAspect).toBeCloseTo(printSpec.widthCm / printSpec.heightCm, 5);
+  });
+
   it("returns a safe empty layout for invalid numeric input", () => {
     const layout = calculateGridLayout(
       { widthCm: Number.NaN, heightCm: -5, dpi: Number.POSITIVE_INFINITY },

@@ -31,6 +31,7 @@ const toolBranding = [
     sourceFile: "filex-generated/batch-print-layout.png",
     pngSourcePath: generatedBrandingSource("batch-print-layout.png"),
   },
+  { toolId: "id-photo", sourceFile: "filex-generated/id-photo.svg" },
   {
     toolId: "archivio-flow",
     sourceFile: "filex-generated/archivio-flow.png",

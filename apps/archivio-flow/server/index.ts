@@ -280,6 +280,10 @@ const RAW_EXT = new Set([
   ".dng", ".orf", ".rw2", ".pef", ".srw", ".3fr", ".x3f", ".gpr",
 ]);
 const JPG_EXT = new Set([".jpg", ".jpeg"]);
+const STANDARD_PHOTO_EXT = new Set([
+  ...JPG_EXT,
+  ".png", ".webp", ".tif", ".tiff", ".heic", ".heif",
+]);
 const VIDEO_EXT = new Set([
   ".mp4", ".mov", ".m4v", ".avi", ".mkv", ".mts", ".m2ts", ".mpg", ".mpeg", ".3gp", ".webm",
 ]);
@@ -3263,7 +3267,7 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
     mediaType: "photo" | "video" | "other";
   };
   const sampleRawFiles: FilterPreviewSample[] = [];
-  const sampleJpgFiles: FilterPreviewSample[] = [];
+  const sampleMediaFiles: FilterPreviewSample[] = [];
 
   for await (const srcFile of walkFiles(sdNorm)) {
     scannedFiles += 1;
@@ -3286,11 +3290,12 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
     const ext = path.extname(fileName).toLowerCase();
     const isRaw = RAW_EXT.has(ext);
     const isJpg = JPG_EXT.has(ext);
+    const isStandardPhoto = STANDARD_PHOTO_EXT.has(ext);
     const isVideo = VIDEO_EXT.has(ext);
     if (isRaw) matchedRawFiles += 1;
     if (isJpg) matchedJpgFiles += 1;
     if (isVideo) matchedVideoFiles += 1;
-    if (!isRaw && !isJpg && !isVideo) matchedOtherFiles += 1;
+    if (!isRaw && !isStandardPhoto && !isVideo) matchedOtherFiles += 1;
 
     minMtimeMs = minMtimeMs === null ? sourceMtimeMs : Math.min(minMtimeMs, sourceMtimeMs);
     maxMtimeMsValue = maxMtimeMsValue === null ? sourceMtimeMs : Math.max(maxMtimeMsValue, sourceMtimeMs);
@@ -3306,8 +3311,8 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
         mediaType: "photo",
       });
     }
-    if (isJpg && sampleJpgFiles.length < sampleLimit) {
-      sampleJpgFiles.push({
+    if (isStandardPhoto && sampleMediaFiles.length < sampleLimit) {
+      sampleMediaFiles.push({
         filePath: srcFile,
         fileName,
         mtimeMs: sourceMtimeMs,
@@ -3317,8 +3322,8 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
         mediaType: "photo",
       });
     }
-    if (isVideo && sampleJpgFiles.length < sampleLimit) {
-      sampleJpgFiles.push({
+    if (isVideo && sampleMediaFiles.length < sampleLimit) {
+      sampleMediaFiles.push({
         filePath: srcFile,
         fileName,
         mtimeMs: sourceMtimeMs,
@@ -3332,16 +3337,16 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
 
   const sampleFiles: FilterPreviewSample[] = [];
   let rawIdx = 0;
-  let jpgIdx = 0;
-  while (sampleFiles.length < sampleLimit && (rawIdx < sampleRawFiles.length || jpgIdx < sampleJpgFiles.length)) {
+  let mediaIdx = 0;
+  while (sampleFiles.length < sampleLimit && (rawIdx < sampleRawFiles.length || mediaIdx < sampleMediaFiles.length)) {
     if (rawIdx < sampleRawFiles.length) {
       sampleFiles.push(sampleRawFiles[rawIdx]!);
       rawIdx += 1;
       if (sampleFiles.length >= sampleLimit) break;
     }
-    if (jpgIdx < sampleJpgFiles.length) {
-      sampleFiles.push(sampleJpgFiles[jpgIdx]!);
-      jpgIdx += 1;
+    if (mediaIdx < sampleMediaFiles.length) {
+      sampleFiles.push(sampleMediaFiles[mediaIdx]!);
+      mediaIdx += 1;
     }
   }
 

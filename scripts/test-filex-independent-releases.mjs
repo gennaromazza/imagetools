@@ -16,6 +16,7 @@ function assert(condition, message) {
 const desktopPackage = JSON.parse(await read("apps/filex-desktop/package.json"));
 const photoSelectorPackage = JSON.parse(await read("apps/photo-selector-app/package.json"));
 const imagePartyFramePackage = JSON.parse(await read("apps/image-party-frame/package.json"));
+const idPhotoPackage = JSON.parse(await read("apps/id-photo/package.json"));
 const archivioFlowPackage = JSON.parse(await read("apps/archivio-flow/package.json"));
 const cacheSweepPackage = JSON.parse(await read("apps/cache-sweep/package.json"));
 const filexSendPackage = JSON.parse(await read("apps/filex-send/package.json"));
@@ -36,6 +37,8 @@ const devConsolePage = await read("apps/filex-dev-console/public/index.html");
 const ciWorkflow = await read(".github/workflows/ci.yml");
 const manifestGenerator = await read("apps/filex-desktop/scripts/generate-release-manifest.mjs");
 const packagedComponentVerifier = await read("apps/filex-desktop/scripts/verify-packaged-component.mjs");
+const componentReleaseValidator = await read("scripts/validate-component-release.mjs");
+const fullCleanTest = await read("scripts/prepare-filex-full-clean-test.ps1");
 const downloadPage = await read("website/index.html");
 const installerLicense = await read("apps/filex-desktop/build/license_it.txt");
 
@@ -55,6 +58,7 @@ for (const [name, packageJson] of [
   ["suite", desktopPackage],
   ["photo-selector-app", photoSelectorPackage],
   ["image-party-frame", imagePartyFramePackage],
+  ["id-photo", idPhotoPackage],
   ["archivio-flow", archivioFlowPackage],
   ["cache-sweep", cacheSweepPackage],
   ["filex-send", filexSendPackage],
@@ -85,6 +89,7 @@ assert(
 );
 assert(
   toolManifest.includes('versionPackageRelativeToShell: "../photo-selector-app"')
+    && toolManifest.includes('versionPackageRelativeToShell: "../id-photo"')
     && toolManifest.includes('versionPackageRelativeToShell: "../cache-sweep"')
     && toolManifest.includes('electronPreloadOutputFile: "cache-sweep/electron/preload.cjs"')
     && toolManifest.includes('versionPackageRelativeToShell: "../filex-send"')
@@ -180,6 +185,12 @@ assert(
   "Backup Guard non dispone di descrizione o icona nel launcher Suite.",
 );
 assert(
+  launcher.includes("'id-photo':")
+    && launcher.includes("Prepara fototessere per documenti")
+    && launcherBuilder.includes('"id-photo"'),
+  "FileX ID Photo non dispone di descrizione o icona nel launcher Suite.",
+);
+assert(
   launcher.includes("button.textContent = 'Verifica...'")
     && launcher.includes("showToast(`Licenza verificata alle ${checkedAt}.`)")
     && launcher.includes("button.textContent = 'Verifica ora'"),
@@ -187,6 +198,7 @@ assert(
 );
 assert(
   releaseWorkflow.includes('"suite-v*"')
+    && releaseWorkflow.includes('"id-photo-v*"')
     && releaseWorkflow.includes('"cache-sweep-v*"')
     && releaseWorkflow.includes('"filex-send-v*"')
     && releaseWorkflow.includes('"backup-guard-v*"')
@@ -205,11 +217,20 @@ assert(
     && releaseWorkflow.includes("Bootstrap dedicated tool catalog")
     && releaseWorkflow.includes("releases/latest/download/$env:FILEX_RELEASE_CHANNEL.json")
     && releaseWorkflow.includes('$component -eq "backup-guard"')
-    && releaseWorkflow.includes("batch-print-layout|image-converter|image-file-finder")
+    && releaseWorkflow.includes("batch-print-layout|id-photo|image-converter|image-file-finder")
     && releaseWorkflow.includes('"batch-print-layout" { npm.cmd --workspace @photo-tools/filex-desktop run dist:batch-print-layout:win64 }')
+    && releaseWorkflow.includes('"id-photo" { npm.cmd --workspace @photo-tools/filex-desktop run dist:id-photo:win64 }')
     && releaseWorkflow.includes('"image-converter" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-converter:win64 }')
     && releaseWorkflow.includes('"image-file-finder" { npm.cmd --workspace @photo-tools/filex-desktop run dist:image-file-finder:win64 }')
-    && releaseWorkflow.includes('{ "0.1.33" } elseif ($component -eq "filex-send") { "0.1.31" } elseif ($component -eq "cache-sweep") { "0.1.28" } else { "0.1.26" }')
+    && releaseWorkflow.includes('$component -eq "id-photo"')
+    && releaseWorkflow.includes('{ "0.1.61" } elseif ($component -eq "backup-guard")')
+    && releaseWorkflow.includes("--filex-id-photo-packaged-smoke-test")
+    && releaseWorkflow.includes("test:id-photo-working-files")
+    && releaseWorkflow.includes("test:id-photo-file-fingerprint")
+    && releaseWorkflow.includes("test:id-photo-unload-guard")
+    && releaseWorkflow.includes("test:batch-print-layout-bug-hunt")
+    && releaseWorkflow.includes("steps.release.outputs.component == 'id-photo' || steps.release.outputs.component == 'batch-print-layout'")
+    && /run:\s+npm\.cmd run test:id-photo(?:\r?\n|$)/u.test(releaseWorkflow)
     && releaseWorkflow.includes("git branch -r --contains $env:GITHUB_SHA")
     && releaseWorkflow.includes('"refs/heads/main"')
     && !releaseWorkflow.includes("Build FileX Suite installer"),
@@ -218,16 +239,33 @@ assert(
 assert(
   ciWorkflow.includes("pull_request:")
     && ciWorkflow.includes("test:filex-independent-releases")
+    && ciWorkflow.includes("test:id-photo-package-runtime")
+    && ciWorkflow.includes("test:id-photo-working-files")
+    && ciWorkflow.includes("test:id-photo-file-fingerprint")
+    && ciWorkflow.includes("test:id-photo-unload-guard")
+    && ciWorkflow.includes("test:batch-print-layout-bug-hunt")
+    && ciWorkflow.includes("@photo-tools/id-photo run test")
+    && ciWorkflow.includes("@photo-tools/id-photo run build")
     && ciWorkflow.includes("build:suite"),
   "La PR non dispone dei controlli automatici per il nuovo contratto di release.",
 );
 assert(
   manifestGenerator.includes("--tool=")
+    && manifestGenerator.includes('{ toolId: "id-photo", executableName: "FileX-ID-Photo" }')
     && manifestGenerator.includes("--previous-manifest-url=")
     && manifestGenerator.includes("--bootstrap-manifest-url=")
     && manifestGenerator.includes("bootstrapResponse.status === 404")
     && manifestGenerator.includes("previousManifest = await readBundledManifest()"),
   "Il generatore non aggiorna atomicamente un singolo tool dal catalogo remoto.",
+);
+assert(
+  componentReleaseValidator.includes('"id-photo": ["FileX ID Photo", "apps/id-photo/package.json"]'),
+  "Il preflight release non riconosce FileX ID Photo.",
+);
+assert(
+  fullCleanTest.includes('"FileX ID Photo"')
+    && fullCleanTest.includes('"FileX-ID-Photo"'),
+  "Il test di rimozione completa non include FileX ID Photo.",
 );
 assert(
   packagedComponentVerifier.includes("(?:-[0-9A-Za-z.-]+)?")
@@ -262,8 +300,15 @@ try {
     "independent-tool-installer",
   );
   await writeFile(
+    join(releaseDir, "FileX-ID-Photo-1.2.3-stable-x64-setup.exe"),
+    "id-photo-installer",
+  );
+  await writeFile(
     notesPath,
-    JSON.stringify({ "photo-selector-app": { "9.8.7": ["Test release indipendente."] } }),
+    JSON.stringify({
+      "photo-selector-app": { "9.8.7": ["Test release indipendente."] },
+      "id-photo": { "1.2.3": ["Test release ID Photo."] },
+    }),
   );
   const preservedRelease = {
     toolId: "archivio-flow",
@@ -301,6 +346,30 @@ try {
   assert(preserved?.version === "4.5.6", "La release di un tool ha modificato una voce estranea.");
   assert(generated?.version === "9.8.7", "La voce del tool selezionato non e' stata generata.");
   assert(generatedManifest.releases.length === 2, "Il catalogo non contiene esattamente le voci attese.");
+
+  execFileSync(
+    process.execPath,
+    [
+      join(root, "apps/filex-desktop/scripts/generate-release-manifest.mjs"),
+      "--channel=stable",
+      "--tool=id-photo",
+      "--base-url=https://github.com/example/releases/download/id-photo-v1.2.3",
+      "--min-launcher-version=0.1.61",
+      `--release-dir=${releaseDir}`,
+      `--manifest-dir=${manifestDir}`,
+      `--release-notes=${notesPath}`,
+    ],
+    { cwd: root, stdio: "pipe" },
+  );
+  const idPhotoManifest = JSON.parse(await readFile(join(manifestDir, "stable.json"), "utf8"));
+  const generatedIdPhoto = idPhotoManifest.releases.find((release) => release.toolId === "id-photo");
+  assert(generatedIdPhoto?.version === "1.2.3", "La voce ID Photo non e' stata generata.");
+  assert(generatedIdPhoto?.minLauncherVersion === "0.1.61", "ID Photo non richiede la prima Suite compatibile.");
+  assert(
+    idPhotoManifest.releases.some((release) => release.toolId === "photo-selector-app" && release.version === "9.8.7"),
+    "La release ID Photo ha rimosso una voce tool gia' presente.",
+  );
+  assert(idPhotoManifest.releases.length === 3, "Il catalogo aggiornato non contiene le tre voci attese.");
 } finally {
   await rm(temporaryRoot, { recursive: true, force: true });
 }
