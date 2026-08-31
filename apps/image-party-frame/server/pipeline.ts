@@ -461,6 +461,15 @@ function reservationKey(filePath: string): string {
   return process.platform === "win32" || process.platform === "darwin" ? canonical.toLowerCase() : canonical;
 }
 
+function existingFileIdentityKey(filePath: string): string | null {
+  try {
+    const fileStats = fs.statSync(filePath, { bigint: true });
+    return fileStats.isFile() ? `file:${fileStats.dev}:${fileStats.ino}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export class OutputReservationMap {
   private readonly reserved = new Set<string>();
   private readonly nextCounters = new Map<string, number>();
@@ -476,7 +485,10 @@ export class OutputReservationMap {
         : path.join(parsed.dir, `${parsed.name}_${String(counter).padStart(2, "0")}${parsed.ext}`);
       const key = reservationKey(candidate);
       const alreadyReserved = this.reserved.has(key) || activeOutputReservations.has(key);
-      const blockedByExistingFile = forbiddenKeys.has(key) || (!overwrite && fs.existsSync(candidate));
+      const candidateIdentity = existingFileIdentityKey(candidate);
+      const blockedByExistingFile = forbiddenKeys.has(key)
+        || (candidateIdentity !== null && forbiddenKeys.has(candidateIdentity))
+        || (!overwrite && fs.existsSync(candidate));
 
       counter += 1;
       if (alreadyReserved || blockedByExistingFile) continue;
@@ -1021,9 +1033,14 @@ export async function executeExport(
   const frameCache = new Map<string, Buffer>();
   const protectedSourceKeys = new Set([
     ...request.files.map((file) => reservationKey(file.path)),
+    ...request.files.map((file) => existingFileIdentityKey(file.path)).filter((key): key is string => key !== null),
     ...Object.values(request.templateBackgroundFiles)
       .filter((file): file is UploadedFileDescriptor => Boolean(file))
       .map((file) => reservationKey(file.path)),
+    ...Object.values(request.templateBackgroundFiles)
+      .filter((file): file is UploadedFileDescriptor => Boolean(file))
+      .map((file) => existingFileIdentityKey(file.path))
+      .filter((key): key is string => key !== null),
   ]);
 
   try {
