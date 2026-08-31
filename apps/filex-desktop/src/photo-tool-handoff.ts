@@ -223,25 +223,7 @@ async function assertRealPathWithoutLinks(
     throw new Error(`Il percorso non esiste o non è accessibile: ${inputPath}`);
   }
 
-  const resolvedInputPath = resolve(inputPath);
-  const rootPath = parse(resolvedInputPath).root;
-  const pathSegments = resolvedInputPath
-    .slice(rootPath.length)
-    .split(sep)
-    .filter(Boolean);
-  let currentPath = rootPath;
-  for (const segment of pathSegments) {
-    currentPath = join(currentPath, segment);
-    let segmentStat;
-    try {
-      segmentStat = await lstat(currentPath);
-    } catch {
-      throw new Error(`Il percorso non esiste o non è accessibile: ${inputPath}`);
-    }
-    if (segmentStat.isSymbolicLink()) {
-      throw new Error(`I collegamenti simbolici non sono ammessi nell'handoff: ${inputPath}`);
-    }
-  }
+  await assertPathSegmentsWithoutLinks(inputPath);
   if (expectedType === "directory" && !pathStat.isDirectory()) {
     throw new Error(`La radice sorgente non è una cartella: ${inputPath}`);
   }
@@ -254,6 +236,23 @@ async function assertRealPathWithoutLinks(
     size: pathStat.size,
     lastModified: Math.trunc(pathStat.mtimeMs),
   };
+}
+
+async function assertPathSegmentsWithoutLinks(inputPath: string): Promise<void> {
+  const resolvedInputPath = resolve(inputPath);
+  const rootPath = parse(resolvedInputPath).root;
+  const pathSegments = resolvedInputPath
+    .slice(rootPath.length)
+    .split(sep)
+    .filter(Boolean);
+  let currentPath = rootPath;
+  for (const segment of pathSegments) {
+    currentPath = join(currentPath, segment);
+    const segmentStat = await lstat(currentPath);
+    if (segmentStat.isSymbolicLink()) {
+      throw new Error(`I collegamenti simbolici non sono ammessi nell'handoff: ${inputPath}`);
+    }
+  }
 }
 
 function assertCardinality(
@@ -604,10 +603,9 @@ export class PhotoToolHandoffManager {
   ): Promise<boolean> {
     const publishedPath = acknowledgementPath(storageRoot, manifest.handoffId);
     let acknowledgementStat;
-    let canonicalPath: string;
     try {
       acknowledgementStat = await lstat(publishedPath);
-      canonicalPath = await realpath(publishedPath);
+      await assertPathSegmentsWithoutLinks(publishedPath);
     } catch (error) {
       if (isNodeErrorWithCode(error, "ENOENT")) return false;
       return false;
@@ -615,7 +613,6 @@ export class PhotoToolHandoffManager {
     if (
       acknowledgementStat.isSymbolicLink()
       || !acknowledgementStat.isFile()
-      || !pathsMatch(publishedPath, canonicalPath)
       || acknowledgementStat.size <= 0
       || acknowledgementStat.size > MAX_ACKNOWLEDGEMENT_BYTES
     ) {
@@ -764,7 +761,8 @@ export class PhotoToolHandoffManager {
     const requestedPath = assertUsableAbsolutePath(projectPathValue, "Il file handoff");
     const storageRoot = await this.#ensureStorageRoot();
     await this.#purgeExpiredArtifacts(storageRoot);
-    if (!pathsMatch(dirname(requestedPath), storageRoot)) {
+    const requestedParent = await assertRealPathWithoutLinks(dirname(requestedPath), "directory");
+    if (!pathsMatch(requestedParent.resolvedPath, storageRoot)) {
       throw new Error("Il file handoff è esterno all'area condivisa FileX.");
     }
     const match = HANDOFF_FILE_PATTERN.exec(basename(requestedPath));
@@ -774,8 +772,8 @@ export class PhotoToolHandoffManager {
 
     try {
       const requestedStat = await lstat(requestedPath);
-      const requestedRealPath = await realpath(requestedPath);
-      if (requestedStat.isSymbolicLink() || !requestedStat.isFile() || !pathsMatch(requestedPath, requestedRealPath)) {
+      await assertPathSegmentsWithoutLinks(requestedPath);
+      if (requestedStat.isSymbolicLink() || !requestedStat.isFile()) {
         throw new Error("Il file handoff non è un file regolare sicuro.");
       }
     } catch (error) {
@@ -796,11 +794,10 @@ export class PhotoToolHandoffManager {
 
     try {
       const claimedStat = await lstat(claimedPath);
-      const claimedRealPath = await realpath(claimedPath);
+      await assertPathSegmentsWithoutLinks(claimedPath);
       if (
         claimedStat.isSymbolicLink()
         || !claimedStat.isFile()
-        || !pathsMatch(claimedPath, claimedRealPath)
         || claimedStat.size <= 0
         || claimedStat.size > MAX_HANDOFF_BYTES
       ) {
