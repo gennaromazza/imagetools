@@ -30,6 +30,14 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-31 - Batch Print Layout 0.1.5
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - FileX Send 0.1.17
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
 ## 2026-08-31 - FileX Suite 0.1.60
 
 - Uniformate le icone di tutti gli strumenti al linguaggio grafico FileX Suite, con copie coerenti in finestre, tray, installer e catalogo web.

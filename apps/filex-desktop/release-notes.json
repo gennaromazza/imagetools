@@ -88,6 +88,9 @@
     ],
     "0.1.16": [
       "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
+    ],
+    "0.1.17": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "cache-sweep": {
@@ -178,6 +181,9 @@
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
     ],
     "0.1.4": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
+    ],
+    "0.1.5": [
       "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
