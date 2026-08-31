@@ -10,32 +10,61 @@ const desktopRoot = resolve(__dirname, "..");
 const repoRoot = resolve(desktopRoot, "..", "..");
 const sourceDir = join(repoRoot, "ICONE E LOGHI");
 const targetDir = join(desktopRoot, ".output", "branding");
+const websiteIconsDir = join(repoRoot, "website", "assets", "icons");
+const generatedBrandingDir = join(desktopRoot, "branding-sources");
 const photoSelectorAssetsDir = join(repoRoot, "apps", "photo-selector-app", "src", "assets");
 const filexSendAssetsDir = join(repoRoot, "apps", "filex-send", "public");
 const filexSendWebAssetsDir = join(repoRoot, "apps", "filex-send-web", "public");
 const photoSelectorLogoPath = join(sourceDir, "photo_selector.png");
 const photoSelectorIconPath = join(sourceDir, "photo_selector_icon.png");
+const generatedBrandingSource = (fileName) => join(generatedBrandingDir, fileName);
 
 const toolBranding = [
   { toolId: "suite-launcher", sourceFile: "filex-system/suite-launcher.png" },
   {
     toolId: "image-party-frame",
     sourceFile: "filex-generated/image-party-frame.png",
+    pngSourcePath: generatedBrandingSource("image-party-frame.png"),
   },
-  { toolId: "batch-print-layout", sourceFile: "filex-generated/batch-print-layout.png" },
-  { toolId: "archivio-flow", sourceFile: "filex-generated/archivio-flow.png" },
-  { toolId: "image-converter", sourceFile: "filex-generated/image-converter.png" },
-  { toolId: "image-file-finder", sourceFile: "filex-generated/image-file-finder.png" },
-  { toolId: "cache-sweep", sourceFile: "filex-generated/cache-sweep.png" },
-  { toolId: "filex-send", sourceFile: "filex-generated/filex-send.png" },
+  {
+    toolId: "batch-print-layout",
+    sourceFile: "filex-generated/batch-print-layout.png",
+    pngSourcePath: generatedBrandingSource("batch-print-layout.png"),
+  },
+  {
+    toolId: "archivio-flow",
+    sourceFile: "filex-generated/archivio-flow.png",
+    pngSourcePath: generatedBrandingSource("archivio-flow.png"),
+  },
+  {
+    toolId: "image-converter",
+    sourceFile: "filex-generated/image-converter.png",
+    pngSourcePath: generatedBrandingSource("image-converter.png"),
+  },
+  {
+    toolId: "image-file-finder",
+    sourceFile: "filex-generated/image-file-finder.png",
+    pngSourcePath: generatedBrandingSource("image-file-finder.png"),
+  },
+  {
+    toolId: "cache-sweep",
+    sourceFile: "filex-generated/cache-sweep.png",
+    pngSourcePath: generatedBrandingSource("cache-sweep.png"),
+  },
+  {
+    toolId: "filex-send",
+    sourceFile: "filex-generated/filex-send.png",
+    pngSourcePath: generatedBrandingSource("filex-send.png"),
+  },
   {
     toolId: "backup-guard",
     sourceFile: "filex-generated/backup-guard.png",
-    icoSourcePath: join(sourceDir, "filex-system", "backup-guard.ico"),
+    pngSourcePath: generatedBrandingSource("backup-guard.png"),
   },
   {
     toolId: "photo-selector-app",
     sourceFile: "filex-generated/photo-selector-app.png",
+    pngSourcePath: generatedBrandingSource("photo-selector-app.png"),
   },
 ];
 
@@ -47,6 +76,7 @@ const rendererAssetCopies = [
 ];
 
 await mkdir(targetDir, { recursive: true });
+await mkdir(websiteIconsDir, { recursive: true });
 await mkdir(photoSelectorAssetsDir, { recursive: true });
 
 for (const asset of rendererAssetCopies) {
@@ -70,10 +100,43 @@ for (const tool of toolBranding) {
   }
 
   if (pngSourcePath.toLowerCase().endsWith(".svg")) {
-    await sharp(pngSourcePath).resize(1024, 1024).png().toFile(pngTargetPath);
+    await writeFile(
+      pngTargetPath,
+      await sharp(pngSourcePath).resize(1024, 1024).png().toBuffer(),
+    );
+  } else if (tool.pngSourcePath && existsSync(tool.pngSourcePath)) {
+    const metadata = await sharp(pngSourcePath).metadata();
+    const size = Math.min(metadata.width ?? 0, metadata.height ?? 0);
+    if (size <= 0) {
+      throw new Error(`Invalid branding master for ${tool.toolId}`);
+    }
+
+    const inset = Math.round(size * 0.024);
+    const mask = Buffer.from(
+      `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg"><rect x="${inset}" y="${inset}" width="${size - (inset * 2)}" height="${size - (inset * 2)}" rx="${Math.round(size * 0.239)}" fill="white"/></svg>`,
+    );
+    await writeFile(
+      pngTargetPath,
+      await sharp(pngSourcePath)
+        .ensureAlpha()
+        .composite([{ input: mask, blend: "dest-in" }])
+        .png({ compressionLevel: 9, adaptiveFiltering: true })
+        .toBuffer(),
+    );
   } else {
     await copyFile(pngSourcePath, pngTargetPath);
   }
+
+  if (tool.toolId !== "suite-launcher") {
+    await writeFile(
+      join(websiteIconsDir, `${tool.toolId}.png`),
+      await sharp(pngTargetPath)
+        .resize(256, 256, { fit: "contain" })
+        .png({ compressionLevel: 9, adaptiveFiltering: true })
+        .toBuffer(),
+    );
+  }
+
   await copyBrandIco(icoSourcePath, icoTargetPath);
   await maybeGenerateIcns(pngSourcePath, icnsTargetPath);
 }
