@@ -30,6 +30,46 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-31 - FileX Suite 0.1.60
+
+- Uniformate le icone di tutti gli strumenti al linguaggio grafico FileX Suite, con copie coerenti in finestre, tray, installer e catalogo web.
+
+## 2026-08-31 - FileX Adobe Cleaner 0.1.4
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - Trova Foto da Lista 0.1.4
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - Image Converter 0.1.4
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - Batch Print Layout 0.1.4
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - FileX Send 0.1.16
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - FileX Backup Guard 0.2.5
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - Archivio Flow 0.1.38
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - Image Party Frame 0.1.30
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
+## 2026-08-31 - Image Select Pro 0.1.33
+
+- Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.
+
 ## 2026-08-30 - FileX Suite 0.1.59
 
 ### Integrazioni native piu affidabili

@@ -26,6 +26,9 @@
     ],
     "0.2.4": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.2.5": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "filex-send": {
@@ -82,6 +85,9 @@
     ],
     "0.1.14": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.1.16": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "cache-sweep": {
@@ -100,6 +106,9 @@
     ],
     "0.1.3": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.1.4": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "image-party-frame": {
@@ -148,6 +157,9 @@
       "I template appena salvati conservano la propria identita e non compaiono piu duplicati come bozze non salvate.",
       "L'export verifica la cartella scelta, mostra avanzamento reale per file, supporta annullamento e scrive i risultati in modo atomico.",
       "Progetti, pacchetti portabili e file spostati vengono validati e possono essere ricollegati senza perdere regolazioni."
+    ],
+    "0.1.30": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "batch-print-layout": {
@@ -164,6 +176,9 @@
     ],
     "0.1.3": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.1.4": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "archivio-flow": {
@@ -242,6 +257,9 @@
     ],
     "0.1.37": [
       "Corretto il caricamento del server IPC nell'installer: il percorso compilato e le dipendenze locali vengono ora verificati prima della pubblicazione."
+    ],
+    "0.1.38": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "image-converter": {
@@ -259,6 +277,9 @@
     ],
     "0.1.3": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.1.4": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "image-file-finder": {
@@ -275,6 +296,9 @@
     ],
     "0.1.3": [
       "Aggiunta la chiusura cooperativa richiesta dalla Suite prima dell'aggiornamento, con fallback sicuro per le installazioni precedenti."
+    ],
+    "0.1.4": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
     ]
   },
   "photo-selector-app": {
@@ -342,6 +366,14 @@
       "I progetti master restano distinti e integrati con Archivio Flow, con modalita e identita sempre riconoscibili.",
       "Il backup manuale Google Drive salva e ripristina le decisioni senza caricare le fotografie originali e rifiuta manifest o percorsi non sicuri.",
       "Persistenza locale, migrazioni e test automatici proteggono modalita libera, progetti, XMP e runtime impacchettato."
+    ],
+    "0.1.33": [
+      "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
+    ]
+  },
+  "suite": {
+    "0.1.60": [
+      "Uniformate le icone di tutti gli strumenti al linguaggio grafico FileX Suite, con copie coerenti in finestre, tray, installer e catalogo web."
     ]
   }
 }
