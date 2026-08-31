@@ -91,6 +91,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid rgba(23, 108, 76, .28
 }
 .tool-hero-grid { display: grid; grid-template-columns: 1fr 300px; gap: 70px; align-items: center; }
 .tool-hero-grid.has-photo { grid-template-columns: minmax(0, 1fr) minmax(380px, 520px); gap: 52px; }
+.tool-hero-grid.has-photo > * { min-width: 0; }
 .kicker { margin-bottom: 13px; color: var(--green); font-size: 11px; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
 .tool-hero:has(.tool-hero-grid) .kicker { color: #8de0b2; }
 h1, h2, h3 { font-family: var(--display); }
@@ -107,10 +108,11 @@ h1 span { color: var(--green); }
   box-shadow: 0 38px 90px rgba(0, 0, 0, .34), 0 0 65px rgba(54, 189, 125, .12);
   animation: tool-logo-float 6s ease-in-out infinite;
 }
-.editorial-photo { margin: 0; }
+.editorial-photo { width: 100%; max-width: 100%; margin: 0; }
 .editorial-photo img {
   display: block;
   width: 100%;
+  max-width: 100%;
   height: auto;
   aspect-ratio: 3 / 2;
   object-fit: cover;
@@ -120,6 +122,7 @@ h1 span { color: var(--green); }
 }
 .editorial-photo figcaption { margin-top: 11px; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .tool-hero-photo { border-color: rgba(255, 255, 255, .18) !important; border-radius: 30px !important; box-shadow: 0 38px 90px rgba(0, 0, 0, .34), 0 0 65px rgba(54, 189, 125, .1) !important; }
+.hero-editorial-photo { max-width: 520px; justify-self: center; }
 .hero-editorial-photo figcaption { color: #9fb4a9; }
 
 .actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 30px; }
@@ -227,8 +230,11 @@ footer::before { content: ""; position: absolute; inset: 0; opacity: .1; backgro
 @media (max-width: 820px) {
   .nav-links a:not(.nav-cta) { display: none; }
   .tool-hero-grid { grid-template-columns: 1fr; }
-  .tool-hero-grid.has-photo, .photo-feature { grid-template-columns: 1fr; }
-  .hero-editorial-photo { order: -1; }
+  .tool-hero-grid.has-photo, .photo-feature { grid-template-columns: minmax(0, 1fr); }
+  .tool-hero-grid.has-photo { gap: 38px; }
+  .tool-hero-grid.has-photo h1 { font-size: clamp(38px, 10.5vw, 48px); overflow-wrap: break-word; }
+  .tool-hero-grid.has-photo .lead { font-size: 16px; }
+  .hero-editorial-photo { order: initial; justify-self: center; }
   .tool-hero-photo { border-radius: 22px !important; }
   .tool-logo { width: 190px; height: 190px; order: -1; }
   .grid, .catalog { grid-template-columns: repeat(2, 1fr); }
