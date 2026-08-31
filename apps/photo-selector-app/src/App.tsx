@@ -49,6 +49,7 @@ import {
   openProjectFolderNative,
   readSidecarXmp,
   readSidecarXmpInfo,
+  reopenFolderNative,
   reopenProjectFolder,
   warmOnDemandPreviewCache,
   writeSidecarXmp,
@@ -3367,6 +3368,26 @@ export function App() {
     ]
   );
 
+  const handlePsdJpegConversionComplete = useCallback(async () => {
+    if (!sourceFolderPath || !workspaceMode) {
+      return;
+    }
+
+    const refreshedFolder = await reopenFolderNative(
+      sourceFolderPath,
+      workspaceMode === "project" ? "legacy" : "project-relative",
+    );
+    if (!refreshedFolder) {
+      throw new Error("Non sono riuscito a rileggere la cartella dopo la conversione PSD.");
+    }
+
+    await handleFolderOpened(refreshedFolder, {
+      mode: workspaceMode,
+      projectId: workspaceMode === "project" ? workspaceId || undefined : undefined,
+      projectName: workspaceMode === "project" ? projectName : undefined,
+    });
+  }, [handleFolderOpened, projectName, sourceFolderPath, workspaceId, workspaceMode]);
+
   // ── Load mock data ───────────────────────────────────────────────────
 
   // ── Photo metadata changes (with undo history) ───────────────────────
@@ -5015,6 +5036,7 @@ export function App() {
                 onRamBudgetPresetChange={handleRamBudgetPresetChange}
                 onDiskCacheBudgetPresetChange={handleDiskCacheBudgetPresetChange}
                 onRefreshDesktopThumbnailCacheInfo={refreshDesktopThumbnailCacheInfo}
+                onPsdJpegConversionComplete={handlePsdJpegConversionComplete}
                 />
             </div>
           ) : null}

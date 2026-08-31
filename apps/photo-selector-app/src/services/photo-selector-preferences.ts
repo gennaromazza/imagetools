@@ -17,7 +17,7 @@ export interface PhotoFilterPreset {
   name: string;
   filters: PhotoFilterState & {
     fileTypeFilter?: string;
-    formatFilter?: "all" | "jpg" | "raw" | "raw+jpg";
+    formatFilter?: "all" | "jpg" | "raw" | "raw+jpg" | "psd";
     customLabelFilter?: string;
     folderFilter?: string;
     seriesFilter?: string;

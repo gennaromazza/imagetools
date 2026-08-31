@@ -51,6 +51,7 @@ import type {
   ImageConverterJobConfig,
   ImageFileFinderJobConfig,
   ImageFileFinderScanRequest,
+  DesktopPsdJpegConversionRequest,
 } from "@photo-tools/desktop-contracts";
 import {
   copyFilesToFolderDesktop,
@@ -168,6 +169,11 @@ import {
   scanImageFileFinderMatchesDesktop,
   startImageFileFinderJobDesktop,
 } from "./image-file-finder-service.js";
+import {
+  cancelPsdJpegConversionDesktop,
+  getPsdJpegConversionProgressDesktop,
+  startPsdJpegConversionDesktop,
+} from "./psd-jpeg-conversion-service.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, Tray } = electron;
 
@@ -902,6 +908,9 @@ const initialOpenFolderPath = extractOpenFolderPathFromArgv(process.argv, proces
 const initialOpenProjectPath = extractOpenProjectPathFromArgv(process.argv);
 const isUpdateShutdownRequest = (argv: readonly string[]): boolean =>
   argv.includes("--filex-update-shutdown");
+const isPhotoSelectorPackagedSmokeTest =
+  requestedTool.id === "photo-selector-app"
+  && process.argv.includes("--filex-photo-selector-packaged-smoke-test");
 const hasSingleInstanceLock = app.requestSingleInstanceLock({
   requestedToolId: requestedTool.id,
   openFolderPath: initialOpenFolderPath,
@@ -1681,6 +1690,15 @@ function registerIpcHandlers(): void {
     (_event, absolutePath: string, options?: { maxDimension?: number; sourceFileKey?: string }) =>
       getDesktopPreview(absolutePath, options?.maxDimension, options?.sourceFileKey),
   );
+  ipcMain.handle("filex:start-psd-jpeg-conversion", (_event, request: DesktopPsdJpegConversionRequest) =>
+    startPsdJpegConversionDesktop(request),
+  );
+  ipcMain.handle("filex:get-psd-jpeg-conversion-progress", () =>
+    getPsdJpegConversionProgressDesktop(),
+  );
+  ipcMain.handle("filex:cancel-psd-jpeg-conversion", () => {
+    cancelPsdJpegConversionDesktop();
+  });
   ipcMain.handle("filex:get-quick-preview-frame", (_event, request: DesktopQuickPreviewRequest) =>
     getDesktopQuickPreviewFrame(request),
   );
@@ -2398,6 +2416,11 @@ process.on("uncaughtException", (error) => {
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     writeBootLog(`App ready for tool ${requestedTool.id}`);
+    if (isPhotoSelectorPackagedSmokeTest) {
+      writeBootLog("Image Select Pro packaged smoke test passed");
+      app.exit(0);
+      return;
+    }
     if (requestedTool.id !== "suite-launcher") {
       const license = await getLicenseState();
       if (!license.canUseTools) {

@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-08-31 - Image Select Pro 0.1.34
+
+- Supporto nativo ai PSD: miniature e anteprime leggono il composito salvato senza modificare il file originale.
+- Conversione in batch dei PSD in JPEG separati, protetta da sovrascritture e sempre impostata alla massima qualità di stampa (qualità 100, colore 4:4:4).
+
 ## 2026-08-31 - FileX Send 0.1.22
 
 - Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite.

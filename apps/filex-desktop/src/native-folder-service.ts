@@ -23,6 +23,7 @@ const { dialog } = electron;
 
 const FOLDER_SCAN_STAT_CONCURRENCY = 32;
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const PSD_EXTENSIONS = new Set([".psd"]);
 const EXTENDED_IMAGE_EXTENSIONS = new Set([".heic", ".heif", ".tif", ".tiff"]);
 const PHOTO_SELECTOR_PROJECT_FILE_NAME = ".image-select-pro.json";
 let projectFileWriteQueue: Promise<void> = Promise.resolve();
@@ -63,6 +64,7 @@ export function isNativeFolderImageFile(fileName: string, includeExtendedImages 
 
   const extension = extname(fileName).toLowerCase();
   return STANDARD_EXTENSIONS.has(extension)
+    || PSD_EXTENSIONS.has(extension)
     || RAW_EXTENSIONS.has(extension)
     || (includeExtendedImages && EXTENDED_IMAGE_EXTENSIONS.has(extension));
 }

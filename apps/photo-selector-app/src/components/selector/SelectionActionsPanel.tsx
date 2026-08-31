@@ -12,6 +12,7 @@ interface SelectionActionsPanelProps {
   visibleSelectedCount: number;
   currentFolderSelectedCount: number;
   selectedCount: number;
+  psdSelectedCount: number;
   workspaceMode: DesktopSelectionMode | null;
   compareCount: number;
   isMenuOpen: boolean;
@@ -24,6 +25,7 @@ interface SelectionActionsPanelProps {
   onRemoveVisible: () => void;
   onInvertVisible: () => void;
   onActivatePickedOnly: () => void;
+  onConvertPsdSelected: () => void;
   onCompare: () => void;
 }
 
@@ -75,6 +77,11 @@ export function SelectionActionsPanel(props: SelectionActionsPanelProps) {
           <button type="button" className="ghost-button ghost-button--small" onClick={props.onRemoveVisible} disabled={props.visibleSelectedCount === 0}>Rimuovi visibili</button>
           <button type="button" className="ghost-button ghost-button--small" onClick={props.onInvertVisible} disabled={props.visibleCount === 0}>Inverti visibili</button>
           <button type="button" className="ghost-button ghost-button--small" onClick={props.onActivatePickedOnly}>Sostituisci con Pick</button>
+          {props.psdSelectedCount > 0 ? (
+            <button type="button" className="ghost-button ghost-button--small" onClick={props.onConvertPsdSelected}>
+              Converti {props.psdSelectedCount === 1 ? "PSD" : `${props.psdSelectedCount} PSD`} in JPEG…
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

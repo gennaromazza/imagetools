@@ -76,6 +76,7 @@
   "dependencies": {
     "@electron/asar": "3.4.1",
     "@photo-tools/desktop-contracts": "0.1.0",
+    "ag-psd": "^31.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.3.1",
     "electron-updater": "^6.8.9",

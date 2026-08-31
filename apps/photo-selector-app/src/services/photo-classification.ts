@@ -3,6 +3,7 @@ import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-typ
 export const COLOR_LABELS: ColorLabel[] = ["red", "yellow", "green", "blue", "purple"];
 export type FileTypeFilter = "all" | "raw" | "jpeg";
 export const JPEG_EXTENSIONS = new Set([".jpg", ".jpeg"]);
+export const PSD_EXTENSIONS = new Set([".psd"]);
 export const RAW_EXTENSIONS = new Set([
   ".cr2", ".cr3", ".crw",
   ".nef", ".nrw",

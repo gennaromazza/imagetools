@@ -93,6 +93,14 @@ if (args.component === "image-party-frame") {
 if (args.component === "photo-selector-app") {
   const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
   verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
+  for (const requiredEntry of [
+    "/node_modules/ag-psd/package.json",
+    "/node_modules/ag-psd/dist/index.js",
+  ]) {
+    if (!entries.has(requiredEntry)) {
+      throw new Error(`Image Select Pro non contiene ${requiredEntry}, richiesto per le anteprime PSD.`);
+    }
+  }
 }
 
 if (args.component === "suite") {

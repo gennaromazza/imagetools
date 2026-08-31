@@ -18,6 +18,7 @@ import type {
 } from "@photo-tools/desktop-contracts";
 import { ExifTool } from "exiftool-vendored";
 import { extractEmbeddedJpeg, locateEmbeddedJpegRange, locateJpegExifThumbnailRange } from "./raw-jpeg-extractor.js";
+import { isPsdPath, renderPsdCompositeToJpeg } from "./psd-image-service.js";
 
 const { app, nativeImage } = electron;
 
@@ -351,6 +352,7 @@ class AsyncSemaphore {
 
 const standardDecodeSemaphore = new AsyncSemaphore(STANDARD_DECODE_CONCURRENCY);
 const rawDecodeSemaphore = new AsyncSemaphore(RAW_DECODE_CONCURRENCY);
+const psdDecodeSemaphore = new AsyncSemaphore(1);
 
 export const QUICK_PREVIEW_PROTOCOL_SCHEME = "filex-preview";
 
@@ -677,6 +679,12 @@ function deleteCachedRawEmbeddedRange(cacheKey: string | undefined): void {
 
 function runDecodeTask<T>(isRaw: boolean, task: () => Promise<T> | T): Promise<T> {
   return (isRaw ? rawDecodeSemaphore : standardDecodeSemaphore).run(task);
+}
+
+function runPsdDecodeTask<T>(task: () => Promise<T> | T): Promise<T> {
+  // Il composito PSD può occupare centinaia di MB durante la decodifica.
+  // Manteniamo una sola elaborazione attiva per non rendere la UI instabile.
+  return psdDecodeSemaphore.run(task);
 }
 
 /**
@@ -1479,6 +1487,7 @@ async function getDesktopPreviewInternal(
 ): Promise<DesktopPreviewRenderResult | null> {
   const cacheKey = getRenderedPreviewCacheKey(absolutePath, maxDimension, sourceFileKey);
   const rawPath = isRawPath(absolutePath);
+  const psdPath = isPsdPath(absolutePath);
   const cachedRendered = getCachedRenderedPreview(cacheKey);
   if (cachedRendered) {
     if (rawPath) {
@@ -1507,6 +1516,24 @@ async function getDesktopPreviewInternal(
         rendered: cacheRenderedPreview(cacheKey, cachedDiskPreview),
         source: "disk-cache",
         cacheHit: true,
+        cacheKey,
+      };
+    }
+
+    if (psdPath) {
+      const psdPreview = await runPsdDecodeTask(() => renderPsdCompositeToJpeg(absolutePath, {
+        maxDimension,
+        quality: 90,
+      })).catch(() => null);
+      if (!psdPreview) {
+        return null;
+      }
+      const rendered = cacheRenderedPreview(cacheKey, psdPreview);
+      void storePreviewInDiskCache(absolutePath, sourceFileKey, maxDimension, rendered);
+      return {
+        rendered,
+        source: "source-file",
+        cacheHit: false,
         cacheKey,
       };
     }
@@ -1919,7 +1946,21 @@ async function computeDesktopThumbnail(
   }
 
   const rawPath = isRawPath(absolutePath);
+  const psdPath = isPsdPath(absolutePath);
   const minimumEmbeddedShortSide = resolveMinimumEmbeddedShortSide(maxDimension, options);
+
+  if (psdPath) {
+    const rendered = await runPsdDecodeTask(() => renderPsdCompositeToJpeg(absolutePath, {
+      maxDimension,
+      quality: Math.round(quality * 100),
+    })).catch(() => null);
+    if (!rendered) {
+      return null;
+    }
+    const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
+    void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
+    return cachedRendered;
+  }
 
   if (!rawPath) {
     // Fast-path: try to read the EXIF IFD1 thumbnail (50–500 KB partial read) before

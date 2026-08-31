@@ -26,6 +26,8 @@ interface PhotoSelectionContextMenuProps {
   onCopyFiles?: () => void;
   onMoveFiles?: () => void;
   onSaveAs?: () => void;
+  canConvertPsd?: boolean;
+  onConvertPsd?: () => void;
   onCopyPath?: () => void;
   onOpenWithEditor?: () => void;
 }
@@ -48,6 +50,8 @@ export function PhotoSelectionContextMenu({
   onCopyFiles,
   onMoveFiles,
   onSaveAs,
+  canConvertPsd = false,
+  onConvertPsd,
   onCopyPath,
   onOpenWithEditor,
 }: PhotoSelectionContextMenuProps) {
@@ -215,6 +219,17 @@ export function PhotoSelectionContextMenu({
         >
           <span className="icon">🎨</span> Apri con editor
         </button>
+        {canConvertPsd ? (
+          <button
+            type="button"
+            className="selection-context-menu__action-item"
+            onClick={onConvertPsd}
+            role="menuitem"
+            title="Crea JPEG dal composito visibile dei PSD selezionati, senza modificare gli originali"
+          >
+            <span className="icon">🖼️</span> Converti PSD in JPEG…
+          </button>
+        ) : null}
         <button
           type="button"
           className="selection-context-menu__action-item"

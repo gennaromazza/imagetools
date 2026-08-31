@@ -7,6 +7,7 @@ import type {
   DesktopEditorCandidate,
   DesktopGraphicsStatus,
   DesktopRamBudgetPreset,
+  DesktopPsdJpegConversionProgress,
   DesktopSelectionMode,
   DesktopThumbnailCacheInfo,
 } from "@photo-tools/desktop-contracts";
@@ -14,6 +15,7 @@ import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-typ
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
 import { PhotoCard } from "./PhotoCard";
 import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
+import { PsdJpegConversionModal } from "./PsdJpegConversionModal";
 import { CompareModal } from "./CompareModal";
 import {
   createOnDemandPreviewAsync,
@@ -31,10 +33,16 @@ import {
   isRawFile,
 } from "../services/folder-access";
 import {
+  cancelPsdJpegConversion,
+  getPsdJpegConversionProgress,
+  startPsdJpegConversion,
+} from "../services/psd-jpeg-conversion";
+import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
   DEFAULT_PHOTO_FILTERS,
   JPEG_EXTENSIONS,
+  PSD_EXTENSIONS,
   RAW_EXTENSIONS,
   getAssetColorLabel,
   getAssetFileExtension,
@@ -131,13 +139,14 @@ interface PhotoSelectorProps {
   onRamBudgetPresetChange?: (preset: DesktopRamBudgetPreset) => void | Promise<void>;
   onDiskCacheBudgetPresetChange?: (preset: DesktopDiskCacheBudgetPreset) => void | Promise<void>;
   onRefreshDesktopThumbnailCacheInfo?: () => void | Promise<void>;
+  onPsdJpegConversionComplete?: () => void | Promise<void>;
 }
 
 type SortMode = "name" | "orientation" | "rating" | "createdAt";
 type CreatedAtSortDirection = "asc" | "desc";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
-type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg";
+type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg" | "psd";
 type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels">>;
 type BatchPulseKind = "dot" | "label";
 type PreviewFeedbackKind = "star" | "pill" | "dot" | "label";
@@ -485,6 +494,7 @@ export function PhotoSelector({
   onRamBudgetPresetChange,
   onDiskCacheBudgetPresetChange,
   onRefreshDesktopThumbnailCacheInfo,
+  onPsdJpegConversionComplete,
 }: PhotoSelectorProps) {
   const { addToast } = useToast();
   const [sortBy, setSortBy] = useState<SortMode>("name");
@@ -564,9 +574,13 @@ export function PhotoSelector({
     y: number;
     targetIds: string[];
   } | null>(null);
+  const [psdConversionTargetIds, setPsdConversionTargetIds] = useState<string[] | null>(null);
+  const [psdConversionProgress, setPsdConversionProgress] = useState<DesktopPsdJpegConversionProgress | null>(null);
+  const [isPsdConversionStarting, setIsPsdConversionStarting] = useState(false);
   const [focusedPhotoId, setFocusedPhotoId] = useState<string | null>(null);
   const [previewStartsZoomed, setPreviewStartsZoomed] = useState(false);
   const lastPreviewAssetIdRef = useRef<string | null>(null);
+  const completedPsdConversionJobIdRef = useRef<string | null>(null);
   const pendingPreviewRestoreIdRef = useRef<string | null>(null);
   const lastClickedIdRef = useRef<string | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -641,6 +655,13 @@ export function PhotoSelector({
     [currentFolderPhotoIdSet, selectedIds],
   );
   const assetById = metadataAssetById;
+  const selectedPsdIds = useMemo(
+    () => selectedIds.filter((id) => {
+      const asset = assetById.get(id);
+      return Boolean(asset && PSD_EXTENSIONS.has(getAssetFileExtension(asset)));
+    }),
+    [assetById, selectedIds],
+  );
   const photosRef = useRef(photos);
   useEffect(() => {
     photosRef.current = photos;
@@ -1570,9 +1591,12 @@ export function PhotoSelector({
           // "JPG" matches plain JPG cards (no companion). Grouped cards are
           // surfaced under the dedicated "RAW + JPG" option to match the
           // labelling on the card badge.
-          if (kind !== "standard" || isRawFile(photo.fileName)) {
+          if (kind !== "standard" || isRawFile(photo.fileName) || PSD_EXTENSIONS.has(getAssetFileExtension(photo))) {
             continue;
           }
+        }
+        if (formatFilter === "psd" && !PSD_EXTENSIONS.has(getAssetFileExtension(photo))) {
+          continue;
         }
       }
       if (timeClusterFilter !== "all" && getTimeClusterKey(photo) !== timeClusterFilter) {
@@ -2525,6 +2549,111 @@ export function PhotoSelector({
     () => selectedAbsolutePaths.join("\n"),
     [selectedAbsolutePaths],
   );
+  const openPsdJpegConversion = useCallback((candidateIds: string[]) => {
+    const targetIds = candidateIds.filter((id) => {
+      const asset = assetById.get(id);
+      return Boolean(asset && PSD_EXTENSIONS.has(getAssetFileExtension(asset)));
+    });
+    if (targetIds.length === 0) {
+      addToast("Seleziona almeno un file PSD da convertire.", "warning");
+      return;
+    }
+
+    completedPsdConversionJobIdRef.current = null;
+    setPsdConversionTargetIds(targetIds);
+    setPsdConversionProgress(null);
+  }, [addToast, assetById]);
+
+  const startSelectedPsdJpegConversion = useCallback(async () => {
+    if (!psdConversionTargetIds || psdConversionTargetIds.length === 0) {
+      return;
+    }
+
+    const inputPaths = getAssetAbsolutePaths(psdConversionTargetIds);
+    if (inputPaths.length === 0) {
+      addToast("I PSD selezionati non sono più disponibili nella cartella aperta.", "error");
+      return;
+    }
+
+    setIsPsdConversionStarting(true);
+    try {
+      const nextProgress = await startPsdJpegConversion({
+        inputPaths,
+      });
+      if (!nextProgress) {
+        addToast("La conversione PSD è disponibile solo nell'app desktop FileX.", "warning");
+        return;
+      }
+      setPsdConversionProgress(nextProgress);
+      if (nextProgress.status === "error") {
+        addToast(nextProgress.error ?? "Non è stato possibile avviare la conversione PSD.", "error");
+      }
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "Non è stato possibile avviare la conversione PSD.", "error");
+    } finally {
+      setIsPsdConversionStarting(false);
+    }
+  }, [addToast, psdConversionTargetIds]);
+
+  const cancelSelectedPsdJpegConversion = useCallback(() => {
+    void cancelPsdJpegConversion().catch(() => {
+      addToast("Non è stato possibile annullare la conversione PSD.", "error");
+    });
+  }, [addToast]);
+
+  const closePsdJpegConversion = useCallback(() => {
+    if (psdConversionProgress?.status === "running") {
+      return;
+    }
+    setPsdConversionTargetIds(null);
+    setPsdConversionProgress(null);
+  }, [psdConversionProgress?.status]);
+
+  useEffect(() => {
+    if (psdConversionProgress?.status !== "running") {
+      return;
+    }
+
+    let disposed = false;
+    const refreshProgress = () => {
+      void getPsdJpegConversionProgress().then((nextProgress) => {
+        if (!disposed && nextProgress) {
+          setPsdConversionProgress(nextProgress);
+        }
+      }).catch(() => undefined);
+    };
+    refreshProgress();
+    const intervalId = window.setInterval(refreshProgress, 300);
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [psdConversionProgress?.status]);
+
+  useEffect(() => {
+    if (
+      psdConversionProgress?.status !== "completed"
+      || !psdConversionProgress.jobId
+      || completedPsdConversionJobIdRef.current === psdConversionProgress.jobId
+    ) {
+      return;
+    }
+
+    completedPsdConversionJobIdRef.current = psdConversionProgress.jobId;
+    if (psdConversionProgress.generated === 0) {
+      addToast("Conversione PSD conclusa senza creare JPEG. Controlla gli errori indicati.", "warning");
+      return;
+    }
+
+    addToast(
+      `${psdConversionProgress.generated} JPEG creati in “JPEG da PSD”. Aggiorno subito la cartella aperta.`,
+      "success",
+      7000,
+    );
+    void Promise.resolve(onPsdJpegConversionComplete?.()).catch(() => {
+      addToast("I JPEG sono stati creati, ma non sono riuscito ad aggiornare la griglia.", "warning", 7000);
+    });
+  }, [addToast, onPsdJpegConversionComplete, psdConversionProgress]);
   const dragOutCheckSeqRef = useRef(0);
 
   useEffect(() => {
@@ -3401,6 +3530,7 @@ export function PhotoSelector({
                 visibleSelectedCount={visibleSelectedCount}
                 currentFolderSelectedCount={currentFolderSelectedIds.length}
                 selectedCount={selectedIds.length}
+                psdSelectedCount={selectedPsdIds.length}
                 workspaceMode={workspaceMode}
                 compareCount={comparePhotos.length}
                 isMenuOpen={isSelectionActionsOpen}
@@ -3413,6 +3543,7 @@ export function PhotoSelector({
                 onRemoveVisible={() => { removeVisibleFromSelection(); setIsSelectionActionsOpen(false); }}
                 onInvertVisible={() => { invertVisibleSelection(); setIsSelectionActionsOpen(false); }}
                 onActivatePickedOnly={() => { activatePickedOnly(); setIsSelectionActionsOpen(false); }}
+                onConvertPsdSelected={() => { openPsdJpegConversion(selectedPsdIds); setIsSelectionActionsOpen(false); }}
                 onCompare={openCompare}
               />
             ),
@@ -4572,6 +4703,10 @@ export function PhotoSelector({
           hasFileAccess={Boolean(window.filexDesktop?.sendToEditor)}
           rootFolderPath={effectiveRootFolderPath || undefined}
           targetPath={contextMenuState.targetIds.length === 1 ? (getAssetRelativePath(contextMenuState.targetIds[0]) ?? undefined) : undefined}
+          canConvertPsd={contextMenuState.targetIds.some((id) => {
+            const asset = assetById.get(id);
+            return Boolean(asset && PSD_EXTENSIONS.has(getAssetFileExtension(asset)));
+          })}
           onApplyRating={(rating) => {
             applyBatchChanges(contextMenuState.targetIds, { rating });
             setContextMenuState(null);
@@ -4621,6 +4756,11 @@ export function PhotoSelector({
             setContextMenuState(null);
             void handleSaveAs(ids);
           }}
+          onConvertPsd={() => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            openPsdJpegConversion(ids);
+          }}
           onCopyPath={() => {
             handleCopyPath(contextMenuState.targetIds, effectiveRootFolderPath);
             setContextMenuState(null);
@@ -4630,6 +4770,17 @@ export function PhotoSelector({
             setContextMenuState(null);
             handleOpenWithEditor(ids);
           }}
+        />
+      ) : null}
+
+      {psdConversionTargetIds ? (
+        <PsdJpegConversionModal
+          totalPsd={psdConversionTargetIds.length}
+          progress={psdConversionProgress}
+          isStarting={isPsdConversionStarting}
+          onStart={() => { void startSelectedPsdJpegConversion(); }}
+          onCancel={cancelSelectedPsdJpegConversion}
+          onClose={closePsdJpegConversion}
         />
       ) : null}
 

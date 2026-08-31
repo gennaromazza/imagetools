@@ -13,6 +13,7 @@ import {
 } from "./desktop-store";
 
 const STANDARD_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const PSD_EXTENSIONS = new Set([".psd"]);
 
 const RAW_EXTENSIONS = new Set([
   ".cr2", ".cr3", ".crw",
@@ -37,7 +38,7 @@ function extOf(name: string): string {
 export function isImageFile(name: string): boolean {
   if (name.startsWith("._")) return false;
   const ext = extOf(name);
-  return STANDARD_EXTENSIONS.has(ext) || RAW_EXTENSIONS.has(ext);
+  return STANDARD_EXTENSIONS.has(ext) || PSD_EXTENSIONS.has(ext) || RAW_EXTENSIONS.has(ext);
 }
 
 export function isRawFile(name: string): boolean {
@@ -340,12 +341,19 @@ export async function openProjectFolderNative(): Promise<FolderOpenResult | null
 }
 
 export async function reopenProjectFolder(rootPath: string): Promise<FolderOpenResult | null> {
+  return reopenFolderNative(rootPath, "legacy");
+}
+
+export async function reopenFolderNative(
+  rootPath: string,
+  relativePathMode: "legacy" | "project-relative",
+): Promise<FolderOpenResult | null> {
   if (!hasDesktopFolderBridge() || typeof window.filexDesktop?.reopenFolder !== "function") {
     return null;
   }
   const result = await window.filexDesktop.reopenFolder(rootPath, {
     recursive: true,
-    relativePathMode: "legacy",
+    relativePathMode,
   });
   return mapProjectFolderResult(result);
 }

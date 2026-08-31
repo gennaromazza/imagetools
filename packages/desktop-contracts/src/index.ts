@@ -242,6 +242,35 @@ export interface DesktopRenderedImage {
   height: number;
 }
 
+export type DesktopPsdJpegConversionStatus = "idle" | "running" | "completed" | "cancelled" | "error";
+
+export interface DesktopPsdJpegConversionRequest {
+  inputPaths: string[];
+}
+
+export interface DesktopPsdJpegConversionResult {
+  sourcePath: string;
+  outputPath?: string;
+  status: "generated" | "skipped" | "error";
+  error?: string;
+}
+
+export interface DesktopPsdJpegConversionProgress {
+  jobId: string | null;
+  status: DesktopPsdJpegConversionStatus;
+  total: number;
+  completed: number;
+  generated: number;
+  skipped: number;
+  errors: number;
+  currentFile: string | null;
+  outputDirectories: string[];
+  startedAt: number | null;
+  finishedAt: number | null;
+  error: string | null;
+  results: DesktopPsdJpegConversionResult[];
+}
+
 export interface DesktopThumbnailFrame {
   token: string;
   src: string;
@@ -1313,6 +1342,11 @@ export interface FileXDesktopApi {
     absolutePath: string,
     options?: DesktopPreviewOptions,
   ) => Promise<DesktopRenderedImage | null>;
+  startPsdJpegConversion: (
+    request: DesktopPsdJpegConversionRequest,
+  ) => Promise<DesktopPsdJpegConversionProgress>;
+  getPsdJpegConversionProgress: () => Promise<DesktopPsdJpegConversionProgress>;
+  cancelPsdJpegConversion: () => Promise<void>;
   warmPreview: (
     absolutePath: string,
     options?: DesktopPreviewOptions,

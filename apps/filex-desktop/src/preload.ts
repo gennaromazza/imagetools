@@ -98,6 +98,9 @@ const api: FileXDesktopApi = {
   dismissCacheLocationRecommendation: () =>
     ipcRenderer.invoke("filex:dismiss-cache-location-recommendation"),
   getPreview: (absolutePath, options) => ipcRenderer.invoke("filex:get-preview", absolutePath, options),
+  startPsdJpegConversion: (request) => ipcRenderer.invoke("filex:start-psd-jpeg-conversion", request),
+  getPsdJpegConversionProgress: () => ipcRenderer.invoke("filex:get-psd-jpeg-conversion-progress"),
+  cancelPsdJpegConversion: () => ipcRenderer.invoke("filex:cancel-psd-jpeg-conversion"),
   warmPreview: (absolutePath, options) => ipcRenderer.invoke("filex:warm-preview", absolutePath, options),
   getQuickPreviewFrame: (request) => ipcRenderer.invoke("filex:get-quick-preview-frame", request),
   warmQuickPreviewFrames: (requests) => ipcRenderer.invoke("filex:warm-quick-preview-frames", requests),

@@ -302,9 +302,10 @@ function testDescription(name: string): string {
   const descriptions: Record<string, string> = {
     "test:photo-selector-workflow": "Controlla il flusso principale di Image Select Pro.",
     "test:photo-selector-free-mode": "Verifica che la modalità libera resti indipendente dai progetti, riconosca la sorgente anche se cambia lettera e mantenga XMP e backup Drive separati.",
-    "test:photo-selector-package-runtime": "Controlla che il main process di Image Select Pro includa nell’ASAR tutte le dipendenze locali, compresa l’identità delle sorgenti.",
+    "test:photo-selector-package-runtime": "Controlla che il main process di Image Select Pro includa nell’ASAR tutte le dipendenze locali, compresi identità sorgenti e servizi PSD.",
     "test:photo-selector-relocation": "Verifica lo spostamento sicuro dei progetti e delle relative risorse.",
     "test:photo-selector-xmp": "Controlla lettura e aggiornamento dei metadati XMP.",
+    "test:photo-selector-psd": "Verifica importazione PSD, anteprima del composito e conversione JPEG senza sovrascrivere gli originali.",
     "test:photo-selector-performance": "Verifica code prioritarie, budget cache, aggiornamenti thumbnail per-ID e invarianti CSS anti-lag.",
     "test:archivio-flow-bug-hunt": "Cerca regressioni con input generati, percorsi ostili e transizioni di importazione vietate.",
     "test:archivio-flow-drive-link": "Verifica il link al registro Drive e il messaggio guidato quando l’API Google è disabilitata.",

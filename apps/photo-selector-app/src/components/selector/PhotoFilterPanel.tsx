@@ -4,7 +4,7 @@ import type { PhotoFilterPreset } from "../../services/photo-selector-preference
 
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
-type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg";
+type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg" | "psd";
 
 interface PhotoFilterPanelProps {
   folderStats: { total: number; picked: number; rejected: number; completionPct: number } | null;
@@ -126,6 +126,7 @@ export function PhotoFilterPanel(props: PhotoFilterPanelProps) {
           <option value="jpg">JPG</option>
           <option value="raw">RAW</option>
           <option value="raw+jpg">RAW + JPG</option>
+          <option value="psd">PSD</option>
         </select>
       </label>
 
