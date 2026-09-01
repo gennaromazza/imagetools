@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "check:git-hygiene": "node scripts/check-git-hygiene.mjs",
     "dev": "npm run dev:photo-selector-app",
     "dev:console": "npm --workspace @photo-tools/filex-dev-console run start",
     "console": "npm --workspace @photo-tools/filex-dev-console run dev",

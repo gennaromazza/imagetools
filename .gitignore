@@ -36,3 +36,9 @@ install.sh
 .release-worktrees/
 mnt/
 test-output.txt
+
+# Local agent attachments and disposable validation artifacts
+.codex-remote-attachments/
+.release-smoke-*/
+.release-license-smoke-*/
+worktrees/

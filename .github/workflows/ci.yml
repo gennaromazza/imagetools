@@ -105,3 +105,6 @@ jobs:
 
       - name: Validate stable manifest
         run: npm.cmd --workspace @photo-tools/filex-desktop run manifest:validate:stable
+
+      - name: Validate Git hygiene
+        run: npm.cmd run check:git-hygiene

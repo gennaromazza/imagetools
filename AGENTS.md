@@ -21,6 +21,15 @@ Prima di modificare un'app, leggi il suo `package.json`, gli script disponibili 
 6. Mantieni il contesto snello: non rileggere file già compresi, non caricare directory intere, non ripetere istruzioni ereditate e non avviare build/test globali se basta un workspace o uno script mirato.
 7. Comunica in modo sintetico: esito, file toccati, verifica e solo i limiti rilevanti. Evita tutorial e riepiloghi ridondanti.
 
+## Igiene Git obbligatoria
+
+- All'inizio di ogni intervento controlla `git status -sb`, il branch corrente, l'allineamento con `origin` e `git worktree list`. Non creare branch o worktree senza una richiesta esplicita dell'utente o una procedura di release verificata che li richieda.
+- Un solo checkout operativo è la condizione normale. Ogni worktree temporaneo deve avere uno scopo dichiarato, rimanere fuori dal percorso principale e venire rimosso appena il lavoro è integrato. Prima della rimozione verifica sempre che sia pulito e che il branch sia preservato; non eliminare mai lavoro non integrato.
+- Allegati, smoke test, cache e cartelle temporanee degli agenti devono essere coperti dal `.gitignore` versionato. Non usare `.git/info/exclude` come unica regola per file prodotti dal normale flusso di sviluppo.
+- Non lasciare file inattesi non tracciati, merge/rebase/cherry-pick incompleti, worktree abbandonati o modifiche generate dai test. Se esiste lavoro precedente non attribuibile con certezza al task, preservalo e segnalalo invece di ripulirlo alla cieca.
+- Prima di dichiarare concluso un intervento esegui il test pertinente, `npm run check:git-hygiene` su un commit pulito e verifica che il branch pubblicato sia allineato con il remoto. Se è stato effettuato un push, attendi l'esito della CI pertinente: stato Git sporco o CI rossa impediscono la chiusura del lavoro.
+- Spegnimenti o riavvii richiesti dall'utente vanno eseguiti soltanto dopo avere salvato le modifiche, completato commit e push richiesti e concluso le verifiche remote.
+
 ## Comandi comuni
 
 ```powershell
