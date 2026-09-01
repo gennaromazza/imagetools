@@ -25,7 +25,7 @@ La preview usa una risoluzione limitata per restare fluida. L'export usa la riso
 | Foglio 15×20 | Priorità prima versione |
 | A4 | Priorità successiva, se coperto da test reale |
 | PDF | Primo formato consegna consigliato per dimensioni fisiche |
-| JPG | Supportato solo con metadati DPI e test di stampa |
+| JPG | Supportato con metadati DPI; la foto singola viene sempre consegnata in JPG |
 | TIFF | Supportato solo con metadati e decoder verificati |
 | PNG | Non deve essere promesso come output a DPI affidabile senza contratto e test specifici |
 
@@ -81,15 +81,9 @@ La tolleranza non va inventata in UI: dipende dal profilo documento, dalla stamp
 
 ## Stampa nativa
 
-La stampa nativa non è implementata oggi nel bridge FileX. Quando verrà aggiunta:
+Il bridge FileX espone un comando tipizzato che prepara i fogli alla risoluzione del profilo e apre il pannello nativo di Windows o macOS tramite Electron. Il percorso standard usa sempre `silent: false`, imposta foglio e margini fisici e distingue consegna al driver, annullamento del dialogo ed errore.
 
-- deve mostrare il dialogo o una UI nativa controllata;
-- deve associare il job al profilo di calibrazione;
-- non può usare la stampa silenziosa come percorso standard;
-- deve distinguere job creato, dialogo annullato, errore driver e completamento osservabile dove il driver lo consente;
-- non può presentare il solo avvio di un processo come stampa riuscita.
-
-Finché questi criteri non sono soddisfatti, il comportamento ufficiale è Genera PDF o file raster pronto alla stampa.
+La consegna al driver non viene presentata come prova dell'avvenuta stampa. L'operatore deve controllare nel pannello scala 100% e assenza di adattamento pagina. I profili automatici stampante/carta e la compensazione basata su calibrazione fisica restano una funzione successiva; non bloccano l'apertura del dialogo manuale.
 
 ## Sicurezza di rendering
 
@@ -106,8 +100,8 @@ Il motore deve:
 
 1. L'operatore verifica la foto e il profilo.
 2. FileX mostra il riepilogo: documento, copie, foglio, DPI e output.
-3. L'operatore seleziona un profilo stampante/carta valido oppure export.
-4. Se la calibrazione manca, FileX blocca la stampa diretta e propone prova o export.
-5. Dopo l'output, la commessa conserva data, profilo e file creato per la ristampa.
+3. L'operatore esporta foto singola e foglio oppure apre il pannello di stampa nativo.
+4. Nel driver conferma formato carta, scala 100% e nessun adattamento pagina.
+5. Dopo l'export, la commessa conserva data, profilo e file creati per la ristampa.
 
 La ristampa deve riutilizzare l'output già approvato oppure generare nuovamente il piano con avviso se profilo, revisione o calibrazione sono cambiati.

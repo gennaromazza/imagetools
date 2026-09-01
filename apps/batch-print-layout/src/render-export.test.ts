@@ -5,7 +5,27 @@ import {
   mapCommittedOutputMetadata,
   resolvePageAssetsForExport,
   runDesktopAtomicWriteTransaction,
+  validateSupplementaryOutputFiles,
 } from "./render-export";
+
+describe("validateSupplementaryOutputFiles", () => {
+  it("conserva la foto singola JPG accanto al foglio", () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    expect(validateSupplementaryOutputFiles([{ fileName: "Cliente-foto-singola.jpg", bytes }]))
+      .toEqual([{ fileName: "Cliente-foto-singola.jpg", bytes }]);
+  });
+
+  it("rifiuta nomi pericolosi, duplicati o file vuoti", () => {
+    expect(() => validateSupplementaryOutputFiles([{ fileName: "../foto.jpg", bytes: new Uint8Array([1]) }]))
+      .toThrow(/nome file supplementare non valido/iu);
+    expect(() => validateSupplementaryOutputFiles([
+      { fileName: "foto.jpg", bytes: new Uint8Array([1]) },
+      { fileName: "FOTO.JPG", bytes: new Uint8Array([2]) },
+    ])).toThrow(/duplicato/iu);
+    expect(() => validateSupplementaryOutputFiles([{ fileName: "foto.jpg", bytes: new Uint8Array() }]))
+      .toThrow(/vuoto/iu);
+  });
+});
 
 function makeCopy(id: string, overrides: Partial<PhotoAsset> = {}): PhotoAsset {
   return {

@@ -83,18 +83,11 @@ FileX ID Photo implementa il concetto di copia di lavoro. Il flusso attuale:
 
 Le Azioni Photoshop automatiche non rientrano nella prima versione.
 
-## Stampa diretta esclusa dalla prima release
+## Pannello di stampa nativo
 
-Nel repository non esistono chiamate a stampa Electron, elenco stampanti o API per selezionare driver. Per poter dichiarare una stampa diretta, serve una nuova API desktop tipizzata con:
+Il contratto desktop espone `printIdPhotoPages`. Il renderer prepara ogni foglio alla risoluzione del profilo, il main process costruisce un documento con dimensioni fisiche e apre il dialogo visibile del sistema tramite Electron con stampa non silenziosa. Il risultato distingue lavoro consegnato al driver, annullamento ed errore.
 
-- generazione del documento finale o del job di stampa in un ambiente controllato;
-- selezione di stampante e carta solo da UI nativa autorizzata;
-- dialogo visibile per l'operatore;
-- stato di avvio, errore e annullamento;
-- collegamento a un profilo di calibrazione;
-- prova che la dimensione fisica non venga ridimensionata dal driver.
-
-L'avvio di una shell o di un'app esterna non è prova che la stampa sia avvenuta. La prima versione si limita all'export PDF o JPG pronto per il driver o il laboratorio: non espone selezione stampante, comando di stampa diretta o calibrazione automatica. Un bridge potrà essere progettato solo dopo prove fisiche su driver, carte e stampanti dichiarate.
+La funzione non seleziona automaticamente stampante, carta o compensazioni e non considera la consegna al driver come prova di stampa completata. L'operatore controlla formato, scala 100% e assenza di adattamento pagina. La calibrazione automatica per combinazioni stampante/carta resta separata e richiederà prove fisiche dedicate.
 
 ## Liste e file espliciti aggiornati
 
@@ -115,7 +108,7 @@ Il test di indipendenza release verifica le liste principali. Il manifest alimen
 
 ## Release indipendente
 
-Il workflow reale riconosce `id-photo-vX.Y.Z`, costruisce il solo installer FileX ID Photo e aggiorna la sola voce catalogo. La prima voce richiede `minLauncherVersion` 0.1.61 e lo smoke test del main process impacchettato. Il componente non è ancora stato pubblicato. La procedura deve seguire:
+Il workflow reale riconosce `id-photo-vX.Y.Z`, costruisce il solo installer FileX ID Photo e aggiorna la sola voce catalogo. La versione 0.1.0 è stata pubblicata; le funzioni successive richiedono una nuova versione del componente e `minLauncherVersion` 0.1.61, oltre allo smoke test del main process impacchettato. La procedura deve seguire:
 
 - **.github/workflows/windows-release.yml**;
 - **docs/18-publish-build-contract.md**;

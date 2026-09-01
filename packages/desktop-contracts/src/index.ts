@@ -284,6 +284,22 @@ export interface DesktopIdPhotoWorkingCleanupResult {
   removed: boolean;
 }
 
+export interface DesktopIdPhotoPrintPage {
+  jpegBytes: Uint8Array;
+}
+
+export interface DesktopIdPhotoPrintRequest {
+  title: string;
+  sheetWidthMm: number;
+  sheetHeightMm: number;
+  pages: DesktopIdPhotoPrintPage[];
+}
+
+export interface DesktopIdPhotoPrintResult {
+  status: "submitted" | "cancelled" | "failed";
+  error?: string;
+}
+
 export interface DesktopAtomicWriteFile {
   fileName: string;
   bytes: Uint8Array;
@@ -1383,6 +1399,7 @@ export interface FileXDesktopApi {
   cleanupIdPhotoWorkingFiles: (
     jobId: string,
   ) => Promise<DesktopIdPhotoWorkingCleanupResult>;
+  printIdPhotoPages: (request: DesktopIdPhotoPrintRequest) => Promise<DesktopIdPhotoPrintResult>;
   statFiles: (absolutePaths: string[]) => Promise<DesktopFileStat[]>;
   fingerprintFiles: (absolutePaths: string[]) => Promise<DesktopFileFingerprint[]>;
   getThumbnail: (

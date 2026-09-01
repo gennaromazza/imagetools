@@ -88,7 +88,7 @@ jobs:
           npm.cmd --workspace @photo-tools/photo-selector-app run build
           npm.cmd --workspace @photo-tools/image-party-frame-app run build
           npm.cmd --workspace @photo-tools/batch-print-layout run build
-          npm.cmd --workspace @photo-tools/id-photo run test
+          npm.cmd run test:id-photo
           npm.cmd --workspace @photo-tools/id-photo run build
           npm.cmd --workspace @photo-tools/archivio-flow run build
           npm.cmd --workspace @photo-tools/cache-sweep run test

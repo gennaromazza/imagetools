@@ -34,7 +34,7 @@
     "test:image-party-frame-package-runtime": "node scripts/test-image-party-frame-package-runtime.mjs",
     "test:batch-print-layout-bug-hunt": "npm --workspace @photo-tools/batch-print-layout run test && tsx --test apps/filex-desktop/src/atomic-output-transaction.test.ts",
     "test:batch-print-layout-desktop-images": "tsx --test scripts/test-batch-print-layout-desktop-images.ts",
-    "test:id-photo": "npm --workspace @photo-tools/id-photo run test",
+    "test:id-photo": "npm --workspace @photo-tools/id-photo run test && tsx --test apps/filex-desktop/src/id-photo-print-service.test.ts",
     "test:id-photo-working-files": "tsx --test apps/filex-desktop/src/id-photo-working-files.test.ts",
     "test:id-photo-file-fingerprint": "tsx --test apps/filex-desktop/src/id-photo-file-fingerprint.test.ts",
     "test:id-photo-unload-guard": "tsx --test apps/filex-desktop/src/id-photo-unload-guard.test.ts",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import {
   AlertTriangle,
   BookOpen,
@@ -38,7 +38,7 @@ import {
   type PhotoPrintSpec,
   type PrintSheetSpec,
 } from "@photo-tools/batch-print-layout/print-engine";
-import { exportBatchWithMetadata, renderPageCanvas, renderPhotoCanvas } from "@photo-tools/batch-print-layout/render-export";
+import { exportBatchWithMetadata, exportRasterPage, renderPageCanvas, renderPhotoCanvas } from "@photo-tools/batch-print-layout/render-export";
 import { DOCUMENT_PROFILES, evaluateTechnicalChecks, safeJobName, type TechnicalCheck } from "./domain";
 import { displayedCropPosition, moveCropInDisplayedAxes } from "./crop-position";
 import { buildRehydrationCandidates } from "./asset-rehydration";
@@ -48,6 +48,7 @@ import {
   type OutputVerificationStatus,
 } from "./output-verification";
 import { analyzeImage, bytesToObjectUrl } from "./image-analysis";
+import { createIdPhotoOutputPlan, selectDroppedIdPhotoFile } from "./id-photo-workflow";
 import {
   createBrowserAssetPreviewResources,
   ID_PHOTO_DETAIL_PREVIEW_MAX_DIMENSION,
@@ -138,14 +139,14 @@ const TUTORIAL_STEPS = [
   {
     id: 5,
     title: "Esporta e stampa",
-    summary: "Crea PDF o JPG verificati, pronti per il driver della stampante o il laboratorio.",
+    summary: "Salva la foto singola e il foglio impaginato oppure apri il pannello di stampa del computer.",
     actions: [
-      "Scegli PDF multipagina o JPG con DPI incorporati.",
+      "Scegli il foglio PDF oppure JPG; la foto singola viene sempre salvata anche in JPG.",
       "Seleziona la cartella di destinazione.",
       "Attendi la verifica finale dei file esportati.",
-      "Nel driver usa scala 100% e disattiva Adatta alla pagina.",
+      "Usa Stampa per aprire il pannello nativo di Windows o macOS.",
     ],
-    attention: "Se la verifica è in attesa usa Riprova verifica: non riesportare gli stessi fogli.",
+    attention: "Nel pannello di stampa controlla scala 100% e disattiva Adatta alla pagina. Se la verifica è in attesa, non riesportare gli stessi file.",
   },
 ] as const;
 
@@ -443,6 +444,7 @@ export function App() {
   const [selectedDetailPreview, setSelectedDetailPreview] = useState<SelectedDetailPreview | null>(null);
   const [status, setStatus] = useState(initialJob ? "Ripristino dell'ultima commessa…" : "Crea una commessa e importa la foto del cliente.");
   const [busy, setBusy] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const [hasUnsavedJobChanges, setHasUnsavedJobChanges] = useState(!initialJob);
   const [jobPersistenceError, setJobPersistenceError] = useState<string | null>(null);
   const [preferencesPersistenceError, setPreferencesPersistenceError] = useState<string | null>(null);
@@ -492,6 +494,10 @@ export function App() {
     heightCm: profile.heightMm / 10,
     dpi: profile.digitalMinDpi ?? 300,
   }), [profile]);
+  const outputPlan = useMemo(
+    () => createIdPhotoOutputPlan(safeJobName(customer, jobName), format),
+    [customer, format, jobName],
+  );
   const layout = useMemo(() => calculateGridLayout(printSpec, sheet), [printSpec, sheet]);
 
   const repeatedAssets = useMemo<PhotoAsset[]>(() => {
@@ -554,7 +560,6 @@ export function App() {
     copies,
     format,
     cutGuides,
-    outputDirectoryPath,
   });
   exportFingerprintRef.current = exportFingerprint;
   const contextualLastExport = lastExport?.contextFingerprint === exportFingerprint ? lastExport : null;
@@ -1234,6 +1239,88 @@ export function App() {
     setStatus("Foto attiva cambiata: ripeti la verifica prima dell'export.");
   };
 
+  const replaceImportedAssets = (nextAssets: IdPhotoAsset[], sourceFolderPath: string | null) => {
+    const previousAssets = [...assetsRef.current];
+    setAssets(nextAssets);
+    deferAssetRevocation(previousAssets);
+    setUnavailableAssets([]);
+    setFolderPath(sourceFolderPath);
+    resetCrops(nextAssets);
+    setSelectedIndex(0);
+    setPreviewPageIndex(0);
+    resetVerification();
+    if (nextAssets.length > 0) setStep(2);
+  };
+
+  const importDesktopPhotoPath = async (absolutePath: string) => {
+    if (!window.filexDesktop) return;
+    setBusy(true);
+    setStatus("Preparazione della foto selezionata…");
+    try {
+      const [stat] = await window.filexDesktop.statFiles([absolutePath]);
+      if (!stat) throw new Error("La foto selezionata non è disponibile.");
+      const preview = await window.filexDesktop.getPreview(absolutePath, {
+        maxDimension: ID_PHOTO_RAIL_THUMBNAIL_MAX_DIMENSION,
+        sourceFileKey: `${stat.size}:${stat.lastModified}`,
+      });
+      if (!preview) throw new Error("Il formato della foto non può essere letto.");
+      const url = bytesToObjectUrl(preview.bytes, preview.mimeType);
+      const asset: IdPhotoAsset = {
+        id: `photo-${hashString(`${absolutePath}:${stat.size}:${stat.lastModified}`)}`,
+        fileName: stat.name,
+        absolutePath,
+        originalAbsolutePath: absolutePath,
+        relativePath: stat.name,
+        sourceUrl: url,
+        previewUrl: url,
+        width: preview.width,
+        height: preview.height,
+        size: stat.size,
+        lastModified: stat.lastModified,
+        revisions: [{
+          kind: "original",
+          absolutePath,
+          createdAt: new Date().toISOString(),
+          size: stat.size,
+          lastModified: stat.lastModified,
+        }],
+      };
+      const sourceFolder = absolutePath.replace(/[\\/][^\\/]+$/u, "") || null;
+      replaceImportedAssets([asset], sourceFolder);
+      setStatus("Foto importata. Regola l’inquadratura e prosegui con la verifica.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Importazione della foto non riuscita.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const importSinglePhoto = async () => {
+    if (window.filexDesktop?.chooseImageFile) {
+      const path = await window.filexDesktop.chooseImageFile();
+      if (path) await importDesktopPhotoPath(path);
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
+  const handlePhotoDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    if (busy) return;
+    const file = selectDroppedIdPhotoFile(event.dataTransfer.files);
+    if (!file) {
+      setStatus("Trascina un file JPG, PNG, WebP, HEIC, TIFF o PSD.");
+      return;
+    }
+    const absolutePath = window.filexDesktop?.getPathForFile?.(file) ?? "";
+    if (absolutePath) {
+      await importDesktopPhotoPath(absolutePath);
+    } else {
+      await importBrowserFiles([file]);
+    }
+  };
+
   const importDesktopFolder = async () => {
     if (!window.filexDesktop?.openFolder) {
       fileInputRef.current?.click();
@@ -1315,12 +1402,12 @@ export function App() {
     }
   };
 
-  const importBrowserFiles = async (files: FileList | null) => {
+  const importBrowserFiles = async (files: FileList | readonly File[] | null) => {
     if (!files?.length) return;
     setBusy(true);
     const loaded: IdPhotoAsset[] = [];
     try {
-      const allCandidates = Array.from(files).filter((file) => file.type.startsWith("image/"));
+      const allCandidates = Array.from(files).filter((file) => file.type.startsWith("image/") || selectDroppedIdPhotoFile([file]) === file);
       const candidates = allCandidates.slice(0, ID_PHOTO_MAX_ASSETS_PER_JOB);
       const overLimitCount = Math.max(0, allCandidates.length - candidates.length);
       let unreadableCount = 0;
@@ -1864,16 +1951,15 @@ export function App() {
     exportInFlightRef.current = true;
     setBusy(true);
     try {
-      if (window.filexDesktop && !outputDirectoryPath) {
-        const selectedOutputPath = await window.filexDesktop.chooseOutputFolder();
-        if (!selectedOutputPath) {
+      let targetOutputDirectoryPath = outputDirectoryPath;
+      if (window.filexDesktop && !targetOutputDirectoryPath) {
+        targetOutputDirectoryPath = await window.filexDesktop.chooseOutputFolder();
+        if (!targetOutputDirectoryPath) {
           setStatus("Export annullato: scegli una cartella di destinazione per ottenere una conferma di scrittura affidabile.");
           return;
         }
-        setOutputDirectoryPath(selectedOutputPath);
+        setOutputDirectoryPath(targetOutputDirectoryPath);
         clearExportRecords();
-        setStatus("Cartella di destinazione impostata. Premi di nuovo Esporta per creare e verificare i file.");
-        return;
       }
 
       const sourcePath = selectedAsset.absolutePath;
@@ -1921,13 +2007,32 @@ export function App() {
       };
 
       setStatus("Creazione file di stampa…");
+      if (!selectedPreviewAsset || !selectedCrop) {
+        throw new Error("Anteprima ad alta risoluzione non disponibile. Attendi il caricamento della foto e riprova.");
+      }
+      const singlePhotoCanvas = await renderPhotoCanvas(
+        selectedPreviewAsset,
+        selectedCrop,
+        printSpec,
+        null,
+        { enabled: false, imageUrl: null, position: "bottom-right", scalePct: 20, opacity: 1, marginPct: 4 },
+        { blackAndWhiteEnabled: false, fitMode: "cover", autoRotateBySourceOrientation: false, borderEnabled: false, borderWidthPx: 0, borderColor: "#000000" },
+      );
+      let singlePhotoBytes: Uint8Array;
+      try {
+        singlePhotoBytes = await exportRasterPage(singlePhotoCanvas, "jpg", 0.98, printSpec.dpi);
+      } finally {
+        singlePhotoCanvas.width = 1;
+        singlePhotoCanvas.height = 1;
+      }
       let persistedPendingRecord: PersistedIdPhotoPendingExport | null = null;
       const { files, committedFiles } = await exportBatchWithMetadata({
         pages,
         format,
-        outputDirectoryPath,
-        fileNamePrefix: safeJobName(customer, jobName),
+        outputDirectoryPath: targetOutputDirectoryPath,
+        fileNamePrefix: outputPlan.layoutPrefix,
         quality: 0.96,
+        supplementaryFiles: [{ fileName: outputPlan.singlePhotoFileName, bytes: singlePhotoBytes }],
         assetsById: new Map(repeatedAssets.map((asset) => [asset.id, asset])),
         cropsById: repeatedCrops,
         printSpec,
@@ -1936,7 +2041,7 @@ export function App() {
         adjustments: { blackAndWhiteEnabled: false, fitMode: "cover", autoRotateBySourceOrientation: false, borderEnabled: false, borderWidthPx: 0, borderColor: "#000000" },
         finishing: { cutGuidesEnabled: cutGuides, cutGuideColor: "#777777", cutGuideWidthMm: 0.1 },
         validateBeforeSave,
-        requireDesktopAtomicTransaction: Boolean(outputDirectoryPath),
+        requireDesktopAtomicTransaction: Boolean(targetOutputDirectoryPath),
         resolveAssetForExport: window.filexDesktop?.getPreview
           ? async (asset, requiredMaxDimension) => {
             if (!asset.absolutePath) return { asset };
@@ -1961,7 +2066,7 @@ export function App() {
           }
           : undefined,
         onCommittedFiles: async (nextFiles, commitContext) => {
-          if (!outputDirectoryPath) return;
+          if (!targetOutputDirectoryPath) return;
           if (pendingPhotoshopChangeRef.current || exportFingerprintRef.current !== startedFingerprint) {
             throw new Error("La pubblicazione è stata annullata perché foto o impostazioni sono cambiate prima del salvataggio del record.");
           }
@@ -1976,7 +2081,7 @@ export function App() {
               size: file.size,
               sha256: file.sha256,
             })),
-            outputDirectoryPath,
+            outputDirectoryPath: targetOutputDirectoryPath,
             sheetId,
             copies,
           };
@@ -2001,7 +2106,7 @@ export function App() {
         },
         onProgress: (done, total, label) => setStatus(`Export ${done}/${total}: ${label}`),
       });
-      if (!outputDirectoryPath) {
+      if (!targetOutputDirectoryPath) {
         clearExportRecords();
         setStatus(`Download richiesto al browser (${files.join(", ")}), ma non verificabile. Usa l'app desktop e una cartella di destinazione per registrare un output pronto.`);
         return;
@@ -2045,6 +2150,73 @@ export function App() {
       setStatus(error instanceof Error ? error.message : "Export non riuscito.");
     } finally {
       exportInFlightRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const runPrint = async () => {
+    if (!readyForExport || pages.length === 0 || !selectedAsset) {
+      setStatus("Stampa bloccata: completa la verifica professionale della foto.");
+      setStep(3);
+      return;
+    }
+    if (!window.filexDesktop?.printIdPhotoPages) {
+      setStatus("Il pannello di stampa richiede l’app desktop aggiornata di FileX ID Photo.");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (selectedAsset.absolutePath) {
+        const [source] = await window.filexDesktop.fingerprintFiles([selectedAsset.absolutePath]).catch(() => []);
+        const approvedSha = selectedDetailPreview?.assetKey === selectedAssetPreviewKey
+          ? selectedDetailPreview.sourceSha256
+          : null;
+        if (!source
+          || source.size !== selectedAsset.size
+          || source.lastModified !== selectedAsset.lastModified
+          || (approvedSha && source.sha256 !== approvedSha)) {
+          markExternalSourceChange("Stampa bloccata: la foto è cambiata dopo la verifica. Ricaricala e controllala di nuovo.");
+          setStep(selectedAsset.workingCopyPath ? 2 : 1);
+          return;
+        }
+      }
+
+      const printPages: Array<{ jpegBytes: Uint8Array }> = [];
+      for (let index = 0; index < pages.length; index += 1) {
+        setStatus(`Preparazione stampa ${index + 1}/${pages.length}…`);
+        const canvas = await renderPageCanvas(pages[index], {
+          assetsById: new Map(previewRepeatedAssets.map((asset) => [asset.id, asset])),
+          cropsById: repeatedCrops,
+          printSpec,
+          layout,
+          logo: { enabled: false, imageUrl: null, position: "bottom-right", scalePct: 20, opacity: 1, marginPct: 4 },
+          adjustments: { blackAndWhiteEnabled: false, fitMode: "cover", autoRotateBySourceOrientation: false, borderEnabled: false, borderWidthPx: 0, borderColor: "#000000" },
+          finishing: { cutGuidesEnabled: cutGuides, cutGuideColor: "#777777", cutGuideWidthMm: 0.1 },
+          renderDpi: printSpec.dpi,
+        });
+        try {
+          printPages.push({ jpegBytes: await exportRasterPage(canvas, "jpg", 0.98, printSpec.dpi) });
+        } finally {
+          canvas.width = 1;
+          canvas.height = 1;
+        }
+      }
+
+      setStatus("Apertura del pannello stampa del sistema…");
+      const result = await window.filexDesktop.printIdPhotoPages({
+        title: `${safeJobName(customer, jobName)} · FileX ID Photo`,
+        sheetWidthMm: layout.sheetWidthCm * 10,
+        sheetHeightMm: layout.sheetHeightCm * 10,
+        pages: printPages,
+      });
+      setStatus(result.status === "submitted"
+        ? "Lavoro consegnato al driver di stampa. Controlla scala 100% e nessun adattamento pagina."
+        : result.status === "cancelled"
+          ? "Stampa annullata dal pannello di sistema."
+          : result.error || "Il driver di stampa non ha accettato il lavoro.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Apertura del pannello stampa non riuscita.");
+    } finally {
       setBusy(false);
     }
   };
@@ -2104,7 +2276,15 @@ export function App() {
   };
 
   return (
-    <div className={busy ? "app-shell busy" : "app-shell"} aria-busy={busy}>
+    <div
+      className={`${busy ? "app-shell busy" : "app-shell"}${dragActive ? " drag-active" : ""}`}
+      aria-busy={busy}
+      onDragEnter={(event) => { event.preventDefault(); if (!busy) setDragActive(true); }}
+      onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
+      onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
+      onDrop={(event) => void handlePhotoDrop(event)}
+    >
+      {dragActive ? <div className="drop-overlay"><ImagePlus size={44} /><strong>Rilascia la foto</strong><span>Verrà importata nella commessa corrente</span></div> : null}
       <header className="topbar">
         <div className="brand-mark">FX</div>
         <div>
@@ -2140,12 +2320,16 @@ export function App() {
 
       <main className="workspace">
         <aside className="photo-rail">
-          <button className="import-card" onClick={importDesktopFolder} disabled={busy}>
+          <div className="import-card">
             <ImagePlus size={24} />
-            <strong>Seleziona cartella</strong>
-            <span>JPG, PNG, WebP, TIFF, HEIC</span>
-          </button>
-          <input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => void importBrowserFiles(event.target.files)} />
+            <strong>Trascina qui una foto</strong>
+            <span>oppure scegli come importarla</span>
+            <div className="import-actions">
+              <button className="secondary" onClick={() => void importSinglePhoto()} disabled={busy}>Una foto</button>
+              <button className="secondary" onClick={importDesktopFolder} disabled={busy}>Cartella</button>
+            </div>
+          </div>
+          <input ref={fileInputRef} hidden type="file" accept="image/*,.heic,.heif,.tif,.tiff,.psd" onChange={(event) => void importBrowserFiles(event.target.files)} />
           <div className="rail-title"><span>Foto commessa</span><b>{assets.length}</b></div>
           <div className="photo-list">
             {assets.map((asset, index) => (
@@ -2178,7 +2362,7 @@ export function App() {
             <div className="panel welcome-panel">
               <div className="eyebrow">STEP 1 · COMMESSA</div>
               <h1>Una commessa chiara, dall’originale alla stampa.</h1>
-              <p>Inserisci i riferimenti del lavoro, scegli il documento e importa la cartella. La commessa viene salvata automaticamente e FileX non apre mai l’originale in Photoshop.</p>
+              <p>Inserisci i riferimenti del lavoro, scegli il documento e importa una foto, una cartella oppure trascina lo scatto nella finestra. La commessa viene salvata automaticamente e FileX non apre mai l’originale in Photoshop.</p>
               <div className="form-grid">
                 <label>Cliente<input value={customer} onChange={(event) => { setCustomer(event.target.value); clearExportRecords(); }} placeholder="Mario Rossi" disabled={busy} /></label>
                 <label>Nome commessa<input value={jobName} onChange={(event) => { setJobName(event.target.value); clearExportRecords(); }} placeholder="CIE agosto 2026" disabled={busy} /></label>
@@ -2206,7 +2390,10 @@ export function App() {
                 <span>{autosaveLabel}</span>
                 {folderPath ? <small>{folderPath}</small> : null}
               </div>
-              <button className="primary large" onClick={importDesktopFolder} disabled={busy}><FolderOpen size={19} /> Seleziona la cartella foto</button>
+              <div className="welcome-import-actions">
+                <button className="primary large" onClick={() => void importSinglePhoto()} disabled={busy}><ImagePlus size={19} /> Seleziona una foto</button>
+                <button className="secondary large" onClick={importDesktopFolder} disabled={busy}><FolderOpen size={19} /> Seleziona una cartella</button>
+              </div>
             </div>
           ) : null}
 
@@ -2224,7 +2411,7 @@ export function App() {
                     <div className="eye-line" style={{ top: `${eyeLineTopPct}%` }}><span>{profile.eyeLineFromBottomMinMm !== undefined ? `${profile.eyeLineFromBottomMinMm}–${profile.eyeLineFromBottomMaxMm} mm` : "linea occhi"}</span></div>
                     <div className="crop-thirds"><i /><i /><b /><b /></div>
                   </div>
-                ) : <div className="empty-stage"><ScanFace size={50} /><strong>Nessuna foto selezionata</strong><span>Importa una cartella dalla colonna a sinistra.</span></div>}
+                ) : <div className="empty-stage"><ScanFace size={50} /><strong>Nessuna foto selezionata</strong><span>Seleziona o trascina una foto dalla colonna a sinistra.</span></div>}
                 <p className="canvas-caption">Le guide sono un supporto visivo: non rappresentano un rilevamento automatico del volto.</p>
               </div>
               <div className="panel controls-panel">
@@ -2301,19 +2488,20 @@ export function App() {
                 <div className="eyebrow">STEP 5 · ESPORTA E STAMPA</div>
                 <h1>{contextualPendingExport ? "File creati, verifica in attesa" : "File pronto per il driver o il laboratorio"}</h1>
                 <div className="summary-sheet">{previewUrl ? <img src={previewUrl} alt="Foglio pronto" /> : null}</div>
-                <div className="print-warning"><AlertTriangle size={20} /><span>Nel driver di stampa usa scala <b>100%</b> e disattiva “Adatta alla pagina”. La stampa diretta verrà abilitata solo dopo la calibrazione fisica delle stampanti supportate.</span></div>
+                <div className="print-warning"><Printer size={20} /><span>Il pulsante <b>Stampa</b> apre il pannello nativo di Windows o macOS. Nel driver controlla scala <b>100%</b> e disattiva “Adatta alla pagina”.</span></div>
               </div>
               <div className="panel controls-panel export-controls">
-                <label>Formato export<select value={format} disabled={busy} onChange={(event) => { setFormat(event.target.value as ExportFormat); clearExportRecords(); }}><option value="pdf">PDF multipagina (consigliato)</option><option value="jpg">JPG con DPI incorporati</option></select></label>
+                <label>Formato del foglio<select value={format} disabled={busy} onChange={(event) => { setFormat(event.target.value as ExportFormat); clearExportRecords(); }}><option value="pdf">Foglio PDF + foto singola JPG</option><option value="jpg">Foglio JPG + foto singola JPG</option></select></label>
                 <div className="output-box"><FolderOutput size={20} /><div><strong>Cartella di destinazione</strong><span>{outputDirectoryPath || "Download del browser"}</span></div><button className="secondary" onClick={chooseOutput} disabled={!window.filexDesktop || busy}>Scegli</button></div>
-                <div className="export-recap"><p><span>Commessa</span><b>{safeJobName(customer, jobName)}</b></p><p><span>Profilo</span><b>{profile.label}</b></p><p><span>Output</span><b>{copies} copie · {pages.length} fogli {sheet.label}</b></p></div>
+                <div className="export-recap"><p><span>Commessa</span><b>{safeJobName(customer, jobName)}</b></p><p><span>Profilo</span><b>{profile.label}</b></p><p><span>Output</span><b>Foto singola JPG · {copies} copie · {pages.length} fogli {sheet.label}</b></p></div>
                 {!readyForExport ? <div className="inline-warning"><AlertTriangle size={17} /> {technicalFailures > 0 ? `${technicalFailures} controllo/i tecnico/i bloccano l'export.` : "Completa e conferma i controlli dello step 3 prima di esportare."}</div> : null}
                 {currentLastExport ? <div className="last-export"><CheckCircle2 size={18} /><div><strong>Ultimo output verificato</strong><span>{new Date(currentLastExport.completedAt).toLocaleString("it-IT")} · {currentLastExport.files.join(", ")}</span></div></div> : null}
                 {contextualLastExport && lastExportVerification === "unavailable" ? <div className="inline-warning"><AlertTriangle size={17} /> Output registrato, ma verifica temporaneamente indisponibile. FileX conserva il record e riprova automaticamente.</div> : null}
                 {contextualPendingExport ? <div className="inline-warning"><AlertTriangle size={17} /> <span>File già pubblicati: {contextualPendingExport.files.join(", ")}. Non sono ancora marcati come pronti e FileX non li riesporterà.</span></div> : null}
                 {contextualPendingExport
                   ? <button className="primary large" onClick={retryPendingExportVerification} disabled={busy}><RefreshCw size={19} /> {busy ? "Verifica…" : "Riprova verifica"}</button>
-                  : <button className="primary large" onClick={runExport} disabled={!readyForExport || busy}><Save size={19} /> {busy ? "Elaborazione…" : `Esporta ${format.toUpperCase()}`}</button>}
+                  : <button className="primary large" onClick={runExport} disabled={!readyForExport || busy}><Save size={19} /> {busy ? "Elaborazione…" : "Esporta foto e foglio"}</button>}
+                <button className="secondary large print-button" onClick={() => void runPrint()} disabled={!readyForExport || busy}><Printer size={19} /> Apri pannello stampa</button>
               </div>
             </div>
           ) : null}

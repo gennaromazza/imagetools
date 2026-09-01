@@ -62,10 +62,17 @@ button { color: inherit; }
 
 .workspace { min-height: 0; display: grid; grid-template-columns: 258px minmax(0, 1fr); }
 .photo-rail { min-height: 0; display: flex; flex-direction: column; padding: 16px 13px; background: #202622; border-right: 1px solid #39403b; }
-.import-card { min-height: 112px; display: grid; place-items: center; align-content: center; gap: 5px; border: 1px dashed #6f745e; border-radius: 12px; background: #29302b; cursor: pointer; }
+.import-card { min-height: 140px; display: grid; place-items: center; align-content: center; gap: 5px; padding: 13px 10px; border: 1px dashed #6f745e; border-radius: 12px; background: #29302b; }
 .import-card:hover { border-color: #b89a63; background: #2d342f; }
 .import-card svg { color: #b89a63; }
 .import-card span { color: #959e98; font-size: 11px; }
+.import-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 7px; }
+.import-actions button { min-height: 32px; padding: 0 8px; font-size: 10px; }
+.welcome-import-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.drop-overlay { position: fixed; inset: 14px; z-index: 100; display: grid; place-items: center; align-content: center; gap: 8px; border: 3px dashed #d1af70; border-radius: 18px; color: #f5ead7; background: rgba(24,29,26,.94); box-shadow: 0 0 0 14px rgba(16,19,17,.72); pointer-events: none; }
+.drop-overlay svg { color: #d1af70; }
+.drop-overlay strong { font-size: 24px; }
+.drop-overlay span { color: #b9c2bb; font-size: 12px; }
 .rail-title { display: flex; justify-content: space-between; margin: 18px 5px 10px; color: #aeb6b0; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
 .rail-title b { min-width: 23px; padding: 2px 6px; text-align: center; border-radius: 20px; color: #d7c5a3; background: #3a382f; }
 .photo-list { min-height: 0; overflow: auto; display: grid; align-content: start; gap: 7px; padding-right: 3px; }
@@ -190,6 +197,7 @@ input[type="range"] { width: 100%; accent-color: #b89a63; }
 .print-warning, .inline-warning { display: flex; gap: 10px; padding: 12px; margin-top: 15px; border-radius: 8px; color: #dac4a0; background: #3b352a; font-size: 12px; line-height: 1.45; }
 .print-warning svg, .inline-warning svg { flex: 0 0 auto; color: #d4b06f; }
 .export-controls { display: grid; align-content: start; gap: 17px; }
+.print-button { border-color: #6e7d73 !important; color: #dfe7e1; background: #2a332e !important; }
 .output-box { display: grid; grid-template-columns: 25px minmax(0,1fr) auto; align-items: center; gap: 10px; padding: 12px; border: 1px solid #444c47; border-radius: 9px; background: #252b27; }
 .output-box > div { min-width: 0; display: grid; gap: 4px; }
 .output-box span { overflow: hidden; color: #939c96; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }

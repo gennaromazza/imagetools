@@ -39,6 +39,7 @@ import type {
   DesktopFolderOpenOptions,
   DesktopGraphicsStatus,
   DesktopIdPhotoWorkingCopyRequest,
+  DesktopIdPhotoPrintRequest,
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
@@ -192,6 +193,10 @@ import {
 } from "./id-photo-working-files.js";
 import { fingerprintFilesDesktop } from "./id-photo-file-fingerprint.js";
 import { createIdPhotoQuitCoordinator, createIdPhotoUnloadGuard } from "./id-photo-unload-guard.js";
+import {
+  printIdPhotoPagesDesktop,
+  type IdPhotoPrintWindow,
+} from "./id-photo-print-service.js";
 import { OpenProjectRequestQueue, PhotoToolHandoffManager } from "./photo-tool-handoff.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, Tray } = electron;
@@ -1689,6 +1694,21 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     "filex:cleanup-id-photo-working-files",
     (_event, jobId: string) => cleanupIdPhotoWorkingFiles(getIdPhotoWorkingBasePath(), jobId),
+  );
+  ipcMain.handle(
+    "filex:print-id-photo-pages",
+    (_event, request: DesktopIdPhotoPrintRequest) => printIdPhotoPagesDesktop(request, () => new BrowserWindow({
+      show: false,
+      width: 900,
+      height: 700,
+      autoHideMenuBar: true,
+      backgroundColor: "#ffffff",
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+    }) as unknown as IdPhotoPrintWindow),
   );
   ipcMain.handle("filex:stat-files", (_event, absolutePaths: string[]) => statFilesFromDisk(absolutePaths));
   ipcMain.handle("filex:fingerprint-files", (_event, absolutePaths: string[]) => fingerprintFilesDesktop(absolutePaths));

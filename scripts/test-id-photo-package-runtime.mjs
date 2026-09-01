@@ -34,6 +34,11 @@ try {
   );
   assert.match(
     mainSource,
+    /filex:print-id-photo-pages[\s\S]*printIdPhotoPagesDesktop/u,
+    "Il pacchetto ID Photo non registra il pannello di stampa nativo.",
+  );
+  assert.match(
+    mainSource,
     /requestedTool\.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest/u,
     "Il bypass licenza ID Photo non è confinato allo smoke test esplicito.",
   );

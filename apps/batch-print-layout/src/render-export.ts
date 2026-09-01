@@ -38,6 +38,25 @@ export interface ExportCommitContext {
   atomicTransactionId: string | null;
 }
 
+export function validateSupplementaryOutputFiles(files: readonly DesktopAtomicWriteFile[]): DesktopAtomicWriteFile[] {
+  const names = new Set<string>();
+  return files.map((file) => {
+    const fileName = file.fileName.trim();
+    const normalized = fileName.toLocaleLowerCase();
+    if (!fileName || fileName === "." || fileName === ".." || /[\\/]/u.test(fileName)) {
+      throw new Error("Nome file supplementare non valido.");
+    }
+    if (!(file.bytes instanceof Uint8Array) || file.bytes.byteLength === 0) {
+      throw new Error(`Il file supplementare ${fileName} è vuoto.`);
+    }
+    if (names.has(normalized)) {
+      throw new Error(`File supplementare duplicato: ${fileName}.`);
+    }
+    names.add(normalized);
+    return { fileName, bytes: file.bytes };
+  });
+}
+
 export interface ExportOptions extends RenderInputs {
   pages: BatchPrintPage[];
   format: ExportFormat;
@@ -51,6 +70,7 @@ export interface ExportOptions extends RenderInputs {
   ) => Promise<{ asset: PhotoAsset; release?: () => void }>;
   validateBeforeSave?: () => Promise<void> | void;
   requireDesktopAtomicTransaction?: boolean;
+  supplementaryFiles?: DesktopAtomicWriteFile[];
   onCommittedFiles?: (
     files: ExportCommittedFile[],
     context: ExportCommitContext,
@@ -648,7 +668,7 @@ function drawCutGuides(
   ctx.restore();
 }
 
-async function exportRasterPage(
+export async function exportRasterPage(
   canvas: HTMLCanvasElement,
   format: Exclude<ExportFormat, "pdf">,
   quality: number,
@@ -810,6 +830,7 @@ export async function exportBatch(options: ExportOptions): Promise<string[]> {
     throw new Error(renderSafetyError);
   }
   const safePrefix = sanitizeFileNamePrefix(options.fileNamePrefix);
+  const supplementaryFiles = validateSupplementaryOutputFiles(options.supplementaryFiles ?? []);
   const desktopTransactionApi = options.outputDirectoryPath
     ? getDesktopAtomicWriteTransactionApi()
     : null;
@@ -848,16 +869,19 @@ export async function exportBatch(options: ExportOptions): Promise<string[]> {
 
     const bytes = new Uint8Array(pdf.output("arraybuffer"));
     const fileName = `${safePrefix}.pdf`;
+    const outputFiles = [{ fileName, bytes }, ...supplementaryFiles];
     const preparedFiles = options.onCommittedFiles
-      ? [await fingerprintPreparedOutput(fileName, bytes)]
+      ? await Promise.all(outputFiles.map((file) => fingerprintPreparedOutput(file.fileName, file.bytes)))
       : [];
-    if (options.onCommittedFiles) assertPreparedOutputMetadata(preparedFiles, 1);
-    let savedFileName: string;
+    if (options.onCommittedFiles) assertPreparedOutputMetadata(preparedFiles, outputFiles.length);
+    let savedFileNames: string[];
     if (options.outputDirectoryPath && desktopTransactionApi) {
-      const [committedFileName] = await runDesktopAtomicWriteTransaction(
+      savedFileNames = await runDesktopAtomicWriteTransaction(
         desktopTransactionApi,
         options.outputDirectoryPath,
-        async (stageFile) => stageFile({ fileName, bytes }),
+        async (stageFile) => {
+          for (const file of outputFiles) await stageFile(file);
+        },
         options.validateBeforeSave,
         async (savedFileNames, transactionId) => notifyCommittedFiles(
           options,
@@ -866,19 +890,19 @@ export async function exportBatch(options: ExportOptions): Promise<string[]> {
           { atomicTransactionId: transactionId },
         ),
       );
-      savedFileName = committedFileName;
     } else {
       await options.validateBeforeSave?.();
-      [savedFileName] = await savePreparedFiles([{ fileName, bytes }], options.outputDirectoryPath);
-      await notifyCommittedFiles(options, preparedFiles, [savedFileName]);
+      savedFileNames = await savePreparedFiles(outputFiles, options.outputDirectoryPath);
+      await notifyCommittedFiles(options, preparedFiles, savedFileNames);
     }
-    options.onProgress?.(options.pages.length, options.pages.length, savedFileName);
-    return [savedFileName];
+    options.onProgress?.(options.pages.length, options.pages.length, savedFileNames.join(", "));
+    return savedFileNames;
   }
   const rasterFormat: Exclude<ExportFormat, "pdf"> = options.format;
 
   if (!options.outputDirectoryPath && options.pages.length > 1) {
-    const zipFiles: Array<{ name: string; bytes: Uint8Array }> = [];
+    const zipFiles: Array<{ name: string; bytes: Uint8Array }> = supplementaryFiles
+      .map((file) => ({ name: file.fileName, bytes: file.bytes }));
     for (let index = 0; index < options.pages.length; index += 1) {
       const page = options.pages[index];
       const fileName = buildPageFileName(safePrefix, page.pageNumber, options.format);
@@ -906,6 +930,12 @@ export async function exportBatch(options: ExportOptions): Promise<string[]> {
       desktopTransactionApi,
       options.outputDirectoryPath,
       async (stageFile) => {
+        for (const file of supplementaryFiles) {
+          if (options.onCommittedFiles) {
+            preparedFiles.push(await fingerprintPreparedOutput(file.fileName, file.bytes));
+          }
+          await stageFile(file);
+        }
         for (let index = 0; index < options.pages.length; index += 1) {
           const page = options.pages[index];
           const fileName = buildPageFileName(safePrefix, page.pageNumber, rasterFormat);
@@ -928,7 +958,7 @@ export async function exportBatch(options: ExportOptions): Promise<string[]> {
         if (options.onCommittedFiles) {
           // Questa verifica avviene ancora nello staging: un errore impedisce il
           // commit, quindi non può lasciare file pubblicati privi di impronta.
-          assertPreparedOutputMetadata(preparedFiles, options.pages.length);
+          assertPreparedOutputMetadata(preparedFiles, options.pages.length + supplementaryFiles.length);
         }
       },
       options.validateBeforeSave,
@@ -964,14 +994,15 @@ export async function exportBatch(options: ExportOptions): Promise<string[]> {
     canvas.height = 1;
   }
   await options.validateBeforeSave?.();
+  const outputFiles = [{ fileName, bytes }, ...supplementaryFiles];
   const preparedFiles = options.onCommittedFiles
-    ? [await fingerprintPreparedOutput(fileName, bytes)]
+    ? await Promise.all(outputFiles.map((file) => fingerprintPreparedOutput(file.fileName, file.bytes)))
     : [];
-  if (options.onCommittedFiles) assertPreparedOutputMetadata(preparedFiles, 1);
-  const [savedFileName] = await savePreparedFiles([{ fileName, bytes }], options.outputDirectoryPath);
-  await notifyCommittedFiles(options, preparedFiles, [savedFileName]);
-  options.onProgress?.(1, 1, savedFileName);
-  return [savedFileName];
+  if (options.onCommittedFiles) assertPreparedOutputMetadata(preparedFiles, outputFiles.length);
+  const savedFileNames = await savePreparedFiles(outputFiles, options.outputDirectoryPath);
+  await notifyCommittedFiles(options, preparedFiles, savedFileNames);
+  options.onProgress?.(1, 1, savedFileNames.join(", "));
+  return savedFileNames;
 }
 
 export async function exportBatchWithMetadata(
