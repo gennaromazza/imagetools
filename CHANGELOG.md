@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-01 - Image Select Pro 0.1.36
+
+- Google Drive mostra l'account collegato, consente cambio e disconnessione e recupera in sicurezza le selezioni su altri computer o dischi.
+
 ## 2026-09-01 - FileX Suite 0.1.61
 
 - Aggiunto FileX ID Photo alla Suite stabile come strumento completo per fototessere, passaporti e documenti d'identità destinato ai fotografi professionisti.

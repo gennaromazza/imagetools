@@ -395,6 +395,9 @@
     ],
     "0.1.33": [
       "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
+    ],
+    "0.1.36": [
+      "Google Drive mostra l'account collegato, consente cambio e disconnessione e recupera in sicurezza le selezioni su altri computer o dischi."
     ]
   },
   "id-photo": {
