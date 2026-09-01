@@ -44,7 +44,7 @@ try {
   );
   assert.match(
     mainSource,
-    /filex:process-id-photo-background[\s\S]*processIdPhotoBackground/u,
+    /if \(requestedTool\.id === "id-photo"\)[\s\S]*filex:process-id-photo-background[\s\S]*await import\("\.\/id-photo-background-service\.js"\)[\s\S]*processIdPhotoBackground/u,
     "Il pacchetto ID Photo non registra il servizio locale di scontorno.",
   );
   assert.match(

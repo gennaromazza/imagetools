@@ -273,6 +273,16 @@ jobs:
               throw "Smoke test main process ID Photo fallito con codice $($smoke.ExitCode)"
             }
           }
+          if ($env:FILEX_COMPONENT -eq "photo-selector-app") {
+            $smokeExecutable = "apps/filex-desktop/.output/releases/win-unpacked/Image-Select-Pro.exe"
+            if (-not (Test-Path -LiteralPath $smokeExecutable)) {
+              throw "Eseguibile Image Select Pro impacchettato non trovato: $smokeExecutable"
+            }
+            $smoke = Start-Process -FilePath $smokeExecutable -ArgumentList "--filex-photo-selector-packaged-smoke-test" -WindowStyle Hidden -Wait -PassThru
+            if ($smoke.ExitCode -ne 0) {
+              throw "Smoke test main process Image Select Pro fallito con codice $($smoke.ExitCode)"
+            }
+          }
 
       - name: Generate Suite release notes from changelog
         if: steps.release.outputs.component == 'suite'

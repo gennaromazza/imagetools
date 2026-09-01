@@ -41,6 +41,16 @@ try {
     /--filex-photo-selector-packaged-smoke-test/u,
     "Il main process non espone lo smoke test dell'artefatto impacchettato.",
   );
+  assert.doesNotMatch(
+    mainSource,
+    /^import\s+\{\s*processIdPhotoBackground\s*\}\s+from\s+["']\.\/id-photo-background-service\.js["'];?$/mu,
+    "Image Select Pro non deve caricare ONNX Runtime tramite un import statico del servizio ID Photo.",
+  );
+  assert.match(
+    mainSource,
+    /if \(requestedTool\.id === "id-photo"\)[\s\S]*await import\("\.\/id-photo-background-service\.js"\)/u,
+    "Il servizio BiRefNet deve essere caricato in modo lazy e soltanto da FileX ID Photo.",
+  );
   assert.match(
     nativeImageSource,
     /from "\.\/psd-image-service\.js"/u,

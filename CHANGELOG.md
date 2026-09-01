@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-01 - Image Select Pro 0.1.38
+
+- Corretto l'avvio dell'app installata: il motore BiRefNet di FileX ID Photo non viene più caricato da Image Select Pro.
+- Aggiunto alla pipeline ufficiale lo smoke test del main process realmente impacchettato, così una dipendenza runtime mancante blocca la release prima della pubblicazione.
+
 ## 2026-09-01 - Image Select Pro 0.1.37
 
 - Corretta la selezione nella griglia: clic, checkbox e deselezione ora aggiornano uno stato unico e non vengono ripristinati da sincronizzazioni XMP tardive.

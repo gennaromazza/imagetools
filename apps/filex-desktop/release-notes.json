@@ -403,6 +403,10 @@
       "Selezione della griglia resa stabile anche con clic rapidi, checkbox, deselezioni e aggiornamenti XMP asincroni.",
       "Ctrl+A con filtri attivi seleziona soltanto le foto visibili e i conteggi distinguono chiaramente risultati nel filtro e selezioni fuori filtro.",
       "La rotazione da card, Quick Preview e Ctrl+R agisce sulla sola foto corrente; la rotazione multipla è disponibile come azione batch esplicita."
+    ],
+    "0.1.38": [
+      "Corretto l'avvio dell'app installata separando il motore BiRefNet, usato soltanto da FileX ID Photo, dal runtime di Image Select Pro.",
+      "La pipeline di release esegue ora uno smoke test sul main process realmente impacchettato prima di pubblicare l'installer."
     ]
   },
   "id-photo": {
