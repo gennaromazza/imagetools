@@ -2,20 +2,17 @@
 
 ## Stato dell'architettura esistente
 
-Il tool è implementato nel workspace **apps/id-photo**, ma non è ancora rilasciato. L'MVP usa:
+Il tool è implementato nel workspace **apps/id-photo** ed è distribuito come componente indipendente della FileX Suite. La versione 0.1.1 usa:
 
 - renderer React/Vite e host Electron FileX;
 - contratti IPC centralizzati in **@photo-tools/desktop-contracts**;
-- selezione cartella, anteprime native, editor esterno e cartella output tramite bridge desktop;
+- selezione di una foto o cartella, drag & drop, anteprime native, editor esterno, cartella output e stampa tramite bridge desktop;
 - dominio e profili versionati in **apps/id-photo/src/domain.ts**;
 - persistenza locale delle commesse in **apps/id-photo/src/job-store.ts**;
 - motore fisico ed export riusati dagli export pubblici di **@photo-tools/batch-print-layout**;
 - API desktop dedicate per creare e pulire copie di lavoro Photoshop sotto l'area dati FileX.
 
-Non fanno parte della prima release:
-
-- stampa nativa, elenco stampanti e calibrazione automatica;
-- Azioni Photoshop automatiche.
+Non fanno parte della versione 0.1.1 la calibrazione automatica e le Azioni Photoshop automatiche.
 
 Queste capacità restano evoluzioni future e non devono essere presentate come già disponibili.
 

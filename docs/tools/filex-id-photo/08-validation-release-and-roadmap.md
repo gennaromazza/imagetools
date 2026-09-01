@@ -16,7 +16,7 @@ Una funzione non è pronta perché appare in anteprima. È pronta solo quando le
 | Output persistito | staging progressivo con journal scritto prima dei link, pubblicazione hard-link atomica no-overwrite di ogni file, collisione race-safe, errore sicuro sui filesystem incompatibili, acknowledgement soltanto dopo persistenza sincrona del pending, cleanup best-effort successivo, rollback/recovery verificati per identità che preservano i nomi sostituiti da terzi e rifiuto symlink; size e SHA-256 calcolati sui byte preparati prima della pubblicazione e associati ai nomi finali; retry dei medesimi percorsi senza nuova esportazione; promozione a `lastExport` soltanto se percorso, size, identità filesystem e SHA coincidono; riapertura e verifica periodica; invalidazione per file mancante, sostituito, modificato o contesto variato; timeout e retry single-flight per reader temporaneamente indisponibile |
 | Photoshop | editor assente, copia atomica gestita, collisioni, polling, rientro sullo stesso file, Salva con nome flattenato e file non decodificabile |
 | Privacy | nessuna chiamata rete per foto, cancellazione delle copie gestite e log senza immagine |
-| Stampa | misura fisica degli export PDF/JPG al 100%; selezione driver, annullamento e stampa diretta sono esclusi dalla prima release |
+| Stampa | rendering alla risoluzione del profilo, apertura pannello nativo, dimensione pagina in microni, annullamento e distinzione tra invio al driver e stampa completata |
 | Electron | preload, IPC, percorso non autorizzato, build, ASAR, main process impacchettato |
 | Licenza | senza entitlement, con entitlement, disinstallazione e reinstallazione |
 
@@ -44,7 +44,7 @@ Prima di creare tag o pubblicare:
 2. tutti i profili inclusi hanno fonti ufficiali verificate;
 3. output e misure fisiche sono provati su stampanti e carte dichiarate;
 4. Photoshop lavora solo sulla copia di lavoro;
-5. installer, sito e documentazione descrivono soltanto le funzioni realmente disponibili e confermano che la stampa diretta è assente dalla prima release;
+5. installer, sito e documentazione descrivono soltanto le funzioni realmente disponibili e distinguono l'apertura del pannello nativo dalla stampa fisicamente completata;
 6. test dominio, renderer, bridge e Dev Console sono superati;
 7. build Electron, packaging reale, chiusura import runtime di main e preload e smoke hidden delle API IPC fingerprint/transazione sono superati; test, dichiarazioni e source map non devono entrare nell'ASAR;
 8. policy shared-runtime è verificata senza e con licenza attiva sull'installer;
@@ -63,8 +63,8 @@ La licenza automatica di sviluppo non vale come prova della release.
 | M1 | workspace, profili, commesse, crop e copie di lavoro non distruttive implementati e coperti da test locali |
 | M2 | impaginazione 10×15/15×20 ed export PDF/JPG implementati; prova fisica su carta ancora necessaria prima della release |
 | M3 | working copy gestita, apertura su Photoshop 2026, polling, snapshot, rollback, ricarica e “Salva con nome” implementati; collaudo desktop locale superato, prova sul futuro installer ancora necessaria |
-| M4 | stampa nativa e calibrazione automatica escluse dalla prima release |
-| M5 | Suite, Dev Console, CI, pipeline, sito e guida integrati; packaging/release, verifica licenza e ciclo installazione non ancora eseguiti |
+| M4 | pannello di stampa nativo implementato e coperto da test automatici; calibrazione automatica esclusa |
+| M5 | Suite, Dev Console, CI, pipeline, sito e guida integrati; release 0.1.1 in preparazione |
 
 ### M0 — Decisioni e dossier
 
@@ -84,7 +84,7 @@ Configurazione editor, working copy, polling, reimport e gestione errori. Gate: 
 
 ### M4 — Stampa nativa e calibrazione
 
-Implementare bridge solo dopo definizione delle stampanti target; aggiungere pagina calibrazione, profili e prove driver. Gate: misura fisica conforme alle tolleranze approvate.
+Il bridge apre il pannello nativo e invia pagine con misura fisica dichiarata. La calibrazione automatica e le prove certificate per specifici modelli di stampante restano un'evoluzione separata.
 
 ### M5 — Suite, sito e release
 
@@ -101,11 +101,11 @@ Alla prima funzionalità verificata devono essere aggiornati:
 - indice guide e sitemap pertinenti;
 - eventuale homepage e metadata SEO.
 
-La pagina deve valorizzare workflow locale, controllo professionale, Photoshop opzionale e riduzione dei passaggi, senza promettere conformità garantita o stampa diretta non ancora verificata.
+La pagina deve valorizzare workflow locale, controllo professionale, Photoshop opzionale e riduzione dei passaggi, senza promettere conformità garantita o attribuire al software la conferma della stampa fisica.
 
 ## Release indipendente
 
-Il componente è registrato nelle liste reali di **.github/workflows/windows-release.yml**, validation e packaging. Il futuro tag `id-photo-vX.Y.Z` pubblicherà il solo componente secondo la pipeline indipendente e richiederà FileX Suite 0.1.61 o successiva; non si deve simulare una release Suite per rendere visibile il nuovo prodotto.
+Il componente è registrato nelle liste reali di **.github/workflows/windows-release.yml**, validation e packaging. Il tag `id-photo-vX.Y.Z` pubblica il solo componente secondo la pipeline indipendente e richiede FileX Suite 0.1.61 o successiva.
 
 La procedura completa segue **docs/18-publish-build-contract.md**: changelog, commit, push, tag, installer, feed, sito, licenza e verifica del manufatto installato.
 
@@ -115,7 +115,6 @@ La procedura completa segue **docs/18-publish-build-contract.md**: changelog, co
 - Azioni Photoshop automatiche;
 - riconoscimento biometrico;
 - cloud backup o sincronizzazione immagini;
-- stampa diretta o silenziosa;
+- stampa silenziosa senza pannello del sistema operativo;
 - supporto ICC completo;
 - app mobile o workflow consumer;
-- pubblicazione o release effettiva.

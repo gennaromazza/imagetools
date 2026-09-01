@@ -2,7 +2,7 @@
 
 ## Stato del progetto
 
-**MVP implementato; integrazione tecnica verificata localmente il 31 agosto 2026. Non ancora rilasciato e non incluso nella FileX Suite stabile 0.1.60; prima compatibilità prevista: Suite 0.1.61.**
+**Versione 0.1.1 pronta per la distribuzione stabile con FileX Suite 0.1.61 o successiva. La versione include il flusso completo di importazione, preparazione, esportazione e stampa nativa.**
 
 Questo dossier definisce come progettare, integrare, validare e pubblicare il prossimo tool FileX dedicato alle fototessere per documenti. Il prodotto è rivolto esclusivamente a fotografi professionisti, studi e negozi; non è progettato come servizio consumer o web.
 
@@ -24,7 +24,7 @@ Il renderer è in `apps/id-photo`; catalogo, script e metadati di distribuzione 
 
 - flusso UI Commessa → Prepara → Verifica → Impagina → Esporta;
 - tutorial operativo sempre raggiungibile da ogni schermata, con capitolo contestuale per ciascuno dei cinque step e indicazioni dedicate al passaggio Photoshop;
-- importazione desktop da cartella e fallback browser;
+- importazione desktop di una singola foto, da cartella, tramite drag & drop e fallback browser;
 - apertura diretta da Archivio Flow con una singola foto selezionata dalla scheda, tramite handoff locale consume-once e senza duplicare i byte nel manifest;
 - profili versionati CIE 35×45, passaporto italiano 35×45 con fonte MAECI e formato generico 35×45 dichiarato come preset studio;
 - crop guidato, zoom, posizione e rotazione senza modifica dell'originale;
@@ -33,10 +33,11 @@ Il renderer è in `apps/id-photo`; catalogo, script e metadati di distribuzione 
 - comando separato per eliminare copie e revisioni Photoshop mantenendo commessa, originali e output;
 - output scritto senza sovrascrivere file esistenti, registrato subito come verifica in attesa e promosso a pronto solo dopo SHA-256; alla riapertura e durante la sessione il retry usa gli stessi file, senza riesportazioni o suffissi;
 - impaginazione condivisa con Batch Print Layout su 10×15 e 15×20;
-- export PDF o JPG con dimensioni fisiche/DPI e indicatori di taglio opzionali;
+- export della foto singola in JPG e del foglio PDF o JPG con dimensioni fisiche/DPI e indicatori di taglio opzionali;
+- apertura del pannello di stampa nativo Windows/macOS con fogli renderizzati alla risoluzione del profilo selezionato;
 - integrazione Suite, licenza, Dev Console, CI, pipeline di release, icona, pagina marketing e guida pubblica.
 
-Restano fuori dal MVP la stampa nativa e la calibrazione automatica: potranno essere introdotte solo dopo prove fisiche con driver, stampanti e carte di riferimento.
+Resta fuori dal prodotto la calibrazione automatica delle stampanti. Il pannello nativo è disponibile; l'operatore deve verificare nel driver scala 100% e adattamento pagina disattivato.
 
 ## Promessa di prodotto
 
@@ -63,21 +64,22 @@ FileX ID Photo deve ridurre i passaggi ripetitivi del banco stampa senza toglier
 | Originale | Mai sovrascritto dal tool |
 | Photoshop | Passaggio manuale assistito su copia di lavoro; nessuna Azione automatica nella prima versione |
 | Profilo documento | Catalogo versionato con fonte primaria, data di verifica e policy di modifica |
-| Output | File pronto alla stampa; la stampa nativa sarà dichiarata solo dopo prova con driver e stampanti reali |
+| Output | Foto singola JPG, foglio JPG/PDF e apertura del pannello di stampa nativo |
 | Conformità | Nessuna promessa di accettazione garantita da parte di un ente |
 
 ## Obiettivo della prima versione commerciale
 
 La prima versione deve permettere a un operatore esperto di creare, verificare, impaginare ed esportare una fototessera per i profili italiani prioritari, con:
 
-1. apertura di una commessa locale e importazione da cartella oppure invio diretto di una foto da Archivio Flow;
+1. apertura di una commessa locale e importazione di una foto, da cartella, con drag & drop oppure invio diretto da Archivio Flow;
 2. selezione della foto e crop guidato;
 3. profili CIE Italia e passaporto Italia 35×45 mm con fonti ufficiali registrate, più un preset studio generico chiaramente distinto;
 4. preparazione locale e ritorno da Photoshop;
 5. scelta del numero copie e del foglio 10×15 o 15×20;
-6. export tracciabile in PDF e raster con specifica di qualità verificata e impronta SHA-256 persistita per ogni file; un output mancante, sostituito o modificato revoca lo stato pronto, mentre un errore temporaneo o un timeout conserva il record, sospende lo stato pronto e attiva un retry senza letture sovrapposte;
+6. export tracciabile della foto singola JPG e del foglio PDF/JPG, con specifica di qualità verificata e impronta SHA-256 persistita per ogni file; un output mancante, sostituito o modificato revoca lo stato pronto, mentre un errore temporaneo o un timeout conserva il record, sospende lo stato pronto e attiva un retry senza letture sovrapposte;
 7. conservazione o eliminazione esplicita delle copie gestite della commessa, senza cancellazioni automatiche silenziose.
-8. guida integrata persistente, consultabile senza abbandonare la commessa e senza cambiare lo step di lavoro corrente.
+8. guida integrata persistente, consultabile senza abbandonare la commessa e senza cambiare lo step di lavoro corrente;
+9. apertura del pannello di stampa Windows/macOS con fogli alle dimensioni fisiche richieste e verifica manuale delle opzioni del driver.
 
 Il tool non rimuove né sostituisce automaticamente lo sfondo. Gli interventi restano manuali e devono rispettare la policy mostrata dal profilo documento.
 
@@ -100,7 +102,7 @@ Sono fuori ambito finché non approvati e verificati:
 - generazione di visi, ricostruzione di porzioni mancanti o beauty retouch automatico;
 - esecuzione automatica di Azioni Photoshop;
 - gestione colore ICC completa e soft proof certificato;
-- stampa diretta o silenziosa, selezione driver e calibrazione automatica;
+- stampa silenziosa senza pannello di sistema e calibrazione automatica;
 - supporto dichiarato a Paesi o documenti senza fonte ufficiale registrata;
 - certificazione o garanzia di accettazione da parte di Questure, Comuni, consolati o altri enti.
 

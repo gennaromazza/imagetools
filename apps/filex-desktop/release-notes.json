@@ -272,6 +272,11 @@
     ],
     "0.1.38": [
       "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
+    ],
+    "0.1.39": [
+      "Invio diretto delle fotografie selezionate a Image Party Frame, Batch Print Layout e FileX ID Photo.",
+      "Selezione multipla fino a dieci foto per impaginazione e Party Frame, oppure una singola foto per fototessere e passaporti.",
+      "Passaggio locale dalla scheda agli strumenti FileX senza duplicare o caricare online gli originali."
     ]
   },
   "image-converter": {
@@ -398,11 +403,22 @@
       "Tutorial operativo sempre disponibile in ogni schermata, con istruzioni contestuali per i cinque step e per il passaggio Photoshop.",
       "Ritocco Photoshop su copie gestite, originali invariati, revisioni ripristinabili ed export PDF o JPG su fogli 10×15 e 15×20.",
       "Apertura diretta di una singola foto da Archivio Flow e verifica persistente SHA-256 dei file esportati."
+    ],
+    "0.1.1": [
+      "Importazione di una singola fotografia, selezione da cartella e drag & drop direttamente nella finestra.",
+      "Esportazione completa della foto singola in JPG e del foglio 10×15 o 15×20 in JPG oppure PDF.",
+      "Apertura del pannello di stampa nativo Windows/macOS con dimensioni fisiche reali e indicazioni operative per il driver.",
+      "Nuovi controlli automatici per stampa, output atomici, runtime impacchettato e collegamento da Archivio Flow."
     ]
   },
   "suite": {
     "0.1.60": [
       "Uniformate le icone di tutti gli strumenti al linguaggio grafico FileX Suite, con copie coerenti in finestre, tray, installer e catalogo web."
+    ],
+    "0.1.61": [
+      "FileX ID Photo è incluso nella Suite stabile per preparare e stampare fototessere, passaporti e fotografie per documenti.",
+      "La Suite supporta importazione singola, drag & drop, esportazione JPG/PDF e pannello di stampa nativo del nuovo strumento.",
+      "Archivio Flow può inviare le fotografie direttamente a Image Party Frame, Batch Print Layout e FileX ID Photo."
     ]
   }
 }

@@ -30,6 +30,26 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-01 - FileX Suite 0.1.61
+
+- Aggiunto FileX ID Photo alla Suite stabile come strumento completo per fototessere, passaporti e documenti d'identità destinato ai fotografi professionisti.
+- Integrati importazione di una singola foto, selezione da cartella e trascinamento diretto nella finestra.
+- Collegati il pannello di stampa nativo di Windows e macOS e gli output professionali JPG/PDF del nuovo flusso ID Photo.
+- Resi disponibili dalla Suite i collegamenti di Archivio Flow verso Image Party Frame, Batch Print Layout e FileX ID Photo.
+
+## 2026-09-01 - Archivio Flow 0.1.39
+
+- Aggiunti i comandi per inviare direttamente le fotografie selezionate a Image Party Frame, Batch Print Layout e FileX ID Photo.
+- Supportata la selezione multipla fino a dieci fotografie per Image Party Frame e Batch Print Layout e una singola fotografia per ID Photo.
+- Conservato il flusso locale dalla scheda di memoria agli strumenti FileX, senza duplicare o caricare online le immagini originali.
+
+## 2026-09-01 - FileX ID Photo 0.1.1
+
+- Aggiunte importazione di una singola fotografia, importazione da cartella e drag & drop sull'intera finestra.
+- L'esportazione crea sempre la fotografia singola in JPG e il foglio impaginato 10×15 o 15×20 in JPG oppure PDF, nello stesso comando e senza sovrascritture.
+- Aggiunta l'apertura del pannello di stampa nativo Windows/macOS con dimensioni fisiche reali e controllo operativo di scala 100% e adattamento pagina disattivato.
+- Rafforzati i test automatici del runtime impacchettato, della stampa nativa, degli output atomici e del passaggio da Archivio Flow.
+
 ## 2026-08-31 - Image Select Pro 0.1.35
 
 - Aggiunta la rotazione non distruttiva a sinistra e a destra direttamente dalla griglia principale e dalla Quick Preview.

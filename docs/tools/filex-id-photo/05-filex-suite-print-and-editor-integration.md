@@ -54,7 +54,7 @@ FileX ID Photo riusa oggi `@photo-tools/batch-print-layout/print-engine` e `@pho
 - non conserva commesse o clienti;
 - l'export richiede preview ad alta risoluzione e non è un pass-through garantito dell'originale;
 - il PDF ha dimensioni fisiche in centimetri e il JPG riceve un patch DPI JFIF, ma PNG e TIFF non impostano oggi metadati DPI verificati;
-- non possiede un'API di stampa nativa;
+- non espone un'API di stampa nativa riutilizzabile da ID Photo; il bridge dedicato risiede nella shell desktop FileX;
 - il suo pulsante con icona stampante è un preset, non una stampa reale.
 
 Il contratto di output di FileX ID Photo deve definire, provare e documentare contenuto, pixel, metadati e risultato stampato per ciascun formato dichiarato.
