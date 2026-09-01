@@ -244,7 +244,7 @@ assert(
     && ciWorkflow.includes("test:id-photo-file-fingerprint")
     && ciWorkflow.includes("test:id-photo-unload-guard")
     && ciWorkflow.includes("test:batch-print-layout-bug-hunt")
-    && ciWorkflow.includes("@photo-tools/id-photo run test")
+    && ciWorkflow.includes("npm.cmd run test:id-photo")
     && ciWorkflow.includes("@photo-tools/id-photo run build")
     && ciWorkflow.includes("build:suite"),
   "La PR non dispone dei controlli automatici per il nuovo contratto di release.",
