@@ -58,6 +58,7 @@ import {
 } from "./services/folder-access";
 import { parseXmpState, upsertXmpState } from "./services/xmp-sidecar";
 import { getAssetRotation, normalizeImageRotation } from "./services/photo-rotation";
+import { shouldApplyExternalSelectionUpdate } from "./services/photo-selection";
 import {
   ThumbnailPipeline,
   type ThumbnailPipelineOptions,
@@ -733,6 +734,7 @@ export function App() {
   const [isXmpBannerDismissed, setIsXmpBannerDismissed] = useState(false);
   const xmpSyncTimerRef = useRef<number | null>(null);
   const pendingXmpSyncIdsRef = useRef(new Set<string>());
+  const localSelectionUpdatedAtByIdRef = useRef(new Map<string, number>());
   const xmpSyncInFlightRef = useRef<Promise<{ synced: number; failed: number }> | null>(null);
   const [xmpSyncVersion, setXmpSyncVersion] = useState(0);
   const [xmpSyncState, setXmpSyncState] = useState<XmpSyncState>({
@@ -1406,6 +1408,7 @@ export function App() {
 
   const suspendActiveFolderWork = useCallback(() => {
     folderLoadSessionRef.current += 1;
+    localSelectionUpdatedAtByIdRef.current.clear();
     persistedStateHydrationRef.current = null;
     interactiveWorkUntilRef.current = 0;
     pipelineRef.current?.destroy();
@@ -2899,8 +2902,11 @@ export function App() {
           };
           const shouldApplyXmpSelection = (record: typeof valid[number]) => {
             const localState = persistedAssetStateById.get(record.id);
-            const locallyUpdatedAt = localState?.selectionUpdatedAt ?? localState?.updatedAt;
-            return locallyUpdatedAt === undefined || record.lastModified > locallyUpdatedAt;
+            return shouldApplyExternalSelectionUpdate({
+              sidecarLastModified: record.lastModified,
+              persistedSelectionUpdatedAt: localState?.selectionUpdatedAt ?? localState?.updatedAt,
+              localSelectionUpdatedAt: localSelectionUpdatedAtByIdRef.current.get(record.id),
+            });
           };
           const recordsToApply = valid.filter((record) => {
             const index = assetIndexByIdRef.current.get(record.id);
@@ -3001,7 +3007,9 @@ export function App() {
                   next.delete(record.id);
                 }
               }
-              return Array.from(next);
+              const nextIds = Array.from(next);
+              activeAssetIdsRef.current = nextIds;
+              return nextIds;
             });
           }
 
@@ -4035,6 +4043,11 @@ export function App() {
       }
     }
 
+    const changedAt = Date.now();
+    for (const assetId of changedIds) {
+      localSelectionUpdatedAtByIdRef.current.set(assetId, changedAt);
+    }
+    activeAssetIdsRef.current = nextIds;
     setActiveAssetIds(nextIds);
     queueXmpSync(Array.from(changedIds));
   }, [queueXmpSync]);

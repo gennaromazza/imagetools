@@ -2240,6 +2240,13 @@ img {
 .photo-card--custom-purple .photo-card__image-wrapper { border-color: rgba(148, 108, 199, 0.85); box-shadow: 0 0 0 2px rgba(148, 108, 199, 0.35), 0 6px 18px rgba(148, 108, 199, 0.18); }
 .photo-card--custom-slate .photo-card__image-wrapper  { border-color: rgba(115, 132, 147, 0.85); box-shadow: 0 0 0 2px rgba(115, 132, 147, 0.35), 0 6px 18px rgba(115, 132, 147, 0.18); }
 
+/* La label conserva il bordo interno; l'anello esterno chiaro indica sempre
+   e soltanto che la foto appartiene alla selezione corrente. */
+.photo-card--selected .photo-card__image-wrapper {
+  outline: 2px solid rgba(255, 244, 217, 0.96);
+  outline-offset: 1px;
+}
+
 /* Keep selection and label borders readable while avoiding diffuse shadow
    repaints on every rendered card during active grid scrolling. */
 .photo-card--scroll-lite .photo-card__image-wrapper,
@@ -2380,6 +2387,8 @@ img {
   color: transparent;
   font-size: 0.72rem;
   font-weight: 700;
+  padding: 0;
+  cursor: pointer;
   transition: background 100ms ease, border-color 100ms ease, color 100ms ease;
 }
 

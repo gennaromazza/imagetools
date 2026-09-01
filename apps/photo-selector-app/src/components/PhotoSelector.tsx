@@ -82,6 +82,12 @@ import { useWorkspacePanelLayout } from "./workspace/useWorkspacePanelLayout";
 import { getThumbnailView } from "../services/thumbnail-view-store";
 import { useThumbnailView } from "../services/use-thumbnail-view";
 import { getAssetRotation, rotateImage, type RotationDirection } from "../services/photo-rotation";
+import {
+  buildToggleAllSelection,
+  countSelectionOutsideFilter,
+  resolveRotationTargetIds,
+  togglePhotoSelection,
+} from "../services/photo-selection";
 import { PhotoFilterPanel } from "./selector/PhotoFilterPanel";
 import { QuickStatsPanel } from "./selector/QuickStatsPanel";
 import { SelectionActionsPanel } from "./selector/SelectionActionsPanel";
@@ -148,6 +154,14 @@ type CreatedAtSortDirection = "asc" | "desc";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
 type FormatFilter = "all" | "jpg" | "raw" | "raw+jpg" | "psd";
+
+function useLatestCallback<Args extends unknown[], Result>(
+  callback: (...args: Args) => Result,
+): (...args: Args) => Result {
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+  return useCallback((...args: Args) => callbackRef.current(...args), []);
+}
 type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels" | "rotationDegrees">>;
 type BatchPulseKind = "dot" | "label";
 type PreviewFeedbackKind = "star" | "pill" | "dot" | "label";
@@ -618,6 +632,14 @@ export function PhotoSelector({
   );
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const selectedIdsRef = useRef(selectedIds);
+  const selectedSetRef = useRef(selectedSet);
+  const lastSelectedIdsPropRef = useRef(selectedIds);
+  if (lastSelectedIdsPropRef.current !== selectedIds) {
+    lastSelectedIdsPropRef.current = selectedIds;
+    selectedIdsRef.current = selectedIds;
+    selectedSetRef.current = selectedSet;
+  }
   // Thumbnail batches replace the photo array many times per second. Metadata
   // only needs rebuilding for actual metadata changes and once at pipeline end,
   // when orientation-based sorting can consume the final thumbnail dimensions.
@@ -667,9 +689,18 @@ export function PhotoSelector({
     [assetById, selectedIds],
   );
   const photosRef = useRef(photos);
-  useEffect(() => {
+  const lastPhotosPropRef = useRef(photos);
+  if (lastPhotosPropRef.current !== photos) {
+    lastPhotosPropRef.current = photos;
     photosRef.current = photos;
-  }, [photos]);
+  }
+
+  const commitSelection = useLatestCallback((nextIds: readonly string[]) => {
+    const normalizedIds = Array.from(new Set(nextIds));
+    selectedIdsRef.current = normalizedIds;
+    selectedSetRef.current = new Set(normalizedIds);
+    onSelectionChange(normalizedIds);
+  });
 
   useEffect(() => {
     return () => {
@@ -2194,7 +2225,7 @@ export function PhotoSelector({
 
     const idSet = new Set(targetIds);
     const changedIds: string[] = [];
-    const nextPhotos = photos.map((photo) => {
+    const nextPhotos = photosRef.current.map((photo) => {
       if (!idSet.has(photo.id)) {
         return photo;
       }
@@ -2209,13 +2240,14 @@ export function PhotoSelector({
       return;
     }
 
+    photosRef.current = nextPhotos;
     onPhotosChange(nextPhotos);
     const subject = changedIds.length === 1 ? "1 foto" : `${changedIds.length} foto`;
     const directionLabel = direction === "left" ? "a sinistra" : "a destra";
     const message = `${subject}: ruotata ${directionLabel}`;
     pushTimelineEntry(message);
     addToast(message, "success", 1800);
-  }, [addToast, onPhotosChange, photos, pushTimelineEntry]);
+  }, [addToast, onPhotosChange, pushTimelineEntry]);
 
   const advanceFocusToNext = useCallback(
     (currentId: string) => {
@@ -2279,13 +2311,11 @@ export function PhotoSelector({
           if (event.repeat) {
             return;
           }
-          const targetIds = selectedIds.length > 0
-            ? selectedIds
-            : focusedPhotoId
-              ? [focusedPhotoId]
-              : visiblePhotoIds[0]
-                ? [visiblePhotoIds[0]]
-                : [];
+          const targetIds = resolveRotationTargetIds(
+            focusedPhotoId ?? visiblePhotoIds[0] ?? null,
+            selectedIdsRef.current,
+            "single",
+          );
           rotatePhotos(targetIds, "right");
           return;
         }
@@ -2434,8 +2464,7 @@ export function PhotoSelector({
     visiblePhotoIds,
   ]);
 
-  function togglePhoto(id: string, event?: React.MouseEvent) {
-    const nextSelection = new Set(selectedSet);
+  const togglePhoto = useLatestCallback((id: string, event?: React.MouseEvent) => {
     setFocusedPhotoId(id);
 
     // Shift+click range selection
@@ -2443,48 +2472,47 @@ export function PhotoSelector({
       const lastIdx = visiblePhotoIndexById.get(lastClickedIdRef.current) ?? -1;
       const curIdx = visiblePhotoIndexById.get(id) ?? -1;
       if (lastIdx >= 0 && curIdx >= 0) {
+        const rangeSelection = new Set(selectedIdsRef.current);
         const [from, to] = lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
         for (let i = from; i <= to; i++) {
           const rangeId = visiblePhotoIds[i];
           if (rangeId) {
-            nextSelection.add(rangeId);
+            rangeSelection.add(rangeId);
           }
         }
         lastClickedIdRef.current = id;
-        onSelectionChange(Array.from(nextSelection));
+        commitSelection(Array.from(rangeSelection));
         return;
       }
     }
 
-    if (nextSelection.has(id)) {
-      nextSelection.delete(id);
-    } else {
-      nextSelection.add(id);
-    }
-
+    const nextSelection = togglePhotoSelection(selectedIdsRef.current, id);
     lastClickedIdRef.current = id;
-    onSelectionChange(Array.from(nextSelection));
-  }
+    commitSelection(nextSelection);
+  });
 
-  function toggleAll(selectAll: boolean) {
+  const toggleAll = useLatestCallback((selectAll: boolean) => {
+    const allPhotoIds = photosRef.current.map((photo) => photo.id);
+    const nextSelection = buildToggleAllSelection({
+      selectAll,
+      hasActiveFilters,
+      selectedIds: selectedIdsRef.current,
+      visibleIds: visiblePhotoIds,
+      allPhotoIds,
+    });
+    commitSelection(nextSelection);
+
     if (selectAll) {
-      const nextSelection = hasActiveFilters ? new Set(selectedIds) : new Set<string>();
-      const idsToSelect = hasActiveFilters ? visiblePhotoIds : photos.map((p) => p.id);
-      idsToSelect.forEach((id) => nextSelection.add(id));
-      onSelectionChange(Array.from(nextSelection));
+      const selectedCount = hasActiveFilters ? visiblePhotoIds.length : allPhotoIds.length;
       pushTimelineEntry(
         hasActiveFilters
-          ? `Selezionate ${idsToSelect.length} foto visibili con i filtri attivi`
-          : `Selezionate tutte le ${idsToSelect.length} foto`
+          ? `Selezione sostituita con ${selectedCount} foto visibili nel perimetro attivo`
+          : `Selezionate tutte le ${selectedCount} foto`
       );
     } else {
-      const nextSelection = hasActiveFilters
-        ? selectedIds.filter((id) => !visiblePhotoIdSet.has(id))
-        : [];
-      onSelectionChange(nextSelection);
       pushTimelineEntry(hasActiveFilters ? "Deselezionate le foto visibili" : "Deselezionate tutte le foto");
     }
-  }
+  });
 
   function updatePhoto(
     id: string,
@@ -2798,8 +2826,8 @@ export function PhotoSelector({
     window.filexDesktop!.startDragOut(selectedAbsolutePaths);
   }, [canStartDesktopDragOut, desktopDragOutMessage, pushTimelineEntry, selectedAbsolutePaths]);
 
-  const handleCardExternalDragStart = useCallback((photoId: string, event: DragEvent<HTMLDivElement>) => {
-    const draggingSelection = selectedSet.has(photoId);
+  const handleCardExternalDragStart = useLatestCallback((photoId: string, event: DragEvent<HTMLDivElement>) => {
+    const draggingSelection = selectedSetRef.current.has(photoId);
     const targetPaths = draggingSelection
       ? getAssetAbsolutePaths(currentFolderSelectedIds)
       : getAssetAbsolutePaths([photoId]);
@@ -2816,7 +2844,7 @@ export function PhotoSelector({
     // Important: prevent HTML drag so Electron native drag-out is the only active channel.
     event.preventDefault();
     window.filexDesktop.startDragOut(targetPaths);
-  }, [currentFolderSelectedIds, desktopDragOutCheck?.ok, selectedSet]);
+  });
   const handlePreviewExternalDragStart = useCallback((photoId: string, event: DragEvent<HTMLElement>) => {
     const targetPaths = getAssetAbsolutePaths([photoId]);
     if (targetPaths.length === 0 || typeof window.filexDesktop?.startDragOut !== "function") {
@@ -2828,36 +2856,44 @@ export function PhotoSelector({
   }, []);
 
   const clearSelection = useCallback(() => {
-    onSelectionChange([]);
+    commitSelection([]);
     pushTimelineEntry("Selezione svuotata");
-  }, [onSelectionChange, pushTimelineEntry]);
+  }, [commitSelection, pushTimelineEntry]);
 
-  const invertVisibleSelection = useCallback(() => {
-    const nextSelection = new Set(selectedIds.filter((id) => !visiblePhotoIdSet.has(id)));
+  const invertVisibleSelection = useLatestCallback(() => {
+    const nextSelection = new Set(selectedIdsRef.current.filter((id) => !visiblePhotoIdSet.has(id)));
     for (const photoId of visiblePhotoIds) {
-      if (!selectedSet.has(photoId)) {
+      if (!selectedSetRef.current.has(photoId)) {
         nextSelection.add(photoId);
       }
     }
-    onSelectionChange(Array.from(nextSelection));
+    commitSelection(Array.from(nextSelection));
     pushTimelineEntry("Selezione visibile invertita");
-  }, [onSelectionChange, pushTimelineEntry, selectedIds, selectedSet, visiblePhotoIdSet, visiblePhotoIds]);
+  });
 
-  // ── Stable callbacks for PhotoCard (identity doesn't matter due to custom memo) ──
+  // Le card sono memoizzate: questi handler mantengono un'identità stabile ma
+  // inoltrano sempre all'implementazione più recente, evitando closure obsolete.
   const handleFocus = useCallback((id: string) => {
     setFocusedPhotoId(id);
   }, []);
 
-  const handlePreview = useCallback((id: string) => {
+  const handlePreview = useLatestCallback((id: string) => {
     openPreview(id, false);
-  }, [openPreview]);
+  });
 
-  const handleRotatePhoto = useCallback((id: string, direction: RotationDirection) => {
-    const targetIds = selectedSet.has(id) && selectedIds.length > 1
-      ? selectedIds
-      : [id];
+  const handleAfterShortcutClassification = useLatestCallback((id: string) => {
+    advanceFocusToNext(id);
+  });
+
+  const handleRotatePhoto = useLatestCallback((id: string, direction: RotationDirection) => {
+    const targetIds = resolveRotationTargetIds(id, selectedIdsRef.current, "single");
     rotatePhotos(targetIds, direction);
-  }, [rotatePhotos, selectedIds, selectedSet]);
+  });
+
+  const handleRotateSelection = useLatestCallback((direction: RotationDirection) => {
+    const targetIds = resolveRotationTargetIds(null, selectedIdsRef.current, "selection");
+    rotatePhotos(targetIds, direction);
+  });
 
   const handlePreviewAssetSelection = useCallback((assetId: string) => {
     lastPreviewAssetIdRef.current = assetId;
@@ -2865,86 +2901,23 @@ export function PhotoSelector({
     setPreviewAssetId(assetId);
   }, []);
 
-  const handleContextMenu = useCallback((id: string, x: number, y: number) => {
+  const handleContextMenu = useLatestCallback((id: string, x: number, y: number) => {
     if (!onPhotosChange) return;
-    const targetIds = selectedSet.has(id) ? selectedIds : [id];
+    const targetIds = selectedSetRef.current.has(id) ? selectedIdsRef.current : [id];
     setContextMenuState({ x, y, targetIds });
-  }, [onPhotosChange, selectedIds, selectedSet]);
+  });
 
-  const handleUpdatePhoto = useCallback((id: string, changes: PhotoMetadataChanges) => {
-    const targetIds = selectedSet.has(id) && selectedIds.length > 1
-      ? selectedIds
-      : [id];
-
-    if (targetIds.length > 1) {
-      applyBatchChanges(targetIds, changes, "grid");
-      return;
-    }
-
+  const handleUpdatePhoto = useLatestCallback((id: string, changes: PhotoMetadataChanges) => {
     applyPhotoChanges(id, changes, "grid");
-  }, [applyBatchChanges, applyPhotoChanges, selectedIds, selectedSet]);
+  });
 
-  const handleShortcutClassification = useCallback((id: string, changes: PhotoMetadataChanges) => {
-    const targetIds = selectedSet.has(id) && selectedIds.length > 1
-      ? selectedIds
-      : [id];
-
-    if (targetIds.length > 1) {
-      applyBatchChanges(targetIds, changes, "grid");
-      return;
-    }
-
+  const handleShortcutClassification = useLatestCallback((id: string, changes: PhotoMetadataChanges) => {
     applyPhotoChanges(id, changes, "grid");
-  }, [applyBatchChanges, applyPhotoChanges, selectedIds, selectedSet]);
+  });
 
-  const handleModalAssetUpdate = useCallback((assetId: string, changes: PhotoMetadataChanges) => {
-    const targetIds = selectedSet.has(assetId) && selectedIds.length > 1
-      ? selectedIds
-      : [assetId];
-
-    if (targetIds.length > 1) {
-      if (changes.customLabels !== undefined) {
-        const sourceAsset = assetById.get(assetId);
-        const currentLabels = normalizeAssetCustomLabels(sourceAsset?.customLabels);
-        const nextLabels = normalizeAssetCustomLabels(changes.customLabels);
-        const addedLabels = nextLabels.filter(
-          (label) => !currentLabels.some((current) => current.toLocaleLowerCase() === label.toLocaleLowerCase()),
-        );
-        const removedLabels = currentLabels.filter(
-          (label) => !nextLabels.some((next) => next.toLocaleLowerCase() === label.toLocaleLowerCase()),
-        );
-
-        if (addedLabels.length === 1 && removedLabels.length === 0) {
-          const labelToAdd = addedLabels[0];
-          updateCustomLabelsForIds(
-            targetIds,
-            (labels) => labels.some((label) => label.toLocaleLowerCase() === labelToAdd.toLocaleLowerCase())
-              ? labels
-              : [...labels, labelToAdd],
-            `${targetIds.length === 1 ? "1 foto" : `${targetIds.length} foto`}: aggiunta etichetta ${labelToAdd}`,
-          );
-          return;
-        }
-
-        if (removedLabels.length === 1 && addedLabels.length === 0) {
-          const labelToRemove = removedLabels[0];
-          updateCustomLabelsForIds(
-            targetIds,
-            (labels) => labels.filter(
-              (label) => label.toLocaleLowerCase() !== labelToRemove.toLocaleLowerCase(),
-            ),
-            `${targetIds.length === 1 ? "1 foto" : `${targetIds.length} foto`}: rimossa etichetta ${labelToRemove}`,
-          );
-          return;
-        }
-      }
-
-      applyBatchChanges(targetIds, changes, "modal");
-      return;
-    }
-
+  const handleModalAssetUpdate = useLatestCallback((assetId: string, changes: PhotoMetadataChanges) => {
     applyPhotoChanges(assetId, changes, "modal");
-  }, [applyBatchChanges, applyPhotoChanges, assetById, selectedIds, selectedSet, updateCustomLabelsForIds]);
+  });
 
   // ── On-demand preview URL for QuickPreviewModal ──
   // Key insight: the URL must be stable for a given asset ID so the browser
@@ -3074,6 +3047,10 @@ export function PhotoSelector({
     ),
     [selectedIds, visiblePhotoIdSet],
   );
+  const selectedOutsideFilterCount = useMemo(
+    () => hasActiveFilters ? countSelectionOutsideFilter(selectedIds, visiblePhotoIdSet) : 0,
+    [hasActiveFilters, selectedIds, visiblePhotoIdSet],
+  );
   const allVisibleSelected = visiblePhotoIds.length > 0 && visibleSelectedCount === visiblePhotoIds.length;
   const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected;
   const allSelected = !hasActiveFilters && photos.length > 0 && selectedIds.length === photos.length;
@@ -3095,31 +3072,31 @@ export function PhotoSelector({
   }, [currentFolderPhotos]);
 
   function selectVisible() {
-    onSelectionChange(visiblePhotoIds);
+    commitSelection(visiblePhotoIds);
     pushTimelineEntry(`Selezionate ${visiblePhotoIds.length} foto visibili`);
   }
 
   function addVisibleToSelection() {
-    const nextSelection = new Set(selectedIds);
+    const nextSelection = new Set(selectedIdsRef.current);
     for (const photoId of visiblePhotoIds) {
       nextSelection.add(photoId);
     }
-    onSelectionChange(Array.from(nextSelection));
+    commitSelection(Array.from(nextSelection));
     pushTimelineEntry(`Aggiunte ${visiblePhotoIds.length} foto visibili alla selezione`);
   }
 
   function removeVisibleFromSelection() {
-    onSelectionChange(selectedIds.filter((id) => !visiblePhotoIdSet.has(id)));
+    commitSelection(selectedIdsRef.current.filter((id) => !visiblePhotoIdSet.has(id)));
     pushTimelineEntry("Rimosse dalla selezione le foto visibili");
   }
 
   function activatePickedOnly() {
-    onSelectionChange(currentFolderPhotos.filter((photo) => photo.pickStatus === "picked").map((photo) => photo.id));
+    commitSelection(currentFolderPhotos.filter((photo) => photo.pickStatus === "picked").map((photo) => photo.id));
     pushTimelineEntry("Selezionate solo le foto Pick della cartella corrente");
   }
 
   function excludeRejected() {
-    onSelectionChange(selectedIds.filter((id) => {
+    commitSelection(selectedIdsRef.current.filter((id) => {
       const photo = assetById.get(id);
       return photo?.pickStatus !== "rejected";
     }));
@@ -3127,7 +3104,7 @@ export function PhotoSelector({
   }
 
   function selectByMinimumRating(minRating: number) {
-    onSelectionChange(currentFolderPhotos.filter((photo) => getAssetRating(photo) >= minRating).map((photo) => photo.id));
+    commitSelection(currentFolderPhotos.filter((photo) => getAssetRating(photo) >= minRating).map((photo) => photo.id));
     pushTimelineEntry(`Selezionate nella cartella corrente le foto con almeno ${minRating} stelle`);
   }
 
@@ -3206,12 +3183,12 @@ export function PhotoSelector({
     if (movedIds.length > 0 && onPhotosChange) {
       const movedSet = new Set(movedIds);
       onPhotosChange(photos.filter((p) => !movedSet.has(p.id)));
-      onSelectionChange(selectedIds.filter((id) => !movedSet.has(id)));
+      commitSelection(selectedIdsRef.current.filter((id) => !movedSet.has(id)));
       pushTimelineEntry(`${movedIds.length === 1 ? "1 file" : `${movedIds.length} file`} spostato/i in cartella`);
     }
     if (result === "partial") addToast("Spostamento parziale: alcuni file non sono stati mossi.", "warning");
     if (result === "error") addToast("Spostamento non riuscito.", "error");
-  }, [addToast, onPhotosChange, onSelectionChange, photos, pushTimelineEntry, selectedIds]);
+  }, [addToast, commitSelection, onPhotosChange, photos, pushTimelineEntry]);
 
   const handleSaveAs = useCallback(async (ids: string[]) => {
     for (const id of ids) {
@@ -3595,6 +3572,7 @@ export function PhotoSelector({
                 someVisibleSelected={someVisibleSelected}
                 visibleCount={visiblePhotoIds.length}
                 visibleSelectedCount={visibleSelectedCount}
+                selectedOutsideFilterCount={selectedOutsideFilterCount}
                 currentFolderSelectedCount={currentFolderSelectedIds.length}
                 selectedCount={selectedIds.length}
                 psdSelectedCount={selectedPsdIds.length}
@@ -3609,6 +3587,7 @@ export function PhotoSelector({
                 onAddVisible={() => { addVisibleToSelection(); setIsSelectionActionsOpen(false); }}
                 onRemoveVisible={() => { removeVisibleFromSelection(); setIsSelectionActionsOpen(false); }}
                 onInvertVisible={() => { invertVisibleSelection(); setIsSelectionActionsOpen(false); }}
+                onRotateSelected={(direction) => { handleRotateSelection(direction); setIsSelectionActionsOpen(false); }}
                 onActivatePickedOnly={() => { activatePickedOnly(); setIsSelectionActionsOpen(false); }}
                 onConvertPsdSelected={() => { openPsdJpegConversion(selectedPsdIds); setIsSelectionActionsOpen(false); }}
                 onCompare={openCompare}
@@ -3730,9 +3709,9 @@ export function PhotoSelector({
             }
           }
           if (newIds.length > 0) {
-            const base = e.shiftKey ? new Set(selectedIds) : new Set<string>();
+            const base = e.shiftKey ? new Set(selectedIdsRef.current) : new Set<string>();
             for (const id of newIds) base.add(id);
-            onSelectionChange(Array.from(base));
+            commitSelection(Array.from(base));
             pushTimelineEntry(`Selezionate ${newIds.length} foto con lasso`);
           }
         }}
@@ -3761,7 +3740,7 @@ export function PhotoSelector({
                 onToggle={togglePhoto}
                 onUpdatePhoto={handleUpdatePhoto}
                 onApplyShortcutChanges={handleShortcutClassification}
-                onAfterShortcutClassification={advanceFocusToNext}
+                onAfterShortcutClassification={handleAfterShortcutClassification}
                 onFocus={handleFocus}
                 onPreview={handlePreview}
                 onRotate={handleRotatePhoto}
@@ -3811,8 +3790,10 @@ export function PhotoSelector({
       <footer className="photo-selector__bottom-bar">
         <div className="photo-selector__stats">
           <span className="photo-selector__count">
-            Cartella: {currentFolderPhotos.length} foto · {currentFolderSelectedIds.length} selezionate qui
-            {hasActiveFilters ? ` · ${visiblePhotoIds.length} visibili con i filtri` : ""}
+            Ambito: {folderFilter === "all" ? "tutte le cartelle" : folderFilter} ({currentFolderPhotos.length} foto)
+            {hasActiveFilters
+              ? ` · Filtro: ${visiblePhotoIds.length} visibili · Selezione: ${visibleSelectedCount} visibili${selectedOutsideFilterCount > 0 ? ` + ${selectedOutsideFilterCount} fuori filtro` : ""}`
+              : ` · Selezione: ${currentFolderSelectedIds.length}`}
           </span>
           {selectionStats && (
             <div className="photo-selector__stat-chips">

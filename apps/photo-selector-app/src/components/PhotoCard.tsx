@@ -354,7 +354,12 @@ export const PhotoCard = memo(
         ref={cardRef}
         data-preview-asset-id={photo.id}
         draggable={canExternalDrag}
-        onClick={(event) => onToggle(photo.id, event)}
+        onClick={(event) => {
+          if (event.detail > 1) {
+            return;
+          }
+          onToggle(photo.id, event);
+        }}
         onDragStart={(event) => {
           if (!canExternalDrag || !onExternalDragStart) {
             event.preventDefault();
@@ -514,11 +519,22 @@ export const PhotoCard = memo(
           </div>
 
           <div className="photo-card__select-badge">
-            <div
+            <button
+              type="button"
               className={`photo-card__check ${isSelected ? "photo-card__check--active" : ""}`}
+              aria-label={isSelected ? `Deseleziona ${photo.fileName}` : `Seleziona ${photo.fileName}`}
+              aria-pressed={isSelected}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (event.detail > 1) {
+                  return;
+                }
+                onToggle(photo.id, event);
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
             >
               {isSelected ? "✓" : ""}
-            </div>
+            </button>
           </div>
 
           {isRawJpgGroup ? (
@@ -693,6 +709,7 @@ export const PhotoCard = memo(
     prev.groupBadge === next.groupBadge &&
     prev.isGroupLeader === next.isGroupLeader &&
     prev.editable === next.editable &&
+    prev.canExternalDrag === next.canExternalDrag &&
     prev.disableNonEssentialUi === next.disableNonEssentialUi &&
     prev.batchPulseToken === next.batchPulseToken &&
     prev.batchPulseKind === next.batchPulseKind &&

@@ -12,6 +12,13 @@ import {
   normalizeImageRotation,
   rotateImage,
 } from "../apps/photo-selector-app/src/services/photo-rotation";
+import {
+  buildToggleAllSelection,
+  countSelectionOutsideFilter,
+  resolveRotationTargetIds,
+  shouldApplyExternalSelectionUpdate,
+  togglePhotoSelection,
+} from "../apps/photo-selector-app/src/services/photo-selection";
 
 function asset(id: string, path: string, size = 100): ImageAsset {
   return {
@@ -133,6 +140,73 @@ assert.equal(getRotatedContentFitScale(1600, 900, 1200, 800, 0), 1);
 assert.ok(
   Math.abs(getRotatedContentFitScale(1600, 900, 1200, 800, 90) - (2 / 3)) < 0.0001,
   "La rotazione a quarto di giro deve riadattare l'immagine al contenitore senza tagliarla.",
+);
+
+let rapidSelection: string[] = [];
+rapidSelection = togglePhotoSelection(rapidSelection, "photo-a");
+rapidSelection = togglePhotoSelection(rapidSelection, "photo-b");
+rapidSelection = togglePhotoSelection(rapidSelection, "photo-c");
+assert.deepEqual(
+  rapidSelection,
+  ["photo-a", "photo-b", "photo-c"],
+  "I click consecutivi devono accumulare la selezione usando sempre lo stato più recente.",
+);
+rapidSelection = togglePhotoSelection(rapidSelection, "photo-b");
+assert.deepEqual(
+  rapidSelection,
+  ["photo-a", "photo-c"],
+  "Deselezionare una card non deve ripristinare o eliminare altre selezioni.",
+);
+
+const filteredSelection = buildToggleAllSelection({
+  selectAll: true,
+  hasActiveFilters: true,
+  selectedIds: ["hidden-1", "hidden-2", "visible-1"],
+  visibleIds: ["visible-1", "visible-2"],
+  allPhotoIds: ["hidden-1", "hidden-2", "visible-1", "visible-2"],
+});
+assert.deepEqual(
+  filteredSelection,
+  ["visible-1", "visible-2"],
+  "Ctrl+A con filtri attivi deve sostituire la selezione ed escludere le foto nascoste.",
+);
+assert.equal(
+  countSelectionOutsideFilter(
+    ["visible-1", "visible-2", "hidden-1", "hidden-2"],
+    new Set(["visible-1", "visible-2"]),
+  ),
+  2,
+  "Il contatore deve separare le foto selezionate fuori filtro.",
+);
+
+assert.deepEqual(
+  resolveRotationTargetIds("visible-1", ["visible-1", "hidden-1", "hidden-2"], "single"),
+  ["visible-1"],
+  "La rotazione dalla card o dall'anteprima deve riguardare soltanto la foto corrente.",
+);
+assert.deepEqual(
+  resolveRotationTargetIds(null, ["visible-1", "hidden-1", "hidden-2"], "selection"),
+  ["visible-1", "hidden-1", "hidden-2"],
+  "La rotazione multipla deve essere disponibile soltanto come azione batch esplicita.",
+);
+
+assert.equal(
+  shouldApplyExternalSelectionUpdate({
+    sidecarLastModified: 1_000,
+    persistedSelectionUpdatedAt: 900,
+    localSelectionUpdatedAt: 1_100,
+  }),
+  false,
+  "Un aggiornamento XMP tardivo non deve sovrascrivere una selezione locale più recente.",
+);
+assert.equal(
+  shouldApplyExternalSelectionUpdate({
+    sidecarLastModified: 1_200,
+    persistedSelectionUpdatedAt: 900,
+    localSelectionUpdatedAt: 1_100,
+  }),
+  true,
+  "Una modifica XMP realmente più recente deve restare importabile.",
 );
 
 console.log("PhotoSelector workflow cases: PASS");

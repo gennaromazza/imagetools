@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-01 - Image Select Pro 0.1.37
+
+- Corretta la selezione nella griglia: clic, checkbox e deselezione ora aggiornano uno stato unico e non vengono ripristinati da sincronizzazioni XMP tardive.
+- `Ctrl+A` con filtri attivi seleziona soltanto le foto visibili; i conteggi distinguono chiaramente foto visibili, selezionate nel filtro e selezionate fuori filtro.
+- La rotazione da card, Quick Preview e `Ctrl+R` agisce soltanto sulla foto corrente; la rotazione multipla resta disponibile come azione batch esplicita.
+
 ## 2026-09-01 - FileX ID Photo 0.1.2
 
 - I controlli di qualità sono ora consultivi e non bloccano export o stampa; restano bloccanti soltanto risoluzione insufficiente e sorgente modificata non ricaricata.

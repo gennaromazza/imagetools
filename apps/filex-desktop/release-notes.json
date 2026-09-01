@@ -398,6 +398,11 @@
     ],
     "0.1.36": [
       "Google Drive mostra l'account collegato, consente cambio e disconnessione e recupera in sicurezza le selezioni su altri computer o dischi."
+    ],
+    "0.1.37": [
+      "Selezione della griglia resa stabile anche con clic rapidi, checkbox, deselezioni e aggiornamenti XMP asincroni.",
+      "Ctrl+A con filtri attivi seleziona soltanto le foto visibili e i conteggi distinguono chiaramente risultati nel filtro e selezioni fuori filtro.",
+      "La rotazione da card, Quick Preview e Ctrl+R agisce sulla sola foto corrente; la rotazione multipla è disponibile come azione batch esplicita."
     ]
   },
   "id-photo": {

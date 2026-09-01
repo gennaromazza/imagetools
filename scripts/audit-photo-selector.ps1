@@ -47,6 +47,7 @@ $summaryPath = Join-Path $sourceRoot "components\SelectionSummary.tsx"
 $progressPath = Join-Path $sourceRoot "components\ImportProgressModal.tsx"
 $stylePath = Join-Path $sourceRoot "styles.css"
 $selectorPath = Join-Path $sourceRoot "components\PhotoSelector.tsx"
+$photoCardPath = Join-Path $sourceRoot "components\PhotoCard.tsx"
 $appHeaderPath = Join-Path $sourceRoot "components\AppHeader.tsx"
 $filterPanelPath = Join-Path $sourceRoot "components\selector\PhotoFilterPanel.tsx"
 $selectionActionsPath = Join-Path $sourceRoot "components\selector\SelectionActionsPanel.tsx"
@@ -68,6 +69,10 @@ Assert-Contains $summaryPath 'Altri export' 'SUMMARY-001' 'Gli export secondari 
 Assert-Contains $summaryPath 'Nessuna foto selezionata' 'SUMMARY-002' 'Il Riepilogo ha uno stato vuoto esplicito.'
 Assert-Contains $filterPanelPath 'Filtri avanzati' 'FILTER-002' 'I filtri avanzati sono richiudibili.'
 Assert-Contains $selectionActionsPath 'Sostituisci con visibili|Aggiungi visibili|Rimuovi visibili' 'SELECT-002' 'Le azioni sulla selezione dichiarano l''effetto.'
+Assert-Contains $selectorPath 'useLatestCallback[\s\S]*selectedIdsRef[\s\S]*togglePhotoSelection\(selectedIdsRef\.current' 'SELECT-006' 'Le card memoizzate leggono la selezione corrente e non una closure obsoleta.'
+Assert-Contains $selectorPath 'resolveRotationTargetIds\(id, selectedIdsRef\.current, "single"\)[\s\S]*resolveRotationTargetIds\(null, selectedIdsRef\.current, "selection"\)' 'SELECT-008' 'Rotazione singola e batch hanno bersagli distinti ed espliciti.'
+Assert-Contains $photoCardPath 'event\.detail > 1[\s\S]*aria-pressed=\{isSelected\}' 'SELECT-009' 'Card e checkbox evitano il doppio toggle e condividono uno stato accessibile.'
+Assert-Contains $appPath 'localSelectionUpdatedAtByIdRef[\s\S]*shouldApplyExternalSelectionUpdate' 'SELECT-010' 'Gli XMP tardivi non sovrascrivono una selezione locale più recente.'
 Assert-Contains $workspacePanelPath 'workspace-panel__drag-handle' 'WORKSPACE-001' 'I pannelli espongono una maniglia di trascinamento.'
 Assert-Contains $workspacePanelPath 'aria-expanded' 'WORKSPACE-002' 'I pannelli possono essere richiusi e riaperti.'
 Assert-Contains $selectorPath 'const currentFolderPhotos = useMemo' 'FOLDER-004' 'I conteggi usano un catalogo limitato alla cartella visualizzata.'
@@ -115,7 +120,7 @@ Assert-Contains $stylePath '\.app-header[\s\S]*z-index:\s*1000' 'LAYOUT-002' 'I 
 Assert-Contains $stylePath '\.quick-preview\s*\{[\s\S]{0,320}z-index:\s*6000' 'LAYOUT-003' 'La quick preview copre la testata senza lasciare titolo e comandi nascosti sotto l header.'
 Assert-Contains $filterPanelPath 'minimumRatingCount[\s\S]*esattamente' 'COUNT-001' 'Il filtro stelle mostra sia il totale minimo sia il conteggio esatto.'
 Assert-Contains $selectionActionsPath 'nella cartella[\s\S]*nel progetto[\s\S]*nella selezione libera' 'COUNT-002' 'La selezione distingue esplicitamente cartella corrente, progetto e selezione libera.'
-Assert-Contains $selectorPath 'visibili con i filtri' 'COUNT-003' 'La barra inferiore distingue foto visibili e selezionate.'
+Assert-Contains $selectorPath 'Filtro:[\s\S]*visibili[\s\S]*Selezione:[\s\S]*fuori filtro' 'COUNT-003' 'La barra inferiore distingue ambito, risultati visibili e selezioni fuori filtro.'
 Assert-Contains $selectorPath 'const comparePhotos = useMemo[\s\S]*visiblePhotoIds[\s\S]*selectedSet\.has' 'COMPARE-001' 'Confronta usa le foto selezionate e visibili nell ordine della griglia.'
 Assert-Contains $selectionActionsPath 'compareCount >= 2 && props\.compareCount <= 4' 'COMPARE-002' 'Il comando Confronta compare soltanto per due, tre o quattro foto della griglia.'
 Assert-Contains $selectorPath 'normalizedKey === "b"[\s\S]{0,420}openCompare\(\)' 'COMPARE-003' 'Ctrl+B apre o richiude la modalita Confronta.'
