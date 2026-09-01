@@ -14,6 +14,8 @@ import {
   shouldWriteProjectFile,
 } from "../apps/photo-selector-app/src/services/workspace-mode";
 import { getSubfolder } from "../apps/photo-selector-app/src/services/folder-access";
+import { rankGoogleDriveVersionsForWorkspace } from "../apps/photo-selector-app/src/services/google-drive-projects";
+import { mapCloudProjectToAssets } from "../apps/photo-selector-app/src/services/cloud-project-mapping";
 
 function desktopEntry(root: string, relativePath: string, size: number): DesktopFolderEntry {
   const separator = root.endsWith("\\") ? "" : "\\";
@@ -165,6 +167,63 @@ assert.equal(emptySelectionSnapshot.mode, "free");
 assert.deepEqual(emptySelectionSnapshot.activeAssetIds, []);
 assert.equal(emptySelectionSnapshot.assetStates[0]?.rating, 5);
 
+const rankedPortableBackups = rankGoogleDriveVersionsForWorkspace([
+  {
+    id: "different-disk",
+    name: "different-disk.json",
+    createdAt: "2026-09-01T10:00:00.000Z",
+    kind: "free",
+    workspaceMode: "free",
+    selectionId: "source-other-disk",
+    workspaceId: "source-other-disk",
+    displayName: "Matrimonio",
+    sourceFolderName: "FOTO",
+    totalAssets: 2,
+  },
+  {
+    id: "same-source",
+    name: "same-source.json",
+    createdAt: "2026-08-31T10:00:00.000Z",
+    kind: "free",
+    workspaceMode: "free",
+    selectionId: fallbackE.sourceId,
+    workspaceId: fallbackE.sourceId,
+    displayName: "Matrimonio",
+    sourceFolderName: "FOTO",
+    totalAssets: 2,
+  },
+  {
+    id: "other-mode",
+    name: "other-mode.json",
+    createdAt: "2026-09-02T10:00:00.000Z",
+    kind: "project",
+    workspaceMode: "project",
+  },
+], {
+  mode: "free",
+  workspaceId: fallbackE.sourceId,
+  projectName: "Matrimonio",
+  sourceFolderName: "FOTO",
+  totalAssets: 2,
+});
+assert.deepEqual(
+  rankedPortableBackups.map((version) => version.id),
+  ["same-source", "different-disk"],
+  "Un altro disco deve restare recuperabile, ma l'identità esatta deve essere proposta per prima.",
+);
+const differentPhotoAtSamePath = mapCloudProjectToAssets([asset], [{
+  relativePath: asset.path,
+  fileName: asset.fileName,
+  size: asset.size! + 1,
+  rating: 0,
+  pickStatus: "unmarked",
+  colorLabel: null,
+  customLabels: [],
+  active: false,
+}]);
+assert.equal(differentPhotoAtSamePath.stateByAssetId.size, 0);
+assert.equal(differentPhotoAtSamePath.unmatchedCount, 1, "Un percorso uguale con dimensione diversa non è la stessa foto.");
+
 const [
   appSource,
   folderSource,
@@ -208,6 +267,7 @@ assert.match(driveSource, /workspaceMode === "free"/);
 assert.match(driveSource, /isUnsafeCloudSourceFileKey/);
 assert.doesNotMatch(driveSource, /sourceFileKey\.split\("::", 1\)/);
 assert.match(driveSource, /DRIVE_MANIFEST_READ_CONCURRENCY/);
+assert.match(driveSource, /prompt: "consent select_account"/);
 assert.match(driveSource, /return versions\.filter\(\(version\): version is CompatibleCloudProjectVersion => version !== null\)/);
 assert.match(browserSource, /Selezione libera/);
 assert.match(browserSource, /Progetto master/);
@@ -216,6 +276,10 @@ assert.match(browserSource, /cartella, una scheda SD o un disco/);
 assert.match(browserSource, /await handleBrowse\("resume"\)/);
 assert.match(browserSource, /handleBrowse\("free"\)/);
 assert.match(headerSource, /Modalità libera/);
+assert.match(headerSource, /Scollega account Drive/);
+assert.match(headerSource, /Cambia account Drive/);
+assert.match(appSource, /rankGoogleDriveVersionsForWorkspace/);
+assert.doesNotMatch(appSource, /Il backup libero scelto appartiene a un’altra sorgente/);
 assert.doesNotMatch(desktopStoreSource, /ALTER TABLE recent_folders ADD COLUMN mode TEXT DEFAULT 'free'/);
 assert.match(desktopStoreSource, /row\.mode === "free" \? "free" : undefined/);
 assert.match(desktopStoreSource, /classification_updated_at/);

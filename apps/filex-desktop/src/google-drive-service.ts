@@ -834,7 +834,9 @@ export async function connectGoogleDrive(): Promise<DesktopGoogleDriveStatus> {
     response_type: "code",
     scope: `openid email ${DRIVE_SCOPE}`,
     access_type: "offline",
-    prompt: "consent",
+    // Mostra sempre il selettore: su una postazione con più account Gmail il
+    // fotografo deve poter scegliere consapevolmente dove salvare i backup.
+    prompt: "consent select_account",
     state,
     code_challenge: codeChallenge,
     code_challenge_method: "S256",

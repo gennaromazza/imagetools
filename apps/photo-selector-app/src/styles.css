@@ -849,6 +849,15 @@ img {
   color: #dff1df;
   font-size: 0.7rem;
   font-weight: 700;
+  max-width: 245px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header__drive-account {
+  font-weight: 600;
+  opacity: 0.82;
 }
 
 .app-header__drive-state--expired {
@@ -915,6 +924,29 @@ img {
 
 .app-header__more-menu > a {
   text-decoration: none;
+}
+
+.app-header__drive-menu-account {
+  display: grid;
+  gap: 0.1rem;
+  max-width: 290px;
+  padding: 0.45rem 0.55rem 0.55rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.app-header__drive-menu-account span {
+  color: var(--text-muted);
+  font-size: 0.67rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.app-header__drive-menu-account strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dockable-workspace {

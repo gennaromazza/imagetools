@@ -141,10 +141,12 @@ import { PhotoSelector } from "./components/PhotoSelector";
 import { SelectionSummary } from "./components/SelectionSummary";
 import {
   connectGoogleDrive,
+  disconnectGoogleDrive,
   downloadGoogleDriveVersion,
   exportProjectToGoogleDrive,
   getGoogleDriveStatus,
   listGoogleDriveVersions,
+  rankGoogleDriveVersionsForWorkspace,
 } from "./services/google-drive-projects";
 import { buildMasterProject } from "./services/project-workflow";
 import { mapCloudProjectToAssets, normalizeCloudPath } from "./services/cloud-project-mapping";
@@ -4059,6 +4061,43 @@ export function App() {
     }
   }, [addToast]);
 
+  const handleGoogleDriveDisconnect = useCallback(async () => {
+    setIsGoogleDriveBusy(true);
+    try {
+      const status = await disconnectGoogleDrive();
+      setGoogleDriveStatus(status);
+      setGoogleDriveNeedsReconnect(false);
+      setLastDriveUrl(null);
+      addToast("Account Google Drive scollegato da questo computer.", "success", 4000);
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "Disconnessione Google Drive non riuscita.", "error", 6000);
+    } finally {
+      setIsGoogleDriveBusy(false);
+    }
+  }, [addToast]);
+
+  const handleGoogleDriveChangeAccount = useCallback(async () => {
+    setIsGoogleDriveBusy(true);
+    try {
+      await disconnectGoogleDrive();
+      const status = await connectGoogleDrive();
+      setGoogleDriveStatus(status);
+      setGoogleDriveNeedsReconnect(false);
+      setLastDriveUrl(null);
+      addToast(
+        status.accountEmail ? `Account Google Drive cambiato: ${status.accountEmail}` : "Account Google Drive cambiato.",
+        "success",
+        4500,
+      );
+    } catch (error) {
+      const status = await getGoogleDriveStatus().catch(() => null);
+      if (status) setGoogleDriveStatus(status);
+      addToast(error instanceof Error ? error.message : "Cambio account Google Drive non riuscito.", "error", 6500);
+    } finally {
+      setIsGoogleDriveBusy(false);
+    }
+  }, [addToast]);
+
   const chooseGoogleDriveVersion = useCallback(
     (versions: DesktopCloudProjectVersion[]) => new Promise<DesktopCloudProjectVersion | null>((resolve) => {
       setDriveVersionPicker({ versions, resolve });
@@ -4160,21 +4199,12 @@ export function App() {
       }
 
       const listedVersions = await listGoogleDriveVersions();
-      const versions = listedVersions.filter((candidate) => {
-        const candidateMode = candidate.workspaceMode ?? candidate.kind ?? "project";
-        if (allAssets.length === 0) {
-          return candidateMode === "project";
-        }
-        if (workspaceMode === "free") {
-          const candidateId = candidate.selectionId ?? candidate.workspaceId;
-          return candidateMode === "free" && candidateId === (sourceIdentity?.sourceId ?? workspaceId);
-        }
-        if (candidateMode !== "project") {
-          return false;
-        }
-        return workspaceId
-          ? candidate.workspaceId === workspaceId
-          : candidate.projectName === projectName;
+      const versions = rankGoogleDriveVersionsForWorkspace(listedVersions, {
+        mode: allAssets.length === 0 ? "project" : workspaceMode ?? "project",
+        workspaceId: sourceIdentity?.sourceId ?? workspaceId,
+        projectName,
+        sourceFolderName: sourceFolderPath.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop(),
+        totalAssets: allAssets.length > 0 ? allAssets.length : undefined,
       });
       if (versions.length === 0) {
         addToast(
@@ -4194,15 +4224,8 @@ export function App() {
 
       const manifest = await downloadGoogleDriveVersion(version.id);
       const manifestMode = manifest.workspaceMode ?? manifest.kind ?? "project";
-      const manifestWorkspaceId = manifest.selectionId ?? manifest.workspaceId ?? manifest.projectId;
       if (allAssets.length > 0 && manifestMode !== workspaceMode) {
         throw new Error("Il backup scelto appartiene a una modalità diversa da quella aperta.");
-      }
-      if (
-        workspaceMode === "free"
-        && manifestWorkspaceId !== (sourceIdentity?.sourceId ?? workspaceId)
-      ) {
-        throw new Error("Il backup libero scelto appartiene a un’altra sorgente.");
       }
       setLastDriveUrl(version.driveUrl ?? version.webViewLink ?? null);
 
@@ -4917,6 +4940,8 @@ export function App() {
           onCorrectMaster={() => void handleCorrectProjectMaster()}
           onRenameProject={() => setIsRenameProjectOpen(true)}
           onDriveConnect={() => void handleGoogleDriveConnect()}
+          onDriveDisconnect={() => void handleGoogleDriveDisconnect()}
+          onDriveChangeAccount={() => void handleGoogleDriveChangeAccount()}
           onDriveExport={() => void handleGoogleDriveExport()}
           onDriveImport={() => void handleGoogleDriveImport()}
           onShowImportProgress={() => setIsImportPanelDismissed(false)}

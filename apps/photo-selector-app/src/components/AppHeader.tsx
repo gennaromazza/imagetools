@@ -33,6 +33,8 @@ export interface AppHeaderProps {
   onCorrectMaster: () => void;
   onRenameProject: () => void;
   onDriveConnect: () => void;
+  onDriveDisconnect: () => void;
+  onDriveChangeAccount: () => void;
   onDriveExport: () => void;
   onDriveImport: () => void;
   onShowImportProgress: () => void;
@@ -148,7 +150,9 @@ export function AppHeader(props: AppHeaderProps) {
             {props.isGoogleDriveBusy ? "Connessione…" : "Riconnetti Drive"}
           </button>
         ) : props.driveConnected && props.driveConfigured ? (
-          <span className="app-header__drive-state" title={props.driveAccountEmail ?? "Google Drive collegato"}>Drive ✓</span>
+          <span className="app-header__drive-state" title={props.driveAccountEmail ?? "Google Drive collegato"}>
+            Drive ✓{props.driveAccountEmail ? <span className="app-header__drive-account"> · {props.driveAccountEmail}</span> : null}
+          </span>
         ) : null}
       </div>
 
@@ -166,9 +170,17 @@ export function AppHeader(props: AppHeaderProps) {
         <details className="app-header__more">
           <summary className="ghost-button app-header__button" aria-label="Altre azioni del lavoro">•••</summary>
           <div className="app-header__more-menu">
+            {props.driveConnected && props.driveConfigured ? (
+              <div className="app-header__drive-menu-account">
+                <span>Account Google Drive</span>
+                <strong title={props.driveAccountEmail ?? "Account collegato"}>{props.driveAccountEmail ?? "Account collegato"}</strong>
+              </div>
+            ) : null}
             <button type="button" className="ghost-button" onClick={(event) => runMenuAction(event, props.onCreateProject)} disabled={globallyBusy}>Nuovo progetto master</button>
             {isProject ? <button type="button" className="ghost-button" onClick={(event) => runMenuAction(event, props.onCorrectMaster)} disabled={globallyBusy}>Correggi master</button> : null}
             {!props.driveConnected || props.driveNeedsReconnect || !props.driveConfigured ? <button type="button" className="ghost-button" onClick={(event) => runMenuAction(event, props.onDriveConnect)} disabled={props.isGoogleDriveBusy || !props.driveConfigured}>{!props.driveConfigured ? "Drive non configurato" : props.driveNeedsReconnect ? "Riconnetti Google Drive" : "Collega Drive"}</button> : null}
+            {props.driveConnected && props.driveConfigured ? <button type="button" className="ghost-button" onClick={(event) => runMenuAction(event, props.onDriveChangeAccount)} disabled={props.isGoogleDriveBusy}>Cambia account Drive</button> : null}
+            {props.driveConnected && props.driveConfigured ? <button type="button" className="ghost-button" onClick={(event) => runMenuAction(event, props.onDriveDisconnect)} disabled={props.isGoogleDriveBusy}>Scollega account Drive</button> : null}
             {hasWorkspace ? <button type="button" className="ghost-button" onClick={(event) => runMenuAction(event, props.onDriveExport)} disabled={props.isGoogleDriveBusy || !props.driveConfigured}>{props.workspaceMode === "free" ? "Backup selezione su Drive" : "Esporta su Drive"}</button> : null}
             <button type="button" className="ghost-button" onClick={(event) => runMenuAction(event, props.onDriveImport)} disabled={globallyBusy || !props.driveConfigured}>{hasWorkspace ? "Continua da Drive" : "Recupera progetto da Drive"}</button>
             {props.lastDriveUrl ? (

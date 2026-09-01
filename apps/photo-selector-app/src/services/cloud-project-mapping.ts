@@ -53,8 +53,15 @@ export function mapCloudProjectToAssets(
   let ambiguousCount = 0;
 
   for (const cloudAsset of cloudAssets) {
+    const pathCandidate = byPath.get(normalizeCloudPath(cloudAsset.relativePath));
+    const pathCandidateHasDifferentSize = Boolean(
+      pathCandidate
+      && typeof cloudAsset.size === "number"
+      && typeof pathCandidate.size === "number"
+      && cloudAsset.size !== pathCandidate.size,
+    );
     const candidates = [
-      byPath.get(normalizeCloudPath(cloudAsset.relativePath)),
+      pathCandidateHasDifferentSize ? undefined : pathCandidate,
       cloudAsset.sourceFileKey ? bySourceKey.get(cloudAsset.sourceFileKey) : undefined,
       byNameAndSize.get(`${cloudAsset.fileName.toLocaleLowerCase()}::${cloudAsset.size ?? ""}`),
     ];
