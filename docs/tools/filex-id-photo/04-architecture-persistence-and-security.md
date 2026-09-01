@@ -2,7 +2,7 @@
 
 ## Stato dell'architettura esistente
 
-Il tool è implementato nel workspace **apps/id-photo** ed è distribuito come componente indipendente della FileX Suite. La versione 0.1.1 usa:
+Il tool è implementato nel workspace **apps/id-photo** ed è distribuito come componente indipendente della FileX Suite. La versione 0.1.2 usa:
 
 - renderer React/Vite e host Electron FileX;
 - contratti IPC centralizzati in **@photo-tools/desktop-contracts**;
@@ -12,7 +12,7 @@ Il tool è implementato nel workspace **apps/id-photo** ed è distribuito come c
 - motore fisico ed export riusati dagli export pubblici di **@photo-tools/batch-print-layout**;
 - API desktop dedicate per creare e pulire copie di lavoro Photoshop sotto l'area dati FileX.
 
-Non fanno parte della versione 0.1.1 la calibrazione automatica e le Azioni Photoshop automatiche.
+Non fanno parte della versione 0.1.2 la calibrazione automatica e le Azioni Photoshop automatiche.
 
 Queste capacità restano evoluzioni future e non devono essere presentate come già disponibili.
 

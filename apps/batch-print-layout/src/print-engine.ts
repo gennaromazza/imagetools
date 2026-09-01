@@ -69,6 +69,9 @@ export interface LogoOverlaySpec {
 
 export interface ImageAdjustmentSpec {
   blackAndWhiteEnabled: boolean;
+  /** Regolazioni percentuali non distruttive. Zero mantiene i pixel originali. */
+  brightness?: number;
+  contrast?: number;
   fitMode: PhotoFitMode;
   autoRotateBySourceOrientation: boolean;
   borderEnabled: boolean;

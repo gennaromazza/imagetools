@@ -87,6 +87,7 @@ function makeJob(overrides: Partial<PersistedIdPhotoJob> = {}): PersistedIdPhoto
     },
     manualChecks: { face: true, expression: true, accessories: true },
     technicalWarningsAccepted: true,
+    imageAdjustments: {},
     sheetId: "10x15",
     copies: 8,
     format: "pdf",
@@ -100,6 +101,23 @@ function makeJob(overrides: Partial<PersistedIdPhotoJob> = {}): PersistedIdPhoto
 }
 
 describe("FileX ID Photo — profili e geometria pura", () => {
+  it("normalizza e conserva le regolazioni non distruttive", () => {
+    const parsed = parseIdPhotoJob(makeJob({
+      imageAdjustments: {
+        "asset-1": {
+          brightness: 18,
+          contrast: -7,
+          backgroundMode: "uniform",
+          backgroundColor: "#f4f4f4",
+          backgroundStrength: 65,
+          maskPath: "C:\\FileX\\mask.png",
+          maskSha256: "a".repeat(64),
+          modelVersion: "birefnet-general-tiny-v1",
+        },
+      },
+    }));
+    expect(parsed?.imageAdjustments["asset-1"]).toMatchObject({ brightness: 18, contrast: -7, backgroundMode: "uniform" });
+  });
   it("mantiene identificatori univoci e metadati verificabili per i profili ufficiali", () => {
     expect(new Set(DOCUMENT_PROFILES.map((profile) => profile.id)).size).toBe(DOCUMENT_PROFILES.length);
     for (const profile of DOCUMENT_PROFILES) {

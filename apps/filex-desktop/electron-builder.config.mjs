@@ -402,6 +402,7 @@ export default {
         "**/node_modules/exiftool-vendored.pl/**",
         "**/node_modules/sharp/**",
         "**/node_modules/@img/**",
+        "**/node_modules/onnxruntime-node/**",
         "**/node_modules/ffmpeg-static/**",
       ],
 
@@ -438,6 +439,7 @@ export default {
         "!node_modules/exiftool-vendored.pl{,/**/*}",
         "!node_modules/express{,/**/*}",
         "!node_modules/multer{,/**/*}",
+        "!node_modules/onnxruntime-node{,/**/*}",
         "!node_modules/sharp{,/**/*}",
       ]
     : requestedTool.id === "cache-sweep" || requestedTool.id === "filex-send"
@@ -452,6 +454,13 @@ export default {
         "!.output/electron/**/*.d.ts",
         "!.output/electron/**/*.map",
         "package.json",
+        ...(requestedTool.id === "id-photo"
+          ? [
+              "!node_modules/onnxruntime-node/bin/napi-v6/darwin{,/**/*}",
+              "!node_modules/onnxruntime-node/bin/napi-v6/linux{,/**/*}",
+              "!node_modules/onnxruntime-node/bin/napi-v6/win32/arm64{,/**/*}",
+            ]
+          : ["!node_modules/onnxruntime-node{,/**/*}"]),
       ],
 
   extraResources: [

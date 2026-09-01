@@ -39,6 +39,21 @@ try {
   );
   assert.match(
     mainSource,
+    /filex:list-id-photo-printers[\s\S]*getPrintersAsync/u,
+    "Il pacchetto ID Photo non registra l'elenco stampanti per il pannello FileX.",
+  );
+  assert.match(
+    mainSource,
+    /filex:process-id-photo-background[\s\S]*processIdPhotoBackground/u,
+    "Il pacchetto ID Photo non registra il servizio locale di scontorno.",
+  );
+  assert.match(
+    builderConfig,
+    /node_modules\/onnxruntime-node/u,
+    "La configurazione Electron non gestisce i binari nativi di ONNX Runtime.",
+  );
+  assert.match(
+    mainSource,
     /requestedTool\.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest/u,
     "Il bypass licenza ID Photo non è confinato allo smoke test esplicito.",
   );

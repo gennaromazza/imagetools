@@ -40,6 +40,8 @@ export interface PersistedIdPhotoAsset {
   absolutePath?: string;
   originalAbsolutePath?: string;
   workingCopyPath?: string;
+  backgroundProcessedPath?: string;
+  backgroundSourcePath?: string;
   width: number;
   height: number;
   size?: number;
@@ -87,6 +89,28 @@ export interface IdPhotoExportContext {
   copies: number;
 }
 
+export interface IdPhotoImageAdjustments {
+  brightness: number;
+  contrast: number;
+  backgroundMode: "original" | "uniform" | "replace";
+  backgroundColor: string;
+  backgroundStrength: number;
+  maskPath: string | null;
+  maskSha256: string | null;
+  modelVersion: string | null;
+}
+
+export const DEFAULT_ID_PHOTO_ADJUSTMENTS: IdPhotoImageAdjustments = {
+  brightness: 0,
+  contrast: 0,
+  backgroundMode: "original",
+  backgroundColor: "#ffffff",
+  backgroundStrength: 70,
+  maskPath: null,
+  maskSha256: null,
+  modelVersion: null,
+};
+
 export interface PersistedIdPhotoJob {
   schemaVersion: typeof ID_PHOTO_JOB_SCHEMA_VERSION;
   id: string;
@@ -101,6 +125,7 @@ export interface PersistedIdPhotoJob {
   crops: Record<string, BatchCropState>;
   manualChecks: { face: boolean; expression: boolean; accessories: boolean };
   technicalWarningsAccepted: boolean;
+  imageAdjustments: Record<string, IdPhotoImageAdjustments>;
   sheetId: string;
   copies: number;
   format: ExportFormat;
@@ -233,6 +258,8 @@ function parseAsset(value: unknown): PersistedIdPhotoAsset | null {
     absolutePath: typeof value.absolutePath === "string" ? value.absolutePath : undefined,
     originalAbsolutePath: typeof value.originalAbsolutePath === "string" ? value.originalAbsolutePath : undefined,
     workingCopyPath: typeof value.workingCopyPath === "string" ? value.workingCopyPath : undefined,
+    backgroundProcessedPath: typeof value.backgroundProcessedPath === "string" ? value.backgroundProcessedPath : undefined,
+    backgroundSourcePath: typeof value.backgroundSourcePath === "string" ? value.backgroundSourcePath : undefined,
     width: typeof value.width === "number" && Number.isFinite(value.width) ? Math.max(0, value.width) : 0,
     height: typeof value.height === "number" && Number.isFinite(value.height) ? Math.max(0, value.height) : 0,
     size: typeof value.size === "number" && Number.isFinite(value.size) ? Math.max(0, value.size) : undefined,
@@ -354,6 +381,23 @@ export function parseIdPhotoJob(value: unknown): PersistedIdPhotoJob | null {
     : [];
   const crops = parseCrops(value.crops);
   const manual = isRecord(value.manualChecks) ? value.manualChecks : {};
+  const adjustmentRecords = isRecord(value.imageAdjustments) ? value.imageAdjustments : {};
+  const imageAdjustments = Object.fromEntries(Object.entries(adjustmentRecords).flatMap(([assetId, raw]) => {
+    if (!isRecord(raw)) return [];
+    const color = typeof raw.backgroundColor === "string" && /^#[0-9a-f]{6}$/i.test(raw.backgroundColor)
+      ? raw.backgroundColor
+      : DEFAULT_ID_PHOTO_ADJUSTMENTS.backgroundColor;
+    return [[assetId, {
+      brightness: clamp(typeof raw.brightness === "number" ? raw.brightness : 0, -50, 50),
+      contrast: clamp(typeof raw.contrast === "number" ? raw.contrast : 0, -50, 50),
+      backgroundMode: raw.backgroundMode === "uniform" || raw.backgroundMode === "replace" ? raw.backgroundMode : "original",
+      backgroundColor: color,
+      backgroundStrength: clamp(typeof raw.backgroundStrength === "number" ? raw.backgroundStrength : 70, 0, 100),
+      maskPath: typeof raw.maskPath === "string" ? raw.maskPath : null,
+      maskSha256: typeof raw.maskSha256 === "string" && /^[a-f0-9]{64}$/i.test(raw.maskSha256) ? raw.maskSha256.toLowerCase() : null,
+      modelVersion: typeof raw.modelVersion === "string" ? raw.modelVersion : null,
+    } satisfies IdPhotoImageAdjustments]];
+  }));
   const verifiedFiles = isRecord(value.lastExport) && Array.isArray(value.lastExport.verifiedFiles)
     ? value.lastExport.verifiedFiles.slice(0, 100).flatMap((file) => (
       isRecord(file)
@@ -407,6 +451,7 @@ export function parseIdPhotoJob(value: unknown): PersistedIdPhotoJob | null {
       accessories: manual.accessories === true,
     },
     technicalWarningsAccepted: value.technicalWarningsAccepted === true,
+    imageAdjustments,
     sheetId: typeof value.sheetId === "string" ? value.sheetId : "10x15",
     copies: parseCopies(value.copies),
     format: isExportFormat(value.format) ? value.format : "pdf",

@@ -30,6 +30,14 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-01 - FileX ID Photo 0.1.2
+
+- I controlli di qualità sono ora consultivi e non bloccano export o stampa; restano bloccanti soltanto risoluzione insufficiente e sorgente modificata non ricaricata.
+- Aggiunte regolazioni non distruttive di luminosità e contrasto, applicate in modo coerente ad anteprima, esportazione e stampa.
+- Nel preset studio è disponibile la pulizia o sostituzione dello sfondo con BiRefNet MIT eseguito localmente, senza costi per immagine e senza upload delle fotografie.
+- Aggiunto un pannello FileX con anteprima reale, selezione stampante e copie; le proprietà avanzate del driver restano disponibili separatamente.
+- Mantenuto il flusso Photoshop opzionale su copia gestita, senza interferire con chi preferisce completare manualmente il ritocco.
+
 ## 2026-09-01 - Image Select Pro 0.1.36
 
 - Google Drive mostra l'account collegato, consente cambio e disconnessione e recupera in sicurezza le selezioni su altri computer o dischi.

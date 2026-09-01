@@ -107,6 +107,20 @@ export interface ImageMetrics {
   backgroundUniformity: number;
 }
 
+export function canProduceIdPhotoOutput(input: {
+  hasAsset: boolean;
+  hasCrop: boolean;
+  pageCount: number;
+  pendingSourceChange: boolean;
+  checks: TechnicalCheck[];
+}): boolean {
+  return input.hasAsset
+    && input.hasCrop
+    && input.pageCount > 0
+    && !input.pendingSourceChange
+    && !input.checks.some((check) => check.id === "resolution" && check.status === "fail");
+}
+
 export interface NormalizedCrop {
   cropLeft: number;
   cropTop: number;

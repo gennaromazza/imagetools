@@ -24,7 +24,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import type { DesktopPhotoToolHandoff } from "@photo-tools/desktop-contracts";
+import type { DesktopIdPhotoPrinter, DesktopPhotoToolHandoff } from "@photo-tools/desktop-contracts";
 import {
   calculateGridLayout,
   createDefaultCrop,
@@ -39,7 +39,7 @@ import {
   type PrintSheetSpec,
 } from "@photo-tools/batch-print-layout/print-engine";
 import { exportBatchWithMetadata, exportRasterPage, renderPageCanvas, renderPhotoCanvas } from "@photo-tools/batch-print-layout/render-export";
-import { DOCUMENT_PROFILES, evaluateTechnicalChecks, safeJobName, type TechnicalCheck } from "./domain";
+import { canProduceIdPhotoOutput, DOCUMENT_PROFILES, evaluateTechnicalChecks, safeJobName, type TechnicalCheck } from "./domain";
 import { displayedCropPosition, moveCropInDisplayedAxes } from "./crop-position";
 import { buildRehydrationCandidates } from "./asset-rehydration";
 import {
@@ -64,6 +64,7 @@ import {
   ID_PHOTO_MAX_ASSETS_PER_JOB,
   ID_PHOTO_MAX_STORED_JOBS,
   IdPhotoStorageError,
+  DEFAULT_ID_PHOTO_ADJUSTMENTS,
   jobDisplayName,
   loadActiveIdPhotoJob,
   loadIdPhotoJobs,
@@ -72,6 +73,7 @@ import {
   saveIdPhotoJob,
   selectLastExportForSnapshot,
   type IdPhotoJobStatus,
+  type IdPhotoImageAdjustments,
   type PersistedIdPhotoAsset,
   type PersistedIdPhotoExport,
   type PersistedIdPhotoJob,
@@ -82,7 +84,7 @@ import {
 const STEPS = [
   { id: 1, label: "Commessa", icon: FolderOpen },
   { id: 2, label: "Prepara", icon: SlidersHorizontal },
-  { id: 3, label: "Verifica", icon: ShieldCheck },
+  { id: 3, label: "Qualità", icon: ShieldCheck },
   { id: 4, label: "Impagina", icon: LayoutGrid },
   { id: 5, label: "Esporta", icon: Printer },
 ] as const;
@@ -114,13 +116,13 @@ const TUTORIAL_STEPS = [
   },
   {
     id: 3,
-    title: "Verifica il documento",
-    summary: "Esamina i controlli tecnici e completa le conferme professionali obbligatorie.",
+    title: "Controlla la qualità",
+    summary: "Esamina gli indicatori tecnici senza interrompere il flusso del fotografo.",
     actions: [
       "Controlla risoluzione, luminosità, contrasto e nitidezza.",
       "Verifica uniformità dello sfondo, ombre e riflessi.",
-      "Conferma volto, espressione, occhi e accessori.",
-      "Leggi e accetta consapevolmente gli eventuali avvisi.",
+      "Controlla visivamente volto, espressione, occhi e accessori.",
+      "Gli avvisi restano consultivi e non bloccano stampa o export.",
     ],
     attention: "FileX assiste il controllo, ma non garantisce l'accettazione da parte dell'ente.",
   },
@@ -205,6 +207,8 @@ const OLD_PASSPORT_PROFILE_ID = "it-passport-studio-35x45-v1";
 interface IdPhotoAsset extends PhotoAsset {
   originalAbsolutePath?: string;
   workingCopyPath?: string;
+  backgroundProcessedPath?: string;
+  backgroundSourcePath?: string;
   revisions: PersistedIdPhotoRevision[];
 }
 
@@ -429,6 +433,7 @@ export function App() {
   const [checks, setChecks] = useState<TechnicalCheck[]>([]);
   const [manualChecks, setManualChecks] = useState(initialJob?.manualChecks ?? { face: false, expression: false, accessories: false });
   const [technicalWarningsAccepted, setTechnicalWarningsAccepted] = useState(initialJob?.technicalWarningsAccepted ?? false);
+  const [imageAdjustments, setImageAdjustments] = useState<Record<string, IdPhotoImageAdjustments>>(initialJob?.imageAdjustments ?? {});
   const [lastExport, setLastExport] = useState<PersistedIdPhotoExport | null>(initialJob?.lastExport ?? null);
   const [pendingExport, setPendingExport] = useState<PersistedIdPhotoPendingExport | null>(initialJob?.pendingExport ?? null);
   const [lastExportVerification, setLastExportVerification] = useState<OutputVerificationStatus>(
@@ -440,6 +445,11 @@ export function App() {
   const [pendingPhotoshopChange, setPendingPhotoshopChange] = useState(false);
   const [previewPageIndex, setPreviewPageIndex] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [printPanelOpen, setPrintPanelOpen] = useState(false);
+  const [printersLoading, setPrintersLoading] = useState(false);
+  const [printers, setPrinters] = useState<DesktopIdPhotoPrinter[]>([]);
+  const [selectedPrinterName, setSelectedPrinterName] = useState("");
+  const [driverCopies, setDriverCopies] = useState(1);
   const [cropPreviewUrl, setCropPreviewUrl] = useState<string | null>(null);
   const [selectedDetailPreview, setSelectedDetailPreview] = useState<SelectedDetailPreview | null>(null);
   const [status, setStatus] = useState(initialJob ? "Ripristino dell'ultima commessa…" : "Crea una commessa e importa la foto del cliente.");
@@ -477,6 +487,19 @@ export function App() {
     return withDetailPreview(selectedAsset, selectedDetailPreview);
   }, [selectedAsset, selectedAssetPreviewKey, selectedDetailPreview]);
   const selectedCrop = selectedAsset ? crops[selectedAsset.id] : null;
+  const selectedAdjustments = selectedAsset
+    ? imageAdjustments[selectedAsset.id] ?? DEFAULT_ID_PHOTO_ADJUSTMENTS
+    : DEFAULT_ID_PHOTO_ADJUSTMENTS;
+  const renderAdjustments = useMemo(() => ({
+    blackAndWhiteEnabled: false,
+    brightness: selectedAdjustments.brightness,
+    contrast: selectedAdjustments.contrast,
+    fitMode: "cover" as const,
+    autoRotateBySourceOrientation: false,
+    borderEnabled: false,
+    borderWidthPx: 0,
+    borderColor: "#000000",
+  }), [selectedAdjustments.brightness, selectedAdjustments.contrast]);
   const currentPreferences = useMemo<SavedPreferences>(() => ({
     customer,
     jobName,
@@ -524,18 +547,15 @@ export function App() {
     { ...(selectedCrop ?? createDefaultCrop(asset, printSpec)), assetId: asset.id },
   ])), [printSpec, repeatedAssets, selectedCrop]);
   const pages = useMemo(() => paginateAssets(repeatedAssets, layout), [layout, repeatedAssets]);
-  const manualReady = Object.values(manualChecks).every(Boolean);
-  const technicalFailures = checks.filter((check) => check.status === "fail").length;
+  const blockingFailures = checks.filter((check) => check.status === "fail" && check.id === "resolution").length;
   const technicalWarnings = checks.filter((check) => check.status === "warning").length;
-  const warningsReady = technicalWarnings === 0 || technicalWarningsAccepted;
-  const readyForExport = Boolean(
-    selectedAsset
-    && manualReady
-    && technicalFailures === 0
-    && warningsReady
-    && checks.length > 0
-    && !pendingPhotoshopChange,
-  );
+  const readyForExport = canProduceIdPhotoOutput({
+    hasAsset: Boolean(selectedAsset),
+    hasCrop: Boolean(selectedCrop),
+    pageCount: pages.length,
+    pendingSourceChange: pendingPhotoshopChange,
+    checks,
+  });
   const exportFingerprint = JSON.stringify({
     jobId,
     customer,
@@ -552,9 +572,7 @@ export function App() {
       ? selectedDetailPreview.sourceSha256
       : null,
     selectedCrop,
-    manualChecks,
-    technicalWarningsAccepted,
-    technicalChecks: checks.map((check) => [check.id, check.status]),
+    imageAdjustments,
     pendingPhotoshopChange,
     sheetId,
     copies,
@@ -581,10 +599,10 @@ export function App() {
   const jobStatus = deriveIdPhotoJobStatus({
     assetCount: assets.length,
     hasCrop: Boolean(selectedCrop),
-    manualReady,
-    technicalFailures,
-    warningsAccepted: technicalWarningsAccepted,
-    technicalWarnings,
+    manualReady: true,
+    technicalFailures: blockingFailures,
+    warningsAccepted: true,
+    technicalWarnings: 0,
     pageCount: pages.length,
     hasExport: Boolean(currentLastExport),
   });
@@ -606,6 +624,8 @@ export function App() {
       absolutePath: asset.absolutePath,
       originalAbsolutePath: asset.originalAbsolutePath,
       workingCopyPath: asset.workingCopyPath,
+      backgroundProcessedPath: asset.backgroundProcessedPath,
+      backgroundSourcePath: asset.backgroundSourcePath,
       width: asset.width,
       height: asset.height,
       size: asset.size,
@@ -615,6 +635,7 @@ export function App() {
     crops,
     manualChecks,
     technicalWarningsAccepted,
+    imageAdjustments,
     sheetId,
     copies,
     format,
@@ -637,6 +658,70 @@ export function App() {
       setStatus("Le impostazioni sono cambiate: la verifica in attesa è stata annullata. I file già creati non sono marcati come pronti.");
     }
   }, []);
+
+  const updateSelectedAdjustments = useCallback((patch: Partial<IdPhotoImageAdjustments>) => {
+    if (!selectedAsset) return;
+    setImageAdjustments((current) => ({
+      ...current,
+      [selectedAsset.id]: { ...(current[selectedAsset.id] ?? DEFAULT_ID_PHOTO_ADJUSTMENTS), ...patch },
+    }));
+    clearExportRecords();
+  }, [clearExportRecords, selectedAsset]);
+
+  const processBackground = async (mode: "uniform" | "replace") => {
+    if (!selectedAsset?.absolutePath || !window.filexDesktop?.processIdPhotoBackground) {
+      setStatus("Lo scontorno locale richiede l'app desktop aggiornata.");
+      return;
+    }
+    if (profile.kind !== "studio") {
+      setStatus("Nei profili ufficiali FileX analizza lo sfondo ma non lo modifica. Usa il preset studio oppure rifai lo scatto.");
+      return;
+    }
+    setBusy(true);
+    setStatus("Preparazione del modello locale gratuito e analisi dello sfondo…");
+    try {
+      const result = await window.filexDesktop.processIdPhotoBackground({
+        jobId,
+        sourcePath: selectedAsset.backgroundSourcePath ?? selectedAsset.absolutePath,
+        mode,
+        backgroundColor: selectedAdjustments.backgroundColor,
+        strength: selectedAdjustments.backgroundStrength,
+      });
+      const [nextStat] = await window.filexDesktop.statFiles([result.processedPath]);
+      const preview = await window.filexDesktop.getPreview(result.processedPath, {
+        maxDimension: PREVIEW_MAX_DIMENSION,
+        sourceFileKey: nextStat ? `${nextStat.size}:${nextStat.lastModified}` : undefined,
+      });
+      if (!preview || !nextStat) throw new Error("Lo sfondo è stato elaborato ma l'anteprima non è leggibile.");
+      const nextUrl = bytesToObjectUrl(preview.bytes, preview.mimeType);
+      setAssets((current) => current.map((asset) => asset.id === selectedAsset.id ? {
+        ...asset,
+        originalAbsolutePath: asset.originalAbsolutePath ?? asset.absolutePath,
+        absolutePath: result.processedPath,
+        backgroundProcessedPath: result.processedPath,
+        backgroundSourcePath: asset.backgroundSourcePath ?? asset.absolutePath,
+        workingCopyPath: undefined,
+        sourceUrl: nextUrl,
+        previewUrl: nextUrl,
+        width: preview.width,
+        height: preview.height,
+        size: nextStat.size,
+        lastModified: nextStat.lastModified,
+      } : asset));
+      updateSelectedAdjustments({
+        backgroundMode: mode,
+        maskPath: result.maskPath,
+        maskSha256: result.maskSha256,
+        modelVersion: result.modelVersion,
+      });
+      resetVerification();
+      setStatus("Sfondo elaborato localmente. Controlla capelli, orecchie e spalle prima di continuare.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Elaborazione dello sfondo non riuscita.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const resetVerification = useCallback(() => {
     analysisGenerationRef.current += 1;
@@ -721,6 +806,10 @@ export function App() {
           heightCm: (DOCUMENT_PROFILES.find((item) => item.id === restoredProfileId) ?? DOCUMENT_PROFILES[0]).heightMm / 10,
           dpi: (DOCUMENT_PROFILES.find((item) => item.id === restoredProfileId) ?? DOCUMENT_PROFILES[0]).digitalMinDpi ?? 300,
         }),
+      ])));
+      setImageAdjustments(Object.fromEntries(restored.assets.map((asset) => [
+        asset.id,
+        job.imageAdjustments[asset.id] ?? DEFAULT_ID_PHOTO_ADJUSTMENTS,
       ])));
       const selectedIndexFromJob = restored.assets.findIndex((asset) => asset.id === job.selectedAssetId);
       setSelectedIndex(selectedIndexFromJob >= 0 ? selectedIndexFromJob : 0);
@@ -1133,7 +1222,7 @@ export function App() {
     setChecks([]);
     let active = true;
     const timeout = window.setTimeout(() => {
-      void analyzeImage(selectedPreviewAsset!.previewUrl, selectedPreviewAsset!.width, selectedPreviewAsset!.height, selectedCrop)
+      void analyzeImage(selectedPreviewAsset!.previewUrl, selectedPreviewAsset!.width, selectedPreviewAsset!.height, selectedCrop, renderAdjustments)
         .then((metrics) => {
           if (active && analysisGenerationRef.current === generation) {
             setChecks(evaluateTechnicalChecks(metrics, profile, selectedCrop));
@@ -1147,7 +1236,7 @@ export function App() {
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [profile, selectedAsset, selectedAssetPreviewKey, selectedCrop, selectedDetailPreview, selectedPreviewAsset]);
+  }, [profile, renderAdjustments, selectedAsset, selectedAssetPreviewKey, selectedCrop, selectedDetailPreview, selectedPreviewAsset]);
 
   useEffect(() => {
     if (!selectedPreviewAsset || !selectedCrop) {
@@ -1162,7 +1251,7 @@ export function App() {
         { ...printSpec, dpi: 140 },
         null,
         { enabled: false, imageUrl: null, position: "bottom-right", scalePct: 20, opacity: 1, marginPct: 4 },
-        { blackAndWhiteEnabled: false, fitMode: "cover", autoRotateBySourceOrientation: false, borderEnabled: false, borderWidthPx: 0, borderColor: "#000000" },
+        renderAdjustments,
       ).then((canvas) => {
         if (active) setCropPreviewUrl(canvas.toDataURL("image/jpeg", 0.9));
       }).catch(() => {
@@ -1173,7 +1262,7 @@ export function App() {
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [printSpec, selectedCrop, selectedPreviewAsset]);
+  }, [printSpec, renderAdjustments, selectedCrop, selectedPreviewAsset]);
 
   useEffect(() => {
     setPreviewPageIndex((current) => Math.max(0, Math.min(current, Math.max(0, pages.length - 1))));
@@ -1193,7 +1282,7 @@ export function App() {
         printSpec,
         layout,
         logo: { enabled: false, imageUrl: null, position: "bottom-right", scalePct: 20, opacity: 1, marginPct: 4 },
-        adjustments: { blackAndWhiteEnabled: false, fitMode: "cover", autoRotateBySourceOrientation: false, borderEnabled: false, borderWidthPx: 0, borderColor: "#000000" },
+        adjustments: renderAdjustments,
         finishing: { cutGuidesEnabled: cutGuides, cutGuideColor: "#777777", cutGuideWidthMm: 0.1 },
         renderDpi: getPreviewRenderDpi(layout, printSpec.dpi, 1000),
       }).then((canvas) => {
@@ -1206,7 +1295,7 @@ export function App() {
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [cutGuides, layout, pages, previewPageIndex, previewRepeatedAssets, printSpec, repeatedCrops]);
+  }, [cutGuides, layout, pages, previewPageIndex, previewRepeatedAssets, printSpec, renderAdjustments, repeatedCrops]);
 
   useEffect(() => {
     const path = selectedAsset?.workingCopyPath;
@@ -1244,6 +1333,7 @@ export function App() {
     setAssets(nextAssets);
     deferAssetRevocation(previousAssets);
     setUnavailableAssets([]);
+    setImageAdjustments({});
     setFolderPath(sourceFolderPath);
     resetCrops(nextAssets);
     setSelectedIndex(0);
@@ -1689,6 +1779,7 @@ export function App() {
     deferAssetRevocation(previousAssets);
     setUnavailableAssets([]);
     setCrops({});
+    setImageAdjustments({});
     setSelectedIndex(0);
     setChecks([]);
     setManualChecks({ face: false, expression: false, accessories: false });
@@ -1942,9 +2033,9 @@ export function App() {
       return;
     }
     if (!readyForExport) {
-      setStatus(technicalFailures > 0
-        ? "Export bloccato: correggi i controlli tecnici non superati."
-        : "Export bloccato: completa e conferma la verifica dello step 3.");
+      setStatus(blockingFailures > 0
+        ? "Export bloccato: la risoluzione utile non è sufficiente."
+        : "Export bloccato: ricarica la sorgente modificata prima di continuare.");
       setStep(3);
       return;
     }
@@ -2016,7 +2107,7 @@ export function App() {
         printSpec,
         null,
         { enabled: false, imageUrl: null, position: "bottom-right", scalePct: 20, opacity: 1, marginPct: 4 },
-        { blackAndWhiteEnabled: false, fitMode: "cover", autoRotateBySourceOrientation: false, borderEnabled: false, borderWidthPx: 0, borderColor: "#000000" },
+        renderAdjustments,
       );
       let singlePhotoBytes: Uint8Array;
       try {
@@ -2038,7 +2129,7 @@ export function App() {
         printSpec,
         layout,
         logo: { enabled: false, imageUrl: null, position: "bottom-right", scalePct: 20, opacity: 1, marginPct: 4 },
-        adjustments: { blackAndWhiteEnabled: false, fitMode: "cover", autoRotateBySourceOrientation: false, borderEnabled: false, borderWidthPx: 0, borderColor: "#000000" },
+        adjustments: renderAdjustments,
         finishing: { cutGuidesEnabled: cutGuides, cutGuideColor: "#777777", cutGuideWidthMm: 0.1 },
         validateBeforeSave,
         requireDesktopAtomicTransaction: Boolean(targetOutputDirectoryPath),
@@ -2154,9 +2245,37 @@ export function App() {
     }
   };
 
-  const runPrint = async () => {
+  const openPrintPanel = async () => {
     if (!readyForExport || pages.length === 0 || !selectedAsset) {
-      setStatus("Stampa bloccata: completa la verifica professionale della foto.");
+      setStatus(blockingFailures > 0 ? "Stampa bloccata: risoluzione utile insufficiente." : "Stampa bloccata: ricarica la sorgente modificata.");
+      setStep(3);
+      return;
+    }
+    setPrintPanelOpen(true);
+    if (!window.filexDesktop?.listIdPhotoPrinters) {
+      setPrinters([]);
+      setStatus("Elenco stampanti non disponibile: puoi comunque usare le impostazioni del driver.");
+      return;
+    }
+    setPrintersLoading(true);
+    try {
+      const nextPrinters = await window.filexDesktop.listIdPhotoPrinters();
+      setPrinters(nextPrinters);
+      setSelectedPrinterName((current) => current && nextPrinters.some((printer) => printer.name === current)
+        ? current
+        : nextPrinters[0]?.name ?? "");
+      setStatus(nextPrinters.length ? "Anteprima di stampa pronta." : "Nessuna stampante rilevata da Windows.");
+    } catch (error) {
+      setPrinters([]);
+      setStatus(error instanceof Error ? error.message : "Impossibile leggere le stampanti installate.");
+    } finally {
+      setPrintersLoading(false);
+    }
+  };
+
+  const runPrint = async (settings: { showDialog: boolean; deviceName?: string; copies?: number }) => {
+    if (!readyForExport || pages.length === 0 || !selectedAsset) {
+      setStatus(blockingFailures > 0 ? "Stampa bloccata: risoluzione utile insufficiente." : "Stampa bloccata: ricarica la sorgente modificata.");
       setStep(3);
       return;
     }
@@ -2190,7 +2309,7 @@ export function App() {
           printSpec,
           layout,
           logo: { enabled: false, imageUrl: null, position: "bottom-right", scalePct: 20, opacity: 1, marginPct: 4 },
-          adjustments: { blackAndWhiteEnabled: false, fitMode: "cover", autoRotateBySourceOrientation: false, borderEnabled: false, borderWidthPx: 0, borderColor: "#000000" },
+          adjustments: renderAdjustments,
           finishing: { cutGuidesEnabled: cutGuides, cutGuideColor: "#777777", cutGuideWidthMm: 0.1 },
           renderDpi: printSpec.dpi,
         });
@@ -2202,17 +2321,21 @@ export function App() {
         }
       }
 
-      setStatus("Apertura del pannello stampa del sistema…");
+      setStatus(settings.showDialog ? "Apertura delle impostazioni del driver…" : "Invio del lavoro alla stampante…");
       const result = await window.filexDesktop.printIdPhotoPages({
         title: `${safeJobName(customer, jobName)} · FileX ID Photo`,
         sheetWidthMm: layout.sheetWidthCm * 10,
         sheetHeightMm: layout.sheetHeightCm * 10,
         pages: printPages,
+        showDialog: settings.showDialog,
+        deviceName: settings.deviceName,
+        copies: settings.copies,
       });
+      if (result.status !== "failed") setPrintPanelOpen(false);
       setStatus(result.status === "submitted"
-        ? "Lavoro consegnato al driver di stampa. Controlla scala 100% e nessun adattamento pagina."
+        ? "Lavoro consegnato alla stampante nelle dimensioni fisiche impostate."
         : result.status === "cancelled"
-          ? "Stampa annullata dal pannello di sistema."
+          ? "Stampa annullata."
           : result.error || "Il driver di stampa non ha accettato il lavoro.");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Apertura del pannello stampa non riuscita.");
@@ -2419,6 +2542,18 @@ export function App() {
                 <div className="control-group"><label>Posizione orizzontale</label><input type="range" min="0" max="1" step="0.005" value={displayedPosition.horizontal} onChange={(event) => selectedCrop && updateCrop(moveCropInDisplayedAxes(selectedCrop, "horizontal", Number(event.target.value)))} disabled={!selectedCrop || busy} /></div>
                 <div className="control-group"><label>Posizione verticale</label><input type="range" min="0" max="1" step="0.005" value={displayedPosition.vertical} onChange={(event) => selectedCrop && updateCrop(moveCropInDisplayedAxes(selectedCrop, "vertical", Number(event.target.value)))} disabled={!selectedCrop || busy} /></div>
                 <div className="button-row"><button className="secondary" onClick={() => selectedAsset && updateCrop(createDefaultCrop(selectedAsset, printSpec))} disabled={!selectedAsset || busy}><RefreshCw size={16} /> Reimposta</button><button className="secondary" onClick={rotateCrop} disabled={!selectedCrop || busy}>Ruota 90°</button></div>
+                <div className="adjustment-card">
+                  <div className="adjustment-title"><SlidersHorizontal size={19} /><strong>Luce e sfondo</strong></div>
+                  <div className="control-group"><label>Luminosità <b>{selectedAdjustments.brightness > 0 ? "+" : ""}{selectedAdjustments.brightness}</b></label><input type="range" min="-50" max="50" step="1" value={selectedAdjustments.brightness} onChange={(event) => updateSelectedAdjustments({ brightness: Number(event.target.value) })} disabled={!selectedAsset || busy} /></div>
+                  <div className="control-group"><label>Contrasto <b>{selectedAdjustments.contrast > 0 ? "+" : ""}{selectedAdjustments.contrast}</b></label><input type="range" min="-50" max="50" step="1" value={selectedAdjustments.contrast} onChange={(event) => updateSelectedAdjustments({ contrast: Number(event.target.value) })} disabled={!selectedAsset || busy} /></div>
+                  <div className="button-row"><button className="secondary" onClick={() => updateSelectedAdjustments({ brightness: 0, contrast: 0 })} disabled={!selectedAsset || busy}>Ripristina luce</button></div>
+                  <div className="background-controls">
+                    <label>Colore sfondo<input type="color" value={selectedAdjustments.backgroundColor} onChange={(event) => updateSelectedAdjustments({ backgroundColor: event.target.value })} disabled={!selectedAsset || busy || profile.kind !== "studio"} /></label>
+                    <div className="control-group"><label>Pulizia pieghe <b>{selectedAdjustments.backgroundStrength}%</b></label><input type="range" min="0" max="100" step="5" value={selectedAdjustments.backgroundStrength} onChange={(event) => updateSelectedAdjustments({ backgroundStrength: Number(event.target.value) })} disabled={!selectedAsset || busy || profile.kind !== "studio"} /></div>
+                    <div className="button-row"><button className="secondary" onClick={() => void processBackground("uniform")} disabled={!selectedAsset?.absolutePath || busy || profile.kind !== "studio"}>Uniforma</button><button className="gold" onClick={() => void processBackground("replace")} disabled={!selectedAsset?.absolutePath || busy || profile.kind !== "studio"}>Sostituisci sfondo</button></div>
+                    {profile.kind === "studio" ? <small>BiRefNet viene eseguito localmente. Al primo utilizzo FileX scarica gratuitamente il modello MIT; la foto non lascia mai il computer.</small> : <small>Per CIE e passaporto FileX non modifica lo sfondo: le fonti ufficiali vietano il ritocco della fotografia.</small>}
+                  </div>
+                </div>
                 <div className="photoshop-card">
                   <div><Palette size={20} /><strong>Passaggio Photoshop</strong></div>
                   <p>FileX crea una copia in un’area gestita e apre soltanto quella. Per questo profilo sono ammessi interventi <b>{profile.editingPolicy === "studio-controlled" ? "controllati dallo studio" : "solo tecnici, senza alterare il soggetto"}</b>.</p>
@@ -2445,22 +2580,22 @@ export function App() {
 
           {step === 3 ? (
             <div className="panel verify-panel">
-              <div className="eyebrow">STEP 3 · VERIFICA</div>
-              <h1>Controlli tecnici e conferma dell’operatore</h1>
-              <p>I valori sono calcolati localmente e sono indicatori, non una promessa di accettazione del documento.</p>
+              <div className="eyebrow">STEP 3 · CONTROLLO QUALITÀ</div>
+              <h1>Indicatori tecnici e controllo del fotografo</h1>
+              <p>I valori sono calcolati localmente e restano consultivi. Solo una risoluzione realmente insufficiente impedisce la produzione.</p>
               {selectedAsset ? <div className="verification-photo"><img src={cropPreviewUrl ?? selectedPreviewAsset?.previewUrl ?? selectedAsset.previewUrl} alt="Foto attiva sottoposta a verifica" decoding="async" /><div><strong>{selectedAsset.fileName}</strong><span>{profile.widthMm}×{profile.heightMm} mm · ritaglio e rotazione correnti</span></div></div> : null}
               <div className="checks-grid">
                 {checks.map((check) => <div key={check.id} className={`check-card ${check.status}`}><StatusIcon status={check.status} /><div><strong>{check.label}</strong><b>{check.value}</b><p>{check.message}</p></div></div>)}
                 {!checks.length ? <div className="empty-checks">{selectedAsset ? "Analisi del ritaglio in corso…" : "Importa una foto per eseguire i controlli."}</div> : null}
               </div>
-              <h3>Conferma visiva obbligatoria</h3>
+              <h3>Promemoria visivo facoltativo</h3>
               <div className="manual-list">
-                <label><input type="checkbox" checked={manualChecks.face} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => { setManualChecks((value) => ({ ...value, face: event.target.checked })); clearExportRecords(); }} /><span>Volto centrato, dimensione e linea occhi coerenti con il profilo</span></label>
-                <label><input type="checkbox" checked={manualChecks.expression} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => { setManualChecks((value) => ({ ...value, expression: event.target.checked })); clearExportRecords(); }} /><span>Espressione neutra, bocca chiusa, occhi visibili</span></label>
-                <label><input type="checkbox" checked={manualChecks.accessories} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => { setManualChecks((value) => ({ ...value, accessories: event.target.checked })); clearExportRecords(); }} /><span>Sfondo, ombre, riflessi e accessori verificati dall’operatore</span></label>
-                {technicalWarnings > 0 ? <label className="warning-ack"><input type="checkbox" checked={technicalWarningsAccepted} disabled={busy || pendingPhotoshopChange} onChange={(event) => { setTechnicalWarningsAccepted(event.target.checked); clearExportRecords(); }} /><span>Ho esaminato i {technicalWarnings} avvisi tecnici e confermo il giudizio professionale sull’immagine</span></label> : null}
+                <label><input type="checkbox" checked={manualChecks.face} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => setManualChecks((value) => ({ ...value, face: event.target.checked }))} /><span>Volto centrato, dimensione e linea occhi coerenti con il profilo</span></label>
+                <label><input type="checkbox" checked={manualChecks.expression} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => setManualChecks((value) => ({ ...value, expression: event.target.checked }))} /><span>Espressione neutra, bocca chiusa, occhi visibili</span></label>
+                <label><input type="checkbox" checked={manualChecks.accessories} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => setManualChecks((value) => ({ ...value, accessories: event.target.checked }))} /><span>Sfondo, ombre, riflessi e accessori verificati dall’operatore</span></label>
+                {technicalWarnings > 0 ? <label className="warning-ack"><input type="checkbox" checked={technicalWarningsAccepted} disabled={busy || pendingPhotoshopChange} onChange={(event) => setTechnicalWarningsAccepted(event.target.checked)} /><span>Ho esaminato i {technicalWarnings} avvisi tecnici</span></label> : null}
               </div>
-              <div className={readyForExport ? "readiness ready" : "readiness warning"}><ShieldCheck size={22} /><div><strong>{readyForExport ? "Foto approvata per l’impaginazione" : "Revisione ancora necessaria"}</strong><span>{!selectedAsset ? "Importa una foto per iniziare la verifica." : pendingPhotoshopChange ? "Ricarica la modifica Photoshop prima di approvare." : checks.length === 0 ? "Analisi tecnica del ritaglio in corso." : technicalFailures ? `${technicalFailures} controllo/i tecnico/i non superato/i bloccano l’export.` : technicalWarnings > 0 && !technicalWarningsAccepted ? "Esamina e conferma gli avvisi tecnici." : "Completa le conferme visive dell’operatore."}</span></div></div>
+              <div className={readyForExport ? "readiness ready" : "readiness warning"}><ShieldCheck size={22} /><div><strong>{readyForExport ? "Foto pronta per impaginazione, export e stampa" : "Intervento tecnico necessario"}</strong><span>{!selectedAsset ? "Importa una foto per iniziare." : pendingPhotoshopChange ? "Ricarica la modifica Photoshop prima di produrre l’output." : blockingFailures > 0 ? "La risoluzione utile è insufficiente per questo profilo." : "Gli altri indicatori e promemoria non bloccano il lavoro."}</span></div></div>
               <div className="verification-source"><span>Profilo {profile.version} · fonte verificata {new Date(`${profile.sourceCheckedAt}T00:00:00`).toLocaleDateString("it-IT")}</span>{profile.sourceUrl ? <a href={profile.sourceUrl} target="_blank" rel="noreferrer">Consulta la fonte <ExternalLink size={12} /></a> : null}</div>
             </div>
           ) : null}
@@ -2488,27 +2623,45 @@ export function App() {
                 <div className="eyebrow">STEP 5 · ESPORTA E STAMPA</div>
                 <h1>{contextualPendingExport ? "File creati, verifica in attesa" : "File pronto per il driver o il laboratorio"}</h1>
                 <div className="summary-sheet">{previewUrl ? <img src={previewUrl} alt="Foglio pronto" /> : null}</div>
-                <div className="print-warning"><Printer size={20} /><span>Il pulsante <b>Stampa</b> apre il pannello nativo di Windows o macOS. Nel driver controlla scala <b>100%</b> e disattiva “Adatta alla pagina”.</span></div>
+                <div className="print-warning"><Printer size={20} /><span>Il pannello FileX mostra l’anteprima reale e permette la stampa diretta. Le impostazioni avanzate del driver restano disponibili come opzione.</span></div>
               </div>
               <div className="panel controls-panel export-controls">
                 <label>Formato del foglio<select value={format} disabled={busy} onChange={(event) => { setFormat(event.target.value as ExportFormat); clearExportRecords(); }}><option value="pdf">Foglio PDF + foto singola JPG</option><option value="jpg">Foglio JPG + foto singola JPG</option></select></label>
                 <div className="output-box"><FolderOutput size={20} /><div><strong>Cartella di destinazione</strong><span>{outputDirectoryPath || "Download del browser"}</span></div><button className="secondary" onClick={chooseOutput} disabled={!window.filexDesktop || busy}>Scegli</button></div>
                 <div className="export-recap"><p><span>Commessa</span><b>{safeJobName(customer, jobName)}</b></p><p><span>Profilo</span><b>{profile.label}</b></p><p><span>Output</span><b>Foto singola JPG · {copies} copie · {pages.length} fogli {sheet.label}</b></p></div>
-                {!readyForExport ? <div className="inline-warning"><AlertTriangle size={17} /> {technicalFailures > 0 ? `${technicalFailures} controllo/i tecnico/i bloccano l'export.` : "Completa e conferma i controlli dello step 3 prima di esportare."}</div> : null}
+                {!readyForExport ? <div className="inline-warning"><AlertTriangle size={17} /> {blockingFailures > 0 ? "La risoluzione utile blocca l'output." : "Ricarica la sorgente modificata prima di produrre l'output."}</div> : null}
                 {currentLastExport ? <div className="last-export"><CheckCircle2 size={18} /><div><strong>Ultimo output verificato</strong><span>{new Date(currentLastExport.completedAt).toLocaleString("it-IT")} · {currentLastExport.files.join(", ")}</span></div></div> : null}
                 {contextualLastExport && lastExportVerification === "unavailable" ? <div className="inline-warning"><AlertTriangle size={17} /> Output registrato, ma verifica temporaneamente indisponibile. FileX conserva il record e riprova automaticamente.</div> : null}
                 {contextualPendingExport ? <div className="inline-warning"><AlertTriangle size={17} /> <span>File già pubblicati: {contextualPendingExport.files.join(", ")}. Non sono ancora marcati come pronti e FileX non li riesporterà.</span></div> : null}
                 {contextualPendingExport
                   ? <button className="primary large" onClick={retryPendingExportVerification} disabled={busy}><RefreshCw size={19} /> {busy ? "Verifica…" : "Riprova verifica"}</button>
                   : <button className="primary large" onClick={runExport} disabled={!readyForExport || busy}><Save size={19} /> {busy ? "Elaborazione…" : "Esporta foto e foglio"}</button>}
-                <button className="secondary large print-button" onClick={() => void runPrint()} disabled={!readyForExport || busy}><Printer size={19} /> Apri pannello stampa</button>
+                <button className="secondary large print-button" onClick={() => void openPrintPanel()} disabled={!readyForExport || busy}><Printer size={19} /> Apri pannello stampa</button>
               </div>
             </div>
           ) : null}
         </section>
       </main>
 
-      <footer className="statusbar" role="status" aria-live="polite"><span className={`status-pulse${hasPersistenceError ? " error" : busy ? " busy" : ""}`} /><span className="status-message">{status}</span><span className={`save-state${hasPersistenceError ? " error" : hasUnsavedJobChanges ? " pending" : ""}`}>{saveStateLabel}</span><button onClick={continueFlow} disabled={step === 5 || busy}>{step === 4 ? "Vai all’export" : "Continua"} <ChevronRight size={16} /></button></footer>
+      {printPanelOpen ? (
+        <div className="print-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) setPrintPanelOpen(false); }}>
+          <section className="print-dialog" role="dialog" aria-modal="true" aria-labelledby="print-dialog-title">
+            <header><div><span>STAMPA FILEX</span><h2 id="print-dialog-title">Anteprima e stampante</h2></div><button className="icon-button" onClick={() => setPrintPanelOpen(false)} disabled={busy} aria-label="Chiudi pannello stampa"><X size={18} /></button></header>
+            <div className="print-dialog-body">
+              <div className="print-dialog-preview">{previewUrl ? <img src={previewUrl} alt="Anteprima esatta del foglio da stampare" /> : <div className="empty-stage">Anteprima non disponibile</div>}<small>Foglio {layout.sheetWidthCm}×{layout.sheetHeightCm} cm · {printSpec.dpi} dpi · scala 100%</small></div>
+              <div className="print-dialog-controls">
+                <label>Stampante<select value={selectedPrinterName} disabled={busy || printersLoading || printers.length === 0} onChange={(event) => setSelectedPrinterName(event.target.value)}>{printersLoading ? <option>Ricerca stampanti…</option> : printers.length ? printers.map((printer) => <option key={printer.name} value={printer.name}>{printer.displayName}</option>) : <option value="">Nessuna stampante rilevata</option>}</select></label>
+                <label>Copie del foglio<input type="number" min="1" max="99" value={driverCopies} disabled={busy} onChange={(event) => setDriverCopies(Math.max(1, Math.min(99, Number(event.target.value) || 1)))} /></label>
+                <div className="print-dialog-recap"><p><span>Pagine</span><b>{pages.length}</b></p><p><span>Orientamento</span><b>{layout.sheetWidthCm > layout.sheetHeightCm ? "Orizzontale" : "Verticale"}</b></p><p><span>Adattamento</span><b>Nessuno</b></p></div>
+                <div className="print-dialog-note"><AlertTriangle size={17} /><span>La finestra nativa di Electron non offre l’anteprima su Windows. Questa è l’anteprima reale generata da FileX.</span></div>
+              </div>
+            </div>
+            <footer><button className="secondary" onClick={() => setPrintPanelOpen(false)} disabled={busy}>Annulla</button><button className="secondary" onClick={() => void runPrint({ showDialog: true })} disabled={busy}>Impostazioni driver</button><button className="primary" onClick={() => void runPrint({ showDialog: false, deviceName: selectedPrinterName, copies: driverCopies })} disabled={busy || !selectedPrinterName}><Printer size={17} /> {busy ? "Elaborazione…" : "Stampa ora"}</button></footer>
+          </section>
+        </div>
+      ) : null}
+
+      <footer className="statusbar" role="status" aria-live="polite"><span className={`status-pulse${hasPersistenceError ? " error" : busy ? " busy" : ""}`} /><span className="status-message">{status}</span><span className={`save-state${hasPersistenceError ? " error" : hasUnsavedJobChanges ? " pending" : ""}`}>{saveStateLabel}</span><div className="status-navigation"><button onClick={() => setStep((current) => Math.max(1, current - 1))} disabled={step === 1 || busy}><ChevronLeft size={16} /> Indietro</button>{step < 5 ? <button onClick={continueFlow} disabled={busy}>{step === 4 ? "Vai all’export" : "Continua"} <ChevronRight size={16} /></button> : null}</div></footer>
       <button className="tutorial-launcher" onClick={openTutorial} aria-label={`Apri tutorial dello step ${step}`} aria-expanded={tutorialOpen} aria-controls="id-photo-tutorial"><BookOpen size={19} /><span><b>Tutorial</b><small>Step {step}</small></span></button>
       {tutorialOpen ? <TutorialDrawer currentStep={step} selectedStep={tutorialStep} onSelectStep={setTutorialStep} onClose={() => setTutorialOpen(false)} /> : null}
     </div>

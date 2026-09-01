@@ -81,7 +81,7 @@ La tolleranza non va inventata in UI: dipende dal profilo documento, dalla stamp
 
 ## Stampa nativa
 
-Il bridge FileX espone un comando tipizzato che prepara i fogli alla risoluzione del profilo e apre il pannello nativo di Windows o macOS tramite Electron. Il percorso standard usa sempre `silent: false`, imposta foglio e margini fisici e distingue consegna al driver, annullamento del dialogo ed errore.
+Il bridge FileX espone comandi tipizzati che elencano le stampanti e preparano i fogli alla risoluzione del profilo. Il pannello FileX mostra l'anteprima reale e invia direttamente alla stampante selezionata con foglio, margini fisici e copie dichiarati; il pannello nativo resta disponibile per le proprietà avanzate del driver. Entrambi i percorsi distinguono consegna al driver, annullamento ed errore.
 
 La consegna al driver non viene presentata come prova dell'avvenuta stampa. L'operatore deve controllare nel pannello scala 100% e assenza di adattamento pagina. I profili automatici stampante/carta e la compensazione basata su calibrazione fisica restano una funzione successiva; non bloccano l'apertura del dialogo manuale.
 

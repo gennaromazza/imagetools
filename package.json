@@ -39,6 +39,8 @@
     "test:id-photo-file-fingerprint": "tsx --test apps/filex-desktop/src/id-photo-file-fingerprint.test.ts",
     "test:id-photo-unload-guard": "tsx --test apps/filex-desktop/src/id-photo-unload-guard.test.ts",
     "test:id-photo-package-runtime": "node scripts/test-id-photo-package-runtime.mjs",
+    "test:id-photo-background": "tsx --test apps/filex-desktop/src/id-photo-background-service.test.ts",
+    "test:id-photo-background-smoke": "tsx scripts/smoke-id-photo-background.ts",
     "test:image-converter-bug-hunt": "tsx --test apps/filex-desktop/src/image-converter-policy.bug.test.ts",
     "test:image-file-finder-bug-hunt": "tsx --test scripts/test-image-file-finder-bug-hunt.ts",
     "test:cache-sweep-bug-hunt": "npm --workspace @photo-tools/cache-sweep run test",
@@ -111,6 +113,7 @@
     "protobufjs": true,
     "re2": true,
     "sharp": true,
+    "onnxruntime-node": true,
     "ffmpeg-static@5.3.0": true
   }
 }

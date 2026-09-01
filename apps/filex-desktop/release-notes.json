@@ -412,6 +412,13 @@
       "Esportazione completa della foto singola in JPG e del foglio 10×15 o 15×20 in JPG oppure PDF.",
       "Apertura del pannello di stampa nativo Windows/macOS con dimensioni fisiche reali e indicazioni operative per il driver.",
       "Nuovi controlli automatici per stampa, output atomici, runtime impacchettato e collegamento da Archivio Flow."
+    ],
+    "0.1.2": [
+      "I controlli di qualità sono consultivi e non bloccano export o stampa; restano protette risoluzione minima e integrità della sorgente.",
+      "Luminosità e contrasto sono regolabili senza modificare l'originale e vengono applicati in modo coerente a anteprima, export e stampa.",
+      "Nel preset studio lo sfondo può essere uniformato o sostituito localmente con BiRefNet MIT, senza costi per immagine e senza upload.",
+      "Il nuovo pannello FileX mostra l'anteprima reale, permette di scegliere stampante e copie e conserva l'accesso alle proprietà avanzate del driver.",
+      "Il fotografo può continuare a usare Photoshop su una copia gestita, senza cambiamenti obbligatori al proprio metodo di lavoro."
     ]
   },
   "suite": {

@@ -23,6 +23,7 @@ export async function analyzeImage(
   originalWidth: number,
   originalHeight: number,
   crop?: NormalizedCrop | null,
+  adjustments?: { brightness?: number; contrast?: number },
 ): Promise<ImageMetrics> {
   const image = await loadImage(source);
   const maxEdge = 420;
@@ -45,6 +46,10 @@ export async function analyzeImage(
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Analisi canvas non disponibile.");
   context.save();
+  const filters: string[] = [];
+  if (adjustments?.brightness) filters.push(`brightness(${Math.max(0.5, Math.min(1.5, 1 + adjustments.brightness / 100))})`);
+  if (adjustments?.contrast) filters.push(`contrast(${Math.max(0.5, Math.min(1.5, 1 + adjustments.contrast / 100))})`);
+  if (filters.length) context.filter = filters.join(" ");
   context.translate(width / 2, height / 2);
   context.rotate((normalizedRotation * Math.PI) / 180);
   const drawWidth = Math.max(1, sourceWidth * scale);

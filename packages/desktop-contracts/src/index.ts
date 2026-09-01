@@ -284,6 +284,22 @@ export interface DesktopIdPhotoWorkingCleanupResult {
   removed: boolean;
 }
 
+export interface DesktopIdPhotoBackgroundRequest {
+  jobId: string;
+  sourcePath: string;
+  mode: "uniform" | "replace";
+  backgroundColor: string;
+  strength: number;
+}
+
+export interface DesktopIdPhotoBackgroundResult {
+  status: "completed";
+  processedPath: string;
+  maskPath: string;
+  maskSha256: string;
+  modelVersion: string;
+}
+
 export interface DesktopIdPhotoPrintPage {
   jpegBytes: Uint8Array;
 }
@@ -293,11 +309,20 @@ export interface DesktopIdPhotoPrintRequest {
   sheetWidthMm: number;
   sheetHeightMm: number;
   pages: DesktopIdPhotoPrintPage[];
+  showDialog?: boolean;
+  deviceName?: string;
+  copies?: number;
 }
 
 export interface DesktopIdPhotoPrintResult {
   status: "submitted" | "cancelled" | "failed";
   error?: string;
+}
+
+export interface DesktopIdPhotoPrinter {
+  name: string;
+  displayName: string;
+  description: string;
 }
 
 export interface DesktopAtomicWriteFile {
@@ -1399,6 +1424,8 @@ export interface FileXDesktopApi {
   cleanupIdPhotoWorkingFiles: (
     jobId: string,
   ) => Promise<DesktopIdPhotoWorkingCleanupResult>;
+  processIdPhotoBackground: (request: DesktopIdPhotoBackgroundRequest) => Promise<DesktopIdPhotoBackgroundResult>;
+  listIdPhotoPrinters: () => Promise<DesktopIdPhotoPrinter[]>;
   printIdPhotoPages: (request: DesktopIdPhotoPrintRequest) => Promise<DesktopIdPhotoPrintResult>;
   statFiles: (absolutePaths: string[]) => Promise<DesktopFileStat[]>;
   fingerprintFiles: (absolutePaths: string[]) => Promise<DesktopFileFingerprint[]>;

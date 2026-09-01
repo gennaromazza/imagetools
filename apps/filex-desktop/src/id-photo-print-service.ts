@@ -1,4 +1,8 @@
 import type { DesktopIdPhotoPrintRequest, DesktopIdPhotoPrintResult } from "@photo-tools/desktop-contracts";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const MAX_PRINT_PAGES = 48;
 const MAX_PAGE_BYTES = 30 * 1024 * 1024;
@@ -45,6 +49,12 @@ export function validateIdPhotoPrintRequest(request: DesktopIdPhotoPrintRequest)
       throw new Error("Dati immagine del foglio non validi.");
     }
   }
+  if (request.copies !== undefined && (!Number.isInteger(request.copies) || request.copies < 1 || request.copies > 99)) {
+    throw new Error("Numero di copie non valido.");
+  }
+  if (request.showDialog === false && !request.deviceName?.trim()) {
+    throw new Error("Seleziona una stampante per la stampa diretta.");
+  }
 }
 
 export function createIdPhotoPrintHtml(request: DesktopIdPhotoPrintRequest): string {
@@ -69,11 +79,20 @@ export async function printIdPhotoPagesDesktop(
 ): Promise<DesktopIdPhotoPrintResult> {
   const html = createIdPhotoPrintHtml(request);
   const printWindow = createWindow();
+  let temporaryDirectory: string | null = null;
   try {
-    await printWindow.loadURL(`data:text/html;base64,${Buffer.from(html, "utf8").toString("base64")}`);
+    temporaryDirectory = await mkdtemp(join(tmpdir(), "filex-id-photo-print-"));
+    const htmlPath = join(temporaryDirectory, "print.html");
+    // Un data URL con uno o più JPEG ad alta risoluzione supera il limite URL
+    // di Chromium e fallisce con ERR_INVALID_URL (-300). Il file resta locale,
+    // vive soltanto per la durata del dialogo e viene eliminato nel finally.
+    await writeFile(htmlPath, html, "utf8");
+    await printWindow.loadURL(pathToFileURL(htmlPath).href);
     return await new Promise((resolve) => {
       printWindow.webContents.print({
-        silent: false,
+        silent: request.showDialog === false,
+        ...(request.deviceName ? { deviceName: request.deviceName } : {}),
+        ...(request.copies ? { copies: request.copies } : {}),
         printBackground: true,
         margins: { marginType: "none" },
         pageSize: {
@@ -92,5 +111,6 @@ export async function printIdPhotoPagesDesktop(
     });
   } finally {
     if (!printWindow.isDestroyed()) printWindow.destroy();
+    if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true });
   }
 }

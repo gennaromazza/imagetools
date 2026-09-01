@@ -82,6 +82,9 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:create-id-photo-working-copy", request),
   cleanupIdPhotoWorkingFiles: (jobId) =>
     ipcRenderer.invoke("filex:cleanup-id-photo-working-files", jobId),
+  processIdPhotoBackground: (request) =>
+    ipcRenderer.invoke("filex:process-id-photo-background", request),
+  listIdPhotoPrinters: () => ipcRenderer.invoke("filex:list-id-photo-printers"),
   printIdPhotoPages: (request) => ipcRenderer.invoke("filex:print-id-photo-pages", request),
   statFiles: (absolutePaths) => ipcRenderer.invoke("filex:stat-files", absolutePaths),
   fingerprintFiles: (absolutePaths) => ipcRenderer.invoke("filex:fingerprint-files", absolutePaths),

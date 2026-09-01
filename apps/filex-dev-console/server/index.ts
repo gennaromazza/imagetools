@@ -288,7 +288,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-drive-link" || name === "test:archivio-flow-package-runtime" || name === "test:archivio-flow-photo-routing" || name === "test:photo-tool-handoff") return "archivio-flow";
   if (name === "test:image-party-frame-bug-hunt" || name === "test:image-party-frame-server" || name === "test:image-party-frame-package-runtime") return "image-party-frame";
   if (name === "test:batch-print-layout-bug-hunt" || name === "test:batch-print-layout-desktop-images") return "batch-print-layout";
-  if (name === "test:id-photo" || name === "test:id-photo-working-files" || name === "test:id-photo-file-fingerprint" || name === "test:id-photo-unload-guard" || name === "test:id-photo-package-runtime") return "id-photo";
+  if (name === "test:id-photo" || name === "test:id-photo-working-files" || name === "test:id-photo-file-fingerprint" || name === "test:id-photo-unload-guard" || name === "test:id-photo-package-runtime" || name === "test:id-photo-background" || name === "test:id-photo-background-smoke") return "id-photo";
   if (name === "test:image-converter-bug-hunt") return "image-converter";
   if (name === "test:image-file-finder-bug-hunt") return "image-file-finder";
   if (name === "test:cache-sweep-bug-hunt") return "cache-sweep";
@@ -320,11 +320,13 @@ function testDescription(name: string): string {
     "test:image-party-frame-package-runtime": "Controlla che il server PartyFrame e tutti i suoi import runtime locali siano inclusi nel pacchetto Electron.",
     "test:batch-print-layout-bug-hunt": "Stressa geometria, memoria e nomi export; verifica 501 file, collisioni senza overwrite, journal e acknowledgement, rollback dopo crash, sostituzioni concorrenti preservate e recovery conservativo di staging stale, attivi, recenti o symlink.",
     "test:batch-print-layout-desktop-images": "Verifica la policy desktop per JPG/RAW e l'abilitazione esplicita di HEIC, HEIF e TIFF.",
-    "test:id-photo": "Verifica profili, importazione singola e drag and drop, output con foto singola e foglio, persistenza e contesto export; controlla inoltre che la stampa apra il pannello nativo senza modalità silenziosa e senza adattamento pagina.",
+    "test:id-photo": "Verifica profili, importazione, controlli qualità non bloccanti, output e persistenza; copre sia il pannello driver sia la stampa diretta con stampante, copie e dimensioni fisiche dichiarate.",
     "test:id-photo-working-files": "Verifica che le copie per Photoshop siano atomiche, separate dagli originali e pulite solo dentro la commessa autorizzata.",
     "test:id-photo-file-fingerprint": "Calcola davvero SHA-256 e metadati degli output, verificando deduplica, file mancanti, percorsi non sicuri e timeout asincrono dell’intero batch.",
     "test:id-photo-unload-guard": "Verifica che una commessa non salvata resti aperta per impostazione predefinita, che la chiusura richieda conferma esplicita e che non si aprano dialoghi sovrapposti.",
     "test:id-photo-package-runtime": "Controlla chiusura degli import ASAR di main e preload, assenza di artefatti di sviluppo e smoke reale delle API IPC fingerprint e transazioni.",
+    "test:id-photo-background": "Verifica che lo scontorno usi esclusivamente il modello BiRefNet MIT fissato, con URL, dimensione e SHA-256 controllati, e rifiuti richieste non valide prima di leggere file.",
+    "test:id-photo-background-smoke": "Scarica una sola volta il modello gratuito nella cache temporanea, esegue davvero BiRefNet su un ritratto sintetico e verifica maschera e composizione generate.",
     "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",
     "test:image-file-finder-bug-hunt": "Stressa il parser con virgolette, separatori, percorsi e duplicati.",
     "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",

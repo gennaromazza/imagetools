@@ -38,6 +38,7 @@ import type {
   DesktopFolderCatalogState,
   DesktopFolderOpenOptions,
   DesktopGraphicsStatus,
+  DesktopIdPhotoBackgroundRequest,
   DesktopIdPhotoWorkingCopyRequest,
   DesktopIdPhotoPrintRequest,
   DesktopLogEvent,
@@ -197,6 +198,7 @@ import {
   printIdPhotoPagesDesktop,
   type IdPhotoPrintWindow,
 } from "./id-photo-print-service.js";
+import { processIdPhotoBackground } from "./id-photo-background-service.js";
 import { OpenProjectRequestQueue, PhotoToolHandoffManager } from "./photo-tool-handoff.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, Tray } = electron;
@@ -1695,6 +1697,19 @@ function registerIpcHandlers(): void {
     "filex:cleanup-id-photo-working-files",
     (_event, jobId: string) => cleanupIdPhotoWorkingFiles(getIdPhotoWorkingBasePath(), jobId),
   );
+  ipcMain.handle(
+    "filex:process-id-photo-background",
+    (_event, request: DesktopIdPhotoBackgroundRequest) =>
+      processIdPhotoBackground(getIdPhotoWorkingBasePath(), request),
+  );
+  ipcMain.handle("filex:list-id-photo-printers", async (event) => {
+    const printers = await event.sender.getPrintersAsync();
+    return printers.map((printer) => ({
+      name: printer.name,
+      displayName: printer.displayName || printer.name,
+      description: printer.description || "",
+    }));
+  });
   ipcMain.handle(
     "filex:print-id-photo-pages",
     (_event, request: DesktopIdPhotoPrintRequest) => printIdPhotoPagesDesktop(request, () => new BrowserWindow({

@@ -518,9 +518,11 @@ export async function renderPhotoCanvas(
 
   ctx.save();
   ctx.translate(contentX, contentY);
-  if (adjustments.blackAndWhiteEnabled) {
-    ctx.filter = "grayscale(1)";
-  }
+  const filters: string[] = [];
+  if (adjustments.blackAndWhiteEnabled) filters.push("grayscale(1)");
+  if (adjustments.brightness) filters.push(`brightness(${Math.max(0.5, Math.min(1.5, 1 + adjustments.brightness / 100))})`);
+  if (adjustments.contrast) filters.push(`contrast(${Math.max(0.5, Math.min(1.5, 1 + adjustments.contrast / 100))})`);
+  if (filters.length) ctx.filter = filters.join(" ");
   if (adjustments.fitMode === "contain") {
     drawCroppedImageContain(ctx, image, effectiveCrop, contentWidth, contentHeight);
   } else {

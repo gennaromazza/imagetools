@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { DOCUMENT_PROFILES, effectiveCropPixelSize, evaluateTechnicalChecks, safeJobName } from "./domain";
+import { canProduceIdPhotoOutput, DOCUMENT_PROFILES, effectiveCropPixelSize, evaluateTechnicalChecks, safeJobName } from "./domain";
 import { deriveIdPhotoJobStatus, parseIdPhotoJob } from "./job-store";
 
 describe("FileX ID Photo domain", () => {
+  it("lascia produrre l'output con avvisi qualità ma blocca la risoluzione insufficiente", () => {
+    const common = { hasAsset: true, hasCrop: true, pageCount: 1, pendingSourceChange: false };
+    expect(canProduceIdPhotoOutput({
+      ...common,
+      checks: [{ id: "brightness", label: "Luminosità", status: "fail", value: "20", message: "Avviso" }],
+    })).toBe(true);
+    expect(canProduceIdPhotoOutput({
+      ...common,
+      checks: [{ id: "resolution", label: "Risoluzione", status: "fail", value: "100×100", message: "Blocco" }],
+    })).toBe(false);
+  });
   it("mantiene il profilo CIE versionato e con fonte", () => {
     const cie = DOCUMENT_PROFILES.find((profile) => profile.id === "it-cie-35x45-v1");
     expect(cie).toMatchObject({

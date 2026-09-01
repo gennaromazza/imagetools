@@ -2,7 +2,7 @@
 
 ## Stato del progetto
 
-**Versione 0.1.1 pronta per la distribuzione stabile con FileX Suite 0.1.61 o successiva. La versione include il flusso completo di importazione, preparazione, esportazione e stampa nativa.**
+**Versione 0.1.2 pronta per la distribuzione stabile con FileX Suite 0.1.61 o successiva. La versione include preparazione non distruttiva, sfondo locale nel preset studio, esportazione e stampa con anteprima FileX.**
 
 Questo dossier definisce come progettare, integrare, validare e pubblicare il prossimo tool FileX dedicato alle fototessere per documenti. Il prodotto è rivolto esclusivamente a fotografi professionisti, studi e negozi; non è progettato come servizio consumer o web.
 
@@ -28,7 +28,9 @@ Il renderer è in `apps/id-photo`; catalogo, script e metadati di distribuzione 
 - apertura diretta da Archivio Flow con una singola foto selezionata dalla scheda, tramite handoff locale consume-once e senza duplicare i byte nel manifest;
 - profili versionati CIE 35×45, passaporto italiano 35×45 con fonte MAECI e formato generico 35×45 dichiarato come preset studio;
 - crop guidato, zoom, posizione e rotazione senza modifica dell'originale;
-- controlli tecnici locali su risoluzione, luminosità, contrasto, nitidezza e uniformità dello sfondo;
+- controlli tecnici locali non bloccanti su luminosità, contrasto, nitidezza e uniformità dello sfondo; soltanto risoluzione insufficiente e integrità della sorgente impediscono l'output;
+- regolazioni non distruttive di luminosità e contrasto applicate in modo identico ad anteprima, export e stampa;
+- nel preset studio, uniformazione o sostituzione dello sfondo con BiRefNet MIT eseguito localmente tramite ONNX Runtime; il modello viene scaricato solo al primo uso, verificato con SHA-256 e nessuna fotografia viene caricata in rete;
 - passaggio Photoshop su copia atomica gestita da FileX, rilevamento della modifica, snapshot reali ripristinabili e rientro sullo stesso file o tramite “Salva con nome” flattenato;
 - comando separato per eliminare copie e revisioni Photoshop mantenendo commessa, originali e output;
 - output scritto senza sovrascrivere file esistenti, registrato subito come verifica in attesa e promosso a pronto solo dopo SHA-256; alla riapertura e durante la sessione il retry usa gli stessi file, senza riesportazioni o suffissi;
@@ -37,7 +39,7 @@ Il renderer è in `apps/id-photo`; catalogo, script e metadati di distribuzione 
 - apertura del pannello di stampa nativo Windows/macOS con fogli renderizzati alla risoluzione del profilo selezionato;
 - integrazione Suite, licenza, Dev Console, CI, pipeline di release, icona, pagina marketing e guida pubblica.
 
-Resta fuori dal prodotto la calibrazione automatica delle stampanti. Il pannello nativo è disponibile; l'operatore deve verificare nel driver scala 100% e adattamento pagina disattivato.
+Resta fuori dal prodotto la calibrazione automatica delle stampanti. FileX mostra l'anteprima reale e consente la stampa diretta alle dimensioni fisiche dichiarate; le proprietà avanzate del driver rimangono disponibili separatamente.
 
 ## Promessa di prodotto
 
@@ -81,7 +83,7 @@ La prima versione deve permettere a un operatore esperto di creare, verificare, 
 8. guida integrata persistente, consultabile senza abbandonare la commessa e senza cambiare lo step di lavoro corrente;
 9. apertura del pannello di stampa Windows/macOS con fogli alle dimensioni fisiche richieste e verifica manuale delle opzioni del driver.
 
-Il tool non rimuove né sostituisce automaticamente lo sfondo. Gli interventi restano manuali e devono rispettare la policy mostrata dal profilo documento.
+La modifica automatica dello sfondo è disponibile esclusivamente nel preset studio. Nei profili ufficiali CIE e passaporto FileX analizza lo sfondo ma disattiva uniformazione e sostituzione; Photoshop resta sempre disponibile come percorso professionale opzionale su copia gestita.
 
 ## Principi non negoziabili
 
@@ -99,10 +101,10 @@ Sono fuori ambito finché non approvati e verificati:
 
 - riconoscimento o identificazione univoca delle persone;
 - invio cloud delle immagini o account cliente;
-- generazione di visi, ricostruzione di porzioni mancanti o beauty retouch automatico;
+- generazione di visi, ricostruzione di porzioni mancanti, snellimento del volto o beauty retouch automatico;
 - esecuzione automatica di Azioni Photoshop;
 - gestione colore ICC completa e soft proof certificato;
-- stampa silenziosa senza pannello di sistema e calibrazione automatica;
+- calibrazione automatica e certificazione colore per specifici modelli di stampante;
 - supporto dichiarato a Paesi o documenti senza fonte ufficiale registrata;
 - certificazione o garanzia di accettazione da parte di Questure, Comuni, consolati o altri enti.
 
