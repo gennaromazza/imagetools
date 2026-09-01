@@ -15,6 +15,7 @@ TEST FOTO/
 .env.local
 **/.env.local
 apps/filex-desktop/src/google-drive-config.generated.ts
+apps/filex-send/electron/firebase-config.generated.ts
 apps/image-party-frame/exports/
 apps/image-party-frame/uploads/
 apps/image-party-frame/temp-test.png
