@@ -19,7 +19,7 @@ import {
 } from "../photoToolRouting";
 
 interface Props {
-  sdPath: string;
+  sdPath: string | null;
   onStartImport: (dateFilter: string | null) => void;
 }
 
@@ -86,6 +86,18 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
   const previewIsTruncated = Boolean(allMedia && allMedia.matchedFiles > allMedia.sampleFiles.length);
 
   useEffect(() => {
+    if (!sdPath) {
+      setPreview(null);
+      setAllMedia(null);
+      setLoading(false);
+      setSelectedPaths(new Set());
+      setSendingTarget(null);
+      setRoutingFeedback(null);
+      setVisibleMediaCount(PREVIEW_PAGE_SIZE);
+      setSafeCheck(null);
+      setCheckingSafe(false);
+      return;
+    }
     let active = true;
     setLoading(true);
     setSafeCheck(null);
@@ -134,6 +146,11 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
   }, [media?.sampleFiles.length, visibleMediaCount]);
 
   async function verifySd() {
+    if (!sdPath) {
+      setCheckingSafe(false);
+      setRoutingFeedback("Nessuna scheda SD rilevata.");
+      return;
+    }
     setCheckingSafe(true);
     try {
       setSafeCheck(await checkArchivioSafeToFormat(sdPath));
@@ -163,6 +180,10 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
   }
 
   async function handleSendToTool(targetToolId: PhotoToolTargetId) {
+    if (!sdPath) {
+      setRoutingFeedback("Nessuna scheda SD rilevata.");
+      return;
+    }
     const validation = validatePhotoToolSelection(targetToolId, selectedPaths.size);
     if (!validation.valid) {
       setRoutingFeedback(validation.message);
@@ -211,16 +232,20 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
         <div>
           <div style={{ display: "flex", gap: "0.8rem", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
             <div>
-              <strong>SD: {sdPath}</strong>
+              {sdPath ? (
+                <strong>SD: {sdPath}</strong>
+              ) : (
+                <strong>Nessuna scheda SD rilevata</strong>
+              )}
               <span style={{ marginLeft: "0.65rem", color: "var(--text-muted)", fontSize: "0.88rem" }}>
-                {loading ? "Rilevamento contenuto…" : `${preview?.totalFiles ?? 0} file · ${(preview?.rawFiles ?? 0) + (preview?.jpgFiles ?? 0)} foto · ${preview?.videoFiles ?? 0} video`}
+                {loading ? "Rilevamento contenuto…" : (preview?.totalFiles ?? 0) > 0 ? `${preview?.totalFiles} file · ${(preview?.rawFiles ?? 0) + (preview?.jpgFiles ?? 0)} foto · ${preview?.videoFiles ?? 0} video` : "In attesa di una scheda"}
               </span>
             </div>
             <div className="button-row">
-              <button className="ghost-button" onClick={() => { void verifySd(); }} disabled={checkingSafe || loading}>
+              <button className="ghost-button" onClick={() => { void verifySd(); }} disabled={!sdPath || checkingSafe || loading}>
                 {checkingSafe ? "Verifica…" : safeCheck?.status === "SAFE" ? "SD sicura" : "Verifica SD"}
               </button>
-              <button className="primary-button" onClick={() => onStartImport(filterMode === "date" ? selectedDate : null)} disabled={loading}>
+              <button className="primary-button" onClick={() => onStartImport(filterMode === "date" ? selectedDate : null)} disabled={!sdPath || loading}>
                 {filterMode === "date" ? "Importa questa data" : "Importa questa SD"}
               </button>
             </div>
@@ -228,14 +253,33 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
         </div>
       </div>
 
-      <section className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
+      {!sdPath ? (
+        <section className="panel-section" style={{ padding: "var(--space-5)", display: "grid", placeItems: "center", minHeight: "320px", textAlign: "center" }}>
+          <div style={{ display: "grid", justifyItems: "center", gap: "1rem" }}>
+            <div aria-hidden="true" style={{ display: "grid", placeItems: "center", width: "88px", height: "88px", borderRadius: "20px", background: "rgba(184, 154, 99, 0.1)", border: "1px solid var(--line)" }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent-strong)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="7" y="9" width="10" height="11" rx="2" />
+                <path d="M10 6h4v3h-4z" />
+                <path d="M9 12h6" />
+                <path d="M9 15h6" />
+              </svg>
+            </div>
+            <div>
+              <strong style={{ fontSize: "1.2rem" }}>In attesa di una scheda</strong>
+              <p style={{ margin: "0.4rem 0 0", color: "var(--text-muted)", fontSize: "0.9rem" }}>Inserisci una SD nel lettore per iniziare.</p>
+            </div>
+          </div>
+        </section>
+      ) : (
+        <>
+        <section className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
         <div className="stack" style={{ gap: "0.8rem" }}>
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "end", justifyContent: "space-between", flexWrap: "wrap" }}>
             <div>
               <strong>{media
                 ? filterMode === "date"
-                  ? `${media.sampleFiles.length} elementi disponibili per questa data · visualizzati ${Math.min(visibleMediaCount, media.sampleFiles.length)}`
-                  : `${media.matchedFiles} file filtrati · ${media.sampleFiles.length} disponibili in griglia · visualizzati ${Math.min(visibleMediaCount, media.sampleFiles.length)}`
+                  ? `${media.sampleFiles.length} elementi disponibili per questa data · visualizzati ${Math.min(visibleMediaCount, media.sampleFiles.length)}${previewIsTruncated && ` · Vista parziale · max 5.000`}`
+                  : `${media.matchedFiles} file filtrati · ${media.sampleFiles.length} disponibili in griglia · visualizzati ${Math.min(visibleMediaCount, media.sampleFiles.length)}${previewIsTruncated && ` · Vista parziale · max 5.000`}`
                 : "Carico contenuto…"}</strong>
               <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.84rem" }}>Scegli se importare tutta la scheda oppure solo un giorno.</p>
             </div>
@@ -266,17 +310,8 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
               ))}
             </div>
           )}
-          {previewIsTruncated && (
-            <div className="message-box sd-preview-limit-note" role="note">
-              <strong>Vista parziale · massimo 5.000 elementi</strong>
-              <p>
-                La scansione ha trovato {allMedia?.matchedFiles ?? 0} file filtrati. Questa schermata rende disponibili
-                soltanto i {allMedia?.sampleFiles.length ?? 0} elementi restituiti dall’anteprima; gli altri non sono
-                selezionabili da questa griglia.
-              </p>
-            </div>
-          )}
-          <div className="sd-tool-routing" aria-label="Invia foto selezionate ai tool FileX">
+          {selectedPaths.size > 0 && (
+            <div className="sd-tool-routing" aria-label="Invia foto selezionate ai tool FileX">
             <div className="sd-tool-routing__header">
               <div>
                 <strong>Continua il lavoro in FileX</strong>
@@ -330,6 +365,7 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
             </div>
             {routingFeedback && <p className="sd-tool-routing__feedback" role="status" aria-live="polite">{routingFeedback}</p>}
           </div>
+          )}
           {media && (
             <div className="sd-media-grid">
               {visibleFiles.map((file) => {
@@ -349,7 +385,7 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
                       aria-label={compatible ? `Seleziona ${file.fileName}` : `${file.fileName}: formato non inviabile direttamente`}
                     />
                     {isPreviewableMedia(file) ? (
-                      <DesktopPreviewImage sdPath={sdPath} filePath={file.filePath} sourceFileKey={buildPreviewSourceKey(file)} alt={file.fileName} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 7 }} />
+                      <DesktopPreviewImage sdPath={sdPath!} filePath={file.filePath} sourceFileKey={buildPreviewSourceKey(file)} alt={file.fileName} style={{ width: "100%", height: 100, objectFit: "cover", borderRadius: 7 }} />
                     ) : (
                       <div style={{ width: "100%", height: 100, borderRadius: 7, display: "grid", placeItems: "center", background: "rgba(255,255,255,0.05)", color: "var(--text-muted)" }}>
                         FOTO {file.ext.toUpperCase()}
@@ -391,6 +427,8 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
           </div>
         </div>
       </details>
+        </>
+      )}
     </div>
   );
 }

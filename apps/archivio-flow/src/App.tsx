@@ -12,7 +12,7 @@ type Screen = "sd" | "nuovo" | "archivio" | "drive" | "impostazioni";
 const SIDEBAR_COLLAPSED_KEY = "filex.archivio-flow.sidebar-collapsed";
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("archivio");
+  const [screen, setScreen] = useState<Screen>("sd");
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [archiveAnalyzing, setArchiveAnalyzing] = useState(false);
@@ -62,7 +62,6 @@ export default function App() {
         if (!detectedCard && detectedSdIdentityRef.current) {
           detectedSdIdentityRef.current = null;
           setDetectedSdPath(null);
-          setScreen((current) => current === "sd" || current === "nuovo" ? "archivio" : current);
           void showArchivioFlowWindow().catch(() => undefined);
         }
         if (newCard) {
@@ -127,8 +126,8 @@ export default function App() {
 
         <nav className="stack">
           <button
-            className={screen === "nuovo" ? "workflow-step workflow-step--active" : "workflow-step"}
-            onClick={() => setScreen("nuovo")}
+            className={screen === "sd" || screen === "nuovo" ? "workflow-step workflow-step--active" : "workflow-step"}
+            onClick={() => setScreen("sd")}
             title="Nuovo lavoro"
           >
             <span aria-hidden="true">＋</span>
@@ -191,7 +190,7 @@ export default function App() {
             <p style={{ margin: 0 }}>{backupGuardFeedback}</p>
           </div>
         )}
-        {screen === "sd" && detectedSdPath && (
+        <div style={{ display: screen === "sd" ? "block" : "none" }} aria-hidden={screen !== "sd"}>
           <SdCardPreviewPanel
             sdPath={detectedSdPath}
             onStartImport={(dateFilter) => {
@@ -199,7 +198,7 @@ export default function App() {
               setScreen("nuovo");
             }}
           />
-        )}
+        </div>
         {(screen === "nuovo" || screen === "impostazioni") && (
           <NuovoLavoroPanel
             onImportDone={handleImportDone}
