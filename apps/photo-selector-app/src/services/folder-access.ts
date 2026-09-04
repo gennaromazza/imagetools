@@ -506,6 +506,65 @@ export function buildDetachedPlaceholderAssets(entries: FolderEntry[], sourceNam
   return createPlaceholderAssets(entries, sourceNamespace, false);
 }
 
+function moveStoreEntry(store: Map<string, string>, oldId: string, newId: string, nextValue?: string): void {
+  store.delete(oldId);
+  if (nextValue !== undefined) {
+    store.set(newId, nextValue);
+  }
+}
+
+/**
+ * Sposta le registrazioni dei percorsi dopo una rinomina, senza rescansione:
+ * miniature e anteprime ripartono dal nuovo path invece di restare orfane.
+ */
+export function remapAssetStoresForRename(
+  oldId: string,
+  newId: string,
+  next: { relativePath: string; absolutePath: string; sourceFileKey: string },
+): void {
+  const dropPreviewCaches = (id: string) => {
+    livePreviewStore.delete(id);
+    onDemandPreviewPromiseStore.delete(id);
+    for (const cacheKey of [...onDemandPreviewStore.keys()]) {
+      if (cacheKey === id || cacheKey.startsWith(`${id}::`)) {
+        const url = onDemandPreviewStore.get(cacheKey);
+        if (url) {
+          URL.revokeObjectURL(url);
+        }
+        onDemandPreviewStore.delete(cacheKey);
+      }
+    }
+    filePromiseStore.delete(id);
+  };
+  dropPreviewCaches(oldId);
+  if (oldId !== newId) {
+    dropPreviewCaches(newId);
+  }
+  moveStoreEntry(assetPathStore, oldId, newId, next.relativePath);
+  moveStoreEntry(assetAbsolutePathStore, oldId, newId, next.absolutePath);
+  moveStoreEntry(assetSourceFileKeyStore, oldId, newId, next.sourceFileKey);
+  const companionAbsolutePath = assetCompanionAbsolutePathStore.get(oldId);
+  const companionRelativePath = assetCompanionRelativePathStore.get(oldId);
+  const companionSourceFileKey = assetCompanionSourceFileKeyStore.get(oldId);
+  const companionFileName = assetCompanionFileNameStore.get(oldId);
+  assetCompanionAbsolutePathStore.delete(oldId);
+  assetCompanionRelativePathStore.delete(oldId);
+  assetCompanionSourceFileKeyStore.delete(oldId);
+  assetCompanionFileNameStore.delete(oldId);
+  if (companionAbsolutePath !== undefined) {
+    assetCompanionAbsolutePathStore.set(newId, companionAbsolutePath);
+  }
+  if (companionRelativePath !== undefined) {
+    assetCompanionRelativePathStore.set(newId, companionRelativePath);
+  }
+  if (companionSourceFileKey !== undefined) {
+    assetCompanionSourceFileKeyStore.set(newId, companionSourceFileKey);
+  }
+  if (companionFileName !== undefined) {
+    assetCompanionFileNameStore.set(newId, companionFileName);
+  }
+}
+
 function getEntryParentPath(relativePath: string): string {
   const idx = relativePath.lastIndexOf("/");
   return idx >= 0 ? relativePath.slice(0, idx) : "";

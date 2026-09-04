@@ -1,10 +1,16 @@
 import type {
+  DesktopCaptureTimeReading,
   DesktopFolderCatalogAssetState,
   DesktopFolderCatalogState,
   DesktopFreeSelectionSnapshot,
   DesktopLogEvent,
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
+  ImageConverterJobConfig,
+  ImageConverterPreset,
+  ImageConverterProgressSnapshot,
+  DesktopPhotoFileRenameItem,
+  DesktopPhotoFileRenameResult,
   DesktopPhotoSelectorPreferences,
   DesktopPhotoSelectorProjectFile,
   DesktopPhotoSelectorProjectLocation,
@@ -169,6 +175,125 @@ export async function listPhotoSelectorLegacyProjects(
   }
   try {
     return await api.listPhotoSelectorLegacyProjects(rootPath);
+  } catch {
+    return [];
+  }
+}
+
+export async function readCaptureTimes(
+  absolutePaths: string[],
+): Promise<DesktopCaptureTimeReading[]> {
+  const api = getDesktopApi();
+  if (!api?.readCaptureTimes || absolutePaths.length === 0) {
+    return [];
+  }
+  try {
+    const readings = await api.readCaptureTimes(absolutePaths);
+    return Array.isArray(readings) ? readings : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function renamePhotoFiles(
+  rootPath: string,
+  items: DesktopPhotoFileRenameItem[],
+): Promise<DesktopPhotoFileRenameResult[]> {
+  const api = getDesktopApi();
+  if (!api?.renamePhotoFiles || !rootPath || items.length === 0) {
+    return [];
+  }
+  try {
+    const results = await api.renamePhotoFiles(rootPath, items);
+    return Array.isArray(results) ? results : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getImageConverterPresets(): Promise<ImageConverterPreset[]> {
+  const api = getDesktopApi();
+  if (!api?.getImageConverterPresets) {
+    return [];
+  }
+  try {
+    const presets = await api.getImageConverterPresets();
+    return Array.isArray(presets) ? presets : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function startImageConverterJob(
+  config: ImageConverterJobConfig,
+): Promise<{ ok: boolean; error?: string }> {
+  const api = getDesktopApi();
+  if (!api?.startImageConverterJob) {
+    return { ok: false, error: "Motore di conversione non disponibile: aggiorna FileX Suite." };
+  }
+  try {
+    const result = await api.startImageConverterJob(config);
+    if (result?.ok) {
+      return { ok: true };
+    }
+    return { ok: false, error: result?.error ?? "Avvio esportazione non riuscito." };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Avvio esportazione non riuscito." };
+  }
+}
+
+export async function getImageConverterProgress(): Promise<ImageConverterProgressSnapshot | null> {
+  const api = getDesktopApi();
+  if (!api?.getImageConverterProgress) {
+    return null;
+  }
+  try {
+    return await api.getImageConverterProgress();
+  } catch {
+    return null;
+  }
+}
+
+export async function cancelImageConverterJob(): Promise<void> {
+  const api = getDesktopApi();
+  try {
+    await api?.cancelImageConverterJob?.();
+  } catch {
+    // best-effort
+  }
+}
+
+export async function chooseImageConverterFolders(): Promise<string[]> {
+  const api = getDesktopApi();
+  if (!api?.chooseImageConverterFolders) {
+    return [];
+  }
+  try {
+    const folders = await api.chooseImageConverterFolders();
+    return Array.isArray(folders) ? folders : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function openImageConverterFolder(folderPath: string): Promise<void> {
+  const api = getDesktopApi();
+  try {
+    await api?.openImageConverterFolder?.(folderPath);
+  } catch {
+    // best-effort
+  }
+}
+
+export async function findNestedPhotoSelectorProjects(
+  rootPath: string,
+): Promise<DesktopPhotoSelectorProjectLocation[]> {
+  const api = getDesktopApi();
+  if (!api?.findNestedPhotoSelectorProjects) {
+    return [];
+  }
+  try {
+    return await api.findNestedPhotoSelectorProjects(rootPath);
   } catch {
     return [];
   }

@@ -30,6 +30,16 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-04 - Image Select Pro 0.1.39
+
+- Il tasto destro su una cartella apre direttamente il progetto giusto o la modalità libera, senza chiedere ogni volta: riconosce i master sopra e dentro la cartella e ricorda la scelta per fingerprint.
+- All'avvio l'app riprende da sola l'ultima sessione con selezione e classificazioni.
+- Nuovo ordinamento per data di scatto EXIF con subsecondi, cache e diagnosi degli orologi sfasati tra corpi macchina.
+- Rilevati i probabili duplicati per peso e dimensioni, con azioni di gruppo reversibili.
+- Rinomina batch con anteprima (data di scatto o nome personalizzato con sequenza, XMP al seguito) e ordinamento manuale della griglia applicabile ai nomi.
+- Esportazione selezionate integrata con il motore Image Converter (JPEG/WebP, qualità, dimensioni, destinazione, metadati).
+- Condivisione da Quick Preview: copia, WhatsApp con numero, email e download, con messaggi di stato chiari.
+
 ## 2026-09-04 - Archivio Flow 0.1.40
 
 - La voce "Nuovo lavoro" della sidebar apre la Home SD, raggiungibile manualmente anche senza scheda inserita; senza SD viene mostrato lo stato vuoto "In attesa di una scheda".

@@ -324,9 +324,15 @@ export function PhotoQuickPreviewModal({
   const [zoomLevel, setZoomLevel] = useState(startZoomed ? 2.2 : 1);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const [shareTone, setShareTone] = useState<"info" | "success" | "error">("info");
   const [shareBusy, setShareBusy] = useState(false);
   const [waAskPhone, setWaAskPhone] = useState(false);
   const [waPhone, setWaPhone] = useState(() => window.localStorage.getItem("filex.shareWaPhone") ?? "");
+
+  function setShareStatus(message: string, tone: "info" | "success" | "error" = "info") {
+    setShareMessage(message);
+    setShareTone(tone);
+  }
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const panOffsetRef = useRef({ x: 0, y: 0 });
@@ -383,22 +389,46 @@ export function PhotoQuickPreviewModal({
     setWaAskPhone(false);
   }, [shareAssetId]);
 
-  async function loadShareBlob(): Promise<Blob | null> {
-    if (!assetAbsolutePath) {
-      return null;
+  async function loadShareBlob(): Promise<{ blob: Blob; lowResolution: boolean } | null> {
+    if (assetAbsolutePath) {
+      const full = await getDesktopShareBlob(assetAbsolutePath, 2048);
+      if (full) {
+        return { blob: full, lowResolution: false };
+      }
     }
-    return await getDesktopShareBlob(assetAbsolutePath, 2048);
+    // Fallback: anteprima già mostrata o miniatura, se recuperabile via fetch.
+    const fallbacks = asset ? [displayPreviewUrl, getQuickPreviewThumbUrl(asset)] : [];
+    for (const url of fallbacks) {
+      if (!url || (!url.startsWith("blob:") && !url.startsWith("http") && !url.startsWith("data:"))) {
+        continue;
+      }
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          continue;
+        }
+        const blob = await response.blob();
+        if (blob && blob.size > 0) {
+          return { blob, lowResolution: true };
+        }
+      } catch {
+        // prova la sorgente successiva
+      }
+    }
+    return null;
   }
 
-  async function copyPreviewImage(): Promise<boolean> {
+  type ShareCopyOutcome = "full" | "lowres" | "failed";
+
+  async function copyPreviewImage(): Promise<ShareCopyOutcome> {
     try {
-      const blob = await loadShareBlob();
-      if (!blob || typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
-        return false;
+      const loaded = await loadShareBlob();
+      if (!loaded || typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
+        return "failed";
       }
-      const bitmap = await createImageBitmap(blob).catch(() => null);
+      const bitmap = await createImageBitmap(loaded.blob).catch(() => null);
       if (!bitmap) {
-        return false;
+        return "failed";
       }
       try {
         const canvas = document.createElement("canvas");
@@ -406,31 +436,35 @@ export function PhotoQuickPreviewModal({
         canvas.height = bitmap.height;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
-          return false;
+          return "failed";
         }
         ctx.drawImage(bitmap, 0, 0);
         const png = await new Promise<Blob | null>((resolve) => canvas.toBlob((next) => resolve(next), "image/png"));
         if (!png) {
-          return false;
+          return "failed";
         }
         await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
-        return true;
+        return loaded.lowResolution ? "lowres" : "full";
       } finally {
         if (typeof bitmap.close === "function") bitmap.close();
       }
     } catch {
-      return false;
+      return "failed";
     }
   }
 
   async function handleShareCopy() {
     setShareBusy(true);
-    setShareMessage("Copia in corso…");
+    setShareStatus("Copia in corso…");
     try {
       const copied = await copyPreviewImage();
-      setShareMessage(copied
-        ? "Immagine copiata: incollala con Ctrl+V in chat, email o WhatsApp."
-        : "Copia non riuscita in questo contesto: usa Salva copia e allega il file manualmente.");
+      if (copied === "full") {
+        setShareStatus("Immagine copiata in alta qualità: incollala con Ctrl+V in chat, email o WhatsApp.", "success");
+      } else if (copied === "lowres") {
+        setShareStatus("Anteprima HD non disponibile: copiata in bassa risoluzione. Per l'originale usa Scarica.", "error");
+      } else {
+        setShareStatus("Copia non riuscita in questo contesto: usa Scarica e allega il file manualmente.", "error");
+      }
     } finally {
       setShareBusy(false);
     }
@@ -438,29 +472,33 @@ export function PhotoQuickPreviewModal({
 
   function handleShareWhatsApp() {
     setWaAskPhone(true);
-    setShareMessage("Inserisci il numero: copierò l'immagine e aprirò la chat, poi incolla con Ctrl+V.");
+    setShareStatus("Inserisci il numero: copierò l'immagine e aprirò la chat, poi incolla con Ctrl+V.");
   }
 
   async function handleOpenWhatsAppChat() {
     const digits = waPhone.replace(/\D/g, "");
     if (digits.length < 7 || digits.length > 15) {
-      setShareMessage("Inserisci un numero valido in formato internazionale (es. 393491234567).");
+      setShareStatus("Inserisci un numero valido in formato internazionale (es. 393491234567).", "error");
       return;
     }
     setShareBusy(true);
-    setShareMessage("Copia in corso…");
+    setShareStatus("Copia in corso…");
     try {
       const copied = await copyPreviewImage();
-      if (!copied) {
+      if (copied === "failed") {
         await handleShareDownload();
       }
       window.localStorage.setItem("filex.shareWaPhone", waPhone);
       setWaAskPhone(false);
       const fileName = asset?.fileName ?? "foto";
       window.open(`https://wa.me/${digits}?text=${encodeURIComponent(`Ti invio questa foto: ${fileName}`)}`, "_blank", "noopener");
-      setShareMessage(copied
-        ? "Chat aperta: incolla l'immagine con Ctrl+V nel messaggio."
-        : "Chat aperta: la copia non è riuscita, allega la foto scaricata.");
+      if (copied === "full") {
+        setShareStatus("Chat aperta: incolla l'immagine con Ctrl+V nel messaggio.", "success");
+      } else if (copied === "lowres") {
+        setShareStatus("Chat aperta: incolla con Ctrl+V (bassa risoluzione) oppure allega il file scaricato.", "error");
+      } else {
+        setShareStatus("Chat aperta: la copia non è riuscita, allega la foto scaricata.", "error");
+      }
     } finally {
       setShareBusy(false);
     }
@@ -468,23 +506,26 @@ export function PhotoQuickPreviewModal({
 
   async function handleShareEmail() {
     setShareBusy(true);
+    setShareStatus("Copia in corso…");
     try {
-      await copyPreviewImage();
+      const copied = await copyPreviewImage();
+      const fileName = asset?.fileName ?? "foto";
+      window.location.href = `mailto:?subject=${encodeURIComponent(`Foto ${fileName}`)}&body=${encodeURIComponent("Ti invio questa foto in anteprima.")}`;
+      setShareStatus(copied === "failed"
+        ? "Email aperta: la copia non è riuscita, allega il file manualmente."
+        : "Email aperta: incolla l'immagine copiata nel messaggio.", copied === "failed" ? "error" : "success");
     } finally {
       setShareBusy(false);
     }
-    const fileName = asset?.fileName ?? "foto";
-    window.location.href = `mailto:?subject=${encodeURIComponent(`Foto ${fileName}`)}&body=${encodeURIComponent("Ti invio questa foto in anteprima.")}`;
-    setShareMessage("Email aperta: incolla l'immagine copiata nel messaggio.");
   }
 
   async function handleShareDownload() {
-    const blob = await loadShareBlob();
-    if (!blob) {
-      setShareMessage("Download non riuscito per questa foto.");
+    const loaded = await loadShareBlob();
+    if (!loaded) {
+      setShareStatus("Download non riuscito per questa foto.", "error");
       return;
     }
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(loaded.blob);
     try {
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -492,7 +533,7 @@ export function PhotoQuickPreviewModal({
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      setShareMessage("Foto scaricata.");
+      setShareStatus(loaded.lowResolution ? "Foto scaricata in bassa risoluzione." : "Foto scaricata.", "success");
     } finally {
       URL.revokeObjectURL(url);
     }
@@ -2873,47 +2914,76 @@ export function PhotoQuickPreviewModal({
 
         {shareOpen ? (
           <div
-            className="quick-preview__share-bar"
-            style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", padding: "0.45rem 0.9rem" }}
+            className="quick-preview__share-panel"
+            style={{
+              margin: "0 0.9rem",
+              padding: "0.65rem 0.8rem",
+              border: "1px solid var(--line-strong, rgba(255,255,255,0.14))",
+              borderRadius: 12,
+              background: "rgba(255,255,255,0.03)",
+              display: "grid",
+              gap: "0.55rem",
+            }}
           >
-            <button type="button" className="ghost-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleShareCopy(); }}>
-              Copia immagine
-            </button>
-            <button type="button" className="ghost-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleShareWhatsApp(); }}>
-              WhatsApp
-            </button>
-            <button type="button" className="ghost-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleShareEmail(); }}>
-              Email
-            </button>
-            <button type="button" className="ghost-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleShareDownload(); }}>
-              Scarica
-            </button>
-            {shareMessage ? (
-              <span role="status" style={{ fontSize: "0.82rem", opacity: 0.75 }}>{shareMessage}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}>
+              <strong style={{ fontSize: "0.88rem", flex: 1 }}>Condividi questa foto</strong>
+              <button
+                type="button"
+                className="ghost-button quick-preview__action"
+                onClick={() => { setShareOpen(false); setShareMessage(null); setWaAskPhone(false); }}
+                aria-label="Chiudi condivisione"
+                style={{ padding: "0.25rem 0.6rem", fontSize: "0.8rem" }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button type="button" className="ghost-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleShareCopy(); }}>
+                Copia immagine
+              </button>
+              <button type="button" className="ghost-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleShareWhatsApp(); }}>
+                WhatsApp
+              </button>
+              <button type="button" className="ghost-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleShareEmail(); }}>
+                Email
+              </button>
+              <button type="button" className="ghost-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleShareDownload(); }}>
+                Scarica
+              </button>
+            </div>
+            {waAskPhone ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                <label htmlFor="quick-share-phone" style={{ fontSize: "0.82rem", opacity: 0.8 }}>
+                  Numero WhatsApp:
+                </label>
+                <input
+                  id="quick-share-phone"
+                  type="tel"
+                  value={waPhone}
+                  onChange={(event) => setWaPhone(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter") void handleOpenWhatsAppChat(); }}
+                  placeholder="es. 393491234567"
+                  inputMode="tel"
+                  style={{ fontSize: "0.85rem", padding: "0.4rem 0.65rem", borderRadius: 8, minWidth: 190 }}
+                />
+                <button type="button" className="primary-button quick-preview__action" disabled={shareBusy} onClick={() => { void handleOpenWhatsAppChat(); }} style={{ padding: "0.4rem 0.9rem", fontSize: "0.82rem" }}>
+                  Apri chat
+                </button>
+              </div>
             ) : null}
-          </div>
-        ) : null}
-        {shareOpen && waAskPhone ? (
-          <div
-            className="quick-preview__share-bar"
-            style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", padding: "0.45rem 0.9rem" }}
-          >
-            <label htmlFor="quick-share-phone" style={{ fontSize: "0.82rem", opacity: 0.75 }}>
-              Numero WhatsApp (formato internazionale):
-            </label>
-            <input
-              id="quick-share-phone"
-              type="tel"
-              value={waPhone}
-              onChange={(event) => setWaPhone(event.target.value)}
-              onKeyDown={(event) => { if (event.key === "Enter") handleOpenWhatsAppChat(); }}
-              placeholder="es. 393491234567"
-              inputMode="tel"
-              style={{ fontSize: "0.85rem", padding: "0.35rem 0.6rem", borderRadius: 8, minWidth: 180 }}
-            />
-            <button type="button" className="ghost-button quick-preview__action" onClick={handleOpenWhatsAppChat}>
-              Apri chat
-            </button>
+            {shareMessage ? (
+              <p
+                role="status"
+                style={{
+                  margin: 0,
+                  fontSize: "0.82rem",
+                  color: shareTone === "success" ? "var(--success, #7fce8a)" : shareTone === "error" ? "#e0a75e" : undefined,
+                  opacity: shareTone === "info" ? 0.8 : 1,
+                }}
+              >
+                {shareMessage}
+              </p>
+            ) : null}
           </div>
         ) : null}
 

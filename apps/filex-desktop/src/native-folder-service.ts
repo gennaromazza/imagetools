@@ -88,6 +88,146 @@ function sidecarPathForAsset(absolutePath: string): string {
   return join(assetDir, `${assetName}.xmp`);
 }
 
+const PHOTO_RENAME_FORBIDDEN = /[<>:"/\\|?*\x00-\x1f]/;
+
+export interface PhotoFileRenameItem {
+  fromAbsolutePath: string;
+  toFileName: string;
+}
+
+export interface PhotoFileRenameResult {
+  fromAbsolutePath: string;
+  toAbsolutePath: string;
+  ok: boolean;
+  error?: string;
+}
+
+function failRename(
+  fromAbsolutePath: string,
+  toAbsolutePath: string,
+  error: string,
+): PhotoFileRenameResult {
+  return { fromAbsolutePath, toAbsolutePath, ok: false, error };
+}
+
+/**
+ * Rinomina file fotografici dentro la radice indicata (sottocartelle incluse),
+ * con sidecar XMP al seguito. Il nuovo nome resta nella stessa cartella
+ * del file: mai spostamenti né sovrascritture.
+ * Due fasi via nomi temporanei (gestisce scambi, cicli e cambi solo-maiuscole);
+ * ogni file è isolato: l'errore su uno non blocca gli altri.
+ */
+export async function renamePhotoFilesDesktop(
+  rootPath: string,
+  items: PhotoFileRenameItem[],
+): Promise<PhotoFileRenameResult[]> {
+  const normalizedRoot = rootPath.replace(/[\\/]+$/, "");
+  try {
+    if (!(await lstat(normalizedRoot)).isDirectory()) {
+      return [];
+    }
+  } catch {
+    return [];
+  }
+
+  const valid = new Map<string, string>();
+  for (const item of items ?? []) {
+    const from = typeof item?.fromAbsolutePath === "string" ? item.fromAbsolutePath : "";
+    const toFileName = typeof item?.toFileName === "string" ? item.toFileName.trim() : "";
+    if (!from || !toFileName || toFileName === "." || toFileName === "..") {
+      continue;
+    }
+    if (toFileName !== basename(toFileName) || PHOTO_RENAME_FORBIDDEN.test(toFileName)) {
+      continue;
+    }
+    try {
+      if (!(await lstat(from)).isFile()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    const normalizedFromDir = dirname(from).replace(/[\\/]+$/, "");
+    const insideRoot = process.platform === "win32"
+      ? normalizedFromDir.toLocaleLowerCase() === normalizedRoot.toLocaleLowerCase()
+        || normalizedFromDir.toLocaleLowerCase().startsWith(`${normalizedRoot.toLocaleLowerCase()}\\`)
+      : normalizedFromDir === normalizedRoot
+        || normalizedFromDir.startsWith(`${normalizedRoot}/`);
+    if (!insideRoot) {
+      continue;
+    }    if (!valid.has(from)) {
+      valid.set(from, toFileName);
+    }
+  }
+
+  const staged: Array<{ from: string; temp: string; to: string }> = [];
+  let counter = 0;
+  for (const [from, toFileName] of valid) {
+    const fromDir = dirname(from).replace(/[\\/]+$/, "");
+    const to = join(fromDir, toFileName);
+    if (from === to) {
+      continue;
+    }
+    if (from.toLocaleLowerCase() !== to.toLocaleLowerCase()) {
+      try {
+        await lstat(to);
+        continue;
+      } catch {
+        // destinazione libera: ok
+      }
+    }
+    counter += 1;
+    staged.push({ from, temp: join(normalizedRoot, `.filex-rename-${Date.now()}-${counter}.tmp`), to });
+  }
+
+  async function moveWithSidecar(source: string, destination: string): Promise<void> {
+    await rename(source, destination);
+    const sourceSidecar = sidecarPathForAsset(source);
+    const destinationSidecar = sidecarPathForAsset(destination);
+    try {
+      await lstat(sourceSidecar);
+    } catch {
+      return;
+    }
+    await rename(sourceSidecar, destinationSidecar);
+  }
+
+  const completed: Array<{ from: string; temp: string; to: string }> = [];
+  const failed = new Map<string, string>();
+  for (const step of staged) {
+    try {
+      await moveWithSidecar(step.from, step.temp);
+      completed.push(step);
+    } catch (error) {
+      failed.set(step.from, error instanceof Error ? error.message : "Spostamento temporaneo non riuscito.");
+      await moveWithSidecar(step.temp, step.from).catch(() => undefined);
+    }
+  }
+  const succeeded: Array<{ from: string; to: string }> = [];
+  for (const step of completed) {
+    try {
+      await moveWithSidecar(step.temp, step.to);
+      succeeded.push({ from: step.from, to: step.to });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Rinomina non riuscita.";
+      failed.set(step.from, message);
+      await moveWithSidecar(step.temp, step.from).catch(() => undefined);
+    }
+  }
+
+  const succeededSet = new Set(succeeded.map((step) => step.from));
+  return [...valid.keys()].map((from) => {
+    const target = staged.find((step) => step.from === from)?.to ?? from;
+    if (succeededSet.has(from)) {
+      return { fromAbsolutePath: from, toAbsolutePath: target, ok: true };
+    }
+    if (!staged.some((step) => step.from === from)) {
+      return failRename(from, from, "Nome non valido, già esistente o fuori cartella.");
+    }
+    return failRename(from, target, failed.get(from) ?? "Rinomina non riuscita.");
+  });
+}
+
 function projectFilePathForFolder(rootPath: string): string {
   return join(rootPath, PHOTO_SELECTOR_PROJECT_FILE_NAME);
 }
@@ -368,6 +508,88 @@ export async function listPhotoSelectorLegacyProjectsDesktop(
   }
 
   await visit(normalizedRootPath);
+  return results;
+}
+
+const NESTED_PROJECT_SCAN_SKIP_DIRS = new Set([
+  "$recycle.bin",
+  "system volume information",
+  "windows",
+  "program files",
+  "program files (x86)",
+  "programdata",
+]);
+
+export interface NestedPhotoSelectorProjectScanOptions {
+  maxDepth?: number;
+  maxDirectories?: number;
+}
+
+/**
+ * Cerca progetti master nei discendenti di una cartella, con limiti rigidi.
+ * Serve al flusso tasto-destro: distingue 0 / 1 / 2+ candidati e si ferma
+ * appena ne trova 2, senza scandire interi dischi.
+ */
+export async function findNestedPhotoSelectorProjectsDesktop(
+  rootPath: string,
+  options: NestedPhotoSelectorProjectScanOptions = {},
+): Promise<DesktopPhotoSelectorProjectLocation[]> {
+  const maxDepth = Math.max(1, Math.min(6, Math.trunc(options.maxDepth ?? 3)));
+  const maxDirectories = Math.max(16, Math.min(2000, Math.trunc(options.maxDirectories ?? 300)));
+  const normalizedRoot = rootPath.replace(/[\\/]+$/, "");
+  const results: DesktopPhotoSelectorProjectLocation[] = [];
+  let visitedDirectories = 0;
+  let stopped = false;
+
+  async function visit(directoryPath: string, depth: number): Promise<void> {
+    if (stopped || visitedDirectories >= maxDirectories || results.length >= 2) {
+      stopped = true;
+      return;
+    }
+    visitedDirectories += 1;
+    let entries;
+    try {
+      entries = await readdir(directoryPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (stopped || results.length >= 2 || visitedDirectories >= maxDirectories) {
+        stopped = true;
+        return;
+      }
+      if (!entry.isDirectory() || entry.isSymbolicLink()) {
+        continue;
+      }
+      if (entry.name.startsWith(".")) {
+        continue;
+      }
+      if (NESTED_PROJECT_SCAN_SKIP_DIRS.has(entry.name.toLocaleLowerCase())) {
+        continue;
+      }
+      if (depth + 1 > maxDepth) {
+        continue;
+      }
+      const childPath = join(directoryPath, entry.name);
+      const project = await readProjectAtPath(childPath);
+      if (project) {
+        results.push({ rootPath: childPath, project });
+      }
+      if (results.length < 2) {
+        await visit(childPath, depth + 1);
+      }
+    }
+  }
+
+  try {
+    const stats = await lstat(normalizedRoot);
+    if (!stats.isDirectory()) {
+      return [];
+    }
+  } catch {
+    return [];
+  }
+  await visit(normalizedRoot, 0);
   return results;
 }
 

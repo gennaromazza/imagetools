@@ -33,7 +33,7 @@ export type DesktopReleaseChannel = "stable" | "beta";
 export type DesktopThumbnailProfile = "ultra-fast" | "fast" | "balanced";
 export type DesktopRamBudgetPreset = "conservative" | "default" | "performance" | "maximum";
 export type DesktopDiskCacheBudgetPreset = "compact" | "balanced" | "performance" | "unlimited";
-export type DesktopPhotoSortMode = "name" | "orientation" | "rating" | "createdAt";
+export type DesktopPhotoSortMode = "name" | "orientation" | "rating" | "createdAt" | "manual";
 export type DesktopCustomLabelTone = "sand" | "rose" | "green" | "blue" | "purple" | "slate";
 export type DesktopColorLabel = "red" | "yellow" | "green" | "blue" | "purple";
 export type DesktopPickStatus = "picked" | "rejected" | "unmarked";
@@ -345,6 +345,22 @@ export interface DesktopCachedThumbnail {
     width: number;
     height: number;
 }
+export interface DesktopPhotoFileRenameItem {
+    fromAbsolutePath: string;
+    toFileName: string;
+}
+export interface DesktopPhotoFileRenameResult {
+    fromAbsolutePath: string;
+    toAbsolutePath: string;
+    ok: boolean;
+    error?: string;
+}
+export interface DesktopCaptureTimeReading {
+    absolutePath: string;
+    captureTimeMs: number | null;
+    cameraModel: string | null;
+    hasExifDate: boolean;
+}
 export interface DesktopThumbnailCacheInfo {
     currentPath: string;
     defaultPath: string;
@@ -435,6 +451,10 @@ export interface DesktopPhotoSelectorProjectFile {
 export interface DesktopPhotoSelectorProjectLocation {
     rootPath: string;
     project: DesktopPhotoSelectorProjectFile;
+}
+export interface DesktopNestedProjectScanOptions {
+    maxDepth?: number;
+    maxDirectories?: number;
 }
 export interface DesktopPhotoSelectorProjectRelocationResult {
     ok: boolean;
@@ -724,6 +744,10 @@ export interface ImageConverterJobConfig {
         maxLongEdge?: number | null;
         targetMaxBytesMb?: number | null;
         openOutputWhenDone?: boolean;
+        format?: ImageConverterOutputFormat | null;
+        quality?: number | null;
+        keepMetadata?: boolean | null;
+        outputDirectory?: string | null;
     };
 }
 export interface ImageConverterProgressLogEntry {
@@ -1190,6 +1214,7 @@ export interface FileXDesktopApi {
     getCachedThumbnails: (entries: DesktopThumbnailCacheLookupEntry[], maxDimension: number, quality: number) => Promise<DesktopCachedThumbnail[]>;
     getCachedThumbnailFrames: (entries: DesktopThumbnailCacheLookupEntry[], maxDimension: number, quality: number) => Promise<DesktopCachedThumbnailFrame[]>;
     getThumbnailCacheInfo: () => Promise<DesktopThumbnailCacheInfo>;
+    readCaptureTimes: (absolutePaths: string[]) => Promise<DesktopCaptureTimeReading[]>;
     chooseThumbnailCacheDirectory: () => Promise<DesktopThumbnailCacheInfo | null>;
     setThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopThumbnailCacheInfo>;
     resetThumbnailCacheDirectory: () => Promise<DesktopThumbnailCacheInfo>;
@@ -1216,6 +1241,7 @@ export interface FileXDesktopApi {
     chooseImageFile: (currentPath?: string) => Promise<string | null>;
     copyFilesToFolder: (absolutePaths: string[]) => Promise<DesktopCopyFilesResult>;
     moveFilesToFolder: (absolutePaths: string[]) => Promise<DesktopMoveFilesResult>;
+    renamePhotoFiles: (rootPath: string, items: DesktopPhotoFileRenameItem[]) => Promise<DesktopPhotoFileRenameResult[]>;
     saveFileAs: (absolutePath: string) => Promise<DesktopSaveFileAsResult>;
     getDesktopPreferences: () => Promise<DesktopPhotoSelectorPreferences>;
     saveDesktopPreferences: (preferences: DesktopPhotoSelectorPreferences) => Promise<DesktopPhotoSelectorPreferences>;
@@ -1224,6 +1250,7 @@ export interface FileXDesktopApi {
     relocatePhotoSelectorProjectFile: (sourceRootPath: string, targetRootPath: string, project: DesktopPhotoSelectorProjectFile) => Promise<DesktopPhotoSelectorProjectRelocationResult>;
     resolvePhotoSelectorProject: (folderPath: string) => Promise<DesktopPhotoSelectorProjectLocation | null>;
     listPhotoSelectorLegacyProjects: (rootPath: string) => Promise<DesktopPhotoSelectorProjectLocation[]>;
+    findNestedPhotoSelectorProjects: (rootPath: string, options?: DesktopNestedProjectScanOptions) => Promise<DesktopPhotoSelectorProjectLocation[]>;
     getGoogleDriveStatus: () => Promise<DesktopGoogleDriveStatus>;
     connectGoogleDrive: () => Promise<DesktopGoogleDriveStatus>;
     disconnectGoogleDrive: () => Promise<DesktopGoogleDriveStatus>;

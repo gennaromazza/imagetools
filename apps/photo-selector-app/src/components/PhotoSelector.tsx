@@ -13,6 +13,10 @@ import type {
 } from "@photo-tools/desktop-contracts";
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
 import { PhotoQuickPreviewModal } from "./PhotoQuickPreviewModal";
+import { RenameModal } from "./RenameModal";
+import type { RenamePatternOptions } from "../services/rename-pattern";
+import { ExportModal } from "./ExportModal";
+import { findLikelyDuplicateGroups } from "../services/duplicate-groups";
 import { PhotoCard } from "./PhotoCard";
 import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
 import { PsdJpegConversionModal } from "./PsdJpegConversionModal";
@@ -22,6 +26,8 @@ import {
   getCachedOnDemandPreviewUrl,
   getSubfolder,
   extractSubfolders,
+  buildAssetId,
+  remapAssetStoresForRename,
   copyAssetsToFolder,
   moveAssetsToFolder,
   saveAssetAs,
@@ -71,11 +77,13 @@ import {
 } from "../services/photo-selector-preferences";
 import {
   buildPhotoSortSignature,
+  getSortTimestamp,
   loadCachedPhotoSortOrder,
   hydratePhotoSortCache,
   saveCachedPhotoSortOrder,
+  type CaptureTimeInfo,
 } from "../services/photo-sort-cache";
-import { logDesktopEvent } from "../services/desktop-store";
+import { logDesktopEvent, readCaptureTimes, renamePhotoFiles } from "../services/desktop-store";
 import { useToast } from "./ToastProvider";
 import { DockableWorkspace } from "./workspace/DockableWorkspace";
 import { useWorkspacePanelLayout } from "./workspace/useWorkspacePanelLayout";
@@ -149,7 +157,7 @@ interface PhotoSelectorProps {
   onPsdJpegConversionComplete?: () => void | Promise<void>;
 }
 
-type SortMode = "name" | "orientation" | "rating" | "createdAt";
+  type SortMode = "name" | "orientation" | "rating" | "createdAt" | "manual";
 type CreatedAtSortDirection = "asc" | "desc";
 type PickFilter = "all" | PickStatus;
 type ColorFilter = "all" | ColorLabel;
@@ -515,8 +523,12 @@ export function PhotoSelector({
   onPsdJpegConversionComplete,
 }: PhotoSelectorProps) {
   const { addToast } = useToast();
-  const [sortBy, setSortBy] = useState<SortMode>("name");
+  const [sortBy, setSortBy] = useState<SortMode>(() => {
+    const saved = window.localStorage.getItem("filex.photoSelector.sortBy");
+    return saved === "orientation" || saved === "rating" || saved === "createdAt" ? saved : "name";
+  });
   const [createdAtSortDirection, setCreatedAtSortDirection] = useState<CreatedAtSortDirection>("desc");
+  const [manualOrder, setManualOrder] = useState<string[] | null>(null);
   const [pickFilter, setPickFilter] = useState<PickFilter>(DEFAULT_PHOTO_FILTERS.pickStatus);
   const [ratingFilter, setRatingFilter] = useState(DEFAULT_PHOTO_FILTERS.ratingFilter);
   const [colorFilter, setColorFilter] = useState<ColorFilter>(DEFAULT_PHOTO_FILTERS.colorLabel);
@@ -551,11 +563,130 @@ export function PhotoSelector({
   const [isSelectionActionsOpen, setIsSelectionActionsOpen] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isCompareOpen, setIsCompareOpen] = useState(false);
+  const [captureById, setCaptureById] = useState<Map<string, CaptureTimeInfo>>(() => new Map());
+  const [captureReady, setCaptureReady] = useState(false);
+  const [captureSupported, setCaptureSupported] = useState(false);
+  const [clockNoticeDismissed, setClockNoticeDismissed] = useState(false);
   const {
     layout: workspacePanelLayout,
     movePanel: moveWorkspacePanel,
     togglePanel: toggleWorkspacePanel,
   } = useWorkspacePanelLayout();
+
+  // Date di scatto EXIF in background: parte solo a miniature ferme per non
+  // contendere CPU/disco con la griglia, e procede a chunk così
+  // l'ordinamento migliora in progressivo invece di attendere tutto.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.filexDesktop?.readCaptureTimes !== "function") {
+      setCaptureSupported(false);
+      return;
+    }
+    setCaptureSupported(true);
+    if (isThumbnailLoading) {
+      return;
+    }
+    setCaptureReady(false);
+    setClockNoticeDismissed(false);
+    if (photos.length === 0) {
+      setCaptureById(new Map());
+      setCaptureReady(true);
+      return;
+    }
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const ids = photos.map((photo) => photo.id);
+          const absolutePaths = getAssetAbsolutePaths(ids);
+          const pathById = new Map<string, string>();
+          ids.forEach((id, position) => {
+            const absolutePath = absolutePaths[position];
+            if (absolutePath) {
+              pathById.set(absolutePath, id);
+            }
+          });
+          const pendingPaths = [...pathById.keys()];
+          const merged = new Map<string, CaptureTimeInfo>();
+          for (let offset = 0; offset < pendingPaths.length; offset += 800) {
+            const readings = await readCaptureTimes(pendingPaths.slice(offset, offset + 800));
+            if (!active) {
+              return;
+            }
+            for (const reading of readings) {
+              const id = pathById.get(reading.absolutePath);
+              if (id && typeof reading.captureTimeMs === "number" && reading.captureTimeMs > 0) {
+                merged.set(id, { timeMs: reading.captureTimeMs, cameraModel: reading.cameraModel });
+              }
+            }
+            setCaptureById(new Map(merged));
+          }
+        } finally {
+          if (active) {
+            setCaptureReady(true);
+          }
+        }
+      })();
+    }, 800);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [isThumbnailLoading, photos, sourceFolderPath]);
+
+  useEffect(() => {
+    window.localStorage.setItem("filex.photoSelector.sortBy", sortBy);
+  }, [sortBy]);
+
+  const captureMissingCount = useMemo(() => {
+    if (!captureSupported || !captureReady) {
+      return 0;
+    }
+    let missing = 0;
+    for (const photo of photos) {
+      if (!captureById.has(photo.id)) {
+        missing += 1;
+      }
+    }
+    return missing;
+  }, [captureById, captureReady, captureSupported, photos]);
+
+  const clockSkewNotice = useMemo(() => {
+    if (!captureSupported || !captureReady || photos.length < 10) {
+      return null;
+    }
+    const offsetsByModel = new Map<string, number[]>();
+    for (const photo of photos) {
+      const info = captureById.get(photo.id);
+      const filesystemTime = resolvePhotoCreatedAt(photo);
+      if (!info || !info.cameraModel || !(filesystemTime > 0)) {
+        continue;
+      }
+      const list = offsetsByModel.get(info.cameraModel);
+      const offsetHours = (info.timeMs - filesystemTime) / 3_600_000;
+      if (list) {
+        list.push(offsetHours);
+      } else {
+        offsetsByModel.set(info.cameraModel, [offsetHours]);
+      }
+    }
+    const suspects: string[] = [];
+    for (const [model, offsets] of offsetsByModel) {
+      if (offsets.length < 10) {
+        continue;
+      }
+      const sorted = [...offsets].sort((left, right) => left - right);
+      const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+      if (Math.abs(median) >= 0.25) {
+        const hours = Math.trunc(Math.abs(median));
+        const minutes = Math.round((Math.abs(median) - hours) * 60);
+        suspects.push(`${model} (${median < 0 ? "-" : "+"}${hours}h${String(minutes).padStart(2, "0")})`);
+      }
+    }
+    if (suspects.length === 0) {
+      return null;
+    }
+    return `Orologi fotocamera sospetti (EXIF vs file): ${suspects.join(" · ")}. L'ordinamento usa comunque la data di scatto.`;
+  }, [captureById, captureReady, captureSupported, photos]);
   const [cardSize, setCardSize] = useState<number>(160);
   const [rootFolderPathOverride, setRootFolderPathOverride] = useState<string>("");
   const [preferredEditorPath, setPreferredEditorPath] = useState<string>("");
@@ -1505,9 +1636,22 @@ export function PhotoSelector({
 
   const sortedPhotoIds = useMemo(() => {
     const isDynamicSort = sortBy === "orientation" || sortBy === "rating";
-    const sortCacheVariant = sortBy === "createdAt" ? `createdAt:${createdAtSortDirection}` : sortBy;
-    const signature = `${buildPhotoSortSignature(metadataPhotos, sortBy)}:${sortCacheVariant}`;
+    const sortCacheVariant = sortBy === "createdAt"
+      ? `createdAt:${createdAtSortDirection}`
+      : sortBy === "manual"
+        ? `manual:${(manualOrder ?? []).join(",")}`
+        : sortBy;
+    const signature = `${buildPhotoSortSignature(metadataPhotos, sortBy, captureById)}:${sortCacheVariant}`;
     const knownIds = new Set(metadataPhotos.map((photo) => photo.id));
+
+    if (sortBy === "manual") {
+      const ordered = (manualOrder ?? []).filter((photoId) => knownIds.has(photoId));
+      const missing = metadataPhotos
+        .filter((photo) => !ordered.includes(photo.id))
+        .sort((left, right) => left.fileName.localeCompare(right.fileName))
+        .map((photo) => photo.id);
+      return [...ordered, ...missing];
+    }
 
     if (isDynamicSort && isThumbnailLoading) {
       const frozen = frozenDynamicSortOrderRef.current;
@@ -1559,7 +1703,7 @@ export function PhotoSelector({
         }
 
         if (sortBy === "createdAt") {
-          const createdAtDiff = resolvePhotoCreatedAt(left) - resolvePhotoCreatedAt(right);
+          const createdAtDiff = getSortTimestamp(left, captureById) - getSortTimestamp(right, captureById);
           return (
             (createdAtSortDirection === "asc" ? createdAtDiff : -createdAtDiff) ||
             left.fileName.localeCompare(right.fileName)
@@ -1585,7 +1729,7 @@ export function PhotoSelector({
     }
 
     return orderedIds;
-  }, [createdAtSortDirection, isSortCacheEnabled, isThumbnailLoading, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
+  }, [captureById, createdAtSortDirection, isSortCacheEnabled, isThumbnailLoading, manualOrder, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
 
   const visiblePhotoIds = useMemo(() => {
     const lowerSearch = deferredSearchQuery.toLowerCase();
@@ -3076,6 +3220,46 @@ export function PhotoSelector({
     pushTimelineEntry(`Selezionate ${visiblePhotoIds.length} foto visibili`);
   }
 
+  const duplicateGroups = useMemo(() => findLikelyDuplicateGroups(photos), [photos]);
+  const [isDuplicatesOpen, setIsDuplicatesOpen] = useState(false);
+
+  // L'ordine manuale segue la cartella: alla sostituzione delle foto si
+  // conservano solo gli id ancora presenti, senza resuscitare eliminati.
+  useEffect(() => {
+    setManualOrder((current) => {
+      if (!current) {
+        return current;
+      }
+      const known = new Set(photos.map((photo) => photo.id));
+      const pruned = current.filter((id) => known.has(id));
+      return pruned.length > 0 ? pruned : null;
+    });
+  }, [photos]);
+
+  useEffect(() => {
+    if (!manualOrder && sortBy === "manual") {
+      setSortBy("name");
+    }
+  }, [manualOrder, sortBy]);
+
+  function selectDuplicateGroup(assetIds: string[]) {
+    const nextSelection = new Set(selectedIdsRef.current);
+    for (const id of assetIds) {
+      nextSelection.add(id);
+    }
+    commitSelection(Array.from(nextSelection));
+    pushTimelineEntry(`Selezionato gruppo di ${assetIds.length} probabili duplicati`);
+  }
+
+  function keepFirstOfDuplicateGroup(assetIds: string[]) {
+    const [, ...rest] = assetIds;
+    if (rest.length === 0) {
+      return;
+    }
+    applyBatchChanges(rest, { pickStatus: "rejected" });
+    pushTimelineEntry(`Tenuta la prima foto, scartati ${rest.length} probabili duplicati`);
+  }
+
   function addVisibleToSelection() {
     const nextSelection = new Set(selectedIdsRef.current);
     for (const photoId of visiblePhotoIds) {
@@ -3101,6 +3285,44 @@ export function PhotoSelector({
       return photo?.pickStatus !== "rejected";
     }));
     pushTimelineEntry("Escluse dalla selezione le scartate");
+  }
+
+  function handleManualOrderMove(ids: string[], action: "move-start" | "move-backward" | "move-forward" | "move-end") {
+    const base = manualOrder && manualOrder.length > 0 ? [...manualOrder] : [...sortedPhotoIds];
+    const selected = new Set(ids);
+    const block = base.filter((id) => selected.has(id));
+    if (block.length === 0) {
+      return;
+    }
+    let next: string[];
+    if (action === "move-start") {
+      next = [...block, ...base.filter((id) => !selected.has(id))];
+    } else if (action === "move-end") {
+      next = [...base.filter((id) => !selected.has(id)), ...block];
+    } else {
+      next = [...base];
+      const step = action === "move-forward" ? 1 : -1;
+      const indices = next.map((_, position) => position);
+      if (step === 1) {
+        indices.reverse();
+      }
+      for (const position of indices) {
+        const target = position + step;
+        if (target < 0 || target >= next.length) {
+          continue;
+        }
+        if (selected.has(next[position]!) && !selected.has(next[target]!)) {
+          const swap: string = next[position]!;
+          next[position] = next[target]!;
+          next[target] = swap;
+        }
+      }
+    }
+    setManualOrder(next);
+    if (sortBy !== "manual") {
+      setSortBy("manual");
+    }
+    pushTimelineEntry(`Ordine manuale: ${block.length === 1 ? "1 foto spostata" : `${block.length} foto spostate`}`);
   }
 
   function selectByMinimumRating(minRating: number) {
@@ -3197,6 +3419,137 @@ export function PhotoSelector({
       if (result === "cancelled") break;
     }
   }, [addToast]);
+
+  const [renameTargetIds, setRenameTargetIds] = useState<string[] | null>(null);
+  const [renameInitialOptions, setRenameInitialOptions] = useState<Partial<RenamePatternOptions> | null>(null);
+  const [exportTargetIds, setExportTargetIds] = useState<string[] | null>(null);
+
+  function resolveAbsolutePaths(ids: string[]): string[] {
+    const root = effectiveRootFolderPath.trim().replace(/[\\/]+$/, "");
+    const resolved: string[] = [];
+    for (const id of ids) {
+      const fromStore = getAssetAbsolutePath(id);
+      if (fromStore) {
+        resolved.push(fromStore);
+        continue;
+      }
+      const photo = assetById.get(id);
+      if (photo && root && photo.path) {
+        resolved.push(`${root}/${photo.path.replace(/^\/+/, "")}`);
+      }
+    }
+    return resolved;
+  }
+
+  const renameModalFiles = useMemo(() => {
+    if (!renameTargetIds) {
+      return [];
+    }
+    const order = new Map(visiblePhotoIds.map((id, position) => [id, position]));
+    return [...renameTargetIds]
+      .sort((left, right) => (order.get(left) ?? 0) - (order.get(right) ?? 0))
+      .map((id) => assetById.get(id))
+      .filter((photo): photo is ImageAsset => Boolean(photo))
+      .map((photo) => ({
+        id: photo.id,
+        fileName: photo.fileName,
+        captureTimeMs: captureById.get(photo.id)?.timeMs ?? null,
+        fallbackTimeMs: resolvePhotoCreatedAt(photo) || undefined,
+      }));
+  }, [renameTargetIds, visiblePhotoIds, assetById, captureById]);
+
+  const handleApplyRename = useCallback(async (items: Array<{ id: string; to: string }>) => {
+    const root = effectiveRootFolderPath.trim();
+    if (!root || !onPhotosChange || items.length === 0) {
+      return;
+    }
+    const absoluteById = new Map<string, string>();
+    const resolvedPaths = resolveAbsolutePaths(items.map((item) => item.id));
+    items.forEach((item, position) => {
+      const absolutePath = resolvedPaths[position];
+      if (absolutePath) {
+        absoluteById.set(item.id, absolutePath);
+      }
+    });
+    const request = items
+      .filter((item) => absoluteById.has(item.id))
+      .map((item) => ({ fromAbsolutePath: absoluteById.get(item.id)!, toFileName: item.to }));
+    if (request.length === 0) {
+      addToast("Nessun percorso disponibile per la rinomina.", "warning");
+      return;
+    }
+    if (typeof window.filexDesktop?.renamePhotoFiles !== "function") {
+      addToast("Bridge desktop non aggiornato: riavvia l'app per abilitare la rinomina.", "error", 7000);
+      return;
+    }
+    let results: Array<{ fromAbsolutePath: string; toAbsolutePath: string; ok: boolean; error?: string }> = [];
+    try {
+      results = await renamePhotoFiles(root, request);
+    } catch {
+      addToast("Rinomina non riuscita: motore non raggiungibile.", "error");
+      return;
+    }
+    if (results.length === 0) {
+      addToast("Rinomina non riuscita: nessuna risposta dal motore.", "error");
+      return;
+    }
+    const okByFrom = new Map(results.filter((result) => result.ok).map((result) => [result.fromAbsolutePath, result.toAbsolutePath]));
+    if (okByFrom.size === 0) {
+      const firstError = results.find((result) => result.error)?.error;
+      addToast(`Rinomina non riuscita. Nessun file è stato modificato.${firstError ? ` Motivo: ${firstError}` : ""}`, "error", 8000);
+      return;
+    }
+    const fromById = new Map(items.map((item) => [item.id, absoluteById.get(item.id)]));
+    const nextPhotos = photos.map((photo) => {
+      const from = fromById.get(photo.id);
+      const toAbsolutePath = from ? okByFrom.get(from) : undefined;
+      if (!toAbsolutePath) {
+        return photo;
+      }
+      const toFileName = toAbsolutePath.replace(/\\/g, "/").split("/").pop() ?? photo.fileName;
+      const directory = photo.path.includes("/") ? photo.path.slice(0, photo.path.lastIndexOf("/")) : "";
+      const nextRelativePath = directory ? `${directory}/${toFileName}` : toFileName;
+      const keySegments = (photo.sourceFileKey ?? "").split("::");
+      const nextSourceFileKey = keySegments.length === 3 ? `${nextRelativePath}::${keySegments[1]}::${keySegments[2]}` : photo.sourceFileKey;
+      const nextId = buildAssetId(nextRelativePath);
+      remapAssetStoresForRename(photo.id, nextId, {
+        relativePath: nextRelativePath,
+        absolutePath: toAbsolutePath,
+        sourceFileKey: nextSourceFileKey ?? photo.sourceFileKey ?? nextRelativePath,
+      });
+      return {
+        ...photo,
+        id: nextId,
+        fileName: toFileName,
+        path: nextRelativePath,
+        sourceFileKey: nextSourceFileKey,
+        thumbnailUrl: undefined,
+        previewUrl: undefined,
+        sourceUrl: undefined,
+      };
+    });
+    const idByOldId = new Map<string, string>();
+    for (const photo of photos) {
+      const from = fromById.get(photo.id);
+      const toAbsolutePath = from ? okByFrom.get(from) : undefined;
+      if (toAbsolutePath) {
+        const toFileName = toAbsolutePath.replace(/\\/g, "/").split("/").pop() ?? photo.fileName;
+        const directory = photo.path.includes("/") ? photo.path.slice(0, photo.path.lastIndexOf("/")) : "";
+        idByOldId.set(photo.id, buildAssetId(directory ? `${directory}/${toFileName}` : toFileName));
+      } else {
+        idByOldId.set(photo.id, photo.id);
+      }
+    }
+    onPhotosChange(nextPhotos);
+    commitSelection(selectedIdsRef.current.map((id) => idByOldId.get(id) ?? id));
+    pushTimelineEntry(`${okByFrom.size === 1 ? "1 foto rinominata" : `${okByFrom.size} foto rinominate`}`);
+    const failedCount = request.length - okByFrom.size;
+    if (failedCount > 0) {
+      addToast(`Rinomina parziale: ${failedCount} file non rinominati (già esistenti o non validi).`, "warning", 6000);
+    }
+    setRenameTargetIds(null);
+    setRenameInitialOptions(null);
+  }, [addToast, commitSelection, effectiveRootFolderPath, onPhotosChange, photos, pushTimelineEntry]);
 
   const handleCopyPath = useCallback((ids: string[], root: string) => {
     const absolutePaths = getAssetAbsolutePaths(ids);
@@ -3605,6 +3958,16 @@ export function PhotoSelector({
                 cardSize={cardSize}
                 sortBy={sortBy}
                 createdAtSortDirection={createdAtSortDirection}
+                hasManualOrder={(manualOrder?.length ?? 0) > 0}
+                captureHint={
+                  !captureSupported
+                    ? "Ordinamento per data file: le date di scatto EXIF richiedono l'app desktop aggiornata."
+                    : !captureReady
+                      ? "Lettura date di scatto EXIF in corso…"
+                      : captureMissingCount > 0
+                        ? `Date di scatto EXIF usate per l'ordinamento (${captureMissingCount} senza EXIF: in coda per data file).`
+                        : "Ordinamento per data di scatto EXIF."
+                }
                 isSettingsPanelOpen={isSettingsPanelOpen}
                 onSearchChange={setSearchQuery}
                 onCardSizeChange={setCardSize}
@@ -3640,6 +4003,30 @@ export function PhotoSelector({
       >
 
       {/* ── MAIN CONTENT ── */}
+      {clockSkewNotice && !clockNoticeDismissed ? (
+        <p
+          role="status"
+          style={{
+            margin: "0 0 0.6rem",
+            padding: "0.5rem 0.75rem",
+            borderRadius: 10,
+            border: "1px solid #d4a35c",
+            fontSize: "0.82rem",
+            display: "flex",
+            gap: "0.6rem",
+            alignItems: "center",
+          }}
+        >
+          <span style={{ flex: 1 }}>{clockSkewNotice}</span>
+          <button
+            type="button"
+            className="ghost-button ghost-button--small"
+            onClick={() => setClockNoticeDismissed(true)}
+          >
+            Nascondi
+          </button>
+        </p>
+      ) : null}
       <div
         ref={gridRef}
         className="photo-selector__grid"
@@ -3859,8 +4246,61 @@ export function PhotoSelector({
               {isBatchToolsOpen ? "Chiudi Batch" : "Apri Batch"}
             </button>
           )}
+          {duplicateGroups.length > 0 && (
+            <button
+              type="button"
+              className="ghost-button ghost-button--small"
+              onClick={() => setIsDuplicatesOpen((open) => !open)}
+              aria-expanded={isDuplicatesOpen}
+              title="Raggruppa le foto con stesso peso e stesse dimensioni: probabili duplicati"
+            >
+              {isDuplicatesOpen ? "Chiudi duplicati" : `Duplicati (${duplicateGroups.length})`}
+            </button>
+          )}
         </div>
       </footer>
+
+      {isDuplicatesOpen && duplicateGroups.length > 0 && (
+        <section
+          className="photo-selector__selection-bar photo-selector__duplicates-panel"
+          aria-label="Probabili duplicati"
+        >
+          <p style={{ fontSize: "0.85rem", opacity: 0.8, margin: "0 0 0.5rem" }}>
+            Stesso peso e stesse dimensioni: quasi sempre la stessa foto copiata. La scelta resta tua, gruppo per gruppo.
+          </p>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.45rem" }}>
+            {duplicateGroups.map((group) => (
+              <li
+                key={group.key}
+                style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}
+              >
+                <strong style={{ fontSize: "0.85rem" }}>{group.assetIds.length} foto</strong>
+                <span style={{ fontSize: "0.8rem", opacity: 0.75, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
+                  {group.fileNames.join(" · ")}
+                </span>
+                <span style={{ display: "inline-flex", gap: "0.4rem", marginLeft: "auto" }}>
+                  <button
+                    type="button"
+                    className="ghost-button ghost-button--small"
+                    onClick={() => selectDuplicateGroup(group.assetIds)}
+                    title="Seleziona tutte le foto del gruppo per confrontarle"
+                  >
+                    Seleziona
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-button ghost-button--small"
+                    onClick={() => keepFirstOfDuplicateGroup(group.assetIds)}
+                    title="Tiene la prima foto e marca le altre come scartate (reversibile)"
+                  >
+                    Tieni la prima
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {isBatchToolsOpen && selectedIds.length > 0 && (
         <section
@@ -4801,6 +5241,27 @@ export function PhotoSelector({
             setContextMenuState(null);
             void handleMoveFiles(ids);
           }}
+          onRenameFiles={() => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            setRenameInitialOptions(null);
+            setRenameTargetIds(ids);
+          }}
+          onManualOrder={(action) => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            if (action === "apply-names") {
+              setRenameInitialOptions({ mode: "custom", customText: "", keepOriginalName: false, startNumber: 1 });
+              setRenameTargetIds(manualOrder && manualOrder.length > 0 ? [...manualOrder] : ids);
+              return;
+            }
+            handleManualOrderMove(ids, action);
+          }}
+          onExportFiles={() => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            setExportTargetIds(ids);
+          }}
           onSaveAs={() => {
             const ids = [...contextMenuState.targetIds];
             setContextMenuState(null);
@@ -4820,6 +5281,27 @@ export function PhotoSelector({
             setContextMenuState(null);
             handleOpenWithEditor(ids);
           }}
+        />
+      ) : null}
+
+      {renameTargetIds ? (
+        <RenameModal
+          files={renameModalFiles}
+          initialOptions={renameInitialOptions ?? undefined}
+          onClose={() => { setRenameTargetIds(null); setRenameInitialOptions(null); }}
+          onApply={(items) => { void handleApplyRename(items); }}
+        />
+      ) : null}
+
+      {exportTargetIds ? (
+        <ExportModal
+          fileCount={exportTargetIds.length}
+          rawCount={exportTargetIds.filter((id) => {
+            const photo = assetById.get(id);
+            return photo ? isRawFile(photo.fileName) : false;
+          }).length}
+          inputPaths={exportTargetIds ? resolveAbsolutePaths(exportTargetIds) : []}
+          onClose={() => setExportTargetIds(null)}
         />
       ) : null}
 

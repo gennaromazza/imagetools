@@ -3,7 +3,12 @@ import { getDesktopSortCache, hasDesktopStateApi, saveDesktopSortCache } from ".
 
 const SORT_CACHE_MAX_ENTRIES = 24;
 
-export type PhotoSortMode = "name" | "orientation" | "rating" | "createdAt";
+export type PhotoSortMode = "name" | "orientation" | "rating" | "createdAt" | "manual";
+
+export interface CaptureTimeInfo {
+  timeMs: number;
+  cameraModel: string | null;
+}
 
 interface SortCacheEntry {
   folderPath: string;
@@ -16,10 +21,17 @@ interface SortCacheEntry {
 let sortCacheEntries: SortCacheEntry[] = [];
 
 function isSupportedSortMode(value: unknown): value is PhotoSortMode {
-  return value === "name" || value === "orientation" || value === "rating" || value === "createdAt";
+  return value === "name" || value === "orientation" || value === "rating" || value === "createdAt" || value === "manual";
 }
 
-function getSortTimestamp(asset: ImageAsset): number {
+export function getSortTimestamp(
+  asset: ImageAsset,
+  captureById?: ReadonlyMap<string, CaptureTimeInfo>,
+): number {
+  const captured = captureById?.get(asset.id)?.timeMs;
+  if (typeof captured === "number" && Number.isFinite(captured) && captured > 0) {
+    return Math.round(captured);
+  }
   if (typeof asset.createdAt === "number" && Number.isFinite(asset.createdAt) && asset.createdAt > 0) {
     return Math.round(asset.createdAt);
   }
@@ -60,6 +72,7 @@ function appendHash(hash: number, value: string): number {
 export function buildPhotoSortSignature(
   photos: ImageAsset[],
   sortBy: PhotoSortMode,
+  captureById?: ReadonlyMap<string, CaptureTimeInfo>,
 ): string {
   let hash = 5381;
   hash = appendHash(hash, sortBy);
@@ -74,7 +87,7 @@ export function buildPhotoSortSignature(
     } else if (sortBy === "orientation") {
       hash = appendHash(hash, photo.orientation ?? "");
     } else if (sortBy === "createdAt") {
-      hash = appendHash(hash, String(getSortTimestamp(photo)));
+      hash = appendHash(hash, String(getSortTimestamp(photo, captureById)));
     } else {
       hash = appendHash(hash, photo.sourceFileKey ?? photo.path);
     }

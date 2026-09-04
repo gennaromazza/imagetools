@@ -69,12 +69,14 @@ import {
   copyFilesToFolderDesktop,
   moveFilesToFolderDesktop,
   listPhotoSelectorLegacyProjectsDesktop,
+  findNestedPhotoSelectorProjectsDesktop,
   openFolderDesktop,
   readFileFromDisk,
   readPhotoSelectorProjectFileDesktop,
   readSidecarXmpFromAssetPath,
   readSidecarXmpInfoFromAssetPath,
   relocatePhotoSelectorProjectFileDesktop,
+  renamePhotoFilesDesktop,
   resolvePhotoSelectorProjectDesktop,
   reopenFolderDesktop,
   saveFileAsDesktop,
@@ -116,6 +118,10 @@ import {
   setDiskCacheBudgetPreset,
   setThumbnailCacheDirectory,
 } from "./thumbnail-disk-cache.js";
+import {
+  readCaptureTimesDesktop,
+  shutdownCaptureTimeService,
+} from "./capture-time-service.js";
 import {
   getDesktopPreferences,
   getDesktopSessionState,
@@ -1777,6 +1783,9 @@ function registerIpcHandlers(): void {
       ...getDesktopImageCacheLimits(),
     };
   });
+  ipcMain.handle("filex:read-capture-times", async (_event, absolutePaths: string[]) =>
+    readCaptureTimesDesktop(Array.isArray(absolutePaths) ? absolutePaths : []),
+  );
   ipcMain.handle("filex:choose-thumbnail-cache-directory", async () => {
     const info = await chooseThumbnailCacheDirectory();
     return info ? { ...info, ...getDesktopImageCacheLimits() } : null;
@@ -1928,6 +1937,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:move-files-to-folder", async (_event, absolutePaths: string[]) =>
     moveFilesToFolderDesktop(absolutePaths),
   );
+  ipcMain.handle(
+    "filex:rename-photo-files",
+    async (_event, rootPath: string, items: Array<{ fromAbsolutePath: string; toFileName: string }>) =>
+      renamePhotoFilesDesktop(sanitizeDesktopPath(rootPath), Array.isArray(items) ? items : []),
+  );
   ipcMain.handle("filex:save-file-as", async (_event, absolutePath: string) =>
     saveFileAsDesktop(absolutePath),
   );
@@ -1981,6 +1995,14 @@ function registerIpcHandlers(): void {
     }));
     return [...fileProjects, ...catalogProjects];
   });
+  ipcMain.handle(
+    "filex:find-nested-photo-selector-projects",
+    async (
+      _event,
+      rootPath: string,
+      options?: { maxDepth?: number; maxDirectories?: number },
+    ) => findNestedPhotoSelectorProjectsDesktop(sanitizeDesktopPath(rootPath), options ?? {}),
+  );
   ipcMain.handle("filex:get-google-drive-status", () => getGoogleDriveStatus());
   ipcMain.handle("filex:connect-google-drive", () => connectGoogleDrive());
   ipcMain.handle("filex:disconnect-google-drive", () => disconnectGoogleDrive());
@@ -3018,6 +3040,7 @@ app.on("before-quit", (event) => {
 
   const nativeShutdown = Promise.allSettled([
     atomicOutputTransactions.rollbackAll(),
+    shutdownCaptureTimeService(),
     shutdownDesktopImageService(),
     shutdownNativeFolderService(),
   ]);

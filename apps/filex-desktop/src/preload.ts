@@ -98,6 +98,7 @@ const api: FileXDesktopApi = {
   getCachedThumbnailFrames: (entries, maxDimension, quality) =>
     ipcRenderer.invoke("filex:get-cached-thumbnail-frames", entries, maxDimension, quality),
   getThumbnailCacheInfo: () => ipcRenderer.invoke("filex:get-thumbnail-cache-info"),
+  readCaptureTimes: (absolutePaths) => ipcRenderer.invoke("filex:read-capture-times", absolutePaths),
   chooseThumbnailCacheDirectory: () => ipcRenderer.invoke("filex:choose-thumbnail-cache-directory"),
   setThumbnailCacheDirectory: (directoryPath) =>
     ipcRenderer.invoke("filex:set-thumbnail-cache-directory", directoryPath),
@@ -131,6 +132,8 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:copy-files-to-folder", absolutePaths),
   moveFilesToFolder: (absolutePaths) =>
     ipcRenderer.invoke("filex:move-files-to-folder", absolutePaths),
+  renamePhotoFiles: (rootPath, items) =>
+    ipcRenderer.invoke("filex:rename-photo-files", rootPath, items),
   saveFileAs: (absolutePath) =>
     ipcRenderer.invoke("filex:save-file-as", absolutePath),
   getDesktopPreferences: () => ipcRenderer.invoke("filex:get-desktop-preferences"),
@@ -145,6 +148,8 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:resolve-photo-selector-project", folderPath),
   listPhotoSelectorLegacyProjects: (rootPath) =>
     ipcRenderer.invoke("filex:list-photo-selector-legacy-projects", rootPath),
+  findNestedPhotoSelectorProjects: (rootPath, options) =>
+    ipcRenderer.invoke("filex:find-nested-photo-selector-projects", rootPath, options),
   getGoogleDriveStatus: () => ipcRenderer.invoke("filex:get-google-drive-status"),
   connectGoogleDrive: () => ipcRenderer.invoke("filex:connect-google-drive"),
   disconnectGoogleDrive: () => ipcRenderer.invoke("filex:disconnect-google-drive"),

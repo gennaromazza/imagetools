@@ -45,6 +45,7 @@ import {
   buildDetachedPlaceholderAssets,
   addRecentFolder,
   getAssetAbsolutePath,
+  hydrateRecentFolders,
   isRawFile,
   openProjectFolderNative,
   readSidecarXmp,
@@ -102,6 +103,7 @@ import {
   logDesktopEvent,
   recordDesktopPerformanceSnapshot,
   readPhotoSelectorProjectFile,
+  findNestedPhotoSelectorProjects,
   listPhotoSelectorLegacyProjects,
   relocatePhotoSelectorProjectFile,
   resolvePhotoSelectorProject,
@@ -779,6 +781,7 @@ export function App() {
   const folderLoadSessionRef = useRef(0);
   const folderOpenIntentRef = useRef(0);
   const folderOpenRequestRef = useRef(0);
+  const sessionRestoreRef = useRef<DesktopPersistedState | null>(null);
   const persistedStateHydrationRef = useRef<{ storageKey: string; session: number } | null>(null);
   const workspaceHydrationSettledRef = useRef<Promise<void>>(Promise.resolve());
   const xmpImportStartTimerRef = useRef<number | null>(null);
@@ -907,6 +910,9 @@ export function App() {
       setProjectName(persisted.projectName);
       setSourceFolderPath(persisted.sourceFolderPath);
       setHasWritableFolderAccess(false);
+      if (persisted.sourceFolderPath?.trim()) {
+        sessionRestoreRef.current = persisted;
+      }
 
     })();
 
@@ -3763,6 +3769,47 @@ export function App() {
     await handleFolderOpened(folder, { mode: "free" });
   }, [createMasterProject, handleFolderOpened, openExistingMasterProject]);
 
+  const tryResumePersistedSession = useCallback(async () => {
+    const persisted = sessionRestoreRef.current;
+    sessionRestoreRef.current = null;
+    if (
+      !persisted
+      || !persisted.sourceFolderPath?.trim()
+      || allAssetsRef.current.length > 0
+      || typeof window === "undefined"
+      || typeof window.filexDesktop?.reopenFolder !== "function"
+    ) {
+      return;
+    }
+
+    const persistedPath = persisted.sourceFolderPath.trim();
+    try {
+      if (persisted.selectionMode === "project") {
+        const projectLocation = await resolvePhotoSelectorProject(persistedPath);
+        if (projectLocation) {
+          const reopened = await openExistingMasterProject(projectLocation.rootPath);
+          if (reopened) {
+            addToast(`Sessione ripristinata: ${persisted.projectName || projectLocation.rootPath}.`, "info", 5000);
+            return;
+          }
+        }
+      }
+      const freeFolder = await window.filexDesktop.reopenFolder(persistedPath, {
+        recursive: true,
+        relativePathMode: "project-relative",
+      });
+      if (freeFolder) {
+        await handleFolderOpened(freeFolder, { mode: "free", outgoingWorkspacePersisted: true });
+        addToast(`Sessione ripristinata: ${persisted.projectName || persistedPath}.`, "info", 5000);
+      }
+    } catch {
+      // Cartella non più disponibile: si resta sulla schermata iniziale.
+    }
+  }, [addToast, handleFolderOpened, openExistingMasterProject]);
+
+  const tryResumePersistedSessionRef = useRef(tryResumePersistedSession);
+  tryResumePersistedSessionRef.current = tryResumePersistedSession;
+
   const handleDesktopRequestedFolderOpen = useCallback(async (folderPath: string) => {
     if (
       typeof window === "undefined"
@@ -3792,31 +3839,11 @@ export function App() {
         return;
       }
 
-      const unassignedChoice = await chooseUnassignedFolderAction(normalizedPath);
-      if (unassignedChoice === "cancel") {
-        return;
-      }
-      if (unassignedChoice === "choose-master") {
-        await handleCreateProject();
-        return;
-      }
-      if (unassignedChoice === "open-free") {
-        const freeFolder = await window.filexDesktop.reopenFolder(normalizedPath, {
-          recursive: true,
-          relativePathMode: "project-relative",
-        });
-        if (freeFolder) {
-          await handleFolderOpened(freeFolder, { mode: "free" });
-        }
-        return;
-      }
-      const projectFolder = await reopenProjectFolder(normalizedPath);
-      if (projectFolder) {
-        await createMasterProject(projectFolder);
-        return;
-      }
-
-      let reopenedFolder = null;
+      // Nessun master sopra la cartella: si decide senza chiedere.
+      // 1) sorgente già nota come progetto -> riapri il master ricordato;
+      // 2) un solo master annidato dentro -> aprilo diretto;
+      // 3) altrimenti libera diretta (mai il modale).
+      let projectFolder = null;
       const retryDelaysMs = [0, 180, 420, 900];
 
       for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
@@ -3825,13 +3852,13 @@ export function App() {
           await new Promise((resolve) => window.setTimeout(resolve, delayMs));
         }
 
-        reopenedFolder = await reopenProjectFolder(normalizedPath);
-        if (reopenedFolder) {
+        projectFolder = await reopenProjectFolder(normalizedPath);
+        if (projectFolder) {
           break;
         }
       }
 
-      if (!reopenedFolder) {
+      if (!projectFolder) {
         addToast("Non sono riuscito ad aprire la cartella richiesta da Esplora file.", "warning");
         if (hasDesktopStateApi()) {
           void logDesktopEvent({
@@ -3844,15 +3871,92 @@ export function App() {
         return;
       }
 
-      const created = await createMasterProject(reopenedFolder);
-      if (!created) {
-        return;
+      const folderSourceId = projectFolder.sourceIdentity?.sourceId;
+      const knownFolders = await hydrateRecentFolders().catch(() => []);
+      if (folderSourceId) {
+        const remembered = knownFolders.find(
+          (item) => item.mode === "project" && item.sourceId === folderSourceId && item.path,
+        );
+        if (remembered?.path) {
+          const rememberedProject = await readPhotoSelectorProjectFile(remembered.path).catch(() => null);
+          if (rememberedProject?.projectMode === "master") {
+            const reopened = await openExistingMasterProject(remembered.path, normalizedPath);
+            if (reopened) {
+              addToast(`Progetto ritrovato: ${rememberedProject.projectName ?? remembered.name}.`, "info", 6000);
+              if (hasDesktopStateApi()) {
+                void logDesktopEvent({
+                  channel: "folder-open",
+                  level: "info",
+                  message: "Progetto ritrovato via memoria sorgente",
+                  details: `${normalizedPath} -> ${remembered.path}`,
+                });
+              }
+              return;
+            }
+          }
+        }
+      }
+
+      const nestedMasters = (await findNestedPhotoSelectorProjects(normalizedPath))
+        .filter((item) => item.project?.projectMode === "master");
+      if (nestedMasters.length === 1 && nestedMasters[0]) {
+        const single = nestedMasters[0];
+        const reopened = await openExistingMasterProject(single.rootPath, normalizedPath);
+        if (reopened) {
+          addToast(`Aperto il progetto ${single.project.projectName ?? single.rootPath}.`, "success", 5000);
+          if (hasDesktopStateApi()) {
+            void logDesktopEvent({
+              channel: "folder-open",
+              level: "info",
+              message: "Unico master annidato aperto",
+              details: `${normalizedPath} -> ${single.rootPath}`,
+            });
+          }
+          return;
+        }
+      }
+      if (nestedMasters.length >= 2) {
+        const normalize = (value: string) => value.replace(/[\\/]+$/, "").toLocaleLowerCase();
+        const rememberedNested = nestedMasters.filter((item) => knownFolders.some(
+          (recent) => recent.mode === "project" && recent.path && normalize(recent.path) === normalize(item.rootPath),
+        ));
+        if (rememberedNested.length === 1 && rememberedNested[0]) {
+          const chosen = rememberedNested[0];
+          const reopened = await openExistingMasterProject(chosen.rootPath, normalizedPath);
+          if (reopened) {
+            addToast(`Aperto il progetto ${chosen.project.projectName ?? chosen.rootPath}.`, "success", 5000);
+            if (hasDesktopStateApi()) {
+              void logDesktopEvent({
+                channel: "folder-open",
+                level: "info",
+                message: "Master annidato scelto dalla cronologia",
+                details: `${normalizedPath} -> ${chosen.rootPath}`,
+              });
+            }
+            return;
+          }
+        }
+      }
+
+      setProjectFolderFocus(null);
+      const freeFolder = await window.filexDesktop.reopenFolder(normalizedPath, {
+        recursive: true,
+        relativePathMode: "project-relative",
+      });
+      if (freeFolder) {
+        await handleFolderOpened(freeFolder, { mode: "free" });
+      }
+      if (nestedMasters.length >= 2) {
+        const names = nestedMasters.slice(0, 3).map((item) => item.project.projectName ?? item.rootPath).join(" · ");
+        addToast(`Aperta in modalità libera: dentro ci sono ${nestedMasters.length} progetti (${names}). Usa Crea o apri un progetto master per quello giusto.`, "info", 8000);
+      } else {
+        addToast("Aperta in modalità libera: crea un progetto master quando il lavoro diventa strutturato.", "info", 5000);
       }
       if (hasDesktopStateApi()) {
         void logDesktopEvent({
           channel: "folder-open",
           level: "info",
-          message: "Cartella aperta dal menu contestuale",
+          message: "Cartella aperta dal menu contestuale in modalità libera",
           details: normalizedPath,
         });
       }
@@ -3873,9 +3977,6 @@ export function App() {
     }
   }, [
     addToast,
-    chooseUnassignedFolderAction,
-    createMasterProject,
-    handleCreateProject,
     handleFolderOpened,
     openExistingMasterProject,
   ]);
@@ -4771,7 +4872,10 @@ export function App() {
     void (async () => {
       const pendingFolderPath = await consumePendingDesktopOpenFolderPath();
       if (!cancelled && pendingFolderPath) {
+        sessionRestoreRef.current = null;
         await desktopFolderRequestHandlerRef.current(pendingFolderPath);
+      } else if (!cancelled) {
+        await tryResumePersistedSessionRef.current();
       }
 
       if (!cancelled) {

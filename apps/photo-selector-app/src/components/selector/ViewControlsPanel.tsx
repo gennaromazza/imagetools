@@ -1,7 +1,7 @@
 import { PhotoClassificationHelpButton } from "../PhotoClassificationHelpButton";
 import { PhotoSearchBar } from "../PhotoSearchBar";
 
-type SortMode = "name" | "orientation" | "rating" | "createdAt";
+type SortMode = "name" | "orientation" | "rating" | "createdAt" | "manual";
 type CreatedAtSortDirection = "asc" | "desc";
 
 interface ViewControlsPanelProps {
@@ -11,6 +11,8 @@ interface ViewControlsPanelProps {
   cardSize: number;
   sortBy: SortMode;
   createdAtSortDirection: CreatedAtSortDirection;
+  captureHint?: string;
+  hasManualOrder?: boolean;
   isSettingsPanelOpen: boolean;
   onSearchChange: (value: string) => void;
   onCardSizeChange: (value: number) => void;
@@ -41,6 +43,7 @@ export function ViewControlsPanel(props: ViewControlsPanelProps) {
         <select
           className="photo-selector__sort photo-selector__toolbar-control"
           value={props.sortBy === "createdAt" ? `createdAt:${props.createdAtSortDirection}` : props.sortBy}
+          title={props.captureHint}
           onChange={(event) => {
             const value = event.target.value;
             if (value === "createdAt:asc" || value === "createdAt:desc") {
@@ -51,8 +54,9 @@ export function ViewControlsPanel(props: ViewControlsPanelProps) {
           }}
         >
           <option value="name">Nome A–Z</option>
-          <option value="createdAt:desc">Più recenti</option>
-          <option value="createdAt:asc">Meno recenti</option>
+          <option value="createdAt:desc">Scatto: più recenti</option>
+          <option value="createdAt:asc">Scatto: meno recenti</option>
+          {props.hasManualOrder ? <option value="manual">Manuale</option> : null}
           <option value="orientation">Orientamento</option>
           <option value="rating">Valutazione</option>
         </select>

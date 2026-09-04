@@ -1,6 +1,8 @@
 import { createPortal } from "react-dom";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ColorLabel, PickStatus } from "@photo-tools/shared-types";
+
+export type ManualOrderAction = "move-start" | "move-backward" | "move-forward" | "move-end" | "apply-names";
 import {
   COLOR_LABEL_NAMES,
   COLOR_LABELS,
@@ -25,6 +27,9 @@ interface PhotoSelectionContextMenuProps {
   onOpenPreview?: () => void;
   onCopyFiles?: () => void;
   onMoveFiles?: () => void;
+  onRenameFiles?: () => void;
+  onExportFiles?: () => void;
+  onManualOrder?: (action: ManualOrderAction) => void;
   onSaveAs?: () => void;
   canConvertPsd?: boolean;
   onConvertPsd?: () => void;
@@ -49,6 +54,9 @@ export function PhotoSelectionContextMenu({
   onOpenPreview,
   onCopyFiles,
   onMoveFiles,
+  onRenameFiles,
+  onExportFiles,
+  onManualOrder,
   onSaveAs,
   canConvertPsd = false,
   onConvertPsd,
@@ -207,6 +215,58 @@ export function PhotoSelectionContextMenu({
 
       <div className="selection-context-menu__divider" />
 
+      {/* ── Manual ordering (grid only, no disk changes) ── */}
+      <div className="selection-context-menu__section">
+        <span className="selection-context-menu__label">Ordine manuale</span>
+        <button
+          type="button"
+          className="selection-context-menu__action-item"
+          onClick={() => onManualOrder?.("move-start")}
+          role="menuitem"
+          title="Sposta le selezionate all'inizio della griglia"
+        >
+          <span className="icon">⏮</span> Sposta all'inizio
+        </button>
+        <button
+          type="button"
+          className="selection-context-menu__action-item"
+          onClick={() => onManualOrder?.("move-backward")}
+          role="menuitem"
+          title="Sposta le selezionate indietro di una posizione"
+        >
+          <span className="icon">◀</span> Sposta prima
+        </button>
+        <button
+          type="button"
+          className="selection-context-menu__action-item"
+          onClick={() => onManualOrder?.("move-forward")}
+          role="menuitem"
+          title="Sposta le selezionate avanti di una posizione"
+        >
+          <span className="icon">▶</span> Sposta dopo
+        </button>
+        <button
+          type="button"
+          className="selection-context-menu__action-item"
+          onClick={() => onManualOrder?.("move-end")}
+          role="menuitem"
+          title="Sposta le selezionate alla fine della griglia"
+        >
+          <span className="icon">⏭</span> Sposta alla fine
+        </button>
+        <button
+          type="button"
+          className="selection-context-menu__action-item"
+          onClick={() => onManualOrder?.("apply-names")}
+          role="menuitem"
+          title="Rinomina i file con numerazione progressiva secondo l'ordine manuale"
+        >
+          <span className="icon">🔢</span> Applica ordine ai nomi…
+        </button>
+      </div>
+
+      <div className="selection-context-menu__divider" />
+
       {/* ── File operations ── */}
       <div className="selection-context-menu__section">
         <span className="selection-context-menu__label">Operazioni file</span>
@@ -256,6 +316,24 @@ export function PhotoSelectionContextMenu({
           title="Sposta i file fisicamente in un'altra cartella (rimuove dall'originale)"
         >
           <span className="icon">✂️</span> Sposta in cartella...
+        </button>
+        <button
+          type="button"
+          className="selection-context-menu__action-item"
+          onClick={onRenameFiles}
+          role="menuitem"
+          title="Rinomina in batch con anteprima: nome personalizzato o data e ora di scatto"
+        >
+          <span className="icon">✏️</span> Rinomina…
+        </button>
+        <button
+          type="button"
+          className="selection-context-menu__action-item"
+          onClick={onExportFiles}
+          role="menuitem"
+          title="Esporta le selezionate in JPEG o WebP con qualità e dimensioni a scelta"
+        >
+          <span className="icon">📤</span> Esporta selezionate…
         </button>
         <button
           type="button"

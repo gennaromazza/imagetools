@@ -414,6 +414,12 @@
     "0.1.38": [
       "Corretto l'avvio dell'app installata separando il motore BiRefNet, usato soltanto da FileX ID Photo, dal runtime di Image Select Pro.",
       "La pipeline di release esegue ora uno smoke test sul main process realmente impacchettato prima di pubblicare l'installer."
+    ],
+    "0.1.39": [
+      "Il tasto destro apre direttamente il progetto giusto o la modalita libera, e all'avvio ritrovi l'ultima sessione.",
+      "Ordinamento per data di scatto EXIF con diagnosi degli orologi sfasati, duplicati rilevati e sfogliamento piu fluido.",
+      "Rinomina batch con anteprima, ordine manuale della griglia ed esportazione integrata con Image Converter.",
+      "Condivisione da Quick Preview: copia, WhatsApp con numero, email e download."
     ]
   },
   "id-photo": {
