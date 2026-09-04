@@ -194,6 +194,11 @@
     ]
   },
   "archivio-flow": {
+    "0.1.40": [
+      "La voce Nuovo lavoro apre la Home SD, raggiungibile anche senza scheda inserita: senza SD viene mostrato lo stato di attesa.",
+      "Con la SD già inserita la schermata mostra subito la preview esistente, senza nuove scansioni inutili.",
+      "Il pulsante Importa questa SD mantiene il flusso di importazione esistente verso la schermata di lavoro."
+    ],
     "0.1.35": [
       "Le miniature si aggiornano correttamente cambiando data, riutilizzano una cache più rapida e mostrano anche le anteprime incorporate dei file RAW.",
       "Aggiungendo file a un lavoro esistente vengono mostrate le cartelle foto e video già presenti, con suggerimenti per evitare nomi duplicati o troppo simili.",

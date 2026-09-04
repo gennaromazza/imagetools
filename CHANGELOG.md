@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-04 - Archivio Flow 0.1.40
+
+- La voce "Nuovo lavoro" della sidebar apre la Home SD, raggiungibile manualmente anche senza scheda inserita; senza SD viene mostrato lo stato vuoto "In attesa di una scheda".
+- Con SD già inserita la schermata mostra subito la preview esistente, senza avviare nuove scansioni inutili al ritorno da Archivio, Drive o Impostazioni.
+- Il pulsante "Importa questa SD" mantiene il flusso esistente verso la schermata di importazione.
+
 ## 2026-09-01 - Image Select Pro 0.1.38
 
 - Corretto l'avvio dell'app installata: il motore BiRefNet di FileX ID Photo non viene più caricato da Image Select Pro.
