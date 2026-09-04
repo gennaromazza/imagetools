@@ -585,7 +585,25 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange,
     return (
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "1rem" }}>
         <div className="stack" style={{ gap: compact ? "0.22rem" : "0.35rem", flex: 1, minWidth: 0 }}>
-          <strong style={{ fontSize: compact ? "0.95rem" : "1rem", lineHeight: 1.2 }}>{job.nomeLavoro}</strong>
+          <button
+            type="button"
+            onClick={() => void handleOpenFolder(job)}
+            disabled={job.folderExists === false}
+            title="Apri cartella in Explorer"
+            style={{
+              background: "none",
+              border: 0,
+              padding: 0,
+              textAlign: "left",
+              fontSize: compact ? "0.95rem" : "1rem",
+              lineHeight: 1.2,
+              fontWeight: 700,
+              color: "var(--text)",
+              cursor: job.folderExists === false ? "not-allowed" : "pointer",
+            }}
+          >
+            {job.nomeLavoro}
+          </button>
 
           <div
             style={{
@@ -680,6 +698,15 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange,
 
         <div className="button-row" style={{ flexShrink: 0 }}>
           <button
+            className="primary-button"
+            style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
+            onClick={() => void handleOpenFolder(job)}
+            title="Apri cartella in Explorer"
+            disabled={job.folderExists === false}
+          >
+            Apri
+          </button>
+          <button
             className="secondary-button"
             style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
             onClick={() => onAddFiles?.(job)}
@@ -687,15 +714,6 @@ export function ArchivioPanel({ jobs, loading, onRefresh, onAnalysisStateChange,
             title="Importa altri file in questo lavoro"
           >
             + File
-          </button>
-          <button
-            className="secondary-button"
-            style={{ padding: compact ? "0.5rem 0.75rem" : "0.55rem 0.9rem", fontSize: "0.84rem" }}
-            onClick={() => void handleOpenFolder(job)}
-            title="Apri cartella in Explorer"
-            disabled={job.folderExists === false}
-          >
-            Apri
           </button>
           <button
             className="secondary-button"

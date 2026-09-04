@@ -4,9 +4,12 @@ import {
   checkArchivioSafeToFormat,
   getArchivioFilterPreview,
   getArchivioSdPreview,
+  listPhotoToolInstallStates,
+  openFileXSuite,
   sendArchivioPhotoSelectionToTool,
 } from "../archivioDesktopApi";
 import { DesktopPreviewImage } from "./DesktopPreviewImage";
+import { SdLightbox } from "./SdLightbox";
 import { buildPreviewSourceKey, filterMediaForDate, isPreviewableMedia, localIsoDate } from "../previewPolicy";
 import {
   PHOTO_TOOL_SELECTION_LIMIT,
@@ -49,6 +52,7 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(() => new Set());
   const [sendingTarget, setSendingTarget] = useState<PhotoToolTargetId | null>(null);
   const [routingFeedback, setRoutingFeedback] = useState<string | null>(null);
+  const [toolInstallState, setToolInstallState] = useState<Record<string, boolean> | null>(null);
   const loadMoreTriggerRef = useRef<HTMLDivElement | null>(null);
   const routingRequestIdRef = useRef(0);
 
@@ -79,9 +83,14 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
     () => media?.sampleFiles.slice(0, visibleMediaCount) ?? [],
     [media, visibleMediaCount],
   );
-  const visibleCompatibleCount = useMemo(
-    () => visibleFiles.filter(isPhotoToolCompatible).length,
-    [visibleFiles],
+  const lightboxPhotos = useMemo(
+    () => media?.sampleFiles.filter((item) => item.mediaType === "photo") ?? [],
+    [media],
+  );
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const totalCompatibleCount = useMemo(
+    () => media?.sampleFiles.filter(isPhotoToolCompatible).length ?? 0,
+    [media],
   );
   const previewIsTruncated = Boolean(allMedia && allMedia.matchedFiles > allMedia.sampleFiles.length);
 
@@ -104,6 +113,7 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
     setSelectedPaths(new Set());
     setSendingTarget(null);
     setRoutingFeedback(null);
+    setLightboxIndex(null);
     routingRequestIdRef.current += 1;
     Promise.all([
       getArchivioSdPreview(sdPath),
@@ -126,6 +136,20 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [sdPath]);
+
+  useEffect(() => {
+    let active = true;
+    void listPhotoToolInstallStates().then((states) => {
+      if (!active || states.length === 0) return;
+      const next: Record<string, boolean> = {};
+      for (const target of PHOTO_TOOL_TARGETS) {
+        const found = states.find((state) => state.toolId === target.id);
+        if (found) next[target.id] = found.installed;
+      }
+      if (active) setToolInstallState(next);
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     setVisibleMediaCount(PREVIEW_PAGE_SIZE);
@@ -167,16 +191,25 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
       : null);
   }
 
-  function handleSelectVisible() {
-    const update = addVisibleCompatiblePhotos(selectedPaths, visibleFiles);
+  function handleSelectAllFiltered() {
+    if (!media) return;
+    const update = addVisibleCompatiblePhotos(selectedPaths, media.sampleFiles);
     setSelectedPaths(update.selectedPaths);
     if (update.limitReached) {
       setRoutingFeedback(`Selezionate ${update.selectedPaths.size} foto. Raggiunto il limite di ${PHOTO_TOOL_SELECTION_LIMIT}.`);
     } else if (update.addedCount > 0) {
-      setRoutingFeedback(`Aggiunte ${update.addedCount} foto visibili alla selezione.`);
+      setRoutingFeedback(`Aggiunte ${update.addedCount} foto del filtro corrente alla selezione.`);
     } else {
-      setRoutingFeedback("Le foto compatibili visibili sono già selezionate.");
+      setRoutingFeedback("Le foto compatibili del filtro corrente sono già selezionate.");
     }
+  }
+
+  async function handleOpenSuiteForTool(targetLabel: string) {
+    setRoutingFeedback(`Apro FileX Suite per installare ${targetLabel}…`);
+    const result = await openFileXSuite();
+    setRoutingFeedback(result.ok
+      ? `FileX Suite aperta: installa ${targetLabel} per inviare le foto.`
+      : `${targetLabel} non è installato. Apri FileX Suite e installalo da lì per inviare le foto.`);
   }
 
   async function handleSendToTool(targetToolId: PhotoToolTargetId) {
@@ -190,6 +223,11 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
       return;
     }
     const target = PHOTO_TOOL_TARGETS.find((item) => item.id === targetToolId);
+    const knownMissing = toolInstallState?.[targetToolId] === false;
+    if (knownMissing) {
+      await handleOpenSuiteForTool(target?.label ?? targetToolId);
+      return;
+    }
     const requestId = routingRequestIdRef.current + 1;
     routingRequestIdRef.current = requestId;
     setSendingTarget(targetToolId);
@@ -201,9 +239,13 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
         absolutePaths: [...selectedPaths],
       });
       if (routingRequestIdRef.current !== requestId) return;
-      setRoutingFeedback(result.ok
-        ? (result.message || `${target?.label ?? "Il tool"} è stato aperto con ${selectedPaths.size} foto.`)
-        : (result.message || `Non è stato possibile aprire ${target?.label ?? "il tool"}.`));
+      if (result.ok) {
+        setRoutingFeedback(result.message || `${target?.label ?? "Il tool"} è stato aperto con ${selectedPaths.size} foto.`);
+      } else if (knownMissing) {
+        setRoutingFeedback(`${target?.label ?? "Il tool"} non è installato. Apri FileX Suite e installalo da lì per inviare le foto.`);
+      } else {
+        setRoutingFeedback(result.message || `Non è stato possibile aprire ${target?.label ?? "il tool"}.`);
+      }
     } catch (error) {
       if (routingRequestIdRef.current !== requestId) return;
       setRoutingFeedback(error instanceof Error
@@ -311,60 +353,72 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
             </div>
           )}
           {selectedPaths.size > 0 && (
-            <div className="sd-tool-routing" aria-label="Invia foto selezionate ai tool FileX">
-            <div className="sd-tool-routing__header">
-              <div>
-                <strong>Continua il lavoro in FileX</strong>
-                <p>
-                  {selectedPaths.size} foto selezionate. La selezione resta attiva cambiando filtro o data e si azzera
-                  quando inserisci un’altra SD.
-                </p>
-              </div>
-              <div className="button-row">
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={handleSelectVisible}
-                  disabled={loading || sendingTarget !== null || visibleCompatibleCount === 0 || selectedPaths.size >= PHOTO_TOOL_SELECTION_LIMIT}
+            <div className="sd-tool-routing sd-tool-routing--compact" aria-label="Invia foto selezionate ai tool FileX">
+              <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                <strong
+                  style={{ fontSize: "0.86rem", whiteSpace: "nowrap" }}
+                  title="La selezione resta attiva cambiando filtro o data e si azzera quando inserisci un’altra SD."
                 >
-                  Seleziona visibili ({visibleCompatibleCount})
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button"
-                  onClick={() => {
-                    setSelectedPaths(new Set());
-                    setRoutingFeedback("Selezione azzerata.");
-                  }}
-                  disabled={sendingTarget !== null || selectedPaths.size === 0}
-                >
-                  Azzera
-                </button>
-              </div>
-            </div>
-            <div className="sd-tool-routing__actions" role="group" aria-label="Tool di destinazione">
-              {PHOTO_TOOL_TARGETS.map((target) => {
-                const validation = validatePhotoToolSelection(target.id, selectedPaths.size);
-                const isSending = sendingTarget === target.id;
-                return (
+                  {selectedPaths.size} selezionate
+                </strong>
+                <div className="sd-tool-routing__actions" role="group" aria-label="Tool di destinazione" title="Party Frame e Batch Layout accettano fino a 500 foto. Photo ID richiede una sola foto.">
+                  {PHOTO_TOOL_TARGETS.map((target) => {
+                    const validation = validatePhotoToolSelection(target.id, selectedPaths.size);
+                    const isSending = sendingTarget === target.id;
+                    const notInstalled = toolInstallState?.[target.id] === false;
+                    return (
+                      <button
+                        key={target.id}
+                        type="button"
+                        className="primary-button"
+                        style={{ padding: "0.42rem 0.7rem", fontSize: "0.8rem", display: "inline-flex", alignItems: "center" }}
+                        onClick={() => { void handleSendToTool(target.id); }}
+                        disabled={sendingTarget !== null || !validation.valid}
+                        title={notInstalled
+                          ? `${target.label} non è installato: clicca per aprire FileX Suite e installarlo`
+                          : validation.valid
+                            ? `Apri ${target.label} con la selezione corrente`
+                            : validation.message}
+                      >
+                        {isSending ? `Apro ${target.label}…` : target.label}
+                        {notInstalled && !isSending && (
+                          <span
+                            style={{ fontSize: "0.68rem", fontWeight: 700, border: "1px solid #1f2421", color: "#1f2421", background: "rgba(31, 36, 33, 0.12)", borderRadius: 999, padding: "0.05rem 0.4rem", marginLeft: "0.35rem", whiteSpace: "nowrap" }}
+                          >
+                            Da installare
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="button-row" style={{ marginLeft: "auto" }}>
                   <button
-                    key={target.id}
                     type="button"
-                    className="primary-button"
-                    onClick={() => { void handleSendToTool(target.id); }}
-                    disabled={sendingTarget !== null || !validation.valid}
-                    title={validation.valid
-                      ? `Apri ${target.label} con la selezione corrente`
-                      : validation.message}
+                    className="ghost-button"
+                    style={{ padding: "0.42rem 0.7rem", fontSize: "0.8rem" }}
+                    onClick={handleSelectAllFiltered}
+                    disabled={loading || sendingTarget !== null || totalCompatibleCount === 0 || selectedPaths.size >= PHOTO_TOOL_SELECTION_LIMIT}
+                    title="Seleziona tutte le foto compatibili del filtro corrente (massimo 500)"
                   >
-                    {isSending ? `Apro ${target.label}…` : `Apri in ${target.label}`}
+                    Tutte ({totalCompatibleCount})
                   </button>
-                );
-              })}
-              <small>Party Frame e Batch Layout accettano fino a 500 foto. Photo ID richiede una sola foto.</small>
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    style={{ padding: "0.42rem 0.7rem", fontSize: "0.8rem" }}
+                    onClick={() => {
+                      setSelectedPaths(new Set());
+                      setRoutingFeedback("Selezione azzerata.");
+                    }}
+                    disabled={sendingTarget !== null || selectedPaths.size === 0}
+                  >
+                    Azzera
+                  </button>
+                </div>
+              </div>
+              {routingFeedback && <p className="sd-tool-routing__feedback" role="status" aria-live="polite">{routingFeedback}</p>}
             </div>
-            {routingFeedback && <p className="sd-tool-routing__feedback" role="status" aria-live="polite">{routingFeedback}</p>}
-          </div>
           )}
           {media && (
             <div className="sd-media-grid">
@@ -376,6 +430,11 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
                     key={`${file.filePath}:${buildPreviewSourceKey(file)}`}
                     className={`sd-media-card${selected ? " sd-media-card--selected" : ""}${compatible ? "" : " sd-media-card--incompatible"}`}
                     title={compatible ? `Seleziona ${file.fileName}` : "Formato non inviabile direttamente ai tool foto"}
+                    onDoubleClick={() => {
+                      if (file.mediaType !== "photo") return;
+                      const photoIndex = lightboxPhotos.findIndex((item) => item.filePath === file.filePath);
+                      if (photoIndex >= 0) setLightboxIndex(photoIndex);
+                    }}
                   >
                     <input
                       type="checkbox"
@@ -428,6 +487,14 @@ export function SdCardPreviewPanel({ sdPath, onStartImport }: Props) {
         </div>
       </details>
         </>
+      )}
+      {lightboxIndex !== null && lightboxPhotos.length > 0 && (
+        <SdLightbox
+          files={lightboxPhotos}
+          index={Math.min(lightboxIndex, lightboxPhotos.length - 1)}
+          onIndexChange={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
       )}
     </div>
   );

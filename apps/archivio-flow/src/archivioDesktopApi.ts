@@ -352,14 +352,17 @@ const previewBlobRequests = new Map<string, Promise<Blob | null>>();
 const previewTaskQueue: Array<() => void> = [];
 let activePreviewTasks = 0;
 
-function runPreviewTask<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+function runPreviewTask<T>(task: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const start = () => {
-      if (signal?.aborted) {
-        reject(new Error("Richiesta anteprima annullata"));
-        previewTaskQueue.shift()?.();
-        return;
-      }
+      // Nota: qui NON si controlla l'abort del chiamante. La promise è
+      // condivisa (deduplicata per cacheKey in previewBlobRequests) tra tutti
+      // i richiedenti: in dev StrictMode rimonta ogni DesktopPreviewImage e
+      // il primo mount abortisce mentre la richiesta è ancora in coda, e un
+      // reject da abort avvelenerebbe anche il secondo mount in attesa
+      // (tile bloccata su "Anteprima non disponibile" senza retry).
+      // Il componente ignora comunque il risultato se smontato (flag alive);
+      // il lavoro in background completa e scalda le cache.
       activePreviewTasks += 1;
       void task().then(resolve, reject).finally(() => {
         activePreviewTasks -= 1;
@@ -419,7 +422,7 @@ async function loadArchivioPreviewBlob(sdPath: string, filePath: string, sourceF
     const response = await fetch(`/api/preview-image?${query.toString()}`);
     if (!response.ok) throw new Error(await readErrorMessage(response));
     return await response.blob();
-  }, signal);
+  });
   previewBlobRequests.set(cacheKey, request);
   try {
     const blob = await request;
@@ -433,6 +436,47 @@ async function loadArchivioPreviewBlob(sdPath: string, filePath: string, sourceF
 export async function getArchivioPreviewImageUrl(sdPath: string, filePath: string, sourceFileKey?: string, signal?: AbortSignal): Promise<string | null> {
   const blob = await loadArchivioPreviewBlob(sdPath, filePath, sourceFileKey, signal);
   return blob ? URL.createObjectURL(blob) : null;
+}
+
+export async function getArchivioFullPreviewBlob(
+  filePath: string,
+  maxDimension?: number,
+  sourceFileKey?: string,
+): Promise<Blob | null> {
+  const desktopApi = getDesktopApi();
+  if (!desktopApi || typeof desktopApi.getPreview !== "function") return null;
+  const rendered = await desktopApi.getPreview(filePath, { maxDimension, sourceFileKey }).catch(() => null);
+  if (!rendered) return null;
+  const ownedBytes = new Uint8Array(rendered.bytes.byteLength);
+  ownedBytes.set(rendered.bytes);
+  return new Blob([ownedBytes], { type: rendered.mimeType || "image/jpeg" });
+}
+
+export function warmArchivioFullPreview(filePath: string, maxDimension?: number, sourceFileKey?: string): void {
+  const desktopApi = getDesktopApi();
+  if (!desktopApi || typeof desktopApi.warmPreview !== "function") return;
+  void desktopApi.warmPreview(filePath, { maxDimension, sourceFileKey }).catch(() => undefined);
+}
+
+export async function openFileXSuite(): Promise<{ ok: boolean; message: string }> {
+  const desktopApi = getDesktopApi();
+  if (!desktopApi) return { ok: false, message: "FileX Suite si apre solo dall'app installata." };
+  try {
+    return await desktopApi.openInstalledTool("suite-launcher");
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "Non è stato possibile aprire FileX Suite." };
+  }
+}
+
+export async function listPhotoToolInstallStates(): Promise<Array<{ toolId: string; toolName: string; installed: boolean }>> {
+  const desktopApi = getDesktopApi();
+  if (!desktopApi || typeof desktopApi.listAvailableTools !== "function") return [];
+  try {
+    const states = await desktopApi.listAvailableTools();
+    return states.map((state) => ({ toolId: state.toolId, toolName: state.toolName, installed: state.installed }));
+  } catch {
+    return [];
+  }
 }
 
 export async function openBackupGuard(): Promise<{ ok: boolean; message: string }> {

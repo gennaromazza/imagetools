@@ -763,6 +763,15 @@ img { display: block; max-width: 100%; }
   color: var(--accent-strong);
 }
 
+.sd-tool-routing--compact {
+  gap: 0.4rem;
+  padding: 0.55rem 0.75rem;
+}
+
+.sd-tool-routing--compact .sd-tool-routing__actions {
+  gap: 0.45rem;
+}
+
 .sd-media-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

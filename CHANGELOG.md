@@ -35,6 +35,10 @@
 - La voce "Nuovo lavoro" della sidebar apre la Home SD, raggiungibile manualmente anche senza scheda inserita; senza SD viene mostrato lo stato vuoto "In attesa di una scheda".
 - Con SD già inserita la schermata mostra subito la preview esistente, senza avviare nuove scansioni inutili al ritorno da Archivio, Drive o Impostazioni.
 - Il pulsante "Importa questa SD" mantiene il flusso esistente verso la schermata di importazione.
+- Nell'elenco lavori il pulsante Apri è ora il primo ed è evidenziato in giallo; anche il nome del lavoro apre direttamente la cartella.
+- La barra di invio ai tool FileX è più compatta e il pulsante Tutte seleziona con un click tutte le foto compatibili del filtro corrente.
+- I tool non installati mostrano il badge "Da installare": il click apre FileX Suite per installarli.
+- Doppio click su una foto per vederla a schermo intero e sfogliarla con frecce o tastiera, con tasto Condividi per copiarla o inviarla al cliente via WhatsApp (con inserimento numero) o email.
 
 ## 2026-09-01 - Image Select Pro 0.1.38
 
