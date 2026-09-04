@@ -170,3 +170,19 @@ export async function releaseDesktopQuickPreviewFrames(tokens: string[]): Promis
     // Ignore release failures: tokens are best-effort.
   }
 }
+
+export async function getDesktopShareBlob(absolutePath: string, maxDimension: number): Promise<Blob | null> {
+  const api = getDesktopApi();
+  if (!api || typeof api.getPreview !== "function") {
+    return null;
+  }
+
+  const rendered = await api.getPreview(absolutePath, { maxDimension }).catch(() => null);
+  if (!rendered) {
+    return null;
+  }
+
+  const ownedBytes = new Uint8Array(rendered.bytes.byteLength);
+  ownedBytes.set(rendered.bytes);
+  return new Blob([ownedBytes], { type: rendered.mimeType || "image/jpeg" });
+}
