@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-07 - Batch Print Layout 0.1.6
+
+- Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida.
+
 ## 2026-09-07 - Image Party Frame 0.1.31
 
 - Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida. Editor testo sul canvas, font locali, loghi, varianti, template portabili e correzioni rendering.

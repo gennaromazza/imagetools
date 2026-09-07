@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@photo-tools/batch-print-layout": "0.1.5",
+    "@photo-tools/batch-print-layout": "0.1.6",
     "@photo-tools/desktop-contracts": "0.1.0",
     "lucide-react": "0.487.0",
     "react": "^19.0.0",
