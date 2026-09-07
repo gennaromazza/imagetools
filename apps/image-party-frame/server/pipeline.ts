@@ -57,6 +57,18 @@ export class ExportCancelledError extends Error {
   }
 }
 
+export const MAX_OVERLAY_SLOTS = 8;
+
+export interface OverlayGeometry {
+  x: number;
+  y: number;
+  width: number;
+  /** 0 means "keep natural aspect from width" (pre-rendered text PNGs). */
+  height: number;
+  /** Percent, 0-100. */
+  opacity: number;
+}
+
 export interface TemplateConfig {
   name: string;
   width: number;
@@ -69,10 +81,13 @@ export interface TemplateConfig {
   photoAreaWidth: number;
   photoAreaHeight: number;
   photoBorderSize: number;
+  photoRadiusPx?: number;
   photoBorderColor: string;
   frameImagePath?: string | null;
   presetId?: string;
   presetOrientation?: PartyFrameOrientation;
+  overlays: OverlayGeometry[];
+  overlayImagePaths: Array<string | null>;
 }
 
 export interface BatchExportCrop {
@@ -101,8 +116,15 @@ export interface CustomTemplateVariantPayload {
   photoAreaWidth: number;
   photoAreaHeight: number;
   borderSizePx?: number;
+  photoRadiusPx?: number;
   borderColor?: string;
   backgroundFileName?: string;
+  /** Logo boxes; overlay images travel in the same order (multipart slots). */
+  logos?: Array<{ x?: unknown; y?: unknown; width?: unknown; height?: unknown; opacity?: unknown }>;
+  /** Pre-rendered text boxes (height 0 = natural PNG aspect); images follow logos. */
+  texts?: Array<{ x?: unknown; y?: unknown; width?: unknown; opacity?: unknown }>;
+  /** Validated overlay geometries in upload order (logos, then texts). */
+  overlays: OverlayGeometry[];
 }
 
 export interface CustomTemplatePayload {
@@ -132,6 +154,7 @@ export interface ExportRequestBody {
   overwrite?: unknown;
   items?: unknown;
   customTemplate?: unknown;
+  counterOffset?: unknown;
 }
 
 export interface PrepareExportOptions {
@@ -144,6 +167,7 @@ export interface PreparedExportRequest {
   customTemplate: CustomTemplatePayload | null;
   files: UploadedFileDescriptor[];
   templateBackgroundFiles: Partial<Record<"vertical" | "horizontal", UploadedFileDescriptor>>;
+  templateOverlayFiles: Partial<Record<"vertical" | "horizontal", UploadedFileDescriptor[]>>;
   items: BatchExportItem[];
   quality: number;
   format: "jpeg" | "png";
@@ -153,6 +177,7 @@ export interface PreparedExportRequest {
   outputDir: string;
   embedColorProfile: boolean;
   overwrite: boolean;
+  counterOffset: number;
 }
 
 export interface ExportResult {
@@ -200,6 +225,8 @@ function presetToTemplateConfig(
     frameImagePath: null,
     presetId: oriented.id,
     presetOrientation: orientation,
+    overlays: [],
+    overlayImagePaths: [],
   };
 }
 
@@ -284,6 +311,10 @@ function parseCustomTemplateVariant(rawVariant: unknown): CustomTemplateVariantP
     throw new HttpError(400, "INVALID_TEMPLATE_GEOMETRY", "Photo area must fit entirely inside the template");
   }
   const maxBorder = Math.max(0, Math.floor(Math.min(photoAreaWidth, photoAreaHeight) / 2) - 1);
+  const photoRadiusPx = parsed.photoRadiusPx === undefined ? 0 : assertFiniteNonNegativeInteger(parsed.photoRadiusPx, "photoRadiusPx");
+  if (photoRadiusPx > Math.min(photoAreaWidth, photoAreaHeight) / 2) {
+    throw new HttpError(400, "INVALID_TEMPLATE_GEOMETRY", "Corner radius exceeds half the photo area");
+  }
   const borderSizePx = parsed.borderSizePx === undefined
     ? 0
     : assertFiniteNonNegativeInteger(parsed.borderSizePx, "borderSizePx");
@@ -297,6 +328,7 @@ function parseCustomTemplateVariant(rawVariant: unknown): CustomTemplateVariantP
   if (parsed.borderColor !== undefined && sanitizeHexColor(parsed.borderColor, "") === "") {
     throw new HttpError(400, "INVALID_TEMPLATE_COLOR", "borderColor must use #RRGGBB format");
   }
+  const overlays = parseClientOverlays(parsed, widthPx, heightPx);
 
   return {
     widthPx,
@@ -307,10 +339,51 @@ function parseCustomTemplateVariant(rawVariant: unknown): CustomTemplateVariantP
     photoAreaWidth,
     photoAreaHeight,
     borderSizePx,
+    photoRadiusPx,
     borderColor: parsed.borderColor ?? "#ffffff",
     backgroundFileName:
       typeof parsed.backgroundFileName === "string" ? parsed.backgroundFileName.slice(0, MAX_ITEM_TEXT_LENGTH) : undefined,
+    overlays,
   };
+}
+
+/**
+ * Read overlay geometry from the client logo/text boxes. Overlay images are
+ * uploaded as indexed multipart slots in the same order (logos first, then
+ * pre-rendered texts), so only geometry + opacity matter here.
+ */
+function parseClientOverlays(
+  parsed: Partial<CustomTemplateVariantPayload>,
+  canvasWidth: number,
+  canvasHeight: number
+): OverlayGeometry[] {
+  const geometries: OverlayGeometry[] = [];
+  const push = (rawOverlay: unknown, index: number, kind: string, naturalHeight: boolean): void => {
+    if (!rawOverlay || typeof rawOverlay !== "object") {
+      throw new HttpError(400, "INVALID_TEMPLATE_OVERLAYS", `Template ${kind} overlay ${index + 1} is invalid`);
+    }
+    const candidate = rawOverlay as { x?: unknown; y?: unknown; width?: unknown; height?: unknown; opacity?: unknown };
+    const x = assertFiniteNonNegativeInteger(candidate.x, "overlay.x");
+    const y = assertFiniteNonNegativeInteger(candidate.y, "overlay.y");
+    const width = assertFinitePositiveInteger(candidate.width, "overlay.width");
+    const height = naturalHeight ? 0 : assertFinitePositiveInteger(candidate.height, "overlay.height");
+    const opacity = candidate.opacity === undefined ? 100 : assertFiniteNonNegativeInteger(candidate.opacity, "overlay.opacity");
+    if (opacity > 100) {
+      throw new HttpError(400, "INVALID_TEMPLATE_OVERLAYS", `Template ${kind} overlay ${index + 1} opacity is invalid`);
+    }
+    if (x + width > canvasWidth || y >= canvasHeight || (height > 0 && y + height > canvasHeight)) {
+      throw new HttpError(400, "INVALID_TEMPLATE_OVERLAYS", `Template ${kind} overlay ${index + 1} must fit inside the canvas`);
+    }
+    geometries.push({ x, y, width, height, opacity });
+  };
+  const logos = parsed.logos ?? [];
+  const texts = parsed.texts ?? [];
+  if (!Array.isArray(logos) || !Array.isArray(texts) || logos.length + texts.length > MAX_OVERLAY_SLOTS) {
+    throw new HttpError(400, "INVALID_TEMPLATE_OVERLAYS", "Template overlays are invalid");
+  }
+  logos.forEach((logo, index) => push(logo, index, "logo", false));
+  texts.forEach((text, index) => push(text, index, "text", true));
+  return geometries;
 }
 
 export function parseCustomTemplate(rawTemplate: unknown): CustomTemplatePayload | null {
@@ -365,8 +438,11 @@ export function toTemplateConfig(
   customTemplate: CustomTemplatePayload,
   orientation: "vertical" | "horizontal",
   backgroundPaths: Partial<Record<"vertical" | "horizontal", string | undefined>> = {},
+  overlayPaths: Partial<Record<"vertical" | "horizontal", Array<string | null | undefined>>> = {},
 ): TemplateConfig {
   const variant = customTemplate.variants[orientation];
+  const geometries = variant.overlays ?? [];
+  const slotPaths = overlayPaths[orientation] ?? [];
   return {
     name: customTemplate.name || "Template Custom",
     width: variant.widthPx,
@@ -379,8 +455,11 @@ export function toTemplateConfig(
     photoAreaWidth: variant.photoAreaWidth,
     photoAreaHeight: variant.photoAreaHeight,
     photoBorderSize: variant.borderSizePx ?? 0,
+    photoRadiusPx: variant.photoRadiusPx ?? 0,
     photoBorderColor: variant.borderColor ?? "#ffffff",
     frameImagePath: backgroundPaths[orientation] || null,
+    overlays: geometries.map(({ x, y, width, height, opacity }) => ({ x, y, width, height, opacity })),
+    overlayImagePaths: geometries.map((_, index) => slotPaths[index] ?? null),
   };
 }
 
@@ -431,13 +510,14 @@ export function buildOutputFilename(
   projectName: string,
   index: number,
   format: "jpeg" | "png",
+  counterOffset = 0,
 ): string {
   const originalBase = originalBaseForItem(item, index);
   const template = pattern || "original_frame";
   const resolved = template
     .replace(/\{originale\}/g, originalBase)
     .replace(/\{progetto\}/g, sanitizeSegment(projectName || "Project", "Project"))
-    .replace(/\{contatore\}/g, String(index + 1).padStart(3, "0"))
+    .replace(/\{contatore\}/g, String(index + 1 + Math.max(0, Math.floor(counterOffset))).padStart(3, "0"))
     .replace(/\{data\}/g, new Date().toISOString().slice(0, 10))
     .replace(/^original_frame$/g, `${originalBase}_frame`);
   const basename = sanitizeSegment(resolved, `${originalBase}_frame`);
@@ -688,6 +768,7 @@ export async function prepareExportRequest(
   defaultExportDir: string,
   jobId: string,
   options: PrepareExportOptions = {},
+  templateOverlayFiles: Partial<Record<"vertical" | "horizontal", UploadedFileDescriptor[]>> = {},
 ): Promise<PreparedExportRequest> {
   const requestBody = body && typeof body === "object" ? body : {};
   const templateId = asString(requestBody.templateId).trim();
@@ -710,6 +791,20 @@ export async function prepareExportRequest(
   for (const [orientation, file] of Object.entries(templateBackgroundFiles)) {
     if (file) validateUploadedFile(file, `${orientation} template background`);
   }
+  const normalizedOverlayFiles: Partial<Record<"vertical" | "horizontal", UploadedFileDescriptor[]>> = {};
+  for (const orientation of ["vertical", "horizontal"] as const) {
+    const slotFiles = templateOverlayFiles[orientation];
+    if (!slotFiles || slotFiles.length === 0) {
+      continue;
+    }
+    if (slotFiles.length > MAX_OVERLAY_SLOTS) {
+      throw new HttpError(400, "INVALID_TEMPLATE_OVERLAYS", "Too many template overlay images");
+    }
+    slotFiles.forEach((file, slot) => {
+      if (file) validateUploadedFile(file, `${orientation} template overlay ${slot + 1}`);
+    });
+    normalizedOverlayFiles[orientation] = [...slotFiles];
+  }
   const nativeFiles = await Promise.all(items.map(async (item, index) =>
     item.absolutePath ? resolveNativeImageFile(item.absolutePath, `Image ${index + 1}`) : null
   ));
@@ -718,7 +813,8 @@ export async function prepareExportRequest(
   items.forEach((item, index) => {
     item.originalName ??= files[index].originalname;
   });
-  const totalBytes = [...files, ...Object.values(templateBackgroundFiles)].reduce(
+  const overlayFileList = Object.values(normalizedOverlayFiles).flat();
+  const totalBytes = [...files, ...Object.values(templateBackgroundFiles), ...overlayFileList].reduce(
     (total, file) => total + (file?.size ?? 0),
     0,
   );
@@ -748,6 +844,8 @@ export async function prepareExportRequest(
     throw new HttpError(400, "INVALID_NAMING_PATTERN", "Naming pattern is invalid or too long");
   }
   const projectName = asString(requestBody.projectName, "Project").trim().slice(0, MAX_PROJECT_NAME_LENGTH) || "Project";
+  const rawCounterOffset = parseOptionalFiniteNumber(requestBody.counterOffset, "counterOffset") ?? 0;
+  const counterOffset = clamp(Math.floor(rawCounterOffset), 0, 1_000_000);
   const createSubfolder = parseBooleanField(requestBody.createSubfolder, true, "createSubfolder");
   const outputDir = planOutputDirectory(requestBody.outputPath, defaultExportDir, projectName, createSubfolder, jobId);
   // Keep accepting the legacy toggle, while the supported output baseline is always color-managed sRGB.
@@ -759,6 +857,7 @@ export async function prepareExportRequest(
     customTemplate,
     files,
     templateBackgroundFiles,
+    templateOverlayFiles: normalizedOverlayFiles,
     items,
     quality,
     format,
@@ -768,6 +867,7 @@ export async function prepareExportRequest(
     outputDir,
     embedColorProfile: true,
     overwrite: parseBooleanField(requestBody.overwrite, false, "overwrite"),
+    counterOffset,
   };
 }
 
@@ -903,6 +1003,7 @@ export async function renderFramedImageAtomic({
   quality = 95,
   format = "jpeg",
   frameBuffer,
+  overlayLayerBuffer,
   sourceDimensions,
   onPhase,
 }: {
@@ -913,14 +1014,21 @@ export async function renderFramedImageAtomic({
   quality?: number;
   format?: "jpeg" | "png";
   frameBuffer?: Buffer;
+  overlayLayerBuffer?: Buffer | null;
   sourceDimensions?: { width: number; height: number };
   onPhase?: (phase: "rendering" | "writing") => void;
 }): Promise<{ size: number }> {
   validateTemplateDimensions(template.width, template.height);
   onPhase?.("rendering");
   const resolvedFrameBuffer = frameBuffer ?? await buildFrameBuffer(template);
-  const photoAreaBuffer = await buildPhotoAreaBuffer(imagePath, template, crop, sourceDimensions);
-  const borderedPhotoBuffer = template.photoBorderSize > 0
+  const roundPhoto = async (buffer: Buffer, width: number, height: number, radius: number) => radius > 0
+    ? sharp(buffer).composite([{ input: Buffer.from(`<svg width="${width}" height="${height}"><rect width="${width}" height="${height}" rx="${radius}" fill="white"/></svg>`), blend: "dest-in" }]).png().toBuffer()
+    : buffer;
+  const radius = template.photoRadiusPx ?? 0;
+  const photoAreaBuffer = await roundPhoto(await buildPhotoAreaBuffer(imagePath, template, crop, sourceDimensions),
+    template.photoAreaWidth - 2 * template.photoBorderSize, template.photoAreaHeight - 2 * template.photoBorderSize,
+    Math.max(0, radius - template.photoBorderSize));
+  const borderedPhotoBuffer = await roundPhoto(template.photoBorderSize > 0
     ? await sharp({
         create: {
           width: template.photoAreaWidth,
@@ -932,13 +1040,20 @@ export async function renderFramedImageAtomic({
         .composite([{ input: photoAreaBuffer, left: template.photoBorderSize, top: template.photoBorderSize }])
         .png()
         .toBuffer()
-    : photoAreaBuffer;
+    : photoAreaBuffer, template.photoAreaWidth, template.photoAreaHeight, radius);
 
-  const output = sharp(resolvedFrameBuffer).composite([{
+  const composites: Array<{ input: Buffer; left: number; top: number }> = [{
     input: borderedPhotoBuffer,
     left: template.photoAreaX,
     top: template.photoAreaY,
-  }]);
+  }];
+  const resolvedOverlayLayer = overlayLayerBuffer === undefined
+    ? await buildOverlayLayerBuffer(template)
+    : overlayLayerBuffer;
+  if (resolvedOverlayLayer) {
+    composites.push({ input: resolvedOverlayLayer, left: 0, top: 0 });
+  }
+  const output = sharp(resolvedFrameBuffer).composite(composites);
   const partialPath = path.join(
     path.dirname(outputPath),
     `.${path.basename(outputPath)}.${randomUUID()}.partial`,
@@ -963,9 +1078,87 @@ function templateForItem(request: PreparedExportRequest, item: BatchExportItem):
     return toTemplateConfig(request.customTemplate, item.orientation, {
       vertical: request.templateBackgroundFiles.vertical?.path,
       horizontal: request.templateBackgroundFiles.horizontal?.path,
+    }, {
+      vertical: (request.templateOverlayFiles.vertical ?? []).map((file) => file?.path),
+      horizontal: (request.templateOverlayFiles.horizontal ?? []).map((file) => file?.path),
     });
   }
   return orientTemplate(request.baseTemplate!, item.orientation);
+}
+
+function overlaySignature(template: TemplateConfig): string {
+  return JSON.stringify({
+    size: [template.width, template.height],
+    overlays: template.overlays,
+    paths: template.overlayImagePaths,
+  });
+}
+
+/** Reduce the alpha channel of a PNG buffer to apply a percent opacity. */
+async function applyOverlayOpacity(image: Buffer, opacity: number): Promise<Buffer> {
+  if (opacity >= 100) {
+    return image;
+  }
+  const { data, info } = await sharp(image).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const factor = Math.min(1, Math.max(0, opacity / 100));
+  for (let offset = 3; offset < data.length; offset += 4) {
+    data[offset] = Math.round(data[offset] * factor);
+  }
+  return sharp(data, { raw: { width: info.width, height: info.height, channels: info.channels as 4 } })
+    .png()
+    .toBuffer();
+}
+
+/**
+ * Flatten all overlay images (logos + pre-rendered texts) into a single
+ * transparent, template-sized layer. Logos keep their aspect ratio inside
+ * their box; text PNGs are scaled to the box width.
+ */
+async function buildOverlayLayerBuffer(template: TemplateConfig): Promise<Buffer | null> {
+  const entries = template.overlays
+    .map((geometry, index) => ({ geometry, imagePath: template.overlayImagePaths[index] }))
+    .filter((entry): entry is { geometry: OverlayGeometry; imagePath: string } => Boolean(entry.imagePath));
+  if (entries.length === 0) {
+    return null;
+  }
+  const parts = await Promise.all(entries.map(async ({ geometry, imagePath }) => {
+    let resized = geometry.height > 0
+      ? await sharp(imagePath, { limitInputPixels: MAX_INPUT_PIXELS })
+        .rotate()
+        .resize(geometry.width, geometry.height, {
+          fit: "contain",
+          background: { r: 0, g: 0, b: 0, alpha: 0 },
+        })
+        .png()
+        .toBuffer()
+      : await sharp(imagePath, { limitInputPixels: MAX_INPUT_PIXELS })
+        .rotate()
+        .resize({ width: geometry.width })
+        .png()
+        .toBuffer();
+    // Text may wrap onto several lines. Clip at the canvas edge exactly as the editor does.
+    const metadata = await sharp(resized).metadata();
+    const remainingHeight = template.height - geometry.y;
+    if ((metadata.height ?? 0) > remainingHeight) {
+      resized = await sharp(resized).extract({ left: 0, top: 0, width: geometry.width, height: remainingHeight }).png().toBuffer();
+    }
+    return {
+      input: await applyOverlayOpacity(resized, geometry.opacity),
+      left: geometry.x,
+      top: geometry.y,
+    };
+  }));
+  return sharp({
+    create: {
+      width: template.width,
+      height: template.height,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite(parts)
+    .png()
+    .toBuffer();
 }
 
 function publicProcessingError(error: unknown): string {
@@ -1026,19 +1219,34 @@ export async function executeExport(
       throw new HttpError(422, "INVALID_TEMPLATE_BACKGROUND", "Lo sfondo del template è danneggiato o non supportato");
     }
   }
+  for (const slotFiles of Object.values(request.templateOverlayFiles)) {
+    for (const overlay of slotFiles ?? []) {
+      if (!overlay) continue;
+      if (hooks.signal?.aborted) throw new ExportCancelledError(result);
+      try {
+        await getAutoOrientedDimensions(overlay.path);
+      } catch {
+        throw new HttpError(422, "INVALID_TEMPLATE_OVERLAY", "Un logo del template è danneggiato o non supportato");
+      }
+    }
+  }
   if (sourceDimensions.some((dimensions) => dimensions !== null)) {
     await ensureOutputDirectoryWritable(request.outputDir);
   }
   const reservations = new OutputReservationMap();
   const frameCache = new Map<string, Buffer>();
+  const overlayLayerCache = new Map<string, Buffer | null>();
+  const templateAssetFiles = [
+    ...Object.values(request.templateBackgroundFiles)
+      .filter((file): file is UploadedFileDescriptor => Boolean(file)),
+    ...Object.values(request.templateOverlayFiles).flat()
+      .filter((file): file is UploadedFileDescriptor => Boolean(file)),
+  ];
   const protectedSourceKeys = new Set([
     ...request.files.map((file) => reservationKey(file.path)),
     ...request.files.map((file) => existingFileIdentityKey(file.path)).filter((key): key is string => key !== null),
-    ...Object.values(request.templateBackgroundFiles)
-      .filter((file): file is UploadedFileDescriptor => Boolean(file))
-      .map((file) => reservationKey(file.path)),
-    ...Object.values(request.templateBackgroundFiles)
-      .filter((file): file is UploadedFileDescriptor => Boolean(file))
+    ...templateAssetFiles.map((file) => reservationKey(file.path)),
+    ...templateAssetFiles
       .map((file) => existingFileIdentityKey(file.path))
       .filter((key): key is string => key !== null),
   ]);
@@ -1066,6 +1274,7 @@ export async function executeExport(
           request.projectName,
           index,
           request.format,
+          request.counterOffset,
         );
         const outputPath = reservations.reserve(
           path.join(request.outputDir, outputFilename),
@@ -1078,6 +1287,12 @@ export async function executeExport(
           frameBuffer = await buildFrameBuffer(template);
           frameCache.set(frameKey, frameBuffer);
         }
+        const overlayKey = [request.templateId, item.orientation, overlaySignature(template)].join("|");
+        let overlayLayerBuffer = overlayLayerCache.get(overlayKey);
+        if (overlayLayerBuffer === undefined) {
+          overlayLayerBuffer = await buildOverlayLayerBuffer(template);
+          overlayLayerCache.set(overlayKey, overlayLayerBuffer);
+        }
 
         const rendered = await renderFramedImageAtomic({
           imagePath: file.path,
@@ -1087,6 +1302,7 @@ export async function executeExport(
           quality: request.quality,
           format: request.format,
           frameBuffer,
+          overlayLayerBuffer,
           sourceDimensions: dimensions,
           onPhase: (phase) => hooks.onPhase?.(phase, item),
         });

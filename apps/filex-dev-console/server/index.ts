@@ -284,6 +284,7 @@ const TEST_CATEGORIES: TestCategory[] = [
 ];
 
 function testCategoryId(name: string): TestCategory["id"] {
+  if (name === "test:image-party-frame-overlays") return "image-party-frame";
   if (name === "test:filex-windows-icons") return "suite";
   if (name === "test:filex-suite-launcher") return "suite";
   if (name.startsWith("test:photo-selector-")) return "photo-selector";
@@ -299,6 +300,9 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
   if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-suite-dock-startup" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
   if (name === "test:filex-license-coverage") return "licenses";
+  if (name === "test:filex-trial") return "licenses";
+  if (name === "test:filex-trial-ui") return "licenses";
+  if (name === "test:filex-license-emulator") return "licenses";
   if (name === "test:filex-cloud") return "cloud";
   return "other";
 }
@@ -321,8 +325,9 @@ function testDescription(name: string): string {
     "test:archivio-flow-photo-routing": "Verifica selezione persistente, limiti e compatibilità delle foto inviate dalla SD a Party Frame, Batch Layout e ID Photo.",
     "test:photo-tool-handoff": "Verifica il passaggio sicuro delle selezioni da Archivio Flow: coda FIFO, ricevuta autenticata, cardinalità, TTL, confini della radice e blocco di symlink o file modificati.",
     "test:image-party-frame-bug-hunt": "Verifica isolamento progetto, crop, import cartelle, coda FIFO da Archivio Flow, ripresa export, identità bozza/libreria, canvas responsive e pacchetti template ostili.",
-    "test:image-party-frame-server": "Verifica job, avanzamento, cancellazione, idempotenza, coda satura/429, crop EXIF, auth desktop, sorgenti native protette, collisioni, scrittura atomica, pulizia upload e CORS locale.",
+    "test:image-party-frame-server": "Verifica export, job, cancellazione, coda, crop EXIF, auth, scrittura atomica, CORS e cartella output; controlla i pixel degli angoli squadrati e arrotondati, con e senza bordo.",
     "test:image-party-frame-package-runtime": "Controlla che il server PartyFrame e tutti i suoi import runtime locali siano inclusi nel pacchetto Electron.",
+    "test:image-party-frame-overlays": "Verifica logo, testo, spessore e arrotondamento nell’editor, font offline, varianti indipendenti e modifica dalla libreria; carica ed elabora una foto controllando anteprime e persistenza.",
     "test:batch-print-layout-bug-hunt": "Stressa geometria, memoria e nomi export; verifica 501 file, collisioni senza overwrite, journal e acknowledgement, rollback dopo crash, sostituzioni concorrenti preservate e recovery conservativo di staging stale, attivi, recenti o symlink.",
     "test:batch-print-layout-desktop-images": "Verifica la policy desktop per JPG/RAW e l'abilitazione esplicita di HEIC, HEIF e TIFF.",
     "test:id-photo": "Verifica profili, importazione, controlli qualità non bloccanti, output e persistenza; copre sia il pannello driver sia la stampa diretta con stampante, copie e dimensioni fisiche dichiarate.",
@@ -350,6 +355,9 @@ function testDescription(name: string): string {
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
+    "test:filex-trial": "Verifica prova di 30 giorni, account, reinstallazione, firme, cache, avviso e chiusura dopo 60 secondi, annullamento dopo rinnovo e rifiuto della licenza anche con errori disco.",
+    "test:filex-trial-ui": "Controlla in Electron primo avvio, attivazione prova, passaggio all'acquisto e consenso sul sito con servizi simulati, senza dati reali.",
+    "test:filex-license-emulator": "Verifica API licenze con veri emulatori Firebase Auth/Firestore: concorrenza, email verificata, riattivazione, scadenza, rimborsi e due PC. Richiede Java 21; non usa dati reali.",
     "test:filex-cloud": "Esegue i test delle funzioni cloud FileX.",
   };
   return descriptions[name] ?? "Esegue il controllo dichiarato nello script npm del progetto.";

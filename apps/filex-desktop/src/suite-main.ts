@@ -31,7 +31,7 @@ import {
 } from "./suite-updater.js";
 import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
 import { prepareFileXSuiteUpdate } from "./filex-process-coordinator.js";
-import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState } from "./license-service.js";
+import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState, startTrial, finishTrial } from "./license-service.js";
 import {
   resolveSuiteDockEnabled,
   resolveSuiteStartupPolicy,
@@ -424,6 +424,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => getLicenseState(Boolean(refresh)));
   ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) => activateLicense(licenseKey, deviceLabel));
   ipcMain.handle("filex:deactivate-license", () => deactivateLicense());
+  ipcMain.handle("filex:start-trial", () => startTrial());
+  ipcMain.handle("filex:finish-trial", () => finishTrial());
   ipcMain.handle("filex:open-license-checkout", async (_event, billingPeriod: "monthly" | "annual") => {
     const checkout = await getCheckoutConfiguration();
     const destination = checkout[billingPeriod] ?? "https://filex-suite.web.app/#prezzi";

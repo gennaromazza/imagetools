@@ -10,7 +10,9 @@ assert.match(sharedMain, /requestedTool\.id !== "suite-launcher"[\s\S]*getLicens
 assert.match(sharedLicenseService, /if \(app\.isPackaged\) return "enforce";/);
 assert.match(sharedLicenseService, /function resolveEnforcement[\s\S]*if \(app\.isPackaged\) return "enforce";/);
 assert.match(sharedLicenseService, /function applyCurrentEnforcement[\s\S]*status === "active" \|\| state\.status === "grace"/);
-assert.match(sharedLicenseService, /return applyCurrentEnforcement\(store\.state\);/);
+// Cached active flags are untrusted: offline use must pass the signed proof.
+assert.doesNotMatch(sharedLicenseService, /return applyCurrentEnforcement\(store\.state\);/);
+assert.match(sharedLicenseService, /const offline = await usableOffline\(store\);/);
 
 const standaloneEntries: Record<string, string> = {
   "cache-sweep": "apps/cache-sweep/electron/main.ts",
@@ -28,8 +30,9 @@ for (const tool of Object.values(desktopToolManifest)) {
   const entry = standaloneEntries[tool.id];
   assert.ok(entry, `${tool.id}: entry point standalone non registrato nel test licenze`);
   const source = await readFile(resolve(root, entry), "utf8");
-  assert.match(source, /import \{ directToolLicenseAllowed \} from "\.\/license-gate\.js"/);
+  assert.match(source, /import \{ directToolLicenseAllowed, startLicenseExpiryWatchdog \} from "\.\/license-gate\.js"/);
   assert.match(source, /await directToolLicenseAllowed\(\)/);
+  assert.match(source, /startLicenseExpiryWatchdog\(\)/);
 }
 
 for (const toolId of Object.keys(standaloneEntries)) {

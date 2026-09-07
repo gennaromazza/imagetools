@@ -119,6 +119,17 @@ export default function ExportSettings() {
                 </p>
               </div>
 
+              {imagesToExportCount > 400 ? (
+                <div className="space-y-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-field)] p-4">
+                  <Label>Export in più blocchi</Label>
+                  <p className="text-sm text-[var(--app-text-muted)]">
+                    {imagesToExportCount} immagini verranno esportate automaticamente in{" "}
+                    {Math.ceil(imagesToExportCount / 400)} blocchi sequenziali nella stessa cartella,
+                    con numerazione {"{contatore}"} continua. Non serve dividere il progetto a mano.
+                  </p>
+                </div>
+              ) : null}
+
               <div className="space-y-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-field)] p-4">
                 <Label>Gestione colore</Label>
                 <p className="text-sm text-[var(--app-text-muted)]">

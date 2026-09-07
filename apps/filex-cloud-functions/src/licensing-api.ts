@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { approveTrial, pollTrial, startTrialSession, TrialError } from "./trial-service.js";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, Timestamp, type Firestore } from "firebase-admin/firestore";
 import type { Request } from "firebase-functions/v2/https";
@@ -6,6 +7,7 @@ import {
   createEntitlement,
   hashLicenseSecret,
   normalizeLicenseKey,
+  preserveCommercialRestrictions,
   type CommercialLicenseState,
   verifySignedWebhook,
 } from "./licensing-core.js";
@@ -78,6 +80,23 @@ export async function handleLicensingRequest(db: Firestore, request: Request, re
   if (request.method === "POST" && path === "/webhooks/paypal") return paypalWebhook(db, request, response, secrets);
   if (request.method === "POST" && path === "/paypal/license") return claimPayPalLicense(db, request, response, secrets);
   if (request.method === "POST" && path === "/account/link") return claimPayPalLicense(db, request, response, secrets);
+  if (request.method === "POST" && ["/trial/session", "/trial/approve", "/trial/poll"].includes(path)) {
+    const identity = path === "/trial/approve" ? await verifiedAccountIdentity(request) : null;
+    if (path === "/trial/approve" && !identity) return json(response, 401, { error: "Accesso richiesto con email verificata." });
+    if (!secrets.signingPrivateKey) return json(response, 503, { error: "Prova temporaneamente non disponibile." });
+    if (path !== "/trial/poll" && !(await consumeActivationAttempt(db, request))) return json(response, 429, { error: "Troppi tentativi. Attendi dieci minuti e riprova." });
+    try {
+      const body = request.body ?? {};
+      if (path === "/trial/approve" && body.acceptedTerms !== true) return json(response, 400, { error: "Accetta termini e licenza per attivare la prova." });
+      const result = path === "/trial/session" ? await startTrialSession(db, body)
+        : path === "/trial/approve" ? await approveTrial(db, body.code, identity!, secrets.signingPrivateKey)
+          : await pollTrial(db, body, secrets.signingPrivateKey);
+      return json(response, 200, result);
+    } catch (error) {
+      if (error instanceof TrialError) return json(response, error.status, { error: error.message });
+      throw error;
+    }
+  }
   if (request.method === "GET" && path === "/account") return accountOverview(db, request, response, secrets);
   if (request.method === "POST" && path === "/account/devices/deactivate") return deactivateAccountDevice(db, request, response);
   if (request.method === "POST" && path === "/activate") return activate(db, request, response, secrets.signingPrivateKey ?? "");
@@ -119,7 +138,9 @@ async function lemonSqueezyWebhook(db: Firestore, request: Request, response: Ht
     if (existingEvent.exists) return;
     const lastProviderEventAt = (existingSubscription.data() as SubscriptionRecord | undefined)?.lastProviderEventAt;
     const stale = lastProviderEventAt instanceof Timestamp && lastProviderEventAt.toMillis() > event.occurredAt;
-    if (!stale) transaction.set(subscriptionRef, update, { merge: true });
+    if (!stale) transaction.set(subscriptionRef, { ...update,
+      ...(event.commercial ? preserveCommercialRestrictions(existingSubscription.data() as SubscriptionRecord | undefined, event.commercial) : {}),
+    }, { merge: true });
     transaction.set(eventRef, {
       provider: "lemonsqueezy",
       type: event.eventName,
@@ -192,7 +213,9 @@ async function paypalWebhook(db: Firestore, request: Request, response: HttpResp
     if (existingEvent.exists) return;
     const lastProviderEventAt = (freshSubscription.data() as SubscriptionRecord | undefined)?.lastProviderEventAt;
     const stale = lastProviderEventAt instanceof Timestamp && lastProviderEventAt.toMillis() > event.occurredAt;
-    if (!stale) transaction.set(subscriptionRef, update, { merge: true });
+    if (!stale) transaction.set(subscriptionRef, { ...update,
+      ...(event.commercial ? preserveCommercialRestrictions(freshSubscription.data() as SubscriptionRecord | undefined, update as unknown as CommercialLicenseState) : {}),
+    }, { merge: true });
     transaction.set(eventRef, {
       provider: "paypal",
       type: event.eventName,
@@ -219,6 +242,7 @@ async function claimPayPalLicense(db: Firestore, request: Request, response: Htt
   const licenseKeySecret = secrets.paypalLicenseKeySecret ?? "";
   if (!paypal.enabled || !paypal.clientId || !clientSecret || !licenseKeySecret) return json(response, 503, { error: "PayPal non configurato." });
 
+  const snapshotStartedAt = Date.now();
   const accessToken = await paypalAccessToken(paypal, clientSecret);
   const subscription = await fetchPayPalSubscription(paypal, accessToken, subscriptionId);
   if (!subscription) return json(response, 404, { error: "PayPal non ha confermato l'abbonamento. Riprova tra poco." });
@@ -228,7 +252,8 @@ async function claimPayPalLicense(db: Firestore, request: Request, response: Htt
   if (!paypalEmail) return json(response, 409, { error: "PayPal non ha restituito l'email dell'abbonamento." });
   if (paypalEmail !== identity.email) return json(response, 403, { error: "Accedi con la stessa email usata per il pagamento PayPal." });
 
-  const existing = await db.collection("licenseSubscriptions").doc(subscriptionId).get();
+  const subscriptionRef = db.collection("licenseSubscriptions").doc(subscriptionId);
+  const existing = await subscriptionRef.get();
   const existingOwner = stringValue(existing.data()?.ownerUid);
   if (existingOwner && existingOwner !== identity.uid) return json(response, 409, { error: "Questo abbonamento è già collegato a un altro account FileX." });
 
@@ -246,13 +271,24 @@ async function claimPayPalLicense(db: Firestore, request: Request, response: Htt
     customerEmailHash: derivePayPalCustomerEmailHash(paypalEmail, licenseKeySecret),
     ownerUid: identity.uid,
     updatedAt: Timestamp.now(),
-    lastProviderEventAt: Timestamp.now(),
   };
   if (currentPeriodEnd !== null) update.currentPeriodEnd = currentPeriodEnd;
   const payerId = stringValue(subscription.subscriber?.payer_id);
   if (payerId) update.providerCustomerId = payerId;
-  await db.collection("licenseSubscriptions").doc(subscriptionId).set(update, { merge: true });
-  return json(response, 200, { ok: true, licenseKey, subscriptionId, status: commercialStatus });
+  const result = await db.runTransaction(async transaction => {
+    const fresh = await transaction.get(subscriptionRef);
+    const previous = fresh.data() as SubscriptionRecord | undefined;
+    if (previous?.ownerUid && previous.ownerUid !== identity.uid) return null;
+    const newerWebhook = previous?.lastProviderEventAt instanceof Timestamp && previous.lastProviderEventAt.toMillis() > snapshotStartedAt;
+    const commercial = newerWebhook ? { status: previous.status, currentPeriodEnd: previous.currentPeriodEnd, paymentFailedAt: previous.paymentFailedAt }
+      : preserveCommercialRestrictions(previous, update as unknown as CommercialLicenseState);
+    const next: Record<string, unknown> = { ...update, ...commercial };
+    Object.keys(next).forEach(key => { if (next[key] === undefined) delete next[key]; });
+    transaction.set(subscriptionRef, next, { merge: true });
+    return commercial.status;
+  });
+  if (!result) return json(response, 409, { error: "Questo abbonamento è già collegato a un altro account FileX." });
+  return json(response, 200, { ok: true, licenseKey, subscriptionId, status: result });
 }
 
 async function accountOverview(db: Firestore, request: Request, response: HttpResponse, secrets: LicensingSecrets) {
@@ -262,7 +298,7 @@ async function accountOverview(db: Firestore, request: Request, response: HttpRe
   if (!licenseKeySecret) return json(response, 503, { error: "Area cliente temporaneamente non disponibile." });
 
   let subscriptions = await db.collection("licenseSubscriptions").where("ownerUid", "==", identity.uid).limit(20).get();
-  if (subscriptions.empty) {
+  if (!subscriptions.docs.some(doc => doc.data().provider === "paypal")) {
     const emailHash = derivePayPalCustomerEmailHash(identity.email, licenseKeySecret);
     if (emailHash) {
       const candidates = await db.collection("licenseSubscriptions").where("customerEmailHash", "==", emailHash).limit(20).get();
@@ -271,9 +307,11 @@ async function accountOverview(db: Firestore, request: Request, response: HttpRe
         return !ownerUid || ownerUid === identity.uid;
       });
       if (linkable.length) {
-        const batch = db.batch();
-        linkable.forEach((doc) => batch.set(doc.ref, { ownerUid: identity.uid, updatedAt: Timestamp.now() }, { merge: true }));
-        await batch.commit();
+        await Promise.all(linkable.map(doc => db.runTransaction(async transaction => {
+          const fresh = await transaction.get(doc.ref);
+          const owner = stringValue(fresh.data()?.ownerUid);
+          if (fresh.exists && (!owner || owner === identity.uid)) transaction.set(doc.ref, { ownerUid: identity.uid, updatedAt: Timestamp.now() }, { merge: true });
+        })));
         subscriptions = await db.collection("licenseSubscriptions").where("ownerUid", "==", identity.uid).limit(20).get();
       }
     }
@@ -281,17 +319,17 @@ async function accountOverview(db: Firestore, request: Request, response: HttpRe
 
   const configuration = await readConfiguration(db);
   const items = await Promise.all(subscriptions.docs
-    .filter((doc) => doc.data().provider === "paypal")
+    .filter((doc) => ["paypal", "trial"].includes(doc.data().provider))
     .map(async (doc) => {
       const data = doc.data() as SubscriptionRecord & { planId?: string };
       const activations = await db.collection("licenseActivations").where("subscriptionId", "==", doc.id).where("deactivatedAt", "==", null).get();
       return {
         subscriptionId: doc.id,
-        plan: data.planId === configuration.paypal.annualPlanId ? "annual" : data.planId === configuration.paypal.monthlyPlanId ? "monthly" : "unknown",
-        status: data.status,
+        plan: data.trial ? "trial" : data.planId === configuration.paypal.annualPlanId ? "annual" : data.planId === configuration.paypal.monthlyPlanId ? "monthly" : "unknown",
+        status: data.trial ? createEntitlement(data, activations.size).status : data.status,
         currentPeriodEnd: timestampMillis(data.currentPeriodEnd),
-        licenseKey: derivePayPalLicenseKey(doc.id, licenseKeySecret),
-        activation: { current: activations.size, limit: 2 },
+        licenseKey: data.trial ? null : derivePayPalLicenseKey(doc.id, licenseKeySecret),
+        activation: { current: activations.size, limit: data.trial ? 1 : 2 },
         devices: activations.docs.map((activation) => {
           const device = activation.data() as ActivationRecord;
           return {
@@ -373,6 +411,7 @@ function paypalApiBase(environment: "sandbox" | "live"): string {
 }
 
 async function activate(db: Firestore, request: Request, response: HttpResponse, signingPrivateKey: string) {
+  if (!signingPrivateKey) return json(response, 503, { error: "Firma licenze temporaneamente non disponibile." });
   const licenseKey = normalizeLicenseKey(request.body?.licenseKey);
   const installationId = normalizeInstallationId(request.body?.installationId);
   if (!licenseKey || !installationId) return json(response, 400, { error: "Chiave licenza o installazione non valida." });
@@ -395,6 +434,8 @@ async function activate(db: Firestore, request: Request, response: HttpResponse,
       transaction.get(activeQuery),
     ]);
     if (!freshSubscription.exists) return { allowed: false as const, reason: "missing" as const };
+    const entitlement = createEntitlement(freshSubscription.data() as SubscriptionRecord, active.size);
+    if (!["active", "grace"].includes(entitlement.status)) return { allowed: false as const, reason: "missing" as const };
     const existingData = existingActivation.data() as ActivationRecord | undefined;
     const isAlreadyActive = Boolean(existingData && !existingData.deactivatedAt);
     if (!isAlreadyActive && active.size >= 2) return { allowed: false as const, reason: "limit" as const };
@@ -459,6 +500,7 @@ async function consumePayPalClaimAttempt(db: Firestore, request: Request): Promi
 }
 
 async function validate(db: Firestore, request: Request, response: HttpResponse, signingPrivateKey: string) {
+  if (!signingPrivateKey) return json(response, 503, { error: "Firma licenze temporaneamente non disponibile." });
   const authorized = await authorizeActivation(db, request.body?.activationToken, request.body?.installationId);
   if (!authorized) return json(response, 401, { error: "Attivazione non valida o disattivata." });
   const subscription = await db.collection("licenseSubscriptions").doc(authorized.data.subscriptionId).get();
@@ -578,7 +620,7 @@ async function verifiedAccountIdentity(request: Request): Promise<{ uid: string;
   const token = String(request.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
   try {
-    const decoded = await getAuth().verifyIdToken(token);
+    const decoded = await getAuth().verifyIdToken(token, true);
     const email = normalizeCustomerEmail(decoded.email);
     return decoded.email_verified === true && email ? { uid: decoded.uid, email } : null;
   } catch {

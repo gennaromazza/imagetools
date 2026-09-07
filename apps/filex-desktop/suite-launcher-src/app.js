@@ -113,7 +113,7 @@ function renderLicense(state) {
   licenseState = state;
   const permitted = state?.canUseTools === true && (state?.status === 'active' || state?.status === 'grace');
   const statusLabel = permitted
-    ? (state.status === 'grace' ? 'Da aggiornare' : 'Attiva')
+    ? (state.trial ? 'Prova gratuita' : state.status === 'grace' ? 'Da aggiornare' : 'Attiva')
     : (state?.status === 'unavailable' ? 'Verifica richiesta' : 'Non attiva');
   document.querySelector('#license-sidebar-status').textContent = statusLabel;
   document.querySelector('#license-dot').classList.toggle('active', permitted);
@@ -122,8 +122,9 @@ function renderLicense(state) {
   document.querySelector('#license-mode').textContent = `Modalita licenze: ${state?.enforcement || 'observe'}`;
   licenseActiveView.hidden = !permitted;
   licenseActivationView.hidden = permitted;
+  document.querySelector('#trial-purchase').hidden = !state?.trial;
   if (permitted) {
-    document.querySelector('#license-state-badge').textContent = state.status === 'grace' ? 'PERIODO DI CORTESIA' : 'ATTIVA';
+    document.querySelector('#license-state-badge').textContent = state.trial ? `PROVA · ${Math.max(0, Math.ceil((state.validUntil - Date.now()) / 86400000))} GIORNI RIMASTI` : state.status === 'grace' ? 'PERIODO DI CORTESIA' : 'ATTIVA';
     document.querySelector('#license-state-message').textContent = state.message;
     document.querySelector('#license-devices').textContent = `${state.activation.current} di ${state.activation.limit}`;
     document.querySelector('#license-valid-until').textContent = formatLicenseDate(state.validUntil);
@@ -135,8 +136,10 @@ function renderLicense(state) {
 }
 
 async function refreshLicense(force = false) {
+  const firstCheck = licenseState === null;
   const state = await api.getLicenseState(force);
   renderLicense(state);
+  if (firstCheck && state.status === 'unlicensed' && !licenseDialog.open) openLicenseDialog();
   return state;
 }
 
@@ -446,6 +449,25 @@ document.querySelector('#force-close-confirm').addEventListener('click', async e
   }
 });
 document.querySelector('#license-btn').addEventListener('click', openLicenseDialog);
+document.querySelector('#trial-buy').addEventListener('click', () => api.openLicenseCheckout('annual'));
+document.querySelector('#trial-enter-key').addEventListener('click', () => { licenseActivationView.hidden = false; document.querySelector('#license-key').focus(); });
+document.querySelector('#license-trial').addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const progress = document.querySelector('#trial-progress');
+  button.disabled = true;
+  try {
+    await api.startTrial();
+    progress.textContent = 'Completa accesso e verifica email nel browser. La Suite si attiverà automaticamente. Lascia aperta questa finestra.';
+    const deadline = Date.now() + 20 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      const state = await api.finishTrial();
+      if (state) { renderLicense(state); progress.textContent = ''; showToast('Prova attiva. Buon lavoro con FileX!'); return; }
+    }
+    throw new Error('Collegamento scaduto. Avvia di nuovo la prova.');
+  } catch (error) { progress.textContent = error.message || String(error); }
+  finally { button.disabled = false; }
+});
 document.querySelector('#license-summary-button').addEventListener('click', openLicenseDialog);
 document.querySelector('#license-refresh').addEventListener('click', async event => {
   const button = event.currentTarget;

@@ -71,6 +71,23 @@ function savedRecord(id = "tpl_saved"): SavedTemplateRecord {
   };
 }
 
+test("logo and text edits detach library identity while transient logo URLs do not create duplicates", () => {
+  const saved = customTemplate("tpl_saved");
+  saved.variants.vertical.logos = [{ id: "logo", x: 10, y: 10, width: 100, height: 50, opacity: 100, fileName: "logo.png", assetKey: "asset:logo", previewUrl: "blob:old" }];
+  saved.variants.vertical.texts = [{ id: "text", text: "Evento", fontKey: "montserrat", fontSizePx: 48, color: "#ffffff", bold: false, italic: false, align: "left", x: 10, y: 100, width: 200, opacity: 100, shadow: false }];
+  const draft = structuredClone(saved);
+  draft.variants.vertical.logos[0].previewUrl = "blob:new";
+  assert.equal(areCustomTemplatesEquivalent(saved, draft), true);
+  assert.equal(preserveCustomTemplateLibraryIdentity(draft, saved).libraryTemplateId, undefined);
+  draft.variants.vertical.logos[0].previewUrl = "blob:old";
+  draft.variants.vertical.texts[0].text = "Evento nuovo";
+  assert.equal(areCustomTemplatesEquivalent(saved, draft), false);
+  assert.equal(preserveCustomTemplateLibraryIdentity(draft, saved).libraryTemplateId, undefined);
+  draft.variants.vertical.texts[0].text = "Evento";
+  draft.variants.vertical.logos[0].x = 20;
+  assert.equal(areCustomTemplatesEquivalent(saved, draft), false);
+});
+
 test("using a just-saved template preserves its library identity and renders one entry", () => {
   const currentSavedTemplate = customTemplate("tpl_saved");
   const rebuiltByBuilder = customTemplate();

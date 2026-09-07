@@ -9,6 +9,7 @@ import {
   hashLicenseSecret,
   normalizeLicenseKey,
   resolveLicenseStatus,
+  preserveCommercialRestrictions,
   verifySignedWebhook,
   webhookTimestampAccepted,
 } from "./licensing-core.js";
@@ -17,6 +18,17 @@ test("normalizes and hashes license keys without retaining plaintext", () => {
   assert.equal(normalizeLicenseKey(" filex-abcd_1234-efgh "), "FILEX-ABCD_1234-EFGH");
   assert.equal(normalizeLicenseKey("short"), null);
   assert.equal(hashLicenseSecret(" KEY "), hashLicenseSecret("KEY"));
+});
+
+test("expiry and repeated failed payments cannot grant unlimited access", () => {
+  const now = Date.now();
+  assert.equal(createEntitlement({ status: "active", currentPeriodEnd: now }, 1, now).status, "expired");
+  assert.equal(createEntitlement({ status: "past_due" }, 1, now).status, "expired");
+  const next = preserveCommercialRestrictions({ status: "past_due", paymentFailedAt: now - LICENSE_GRACE_MS }, { status: "past_due", paymentFailedAt: now });
+  assert.equal(createEntitlement(next, 1, now).status, "expired");
+  for (const status of ["refunded", "chargeback"] as const) {
+    assert.equal(createEntitlement(preserveCommercialRestrictions({ status }, { status: "active", currentPeriodEnd: now + 86400000 }), 1, now).status, "revoked");
+  }
 });
 
 test("maps commercial states to canonical FileX states", () => {

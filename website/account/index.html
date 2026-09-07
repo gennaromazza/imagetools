@@ -39,7 +39,7 @@
   <section class="tool-hero"><div class="wrap">
     <div class="kicker">Licenza e abbonamento</div>
     <h1>La tua area <span>FileX.</span></h1>
-    <p class="lead">Accedi con la stessa email utilizzata su PayPal per ritrovare la chiave e controllare il tuo piano.</p>
+    <p class="lead">Crea un account e verifica la tua email per provare FileX gratis per 30 giorni. Se hai già acquistato, usa la stessa email di PayPal per ritrovare la licenza.</p>
 
     <div class="account-grid" id="auth-panels">
       <section class="account-panel">
@@ -54,7 +54,7 @@
       <section class="account-panel">
         <h2>Crea account</h2>
         <form class="account-form" id="register-form">
-          <label>Email usata su PayPal<input id="register-email" type="email" autocomplete="email" required></label>
+          <label>Email<input id="register-email" type="email" autocomplete="email" required></label>
           <label>Password<input id="register-password" type="password" autocomplete="new-password" minlength="8" required></label>
           <button class="button primary" type="submit">Crea account</button>
         </form>
@@ -69,6 +69,16 @@
     </section>
 
     <section id="dashboard" hidden>
+      <section class="account-panel" id="trial-panel">
+        <h2>30 giorni gratuiti di FileX All Access</h2>
+        <p id="trial-instructions">Scarica FileX Suite e scegli “Inizia la prova gratuita” per collegare questo account al PC Windows. Nessuna carta richiesta, nessun addebito automatico. Dopo 30 giorni puoi scegliere 12 €/mese o 100 €/anno.</p>
+        <div id="trial-approval" hidden>
+          <p>Attiva la prova solo se hai aperto questa pagina dalla tua FileX Suite. La prova è disponibile una sola volta per account e PC, su un dispositivo.</p>
+          <label><input type="checkbox" id="trial-consent"> Accetto <a href="../termini/">termini</a> e <a href="../licenza/">licenza</a> e ho letto la <a href="../privacy/">privacy</a>.</label>
+          <button class="button primary" type="button" id="approve-trial" disabled>Attiva la prova sul mio PC</button>
+        </div>
+        <p id="trial-message" role="status" aria-live="polite"></p>
+      </section>
       <div class="account-head"><div><h2>Il tuo account</h2><p id="account-email"></p></div><button class="button secondary" id="logout" type="button">Esci</button></div>
       <p class="account-message" id="dashboard-message" aria-live="polite"></p>
       <div id="subscriptions" class="subscription-list"></div>
@@ -91,6 +101,24 @@
   const dashboard = $('#dashboard');
   const globalMessage = $('#global-message');
   const dashboardMessage = $('#dashboard-message');
+  const incomingTrial = new URLSearchParams(location.hash.slice(1)).get('trial');
+  if (incomingTrial && /^[A-Za-z0-9_-]{43}$/.test(incomingTrial)) {
+    sessionStorage.setItem('filexTrialCode', incomingTrial);
+    history.replaceState({}, '', location.pathname + location.search);
+  }
+  const trialCode = sessionStorage.getItem('filexTrialCode');
+  $('#trial-approval').hidden = !trialCode;
+  $('#trial-consent').addEventListener('change', () => { $('#approve-trial').disabled = !$('#trial-consent').checked; });
+  $('#approve-trial').addEventListener('click', async () => {
+    if (!$('#trial-consent').checked) return;
+    $('#approve-trial').disabled = true;
+    try {
+      const result = await accountApi('/trial/approve', { method: 'POST', body: JSON.stringify({ code: trialCode, acceptedTerms: true }) });
+      sessionStorage.removeItem('filexTrialCode');
+      $('#trial-approval').hidden = true;
+      $('#trial-message').textContent = `Prova attivata fino al ${formatDate(result.validUntil)}. Torna nella Suite: l'attivazione arriverà automaticamente.`;
+    } catch (error) { $('#trial-message').textContent = error.message; $('#approve-trial').disabled = false; }
+  });
   const pendingSubscriptionId = new URLSearchParams(location.search).get('subscription_id') || sessionStorage.getItem('filexPendingSubscriptionId');
   if (pendingSubscriptionId && /^[A-Z0-9-]{8,80}$/i.test(pendingSubscriptionId)) sessionStorage.setItem('filexPendingSubscriptionId', pendingSubscriptionId);
 
@@ -117,7 +145,7 @@
   function renderSubscriptions(items) {
     const container = $('#subscriptions');
     container.replaceChildren();
-    $('#manual-link').hidden = items.length > 0;
+    $('#manual-link').hidden = items.some(item => item.plan !== 'trial');
     if (!items.length) {
       dashboardMessage.textContent = 'Non abbiamo ancora trovato un abbonamento collegato a questa email.';
       return;
@@ -125,18 +153,24 @@
     dashboardMessage.textContent = '';
     for (const item of items) {
       const card = makeElement('article', undefined, 'subscription-card');
-      card.append(makeElement('h3', item.plan === 'annual' ? 'FileX All Access — Annuale' : item.plan === 'monthly' ? 'FileX All Access — Mensile' : 'FileX All Access'));
+      card.append(makeElement('h3', item.plan === 'trial' ? 'FileX All Access — Prova gratuita' : item.plan === 'annual' ? 'FileX All Access — Annuale' : item.plan === 'monthly' ? 'FileX All Access — Mensile' : 'FileX All Access'));
       const meta = makeElement('div', undefined, 'subscription-meta');
       for (const [label, value] of [['Stato', statusLabel(item.status)], ['Prossima scadenza', formatDate(item.currentPeriodEnd)], ['Dispositivi', `${item.activation.current} su ${item.activation.limit}`]]) {
         const cell = makeElement('div'); cell.append(makeElement('span', label), makeElement('strong', value)); meta.append(cell);
       }
-      card.append(meta, makeElement('strong', 'La tua chiave FileX'));
+      card.append(meta);
+      if (item.licenseKey) {
+      card.append(makeElement('strong', 'La tua chiave FileX'));
       const code = makeElement('code', item.licenseKey, 'license-key');
       const copy = makeElement('button', 'Copia chiave', 'button secondary'); copy.type = 'button';
       copy.addEventListener('click', async () => { await navigator.clipboard.writeText(item.licenseKey); copy.textContent = 'Chiave copiata'; });
       card.append(code, copy);
       const actions = makeElement('div', undefined, 'actions');
       const manage = makeElement('a', 'Gestisci su PayPal', 'button secondary'); manage.href = 'https://www.paypal.com/myaccount/autopay/'; manage.target = '_blank'; manage.rel = 'noopener'; actions.append(manage); card.append(actions);
+      } else {
+        card.append(makeElement('p', 'La prova si attiva dalla Suite, senza chiave. Non si rinnova e non prevede addebiti automatici.'));
+        const buy = makeElement('a', 'Continua con 12 €/mese o 100 €/anno', 'button primary'); buy.href = '../#prezzi'; card.append(buy);
+      }
       const title = makeElement('h4', 'Dispositivi attivi'); card.append(title);
       const deviceList = makeElement('div', undefined, 'device-list');
       if (!item.devices.length) deviceList.append(makeElement('p', 'Nessun dispositivo attivo.'));

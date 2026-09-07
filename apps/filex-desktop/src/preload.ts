@@ -36,6 +36,8 @@ const api: FileXDesktopApi = {
   activateLicense: (licenseKey, deviceLabel) =>
     ipcRenderer.invoke("filex:activate-license", licenseKey, deviceLabel),
   deactivateLicense: () => ipcRenderer.invoke("filex:deactivate-license"),
+  startTrial: () => ipcRenderer.invoke("filex:start-trial"),
+  finishTrial: () => ipcRenderer.invoke("filex:finish-trial"),
   openLicenseCheckout: (billingPeriod) => ipcRenderer.invoke("filex:open-license-checkout", billingPeriod),
   openFolder: (options) => ipcRenderer.invoke("filex:open-folder", options),
   reopenFolder: (rootPath, options) => ipcRenderer.invoke("filex:reopen-folder", rootPath, options),

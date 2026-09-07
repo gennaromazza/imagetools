@@ -1,5 +1,5 @@
 import * as electron from "electron";
-import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState } from "./license-service.js";
+import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState, startTrial, finishTrial, startLicenseExpiryWatchdog } from "./license-service.js";
 import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
@@ -1563,6 +1563,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) =>
     activateLicense(licenseKey, deviceLabel));
   ipcMain.handle("filex:deactivate-license", () => deactivateLicense());
+  ipcMain.handle("filex:start-trial", () => startTrial());
+  ipcMain.handle("filex:finish-trial", () => finishTrial());
   ipcMain.handle("filex:open-license-checkout", async (_event, billingPeriod: "monthly" | "annual") => {
     const checkout = await getCheckoutConfiguration();
     const destination = checkout[billingPeriod] ?? "https://filex-suite.web.app/#prezzi";
@@ -2909,6 +2911,7 @@ if (hasSingleInstanceLock) {
         return;
       }
     }
+    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest) startLicenseExpiryWatchdog();
     // Apply the persisted RAM budget before registering IPC handlers so that
     // the cache limits are already in effect when the first thumbnail request arrives.
     const savedPreset = await loadRamBudgetPreset();

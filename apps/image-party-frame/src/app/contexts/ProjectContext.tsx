@@ -53,6 +53,45 @@ export const clearImageFiles = (projectId?: string): void => {
   imageFilesByProject.clear();
 };
 
+/**
+ * Logo overlay: geometry is expressed in template pixels relative to the full
+ * canvas. The image file itself travels separately (session store, IndexedDB
+ * library assets, multipart upload) and is matched by overlay id.
+ */
+export interface TemplateLogoOverlay {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  opacity: number;
+  fileName?: string;
+  previewUrl?: string;
+  assetKey?: string;
+}
+
+/**
+ * Text overlay: rendered client-side to a transparent PNG at template
+ * resolution (canvas 2D with the selected photobooth font) so the export is
+ * always WYSIWYG without server font dependencies. Only geometry + slot are
+ * used by the server; text fields are validated but otherwise client-side.
+ */
+export interface TemplateTextOverlay {
+  id: string;
+  text: string;
+  fontKey: string;
+  fontSizePx: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  align: "left" | "center" | "right";
+  x: number;
+  y: number;
+  width: number;
+  opacity: number;
+  shadow: boolean;
+}
+
 export interface CustomTemplateVariant {
   widthCm: number;
   heightCm: number;
@@ -70,8 +109,16 @@ export interface CustomTemplateVariant {
   backgroundDataUrl?: string;
   backgroundAssetKey?: string;
   borderSizePx: number;
+  photoRadiusPx?: number;
   borderColor: string;
+  logos: TemplateLogoOverlay[];
+  texts: TemplateTextOverlay[];
 }
+
+export const MAX_LOGOS_PER_VARIANT = 3;
+export const MAX_TEXTS_PER_VARIANT = 5;
+/** Total overlay image slots per orientation (logos + pre-rendered texts). */
+export const MAX_OVERLAY_SLOTS = 8;
 
 export const getCustomTemplateBackgroundFile = (orientation: "vertical" | "horizontal"): File | null => {
   return customTemplateBackgroundFiles[orientation];
@@ -91,6 +138,55 @@ export const setCustomTemplateBackgroundFile = (
 export const clearCustomTemplateBackgroundFiles = (): void => {
   customTemplateBackgroundFiles.vertical = null;
   customTemplateBackgroundFiles.horizontal = null;
+};
+
+// Logo overlay files are session-only, keyed by orientation + overlay id so
+// each logo box keeps its own image independently of file names.
+const customTemplateLogoFiles = new Map<string, File>();
+
+function customTemplateLogoKey(orientation: "vertical" | "horizontal", overlayId: string): string {
+  return `${orientation}:${overlayId}`;
+}
+
+export const getCustomTemplateLogoFile = (
+  orientation: "vertical" | "horizontal",
+  overlayId: string
+): File | null => {
+  return customTemplateLogoFiles.get(customTemplateLogoKey(orientation, overlayId)) ?? null;
+};
+
+export const getCustomTemplateLogoFiles = (): Record<"vertical" | "horizontal", Map<string, File>> => {
+  const grouped: Record<"vertical" | "horizontal", Map<string, File>> = {
+    vertical: new Map(),
+    horizontal: new Map(),
+  };
+  for (const [key, file] of customTemplateLogoFiles) {
+    const separatorIndex = key.indexOf(":");
+    if (separatorIndex < 0) continue;
+    const orientation = key.slice(0, separatorIndex);
+    const overlayId = key.slice(separatorIndex + 1);
+    if (orientation === "vertical" || orientation === "horizontal") {
+      grouped[orientation].set(overlayId, file);
+    }
+  }
+  return grouped;
+};
+
+export const setCustomTemplateLogoFile = (
+  orientation: "vertical" | "horizontal",
+  overlayId: string,
+  file: File | null
+): void => {
+  const key = customTemplateLogoKey(orientation, overlayId);
+  if (file) {
+    customTemplateLogoFiles.set(key, file);
+  } else {
+    customTemplateLogoFiles.delete(key);
+  }
+};
+
+export const clearCustomTemplateLogoFiles = (): void => {
+  customTemplateLogoFiles.clear();
 };
 
 export interface CustomTemplate {
@@ -476,11 +572,24 @@ export function normalizeProjectState(project?: Partial<ProjectState> | null): P
   const vertical = normalizedImages.filter((image) => image.orientation === "vertical").length;
   const horizontal = normalizedImages.length - vertical;
 
+  const rawCustomTemplate = project?.customTemplate;
+  const customTemplate = rawCustomTemplate && typeof rawCustomTemplate === "object"
+      && rawCustomTemplate.variants?.vertical
+      && rawCustomTemplate.variants?.horizontal
+    ? {
+        ...rawCustomTemplate,
+        variants: {
+          vertical: normalizeCustomTemplateOverlays(rawCustomTemplate.variants.vertical),
+          horizontal: normalizeCustomTemplateOverlays(rawCustomTemplate.variants.horizontal),
+        },
+      }
+    : (rawCustomTemplate ?? null);
+
   return {
     ...defaultProjectShape,
     ...project,
     projectId,
-    customTemplate: project?.customTemplate ?? null,
+    customTemplate,
     images: normalizedImages,
     imageCount: {
       total: normalizedImages.length,
@@ -488,6 +597,18 @@ export function normalizeProjectState(project?: Partial<ProjectState> | null): P
       horizontal,
     },
     exportSettings: normalizeProjectExportSettings(project?.exportSettings),
+  };
+}
+
+/**
+ * Backfill overlay arrays for templates created before the logo/text feature
+ * (e.g. restored from recent projects or imported packages).
+ */
+function normalizeCustomTemplateOverlays(variant: CustomTemplateVariant): CustomTemplateVariant {
+  return {
+    ...variant,
+    logos: Array.isArray(variant.logos) ? variant.logos : [],
+    texts: Array.isArray(variant.texts) ? variant.texts : [],
   };
 }
 
@@ -503,6 +624,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const setProject = (nextProject: Partial<ProjectState>) => {
     if (nextProject.template !== "custom" || !nextProject.customTemplate) {
       clearCustomTemplateBackgroundFiles();
+      clearCustomTemplateLogoFiles();
     }
 
     const normalizedProject = normalizeProjectState(nextProject);
@@ -526,6 +648,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   ) => {
     if (template !== "custom") {
       clearCustomTemplateBackgroundFiles();
+      clearCustomTemplateLogoFiles();
     }
 
     setProjectState((prev) => ({
@@ -563,6 +686,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
   const setCustomTemplate = (template: CustomTemplate | null) => {
     if (!template) {
       clearCustomTemplateBackgroundFiles();
+      clearCustomTemplateLogoFiles();
     }
 
     setProjectState((prev) => ({

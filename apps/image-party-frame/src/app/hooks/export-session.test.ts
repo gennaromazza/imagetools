@@ -53,8 +53,9 @@ test("rejects invalid statuses, duplicate item ids and snapshot/job mismatches",
 });
 
 test("rejects oversized export intents before they can be rendered", () => {
-  const itemIds = Array.from({ length: 501 }, (_, index) => `image-${index}`);
+  const itemIds = Array.from({ length: 5001 }, (_, index) => `image-${index}`);
   assert.equal(normalizeExportSession({ ...validSession(), itemIds }), null);
+  assert.equal(normalizeExportSession({ ...validSession(), itemIds: itemIds.slice(0, 5000) })?.itemIds.length, 5000);
 });
 
 test("deep-validates persisted job progress and result entries", () => {

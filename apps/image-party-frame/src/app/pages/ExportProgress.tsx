@@ -9,6 +9,7 @@ import {
   getImageFile,
   useProject,
 } from "../contexts/ProjectContext";
+import { prepareTemplateOverlays } from "../lib/textOverlay";
 import {
   cancelExportJob,
   createExportIntent,
@@ -81,6 +82,71 @@ function toApiError(error: unknown): PartyFrameApiError {
   });
 }
 
+/** Max files per chunk job: below the server per-job limit (500) with margin. */
+const EXPORT_CHUNK_MAX_FILES = 400;
+/** Max estimated upload bytes per chunk: below the 4 GB server aggregate limit. */
+const EXPORT_CHUNK_MAX_BYTES = 3 * 1024 * 1024 * 1024;
+
+function estimateExportImageBytes(image: BatchExportImage): number {
+  if (typeof image.file?.size === "number" && image.file.size > 0) return image.file.size;
+  return 0;
+}
+
+/**
+ * Split an export payload into sequential chunks so that no single job
+ * exceeds the server per-job file count or aggregate byte limits.
+ */
+function splitExportIntoChunks(payload: BatchExportImage[]): BatchExportImage[][] {
+  if (payload.length <= EXPORT_CHUNK_MAX_FILES) {
+    const totalBytes = payload.reduce((total, image) => total + estimateExportImageBytes(image), 0);
+    if (totalBytes <= EXPORT_CHUNK_MAX_BYTES) return [payload];
+  }
+  const chunks: BatchExportImage[][] = [];
+  let current: BatchExportImage[] = [];
+  let currentBytes = 0;
+  for (const image of payload) {
+    const size = estimateExportImageBytes(image);
+    if (
+      current.length >= EXPORT_CHUNK_MAX_FILES
+      || (current.length > 0 && currentBytes + size > EXPORT_CHUNK_MAX_BYTES)
+    ) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(image);
+    currentBytes += size;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks.length > 0 ? chunks : [payload];
+}
+
+/** Rewrite a chunk job snapshot so progress bars reflect the whole export. */
+function withOverallProgress(
+  snapshot: ExportJobSnapshot,
+  completedBefore: number,
+  total: number,
+): ExportJobSnapshot {
+  return {
+    ...snapshot,
+    progress: {
+      ...snapshot.progress,
+      completed: completedBefore + snapshot.progress.completed,
+      total,
+      percent: total === 0 ? 100 : Math.round(((completedBefore + snapshot.progress.completed) / total) * 100),
+    },
+  };
+}
+
+async function pollChunkToTerminal(
+  poll: (jobId: string, mapSnapshot?: (snapshot: ExportJobSnapshot) => ExportJobSnapshot) => Promise<ExportJobSnapshot | null>,
+  jobId: string,
+  completedBefore: number,
+  total: number,
+): Promise<ExportJobSnapshot | null> {
+  return poll(jobId, (snapshot) => withOverallProgress(snapshot, completedBefore, total));
+}
+
 export default function ExportProgress() {
   const { project } = useProject();
   const exportSettings = project.exportSettings ?? defaultProjectExportSettings;
@@ -144,14 +210,20 @@ export default function ExportProgress() {
     runControllerRef.current = controller;
     let active = true;
 
-    const poll = async (jobId: string) => {
+    const poll = async (
+      jobId: string,
+      mapSnapshot: (snapshot: ExportJobSnapshot) => ExportJobSnapshot = (snapshot) => snapshot,
+    ): Promise<ExportJobSnapshot | null> => {
+      let latest: ExportJobSnapshot | null = null;
       while (!controller.signal.aborted) {
         const nextSnapshot = await getExportJob(jobId, controller.signal);
-        if (!active) return;
-        applySnapshot(nextSnapshot);
-        if (isTerminal(nextSnapshot)) return;
+        if (!active) return null;
+        latest = nextSnapshot;
+        applySnapshot(mapSnapshot(nextSnapshot));
+        if (isTerminal(nextSnapshot)) return nextSnapshot;
         await waitForNextPoll(controller.signal);
       }
+      return latest;
     };
 
     const run = async () => {
@@ -217,31 +289,113 @@ export default function ExportProgress() {
         });
       }
 
-      setClientPhase("uploading");
-      updateExportSession(intent.intentId, { status: "uploading" });
-      const created = await createExportJob(
-        payload,
-        project.template,
-        {
-          quality: exportSettings.quality,
-          format: exportSettings.format,
-          colorProfile: "sRGB",
-          namingPattern: exportSettings.namingPattern,
-          projectName: project.name,
-          outputPath: project.outputPath,
-          createSubfolder: exportSettings.createSubfolder,
-          embedColorProfile: true,
-          overwrite: exportSettings.overwrite,
-          customTemplate: project.customTemplate,
-          customTemplateBackgroundFiles: getCustomTemplateBackgroundFiles(),
-        },
-        intent.idempotencyKey,
-        (progress) => { if (active) setUploadProgress(progress); },
-        controller.signal
-      );
-      if (!active) return;
-      applySnapshot(created);
-      if (!isTerminal(created)) await poll(created.id);
+      // Render text overlays to PNGs once (shared by all chunks) and collect
+      // logo files. The template copy drops logos whose file is missing so
+      // overlay geometries and uploaded slots stay aligned.
+      let overlayTemplate = project.customTemplate;
+      let overlayFiles: Partial<Record<"vertical" | "horizontal", File[]>> = {};
+      if (project.template === "custom" && project.customTemplate) {
+        setClientPhase("preparing");
+        const prepared = await prepareTemplateOverlays(project.customTemplate);
+        overlayTemplate = prepared.template;
+        overlayFiles = prepared.files;
+        if (prepared.droppedLogoNames.length > 0) {
+          updateExportSession(intent.intentId, { status: "uploading" });
+          setRequestError(new PartyFrameApiError({
+            message: `Logo non trovato e saltato: ${prepared.droppedLogoNames.join(", ")}. Riapri il template per ricaricarlo oppure continua senza.`,
+            code: "OVERLAY_LOGO_MISSING",
+            retryable: false,
+          }));
+          return;
+        }
+      }
+
+      // Large projects are split into sequential chunk jobs so a single job
+      // never hits the server per-job file/byte limits (HTTP 413).
+      const chunks = splitExportIntoChunks(payload);
+      let completedBefore = 0;
+      let firstOutputDir: string | null = null;
+      const aggregatedSuccess: Array<{ id: string; filename: string; size: number }> = [];
+      const aggregatedFailed: Array<{ id: string; error: string }> = [];
+      let aggregatedTime = 0;
+      let lastSnapshot: ExportJobSnapshot | null = null;
+
+      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+        if (controller.signal.aborted) return;
+        const chunk = chunks[chunkIndex];
+        setClientPhase("uploading");
+        updateExportSession(intent.intentId, { status: "uploading" });
+        const created = await createExportJob(
+          chunk,
+          project.template,
+          {
+            quality: exportSettings.quality,
+            format: exportSettings.format,
+            colorProfile: "sRGB",
+            namingPattern: exportSettings.namingPattern,
+            projectName: project.name,
+            outputPath: chunkIndex === 0 ? project.outputPath : (firstOutputDir ?? project.outputPath),
+            createSubfolder: chunkIndex === 0 ? exportSettings.createSubfolder : false,
+            embedColorProfile: true,
+            overwrite: exportSettings.overwrite,
+            customTemplate: overlayTemplate,
+            customTemplateBackgroundFiles: getCustomTemplateBackgroundFiles(),
+            customTemplateOverlayFiles: overlayFiles,
+            counterOffset: completedBefore,
+          },
+          chunks.length === 1
+            ? intent.idempotencyKey
+            : `${intent.idempotencyKey}.part${chunkIndex + 1}of${chunks.length}`,
+          (progress) => { if (active) setUploadProgress(progress); },
+          controller.signal
+        );
+        if (!active) return;
+        // Show overall progress (all chunks) instead of the single-job one.
+        applySnapshot(withOverallProgress(created, completedBefore, payload.length));
+        let terminal: ExportJobSnapshot | null = created;
+        if (!isTerminal(created)) {
+          terminal = await pollChunkToTerminal(poll, created.id, completedBefore, payload.length);
+        }
+        if (!active || !terminal) return;
+        lastSnapshot = terminal;
+        if (terminal.status === "cancelled") {
+          // Keep already-exported chunks visible; stop scheduling new ones.
+          break;
+        }
+        if (terminal.status === "failed" || !terminal.result) {
+          throw new PartyFrameApiError({
+            message: chunks.length > 1
+              ? `Esportazione interrotta al blocco ${chunkIndex + 1} di ${chunks.length}.`
+              : (terminal.error?.message ?? "Esportazione non riuscita."),
+            code: terminal.error?.code ?? "EXPORT_REQUEST_FAILED",
+            retryable: true,
+          });
+        }
+        if (!firstOutputDir) firstOutputDir = terminal.result.outputDir;
+        aggregatedSuccess.push(...terminal.result.success);
+        aggregatedFailed.push(...terminal.result.failed);
+        aggregatedTime += terminal.result.totalTime;
+        completedBefore += chunk.length;
+      }
+
+      if (lastSnapshot && chunks.length > 1) {
+        applySnapshot({
+          ...lastSnapshot,
+          progress: {
+            phase: lastSnapshot.progress.phase,
+            completed: payload.length,
+            total: payload.length,
+            percent: 100,
+            currentItemId: null,
+          },
+          result: {
+            success: aggregatedSuccess,
+            failed: aggregatedFailed,
+            totalTime: aggregatedTime,
+            outputDir: firstOutputDir ?? lastSnapshot.result?.outputDir ?? "",
+          },
+        });
+      }
     };
 
     void run().catch((error: unknown) => {

@@ -80,6 +80,10 @@
         <div class="license-actions"><button id="license-refresh" class="secondary-action" type="button">Verifica ora</button><button id="license-deactivate" class="danger-action" type="button">Disattiva questo PC</button></div>
       </div>
       <div id="license-activation-view" hidden>
+        <h3>Prova tutti i tool gratis per 30 giorni</h3>
+        <p>Accedi o crea un account con email verificata. La prova vale su un PC, senza carta di credito. Poi scegli: 12 EUR al mese o 100 EUR all'anno.</p>
+        <button id="license-trial" class="license-primary" type="button">Inizia la prova gratuita</button>
+        <p id="trial-progress" role="status" aria-live="polite"></p>
         <p class="license-intro">Inserisci la chiave ricevuta dopo l'acquisto. Il piano comprende due PC dello stesso titolare.</p>
         <label class="license-field"><span>Chiave licenza</span><input id="license-key" autocomplete="off" spellcheck="false" placeholder="FILEX-XXXX-XXXX-XXXX"></label>
         <label class="license-field"><span>Nome di questo PC</span><input id="license-device-label" maxlength="80" value="PC FileX"></label>
@@ -88,6 +92,7 @@
         <button id="license-activate" class="license-primary" type="button" disabled>Attiva FileX</button>
         <div class="license-buy"><span>Non hai ancora una licenza?</span><button id="buy-annual" type="button">100 EUR / anno</button><button id="buy-monthly" type="button">12 EUR / mese</button></div>
       </div>
+      <div id="trial-purchase" class="license-buy" hidden><span>Continua dopo la prova: 12 EUR/mese o 100 EUR/anno.</span><button id="trial-buy" type="button">Scegli abbonamento</button><button id="trial-enter-key" type="button">Ho acquistato: inserisci chiave</button></div>
       <footer><span class="license-mode" id="license-mode"></span><button class="secondary-action" value="cancel">Chiudi</button></footer>
     </form>
   </dialog>

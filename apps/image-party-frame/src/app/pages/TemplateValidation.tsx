@@ -4,6 +4,7 @@ import { Button } from "../components/ui/button";
 import { getImageFile, useProject } from "../contexts/ProjectContext";
 import { getCustomTemplateVariant, getPresetFrameDataUrl, getProjectTemplateGeometry } from "../lib/templateGeometry";
 import { validateProjectForWorkspace } from "../lib/projectValidation";
+import { TemplateOverlayPreview } from "../components/TemplateOverlayPreview";
 
 export default function TemplateValidation() {
   const navigate = useNavigate();
@@ -38,13 +39,15 @@ export default function TemplateValidation() {
       </div>
 
       <div className="flex-1 overflow-auto p-8">
-        <div className="max-w-7xl mx-auto grid grid-cols-[1.2fr,0.9fr] gap-8">
-          <div>
+        <div className="max-w-7xl mx-auto flex flex-col gap-8">
+          <div data-testid="validation-previews">
             <h2 className="text-xl mb-4">Anteprima Layout</h2>
             <div className={`grid gap-6 ${previewOrientations.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
               {previewOrientations.map((orientation) => {
                 const geometry = getProjectTemplateGeometry(project.template, orientation, project.customTemplate);
                 const variant = getCustomTemplateVariant(project.customTemplate, orientation);
+                const radius = Math.min(geometry.photoRadiusPx ?? 0, Math.min(geometry.photoAreaWidth, geometry.photoAreaHeight) / 2);
+                const innerRadius = Math.max(0, radius - (geometry.borderSizePx ?? 0));
                 const framePreviewUrl = project.template === "custom"
                   ? variant?.backgroundPreviewUrl
                   : getPresetFrameDataUrl(project.template, orientation);
@@ -73,23 +76,41 @@ export default function TemplateValidation() {
                           top: `${(geometry.photoAreaY / geometry.height) * 100}%`,
                           width: `${(geometry.photoAreaWidth / geometry.width) * 100}%`,
                           height: `${(geometry.photoAreaHeight / geometry.height) * 100}%`,
-                          backgroundColor: geometry.borderColor ?? "#ffffff",
+                          backgroundColor: (geometry.borderSizePx ?? 0) > 0 ? geometry.borderColor ?? "#ffffff" : "transparent",
+                          borderRadius: `${radius / geometry.photoAreaWidth * 100}% / ${radius / geometry.photoAreaHeight * 100}%`,
                         }}
                       >
                         <div
-                          className="absolute bg-[rgba(31,36,33,0.18)] rounded-[12px]"
+                          data-testid="photo-placeholder"
+                          className="absolute bg-[#d9d9d9]"
                           style={{
                             left: `${((geometry.borderSizePx ?? 0) / geometry.photoAreaWidth) * 100}%`,
+                            borderRadius: `${innerRadius / (geometry.photoAreaWidth - 2 * (geometry.borderSizePx ?? 0)) * 100}% / ${innerRadius / (geometry.photoAreaHeight - 2 * (geometry.borderSizePx ?? 0)) * 100}%`,
                             top: `${((geometry.borderSizePx ?? 0) / geometry.photoAreaHeight) * 100}%`,
                             right: `${((geometry.borderSizePx ?? 0) / geometry.photoAreaWidth) * 100}%`,
                             bottom: `${((geometry.borderSizePx ?? 0) / geometry.photoAreaHeight) * 100}%`,
                           }}
                         />
                       </div>
+                      {project.template === "custom" && variant && <TemplateOverlayPreview variant={variant} orientation={orientation} />}
                     </div>
                   </div>
                 );
               })}
+            </div>
+            <div data-testid="validation-actions" className="mt-4 flex flex-col gap-3 sm:flex-row">
+              <Button asChild variant="outline" className="flex-1 border-[var(--app-border-strong)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]">
+                <Link to={project.template === "custom" ? "/custom-template" : "/new-project"}>
+                  {project.template === "custom" ? "Modifica Template" : "Cambia Modello"}
+                </Link>
+              </Button>
+              <Button
+                onClick={() => navigate("/workspace")}
+                disabled={!validation.canContinue}
+                className="flex-1 bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] hover:bg-[var(--brand-primary-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Vai all'Area di Lavoro
+              </Button>
             </div>
           </div>
 
@@ -184,20 +205,6 @@ export default function TemplateValidation() {
                 </div>
               </div>
 
-              <div className="flex gap-4 pt-4">
-                <Button asChild variant="outline" className="flex-1 border-[var(--app-border-strong)] bg-[var(--app-surface)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]">
-                  <Link to={project.template === "custom" ? "/custom-template" : "/new-project"}>
-                    {project.template === "custom" ? "Modifica Template" : "Cambia Modello"}
-                  </Link>
-                </Button>
-                <Button
-                  onClick={() => navigate("/workspace")}
-                  disabled={!validation.canContinue}
-                  className="flex-1 bg-[var(--brand-primary)] text-[var(--brand-primary-foreground)] hover:bg-[var(--brand-primary-strong)] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Vai all'Area di Lavoro
-                </Button>
-              </div>
             </div>
           </div>
         </div>

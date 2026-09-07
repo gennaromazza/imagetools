@@ -15,6 +15,7 @@ export type TemplateGeometry = {
   photoAreaWidth: number;
   photoAreaHeight: number;
   borderSizePx?: number;
+  photoRadiusPx?: number;
   borderColor?: string;
 };
 
@@ -49,6 +50,7 @@ export function getProjectTemplateGeometry(
       photoAreaWidth: variant.photoAreaWidth,
       photoAreaHeight: variant.photoAreaHeight,
       borderSizePx: variant.borderSizePx,
+      photoRadiusPx: variant.photoRadiusPx ?? 0,
       borderColor: variant.borderColor,
     };
   }

@@ -49,7 +49,7 @@ type HomeConfirmAction =
 
 export default function Home() {
   const navigate = useNavigate();
-  const { resetProject, setProject } = useProject();
+  const { resetProject, setProject, setCustomTemplate } = useProject();
   const [recentProjects, setRecentProjects] = useState(loadRecentProjects());
   const [recentTemplates, setRecentTemplates] = useState(loadSavedTemplates());
   const projectImportInputRef = useRef<HTMLInputElement | null>(null);
@@ -160,6 +160,30 @@ export default function Home() {
     }
 
     setConfirmAction({ kind: "delete-project", projectId: selectedProject.projectId, name: selectedProject.name });
+  };
+
+  const handleEditTemplate = async (templateId: string) => {
+    const record = loadSavedTemplates().find((template) => template.id === templateId);
+    if (!record) return;
+    const requestId = ++projectLoadGenerationRef.current;
+    setProjectOperation(templateId);
+    try {
+      const prepared = await prepareSavedTemplateHydration(record);
+      if (requestId !== projectLoadGenerationRef.current) {
+        disposePreparedSavedTemplateHydration(prepared);
+        return;
+      }
+      setCustomTemplate(commitPreparedSavedTemplateHydration(prepared));
+      navigate("/custom-template");
+    } catch (error) {
+      if (requestId === projectLoadGenerationRef.current) {
+        toast.error("Apertura template non riuscita", {
+          description: error instanceof Error ? error.message : "Impossibile recuperare i file del template.",
+        });
+      }
+    } finally {
+      if (requestId === projectLoadGenerationRef.current) setProjectOperation(null);
+    }
   };
 
   const handleRenameTemplate = (templateId: string, currentName: string) => {
@@ -466,6 +490,15 @@ export default function Home() {
                       </div>
 
                       <div className="mt-4 flex items-center gap-2 flex-wrap">
+                        <Button
+                          size="sm"
+                          onClick={() => void handleEditTemplate(template.id)}
+                          disabled={projectOperation !== null}
+                          aria-label={`Modifica template ${template.name}`}
+                        >
+                          <Pencil className="w-4 h-4" />
+                          {projectOperation === template.id ? "Apertura..." : "Modifica"}
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"

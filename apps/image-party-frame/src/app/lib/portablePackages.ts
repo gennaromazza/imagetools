@@ -1,10 +1,14 @@
 import {
   clearCustomTemplateBackgroundFiles,
+  clearCustomTemplateLogoFiles,
   getCustomTemplateBackgroundFiles,
+  getCustomTemplateLogoFiles,
   normalizeProjectState,
   setCustomTemplateBackgroundFile,
+  setCustomTemplateLogoFile,
   type ImageItem,
   type ProjectState,
+  type TemplateLogoOverlay,
 } from "../contexts/ProjectContext";
 import {
   commitPreparedSavedTemplatesPackageImport,
@@ -18,19 +22,21 @@ import {
   reserveSavedTemplatesImportGeneration,
   type PortableSavedTemplatesPackage,
   type PortableTemplateAsset,
+  type PortableTemplateOrientationAssets,
 } from "./savedTemplates";
 
 export type PortableProjectPackage = {
   version: 1;
   exportedAt: string;
   project: ProjectState;
-  customTemplateAssets?: Partial<Record<Orientation, PortableTemplateAsset>>;
+  customTemplateAssets?: Partial<Record<Orientation, PortableTemplateAsset | PortableTemplateOrientationAssets>>;
 };
 
 export type PreparedProjectPackageImport = {
   generation: number;
   project: ProjectState;
   backgroundFiles: Partial<Record<Orientation, File>>;
+  logoFiles: Partial<Record<Orientation, Map<string, File>>>;
   previewUrls: string[];
   disposed: boolean;
 };
@@ -160,6 +166,10 @@ function clonePortableProjectForExport(project: ProjectState): ProjectState {
       delete customTemplate.variants[orientation].backgroundAssetKey;
       delete customTemplate.variants[orientation].backgroundPreviewUrl;
       delete customTemplate.variants[orientation].backgroundDataUrl;
+      for (const logo of customTemplate.variants[orientation].logos) {
+        delete logo.assetKey;
+        delete logo.previewUrl;
+      }
     }
   }
   return {
@@ -285,22 +295,46 @@ async function exportCustomTemplateAssets(
     return undefined;
   }
   const backgroundFiles = getCustomTemplateBackgroundFiles();
-  const assets: NonNullable<PortableProjectPackage["customTemplateAssets"]> = {};
+  const logoFiles = getCustomTemplateLogoFiles();
+  const assets: Partial<Record<Orientation, PortableTemplateOrientationAssets>> = {};
   for (const orientation of ORIENTATIONS) {
     const sourceFile = backgroundFiles[orientation];
     const variant = customTemplate.variants[orientation];
     delete variant.backgroundAssetKey;
+    const orientationAssets: PortableTemplateOrientationAssets = {};
     if (!sourceFile) {
       delete variant.backgroundFileName;
-      continue;
+    } else {
+      const file = await normalizePortableImageFile(sourceFile, sourceFile.name, `background-${orientation}`);
+      variant.backgroundFileName = file.name;
+      orientationAssets.background = {
+        fileName: file.name,
+        mimeType: file.type,
+        dataUrl: await blobToDataUrl(file),
+      };
     }
-    const file = await normalizePortableImageFile(sourceFile, sourceFile.name, `background-${orientation}`);
-    variant.backgroundFileName = file.name;
-    assets[orientation] = {
-      fileName: file.name,
-      mimeType: file.type,
-      dataUrl: await blobToDataUrl(file),
-    };
+    const orientationLogos = logoFiles[orientation];
+    const logoAssets: NonNullable<PortableTemplateOrientationAssets["logos"]> = [];
+    for (const logo of variant.logos) {
+      const logoFile = orientationLogos.get(logo.id);
+      if (!logoFile) {
+        continue;
+      }
+      const file = await normalizePortableImageFile(logoFile, logoFile.name, `logo-${orientation}`);
+      logo.fileName = file.name;
+      logoAssets.push({
+        fileName: file.name,
+        mimeType: file.type,
+        dataUrl: await blobToDataUrl(file),
+        overlayId: logo.id,
+      });
+    }
+    if (logoAssets.length > 0) {
+      orientationAssets.logos = logoAssets;
+    }
+    if (orientationAssets.background || orientationAssets.logos) {
+      assets[orientation] = orientationAssets;
+    }
   }
   return Object.keys(assets).length > 0 ? assets : undefined;
 }
@@ -328,6 +362,7 @@ export async function prepareProjectPackageImport(file: File): Promise<PreparedP
     throw new Error("Importazione progetto sostituita da una richiesta piu recente.");
   }
   const backgroundFiles: PreparedProjectPackageImport["backgroundFiles"] = {};
+  const logoFiles: PreparedProjectPackageImport["logoFiles"] = {};
   const previewUrls: string[] = [];
   try {
     if (project.customTemplate) {
@@ -336,24 +371,57 @@ export async function prepareProjectPackageImport(file: File): Promise<PreparedP
         delete variant.backgroundAssetKey;
         delete variant.backgroundPreviewUrl;
         delete variant.backgroundDataUrl;
-        const asset = assets[orientation];
-        if (asset === undefined) {
+        for (const logo of variant.logos) {
+          delete logo.assetKey;
+          delete logo.previewUrl;
+        }
+        const rawAsset = assets[orientation];
+        const orientationAssets: PortableTemplateOrientationAssets | undefined =
+          rawAsset === undefined
+            ? undefined
+            : isPlainRecord(rawAsset) && typeof rawAsset.dataUrl === "string"
+              ? { background: rawAsset as PortableTemplateAsset }
+              : (rawAsset as PortableTemplateOrientationAssets);
+        if (orientationAssets === undefined) {
           delete variant.backgroundFileName;
+          variant.logos = [];
           continue;
         }
-        const importedFile = decodePortableImageAsset(asset);
-        const previewUrl = URL.createObjectURL(importedFile);
-        backgroundFiles[orientation] = importedFile;
-        previewUrls.push(previewUrl);
-        variant.backgroundFileName = importedFile.name;
-        variant.backgroundPreviewUrl = previewUrl;
+        if (orientationAssets.background === undefined) {
+          delete variant.backgroundFileName;
+        } else {
+          const importedFile = decodePortableImageAsset(orientationAssets.background);
+          const previewUrl = URL.createObjectURL(importedFile);
+          backgroundFiles[orientation] = importedFile;
+          previewUrls.push(previewUrl);
+          variant.backgroundFileName = importedFile.name;
+          variant.backgroundPreviewUrl = previewUrl;
+        }
+        const restoredLogos: TemplateLogoOverlay[] = [];
+        for (const logoAsset of orientationAssets.logos ?? []) {
+          if (!isPlainRecord(logoAsset) || typeof logoAsset.overlayId !== "string") {
+            throw new Error("Asset logo del progetto non valido.");
+          }
+          const logo = variant.logos.find((candidate) => candidate.id === logoAsset.overlayId);
+          if (!logo) {
+            continue;
+          }
+          const importedFile = decodePortableImageAsset(logoAsset);
+          const previewUrl = URL.createObjectURL(importedFile);
+          const orientationMap = logoFiles[orientation] ?? new Map<string, File>();
+          orientationMap.set(logo.id, importedFile);
+          logoFiles[orientation] = orientationMap;
+          previewUrls.push(previewUrl);
+          restoredLogos.push({ ...logo, fileName: importedFile.name, previewUrl });
+        }
+        variant.logos = restoredLogos;
       }
     }
   } catch (error) {
     previewUrls.forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
     throw error;
   }
-  return { generation, project, backgroundFiles, previewUrls, disposed: false };
+  return { generation, project, backgroundFiles, logoFiles, previewUrls, disposed: false };
 }
 
 export function commitPreparedProjectPackageImport(prepared: PreparedProjectPackageImport): ProjectState {
@@ -361,10 +429,14 @@ export function commitPreparedProjectPackageImport(prepared: PreparedProjectPack
     throw new Error("Questa importazione progetto e gia stata annullata o sostituita.");
   }
   clearCustomTemplateBackgroundFiles();
+  clearCustomTemplateLogoFiles();
   for (const orientation of ORIENTATIONS) {
     const file = prepared.backgroundFiles[orientation];
     if (file) {
       setCustomTemplateBackgroundFile(orientation, file);
+    }
+    for (const [overlayId, logoFile] of prepared.logoFiles[orientation] ?? []) {
+      setCustomTemplateLogoFile(orientation, overlayId, logoFile);
     }
   }
   return prepared.project;
@@ -378,6 +450,7 @@ export function disposePreparedProjectPackageImport(prepared: PreparedProjectPac
   prepared.previewUrls.splice(0).forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
   for (const orientation of ORIENTATIONS) {
     delete prepared.backgroundFiles[orientation];
+    delete prepared.logoFiles[orientation];
   }
 }
 

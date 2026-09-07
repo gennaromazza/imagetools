@@ -19,6 +19,7 @@ import {
   MAX_BATCH_FILES,
   MAX_BATCH_TOTAL_BYTES,
   MAX_FILE_BYTES,
+  MAX_OVERLAY_SLOTS,
   isSupportedImageFilename,
   orientTemplate,
   parseCustomTemplate,
@@ -224,10 +225,12 @@ function sendSynchronousJobResult(snapshot: ExportJobSnapshot, res: Response): v
   });
 }
 
-async function openFolder(folderPath: string): Promise<void> {
+export async function openFolder(folderPath: string, launch: typeof spawn = spawn): Promise<void> {
   const command = process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open";
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, [folderPath], { detached: true, stdio: "ignore", windowsHide: true });
+    // This command opens a window explicitly requested by the user. Hiding it
+    // also hides Explorer when Windows starts a new instance for the folder.
+    const child = launch(command, [folderPath], { detached: true, stdio: "ignore", windowsHide: false });
     child.once("error", reject);
     child.once("spawn", () => {
       child.unref();
@@ -293,16 +296,36 @@ export async function createPartyFrameApp(options: PartyFrameAppOptions): Promis
     next();
   });
 
-  const processUpload = createUploader(uploadDir, 3, PROCESS_UPLOAD_AGGREGATE_BYTES).fields([
+  const overlayFieldNames = (["vertical", "horizontal"] as const).flatMap((orientation) =>
+    Array.from({ length: MAX_OVERLAY_SLOTS }, (_, slot) => `templateOverlay${orientation === "vertical" ? "Vertical" : "Horizontal"}${slot}`)
+  );
+  const processUpload = createUploader(uploadDir, 3 + overlayFieldNames.length, PROCESS_UPLOAD_AGGREGATE_BYTES).fields([
     { name: "image", maxCount: 1 },
     { name: "templateBackgroundVertical", maxCount: 1 },
     { name: "templateBackgroundHorizontal", maxCount: 1 },
+    ...overlayFieldNames.map((name) => ({ name, maxCount: 1 })),
   ]);
-  const batchUpload = createUploader(uploadDir, MAX_BATCH_FILES + 2, MAX_BATCH_TOTAL_BYTES).fields([
+  const batchUpload = createUploader(uploadDir, MAX_BATCH_FILES + 2 + overlayFieldNames.length, MAX_BATCH_TOTAL_BYTES).fields([
     { name: "images", maxCount: MAX_BATCH_FILES },
     { name: "templateBackgroundVertical", maxCount: 1 },
     { name: "templateBackgroundHorizontal", maxCount: 1 },
+    ...overlayFieldNames.map((name) => ({ name, maxCount: 1 })),
   ]);
+
+  function overlayDescriptors(
+    fields: Record<string, Express.Multer.File[]>,
+    orientation: "vertical" | "horizontal"
+  ): UploadedFileDescriptor[] {
+    const prefix = `templateOverlay${orientation === "vertical" ? "Vertical" : "Horizontal"}`;
+    const slots: UploadedFileDescriptor[] = [];
+    for (let slot = 0; slot < MAX_OVERLAY_SLOTS; slot += 1) {
+      const file = fields[`${prefix}${slot}`]?.[0];
+      if (file) {
+        slots[slot] = descriptor(file);
+      }
+    }
+    return slots;
+  }
   const requireJobCapacity = (_req: Request, _res: Response, next: NextFunction): void => {
     if (!jobs.hasCapacity()) {
       next(new HttpError(429, "JOB_QUEUE_FULL", "The export queue is full; wait for a running job to finish"));
@@ -375,6 +398,9 @@ export async function createPartyFrameApp(options: PartyFrameAppOptions): Promis
           ? toTemplateConfig(customTemplate, orientation, {
               vertical: backgroundFiles.vertical?.path,
               horizontal: backgroundFiles.horizontal?.path,
+            }, {
+              vertical: overlayDescriptors(fields, "vertical").map((file) => file?.path),
+              horizontal: overlayDescriptors(fields, "horizontal").map((file) => file?.path),
             })
           : null
         : templates[templateId]
@@ -437,6 +463,10 @@ export async function createPartyFrameApp(options: PartyFrameAppOptions): Promis
         exportDir,
         id,
         { allowNativePaths: nativePathsEnabled },
+        {
+          vertical: overlayDescriptors(fields, "vertical"),
+          horizontal: overlayDescriptors(fields, "horizontal"),
+        },
       );
       const created = await jobs.create({ id, request: prepared, cleanupPaths });
       transferred = true;
@@ -493,6 +523,10 @@ export async function createPartyFrameApp(options: PartyFrameAppOptions): Promis
         exportDir,
         id,
         { allowNativePaths: nativePathsEnabled },
+        {
+          vertical: overlayDescriptors(fields, "vertical"),
+          horizontal: overlayDescriptors(fields, "horizontal"),
+        },
       );
       const created = await jobs.create({
         id,

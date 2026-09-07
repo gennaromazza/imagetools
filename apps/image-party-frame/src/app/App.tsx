@@ -80,7 +80,7 @@ export default function App() {
         <PhotoSelectionHandoffCoordinator />
         <RouterProvider router={router} />
         <Toaster
-          position="top-right"
+          position="bottom-right"
           richColors
           closeButton
           toastOptions={{

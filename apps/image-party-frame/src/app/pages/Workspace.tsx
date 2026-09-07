@@ -23,6 +23,8 @@ import { toast } from "sonner";
 import { Slider } from "../components/ui/slider";
 import { type ImageItem, useProject } from "../contexts/ProjectContext";
 import { getCustomTemplateBackgroundFiles, getImageFile } from "../contexts/ProjectContext";
+import { prepareTemplateOverlays } from "../lib/textOverlay";
+import { TemplateOverlayPreview } from "../components/TemplateOverlayPreview";
 import { useProcessImage } from "../hooks/useApi";
 import { createCompressedPreview } from "../utils/imagePreview";
 import { getCustomTemplateVariant, getPresetFrameDataUrl, getProjectTemplateGeometry } from "../lib/templateGeometry";
@@ -490,7 +492,10 @@ export default function Workspace() {
   const customTemplateVariant = getCustomTemplateVariant(project.customTemplate, currentImage.orientation);
   const frameAspectRatio = templateGeometry.width / templateGeometry.height;
   const outerBorderSize = templateGeometry.borderSizePx ?? 0;
+  const photoRadius = Math.min(templateGeometry.photoRadiusPx ?? 0, Math.min(templateGeometry.photoAreaWidth, templateGeometry.photoAreaHeight) / 2);
+  const innerRadius = Math.max(0, photoRadius - outerBorderSize);
   const photoViewportStyle = {
+    borderRadius: project.template === "custom" ? `${innerRadius / (templateGeometry.photoAreaWidth - 2 * outerBorderSize) * 100}% / ${innerRadius / (templateGeometry.photoAreaHeight - 2 * outerBorderSize) * 100}%` : undefined,
     left: `${((templateGeometry.photoAreaX + outerBorderSize) / templateGeometry.width) * 100}%`,
     top: `${((templateGeometry.photoAreaY + outerBorderSize) / templateGeometry.height) * 100}%`,
     width: `${((templateGeometry.photoAreaWidth - outerBorderSize * 2) / templateGeometry.width) * 100}%`,
@@ -787,14 +792,31 @@ export default function Workspace() {
     const requestedCrop = normalizeCropTransform(imageToProcess.crop);
     setProcessingImageId(imageToProcess.id);
     updateImageProcessing(imageToProcess.id, "processing");
+    let overlayTemplate = project.customTemplate;
+    let overlayFiles: Partial<Record<"vertical" | "horizontal", File[]>> = {};
+    if (project.template === "custom" && project.customTemplate) {
+      try {
+        const prepared = await prepareTemplateOverlays(project.customTemplate);
+        overlayTemplate = prepared.template;
+        overlayFiles = prepared.files;
+        if (prepared.droppedLogoNames.length > 0) {
+          toast.warning("Logo saltato in anteprima", {
+            description: `${prepared.droppedLogoNames.join(", ")}: file non disponibile. Ricaricalo nel template.`,
+          });
+        }
+      } catch (error) {
+        updateImageProcessing(imageToProcess.id, "error", error instanceof Error ? error.message : "Rendering testo non riuscito.");
+        return false;
+      }
+    }
     const result = await processImage(
       imageFile ?? null,
       project.template,
       requestedCrop,
       imageToProcess.orientation,
-      project.customTemplate,
+      overlayTemplate,
       getCustomTemplateBackgroundFiles(),
-      { absolutePath: imageToProcess.absolutePath }
+      { absolutePath: imageToProcess.absolutePath, customTemplateOverlayFiles: overlayFiles }
     );
 
     const latestImage = projectRef.current.images.find((image) => image.id === imageToProcess.id);
@@ -1290,8 +1312,9 @@ export default function Workspace() {
                 {project.template === "custom" ? (
                   <>
                     <div className="absolute inset-0 rounded-[24px] border border-[rgba(237,230,221,0.12)] pointer-events-none" />
-                    {(templateGeometry.borderSizePx ?? 0) > 0 ? (
+                    {!processedImageUrl && (templateGeometry.borderSizePx ?? 0) > 0 ? (
                       <div
+                        data-testid="live-photo-border"
                         className="absolute pointer-events-none"
                         style={{
                           left: `${(templateGeometry.photoAreaX / templateGeometry.width) * 100}%`,
@@ -1299,7 +1322,7 @@ export default function Workspace() {
                           width: `${(templateGeometry.photoAreaWidth / templateGeometry.width) * 100}%`,
                           height: `${(templateGeometry.photoAreaHeight / templateGeometry.height) * 100}%`,
                           backgroundColor: templateGeometry.borderColor ?? "#ffffff",
-                          borderRadius: "18px",
+                          borderRadius: `${photoRadius / templateGeometry.photoAreaWidth * 100}% / ${photoRadius / templateGeometry.photoAreaHeight * 100}%`,
                         }}
                       />
                     ) : null}
@@ -1350,6 +1373,9 @@ export default function Workspace() {
                     </div>
                     )}
                   </div>
+                {project.template === "custom" && customTemplateVariant && !processedImageUrl && (
+                  <TemplateOverlayPreview variant={customTemplateVariant} orientation={currentImage.orientation} />
+                )}
               </FitPreviewSurface>
             </div>
           </div>

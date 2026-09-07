@@ -262,7 +262,7 @@ Il sistema e' pronto quando, in ambiente live:
 
 1. Account PayPal Business verificato e applicazione REST abilitata per Subscriptions.
 2. Prezzi finali 12 EUR/mese e 100 EUR/anno e loro trattamento fiscale mostrato nel checkout.
-3. Nessuna prova gratuita al lancio. Si puo' aggiungere dopo senza cambiare architettura.
+3. Prova gratuita di 30 giorni, su un PC Windows, dopo accesso con email verificata e collegamento dalla Suite. Nessuna carta e nessuna conversione automatica. Vedi `docs/22-free-trial.md` per implementazione e verifiche prima della pubblicazione.
 4. Cortesia di 7 giorni e offline di 14 giorni.
 5. Blocco di tutti i tool commerciali alla scadenza, mantenendo sempre accessibili dati e gestione licenza.
 6. Testo definitivo revisionato da commercialista/legale italiano.

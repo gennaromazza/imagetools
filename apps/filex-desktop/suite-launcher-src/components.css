@@ -56,3 +56,6 @@
   display: block;
   object-fit: contain;
 }
+
+#trial-purchase[hidden] { display: none; }
+#trial-progress { margin-block: 12px; line-height: 1.5; }

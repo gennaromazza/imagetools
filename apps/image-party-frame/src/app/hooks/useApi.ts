@@ -69,6 +69,16 @@ export interface BatchExportRequestOptions {
   overwrite?: boolean;
   customTemplate?: CustomTemplate | null;
   customTemplateBackgroundFiles?: Partial<Record<"vertical" | "horizontal", File | null>>;
+  /**
+   * Per orientation, overlay images ordered like the overlay geometries
+   * (logo files first, then pre-rendered text PNGs). See prepareTemplateOverlays.
+   */
+  customTemplateOverlayFiles?: Partial<Record<"vertical" | "horizontal", File[]>>;
+  /**
+   * Global start index for the {contatore} naming variable. Used by chunked
+   * exports so numbering continues across sequential jobs.
+   */
+  counterOffset?: number;
 }
 
 export interface UploadProgressSnapshot {
@@ -235,6 +245,9 @@ function createBatchExportFormData(
   formData.append("createSubfolder", String(options.createSubfolder ?? true));
   formData.append("embedColorProfile", "true");
   formData.append("overwrite", String(options.overwrite ?? false));
+  if (Number.isFinite(options.counterOffset) && (options.counterOffset ?? 0) > 0) {
+    formData.append("counterOffset", String(Math.floor(options.counterOffset ?? 0)));
+  }
 
   if (templateId === "custom" && options.customTemplate) {
     formData.append("customTemplate", JSON.stringify(options.customTemplate));
@@ -242,6 +255,12 @@ function createBatchExportFormData(
     const horizontalFile = options.customTemplateBackgroundFiles?.horizontal;
     if (verticalFile) formData.append("templateBackgroundVertical", verticalFile, verticalFile.name);
     if (horizontalFile) formData.append("templateBackgroundHorizontal", horizontalFile, horizontalFile.name);
+    for (const orientation of ["vertical", "horizontal"] as const) {
+      const prefix = orientation === "vertical" ? "templateOverlayVertical" : "templateOverlayHorizontal";
+      (options.customTemplateOverlayFiles?.[orientation] ?? []).forEach((file, slot) => {
+        formData.append(`${prefix}${slot}`, file, file.name);
+      });
+    }
   }
   return formData;
 }
@@ -335,7 +354,12 @@ export const useProcessImage = () => {
       orientation: "vertical" | "horizontal" = "horizontal",
       customTemplate: CustomTemplate | null = null,
       customTemplateBackgroundFiles: Partial<Record<"vertical" | "horizontal", File | null>> = {},
-      requestOptions: { signal?: AbortSignal; timeoutMs?: number; absolutePath?: string } = {}
+      requestOptions: {
+        signal?: AbortSignal;
+        timeoutMs?: number;
+        absolutePath?: string;
+        customTemplateOverlayFiles?: Partial<Record<"vertical" | "horizontal", File[]>>;
+      } = {}
     ): Promise<ProcessImageResponse | null> => {
       const requestId = ++requestGenerationRef.current;
       controllerRef.current?.abort();
@@ -384,6 +408,12 @@ export const useProcessImage = () => {
           }
           if (horizontalFile) {
             formData.append("templateBackgroundHorizontal", horizontalFile, horizontalFile.name);
+          }
+          for (const overlayOrientation of ["vertical", "horizontal"] as const) {
+            const prefix = overlayOrientation === "vertical" ? "templateOverlayVertical" : "templateOverlayHorizontal";
+            (requestOptions.customTemplateOverlayFiles?.[overlayOrientation] ?? []).forEach((overlayFile, slot) => {
+              formData.append(`${prefix}${slot}`, overlayFile, overlayFile.name);
+            });
           }
         }
 

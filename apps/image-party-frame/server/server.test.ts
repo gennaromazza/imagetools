@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { ChildProcess, type spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
@@ -6,7 +7,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import sharp from "sharp";
-import { createPartyFrameApp, type PartyFrameAppRuntime } from "./app.js";
+import { createPartyFrameApp, openFolder, type PartyFrameAppRuntime } from "./app.js";
 import {
   PARTY_FRAME_API_CONTRACT,
   isCompatiblePartyFrameApiHealth,
@@ -18,6 +19,25 @@ import {
   ensureOutputDirectoryWritable,
   getAutoOrientedDimensions,
 } from "./pipeline.js";
+
+test("folder opening requests a visible window and reports launch failures", async () => {
+  const folder = path.resolve(tmpdir(), "Foto matrimonio è pronto");
+  const launch = ((command, args, options) => {
+    assert.equal(command, process.platform === "win32" ? "explorer.exe" : process.platform === "darwin" ? "open" : "xdg-open");
+    assert.deepEqual(args, [folder], "Spaces and accents remain in a single path argument");
+    assert.equal(options.windowsHide, false, "Explorer must open visibly after the user's click");
+    const child = new ChildProcess();
+    queueMicrotask(() => child.emit("spawn"));
+    return child;
+  }) as typeof spawn;
+  await openFolder(folder, launch);
+  const failingLaunch = (() => {
+    const child = new ChildProcess();
+    queueMicrotask(() => child.emit("error", new Error("Explorer unavailable")));
+    return child;
+  }) as typeof spawn;
+  await assert.rejects(openFolder(folder, failingLaunch), /Explorer unavailable/);
+});
 
 interface TestServer {
   runtime: PartyFrameAppRuntime;
@@ -360,6 +380,109 @@ test("job API reports real progress, writes atomically, reserves names and is id
     await server.close();
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("sequential chunk jobs continue {contatore} numbering via counterOffset", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "partyframe-chunks-"));
+  const server = await startTestServer(path.join(directory, "data"));
+  const outputPath = path.join(directory, "result");
+  const image = await testJpeg();
+  try {
+    async function runChunk(count: number, counterOffset: number, targetOutput: string): Promise<Record<string, any>> {
+      const form = new FormData();
+      const items = [];
+      for (let index = 0; index < count; index += 1) {
+        form.append("images", new Blob([image], { type: "image/jpeg" }), `chunk-${counterOffset + index}.jpg`);
+        items.push({
+          id: `chunk-item-${counterOffset + index + 1}`,
+          originalName: `chunk-${counterOffset + index}.jpg`,
+          orientation: "horizontal",
+          crop: { offsetX: 0, offsetY: 0, zoom: 100 },
+        });
+      }
+      form.append("items", JSON.stringify(items));
+      form.append("templateId", "custom");
+      form.append("customTemplate", customTemplate());
+      form.append("quality", "90");
+      form.append("format", "jpeg");
+      form.append("namingPattern", "{contatore}");
+      form.append("projectName", "Chunked");
+      form.append("outputPath", targetOutput);
+      form.append("createSubfolder", "false");
+      form.append("overwrite", "false");
+      form.append("counterOffset", String(counterOffset));
+      const createResponse = await fetch(`${server.origin}/api/export-jobs`, { method: "POST", body: form });
+      assert.equal(createResponse.status, 202);
+      const created = await createResponse.json() as Record<string, any>;
+      return waitForTerminalJob(server.origin, created.id);
+    }
+
+    const first = await runChunk(2, 0, outputPath);
+    assert.equal(first.status, "completed");
+    const sharedOutput = first.result.outputDir as string;
+    const second = await runChunk(2, 2, sharedOutput);
+    assert.equal(second.status, "completed");
+    assert.deepEqual((await readdir(sharedOutput)).sort(), ["001.jpg", "002.jpg", "003.jpg", "004.jpg"]);
+  } finally {
+    await server.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("custom logo and text uploads retain aspect, opacity and clip multiline text at the canvas edge", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "partyframe-overlay-"));
+  const server = await startTestServer(path.join(directory, "data"));
+  const outputPath = path.join(directory, "result");
+  try {
+    const payload = JSON.parse(customTemplate());
+    payload.variants.horizontal.logos = [{ x: 20, y: 20, width: 40, height: 40, opacity: 50 }];
+    payload.variants.horizontal.texts = [{ x: 80, y: 70, width: 20, opacity: 50 }];
+    const logo = await sharp({ create: { width: 80, height: 40, channels: 4, background: "red" } }).png().toBuffer();
+    const text = await sharp({ create: { width: 20, height: 40, channels: 4, background: "black" } }).png().toBuffer();
+    const form = new FormData();
+    appendExportFields(form, await testJpeg(), outputPath, 1, JSON.stringify(payload));
+    form.set("format", "png");
+    form.append("templateOverlayHorizontal0", new Blob([logo], { type: "image/png" }), "logo.png");
+    form.append("templateOverlayHorizontal1", new Blob([text], { type: "image/png" }), "text.png");
+    const response = await fetch(`${server.origin}/api/export-jobs`, { method: "POST", body: form });
+    assert.equal(response.status, 202);
+    const result = await waitForTerminalJob(server.origin, (await response.json() as any).id);
+    assert.equal(result.status, "completed", JSON.stringify(result));
+    const { data, info } = await sharp(path.join(outputPath, "same-name.png")).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const pixel = (x: number, y: number) => Array.from(data.subarray((y * info.width + x) * info.channels, (y * info.width + x) * info.channels + 3));
+    assert.deepEqual([info.width, info.height], [120, 80]);
+    const base = pixel(25, 25), red = pixel(25, 35), clippedText = pixel(85, 75);
+    assert.ok(red[0] > base[0] + 20 && Math.abs(red[1] - base[1] / 2) < 3, `Logo alpha/aspect: ${base} → ${red}`);
+    const background = pixel(105, 75);
+    assert.ok(clippedText.every((channel, index) => Math.abs(channel - background[index] / 2) <= 2), `Text opacity: ${background} → ${clippedText}`);
+  } finally { await server.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
+test("rounded photo corners preserve background, border and photo in exported PNGs", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "partyframe-radius-"));
+  const server = await startTestServer(path.join(directory, "data"));
+  try {
+    for (const borderSizePx of [0, 4]) {
+      for (const photoRadiusPx of [0, 20]) {
+        const payload = JSON.parse(customTemplate());
+        Object.assign(payload.variants.horizontal, { borderSizePx, borderColor: "#ff0000", photoRadiusPx });
+        const outputPath = path.join(directory, `result-${borderSizePx}-${photoRadiusPx}`);
+        const photo = await sharp({ create: { width: 320, height: 240, channels: 3, background: "#2876ad" } }).jpeg().toBuffer();
+        const form = new FormData();
+        appendExportFields(form, photo, outputPath, 1, JSON.stringify(payload)); form.set("format", "png");
+        const response = await fetch(`${server.origin}/api/export-jobs`, { method: "POST", body: form });
+        assert.equal(response.status, 202);
+        const result = await waitForTerminalJob(server.origin, (await response.json() as any).id);
+        assert.equal(result.status, "completed");
+        const { data, info } = await sharp(path.join(outputPath, "same-name.png")).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+        const pixel = (x: number, y: number) => Array.from(data.subarray((y * info.width + x) * info.channels, (y * info.width + x) * info.channels + 3));
+        if (photoRadiusPx) assert.deepEqual(pixel(10, 10), pixel(0, 0), "Rounded outer corner reveals background");
+        else assert.notDeepEqual(pixel(10, 10), pixel(0, 0), "Zero radius keeps square corners");
+        if (borderSizePx) assert.deepEqual(pixel(60, 11), [255, 0, 0], "Border remains visible at the top");
+        assert.ok(pixel(60, 40).every((value, index) => Math.abs(value - [40, 118, 173][index]) < 3), "Photo remains visible at the center");
+      }
+    }
+  } finally { await server.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
 test("legacy synchronous batch endpoint keeps its result contract", async () => {

@@ -7,7 +7,7 @@ import {
   scanCacheSweep,
   uninstallOldAdobeVersion,
 } from "./cache-sweep-service.js";
-import { directToolLicenseAllowed } from "./license-gate.js";
+import { directToolLicenseAllowed, startLicenseExpiryWatchdog } from "./license-gate.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -93,6 +93,7 @@ if (!hasSingleInstanceLock) {
   });
   app.whenReady().then(async () => {
     if (!(await directToolLicenseAllowed())) { app.quit(); return; }
+    startLicenseExpiryWatchdog();
     registerIpc();
     await createWindow();
   });

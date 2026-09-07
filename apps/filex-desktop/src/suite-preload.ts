@@ -43,6 +43,8 @@ const suiteApi = {
   activateLicense: (licenseKey: string, deviceLabel?: string) =>
     ipcRenderer.invoke("filex:activate-license", licenseKey, deviceLabel),
   deactivateLicense: () => ipcRenderer.invoke("filex:deactivate-license"),
+  startTrial: () => ipcRenderer.invoke("filex:start-trial"),
+  finishTrial: () => ipcRenderer.invoke("filex:finish-trial"),
   openLicenseCheckout: (billingPeriod: "monthly" | "annual") =>
     ipcRenderer.invoke("filex:open-license-checkout", billingPeriod),
 };

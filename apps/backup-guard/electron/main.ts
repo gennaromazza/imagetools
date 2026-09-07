@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { cancelBackupGuard, configureBackupGuardInbox, configureBackupGuardStorage, configureBackupGuardTestMode, deepVerifyBackupGuard, deleteBackupGuardTrash, executeBackupGuard, getBackupGuardConfiguration, getBackupGuardProgress, listBackupGuardHistory, listBackupGuardTrash, listPendingBackupGuardProjects, pauseBackupGuard, recoverBackupGuardTrash, resolveBackupGuardConflict, resumeBackupGuard, saveBackupGuardConfiguration, scanBackupGuard } from "./backup-guard-service.js";
-import { directToolLicenseAllowed } from "./license-gate.js";
+import { directToolLicenseAllowed, startLicenseExpiryWatchdog } from "./license-gate.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -74,6 +74,7 @@ else {
   });
   app.whenReady().then(async () => {
     if (!(await directToolLicenseAllowed())) { app.quit(); return; }
+    startLicenseExpiryWatchdog();
     configureBackupGuardStorage(app.getPath("userData")); configureBackupGuardInbox(app.getPath("appData")); configureBackupGuardTestMode(testMode);
     const testMaster = argumentValue("--test-master"); const testClone = argumentValue("--test-clone");
     if (testMode && testMaster && testClone) await saveBackupGuardConfiguration(testMaster, testClone);

@@ -537,6 +537,7 @@ export interface DesktopGraphicsStatus {
 export type DesktopLicenseStatus = "active" | "grace" | "expired" | "revoked" | "unlicensed" | "unavailable";
 export type DesktopLicenseEnforcement = "observe" | "warn" | "enforce";
 export interface DesktopLicenseState {
+  trial?: boolean;
     schemaVersion: 1;
     status: DesktopLicenseStatus;
     enforcement: DesktopLicenseEnforcement;
@@ -1192,7 +1193,9 @@ export interface FileXDesktopApi {
     getSuiteNotifications?: () => Promise<DesktopSuiteNotification[]>;
     saveSuiteDockState: (state: Partial<DesktopDockState>) => Promise<DesktopDockState>;
     setSuiteDockEnabled?: (enabled: boolean) => Promise<DesktopDockState>;
-    getLicenseState: (refresh?: boolean) => Promise<DesktopLicenseState>;
+  startTrial: () => Promise<void>;
+  finishTrial: () => Promise<DesktopLicenseState | null>;
+  getLicenseState: (refresh?: boolean) => Promise<DesktopLicenseState>;
     activateLicense: (licenseKey: string, deviceLabel?: string) => Promise<DesktopLicenseState>;
     deactivateLicense: () => Promise<DesktopLicenseState>;
     openLicenseCheckout: (billingPeriod: "monthly" | "annual") => Promise<void>;

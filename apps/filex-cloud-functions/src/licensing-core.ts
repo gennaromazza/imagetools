@@ -8,12 +8,16 @@ export const LICENSE_WEBHOOK_TOLERANCE_MS = 5 * 60 * 1000;
 export type LicenseStatus = "active" | "grace" | "expired" | "revoked" | "unlicensed";
 
 export interface CommercialLicenseState {
+  trial?: boolean;
+  trialDeviceIdHash?: string;
   status: "active" | "past_due" | "cancelled" | "expired" | "refunded" | "chargeback";
   currentPeriodEnd?: number | null;
   paymentFailedAt?: number | null;
 }
 
 export interface LicenseEntitlement {
+  trial?: boolean;
+  trialDeviceIdHash?: string;
   schemaVersion: 1;
   entitlement: "filex-all-access";
   status: LicenseStatus;
@@ -35,15 +39,26 @@ export function normalizeLicenseKey(value: unknown): string | null {
 
 export function resolveLicenseStatus(state: CommercialLicenseState, now = Date.now()): LicenseStatus {
   if (state.status === "refunded" || state.status === "chargeback") return "revoked";
-  if (state.status === "active") return "active";
+  if (state.status === "active") return typeof state.currentPeriodEnd === "number" && state.currentPeriodEnd <= now ? "expired" : "active";
   if (state.status === "cancelled") {
     return typeof state.currentPeriodEnd === "number" && state.currentPeriodEnd > now ? "active" : "expired";
   }
   if (state.status === "past_due") {
-    const failedAt = state.paymentFailedAt ?? now;
+    const failedAt = state.paymentFailedAt;
+    if (typeof failedAt !== "number" || !Number.isFinite(failedAt)) return "expired";
     return failedAt + LICENSE_GRACE_MS > now ? "grace" : "expired";
   }
   return "expired";
+}
+
+// Repeated provider notifications or account linking must not extend payment grace
+// or resurrect an already refunded/reversed subscription.
+export function preserveCommercialRestrictions(previous: Partial<CommercialLicenseState> | undefined, next: CommercialLicenseState): CommercialLicenseState {
+  if (previous?.status === "refunded" || previous?.status === "chargeback") return { ...next, status: previous.status };
+  if (previous?.status === "past_due" && next.status === "past_due" && typeof previous.paymentFailedAt === "number") {
+    return { ...next, paymentFailedAt: Math.min(previous.paymentFailedAt, next.paymentFailedAt ?? previous.paymentFailedAt) };
+  }
+  return next;
 }
 
 export function createEntitlement(
@@ -59,15 +74,16 @@ export function createEntitlement(
       ? (commercial.paymentFailedAt ?? now) + LICENSE_GRACE_MS
       : null;
   const offlineUntil = status === "active" || status === "grace"
-    ? Math.min(now + LICENSE_OFFLINE_MS, validUntil ?? now + LICENSE_OFFLINE_MS)
+    ? Math.min(now + (commercial.trial ? 24 * 60 * 60 * 1000 : LICENSE_OFFLINE_MS), validUntil ?? now + LICENSE_OFFLINE_MS)
     : null;
   return {
+    ...(commercial.trial ? { trial: true, trialDeviceIdHash: commercial.trialDeviceIdHash } : {}),
     schemaVersion: 1,
     entitlement: "filex-all-access",
     status,
     validUntil,
     offlineUntil,
-    activation: { current: Math.max(0, activeInstallations), limit: LICENSE_ACTIVATION_LIMIT },
+    activation: { current: Math.max(0, activeInstallations), limit: commercial.trial ? 1 : LICENSE_ACTIVATION_LIMIT },
   };
 }
 

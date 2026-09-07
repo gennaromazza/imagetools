@@ -1,20 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, Crop, ImagePlus, Move, Save } from "lucide-react";
+import { ArrowLeft, Crop, ImagePlus, Move, Save, Trash2, Type } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
+import { TemplateOverlayControls } from "../components/TemplateOverlayControls";
+import { TemplateTextPreview } from "../components/TemplateTextPreview";
+import { TemplateInlineTextEditor } from "../components/TemplateInlineTextEditor";
+import { dragOverlayRect, moveTextBox } from "../lib/overlayGeometry";
+import { fitPreviewSurface } from "../lib/workspaceLayout";
 import {
   CustomTemplate,
   CustomTemplateVariant,
+  MAX_LOGOS_PER_VARIANT,
+  MAX_TEXTS_PER_VARIANT,
+  clearCustomTemplateLogoFiles,
   getCustomTemplateBackgroundFiles,
+  getCustomTemplateLogoFiles,
   setCustomTemplateBackgroundFile,
+  setCustomTemplateLogoFile,
   useProject,
+  type TemplateLogoOverlay,
+  type TemplateTextOverlay,
 } from "../contexts/ProjectContext";
 import { cmToPx } from "../lib/templateGeometry";
-import { saveTemplateToLibrary } from "../lib/savedTemplates";
+import { normalizePortableImageFile, saveTemplateToLibrary } from "../lib/savedTemplates";
 import { preserveCustomTemplateLibraryIdentity } from "../lib/templateLibrary";
+import { DEFAULT_PHOTOBOOTH_FONT_KEY, PHOTOBOOTH_FONTS, getPhotoboothFont } from "../lib/photoboothFonts";
+import { MAX_TEXT_FONT_PX, MAX_TEXT_OVERLAY_CHARS, MIN_TEXT_FONT_PX } from "../lib/textOverlay";
 
 type Orientation = "vertical" | "horizontal";
 
@@ -23,6 +37,33 @@ type Rect = {
   y: number;
   width: number;
   height: number;
+};
+
+type LogoDraft = {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  opacity: number;
+  previewUrl: string;
+  fileName: string;
+};
+
+type TextDraft = {
+  id: string;
+  text: string;
+  fontKey: string;
+  fontSizePx: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  align: "left" | "center" | "right";
+  x: number;
+  y: number;
+  width: number;
+  opacity: number;
+  shadow: boolean;
 };
 
 type VariantDraft = {
@@ -36,8 +77,13 @@ type VariantDraft = {
   backgroundPreviewUrl: string;
   backgroundFileName: string;
   borderSizePx: string;
+  photoRadiusPx: string;
   borderColor: string;
+  logos: LogoDraft[];
+  texts: TextDraft[];
 };
+
+type OverlaySelection = { kind: "logo" | "text"; id: string } | null;
 
 type BackgroundFeedback = {
   message: string;
@@ -45,12 +91,14 @@ type BackgroundFeedback = {
 };
 
 type DragState = {
+  fontSizePx?: number;
   pointerId: number;
   orientation: Orientation;
   startX: number;
   startY: number;
   origin: Rect;
   mode: "move" | "resize";
+  target: { kind: "photo" } | { kind: "logo"; id: string } | { kind: "text"; id: string };
 };
 
 type PreviewGeometry = {
@@ -59,6 +107,8 @@ type PreviewGeometry = {
   ratio: number;
   photoArea: Rect;
   borderSizePx: number;
+  logos: LogoDraft[];
+  texts: TextDraft[];
 };
 
 type VariantValidationResult =
@@ -83,6 +133,9 @@ const MAX_RATIO_PART = 100;
 const MIN_PHOTO_ASPECT_RATIO = 0.1;
 const MAX_PHOTO_ASPECT_RATIO = 10;
 const MAX_BORDER_SIZE_PX = 2_000;
+const MAX_LOGO_BYTES = 10 * 1024 * 1024;
+const MIN_LOGO_SIDE_PX = 16;
+const MIN_TEXT_BOX_WIDTH_PX = 40;
 const MAX_CLIENT_OPTIMIZATION_PIXELS = 24_000_000;
 const SOFT_WARNING_BYTES = 12 * 1024 * 1024;
 const AUTO_OPTIMIZE_BYTES = 18 * 1024 * 1024;
@@ -227,6 +280,35 @@ function clampNumber(value: number, minimum: number, maximum: number): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
+function createOverlayId(prefix: "logo" | "text"): string {
+  const random = globalThis.crypto?.randomUUID?.()?.replace(/-/g, "").slice(0, 10)
+    ?? Math.random().toString(36).slice(2, 12);
+  return `${prefix}_${random}`;
+}
+
+function clampOverlayRect(rect: Rect, bounds: { width: number; height: number }): Rect {
+  const width = clampNumber(Math.round(rect.width), MIN_LOGO_SIDE_PX, bounds.width);
+  const height = clampNumber(Math.round(rect.height), MIN_LOGO_SIDE_PX, bounds.height);
+  return {
+    x: clampNumber(Math.round(rect.x), 0, Math.max(0, bounds.width - width)),
+    y: clampNumber(Math.round(rect.y), 0, Math.max(0, bounds.height - height)),
+    width,
+    height,
+  };
+}
+
+function clampTextBox(
+  draft: Pick<TextDraft, "x" | "y" | "width">,
+  bounds: { width: number; height: number }
+): Pick<TextDraft, "x" | "y" | "width"> {
+  const width = clampNumber(Math.round(draft.width), MIN_TEXT_BOX_WIDTH_PX, bounds.width);
+  return {
+    x: clampNumber(Math.round(draft.x), 0, Math.max(0, bounds.width - width)),
+    y: clampNumber(Math.round(draft.y), 0, bounds.height),
+    width,
+  };
+}
+
 function finiteNumberOr(value: string | number, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -272,7 +354,10 @@ function createDefaultVariant(orientation: Orientation): VariantDraft {
     backgroundPreviewUrl: "",
     backgroundFileName: "",
     borderSizePx: "0",
+    photoRadiusPx: "0",
     borderColor: "#ffffff",
+    logos: [],
+    texts: [],
   };
 }
 
@@ -297,7 +382,33 @@ function variantToDraft(variant: CustomTemplateVariant | undefined): VariantDraf
     backgroundPreviewUrl: variant.backgroundPreviewUrl ?? "",
     backgroundFileName: variant.backgroundFileName ?? "",
     borderSizePx: String(variant.borderSizePx ?? 0),
+    photoRadiusPx: String(variant.photoRadiusPx ?? 0),
     borderColor: variant.borderColor ?? "#ffffff",
+    logos: (variant.logos ?? []).map((logo) => ({
+      id: logo.id,
+      x: logo.x,
+      y: logo.y,
+      width: logo.width,
+      height: logo.height,
+      opacity: logo.opacity,
+      previewUrl: logo.previewUrl ?? "",
+      fileName: logo.fileName ?? "",
+    })),
+    texts: (variant.texts ?? []).map((text) => ({
+      id: text.id,
+      text: text.text,
+      fontKey: text.fontKey,
+      fontSizePx: text.fontSizePx,
+      color: text.color,
+      bold: text.bold,
+      italic: text.italic,
+      align: text.align,
+      x: text.x,
+      y: text.y,
+      width: text.width,
+      opacity: text.opacity,
+      shadow: text.shadow,
+    })),
   };
 }
 
@@ -358,8 +469,19 @@ function getPreviewGeometry(draft: VariantDraft): PreviewGeometry {
     0,
     Math.min(MAX_BORDER_SIZE_PX, maximumBorder)
   );
+  const logos = draft.logos.map((logo) => ({
+    ...logo,
+    opacity: clampNumber(Math.round(finiteNumberOr(logo.opacity, 100)), 0, 100),
+    ...clampOverlayRect(logo, { width: widthPx, height: heightPx }),
+  }));
+  const texts = draft.texts.map((text) => ({
+    ...text,
+    opacity: clampNumber(Math.round(finiteNumberOr(text.opacity, 100)), 0, 100),
+    fontSizePx: clampNumber(Math.round(finiteNumberOr(text.fontSizePx, 48)), MIN_TEXT_FONT_PX, MAX_TEXT_FONT_PX),
+    ...clampTextBox(text, { width: widthPx, height: heightPx }),
+  }));
 
-  return { widthPx, heightPx, ratio, photoArea, borderSizePx };
+  return { widthPx, heightPx, ratio, photoArea, borderSizePx, logos, texts };
 }
 
 function validateVariantDraft(draft: VariantDraft, orientation: Orientation): VariantValidationResult {
@@ -371,6 +493,10 @@ function validateVariantDraft(draft: VariantDraft, orientation: Orientation): Va
   const ratioX = Number(draft.photoRatioX);
   const ratioY = Number(draft.photoRatioY);
   const borderSizePx = Number(draft.borderSizePx);
+  const photoRadiusPx = Number(draft.photoRadiusPx);
+  if (!Number.isInteger(photoRadiusPx) || photoRadiusPx < 0 || photoRadiusPx > 6000) {
+    errors.push("Il raggio degli angoli deve essere un intero tra 0 e 6000 px.");
+  }
 
   if (!Number.isFinite(widthCm) || widthCm < MIN_SIZE_CM || widthCm > MAX_SIZE_CM) {
     errors.push(`${label}: la larghezza deve essere tra ${MIN_SIZE_CM} e ${MAX_SIZE_CM} cm.`);
@@ -451,9 +577,101 @@ function validateVariantDraft(draft: VariantDraft, orientation: Orientation): Va
     errors.push(`${label}: il bordo non puo superare ${maximumBorder} px con l'area foto corrente.`);
   }
 
+  if (draft.logos.length > MAX_LOGOS_PER_VARIANT) {
+    errors.push(`${label}: massimo ${MAX_LOGOS_PER_VARIANT} loghi per variante.`);
+  }
+  if (draft.texts.length > MAX_TEXTS_PER_VARIANT) {
+    errors.push(`${label}: massimo ${MAX_TEXTS_PER_VARIANT} testi per variante.`);
+  }
+  const seenOverlayIds = new Set<string>();
+  for (const [index, logo] of draft.logos.entries()) {
+    const position = index + 1;
+    if (!logo.id || seenOverlayIds.has(logo.id)) {
+      errors.push(`${label}: logo ${position} non valido.`);
+      continue;
+    }
+    seenOverlayIds.add(logo.id);
+    if (![logo.x, logo.y, logo.width, logo.height].every(Number.isInteger) || logo.x < 0 || logo.y < 0) {
+      errors.push(`${label}: logo ${position}: posizione e dimensioni devono essere pixel interi non negativi.`);
+    }
+    if (logo.width < MIN_LOGO_SIDE_PX || logo.height < MIN_LOGO_SIDE_PX) {
+      errors.push(`${label}: logo ${position}: almeno ${MIN_LOGO_SIDE_PX} px per lato.`);
+    }
+    if (logo.x + logo.width > widthPx || logo.y + logo.height > heightPx) {
+      errors.push(`${label}: logo ${position} deve rimanere dentro il canvas.`);
+    }
+    if (!Number.isInteger(logo.opacity) || logo.opacity < 0 || logo.opacity > 100) {
+      errors.push(`${label}: logo ${position}: opacita tra 0 e 100.`);
+    }
+  }
+  for (const [index, text] of draft.texts.entries()) {
+    const position = index + 1;
+    if (!text.id || seenOverlayIds.has(text.id)) {
+      errors.push(`${label}: testo ${position} non valido.`);
+      continue;
+    }
+    seenOverlayIds.add(text.id);
+    if (!text.text.trim()) {
+      errors.push(`${label}: testo ${position}: inserisci un testo.`);
+    }
+    if (text.text.length > MAX_TEXT_OVERLAY_CHARS) {
+      errors.push(`${label}: testo ${position}: massimo ${MAX_TEXT_OVERLAY_CHARS} caratteri.`);
+    }
+    if (!PHOTOBOOTH_FONTS.some((font) => font.key === text.fontKey)) {
+      errors.push(`${label}: testo ${position}: font non valido.`);
+    }
+    if (!Number.isInteger(text.fontSizePx) || text.fontSizePx < MIN_TEXT_FONT_PX || text.fontSizePx > MAX_TEXT_FONT_PX) {
+      errors.push(`${label}: testo ${position}: dimensione tra ${MIN_TEXT_FONT_PX} e ${MAX_TEXT_FONT_PX} px.`);
+    }
+    if (!/^#([0-9a-fA-F]{6})$/.test(text.color)) {
+      errors.push(`${label}: testo ${position}: colore nel formato #RRGGBB.`);
+    }
+    if (![text.x, text.y, text.width].every(Number.isInteger) || text.x < 0 || text.y < 0) {
+      errors.push(`${label}: testo ${position}: posizione e larghezza devono essere pixel interi non negativi.`);
+    }
+    if (text.width < MIN_TEXT_BOX_WIDTH_PX || text.x + text.width > widthPx || text.y >= heightPx) {
+      errors.push(`${label}: testo ${position} deve rimanere dentro il canvas.`);
+    }
+    if (!Number.isInteger(text.opacity) || text.opacity < 0 || text.opacity > 100) {
+      errors.push(`${label}: testo ${position}: opacita tra 0 e 100.`);
+    }
+  }
+
   if (errors.length > 0) {
     return { ok: false, errors };
   }
+
+  const validLogos: TemplateLogoOverlay[] = draft.logos.map((logo) => {
+    const clamped = clampOverlayRect(logo, { width: widthPx, height: heightPx });
+    return {
+      id: logo.id,
+      x: clamped.x,
+      y: clamped.y,
+      width: clamped.width,
+      height: clamped.height,
+      opacity: clampNumber(Math.round(logo.opacity), 0, 100),
+      ...(logo.fileName ? { fileName: logo.fileName } : {}),
+      ...(logo.previewUrl ? { previewUrl: logo.previewUrl } : {}),
+    };
+  });
+  const validTexts: TemplateTextOverlay[] = draft.texts.map((text) => {
+    const clamped = clampTextBox(text, { width: widthPx, height: heightPx });
+    return {
+      id: text.id,
+      text: text.text,
+      fontKey: text.fontKey,
+      fontSizePx: clampNumber(Math.round(text.fontSizePx), MIN_TEXT_FONT_PX, MAX_TEXT_FONT_PX),
+      color: text.color,
+      bold: text.bold,
+      italic: text.italic,
+      align: text.align,
+      x: clamped.x,
+      y: clamped.y,
+      width: clamped.width,
+      opacity: clampNumber(Math.round(text.opacity), 0, 100),
+      shadow: text.shadow,
+    };
+  });
 
   return {
     ok: true,
@@ -472,7 +690,10 @@ function validateVariantDraft(draft: VariantDraft, orientation: Orientation): Va
       backgroundPreviewUrl: draft.backgroundPreviewUrl || undefined,
       backgroundFileName: draft.backgroundFileName || undefined,
       borderSizePx,
+      photoRadiusPx: Math.min(photoRadiusPx, Math.floor(Math.min(photoArea.width, photoArea.height) / 2)),
       borderColor: draft.borderColor,
+      logos: validLogos,
+      texts: validTexts,
     },
   };
 }
@@ -528,8 +749,16 @@ export default function CustomTemplateBuilder() {
     },
   });
   const [draftBackgroundFiles] = useState(() => getCustomTemplateBackgroundFiles());
+  const draftLogoFilesRef = useRef(getCustomTemplateLogoFiles());
+  const logoBusyRef = useRef({ vertical: false, horizontal: false });
+  const [selectedOverlay, setSelectedOverlay] = useState<OverlaySelection>(null);
+  const [editingTextId, setEditingTextId] = useState<string | null>(null);
 
   const fileInputRefs = {
+    vertical: useRef<HTMLInputElement | null>(null),
+    horizontal: useRef<HTMLInputElement | null>(null),
+  };
+  const logoInputRefs = {
     vertical: useRef<HTMLInputElement | null>(null),
     horizontal: useRef<HTMLInputElement | null>(null),
   };
@@ -566,14 +795,26 @@ export default function CustomTemplateBuilder() {
   }, []);
 
   const activeDraft = variants[activeOrientation];
+  const previewHostRef = useRef<HTMLDivElement | null>(null);
+  const [previewSize, setPreviewSize] = useState({ width: 0, height: 0 });
   const previewGeometry = useMemo(() => getPreviewGeometry(activeDraft), [activeDraft]);
   const { widthPx, heightPx, ratio, photoArea: previewPhotoArea, borderSizePx: safeBorderSize } = previewGeometry;
+  useEffect(() => {
+    const host = previewHostRef.current;
+    if (!host) return;
+    const measure = () => setPreviewSize(fitPreviewSurface(host.clientWidth, host.clientHeight, widthPx / heightPx));
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    measure();
+    return () => observer.disconnect();
+  }, [widthPx, heightPx]);
   const activeValidation = useMemo(
     () => validateVariantDraft(activeDraft, activeOrientation),
     [activeDraft, activeOrientation]
   );
   const activeValidationErrors = activeValidation.ok ? [] : activeValidation.errors;
-  const anyUploadBusy = uploadBusy.vertical || uploadBusy.horizontal;
+  const [logoUploadBusy, setLogoUploadBusy] = useState<Record<Orientation, boolean>>({ vertical: false, horizontal: false });
+  const anyUploadBusy = uploadBusy.vertical || uploadBusy.horizontal || logoUploadBusy.vertical || logoUploadBusy.horizontal;
   const saveBusy = savingLibrary || anyUploadBusy;
   const fieldPrefix = `custom-template-${activeOrientation}`;
   const previewBorderColor = /^#([0-9a-fA-F]{6})$/.test(activeDraft.borderColor)
@@ -604,9 +845,9 @@ export default function CustomTemplateBuilder() {
       top: `${(safeBorderSize / previewPhotoArea.height) * 100}%`,
       right: `${(safeBorderSize / previewPhotoArea.width) * 100}%`,
       bottom: `${(safeBorderSize / previewPhotoArea.height) * 100}%`,
-      borderRadius: 12,
+      borderRadius: `${Math.max(0, Math.min(Number(activeDraft.photoRadiusPx) || 0, Math.min(previewPhotoArea.width, previewPhotoArea.height) / 2) - safeBorderSize) / (previewPhotoArea.width - 2 * safeBorderSize) * 100}% / ${Math.max(0, Math.min(Number(activeDraft.photoRadiusPx) || 0, Math.min(previewPhotoArea.width, previewPhotoArea.height) / 2) - safeBorderSize) / (previewPhotoArea.height - 2 * safeBorderSize) * 100}%`,
     }),
-    [safeBorderSize, previewPhotoArea.height, previewPhotoArea.width]
+    [safeBorderSize, previewPhotoArea.height, previewPhotoArea.width, activeDraft.photoRadiusPx]
   );
 
   const handleBackgroundSelected = async (orientation: Orientation, event: React.ChangeEvent<HTMLInputElement>) => {
@@ -698,14 +939,74 @@ export default function CustomTemplateBuilder() {
     }
   };
 
-  const beginDrag = (event: React.PointerEvent<HTMLDivElement>, mode: "move" | "resize") => {
+  const handleLogoSelected = async (orientation: Orientation, event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (savingLibraryRef.current || logoBusyRef.current[orientation] || variants[orientation].logos.length >= MAX_LOGOS_PER_VARIANT) return;
+    if (file.size > MAX_LOGO_BYTES) {
+      toast.error("Logo troppo grande", { description: `Il logo deve essere inferiore a ${(MAX_LOGO_BYTES / 1024 / 1024).toFixed(0)} MB.` });
+      return;
+    }
+    setLogoUploadBusy((previous) => ({ ...previous, [orientation]: true }));
+    logoBusyRef.current[orientation] = true;
+    setSaveErrors([]);
+    try {
+      const safeFile = await normalizePortableImageFile(file, file.name, "logo");
+      const image = await loadImageElement(safeFile);
+      if (!mountedRef.current) return;
+      const bounds = getPreviewGeometry(variants[orientation]);
+      const scale = Math.min(128 / Math.max(image.naturalWidth, image.naturalHeight), 1);
+      const size = { width: Math.max(16, Math.round(image.naturalWidth * scale)), height: Math.max(16, Math.round(image.naturalHeight * scale)) };
+      const previewUrl = URL.createObjectURL(safeFile);
+      ownedPreviewUrlsRef.current.add(previewUrl);
+      const newLogo: LogoDraft = {
+        id: createOverlayId("logo"),
+        ...clampOverlayRect({ x: Math.round((bounds.widthPx - size.width) / 2), y: Math.round((bounds.heightPx - size.height) / 2), ...size }, { width: bounds.widthPx, height: bounds.heightPx }),
+        opacity: 100,
+        previewUrl,
+        fileName: safeFile.name,
+      };
+      setVariants((prev) => ({
+        ...prev,
+        [orientation]: {
+          ...prev[orientation],
+          logos: [...prev[orientation].logos, newLogo],
+        },
+      }));
+      draftLogoFilesRef.current[orientation].set(newLogo.id, safeFile);
+      setSelectedOverlay({ kind: "logo", id: newLogo.id });
+      toast.success("Logo aggiunto", { description: `${file.name} caricato con successo.` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Impossibile aggiungere il logo.";
+      toast.error("Aggiunta logo non riuscita", { description: message });
+    } finally {
+      logoBusyRef.current[orientation] = false;
+      if (mountedRef.current) {
+        setLogoUploadBusy((previous) => ({ ...previous, [orientation]: false }));
+      }
+    }
+  };
+
+  const getOverlayRectById = (id: string): Rect | null => {
+    const logo = activeDraft.logos.find((l) => l.id === id);
+    if (logo) return { x: logo.x, y: logo.y, width: logo.width, height: logo.height };
+    const text = activeDraft.texts.find((t) => t.id === id);
+    if (text) return { x: text.x, y: text.y, width: text.width, height: Math.ceil(text.fontSizePx * 1.18) };
+    return null;
+  };
+
+  const beginDrag = (event: React.PointerEvent<HTMLElement>, mode: "move" | "resize", target: { kind: "photo" } | { kind: "logo" | "text"; id: string }) => {
+    const targetRect = target.kind === "photo" ? previewPhotoArea : getOverlayRectById(target.id);
+    if (!targetRect) return;
     dragStateRef.current = {
       pointerId: event.pointerId,
       orientation: activeOrientation,
       startX: event.clientX,
       startY: event.clientY,
-      origin: previewPhotoArea,
+      origin: targetRect,
       mode,
+      target,
+      fontSizePx: target.kind === "text" ? activeDraft.texts.find((text) => text.id === target.id)?.fontSizePx : undefined,
     };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -721,25 +1022,51 @@ export default function CustomTemplateBuilder() {
     const deltaY = ((event.clientY - drag.startY) / bounds.height) * heightPx;
 
     updateActiveDraft((draft) => {
-      const nextRect =
-        drag.mode === "move"
-          ? {
-              ...drag.origin,
-              x: Math.round(drag.origin.x + deltaX),
-              y: Math.round(drag.origin.y + deltaY),
-            }
-          : {
-              ...drag.origin,
-              width: Math.round(drag.origin.width + deltaX),
-              height: draft.lockAspectRatio
-                ? Math.round((drag.origin.width + deltaX) / ratio)
-                : Math.round(drag.origin.height + deltaY),
-            };
+      if (drag.target.kind === "photo") {
+        const nextRect =
+          drag.mode === "move"
+            ? {
+                ...drag.origin,
+                x: Math.round(drag.origin.x + deltaX),
+                y: Math.round(drag.origin.y + deltaY),
+              }
+            : {
+                ...drag.origin,
+                width: Math.round(drag.origin.width + deltaX),
+                height: draft.lockAspectRatio
+                  ? Math.round((drag.origin.width + deltaX) / ratio)
+                  : Math.round(drag.origin.height + deltaY),
+              };
+        return {
+          ...draft,
+          photoArea: clampRect(nextRect, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio),
+        };
+      }
 
-      return {
-        ...draft,
-        photoArea: clampRect(nextRect, { width: widthPx, height: heightPx }, draft.lockAspectRatio, ratio),
-      };
+      const overlayId = ("id" in drag.target) ? drag.target.id : undefined;
+      if (!overlayId) return draft;
+      const canvasBounds = { width: widthPx, height: heightPx };
+
+      if (drag.target.kind === "logo") {
+        const overlay = draft.logos.find((l) => l.id === overlayId);
+        if (!overlay) return draft;
+        const nextRect = dragOverlayRect(drag.origin, drag.mode, deltaX, deltaY, canvasBounds, true);
+        const nextLogos = draft.logos.map((l) => l.id === overlayId ? { ...l, ...nextRect } : l);
+        return { ...draft, logos: nextLogos };
+      }
+
+      const textOverlay = draft.texts.find((t) => t.id === overlayId);
+      if (!textOverlay) return draft;
+      const textHeight = textOverlay.fontSizePx;
+      if (drag.mode === "move") {
+        const nextRect = moveTextBox(drag.origin, deltaX, deltaY, canvasBounds);
+        const nextTexts = draft.texts.map((t) => t.id === overlayId ? { ...t, x: nextRect.x, y: nextRect.y, width: nextRect.width } : t);
+        return { ...draft, texts: nextTexts };
+      }
+      const nextWidth = clampNumber(Math.round(drag.origin.width + deltaX), MIN_TEXT_BOX_WIDTH_PX, widthPx - drag.origin.x);
+      const fontSizePx = clampNumber(Math.round((drag.fontSizePx ?? textHeight) * nextWidth / drag.origin.width), MIN_TEXT_FONT_PX, MAX_TEXT_FONT_PX);
+      const nextTexts = draft.texts.map((t) => t.id === overlayId ? { ...t, width: nextWidth, fontSizePx } : t);
+      return { ...draft, texts: nextTexts };
     });
   };
 
@@ -768,7 +1095,12 @@ export default function CustomTemplateBuilder() {
       throw error;
     }
 
+    clearCustomTemplateLogoFiles();
     for (const orientation of ["vertical", "horizontal"] as const) {
+      for (const logo of template.variants[orientation].logos) {
+        setCustomTemplateLogoFile(orientation, logo.id, draftLogoFilesRef.current[orientation].get(logo.id) ?? null);
+        if (logo.previewUrl) ownedPreviewUrlsRef.current.delete(logo.previewUrl);
+      }
       const previewUrl = template.variants[orientation].backgroundPreviewUrl;
       if (previewUrl) {
         ownedPreviewUrlsRef.current.delete(previewUrl);
@@ -789,13 +1121,16 @@ export default function CustomTemplateBuilder() {
   };
 
   const handleSaveTemplate = () => {
-    if (savingLibraryRef.current || uploadBusyRef.current.vertical || uploadBusyRef.current.horizontal) {
+    setEditingTextId(null);
+    if (savingLibraryRef.current || uploadBusyRef.current.vertical || uploadBusyRef.current.horizontal || logoBusyRef.current.vertical || logoBusyRef.current.horizontal) {
       return;
     }
 
     const cleanedName = templateName.trim();
     if (!cleanedName) {
       setTemplateNameError("Inserisci un nome template prima di salvarlo.");
+      toast.error("Inserisci il nome del template", { description: "Il nome è obbligatorio per usare o salvare il template." });
+      document.getElementById("template-name")?.focus();
       return;
     }
 
@@ -811,13 +1146,16 @@ export default function CustomTemplateBuilder() {
   };
 
   const handleSaveTemplateToLibrary = async () => {
-    if (savingLibraryRef.current || uploadBusyRef.current.vertical || uploadBusyRef.current.horizontal) {
+    setEditingTextId(null);
+    if (savingLibraryRef.current || uploadBusyRef.current.vertical || uploadBusyRef.current.horizontal || logoBusyRef.current.vertical || logoBusyRef.current.horizontal) {
       return;
     }
 
     const cleanedName = templateName.trim();
     if (!cleanedName) {
       setTemplateNameError("Il nome template e obbligatorio per salvarlo nella libreria.");
+      toast.error("Inserisci il nome del template", { description: "Il nome è obbligatorio per usare o salvare il template." });
+      document.getElementById("template-name")?.focus();
       return;
     }
 
@@ -833,7 +1171,10 @@ export default function CustomTemplateBuilder() {
     setSaveErrors([]);
 
     try {
-      const savedRecord = await saveTemplateToLibrary(result.template, backgroundFiles);
+      const savedRecord = await saveTemplateToLibrary({
+        ...result.template,
+        libraryTemplateId: existingTemplate?.libraryTemplateId,
+      }, backgroundFiles, draftLogoFilesRef.current);
       if (!mountedRef.current) {
         return;
       }
@@ -844,10 +1185,12 @@ export default function CustomTemplateBuilder() {
         variants: {
           vertical: {
             ...savedRecord.template.variants.vertical,
+            logos: savedRecord.template.variants.vertical.logos.map((logo) => ({ ...logo, previewUrl: result.template.variants.vertical.logos.find((draft) => draft.id === logo.id)?.previewUrl })),
             backgroundPreviewUrl: result.template.variants.vertical.backgroundPreviewUrl,
           },
           horizontal: {
             ...savedRecord.template.variants.horizontal,
+            logos: savedRecord.template.variants.horizontal.logos.map((logo) => ({ ...logo, previewUrl: result.template.variants.horizontal.logos.find((draft) => draft.id === logo.id)?.previewUrl })),
             backgroundPreviewUrl: result.template.variants.horizontal.backgroundPreviewUrl,
           },
         },
@@ -881,8 +1224,8 @@ export default function CustomTemplateBuilder() {
   };
 
   return (
-    <div className="min-h-screen bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col">
-      <div className="h-16 bg-[var(--app-topbar)] border-b border-[var(--app-border)] backdrop-blur-xl flex items-center px-6 justify-between">
+    <div className="h-screen overflow-hidden bg-[var(--app-bg)] text-[var(--app-text)] flex flex-col">
+      <div className="h-16 shrink-0 bg-[var(--app-topbar)] border-b border-[var(--app-border)] backdrop-blur-xl flex items-center px-6 justify-between">
         <div className="flex items-center gap-4">
           <Button
             type="button"
@@ -923,7 +1266,7 @@ export default function CustomTemplateBuilder() {
         </div>
       </div>
 
-      <div className="flex-1 grid grid-cols-[390px,1fr] min-h-0">
+      <div className="flex-1 grid grid-cols-[minmax(280px,390px)_minmax(0,1fr)] min-h-0">
         <aside className="bg-[var(--app-topbar)] border-r border-[var(--app-border)] p-6 overflow-y-auto space-y-6">
           <div className="space-y-2">
             <Label htmlFor="template-name">Nome Template</Label>
@@ -965,7 +1308,7 @@ export default function CustomTemplateBuilder() {
                 <button
                   key={orientation}
                   type="button"
-                  onClick={() => setActiveOrientation(orientation)}
+                  onClick={() => { setEditingTextId(null); setActiveOrientation(orientation); }}
                   className={`rounded-lg border px-3 py-2 text-sm transition ${
                     activeOrientation === orientation
                       ? "border-[var(--brand-accent)] bg-[var(--brand-primary-soft)] text-[var(--app-text)]"
@@ -1119,11 +1462,161 @@ export default function CustomTemplateBuilder() {
                 </div>
               </div>
             </div>
+            <div className="mt-3 space-y-2">
+              <Label htmlFor="photo-radius">Arrotondamento angoli (px)</Label>
+              <Input id="photo-radius" type="number" min={0} max={Math.floor(Math.min(previewPhotoArea.width, previewPhotoArea.height) / 2)} step={1}
+                value={activeDraft.photoRadiusPx} onChange={(event) => updateActiveDraft((draft) => ({ ...draft, photoRadiusPx: event.target.value }))} />
+              <p className="text-xs text-[var(--app-text-subtle)]">0 per angoli squadrati. Il raggio si applica alla foto e al bordo, anche nell’export.</p>
+            </div>
             <p className="text-[11px] text-[var(--app-text-subtle)]">
-              Bordo: 0-{MAX_BORDER_SIZE_PX} px e comunque meno della metà del lato corto dell'area foto.
-            </p>
-          </div>
+               Bordo: 0-{MAX_BORDER_SIZE_PX} px e comunque meno della metà del lato corto dell'area foto.
+             </p>
+           </div>
 
+           <div className="space-y-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.16)]">
+             <div className="flex items-center justify-between">
+               <div>
+                 <div className="text-sm font-medium">Logo Overlay</div>
+                 <div className="text-xs text-[var(--app-text-subtle)]">Fino a {MAX_LOGOS_PER_VARIANT} loghi per variante</div>
+               </div>
+               <Button
+                 type="button"
+                 variant="outline"
+                 size="sm"
+                 className="border-[var(--app-border)] bg-[var(--app-field)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]"
+                 onClick={() => {
+                   if (activeDraft.logos.length >= MAX_LOGOS_PER_VARIANT) {
+                     toast.error("Limite raggiunto", { description: `Massimo ${MAX_LOGOS_PER_VARIANT} loghi per variante.` });
+                     return;
+                   }
+                   const logoInput = logoInputRefs[activeOrientation].current;
+                   if (logoInput) { logoInput.value = ""; logoInput.click(); }
+                 }}
+                 disabled={savingLibrary}
+               >
+                 <ImagePlus className="w-4 h-4 mr-1" />
+                 Aggiungi
+               </Button>
+             </div>
+             <input
+               ref={logoInputRefs[activeOrientation]}
+               type="file"
+               accept="image/*"
+               hidden
+               aria-label="Aggiungi logo"
+               onChange={(event) => handleLogoSelected(activeOrientation, event)}
+             />
+             {activeDraft.logos.length === 0 ? (
+               <p className="text-xs text-[var(--app-text-subtle)]">Nessun logo aggiunto. Clicca Aggiungi per caricarne uno.</p>
+             ) : (
+               <div className="space-y-2">
+                 {activeDraft.logos.map((logo) => (
+                   <div key={logo.id} className="flex items-center gap-2 rounded-lg border border-[var(--app-border)] p-2 text-xs">
+                     <button type="button" className="flex-1 min-w-0 text-left" onClick={() => setSelectedOverlay({ kind: "logo", id: logo.id })} aria-label={`Modifica logo ${logo.fileName}`}>
+                       <div className="font-medium truncate">{logo.fileName || logo.id}</div>
+                       <div className="text-[var(--app-text-subtle)]">{logo.width}x{logo.height}px @ {logo.opacity}%</div>
+                     </button>
+                     <Button
+                       type="button"
+                       variant="ghost"
+                       size="sm"
+                       className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10"
+                       onClick={() => updateActiveDraft((draft) => ({
+                         ...draft,
+                         logos: draft.logos.filter((l) => l.id !== logo.id),
+                       }))}
+                       aria-label="Rimuovi logo"
+                     >
+                       <Trash2 className="w-3 h-3" />
+                     </Button>
+                   </div>
+                 ))}
+               </div>
+             )}
+           </div>
+
+           <div className="space-y-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.16)]">
+             <div className="flex items-center justify-between">
+               <div>
+                 <div className="text-sm font-medium">Testo Overlay</div>
+                 <div className="text-xs text-[var(--app-text-subtle)]">Fino a {MAX_TEXTS_PER_VARIANT} testi per variante</div>
+               </div>
+               <Button
+                 type="button"
+                 variant="outline"
+                 size="sm"
+                 className="border-[var(--app-border)] bg-[var(--app-field)] text-[var(--app-text)] hover:bg-[var(--app-surface-strong)]"
+                 onClick={() => {
+                   if (activeDraft.texts.length >= MAX_TEXTS_PER_VARIANT) {
+                     toast.error("Limite raggiunto", { description: `Massimo ${MAX_TEXTS_PER_VARIANT} testi per variante.` });
+                     return;
+                   }
+                   const newText: TextDraft = {
+                     id: createOverlayId("text"),
+                     text: "Testo",
+                     fontKey: DEFAULT_PHOTOBOOTH_FONT_KEY,
+                     fontSizePx: 48,
+                     color: "#ffffff",
+                     bold: false,
+                     italic: false,
+                     align: "left",
+                     x: Math.round(widthPx / 4),
+                     y: Math.round(heightPx / 4),
+                     width: Math.round(widthPx / 2),
+                     opacity: 100,
+                     shadow: false,
+                   };
+                   updateActiveDraft((draft) => ({ ...draft, texts: [...draft.texts, newText] }));
+                   setSelectedOverlay({ kind: "text", id: newText.id });
+                   setEditingTextId(newText.id);
+                 }}
+                 disabled={savingLibrary}
+               >
+                 <Type className="w-4 h-4 mr-1" />
+                 Aggiungi
+               </Button>
+             </div>
+             {activeDraft.texts.length === 0 ? (
+               <p className="text-xs text-[var(--app-text-subtle)]">Nessun testo aggiunto. Clicca Aggiungi per inserirne uno.</p>
+             ) : (
+               <div className="space-y-2">
+                 {activeDraft.texts.map((text) => {
+                   const font = getPhotoboothFont(text.fontKey);
+                   return (
+                     <div key={text.id} className="flex items-center gap-2 rounded-lg border border-[var(--app-border)] p-2 text-xs">
+                       <button type="button" className="flex-1 min-w-0 text-left" onClick={() => setSelectedOverlay({ kind: "text", id: text.id })} aria-label={`Modifica testo ${text.text}`}>
+                         <div className="font-medium truncate" style={{ fontFamily: font?.family ?? "inherit", fontSize: Math.min(text.fontSizePx, 20), fontWeight: text.bold ? 700 : 400, fontStyle: text.italic ? "italic" : "normal" }}>
+                           {text.text || "Senza testo"}
+                         </div>
+                         <div className="text-[var(--app-text-subtle)]">{font?.label ?? "Font"} · {text.fontSizePx}px · {text.color}</div>
+                       </button>
+                       <Button
+                         type="button"
+                         variant="ghost"
+                         size="sm"
+                         className="text-[var(--danger)] hover:text-[var(--danger)] hover:bg-[var(--danger)]/10"
+                         onClick={() => updateActiveDraft((draft) => ({
+                           ...draft,
+                           texts: draft.texts.filter((t) => t.id !== text.id),
+                         }))}
+                         aria-label="Rimuovi testo"
+                       >
+                         <Trash2 className="w-3 h-3" />
+                       </Button>
+                     </div>
+                   );
+                 })}
+               </div>
+             )}
+           </div>
+
+          <TemplateOverlayControls
+            logo={selectedOverlay?.kind === "logo" ? activeDraft.logos.find((logo) => logo.id === selectedOverlay.id) : undefined}
+            text={selectedOverlay?.kind === "text" ? activeDraft.texts.find((text) => text.id === selectedOverlay.id) : undefined}
+            width={widthPx} height={heightPx} disabled={saveBusy}
+            onLogo={(patch) => updateActiveDraft((draft) => ({ ...draft, logos: draft.logos.map((logo) => logo.id === selectedOverlay?.id ? { ...logo, ...patch } : logo) }))}
+            onText={(patch) => updateActiveDraft((draft) => ({ ...draft, texts: draft.texts.map((text) => text.id === selectedOverlay?.id ? { ...text, ...patch } : text) }))}
+          />
           <div className="space-y-3 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] p-4 shadow-[0_18px_42px_rgba(0,0,0,0.16)]">
             <div className="flex items-center justify-between">
               <div>
@@ -1296,9 +1789,9 @@ export default function CustomTemplateBuilder() {
           </div>
         </aside>
 
-        <main className="p-8 flex items-center justify-center overflow-auto bg-[radial-gradient(circle_at_top,rgba(103,117,107,0.16),transparent_36%),linear-gradient(180deg,#1f2421,#232925)]">
-          <div className="w-full max-w-[860px]">
-            <div className="mb-5 flex items-center justify-between text-sm text-[var(--app-text-muted)]">
+        <main className="min-w-0 min-h-0 p-6 flex items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_top,rgba(103,117,107,0.16),transparent_36%),linear-gradient(180deg,#1f2421,#232925)]">
+          <div className="w-full h-full max-w-[860px] flex flex-col">
+            <div className="mb-5 shrink-0 flex flex-wrap gap-2 items-center justify-between text-sm text-[var(--app-text-muted)]">
               <span>Preview live variante {activeOrientation === "vertical" ? "Verticale" : "Orizzontale"}</span>
               <span className="flex items-center gap-2">
                 <Move className="w-4 h-4" />
@@ -1306,10 +1799,13 @@ export default function CustomTemplateBuilder() {
               </span>
             </div>
 
+            <div ref={previewHostRef} className="flex-1 min-h-0 flex items-center justify-center">
             <div
-              className="relative mx-auto w-full overflow-hidden rounded-[30px] border border-[var(--app-border)] bg-[var(--app-surface)] shadow-[0_32px_90px_rgba(0,0,0,0.28)]"
+              data-testid="template-canvas"
+              className="relative mx-auto shrink-0 overflow-hidden rounded-[30px] border border-[var(--app-border)] bg-[var(--app-surface)] shadow-[0_32px_90px_rgba(0,0,0,0.28)]"
               style={{
-                aspectRatio: `${widthPx} / ${heightPx}`,
+                width: previewSize.width,
+                height: previewSize.height,
                 backgroundImage: activeDraft.backgroundPreviewUrl ? `url(${activeDraft.backgroundPreviewUrl})` : undefined,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
@@ -1324,29 +1820,104 @@ export default function CustomTemplateBuilder() {
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(237,230,221,0.12),transparent_35%)]" />
 
               <div
+                data-testid="editor-photo-area"
                 className="absolute rounded-[18px] shadow-[0_0_0_9999px_rgba(0,0,0,0.18)]"
                 style={{
                   ...photoAreaStyle,
-                  backgroundColor: previewBorderColor,
+                  borderRadius: `${Math.max(0, Math.min(Number(activeDraft.photoRadiusPx) || 0, Math.min(previewPhotoArea.width, previewPhotoArea.height) / 2)) / previewPhotoArea.width * 100}% / ${Math.max(0, Math.min(Number(activeDraft.photoRadiusPx) || 0, Math.min(previewPhotoArea.width, previewPhotoArea.height) / 2)) / previewPhotoArea.height * 100}%`,
+                  backgroundColor: safeBorderSize > 0 ? previewBorderColor : "transparent",
                   border: "2px dashed rgba(212, 193, 170, 0.95)",
                 }}
-                onPointerDown={(event) => beginDrag(event, "move")}
-              >
-                <div
-                  className="absolute bg-[rgba(31,36,33,0.18)]"
-                  style={innerPhotoAreaStyle}
-                />
-                <div className="absolute inset-0 flex items-center justify-center text-[11px] font-medium tracking-[0.2em] text-[var(--brand-secondary)] uppercase">
-                  Area Foto
-                </div>
-                <div
-                  className="absolute bottom-2 right-2 h-5 w-5 rounded-md border border-[var(--brand-secondary)] bg-[var(--brand-accent)] shadow"
-                  onPointerDown={(event) => {
-                    event.stopPropagation();
-                    beginDrag(event, "resize");
-                  }}
-                />
-              </div>
+                onPointerDown={(event) => beginDrag(event, "move", { kind: "photo" })}
+               >
+                 <div
+                   data-testid="photo-placeholder"
+                   className="absolute bg-[#d9d9d9]"
+                   style={innerPhotoAreaStyle}
+                 />
+                 <div className="absolute inset-0 flex items-center justify-center text-[11px] font-medium tracking-[0.2em] text-[var(--brand-secondary)] uppercase">
+                   Area Foto
+                 </div>
+                  <div
+                    className="absolute bottom-2 right-2 h-5 w-5 rounded-md border border-[var(--brand-secondary)] bg-[var(--brand-accent)] shadow"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      beginDrag(event, "resize", { kind: "photo" });
+                    }}
+                 />
+               </div>
+
+               {activeDraft.logos.map((logo) => {
+                 const logoStyle: React.CSSProperties = {
+                   left: `${(logo.x / widthPx) * 100}%`,
+                   top: `${(logo.y / heightPx) * 100}%`,
+                   width: `${(logo.width / widthPx) * 100}%`,
+                   height: `${(logo.height / heightPx) * 100}%`,
+                   opacity: logo.opacity / 100,
+                   backgroundImage: logo.previewUrl ? `url(${logo.previewUrl})` : undefined,
+                   backgroundSize: "contain",
+                   backgroundRepeat: "no-repeat",
+                   backgroundPosition: "center",
+                   borderRadius: 4,
+                   outline: selectedOverlay?.kind === "logo" && selectedOverlay.id === logo.id
+                     ? "2px solid var(--brand-accent)"
+                     : "2px solid transparent",
+                   cursor: "move",
+                 };
+                 return (
+                   <div
+                     key={logo.id}
+                     data-testid="logo-overlay"
+                     className="absolute touch-none"
+                     style={logoStyle}
+                     onPointerDown={(event) => {
+                       event.stopPropagation();
+                       setSelectedOverlay({ kind: "logo", id: logo.id });
+                       beginDrag(event, "move", { kind: "logo", id: logo.id });
+                     }}
+                   >
+                     <div aria-label="Ridimensiona logo" className="absolute bottom-1 right-1 h-3 w-3 cursor-nwse-resize rounded bg-[var(--brand-accent)] border border-white/50"
+                       onPointerDown={(event) => { event.stopPropagation(); beginDrag(event, "resize", { kind: "logo", id: logo.id }); }} />
+                   </div>
+                 );
+               })}
+
+               {activeDraft.texts.map((text) => {
+                 const textStyle: React.CSSProperties = {
+                   left: `${(text.x / widthPx) * 100}%`,
+                   top: `${(text.y / heightPx) * 100}%`,
+                   width: `${(text.width / widthPx) * 100}%`,
+                   opacity: text.opacity / 100,
+                   outline: selectedOverlay?.kind === "text" && selectedOverlay.id === text.id
+                     ? "2px dashed var(--brand-accent)"
+                     : "2px dashed transparent",
+                   cursor: "move",
+                 };
+                 return (
+                   <div
+                     key={text.id}
+                     data-testid="text-overlay"
+                     className="absolute touch-none"
+                     style={textStyle}
+                     onDoubleClick={() => setEditingTextId(text.id)}
+                     onPointerDown={(event) => {
+                       event.stopPropagation();
+                       setSelectedOverlay({ kind: "text", id: text.id });
+                       if (editingTextId !== text.id) beginDrag(event, "move", { kind: "text", id: text.id });
+                     }}
+                   >
+                     {editingTextId === text.id ? <TemplateInlineTextEditor text={text} scale={previewSize.width / widthPx}
+                       onChange={(value) => updateActiveDraft((draft) => ({ ...draft, texts: draft.texts.map((item) => item.id === text.id ? { ...item, text: value } : item) }))}
+                       onDone={() => setEditingTextId(null)} /> : <TemplateTextPreview text={text} maxHeight={heightPx - text.y} />}
+                     {selectedOverlay?.id === text.id && <button type="button" aria-label="Sposta testo" title="Trascina per spostare; doppio clic sul testo per scrivere"
+                       className="absolute right-0 top-0 z-10 h-6 w-6 cursor-move rounded bg-[var(--brand-accent)] text-black"
+                       onPointerDown={(event) => { event.stopPropagation(); setEditingTextId(null); beginDrag(event, "move", { kind: "text", id: text.id }); }}><Move className="h-4 w-4 mx-auto" /></button>}
+                     <div aria-label="Ridimensiona testo" title="Trascina per ridimensionare testo e riquadro" className="absolute bottom-0 right-0 z-20 h-3 w-3 cursor-nwse-resize bg-[var(--brand-accent)]"
+                       onPointerDown={(event) => { event.stopPropagation(); beginDrag(event, "resize", { kind: "text", id: text.id }); }} />
+                   </div>
+                 );
+               })}
+             </div>
             </div>
           </div>
         </main>

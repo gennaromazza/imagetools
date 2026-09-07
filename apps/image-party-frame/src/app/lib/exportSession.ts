@@ -61,7 +61,12 @@ const EXPORT_JOB_STATUSES = new Set<ExportJobStatus>(["queued", "running", "canc
 const EXPORT_JOB_PHASES = new Set<ExportJobPhase>([
   "queued", "preparing", "rendering", "writing", "cleaning", "completed", "cancelled", "failed",
 ]);
-const MAX_EXPORT_ITEMS = 500;
+/**
+ * Cap for a whole export intent (all chunks combined). A single server job is
+ * still limited to 500 files; ExportProgress splits larger intents into
+ * sequential chunk jobs automatically.
+ */
+const MAX_EXPORT_ITEMS = 5_000;
 
 function isBoundedString(value: unknown, maxLength: number, allowEmpty = false): value is string {
   return typeof value === "string" && value.length <= maxLength && (allowEmpty || value.trim().length > 0);

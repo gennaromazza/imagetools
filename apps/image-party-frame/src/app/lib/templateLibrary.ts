@@ -103,9 +103,19 @@ export function areCustomTemplatesEquivalent(
     if (!leftVariant || !rightVariant) {
       return false;
     }
+    if ((leftVariant.photoRadiusPx ?? 0) !== (rightVariant.photoRadiusPx ?? 0)) return false;
     if (comparableFields.some((field) => leftVariant[field] !== rightVariant[field])) {
       return false;
     }
+    const logoFields = ["id", "x", "y", "width", "height", "opacity", "fileName"] as const;
+    const leftLogos = leftVariant.logos ?? [], rightLogos = rightVariant.logos ?? [];
+    if (leftLogos.length !== rightLogos.length || leftLogos.some((logo, index) =>
+      logoFields.some((key) => logo[key] !== rightLogos[index][key])
+      || (options.includePreviewUrls && logo.previewUrl !== rightLogos[index].previewUrl))) return false;
+    const textFields = ["id", "text", "fontKey", "fontSizePx", "color", "bold", "italic", "align", "x", "y", "width", "opacity", "shadow"] as const;
+    const leftTexts = leftVariant.texts ?? [], rightTexts = rightVariant.texts ?? [];
+    if (leftTexts.length !== rightTexts.length || leftTexts.some((text, index) =>
+      textFields.some((key) => text[key] !== rightTexts[index][key]))) return false;
     return !options.includePreviewUrls
       || leftVariant.backgroundPreviewUrl === rightVariant.backgroundPreviewUrl;
   });

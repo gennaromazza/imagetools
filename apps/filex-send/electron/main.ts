@@ -9,7 +9,7 @@ import { FIREBASE_API_KEY } from "./firebase-config.generated.js";
 import { FileSendRemoteClient, type PersistedRemoteSession } from "./remote-client-service.js";
 import type { FirebaseAnonymousAuthState } from "./firebase-anonymous-auth.js";
 import type { FileSendSession, FileSendSessionHistoryEntry, FileSendSnapshot } from "../src/contracts.js";
-import { directToolLicenseAllowed } from "./license-gate.js";
+import { directToolLicenseAllowed, startLicenseExpiryWatchdog } from "./license-gate.js";
 import { publishReceivedFiles } from "./dock-notifications.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -401,6 +401,7 @@ if (!hasSingleInstanceLock) {
   });
   app.whenReady().then(async () => {
     if (!(await directToolLicenseAllowed())) { app.quit(); return; }
+    startLicenseExpiryWatchdog();
     settings = await readSettings();
     const detected = await detectCurrentWifi();
     if (detected.wifi) {

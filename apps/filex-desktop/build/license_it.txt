@@ -1,5 +1,5 @@
 CONTRATTO DI LICENZA FILEX
-Versione 13 agosto 2026
+Versione 7 settembre 2026
 
 Licenziante: Gennaro Mazzacane - Image Studio Fotografico
 Sede fiscale: Via Quinto Orazio Flacco 5, 81031 Aversa (CE), Italia
@@ -14,6 +14,10 @@ installare o attivare il software.
 non trasferibile e revocabile per usare FileX nelle attivita' lecite del
 titolare su un massimo di due PC.
 
+La prova gratuita concede tutte le funzioni per 30 giorni su un PC Windows,
+una sola volta per account con email verificata e dispositivo. Non richiede
+carta di credito e non si converte automaticamente in abbonamento.
+
 2. FileX All Access comprende la Suite e gli strumenti pubblicati nel catalogo.
 I tool condividono la stessa licenza e lo stesso limite di attivazione.
 
@@ -23,9 +27,14 @@ rimuovere indicazioni di proprieta'; usare FileX per contenuti illeciti. Sono
 salve le attivita' consentite inderogabilmente dalla legge.
 
 4. La licenza viene verificata periodicamente. Dopo una verifica valida e'
-possibile l'uso offline fino a 14 giorni. Alla scadenza, al rimborso totale o
+possibile l'uso offline fino a 14 giorni per l'abbonamento e fino a 24 ore
+per la prova, senza superare la scadenza. La prova associa all'account un hash
+dell'identificatore Windows del PC: reinstallare la Suite non riavvia i 30
+giorni. Alla scadenza, al rimborso totale o
 alla revoca i tool commerciali possono essere bloccati; i file locali non sono
-eliminati.
+eliminati. Un tool aperto mostra un avviso e si chiude dopo 60 secondi:
+salvare subito il lavoro, poiche le elaborazioni possono essere interrotte.
+Una riattivazione rilevata prima della chiusura consente di continuare.
 
 5. L'utente conserva ogni diritto sulle proprie fotografie ed e' responsabile
 dei permessi, dei file sorgente, delle copie di sicurezza e della verifica dei

@@ -1,5 +1,17 @@
-import type { CustomTemplate, CustomTemplateVariant } from "../contexts/ProjectContext";
-import { clearCustomTemplateBackgroundFiles, setCustomTemplateBackgroundFile } from "../contexts/ProjectContext";
+import {
+  MAX_LOGOS_PER_VARIANT,
+  MAX_TEXTS_PER_VARIANT,
+  clearCustomTemplateBackgroundFiles,
+  clearCustomTemplateLogoFiles,
+  setCustomTemplateBackgroundFile,
+  setCustomTemplateLogoFile,
+  type CustomTemplate,
+  type CustomTemplateVariant,
+  type TemplateLogoOverlay,
+  type TemplateTextOverlay,
+} from "../contexts/ProjectContext";
+import { MAX_TEXT_OVERLAY_CHARS, MAX_TEXT_FONT_PX, MIN_TEXT_FONT_PX } from "./textOverlay";
+import { isPhotoboothFontKey } from "./photoboothFonts";
 
 export type SavedTemplateRecord = {
   id: string;
@@ -12,6 +24,7 @@ export type SavedTemplateRecord = {
 export type PreparedSavedTemplateHydration = {
   template: CustomTemplate;
   backgroundFiles: Partial<Record<Orientation, File>>;
+  logoFiles: Partial<Record<Orientation, Map<string, File>>>;
   previewUrls: string[];
 };
 
@@ -21,14 +34,47 @@ export type PortableTemplateAsset = {
   dataUrl: string;
 };
 
+export type PortableTemplateLogoAsset = PortableTemplateAsset & {
+  overlayId: string;
+};
+
+export type PortableTemplateOrientationAssets = {
+  background?: PortableTemplateAsset;
+  logos?: PortableTemplateLogoAsset[];
+};
+
 export type PortableSavedTemplatesPackage = {
   version: 1;
   exportedAt: string;
   templates: Array<{
     record: SavedTemplateRecord;
-    assets?: Partial<Record<Orientation, PortableTemplateAsset>>;
+    assets?: Partial<Record<Orientation, PortableTemplateOrientationAssets>>;
   }>;
 };
+
+/** Legacy packages stored the background asset directly per orientation. */
+function normalizeOrientationAssets(value: unknown): PortableTemplateOrientationAssets | null {
+  if (!isPlainRecord(value)) {
+    return null;
+  }
+  if (typeof value.dataUrl === "string") {
+    return { background: value as PortableTemplateAsset };
+  }
+  const normalized: PortableTemplateOrientationAssets = {};
+  if (value.background !== undefined) {
+    if (!isPlainRecord(value.background)) {
+      return null;
+    }
+    normalized.background = value.background as PortableTemplateAsset;
+  }
+  if (value.logos !== undefined) {
+    if (!Array.isArray(value.logos)) {
+      return null;
+    }
+    normalized.logos = value.logos as PortableTemplateLogoAsset[];
+  }
+  return normalized;
+}
 
 type StagedTemplateAsset = {
   assetKey: string;
@@ -322,6 +368,121 @@ function finiteNumber(value: unknown, minimum: number, maximum: number, integer 
   return !integer || Number.isInteger(value) ? value : null;
 }
 
+const MAX_OVERLAY_ID_LENGTH = 64;
+const MIN_LOGO_SIDE_PX = 16;
+const MIN_TEXT_BOX_WIDTH_PX = 40;
+
+function normalizeOverlayId(value: unknown): string | null {
+  if (typeof value !== "string" || value.length < 1 || value.length > MAX_OVERLAY_ID_LENGTH) {
+    return null;
+  }
+  return /^[A-Za-z0-9._:-]+$/.test(value) ? value : null;
+}
+
+function normalizeOverlayOpacity(value: unknown): number | null {
+  return finiteNumber(value, 0, 100, true);
+}
+
+function normalizeLogoOverlays(value: unknown, canvasWidth: number, canvasHeight: number): TemplateLogoOverlay[] | null {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.length > MAX_LOGOS_PER_VARIANT) {
+    return null;
+  }
+  const seenIds = new Set<string>();
+  const normalized: TemplateLogoOverlay[] = [];
+  for (const candidate of value) {
+    if (!isPlainRecord(candidate)) {
+      return null;
+    }
+    const id = normalizeOverlayId(candidate.id);
+    const x = finiteNumber(candidate.x, 0, canvasWidth, true);
+    const y = finiteNumber(candidate.y, 0, canvasHeight, true);
+    const width = finiteNumber(candidate.width, MIN_LOGO_SIDE_PX, canvasWidth, true);
+    const height = finiteNumber(candidate.height, MIN_LOGO_SIDE_PX, canvasHeight, true);
+    const opacity = normalizeOverlayOpacity(candidate.opacity ?? 100);
+    if (!id || seenIds.has(id) || x === null || y === null || width === null || height === null || opacity === null) {
+      return null;
+    }
+    if (x + width > canvasWidth || y + height > canvasHeight) {
+      return null;
+    }
+    seenIds.add(id);
+    const fileName = candidate.fileName === undefined
+      ? undefined
+      : normalizePortableImageFileName(candidate.fileName);
+    if (candidate.fileName !== undefined && !fileName) {
+      return null;
+    }
+    const assetKey = candidate.assetKey === undefined ? undefined : normalizeAssetKey(candidate.assetKey);
+    if (candidate.assetKey !== undefined && !assetKey) {
+      return null;
+    }
+    normalized.push({
+      id, x, y, width, height, opacity,
+      ...(fileName ? { fileName } : {}),
+      ...(assetKey ? { assetKey } : {}),
+    });
+  }
+  return normalized;
+}
+
+function normalizeTextOverlays(value: unknown, canvasWidth: number, canvasHeight: number): TemplateTextOverlay[] | null {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value) || value.length > MAX_TEXTS_PER_VARIANT) {
+    return null;
+  }
+  const seenIds = new Set<string>();
+  const normalized: TemplateTextOverlay[] = [];
+  for (const candidate of value) {
+    if (!isPlainRecord(candidate)) {
+      return null;
+    }
+    const id = normalizeOverlayId(candidate.id);
+    const text = typeof candidate.text === "string" ? candidate.text : null;
+    const x = finiteNumber(candidate.x, 0, canvasWidth, true);
+    const y = finiteNumber(candidate.y, 0, canvasHeight, true);
+    const width = finiteNumber(candidate.width, MIN_TEXT_BOX_WIDTH_PX, canvasWidth, true);
+    const fontSizePx = finiteNumber(candidate.fontSizePx, MIN_TEXT_FONT_PX, MAX_TEXT_FONT_PX, true);
+    const opacity = normalizeOverlayOpacity(candidate.opacity ?? 100);
+    const color = typeof candidate.color === "string" && /^#[0-9a-fA-F]{6}$/.test(candidate.color)
+      ? candidate.color
+      : null;
+    if (
+      !id || seenIds.has(id) || text === null || text.length < 1 || text.length > MAX_TEXT_OVERLAY_CHARS
+      || x === null || y === null || width === null || fontSizePx === null || opacity === null || color === null
+      || !isPhotoboothFontKey(candidate.fontKey)
+      || (candidate.align !== "left" && candidate.align !== "center" && candidate.align !== "right")
+      || candidate.bold !== true && candidate.bold !== false
+      || candidate.italic !== true && candidate.italic !== false
+      || candidate.shadow !== true && candidate.shadow !== false
+    ) {
+      return null;
+    }
+    if (x + width > canvasWidth || y >= canvasHeight) {
+      return null;
+    }
+    seenIds.add(id);
+    normalized.push({
+      id,
+      text,
+      fontKey: candidate.fontKey,
+      fontSizePx,
+      color,
+      bold: candidate.bold,
+      italic: candidate.italic,
+      align: candidate.align,
+      x, y, width,
+      opacity,
+      shadow: candidate.shadow,
+    });
+  }
+  return normalized;
+}
+
 function normalizeCustomTemplateVariant(value: unknown): CustomTemplateVariant | null {
   if (!isPlainRecord(value)) {
     return null;
@@ -337,6 +498,7 @@ function normalizeCustomTemplateVariant(value: unknown): CustomTemplateVariant |
   const photoAreaHeight = finiteNumber(value.photoAreaHeight, MIN_PHOTO_AREA_SIDE_PX, MAX_TEMPLATE_SIDE_PX, true);
   const photoAspectRatio = finiteNumber(value.photoAspectRatio, 0.1, 10);
   const borderSizePx = finiteNumber(value.borderSizePx, 0, MAX_TEMPLATE_BORDER_PX, true);
+  const photoRadiusPx = finiteNumber(value.photoRadiusPx ?? 0, 0, MAX_TEMPLATE_SIDE_PX / 2, true);
   const borderColor = typeof value.borderColor === "string" && /^#[0-9a-fA-F]{6}$/.test(value.borderColor)
     ? value.borderColor
     : null;
@@ -352,7 +514,7 @@ function normalizeCustomTemplateVariant(value: unknown): CustomTemplateVariant |
     || photoAreaX === null || photoAreaY === null || photoAreaWidth === null || photoAreaHeight === null
     || photoAreaX + photoAreaWidth > widthPx || photoAreaY + photoAreaHeight > heightPx
     || (value.lockAspectRatio !== true && value.lockAspectRatio !== false)
-    || photoAspectRatio === null || borderSizePx === null
+    || photoAspectRatio === null || borderSizePx === null || photoRadiusPx === null
     || (value.lockAspectRatio === true && areaAspectRatio !== null
       && Math.abs(areaAspectRatio - photoAspectRatio) / photoAspectRatio > 0.03)
     || borderSizePx >= Math.min(photoAreaWidth, photoAreaHeight) / 2 || borderColor === null
@@ -361,6 +523,14 @@ function normalizeCustomTemplateVariant(value: unknown): CustomTemplateVariant |
   }
   const backgroundFileName = normalizePortableImageFileName(value.backgroundFileName);
   const backgroundAssetKey = normalizeAssetKey(value.backgroundAssetKey);
+  if (widthPx === null || heightPx === null) {
+    return null;
+  }
+  const logos = normalizeLogoOverlays(value.logos, widthPx, heightPx);
+  const texts = normalizeTextOverlays(value.texts, widthPx, heightPx);
+  if (logos === null || texts === null) {
+    return null;
+  }
   return {
     widthCm, heightCm, dpi, widthPx, heightPx,
     photoAreaX, photoAreaY, photoAreaWidth, photoAreaHeight,
@@ -369,7 +539,10 @@ function normalizeCustomTemplateVariant(value: unknown): CustomTemplateVariant |
     ...(backgroundFileName ? { backgroundFileName } : {}),
     ...(backgroundAssetKey ? { backgroundAssetKey } : {}),
     borderSizePx,
+    photoRadiusPx: Math.min(photoRadiusPx, Math.floor(Math.min(photoAreaWidth, photoAreaHeight) / 2)),
     borderColor,
+    logos,
+    texts,
   };
 }
 
@@ -588,9 +761,21 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 function collectRecordAssetKeys(record: SavedTemplateRecord): string[] {
-  return ORIENTATIONS
-    .map((orientation) => normalizeAssetKey(record.template?.variants?.[orientation]?.backgroundAssetKey))
-    .filter((assetKey): assetKey is string => Boolean(assetKey));
+  const keys: string[] = [];
+  for (const orientation of ORIENTATIONS) {
+    const variant = record.template?.variants?.[orientation];
+    const backgroundKey = normalizeAssetKey(variant?.backgroundAssetKey);
+    if (backgroundKey) {
+      keys.push(backgroundKey);
+    }
+    for (const logo of variant?.logos ?? []) {
+      const logoKey = normalizeAssetKey(logo.assetKey);
+      if (logoKey) {
+        keys.push(logoKey);
+      }
+    }
+  }
+  return keys;
 }
 
 export function findUnreferencedAssetKeys(
@@ -657,19 +842,21 @@ export function onSavedTemplatesUpdated(listener: () => void): () => void {
 
 export async function saveTemplateToLibrary(
   template: CustomTemplate,
-  backgroundFiles?: Partial<Record<Orientation, File | null>>
+  backgroundFiles?: Partial<Record<Orientation, File | null>>,
+  logoFiles?: Partial<Record<Orientation, Map<string, File> | null>>
 ): Promise<SavedTemplateRecord> {
   const normalizedTemplate = normalizePortableCustomTemplate(template);
   if (!normalizedTemplate) {
     throw new Error("Il template non supera la validazione di dimensioni e geometria.");
   }
   const existing = loadSavedTemplates();
-  const recordId = createUniqueTemplateId(new Set(existing.map((record) => record.id)));
+  const previous = existing.find((record) => record.id === normalizedTemplate.libraryTemplateId);
+  const recordId = previous?.id ?? createUniqueTemplateId(new Set(existing.map((record) => record.id)));
   normalizedTemplate.libraryTemplateId = recordId;
   const record: SavedTemplateRecord = {
     id: recordId,
     name: normalizedTemplate.name,
-    createdAt: new Date().toISOString(),
+    createdAt: previous?.createdAt ?? new Date().toISOString(),
     summary: templateSummary(normalizedTemplate),
     template: normalizedTemplate,
   };
@@ -685,9 +872,26 @@ export async function saveTemplateToLibrary(
     record.template.variants[orientation].backgroundAssetKey = assetKey;
     record.template.variants[orientation].backgroundFileName = file.name;
   }
+  for (const orientation of ORIENTATIONS) {
+    const orientationLogos = logoFiles?.[orientation];
+    if (!orientationLogos || orientationLogos.size === 0) {
+      continue;
+    }
+    for (const logo of record.template.variants[orientation].logos) {
+      const sourceFile = orientationLogos.get(logo.id);
+      if (!sourceFile) {
+        continue;
+      }
+      const file = await normalizePortableImageFile(sourceFile, sourceFile.name, `logo-${orientation}`);
+      const assetKey = createAssetKey(recordId, orientation);
+      stagedAssets.push({ assetKey, file });
+      logo.assetKey = assetKey;
+      logo.fileName = file.name;
+    }
+  }
   try {
     await setAssetBlobs(stagedAssets);
-    const next = [record, ...existing].slice(0, 20);
+    const next = [record, ...existing.filter((entry) => entry.id !== recordId)].slice(0, 20);
     safeLocalStorageSet(next, true);
     scheduleAssetCleanup(findUnreferencedAssetKeys(existing, next));
     return record;
@@ -746,14 +950,22 @@ export function duplicateSavedTemplate(templateId: string, nextName?: string): S
     return current;
   }
   const duplicateId = createUniqueTemplateId(new Set(current.map((record) => record.id)));
-  // Background keys are intentionally shared. Cleanup is reference-aware.
+  // Background and logo keys are intentionally shared. Cleanup is reference-aware.
   const duplicateTemplate: CustomTemplate = {
     ...source.template,
     libraryTemplateId: duplicateId,
     name: duplicateName,
     variants: {
-      vertical: { ...source.template.variants.vertical },
-      horizontal: { ...source.template.variants.horizontal },
+      vertical: {
+        ...source.template.variants.vertical,
+        logos: source.template.variants.vertical.logos.map((logo) => ({ ...logo })),
+        texts: source.template.variants.vertical.texts.map((text) => ({ ...text })),
+      },
+      horizontal: {
+        ...source.template.variants.horizontal,
+        logos: source.template.variants.horizontal.logos.map((logo) => ({ ...logo })),
+        texts: source.template.variants.horizontal.texts.map((text) => ({ ...text })),
+      },
     },
   };
   const duplicateRecord: SavedTemplateRecord = {
@@ -814,44 +1026,72 @@ export async function prepareSavedTemplateHydration(
     },
   };
   const backgroundFiles: PreparedSavedTemplateHydration["backgroundFiles"] = {};
+  const logoFiles: PreparedSavedTemplateHydration["logoFiles"] = {};
   const previewUrls: string[] = [];
 
   for (const orientation of ORIENTATIONS) {
     const variant = nextTemplate.variants[orientation];
     if (!variant.backgroundAssetKey || !variant.backgroundFileName) {
       delete variant.backgroundAssetKey;
-      continue;
-    }
-    try {
-      const blob = await getAssetBlob(variant.backgroundAssetKey);
-      if (!blob) {
-        throw new Error("Asset IndexedDB mancante o non valido.");
+    } else {
+      try {
+        const blob = await getAssetBlob(variant.backgroundAssetKey);
+        if (!blob) {
+          throw new Error("Asset IndexedDB mancante o non valido.");
+        }
+        const file = await normalizePortableImageFile(blob, variant.backgroundFileName, `background-${orientation}`);
+        const previewUrl = URL.createObjectURL(file);
+        backgroundFiles[orientation] = file;
+        previewUrls.push(previewUrl);
+        variant.backgroundFileName = file.name;
+        variant.backgroundPreviewUrl = previewUrl;
+      } catch (error) {
+        console.warn(`Ignored corrupt template asset ${variant.backgroundAssetKey}`, error);
+        delete variant.backgroundAssetKey;
+        delete variant.backgroundFileName;
+        delete variant.backgroundPreviewUrl;
       }
-      const file = await normalizePortableImageFile(blob, variant.backgroundFileName, `background-${orientation}`);
-      const previewUrl = URL.createObjectURL(file);
-      backgroundFiles[orientation] = file;
-      previewUrls.push(previewUrl);
-      variant.backgroundFileName = file.name;
-      variant.backgroundPreviewUrl = previewUrl;
-    } catch (error) {
-      console.warn(`Ignored corrupt template asset ${variant.backgroundAssetKey}`, error);
-      delete variant.backgroundAssetKey;
-      delete variant.backgroundFileName;
-      delete variant.backgroundPreviewUrl;
     }
+
+    const restoredLogos: TemplateLogoOverlay[] = [];
+    for (const logo of variant.logos) {
+      if (!logo.assetKey || !logo.fileName) {
+        continue;
+      }
+      try {
+        const blob = await getAssetBlob(logo.assetKey);
+        if (!blob) {
+          throw new Error("Asset logo IndexedDB mancante o non valido.");
+        }
+        const file = await normalizePortableImageFile(blob, logo.fileName, `logo-${orientation}`);
+        const previewUrl = URL.createObjectURL(file);
+        const orientationMap = logoFiles[orientation] ?? new Map<string, File>();
+        orientationMap.set(logo.id, file);
+        logoFiles[orientation] = orientationMap;
+        previewUrls.push(previewUrl);
+        restoredLogos.push({ ...logo, fileName: file.name, previewUrl });
+      } catch (error) {
+        console.warn(`Ignored corrupt logo asset ${logo.assetKey}`, error);
+      }
+    }
+    variant.logos = restoredLogos;
   }
 
-  return { template: nextTemplate, backgroundFiles, previewUrls };
+  return { template: nextTemplate, backgroundFiles, logoFiles, previewUrls };
 }
 
 export function commitPreparedSavedTemplateHydration(
   prepared: PreparedSavedTemplateHydration
 ): CustomTemplate {
   clearCustomTemplateBackgroundFiles();
+  clearCustomTemplateLogoFiles();
   for (const orientation of ORIENTATIONS) {
     const file = prepared.backgroundFiles[orientation];
     if (file) {
       setCustomTemplateBackgroundFile(orientation, file);
+    }
+    for (const [overlayId, logoFile] of prepared.logoFiles[orientation] ?? []) {
+      setCustomTemplateLogoFile(orientation, overlayId, logoFile);
     }
   }
   return prepared.template;
@@ -877,39 +1117,83 @@ export async function exportSavedTemplatesPackage(): Promise<PortableSavedTempla
       continue;
     }
     const portableRecord = normalizeSavedTemplateRecord(record)!;
-    const assets: Partial<Record<Orientation, PortableTemplateAsset>> = {};
+    const assets: Partial<Record<Orientation, PortableTemplateOrientationAssets>> = {};
+
+    const budgetAsset = async (
+      blob: Blob,
+      fileName: string,
+      fallbackStem: string
+    ): Promise<PortableTemplateAsset> => {
+      const file = await normalizePortableImageFile(blob, fileName, fallbackStem);
+      const encodedLength = Math.ceil(file.size / 3) * 4 + 64;
+      if (encodedAssetBudget + encodedLength > MAX_PORTABLE_PACKAGE_BYTES) {
+        throw new Error("La libreria supera il limite di 100 MB del pacchetto portabile.");
+      }
+      encodedAssetBudget += encodedLength;
+      return {
+        fileName: file.name,
+        mimeType: file.type,
+        dataUrl: await blobToDataUrl(file),
+      };
+    };
 
     for (const orientation of ORIENTATIONS) {
       const sourceVariant = record.template.variants[orientation];
       const portableVariant = portableRecord.template.variants[orientation];
       delete portableVariant.backgroundAssetKey;
-      if (!sourceVariant.backgroundAssetKey || !sourceVariant.backgroundFileName) {
-        delete portableVariant.backgroundFileName;
-        continue;
+      for (const portableLogo of portableVariant.logos) {
+        delete portableLogo.assetKey;
       }
-      try {
-        const blob = await getAssetBlob(sourceVariant.backgroundAssetKey);
-        if (!blob) {
-          throw new Error("Asset IndexedDB mancante o non valido.");
+      const orientationAssets: PortableTemplateOrientationAssets = {};
+      if (sourceVariant.backgroundAssetKey && sourceVariant.backgroundFileName) {
+        try {
+          const blob = await getAssetBlob(sourceVariant.backgroundAssetKey);
+          if (!blob) {
+            throw new Error("Asset IndexedDB mancante o non valido.");
+          }
+          orientationAssets.background = await budgetAsset(blob, sourceVariant.backgroundFileName, `background-${orientation}`);
+          portableVariant.backgroundFileName = orientationAssets.background.fileName;
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("limite di 100 MB")) {
+            throw error;
+          }
+          console.warn(`Skipped corrupt template asset ${sourceVariant.backgroundAssetKey}`, error);
+          delete portableVariant.backgroundFileName;
         }
-        const file = await normalizePortableImageFile(blob, sourceVariant.backgroundFileName, `background-${orientation}`);
-        const encodedLength = Math.ceil(file.size / 3) * 4 + 64;
-        if (encodedAssetBudget + encodedLength > MAX_PORTABLE_PACKAGE_BYTES) {
-          throw new Error("La libreria supera il limite di 100 MB del pacchetto portabile.");
-        }
-        encodedAssetBudget += encodedLength;
-        assets[orientation] = {
-          fileName: file.name,
-          mimeType: file.type,
-          dataUrl: await blobToDataUrl(file),
-        };
-        portableVariant.backgroundFileName = file.name;
-      } catch (error) {
-        if (error instanceof Error && error.message.includes("limite di 100 MB")) {
-          throw error;
-        }
-        console.warn(`Skipped corrupt template asset ${sourceVariant.backgroundAssetKey}`, error);
+      } else {
         delete portableVariant.backgroundFileName;
+      }
+
+      const portableLogos: PortableTemplateLogoAsset[] = [];
+      for (const sourceLogo of sourceVariant.logos) {
+        if (!sourceLogo.assetKey || !sourceLogo.fileName) {
+          continue;
+        }
+        try {
+          const blob = await getAssetBlob(sourceLogo.assetKey);
+          if (!blob) {
+            throw new Error("Asset logo IndexedDB mancante o non valido.");
+          }
+          const asset = await budgetAsset(blob, sourceLogo.fileName, `logo-${orientation}`);
+          portableLogos.push({ ...asset, overlayId: sourceLogo.id });
+          const portableLogo = portableVariant.logos.find((logo) => logo.id === sourceLogo.id);
+          if (portableLogo) {
+            portableLogo.fileName = asset.fileName;
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("limite di 100 MB")) {
+            throw error;
+          }
+          console.warn(`Skipped corrupt logo asset ${sourceLogo.assetKey}`, error);
+        }
+      }
+      const stagedLogoIds = new Set(portableLogos.map((asset) => asset.overlayId));
+      portableVariant.logos = portableVariant.logos.filter((logo) => stagedLogoIds.has(logo.id));
+      if (portableLogos.length > 0) {
+        orientationAssets.logos = portableLogos;
+      }
+      if (orientationAssets.background || orientationAssets.logos) {
+        assets[orientation] = orientationAssets;
       }
     }
 
@@ -971,22 +1255,50 @@ export function prepareSavedTemplatesPackageImport(
       delete variant.backgroundAssetKey;
       delete variant.backgroundPreviewUrl;
       delete variant.backgroundDataUrl;
-      const asset = isPlainRecord(assets) ? assets[orientation] : undefined;
-      if (asset === undefined) {
+      const rawAsset = isPlainRecord(assets) ? assets[orientation] : undefined;
+      const orientationAssets = rawAsset === undefined ? undefined : normalizeOrientationAssets(rawAsset);
+      if (orientationAssets === null) {
+        throw new Error(`Template ${index + 1}: asset ${orientation} non validi.`);
+      }
+      if (orientationAssets === undefined) {
         delete variant.backgroundFileName;
+        variant.logos = [];
         continue;
       }
-      if (isPlainRecord(asset) && typeof asset.dataUrl === "string") {
-        encodedAssetBudget += asset.dataUrl.length;
+      const chargeBudget = (dataUrl: unknown) => {
+        if (typeof dataUrl === "string") {
+          encodedAssetBudget += dataUrl.length;
+        }
+        if (encodedAssetBudget > MAX_PORTABLE_PACKAGE_BYTES) {
+          throw new Error("La libreria supera il limite di 100 MB del pacchetto portabile.");
+        }
+      };
+      if (orientationAssets.background === undefined) {
+        delete variant.backgroundFileName;
+      } else {
+        chargeBudget(orientationAssets.background.dataUrl);
+        const file = decodePortableImageAsset(orientationAssets.background);
+        const assetKey = createAssetKey(record.id, orientation);
+        stagedAssets.push({ assetKey, file });
+        variant.backgroundAssetKey = assetKey;
+        variant.backgroundFileName = file.name;
       }
-      if (encodedAssetBudget > MAX_PORTABLE_PACKAGE_BYTES) {
-        throw new Error("La libreria supera il limite di 100 MB del pacchetto portabile.");
+      const importedLogos: TemplateLogoOverlay[] = [];
+      for (const logoAsset of orientationAssets.logos ?? []) {
+        if (!isPlainRecord(logoAsset) || normalizeOverlayId(logoAsset.overlayId) === null) {
+          throw new Error(`Template ${index + 1}: asset logo non valido.`);
+        }
+        chargeBudget(logoAsset.dataUrl);
+        const logo = variant.logos.find((candidate) => candidate.id === logoAsset.overlayId);
+        if (!logo) {
+          continue;
+        }
+        const file = decodePortableImageAsset(logoAsset);
+        const assetKey = createAssetKey(record.id, orientation);
+        stagedAssets.push({ assetKey, file });
+        importedLogos.push({ ...logo, assetKey, fileName: file.name });
       }
-      const file = decodePortableImageAsset(asset);
-      const assetKey = createAssetKey(record.id, orientation);
-      stagedAssets.push({ assetKey, file });
-      variant.backgroundAssetKey = assetKey;
-      variant.backgroundFileName = file.name;
+      variant.logos = importedLogos;
     }
     records.push(record);
   }

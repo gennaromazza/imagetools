@@ -11,6 +11,12 @@
   ],
   "fieldOverrides": [
     {
+      "collectionGroup": "licenseTrialSessions",
+      "fieldPath": "cleanupAt",
+      "ttl": true,
+      "indexes": []
+    },
+    {
       "collectionGroup": "files",
       "fieldPath": "downloadedAt",
       "indexes": [

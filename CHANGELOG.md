@@ -32,6 +32,18 @@
 
 ## Non rilasciato — 2026-09-07
 
+### Prova gratuita e controllo licenze
+
+- Prova FileX All Access di 30 giorni su un PC, attivata dalla Suite tramite account con email verificata, senza carta di credito e senza rinnovo automatico.
+- Verifica obbligatoria della licenza firmata in tutti i tool, cache protetta, controlli su scadenze e revoche, gestione concorrente delle attivazioni e recupero della prova senza nuovi giorni.
+- Alla perdita del diritto di utilizzo, avviso e chiusura del tool dopo 60 secondi; la riattivazione rilevata in tempo annulla la chiusura.
+- Aggiornati sito, area account e documentazione; aggiunti test del runtime, delle schermate e dell'integrazione con emulatori Firebase.
+
+### Image Party Frame
+
+- Editor di testo direttamente sul canvas, font locali, loghi ridimensionabili e trascinabili, anteprima coerente di opacità e varianti.
+- Salvataggio e riapertura dei template e dei pacchetti portabili con testo e logo; correzioni a bordi, validazione e rendering delle esportazioni.
+
 ### Launcher FileX e integrazione Windows
 
 - La dock si apre dalla barra delle applicazioni come una striscia orizzontale di sole icone, con nomi al passaggio del mouse o al focus da tastiera. Si centra sopra il punto cliccato e conserva il riferimento quando cambia larghezza.
