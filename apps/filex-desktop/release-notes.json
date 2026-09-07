@@ -290,6 +290,9 @@
       "Invio diretto delle fotografie selezionate a Image Party Frame, Batch Print Layout e FileX ID Photo.",
       "Selezione multipla fino a dieci foto per impaginazione e Party Frame, oppure una singola foto per fototessere e passaporti.",
       "Passaggio locale dalla scheda agli strumenti FileX senza duplicare o caricare online gli originali."
+    ],
+    "0.1.41": [
+      "Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida."
     ]
   },
   "image-converter": {
