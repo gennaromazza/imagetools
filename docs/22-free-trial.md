@@ -14,6 +14,8 @@ Offline: massimo 24 ore per la prova, entro i 30 giorni; resta il limite di 14 g
 
 La disattivazione resta disponibile e non cancella i riferimenti di prova. La disinstallazione non dipende dalla licenza e non è modificata da questo intervento.
 
+Il formato locale `dpapi-v1:` protegge il token con Windows DPAPI CurrentUser e un contesto FileX, indipendentemente dal profilo Chromium del singolo tool. I vecchi token `v10` vengono recuperati esclusivamente dai profili FileX conosciuti e migrati con scrittura atomica: installazione, credenziale server e scadenza restano le stesse. Nessun token in chiaro viene scritto su disco o passato nella riga di comando. La cache del token decifrato è limitata all'ultima credenziale nel processo. Riferimento API: [Microsoft ProtectedData](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.protecteddata).
+
 Durante l'esecuzione, tutti i tool controllano periodicamente il diritto di utilizzo. Quando non è più valido mostrano un avviso e concedono 60 secondi per salvare, poi si chiudono; non attendono il completamento delle elaborazioni. La riattivazione rilevata prima della chiusura annulla il conto alla rovescia. La Suite resta aperta per gestire la licenza. Il controllo locale avviene ogni 15 secondi, rispettando le finestre offline firmate; una revoca remota diventa osservabile alla successiva verifica online.
 
 ## API e archivi

@@ -4,6 +4,12 @@
 
 Audit locale del backend licenze, prova gratuita, runtime condiviso dei tool, tre runtime autonomi, Suite, contratti IPC e percorso account/sito. Le anomalie riproducibili descritte sotto sono state corrette. Non è una certificazione anti-crack né un via libera alla pubblicazione: gli installer aggiornati e il flusso PayPal reale richiedono ancora il collaudo di release.
 
+## Integrazione emersa nel collaudo degli installer
+
+La validazione online forzata ha individuato un difetto non rilevato dai primi test con attestazione in cache: i token Electron `v10` dipendevano dalla chiave del vecchio profilo Chromium `FileX Suite`, diversa da quella dei tool e del profilo `FileX-Suite`. La pipeline Party Frame 0.1.31 è stata annullata prima della pubblicazione della release; il tag annullato è conservato.
+
+La correzione usa DPAPI CurrentUser con formato condiviso `dpapi-v1:` e migra i vecchi token recuperando le sole chiavi dei profili FileX conosciuti. Quattro test aggiuntivi eseguono la vera API Windows per verificare condivisione fra profili, rifiuto dei dati corrotti e recupero del formato legacy. Il collaudo installato comprende ora anche il rinnovo online obbligatorio della prova firmata, senza accettare la sola cache come evidenza.
+
 ## Correzioni
 
 - Le risposte 401/403 eliminano le credenziali rifiutate e non vengono trattate come semplici guasti di rete. Una revoca ricevuta con risposta 200 non consente di ripiegare sulla vecchia firma se la cache non è scrivibile. Il rifiuto resta memorizzato nel processo anche durante un successivo guasto di rete.
@@ -19,7 +25,7 @@ Audit locale del backend licenze, prova gratuita, runtime condiviso dei tool, tr
 
 | Verifica | Esito | Limite della verifica |
 | --- | --- | --- |
-| `npm run test:filex-trial` | 43 test superati | Runtime di produzione caricato con Electron, tempo, disco e rete simulati; include avviso/chiusura/rinnovo, errori disco e risposte tardive |
+| `npm run test:filex-trial` | 50 test superati | Runtime di produzione caricato con Electron, tempo, disco e rete simulati; quattro test usano la vera DPAPI Windows; include avviso/chiusura/rinnovo, errori disco e risposte tardive |
 | `npm run test:filex-cloud` | 36 test superati | Comprende test già inclusi nel comando precedente; i conteggi non vanno sommati come test distinti |
 | `npm run test:filex-license-coverage` | Copertura dei 10 tool del catalogo | Controllo statico degli ingressi e delle policy |
 | `npm run test:filex-trial-ui` | Superato | Schermate reali in Electron nascosto; servizi simulati |

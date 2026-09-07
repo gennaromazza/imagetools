@@ -1,6 +1,6 @@
 import { app, safeStorage, dialog } from "electron";
-import { createHash, verify, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { createHash, verify, randomUUID, createDecipheriv } from "node:crypto";
+import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, readFile, writeFile, rename, unlink, rmdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,7 +19,16 @@ export async function directToolLicenseAllowed(refresh = false): Promise<boolean
   try { store = JSON.parse(await readFile(path, "utf8")) as Store; } catch { /* Not activated. */ }
   // Packaged tools always enforce the signed entitlement, including during outages.
   if (!refresh && !deniedCredentials.has(store.activationTokenEncrypted) && await attestationValid(store, true)) return true;
-  const token = decryptToken(store.activationTokenEncrypted);
+  let token = await decryptToken(store.activationTokenEncrypted);
+  if (token && store.activationTokenEncrypted && !store.activationTokenEncrypted.startsWith(SHARED_TOKEN_PREFIX)) {
+    const previousCredential = store.activationTokenEncrypted;
+    try {
+      const migrated = encryptToken(token);
+      store = await persistAttestation(store, store.attestation, migrated);
+      if (deniedCredentials.has(previousCredential)) deniedCredentials.add(migrated);
+      token = await decryptToken(store.activationTokenEncrypted);
+    } catch { /* Keep validating the legacy token if migration cannot be persisted yet. */ }
+  }
   if (!token || !store.installationId) return false;
   let denied = deniedCredentials.has(store.activationTokenEncrypted);
   try {
@@ -38,9 +47,10 @@ export async function directToolLicenseAllowed(refresh = false): Promise<boolean
     const payload = await response.json() as { attestation?: string };
     const valid = await attestationValid({ ...store, attestation: payload.attestation });
     if (!valid) { denied = true; deniedCredentials.add(store.activationTokenEncrypted); }
+    const validatedCredential = store.activationTokenEncrypted;
     store = await persistAttestation(store, payload.attestation);
-    if (valid) deniedCredentials.delete(store.activationTokenEncrypted);
-    return attestationValid(store);
+    if (valid) deniedCredentials.delete(validatedCredential);
+    return deniedCredentials.has(store.activationTokenEncrypted) ? false : attestationValid(store);
   } catch { return denied ? false : attestationValid(store); }
 }
 
@@ -84,17 +94,78 @@ export function startLicenseExpiryWatchdog(): () => void {
   return stop;
 }
 
-function decryptToken(value?: string): string | null {
-  try { return value && safeStorage.isEncryptionAvailable() ? safeStorage.decryptString(Buffer.from(value, "base64")) : null; }
-  catch { return null; }
+const SHARED_TOKEN_PREFIX = "dpapi-v1:";
+let tokenCache: { encrypted: string; token: string } | undefined;
+
+function windowsDataProtection(operation: "Protect" | "Unprotect", bytes: Buffer, entropy = true): Buffer {
+  const script = `$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.Security; $data=[Convert]::FromBase64String([Console]::In.ReadToEnd()); $entropy=${entropy ? "[Text.Encoding]::UTF8.GetBytes('FileX.AllAccess.Token.v1')" : "$null"}; $result=[Security.Cryptography.ProtectedData]::${operation}($data,$entropy,[Security.Cryptography.DataProtectionScope]::CurrentUser); [Console]::Out.Write([Convert]::ToBase64String($result))`;
+  const output = execFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), ["-NoProfile", "-NonInteractive", "-Command", script], {
+    input: bytes.toString("base64"), encoding: "utf8", windowsHide: true, timeout: 10000, maxBuffer: 65536, stdio: ["pipe", "pipe", "pipe"],
+  });
+  return Buffer.from(output.trim(), "base64");
 }
 
-async function persistAttestation(previous: Store, attestation: string | undefined): Promise<Store> {
+function encryptToken(token: string): string {
+  let encrypted: string;
+  if (process.platform === "win32") {
+    const bytes = Buffer.from(token, "utf8");
+    try { encrypted = SHARED_TOKEN_PREFIX + windowsDataProtection("Protect", bytes).toString("base64"); }
+    catch { throw new Error("Protezione credenziali Windows non disponibile."); }
+    finally { bytes.fill(0); }
+  } else {
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("Protezione credenziali non disponibile.");
+    encrypted = safeStorage.encryptString(token).toString("base64");
+  }
+  tokenCache = { encrypted, token };
+  return encrypted;
+}
+
+async function decryptToken(value: string | undefined): Promise<string | null> {
+  if (!value || value.length > 16384) { tokenCache = undefined; return null; }
+  if (tokenCache?.encrypted === value) return tokenCache.token;
+  let token: string | null = null;
+  if (value.startsWith(SHARED_TOKEN_PREFIX)) {
+    if (process.platform !== "win32") return null;
+    try {
+      const bytes = windowsDataProtection("Unprotect", Buffer.from(value.slice(SHARED_TOKEN_PREFIX.length), "base64"));
+      try { token = bytes.toString("utf8"); } finally { bytes.fill(0); }
+    } catch { return null; }
+  } else {
+    try { if (safeStorage.isEncryptionAvailable()) token = safeStorage.decryptString(Buffer.from(value, "base64")); } catch { /* Try the old Suite profile below. */ }
+    if (!token && process.platform === "win32") {
+      const encrypted = Buffer.from(value, "base64");
+      if (encrypted.length < 32 || encrypted.subarray(0, 3).toString() !== "v10") return null;
+      // Legacy Chromium AES keys are scoped to the original Suite profile.
+      // Only FileX profiles are read, and their keys remain protected by CurrentUser DPAPI.
+      const profiles = [app.getPath("userData"), join(app.getPath("appData"), "FileX Suite"), join(app.getPath("appData"), "FileX-Suite")];
+      for (const profile of new Set(profiles)) {
+        let key: Buffer | undefined;
+        try {
+          const state = JSON.parse(await readFile(join(profile, "Local State"), "utf8")) as { os_crypt?: { encrypted_key?: string } };
+          const wrapped = Buffer.from(state.os_crypt?.encrypted_key ?? "", "base64");
+          if (wrapped.subarray(0, 5).toString() !== "DPAPI") continue;
+          key = windowsDataProtection("Unprotect", wrapped.subarray(5), false);
+          const decipher = createDecipheriv("aes-256-gcm", key, encrypted.subarray(3, 15));
+          decipher.setAuthTag(encrypted.subarray(-16));
+          const bytes = Buffer.concat([decipher.update(encrypted.subarray(15, -16)), decipher.final()]);
+          try { token = bytes.toString("utf8"); } finally { bytes.fill(0); }
+          break;
+        } catch { /* Another known FileX profile may own the legacy credential. */ }
+        finally { key?.fill(0); }
+      }
+    }
+  }
+  if (!token) return null;
+  tokenCache = { encrypted: value, token };
+  return token;
+}
+
+async function persistAttestation(previous: Store, attestation: string | undefined, activationTokenEncrypted = previous.activationTokenEncrypted): Promise<Store> {
   return withLicenseStoreLock(async () => {
     const path = join(app.getPath("appData"), "FileX", "filex-license.json");
     const latest = JSON.parse(await readFile(path, "utf8")) as Store;
     if (latest.activationTokenEncrypted !== previous.activationTokenEncrypted) return latest;
-    const updated = { ...latest, attestation, state: { ...latest.state, enforcement: "enforce" } };
+    const updated = { ...latest, attestation, activationTokenEncrypted, state: { ...latest.state, enforcement: "enforce" } };
     const temporary = `${path}.${randomUUID()}.tmp`;
     try {
       await writeFile(temporary, `${JSON.stringify(updated, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });

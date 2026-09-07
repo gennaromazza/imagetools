@@ -66,6 +66,9 @@ jobs:
       - name: Validate licensing coverage
         run: npm.cmd run test:filex-license-coverage
 
+      - name: Validate licensing runtime and Windows profile migration
+        run: npm.cmd run test:filex-trial
+
       - name: Test Image Party Frame bug hunt
         run: npm.cmd run test:image-party-frame-bug-hunt
 

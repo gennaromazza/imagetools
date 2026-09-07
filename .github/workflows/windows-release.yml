@@ -162,6 +162,8 @@ jobs:
           npm.cmd run test:filex-installer-runner
           npm.cmd run test:filex-cooperative-signal
           npm.cmd run test:filex-independent-releases
+          npm.cmd run test:filex-trial
+          if ($LASTEXITCODE -ne 0) { throw "Test licenze e migrazione profili Windows falliti" }
           npm.cmd run test:id-photo-package-runtime
           npm.cmd run test:id-photo-working-files
           npm.cmd run test:id-photo-file-fingerprint

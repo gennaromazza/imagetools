@@ -17,6 +17,11 @@ for (const id of selected) assert.ok(components[id], `Componente non riconosciut
 const temporaryBase = resolve(".codex-remote-attachments/installed-license-tests"); await mkdir(temporaryBase, { recursive: true });
 const realLicense = await readFile(join(process.env.APPDATA, "FileX/filex-license.json"), "utf8");
 const original = JSON.parse(realLicense); assert.ok(original.attestation, "Occorre una licenza reale firmata per il collaudo installato.");
+const legacyStates = [];
+for (const profile of ["FileX Suite", "FileX-Suite"]) {
+  const state = await readFile(join(process.env.APPDATA, profile, "Local State"), "utf8").then(JSON.parse, () => null);
+  if (state?.os_crypt) legacyStates.push({ profile, state: { os_crypt: state.os_crypt } });
+}
 for (const id of selected) {
   const name = components[id]; const install = join(process.env.LOCALAPPDATA, "Programs", name);
   const archive = join(install, "resources/app.asar");
@@ -31,17 +36,28 @@ for (const id of selected) {
     const { posix } = await import("node:path");
     for (const match of source.matchAll(/(?:from\s*|import\s*\(\s*)["'](\.{1,2}\/[^"']+\.js)["']/g)) queue.push(posix.normalize(posix.join(posix.dirname(path), match[1])));
   }
-  for (const mode of ["absent", "active", "tampered"]) {
+  for (const mode of ["absent", "active", "tampered", "online"]) {
     const temporary = await mkdtemp(join(temporaryBase, `${id}-${mode}-`));
     try {
       await mkdir(join(temporary, "FileX"));
-      if (mode !== "absent") await writeFile(join(temporary, "FileX/filex-license.json"), mode === "active" ? realLicense : JSON.stringify({ ...original, activationTokenEncrypted: undefined, attestation: "tampered", state: { status: "active", enforcement: "observe", canUseTools: true } }));
-      const report = await run(join(install, `${name}.exe`), temporary, id === "suite" || mode === "active");
+      for (const legacy of legacyStates) {
+        await mkdir(join(temporary, legacy.profile));
+        await writeFile(join(temporary, legacy.profile, "Local State"), JSON.stringify(legacy.state));
+      }
+      if (mode !== "absent") await writeFile(join(temporary, "FileX/filex-license.json"), mode === "active" ? realLicense : mode === "online" ? JSON.stringify({ ...original, attestation: undefined, state: undefined }) : JSON.stringify({ ...original, activationTokenEncrypted: undefined, attestation: "tampered", state: { status: "active", enforcement: "observe", canUseTools: true } }));
+      const shouldLoad = id === "suite" || mode === "active" || mode === "online";
+      const report = await run(join(install, `${name}.exe`), temporary, shouldLoad, mode === "online");
       assert.equal(report.packaged, true); assert.equal(report.appData, temporary);
       assert.equal(report.ready, true, `${id}/${mode}: main process non pronto`);
-      assert.equal(report.loaded, id === "suite" || mode === "active", `${id}/${mode}: policy licenza errata (${JSON.stringify(report)})`);
+      assert.equal(report.loaded, shouldLoad, `${id}/${mode}: policy licenza errata (${JSON.stringify(report)})`);
       assert.deepEqual(report.errors, [], `${id}/${mode}: errore main/renderer`);
-      if (id === "suite" || mode === "active") assert.deepEqual(report.dialogs, [], `${id}/${mode}: errore di avvio`);
+      if (shouldLoad) assert.deepEqual(report.dialogs, [], `${id}/${mode}: errore di avvio`);
+      if (mode === "online") {
+        const refreshed = JSON.parse(await readFile(join(temporary, "FileX/filex-license.json"), "utf8"));
+        assert.ok(refreshed.attestation, "Il server deve restituire una nuova prova firmata");
+        assert.match(refreshed.activationTokenEncrypted, /^dpapi-v1:/, "Il token deve essere condivisibile fra i profili FileX");
+        assert.equal(refreshed.installationId, original.installationId, "La migrazione non deve cambiare l'installazione");
+      }
       console.log(`PASS installato ${id} ${metadata.version}: ${mode}, import ${seen.size}`);
     } finally {
       assert.ok(resolve(temporary).startsWith(temporaryBase + "\\"));
@@ -50,7 +66,7 @@ for (const id of selected) {
   }
 }
 
-async function run(executable, directory, shouldLoad) {
+async function run(executable, directory, shouldLoad, requireOnline) {
   const reportPath = join(directory, "smoke.json");
   const child = spawn(executable, ["--inspect-brk=127.0.0.1:0", `--user-data-dir=${join(directory, "profile")}`], { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
   let ws; let output = ""; let configured = false; let failure;
@@ -93,6 +109,10 @@ async function run(executable, directory, shouldLoad) {
     while (Date.now() < deadline) {
       if (failure) throw failure;
       const report = await readFile(reportPath, "utf8").then(JSON.parse, () => null);
+      if (report?.loaded && requireOnline) {
+        const refreshed = await readFile(join(directory, "FileX/filex-license.json"), "utf8").then(JSON.parse, () => null);
+        if (!refreshed?.attestation) { await new Promise(resolveWait => setTimeout(resolveWait, 250)); continue; }
+      }
       if (report?.loaded || report?.errors?.length || report?.quitting || (child.exitCode !== null && report)) {
         if (report.loaded) await new Promise(resolveWait => setTimeout(resolveWait, 2000));
         return await readFile(reportPath, "utf8").then(JSON.parse);

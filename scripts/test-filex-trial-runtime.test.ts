@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, createHash } from "node:crypto";
+import { generateKeyPairSync, createHash, randomBytes, createCipheriv } from "node:crypto";
+import { execFileSync as realExecFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
@@ -25,7 +26,7 @@ function signed(trial = true, offlineMs = 86400000) {
       ...(trial ? { trial: true, trialDeviceIdHash: deviceIdHash } : {}) } }, privateKey);
 }
 
-function runtime(path: string, store: any, now = issuedAt + 1000, machine = guid, transport: typeof fetch = async () => { throw new Error("offline"); }, options: { failWrites?: boolean; packaged?: boolean } = {}) {
+function runtime(path: string, store: any, now = issuedAt + 1000, machine = guid, transport: typeof fetch = async () => { throw new Error("offline"); }, options: { failWrites?: boolean; packaged?: boolean; realDpapi?: boolean; wrongProfile?: boolean; localState?: unknown } = {}) {
   const temporaryFiles = new Map<string, string>();
   const events = { warnings: 0, quits: 0, exits: 0 };
   let tick: (() => void) | undefined;
@@ -33,10 +34,10 @@ function runtime(path: string, store: any, now = issuedAt + 1000, machine = guid
   const timer = { unref() {} };
   const execFile = Object.assign(() => {}, { [promisify.custom]: async () => ({ stdout: `MachineGuid    REG_SZ    ${machine}` }) });
   const mocks: Record<string, unknown> = {
-    electron: { app: { isPackaged: options.packaged ?? true, getPath: () => "/fake", getVersion: () => "test", once() {}, quit() { events.quits++; }, exit() { events.exits++; } }, dialog: { async showMessageBox() { events.warnings++; } }, safeStorage: { isEncryptionAvailable: () => true, decryptString: () => "token", encryptString: (value: string) => Buffer.from(value) } },
-    "node:child_process": { execFile },
+    electron: { app: { isPackaged: options.packaged ?? true, getPath: () => "/fake", getVersion: () => "test", once() {}, quit() { events.quits++; }, exit() { events.exits++; } }, dialog: { async showMessageBox() { events.warnings++; } }, safeStorage: { isEncryptionAvailable: () => true, decryptString: () => { if (options.wrongProfile) throw new Error("different Chromium profile"); return "token"; }, encryptString: (value: string) => Buffer.from(value) } },
+    "node:child_process": { execFile, execFileSync: options.realDpapi ? realExecFileSync : (_file: string, _args: string[], options: { input: string }) => options.input },
     "node:fs/promises": {
-      readFile: async () => JSON.stringify(store),
+      readFile: async (path: string) => JSON.stringify(path.endsWith("Local State") ? options.localState ?? {} : store),
       writeFile: async (path: string, value: string) => { if (options.failWrites) throw new Error("disk read only"); if (path.endsWith('.tmp')) temporaryFiles.set(path, value); else store = JSON.parse(value); },
       rename: async (path: string) => { store = JSON.parse(temporaryFiles.get(path)!); temporaryFiles.delete(path); },
       unlink: async () => {}, mkdir: async () => {}, rmdir: async () => {},
@@ -45,7 +46,8 @@ function runtime(path: string, store: any, now = issuedAt + 1000, machine = guid
   };
   function load(file: string): any {
     const source = readFileSync(file, "utf8").replace(/const PUBLIC_KEY = .*?;/, `const PUBLIC_KEY = ${JSON.stringify(publicKey)};`);
-    const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+    const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+      + (source.includes("function windowsDataProtection(") ? "\nexports.cryptoForTest = { encryptToken, decryptToken, windowsDataProtection };" : "");
     const module = { exports: {} };
     runInNewContext(compiled, {
       module, exports: module.exports, Buffer, AbortController, AbortSignal, clearTimeout,
@@ -61,6 +63,24 @@ function runtime(path: string, store: any, now = issuedAt + 1000, machine = guid
   return Object.assign(load(path), { replaceTestStore: (next: unknown) => { store = next; }, events,
     advance: async (ms: number) => { now += ms; tick?.(); for (let i = 0; i < 100; i++) await new Promise<void>(resolve => setImmediate(resolve)); },
     finishExit: () => exitTimer?.(),
+  });
+}
+
+for (const path of ["apps/filex-desktop/src/license-service.ts", ...["cache-sweep", "filex-send", "backup-guard"].map(tool => `apps/${tool}/electron/license-gate.ts`)]) {
+  test(`${path}: real Windows DPAPI shares tokens across profiles, rejects corruption and recovers legacy Suite keys`, { skip: process.platform !== "win32" }, async () => {
+    const fixtureToken = "filex-fixture-token-" + randomBytes(16).toString("hex");
+    const source = runtime(path, {}, issuedAt, guid, undefined, { realDpapi: true, wrongProfile: true });
+    const encrypted = source.cryptoForTest.encryptToken(fixtureToken);
+    assert.match(encrypted, /^dpapi-v1:/);
+    const destination = runtime(path, {}, issuedAt, guid, undefined, { realDpapi: true, wrongProfile: true });
+    assert.equal(await destination.cryptoForTest.decryptToken(encrypted), fixtureToken);
+    const corrupted = Buffer.from(encrypted.slice("dpapi-v1:".length), "base64"); corrupted[corrupted.length - 1] ^= 1;
+    assert.equal(await destination.cryptoForTest.decryptToken("dpapi-v1:" + corrupted.toString("base64")), null);
+    const key = randomBytes(32); const nonce = randomBytes(12); const cipher = createCipheriv("aes-256-gcm", key, nonce);
+    const legacy = Buffer.concat([Buffer.from("v10"), nonce, cipher.update(fixtureToken), cipher.final(), cipher.getAuthTag()]).toString("base64");
+    const wrapped = source.cryptoForTest.windowsDataProtection("Protect", key, false);
+    const migrated = runtime(path, {}, issuedAt, guid, undefined, { realDpapi: true, wrongProfile: true, localState: { os_crypt: { encrypted_key: Buffer.concat([Buffer.from("DPAPI"), wrapped]).toString("base64") } } });
+    assert.equal(await migrated.cryptoForTest.decryptToken(legacy), fixtureToken);
   });
 }
 
@@ -145,6 +165,20 @@ test("a late validation denial cannot overwrite a newer paid activation", async 
   assert.equal(state.canUseTools, true);
   assert.equal(state.trial, false);
 });
+
+for (const tool of ["cache-sweep", "filex-send", "backup-guard"]) {
+  test(`${tool}: a late success for an old token cannot clear a newer token rejection`, async () => {
+    let release!: (value: Response) => void; let started!: () => void;
+    const requested = new Promise<void>(resolve => { started = resolve; }); let calls = 0;
+    const api = runtime(`apps/${tool}/electron/license-gate.ts`, { installationId, activationTokenEncrypted: "old", attestation: signed(false) }, issuedAt + 1000, guid,
+      async () => { if (calls++ === 0) { started(); return new Promise<Response>(resolve => { release = resolve; }); } return new Response('{}', { status: 403 }); }, { failWrites: true });
+    const previous = api.directToolLicenseAllowed(true); await requested;
+    api.replaceTestStore({ installationId, activationTokenEncrypted: "new", attestation: signed(false) });
+    assert.equal(await api.directToolLicenseAllowed(true), false);
+    release(new Response(JSON.stringify({ attestation: signed(false) }), { status: 200 }));
+    assert.equal(await previous, false);
+  });
+}
 
 test("shared runtime ignores forged cached active state and respects signed offline expiry", async () => {
   const path = "apps/filex-desktop/src/license-service.ts";
