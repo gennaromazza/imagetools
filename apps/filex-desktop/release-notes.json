@@ -184,6 +184,9 @@
     ],
     "0.1.31": [
       "Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida. Editor testo sul canvas, font locali, loghi, varianti, template portabili e correzioni rendering."
+    ],
+    "0.1.32": [
+      "Editor testo sul canvas, font locali, loghi e template portabili; prova All Access di 30 giorni, controllo obbligatorio della licenza, chiusura dopo avviso e token Windows condiviso con migrazione dei profili precedenti."
     ]
   },
   "batch-print-layout": {

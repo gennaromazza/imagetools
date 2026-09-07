@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-07 - Image Party Frame 0.1.32
+
+- Editor testo sul canvas, font locali, loghi e template portabili; prova All Access di 30 giorni, controllo obbligatorio della licenza, chiusura dopo avviso e token Windows condiviso con migrazione dei profili precedenti.
+
 ## 2026-09-07 - FileX Suite 0.1.62
 
 - Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida. Launcher orizzontale, temi, preferiti, ricerca, notifiche e icone Windows; attivazione prova tramite account verificato.
