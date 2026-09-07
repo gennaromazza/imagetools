@@ -97,6 +97,9 @@
     ],
     "0.1.22": [
       "Allineata l'icona dell'applicazione, della tray e del catalogo web allo stile grafico FileX Suite."
+    ],
+    "0.1.23": [
+      "Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida. Notifiche di ricezione integrate nella Suite."
     ]
   },
   "cache-sweep": {
