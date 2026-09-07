@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-07 - FileX Suite 0.1.62
+
+- Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida. Launcher orizzontale, temi, preferiti, ricerca, notifiche e icone Windows; attivazione prova tramite account verificato.
+
 ## 2026-09-07 - FileX Backup Guard 0.2.6
 
 - Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida.
