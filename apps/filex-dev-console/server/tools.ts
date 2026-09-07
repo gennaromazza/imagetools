@@ -6,9 +6,9 @@ export interface DevTool {
   workspace: "@photo-tools/filex-desktop";
   devScript: string;
   buildScript: string;
-  port: number;
+  port: number | null;
   kind: "electron";
-  rendererUrl: string;
+  rendererUrl: string | null;
 }
 
 function readDevPort(toolId: string, devUrl: string | undefined): { port: number; rendererUrl: string } {
@@ -28,7 +28,16 @@ function readDevPort(toolId: string, devUrl: string | undefined): { port: number
  * Fonte unica per la dashboard: il catalogo dei tool desktop.
  * Ogni tool viene avviato tramite lo script Electron canonico `dev:<tool-id>`.
  */
-export const DEV_TOOLS: DevTool[] = getSuiteManagedTools().map((tool) => {
+export const DEV_TOOLS: DevTool[] = [{
+  id: desktopToolManifest["suite-launcher"].id,
+  displayName: "FileX Suite Launcher",
+  workspace: "@photo-tools/filex-desktop",
+  devScript: "start:suite",
+  buildScript: "build:suite",
+  port: null,
+  kind: "electron",
+  rendererUrl: null,
+}, ...getSuiteManagedTools().map((tool): DevTool => {
   const { port, rendererUrl } = readDevPort(tool.id, tool.devUrl);
   return {
     id: tool.id,
@@ -43,7 +52,7 @@ export const DEV_TOOLS: DevTool[] = getSuiteManagedTools().map((tool) => {
     kind: "electron",
     rendererUrl,
   };
-});
+})];
 
 const suite = desktopToolManifest["suite-launcher"];
 

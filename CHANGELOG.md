@@ -30,6 +30,17 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## Non rilasciato — 2026-09-07
+
+### Launcher FileX e integrazione Windows
+
+- La dock si apre dalla barra delle applicazioni come una striscia orizzontale di sole icone, con nomi al passaggio del mouse o al focus da tastiera. Si centra sopra il punto cliccato e conserva il riferimento quando cambia larghezza.
+- Comandi laterali espandibili con ‹, ricerca aperta dalla lente, preferiti persistenti e temi verde FileX, nero, automatico Windows e colore personalizzato.
+- Campanella con cronologia e conteggio delle notifiche; il segnale delle notifiche non lette resta visibile anche con i comandi chiusi. Integrata la ricezione locale e remota di FileX Send, che richiede anche il tool aggiornato.
+- Launcher avviabile dalla Dev Console, con stato pronto verificato dopo il caricamento della finestra Electron. Avvio automatico ridotto e gestione Suite separata.
+- Identità Windows distinta per le build Dev e icone esplicite per le finestre dei tool. Aggiunti audit e riparazione con backup dei collegamenti legacy, più un controllo automatico delle icone e degli installer per tutti i componenti del catalogo.
+- Test del launcher, del posizionamento, delle notifiche e delle icone disponibili dalla Dev Console; aggiornate documentazione tecnica e pagine del sito dedicate al launcher e a FileX Send.
+
 ## 2026-09-04 - Image Select Pro 0.1.39
 
 - Il tasto destro su una cartella apre direttamente il progetto giusto o la modalità libera, senza chiedere ogni volta: riconosce i master sopra e dentro la cartella e ricorda la scelta per fingerprint.

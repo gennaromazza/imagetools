@@ -1,14 +1,34 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { FileSendService } from "./file-send-service.js";
+import { publishReceivedFiles } from "./dock-notifications.js";
 import { FileSendRemoteClient, type PersistedRemoteSession } from "./remote-client-service.js";
+
+test("la inbox dock conserva eventi concorrenti completi e limita la cronologia", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "filex-dock-inbox-"));
+  try {
+    await publishReceivedFiles(directory, 0, "Ignora");
+    assert.deepEqual(await readdir(directory), []);
+    await Promise.all(Array.from({ length: 8 }, (_, index) => publishReceivedFiles(directory, 1, "Cliente " + index)));
+    const events = await Promise.all((await readdir(directory)).map(async file => JSON.parse(await readFile(join(directory, file), "utf8"))));
+    assert.equal(events.length, 8);
+    assert.equal(new Set(events.map(event => event.id)).size, 8);
+    assert.ok(events.every(event => event.toolId === "filex-send" && event.message.includes("file ricevuto")));
+    for (let index = 0; index < 96; index++) await publishReceivedFiles(directory, 2, "Prova");
+    assert.equal((await readdir(directory)).length, 100);
+    assert.ok((await readdir(directory)).every(file => file.endsWith(".json")));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 test("crea una sessione, riceve un file e la invalida alla chiusura", async () => {
   const outputRoot = await mkdtemp(join(tmpdir(), "filex-send-"));
-  const service = new FileSendService({ outputRoot, host: "127.0.0.1", publicAddress: "127.0.0.1" });
+  const arrivals: Array<{ count: number; label: string }> = [];
+  const service = new FileSendService({ outputRoot, host: "127.0.0.1", publicAddress: "127.0.0.1",
+    onFilesReceived: (count, label) => { arrivals.push({ count, label }); },
+  });
   try {
     await service.start();
     const started = await service.startSession("Cliente Test");
@@ -29,6 +49,7 @@ test("crea una sessione, riceve un file e la invalida alla chiusura", async () =
       body: payload,
     });
     assert.equal(uploadResponse.status, 201);
+    assert.deepEqual(arrivals, [{ count: 1, label: "Cliente Test" }]);
     const snapshot = service.snapshot();
     assert.equal(snapshot.session?.receivedFiles.length, 1);
     assert.equal(await readFile(join(snapshot.session!.folderPath, "foto.jpg"), "utf8"), "file di prova");

@@ -4,10 +4,11 @@ import type {
   Tray as TrayInstance,
 } from "electron";
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
   DesktopDockState,
+  DesktopSuiteNotification,
   DesktopReleaseChannel,
   DesktopRuntimeInfo,
   DesktopSuiteUpdateState,
@@ -34,13 +35,17 @@ import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicens
 import {
   resolveSuiteDockEnabled,
   resolveSuiteStartupPolicy,
+  resolveSuiteLauncherBounds,
 } from "./suite-startup-policy.js";
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, screen, shell, Tray } = electron;
 const suite = desktopToolManifest["suite-launcher"];
-const appUserModelId = `studio.filex.${suite.id}`;
+const appUserModelId = `studio.filex.${suite.id}${app.isPackaged ? "" : ".dev"}`;
 let mainWindow: BrowserWindowInstance | null = null;
 let dockWindow: BrowserWindowInstance | null = null;
+let launcherHeight = 112;
+let launcherWidth = 440;
+let launcherAnchor: { displayId: number; x: number } | null = null;
 let tray: TrayInstance | null = null;
 let dockEnabled = true;
 let toolUpdateTimer: NodeJS.Timeout | null = null;
@@ -131,78 +136,9 @@ async function readDockState(): Promise<DesktopDockState> {
   }
 }
 
-function applyDockLayout(state: DesktopDockState, animate: boolean, resetPosition = false): void {
-  if (!dockWindow || dockWindow.isDestroyed()) return;
-  const currentBounds = dockWindow.getBounds();
-  const display = screen.getDisplayMatching(currentBounds);
-  const isBottomAnchor = state.edgeAnchor === "bottom";
-  const isLeftAnchor = state.edgeAnchor === "left";
-  const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, state.visibleToolCount));
-  const collapsedSize = isBottomAnchor ? 88 : 76;
-  const expandedWidth = isBottomAnchor
-    ? Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + itemCount * 62))
-    : state.settingsOpen || state.notificationCenterOpen ? 380 : 82;
-  const expandedHeight = isBottomAnchor
-    ? state.notificationCenterOpen && !state.collapsed ? 420 : state.settingsOpen && !state.collapsed ? 220 : 100
-    : Math.min(display.workAreaSize.height - 30, Math.max(state.notificationCenterOpen ? 340 : 220, 132 + itemCount * 62 + (state.settingsOpen && !state.collapsed ? 70 : 0)));
-  const width = state.collapsed ? collapsedSize : expandedWidth;
-  const height = state.collapsed ? collapsedSize : expandedHeight;
-  const centerY = resetPosition
-    ? display.workArea.y + display.workAreaSize.height / 2
-    : currentBounds.y + currentBounds.height / 2;
-  const centerX = resetPosition
-    ? display.workArea.x + display.workAreaSize.width / 2
-    : currentBounds.x + currentBounds.width / 2;
-  const bottom = resetPosition
-    ? display.workArea.y + display.workAreaSize.height - 18
-    : currentBounds.y + currentBounds.height;
-  const defaultY = isBottomAnchor ? Math.round(bottom - height) : Math.round(centerY - height / 2);
-  const defaultX = isBottomAnchor
-    ? Math.round(centerX - width / 2)
-    : isLeftAnchor
-      ? display.workArea.x
-      : display.workArea.x + display.workAreaSize.width - width;
-  const x = isBottomAnchor
-    ? Math.min(
-      display.workArea.x + display.workAreaSize.width - width,
-      Math.max(display.workArea.x, defaultX),
-    )
-    : defaultX;
-  const y = Math.min(
-    display.workArea.y + display.workAreaSize.height - height,
-    Math.max(display.workArea.y, defaultY),
-  );
-  dockWindow.setBounds({ x, y, width, height }, animate);
-}
-
 async function saveDockState(partial: Partial<DesktopDockState>): Promise<DesktopDockState> {
   const current = await readDockState();
-  const bounds = dockWindow && !dockWindow.isDestroyed() ? dockWindow.getBounds() : null;
-  const next = sanitizeDockState({
-    ...current,
-    ...partial,
-    x: typeof partial.x === "number" ? partial.x : bounds?.x ?? current.x,
-    y: typeof partial.y === "number" ? partial.y : bounds?.y ?? current.y,
-  });
-  if (dockWindow && !dockWindow.isDestroyed()) {
-    if (
-      typeof partial.collapsed === "boolean"
-      || typeof partial.visibleToolCount === "number"
-      || typeof partial.settingsOpen === "boolean"
-      || typeof partial.notificationCenterOpen === "boolean"
-      || typeof partial.edgeAnchor === "string"
-    ) {
-      const edgeChanged = typeof partial.edgeAnchor === "string" && partial.edgeAnchor !== current.edgeAnchor;
-      applyDockLayout(next, true, edgeChanged);
-      const resizedBounds = dockWindow.getBounds();
-      next.x = resizedBounds.x;
-      next.y = resizedBounds.y;
-    }
-    if (typeof partial.x === "number" || typeof partial.y === "number") {
-      dockWindow.setPosition(next.x, next.y, true);
-    }
-    dockWindow.setOpacity(next.opacity);
-  }
+  const next = sanitizeDockState({ ...current, ...partial });
   await writeFile(dockStatePath(), `${JSON.stringify(next, null, 2)}\n`, "utf8");
   return next;
 }
@@ -253,63 +189,69 @@ async function createMainWindow(): Promise<void> {
   await window.loadFile(entry);
 }
 
-async function createDock(): Promise<void> {
-  if (!dockEnabled || (dockWindow && !dockWindow.isDestroyed())) return;
-  const display = screen.getPrimaryDisplay();
-  const state = await readDockState();
-  if (!resolveSuiteDockEnabled(state)) {
-    dockEnabled = false;
-    updateTrayMenu();
+async function createDock(reveal = true): Promise<void> {
+  if (!dockEnabled) return;
+  if (dockWindow && !dockWindow.isDestroyed()) {
+    if (reveal) {
+      positionLauncher(dockWindow);
+      dockWindow.restore();
+      dockWindow.show();
+      dockWindow.focus();
+    }
     return;
   }
-  const isBottomAnchor = state.edgeAnchor === "bottom";
-  const isLeftAnchor = state.edgeAnchor === "left";
-  const itemCount = Math.min(getSuiteManagedTools().length, Math.max(0, state.visibleToolCount));
-  const width = state.collapsed ? (isBottomAnchor ? 88 : 76) : isBottomAnchor
-    ? Math.min(display.workAreaSize.width - 24, Math.max(220, 142 + itemCount * 62))
-    : state.settingsOpen || state.notificationCenterOpen ? 380 : 82;
-  const height = state.collapsed ? (isBottomAnchor ? 88 : 76) : isBottomAnchor
-    ? (state.notificationCenterOpen ? 420 : state.settingsOpen ? 220 : 100)
-    : Math.min(display.workAreaSize.height - 30, Math.max(state.notificationCenterOpen ? 340 : 220, 132 + itemCount * 62 + (state.settingsOpen ? 70 : 0)));
-  const defaultX = isBottomAnchor
-    ? Math.round(display.workArea.x + (display.workAreaSize.width - width) / 2)
-    : isLeftAnchor
-      ? display.workArea.x
-      : display.workArea.x + display.workAreaSize.width - width;
-  const defaultY = isBottomAnchor
-    ? display.workArea.y + display.workAreaSize.height - height - 18
-    : Math.round(display.workArea.y + (display.workAreaSize.height - height) / 2);
-  dockWindow = new BrowserWindow({
-    width,
-    height,
-    x: isBottomAnchor ? state.x || defaultX : defaultX,
-    y: state.y || defaultY,
-    frame: false,
+  const window = new BrowserWindow({
+    title: "FileX Suite Launcher",
+    width: launcherWidth, height: launcherHeight,
+    frame: false, resizable: false, movable: false,
+    minimizable: true, maximizable: false,
+    skipTaskbar: false, alwaysOnTop: false, show: false,
     transparent: true,
     hasShadow: false,
-    resizable: false,
-    movable: true,
-    minimizable: false,
-    maximizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    show: false,
     backgroundColor: "#00000000",
+    icon: iconPath(),
     webPreferences: {
-      preload: preloadPath(),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
+      preload: preloadPath(), contextIsolation: true,
+      nodeIntegration: false, sandbox: false,
     },
   });
-  dockWindow.setOpacity(state.opacity);
-  dockWindow.setAlwaysOnTop(true, "floating");
-  dockWindow.on("closed", () => { dockWindow = null; });
+  dockWindow = window;
+  positionLauncher(window);
+  window.on("restore", () => positionLauncher(window));
+  window.on("blur", () => {
+    if (!window.isDestroyed() && window.isVisible() && !window.isMinimized()) window.minimize();
+  });
+  window.on("close", (event) => {
+    event.preventDefault();
+    window.minimize();
+  });
+  window.on("closed", () => { if (dockWindow === window) dockWindow = null; });
   const entry = rendererPath("dock.html");
-  if (existsSync(entry)) {
-    await dockWindow.loadFile(entry);
-    dockWindow.showInactive();
+  if (!existsSync(entry)) throw new Error(`Launcher FileX Suite non trovato: ${entry}`);
+  await window.loadFile(entry);
+  if (reveal) {
+    window.show();
+    window.focus();
+  } else {
+    // Minimize rather than hide to retain the Windows taskbar entry.
+    window.minimize();
   }
+}
+
+function positionLauncher(window: BrowserWindowInstance, followCursor = true): void {
+  const cursor = screen.getCursorScreenPoint();
+  const cursorDisplay = screen.getDisplayNearestPoint(cursor);
+  const area = cursorDisplay.workArea;
+  // On taskbar restore the pointer is still over the clicked FileX button.
+  // Keep that anchor while the pointer moves into the dock or panels resize.
+  const onTaskbar = cursor.y >= area.y + area.height - 2 || cursor.y < area.y
+    || cursor.x < area.x || cursor.x >= area.x + area.width;
+  if (followCursor && onTaskbar) launcherAnchor = { displayId: cursorDisplay.id, x: cursor.x };
+  const display = screen.getAllDisplays().find(display => display.id === launcherAnchor?.displayId) ?? cursorDisplay;
+  if (!launcherAnchor || launcherAnchor.displayId !== display.id) {
+    launcherAnchor = { displayId: display.id, x: display.workArea.x + display.workArea.width / 2 };
+  }
+  window.setBounds(resolveSuiteLauncherBounds(display.workArea, launcherWidth, launcherHeight, launcherAnchor.x));
 }
 
 async function setDockEnabled(enabled: boolean): Promise<DesktopDockState> {
@@ -340,23 +282,24 @@ async function setDockEnabled(enabled: boolean): Promise<DesktopDockState> {
 }
 
 async function openSuiteExperience(): Promise<void> {
-  await createMainWindow();
-  await createDock();
+  if (dockEnabled) await createDock();
+  else await createMainWindow();
 }
 
 function updateTrayMenu(): void {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "Apri FileX Suite", click: () => { void openSuiteExperience(); } },
+    { label: "Apri launcher", click: () => { void openSuiteExperience(); } },
+    { label: "Gestisci FileX Suite", click: () => { void createMainWindow(); } },
     {
-      label: "Dock Station",
+      label: "Launcher nella barra delle applicazioni",
       type: "checkbox",
       checked: dockEnabled,
       click: (menuItem) => {
         void setDockEnabled(menuItem.checked).catch((error) => {
           dialog.showErrorBox(
             "FileX Suite",
-            `Impossibile aggiornare la Dock Station: ${error instanceof Error ? error.message : String(error)}`,
+            `Impossibile aggiornare il launcher: ${error instanceof Error ? error.message : String(error)}`,
           );
         });
       },
@@ -395,7 +338,7 @@ async function checkToolUpdatesInBackground(): Promise<void> {
       title: "FileX Suite",
       body: `${count} ${count === 1 ? "aggiornamento è disponibile" : "aggiornamenti sono disponibili"}. Apri FileX Suite per installarli.`,
     });
-    notification.on("click", () => { void openSuiteExperience(); });
+    notification.on("click", () => { void createMainWindow(); });
     notification.show();
   }
   lastNotifiedToolUpdateCount = count;
@@ -406,6 +349,26 @@ function startToolUpdateChecks(): void {
   if (!toolUpdateTimer) {
     toolUpdateTimer = setInterval(() => { void checkToolUpdatesInBackground(); }, TOOL_UPDATE_CHECK_INTERVAL_MS);
   }
+}
+
+async function readSuiteNotifications(): Promise<DesktopSuiteNotification[]> {
+  const directories = [join(app.getPath("appData"), "FileX", "notifications")];
+  if (!app.isPackaged) directories.push(join(app.getPath("appData"), "FileX", "notifications-dev"));
+  const result: DesktopSuiteNotification[] = [];
+  for (const directory of directories) {
+    const names = await readdir(directory).catch(() => []);
+    for (const name of names.filter(name => /^\d+-[a-f0-9-]+\.json$/.test(name)).sort().slice(-100)) {
+      try {
+        const file = join(directory, name);
+        if ((await stat(file)).size > 8192) continue;
+        const value = JSON.parse(await readFile(file, "utf8")) as DesktopSuiteNotification;
+        if (value.toolId !== "filex-send" || typeof value.id !== "string" || typeof value.title !== "string"
+          || typeof value.message !== "string" || !Number.isFinite(value.createdAt)) continue;
+        result.push({ ...value, title: value.title.slice(0, 120), message: value.message.slice(0, 500) });
+      } catch { /* Ignore incomplete or invalid events without losing the rest of the inbox. */ }
+    }
+  }
+  return result.sort((a, b) => b.createdAt - a.createdAt).slice(0, 100);
 }
 
 function registerIpcHandlers(): void {
@@ -447,6 +410,14 @@ function registerIpcHandlers(): void {
       ? openInstalledTool(toolId, launchArgs)
       : ({ ok: false, message: "FileX All Access non e' attivo. Apri la sezione Licenza nella Suite." }));
   });
+  ipcMain.handle("filex:open-suite-window", () => createMainWindow());
+  ipcMain.handle("filex:resize-suite-launcher", (event, height: number, width?: number) => {
+    if (!dockWindow || event.sender !== dockWindow.webContents || !Number.isFinite(height)) return;
+    launcherHeight = Math.min(620, Math.max(96, Math.ceil(height)));
+    if (typeof width === "number" && Number.isFinite(width)) launcherWidth = Math.min(900, Math.max(240, Math.ceil(width)));
+    if (!dockWindow.isMinimized()) positionLauncher(dockWindow, false);
+  });
+  ipcMain.handle("filex:get-suite-notifications", () => readSuiteNotifications());
   ipcMain.handle("filex:get-suite-dock-state", () => readDockState());
   ipcMain.handle("filex:save-suite-dock-state", (_event, state: Partial<DesktopDockState>) => saveDockState(state));
   ipcMain.handle("filex:set-suite-dock-enabled", (_event, enabled: boolean) => setDockEnabled(enabled !== false));
@@ -461,7 +432,17 @@ function registerIpcHandlers(): void {
 }
 
 app.setName(suite.productName);
-if (process.platform === "win32") app.setAppUserModelId(appUserModelId);
+if (process.platform === "win32") {
+  app.setAppUserModelId(appUserModelId);
+  app.on("browser-window-created", (_event, window) => {
+    window.setAppDetails({
+      appId: appUserModelId,
+      appIconPath: iconPath(),
+      appIconIndex: 0,
+      ...(app.isPackaged ? { relaunchCommand: `"${process.execPath}"`, relaunchDisplayName: suite.productName } : {}),
+    });
+  });
+}
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
@@ -475,9 +456,25 @@ if (!hasSingleInstanceLock) {
     const startupPolicy = resolveSuiteStartupPolicy({ startsInBackground, dockEnabled });
     if (isPackagedSmokeTest) {
       if (!startupPolicy.createDock) throw new Error("La Dock deve essere attiva nel profilo smoke test.");
-      await createDock();
-      if (!dockWindow || dockWindow.isDestroyed() || dockWindow.getTitle() !== "FileX Suite Dock") {
+      await createDock(false);
+      if (!dockWindow || dockWindow.isDestroyed() || dockWindow.getTitle() !== "FileX Suite Launcher") {
         throw new Error("La Dock impacchettata non e' stata creata correttamente.");
+      }
+      const launcher: BrowserWindowInstance = dockWindow;
+      if (launcher.isAlwaysOnTop() || !launcher.isMinimizable() || !launcher.isMinimized()) {
+        throw new Error("Il launcher deve partire ridotto e non essere sempre in primo piano.");
+      }
+      await createDock();
+      if (launcher.isMinimized() || !launcher.isVisible()) {
+        throw new Error("Il launcher non si ripristina dalla barra.");
+      }
+      launcher.close();
+      if (launcher.isDestroyed() || !launcher.isMinimized()) {
+        throw new Error("La chiusura deve ridurre il launcher senza distruggerlo.");
+      }
+      await createDock();
+      if (BrowserWindow.getAllWindows().length !== 1) {
+        throw new Error("La riapertura ha duplicato le finestre.");
       }
       app.exit(0);
       return;
@@ -501,7 +498,7 @@ if (!hasSingleInstanceLock) {
     }
     if (startupPolicy.createMainWindow) await createMainWindow();
     createTray();
-    if (startupPolicy.createDock) await createDock();
+    if (startupPolicy.createDock) await createDock(!startsInBackground);
     startToolUpdateChecks();
     if (app.isPackaged) setTimeout(() => { void checkSuiteUpdate(); }, 3500);
   }).catch((error) => {

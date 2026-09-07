@@ -284,6 +284,8 @@ const TEST_CATEGORIES: TestCategory[] = [
 ];
 
 function testCategoryId(name: string): TestCategory["id"] {
+  if (name === "test:filex-windows-icons") return "suite";
+  if (name === "test:filex-suite-launcher") return "suite";
   if (name.startsWith("test:photo-selector-")) return "photo-selector";
   if (name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-drive-link" || name === "test:archivio-flow-package-runtime" || name === "test:archivio-flow-photo-routing" || name === "test:photo-tool-handoff") return "archivio-flow";
   if (name === "test:image-party-frame-bug-hunt" || name === "test:image-party-frame-server" || name === "test:image-party-frame-package-runtime") return "image-party-frame";
@@ -333,7 +335,7 @@ function testDescription(name: string): string {
     "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",
     "test:image-file-finder-bug-hunt": "Stressa il parser con virgolette, separatori, percorsi e duplicati.",
     "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",
-    "test:filex-send-bug-hunt": "Verifica trasferimenti, autenticazione e rete con casi di errore.",
+    "test:filex-send-bug-hunt": "Verifica trasferimenti, autenticazione, rete e notifiche di ricezione nella dock: eventi completi, concorrenza e cronologia limitata.",
     "test:filex-send-upload": "Esegue 12 test sul caricamento a blocchi, retry, timeout e ripresa degli offset.",
     "test:backup-guard-bug-hunt": "Verifica che sincronizzazione e rinomine non perdano o sovrascrivano file.",
     "test:filex-updater-lock": "Verifica che gli archivi dell'updater non restino bloccati su Windows.",
@@ -342,7 +344,9 @@ function testDescription(name: string): string {
     "test:filex-installer-runner": "Verifica che la Suite avvii NSIS con /S, attenda la conclusione reale e intercetti errori di avvio o exit code.",
     "test:filex-cooperative-signal": "Verifica che una versione legacy non possa bloccare indefinitamente il comando di chiusura cooperativa prima del fallback.",
     "test:filex-suite-package-imports": "Controlla gli import runtime nel pacchetto ASAR reale e avvia il main process della Suite impacchettata.",
-    "test:filex-suite-dock-startup": "Verifica che la Dock parta anche con Windows, rispetti la preferenza dell'utente e non apra forzatamente la finestra principale.",
+    "test:filex-suite-dock-startup": "Verifica avvio del launcher e posizione sopra il clic nella barra Windows, mantenuta quando cambiano larghezza, monitor e spazio disponibile.",
+    "test:filex-windows-icons": "Controlla per ogni tool del catalogo, inclusi quelli nuovi, icone ICO alle diverse scale, identità distinta in Dev e configurazione della barra Windows e dei collegamenti installer.",
+    "test:filex-suite-launcher": "Verifica in Electron dock orizzontale, tooltip, ricerca espandibile, temi, preferiti, notifiche FileX Send e rimozione persistente con dati simulati.",
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
@@ -378,10 +382,12 @@ app.get("/api/tools", async (_req, res) => {
     tools: await Promise.all(
       DEV_TOOLS.map(async (tool) => {
         const running = runningList.includes(tool.id);
-        const portOpen = await isPortOpen(tool.port);
-        const portProcess = !running && portOpen ? await getPortProcess(tool.port) : null;
+        const portOpen = tool.port !== null && await isPortOpen(tool.port);
+        const portProcess = !running && portOpen && tool.port !== null ? await getPortProcess(tool.port) : null;
+        const ready = tool.port !== null ? portOpen
+          : running && (await readLog(tool.id)).includes("[FileX Suite] Finestra pronta.");
         const status = running
-          ? portOpen ? "running" : "starting"
+          ? ready ? "running" : "starting"
           : portOpen ? portProcess?.recognized ? "external" : "occupied" : "stopped";
         return {
           id: tool.id,
@@ -428,7 +434,7 @@ app.post("/api/tools/:id/start", async (req, res) => {
     res.status(404).json({ error: `Tool sconosciuto: ${req.params.id}` });
     return;
   }
-  if (!await isRunning(tool.id) && await isPortOpen(tool.port)) {
+  if (!await isRunning(tool.id) && tool.port !== null && await isPortOpen(tool.port)) {
     res.status(409).json({ ok: false, error: `La porta ${tool.port} è già occupata da un processo non gestito.` });
     return;
   }
@@ -445,7 +451,8 @@ app.post("/api/tools/:id/stop", async (req, res) => {
   }
   const result = await isRunning(tool.id)
     ? await stopProcess(tool.id)
-    : await stopPortProcess(tool.port);
+    : tool.port !== null ? await stopPortProcess(tool.port)
+      : { ok: false, error: "Il launcher non è in esecuzione." };
   res.json({ ok: result.ok, error: result.error });
 });
 
@@ -471,7 +478,7 @@ app.post("/api/tools/stop-all", async (_req, res) => {
   // avviati da terminali esterni. Processi sconosciuti restano intatti.
   const externalPorts: number[] = [];
   for (const tool of DEV_TOOLS) {
-    if (await isRunning(tool.id) || !await isPortOpen(tool.port)) continue;
+    if (tool.port === null || await isRunning(tool.id) || !await isPortOpen(tool.port)) continue;
     if ((await getPortProcess(tool.port))?.recognized) externalPorts.push(tool.port);
   }
 

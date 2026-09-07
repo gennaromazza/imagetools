@@ -57,6 +57,8 @@
     "test:filex-cooperative-signal": "tsx --test apps/filex-desktop/src/cooperative-process-signal.test.ts",
     "test:filex-suite-package-imports": "node scripts/test-filex-suite-package-imports.mjs",
     "test:filex-suite-dock-startup": "tsx --test apps/filex-desktop/src/suite-startup-policy.test.ts",
+    "test:filex-windows-icons": "npm --workspace @photo-tools/filex-desktop run build:shell",
+    "test:filex-suite-launcher": "npm --workspace @photo-tools/filex-desktop run build:suite && node scripts/test-filex-suite-launcher.mjs",
     "test:filex-independent-releases": "node scripts/test-filex-independent-releases.mjs",
     "test:filex-component-release-flow": "node scripts/test-component-release-flow.mjs",
     "release:prepare-filex-suite-clean-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-filex-suite-clean-install.ps1 -Apply",

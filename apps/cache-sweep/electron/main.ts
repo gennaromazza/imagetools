@@ -13,7 +13,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
 
 app.setName("FileX Adobe Cleaner");
-if (process.platform === "win32") app.setAppUserModelId("studio.filex.cache-sweep");
+const appUserModelId = "studio.filex.cache-sweep" + (app.isPackaged ? "" : ".dev");
+if (process.platform === "win32") {
+  app.setAppUserModelId(appUserModelId);
+  app.on("browser-window-created", (_event, window) => {
+    window.setAppDetails({
+      appId: appUserModelId,
+      appIconPath: iconPath(),
+      appIconIndex: 0,
+      ...(app.isPackaged ? { relaunchCommand: `"${process.execPath}"`, relaunchDisplayName: "FileX Adobe Cleaner" } : {}),
+    });
+  });
+}
 
 function rendererEntry(): string {
   if (app.isPackaged) return join(process.resourcesPath, "apps", "cache-sweep", "web", "index.html");

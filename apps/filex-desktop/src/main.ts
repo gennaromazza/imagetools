@@ -260,7 +260,7 @@ if (imagePartyFrameSessionToken) {
 }
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
-const appUserModelId = `studio.filex.${requestedTool.id}`;
+const appUserModelId = `studio.filex.${requestedTool.id}${app.isPackaged ? "" : ".dev"}`;
 let mainWindow: BrowserWindowInstance | null = null;
 const idPhotoQuitCoordinator = createIdPhotoQuitCoordinator();
 const PHOTO_SELECTOR_CLOSE_PREPARATION_TIMEOUT_MS = 20_000;
@@ -570,6 +570,14 @@ protocol.registerSchemesAsPrivileged([
 app.setName(requestedTool.productName);
 if (process.platform === "win32") {
   app.setAppUserModelId(appUserModelId);
+  app.on("browser-window-created", (_event, window) => {
+    window.setAppDetails({
+      appId: appUserModelId,
+      appIconPath: resolveWindowIcon(),
+      appIconIndex: 0,
+      ...(app.isPackaged ? { relaunchCommand: `"${process.execPath}"`, relaunchDisplayName: requestedTool.productName } : {}),
+    });
+  });
 }
 
 function resolveWindowIcon(): string {

@@ -10,7 +10,18 @@ let mainWindow: BrowserWindow | null = null;
 const testMode = process.argv.includes("--allow-same-volume-test");
 const argumentValue = (name: string): string | null => process.argv.find((value) => value.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
 app.setName("FileX Backup Guard");
-if (process.platform === "win32") app.setAppUserModelId("studio.filex.backup-guard");
+const appUserModelId = "studio.filex.backup-guard" + (app.isPackaged ? "" : ".dev");
+if (process.platform === "win32") {
+  app.setAppUserModelId(appUserModelId);
+  app.on("browser-window-created", (_event, window) => {
+    window.setAppDetails({
+      appId: appUserModelId,
+      appIconPath: iconPath(),
+      appIconIndex: 0,
+      ...(app.isPackaged ? { relaunchCommand: `"${process.execPath}"`, relaunchDisplayName: "FileX Backup Guard" } : {}),
+    });
+  });
+}
 
 function rendererEntry(): string { return app.isPackaged ? join(process.resourcesPath, "apps", "backup-guard", "web", "index.html") : resolve(app.getAppPath(), ".output", "web", "index.html"); }
 function iconPath(): string { return app.isPackaged ? join(process.resourcesPath, "branding", "backup-guard.ico") : resolve(app.getAppPath(), "..", "filex-desktop", ".output", "branding", "backup-guard.ico"); }

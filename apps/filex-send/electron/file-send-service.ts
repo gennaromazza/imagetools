@@ -27,6 +27,7 @@ export interface FileSendServiceOptions {
   port?: number;
   publicAddress?: string;
   onChange?: (snapshot: FileSendSnapshot) => void;
+  onFilesReceived?: (count: number, label: string) => void;
   wifi?: FileSendWifiConfig;
   wifiSource?: FileSendWifiSource;
   wifiError?: string | null;
@@ -38,6 +39,7 @@ export class FileSendService {
   private readonly requestedPort: number;
   private readonly publicAddress?: string;
   private readonly onChange?: (snapshot: FileSendSnapshot) => void;
+  private readonly onFilesReceived?: (count: number, label: string) => void;
   private server: Server | null = null;
   private port: number | null = null;
   private readonly sessions = new Map<string, InternalSession>();
@@ -54,6 +56,7 @@ export class FileSendService {
     this.requestedPort = options.port ?? 0;
     this.publicAddress = options.publicAddress;
     this.onChange = options.onChange;
+    this.onFilesReceived = options.onFilesReceived;
     this.wifi = options.wifi ?? { ssid: "FileX Send", password: "", security: "WPA" };
     this.wifiSource = options.wifiSource ?? "missing";
     this.wifiError = options.wifiError ?? null;
@@ -325,6 +328,7 @@ export class FileSendService {
       this.syncActiveTotals(session);
       this.emit(true);
       this.sendJson(response, 201, { ok: true, file: receivedFile });
+      try { this.onFilesReceived?.(1, session.label); } catch { /* A notification must never invalidate a completed upload. */ }
     } catch {
       session.active.delete(uploadId);
       this.syncActiveTotals(session);

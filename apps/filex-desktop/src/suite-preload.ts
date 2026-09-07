@@ -9,6 +9,9 @@ import type {
 const { contextBridge, ipcRenderer } = electron;
 
 const suiteApi = {
+  resizeSuiteLauncher: (height: number, width?: number): Promise<void> => ipcRenderer.invoke("filex:resize-suite-launcher", height, width),
+  getSuiteNotifications: () => ipcRenderer.invoke("filex:get-suite-notifications"),
+  openSuiteWindow: (): Promise<void> => ipcRenderer.invoke("filex:open-suite-window"),
   getRuntimeInfo: () => ipcRenderer.invoke("filex:get-runtime-info"),
   getSuiteUpdateState: () => ipcRenderer.invoke("filex:get-suite-update-state"),
   checkSuiteUpdate: () => ipcRenderer.invoke("filex:check-suite-update"),

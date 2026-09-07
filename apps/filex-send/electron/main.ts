@@ -10,6 +10,7 @@ import { FileSendRemoteClient, type PersistedRemoteSession } from "./remote-clie
 import type { FirebaseAnonymousAuthState } from "./firebase-anonymous-auth.js";
 import type { FileSendSession, FileSendSessionHistoryEntry, FileSendSnapshot } from "../src/contracts.js";
 import { directToolLicenseAllowed } from "./license-gate.js";
+import { publishReceivedFiles } from "./dock-notifications.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -47,7 +48,18 @@ interface PersistedFileSendSettings {
 
 const isDevRenderer = process.env.FILEX_RENDERER_MODE === "dev";
 app.setName(isDevRenderer ? "FileX Send Dev" : "FileX Send");
-if (process.platform === "win32") app.setAppUserModelId(isDevRenderer ? "studio.filex.filex-send.dev" : "studio.filex.filex-send");
+const appUserModelId = "studio.filex.filex-send" + (app.isPackaged ? "" : ".dev");
+if (process.platform === "win32") {
+  app.setAppUserModelId(appUserModelId);
+  app.on("browser-window-created", (_event, window) => {
+    window.setAppDetails({
+      appId: appUserModelId,
+      appIconPath: iconPath(),
+      appIconIndex: 0,
+      ...(app.isPackaged ? { relaunchCommand: `"${process.execPath}"`, relaunchDisplayName: "FileX Send" } : {}),
+    });
+  });
+}
 
 function rendererEntry(): string {
   if (app.isPackaged) return join(process.resourcesPath, "apps", "filex-send", "web", "index.html");
@@ -147,6 +159,14 @@ async function saveSettings(): Promise<void> {
     } : undefined,
   };
   await writeFile(settingsPath(), JSON.stringify(persisted, null, 2), "utf8");
+}
+
+function notifyFilesReceived(count: number, label: string): void {
+  const directory = join(app.getPath("appData"), "FileX", app.isPackaged ? "notifications" : "notifications-dev");
+  void publishReceivedFiles(directory, count, label).catch(error => console.error("Notifica dock non salvata", error));
+  if (Notification.isSupported()) {
+    new Notification({ title: "FileX Send", body: `${count} ${count === 1 ? "file ricevuto" : "file ricevuti"} da ${label}.` }).show();
+  }
 }
 
 function queueSettingsSave(): Promise<void> {
@@ -393,6 +413,7 @@ if (!hasSingleInstanceLock) {
       wifi: settings.wifi,
       wifiSource: detected.wifi ? "detected" : hasRememberedWifi ? "remembered" : "missing",
       wifiError: detected.wifi ? null : detected.error,
+      onFilesReceived: notifyFilesReceived,
       onChange: () => {
         settings.activeLocalSessions = service.getSessions();
         scheduleSettingsSave();
@@ -412,9 +433,7 @@ if (!hasSingleInstanceLock) {
         scheduleSettingsSave();
         emitSnapshot();
       },
-      onFilesReceived: (count, label) => {
-        if (Notification.isSupported()) new Notification({ title: "FileX Send", body: `${count} ${count === 1 ? "file ricevuto" : "file ricevuti"} da ${label}.` }).show();
-      },
+      onFilesReceived: notifyFilesReceived,
     });
     if (settings.remoteSessions[0]) {
       currentMode = "remote";

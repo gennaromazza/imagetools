@@ -267,6 +267,14 @@ export interface DesktopFilePayload {
   lastModified: number;
 }
 
+export interface DesktopSuiteNotification {
+  id: string;
+  toolId: DesktopToolId;
+  title: string;
+  message: string;
+  createdAt: number;
+}
+
 export interface DesktopIdPhotoWorkingCopyRequest {
   jobId: string;
   sourcePath: string;
@@ -1425,6 +1433,9 @@ export interface FileXDesktopApi {
     projectPath: string,
   ) => Promise<DesktopPhotoToolHandoff | null>;
   getSuiteDockState: () => Promise<DesktopDockState>;
+  openSuiteWindow?: () => Promise<void>;
+  resizeSuiteLauncher?: (height: number, width?: number) => Promise<void>;
+  getSuiteNotifications?: () => Promise<DesktopSuiteNotification[]>;
   saveSuiteDockState: (state: Partial<DesktopDockState>) => Promise<DesktopDockState>;
   setSuiteDockEnabled?: (enabled: boolean) => Promise<DesktopDockState>;
   getLicenseState: (refresh?: boolean) => Promise<DesktopLicenseState>;

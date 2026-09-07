@@ -218,7 +218,7 @@
 
     <section id="suite" class="tab-panel">
       <h2>FileX Suite (Electron)</h2>
-      <p class="hint">Avvia la suite desktop completa in dev mode (build shell + electron).</p>
+      <p class="hint">Avvia il nuovo launcher dalla barra delle applicazioni. Lo trovi anche nella scheda Tool come FileX Suite Launcher. Dal launcher, Gestisci Suite apre il catalogo completo.</p>
       <div class="row">
         <button id="suiteStart">Avvia Suite</button>
         <button id="suiteStop" class="secondary">Ferma Suite</button>
@@ -391,9 +391,9 @@
           : tool.status === "occupied"
             ? "Porta usata da un processo non riconosciuto: arresto bloccato per sicurezza."
             : tool.status === "running"
-              ? "Electron e renderer risultano attivi."
+              ? tool.port === null ? "Launcher pronto nella barra delle applicazioni." : "Electron e renderer risultano attivi."
               : tool.status === "starting"
-                ? "Processo avviato; attendo il renderer."
+                ? tool.port === null ? "Compilazione e avvio del launcher in corso…" : "Processo avviato; attendo il renderer."
                 : "Pronto per l'avvio.";
         const card = document.createElement("div");
         card.className = "card";
@@ -405,7 +405,7 @@
           </div>
           <div class="meta">
             <span class="badge ${statusInfo[1]}">${statusInfo[0]}</span>
-            <span>:${tool.port}</span>
+            <span>${tool.port === null ? 'barra delle applicazioni' : ':' + tool.port}</span>
             <span class="badge electron">app desktop</span>
           </div>
           <div class="feedback ${operation?.type || ''}">${operation?.busy ? '<span class="spinner"></span>' : ''}${operation?.message || defaultFeedback}</div>
@@ -464,7 +464,7 @@
           await setOperation(id, { action, busy: true, type: "busy", message: "Avvio di Electron e del renderer in corso…" });
           const res = await api(`/api/tools/${id}/start`, { method: "POST" });
           if (!res.ok) throw new Error(res.error || "Errore durante l'avvio.");
-          await waitForStatus(id, ["running"], 30000);
+          await waitForStatus(id, ["running"], id === "suite-launcher" ? 180000 : 30000);
           operations.set(id, { type: "success", message: "Avvio completato: finestra Electron e renderer attivi." });
           toast(`Avvio completato: ${id}`);
         } else if (action === "stop") {

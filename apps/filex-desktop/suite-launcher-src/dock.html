@@ -1,44 +1,40 @@
 <!doctype html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>FileX Suite Dock</title>
-  <link rel="stylesheet" href="./dock-window.css" />
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self'; style-src 'self'; script-src 'self'">
+<title>FileX Suite Launcher</title><link rel="stylesheet" href="./launcher.css">
 </head>
-<body class="collapsed booting">
-  <div class="dock-window">
-    <button id="suite-toggle" class="suite-toggle" title="Espandi FileX Suite"><img src="./icons/suite-launcher.png" alt="FileX Suite" /></button>
-    <div id="dock-tools" class="dock-tools"></div>
-    <button id="dock-notifications" class="dock-notifications" title="Notifiche FileX" aria-expanded="false" aria-controls="dock-notification-center">
-      <span id="dock-notification-count" aria-live="polite">0</span>
-    </button>
-    <button id="dock-settings" class="dock-settings" title="Impostazioni dock" aria-expanded="false" aria-controls="dock-controls">&#9881;</button>
-    <div id="dock-controls" class="dock-controls" hidden>
-      <label class="dock-select">Posizione
-        <select id="dock-edge-anchor">
-          <option value="left">Sinistra</option>
-          <option value="right">Destra</option>
-          <option value="bottom">In basso</option>
-        </select>
-      </label>
-      <label>Trasparenza <input id="dock-opacity" type="range" min="45" max="100" value="94" /></label>
-      <label class="dock-check"><input id="dock-autohide" type="checkbox" /> Riduci automaticamente</label>
-      <span class="dock-hint">Trascina le icone per riordinarle</span>
-      <button id="dock-collapse" type="button">Riduci a icona</button>
-      <button id="dock-reset" type="button">Ripristina posizione</button>
-      <button id="dock-disable" type="button" title="Puoi riattivarla dal menu FileX vicino all'orologio di Windows">Disattiva Dock</button>
-      <button id="dock-close-settings" type="button" aria-label="Chiudi impostazioni">×</button>
-    </div>
-  </div>
-  <section id="dock-notification-center" class="dock-notification-center" hidden>
-    <header class="dock-notification-header">
-      <strong>Notifiche</strong>
-      <button id="dock-notification-close" type="button" aria-label="Chiudi notifiche">×</button>
-    </header>
-    <div id="dock-notification-list" class="dock-notification-list"></div>
-    <button id="dock-notifications-clear" type="button">Pulisci tutte</button>
+<body>
+<div id="tooltip" role="tooltip" hidden></div>
+<div id="surface">
+  <section id="settings-panel" class="panel" hidden aria-label="Aspetto della dock">
+    <h2>Aspetto</h2>
+    <label for="theme">Tema</label>
+    <select id="theme"><option value="filex">Verde FileX</option><option value="black">Nero</option><option value="system">Come Windows</option><option value="custom">Personalizzato</option></select>
+    <label id="color-label" for="custom-color" hidden>Colore (es. #243447)</label>
+    <input id="custom-color" type="text" value="#243447" maxlength="7" pattern="#[0-9a-fA-F]{6}" hidden aria-label="Colore personalizzato esadecimale">
+    <p class="hint">Clic destro su un programma per aggiungerlo ai preferiti. Da tastiera: Maiusc+F.</p>
   </section>
-  <script type="module" src="./dock-window.js"></script>
-</body>
-</html>
+  <section id="notifications-panel" class="panel" hidden aria-label="Notifiche FileX">
+    <div class="panel-header"><h2>Notifiche</h2><button id="clear-notifications">Pulisci</button></div>
+    <div id="notifications-list"></div>
+  </section>
+  <div id="search-panel" class="panel" hidden>
+    <label class="sr-only" for="search">Cerca un programma</label>
+    <input id="search" type="search" placeholder="Cerca un programma…" autocomplete="off">
+  </div>
+  <p id="status" role="status" hidden></p>
+  <nav id="dock" aria-label="Programmi FileX">
+    <div id="tools" role="group" aria-label="Programmi installati"></div>
+    <button id="controls-toggle" class="control" aria-label="Espandi comandi" aria-expanded="false" aria-controls="controls" data-tip="Espandi comandi"><span id="controls-chevron">‹</span><span id="collapsed-notification-dot" hidden></span></button>
+    <div id="controls" hidden>
+      <button id="search-toggle" class="control" aria-label="Cerca" aria-expanded="false" aria-controls="search-panel" data-tip="Cerca un programma"><svg viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg></button>
+      <button id="notifications-toggle" class="control" aria-label="Notifiche" aria-expanded="false" aria-controls="notifications-panel" data-tip="Notifiche"><svg viewBox="0 0 24 24"><path d="M5 17h14l-2-3V9a5 5 0 0 0-10 0v5l-2 3M10 21h4M12 2v2"/></svg><span id="notification-count" hidden></span></button>
+      <button id="settings-toggle" class="control" aria-label="Aspetto" aria-expanded="false" aria-controls="settings-panel" data-tip="Aspetto della dock"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></svg></button>
+      <button id="manage" class="control" aria-label="Gestisci FileX Suite" data-tip="Gestisci FileX Suite"><img src="./icons/suite-launcher.png" alt=""></button>
+    </div>
+  </nav>
+</div>
+<script type="module" src="./launcher.js"></script>
+</body></html>
