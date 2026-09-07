@@ -41,6 +41,7 @@ for (const id of selected) {
       assert.equal(report.ready, true, `${id}/${mode}: main process non pronto`);
       assert.equal(report.loaded, id === "suite" || mode === "active", `${id}/${mode}: policy licenza errata (${JSON.stringify(report)})`);
       assert.deepEqual(report.errors, [], `${id}/${mode}: errore main/renderer`);
+      if (id === "suite" || mode === "active") assert.deepEqual(report.dialogs, [], `${id}/${mode}: errore di avvio`);
       console.log(`PASS installato ${id} ${metadata.version}: ${mode}, import ${seen.size}`);
     } finally {
       assert.ok(resolve(temporary).startsWith(temporaryBase + "\\"));
