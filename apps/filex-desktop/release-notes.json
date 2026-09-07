@@ -450,6 +450,9 @@
       "Nel preset studio lo sfondo può essere uniformato o sostituito localmente con BiRefNet MIT, senza costi per immagine e senza upload.",
       "Il nuovo pannello FileX mostra l'anteprima reale, permette di scegliere stampante e copie e conserva l'accesso alle proprietà avanzate del driver.",
       "Il fotografo può continuare a usare Photoshop su una copia gestita, senza cambiamenti obbligatori al proprio metodo di lavoro."
+    ],
+    "0.1.3": [
+      "Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida."
     ]
   },
   "suite": {
