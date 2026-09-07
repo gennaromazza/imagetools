@@ -74,7 +74,7 @@
 
 - Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida.
 
-## Non rilasciato — 2026-09-07
+## Note comuni del ciclo di release — 2026-09-07
 
 ### Prova gratuita e controllo licenze
 
