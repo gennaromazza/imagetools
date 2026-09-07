@@ -356,7 +356,7 @@ function testDescription(name: string): string {
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
-    "test:filex-trial": "Verifica prova di 30 giorni, account, reinstallazione, firme, cache, avviso e chiusura dopo 60 secondi, annullamento dopo rinnovo e rifiuto della licenza anche con errori disco.",
+    "test:filex-trial": "Verifica prova di 30 giorni, account, firme, DPAPI Windows e migrazione fra profili, concorrenza, cache, avviso e chiusura dopo 60 secondi e annullamento dopo rinnovo.",
     "test:filex-installed-licenses": "Avvia gli installer con profili isolati: controlla import, versione, licenza reale, blocchi, migrazione dei vecchi token e validazione online obbligatoria. Richiede componenti aggiornati, rete e licenza reale attiva.",
     "test:filex-trial-ui": "Controlla in Electron primo avvio, attivazione prova, passaggio all'acquisto e consenso sul sito con servizi simulati, senza dati reali.",
     "test:filex-license-emulator": "Verifica API licenze con veri emulatori Firebase Auth/Firestore: concorrenza, email verificata, riattivazione, scadenza, rimborsi e due PC. Richiede Java 21; non usa dati reali.",

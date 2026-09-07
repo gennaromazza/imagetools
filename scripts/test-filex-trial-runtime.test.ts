@@ -69,11 +69,12 @@ function runtime(path: string, store: any, now = issuedAt + 1000, machine = guid
 for (const path of ["apps/filex-desktop/src/license-service.ts", ...["cache-sweep", "filex-send", "backup-guard"].map(tool => `apps/${tool}/electron/license-gate.ts`)]) {
   test(`${path}: real Windows DPAPI shares tokens across profiles, rejects corruption and recovers legacy Suite keys`, { skip: process.platform !== "win32" }, async () => {
     const fixtureToken = "filex-fixture-token-" + randomBytes(16).toString("hex");
-    const source = runtime(path, {}, issuedAt, guid, undefined, { realDpapi: true, wrongProfile: true });
+    const source = runtime("apps/filex-desktop/src/license-service.ts", {}, issuedAt, guid, undefined, { realDpapi: true, wrongProfile: true });
     const encrypted = source.cryptoForTest.encryptToken(fixtureToken);
     assert.match(encrypted, /^dpapi-v1:/);
     const destination = runtime(path, {}, issuedAt, guid, undefined, { realDpapi: true, wrongProfile: true });
     assert.equal(await destination.cryptoForTest.decryptToken(encrypted), fixtureToken);
+    assert.equal(await source.cryptoForTest.decryptToken(destination.cryptoForTest.encryptToken(fixtureToken + "-roundtrip")), fixtureToken + "-roundtrip");
     const corrupted = Buffer.from(encrypted.slice("dpapi-v1:".length), "base64"); corrupted[corrupted.length - 1] ^= 1;
     assert.equal(await destination.cryptoForTest.decryptToken("dpapi-v1:" + corrupted.toString("base64")), null);
     const key = randomBytes(32); const nonce = randomBytes(12); const cipher = createCipheriv("aes-256-gcm", key, nonce);
