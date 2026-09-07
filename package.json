@@ -78,6 +78,7 @@
     "test:filex-trial-ui": "node scripts/test-filex-trial-ui.mjs",
     "test:filex-license-emulator": "node scripts/test-filex-license-emulator.mjs",
     "test:filex-license-coverage": "tsx scripts/test-filex-license-coverage.ts",
+    "test:filex-installed-licenses": "node scripts/test-filex-installed-licenses.mjs",
     "license:status": "node scripts/filex-license-admin.mjs status",
     "license:observe": "node scripts/filex-license-admin.mjs enforcement observe",
     "license:bootstrap-commerce": "node scripts/bootstrap-paypal-commerce.mjs",

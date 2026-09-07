@@ -300,6 +300,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
   if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-suite-dock-startup" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
   if (name === "test:filex-license-coverage") return "licenses";
+  if (name === "test:filex-installed-licenses") return "licenses";
   if (name === "test:filex-trial") return "licenses";
   if (name === "test:filex-trial-ui") return "licenses";
   if (name === "test:filex-license-emulator") return "licenses";
@@ -356,6 +357,7 @@ function testDescription(name: string): string {
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
     "test:filex-trial": "Verifica prova di 30 giorni, account, reinstallazione, firme, cache, avviso e chiusura dopo 60 secondi, annullamento dopo rinnovo e rifiuto della licenza anche con errori disco.",
+    "test:filex-installed-licenses": "Avvia gli installer presenti sul PC con profili isolati: controlla import, versione, licenza reale, licenza assente e cache contraffatta. Richiede tutti i componenti aggiornati e una licenza firmata attiva.",
     "test:filex-trial-ui": "Controlla in Electron primo avvio, attivazione prova, passaggio all'acquisto e consenso sul sito con servizi simulati, senza dati reali.",
     "test:filex-license-emulator": "Verifica API licenze con veri emulatori Firebase Auth/Firestore: concorrenza, email verificata, riattivazione, scadenza, rimborsi e due PC. Richiede Java 21; non usa dati reali.",
     "test:filex-cloud": "Esegue i test delle funzioni cloud FileX.",
