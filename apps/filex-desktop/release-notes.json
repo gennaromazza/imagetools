@@ -420,6 +420,9 @@
       "Ordinamento per data di scatto EXIF con diagnosi degli orologi sfasati, duplicati rilevati e sfogliamento piu fluido.",
       "Rinomina batch con anteprima, ordine manuale della griglia ed esportazione integrata con Image Converter.",
       "Condivisione da Quick Preview: copia, WhatsApp con numero, email e download."
+    ],
+    "0.1.40": [
+      "Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida."
     ]
   },
   "id-photo": {

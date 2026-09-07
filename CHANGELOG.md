@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-07 - Image Select Pro 0.1.40
+
+- Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida.
+
 ## Non rilasciato — 2026-09-07
 
 ### Prova gratuita e controllo licenze
