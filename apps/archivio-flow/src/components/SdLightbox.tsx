@@ -5,6 +5,7 @@ import { getArchivioFullPreviewBlob, warmArchivioFullPreview } from "../archivio
 
 interface Props {
   files: PreviewMediaFile[];
+  sourceIdentity?: string;
   index: number;
   onIndexChange: (index: number) => void;
   onClose: () => void;
@@ -16,7 +17,7 @@ function fitMaxDimension(): number {
   return Math.min(2560, Math.ceil(viewport * ratio));
 }
 
-export function SdLightbox({ files, index, onIndexChange, onClose }: Props) {
+export function SdLightbox({ files, sourceIdentity, index, onIndexChange, onClose }: Props) {
   const file = files[index] ?? null;
   const [blob, setBlob] = useState<Blob | null>(null);
   const [src, setSrc] = useState<string | null>(null);
@@ -47,7 +48,7 @@ export function SdLightbox({ files, index, onIndexChange, onClose }: Props) {
     setShareOpen(false);
     setShareMessage(null);
     setWaAskPhone(false);
-    const sourceKey = buildPreviewSourceKey(file);
+    const sourceKey = buildPreviewSourceKey(file, sourceIdentity);
     void getArchivioFullPreviewBlob(file.filePath, maxDimension, sourceKey)
       .then((nextBlob) => {
         if (!alive) return;
@@ -66,14 +67,14 @@ export function SdLightbox({ files, index, onIndexChange, onClose }: Props) {
     for (const delta of [1, -1, 2, -2]) {
       const neighbor = files[(index + delta + files.length) % files.length];
       if (neighbor && neighbor.filePath !== file.filePath) {
-        warmArchivioFullPreview(neighbor.filePath, maxDimension, buildPreviewSourceKey(neighbor));
+        warmArchivioFullPreview(neighbor.filePath, maxDimension, buildPreviewSourceKey(neighbor, sourceIdentity));
       }
     }
     return () => {
       alive = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file, files, index, maxDimension]);
+  }, [file, files, index, maxDimension, sourceIdentity]);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;

@@ -310,6 +310,11 @@
     "0.1.41": [
       "Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida.",
       "Token licenza condiviso fra i profili FileX dello stesso utente Windows, migrazione automatica dei token precedenti e collaudo online sugli installer."
+    ],
+    "0.1.42": [
+      "Importazione SD più affidabile su schede grandi: inventario progressivo, paginazione cronologica e gruppi di scatto modificabili anche oltre la mezzanotte.",
+      "Selezione esplicita dei file importati, protezione dalle richieste concorrenti e avanzamento correlato alla singola operazione; anteprime virtualizzate con coda annullabile e cache separata per scheda.",
+      "Aggiornati i test disponibili dalla Dev Console e le pagine ufficiali con il nuovo flusso di importazione."
     ]
   },
   "image-converter": {

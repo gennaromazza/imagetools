@@ -16,6 +16,6 @@ export function isPreviewableMedia(file: PreviewMediaFile): boolean {
   return file.mediaType === "photo" || file.mediaType === "video";
 }
 
-export function buildPreviewSourceKey(file: PreviewMediaFile): string {
-  return `${file.size}:${Math.trunc(file.mtimeMs)}`;
+export function buildPreviewSourceKey(file: Pick<PreviewMediaFile, "size" | "mtimeMs">, sourceIdentity?: string): string {
+  return `${sourceIdentity ? `${sourceIdentity}:` : ""}${file.size}:${file.mtimeMs}`;
 }

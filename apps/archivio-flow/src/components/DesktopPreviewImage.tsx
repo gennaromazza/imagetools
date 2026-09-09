@@ -23,7 +23,8 @@ export function DesktopPreviewImage({ sdPath, filePath, sourceFileKey, alt, styl
 
     void getArchivioPreviewImageUrl(sdPath, filePath, sourceFileKey, controller.signal)
       .then((nextUrl) => {
-        if (!alive || !nextUrl) return;
+        if (!alive) { if (nextUrl) URL.revokeObjectURL(nextUrl); return; }
+        if (!nextUrl) { setStatus("error"); return; }
         objectUrl = nextUrl;
         setSrc(nextUrl);
         setStatus("ready");

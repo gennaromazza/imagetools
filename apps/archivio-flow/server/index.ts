@@ -12,10 +12,11 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { StudioFlowStore, type ImportSessionRecord } from "./studioflow-store.js";
 import { resolveDestination, type CategoryMapping } from "./destination-resolver.js";
 import { createBloomFilter } from "./bloom-filter.js";
-import type { ArchivioArchiveRenameProgress } from "@photo-tools/desktop-contracts";
+import type { ArchivioArchiveRenameProgress, ArchivioImportRequest, ArchivioFilterPreviewData } from "@photo-tools/desktop-contracts";
 
 const app = express();
 app.use(cors());
+app.use("/api/import", express.json({ limit: "16mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 const PORT = parseInt(process.env.PORT ?? "3003", 10);
@@ -177,23 +178,7 @@ export interface ArchiveHierarchyConfig {
   jobLevel: number;
 }
 
-export interface ImportRequest {
-  sdPath: string;
-  nomeLavoro: string;
-  dataLavoro: string;
-  autore: string;
-  destinazione: string;
-  sottoCartella: string;
-  contrattoLink?: string;
-  existingJobId?: string;
-  rinominaFile: boolean;
-  generaJpg: boolean;
-  fileNameIncludes?: string;
-  mtimeFrom?: string;
-  mtimeTo?: string;
-  categoryKey?: string;
-  destinationOverride?: boolean;
-}
+export type ImportRequest = ArchivioImportRequest;
 
 export interface CardSnapshot {
   id: string;
@@ -226,6 +211,7 @@ interface FilterCriteria {
 }
 
 export interface ImportProgressState {
+  operationId?: string;
   active: boolean;
   phase: "idle" | "copying" | "compressing" | "done" | "error";
   startedAt: number | null;
@@ -2782,7 +2768,7 @@ function computeEstimatedRemainingSec(snapshot: ImportProgressState): number | n
 }
 
 function getImportPhaseLabel(snapshot: ImportProgressState): string {
-  if (snapshot.phase === "idle") return "In attesa";
+  if (snapshot.phase === "idle") return snapshot.active ? "Preparazione importazione" : "In attesa";
   if (snapshot.phase === "done") return "Completato";
   if (snapshot.phase === "error") return snapshot.error?.includes("annullata") ? "Import annullato" : "Errore import";
   if (snapshot.phase === "compressing") {
@@ -3177,7 +3163,7 @@ const safeToFormatHandler = async (req: Request, res: Response) => {
 app.post("/api/sd/safe-to-format", safeToFormatHandler);
 
 const studioFlowStatusHandler = (_req: Request, res: Response) => {
-  res.json({ health: studioFlowStore.health(), archiveIndex: getArchiveIndexStatus(), sessions: studioFlowStore.listSessions(50), resumable: studioFlowStore.listResumableSessions() });
+  res.json({ health: studioFlowStore.health(), archiveIndex: getArchiveIndexStatus(), sessions: studioFlowStore.listSessions(50).map((session) => ({ ...session, ...studioFlowStore.getSessionMediaBounds(session.id) })), resumable: studioFlowStore.listResumableSessions() });
 };
 app.get("/api/studioflow/status", studioFlowStatusHandler);
 const driveRegistryBatchHandler = (_req: Request, res: Response) => {
@@ -3213,6 +3199,47 @@ app.post("/api/archive/reconcile", reconcileArchiveIndexHandler);
  * POST /api/filter-preview
  * Lightweight preview for multi-job SD filtering.
  */
+// Session-scoped inventories avoid rescanning removable media for every page.
+// A new card/explicit refresh uses a new session; this is never an archive proof.
+type SdInventory = { files: Array<{ filePath: string; size: number; mtimeMs: number }>; complete: boolean; error?: string; touched: number; cancelled: boolean };
+const sdInventories = new Map<string, SdInventory>();
+async function readSdInventory(root: string, session: string): Promise<SdInventory> {
+  const key = `${root}\0${session}`;
+  const now = Date.now();
+  for (const [oldKey, old] of sdInventories) {
+    if (now - old.touched > 15 * 60_000) { old.cancelled = true; sdInventories.delete(oldKey); }
+  }
+  let inventory = sdInventories.get(key);
+  if (!inventory) {
+    while (sdInventories.size >= 4) {
+      const oldest = [...sdInventories].sort((a, b) => a[1].touched - b[1].touched)[0]!;
+      oldest[1].cancelled = true;
+      sdInventories.delete(oldest[0]);
+    }
+    inventory = { files: [], complete: false, touched: now, cancelled: false };
+    sdInventories.set(key, inventory);
+    const target = inventory;
+    void (async () => {
+      try {
+        for await (const filePath of walkFiles(root)) {
+          if (target.cancelled) return;
+          if (!isCopyableFile(filePath)) continue;
+          const stat = await fs.promises.stat(filePath);
+          target.files.push({ filePath, size: stat.size, mtimeMs: stat.mtimeMs });
+        }
+      } catch (error) { target.error = String(error); }
+      finally { target.complete = true; }
+    })();
+    // Return the first useful batch, without waiting for the complete card.
+    const deadline = Date.now() + 150;
+    while (!inventory.complete && inventory.files.length < 48 && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  }
+  inventory.touched = now;
+  return inventory;
+}
+
 const getFilterPreviewHandler = async (req: Request, res: Response) => {
   const {
     sdPath,
@@ -3220,12 +3247,18 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
     mtimeFrom,
     mtimeTo,
     maxSamples,
+    sampleOffset,
+    groupGapHours,
+    inventorySession,
   } = req.body as {
     sdPath?: string;
     fileNameIncludes?: string;
     mtimeFrom?: string;
     mtimeTo?: string;
     maxSamples?: number;
+    sampleOffset?: number;
+    groupGapHours?: number;
+    inventorySession?: string;
   };
 
   if (!sdPath?.trim()) {
@@ -3248,6 +3281,19 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
     return void res.status(400).json({ error: filter.error });
   }
 
+  if (sampleOffset !== undefined && (!Number.isInteger(sampleOffset) || sampleOffset < 0)) {
+    return void res.status(400).json({ error: "Pagina anteprima non valida" });
+  }
+  if (groupGapHours !== undefined && (!Number.isFinite(groupGapHours) || groupGapHours < 0.01 || groupGapHours > 168)) {
+    return void res.status(400).json({ error: "La pausa deve essere tra 0,01 e 168 ore" });
+  }
+  if (inventorySession !== undefined && (typeof inventorySession !== "string" || !/^[a-zA-Z0-9-]{1,100}$/.test(inventorySession))) {
+    return void res.status(400).json({ error: "Sessione scheda non valida" });
+  }
+  const inventory = inventorySession ? await readSdInventory(sdNorm, inventorySession) : null;
+  if (inventory?.error) return void res.status(409).json({ error: `Lettura SD interrotta: ${inventory.error}. Aggiorna la scheda.` });
+  const inventoryComplete = inventory ? inventory.complete : true;
+  const inventoryFiles = inventory?.files.slice();
   const sampleLimit = Math.max(1, Math.min(5000, Number(maxSamples) || 36));
   let scannedFiles = 0;
   let matchedFiles = 0;
@@ -3266,21 +3312,23 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
     isJpg: boolean;
     mediaType: "photo" | "video" | "other";
   };
+  const timeline: ArchivioFilterPreviewData["sampleFiles"] = [];
   const sampleRawFiles: FilterPreviewSample[] = [];
   const sampleMediaFiles: FilterPreviewSample[] = [];
 
-  for await (const srcFile of walkFiles(sdNorm)) {
+  async function* sourceEntries() {
+    if (inventoryFiles) { yield* inventoryFiles; return; }
+    for await (const filePath of walkFiles(sdNorm)) {
+      if (!isCopyableFile(filePath)) continue;
+      try { const stat = await fs.promises.stat(filePath); yield { filePath, size: stat.size, mtimeMs: stat.mtimeMs }; } catch { /* legacy scan tolerates vanished files */ }
+    }
+  }
+  for await (const sourceStat of sourceEntries()) {
+    const srcFile = sourceStat.filePath;
     scannedFiles += 1;
     if (!isCopyableFile(srcFile)) continue;
 
     const fileName = path.basename(srcFile);
-    let sourceStat: fs.Stats;
-    try {
-      sourceStat = await fs.promises.stat(srcFile);
-    } catch {
-      continue;
-    }
-
     const sourceMtimeMs = sourceStat.mtimeMs;
     if (!isFileMatchingFilter(fileName, sourceMtimeMs, filter)) {
       continue;
@@ -3299,6 +3347,11 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
 
     minMtimeMs = minMtimeMs === null ? sourceMtimeMs : Math.min(minMtimeMs, sourceMtimeMs);
     maxMtimeMsValue = maxMtimeMsValue === null ? sourceMtimeMs : Math.max(maxMtimeMsValue, sourceMtimeMs);
+
+    if (sampleOffset !== undefined || groupGapHours !== undefined) {
+      timeline.push({ filePath: srcFile, fileName, mtimeMs: sourceMtimeMs, size: sourceStat.size, ext,
+        isJpg, mediaType: isRaw || isStandardPhoto ? "photo" : isVideo ? "video" : "other" });
+    }
 
     if (isRaw && sampleRawFiles.length < sampleLimit) {
       sampleRawFiles.push({
@@ -3352,6 +3405,23 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
 
   sampleFiles.sort((a, b) => a.mtimeMs - b.mtimeMs);
 
+  timeline.sort((left, right) => left.mtimeMs - right.mtimeMs || left.filePath.localeCompare(right.filePath));
+  const timeGroups: NonNullable<ArchivioFilterPreviewData["timeGroups"]> = [];
+  if (groupGapHours !== undefined) {
+    for (const file of timeline) {
+      const last = timeGroups.at(-1);
+      if (!last || file.mtimeMs - last.endMs >= groupGapHours * 3_600_000) {
+        timeGroups.push({ startMs: file.mtimeMs, endMs: file.mtimeMs, fileCount: 1, firstFile: file, lastFile: file });
+      } else {
+        last.endMs = file.mtimeMs;
+        last.lastFile = file;
+        last.fileCount += 1;
+      }
+    }
+  }
+  const inventoryHash = createHash("sha256");
+  for (const file of timeline) inventoryHash.update(JSON.stringify([file.filePath, file.size, file.mtimeMs]));
+  const page = sampleOffset === undefined ? sampleFiles : timeline.slice(sampleOffset, sampleOffset + sampleLimit);
   res.json({
     ok: true,
     scannedFiles,
@@ -3362,7 +3432,11 @@ const getFilterPreviewHandler = async (req: Request, res: Response) => {
     matchedOtherFiles,
     minMtimeMs,
     maxMtimeMs: maxMtimeMsValue,
-    sampleFiles,
+    sampleFiles: page,
+    inventoryComplete,
+    inventoryRevision: sampleOffset === undefined ? undefined : inventoryHash.digest("hex"),
+    nextSampleOffset: sampleOffset === undefined ? undefined : sampleOffset + page.length < timeline.length ? sampleOffset + page.length : null,
+    timeGroups: groupGapHours === undefined ? undefined : timeGroups,
   });
 };
 app.post("/api/filter-preview", getFilterPreviewHandler);
@@ -3451,7 +3525,7 @@ app.get("/api/preview-image", getPreviewImageHandler);
  * Full import pipeline: create folders, copy files, (optionally) rename + compress.
  * Saves job to registry.
  */
-const importHandler = async (req: Request, res: Response) => {
+const runImportHandler = async (req: Request, res: Response) => {
   const startedAt = Date.now();
   importCancelRequested = false;
   const {
@@ -3508,6 +3582,36 @@ const importHandler = async (req: Request, res: Response) => {
 
   if (!fs.existsSync(sdNorm)) {
     return void res.status(400).json({ error: "Percorso SD non trovato: " + sdNorm });
+  }
+
+  const filter = parseFilterCriteria({ fileNameIncludes, mtimeFrom, mtimeTo });
+  if (filter.error) return void res.status(400).json({ error: filter.error });
+
+  let selectedSourcePaths: string[] | undefined;
+  const requestedPaths = (req.body as ImportRequest).selectedFilePaths;
+  if (requestedPaths !== undefined) {
+    if (!Array.isArray(requestedPaths) || requestedPaths.length === 0 || requestedPaths.length > 50_000 || requestedPaths.some((value) => typeof value !== "string" || !value.trim())) {
+      return void res.status(400).json({ error: "Seleziona da 1 a 50000 file validi" });
+    }
+    if (fileNameIncludes || mtimeFrom || mtimeTo) {
+      return void res.status(400).json({ error: "La selezione esplicita non può essere combinata con filtri" });
+    }
+    selectedSourcePaths = [];
+    const seen = new Set<string>();
+    try {
+      const realRoot = await fs.promises.realpath(sdNorm);
+      for (const requested of requestedPaths) {
+        const candidate = path.resolve(requested);
+        const realFile = await fs.promises.realpath(candidate);
+        if (!isSameOrNestedPath(sdNorm, candidate) || !isSameOrNestedPath(realRoot, realFile) || !isCopyableFile(candidate) || !(await fs.promises.stat(realFile)).isFile()) {
+          throw new Error("File fuori dalla scheda o formato non importabile");
+        }
+        const key = process.platform === "win32" ? candidate.toLowerCase() : candidate;
+        if (!seen.has(key)) { seen.add(key); selectedSourcePaths.push(candidate); }
+      }
+    } catch (error) {
+      return void res.status(400).json({ error: `Selezione non più valida: ${String(error)}. Torna alla scheda e seleziona di nuovo i file.` });
+    }
   }
 
   const registeredJobsSnapshot = cleanupMissingJobs();
@@ -3628,12 +3732,6 @@ const importHandler = async (req: Request, res: Response) => {
   const safeData = ymd(effectiveDataLavoro);
   const safeAutore = toSafeId(autore.trim());
   const safeContrattoLink = normalizeContractLink(contrattoLink);
-  const filter = parseFilterCriteria({ fileNameIncludes, mtimeFrom, mtimeTo });
-  if (filter.error) {
-    studioFlowStore.updateSession(importSessionId, { status: "FAILED", completedAt: Date.now(), errorCode: "INVALID_FILTER", errorMessage: filter.error });
-    return void res.status(400).json({ error: filter.error });
-  }
-
   const scanSampleStartedAt = Date.now();
   const sampled = await collectSampleFiles(sdNorm, 50).catch(() => [] as string[]);
   const sampleFiles = sampled.filter((f) => isCopyableFile(f)).slice(0, 30);
@@ -3672,11 +3770,9 @@ const importHandler = async (req: Request, res: Response) => {
   let lastManifestFlushAt = Date.now();
   let manifestFlushChain: Promise<void> = Promise.resolve();
 
-  importProgress = createEmptyImportProgress();
   updateImportProgress({
     active: true,
     phase: "copying",
-    startedAt: Date.now(),
     targetFolder: targetFotoDir,
     jpgEnabled: generaJpg,
     initialCopyConcurrency,
@@ -3818,7 +3914,7 @@ const importHandler = async (req: Request, res: Response) => {
 
     // Determina l'intero piano prima di copiare: il totale mostrato all'utente
     // resta stabile per tutta l'importazione, anche con SD molto grandi.
-    for await (const srcFile of walkFiles(sdNorm)) {
+    for await (const srcFile of selectedSourcePaths ?? walkFiles(sdNorm)) {
       if (importCancelRequested) {
         throw new Error("Importazione annullata");
       }
@@ -4146,6 +4242,20 @@ const importHandler = async (req: Request, res: Response) => {
   });
 
 };
+// Reserve the operation before any discovery, fingerprinting or sampling awaits.
+const importHandler = async (req: Request, res: Response) => {
+  if (importProgress.active || archiveRenameRuntime.active) {
+    return void res.status(409).json({ error: "Un’altra operazione sull’archivio è già in corso." });
+  }
+  importProgress = createEmptyImportProgress();
+  updateImportProgress({ active: true, startedAt: Date.now(), operationId: typeof req.body?.operationId === "string" ? req.body.operationId : randomUUID() });
+  try {
+    await runImportHandler(req, res);
+  } finally {
+    // Validation and preparation failures must also release the operation.
+    if (importProgress.active) updateImportProgress({ active: false, phase: "error", error: "Importazione non completata" });
+  }
+};
 app.post("/api/import", importHandler);
 
 const resumeImportHandler = async (req: Request, res: Response) => {
@@ -4156,7 +4266,7 @@ const resumeImportHandler = async (req: Request, res: Response) => {
   if (!payload) return void res.status(409).json({ error: "Dati originali della sessione non disponibili" });
   if (!fs.existsSync(session.sourceRoot)) return void res.status(409).json({ error: "Ricollega la scheda sorgente prima di riprendere" });
   studioFlowStore.updateSession(sessionId, { status: "CANCELLED", completedAt: Date.now(), errorCode: "SUPERSEDED_BY_RESUME", errorMessage: "Ripresa in una nuova sessione" });
-  await importHandler({ ...req, body: payload } as Request, res);
+  await importHandler({ ...req, body: { ...payload, operationId: randomUUID() } } as Request, res);
 };
 app.post("/api/import-sessions/:id/resume", resumeImportHandler);
 
@@ -4725,16 +4835,10 @@ export async function getFilterPreviewService(input: {
   mtimeFrom?: string;
   mtimeTo?: string;
   maxSamples?: number;
-}): Promise<{
-  ok: true;
-  scannedFiles: number;
-  matchedFiles: number;
-  matchedRawFiles: number;
-  matchedJpgFiles: number;
-  minMtimeMs: number | null;
-  maxMtimeMs: number | null;
-  sampleFiles: Array<{ filePath: string; fileName: string; mtimeMs: number; size: number; ext: string; isJpg: boolean }>;
-}> {
+  sampleOffset?: number;
+  groupGapHours?: number;
+  inventorySession?: string;
+}): Promise<ArchivioFilterPreviewData> {
   return unwrapInvocationResult(await invokeHandler(getFilterPreviewHandler, { body: input }));
 }
 
@@ -4858,7 +4962,7 @@ export async function checkSafeToFormatService(sdPath: string): Promise<{
 export async function getStudioFlowStatusService(): Promise<{
   health: ReturnType<StudioFlowStore["health"]>;
   archiveIndex: ArchiveIndexStatus;
-  sessions: Array<Pick<ImportSessionRecord, "id" | "cardSnapshotId" | "jobId" | "archiveId" | "status" | "completedAt" | "verifiedAt" | "plannedFiles" | "verifiedFiles" | "duplicateFiles" | "failedFiles">>;
+  sessions: Array<Pick<ImportSessionRecord, "id" | "cardSnapshotId" | "jobId" | "archiveId" | "status" | "completedAt" | "verifiedAt" | "plannedFiles" | "verifiedFiles" | "duplicateFiles" | "failedFiles"> & { mediaStartMs?: number | null; mediaEndMs?: number | null }>;
   resumable: ImportSessionRecord[];
 }> {
   return unwrapInvocationResult(await invokeHandler(studioFlowStatusHandler, {}));

@@ -24,6 +24,10 @@ try {
     join(root, "apps", "archivio-flow", "server", "tsconfig.json"),
     "utf8",
   );
+  const releaseWorkflow = await readFile(
+    join(root, ".github", "workflows", "windows-release.yml"),
+    "utf8",
+  );
   assert.match(
     mainSource,
     /archivio-flow-server", "server", "index\.js"/u,
@@ -33,6 +37,16 @@ try {
     serverTsConfig,
     /"rootDir": "\.\."/u,
     "La struttura dell'output del server Archivio Flow non e' deterministica.",
+  );
+  assert.match(
+    mainSource,
+    /--filex-archivio-flow-packaged-smoke-test/u,
+    "Il main process Archivio Flow non espone lo smoke test impacchettato.",
+  );
+  assert.match(
+    releaseWorkflow,
+    /Archivio-Flow\.exe[\s\S]*--filex-archivio-flow-packaged-smoke-test/u,
+    "Il workflow di release non esegue lo smoke test impacchettato di Archivio Flow.",
   );
 
   const validArchive = await createFixtureArchive("valid", true);

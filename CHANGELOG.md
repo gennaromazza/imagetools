@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-09 - Archivio Flow 0.1.42
+
+- Importazione SD più affidabile su schede grandi: inventario progressivo, paginazione cronologica e gruppi di scatto modificabili anche oltre la mezzanotte.
+- Selezione esplicita dei file importati, protezione dalle richieste concorrenti e avanzamento correlato alla singola operazione; anteprime virtualizzate con coda annullabile e cache separata per scheda.
+- Aggiornati i test disponibili dalla Dev Console e le pagine ufficiali con il nuovo flusso di importazione.
+
 ## 2026-09-07 - Image Party Frame 0.1.32
 
 - Editor testo sul canvas, font locali, loghi e template portabili; prova All Access di 30 giorni, controllo obbligatorio della licenza, chiusura dopo avviso e token Windows condiviso con migrazione dei profili precedenti.

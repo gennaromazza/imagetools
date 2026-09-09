@@ -1020,6 +1020,9 @@ const isPhotoSelectorPackagedSmokeTest =
 const isIdPhotoPackagedSmokeTest =
   requestedTool.id === "id-photo"
   && process.argv.includes("--filex-id-photo-packaged-smoke-test");
+const isArchivioFlowPackagedSmokeTest =
+  requestedTool.id === "archivio-flow"
+  && process.argv.includes("--filex-archivio-flow-packaged-smoke-test");
 const hasSingleInstanceLock = app.requestSingleInstanceLock({
   requestedToolId: requestedTool.id,
   openFolderPath: initialOpenFolderPath,
@@ -2903,7 +2906,7 @@ if (hasSingleInstanceLock) {
       app.exit(0);
       return;
     }
-    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest) {
+    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest) {
       const license = await getLicenseState();
       if (!license.canUseTools) {
         dialog.showErrorBox("FileX All Access", "La licenza FileX non e' attiva. Apri FileX Suite per attivarla o aggiornare il pagamento.");
@@ -2911,7 +2914,7 @@ if (hasSingleInstanceLock) {
         return;
       }
     }
-    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest) startLicenseExpiryWatchdog();
+    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest) startLicenseExpiryWatchdog();
     // Apply the persisted RAM budget before registering IPC handlers so that
     // the cache limits are already in effect when the first thumbnail request arrives.
     const savedPreset = await loadRamBudgetPreset();
@@ -2928,6 +2931,12 @@ if (hasSingleInstanceLock) {
     if (isIdPhotoPackagedSmokeTest) {
       await runIdPhotoPackagedSmokeTest();
       writeBootLog("FileX ID Photo packaged preload and IPC smoke test passed");
+      app.exit(0);
+      return;
+    }
+    if (isArchivioFlowPackagedSmokeTest) {
+      await loadArchivioFlowModule();
+      writeBootLog("Archivio Flow packaged main process smoke test passed");
       app.exit(0);
       return;
     }

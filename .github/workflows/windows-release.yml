@@ -285,6 +285,16 @@ jobs:
               throw "Smoke test main process Image Select Pro fallito con codice $($smoke.ExitCode)"
             }
           }
+          if ($env:FILEX_COMPONENT -eq "archivio-flow") {
+            $smokeExecutable = "apps/filex-desktop/.output/releases/win-unpacked/Archivio-Flow.exe"
+            if (-not (Test-Path -LiteralPath $smokeExecutable)) {
+              throw "Eseguibile Archivio Flow impacchettato non trovato: $smokeExecutable"
+            }
+            $smoke = Start-Process -FilePath $smokeExecutable -ArgumentList "--filex-archivio-flow-packaged-smoke-test" -WindowStyle Hidden -Wait -PassThru
+            if ($smoke.ExitCode -ne 0) {
+              throw "Smoke test main process Archivio Flow fallito con codice $($smoke.ExitCode)"
+            }
+          }
 
       - name: Generate Suite release notes from changelog
         if: steps.release.outputs.component == 'suite'

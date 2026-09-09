@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { suggestImportJobs, type ImportSelection } from "../importSelection";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SdCard, SdPreview, SafeToFormatResult, StudioFlowStatus, ArchivioFlowSettings, ImportRequest, ImportResult, Job, ImportProgressSnapshot, FilterPreviewData } from "../types";
 import {
   browseArchivioFolder,
@@ -32,9 +33,16 @@ import { findSimilarFolderNames } from "../folderSuggestions";
 interface Props {
   onImportDone: (result: ImportResult) => void;
   activeView?: "nuovo" | "impostazioni";
+  isVisible?: boolean;
   existingJobImportId?: string | null;
   initialSdPath?: string | null;
   initialDateFilter?: string | null;
+  initialSelection?: ImportSelection | null;
+  onEditSelection?: () => void;
+  onImportingChange?: (busy: boolean) => void;
+  sourceRevision?: number;
+  selectionRevision?: number;
+  newJobRevision?: number;
 }
 
 type CategoryLayout = "year-category" | "category-year" | "category-only" | "custom";
@@ -85,7 +93,7 @@ interface ImportedRangeRecord {
 }
 type ImportValidationField =
   | "sdPath"
-  | "hasMultipleJobsOnSd"
+  | "showSelectionFilters"
   | "filters"
   | "rangeOverlap"
   | "nomeLavoro"
@@ -231,7 +239,7 @@ async function showCompletionDesktopNotification(title: string, body: string) {
   }
 }
 
-export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJobImportId = null, initialSdPath = null, initialDateFilter = null }: Props) {
+export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible = true, existingJobImportId = null, initialSdPath = null, initialDateFilter = null, initialSelection = null, onEditSelection, sourceRevision = 0, selectionRevision = 0, newJobRevision = 0, onImportingChange }: Props) {
   const initialImportPreferencesRef = useRef(readImportUiPreferences());
   // ── SD detection ────────────────────────────────────────────────────────────
   const [sdCards, setSdCards] = useState<SdCard[]>([]);
@@ -253,8 +261,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     const stored = window.localStorage.getItem(SETTINGS_OPEN_SECTION_KEY);
     return stored === "studioflow" || stored === "categorie" ? stored : null;
   });
-  const [hasMultipleJobsOnSd, setHasMultipleJobsOnSd] = useState<boolean | null>(null);
-  const [showMultiJobConfirm, setShowMultiJobConfirm] = useState(false);
+  const [explicitFiles, setExplicitFiles] = useState<string[] | null>(null);
+  const [showSelectionFilters, setShowSelectionFilters] = useState(Boolean(initialDateFilter));
   const [fileNameIncludesFilter, setFileNameIncludesFilter] = useState("");
   const [mtimeFromFilter, setMtimeFromFilter] = useState(() => initialDateFilter ? `${initialDateFilter}T00:00` : "");
   const [mtimeToFilter, setMtimeToFilter] = useState(() => initialDateFilter ? `${initialDateFilter}T23:59:59.999` : "");
@@ -264,14 +272,16 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const [previewRangeStartMs, setPreviewRangeStartMs] = useState<number | null>(null);
   const [previewRangeEndMs, setPreviewRangeEndMs] = useState<number | null>(null);
   const [showVisualRangePicker, setShowVisualRangePicker] = useState(false);
+  const [visualPickerTruncated, setVisualPickerTruncated] = useState(false);
   const [visualPickerSamples, setVisualPickerSamples] = useState<FilterPreviewData["sampleFiles"]>([]);
   const [loadingVisualPicker, setLoadingVisualPicker] = useState(false);
   const [visualPickerError, setVisualPickerError] = useState<string | null>(null);
   const [importedRangesBySd, setImportedRangesBySd] = useState<Record<string, ImportedRangeRecord[]>>({});
-  const [allowRangeOverlap, setAllowRangeOverlap] = useState(false);
+  const [allowRangeOverlap, setAllowRangeOverlap] = useState(true);
 
   // ── Form fields ─────────────────────────────────────────────────────────────
   const [nomeLavoro, setNomeLavoro] = useState("");
+  const jobDateInitializedRef = useRef(false);
   const [dataLavoro, setDataLavoro] = useState(() => initialDateFilter ?? todayIso());
   const [autore, setAutore] = useState(() => initialImportPreferencesRef.current.autore);
   const [contrattoLink, setContrattoLink] = useState("");
@@ -290,6 +300,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const [destinationOverride, setDestinationOverride] = useState(false);
 
   // ── Import state ─────────────────────────────────────────────────────────────
+  const importOperationRef = useRef<string | null>(null);
+  const sourceRequestRef = useRef(0);
+  const sourceIdentityRef = useRef(0);
+  const [sourceDetailsOpen, setSourceDetailsOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importSuccess, setImportSuccess] = useState<ImportResult | null>(null);
@@ -367,20 +381,6 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     if (!sdPath.trim()) {
       issues.push({ field: "sdPath", message: "Seleziona o inserisci il percorso della SD card." });
     }
-    if (hasMultipleJobsOnSd === null) {
-      issues.push({ field: "hasMultipleJobsOnSd", message: "Indica se la SD contiene uno o piu lavori." });
-    }
-
-    const hasFilter = Boolean(
-      fileNameIncludesFilter.trim() || mtimeFromFilter.trim() || mtimeToFilter.trim(),
-    );
-    if (hasMultipleJobsOnSd === true && !hasFilter) {
-      issues.push({
-        field: "filters",
-        message: "Per SD con piu lavori imposta almeno un filtro (nome file o intervallo data/ora).",
-      });
-    }
-
     const rawFrom = mtimeFromFilter.trim();
     const rawTo = mtimeToFilter.trim();
     const fromMs = rawFrom ? Date.parse(rawFrom) : NaN;
@@ -396,7 +396,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       issues.push({ field: "filters", message: "Intervallo data/ora non valido: inizio dopo fine." });
     }
 
-    if (hasMultipleJobsOnSd === true && Number.isFinite(fromMs) && Number.isFinite(toMs)) {
+    if (showSelectionFilters === true && Number.isFinite(fromMs) && Number.isFinite(toMs)) {
       const sdKey = sdPath.trim();
       const currentRanges = importedRangesBySd[sdKey] ?? [];
       const selStart = Math.min(fromMs, toMs);
@@ -405,7 +405,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       if (hasOverlap && !allowRangeOverlap) {
         issues.push({
           field: "rangeOverlap",
-          message: "Il range selezionato si sovrappone a un range gia importato su questa SD.",
+          message: "Il range selezionato si sovrappone a un intervallo usato in questa sessione; non è una verifica dei file archiviati.",
         });
       }
     }
@@ -488,15 +488,59 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   }, [openSettingsSection]);
 
   useEffect(() => {
-    if (initialSdPath?.trim()) setSdPath(initialSdPath);
-  }, [initialSdPath]);
+    setSdPath(initialSdPath ?? "");
+  }, [initialSdPath, sourceRevision]);
 
   useEffect(() => {
-    if (!initialDateFilter) return;
-    setDataLavoro(initialDateFilter);
-    setMtimeFromFilter(`${initialDateFilter}T00:00`);
-    setMtimeToFilter(`${initialDateFilter}T23:59:59.999`);
-  }, [initialDateFilter]);
+    sourceRequestRef.current += 1;
+    sourceIdentityRef.current += 1;
+    setSdPreview(null);
+    setSafeCheck(null);
+    setSafeCheckError(null);
+    setCheckingSafe(false);
+    setFilterPreview(null);
+    setFilterPreviewError(null);
+    setVisualPickerSamples([]);
+    setShowVisualRangePicker(false);
+    setVisualPickerError(null);
+    setLoadingVisualPicker(false);
+    setPreviewRangeStartMs(null);
+    setPreviewRangeEndMs(null);
+    setImportedRangesBySd({});
+    setImportSuccess(null);
+    setImportValidationState([]);
+    setExplicitFiles(null);
+    setFileNameIncludesFilter("");
+    setMtimeFromFilter("");
+    setMtimeToFilter("");
+    setShowSelectionFilters(false);
+  }, [sdPath, sourceRevision]);
+
+  useEffect(() => {
+    if (initialDateFilter && !jobDateInitializedRef.current && !usaLavoroEsistente && !nomeLavoro.trim()) {
+      setDataLavoro(initialDateFilter);
+      jobDateInitializedRef.current = true;
+    }
+    if (initialSelection?.existingJobId) {
+      setUsaLavoroEsistente(true);
+      setExistingJobId(initialSelection.existingJobId);
+    }
+    setExplicitFiles(initialSelection?.selectedFilePaths ?? null);
+    setMtimeFromFilter(initialSelection?.mtimeFrom ?? (initialSelection?.selectedFilePaths ? "" : initialDateFilter ? `${initialDateFilter}T00:00` : ""));
+    setMtimeToFilter(initialSelection?.mtimeTo ?? (initialSelection?.selectedFilePaths ? "" : initialDateFilter ? `${initialDateFilter}T23:59:59.999` : ""));
+    setFileNameIncludesFilter("");
+    setShowSelectionFilters(Boolean(initialDateFilter));
+  }, [initialDateFilter, initialSelection, selectionRevision]);
+
+  useEffect(() => {
+    if (!newJobRevision) return;
+    setUsaLavoroEsistente(false);
+    setExistingJobId("");
+    setNomeLavoro("");
+    setDataLavoro(initialDateFilter ?? todayIso());
+    setContrattoLink("");
+    setImportValidationState([]);
+  }, [newJobRevision]);
 
   useEffect(() => {
     if (!usaLavoroEsistente || !existingJobId) return;
@@ -509,13 +553,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   }, [usaLavoroEsistente, existingJobId, jobsEsistenti]);
 
   useEffect(() => {
-    if (!existingJobImportId) return;
+    if (!existingJobImportId) { setUsaLavoroEsistente(false); return; }
     setUsaLavoroEsistente(true);
     setExistingJobId(existingJobImportId);
     setExistingJobSearch("");
     setSottoCartella("");
     setImportValidationState([]);
-    setShowQuickAddSetup(true);
+    setShowQuickAddSetup(false);
   }, [existingJobImportId]);
 
   useEffect(() => {
@@ -560,12 +604,6 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     try {
       const cards = await getArchivioSdCards();
       setSdCards(cards);
-      const selectedCardStillPresent = cards.some((card) => card.path === sdPath);
-      if (sdPath && !selectedCardStillPresent) {
-        setSdPath(cards[0]?.path ?? "");
-      } else if (cards.length > 0 && !sdPath) {
-        setSdPath(cards[0]!.path);
-      }
     } catch {
       /* ignore transient desktop runtime errors */
     } finally {
@@ -574,10 +612,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   }, [sdPath]);
 
   useEffect(() => {
-    if (activeView !== "nuovo") return;
+    if (!isVisible || activeView !== "nuovo") return;
     const timer = window.setInterval(() => void fetchSdCards(), 2500);
     return () => window.clearInterval(timer);
-  }, [activeView, fetchSdCards]);
+  }, [isVisible, activeView, fetchSdCards]);
 
   async function handleEjectSd() {
     if (!sdPath.trim()) return;
@@ -595,15 +633,20 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   }
 
   async function handleSafeCheck() {
+    const revision = sourceIdentityRef.current;
     if (!sdPath.trim()) return;
     setCheckingSafe(true);
     setSafeCheck(null);
     setSafeCheckError(null);
     try {
-      setSafeCheck(await checkArchivioSafeToFormat(sdPath.trim()));
+      const result = await checkArchivioSafeToFormat(sdPath.trim());
+      if (revision !== sourceIdentityRef.current) return;
+      setSafeCheck(result);
     } catch (error) {
+      if (revision !== sourceIdentityRef.current) return;
       setSafeCheckError(error instanceof Error ? error.message : "Verifica non disponibile");
     } finally {
+      if (revision !== sourceIdentityRef.current) return;
       setCheckingSafe(false);
     }
   }
@@ -623,8 +666,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   }, []);
 
   useEffect(() => {
-    if (activeView === "impostazioni") void refreshStudioFlowStatus();
-  }, [activeView, refreshStudioFlowStatus]);
+    if (isVisible) void refreshStudioFlowStatus();
+  }, [isVisible, activeView, selectionRevision, refreshStudioFlowStatus]);
 
   useEffect(() => {
     if (activeView !== "impostazioni") return;
@@ -744,10 +787,15 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
 
   // Fetch file preview whenever sdPath changes
   useEffect(() => {
+    if (!isVisible) return;
+    if (initialSelection?.sourceSummary && initialSdPath === sdPath) {
+      setSdPreview(initialSelection.sourceSummary);
+      setLoadingSd(false);
+      return;
+    }
     if (!sdPath.trim()) {
       setSdPreview(null);
-      setHasMultipleJobsOnSd(null);
-      setShowMultiJobConfirm(false);
+      setShowSelectionFilters(false);
       setFilterPreview(null);
       setFilterPreviewError(null);
       return;
@@ -761,7 +809,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       .catch(() => { if (alive) setSdPreview(null); })
       .finally(() => { if (alive) setLoadingSd(false); });
     return () => { alive = false; };
-  }, [sdPath]);
+  }, [sdPath, sourceRevision, isVisible, initialSelection?.sourceSummary, initialSdPath]);
 
   // Calcola subito il numero reale dei file quando il flusso arriva dalla
   // selezione per data. Evita di mostrare temporaneamente il totale della SD.
@@ -772,7 +820,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     const mtimeTo = mtimeToFilter.trim();
     const hasActiveFilter = Boolean(fileNameIncludes || mtimeFrom || mtimeTo);
 
-    if (!source || !hasActiveFilter) {
+    if (!isVisible || explicitFiles || !source || !hasActiveFilter) {
       setFilterPreview(null);
       setFilterPreviewError(null);
       setLoadingFilterPreview(false);
@@ -780,10 +828,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     }
 
     let alive = true;
+    setFilterPreview(null);
+    setFilterPreviewError(null);
+    setLoadingFilterPreview(true);
     const timer = window.setTimeout(() => {
-      setFilterPreview(null);
-      setFilterPreviewError(null);
-      setLoadingFilterPreview(true);
       void getArchivioFilterPreview({
         sdPath: source,
         fileNameIncludes: fileNameIncludes || undefined,
@@ -809,9 +857,10 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [sdPath, fileNameIncludesFilter, mtimeFromFilter, mtimeToFilter]);
+  }, [sdPath, sourceRevision, fileNameIncludesFilter, mtimeFromFilter, mtimeToFilter, isVisible, explicitFiles]);
 
-  async function handleImport(forceProceed = false) {
+  async function handleImport() {
+    if (importing) return;
     setImportError(null);
     setImportSuccess(null);
     setImportProgress(null);
@@ -828,15 +877,16 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       return;
     }
     setImportValidationState([]);
-    if (hasMultipleJobsOnSd === true && !forceProceed) {
-      setShowMultiJobConfirm(true);
-      return;
-    }
 
+
+    importOperationRef.current = crypto.randomUUID();
     setImportStartedAt(Date.now());
     setImporting(true);
+    onImportingChange?.(true);
     try {
       const importResult = await startArchivioImport({
+        operationId: importOperationRef.current,
+        selectedFilePaths: explicitFiles ?? undefined,
         sdPath: sdPath.trim(),
         nomeLavoro: nomeLavoro.trim(),
         dataLavoro,
@@ -847,15 +897,15 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
         existingJobId: usaLavoroEsistente ? existingJobId : undefined,
         rinominaFile,
         generaJpg,
-        fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
-        mtimeFrom: mtimeFromFilter.trim() || undefined,
-        mtimeTo: mtimeToFilter.trim() || undefined,
+        fileNameIncludes: explicitFiles ? undefined : fileNameIncludesFilter.trim() || undefined,
+        mtimeFrom: explicitFiles ? undefined : mtimeFromFilter.trim() || undefined,
+        mtimeTo: explicitFiles ? undefined : mtimeToFilter.trim() || undefined,
         categoryKey: categoryKey || undefined,
         destinationOverride,
       } satisfies ImportRequest);
         const fromMsDone = mtimeFromFilter.trim() ? Date.parse(mtimeFromFilter.trim()) : NaN;
         const toMsDone = mtimeToFilter.trim() ? Date.parse(mtimeToFilter.trim()) : NaN;
-        if (hasMultipleJobsOnSd === true && Number.isFinite(fromMsDone) && Number.isFinite(toMsDone)) {
+        if (!importResult.incomplete && showSelectionFilters === true && Number.isFinite(fromMsDone) && Number.isFinite(toMsDone)) {
           const startMs = Math.min(fromMsDone, toMsDone);
           const endMs = Math.max(fromMsDone, toMsDone);
           const rangeLabel = usaLavoroEsistente
@@ -875,6 +925,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             ],
           }));
         }
+        setUsaLavoroEsistente(true);
+        setExistingJobId(importResult.job.id);
         setImportSuccess(importResult);
         try {
           await notifyBackupGuardProject(importResult);
@@ -903,6 +955,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       setImportError(message);
     } finally {
       setImporting(false);
+      onImportingChange?.(false);
       setImportStartedAt(null);
     }
   }
@@ -916,6 +969,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     }
   }
 
+  const jobSuggestions = useMemo(() => suggestImportJobs(jobsEsistenti, studioFlowStatus?.sessions ?? [], initialSelection?.suggestedFiles ?? []), [jobsEsistenti, studioFlowStatus?.sessions, initialSelection?.suggestedFiles]);
   const selectedExistingJob = jobsEsistenti.find((j) => j.id === existingJobId) ?? null;
   const similarExistingFolders = usaLavoroEsistente
     ? findSimilarFolderNames(sottoCartella, existingJobFolders)
@@ -1089,7 +1143,15 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     setNewCategoryLayout("year-category");
   }
 
+  useEffect(() => {
+    sourceRequestRef.current += 1;
+    setLoadingVisualPicker(false);
+    setShowVisualRangePicker(false);
+    return () => { sourceRequestRef.current += 1; };
+  }, [sdPath, sourceRevision, fileNameIncludesFilter, mtimeFromFilter, mtimeToFilter]);
+
   async function handleFilterPreview() {
+    const revision = sourceRequestRef.current;
     setFilterPreview(null);
     setFilterPreviewError(null);
     if (!sdPath.trim()) {
@@ -1105,17 +1167,21 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
         mtimeTo: mtimeToFilter.trim() || undefined,
         maxSamples: 36,
       });
+      if (revision !== sourceRequestRef.current) return;
       setFilterPreview(data as FilterPreviewData);
       setPreviewRangeStartMs(null);
       setPreviewRangeEndMs(null);
     } catch (error) {
+      if (revision !== sourceRequestRef.current) return;
       setFilterPreviewError(error instanceof Error ? error.message : "Anteprima filtro non riuscita");
     } finally {
+      if (revision !== sourceRequestRef.current) return;
       setLoadingFilterPreview(false);
     }
   }
 
   async function openVisualRangePicker() {
+    const revision = sourceRequestRef.current;
     setVisualPickerError(null);
     if (!sdPath.trim()) {
       setVisualPickerError("Seleziona prima il percorso SD.");
@@ -1127,15 +1193,20 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       const previewData = await getArchivioFilterPreview({
         sdPath: sdPath.trim(),
         fileNameIncludes: fileNameIncludesFilter.trim() || undefined,
-        mtimeFrom: mtimeFromFilter.trim() || undefined,
-        mtimeTo: mtimeToFilter.trim() || undefined,
         maxSamples: 5000,
       });
+      if (revision !== sourceRequestRef.current) return;
+      setVisualPickerTruncated(previewData.matchedFiles > previewData.sampleFiles.length);
+      if (previewData.matchedFiles > previewData.sampleFiles.length) {
+        setVisualPickerError("Anteprima limitata ai primi 5000 file: per gli altri usa i filtri data/ora.");
+      }
       setVisualPickerSamples(previewData.sampleFiles ?? []);
       setShowVisualRangePicker(true);
     } catch (error) {
+      if (revision !== sourceRequestRef.current) return;
       setVisualPickerError(error instanceof Error ? error.message : "Impossibile aprire il selettore visuale");
     } finally {
+      if (revision !== sourceRequestRef.current) return;
       setLoadingVisualPicker(false);
     }
   }
@@ -1147,17 +1218,14 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      second: "2-digit",
     });
   }
 
   function toDateTimeLocalValue(ms: number): string {
-    const d = new Date(ms);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mm = String(d.getMinutes()).padStart(2, "0");
-    return `${y}-${m}-${day}T${hh}:${mm}`;
+    const date = new Date(ms);
+    const offsetMs = date.getTimezoneOffset() * 60_000;
+    return new Date(ms - offsetMs).toISOString().slice(0, -1);
   }
 
   function selectPreviewPoint(ms: number) {
@@ -1175,8 +1243,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
 
   function applyPreviewRangeToFilters() {
     if (previewRangeStartMs === null || previewRangeEndMs === null) return;
-    setMtimeFromFilter(toDateTimeLocalValue(previewRangeStartMs));
-    setMtimeToFilter(toDateTimeLocalValue(previewRangeEndMs));
+    setMtimeFromFilter(toDateTimeLocalValue(Math.floor(previewRangeStartMs)));
+    setMtimeToFilter(toDateTimeLocalValue(Math.ceil(previewRangeEndMs)));
   }
 
   function handleApplyVisualRange(startMs: number, endMs: number) {
@@ -1184,8 +1252,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     const end = Math.max(startMs, endMs);
     setPreviewRangeStartMs(start);
     setPreviewRangeEndMs(end);
-    setMtimeFromFilter(toDateTimeLocalValue(start));
-    setMtimeToFilter(toDateTimeLocalValue(end));
+    setMtimeFromFilter(toDateTimeLocalValue(Math.floor(start)));
+    setMtimeToFilter(toDateTimeLocalValue(Math.ceil(end)));
     setShowVisualRangePicker(false);
   }
 
@@ -1193,10 +1261,6 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     if (previewRangeStartMs === null) return false;
     if (previewRangeEndMs === null) return ms === previewRangeStartMs;
     return ms >= previewRangeStartMs && ms <= previewRangeEndMs;
-  }
-
-  function isWithinImportedRanges(ms: number): boolean {
-    return importedRangesForCurrentSd.some((r) => ms >= r.startMs && ms <= r.endMs);
   }
 
   function applyImportedRange(range: ImportedRangeRecord) {
@@ -1218,15 +1282,19 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   useEffect(() => {
     if (!importing) return;
     let alive = true;
+    let polling = false;
+    const operationId = importOperationRef.current;
 
     async function pollProgress() {
+      if (polling) return;
+      polling = true;
       try {
         const data = await getArchivioImportProgress() as ImportProgressSnapshot;
-        if (!alive) return;
+        if (!alive || !operationId || data.operationId !== operationId) return;
         setImportProgress(data);
       } catch {
         /* ignore transient polling errors */
-      }
+      } finally { polling = false; }
     }
 
     void pollProgress();
@@ -1279,7 +1347,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
   const hasActiveImportFilter = Boolean(
     fileNameIncludesFilter.trim() || mtimeFromFilter.trim() || mtimeToFilter.trim(),
   );
-  const initialPlannedFiles = hasActiveImportFilter
+  const initialPlannedFiles = explicitFiles ? explicitFiles.length : hasActiveImportFilter
     ? (filterPreview?.matchedFiles ?? 0)
     : (sdPreview?.totalFiles ?? 0);
   const displayedPlannedFiles = importProgress?.plannedFiles || initialPlannedFiles;
@@ -1293,6 +1361,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
     ?? (progressPhase === "compressing" ? "Compressione JPG" : "Preparazione importazione");
 
   function scrollToImportStep(target: React.RefObject<HTMLDivElement | null>) {
+    if (target === sourceStepRef) setSourceDetailsOpen(true);
     target.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -1313,19 +1382,24 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
         </div>
       </div>
 
-      {activeView === "nuovo" && initialDateFilter && (
-        <div className="message-box" role="status" style={{ borderColor: "var(--accent)", margin: 0 }}>
-          Importazione filtrata: verranno copiati soltanto i file del {new Date(`${initialDateFilter}T12:00`).toLocaleDateString("it-IT")}.
+      {activeView === "nuovo" && (
+        <div className="message-box" role="status">
+          <strong>Selezione da importare: </strong>
+          {explicitFiles ? `${explicitFiles.length} file selezionati singolarmente: verranno importati soltanto questi file.` : hasActiveImportFilter ? `${mtimeFromFilter ? formatPreviewDateTime(Date.parse(mtimeFromFilter)) : "inizio scheda"} → ${mtimeToFilter ? formatPreviewDateTime(Date.parse(mtimeToFilter)) : "fine scheda"}${fileNameIncludesFilter ? ` · Nome: ${fileNameIncludesFilter}` : ""}` : "Tutti i file della scheda"}
+          <p>Le date dei file non cambiano la data del lavoro. Puoi includere più giorni nello stesso evento.</p>
+          <button className="secondary-button" onClick={onEditSelection ?? (() => { setSourceDetailsOpen(true); setShowSelectionFilters(true); })}>Modifica selezione sulla scheda</button>
+          <button className="ghost-button" onClick={openVisualRangePicker} disabled={Boolean(explicitFiles) || loadingVisualPicker || !sdPath || importing}>Scegli primo e ultimo scatto</button>
+          {visualPickerError && <p>{visualPickerError}</p>}
         </div>
       )}
 
       {activeView === "nuovo" && (
         <nav className="import-flow-nav" aria-label="Percorso di importazione">
-          <button type="button" onClick={() => scrollToImportStep(sourceStepRef)}>
-            <span>1</span><strong>Origine</strong><small>SD e filtro</small>
-          </button>
           <button type="button" onClick={() => scrollToImportStep(destinationStepRef)}>
-            <span>2</span><strong>Destinazione</strong><small>Lavoro e cartella</small>
+            <span>1</span><strong>Lavoro</strong><small>Nome e dati essenziali</small>
+          </button>
+          <button type="button" onClick={() => scrollToImportStep(sourceStepRef)}>
+            <span>2</span><strong>Origine</strong><small>SD e filtro</small>
           </button>
           <button type="button" onClick={() => scrollToImportStep(confirmStepRef)}>
             <span>3</span><strong>Conferma</strong><small>Riepilogo e import</small>
@@ -1722,457 +1796,39 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       {activeView === "nuovo" && (
         <>
       {/* SD Card section */}
-      <div ref={sourceStepRef} className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
-        <div className="stack">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <span className="import-step__eyebrow">Passo 1</span>
-              <strong>Da dove importare</strong>
-              <p className="import-step__description">Scegli la SD e, solo se necessario, limita i file da copiare.</p>
-            </div>
-            <button
-              className="ghost-button"
-              onClick={fetchSdCards}
-              disabled={refreshingSd}
-              style={{ padding: "0.5rem 0.9rem", fontSize: "0.88rem" }}
-            >
-              {refreshingSd ? "Aggiorno..." : "⟳ Aggiorna"}
-            </button>
-            <button
-              className="ghost-button"
-              onClick={() => void handleEjectSd()}
-              disabled={ejectingSd || !sdCards.some((card) => card.path === sdPath)}
-              style={{ padding: "0.5rem 0.9rem", fontSize: "0.88rem" }}
-            >
-              {ejectingSd ? "Espulsione…" : "⏏ Espelli"}
-            </button>
-          </div>
-
-          {sdFeedback && <p role="status" style={{ color: "var(--text-muted)", margin: 0, fontSize: "0.9rem" }}>{sdFeedback}</p>}
-
-          {sdCards.length > 0 && (
-            <div className="stats-grid">
-              {sdCards.map((card) => (
-                <button
-                  key={card.deviceId}
-                  className={sdPath === card.path ? "stat-card stat-card--highlight" : "stat-card"}
-                  style={{ cursor: "pointer", textAlign: "left" }}
-                  onClick={() => {
-                    setSdPath(card.path);
-                    clearImportValidationField("sdPath");
-                  }}
-                >
-                  <span>{card.volumeName || "SD Card"}</span>
-                  <strong>{card.deviceId}</strong>
-                  <small style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-                    {formatBytes(card.freeSpace)} liberi di {formatBytes(card.totalSize)}
-                  </small>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {sdCards.length === 0 && (
-            <p style={{ color: "var(--text-muted)", margin: 0, fontSize: "0.9rem" }}>
-              Nessuna SD rilevata automaticamente — usa Sfoglia o digita il percorso.
-            </p>
-          )}
-
-          <div className="field">
-            <span>Percorso SD card</span>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <input
-                type="text"
-                value={sdPath}
-                onChange={(e) => {
-                  setSdPath(e.target.value);
-                  clearImportValidationField("sdPath");
-                }}
-                placeholder="E:\\ oppure seleziona con Sfoglia"
-                style={{ flex: 1, ...getInvalidInputStyle("sdPath") }}
-              />
-              <button
-                className="secondary-button"
-                onClick={() => handleBrowse("sd")}
-                disabled={browsingField === "sd"}
-                style={{ flexShrink: 0, padding: "0.7rem 1rem", whiteSpace: "nowrap" }}
-              >
-                {browsingField === "sd" ? "…" : "Sfoglia"}
-              </button>
-            </div>
-          </div>
-
-          {sdPath.trim() && (
-            <div className="stats-grid">
-              <div className="stat-card">
-                <span>File totali</span>
-                <strong>{loadingSd ? "…" : (sdPreview?.totalFiles ?? "—")}</strong>
-              </div>
-              <div className="stat-card stat-card--highlight">
-                <span>File RAW</span>
-                <strong>{loadingSd ? "…" : (sdPreview?.rawFiles ?? "—")}</strong>
-              </div>
-              <div className="stat-card">
-                <span>File JPG</span>
-                <strong>{loadingSd ? "…" : (sdPreview?.jpgFiles ?? "—")}</strong>
-              </div>
-              <div className="stat-card">
-                <span>File video</span>
-                <strong>{loadingSd ? "…" : (sdPreview?.videoFiles ?? "—")}</strong>
-              </div>
-              <div className="stat-card">
-                <span>Altri file</span>
-                <strong>{loadingSd ? "…" : (sdPreview?.otherFiles ?? "—")}</strong>
-              </div>
-            </div>
-          )}
-
-          {sdPath.trim() && (
-            <details
-              className="import-advanced-panel"
-              onToggle={(event) => {
-                if ((event.currentTarget as HTMLDetailsElement).open && !checkingSafe && !safeCheck) {
-                  void handleSafeCheck();
-                }
-              }}
-            >
-              <summary>Verifica sicurezza della SD</summary>
-              <div className="message-box" style={{
-                borderColor: safeCheck?.status === "SAFE" ? "var(--success)" : safeCheck ? "#d4a35c" : "var(--line)",
-              }}>
-              <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-                <div>
-                  <strong>Sicurezza formattazione</strong>
-                  <p style={{ margin: "0.35rem 0 0", color: "var(--text-muted)" }}>
-                    {checkingSafe
-                      ? "Scansione e confronto con l’archivio in corso: attendi l’esito prima di formattare la SD."
-                      : safeCheck?.status === "SAFE"
-                        ? `Tutto a posto: ${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file hanno una copia identica e verificata nell’archivio.`
-                        : safeCheck?.status === "PARTIAL"
-                          ? `Attenzione: ${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file verificati. ${safeCheck.reason ?? "Non formattare ancora la SD."}`
-                          : safeCheck?.status === "UNSAFE"
-                            ? `Non formattare la SD: ${safeCheck.reason ?? "non risulta alcuna copia verificata nell’archivio."}`
-                            : safeCheck?.status === "UNKNOWN"
-                              ? `Esito non disponibile: ${safeCheck.reason ?? "non è possibile stabilire se la SD sia al sicuro."}`
-                              : safeCheckError ?? "Aprendo questa sezione parte automaticamente il controllo. Nessuna formattazione viene eseguita da qui."}
-                  </p>
-                </div>
-                <button className="secondary-button" onClick={handleSafeCheck} disabled={checkingSafe || importing}>
-                  {checkingSafe ? "Verifica in corso…" : safeCheck ? "Ripeti verifica" : "Verifica SD"}
-                </button>
-              </div>
-              </div>
-            </details>
-          )}
-
-          {sdPath.trim() && (
-            <div
-              className="message-box"
-              style={{
-                background: "rgba(255,255,255,0.04)",
-                borderColor:
-                  (invalidImportFields.hasMultipleJobsOnSd || invalidImportFields.filters || invalidImportFields.rangeOverlap)
-                    ? "rgba(212, 163, 156, 0.45)"
-                    : "var(--line)",
-              }}
-            >
-              <p style={{ marginBottom: "0.55rem" }}>
-                <strong>Domanda rapida:</strong> ci sono piu lavori in questa SD?
-              </p>
-              <div className="button-row">
-                <button
-                  className={hasMultipleJobsOnSd === false ? "secondary-button" : "ghost-button"}
-                  onClick={() => {
-                    setHasMultipleJobsOnSd(false);
-                    clearImportValidationField("hasMultipleJobsOnSd");
-                    clearImportValidationField("filters");
-                    clearImportValidationField("rangeOverlap");
-                  }}
-                  style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}
-                >
-                  No, un solo lavoro
-                </button>
-                <button
-                  className={hasMultipleJobsOnSd === true ? "secondary-button" : "ghost-button"}
-                  onClick={() => {
-                    setHasMultipleJobsOnSd(true);
-                    clearImportValidationField("hasMultipleJobsOnSd");
-                  }}
-                  style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}
-                >
-                  Sì, piu lavori
-                </button>
-              </div>
-
-              {hasMultipleJobsOnSd === true && (
-                <div className="stack" style={{ marginTop: "0.55rem", gap: "0.45rem" }}>
-                  <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--text-muted)" }}>
-                    Imposta un filtro per importare solo un lavoro alla volta (senza toccare la SD).
-                  </p>
-
-                  <label className="field">
-                    <span>Filtro nome file contiene (opzionale)</span>
-                    <input
-                      type="text"
-                      value={fileNameIncludesFilter}
-                      onChange={(e) => {
-                        setFileNameIncludesFilter(e.target.value);
-                        clearImportValidationField("filters");
-                        clearImportValidationField("rangeOverlap");
-                      }}
-                      placeholder="es. DSCF oppure IMG_"
-                      style={getInvalidInputStyle("filters")}
-                    />
-                  </label>
-
-                  <div className="inline-grid inline-grid--2">
-                    <DateFilterPicker
-                      label="Data iniziale (opzionale)"
-                      value={mtimeFromFilter}
-                      boundary="start"
-                      invalid={Boolean(invalidImportFields.filters)}
-                      onChange={(value) => {
-                        setMtimeFromFilter(value);
-                        clearImportValidationField("filters");
-                        clearImportValidationField("rangeOverlap");
-                      }}
-                    />
-                    <DateFilterPicker
-                      label="Data finale (opzionale)"
-                      value={mtimeToFilter}
-                      boundary="end"
-                      invalid={Boolean(invalidImportFields.filters)}
-                      onChange={(value) => {
-                        setMtimeToFilter(value);
-                        clearImportValidationField("filters");
-                        clearImportValidationField("rangeOverlap");
-                      }}
-                    />
-                  </div>
-
-                  <label className="check-row" style={{ cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={allowRangeOverlap}
-                      onChange={(e) => {
-                        setAllowRangeOverlap(e.target.checked);
-                        if (e.target.checked) clearImportValidationField("rangeOverlap");
-                      }}
-                      style={{ width: 16, height: 16, cursor: "pointer" }}
-                    />
-                    <span>Consenti sovrapposizione con range già importati</span>
-                  </label>
-
-                  <div className="button-row">
-                    <button
-                      className="secondary-button"
-                      onClick={handleFilterPreview}
-                      disabled={loadingFilterPreview}
-                      style={{ padding: "0.45rem 0.8rem", fontSize: "0.84rem" }}
-                    >
-                      {loadingFilterPreview ? "Anteprima in corso..." : "Anteprima filtro"}
-                    </button>
-                    <button
-                      className="ghost-button"
-                      onClick={openVisualRangePicker}
-                      disabled={loadingVisualPicker || (!filterPreview && !sdPath.trim())}
-                      style={{ padding: "0.45rem 0.8rem", fontSize: "0.84rem" }}
-                    >
-                      {loadingVisualPicker ? "Carico i file multimediali..." : "Selettore visuale"}
-                    </button>
-                  </div>
-
-                  {visualPickerError && (
-                    <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--danger)" }}>
-                      {visualPickerError}
-                    </p>
-                  )}
-
-                  {filterPreviewError && (
-                    <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--danger)" }}>
-                      {filterPreviewError}
-                    </p>
-                  )}
-
-                  {filterPreview && (
-                    <div className="message-box" style={{ background: "rgba(255,255,255,0.03)", borderColor: "var(--line)" }}>
-                      <p style={{ margin: 0 }}>
-                        Match filtro: <strong>{filterPreview.matchedFiles}</strong> file
-                        (foto {filterPreview.matchedRawFiles + filterPreview.matchedJpgFiles}, video {filterPreview.matchedVideoFiles}, altri {filterPreview.matchedOtherFiles})
-                      </p>
-                      <p style={{ margin: "0.35rem 0 0", fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                        Scansionati: {filterPreview.scannedFiles}
-                        {filterPreview.minMtimeMs !== null && filterPreview.maxMtimeMs !== null && (
-                          <> · Intervallo: {formatPreviewDateTime(filterPreview.minMtimeMs)} → {formatPreviewDateTime(filterPreview.maxMtimeMs)}</>
-                        )}
-                      </p>
-
-                      <p style={{ margin: "0.45rem 0 0", fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                        Selezione range: clicca una card per INIZIO, clicca una seconda card per FINE.
-                      </p>
-
-                      <div className="button-row" style={{ marginTop: "0.45rem" }}>
-                        <button
-                          className="ghost-button"
-                          onClick={() => {
-                            setPreviewRangeStartMs(null);
-                            setPreviewRangeEndMs(null);
-                          }}
-                          style={{ padding: "0.4rem 0.7rem", fontSize: "0.82rem" }}
-                        >
-                          Azzera selezione
-                        </button>
-                        <button
-                          className="secondary-button"
-                          onClick={applyPreviewRangeToFilters}
-                          disabled={previewRangeStartMs === null || previewRangeEndMs === null}
-                          style={{ padding: "0.4rem 0.7rem", fontSize: "0.82rem" }}
-                        >
-                          Usa range come filtro lavoro
-                        </button>
-                      </div>
-
-                      {previewRangeStartMs !== null && (
-                        <p style={{ margin: "0.45rem 0 0", fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                          Inizio: {formatPreviewDateTime(previewRangeStartMs)}
-                          {previewRangeEndMs !== null && ` · Fine: ${formatPreviewDateTime(previewRangeEndMs)}`}
-                        </p>
-                      )}
-
-                      {importedRangesForCurrentSd.length > 0 && (
-                        <div style={{ marginTop: "0.6rem" }}>
-                          <p style={{ margin: "0 0 0.35rem", fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                            Range già importati su questa SD:
-                          </p>
-                          <div className="stack" style={{ gap: "0.35rem" }}>
-                            {importedRangesForCurrentSd.map((r, i) => (
-                              <div
-                                key={`${r.startMs}-${r.endMs}-${i}`}
-                                style={{
-                                  display: "flex",
-                                  gap: "0.45rem",
-                                  flexWrap: "wrap",
-                                  alignItems: "center",
-                                  border: "1px solid var(--line)",
-                                  borderRadius: 8,
-                                  padding: "0.35rem 0.45rem",
-                                  background: "rgba(255,255,255,0.02)",
-                                }}
-                              >
-                                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-                                  {r.label}: {formatPreviewDateTime(r.startMs)} → {formatPreviewDateTime(r.endMs)}
-                                </span>
-                                <button
-                                  className="ghost-button"
-                                  onClick={() => applyImportedRange(r)}
-                                  style={{ padding: "0.28rem 0.55rem", fontSize: "0.78rem" }}
-                                >
-                                  Usa
-                                </button>
-                                <button
-                                  className="ghost-button"
-                                  onClick={() => removeImportedRange(i)}
-                                  style={{ padding: "0.28rem 0.55rem", fontSize: "0.78rem" }}
-                                >
-                                  Rimuovi
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {filterPreview.sampleFiles.length > 0 && (
-                        <div style={{ marginTop: "0.6rem", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: "0.5rem" }}>
-                          {filterPreview.sampleFiles.map((f, idx) => (
-                            <div
-                              key={`${f.filePath}-${idx}`}
-                              style={{
-                                border: isWithinSelectedRange(f.mtimeMs)
-                                  ? "1px solid var(--line-strong)"
-                                  : isWithinImportedRanges(f.mtimeMs)
-                                    ? "1px dashed rgba(212,163,156,0.75)"
-                                    : "1px solid var(--line)",
-                                borderRadius: 10,
-                                padding: "0.35rem",
-                                background: "rgba(0,0,0,0.15)",
-                                cursor: "pointer",
-                              }}
-                              onClick={() => selectPreviewPoint(f.mtimeMs)}
-                              title="Clicca per impostare inizio/fine range"
-                            >
-                              {isPreviewableMedia(f) ? (
-                                <DesktopPreviewImage
-                                  sdPath={sdPath.trim()}
-                                  filePath={f.filePath}
-                                  sourceFileKey={buildPreviewSourceKey(f)}
-                                  alt={f.fileName}
-                                  style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 7, marginBottom: "0.35rem" }}
-                                />
-                              ) : (
-                                <div
-                                  style={{
-                                    width: "100%",
-                                    height: 90,
-                                    borderRadius: 7,
-                                    marginBottom: "0.35rem",
-                                    background: "rgba(255,255,255,0.05)",
-                                    display: "grid",
-                                    placeItems: "center",
-                                    color: "var(--text-muted)",
-                                    fontSize: "0.8rem",
-                                  }}
-                                >
-                                  {f.mediaType === "photo" ? "RAW" : "ALTRO"} {f.ext.toUpperCase()}
-                                </div>
-                              )}
-                              <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", wordBreak: "break-all" }}>{f.fileName}</div>
-                              <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>
-                                {formatBytes(f.size)} · {formatPreviewDateTime(f.mtimeMs)}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
       {/* Job data */}
       <div ref={destinationStepRef} className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
         <div className="stack">
           <div>
-            <span className="import-step__eyebrow">Passo 2</span>
+            <span className="import-step__eyebrow">Lavoro</span>
             <strong>Dove salvare i file</strong>
             <p className="import-step__description">Crea un lavoro o aggiungi gli scatti a un lavoro già presente.</p>
           </div>
 
-          <label className="check-row" style={{ cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={usaLavoroEsistente}
-              onChange={(e) => {
-                setUsaLavoroEsistente(e.target.checked);
-                setImportValidationState([]);
-                if (!e.target.checked) {
-                  setExistingJobId("");
-                  setExistingJobSearch("");
-                  clearImportValidationField("nomeLavoro");
-                } else {
-                  setSottoCartella("");
-                  clearImportValidationField("existingJobId");
-                }
-              }}
-              style={{ width: 16, height: 16, cursor: "pointer" }}
-            />
-            <span>Importa in lavoro esistente (stessa cartella principale)</span>
-          </label>
+          <div className="button-row" role="group" aria-label="Lavoro di destinazione">
+            <button className={!usaLavoroEsistente ? "primary-button" : "secondary-button"} aria-pressed={!usaLavoroEsistente} onClick={() => {
+              if (!usaLavoroEsistente) return;
+              setUsaLavoroEsistente(false);
+              setExistingJobId("");
+              setNomeLavoro("");
+              setDataLavoro(initialSelection?.suggestedJobDate ?? initialDateFilter ?? todayIso());
+              jobDateInitializedRef.current = false;
+              setContrattoLink("");
+              setSottoCartella("");
+              setImportValidationState([]);
+            }}>Nuovo lavoro</button>
+            <button className={usaLavoroEsistente ? "primary-button" : "secondary-button"} aria-pressed={usaLavoroEsistente} onClick={() => {
+              setUsaLavoroEsistente(true);
+              setSottoCartella("");
+              setImportValidationState([]);
+            }}>Lavoro esistente</button>
+          </div>
 
+          {explicitFiles && jobSuggestions.length > 0 && <details className="import-advanced-panel">
+            <summary>Lavori suggeriti · {jobSuggestions[0]!.job.nomeLavoro}</summary>
+            <p>Conferma il lavoro: gli orari e le importazioni precedenti sono indizi.</p>
+            {jobSuggestions.map(({ job, reason }) => <div key={job.id} style={{ marginBottom: ".6rem" }}><button className="secondary-button" onClick={() => { setUsaLavoroEsistente(true); setExistingJobId(job.id); setSottoCartella(""); setImportValidationState([]); }}>Usa {job.nomeLavoro} · {job.dataLavoro}</button><small style={{ display: "block" }}>{reason}</small></div>)}
+          </details>}
           {usaLavoroEsistente && (
             <div className="stack" style={{ gap: "0.55rem" }}>
               <label className="field">
@@ -2239,11 +1895,13 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             </label>
 
             <label className="field">
-              <span>Data lavoro</span>
+              <span>Data del lavoro (indipendente dai file selezionati)</span>
               <input
                 type="date"
                 value={dataLavoro}
+                disabled={usaLavoroEsistente}
                 onChange={(e) => {
+                  jobDateInitializedRef.current = true;
                   setDataLavoro(e.target.value);
                   clearImportValidationField("dataLavoro");
                 }}
@@ -2276,6 +1934,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             />
           </label>
 
+          <details><summary>Percorsi e opzioni di importazione</summary>
           {!usaLavoroEsistente && (
             <div className="field">
               <span>{categoryKey && !destinationOverride ? "Destinazione automatica (override opzionale)" : "Cartella di destinazione"}</span>
@@ -2446,10 +2105,436 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
             </label>
             </div>
           </details>
+          </details>
         </div>
       </div>
 
       {/* Error / result feedback */}
+      <div ref={sourceStepRef} className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
+        <details open={sourceDetailsOpen} onToggle={(event) => setSourceDetailsOpen(event.currentTarget.open)}>
+          <summary>Origine, conteggi e filtri avanzati</summary>
+        <div className="stack">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div>
+              <span className="import-step__eyebrow">Origine</span>
+              <strong>Da dove importare</strong>
+              <p className="import-step__description">Scegli la SD e, solo se necessario, limita i file da copiare.</p>
+            </div>
+            <button
+              className="ghost-button"
+              onClick={fetchSdCards}
+              disabled={refreshingSd}
+              style={{ padding: "0.5rem 0.9rem", fontSize: "0.88rem" }}
+            >
+              {refreshingSd ? "Aggiorno..." : "⟳ Aggiorna"}
+            </button>
+            <button
+              className="ghost-button"
+              onClick={() => void handleEjectSd()}
+              disabled={ejectingSd || !sdCards.some((card) => card.path === sdPath)}
+              style={{ padding: "0.5rem 0.9rem", fontSize: "0.88rem" }}
+            >
+              {ejectingSd ? "Espulsione…" : "⏏ Espelli"}
+            </button>
+          </div>
+
+          {sdFeedback && <p role="status" style={{ color: "var(--text-muted)", margin: 0, fontSize: "0.9rem" }}>{sdFeedback}</p>}
+
+          {sdCards.length > 0 && (
+            <div className="stats-grid">
+              {sdCards.map((card) => (
+                <button
+                  key={card.deviceId}
+                  className={sdPath === card.path ? "stat-card stat-card--highlight" : "stat-card"}
+                  style={{ cursor: "pointer", textAlign: "left" }}
+                  onClick={() => {
+                    setSdPath(card.path);
+                    clearImportValidationField("sdPath");
+                  }}
+                >
+                  <span>{card.volumeName || "SD Card"}</span>
+                  <strong>{card.deviceId}</strong>
+                  <small style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                    {formatBytes(card.freeSpace)} liberi di {formatBytes(card.totalSize)}
+                  </small>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {sdCards.length === 0 && (
+            <p style={{ color: "var(--text-muted)", margin: 0, fontSize: "0.9rem" }}>
+              Nessuna SD rilevata automaticamente — usa Sfoglia o digita il percorso.
+            </p>
+          )}
+
+          <div className="field">
+            <span>Percorso SD card</span>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <input
+                type="text"
+                value={sdPath}
+                onChange={(e) => {
+                  setSdPath(e.target.value);
+                  clearImportValidationField("sdPath");
+                }}
+                placeholder="E:\\ oppure seleziona con Sfoglia"
+                style={{ flex: 1, ...getInvalidInputStyle("sdPath") }}
+              />
+              <button
+                className="secondary-button"
+                onClick={() => handleBrowse("sd")}
+                disabled={browsingField === "sd"}
+                style={{ flexShrink: 0, padding: "0.7rem 1rem", whiteSpace: "nowrap" }}
+              >
+                {browsingField === "sd" ? "…" : "Sfoglia"}
+              </button>
+            </div>
+          </div>
+
+          {sdPath.trim() && !explicitFiles && (
+            <div className="stats-grid">
+              <div className="stat-card">
+                <span>File totali</span>
+                <strong>{loadingSd ? "…" : (sdPreview?.totalFiles ?? "—")}</strong>
+              </div>
+              <div className="stat-card stat-card--highlight">
+                <span>File RAW</span>
+                <strong>{loadingSd ? "…" : (sdPreview?.rawFiles ?? "—")}</strong>
+              </div>
+              <div className="stat-card">
+                <span>File JPG</span>
+                <strong>{loadingSd ? "…" : (sdPreview?.jpgFiles ?? "—")}</strong>
+              </div>
+              <div className="stat-card">
+                <span>File video</span>
+                <strong>{loadingSd ? "…" : (sdPreview?.videoFiles ?? "—")}</strong>
+              </div>
+              <div className="stat-card">
+                <span>Altri file</span>
+                <strong>{loadingSd ? "…" : (sdPreview?.otherFiles ?? "—")}</strong>
+              </div>
+            </div>
+          )}
+
+          {sdPath.trim() && (
+            <details
+              className="import-advanced-panel"
+              onToggle={(event) => {
+                if ((event.currentTarget as HTMLDetailsElement).open && !checkingSafe && !safeCheck) {
+                  void handleSafeCheck();
+                }
+              }}
+            >
+              <summary>Verifica sicurezza della SD</summary>
+              <div className="message-box" style={{
+                borderColor: safeCheck?.status === "SAFE" ? "var(--success)" : safeCheck ? "#d4a35c" : "var(--line)",
+              }}>
+              <div style={{ display: "flex", gap: "0.75rem", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                <div>
+                  <strong>Sicurezza formattazione</strong>
+                  <p style={{ margin: "0.35rem 0 0", color: "var(--text-muted)" }}>
+                    {checkingSafe
+                      ? "Scansione e confronto con l’archivio in corso: attendi l’esito prima di formattare la SD."
+                      : safeCheck?.status === "SAFE"
+                        ? `Tutto a posto: ${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file hanno una copia identica e verificata nell’archivio.`
+                        : safeCheck?.status === "PARTIAL"
+                          ? `Attenzione: ${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file verificati. ${safeCheck.reason ?? "Non formattare ancora la SD."}`
+                          : safeCheck?.status === "UNSAFE"
+                            ? `Non formattare la SD: ${safeCheck.reason ?? "non risulta alcuna copia verificata nell’archivio."}`
+                            : safeCheck?.status === "UNKNOWN"
+                              ? `Esito non disponibile: ${safeCheck.reason ?? "non è possibile stabilire se la SD sia al sicuro."}`
+                              : safeCheckError ?? "Aprendo questa sezione parte automaticamente il controllo. Nessuna formattazione viene eseguita da qui."}
+                  </p>
+                </div>
+                <button className="secondary-button" onClick={handleSafeCheck} disabled={checkingSafe || importing}>
+                  {checkingSafe ? "Verifica in corso…" : safeCheck ? "Ripeti verifica" : "Verifica SD"}
+                </button>
+              </div>
+              </div>
+            </details>
+          )}
+
+          {sdPath.trim() && (
+            <div
+              className="message-box"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                borderColor:
+                  (invalidImportFields.showSelectionFilters || invalidImportFields.filters || invalidImportFields.rangeOverlap)
+                    ? "rgba(212, 163, 156, 0.45)"
+                    : "var(--line)",
+              }}
+            >
+              <p style={{ marginBottom: "0.55rem" }}>
+                <strong>Selezione dei file</strong>: importa tutta la scheda oppure delimita un intervallo.
+              </p>
+              <div className="button-row">
+                <button
+                  className={showSelectionFilters === false ? "secondary-button" : "ghost-button"}
+                  onClick={() => {
+                    setShowSelectionFilters(false);
+                    setMtimeFromFilter("");
+                    setMtimeToFilter("");
+                    setFileNameIncludesFilter("");
+                    clearImportValidationField("showSelectionFilters");
+                    clearImportValidationField("filters");
+                    clearImportValidationField("rangeOverlap");
+                  }}
+                  style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}
+                >
+                  Tutta la scheda
+                </button>
+                <button
+                  className={showSelectionFilters === true ? "secondary-button" : "ghost-button"}
+                  onClick={() => {
+                    setShowSelectionFilters(true);
+                    clearImportValidationField("showSelectionFilters");
+                  }}
+                  style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}
+                >
+                  Date / intervallo / nome
+                </button>
+              </div>
+
+              {showSelectionFilters === true && (
+                <div className="stack" style={{ marginTop: "0.55rem", gap: "0.45rem" }}>
+                  <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--text-muted)" }}>
+                    Orari basati sulla modifica dei file (mtime), non sui dati EXIF. Inizio e fine inclusi, anche oltre mezzanotte; i file con lo stesso orario sono inclusi insieme.
+                  </p>
+
+                  <label className="field">
+                    <span>Filtro nome file contiene (opzionale)</span>
+                    <input
+                      type="text"
+                      value={fileNameIncludesFilter}
+                      onChange={(e) => {
+                        setFileNameIncludesFilter(e.target.value);
+                        clearImportValidationField("filters");
+                        clearImportValidationField("rangeOverlap");
+                      }}
+                      placeholder="es. DSCF oppure IMG_"
+                      style={getInvalidInputStyle("filters")}
+                    />
+                  </label>
+
+                  <div className="inline-grid inline-grid--2">
+                    <DateFilterPicker
+                      label="Data iniziale (opzionale)"
+                      value={mtimeFromFilter}
+                      boundary="start"
+                      invalid={Boolean(invalidImportFields.filters)}
+                      onChange={(value) => {
+                        setMtimeFromFilter(value);
+                        clearImportValidationField("filters");
+                        clearImportValidationField("rangeOverlap");
+                      }}
+                    />
+                    <DateFilterPicker
+                      label="Data finale (opzionale)"
+                      value={mtimeToFilter}
+                      boundary="end"
+                      invalid={Boolean(invalidImportFields.filters)}
+                      onChange={(value) => {
+                        setMtimeToFilter(value);
+                        clearImportValidationField("filters");
+                        clearImportValidationField("rangeOverlap");
+                      }}
+                    />
+                  </div>
+
+                  <label className="check-row" style={{ cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={allowRangeOverlap}
+                      onChange={(e) => {
+                        setAllowRangeOverlap(e.target.checked);
+                        if (e.target.checked) clearImportValidationField("rangeOverlap");
+                      }}
+                      style={{ width: 16, height: 16, cursor: "pointer" }}
+                    />
+                    <span>Consenti sovrapposizione con intervalli usati in questa sessione</span>
+                  </label>
+
+                  <div className="button-row">
+                    <button
+                      className="secondary-button"
+                      onClick={handleFilterPreview}
+                      disabled={loadingFilterPreview}
+                      style={{ padding: "0.45rem 0.8rem", fontSize: "0.84rem" }}
+                    >
+                      {loadingFilterPreview ? "Anteprima in corso..." : "Anteprima filtro"}
+                    </button>
+                    <button
+                      className="ghost-button"
+                      onClick={openVisualRangePicker}
+                      disabled={loadingVisualPicker || (!filterPreview && !sdPath.trim())}
+                      style={{ padding: "0.45rem 0.8rem", fontSize: "0.84rem" }}
+                    >
+                      {loadingVisualPicker ? "Carico i file multimediali..." : "Selettore visuale"}
+                    </button>
+                  </div>
+
+                  {visualPickerError && (
+                    <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--danger)" }}>
+                      {visualPickerError}
+                    </p>
+                  )}
+
+                  {filterPreviewError && (
+                    <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--danger)" }}>
+                      {filterPreviewError}
+                    </p>
+                  )}
+
+                  {filterPreview && (
+                    <div className="message-box" style={{ background: "rgba(255,255,255,0.03)", borderColor: "var(--line)" }}>
+                      <p style={{ margin: 0 }}>
+                        Match filtro: <strong>{filterPreview.matchedFiles}</strong> file
+                        (foto {filterPreview.matchedRawFiles + filterPreview.matchedJpgFiles}, video {filterPreview.matchedVideoFiles}, altri {filterPreview.matchedOtherFiles})
+                      </p>
+                      <p style={{ margin: "0.35rem 0 0", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                        Scansionati: {filterPreview.scannedFiles}
+                        {filterPreview.minMtimeMs !== null && filterPreview.maxMtimeMs !== null && (
+                          <> · Intervallo: {formatPreviewDateTime(filterPreview.minMtimeMs)} → {formatPreviewDateTime(filterPreview.maxMtimeMs)}</>
+                        )}
+                      </p>
+
+                      <p style={{ margin: "0.45rem 0 0", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                        Selezione range: clicca una card per INIZIO, clicca una seconda card per FINE.
+                      </p>
+
+                      <div className="button-row" style={{ marginTop: "0.45rem" }}>
+                        <button
+                          className="ghost-button"
+                          onClick={() => {
+                            setPreviewRangeStartMs(null);
+                            setPreviewRangeEndMs(null);
+                          }}
+                          style={{ padding: "0.4rem 0.7rem", fontSize: "0.82rem" }}
+                        >
+                          Azzera selezione
+                        </button>
+                        <button
+                          className="secondary-button"
+                          onClick={applyPreviewRangeToFilters}
+                          disabled={previewRangeStartMs === null || previewRangeEndMs === null}
+                          style={{ padding: "0.4rem 0.7rem", fontSize: "0.82rem" }}
+                        >
+                          Usa range come filtro lavoro
+                        </button>
+                      </div>
+
+                      {previewRangeStartMs !== null && (
+                        <p style={{ margin: "0.45rem 0 0", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                          Inizio: {formatPreviewDateTime(previewRangeStartMs)}
+                          {previewRangeEndMs !== null && ` · Fine: ${formatPreviewDateTime(previewRangeEndMs)}`}
+                        </p>
+                      )}
+
+                      {importedRangesForCurrentSd.length > 0 && (
+                        <div style={{ marginTop: "0.6rem" }}>
+                          <p style={{ margin: "0 0 0.35rem", fontSize: "0.82rem", color: "var(--text-muted)" }}>
+                            Intervalli usati in questa sessione (non attestano una copia verificata):
+                          </p>
+                          <div className="stack" style={{ gap: "0.35rem" }}>
+                            {importedRangesForCurrentSd.map((r, i) => (
+                              <div
+                                key={`${r.startMs}-${r.endMs}-${i}`}
+                                style={{
+                                  display: "flex",
+                                  gap: "0.45rem",
+                                  flexWrap: "wrap",
+                                  alignItems: "center",
+                                  border: "1px solid var(--line)",
+                                  borderRadius: 8,
+                                  padding: "0.35rem 0.45rem",
+                                  background: "rgba(255,255,255,0.02)",
+                                }}
+                              >
+                                <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                                  {r.label}: {formatPreviewDateTime(r.startMs)} → {formatPreviewDateTime(r.endMs)}
+                                </span>
+                                <button
+                                  className="ghost-button"
+                                  onClick={() => applyImportedRange(r)}
+                                  style={{ padding: "0.28rem 0.55rem", fontSize: "0.78rem" }}
+                                >
+                                  Usa
+                                </button>
+                                <button
+                                  className="ghost-button"
+                                  onClick={() => removeImportedRange(i)}
+                                  style={{ padding: "0.28rem 0.55rem", fontSize: "0.78rem" }}
+                                >
+                                  Rimuovi
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {filterPreview.sampleFiles.length > 0 && (
+                        <div style={{ marginTop: "0.6rem", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: "0.5rem" }}>
+                          {filterPreview.sampleFiles.map((f, idx) => (
+                            <div
+                              key={`${f.filePath}-${idx}`}
+                              style={{
+                                border: isWithinSelectedRange(f.mtimeMs)
+                                  ? "1px solid var(--line-strong)"
+                                  : "1px solid var(--line)",
+                                borderRadius: 10,
+                                padding: "0.35rem",
+                                background: "rgba(0,0,0,0.15)",
+                                cursor: "pointer",
+                              }}
+                              onClick={() => selectPreviewPoint(f.mtimeMs)}
+                              title="Clicca per impostare inizio/fine range"
+                            >
+                              {isPreviewableMedia(f) ? (
+                                <DesktopPreviewImage
+                                  sdPath={sdPath.trim()}
+                                  filePath={f.filePath}
+                                  sourceFileKey={buildPreviewSourceKey(f)}
+                                  alt={f.fileName}
+                                  style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 7, marginBottom: "0.35rem" }}
+                                />
+                              ) : (
+                                <div
+                                  style={{
+                                    width: "100%",
+                                    height: 90,
+                                    borderRadius: 7,
+                                    marginBottom: "0.35rem",
+                                    background: "rgba(255,255,255,0.05)",
+                                    display: "grid",
+                                    placeItems: "center",
+                                    color: "var(--text-muted)",
+                                    fontSize: "0.8rem",
+                                  }}
+                                >
+                                  {f.mediaType === "photo" ? "RAW" : "ALTRO"} {f.ext.toUpperCase()}
+                                </div>
+                              )}
+                              <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", wordBreak: "break-all" }}>{f.fileName}</div>
+                              <div style={{ fontSize: "0.74rem", color: "var(--text-muted)", marginTop: "0.2rem" }}>
+                                {formatBytes(f.size)} · {formatPreviewDateTime(f.mtimeMs)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        </details>
+      </div>
+
       {importing && (
         <div
           style={{
@@ -2660,7 +2745,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
           </p>
           <div className="import-summary" aria-label="Riepilogo importazione">
             <div><span>Origine</span><strong>{sdPath.trim() || "SD da selezionare"}</strong></div>
-            <div><span>File</span><strong>{hasActiveImportFilter && loadingFilterPreview ? "Calcolo selezione…" : filterPreview ? `${filterPreview.matchedFiles} filtrati` : hasActiveImportFilter ? "Selezione da calcolare" : sdPreview ? `${sdPreview.totalFiles} totali · ${sdPreview.rawFiles} RAW · ${sdPreview.jpgFiles} JPG` : "Da rilevare"}</strong></div>
+            <div><span>File</span><strong>{explicitFiles ? `${explicitFiles.length} selezionati esattamente` : hasActiveImportFilter && loadingFilterPreview ? "Calcolo selezione…" : filterPreview ? `${filterPreview.matchedFiles} filtrati` : hasActiveImportFilter ? "Selezione da calcolare" : sdPreview ? `${sdPreview.totalFiles} totali · ${sdPreview.rawFiles} RAW · ${sdPreview.jpgFiles} JPG` : "Da rilevare"}</strong></div>
             <div><span>Destinazione</span><strong>{folderPreview}</strong></div>
             <div><span>Opzioni</span><strong>{rinominaFile ? "Rinomina attiva" : "Nessuna rinomina"}{generaJpg ? " · JPG BQ" : ""}</strong></div>
           </div>
@@ -2702,7 +2787,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
           <button
             className="primary-button"
             style={{ width: "100%" }}
-            onClick={() => { void handleImport(false); }}
+            onClick={() => { void handleImport(); }}
             disabled={importing}
           >
             {importing ? "Importazione in corso…" : "▶ IMPORTA"}
@@ -2710,92 +2795,6 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
         </div>
       </div>
         </>
-      )}
-
-      {showMultiJobConfirm && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.55)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 50,
-            padding: "1rem",
-          }}
-        >
-          <div
-            className="panel-section"
-            style={{
-              width: "min(640px, 100%)",
-              padding: "1rem",
-              borderColor: "var(--line-strong)",
-            }}
-          >
-            <div className="stack" style={{ gap: "0.7rem" }}>
-              <strong>Conferma import multiplo</strong>
-              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>
-                Hai indicato che questa SD contiene più lavori. Confermi che stai importando solo il primo lavoro
-                (cartella/sottocartella corretta) e che importerai il successivo dopo?
-              </p>
-              <div className="button-row" style={{ justifyContent: "flex-end" }}>
-                <button
-                  className="ghost-button"
-                  onClick={() => setShowMultiJobConfirm(false)}
-                  style={{ padding: "0.55rem 0.9rem", fontSize: "0.88rem" }}
-                >
-                  Annulla
-                </button>
-                <button
-                  className="primary-button"
-                  onClick={() => {
-                    setShowMultiJobConfirm(false);
-                    void handleImport(true);
-                  }}
-                  style={{ padding: "0.55rem 0.95rem", fontSize: "0.88rem" }}
-                >
-                  Conferma e importa
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {pendingSubfolderParent && (
-        <div className="quick-add-modal__backdrop" role="presentation">
-          <div className="panel-section quick-add-modal" role="dialog" aria-modal="true">
-            <div className="stack" style={{ gap: "0.8rem" }}>
-              <div>
-                <span className="import-step__eyebrow">Cartella esistente</span>
-                <h3>{pendingSubfolderParent}</h3>
-                <p>Vuoi aggiungere i file qui oppure creare una sottocartella?</p>
-              </div>
-              <div className="button-row">
-                <button type="button" className="secondary-button" onClick={() => { setSottoCartella(pendingSubfolderParent); setPendingSubfolderParent(null); }}>
-                  Aggiungi in {pendingSubfolderParent}
-                </button>
-              </div>
-              <label className="field">
-                <span>Sottocartella predefinita o personalizzata</span>
-                <input value={newNestedSubfolder} onChange={(event) => setNewNestedSubfolder(event.target.value)} placeholder="es. Camera 2 o Drone" />
-              </label>
-              {cartellePredefinite.length > 0 && (
-                <div className="button-row">
-                  {cartellePredefinite.filter((item) => item !== pendingSubfolderParent).map((item) => (
-                    <button type="button" key={item} className={newNestedSubfolder === item ? "secondary-button" : "ghost-button"} onClick={() => setNewNestedSubfolder(item)}>{item}</button>
-                  ))}
-                </div>
-              )}
-              <div className="button-row" style={{ justifyContent: "flex-end" }}>
-                <button type="button" className="ghost-button" onClick={() => setPendingSubfolderParent(null)}>Annulla</button>
-                <button type="button" className="secondary-button" disabled={!newNestedSubfolder.trim()} onClick={() => { setSottoCartella(`${pendingSubfolderParent}\\${newNestedSubfolder}`); setPendingSubfolderParent(null); }}>
-                  Crea sottocartella
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       )}
 
       {showQuickAddSetup && selectedExistingJob && (
@@ -2861,10 +2860,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", existingJ
       )}
 
       <FilterRangePickerModal
+        sourceIdentity={initialSdPath === sdPath ? initialSelection?.sourceIdentity : undefined}
         open={showVisualRangePicker}
         sdPath={sdPath.trim()}
         samples={visualPickerSamples}
-        importedRanges={importedRangesForCurrentSd}
+        truncated={visualPickerTruncated}
+        importedRanges={[]}
         onClose={() => setShowVisualRangePicker(false)}
         onApplyRange={handleApplyVisualRange}
       />

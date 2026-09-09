@@ -288,7 +288,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:filex-windows-icons") return "suite";
   if (name === "test:filex-suite-launcher") return "suite";
   if (name.startsWith("test:photo-selector-")) return "photo-selector";
-  if (name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-drive-link" || name === "test:archivio-flow-package-runtime" || name === "test:archivio-flow-photo-routing" || name === "test:photo-tool-handoff") return "archivio-flow";
+  if (name === "test:archivio-flow-preview-queue" || name === "test:archivio-flow-selection" || name === "test:archivio-flow-import-workflow" || name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-drive-link" || name === "test:archivio-flow-package-runtime" || name === "test:archivio-flow-photo-routing" || name === "test:photo-tool-handoff") return "archivio-flow";
   if (name === "test:image-party-frame-bug-hunt" || name === "test:image-party-frame-server" || name === "test:image-party-frame-package-runtime") return "image-party-frame";
   if (name === "test:batch-print-layout-bug-hunt" || name === "test:batch-print-layout-desktop-images") return "batch-print-layout";
   if (name === "test:id-photo" || name === "test:id-photo-working-files" || name === "test:id-photo-file-fingerprint" || name === "test:id-photo-unload-guard" || name === "test:id-photo-package-runtime" || name === "test:id-photo-background" || name === "test:id-photo-background-smoke") return "id-photo";
@@ -320,7 +320,10 @@ function testDescription(name: string): string {
     "test:photo-selector-duplicates": "Verifica il raggruppamento dei probabili duplicati per peso e dimensioni, senza falsi positivi.",
     "test:photo-selector-capture-time": "Verifica il parser delle date di scatto EXIF con subsecondi, fusi e valori corrotti.",
     "test:photo-selector-rename": "Verifica anteprima rinomina batch con data scatto, sequenze, collisioni e nomi Windows.",
-    "test:archivio-flow-bug-hunt": "Cerca regressioni con input generati, percorsi ostili e transizioni di importazione vietate.",
+    "test:archivio-flow-preview-queue": "Verifica errori condivisi senza richieste ripetute, cancellazione delle miniature fuori vista, rimontaggi e cache distinta tra schede.",
+    "test:archivio-flow-selection": "Verifica clic e Shift anche oltre le righe visibili, griglia limitata con 20.000 foto, unione e divisione gruppi e suggerimenti oltre mezzanotte.",
+    "test:archivio-flow-import-workflow": "Verifica inventario progressivo e refresh con oltre 5.000 file, selezione esatta, matrimonio oltre mezzanotte e progresso isolato tra copie.",
+    "test:archivio-flow-bug-hunt": "Verifica intervalli oltre mezzanotte, confini temporali, isolamento del progresso tra copie, input ostili e transizioni di importazione vietate.",
     "test:archivio-flow-drive-link": "Verifica il link al registro Drive e il messaggio guidato quando l’API Google è disabilitata.",
     "test:archivio-flow-package-runtime": "Verifica che il server IPC e tutti i suoi import locali siano presenti nell'ASAR di Archivio Flow.",
     "test:archivio-flow-photo-routing": "Verifica selezione persistente, limiti e compatibilità delle foto inviate dalla SD a Party Frame, Batch Layout e ID Photo.",

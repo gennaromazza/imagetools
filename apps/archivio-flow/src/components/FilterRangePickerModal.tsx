@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DesktopPreviewImage } from "./DesktopPreviewImage";
+import { buildPreviewSourceKey } from "../previewPolicy";
 
 export interface PreviewSampleFile {
   filePath: string;
@@ -18,7 +19,9 @@ export interface ImportedRangeMarker {
 
 interface Props {
   open: boolean;
+  truncated?: boolean;
   sdPath: string;
+  sourceIdentity?: string;
   samples: PreviewSampleFile[];
   importedRanges: ImportedRangeMarker[];
   onClose: () => void;
@@ -42,7 +45,9 @@ function formatDateTime(ms: number): string {
 
 export function FilterRangePickerModal({
   open,
+  truncated = false,
   sdPath,
+  sourceIdentity,
   samples,
   importedRanges,
   onClose,
@@ -56,6 +61,27 @@ export function FilterRangePickerModal({
   const autoScrollFrameRef = useRef<number | null>(null);
   const pointerDownIndexRef = useRef<number | null>(null);
   const pointerDragActivatedRef = useRef(false);
+  const [viewport, setViewport] = useState({ top: 0, height: 500, columns: 4 });
+  useEffect(() => {
+    const element = scrollContainerRef.current;
+    if (!open || !element) return;
+    element.scrollTop = 0;
+    const observer = new ResizeObserver(() => setViewport(value => ({ ...value, height: element.clientHeight, columns: Math.max(1, Math.floor((element.clientWidth - 24 + 9) / 169)) })));
+    setViewport(value => ({ ...value, top: 0 }));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [open, samples, sourceIdentity]);
+  useEffect(() => {
+    setAnchorIndex(null);
+    setFocusIndex(null);
+    setIsDragging(false);
+    pointerDownIndexRef.current = null;
+    pointerDragActivatedRef.current = false;
+    dragClientYRef.current = null;
+  }, [samples, sourceIdentity]);
+  const firstRow = Math.min(Math.max(0, Math.ceil(samples.length / viewport.columns) - 1), Math.max(0, Math.floor(viewport.top / 190) - 2));
+  const lastRow = Math.min(Math.ceil(samples.length / viewport.columns), Math.ceil((viewport.top + viewport.height) / 190) + 2);
+  const firstSample = firstRow * viewport.columns;
 
   useEffect(() => {
     if (!open) {
@@ -127,8 +153,15 @@ export function FilterRangePickerModal({
     if (anchorIndex === null || focusIndex === null) return null;
     const start = Math.min(anchorIndex, focusIndex);
     const end = Math.max(anchorIndex, focusIndex);
-    return { start, end };
-  }, [anchorIndex, focusIndex]);
+    // Inclusive time bounds also select all files sharing the boundary timestamp.
+    const startMs = samples[start]?.mtimeMs;
+    const endMs = samples[end]?.mtimeMs;
+    if (startMs === undefined || endMs === undefined) return null;
+    return {
+      start: samples.findIndex((file) => file.mtimeMs === startMs),
+      end: samples.reduce((last, file, index) => file.mtimeMs === endMs ? index : last, end),
+    };
+  }, [anchorIndex, focusIndex, samples]);
 
   const selectedCount = range ? (range.end - range.start + 1) : 0;
 
@@ -244,22 +277,26 @@ export function FilterRangePickerModal({
       >
         <div style={{ padding: "0.8rem 0.9rem", borderBottom: "1px solid var(--line)" }}>
           <strong>Selettore visuale range foto</strong>
+          {truncated && <p role="status">Anteprima parziale: sono mostrate solo le foto caricate. Per gli altri file torna alla griglia SD e carica altre foto, oppure usa i filtri data/ora.</p>}
           <p style={{ margin: "0.25rem 0 0", color: "var(--text-muted)", fontSize: "0.86rem" }}>
-            Clicca una foto per impostare l'inizio, clicca una seconda foto per impostare la fine, oppure trascina direttamente sulle anteprime. Il range verra usato per compilare automaticamente i filtri data/ora.
+            Clicca una foto per impostare l'inizio, clicca una seconda foto per impostare la fine, oppure trascina direttamente sulle anteprime. Puoi attraversare mezzanotte senza cambiare la data del lavoro. Si usa la modifica del file (mtime), non EXIF: confini inclusi e file con lo stesso timestamp selezionati insieme.
           </p>
         </div>
 
         <div
           ref={scrollContainerRef}
-          style={{ overflowY: "auto", padding: "0.75rem" }}
+          style={{ overflowY: "auto", padding: "0.75rem", height: "50vh", minHeight: 200, overflowAnchor: "none" }}
+          onScroll={event => { const top = event.currentTarget.scrollTop; setViewport(value => ({ ...value, top })); }}
           onPointerMove={(event) => {
             if (isDragging || pointerDownIndexRef.current !== null) {
               dragClientYRef.current = event.clientY;
             }
           }}
         >
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: "0.55rem" }}>
-            {samples.map((f, idx) => {
+          <div style={{ height: firstRow * 190 }} />
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${viewport.columns},minmax(0,1fr))`, columnGap: 9, gridAutoRows: 190 }}>
+            {samples.slice(firstSample, lastRow * viewport.columns).map((f, offset) => {
+              const idx = firstSample + offset;
               const selected = isSelectedIndex(idx);
               const imported = isInImportedRange(f.mtimeMs);
               const marker = cardLabel(idx);
@@ -281,6 +318,8 @@ export function FilterRangePickerModal({
                     cursor: "crosshair",
                     userSelect: "none",
                     position: "relative",
+                    height: 181,
+                    overflow: "hidden",
                   }}
                   title="Clicca o trascina per selezionare range"
                 >
@@ -306,7 +345,7 @@ export function FilterRangePickerModal({
                   <DesktopPreviewImage
                     sdPath={sdPath}
                     filePath={f.filePath}
-                    sourceFileKey={`${f.size}:${Math.trunc(f.mtimeMs)}`}
+                    sourceFileKey={buildPreviewSourceKey(f, sourceIdentity)}
                     alt={f.fileName}
                     style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 7, marginBottom: "0.35rem" }}
                   />
@@ -318,6 +357,7 @@ export function FilterRangePickerModal({
               );
             })}
           </div>
+          <div style={{ height: Math.max(0, Math.ceil(samples.length / viewport.columns) - lastRow) * 190 }} />
         </div>
 
         <div

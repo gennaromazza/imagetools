@@ -515,6 +515,10 @@ export class StudioFlowStore {
       );
   }
 
+  getSessionMediaBounds(sessionId: string): { mediaStartMs: number | null; mediaEndMs: number | null } {
+    return this.db.prepare("SELECT MIN(source_mtime_ms) AS mediaStartMs, MAX(source_mtime_ms) AS mediaEndMs FROM import_files WHERE session_id=?").get(sessionId) as { mediaStartMs: number | null; mediaEndMs: number | null };
+  }
+
   listSessions(limit = 100): ImportSessionRecord[] {
     const rows = this.db.prepare("SELECT * FROM import_sessions ORDER BY started_at DESC LIMIT ?").all(limit) as Record<string, unknown>[];
     return rows.map((row) => this.mapSession(row));

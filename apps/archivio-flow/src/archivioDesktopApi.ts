@@ -202,6 +202,9 @@ export async function getArchivioFilterPreview(input: {
   mtimeFrom?: string;
   mtimeTo?: string;
   maxSamples?: number;
+  sampleOffset?: number;
+  inventorySession?: string;
+  groupGapHours?: number;
 }): Promise<FilterPreviewData> {
   const desktopApi = getDesktopApi();
   if (desktopApi) {
@@ -345,24 +348,20 @@ export async function deleteArchivioJob(jobId: string) {
   return await apiDelete<{ ok: true }>(`/api/jobs/${encodeURIComponent(jobId)}`);
 }
 
-const PREVIEW_CACHE_LIMIT = 240;
+const PREVIEW_CACHE_LIMIT = 512;
+const PREVIEW_CACHE_BYTES = 32 * 1024 * 1024;
 const PREVIEW_CONCURRENCY = 6;
 const previewBlobCache = new Map<string, Blob>();
-const previewBlobRequests = new Map<string, Promise<Blob | null>>();
+const SKIPPED_PREVIEW = Symbol("skipped-preview");
+const previewBlobRequests = new Map<string, Promise<Blob | null | typeof SKIPPED_PREVIEW>>();
+const previewDemand = new Map<string, Set<AbortSignal | undefined>>();
 const previewTaskQueue: Array<() => void> = [];
 let activePreviewTasks = 0;
 
 function runPreviewTask<T>(task: () => Promise<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const start = () => {
-      // Nota: qui NON si controlla l'abort del chiamante. La promise è
-      // condivisa (deduplicata per cacheKey in previewBlobRequests) tra tutti
-      // i richiedenti: in dev StrictMode rimonta ogni DesktopPreviewImage e
-      // il primo mount abortisce mentre la richiesta è ancora in coda, e un
-      // reject da abort avvelenerebbe anche il secondo mount in attesa
-      // (tile bloccata su "Anteprima non disponibile" senza retry).
-      // Il componente ignora comunque il risultato se smontato (flag alive);
-      // il lavoro in background completa e scalda le cache.
+      // Subscriber demand is checked inside the shared task when it starts.
       activePreviewTasks += 1;
       void task().then(resolve, reject).finally(() => {
         activePreviewTasks -= 1;
@@ -370,16 +369,19 @@ function runPreviewTask<T>(task: () => Promise<T>): Promise<T> {
       });
     };
     if (activePreviewTasks < PREVIEW_CONCURRENCY) start();
-    else previewTaskQueue.push(start);
+    // Newly visible rows take priority over rows left behind during fast scrolling.
+    else previewTaskQueue.unshift(start);
   });
 }
 
 function rememberPreviewBlob(cacheKey: string, blob: Blob): void {
   previewBlobCache.delete(cacheKey);
   previewBlobCache.set(cacheKey, blob);
-  while (previewBlobCache.size > PREVIEW_CACHE_LIMIT) {
+  let bytes = [...previewBlobCache.values()].reduce((total, item) => total + item.size, 0);
+  while (previewBlobCache.size > PREVIEW_CACHE_LIMIT || bytes > PREVIEW_CACHE_BYTES) {
     const oldestKey = previewBlobCache.keys().next().value as string | undefined;
     if (!oldestKey) break;
+    bytes -= previewBlobCache.get(oldestKey)!.size;
     previewBlobCache.delete(oldestKey);
   }
 }
@@ -393,9 +395,18 @@ async function loadArchivioPreviewBlob(sdPath: string, filePath: string, sourceF
     return cached;
   }
   const pending = previewBlobRequests.get(cacheKey);
-  if (pending) return await pending;
+  if (pending) {
+    previewDemand.get(cacheKey)?.add(signal);
+    const blob = await pending;
+    // A row can reappear just after its abandoned queued task was skipped.
+    if (blob === SKIPPED_PREVIEW && !signal?.aborted) return await loadArchivioPreviewBlob(sdPath, filePath, sourceFileKey, signal);
+    return blob === SKIPPED_PREVIEW ? null : blob;
+  }
+  previewDemand.set(cacheKey, new Set([signal]));
 
-  const request = runPreviewTask(async () => {
+  const request = runPreviewTask<Blob | null | typeof SKIPPED_PREVIEW>(async () => {
+    // Check all subscribers at execution time, preserving StrictMode remounts.
+    if (![...(previewDemand.get(cacheKey) ?? [])].some(consumer => !consumer?.aborted)) return SKIPPED_PREVIEW;
     const desktopApi = getDesktopApi();
     const isVideo = /\.(mp4|mov|m4v|avi|mkv|mts|m2ts|mpg|mpeg|3gp|webm)$/i.test(filePath);
     if (desktopApi && !isVideo) {
@@ -426,10 +437,12 @@ async function loadArchivioPreviewBlob(sdPath: string, filePath: string, sourceF
   previewBlobRequests.set(cacheKey, request);
   try {
     const blob = await request;
+    if (blob === SKIPPED_PREVIEW) return null;
     if (blob) rememberPreviewBlob(cacheKey, blob);
     return blob;
   } finally {
     previewBlobRequests.delete(cacheKey);
+    previewDemand.delete(cacheKey);
   }
 }
 

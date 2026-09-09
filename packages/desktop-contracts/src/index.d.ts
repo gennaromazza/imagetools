@@ -955,6 +955,8 @@ export interface ArchivioSafeToFormatResult {
     sessions: string[];
 }
 export interface ArchivioImportSessionSummary {
+  mediaStartMs?: number | null;
+  mediaEndMs?: number | null;
     id: string;
     jobId: string | null;
     sourceRoot: string;
@@ -1059,6 +1061,10 @@ export interface ArchivioSettings {
     categoryMappings: Array<{ id: string; categoryKey: string; displayName: string; relativePathPattern: string; jobFolderPattern: string; enabled: boolean }>;
 }
 export interface ArchivioImportRequest {
+  /** Elenco esplicito: nessun file esterno a questa selezione viene importato. */
+  selectedFilePaths?: string[];
+  /** Correlazione della richiesta corrente, disponibile anche durante la preparazione. */
+  operationId?: string;
     sdPath: string;
     nomeLavoro: string;
     dataLavoro: string;
@@ -1100,6 +1106,8 @@ export interface BackupGuardProjectNotification {
     fileCount: number;
 }
 export interface ArchivioImportProgressSnapshot {
+  /** Correlazione della richiesta corrente, disponibile anche durante la preparazione. */
+  operationId?: string;
     active: boolean;
     phase: "idle" | "copying" | "compressing" | "done" | "error";
     scannedFiles: number;
@@ -1148,6 +1156,17 @@ export interface ArchivioLowQualityProgressSnapshot {
     progressPct: number;
 }
 export interface ArchivioFilterPreviewData {
+  /** Paginazione cronologica completa, indipendente dal campione di miniature. */
+  nextSampleOffset?: number | null;
+  inventoryRevision?: string;
+  inventoryComplete?: boolean;
+  timeGroups?: Array<{
+    startMs: number;
+    endMs: number;
+    fileCount: number;
+    firstFile: ArchivioFilterPreviewData["sampleFiles"][number];
+    lastFile: ArchivioFilterPreviewData["sampleFiles"][number];
+  }>;
     ok: true;
     scannedFiles: number;
     matchedFiles: number;
@@ -1328,6 +1347,9 @@ export interface FileXDesktopApi {
         mtimeFrom?: string;
         mtimeTo?: string;
         maxSamples?: number;
+    sampleOffset?: number;
+    inventorySession?: string;
+    groupGapHours?: number;
     }) => Promise<ArchivioFilterPreviewData>;
     getArchivioPreviewImage: (sdPath: string, filePath: string) => Promise<DesktopRenderedImage | null>;
     getArchivioStartAtLogin: () => Promise<boolean>;

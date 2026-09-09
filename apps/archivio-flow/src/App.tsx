@@ -8,6 +8,8 @@ import { GoogleDrivePanel } from "./components/GoogleDrivePanel";
 import archivioLogo from "./assets/photo_Archivie.png";
 import archivioPackage from "../package.json";
 
+import type { ImportSelection } from "./importSelection";
+
 type Screen = "sd" | "nuovo" | "archivio" | "drive" | "impostazioni";
 const SIDEBAR_COLLAPSED_KEY = "filex.archivio-flow.sidebar-collapsed";
 
@@ -18,10 +20,15 @@ export default function App() {
   const [archiveAnalyzing, setArchiveAnalyzing] = useState(false);
   const [existingJobImportId, setExistingJobImportId] = useState<string | null>(null);
   const [detectedSdPath, setDetectedSdPath] = useState<string | null>(null);
+  const [newJobRevision, setNewJobRevision] = useState(0);
+  const [sourceRevision, setSourceRevision] = useState(0);
+  const [selectionRevision, setSelectionRevision] = useState(0);
+  const [pendingImportSelection, setPendingImportSelection] = useState<ImportSelection | null>(null);
   const [pendingImportDateFilter, setPendingImportDateFilter] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
   const [backupGuardFeedback, setBackupGuardFeedback] = useState<string | null>(null);
   const [openingBackupGuard, setOpeningBackupGuard] = useState(false);
+  const importBusyRef = useRef(false);
   const knownSdIdentitiesRef = useRef<Map<string, string> | null>(null);
   const detectedSdIdentityRef = useRef<string | null>(null);
 
@@ -49,10 +56,13 @@ export default function App() {
   useEffect(() => {
     let active = true;
 
+    let detecting = false;
     async function detectInsertedSd() {
+      if (detecting) return;
+      detecting = true;
       try {
         const cards = await getArchivioSdCards();
-        if (!active) return;
+        if (!active || importBusyRef.current) return;
         const previousIdentities = knownSdIdentitiesRef.current;
         const detectedCard = cards.find((card) => sdIdentity(card) === detectedSdIdentityRef.current);
         const newCard = previousIdentities === null
@@ -62,17 +72,22 @@ export default function App() {
         if (!detectedCard && detectedSdIdentityRef.current) {
           detectedSdIdentityRef.current = null;
           setDetectedSdPath(null);
+          setSourceRevision((value) => value + 1);
+          setPendingImportDateFilter(null);
+          setPendingImportSelection(null);
           void showArchivioFlowWindow().catch(() => undefined);
         }
         if (newCard) {
           detectedSdIdentityRef.current = sdIdentity(newCard);
           setDetectedSdPath(newCard.path);
-          setExistingJobImportId(null);
+          setSourceRevision((value) => value + 1);
+          setPendingImportDateFilter(null);
+          setPendingImportSelection(null);
           setScreen("sd");
         }
       } catch {
         // Il controllo periodico riproverà: non interrompere la navigazione dell'archivio.
-      }
+      } finally { detecting = false; }
     }
 
     void detectInsertedSd();
@@ -93,6 +108,7 @@ export default function App() {
       next[idx] = result.job;
       return next;
     });
+    setExistingJobImportId(result.job.id);
     if (!result.incomplete) {
       setScreen("archivio");
     }
@@ -192,22 +208,36 @@ export default function App() {
         )}
         <div style={{ display: screen === "sd" ? "block" : "none" }} aria-hidden={screen !== "sd"}>
           <SdCardPreviewPanel
+            key={sourceRevision}
             sdPath={detectedSdPath}
-            onStartImport={(dateFilter) => {
-              setPendingImportDateFilter(dateFilter);
+            sourceIdentity={detectedSdIdentityRef.current ?? undefined}
+            jobs={jobs}
+            onStartImport={(selection, jobId) => {
+              setPendingImportSelection({ ...selection, existingJobId: jobId });
+              if (jobId !== undefined) setExistingJobImportId(jobId);
+              if (jobId === null) setNewJobRevision((value) => value + 1);
+              setPendingImportDateFilter(selection.suggestedJobDate ?? null);
+              setSelectionRevision((value) => value + 1);
               setScreen("nuovo");
             }}
           />
         </div>
-        {(screen === "nuovo" || screen === "impostazioni") && (
+        <div style={{ display: screen === "nuovo" || screen === "impostazioni" ? "block" : "none" }}>
           <NuovoLavoroPanel
             onImportDone={handleImportDone}
+            onImportingChange={(busy) => { importBusyRef.current = busy; }}
             activeView={screen === "impostazioni" ? "impostazioni" : "nuovo"}
+            isVisible={screen === "nuovo" || screen === "impostazioni"}
             existingJobImportId={existingJobImportId}
-            initialSdPath={screen === "nuovo" ? detectedSdPath : null}
-            initialDateFilter={screen === "nuovo" ? pendingImportDateFilter : null}
+            initialSdPath={detectedSdPath}
+            sourceRevision={sourceRevision}
+            selectionRevision={selectionRevision}
+            newJobRevision={newJobRevision}
+            initialDateFilter={pendingImportDateFilter}
+            initialSelection={pendingImportSelection}
+            onEditSelection={() => setScreen("sd")}
           />
-        )}
+        </div>
         <div style={{ display: screen === "archivio" ? "block" : "none" }} aria-hidden={screen !== "archivio"}>
           <ArchivioPanel
             jobs={jobs}
@@ -219,6 +249,10 @@ export default function App() {
               setScreen("nuovo");
             }}
             onNewJob={() => {
+              setNewJobRevision((value) => value + 1);
+              setPendingImportDateFilter(null);
+              setPendingImportSelection(null);
+              setSelectionRevision((value) => value + 1);
               setExistingJobImportId(null);
               setScreen("nuovo");
             }}

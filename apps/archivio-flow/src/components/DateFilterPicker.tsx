@@ -30,7 +30,7 @@ function hasCustomTime(value: string, boundary: Boundary): boolean {
 }
 
 function valueForDate(date: Date, boundary: Boundary, time?: string): string {
-  const safeTime = time ?? (boundary === "start" ? "00:00" : "23:59");
+  const safeTime = time ? `${time}${boundary === "end" ? ":59.999" : ":00.000"}` : (boundary === "start" ? "00:00:00.000" : "23:59:59.999");
   return `${dateKey(date)}T${safeTime}`;
 }
 
@@ -43,6 +43,7 @@ export function DateFilterPicker({ label, value, boundary, invalid = false, onCh
   const time = value.match(/T(\d{2}:\d{2})/)?.[1] ?? (boundary === "start" ? "00:00" : "23:59");
 
   useEffect(() => {
+    setShowTime(hasCustomTime(value, boundary));
     if (selectedDate) setMonth(new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1));
   }, [value]);
 
