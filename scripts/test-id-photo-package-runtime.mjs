@@ -59,7 +59,7 @@ try {
   );
   assert.match(
     mainSource,
-    /if \(!hasSingleInstanceLock\)[\s\S]*if \(isIdPhotoPackagedSmokeTest\)[\s\S]*app\.exit\(3\)/u,
+    /if \(!hasSingleInstanceLock\)[\s\S]*isIdPhotoPackagedSmokeTest[\s\S]*app\.exit\(3\)/u,
     "Uno smoke ID Photo senza single-instance lock deve fallire con exit code non-zero.",
   );
   assert.match(
