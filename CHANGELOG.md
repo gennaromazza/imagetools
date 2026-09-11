@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-11 - Archivio Flow 0.1.43
+
+- Migliorata la gestione delle destinazioni e dei percorsi durante l'importazione, con controlli più affidabili sui lavori e sulle cartelle suggerite.
+
 ## 2026-09-09 - Trova Foto da Lista 0.1.6
 
 - Le corrispondenze ambigue mostrano miniature e percorso: si scelgono una o più foto prima della copia o dello spostamento, senza lasciare fuori risultati ritenuti corretti.
