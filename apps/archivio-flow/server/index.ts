@@ -2989,6 +2989,31 @@ const browseFolderHandler = (req: Request, res: Response) => {
 };
 app.post("/api/browse-folder", browseFolderHandler);
 
+app.get("/api/archive-folders", (req: Request, res: Response) => {
+  const rawRoot = String(req.query.root ?? "").trim();
+  if (!rawRoot) return void res.json([]);
+  try {
+    const root = resolveAndValidate(rawRoot);
+    if (!fs.existsSync(root)) return void res.json([]);
+    const settings = loadSettings();
+    const categoryLevel = settings.archiveHierarchy.categoryLevel ?? 1;
+    const folders: string[] = [];
+    const walk = (current: string, depth: number, relative: string[]) => {
+      if (depth >= categoryLevel) {
+        if (relative.length > 0) folders.push(relative.join(path.sep));
+        return;
+      }
+      for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+        if (!entry.isDirectory() || isArchiveSystemDir(entry.name) || isYearFolder(entry.name) === false && depth === 0) continue;
+        walk(path.join(current, entry.name), depth + 1, [...relative, entry.name]);
+      }
+    };
+    walk(root, 0, []);
+    folders.sort((a, b) => a.localeCompare(b, "it"));
+    res.json(folders);
+  } catch { res.json([]); }
+});
+
 /**
  * GET /api/settings
  */
@@ -3648,7 +3673,12 @@ const runImportHandler = async (req: Request, res: Response) => {
   }
 
   if (!existingJob && fs.existsSync(jobRoot)) {
-    return void res.status(409).json({ error: "Cartella già esistente: " + folderName });
+    let details = "";
+    try {
+      const stat = fs.statSync(jobRoot);
+      details = stat.isDirectory() ? "La cartella esiste nella destinazione configurata." : "Esiste già un file con questo nome nella destinazione configurata.";
+    } catch { details = "Il percorso risulta occupato ma non è leggibile."; }
+    return void res.status(409).json({ error: `Cartella già esistente: ${jobRoot}. ${details} Controlla la destinazione e il lavoro esistente.` });
   }
 
   // ── Create folder structure ──────────────────────────────────────────────────

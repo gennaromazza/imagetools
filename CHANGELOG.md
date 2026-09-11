@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-09 - Trova Foto da Lista 0.1.6
+
+- Le corrispondenze ambigue mostrano miniature e percorso: si scelgono una o più foto prima della copia o dello spostamento, senza lasciare fuori risultati ritenuti corretti.
+- Aggiunto trascinamento diretto delle cartelle sorgente e destinazione; parser più tollerante per nomi quotati e copia protetta da sovrascritture concorrenti.
+- La scansione può essere annullata anche mentre è in corso e la verifica usa solo i file selezionati nell'anteprima, evitando una seconda ricerca completa dell'archivio.
+
 ## 2026-09-09 - Archivio Flow 0.1.42
 
 - Importazione SD più affidabile su schede grandi: inventario progressivo, paginazione cronologica e gruppi di scatto modificabili anche oltre la mezzanotte.

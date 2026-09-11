@@ -342,7 +342,7 @@ function testDescription(name: string): string {
     "test:id-photo-background": "Verifica che lo scontorno usi esclusivamente il modello BiRefNet MIT fissato, con URL, dimensione e SHA-256 controllati, e rifiuti richieste non valide prima di leggere file.",
     "test:id-photo-background-smoke": "Scarica una sola volta il modello gratuito nella cache temporanea, esegue davvero BiRefNet su un ritratto sintetico e verifica maschera e composizione generate.",
     "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",
-    "test:image-file-finder-bug-hunt": "Stressa il parser con virgolette, separatori, percorsi e duplicati.",
+    "test:image-file-finder-bug-hunt": "Verifica che anteprima e copia interpretino allo stesso modo virgolette, separatori, percorsi e duplicati.",
     "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",
     "test:filex-send-bug-hunt": "Verifica trasferimenti, autenticazione, rete e notifiche di ricezione nella dock: eventi completi, concorrenza e cronologia limitata.",
     "test:filex-send-upload": "Esegue 12 test sul caricamento a blocchi, retry, timeout e ripresa degli offset.",

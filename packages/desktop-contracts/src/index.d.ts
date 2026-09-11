@@ -828,6 +828,8 @@ export interface ImageFileFinderScanResult {
 export interface ImageFileFinderJobConfig extends ImageFileFinderScanRequest {
     destinationFolder: string;
     operation: ImageFileFinderOperation;
+    /** Percorsi scelti esplicitamente nell'anteprima; se presenti non viene rieseguita la scelta automatica. */
+    selectedFilePaths?: string[];
 }
 export interface ImageFileFinderProgressLogEntry {
     level: "info" | "warn" | "error";
@@ -1403,6 +1405,11 @@ export interface FileXDesktopApi {
     }>;
     chooseImageFileFinderSourceFolder: () => Promise<string | null>;
     chooseImageFileFinderDestinationFolder: () => Promise<string | null>;
+    validateImageFileFinderFolder: (folderPath: string) => Promise<{
+        ok: boolean;
+        path?: string;
+        error?: string;
+    }>;
     scanImageFileFinderMatches: (request: ImageFileFinderScanRequest) => Promise<ImageFileFinderScanResult>;
     startImageFileFinderJob: (config: ImageFileFinderJobConfig) => Promise<ImageFileFinderJobStartResult>;
     getImageFileFinderProgress: () => Promise<ImageFileFinderProgressSnapshot>;

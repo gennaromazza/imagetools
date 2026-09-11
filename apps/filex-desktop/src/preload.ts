@@ -245,6 +245,7 @@ const api: FileXDesktopApi = {
   openImageConverterFolder: (folderPath) => ipcRenderer.invoke("filex:open-image-converter-folder", folderPath),
   chooseImageFileFinderSourceFolder: () => ipcRenderer.invoke("filex:choose-image-file-finder-source-folder"),
   chooseImageFileFinderDestinationFolder: () => ipcRenderer.invoke("filex:choose-image-file-finder-destination-folder"),
+  validateImageFileFinderFolder: (folderPath) => ipcRenderer.invoke("filex:validate-image-file-finder-folder", folderPath),
   scanImageFileFinderMatches: (request) => ipcRenderer.invoke("filex:scan-image-file-finder-matches", request),
   startImageFileFinderJob: (config) => ipcRenderer.invoke("filex:start-image-file-finder-job", config),
   getImageFileFinderProgress: () => ipcRenderer.invoke("filex:get-image-file-finder-progress"),

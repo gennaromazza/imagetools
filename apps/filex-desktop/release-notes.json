@@ -216,6 +216,9 @@
     ]
   },
   "archivio-flow": {
+    "0.1.43": [
+      "Migliorata la gestione delle destinazioni e dei percorsi durante l'importazione, con controlli più affidabili sui lavori e sulle cartelle suggerite."
+    ],
     "0.1.40": [
       "La voce Nuovo lavoro apre la Home SD, raggiungibile anche senza scheda inserita: senza SD viene mostrato lo stato di attesa.",
       "Con la SD già inserita la schermata mostra subito la preview esistente, senza nuove scansioni inutili.",
@@ -362,6 +365,10 @@
     "0.1.5": [
       "Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida.",
       "Token licenza condiviso fra i profili FileX dello stesso utente Windows, migrazione automatica dei token precedenti e collaudo online sugli installer."
+    ],
+    "0.1.6": [
+      "Le corrispondenze ambigue mostrano miniature e percorsi: puoi scegliere esattamente quali fotografie copiare o spostare, senza escluderle automaticamente.",
+      "Le cartelle sorgente e destinazione accettano ora il trascinamento diretto; la copia usa nomi di destinazione esclusivi, interrompe subito le scansioni annullate e non sovrascrive file comparsi nel frattempo."
     ]
   },
   "photo-selector-app": {

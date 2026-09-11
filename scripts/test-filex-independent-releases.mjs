@@ -225,6 +225,7 @@ assert(
     && releaseWorkflow.includes('$component -eq "id-photo"')
     && releaseWorkflow.includes('{ "0.1.61" } elseif ($component -eq "backup-guard")')
     && releaseWorkflow.includes("--filex-id-photo-packaged-smoke-test")
+    && releaseWorkflow.includes("--filex-image-file-finder-packaged-smoke-test")
     && releaseWorkflow.includes("test:id-photo-working-files")
     && releaseWorkflow.includes("test:id-photo-file-fingerprint")
     && releaseWorkflow.includes("test:id-photo-unload-guard")

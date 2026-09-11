@@ -104,6 +104,21 @@ if (args.component === "photo-selector-app") {
   }
 }
 
+if (args.component === "image-file-finder") {
+  const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+  for (const requiredEntry of [
+    "/.output/electron/main.js",
+    "/.output/electron/preload.js",
+    "/.output/electron/image-file-finder-service.js",
+  ]) {
+    if (!entries.has(requiredEntry)) {
+      throw new Error(`Trova Foto da Lista non contiene ${requiredEntry}`);
+    }
+  }
+  verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
+  verifyRelativeImportClosure(archivePath, entries, "/.output/electron/preload.js");
+}
+
 if (args.component === "id-photo") {
   const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
   const preloadEntry = "/.output/electron/preload.js";

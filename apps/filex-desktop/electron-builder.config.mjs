@@ -335,6 +335,12 @@ ${suiteInstallCacheCleanupLines}
 
 ${contextMenuUninstallLines}
 
+  ; NSIS non puo rimuovere la directory di output corrente: passa prima
+  ; alla cartella temporanea, poi elimina l'eventuale payload residuo.
+  SetOutPath "$TEMP"
+  Delete /REBOOTOK "$INSTDIR\\resources\\app.asar"
+  RMDir /r "$INSTDIR\\resources"
+
 ${suiteUninstallCacheCleanupLines}
 
 ${suiteUninstallChoiceLines}

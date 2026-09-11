@@ -81,6 +81,10 @@ export async function browseArchivioFolder(): Promise<string | null> {
   return response.path ?? null;
 }
 
+export async function getArchivioFolders(root: string): Promise<string[]> {
+  return await apiGet<string[]>(`/api/archive-folders?root=${encodeURIComponent(root)}`);
+}
+
 export async function getArchivioSettings(): Promise<ArchivioFlowSettings> {
   const desktopApi = getDesktopApi();
   if (desktopApi) {

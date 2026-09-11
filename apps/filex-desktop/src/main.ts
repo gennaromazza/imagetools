@@ -187,6 +187,7 @@ import {
   openImageFileFinderFolderDesktop,
   scanImageFileFinderMatchesDesktop,
   startImageFileFinderJobDesktop,
+  validateImageFileFinderFolderDesktop,
 } from "./image-file-finder-service.js";
 import {
   cancelPsdJpegConversionDesktop,
@@ -1023,6 +1024,9 @@ const isIdPhotoPackagedSmokeTest =
 const isArchivioFlowPackagedSmokeTest =
   requestedTool.id === "archivio-flow"
   && process.argv.includes("--filex-archivio-flow-packaged-smoke-test");
+const isImageFileFinderPackagedSmokeTest =
+  requestedTool.id === "image-file-finder"
+  && process.argv.includes("--filex-image-file-finder-packaged-smoke-test");
 const hasSingleInstanceLock = app.requestSingleInstanceLock({
   requestedToolId: requestedTool.id,
   openFolderPath: initialOpenFolderPath,
@@ -1030,8 +1034,8 @@ const hasSingleInstanceLock = app.requestSingleInstanceLock({
 });
 if (!hasSingleInstanceLock) {
   writeEarlyBootLog("Single instance lock denied, quitting");
-  if (isIdPhotoPackagedSmokeTest) {
-    writeEarlyBootLog("FileX ID Photo packaged smoke test aborted: single instance lock denied");
+  if (isIdPhotoPackagedSmokeTest || isImageFileFinderPackagedSmokeTest) {
+    writeEarlyBootLog("Packaged smoke test aborted: single instance lock denied");
     app.exit(3);
   } else {
     app.quit();
@@ -2319,6 +2323,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:choose-image-file-finder-destination-folder", () =>
     chooseImageFileFinderDestinationFolderDesktop(),
   );
+  ipcMain.handle("filex:validate-image-file-finder-folder", (_event, folderPath: string) =>
+    validateImageFileFinderFolderDesktop(folderPath),
+  );
   ipcMain.handle("filex:scan-image-file-finder-matches", (_event, request: ImageFileFinderScanRequest) =>
     scanImageFileFinderMatchesDesktop(request),
   );
@@ -2906,7 +2913,7 @@ if (hasSingleInstanceLock) {
       app.exit(0);
       return;
     }
-    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest) {
+    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest && !isImageFileFinderPackagedSmokeTest) {
       const license = await getLicenseState();
       if (!license.canUseTools) {
         dialog.showErrorBox("FileX All Access", "La licenza FileX non e' attiva. Apri FileX Suite per attivarla o aggiornare il pagamento.");
@@ -2914,7 +2921,7 @@ if (hasSingleInstanceLock) {
         return;
       }
     }
-    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest) startLicenseExpiryWatchdog();
+    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest && !isImageFileFinderPackagedSmokeTest) startLicenseExpiryWatchdog();
     // Apply the persisted RAM budget before registering IPC handlers so that
     // the cache limits are already in effect when the first thumbnail request arrives.
     const savedPreset = await loadRamBudgetPreset();
@@ -2937,6 +2944,15 @@ if (hasSingleInstanceLock) {
     if (isArchivioFlowPackagedSmokeTest) {
       await loadArchivioFlowModule();
       writeBootLog("Archivio Flow packaged main process smoke test passed");
+      app.exit(0);
+      return;
+    }
+    if (isImageFileFinderPackagedSmokeTest) {
+      const result = await validateImageFileFinderFolderDesktop(app.getPath("temp"));
+      if (!result.ok) {
+        throw new Error(`Cartella temporanea non valida nello smoke test: ${result.error ?? "motivo sconosciuto"}`);
+      }
+      writeBootLog("Trova Foto da Lista packaged main process smoke test passed");
       app.exit(0);
       return;
     }

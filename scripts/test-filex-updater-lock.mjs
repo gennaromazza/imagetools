@@ -64,6 +64,9 @@ try {
   if (!builderConfig.includes("!macro customUnInstallCheck")) {
     throw new Error("L'installer non gestisce gli errori NSIS senza modale bloccante.");
   }
+  if (!builderConfig.includes('SetOutPath "$TEMP"') || !builderConfig.includes('Delete /REBOOTOK "$INSTDIR\\\\resources\\\\app.asar"') || !builderConfig.includes('RMDir /r "$INSTDIR\\\\resources"')) {
+    throw new Error("L'uninstaller non rimuove esplicitamente il payload resources dell'app.");
+  }
 
   console.log("FileX updater ASAR lock regression: PASS");
 } finally {

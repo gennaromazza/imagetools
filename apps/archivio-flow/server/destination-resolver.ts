@@ -1,4 +1,5 @@
 import path from "node:path";
+import fs from "node:fs";
 
 export interface CategoryMapping {
   id: string;
@@ -41,6 +42,33 @@ function safeRelativePattern(rendered: string): string {
   return segments.join(path.sep);
 }
 
+function normalizedFolderName(value: string): string {
+  const compact = value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^\d{1,3}\s*[-_.]?\s*/u, "").replace(/[^a-z0-9]+/g, "");
+  return compact.replace(/[oi]$/u, "");
+}
+
+function resolveExistingPath(root: string, relativePath: string): string {
+  const segments = relativePath.split(path.sep).filter(Boolean);
+  let current = root;
+  for (const segment of segments) {
+    const wanted = normalizedFolderName(segment);
+    let chosen = segment;
+    try {
+      const matches = fs.readdirSync(current, { withFileTypes: true }).filter((entry) =>
+        entry.isDirectory() && (entry.name.toLowerCase() === segment.toLowerCase() || normalizedFolderName(entry.name) === wanted || (!/^\d+$/u.test(entry.name) && !/^\d+$/u.test(segment) && normalizedFolderName(entry.name.slice(0, -1)) === normalizedFolderName(segment.slice(0, -1)))),
+      );
+      const match = matches.sort((a, b) => {
+        const aPrefixed = /^\d{1,3}\s*[-_.]/u.test(a.name) ? 0 : 1;
+        const bPrefixed = /^\d{1,3}\s*[-_.]/u.test(b.name) ? 0 : 1;
+        return aPrefixed - bPrefixed || a.name.localeCompare(b.name, "it");
+      })[0];
+      if (match) chosen = match.name;
+    } catch { /* la cartella verrà creata dal flusso di importazione */ }
+    current = path.join(current, chosen);
+  }
+  return current;
+}
+
 export function resolveDestination(input: {
   archiveId: string;
   archiveRoot: string;
@@ -60,11 +88,13 @@ export function resolveDestination(input: {
     job: safeSegment(input.jobName),
   };
   const mapping = input.mappings.find((item) => item.enabled && item.categoryKey === input.categoryKey);
-  const usedOverride = Boolean(input.overrideParent?.trim());
-  const absoluteParentPath = usedOverride
-    ? path.resolve(input.overrideParent!.trim())
-    : mapping
-      ? path.resolve(archiveRoot, safeRelativePattern(render(mapping.relativePathPattern, values)))
+  // Una categoria selezionata è la fonte di verità: un vecchio override della UI
+  // non deve poter riportare il lavoro in un altro anno o in un'altra categoria.
+  const usedOverride = !mapping && Boolean(input.overrideParent?.trim());
+  const absoluteParentPath = mapping
+    ? resolveExistingPath(archiveRoot, safeRelativePattern(render(mapping.relativePathPattern, values)))
+    : usedOverride
+      ? path.resolve(input.overrideParent!.trim())
       : archiveRoot;
   const relativeCheck = path.relative(archiveRoot, absoluteParentPath);
   if (!usedOverride && (relativeCheck.startsWith("..") || path.isAbsolute(relativeCheck))) {

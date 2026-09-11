@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent } from "react";
 import type {
+  DesktopRenderedImage,
   FileXDesktopApi,
+  ImageFileFinderFileMatch,
   ImageFileFinderMatchMode,
   ImageFileFinderOperation,
   ImageFileFinderProgressSnapshot,
@@ -62,6 +64,8 @@ export default function App() {
   const [progress, setProgress] = useState<ImageFileFinderProgressSnapshot>(emptyProgress);
   const [isScanning, setIsScanning] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<"source" | "destination" | null>(null);
+  const [selectedFilePaths, setSelectedFilePaths] = useState<Set<string>>(() => new Set());
 
   const parsedInput = useMemo(() => parseFileNameInput(rawInput), [rawInput]);
   const isBusy = progress.status === "scanning" || progress.status === "running";
@@ -72,7 +76,7 @@ export default function App() {
     sourceFolder.trim().length > 0 &&
     destinationFolder.trim().length > 0 &&
     parsedInput.names.length > 0 &&
-    (scan?.matched.length ?? 0) > 0 &&
+    selectedFilePaths.size > 0 &&
     !isBusy;
 
   useEffect(() => {
@@ -97,6 +101,7 @@ export default function App() {
 
   useEffect(() => {
     setScan(null);
+    setSelectedFilePaths(new Set());
   }, [rawInput, sourceFolder, matchMode]);
 
   const chooseSource = useCallback(async () => {
@@ -114,6 +119,27 @@ export default function App() {
       setNotice(null);
     }
   }, []);
+
+  const acceptDroppedFolder = useCallback(async (target: "source" | "destination", event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDropTarget(null);
+    if (isBusy) return;
+    const desktopApi = getDesktopApi();
+    const file = Array.from(event.dataTransfer.files)[0];
+    const droppedPath = file && desktopApi?.getPathForFile(file);
+    if (!desktopApi || !droppedPath) {
+      setNotice("Il trascinamento di cartelle è disponibile nell'app desktop.");
+      return;
+    }
+    const result = await desktopApi.validateImageFileFinderFolder(droppedPath);
+    if (!result.ok || !result.path) {
+      setNotice(result.error ?? "Puoi trascinare soltanto una cartella.");
+      return;
+    }
+    if (target === "source") setSourceFolder(result.path);
+    else setDestinationFolder(result.path);
+    setNotice(null);
+  }, [isBusy]);
 
   const previewMatches = useCallback(async () => {
     const desktopApi = getDesktopApi();
@@ -135,6 +161,7 @@ export default function App() {
         matchMode,
       });
       setScan(result);
+      setSelectedFilePaths(new Set(result.matched.map((item) => item.absolutePath)));
       if (result.matched.length === 0) {
         setNotice("Nessun file univoco trovato con le impostazioni correnti.");
       }
@@ -157,12 +184,27 @@ export default function App() {
       rawInput,
       matchMode,
       operation,
+      selectedFilePaths: [...selectedFilePaths],
     });
     setProgress(result.progress);
     if (!result.ok) {
       setNotice(result.error ?? "Impossibile avviare l'operazione.");
     }
-  }, [destinationFolder, matchMode, operation, rawInput, sourceFolder]);
+  }, [destinationFolder, matchMode, operation, rawInput, selectedFilePaths, sourceFolder]);
+
+  const setMatchSelected = useCallback((absolutePath: string, selected: boolean) => {
+    setSelectedFilePaths((current) => {
+      const next = new Set(current);
+      if (selected) next.add(absolutePath);
+      else next.delete(absolutePath);
+      return next;
+    });
+  }, []);
+
+  const allCandidates = useMemo(
+    () => scan ? [...scan.matched, ...scan.ambiguous.flatMap((item) => item.matches)] : [],
+    [scan],
+  );
 
   const cancelJob = useCallback(async () => {
     await getDesktopApi()?.cancelImageFileFinderJob();
@@ -198,21 +240,35 @@ export default function App() {
             <div className="field-stack">
               <label className="field">
                 <span>Sorgente</span>
-                <div className="path-picker">
+                <div
+                  className={dropTarget === "source" ? "path-picker path-picker--drop-active" : "path-picker"}
+                  onDragEnter={(event) => { event.preventDefault(); if (!isBusy) setDropTarget("source"); }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragLeave={(event) => { if (event.currentTarget === event.target) setDropTarget(null); }}
+                  onDrop={(event) => void acceptDroppedFolder("source", event)}
+                >
                   <input value={sourceFolder} onChange={(event) => setSourceFolder(event.target.value)} disabled={isBusy} />
                   <button className="ghost-button" type="button" onClick={chooseSource} disabled={isBusy || !apiAvailable}>
                     Sfoglia
                   </button>
                 </div>
+                <small className="drop-hint">Trascina qui una cartella</small>
               </label>
               <label className="field">
                 <span>Destinazione</span>
-                <div className="path-picker">
+                <div
+                  className={dropTarget === "destination" ? "path-picker path-picker--drop-active" : "path-picker"}
+                  onDragEnter={(event) => { event.preventDefault(); if (!isBusy) setDropTarget("destination"); }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragLeave={(event) => { if (event.currentTarget === event.target) setDropTarget(null); }}
+                  onDrop={(event) => void acceptDroppedFolder("destination", event)}
+                >
                   <input value={destinationFolder} onChange={(event) => setDestinationFolder(event.target.value)} disabled={isBusy} />
                   <button className="ghost-button" type="button" onClick={chooseDestination} disabled={isBusy || !apiAvailable}>
                     Sfoglia
                   </button>
                 </div>
+                <small className="drop-hint">Trascina qui una cartella</small>
               </label>
             </div>
           </section>
@@ -305,7 +361,7 @@ export default function App() {
                   </button>
                 ) : (
                   <button className="primary-button" type="button" onClick={startJob} disabled={!canStart}>
-                    {operation === "move" ? "Sposta trovati" : "Copia trovati"}
+                    {operation === "move" ? `Sposta ${selectedFilePaths.size} selezionate` : `Copia ${selectedFilePaths.size} selezionate`}
                   </button>
                 )}
                 <button className="ghost-button" type="button" onClick={openDestination} disabled={!apiAvailable || !destinationFolder}>
@@ -366,6 +422,47 @@ export default function App() {
             />
           </section>
 
+          {scan ? (
+            <section className="section-block selection-panel">
+              <div className="section-heading">
+                <div>
+                  <h2>Scegli le foto da copiare</h2>
+                  <span>Le foto ambigue non vengono copiate finché non le selezioni qui.</span>
+                </div>
+                <div className="selection-actions">
+                  <strong>{formatCount(selectedFilePaths.size, "foto selezionata", "foto selezionate")}</strong>
+                  <button className="ghost-button" type="button" onClick={() => setSelectedFilePaths(new Set(allCandidates.map((item) => item.absolutePath)))} disabled={allCandidates.length === 0 || isBusy}>
+                    Seleziona tutte
+                  </button>
+                  <button className="ghost-button" type="button" onClick={() => setSelectedFilePaths(new Set())} disabled={selectedFilePaths.size === 0 || isBusy}>
+                    Deseleziona
+                  </button>
+                </div>
+              </div>
+              {scan.matched.length > 0 ? (
+                <MatchGroup
+                  title="Corrispondenze univoche"
+                  description="Sono già selezionate, ma puoi escluderle."
+                  matches={scan.matched}
+                  selectedFilePaths={selectedFilePaths}
+                  disabled={isBusy}
+                  onSelect={setMatchSelected}
+                />
+              ) : null}
+              {scan.ambiguous.map((item) => (
+                <MatchGroup
+                  key={item.requestedName}
+                  title={item.requestedName}
+                  description={`${item.matches.length} file con questo nome: seleziona quello o quelli corretti.`}
+                  matches={item.matches}
+                  selectedFilePaths={selectedFilePaths}
+                  disabled={isBusy}
+                  onSelect={setMatchSelected}
+                />
+              ))}
+            </section>
+          ) : null}
+
           <section className="section-block logs-block">
             <div className="section-heading">
               <h2>Log</h2>
@@ -389,6 +486,71 @@ export default function App() {
       </section>
     </main>
   );
+}
+
+function MatchGroup({
+  title,
+  description,
+  matches,
+  selectedFilePaths,
+  disabled,
+  onSelect,
+}: {
+  title: string;
+  description: string;
+  matches: ImageFileFinderFileMatch[];
+  selectedFilePaths: Set<string>;
+  disabled: boolean;
+  onSelect: (absolutePath: string, selected: boolean) => void;
+}) {
+  return (
+    <section className="match-group">
+      <header>
+        <div><strong>{title}</strong><span>{description}</span></div>
+        <button className="text-button" type="button" disabled={disabled} onClick={() => matches.forEach((item) => onSelect(item.absolutePath, true))}>Tutte</button>
+      </header>
+      <div className="match-picker-grid">
+        {matches.map((match) => (
+          <label className={selectedFilePaths.has(match.absolutePath) ? "match-card match-card--selected" : "match-card"} key={match.absolutePath}>
+            <input
+              type="checkbox"
+              checked={selectedFilePaths.has(match.absolutePath)}
+              disabled={disabled}
+              onChange={(event) => onSelect(match.absolutePath, event.target.checked)}
+            />
+            <MatchThumbnail match={match} />
+            <span className="match-card__name">{match.fileName}</span>
+            <span className="match-card__path" title={match.relativePath}>{match.relativePath}</span>
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MatchThumbnail({ match }: { match: ImageFileFinderFileMatch }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    let objectUrl: string | null = null;
+    setSrc(null);
+    setFailed(false);
+    void getDesktopApi()?.getThumbnail(match.absolutePath, 240, 72, `${match.absolutePath}:${match.size}`, { profile: "fast" })
+      .then((image: DesktopRenderedImage | null) => {
+        if (!image) throw new Error("anteprima assente");
+        const bytes = new Uint8Array(image.bytes);
+        objectUrl = URL.createObjectURL(new Blob([bytes.buffer as ArrayBuffer], { type: image.mimeType }));
+        if (alive) setSrc(objectUrl);
+        else URL.revokeObjectURL(objectUrl);
+      })
+      .catch(() => { if (alive) setFailed(true); });
+    return () => { alive = false; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [match.absolutePath, match.size]);
+
+  if (!src) return <div className="match-thumbnail match-thumbnail--placeholder">{failed ? "Anteprima non disponibile" : "Carico anteprima…"}</div>;
+  return <img className="match-thumbnail" src={src} alt={`Anteprima ${match.fileName}`} decoding="async" />;
 }
 
 interface ResultListRow {

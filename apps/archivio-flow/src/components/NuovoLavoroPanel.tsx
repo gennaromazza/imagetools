@@ -8,6 +8,7 @@ import {
   getArchivioFilterPreview,
   getArchivioImportProgress,
   getArchivioJobs,
+  getArchivioFolders,
   getArchivioJobSubfolders,
   getArchivioSdCards,
   ejectArchivioSdCard,
@@ -338,6 +339,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryPath, setNewCategoryPath] = useState("");
   const [newCategoryLayout, setNewCategoryLayout] = useState<CategoryLayout>("year-category");
+  const [archiveFolders, setArchiveFolders] = useState<string[]>([]);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [nuovaCartellaPredefinita, setNuovaCartellaPredefinita] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
@@ -477,6 +479,11 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
   useEffect(() => {
     void refreshExistingJobs();
   }, [refreshExistingJobs]);
+
+  useEffect(() => {
+    if (!archiveRoot.trim()) { setArchiveFolders([]); return; }
+    void getArchivioFolders(archiveRoot.trim()).then(setArchiveFolders).catch(() => setArchiveFolders([]));
+  }, [archiveRoot]);
 
   useEffect(() => {
     void getArchivioStartAtLogin().then(setStartupAtLogin).catch(() => setStartupAtLogin(null));
@@ -1737,11 +1744,22 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
               </div>
 
               {newCategoryLayout === "custom" && (
+                <>
+                {archiveFolders.length > 0 && <label className="field">
+                  <span>Cartella già presente nell’archivio</span>
+                  <select value="" onChange={(event) => { const folder = event.target.value; if (folder) { const category = folder.split(/[/\\\\]+/).pop() ?? folder; setNewCategoryPath(`{year}\\${category}`); } }}>
+                    <option value="">Scegli una cartella esistente…</option>
+                    {archiveFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
+                  </select>
+                  <small>Archivio Flow userà il nome reale della cartella, anche se la categoria ha un nome diverso.</small>
+                  <small>Le cartelle mostrate appartengono alla radice archivio configurata sopra. Se non trovi quella giusta, controlla prima la radice.</small>
+                </label>}
                 <label className="field">
                   <span>Percorso personalizzato (avanzato)</span>
                   <input value={newCategoryPath} onChange={(event) => setNewCategoryPath(event.target.value)} placeholder="es. CLIENTI/{year}/MATRIMONI" />
                   <small>Puoi usare {'{year}'}, {'{month}'}, {'{client}'} e {'{date}'}.</small>
                 </label>
+                </>
               )}
 
               <div className="message-box" style={{ background: "rgba(255,255,255,0.04)" }}>
@@ -1869,7 +1887,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
           {!usaLavoroEsistente && categoryMappings.length > 0 && (
             <label className="field">
               <span>Categoria</span>
-              <select value={categoryKey} onChange={(event) => { setCategoryKey(event.target.value); setDestinationOverride(false); }}>
+              <select value={categoryKey} onChange={(event) => { setCategoryKey(event.target.value); setDestinationOverride(false); setDestinazione(""); clearImportValidationField("destinazione"); }}>
                 <option value="">Nessuna categoria automatica</option>
                 {categoryMappings.filter((item) => item.enabled).map((mapping) => (
                   <option key={mapping.id} value={mapping.categoryKey}>{mapping.displayName} → {mapping.relativePathPattern}</option>

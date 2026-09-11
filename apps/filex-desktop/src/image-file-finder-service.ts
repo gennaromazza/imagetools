@@ -1,7 +1,7 @@
 import * as electron from "electron";
-import { access, copyFile, lstat, mkdir, readdir, rename, unlink } from "node:fs/promises";
+import { access, copyFile, link, lstat, mkdir, readdir, realpath, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
-import { basename, dirname, extname, join, relative, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   ImageFileFinderAmbiguousMatch,
   ImageFileFinderFileMatch,
@@ -87,14 +87,40 @@ function normalizeInputName(value: string): string {
   return basename(normalizedSeparators).trim();
 }
 
+function isSameOrNestedPath(rootPath: string, candidatePath: string): boolean {
+  const relativePath = relative(rootPath, candidatePath);
+  return relativePath === "" || (!relativePath.startsWith(`..${sep}`) && relativePath !== ".." && !isAbsolute(relativePath));
+}
+
 export function parseImageFileFinderInput(rawInput: string): ImageFileFinderInputParseResult {
-  const source = typeof rawInput === "string" ? rawInput : "";
-  const tokens = source
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .split(/[\r\n,;\t]+| {2,}/g)
-    .map(normalizeInputName)
-    .filter(Boolean);
+  const source = typeof rawInput === "string" ? rawInput.replace(/[“”]/g, '"').replace(/[‘’]/g, "'") : "";
+  const tokens: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | "`" | null = null;
+  const flush = () => {
+    const name = normalizeInputName(current);
+    if (name) tokens.push(name);
+    current = "";
+  };
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (quote) {
+      if (character === quote) quote = null;
+      else current += character;
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (/[\r\n,;\t]/u.test(character) || (character === " " && source[index + 1] === " ")) {
+      flush();
+      while (character === " " && source[index + 1] === " ") index += 1;
+      continue;
+    }
+    current += character;
+  }
+  flush();
 
   const seen = new Set<string>();
   const names: string[] = [];
@@ -178,12 +204,38 @@ async function uniqueDestinationPath(destinationFolder: string, sourcePath: stri
   return join(destinationFolder, `${name} (${Date.now()})${extension}`);
 }
 
+function isAlreadyExists(error: unknown): boolean {
+  return error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "EEXIST";
+}
+
+function canFallbackToCopy(error: unknown): boolean {
+  return error instanceof Error
+    && "code" in error
+    && ["EXDEV", "EPERM", "EOPNOTSUPP", "ENOSYS"].includes((error as NodeJS.ErrnoException).code ?? "");
+}
+
+async function copyToUniqueDestination(destinationFolder: string, sourcePath: string): Promise<string> {
+  for (let attempt = 0; attempt < 10_000; attempt += 1) {
+    const destinationPath = await uniqueDestinationPath(destinationFolder, sourcePath);
+    try {
+      await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL);
+      return destinationPath;
+    } catch (error) {
+      if (isAlreadyExists(error)) continue;
+      throw error;
+    }
+  }
+  throw new Error("Non riesco a creare un nome libero nella cartella destinazione.");
+}
+
 async function scanDirectory(
   sourceFolder: string,
   currentPath: string,
   files: ImageFileFinderFileMatch[],
   issues: ImageFileFinderScanIssue[],
+  isCancelled: () => boolean,
 ): Promise<void> {
+  if (isCancelled()) throw new ImageFileFinderCancelledError();
   let dirEntries;
   try {
     dirEntries = await readdir(currentPath, { withFileTypes: true });
@@ -197,12 +249,13 @@ async function scanDirectory(
 
   dirEntries.sort((left, right) => left.name.localeCompare(right.name));
   for (const dirEntry of dirEntries) {
+    if (isCancelled()) throw new ImageFileFinderCancelledError();
     const absolutePath = join(currentPath, dirEntry.name);
     if (dirEntry.isSymbolicLink()) {
       continue;
     }
     if (dirEntry.isDirectory()) {
-      await scanDirectory(sourceFolder, absolutePath, files, issues);
+      await scanDirectory(sourceFolder, absolutePath, files, issues, isCancelled);
       continue;
     }
     if (!dirEntry.isFile() || !isSupportedImage(dirEntry.name)) {
@@ -247,6 +300,7 @@ export async function chooseImageFileFinderDestinationFolderDesktop(): Promise<s
 
 export async function scanImageFileFinderMatchesDesktop(
   request: ImageFileFinderScanRequest,
+  options: { isCancelled?: () => boolean } = {},
 ): Promise<ImageFileFinderScanResult> {
   const sourceFolder = sanitizeDesktopPath(request.sourceFolder);
   const parsed = parseImageFileFinderInput(request.rawInput);
@@ -272,8 +326,9 @@ export async function scanImageFileFinderMatchesDesktop(
     if (!stats.isDirectory()) {
       throw new Error("Il percorso sorgente non e' una cartella.");
     }
-    await scanDirectory(sourceFolder, sourceFolder, allFiles, issues);
+    await scanDirectory(sourceFolder, sourceFolder, allFiles, issues, options.isCancelled ?? (() => false));
   } catch (error) {
+    if (error instanceof ImageFileFinderCancelledError) throw error;
     issues.push({
       path: sourceFolder,
       message: error instanceof Error ? error.message : "Cartella sorgente non leggibile.",
@@ -284,9 +339,27 @@ export async function scanImageFileFinderMatchesDesktop(
   const missing: Array<{ requestedName: string }> = [];
   const ambiguous: ImageFileFinderAmbiguousMatch[] = [];
 
+  const exactIndex = new Map<string, ImageFileFinderFileMatch[]>();
+  const stemIndex = new Map<string, ImageFileFinderFileMatch[]>();
+  for (const file of allFiles) {
+    const exactKey = normalizeKey(file.fileName);
+    const stemKey = normalizeKey(basename(file.fileName, extname(file.fileName)));
+    const exactMatches = exactIndex.get(exactKey);
+    if (exactMatches) exactMatches.push(file);
+    else exactIndex.set(exactKey, [file]);
+    const stemMatches = stemIndex.get(stemKey);
+    if (stemMatches) stemMatches.push(file);
+    else stemIndex.set(stemKey, [file]);
+  }
   for (const requestedName of parsed.names) {
-    const candidates = allFiles
-      .filter((file) => matchFileName(requestedName, file.fileName, matchMode))
+    if (options.isCancelled?.()) throw new ImageFileFinderCancelledError();
+    const requestedStem = normalizeKey(basename(requestedName, extname(requestedName)));
+    const indexed = matchMode === "exact"
+      ? (extname(requestedName) ? exactIndex.get(normalizeKey(requestedName)) : stemIndex.get(requestedStem))
+      : matchMode === "stem" ? stemIndex.get(requestedStem) : undefined;
+    const candidates = (indexed ?? (matchMode === "contains"
+      ? allFiles.filter((file) => matchFileName(requestedName, file.fileName, matchMode))
+      : []))
       .map((file) => ({ ...file, requestedName }));
 
     if (candidates.length === 0) {
@@ -310,18 +383,66 @@ export async function scanImageFileFinderMatchesDesktop(
   };
 }
 
-async function moveFileToDestination(sourcePath: string, destinationPath: string): Promise<void> {
-  try {
-    await rename(sourcePath, destinationPath);
-    return;
-  } catch (error) {
-    if (!(error instanceof Error) || !("code" in error) || (error as NodeJS.ErrnoException).code !== "EXDEV") {
+class ImageFileFinderCancelledError extends Error {
+  constructor() {
+    super("Operazione annullata");
+  }
+}
+
+async function moveToUniqueDestination(destinationFolder: string, sourcePath: string): Promise<string> {
+  for (let attempt = 0; attempt < 10_000; attempt += 1) {
+    const destinationPath = await uniqueDestinationPath(destinationFolder, sourcePath);
+    try {
+      await link(sourcePath, destinationPath);
+      await unlink(sourcePath);
+      return destinationPath;
+    } catch (error) {
+      if (isAlreadyExists(error)) continue;
+      if (!canFallbackToCopy(error)) throw error;
+    }
+    try {
+      await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL);
+      await unlink(sourcePath);
+      return destinationPath;
+    } catch (error) {
+      if (isAlreadyExists(error)) continue;
       throw error;
     }
   }
+  throw new Error("Non riesco a creare un nome libero nella cartella destinazione.");
+}
 
-  await copyFile(sourcePath, destinationPath);
-  await unlink(sourcePath);
+async function resolveExplicitSelection(
+  sourceFolder: string,
+  selectedFilePaths: string[] | undefined,
+): Promise<ImageFileFinderFileMatch[] | null> {
+  if (selectedFilePaths === undefined) return null;
+  if (!Array.isArray(selectedFilePaths) || selectedFilePaths.length === 0 || selectedFilePaths.length > 20_000) {
+    throw new Error("Seleziona da 1 a 20000 foto valide dall'anteprima.");
+  }
+  const sourceRealPath = await realpath(sourceFolder);
+  const selected: ImageFileFinderFileMatch[] = [];
+  const seen = new Set<string>();
+  for (const selectedPath of selectedFilePaths) {
+    if (typeof selectedPath !== "string" || !selectedPath.trim()) throw new Error("La selezione contiene un percorso non valido.");
+    const resolvedPath = resolve(selectedPath);
+    const realPath = await realpath(resolvedPath);
+    const stats = await lstat(realPath);
+    const key = normalizeKey(realPath);
+    if (!isSameOrNestedPath(sourceRealPath, realPath) || !stats.isFile() || !isSupportedImage(basename(realPath))) {
+      throw new Error("La selezione contiene un file non più valido nella cartella sorgente.");
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    selected.push({
+      requestedName: basename(realPath),
+      absolutePath: realPath,
+      fileName: basename(realPath),
+      relativePath: normalizeSlashes(relative(sourceRealPath, realPath)),
+      size: stats.size,
+    });
+  }
+  return selected;
 }
 
 function makeProgress(jobId: string, config: ImageFileFinderJobConfig): ImageFileFinderProgressSnapshot {
@@ -354,28 +475,32 @@ async function runJob(jobId: string, config: ImageFileFinderJobConfig): Promise<
       throw new Error("La destinazione non e' una cartella.");
     }
 
-    const scan = await scanImageFileFinderMatchesDesktop(config);
+    const selectedMatches = await resolveExplicitSelection(config.sourceFolder, config.selectedFilePaths);
+    const scan = selectedMatches ? null : await scanImageFileFinderMatchesDesktop(config, {
+      isCancelled: () => cancelRequested || progress.jobId !== jobId,
+    });
+    const matches = selectedMatches ?? scan?.matched ?? [];
     progress = {
       ...progress,
       status: "running",
-      total: scan.matched.length,
+      total: matches.length,
     };
 
-    if (scan.ignoredDuplicates.length > 0) {
+    if (scan?.ignoredDuplicates.length) {
       log("info", `${scan.ignoredDuplicates.length} nomi duplicati ignorati.`);
     }
-    for (const missing of scan.missing) {
+    for (const missing of scan?.missing ?? []) {
       log("warn", "File non trovato.", missing.requestedName);
     }
-    for (const item of scan.ambiguous) {
+    for (const item of scan?.ambiguous ?? []) {
       log("warn", `${item.matches.length} corrispondenze, non elaborato.`, item.requestedName);
     }
-    for (const issue of scan.issues) {
+    for (const issue of scan?.issues ?? []) {
       log("warn", issue.message, issue.path);
     }
 
     await mkdir(destinationFolder, { recursive: true });
-    for (const match of scan.matched) {
+    for (const match of matches) {
       if (cancelRequested || progress.jobId !== jobId) {
         progress = {
           ...progress,
@@ -389,13 +514,12 @@ async function runJob(jobId: string, config: ImageFileFinderJobConfig): Promise<
 
       progress = { ...progress, currentFile: match.absolutePath };
       try {
-        const destinationPath = await uniqueDestinationPath(destinationFolder, match.absolutePath);
         if (config.operation === "move") {
-          await moveFileToDestination(match.absolutePath, destinationPath);
+          const destinationPath = await moveToUniqueDestination(destinationFolder, match.absolutePath);
           progress = { ...progress, moved: progress.moved + 1 };
           log("info", "Spostato.", destinationPath);
         } else {
-          await copyFile(match.absolutePath, destinationPath);
+          const destinationPath = await copyToUniqueDestination(destinationFolder, match.absolutePath);
           progress = { ...progress, copied: progress.copied + 1 };
           log("info", "Copiato.", destinationPath);
         }
@@ -419,6 +543,11 @@ async function runJob(jobId: string, config: ImageFileFinderJobConfig): Promise<
     };
     log("info", "Operazione completata.");
   } catch (error) {
+    if (error instanceof ImageFileFinderCancelledError) {
+      progress = { ...progress, status: "cancelled", currentFile: null, finishedAt: Date.now() };
+      log("warn", "Operazione annullata.");
+      return;
+    }
     progress = {
       ...progress,
       status: "error",
@@ -480,6 +609,17 @@ export function cancelImageFileFinderJobDesktop(): { ok: boolean; active: boolea
     cancelRequested = true;
   }
   return { ok: true, active };
+}
+
+export async function validateImageFileFinderFolderDesktop(folderPath: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+  const normalizedPath = sanitizeDesktopPath(folderPath);
+  if (!normalizedPath) return { ok: false, error: "Trascina una cartella valida." };
+  try {
+    if (!(await lstat(normalizedPath)).isDirectory()) return { ok: false, error: "Puoi trascinare soltanto una cartella." };
+    return { ok: true, path: normalizedPath };
+  } catch {
+    return { ok: false, error: "La cartella trascinata non è più disponibile." };
+  }
 }
 
 export async function openImageFileFinderFolderDesktop(folderPath: string): Promise<{ ok: boolean }> {
