@@ -9,14 +9,64 @@ export type DesktopToolId =
   | "cache-sweep"
   | "filex-send"
   | "backup-guard"
+  | "album-flow"
   | "photo-selector-app";
 
+export type DesktopAlbumFlowHandoffTargetToolId = "album-flow";
+
+export interface DesktopAlbumFlowHandoffAsset {
+  assetId: string;
+  relativePath: string;
+  absolutePath?: string;
+  sourceFileKey?: string;
+  fileName: string;
+  width: number;
+  height: number;
+  aspectRatio: number;
+  orientation: "vertical" | "horizontal" | "square";
+  selected: boolean;
+  selectionOrder: number;
+  rating: number;
+  pickStatus: DesktopPickStatus;
+  colorLabel: DesktopColorLabel | null;
+  customLabels: string[];
+  labelIds: string[];
+  rotationDegrees?: number;
+  size?: number;
+}
+
+export interface DesktopAlbumFlowHandoffManifestV1 {
+  schemaVersion: 1;
+  handoffId: string;
+  sourceToolId: "photo-selector-app" | "archivio-flow";
+  sourceRoot: string;
+  projectId: string;
+  projectName: string;
+  selectorRevision?: string;
+  createdAt: string;
+  expiresAt: string;
+  labels: Array<{
+    id: string;
+    name: string;
+    color?: string;
+    source: "selector-custom" | "selector-color" | "album";
+  }>;
+  assets: DesktopAlbumFlowHandoffAsset[];
+}
+
+export interface DesktopAlbumFlowHandoffRequest {
+  manifest: DesktopAlbumFlowHandoffManifestV1;
+}
+
+
 export type DesktopPhotoToolHandoffTargetToolId =
+  | "album-flow"
   | "image-party-frame"
   | "batch-print-layout"
   | "id-photo";
 
 export interface DesktopPhotoToolHandoffRequest {
+  albumFlow?: DesktopAlbumFlowHandoffManifestV1;
   targetToolId: DesktopPhotoToolHandoffTargetToolId;
   sourceRoot: string;
   absolutePaths: string[];
@@ -31,6 +81,7 @@ export interface DesktopPhotoToolHandoffFile {
 }
 
 export interface DesktopPhotoToolHandoff {
+  albumFlow?: DesktopAlbumFlowHandoffManifestV1;
   schemaVersion: 1;
   handoffId: string;
   sourceToolId: DesktopToolId;
@@ -1424,6 +1475,7 @@ export interface ArchivioFilterPreviewData {
 }
 
 export interface FileXDesktopApi {
+  sendAlbumFlowHandoff: (request: DesktopAlbumFlowHandoffRequest) => Promise<DesktopPhotoToolHandoffSendResult>;
   getRuntimeInfo: () => Promise<DesktopRuntimeInfo>;
   getGraphicsStatus: () => Promise<DesktopGraphicsStatus>;
   getSuiteUpdateState: () => Promise<DesktopSuiteUpdateState>;

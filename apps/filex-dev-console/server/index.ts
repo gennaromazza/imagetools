@@ -267,6 +267,7 @@ interface TestCategory {
 }
 
 const TEST_CATEGORIES: TestCategory[] = [
+  { id: "album-flow", title: "Album Flow — Importazione", description: "Handoff Selector, metadati, capitoli, ordine e integrità dei file ricevuti." },
   { id: "photo-selector", title: "Image Select Pro", description: "Modalità libera e progetto, prestazioni, cache, Drive, spostamenti e metadati XMP." },
   { id: "image-party-frame", title: "Image Party Frame — Affidabilità", description: "Progetti, crop, rendering, job export e completezza del pacchetto installato." },
   { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Geometria, memoria, export progressivo no-overwrite, rollback protetto dall’identità dei file e recovery sicuro degli staging." },
@@ -284,6 +285,7 @@ const TEST_CATEGORIES: TestCategory[] = [
 ];
 
 function testCategoryId(name: string): TestCategory["id"] {
+  if (name.startsWith("test:album-flow-")) return "album-flow";
   if (name === "test:image-party-frame-overlays") return "image-party-frame";
   if (name === "test:filex-windows-icons") return "suite";
   if (name === "test:filex-suite-launcher") return "suite";
@@ -310,6 +312,12 @@ function testCategoryId(name: string): TestCategory["id"] {
 
 function testDescription(name: string): string {
   const descriptions: Record<string, string> = {
+    "test:album-flow-renderer": "Verifica geometria SVG, dimensioni fisiche, escaping XML e rifiuto degli slot mancanti. Non certifica la fedeltà di stampa.",
+    "test:album-flow-relink": "Verifica la risoluzione dei percorsi relativi e il rifiuto di traversal o file fuori dalla radice.",
+    "test:album-flow-all": "Gate completo Album Flow: handoff, capitoli, preflight, portabilità e controlli di sistema.",
+    "test:album-flow-chapters": "Verifica creazione, assegnazioni multiple, rimozione, ordine, riferimenti invalidi e conservazione dei metadati Selector.",
+    "test:album-flow-system": "Controlli statici di presenza: non verificano clic, flussi runtime o comportamento delle anteprime.",
+    "test:album-flow-handoff": "Controlla ordine completo, etichette Unicode, capitoli, passaggio Electron, file modificati, payload non validi e chiusura degli import runtime.",
     "test:photo-selector-workflow": "Controlla il flusso principale di Image Select Pro, inclusi click consecutivi, Ctrl+A nel perimetro filtrato, rotazione singola o batch e precedenza della selezione locale sugli XMP tardivi.",
     "test:photo-selector-free-mode": "Verifica che la modalità libera resti indipendente dai progetti, riconosca la sorgente anche se cambia lettera e mantenga XMP e backup Drive separati.",
     "test:photo-selector-package-runtime": "Controlla che il main process di Image Select Pro includa nell’ASAR tutte le dipendenze locali, compresi identità sorgenti e servizi PSD.",

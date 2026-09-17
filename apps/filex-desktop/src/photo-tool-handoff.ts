@@ -4,6 +4,7 @@ import {
   randomUUID,
   timingSafeEqual,
 } from "node:crypto";
+import { parseAlbumFlowManifest, MAX_ALBUM_HANDOFF_BYTES, MAX_ALBUM_ASSETS } from "./album-flow-handoff.js";
 import {
   link,
   lstat,
@@ -32,6 +33,7 @@ import type {
   DesktopPhotoToolHandoffSendResult,
   DesktopPhotoToolHandoffTargetToolId,
   DesktopToolId,
+  DesktopAlbumFlowHandoffManifestV1,
 } from "@photo-tools/desktop-contracts";
 
 const DEFAULT_HANDOFF_TTL_MS = 10 * 60_000;
@@ -62,12 +64,14 @@ const ALL_DESKTOP_TOOL_IDS = new Set<DesktopToolId>([
   "filex-send",
   "backup-guard",
   "photo-selector-app",
+  "album-flow",
 ]);
 
 const TARGET_CARDINALITY: Record<
   DesktopPhotoToolHandoffTargetToolId,
   { minimum: number; maximum: number }
 > = {
+  "album-flow": { minimum: 1, maximum: MAX_ALBUM_ASSETS },
   "image-party-frame": { minimum: 1, maximum: 500 },
   "batch-print-layout": { minimum: 1, maximum: 500 },
   "id-photo": { minimum: 1, maximum: 1 },
@@ -92,6 +96,7 @@ export interface PhotoToolHandoffManagerOptions {
 interface StoredPhotoToolHandoff extends Omit<DesktopPhotoToolHandoff, "schemaVersion"> {
   schemaVersion: 2;
   acknowledgementSecret: string;
+  albumFlow?: DesktopAlbumFlowHandoffManifestV1;
 }
 
 interface StoredPhotoToolHandoffAcknowledgement {
@@ -321,6 +326,7 @@ function parseManifest(value: unknown): StoredPhotoToolHandoff {
       "createdAt",
       "expiresAt",
       "acknowledgementSecret",
+      "albumFlow",
     ])
     || value.schemaVersion !== 2
     || typeof value.handoffId !== "string"
@@ -372,6 +378,7 @@ function parseManifest(value: unknown): StoredPhotoToolHandoff {
     createdAt: value.createdAt,
     expiresAt: value.expiresAt,
     acknowledgementSecret: value.acknowledgementSecret,
+    ...(value.albumFlow !== undefined ? { albumFlow: parseAlbumFlowManifest(value.albumFlow) } : {}),
   };
 }
 
@@ -389,6 +396,27 @@ function manifestsReferenceSameFiles(
       && file.fileName === current.fileName
       && file.size === current.size
       && file.lastModified === current.lastModified;
+  });
+}
+
+function validateAlbumFileBindings(
+  album: DesktopAlbumFlowHandoffManifestV1,
+  validated: { sourceRoot: string; files: DesktopPhotoToolHandoffFile[] },
+): void {
+  if (album.assets.length !== validated.files.length || album.sourceRoot.toLocaleLowerCase() !== validated.sourceRoot.toLocaleLowerCase()) {
+    throw new Error("Il manifest Album Flow non corrisponde ai file verificati.");
+  }
+  album.assets.forEach((asset, index) => {
+    const file = validated.files[index];
+    if (asset.absolutePath && !pathsMatch(asset.absolutePath, file.absolutePath)) {
+      throw new Error("Il manifest Album Flow contiene un percorso file incoerente.");
+    }
+    if (asset.relativePath.replace(/\\/g, "/") !== file.relativePath.replace(/\\/g, "/")) {
+      throw new Error("L'ordine o il percorso delle foto Album Flow è cambiato.");
+    }
+    if (asset.size !== undefined && asset.size !== file.size) {
+      throw new Error("Una foto Album Flow è cambiata dopo la selezione.");
+    }
   });
 }
 
@@ -455,6 +483,7 @@ function toPublicManifest(manifest: StoredPhotoToolHandoff): DesktopPhotoToolHan
     files: manifest.files,
     createdAt: manifest.createdAt,
     expiresAt: manifest.expiresAt,
+    ...(manifest.albumFlow ? { albumFlow: manifest.albumFlow } : {}),
   };
 }
 
@@ -659,7 +688,7 @@ export class PhotoToolHandoffManager {
   async sendPhotoSelectionToTool(
     request: DesktopPhotoToolHandoffRequest,
   ): Promise<DesktopPhotoToolHandoffSendResult> {
-    if (!isRecord(request) || !hasOnlyKeys(request, ["targetToolId", "sourceRoot", "absolutePaths"])) {
+    if (!isRecord(request) || !hasOnlyKeys(request, ["targetToolId", "sourceRoot", "absolutePaths", "albumFlow"])) {
       throw new Error("Richiesta di passaggio foto non valida.");
     }
     if (!isTargetToolId(request.targetToolId)) {
@@ -669,11 +698,19 @@ export class PhotoToolHandoffManager {
       throw new Error("L'avvio del tool di destinazione non è disponibile.");
     }
 
+    const albumFlow = request.albumFlow === undefined ? undefined : parseAlbumFlowManifest(request.albumFlow);
+    if (request.targetToolId === "album-flow"
+      ? !albumFlow || this.#currentToolId !== "photo-selector-app"
+      : albumFlow !== undefined) {
+      throw new Error("Album Flow richiede un manifest proveniente dal Photo Selector.");
+    }
+
     const selection = await validateSelection(
       request.targetToolId,
       request.sourceRoot,
       request.absolutePaths,
     );
+    if (albumFlow) validateAlbumFileBindings(albumFlow, selection);
     const storageRoot = await this.#ensureStorageRoot();
     await this.#purgeExpiredArtifacts(storageRoot);
 
@@ -689,9 +726,18 @@ export class PhotoToolHandoffManager {
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + this.#ttlMs).toISOString(),
       acknowledgementSecret: randomBytes(32).toString("hex"),
+      ...(albumFlow ? { albumFlow: {
+        ...albumFlow, handoffId, sourceRoot: selection.sourceRoot,
+        createdAt: new Date(now).toISOString(), expiresAt: new Date(now + this.#ttlMs).toISOString(),
+        assets: albumFlow.assets.map((asset, index) => ({ ...asset,
+          absolutePath: selection.files[index].absolutePath,
+          relativePath: selection.files[index].relativePath.replace(/\\/g, "/"),
+          size: selection.files[index].size,
+        })),
+      } } : {}),
     };
     const serialized = JSON.stringify(manifest);
-    if (Buffer.byteLength(serialized, "utf8") > MAX_HANDOFF_BYTES) {
+    if (Buffer.byteLength(serialized, "utf8") > (albumFlow ? MAX_ALBUM_HANDOFF_BYTES : MAX_HANDOFF_BYTES)) {
       throw new Error("La selezione è troppo grande per essere passata in sicurezza.");
     }
 
@@ -799,7 +845,7 @@ export class PhotoToolHandoffManager {
         claimedStat.isSymbolicLink()
         || !claimedStat.isFile()
         || claimedStat.size <= 0
-        || claimedStat.size > MAX_HANDOFF_BYTES
+        || claimedStat.size > MAX_ALBUM_HANDOFF_BYTES
       ) {
         throw new Error("Il file handoff non è un manifest regolare valido.");
       }
@@ -811,6 +857,16 @@ export class PhotoToolHandoffManager {
         throw new Error("Il manifest del passaggio foto non è leggibile.");
       }
       const manifest = parseManifest(parsedValue);
+      if (manifest.targetToolId === "album-flow") {
+        if (!manifest.albumFlow || manifest.sourceToolId !== "photo-selector-app"
+          || manifest.albumFlow.handoffId !== manifest.handoffId
+          || manifest.albumFlow.createdAt !== manifest.createdAt
+          || manifest.albumFlow.expiresAt !== manifest.expiresAt) {
+          throw new Error("Contenuto Album Flow mancante o non coerente con il passaggio.");
+        }
+      } else if (manifest.albumFlow || claimedStat.size > MAX_HANDOFF_BYTES) {
+        throw new Error("Contenuto non ammesso per il tool destinatario.");
+      }
       if (manifest.handoffId.toLocaleLowerCase("en-US") !== match[1].toLocaleLowerCase("en-US")) {
         throw new Error("L'identità del manifest non corrisponde al file handoff.");
       }
@@ -842,6 +898,7 @@ export class PhotoToolHandoffManager {
       if (!manifestsReferenceSameFiles(manifest, validated)) {
         throw new Error("Una o più foto sono cambiate dopo la creazione del passaggio.");
       }
+      if (manifest.albumFlow) validateAlbumFileBindings(manifest.albumFlow, validated);
 
       await this.#writeAcknowledgement(storageRoot, manifest);
       return toPublicManifest(manifest);

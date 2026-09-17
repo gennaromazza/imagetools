@@ -27,6 +27,28 @@ export interface DesktopToolDescriptor {
 }
 
 export const desktopToolManifest = {
+  "album-flow": {
+    id: "album-flow",
+    displayName: "FileX Album Flow",
+    productName: "FileX Album Flow",
+    executableName: "FileX-Album-Flow",
+    workspacePackageName: "@photo-tools/album-flow",
+    versionPackageRelativeToShell: "../album-flow",
+    electronMainOutputFile: "main.js",
+    electronPreloadOutputFile: "preload.js",
+    workspaceDistDirRelativeToShell: "../album-flow/.output/web",
+    packagedDistDir: "apps/album-flow/web",
+    brandAssetName: "LOGO_Image_tool",
+    defaultWindowWidth: 1540,
+    defaultWindowHeight: 980,
+    minWindowWidth: 1100,
+    minWindowHeight: 740,
+    devUrl: "http://127.0.0.1:4265",
+    releaseChannelDefault: "stable",
+    releaseManifestKey: "album-flow",
+    suiteVisible: false,
+    licenseRuntime: "shared-runtime",
+  },
   "suite-launcher": {
     id: "suite-launcher",
     displayName: "FileX Suite",

@@ -5,6 +5,7 @@ import type { FileXDesktopApi } from "@photo-tools/desktop-contracts";
 const { contextBridge, ipcRenderer, webUtils } = electron;
 
 const api: FileXDesktopApi = {
+  sendAlbumFlowHandoff: (request) => ipcRenderer.invoke("filex:send-album-flow-handoff", request),
   getRuntimeInfo: () => ipcRenderer.invoke("filex:get-runtime-info"),
   getGraphicsStatus: () => ipcRenderer.invoke("filex:get-graphics-status"),
   getSuiteUpdateState: () => ipcRenderer.invoke("filex:get-suite-update-state"),

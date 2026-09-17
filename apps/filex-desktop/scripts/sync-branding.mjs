@@ -22,6 +22,11 @@ const generatedBrandingSource = (fileName) => join(generatedBrandingDir, fileNam
 const toolBranding = [
   { toolId: "suite-launcher", sourceFile: "filex-system/suite-launcher.png" },
   {
+    toolId: "album-flow",
+    sourceFile: "filex-generated/photo-selector-app.png",
+    pngSourcePath: generatedBrandingSource("photo-selector-app.png"),
+  },
+  {
     toolId: "image-party-frame",
     sourceFile: "filex-generated/image-party-frame.png",
     pngSourcePath: generatedBrandingSource("image-party-frame.png"),

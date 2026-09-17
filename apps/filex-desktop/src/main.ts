@@ -45,6 +45,7 @@ import type {
   DesktopPerformanceSnapshot,
   DesktopPersistedState,
   DesktopPhotoToolHandoffRequest,
+  DesktopAlbumFlowHandoffRequest,
   DesktopDiskCacheBudgetPreset,
   DesktopRamBudgetPreset,
   DesktopReleaseChannel,
@@ -283,7 +284,28 @@ function getPhotoToolHandoffManager(): PhotoToolHandoffManager {
     photoToolHandoffManager = new PhotoToolHandoffManager({
       storageRoot: join(app.getPath("appData"), "FileX", "photo-tool-handoffs"),
       currentToolId: requestedTool.id,
-      launchTool: (toolId, launchArgs) => openInstalledTool(toolId, launchArgs),
+      launchTool: (toolId, launchArgs) => {
+        // In sviluppo Album Flow gira nello stesso workspace e non ha ancora
+        // un eseguibile installato: avviamo una seconda shell Electron con il
+        // renderer Vite dedicato. Il manifest resta condiviso tramite appData.
+        if (toolId === "album-flow" && !app.isPackaged && process.env.FILEX_RENDERER_MODE === "dev") {
+          const args = [...(launchArgs ?? [])];
+          const normalized: string[] = [];
+          for (let index = 0; index < args.length; index += 1) {
+            const arg = args[index];
+            if (arg === "--open-project" && args[index + 1]) {
+              normalized.push(`--open-project=${args[++index]}`);
+            } else normalized.push(arg);
+          }
+          const child = spawn(process.execPath, [app.getAppPath(), ...normalized], {
+            cwd: app.getAppPath(), detached: true, stdio: "ignore", windowsHide: false,
+            env: { ...process.env, FILEX_TOOL: "album-flow", FILEX_RENDERER_MODE: "dev", FILEX_RENDERER_URL: "http://127.0.0.1:4265" },
+          });
+          child.unref();
+          return Promise.resolve({ ok: true, message: `Album Flow dev avviato (${toolId}).` });
+        }
+        return openInstalledTool(toolId, launchArgs);
+      },
     });
   }
   return photoToolHandoffManager;
@@ -1560,6 +1582,19 @@ function registerIpcHandlers(): void {
     "filex:send-photo-selection-to-tool",
     async (_event, request: DesktopPhotoToolHandoffRequest) =>
       getPhotoToolHandoffManager().sendPhotoSelectionToTool(request),
+  );
+  ipcMain.handle(
+    "filex:send-album-flow-handoff",
+    async (_event, request: DesktopAlbumFlowHandoffRequest) => {
+      const manifest = request?.manifest;
+      if (!manifest) throw new Error("Manifest Album Flow mancante.");
+      return getPhotoToolHandoffManager().sendPhotoSelectionToTool({
+        targetToolId: "album-flow",
+        sourceRoot: manifest.sourceRoot,
+        absolutePaths: manifest.assets.map((asset) => asset.absolutePath).filter((path): path is string => Boolean(path)),
+        albumFlow: manifest,
+      });
+    },
   );
   ipcMain.handle(
     "filex:consume-photo-selection-handoff",

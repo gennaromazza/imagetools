@@ -65,6 +65,7 @@ const REQUIRED_DESKTOP_METHODS: Array<keyof FileXDesktopApi> = [
   "logDesktopEvent",
   "readSidecarXmp",
   "writeSidecarXmp",
+  "sendAlbumFlowHandoff",
 ];
 
 function getDesktopApiGuard(): { ok: true } | { ok: false; missingMethods: string[] } {

@@ -37,7 +37,7 @@ export const DEV_TOOLS: DevTool[] = [{
   port: null,
   kind: "electron",
   rendererUrl: null,
-}, ...getSuiteManagedTools().map((tool): DevTool => {
+}, ...[...getSuiteManagedTools(), desktopToolManifest["album-flow"]].map((tool): DevTool => {
   const { port, rendererUrl } = readDevPort(tool.id, tool.devUrl);
   return {
     id: tool.id,

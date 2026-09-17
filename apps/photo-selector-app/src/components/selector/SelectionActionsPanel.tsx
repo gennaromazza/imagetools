@@ -29,6 +29,7 @@ interface SelectionActionsPanelProps {
   onActivatePickedOnly: () => void;
   onConvertPsdSelected: () => void;
   onCompare: () => void;
+  onOpenAlbumFlow?: () => void;
 }
 
 export function SelectionActionsPanel(props: SelectionActionsPanelProps) {
@@ -83,6 +84,7 @@ export function SelectionActionsPanel(props: SelectionActionsPanelProps) {
           <button type="button" className="ghost-button ghost-button--small" onClick={() => props.onRotateSelected("left")} disabled={props.selectedCount === 0}>Ruota {props.selectedCount} selezionate a sinistra</button>
           <button type="button" className="ghost-button ghost-button--small" onClick={() => props.onRotateSelected("right")} disabled={props.selectedCount === 0}>Ruota {props.selectedCount} selezionate a destra</button>
           <button type="button" className="ghost-button ghost-button--small" onClick={props.onActivatePickedOnly}>Sostituisci con Pick</button>
+          {props.onOpenAlbumFlow ? <button type="button" className="ghost-button ghost-button--small" onClick={props.onOpenAlbumFlow} disabled={props.selectedCount === 0}>Apri in Album Flow</button> : null}
           {props.psdSelectedCount > 0 ? (
             <button type="button" className="ghost-button ghost-button--small" onClick={props.onConvertPsdSelected}>
               Converti {props.psdSelectedCount === 1 ? "PSD" : `${props.psdSelectedCount} PSD`} in JPEG…

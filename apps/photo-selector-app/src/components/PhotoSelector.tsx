@@ -114,6 +114,8 @@ interface PhotoSelectorProps {
   onPriorityIdsChange?: (priorityIds: Set<string>) => void;
   onPreviewPriorityIdsChange?: (priorityIds: Set<string>) => void;
   onBackgroundPreviewOrderChange?: (orderedIds: string[]) => void;
+  onOrderChange?: (orderedIds: string[]) => void;
+  onOpenAlbumFlow?: () => void;
   onScrollLiteActiveMsChange?: (activeMs: number) => void;
   onUndo?: () => void;
   onRedo?: () => void;
@@ -493,6 +495,8 @@ export function PhotoSelector({
   onPriorityIdsChange,
   onPreviewPriorityIdsChange,
   onBackgroundPreviewOrderChange,
+  onOrderChange,
+  onOpenAlbumFlow,
   onScrollLiteActiveMsChange,
   onUndo,
   onRedo,
@@ -1730,6 +1734,10 @@ export function PhotoSelector({
 
     return orderedIds;
   }, [captureById, createdAtSortDirection, isSortCacheEnabled, isThumbnailLoading, manualOrder, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
+
+  useEffect(() => {
+    onOrderChange?.(sortedPhotoIds);
+  }, [onOrderChange, sortedPhotoIds]);
 
   const visiblePhotoIds = useMemo(() => {
     const lowerSearch = deferredSearchQuery.toLowerCase();
@@ -3943,6 +3951,7 @@ export function PhotoSelector({
                 onRotateSelected={(direction) => { handleRotateSelection(direction); setIsSelectionActionsOpen(false); }}
                 onActivatePickedOnly={() => { activatePickedOnly(); setIsSelectionActionsOpen(false); }}
                 onConvertPsdSelected={() => { openPsdJpegConversion(selectedPsdIds); setIsSelectionActionsOpen(false); }}
+                onOpenAlbumFlow={() => { onOpenAlbumFlow?.(); setIsSelectionActionsOpen(false); }}
                 onCompare={openCompare}
               />
             ),

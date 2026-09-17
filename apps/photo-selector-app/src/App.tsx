@@ -58,6 +58,7 @@ import {
   type FolderOpenResult,
 } from "./services/folder-access";
 import { parseXmpState, upsertXmpState } from "./services/xmp-sidecar";
+import { buildAlbumFlowManifest } from "./services/album-flow-manifest";
 import { getAssetRotation, normalizeImageRotation } from "./services/photo-rotation";
 import { shouldApplyExternalSelectionUpdate } from "./services/photo-selection";
 import {
@@ -627,6 +628,7 @@ export function App() {
 
   // ── Persisted state ──────────────────────────────────────────────────
   const [projectName, setProjectName] = useState("Image Select Pro");
+  const [selectorOrderIds, setSelectorOrderIds] = useState<string[]>([]);
   const [workspaceMode, setWorkspaceMode] = useState<DesktopSelectionMode | null>(null);
   const [workspaceId, setWorkspaceId] = useState("");
   const [sourceIdentity, setSourceIdentity] = useState<DesktopSourceIdentity | null>(null);
@@ -4781,6 +4783,30 @@ export function App() {
     );
   }, [activeAssetIds, addToast, allAssets, projectName, workspaceId]);
 
+  const handleOpenAlbumFlow = useCallback(async () => {
+    const api = window.filexDesktop;
+    if (!api?.sendAlbumFlowHandoff || !sourceFolderPath) {
+      addToast("Album Flow richiede una cartella sorgente aperta nella shell FileX.", "error");
+      return;
+    }
+    try {
+      const manifest = buildAlbumFlowManifest({
+        projectId: workspaceId || PROJECT_ID,
+        projectName,
+        sourceRoot: sourceFolderPath,
+        assets: allAssets,
+        activeAssetIds,
+        orderedAssetIds: selectorOrderIds,
+        selectorRevision: `selector-${photoMetadataVersion}`,
+        getAbsolutePath: getAssetAbsolutePath,
+      });
+      const result = await api.sendAlbumFlowHandoff({ manifest });
+      addToast(result.message, result.ok ? "success" : "error");
+    } catch (error) {
+      addToast(error instanceof Error ? error.message : "Avvio Album Flow non riuscito.", "error");
+    }
+  }, [activeAssetIds, addToast, allAssets, photoMetadataVersion, projectName, selectorOrderIds, sourceFolderPath, workspaceId]);
+
   // ── Viewport tracking for pipeline priority ──────────────────────────
   const handleVisibleIdsChange = useCallback((ids: Set<string>) => {
     markInteractiveWork();
@@ -5181,6 +5207,8 @@ export function App() {
                 onPriorityIdsChange={handlePriorityIdsChange}
                 onPreviewPriorityIdsChange={handlePreviewPriorityIdsChange}
                 onBackgroundPreviewOrderChange={handleBackgroundPreviewOrderChange}
+                onOrderChange={setSelectorOrderIds}
+                onOpenAlbumFlow={handleOpenAlbumFlow}
                 onScrollLiteActiveMsChange={handleScrollLiteActiveMsChange}
                 onUndo={undoRedo.undo}
                 onRedo={undoRedo.redo}
