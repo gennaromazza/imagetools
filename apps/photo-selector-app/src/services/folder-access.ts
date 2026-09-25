@@ -100,6 +100,10 @@ function hasDesktopMoveBridge(): boolean {
   return typeof window !== "undefined" && typeof window.filexDesktop?.moveFilesToFolder === "function";
 }
 
+function hasDesktopTrashBridge(): boolean {
+  return typeof window !== "undefined" && typeof window.filexDesktop?.trashFiles === "function";
+}
+
 function hasDesktopSaveAsBridge(): boolean {
   return typeof window !== "undefined" && typeof window.filexDesktop?.saveFileAs === "function";
 }
@@ -1154,6 +1158,60 @@ export async function moveAssetsToFolder(assetIds: string[]): Promise<{ result: 
     };
   } catch {
     return { result: "error", movedIds: [] };
+  }
+}
+
+export async function trashAssetsToRecycleBin(assetIds: string[]): Promise<{ result: FileOpResult; trashedIds: string[] }> {
+  if (assetIds.length === 0) return { result: "no-file", trashedIds: [] };
+  if (!hasDesktopTrashBridge()) return { result: "error", trashedIds: [] };
+
+  const idByAbsolutePath = new Map<string, string>();
+  const expectedPathCountById = new Map<string, number>();
+  for (const assetId of assetIds) {
+    for (const absolutePath of [
+      assetAbsolutePathStore.get(assetId),
+      assetCompanionAbsolutePathStore.get(assetId),
+    ]) {
+      if (absolutePath && !idByAbsolutePath.has(absolutePath)) {
+        idByAbsolutePath.set(absolutePath, assetId);
+        expectedPathCountById.set(assetId, (expectedPathCountById.get(assetId) ?? 0) + 1);
+      }
+    }
+  }
+  const absolutePaths = Array.from(idByAbsolutePath.keys());
+  if (absolutePaths.length === 0) return { result: "no-file", trashedIds: [] };
+
+  try {
+    const response = await window.filexDesktop!.trashFiles(absolutePaths);
+    const trashedPathCountById = new Map<string, number>();
+    for (const path of response.trashedPaths) {
+      const id = idByAbsolutePath.get(path);
+      if (id) {
+        trashedPathCountById.set(id, (trashedPathCountById.get(id) ?? 0) + 1);
+      }
+    }
+    const trashedIds = Array.from(trashedPathCountById.entries())
+      .filter(([id, count]) => count >= (expectedPathCountById.get(id) ?? Number.MAX_SAFE_INTEGER))
+      .map(([id]) => id);
+
+    for (const assetId of trashedIds) {
+      revokeLivePreviewUrl(assetId);
+      invalidateOnDemandPreview(assetId);
+      assetPathStore.delete(assetId);
+      assetAbsolutePathStore.delete(assetId);
+      assetSourceFileKeyStore.delete(assetId);
+      assetSourceNamespaceStore.delete(assetId);
+      assetCompanionAbsolutePathStore.delete(assetId);
+      assetCompanionRelativePathStore.delete(assetId);
+      assetCompanionSourceFileKeyStore.delete(assetId);
+      assetCompanionFileNameStore.delete(assetId);
+      fileStore.delete(assetId);
+      filePromiseStore.delete(assetId);
+    }
+
+    return { result: mapDesktopFileOpStatus(response.status), trashedIds };
+  } catch {
+    return { result: "error", trashedIds: [] };
   }
 }
 

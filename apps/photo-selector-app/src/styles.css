@@ -1325,6 +1325,11 @@ img {
   align-items: center;
   justify-content: space-between;
   min-height: 48px;
+  position: sticky;
+  bottom: 0;
+  z-index: 120;
+  flex-wrap: wrap;
+  gap: 0.55rem;
 }
 
 .photo-selector__controls {
@@ -2054,6 +2059,32 @@ img {
   opacity: 0.8;
 }
 
+.photo-selector__selection-quick-actions {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid rgba(208, 165, 98, 0.28);
+  border-radius: 10px;
+  background: rgba(208, 165, 98, 0.08);
+  color: var(--text);
+  font-size: 0.73rem;
+}
+.photo-selector__selection-quick-actions strong {
+  color: #f5dea8;
+  white-space: nowrap;
+}
+.photo-selector__selection-quick-muted {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.photo-selector__quick-action-danger {
+  border-color: rgba(214, 119, 104, 0.35);
+  color: #f2b6aa;
+}
+
 .photo-selector__footer-actions {
   display: flex;
   gap: 0.75rem;
@@ -2190,9 +2221,13 @@ img {
 }
 
 .photo-card:focus-visible {
-  outline: 3px solid rgba(208, 165, 98, 0.85);
+  outline: 2px solid rgba(255, 255, 255, 0.72);
   outline-offset: 3px;
-  box-shadow: 0 0 0 6px rgba(208, 165, 98, 0.15);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.1);
+}
+.photo-card--selected:focus-visible {
+  outline-color: rgba(255, 244, 217, 0.96);
+  box-shadow: 0 0 0 4px rgba(208, 165, 98, 0.16);
 }
 
 .photo-card__image-wrapper {
@@ -2208,7 +2243,7 @@ img {
 }
 
 .photo-card:hover .photo-card__image-wrapper {
-  border-color: rgba(160, 130, 80, 0.4);
+  border-color: rgba(255, 255, 255, 0.22);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
@@ -2227,18 +2262,18 @@ img {
    in the stylesheet (same specificity, last wins), so they override both
    border-color AND box-shadow: label color is clearly visible even on selected
    cards, replacing the golden selected glow with the label's own colored glow. */
-.photo-card--color-red .photo-card__image-wrapper    { border-color: rgba(185, 101, 88, 0.85);  box-shadow: 0 0 0 2px rgba(185, 101, 88, 0.35),  0 6px 18px rgba(185, 101, 88, 0.18); }
-.photo-card--color-yellow .photo-card__image-wrapper { border-color: rgba(215, 185, 95, 0.85);  box-shadow: 0 0 0 2px rgba(215, 185, 95, 0.35),  0 6px 18px rgba(215, 185, 95, 0.18); }
-.photo-card--color-green .photo-card__image-wrapper  { border-color: rgba(111, 159, 104, 0.85); box-shadow: 0 0 0 2px rgba(111, 159, 104, 0.35), 0 6px 18px rgba(111, 159, 104, 0.18); }
-.photo-card--color-blue .photo-card__image-wrapper   { border-color: rgba(95, 137, 200, 0.85);  box-shadow: 0 0 0 2px rgba(95, 137, 200, 0.35),  0 6px 18px rgba(95, 137, 200, 0.18); }
-.photo-card--color-purple .photo-card__image-wrapper { border-color: rgba(139, 111, 199, 0.85); box-shadow: 0 0 0 2px rgba(139, 111, 199, 0.35), 0 6px 18px rgba(139, 111, 199, 0.18); }
+.photo-card--selected.photo-card--color-red .photo-card__image-wrapper    { border-color: rgba(185, 101, 88, 0.85);  box-shadow: 0 0 0 2px rgba(185, 101, 88, 0.35),  0 6px 18px rgba(185, 101, 88, 0.18); }
+.photo-card--selected.photo-card--color-yellow .photo-card__image-wrapper { border-color: rgba(215, 185, 95, 0.85);  box-shadow: 0 0 0 2px rgba(215, 185, 95, 0.35),  0 6px 18px rgba(215, 185, 95, 0.18); }
+.photo-card--selected.photo-card--color-green .photo-card__image-wrapper  { border-color: rgba(111, 159, 104, 0.85); box-shadow: 0 0 0 2px rgba(111, 159, 104, 0.35), 0 6px 18px rgba(111, 159, 104, 0.18); }
+.photo-card--selected.photo-card--color-blue .photo-card__image-wrapper   { border-color: rgba(95, 137, 200, 0.85);  box-shadow: 0 0 0 2px rgba(95, 137, 200, 0.35),  0 6px 18px rgba(95, 137, 200, 0.18); }
+.photo-card--selected.photo-card--color-purple .photo-card__image-wrapper { border-color: rgba(139, 111, 199, 0.85); box-shadow: 0 0 0 2px rgba(139, 111, 199, 0.35), 0 6px 18px rgba(139, 111, 199, 0.18); }
 
-.photo-card--custom-sand .photo-card__image-wrapper   { border-color: rgba(184, 154, 99, 0.85);  box-shadow: 0 0 0 2px rgba(184, 154, 99, 0.35),  0 6px 18px rgba(184, 154, 99, 0.18); }
-.photo-card--custom-rose .photo-card__image-wrapper   { border-color: rgba(194, 104, 122, 0.85); box-shadow: 0 0 0 2px rgba(194, 104, 122, 0.35), 0 6px 18px rgba(194, 104, 122, 0.18); }
-.photo-card--custom-green .photo-card__image-wrapper  { border-color: rgba(89, 163, 115, 0.85);  box-shadow: 0 0 0 2px rgba(89, 163, 115, 0.35),  0 6px 18px rgba(89, 163, 115, 0.18); }
-.photo-card--custom-blue .photo-card__image-wrapper   { border-color: rgba(80, 136, 209, 0.85);  box-shadow: 0 0 0 2px rgba(80, 136, 209, 0.35),  0 6px 18px rgba(80, 136, 209, 0.18); }
-.photo-card--custom-purple .photo-card__image-wrapper { border-color: rgba(148, 108, 199, 0.85); box-shadow: 0 0 0 2px rgba(148, 108, 199, 0.35), 0 6px 18px rgba(148, 108, 199, 0.18); }
-.photo-card--custom-slate .photo-card__image-wrapper  { border-color: rgba(115, 132, 147, 0.85); box-shadow: 0 0 0 2px rgba(115, 132, 147, 0.35), 0 6px 18px rgba(115, 132, 147, 0.18); }
+.photo-card--selected.photo-card--custom-sand .photo-card__image-wrapper   { border-color: rgba(184, 154, 99, 0.85);  box-shadow: 0 0 0 2px rgba(184, 154, 99, 0.35),  0 6px 18px rgba(184, 154, 99, 0.18); }
+.photo-card--selected.photo-card--custom-rose .photo-card__image-wrapper   { border-color: rgba(194, 104, 122, 0.85); box-shadow: 0 0 0 2px rgba(194, 104, 122, 0.35), 0 6px 18px rgba(194, 104, 122, 0.18); }
+.photo-card--selected.photo-card--custom-green .photo-card__image-wrapper  { border-color: rgba(89, 163, 115, 0.85);  box-shadow: 0 0 0 2px rgba(89, 163, 115, 0.35),  0 6px 18px rgba(89, 163, 115, 0.18); }
+.photo-card--selected.photo-card--custom-blue .photo-card__image-wrapper   { border-color: rgba(80, 136, 209, 0.85);  box-shadow: 0 0 0 2px rgba(80, 136, 209, 0.35),  0 6px 18px rgba(80, 136, 209, 0.18); }
+.photo-card--selected.photo-card--custom-purple .photo-card__image-wrapper { border-color: rgba(148, 108, 199, 0.85); box-shadow: 0 0 0 2px rgba(148, 108, 199, 0.35), 0 6px 18px rgba(148, 108, 199, 0.18); }
+.photo-card--selected.photo-card--custom-slate .photo-card__image-wrapper  { border-color: rgba(115, 132, 147, 0.85); box-shadow: 0 0 0 2px rgba(115, 132, 147, 0.35), 0 6px 18px rgba(115, 132, 147, 0.18); }
 
 /* La label conserva il bordo interno; l'anello esterno chiaro indica sempre
    e soltanto che la foto appartiene alla selezione corrente. */

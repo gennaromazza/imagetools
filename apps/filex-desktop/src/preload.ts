@@ -135,6 +135,8 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:copy-files-to-folder", absolutePaths),
   moveFilesToFolder: (absolutePaths) =>
     ipcRenderer.invoke("filex:move-files-to-folder", absolutePaths),
+  trashFiles: (absolutePaths) =>
+    ipcRenderer.invoke("filex:trash-files", absolutePaths),
   renamePhotoFiles: (rootPath, items) =>
     ipcRenderer.invoke("filex:rename-photo-files", rootPath, items),
   saveFileAs: (absolutePath) =>

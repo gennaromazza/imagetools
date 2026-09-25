@@ -19,6 +19,7 @@ import { ExportModal } from "./ExportModal";
 import { findLikelyDuplicateGroups } from "../services/duplicate-groups";
 import { PhotoCard } from "./PhotoCard";
 import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
+import { ConfirmModal } from "./ConfirmModal";
 import { PsdJpegConversionModal } from "./PsdJpegConversionModal";
 import { CompareModal } from "./CompareModal";
 import {
@@ -30,6 +31,7 @@ import {
   remapAssetStoresForRename,
   copyAssetsToFolder,
   moveAssetsToFolder,
+  trashAssetsToRecycleBin,
   saveAssetAs,
   getAssetRelativePath,
   getAssetAbsolutePath,
@@ -750,6 +752,10 @@ export function PhotoSelector({
   const batchPulseClearTimerRef = useRef<number | null>(null);
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const lassoPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const lassoAutoScrollFrameRef = useRef<number | null>(null);
+  const lassoAdditiveRef = useRef(false);
+  const lassoHitIdsRef = useRef<Set<string>>(new Set());
   const [gridViewport, setGridViewport] = useState({ width: 0, height: 720 });
   const [batchPulseState, setBatchPulseState] = useState<{
     token: number;
@@ -952,6 +958,62 @@ export function PhotoSelector({
       ));
       batchPulseClearTimerRef.current = null;
     }, 1200);
+  }, []);
+
+  const collectLassoHits = useCallback((selRect: { left: number; top: number; right: number; bottom: number }) => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const cards = grid.querySelectorAll<HTMLElement>("[data-preview-asset-id]");
+    for (let index = 0; index < cards.length; index += 1) {
+      const card = cards[index];
+      const cardRect = card.getBoundingClientRect();
+      const overlaps =
+        cardRect.left < selRect.right
+        && cardRect.right > selRect.left
+        && cardRect.top < selRect.bottom
+        && cardRect.bottom > selRect.top;
+      const id = card.dataset.previewAssetId;
+      if (overlaps && id) lassoHitIdsRef.current.add(id);
+    }
+  }, []);
+
+  const scheduleLassoAutoScroll = useCallback(() => {
+    if (lassoAutoScrollFrameRef.current !== null) return;
+    const tick = () => {
+      lassoAutoScrollFrameRef.current = null;
+      const grid = gridRef.current;
+      const pointer = lassoPointerRef.current;
+      if (!grid || !pointer || !dragOriginRef.current) return;
+      const bounds = grid.getBoundingClientRect();
+      const edge = Math.min(92, Math.max(48, bounds.height * 0.14));
+      let delta = 0;
+      if (pointer.y < bounds.top + edge) {
+        delta = -Math.max(3, Math.round((bounds.top + edge - pointer.y) / 8));
+      } else if (pointer.y > bounds.bottom - edge) {
+        delta = Math.max(3, Math.round((pointer.y - (bounds.bottom - edge)) / 8));
+      }
+      if (delta === 0) return;
+      const previousScrollTop = grid.scrollTop;
+      grid.scrollTop += delta;
+      const origin = dragOriginRef.current;
+      if (origin) {
+        collectLassoHits({
+          left: Math.min(origin.x, pointer.x),
+          top: Math.min(origin.y, pointer.y),
+          right: Math.max(origin.x, pointer.x),
+          bottom: Math.max(origin.y, pointer.y),
+        });
+      }
+      if (grid.scrollTop === previousScrollTop) return;
+      lassoAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
+    };
+    lassoAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
+  }, [collectLassoHits]);
+  const cancelLassoAutoScroll = useCallback(() => {
+    if (lassoAutoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(lassoAutoScrollFrameRef.current);
+      lassoAutoScrollFrameRef.current = null;
+    }
   }, []);
   const emitPreviewSyncFeedback = useCallback((feedback: Omit<PreviewSyncFeedback, "token"> | null) => {
     if (!feedback || feedback.assetIds.length === 0) {
@@ -1162,14 +1224,13 @@ export function PhotoSelector({
     if (changed) {
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, 1));
-      addToast(describeMetadataChanges(changes, 1), "success", 1800);
       if (source === "grid") {
         emitPreviewSyncFeedback(buildPreviewSyncFeedback(changes, [id]));
       } else if (source === "modal") {
         emitCardSyncFeedback(buildPreviewSyncFeedback(changes, [id]));
       }
     }
-  }, [addToast, buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry]);
+  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry]);
 
   function resetFilters() {
     setPickFilter("all");
@@ -2363,9 +2424,12 @@ export function PhotoSelector({
     // pointer capture from routing events away from the menu.
     if (contextMenuState) {
       dragOriginRef.current = null;
+      lassoPointerRef.current = null;
+      lassoHitIdsRef.current.clear();
       setDragRect(null);
+      cancelLassoAutoScroll();
     }
-  }, [contextMenuState]);
+  }, [cancelLassoAutoScroll, contextMenuState]);
 
   // Sposta il focus alla foto successiva (o alla precedente se in fondo).
   // Usato dall'auto-advance dopo una classificazione tramite scorciatoia,
@@ -2398,18 +2462,32 @@ export function PhotoSelector({
     const directionLabel = direction === "left" ? "a sinistra" : "a destra";
     const message = `${subject}: ruotata ${directionLabel}`;
     pushTimelineEntry(message);
-    addToast(message, "success", 1800);
-  }, [addToast, onPhotosChange, pushTimelineEntry]);
+  }, [onPhotosChange, pushTimelineEntry]);
 
   const advanceFocusToNext = useCallback(
     (currentId: string) => {
       if (!autoAdvanceOnAction || visiblePhotoIds.length === 0) return;
       const currentIndex = visiblePhotoIndexById.get(currentId);
-      if (currentIndex === undefined || currentIndex < 0) return;
-      const nextIndex = currentIndex < visiblePhotoIds.length - 1
-        ? currentIndex + 1
-        : currentIndex; // resta sull'ultima se non c'è successiva
-      const nextId = visiblePhotoIds[nextIndex];
+      let nextId: string | undefined;
+
+      if (currentIndex !== undefined && currentIndex >= 0) {
+        const nextIndex = currentIndex < visiblePhotoIds.length - 1
+          ? currentIndex + 1
+          : currentIndex; // resta sull'ultima se non c'è successiva
+        nextId = visiblePhotoIds[nextIndex];
+      } else {
+        // Una classificazione può escludere subito la foto dal filtro attivo.
+        // In quel caso la foto non ha più un indice nella lista visibile, ma
+        // la navigazione deve comunque trovare il primo scatto successivo.
+        const currentSourceIndex = sortedPhotoIds.indexOf(currentId);
+        if (currentSourceIndex >= 0) {
+          nextId = visiblePhotoIds.find((photoId) => {
+            const sourceIndex = sortedPhotoIds.indexOf(photoId);
+            return sourceIndex > currentSourceIndex;
+          });
+        }
+      }
+
       if (!nextId || nextId === currentId) return;
       setFocusedPhotoId(nextId);
       scrollPhotoIntoView(nextId);
@@ -2419,7 +2497,7 @@ export function PhotoSelector({
         if (el) el.focus();
       });
     },
-    [autoAdvanceOnAction, scrollPhotoIntoView, visiblePhotoIds, visiblePhotoIndexById],
+    [autoAdvanceOnAction, scrollPhotoIntoView, sortedPhotoIds, visiblePhotoIds, visiblePhotoIndexById],
   );
 
   // Consolidated keyboard handler: Escape chain + arrow navigation
@@ -2439,7 +2517,19 @@ export function PhotoSelector({
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("select, input, textarea")) return;
 
-      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
+      if (
+        event.key === "Delete"
+        && !event.ctrlKey
+        && !event.metaKey
+        && !event.altKey
+        && selectedIdsRef.current.length > 0
+      ) {
+        event.preventDefault();
+        setTrashTargetIds([...selectedIdsRef.current]);
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
         const normalizedKey = event.key.toLowerCase();
         if (normalizedKey === "a") {
           event.preventDefault();
@@ -2455,6 +2545,13 @@ export function PhotoSelector({
             setIsCompareOpen(false);
           } else {
             openCompare();
+          }
+          return;
+        }
+        if (normalizedKey === "r" && event.shiftKey) {
+          event.preventDefault();
+          if (!event.repeat) {
+            rotatePhotos(selectedIdsRef.current, "right");
           }
           return;
         }
@@ -2725,7 +2822,6 @@ export function PhotoSelector({
     if (changed) {
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, targetIds.length));
-      addToast(describeMetadataChanges(changes, changedIds.length), "success", 2200);
       if (changes.colorLabel !== undefined) {
         triggerBatchPulse(changedIds, "dot");
       }
@@ -2738,7 +2834,7 @@ export function PhotoSelector({
         emitCardSyncFeedback(buildPreviewSyncFeedback(changes, changedIds));
       }
     }
-  }, [addToast, buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
+  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
 
   const selectedCustomLabelCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -2782,8 +2878,8 @@ export function PhotoSelector({
   }, [selectedIds, updateCustomLabelsForIds]);
 
   const selectedAbsolutePaths = useMemo(
-    () => getAssetAbsolutePaths(currentFolderSelectedIds),
-    [currentFolderSelectedIds],
+    () => getAssetAbsolutePaths(selectedIds),
+    [selectedIds],
   );
   const selectedAbsolutePathsSignature = useMemo(
     () => selectedAbsolutePaths.join("\n"),
@@ -2907,7 +3003,7 @@ export function PhotoSelector({
 
     // Snapshot stabile della selezione per questa esecuzione: evita race in cui
     // il signature cambia mentre la promise è in volo.
-    const requestedCount = currentFolderSelectedIds.length;
+    const requestedCount = selectedIds.length;
     const pathsSnapshot = selectedAbsolutePaths.slice();
 
     if (pathsSnapshot.length === 0) {
@@ -2953,7 +3049,7 @@ export function PhotoSelector({
       dragOutCheckSeqRef.current += 1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAbsolutePathsSignature]);
+  }, [selectedAbsolutePathsSignature, selectedIds.length]);
 
   const canStartDesktopDragOut = Boolean(
     desktopDragOutCheck?.ok
@@ -2962,8 +3058,8 @@ export function PhotoSelector({
   );
   const desktopDragOutMessage = desktopDragOutCheck?.message
     ?? "Drag esterno non disponibile in questa sessione desktop.";
-  const desktopDragOutDisabledMessage = currentFolderSelectedIds.length === 0
-    ? "Seleziona almeno una foto nella cartella corrente per il drag esterno."
+  const desktopDragOutDisabledMessage = selectedIds.length === 0
+    ? "Seleziona almeno una foto per il drag esterno."
     : desktopDragOutMessage;
 
   const handleSelectionDragStart = useCallback((event: DragEvent<HTMLElement>) => {
@@ -2981,7 +3077,7 @@ export function PhotoSelector({
   const handleCardExternalDragStart = useLatestCallback((photoId: string, event: DragEvent<HTMLDivElement>) => {
     const draggingSelection = selectedSetRef.current.has(photoId);
     const targetPaths = draggingSelection
-      ? getAssetAbsolutePaths(currentFolderSelectedIds)
+      ? getAssetAbsolutePaths(selectedIdsRef.current)
       : getAssetAbsolutePaths([photoId]);
 
     if (
@@ -3178,11 +3274,28 @@ export function PhotoSelector({
   }, [previewAsset, asyncPreviewUrl]);
 
   const isPreviewOpen = Boolean(previewAssetId);
-  const visiblePreviewAssets = useMemo(() => {
+  const previewNavigationIds = useMemo(() => {
     if (!isPreviewOpen) {
-      return [] as ImageAsset[];
+      return [] as string[];
     }
-    return visiblePhotoIds
+
+    const ids = visiblePhotoIds.slice();
+    if (!previewAssetId || ids.includes(previewAssetId)) {
+      return ids;
+    }
+
+    // A rating/pick/label can remove the current photo from the active filter.
+    // Keep it in the same relative position so next/previous never dead-end.
+    const currentSourceIndex = sortedPhotoIds.indexOf(previewAssetId);
+    const insertAt = currentSourceIndex < 0
+      ? ids.length
+      : ids.findIndex((id) => sortedPhotoIds.indexOf(id) > currentSourceIndex);
+    ids.splice(insertAt < 0 ? ids.length : insertAt, 0, previewAssetId);
+    return ids;
+  }, [isPreviewOpen, previewAssetId, sortedPhotoIds, visiblePhotoIds]);
+
+  const visiblePreviewAssets = useMemo(() => {
+    return previewNavigationIds
       .map((photoId) => {
         const photo = assetById.get(photoId);
         if (!photo) return null;
@@ -3190,7 +3303,7 @@ export function PhotoSelector({
         return thumbnailView ? { ...photo, ...thumbnailView } : photo;
       })
       .filter((photo): photo is ImageAsset => Boolean(photo));
-  }, [assetById, isPreviewOpen, visiblePhotoIds]);
+  }, [assetById, previewNavigationIds]);
 
   const visibleSelectedCount = useMemo(
     () => selectedIds.reduce(
@@ -3407,6 +3520,19 @@ export function PhotoSelector({
     else if (result === "error") addToast("Errore durante la copia. Alcuni file potrebbero non essere stati copiati.", "error");
   }, [addToast, pushTimelineEntry]);
 
+  const handleTrashFiles = useCallback(async (ids: string[]) => {
+    const { result, trashedIds } = await trashAssetsToRecycleBin(ids);
+    if (trashedIds.length > 0 && onPhotosChange) {
+      const trashedSet = new Set(trashedIds);
+      onPhotosChange(photos.filter((photo) => !trashedSet.has(photo.id)));
+      commitSelection(selectedIdsRef.current.filter((id) => !trashedSet.has(id)));
+      pushTimelineEntry((trashedIds.length === 1 ? "1 foto" : trashedIds.length + " foto") + " spostata/e nel Cestino");
+    }
+    if (result === "partial") addToast("Cancellazione parziale: alcuni file non sono stati spostati nel Cestino.", "warning");
+    if (result === "error") addToast("Non è stato possibile spostare la selezione nel Cestino.", "error");
+    if (result === "no-file") addToast("Nessun file selezionato disponibile.", "warning");
+  }, [addToast, commitSelection, onPhotosChange, photos, pushTimelineEntry]);
+
   const handleMoveFiles = useCallback(async (ids: string[]) => {
     const { result, movedIds } = await moveAssetsToFolder(ids);
     if (result === "cancelled") return;
@@ -3431,6 +3557,7 @@ export function PhotoSelector({
   const [renameTargetIds, setRenameTargetIds] = useState<string[] | null>(null);
   const [renameInitialOptions, setRenameInitialOptions] = useState<Partial<RenamePatternOptions> | null>(null);
   const [exportTargetIds, setExportTargetIds] = useState<string[] | null>(null);
+  const [trashTargetIds, setTrashTargetIds] = useState<string[] | null>(null);
 
   function resolveAbsolutePaths(ids: string[]): string[] {
     const root = effectiveRootFolderPath.trim().replace(/[\\/]+$/, "");
@@ -3558,6 +3685,24 @@ export function PhotoSelector({
     setRenameTargetIds(null);
     setRenameInitialOptions(null);
   }, [addToast, commitSelection, effectiveRootFolderPath, onPhotosChange, photos, pushTimelineEntry]);
+
+  const handleCopyNames = useCallback(async (ids: string[]) => {
+    const names = ids
+      .map((id) => assetById.get(id))
+      .filter((photo): photo is ImageAsset => Boolean(photo))
+      .flatMap((photo) => [photo.fileName, photo.companionFileName].filter((name): name is string => Boolean(name)));
+    if (names.length === 0) {
+      addToast("Nessun nome file disponibile per la selezione.", "warning");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(Array.from(new Set(names)).join("\n"));
+      pushTimelineEntry((names.length === 1 ? "1 nome file" : names.length + " nomi file") + " copiati negli appunti");
+      addToast("Nomi file copiati negli appunti.", "success", 2200);
+    } catch {
+      addToast("Non è stato possibile copiare i nomi file negli appunti.", "error");
+    }
+  }, [addToast, assetById, pushTimelineEntry]);
 
   const handleCopyPath = useCallback((ids: string[], root: string) => {
     const absolutePaths = getAssetAbsolutePaths(ids);
@@ -4052,30 +4197,44 @@ export function PhotoSelector({
           if (eventTarget instanceof HTMLElement && eventTarget.closest(".photo-card")) return;
           if (e.button !== 0) return;
           dragOriginRef.current = { x: e.clientX, y: e.clientY };
+          lassoPointerRef.current = { x: e.clientX, y: e.clientY };
+          lassoAdditiveRef.current = e.shiftKey;
+          lassoHitIdsRef.current.clear();
           setDragRect(null);
           (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         }}
         onPointerMove={(e) => {
           if (!dragOriginRef.current) return;
+          lassoPointerRef.current = { x: e.clientX, y: e.clientY };
+          scheduleLassoAutoScroll();
           const ox = dragOriginRef.current.x;
           const oy = dragOriginRef.current.y;
           const cx = e.clientX;
           const cy = e.clientY;
           const threshold = 6;
           if (Math.abs(cx - ox) < threshold && Math.abs(cy - oy) < threshold) return;
-          setDragRect({
+          const nextRect = {
             left: Math.min(ox, cx),
             top: Math.min(oy, cy),
             width: Math.abs(cx - ox),
             height: Math.abs(cy - oy),
+          };
+          setDragRect(nextRect);
+          collectLassoHits({
+            left: nextRect.left,
+            top: nextRect.top,
+            right: nextRect.left + nextRect.width,
+            bottom: nextRect.top + nextRect.height,
           });
         }}
-        onPointerUp={(e) => {
+        onPointerUp={() => {
           if (!dragOriginRef.current) return;
-          const origin = dragOriginRef.current;
           dragOriginRef.current = null;
+          lassoPointerRef.current = null;
+          cancelLassoAutoScroll();
 
           if (!dragRect) {
+            lassoHitIdsRef.current.clear();
             setDragRect(null);
             return;
           }
@@ -4086,30 +4245,24 @@ export function PhotoSelector({
             right: dragRect.left + dragRect.width,
             bottom: dragRect.top + dragRect.height,
           };
+          collectLassoHits(selRect);
           setDragRect(null);
 
-          const grid = gridRef.current;
-          if (!grid) return;
-          const cards = grid.querySelectorAll<HTMLElement>("[data-preview-asset-id]");
-          const newIds: string[] = [];
-          for (let i = 0; i < cards.length; i++) {
-            const cr = cards[i].getBoundingClientRect();
-            const overlaps =
-              cr.left < selRect.right &&
-              cr.right > selRect.left &&
-              cr.top < selRect.bottom &&
-              cr.bottom > selRect.top;
-            if (overlaps) {
-              const id = cards[i].dataset.previewAssetId;
-              if (id) newIds.push(id);
-            }
-          }
+          const newIds = Array.from(lassoHitIdsRef.current);
+          lassoHitIdsRef.current.clear();
           if (newIds.length > 0) {
-            const base = e.shiftKey ? new Set(selectedIdsRef.current) : new Set<string>();
+            const base = lassoAdditiveRef.current ? new Set(selectedIdsRef.current) : new Set<string>();
             for (const id of newIds) base.add(id);
             commitSelection(Array.from(base));
             pushTimelineEntry(`Selezionate ${newIds.length} foto con lasso`);
           }
+        }}
+        onPointerCancel={() => {
+          dragOriginRef.current = null;
+          lassoPointerRef.current = null;
+          lassoHitIdsRef.current.clear();
+          setDragRect(null);
+          cancelLassoAutoScroll();
         }}
         onScroll={handleGridScroll}
       >
@@ -4184,6 +4337,18 @@ export function PhotoSelector({
 
       {/* ── STATUS BAR (Bridge Bottom Style) ── */}
       <footer className="photo-selector__bottom-bar">
+        {selectedIds.length > 0 ? (
+          <div className="photo-selector__selection-quick-actions" role="toolbar" aria-label="Azioni rapide sulla selezione">
+            <strong>{selectedIds.length} selezionate</strong>
+            {selectedOutsideFilterCount > 0 ? (
+              <span className="photo-selector__selection-quick-muted">{selectedOutsideFilterCount} fuori filtro</span>
+            ) : null}
+            <button type="button" className="ghost-button ghost-button--small" onClick={() => void handleCopyNames(selectedIds)} title="Copia un nome per riga negli appunti">Copia nomi</button>
+            <button type="button" className="ghost-button ghost-button--small" onClick={() => handleRotateSelection("left")} title="Ruota la selezione di 90° a sinistra" aria-label="Ruota la selezione a sinistra">↶</button>
+            <button type="button" className="ghost-button ghost-button--small" onClick={() => handleRotateSelection("right")} title="Ruota la selezione di 90° a destra" aria-label="Ruota la selezione a destra">↷</button>
+            <button type="button" className="ghost-button ghost-button--small photo-selector__quick-action-danger" onClick={() => setTrashTargetIds([...selectedIds])} title="Sposta la selezione nel Cestino">Cestino</button>
+          </div>
+        ) : null}
         <div className="photo-selector__stats">
           <span className="photo-selector__count">
             Ambito: {folderFilter === "all" ? "tutte le cartelle" : folderFilter} ({currentFolderPhotos.length} foto)
@@ -4240,7 +4405,7 @@ export function PhotoSelector({
                 : desktopDragOutDisabledMessage}
               disabled={!canStartDesktopDragOut}
             >
-              Trascina fuori ({currentFolderSelectedIds.length})
+              Trascina fuori ({selectedIds.length})
             </button>
           {!canStartDesktopDragOut && (
             <span className="photo-selector__dragout-feedback" role="status" aria-live="polite">
@@ -5285,10 +5450,33 @@ export function PhotoSelector({
             handleCopyPath(contextMenuState.targetIds, effectiveRootFolderPath);
             setContextMenuState(null);
           }}
+          onCopyNames={() => {
+            const ids = [...contextMenuState.targetIds];
+            setContextMenuState(null);
+            void handleCopyNames(ids);
+          }}
+          onTrashFiles={() => {
+            setTrashTargetIds([...contextMenuState.targetIds]);
+            setContextMenuState(null);
+          }}
           onOpenWithEditor={() => {
             const ids = [...contextMenuState.targetIds];
             setContextMenuState(null);
             handleOpenWithEditor(ids);
+          }}
+        />
+      ) : null}
+
+      {trashTargetIds ? (
+        <ConfirmModal
+          title="Spostare nel Cestino?"
+          description={(trashTargetIds.length === 1 ? "La foto selezionata" : trashTargetIds.length + " foto selezionate") + " verrà spostata nel Cestino di sistema. Potrai recuperarla dal Cestino di Windows."}
+          confirmText="Sposta nel Cestino"
+          onCancel={() => setTrashTargetIds(null)}
+          onConfirm={() => {
+            const ids = [...trashTargetIds];
+            setTrashTargetIds(null);
+            void handleTrashFiles(ids);
           }}
         />
       ) : null}

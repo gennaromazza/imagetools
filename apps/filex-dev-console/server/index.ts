@@ -324,7 +324,7 @@ function testDescription(name: string): string {
     "test:photo-selector-relocation": "Verifica lo spostamento sicuro dei progetti e delle relative risorse.",
     "test:photo-selector-xmp": "Controlla lettura e aggiornamento dei metadati XMP.",
     "test:photo-selector-psd": "Verifica importazione PSD, anteprima del composito e conversione JPEG senza sovrascrivere gli originali.",
-    "test:photo-selector-performance": "Verifica code prioritarie, budget cache, aggiornamenti thumbnail per-ID e invarianti CSS anti-lag.",
+    "test:photo-selector-performance": "Verifica code prioritarie, budget cache, orientamento EXIF, lasso con autoscroll, azioni rapide e continuità della Quick Preview.",
     "test:photo-selector-duplicates": "Verifica il raggruppamento dei probabili duplicati per peso e dimensioni, senza falsi positivi.",
     "test:photo-selector-capture-time": "Verifica il parser delle date di scatto EXIF con subsecondi, fusi e valori corrotti.",
     "test:photo-selector-rename": "Verifica anteprima rinomina batch con data scatto, sequenze, collisioni e nomi Windows.",

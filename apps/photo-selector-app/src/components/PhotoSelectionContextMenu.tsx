@@ -34,6 +34,8 @@ interface PhotoSelectionContextMenuProps {
   canConvertPsd?: boolean;
   onConvertPsd?: () => void;
   onCopyPath?: () => void;
+  onCopyNames?: () => void;
+  onTrashFiles?: () => void;
   onOpenWithEditor?: () => void;
 }
 
@@ -61,6 +63,8 @@ export function PhotoSelectionContextMenu({
   canConvertPsd = false,
   onConvertPsd,
   onCopyPath,
+  onCopyNames,
+  onTrashFiles,
   onOpenWithEditor,
 }: PhotoSelectionContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
@@ -349,6 +353,24 @@ export function PhotoSelectionContextMenu({
       <div className="selection-context-menu__divider" />
 
       <div className="selection-context-menu__section">
+        <button
+          type="button"
+          className="selection-context-menu__action-item"
+          onClick={onCopyNames}
+          role="menuitem"
+          title="Copia negli appunti i nomi dei file selezionati, uno per riga"
+        >
+          <span className="icon">📝</span> Copia nomi file
+        </button>
+        <button
+          type="button"
+          className="selection-context-menu__action-item selection-context-menu__action-item--danger"
+          onClick={onTrashFiles}
+          role="menuitem"
+          title="Sposta le foto selezionate nel Cestino di sistema"
+        >
+          <span className="icon">🗑️</span> Sposta nel Cestino…
+        </button>
         <button
           type="button"
           className="selection-context-menu__action-item selection-context-menu__action-item--danger"

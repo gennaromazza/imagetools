@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-25 - Image Select Pro 0.1.41
+
+- Selezione e sfogliamento più fluidi: trascinamento multi-foto affidabile, copia dei nomi file e spostamento nel Cestino; feedback di selezione coerenti, classificazione senza interrompere la navigazione, rotazione automatica EXIF e rotazione batch, lasso più rapido e zoom mantenuto in Quick Preview.
+
 ## 2026-09-11 - Archivio Flow 0.1.43
 
 - Migliorata la gestione delle destinazioni e dei percorsi durante l'importazione, con controlli più affidabili sui lavori e sulle cartelle suggerite.

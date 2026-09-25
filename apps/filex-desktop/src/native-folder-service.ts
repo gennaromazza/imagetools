@@ -1,8 +1,11 @@
 import * as electron from "electron";
+import { statSync } from "node:fs";
 import { copyFile, lstat, readFile, readdir, realpath, rename, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type {
   DesktopCopyFilesResult,
+  DesktopDragOutCheck,
+  DesktopTrashFilesResult,
   DesktopFileStat,
   DesktopFilePayload,
   DesktopFolderEntry,
@@ -914,6 +917,107 @@ async function moveFileToDestination(sourcePath: string, destinationPath: string
 
   await copyFile(sourcePath, destinationPath);
   await unlink(sourcePath);
+}
+
+/** Validate once, synchronously inside the native drag gesture. Never truncate a selection. */
+export function prepareDesktopDragOut(input: unknown): { check: DesktopDragOutCheck; paths: string[] } {
+  const requestedCount = Array.isArray(input) ? input.length : 0;
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  let invalid = !Array.isArray(input);
+  for (const value of Array.isArray(input) ? input : []) {
+    if (typeof value !== "string" || !isAbsolute(value)) {
+      invalid = true;
+      continue;
+    }
+    const path = resolve(value);
+    const key = process.platform === "win32" ? path.toLowerCase() : path;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    try {
+      if (!statSync(path).isFile()) { invalid = true; continue; }
+      paths.push(path);
+    } catch {
+      invalid = true;
+    }
+  }
+  const ok = !invalid && paths.length > 0;
+  return {
+    paths,
+    check: {
+      ok, requestedCount, validCount: paths.length, allowedCount: ok ? paths.length : 0,
+      reason: requestedCount === 0 ? "empty-selection" : ok ? "ok" : "invalid-paths",
+      message: requestedCount === 0
+        ? "Seleziona almeno una foto."
+        : ok ? paths.length + " file pronti per il trascinamento."
+          : "Trascinamento annullato: uno o più file non sono disponibili. Nessun file è stato escluso dalla selezione.",
+    },
+  };
+}
+
+export function startDesktopFileDrag(
+  input: unknown,
+  icon: string,
+  startDrag: (item: { file: string; files: string[]; icon: string }) => void,
+): void {
+  const { check, paths } = prepareDesktopDragOut(input);
+  if (!check.ok) throw new Error(check.message);
+  startDrag({ file: paths[0], files: paths, icon });
+}
+
+interface TrashDependencies {
+  confirm: (paths: string[]) => Promise<boolean>;
+  trash: (path: string) => Promise<void>;
+}
+
+export async function trashFilesDesktop(
+  input: unknown,
+  dependencies: TrashDependencies = {
+    // The renderer opens ConfirmModal before invoking this IPC method.
+    // Keeping the native operation confirmation-free avoids a confusing double prompt.
+    confirm: async () => true,
+    trash: (path) => electron.shell.trashItem(path),
+  }
+): Promise<DesktopTrashFilesResult> {
+  const requested = Array.isArray(input) ? input : [];
+  const paths = new Map<string, string>();
+  let invalid = !Array.isArray(input);
+  for (const value of requested) {
+    if (typeof value !== "string" || !isAbsolute(value) || !isNativeFolderImageFile(value, true)) {
+      invalid = true;
+      continue;
+    }
+    const path = resolve(value);
+    paths.set(process.platform === "win32" ? path.toLowerCase() : path, path);
+  }
+  const requestedCount = paths.size;
+  const empty = { requestedCount, trashedCount: 0, trashedPaths: [] as string[] };
+  if (invalid) return { ...empty, status: "error" };
+  if (!requestedCount) return { ...empty, status: "no-file" };
+  // Refuse directories, symlinks and missing files before asking for confirmation.
+  for (const path of paths.values()) {
+    try {
+      if (!(await lstat(path)).isFile()) return { ...empty, status: "error" };
+    } catch {
+      return { ...empty, status: "error" };
+    }
+  }
+  if (!await dependencies.confirm([...paths.values()])) return { ...empty, status: "cancelled" };
+  const trashedPaths: string[] = [];
+  for (const path of paths.values()) {
+    try {
+      if (!(await lstat(path)).isFile()) continue;
+      // No unlink fallback: a file must remain recoverable from the system trash.
+      await dependencies.trash(path);
+      trashedPaths.push(path);
+    } catch {
+      // Preserve failures in the catalog; return every successful path for reconciliation.
+    }
+  }
+  return {
+    status: resolveFileOpStatus(trashedPaths.length, requestedCount, trashedPaths.length !== requestedCount),
+    requestedCount, trashedCount: trashedPaths.length, trashedPaths,
+  };
 }
 
 export async function moveFilesToFolderDesktop(absolutePaths: string[]): Promise<DesktopMoveFilesResult> {

@@ -470,6 +470,9 @@
     "0.1.40": [
       "Prova All Access di 30 giorni, licenza firmata obbligatoria, protezione di cache e scadenze, avviso e chiusura dopo 60 secondi senza licenza valida.",
       "Token licenza condiviso fra i profili FileX dello stesso utente Windows, migrazione automatica dei token precedenti e collaudo online sugli installer."
+    ],
+    "0.1.41": [
+      "Selezione e sfogliamento più fluidi: trascinamento multi-foto affidabile, copia dei nomi file e spostamento nel Cestino; feedback di selezione coerenti, classificazione senza interrompere la navigazione, rotazione automatica EXIF e rotazione batch, lasso più rapido e zoom mantenuto in Quick Preview."
     ]
   },
   "id-photo": {

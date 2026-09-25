@@ -706,6 +706,12 @@ export interface DesktopMoveFilesResult {
     movedPaths: string[];
     destinationDirectory: string | null;
 }
+export interface DesktopTrashFilesResult {
+    status: DesktopNativeFileOpStatus;
+    requestedCount: number;
+    trashedCount: number;
+    trashedPaths: string[];
+}
 export interface DesktopSaveFileAsResult {
     status: DesktopNativeFileOpStatus;
     sourcePath: string;
@@ -1313,6 +1319,7 @@ export interface FileXDesktopApi {
     chooseImageFile: (currentPath?: string) => Promise<string | null>;
     copyFilesToFolder: (absolutePaths: string[]) => Promise<DesktopCopyFilesResult>;
     moveFilesToFolder: (absolutePaths: string[]) => Promise<DesktopMoveFilesResult>;
+    trashFiles: (absolutePaths: string[]) => Promise<DesktopTrashFilesResult>;
     renamePhotoFiles: (rootPath: string, items: DesktopPhotoFileRenameItem[]) => Promise<DesktopPhotoFileRenameResult[]>;
     saveFileAs: (absolutePath: string) => Promise<DesktopSaveFileAsResult>;
     getDesktopPreferences: () => Promise<DesktopPhotoSelectorPreferences>;

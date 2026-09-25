@@ -1158,6 +1158,42 @@ function resolvePreviewSourceFromBufferWithBudget(
   return runDecodeTask(isRaw, () => resolvePreviewSourceFromBuffer(buffer, mimeType));
 }
 
+async function resolveEmbeddedPreviewSourceFromBuffer(
+  buffer: Buffer,
+  mimeType: string,
+): Promise<ResolvedPreviewSource | null> {
+  const sharpMod = await getSharp();
+  if (sharpMod) {
+    try {
+      const metadata = await sharpMod(buffer, { failOn: "none" }).metadata();
+      if (
+        (metadata.width ?? 0) > 0
+        && (metadata.height ?? 0) > 0
+        && (!metadata.orientation || metadata.orientation === 1)
+      ) {
+        return {
+          buffer,
+          mimeType,
+          width: metadata.width,
+          height: metadata.height,
+        };
+      }
+    } catch {
+      // Fall back to the oriented decode below.
+    }
+  }
+
+  return resolvePreviewSourceFromBuffer(buffer, mimeType);
+}
+
+function resolveEmbeddedPreviewSourceFromBufferWithBudget(
+  buffer: Buffer,
+  mimeType: string,
+  isRaw: boolean,
+): Promise<ResolvedPreviewSource | null> {
+  return runDecodeTask(isRaw, () => resolveEmbeddedPreviewSourceFromBuffer(buffer, mimeType));
+}
+
 async function tryExtractEmbeddedPreviewFromPrefix(
   handle: FileHandle,
   fileSize: number,
@@ -1979,15 +2015,25 @@ async function computeDesktopThumbnail(
         minimumEmbeddedShortSide,
       );
       if (exifThumbnailBuffer) {
-        const embeddedDimensions = readJpegDimensionsOrDecode(exifThumbnailBuffer);
+        // Read metadata first so thumbnails already in the correct orientation
+        // stay on the zero-copy fast path; only rotated EXIF previews are decoded.
+        const orientedSource = await resolveEmbeddedPreviewSourceFromBufferWithBudget(
+          exifThumbnailBuffer,
+          getMimeTypeForBuffer(exifThumbnailBuffer),
+          false,
+        );
+        const embeddedDimensions = orientedSource
+          ? { width: orientedSource.width, height: orientedSource.height }
+          : readJpegDimensionsOrDecode(exifThumbnailBuffer);
         if (
-          options?.allowDirectEmbeddedJpeg &&
-          embeddedDimensions &&
-          Math.max(embeddedDimensions.width, embeddedDimensions.height) <= maxDimension
+          options?.allowDirectEmbeddedJpeg
+          && orientedSource
+          && embeddedDimensions
+          && Math.max(embeddedDimensions.width, embeddedDimensions.height) <= maxDimension
         ) {
           const rendered: DesktopRenderedImage = {
-            bytes: toOwnedUint8Array(exifThumbnailBuffer),
-            mimeType: getMimeTypeForBuffer(exifThumbnailBuffer),
+            bytes: toOwnedUint8Array(orientedSource.buffer),
+            mimeType: orientedSource.mimeType,
             width: embeddedDimensions.width,
             height: embeddedDimensions.height,
           };
@@ -1998,7 +2044,7 @@ async function computeDesktopThumbnail(
         }
 
         const source: ResolvedPreviewSourceResult = {
-          source: {
+          source: orientedSource ?? {
             buffer: exifThumbnailBuffer,
             mimeType: getMimeTypeForBuffer(exifThumbnailBuffer),
             width: embeddedDimensions?.width ?? 0,

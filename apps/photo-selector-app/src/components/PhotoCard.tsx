@@ -406,7 +406,14 @@ export const PhotoCard = memo(
             setIsToolbarVisible(false);
           }
         }}
-        onDoubleClick={() => onPreview(photo.id)}
+        onDoubleClick={(event) => {
+          // The first click of a double-click is still delivered to onClick and
+          // toggles selection. Toggle once more before opening so preview never
+          // changes the selection the photographer was building.
+          event.preventDefault();
+          onToggle(photo.id);
+          onPreview(photo.id);
+        }}
         onContextMenu={(event) => {
           if (!editable) return;
           event.preventDefault();

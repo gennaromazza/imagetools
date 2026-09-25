@@ -44,6 +44,7 @@ const REQUIRED_DESKTOP_METHODS: Array<keyof FileXDesktopApi> = [
   "startDragOut",
   "copyFilesToFolder",
   "moveFilesToFolder",
+  "trashFiles",
   "saveFileAs",
   "getDesktopPreferences",
   "saveDesktopPreferences",

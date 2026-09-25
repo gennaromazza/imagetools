@@ -121,3 +121,29 @@ test("la pagina prodotto documenta le garanzie prestazionali", () => {
   assert.match(page, /budget su disco da 2, 8 o 24 GB/);
   assert.match(page, /50\.000 immagini/);
 });
+
+test("la Quick Preview conserva la foto classificata e la rotazione EXIF nel percorso veloce", () => {
+  const selector = source("apps/photo-selector-app/src/components/PhotoSelector.tsx");
+  const card = source("apps/photo-selector-app/src/components/PhotoCard.tsx");
+  const quickPreview = source("apps/photo-selector-app/src/components/PhotoQuickPreviewModal.tsx");
+  const nativeImage = source("apps/filex-desktop/src/native-image-service.ts");
+  const css = source("apps/photo-selector-app/src/styles.css");
+  const actions = source("apps/photo-selector-app/src/components/selector/SelectionActionsPanel.tsx");
+  assert.match(selector, /previewNavigationIds/);
+  assert.match(selector, /Keep it in the same relative position/);
+  assert.match(selector, /scheduleLassoAutoScroll/);
+  assert.match(selector, /photo-selector__selection-quick-actions/);
+  assert.match(card, /onDoubleClick=\{\(event\) =>/);
+  assert.match(card, /onToggle\(photo\.id\);[\s\S]{0,180}onPreview\(photo\.id\)/);
+  assert.match(quickPreview, /keepZoomOnNavigate/);
+  assert.match(quickPreview, /Mantieni zoom/);
+  assert.match(selector, /const visiblePreviewAssets = useMemo/);
+  assert.match(selector, /const currentSourceIndex = sortedPhotoIds\.indexOf/);
+  assert.match(actions, /aria-label="Ruota le foto selezionate di 90° a destra"/);
+  assert.match(nativeImage, /orientedSource = await resolveEmbeddedPreviewSourceFromBufferWithBudget/);
+  assert.match(nativeImage, /orientedSource\.buffer/);
+  assert.match(nativeImage, /allowDirectEmbeddedJpeg/);
+  assert.match(css, /\.photo-card--selected\.photo-card--color-yellow/);
+  assert.match(css, /\.photo-card:focus-visible/);
+  assert.match(css, /rgba\(255, 255, 255/);
+});

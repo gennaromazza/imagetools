@@ -60,6 +60,25 @@ export function SelectionActionsPanel(props: SelectionActionsPanelProps) {
           ? props.allVisibleSelected ? "Deseleziona visibili" : "Seleziona visibili"
           : props.allSelected ? "Deseleziona tutto" : "Seleziona tutto"}
       </button>
+      <button
+        type="button"
+        className="ghost-button ghost-button--small"
+        onClick={() => props.onRotateSelected("left")}
+        disabled={props.selectedCount === 0}
+        title="Ruota tutte le foto selezionate di 90° a sinistra"
+      >
+        ↶ Ruota selezionate
+      </button>
+      <button
+        type="button"
+        className="ghost-button ghost-button--small"
+        onClick={() => props.onRotateSelected("right")}
+        disabled={props.selectedCount === 0}
+        title="Ruota tutte le foto selezionate di 90° a destra"
+        aria-label="Ruota le foto selezionate di 90° a destra"
+      >
+        ↷
+      </button>
       <button type="button" className="ghost-button ghost-button--small" onClick={props.onToggleMenu} aria-expanded={props.isMenuOpen}>
         Azioni <span aria-hidden="true">⌄</span>
       </button>

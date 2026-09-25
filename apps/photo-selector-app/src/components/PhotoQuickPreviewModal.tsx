@@ -82,6 +82,7 @@ interface PhotoQuickPreviewModalProps {
   canExternalDrag?: boolean;
   onExternalDragStart?: (assetId: string, event: DragEvent<HTMLElement>) => void;
   autoAdvanceOnAction?: boolean;
+  keepZoomOnNavigate?: boolean;
   onAutoAdvanceOnActionChange?: (enabled: boolean) => void;
   onClose: () => void;
   onSelectAsset?: (assetId: string) => void;
@@ -247,6 +248,7 @@ export function PhotoQuickPreviewModal({
   canExternalDrag = false,
   onExternalDragStart,
   autoAdvanceOnAction = true,
+  keepZoomOnNavigate = true,
   onAutoAdvanceOnActionChange,
   onClose,
   onSelectAsset,
@@ -284,6 +286,7 @@ export function PhotoQuickPreviewModal({
   const comparePreviewRecoveryKeyRef = useRef<string | null>(null);
   const preCompareZoomRef = useRef<number>(1);
   const lastAssetIdRef = useRef<string | null>(null);
+  const zoomInitializedAssetRef = useRef<string | null>(null);
   const lastPerfSinkSignatureRef = useRef<string>("");
   const fallbackSignatureRef = useRef<string>("");
   const previewFrameMetricsRef = useRef<{
@@ -322,6 +325,9 @@ export function PhotoQuickPreviewModal({
     lastRenderedAssetName: "",
   });
   const [zoomLevel, setZoomLevel] = useState(startZoomed ? 2.2 : 1);
+  const [keepZoomState, setKeepZoomState] = useState(keepZoomOnNavigate);
+  const keepZoomStateRef = useRef(keepZoomState);
+  keepZoomStateRef.current = keepZoomState;
   const [shareOpen, setShareOpen] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [shareTone, setShareTone] = useState<"info" | "success" | "error">("info");
@@ -1971,6 +1977,20 @@ export function PhotoQuickPreviewModal({
   }, [clampPan, compareMode, persistPanOffset, zoomLevel]);
 
   useEffect(() => {
+    if (!asset) {
+      zoomInitializedAssetRef.current = null;
+      return;
+    }
+    const shouldPreserveZoom = keepZoomStateRef.current && zoomInitializedAssetRef.current !== null;
+    zoomInitializedAssetRef.current = asset.id;
+    if (shouldPreserveZoom) {
+      // Keep both zoom and pan while browsing a sequence; the clamp effect
+      // below trims the offset when the next image has smaller bounds.
+      setIsPanning(false);
+      panDragRef.current = null;
+      swipeDragRef.current = null;
+      return;
+    }
     pendingOneToOneZoomRef.current = startZoomed;
     preCompareZoomRef.current = startZoomed ? QUICK_PREVIEW_INTERACTIVE_ZOOM : 1;
     setZoomLevel(startZoomed ? QUICK_PREVIEW_INTERACTIVE_ZOOM : 1);
@@ -2823,6 +2843,21 @@ export function PhotoQuickPreviewModal({
                 <strong>{autoAdvanceOnAction ? "ON" : "OFF"}</strong>
               </button>
             ) : null}
+            <button
+              type="button"
+              className={`quick-preview__auto-advance${keepZoomState ? " quick-preview__auto-advance--on" : " quick-preview__auto-advance--off"}`}
+              onClick={() => setKeepZoomState((current) => !current)}
+              role="switch"
+              aria-checked={keepZoomState}
+              aria-label="Mantieni zoom durante lo sfoglio"
+              title="Mantiene ingrandimento e punto osservato passando alla foto precedente o successiva"
+            >
+              <span>Mantieni zoom</span>
+              <span className="quick-preview__switch-track" aria-hidden="true">
+                <span className="quick-preview__switch-thumb" />
+              </span>
+              <strong>{keepZoomState ? "ON" : "OFF"}</strong>
+            </button>
             <span
               className="quick-preview__perf-badge"
               title={`Benchmark locale della quick preview | ${quickPreviewPerf.sourceBreakdown}`}

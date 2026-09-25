@@ -30,7 +30,6 @@ for (const output of [process.stdout, process.stderr]) {
 import type {
   DesktopAtomicWriteFinalizeRecovery,
   DesktopAtomicWriteFile,
-  DesktopDragOutCheck,
   DesktopDockState,
   DesktopEditorCandidate,
   DesktopFreeSelectionSnapshot,
@@ -69,6 +68,9 @@ import type {
 import {
   copyFilesToFolderDesktop,
   moveFilesToFolderDesktop,
+  trashFilesDesktop,
+  prepareDesktopDragOut,
+  startDesktopFileDrag,
   listPhotoSelectorLegacyProjectsDesktop,
   findNestedPhotoSelectorProjectsDesktop,
   openFolderDesktop,
@@ -1126,56 +1128,6 @@ function normalizeExistingAbsolutePaths(absolutePaths: unknown): string[] {
   return Array.from(unique);
 }
 
-function validateDesktopDragOut(absolutePaths: unknown): DesktopDragOutCheck {
-  const requestedCount = Array.isArray(absolutePaths) ? absolutePaths.length : 0;
-  const normalizedPaths = normalizeExistingAbsolutePaths(absolutePaths);
-  const validCount = normalizedPaths.length;
-
-  if (requestedCount <= 0) {
-    return {
-      ok: false,
-      requestedCount,
-      validCount,
-      allowedCount: 0,
-      reason: "empty-selection",
-      message: "Nessun file selezionato per il drag esterno.",
-    };
-  }
-
-  if (validCount === 0) {
-    return {
-      ok: false,
-      requestedCount,
-      validCount,
-      allowedCount: 0,
-      reason: "missing-paths",
-      message: "La selezione non ha percorsi assoluti validi per il drag esterno.",
-    };
-  }
-
-  if (validCount !== requestedCount) {
-    return {
-      ok: false,
-      requestedCount,
-      validCount,
-      allowedCount: validCount,
-      reason: "invalid-paths",
-      message: "Alcuni file selezionati non hanno un percorso valido.",
-    };
-  }
-
-  return {
-    ok: true,
-    requestedCount,
-    validCount,
-    allowedCount: validCount,
-    reason: "ok",
-    message: validCount === 1
-      ? "1 file pronto per il drag esterno."
-      : `${validCount} file pronti per il drag esterno.`,
-  };
-}
-
 async function launchEditorProcess(
   editorPath: string,
   absolutePaths: string[],
@@ -1681,67 +1633,15 @@ function registerIpcHandlers(): void {
     deliverNextOpenProjectRequest();
   });
   ipcMain.handle("filex:can-start-drag-out", (_event, absolutePaths: unknown) =>
-    validateDesktopDragOut(absolutePaths),
+    prepareDesktopDragOut(absolutePaths).check,
   );
   ipcMain.on("filex:start-drag-out", (event, absolutePaths: unknown) => {
-    const dragCheck = validateDesktopDragOut(absolutePaths);
-    const paths = normalizeExistingAbsolutePaths(absolutePaths);
-
-    if (!dragCheck.ok || paths.length === 0) {
-      logDesktopEvent({
-        channel: "drag-out",
-        level: "warn",
-        message: "Drag esterno bloccato",
-        details: dragCheck.message,
-      });
-      return;
-    }
-
-    const iconPath = resolveWindowIcon();
-    const dragItem = paths.length > 1
-      ? { file: paths[0], files: paths, icon: iconPath }
-      : { file: paths[0], icon: iconPath };
-
     try {
-      event.sender.startDrag(dragItem);
-      logDesktopEvent({
-        channel: "drag-out",
-        level: "info",
-        message: "Drag esterno avviato",
-        details: `${paths.length} file`,
-      });
+      startDesktopFileDrag(absolutePaths, resolveWindowIcon(), (item) => event.sender.startDrag(item));
     } catch (error) {
-      console.error("FileX startDrag failed", error);
-      logDesktopEvent({
-        channel: "drag-out",
-        level: "error",
-        message: "startDrag fallito",
-        details: error instanceof Error ? error.message : String(error),
-      });
-
-      if (paths.length > 1) {
-        try {
-          event.sender.startDrag({
-            file: paths[0],
-            icon: iconPath,
-          });
-          logDesktopEvent({
-            channel: "drag-out",
-            level: "warn",
-            message: "startDrag fallback singolo file usato",
-            details: paths[0],
-          });
-          return;
-        } catch (fallbackError) {
-          console.error("FileX startDrag fallback failed", fallbackError);
-          logDesktopEvent({
-            channel: "drag-out",
-            level: "error",
-            message: "Fallback startDrag fallito",
-            details: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
-          });
-        }
-      }
+      const message = error instanceof Error ? error.message : String(error);
+      logDesktopEvent({ channel: "drag-out", level: "error", message: "Trascinamento non riuscito", details: message });
+      dialog.showErrorBox("Trascinamento non riuscito", message + "\nRiprova oppure usa Copia in cartella.");
     }
   });
   ipcMain.handle("filex:read-file", (_event, absolutePath: string) => readFileFromDisk(absolutePath));
@@ -1988,6 +1888,9 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("filex:move-files-to-folder", async (_event, absolutePaths: string[]) =>
     moveFilesToFolderDesktop(absolutePaths),
+  );
+  ipcMain.handle("filex:trash-files", async (_event, absolutePaths: string[]) =>
+    trashFilesDesktop(absolutePaths),
   );
   ipcMain.handle(
     "filex:rename-photo-files",
