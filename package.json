@@ -17,6 +17,7 @@
     "dev:photo-selector-app": "npm --workspace @photo-tools/filex-desktop run dev:photo-selector-app",
     "dev:archivio-flow": "npm --workspace @photo-tools/filex-desktop run dev:archivio-flow",
     "dev:album-flow": "npm --workspace @photo-tools/filex-desktop run dev:album-flow",
+    "bench:photo-selector-thumbnails": "apps/filex-desktop/node_modules/electron/dist/electron.exe scripts/bench-thumbnail-decode.cjs",
     "audit:photo-selector": "powershell -ExecutionPolicy Bypass -File scripts/audit-photo-selector.ps1",
     "test:image-converter-raw": "tsx --test apps/filex-desktop/src/image-converter-raw.test.ts apps/filex-desktop/src/image-converter-output.test.ts",
     "test:photo-selector-workflow": "tsx scripts/test-photo-selector-workflow.ts",
