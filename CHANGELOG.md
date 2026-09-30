@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-30 - FileX Suite 0.1.63
+
+- Aggiornamento dei tool: la Suite rileva subito la nuova versione appena installata, senza restare fino a 5 minuti su "Installazione..." e senza segnalare un falso errore.
+- In caso di errore il pulsante del tool torna allo stato corretto e l'elenco viene ricaricato.
+
 ## 2026-09-30 - Image Select Pro 0.1.42
 
 - Scorciatoie di classificazione (1-5, P, X, U, Ctrl+6-9) attive da qualsiasi punto della griglia, sulla foto attiva o sull'intera selezione multipla; nessuna ripetizione con tasto tenuto premuto.

@@ -288,36 +288,30 @@ function readExecutableVersion(
     "app.asar",
   );
 
+  const parseVersion = (raw: string): string | null => {
+    const version = (JSON.parse(raw) as { version?: unknown }).version;
+    return typeof version === "string" && version.trim() ? version.trim() : null;
+  };
+
+  // Electron mette in cache gli archivi ASAR gia' aperti: dopo che un installer
+  // ha sostituito app.asar, il filesystem virtuale continuerebbe a restituire la
+  // versione precedente e l'aggiornamento risulterebbe non applicato. Con
+  // noAsar il file viene letto come normale file e l'header e' sempre aggiornato.
+  const previousNoAsar = process.noAsar;
   try {
-    // In Electron, node:fs espone app.asar come filesystem virtuale. Leggere
-    // direttamente il file interno evita che @electron/asar tenti di aprire
-    // l'archivio attraverso lo stesso layer virtuale e restituisca un falso
-    // negativo dopo un aggiornamento riuscito.
-    const packageJson = JSON.parse(
-      readFileSync(join(archivePath, "package.json"), "utf8"),
-    ) as { version?: unknown };
-    if (
-      typeof packageJson.version === "string" &&
-      packageJson.version.trim()
-    ) {
-      return packageJson.version.trim();
-    }
+    process.noAsar = true;
+    const version = parseVersion(extractFile(archivePath, "package.json").toString("utf8"));
+    if (version) return version;
   } catch {
-    // In Node puro (test e strumenti di verifica) app.asar non viene montato
-    // come directory virtuale. Manteniamo quindi il reader ASAR esplicito.
-    try {
-      const packageJson = JSON.parse(
-        extractFile(archivePath, "package.json").toString("utf8"),
-      ) as { version?: unknown };
-      if (
-        typeof packageJson.version === "string" &&
-        packageJson.version.trim()
-      ) {
-        return packageJson.version.trim();
-      }
-    } catch {
-      // Installazioni legacy potrebbero non contenere un ASAR leggibile.
-    }
+    // Installazioni legacy o file in corso di sostituzione: si usa il fallback.
+  } finally {
+    process.noAsar = previousNoAsar;
+  }
+
+  try {
+    return parseVersion(readFileSync(join(archivePath, "package.json"), "utf8"));
+  } catch {
+    // Installazioni legacy potrebbero non contenere un ASAR leggibile.
   }
   return null;
 }
