@@ -1,6 +1,6 @@
 if (process.env.BENCH_SET_POOL) process.env.UV_THREADPOOL_SIZE = process.env.BENCH_SET_POOL;
 // Benchmark della sola fase di decodifica miniature (riga di comando, eseguito da Electron):
-//   npx electron scripts/bench-thumbnail-decode.cjs <cartella> [ripetizioni]
+//   bench-thumbnail-decode.cjs <cartella> [ripetizioni] [max file]
 // Confronta il percorso attuale (nativeImage sul main thread) con sharp + shrink-on-load.
 const { app, nativeImage } = require("electron");
 const fs = require("node:fs");
@@ -11,12 +11,17 @@ const RAW = new Set([".cr2",".cr3",".nef",".arw",".raf",".dng",".orf",".rw2",".p
 const MAX = 320;
 const q = (n) => Math.round(n * 10) / 10;
 
-async function extractPreviews(dir) {
+async function extractPreviews(dir, limit) {
   const { ExifTool } = require("exiftool-vendored");
   const et = new ExifTool({ maxProcs: 4 });
   const out = [];
-  for (const f of fs.readdirSync(dir)) {
+  for (const f of fs.readdirSync(dir).filter((n) => !/\.xmp$/i.test(n)).slice(Number(process.env.BENCH_SKIP || 0), Number(process.env.BENCH_SKIP || 0) + limit)) {
     const p = path.join(dir, f); const ext = path.extname(f).toLowerCase();
+    if (ext === ".raf" && process.env.BENCH_RAF_HEADER) { // lettura diretta dell'offset del JPEG nell'intestazione RAF
+      const fd = fs.openSync(p, "r"); const h = Buffer.alloc(100); fs.readSync(fd, h, 0, 100, 0);
+      const off = h.readUInt32BE(84), len = h.readUInt32BE(88); const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, off); fs.closeSync(fd);
+      out.push({ name: f, buf: b }); continue;
+    }
     if (RAW.has(ext)) {
       for (const tag of ["JpgFromRaw", "PreviewImage"]) {
         const b = await et.extractBinaryTagToBuffer(tag, p).catch(() => null);
@@ -41,9 +46,12 @@ async function pool(items, n, fn) {
 }
 
 app.whenReady().then(async () => {
-  const dir = process.argv[2]; const reps = Number(process.argv[3] || 25);
+  const dir = process.argv[2]; const reps = Number(process.argv[3] || 25); const limit = Number(process.argv[4] || 200);
   const sharp = require("sharp");
-  const base = await extractPreviews(dir);
+  const tx = performance.now();
+  const base = await extractPreviews(dir, limit);
+  const ext = performance.now() - tx;
+  console.log(`estrazione anteprime (exiftool, 4 processi): ${q(ext)} ms per ${base.length} file -> ${q(ext/Math.max(1,base.length))} ms/file`);
   if (!base.length) { console.log("nessun file utilizzabile"); return app.quit(); }
   const set = Array.from({ length: base.length * reps }, (_, i) => base[i % base.length]);
   const meta = await sharp(base[0].buf).metadata();
