@@ -804,7 +804,15 @@ export async function writeSidecarXmpForAssetPath(
     if (existingXml === xml) {
       return true;
     }
-    await writeFile(sidecarPath, xml, "utf8");
+    // Scrittura atomica: un crash a metà non deve lasciare un sidecar troncato.
+    const temporaryPath = `${sidecarPath}.${process.pid}.tmp`;
+    try {
+      await writeFile(temporaryPath, xml, "utf8");
+      await rename(temporaryPath, sidecarPath);
+    } catch (error) {
+      await unlink(temporaryPath).catch(() => undefined);
+      throw error;
+    }
     return true;
   } catch {
     return false;

@@ -112,6 +112,8 @@ interface PhotoSelectorProps {
   selectedIds: string[];
   onSelectionChange: (selectedIds: string[]) => void;
   onPhotosChange?: (photos: ImageAsset[]) => void;
+  /** Elenco asset più recente, indipendente dall'ultimo render (evita aggiornamenti persi). */
+  getLatestPhotos?: () => ImageAsset[];
   onVisibleIdsChange?: (visibleIds: Set<string>) => void;
   onPriorityIdsChange?: (priorityIds: Set<string>) => void;
   onPreviewPriorityIdsChange?: (priorityIds: Set<string>) => void;
@@ -493,6 +495,7 @@ export function PhotoSelector({
   selectedIds,
   onSelectionChange,
   onPhotosChange,
+  getLatestPhotos,
   onVisibleIdsChange,
   onPriorityIdsChange,
   onPreviewPriorityIdsChange,
@@ -835,6 +838,15 @@ export function PhotoSelector({
     lastPhotosPropRef.current = photos;
     photosRef.current = photos;
   }
+  const getLatestPhotosRef = useRef(getLatestPhotos);
+  getLatestPhotosRef.current = getLatestPhotos;
+  // Le classificazioni devono partire dallo stato realmente più recente: un
+  // aggiornamento asincrono (XMP esterno, patch miniature) arrivato prima del
+  // render successivo verrebbe altrimenti sovrascritto da un array vecchio.
+  const readLatestPhotos = useCallback(
+    (): ImageAsset[] => getLatestPhotosRef.current?.() ?? photosRef.current,
+    [],
+  );
 
   const commitSelection = useLatestCallback((nextIds: readonly string[]) => {
     const normalizedIds = Array.from(new Set(nextIds));
@@ -1187,7 +1199,7 @@ export function PhotoSelector({
     if (!onPhotosChange) return;
 
     let changed = false;
-    const nextPhotos = photos.map((photo) => {
+    const nextPhotos = readLatestPhotos().map((photo) => {
       if (photo.id !== id) {
         return photo;
       }
@@ -1222,6 +1234,7 @@ export function PhotoSelector({
     });
 
     if (changed) {
+      photosRef.current = nextPhotos;
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, 1));
       if (source === "grid") {
@@ -1230,7 +1243,7 @@ export function PhotoSelector({
         emitCardSyncFeedback(buildPreviewSyncFeedback(changes, [id]));
       }
     }
-  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry]);
+  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, pushTimelineEntry, readLatestPhotos]);
 
   function resetFilters() {
     setPickFilter("all");
@@ -1438,7 +1451,7 @@ export function PhotoSelector({
     const idSet = new Set(targetIds);
     let changed = false;
     const changedIds: string[] = [];
-    const nextPhotos = photos.map((photo) => {
+    const nextPhotos = readLatestPhotos().map((photo) => {
       if (!idSet.has(photo.id)) {
         return photo;
       }
@@ -1458,11 +1471,12 @@ export function PhotoSelector({
     });
 
     if (changed) {
+      photosRef.current = nextPhotos;
       onPhotosChange(nextPhotos);
       pushTimelineEntry(timelineLabel);
       triggerBatchPulse(changedIds, "label");
     }
-  }, [onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
+  }, [onPhotosChange, pushTimelineEntry, readLatestPhotos, triggerBatchPulse]);
 
   const assignCustomLabelToSelection = useCallback((label: string) => {
     if (selectedIds.length === 0) {
@@ -2441,7 +2455,7 @@ export function PhotoSelector({
 
     const idSet = new Set(targetIds);
     const changedIds: string[] = [];
-    const nextPhotos = photosRef.current.map((photo) => {
+    const nextPhotos = readLatestPhotos().map((photo) => {
       if (!idSet.has(photo.id)) {
         return photo;
       }
@@ -2462,7 +2476,7 @@ export function PhotoSelector({
     const directionLabel = direction === "left" ? "a sinistra" : "a destra";
     const message = `${subject}: ruotata ${directionLabel}`;
     pushTimelineEntry(message);
-  }, [onPhotosChange, pushTimelineEntry]);
+  }, [onPhotosChange, pushTimelineEntry, readLatestPhotos]);
 
   const advanceFocusToNext = useCallback(
     (currentId: string) => {
@@ -2499,6 +2513,9 @@ export function PhotoSelector({
     },
     [autoAdvanceOnAction, scrollPhotoIntoView, sortedPhotoIds, visiblePhotoIds, visiblePhotoIndexById],
   );
+
+  // Assegnato più sotto, dove sono disponibili applyBatchChanges e la timeline.
+  const classifyFromKeyboardRef = useRef<(changes: PhotoMetadataChanges) => void>(() => {});
 
   // Consolidated keyboard handler: Escape chain + arrow navigation
   const handleWindowKeyDown = useCallback(
@@ -2588,6 +2605,25 @@ export function PhotoSelector({
             }
             return;
           }
+        }
+      }
+
+      // Classificazione da tastiera (1-5, P, X, U, Ctrl+6-9/V/0): vale su tutta la
+      // griglia, non solo se il focus è su una card. Un tasto tenuto premuto non
+      // ripete l'azione per non classificare per errore intere serie di foto.
+      if (!event.altKey && !isCompareOpen && !document.querySelector('[role="dialog"]:not([aria-modal="false"])')) {
+        const shortcutChanges = resolvePhotoClassificationShortcut({
+          key: event.key,
+          code: event.code,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+        });
+        if (shortcutChanges) {
+          event.preventDefault();
+          if (!event.repeat) {
+            classifyFromKeyboardRef.current(shortcutChanges);
+          }
+          return;
         }
       }
 
@@ -2783,7 +2819,7 @@ export function PhotoSelector({
     const idSet = new Set(targetIds);
     let changed = false;
     const changedIds: string[] = [];
-    const nextPhotos = photos.map((photo) => {
+    const nextPhotos = readLatestPhotos().map((photo) => {
       if (!idSet.has(photo.id)) {
         return photo;
       }
@@ -2820,6 +2856,7 @@ export function PhotoSelector({
     });
 
     if (changed) {
+      photosRef.current = nextPhotos;
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, targetIds.length));
       if (changes.colorLabel !== undefined) {
@@ -2834,7 +2871,7 @@ export function PhotoSelector({
         emitCardSyncFeedback(buildPreviewSyncFeedback(changes, changedIds));
       }
     }
-  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, photos, pushTimelineEntry, triggerBatchPulse]);
+  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, pushTimelineEntry, readLatestPhotos, triggerBatchPulse]);
 
   const selectedCustomLabelCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -3162,6 +3199,25 @@ export function PhotoSelector({
   const handleShortcutClassification = useLatestCallback((id: string, changes: PhotoMetadataChanges) => {
     applyPhotoChanges(id, changes, "grid");
   });
+
+  // Bersaglio esplicito: se la foto attiva fa parte di una selezione multipla
+  // l'azione vale per tutta la selezione, altrimenti solo per la foto attiva.
+  classifyFromKeyboardRef.current = (changes) => {
+    if (!onPhotosChange) return;
+    const currentSelection = selectedIdsRef.current;
+    const anchorId = focusedPhotoId;
+    const targetIds = anchorId
+      ? (currentSelection.length > 1 && currentSelection.includes(anchorId) ? [...currentSelection] : [anchorId])
+      : currentSelection.length > 0 ? [...currentSelection] : [];
+    if (targetIds.length === 0) {
+      pushTimelineEntry("Nessuna foto attiva: seleziona o clicca una foto prima di classificare");
+      return;
+    }
+    applyBatchChanges(targetIds, changes, "grid");
+    if (targetIds.length === 1) {
+      handleAfterShortcutClassification(targetIds[0]);
+    }
+  };
 
   const handleModalAssetUpdate = useLatestCallback((assetId: string, changes: PhotoMetadataChanges) => {
     applyPhotoChanges(assetId, changes, "modal");

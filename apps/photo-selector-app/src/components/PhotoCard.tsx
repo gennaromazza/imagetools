@@ -12,7 +12,6 @@ import {
   getAssetRating,
   getColorShortcutHint,
   PICK_STATUS_LABELS,
-  resolvePhotoClassificationShortcut,
 } from "../services/photo-classification";
 import { isRawFile } from "../services/folder-access";
 import type { CustomLabelShortcut, CustomLabelTone } from "../services/photo-selector-preferences";
@@ -444,23 +443,7 @@ export const PhotoCard = memo(
             }
             return;
           }
-          if (editable) {
-            const changes = resolvePhotoClassificationShortcut({
-              key: event.key,
-              code: event.code,
-              ctrlKey: event.ctrlKey,
-              metaKey: event.metaKey,
-            });
-            if (changes) {
-              event.preventDefault();
-              if (onApplyShortcutChanges) {
-                onApplyShortcutChanges(photo.id, changes);
-              } else {
-                onUpdatePhoto(photo.id, changes);
-              }
-              onAfterShortcutClassification?.(photo.id);
-            }
-          }
+          // 1-5/P/X/U/colori sono gestiti dall'handler globale della griglia.
         }}
       >
         <div

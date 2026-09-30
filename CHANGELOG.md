@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-30 - Image Select Pro 0.1.42
+
+- Scorciatoie di classificazione (1-5, P, X, U, Ctrl+6-9) attive da qualsiasi punto della griglia, sulla foto attiva o sull'intera selezione multipla; nessuna ripetizione con tasto tenuto premuto.
+- Classificazioni calcolate sempre sullo stato piu' recente, senza sovrascrivere aggiornamenti arrivati in background.
+- Sidecar XMP: colore e Pick non si perdono piu' al riavvio, i sidecar illeggibili non vengono sovrascritti e la scrittura e' atomica.
+
 ## 2026-09-30 - Image Converter 0.1.6
 
 - Nuovo preset "RAW in JPG massima qualita": JPG a risoluzione originale con il look della fotocamera e metadati del RAW (modello, obiettivo, ISO) senza orientamento o dimensioni errati.

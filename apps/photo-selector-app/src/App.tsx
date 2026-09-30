@@ -4032,6 +4032,8 @@ export function App() {
     }
   }, [bumpPhotoMetadataVersion, queueXmpSync, undoRedo]);
 
+  const getLatestAssets = useCallback(() => allAssetsRef.current, []);
+
   const handlePhotoUpdates = useCallback((updates: Array<{ id: string; asset: ImageAsset }>) => {
     if (updates.length === 0) {
       return;
@@ -5203,6 +5205,7 @@ export function App() {
                 selectedIds={activeAssetIds}
                 onSelectionChange={handleSelectionChange}
                 onPhotosChange={handlePhotosChange}
+                getLatestPhotos={getLatestAssets}
                 onVisibleIdsChange={handleVisibleIdsChange}
                 onPriorityIdsChange={handlePriorityIdsChange}
                 onPreviewPriorityIdsChange={handlePreviewPriorityIdsChange}

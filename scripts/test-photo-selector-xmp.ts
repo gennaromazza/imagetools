@@ -57,6 +57,33 @@ const asset = {
   customLabels: [],
 } as unknown as ImageAsset;
 
+// Pick e colore devono sopravvivere insieme al round-trip sul sidecar.
+const pickedRed = { ...asset, pickStatus: "picked", colorLabel: "red", rating: 3 } as unknown as ImageAsset;
+const pickedRedState = parseXmpState(upsertXmpState(null, pickedRed, true));
+assert.equal(pickedRedState.pickStatus, "picked", "Pick must round-trip");
+assert.equal(pickedRedState.colorLabel, "red", "Color label must survive a Pick round-trip");
+assert.equal(pickedRedState.rating, 3);
+
+const rejectedBlue = { ...asset, pickStatus: "rejected", colorLabel: "blue", rating: 4 } as unknown as ImageAsset;
+const rejectedBlueState = parseXmpState(upsertXmpState(null, rejectedBlue, false));
+assert.equal(rejectedBlueState.pickStatus, "rejected");
+assert.equal(rejectedBlueState.colorLabel, "blue", "Color label must survive a Reject round-trip");
+assert.equal(rejectedBlueState.rating, 4, "Rating must survive a Reject round-trip");
+
+// Un colore cambiato altrove (xmp:Label) prevale sul valore salvato in photosuite.
+const staleColorXml = upsertXmpState(null, pickedRed, true).replace('xmp:Label="Select"', 'xmp:Label="Green"');
+assert.equal(parseXmpState(staleColorXml).colorLabel, "green", "External xmp:Label color must win");
+// Label svuotato da Bridge: il colore salvato non deve riapparire.
+const clearedXml = upsertXmpState(null, pickedRed, true).replace(/xmp:Label="Select"/, "");
+assert.equal(parseXmpState(clearedXml).colorLabel, undefined, "A cleared xmp:Label must not resurrect a stale color");
+
+// Un sidecar esistente ma illeggibile non va mai sostituito da un pacchetto vuoto.
+assert.throws(
+  () => upsertXmpState("garbage not xml <<< crs:Exposure2012=+1.0", asset, false),
+  /XMP/,
+  "An unreadable existing sidecar must not be overwritten",
+);
+
 const canonicalXml = upsertXmpState(duplicateXml, asset, true);
 assert.equal(
   (canonicalXml.match(/xmp:Rating\s*=/g) ?? []).length,

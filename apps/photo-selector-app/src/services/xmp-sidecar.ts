@@ -201,8 +201,11 @@ export function parseXmpState(xml: string): XmpState {
       result.rating = clampRating(rating);
     }
   };
+  let photosuiteColor: ColorLabel | null = null;
+  let labelIsPickState = false;
   const applyLabel = (value: string) => {
     const lv = value.trim().toLowerCase();
+    labelIsPickState = lv === "select" || lv === "picked" || lv === "reject" || lv === "rejected";
     if (lv === "select" || lv === "picked") result.pickStatus = "picked";
     if (lv === "reject" || lv === "rejected") result.pickStatus = "rejected";
     const color = toColorLabel(value);
@@ -235,6 +238,10 @@ export function parseXmpState(xml: string): XmpState {
 
       if (isNamespacedProperty(attr, XMP_NS, "xmp", "Label")) {
         applyLabel(value);
+      }
+
+      if (isNamespacedProperty(attr, PHOTOSUITE_NS, "photosuite", "ColorLabel")) {
+        photosuiteColor = toColorLabel(value);
       }
 
       if (isNamespacedProperty(attr, PHOTOSUITE_NS, "photosuite", "Pick")) {
@@ -277,6 +284,13 @@ export function parseXmpState(xml: string): XmpState {
     }
   }
 
+  // xmp:Label ha un solo posto: quando contiene Select/Rejected il colore vive
+  // solo in photosuite:ColorLabel. Se xmp:Label è un colore (o è stato svuotato
+  // da Bridge/Lightroom) vince quello e il valore salvato è considerato vecchio.
+  if (result.colorLabel === undefined && labelIsPickState && photosuiteColor) {
+    result.colorLabel = photosuiteColor;
+  }
+
   return result;
 }
 
@@ -289,14 +303,23 @@ export function upsertXmpState(
 
   const sourceXml = existingXml && existingXml.trim().length > 0 ? existingXml : fallbackXml;
 
+  // Un sidecar esistente ma illeggibile può contenere regolazioni Lightroom/ACR:
+  // non lo sostituiamo mai con un pacchetto vuoto, lasciamo fallire la scrittura.
+  const hasExistingContent = sourceXml !== fallbackXml;
   let doc: Document;
   try {
     doc = new DOMParser().parseFromString(sourceXml, "application/xml");
   } catch {
+    if (hasExistingContent) {
+      throw new Error("Sidecar XMP esistente non leggibile: scrittura annullata per non perdere dati.");
+    }
     doc = new DOMParser().parseFromString(fallbackXml, "application/xml");
   }
 
-  if (doc.getElementsByTagName("parsererror").length > 0) {
+  if (doc.getElementsByTagName("parsererror").length > 0 || !doc.documentElement) {
+    if (hasExistingContent) {
+      throw new Error("Sidecar XMP esistente non valido: scrittura annullata per non perdere dati.");
+    }
     doc = new DOMParser().parseFromString(fallbackXml, "application/xml");
   }
 
@@ -329,6 +352,13 @@ export function upsertXmpState(
   } else {
     desc.removeAttribute("xmp:Label");
     desc.removeAttributeNS(XMP_NS, "Label");
+  }
+
+  if (asset.colorLabel) {
+    desc.setAttributeNS(PHOTOSUITE_NS, "photosuite:ColorLabel", asset.colorLabel);
+  } else {
+    desc.removeAttribute("photosuite:ColorLabel");
+    desc.removeAttributeNS(PHOTOSUITE_NS, "ColorLabel");
   }
 
   desc.setAttributeNS(PHOTOSUITE_NS, "photosuite:Selected", selected ? "True" : "False");

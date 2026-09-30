@@ -477,6 +477,10 @@
     ],
     "0.1.41": [
       "Selezione e sfogliamento più fluidi: trascinamento multi-foto affidabile, copia dei nomi file e spostamento nel Cestino; feedback di selezione coerenti, classificazione senza interrompere la navigazione, rotazione automatica EXIF e rotazione batch, lasso più rapido e zoom mantenuto in Quick Preview."
+    ],
+    "0.1.42": [
+      "Scorciatoie 1-5, P, X, U e colori attive da tutta la griglia, sulla foto attiva o sulla selezione multipla.",
+      "Sidecar XMP piu' sicuri: colore e Pick conservati insieme, nessuna sovrascrittura di sidecar illeggibili e scrittura atomica."
     ]
   },
   "id-photo": {
