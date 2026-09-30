@@ -1,4 +1,5 @@
 import { UPLOAD_MAX_RETRIES, UPLOAD_REQUEST_TIMEOUT_MS, chunkEnd, isRetryableStatus, nextOffset, retryDelay, totalBytes } from "./upload-protocol.js";
+import { downloadFilesSequentially, saveFilesToDirectory } from "./download-protocol.js";
 
 const credential = decodeURIComponent(location.pathname.replace(/^\/r\//, "").split("/")[0] || "");
 const loading = document.querySelector("#loading");
@@ -30,6 +31,7 @@ const api = async (path, init) => {
   return body;
 };
 const showError = (message) => { loading.hidden = true; upload.hidden = true; errorText.textContent = message; errorCard.hidden = false; };
+const waitForDownload = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 function triggerDownload(file) {
   const link = document.createElement("a");
@@ -46,10 +48,33 @@ async function downloadAllFiles() {
   if (!sharedFiles.length || !downloadAll) return;
   downloadAll.disabled = true;
   downloadAll.textContent = "Avvio download…";
-  downloadAllStatus.textContent = "Avvio dei download in corso…";
-  sharedFiles.forEach((file) => triggerDownload(file));
-  downloadAll.textContent = `Download avviati · ${sharedFiles.length}`;
-  downloadAllStatus.textContent = "I file vengono scaricati separatamente e senza creare archivi temporanei. Se il browser lo chiede, autorizza i download multipli.";
+  downloadAllStatus.textContent = "Preparazione del salvataggio…";
+  try {
+    if (typeof window.showDirectoryPicker === "function") {
+      downloadAllStatus.textContent = "Scegli la cartella di destinazione: verrà chiesta una sola autorizzazione.";
+      const directory = await window.showDirectoryPicker({ mode: "readwrite" });
+      await saveFilesToDirectory(sharedFiles, directory, (url, options) => fetch(url, options), (completed, total, name) => {
+        downloadAllStatus.textContent = `Salvati ${completed} di ${total} · ${name}`;
+      }, (current, total, name, bytes, size) => {
+        downloadAllStatus.textContent = `Salvataggio ${current} di ${total} · ${name} · ${Math.floor(bytes / size * 100)}%`;
+      });
+      downloadAll.textContent = `File salvati · ${sharedFiles.length}`;
+      downloadAllStatus.textContent = "Salvataggio completato nella cartella scelta.";
+      return;
+    }
+
+    await downloadFilesSequentially(sharedFiles, (file, index, total) => {
+      triggerDownload(file);
+      downloadAllStatus.textContent = `Download ${index + 1} di ${total} avviato…`;
+    }, waitForDownload);
+    downloadAll.textContent = `Download avviati · ${sharedFiles.length}`;
+    downloadAllStatus.textContent = "Il browser avvia i file separatamente. Se richiesto, autorizza i download multipli.";
+  } catch (cause) {
+    const cancelled = cause?.name === "AbortError";
+    downloadAll.disabled = false;
+    downloadAll.textContent = `Riprova · ${sharedFiles.length}`;
+    downloadAllStatus.textContent = cancelled ? "Salvataggio annullato." : (cause?.message || "Salvataggio interrotto. Riprova.");
+  }
 }
 
 async function initialize() {

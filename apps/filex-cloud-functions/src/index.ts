@@ -8,8 +8,10 @@ import { logger } from "firebase-functions";
 import { defineSecret } from "firebase-functions/params";
 import { onRequest, type Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, hashToken, normalizeLinkExpiry, publicUploadAllowed, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
+import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, downloadContentDisposition, hashToken, normalizeLinkExpiry, publicUploadAllowed, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
 import { handleLicensingRequest } from "./licensing-api.js";
+import { sendDownloadRange } from "./download-response.js";
+import type { ServerResponse } from "node:http";
 
 if (!getApps().length) initializeApp({ storageBucket: "filex-cloud-391620173227-eu" });
 
@@ -40,6 +42,7 @@ interface FileRecord {
   name: string;
   size: number;
   contentType?: string;
+  contentDisposition?: string;
   objectPath: string;
   downloadToken: string;
   receivedAt: Timestamp;
@@ -76,12 +79,14 @@ export const api = onRequest({ region: "europe-west1", timeoutSeconds: 60, memor
     const uploadCompleteMatch = path.match(/^\/public\/([^/]+)\/uploads\/([0-9a-f-]{36})\/complete$/i);
     const publicCompleteMatch = path.match(/^\/public\/([^/]+)\/complete$/);
     const desktopMatch = path.match(/^\/desktop\/([0-9a-f-]{36})$/i);
+    const publicFileMatch = path.match(/^\/public\/([^/]+)\/files\/([0-9a-f-]{36})$/i);
     const desktopFileMatch = path.match(/^\/desktop\/([0-9a-f-]{36})\/files\/([0-9a-f-]{36})$/i);
 
     if (request.method === "GET" && publicMatch) return publicSession(publicMatch[1], response);
     if (request.method === "POST" && uploadMatch) return beginUpload(uploadMatch[1], request, response);
     if (request.method === "POST" && uploadCompleteMatch) return finishUpload(uploadCompleteMatch[1], uploadCompleteMatch[2], request, response);
     if (request.method === "POST" && publicCompleteMatch) return finishSession(publicCompleteMatch[1], response);
+    if (request.method === "GET" && publicFileMatch) return publicDownload(publicFileMatch[1], publicFileMatch[2], request, response);
     if (request.method === "GET" && desktopMatch) return desktopStatus(desktopMatch[1], request, response);
     if (request.method === "PATCH" && desktopMatch) return updateSessionExpiry(desktopMatch[1], request, response);
     if (request.method === "DELETE" && desktopMatch) return deleteSession(desktopMatch[1], request, response);
@@ -136,21 +141,52 @@ async function publicSession(rawCredential: string, response: HttpResponse) {
   if (!authorized) return json(response, 410, { error: "Sessione scaduta." });
   const direction = authorized.data.direction ?? "receive";
   const files = direction === "send" ? await authorized.ref.collection("files").orderBy("receivedAt").get() : null;
+  const publicFiles = files ? await Promise.all(files.docs.map(async (doc) => {
+    const file = doc.data() as FileRecord;
+    const contentDisposition = file.contentDisposition ?? downloadContentDisposition(file.name);
+    if (!file.contentDisposition) {
+      try {
+        await bucket.file(file.objectPath).setMetadata({ contentDisposition });
+        await doc.ref.update({ contentDisposition });
+      } catch (cause) {
+        logger.warn("FileX Send download metadata repair failed", { sessionId: authorized.id, fileId: doc.id, message: cause instanceof Error ? cause.message : String(cause) });
+      }
+    }
+    return {
+      id: doc.id,
+      name: file.name,
+      size: file.size,
+      contentType: file.contentType ?? inferContentType(file.name),
+      downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(file.objectPath)}?alt=media&token=${encodeURIComponent(file.downloadToken)}`,
+      downloadProxyUrl: `/api/public/${encodeURIComponent(rawCredential)}/files/${doc.id}`,
+    };
+  })) : [];
   return json(response, 200, {
     label: authorized.data.label,
     direction,
     expiresAt: authorized.data.expiresAt.toMillis(),
-    files: files?.docs.map((doc) => {
-      const file = doc.data() as FileRecord;
-      return {
-        id: doc.id,
-        name: file.name,
-        size: file.size,
-        contentType: file.contentType ?? inferContentType(file.name),
-        downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket.name)}/o/${encodeURIComponent(file.objectPath)}?alt=media&token=${encodeURIComponent(file.downloadToken)}`,
-      };
-    }) ?? [],
+    files: publicFiles,
   });
+}
+
+async function publicDownload(rawCredential: string, fileId: string, request: Request, response: HttpResponse & ServerResponse) {
+  const authorized = await authorizePublic(rawCredential);
+  if (!authorized) return json(response, 410, { error: "Sessione scaduta." });
+  if (authorized.data.direction !== "send") return json(response, 403, { error: "Download non disponibile per questa sessione." });
+  const snapshot = await authorized.ref.collection("files").doc(fileId).get();
+  if (!snapshot.exists) return json(response, 404, { error: "File non trovato." });
+  const file = snapshot.data() as FileRecord;
+  try {
+    const queryStart = typeof request.query?.start === "string" ? request.query.start : undefined;
+    const queryEnd = typeof request.query?.end === "string" ? request.query.end : undefined;
+    const queryRange = queryStart !== undefined && queryEnd !== undefined ? `bytes=${queryStart}-${queryEnd}` : undefined;
+    await sendDownloadRange(file, request.get("range") ?? queryRange, response, (range) =>
+      bucket.file(file.objectPath).createReadStream({ ...range, decompress: false }),
+    );
+  } catch (cause) {
+    logger.error("FileX Send public download failed", { fileId, message: cause instanceof Error ? cause.message : String(cause) });
+    if (!response.destroyed) response.destroy(cause instanceof Error ? cause : new Error(String(cause)));
+  }
 }
 
 async function beginUpload(rawCredential: string, request: Request, response: HttpResponse) {
@@ -167,6 +203,7 @@ async function beginUpload(rawCredential: string, request: Request, response: Ht
   const [uploadUrl] = await bucket.file(objectPath).createResumableUpload({
     metadata: {
       contentType,
+      contentDisposition: downloadContentDisposition(name),
       metadata: { filexSessionId: authorized.id, originalName: name, expectedSize: String(size), firebaseStorageDownloadTokens: downloadToken },
     },
     origin: request.get("origin") || publicBaseUrl,
@@ -190,6 +227,7 @@ async function finishUpload(rawCredential: string, fileId: string, request: Requ
     name: sanitizeFileName(metadata.metadata?.originalName),
     size,
     contentType: metadata.contentType ?? "application/octet-stream",
+    contentDisposition: downloadContentDisposition(sanitizeFileName(metadata.metadata?.originalName)),
     objectPath,
     downloadToken: String(metadata.metadata?.firebaseStorageDownloadTokens ?? ""),
     receivedAt: Timestamp.now(),

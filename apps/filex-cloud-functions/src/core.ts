@@ -5,6 +5,20 @@ export const MIN_LINK_TTL_MS = 15 * 60 * 1000;
 export const MAX_LINK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const DOWNLOADED_RETENTION_MS = 60 * 60 * 1000;
 export const MAX_FILE_BYTES = 25 * 1024 * 1024 * 1024;
+// Stay below the HTTP response limits of both Functions and Hosting.
+export const MAX_DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024;
+
+export function publicDownloadRange(size: number, header?: string): { start: number; end: number } | null {
+  if (!Number.isSafeInteger(size) || size <= 0) return null;
+  if (!header) return size <= MAX_DOWNLOAD_CHUNK_BYTES ? { start: 0, end: size - 1 } : null;
+  const match = /^bytes=(\d+)-(\d+)$/.exec(header);
+  if (!match) return null;
+  const start = Number(match[1]);
+  const requestedEnd = Number(match[2]);
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(requestedEnd) || start >= size || requestedEnd < start) return null;
+  const end = Math.min(requestedEnd, size - 1);
+  return end - start + 1 <= MAX_DOWNLOAD_CHUNK_BYTES ? { start, end } : null;
+}
 
 export function createToken(): string {
   return randomBytes(32).toString("base64url");
@@ -61,6 +75,13 @@ export function sanitizeFileName(value: unknown): string {
   const leaf = value.split(/[\\/]/).pop() ?? "foto";
   const clean = leaf.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/[. ]+$/g, "").trim();
   return clean.slice(0, 180) || "foto";
+}
+
+export function downloadContentDisposition(fileName: string): string {
+  const safeName = sanitizeFileName(fileName);
+  const fallback = safeName.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
+  const encoded = encodeURIComponent(safeName).replace(/[!'()*]/g, (char) => `%${char.codePointAt(0)!.toString(16).toUpperCase()}`);
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 export function sessionCredential(value: string): { id: string; token: string } | null {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DOWNLOADED_RETENTION_MS, MAX_LINK_TTL_MS, MIN_LINK_TTL_MS, createSessionIdentity, downloadedFileExpired, hashToken, normalizeLinkExpiry, publicUploadAllowed, sanitizeFileName, sessionCredential, tokensEqual } from "./core.js";
+import { DOWNLOADED_RETENTION_MS, MAX_DOWNLOAD_CHUNK_BYTES, MAX_LINK_TTL_MS, MIN_LINK_TTL_MS, createSessionIdentity, downloadContentDisposition, downloadedFileExpired, hashToken, normalizeLinkExpiry, publicDownloadRange, publicUploadAllowed, sanitizeFileName, sessionCredential, tokensEqual } from "./core.js";
 
 test("creates an expiring session with independent tokens", () => {
   const session = createSessionIdentity(1_000);
@@ -31,4 +31,19 @@ test("parses public credentials and sanitizes names", () => {
   assert.equal(sessionCredential("bad"), null);
   assert.equal(sanitizeFileName("../foto?.jpg"), "foto_.jpg");
   assert.equal(hashToken("a").length, 64);
+});
+
+test("forces shared objects to download with a safe filename", () => {
+  assert.equal(
+    downloadContentDisposition("vacanza estate (1) é.jpg"),
+    "attachment; filename=\"vacanza estate (1) _.jpg\"; filename*=UTF-8''vacanza%20estate%20%281%29%20%C3%A9.jpg",
+  );
+});
+
+
+test("limita il proxy cloud a blocchi HTTP da 4 MB", () => {
+  assert.deepEqual(publicDownloadRange(MAX_DOWNLOAD_CHUNK_BYTES), { start: 0, end: MAX_DOWNLOAD_CHUNK_BYTES - 1 });
+  assert.deepEqual(publicDownloadRange(MAX_DOWNLOAD_CHUNK_BYTES + 1, "bytes=0-4194303"), { start: 0, end: MAX_DOWNLOAD_CHUNK_BYTES - 1 });
+  assert.equal(publicDownloadRange(MAX_DOWNLOAD_CHUNK_BYTES + 1), null);
+  assert.equal(publicDownloadRange(MAX_DOWNLOAD_CHUNK_BYTES + 1, "bytes=0-4194304"), null);
 });

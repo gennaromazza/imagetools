@@ -353,7 +353,7 @@ function testDescription(name: string): string {
     "test:image-file-finder-bug-hunt": "Verifica che anteprima e copia interpretino allo stesso modo virgolette, separatori, percorsi e duplicati.",
     "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",
     "test:filex-send-bug-hunt": "Verifica trasferimenti, autenticazione, rete e notifiche di ricezione nella dock: eventi completi, concorrenza e cronologia limitata.",
-    "test:filex-send-upload": "Esegue 12 test sul caricamento a blocchi, retry, timeout e ripresa degli offset.",
+    "test:filex-send-upload": "Verifica caricamento a blocchi, retry, ripresa degli offset e salvataggio multiplo nella cartella scelta.",
     "test:backup-guard-bug-hunt": "Verifica che sincronizzazione e rinomine non perdano o sovrascrivano file.",
     "test:filex-updater-lock": "Verifica che gli archivi dell'updater non restino bloccati su Windows.",
     "test:filex-update-shutdown": "Verifica chiusura cooperativa dei tool e isolamento degli installer dalla Suite.",
@@ -371,7 +371,7 @@ function testDescription(name: string): string {
     "test:filex-installed-licenses": "Avvia gli installer con profili isolati: controlla import, versione, licenza reale, blocchi, migrazione dei vecchi token e validazione online obbligatoria. Richiede componenti aggiornati, rete e licenza reale attiva.",
     "test:filex-trial-ui": "Controlla in Electron primo avvio, attivazione prova, passaggio all'acquisto e consenso sul sito con servizi simulati, senza dati reali.",
     "test:filex-license-emulator": "Verifica API licenze con veri emulatori Firebase Auth/Firestore: concorrenza, email verificata, riattivazione, scadenza, rimborsi e due PC. Richiede Java 21; non usa dati reali.",
-    "test:filex-cloud": "Esegue i test delle funzioni cloud FileX.",
+    "test:filex-cloud": "Verifica API, autorizzazioni e proxy di download a blocchi delle funzioni cloud FileX.",
   };
   return descriptions[name] ?? "Esegue il controllo dichiarato nello script npm del progetto.";
 }
