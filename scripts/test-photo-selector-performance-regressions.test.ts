@@ -159,3 +159,13 @@ test("la chiave dei gruppi orari non riformatta la data localizzata per ogni fot
     "la cache deve essere consultata prima della formattazione localizzata",
   );
 });
+
+test("la vista non si riordina e le foto valutate non spariscono durante la classificazione", () => {
+  const selector = source("apps/photo-selector-app/src/components/PhotoSelector.tsx");
+  assert.match(selector, /classificationFreezeRef/);
+  assert.match(selector, /freezeViewForClassification\(/, "ogni classificazione deve congelare la vista");
+  assert.match(selector, /keepBecauseClassified/, "le foto classificate restano nel filtro attivo");
+  assert.match(selector, /releaseClassificationFreeze\(\);/, "cambiando filtro o ordinamento la vista si aggiorna");
+  const panel = source("apps/photo-selector-app/src/components/selector/ViewControlsPanel.tsx");
+  assert.match(panel, /Aggiorna vista/);
+});

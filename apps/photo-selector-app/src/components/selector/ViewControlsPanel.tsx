@@ -14,6 +14,9 @@ interface ViewControlsPanelProps {
   captureHint?: string;
   hasManualOrder?: boolean;
   isSettingsPanelOpen: boolean;
+  /** Vista ferma dopo una classificazione: ordine e filtri non si aggiornano da soli. */
+  isViewFrozen?: boolean;
+  onRefreshView?: () => void;
   onSearchChange: (value: string) => void;
   onCardSizeChange: (value: number) => void;
   onSortChange: (sortBy: SortMode, direction?: CreatedAtSortDirection) => void;
@@ -60,6 +63,16 @@ export function ViewControlsPanel(props: ViewControlsPanelProps) {
           <option value="orientation">Orientamento</option>
           <option value="rating">Valutazione</option>
         </select>
+        {props.isViewFrozen && props.onRefreshView ? (
+          <button
+            type="button"
+            className="photo-selector__toolbar-control"
+            onClick={props.onRefreshView}
+            title="Le foto classificate restano dove sono. Aggiorna per riapplicare ordine e filtri."
+          >
+            ↻ Aggiorna vista
+          </button>
+        ) : null}
         <button type="button" className={`icon-button${props.isSettingsPanelOpen ? " icon-button--active" : ""}`} onClick={props.onSettingsToggle} title="Impostazioni workspace">⚙</button>
         <PhotoClassificationHelpButton />
       </div>

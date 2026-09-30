@@ -865,6 +865,38 @@ export function PhotoSelector({
     }),
     [assetById, selectedIds],
   );
+  // Durante la classificazione la vista non deve riordinarsi né far sparire le foto
+  // appena valutate: l'ordine per valutazione e la lista filtrata restano ferme finché
+  // non cambia ordinamento/filtro/cartella o non si preme "Aggiorna vista".
+  const classificationFreezeRef = useRef<{ sortBy: string | null; order: string[] | null; sticky: Set<string> }>({
+    sortBy: null,
+    order: null,
+    sticky: new Set(),
+  });
+  const sortedPhotoIdsRef = useRef<string[]>([]);
+  const [isViewFrozen, setIsViewFrozen] = useState(false);
+  const [freezeVersion, setFreezeVersion] = useState(0);
+  const freezeViewForClassification = useCallback((changedIds: string[], activeSortBy: string) => {
+    const freeze = classificationFreezeRef.current;
+    if (activeSortBy === "rating" && !freeze.order && sortedPhotoIdsRef.current.length > 0) {
+      freeze.order = sortedPhotoIdsRef.current;
+      freeze.sortBy = activeSortBy;
+    }
+    for (const id of changedIds) {
+      freeze.sticky.add(id);
+    }
+    setIsViewFrozen(true);
+  }, []);
+  const releaseClassificationFreeze = useCallback(() => {
+    const freeze = classificationFreezeRef.current;
+    if (!freeze.order && freeze.sticky.size === 0) {
+      return;
+    }
+    classificationFreezeRef.current = { sortBy: null, order: null, sticky: new Set() };
+    setIsViewFrozen(false);
+    setFreezeVersion((current) => current + 1);
+  }, []);
+
   const photosRef = useRef(photos);
   const lastPhotosPropRef = useRef(photos);
   if (lastPhotosPropRef.current !== photos) {
@@ -1267,6 +1299,7 @@ export function PhotoSelector({
     });
 
     if (changed) {
+      freezeViewForClassification([id], sortBy);
       photosRef.current = nextPhotos;
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, 1));
@@ -1276,7 +1309,24 @@ export function PhotoSelector({
         emitCardSyncFeedback(buildPreviewSyncFeedback(changes, [id]));
       }
     }
-  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, pushTimelineEntry, readLatestPhotos]);
+  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, freezeViewForClassification, onPhotosChange, pushTimelineEntry, readLatestPhotos, sortBy]);
+
+  useEffect(() => {
+    releaseClassificationFreeze();
+  }, [
+    colorFilter,
+    customLabelFilter,
+    deferredSearchQuery,
+    folderFilter,
+    formatFilter,
+    pickFilter,
+    ratingFilter,
+    releaseClassificationFreeze,
+    seriesFilter,
+    sortBy,
+    sourceFolderPath,
+    timeClusterFilter,
+  ]);
 
   function resetFilters() {
     setPickFilter("all");
@@ -1504,12 +1554,13 @@ export function PhotoSelector({
     });
 
     if (changed) {
+      freezeViewForClassification(changedIds, sortBy);
       photosRef.current = nextPhotos;
       onPhotosChange(nextPhotos);
       pushTimelineEntry(timelineLabel);
       triggerBatchPulse(changedIds, "label");
     }
-  }, [onPhotosChange, pushTimelineEntry, readLatestPhotos, triggerBatchPulse]);
+  }, [freezeViewForClassification, onPhotosChange, pushTimelineEntry, readLatestPhotos, sortBy, triggerBatchPulse]);
 
   const assignCustomLabelToSelection = useCallback((label: string) => {
     if (selectedIds.length === 0) {
@@ -1756,6 +1807,16 @@ export function PhotoSelector({
     const signature = `${buildPhotoSortSignature(metadataPhotos, sortBy, captureById)}:${sortCacheVariant}`;
     const knownIds = new Set(metadataPhotos.map((photo) => photo.id));
 
+    const classificationFreeze = classificationFreezeRef.current;
+    if (
+      classificationFreeze.order
+      && classificationFreeze.sortBy === sortBy
+      && classificationFreeze.order.length === metadataPhotos.length
+      && classificationFreeze.order.every((photoId) => knownIds.has(photoId))
+    ) {
+      return classificationFreeze.order;
+    }
+
     if (sortBy === "manual") {
       const ordered = (manualOrder ?? []).filter((photoId) => knownIds.has(photoId));
       const missing = metadataPhotos
@@ -1841,7 +1902,8 @@ export function PhotoSelector({
     }
 
     return orderedIds;
-  }, [captureById, createdAtSortDirection, isSortCacheEnabled, isThumbnailLoading, manualOrder, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
+  }, [captureById, createdAtSortDirection, freezeVersion, isSortCacheEnabled, isThumbnailLoading, manualOrder, metadataPhotos, sortBy, sortCacheHydrationToken, sourceFolderPath]);
+  sortedPhotoIdsRef.current = sortedPhotoIds;
 
   useEffect(() => {
     onOrderChange?.(sortedPhotoIds);
@@ -1850,6 +1912,7 @@ export function PhotoSelector({
   const visiblePhotoIds = useMemo(() => {
     const lowerSearch = deferredSearchQuery.toLowerCase();
     const filteredIds: string[] = [];
+    const stickyIds = classificationFreezeRef.current.sticky;
 
     for (const photoId of sortedPhotoIds) {
       const photo = metadataAssetById.get(photoId);
@@ -1857,7 +1920,10 @@ export function PhotoSelector({
         continue;
       }
 
-      if (!matchesPhotoFilters(photo, {
+      // Le foto appena classificate restano visibili anche se non rispettano più i
+      // filtri di classificazione, così non spariscono sotto le dita.
+      const keepBecauseClassified = stickyIds.has(photoId);
+      if (!keepBecauseClassified && !matchesPhotoFilters(photo, {
         pickStatus: pickFilter,
         ratingFilter,
         colorLabel: colorFilter,
@@ -1865,7 +1931,8 @@ export function PhotoSelector({
         continue;
       }
       if (
-        customLabelFilter !== "all"
+        !keepBecauseClassified
+        && customLabelFilter !== "all"
         && !normalizeAssetCustomLabels(photo.customLabels).some(
           (label) => label.toLocaleLowerCase() === customLabelFilter.toLocaleLowerCase(),
         )
@@ -1916,6 +1983,7 @@ export function PhotoSelector({
     deferredSearchQuery,
     folderFilter,
     formatFilter,
+    freezeVersion,
     metadataAssetById,
     metadataIndex,
     pickFilter,
@@ -2889,6 +2957,7 @@ export function PhotoSelector({
     });
 
     if (changed) {
+      freezeViewForClassification(changedIds, sortBy);
       photosRef.current = nextPhotos;
       onPhotosChange(nextPhotos);
       pushTimelineEntry(describeMetadataChanges(changes, targetIds.length));
@@ -2904,7 +2973,7 @@ export function PhotoSelector({
         emitCardSyncFeedback(buildPreviewSyncFeedback(changes, changedIds));
       }
     }
-  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, onPhotosChange, pushTimelineEntry, readLatestPhotos, triggerBatchPulse]);
+  }, [buildPreviewSyncFeedback, emitCardSyncFeedback, emitPreviewSyncFeedback, freezeViewForClassification, onPhotosChange, pushTimelineEntry, readLatestPhotos, sortBy, triggerBatchPulse]);
 
   const selectedCustomLabelCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -4212,6 +4281,8 @@ export function PhotoSelector({
                         : "Ordinamento per data di scatto EXIF."
                 }
                 isSettingsPanelOpen={isSettingsPanelOpen}
+                isViewFrozen={isViewFrozen}
+                onRefreshView={releaseClassificationFreeze}
                 onSearchChange={setSearchQuery}
                 onCardSizeChange={setCardSize}
                 onSortChange={(nextSort, direction) => {
