@@ -49,14 +49,17 @@ try {
   );
 
   const virtualAsarRead = 'readFileSync(join(archivePath, "package.json"), "utf8")';
-  const explicitAsarFallback = 'extractFile(archivePath, "package.json")';
+  const explicitAsarRead = 'extractFile(archivePath, "package.json")';
   const virtualReadIndex = updaterSource.indexOf(virtualAsarRead);
-  const fallbackIndex = updaterSource.indexOf(explicitAsarFallback);
+  const explicitReadIndex = updaterSource.indexOf(explicitAsarRead);
+  const noAsarIndex = updaterSource.indexOf("process.noAsar = true");
   if (virtualReadIndex < 0) {
-    throw new Error("L'updater non usa il filesystem ASAR virtuale di Electron.");
+    throw new Error("L'updater non mantiene il filesystem ASAR virtuale di Electron come fallback.");
   }
-  if (fallbackIndex < 0 || fallbackIndex < virtualReadIndex) {
-    throw new Error("L'updater non mantiene il reader ASAR esplicito come fallback.");
+  // Electron cachea gli ASAR gia' aperti: la versione dopo un'installazione va
+  // letta prima con noAsar, altrimenti la Suite vede la versione precedente.
+  if (noAsarIndex < 0 || explicitReadIndex < noAsarIndex || explicitReadIndex > virtualReadIndex) {
+    throw new Error("L'updater deve leggere prima la versione con il reader ASAR esplicito (noAsar) e solo dopo con quello virtuale.");
   }
   if (!mainSource.includes("Promise.allSettled([")) {
     throw new Error("La chiusura desktop non attende i servizi nativi.");
