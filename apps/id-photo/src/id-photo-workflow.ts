@@ -20,6 +20,12 @@ export function createIdPhotoOutputPlan(jobName: string, format: ExportFormat): 
   };
 }
 
+/** Identificativo ordine automatico (ID-AAAAMMGG-HHMMSS, ora locale) usato come nome cartella. */
+export function createIdPhotoOrderId(date: Date): string {
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `ID-${date.getFullYear()}${two(date.getMonth() + 1)}${two(date.getDate())}-${two(date.getHours())}${two(date.getMinutes())}${two(date.getSeconds())}`;
+}
+
 export function selectDroppedIdPhotoFile(files: FileList | readonly File[]): File | null {
   return Array.from(files).find((file) => file.type.startsWith("image/") || IMAGE_FILE_PATTERN.test(file.name)) ?? null;
 }

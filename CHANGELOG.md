@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-30 - FileX ID Photo 0.1.5
+
+- Flusso più semplice in quattro passaggi: eliminati il controllo qualità bloccante e la gestione commesse, così non compaiono più blocchi come «Ricarica la sorgente modificata».
+- Nello step Prepara puoi riposizionare la foto trascinandola e zoomare con la rotella del mouse.
+- Ogni esportazione crea automaticamente una cartella con l'ID ordine (ID-AAAAMMGG-HHMMSS) nella destinazione scelta e la apre a verifica completata.
+
 ## 2026-09-30 - FileX ID Photo 0.1.4
 
 - Il controllo di risoluzione ora misura i pixel reali della foto originale e non più quelli dell'anteprima: le foto ad alta risoluzione con ritaglio zoomato non vengono più bloccate per errore.

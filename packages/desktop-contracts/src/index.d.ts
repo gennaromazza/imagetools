@@ -1308,6 +1308,11 @@ export interface FileXDesktopApi {
     getCacheLocationRecommendation: () => Promise<DesktopCacheLocationRecommendation>;
     migrateThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopCacheMigrationResult>;
     dismissCacheLocationRecommendation: () => Promise<void>;
+    openIdPhotoOutputFolder: (folderPath: string) => Promise<{
+        ok: boolean;
+    }>;
+    createIdPhotoOrderFolder: (parentPath: string, folderName: string) => Promise<string>;
+    removeEmptyIdPhotoOrderFolder: (folderPath: string) => Promise<boolean>;
     getImageDimensions: (absolutePath: string) => Promise<DesktopImageDimensions | null>;
     getPreview: (absolutePath: string, options?: DesktopPreviewOptions) => Promise<DesktopRenderedImage | null>;
     startPsdJpegConversion: (request: DesktopPsdJpegConversionRequest) => Promise<DesktopPsdJpegConversionProgress>;

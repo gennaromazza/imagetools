@@ -23,12 +23,12 @@ Il renderer è in `apps/id-photo`; catalogo, script e metadati di distribuzione 
 ## Perimetro implementato
 
 - flusso UI Commessa → Prepara → Verifica → Impagina → Esporta;
-- tutorial operativo sempre raggiungibile da ogni schermata, con capitolo contestuale per ciascuno dei cinque step e indicazioni dedicate al passaggio Photoshop;
+- tutorial operativo sempre raggiungibile da ogni schermata, con capitolo contestuale per ciascuno dei quattro step (Foto, Prepara, Impagina, Esporta) e indicazioni dedicate al passaggio Photoshop;
 - importazione desktop di una singola foto, da cartella, tramite drag & drop e fallback browser;
 - apertura diretta da Archivio Flow con una singola foto selezionata dalla scheda, tramite handoff locale consume-once e senza duplicare i byte nel manifest;
 - profili versionati CIE 35×45, passaporto italiano 35×45 con fonte MAECI e formato generico 35×45 dichiarato come preset studio;
 - crop guidato, zoom, posizione e rotazione senza modifica dell'originale;
-- controlli tecnici locali non bloccanti su luminosità, contrasto, nitidezza e uniformità dello sfondo; una risoluzione insufficiente, verificata sui pixel reali del file sorgente, richiede conferma esplicita dell'operatore; solo l'integrità della sorgente impedisce l'output;
+- nessun controllo qualità bloccante e nessuna gestione commesse: il lavoro si salva in automatico e ogni export crea una cartella ordine `ID-AAAAMMGG-HHMMSS` nella destinazione scelta, aperta a fine verifica;
 - regolazioni non distruttive di luminosità e contrasto applicate in modo identico ad anteprima, export e stampa;
 - nel preset studio, uniformazione o sostituzione dello sfondo con BiRefNet MIT eseguito localmente tramite ONNX Runtime; il modello viene scaricato solo al primo uso, verificato con SHA-256 e nessuna fotografia viene caricata in rete;
 - passaggio Photoshop su copia atomica gestita da FileX, rilevamento della modifica, snapshot reali ripristinabili e rientro sullo stesso file o tramite “Salva con nome” flattenato;

@@ -88,7 +88,7 @@ Il renderer e l'UI ricevono le decisioni da questo modello. Nessuna regola deve 
 | Avviso | Evidenzia un rischio, consente la continuazione con conferma e conserva la motivazione |
 | Informazione | Mostra un dato utile senza richiedere un'azione |
 
-Nella prima release i blocchi possono riguardare rapporto fisico incompatibile; la risoluzione utile insufficiente, misurata sui pixel reali della sorgente (non dell'anteprima), richiede una conferma esplicita e non è più un blocco definitivo; gli avvisi tecnici riguardano luminosità, contrasto, nitidezza e uniformità dello sfondo. Volto, espressione e accessori restano conferme manuali.
+Dalla 0.1.5 il flusso non ha più uno step di controllo qualità né blocchi su risoluzione: il giudizio su volto, sfondo e risoluzione resta all'operatore. Restano le protezioni sull'integrità della sorgente al momento dell'export.
 
 La classificazione definitiva di ogni regola deve essere approvata insieme al responsabile prodotto e al consulente competente; non va dedotta automaticamente.
 

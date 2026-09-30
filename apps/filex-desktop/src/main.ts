@@ -2,7 +2,7 @@ import * as electron from "electron";
 import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState, startTrial, finishTrial, startLicenseExpiryWatchdog } from "./license-service.js";
 import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, rmdirSync, statSync } from "node:fs";
 import {
   mkdtemp,
   readFile as readFileAsync,
@@ -2231,6 +2231,46 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:generate-archivio-low-quality", async (_event, jobId: string, overwrite: boolean, sourceSubfolder?: string) => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.generateLowQualityService(jobId, overwrite, sourceSubfolder);
+  });
+  ipcMain.handle("filex:create-id-photo-order-folder", (_event, parentPath: string, folderName: string) => {
+    const normalizedParent = sanitizeDesktopPath(parentPath);
+    if (!normalizedParent || !existsSync(normalizedParent) || !statSync(normalizedParent).isDirectory()) {
+      throw new Error("Cartella di destinazione non trovata");
+    }
+    if (typeof folderName !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(folderName)) {
+      throw new Error("Nome della cartella ordine non valido");
+    }
+    for (let attempt = 1; attempt <= 99; attempt += 1) {
+      const candidate = join(normalizedParent, attempt === 1 ? folderName : `${folderName}-${attempt}`);
+      try {
+        mkdirSync(candidate);
+        return candidate;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
+    }
+    throw new Error("Impossibile creare una cartella ordine univoca");
+  });
+  ipcMain.handle("filex:remove-empty-id-photo-order-folder", (_event, folderPath: string) => {
+    const normalizedPath = sanitizeDesktopPath(folderPath);
+    if (!normalizedPath || !existsSync(normalizedPath)) return false;
+    try {
+      rmdirSync(normalizedPath); // fallisce se la cartella non è vuota
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  ipcMain.handle("filex:open-id-photo-output-folder", async (_event, folderPath: string) => {
+    const normalizedPath = sanitizeDesktopPath(folderPath);
+    if (!normalizedPath || !existsSync(normalizedPath) || !statSync(normalizedPath).isDirectory()) {
+      throw new Error("Cartella di destinazione non trovata");
+    }
+    const shellError = await shell.openPath(normalizedPath);
+    if (shellError) {
+      throw new Error(shellError);
+    }
+    return { ok: true };
   });
   ipcMain.handle("filex:open-archivio-folder", async (_event, folderPath: string) => {
     const normalizedPath = sanitizeDesktopPath(folderPath);
