@@ -217,6 +217,8 @@ interface SelectedDetailPreview {
   url: string;
   width: number;
   height: number;
+  sourceWidth: number | null;
+  sourceHeight: number | null;
   sourceSha256: string | null;
 }
 
@@ -432,6 +434,7 @@ export function App() {
   const [crops, setCrops] = useState<Record<string, BatchCropState>>(initialJob?.crops ?? {});
   const [checks, setChecks] = useState<TechnicalCheck[]>([]);
   const [manualChecks, setManualChecks] = useState(initialJob?.manualChecks ?? { face: false, expression: false, accessories: false });
+  const [lowResolutionAccepted, setLowResolutionAccepted] = useState(false);
   const [technicalWarningsAccepted, setTechnicalWarningsAccepted] = useState(initialJob?.technicalWarningsAccepted ?? false);
   const [imageAdjustments, setImageAdjustments] = useState<Record<string, IdPhotoImageAdjustments>>(initialJob?.imageAdjustments ?? {});
   const [lastExport, setLastExport] = useState<PersistedIdPhotoExport | null>(initialJob?.lastExport ?? null);
@@ -555,6 +558,7 @@ export function App() {
     pageCount: pages.length,
     pendingSourceChange: pendingPhotoshopChange,
     checks,
+    lowResolutionAccepted,
   });
   const exportFingerprint = JSON.stringify({
     jobId,
@@ -726,6 +730,7 @@ export function App() {
   const resetVerification = useCallback(() => {
     analysisGenerationRef.current += 1;
     setChecks([]);
+    setLowResolutionAccepted(false);
     setManualChecks({ face: false, expression: false, accessories: false });
     setTechnicalWarningsAccepted(false);
     clearExportRecords();
@@ -1159,6 +1164,7 @@ export function App() {
           if (!sourceFingerprint) {
             throw new Error("Impronta sorgente non disponibile.");
           }
+          const sourceDimensions = await window.filexDesktop.getImageDimensions(selectedAsset.absolutePath).catch(() => null);
           const rendered = await window.filexDesktop.getPreview(selectedAsset.absolutePath, {
             maxDimension: ID_PHOTO_DETAIL_PREVIEW_MAX_DIMENSION,
             sourceFileKey: sourceFingerprint
@@ -1170,6 +1176,8 @@ export function App() {
             url: bytesToObjectUrl(rendered.bytes, rendered.mimeType),
             width: rendered.width,
             height: rendered.height,
+            sourceWidth: sourceDimensions?.width ?? null,
+            sourceHeight: sourceDimensions?.height ?? null,
             sourceSha256: sourceFingerprint?.sha256 ?? null,
           };
         } else {
@@ -1181,6 +1189,8 @@ export function App() {
             url: URL.createObjectURL(rendered.blob),
             width: rendered.width,
             height: rendered.height,
+            sourceWidth: rendered.sourceWidth,
+            sourceHeight: rendered.sourceHeight,
             sourceSha256: null,
           };
         }
@@ -1220,12 +1230,20 @@ export function App() {
     const generation = analysisGenerationRef.current + 1;
     analysisGenerationRef.current = generation;
     setChecks([]);
+    setLowResolutionAccepted(false);
     let active = true;
     const timeout = window.setTimeout(() => {
-      void analyzeImage(selectedPreviewAsset!.previewUrl, selectedPreviewAsset!.width, selectedPreviewAsset!.height, selectedCrop, renderAdjustments)
+      const sourceDimensionsKnown = selectedDetailPreview.sourceWidth !== null && selectedDetailPreview.sourceHeight !== null;
+      void analyzeImage(
+        selectedPreviewAsset!.previewUrl,
+        selectedDetailPreview.sourceWidth ?? selectedPreviewAsset!.width,
+        selectedDetailPreview.sourceHeight ?? selectedPreviewAsset!.height,
+        selectedCrop,
+        renderAdjustments,
+      )
         .then((metrics) => {
           if (active && analysisGenerationRef.current === generation) {
-            setChecks(evaluateTechnicalChecks(metrics, profile, selectedCrop));
+            setChecks(evaluateTechnicalChecks(metrics, profile, selectedCrop, { sourceDimensionsKnown }));
           }
         })
         .catch(() => {
@@ -1782,6 +1800,7 @@ export function App() {
     setImageAdjustments({});
     setSelectedIndex(0);
     setChecks([]);
+    setLowResolutionAccepted(false);
     setManualChecks({ face: false, expression: false, accessories: false });
     setTechnicalWarningsAccepted(false);
     clearExportRecords();
@@ -2034,7 +2053,7 @@ export function App() {
     }
     if (!readyForExport) {
       setStatus(blockingFailures > 0
-        ? "Export bloccato: la risoluzione utile non è sufficiente."
+        ? "Export bloccato: conferma nel controllo qualità di voler procedere con risoluzione insufficiente."
         : "Export bloccato: ricarica la sorgente modificata prima di continuare.");
       setStep(3);
       return;
@@ -2247,7 +2266,7 @@ export function App() {
 
   const openPrintPanel = async () => {
     if (!readyForExport || pages.length === 0 || !selectedAsset) {
-      setStatus(blockingFailures > 0 ? "Stampa bloccata: risoluzione utile insufficiente." : "Stampa bloccata: ricarica la sorgente modificata.");
+      setStatus(blockingFailures > 0 ? "Stampa bloccata: conferma nel controllo qualità la risoluzione insufficiente." : "Stampa bloccata: ricarica la sorgente modificata.");
       setStep(3);
       return;
     }
@@ -2275,7 +2294,7 @@ export function App() {
 
   const runPrint = async (settings: { showDialog: boolean; deviceName?: string; copies?: number }) => {
     if (!readyForExport || pages.length === 0 || !selectedAsset) {
-      setStatus(blockingFailures > 0 ? "Stampa bloccata: risoluzione utile insufficiente." : "Stampa bloccata: ricarica la sorgente modificata.");
+      setStatus(blockingFailures > 0 ? "Stampa bloccata: conferma nel controllo qualità la risoluzione insufficiente." : "Stampa bloccata: ricarica la sorgente modificata.");
       setStep(3);
       return;
     }
@@ -2582,7 +2601,7 @@ export function App() {
             <div className="panel verify-panel">
               <div className="eyebrow">STEP 3 · CONTROLLO QUALITÀ</div>
               <h1>Indicatori tecnici e controllo del fotografo</h1>
-              <p>I valori sono calcolati localmente e restano consultivi. Solo una risoluzione realmente insufficiente impedisce la produzione.</p>
+              <p>I valori sono calcolati localmente e restano consultivi. Se la risoluzione è insufficiente potrai comunque produrre, ma solo dopo una conferma esplicita.</p>
               {selectedAsset ? <div className="verification-photo"><img src={cropPreviewUrl ?? selectedPreviewAsset?.previewUrl ?? selectedAsset.previewUrl} alt="Foto attiva sottoposta a verifica" decoding="async" /><div><strong>{selectedAsset.fileName}</strong><span>{profile.widthMm}×{profile.heightMm} mm · ritaglio e rotazione correnti</span></div></div> : null}
               <div className="checks-grid">
                 {checks.map((check) => <div key={check.id} className={`check-card ${check.status}`}><StatusIcon status={check.status} /><div><strong>{check.label}</strong><b>{check.value}</b><p>{check.message}</p></div></div>)}
@@ -2593,9 +2612,10 @@ export function App() {
                 <label><input type="checkbox" checked={manualChecks.face} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => setManualChecks((value) => ({ ...value, face: event.target.checked }))} /><span>Volto centrato, dimensione e linea occhi coerenti con il profilo</span></label>
                 <label><input type="checkbox" checked={manualChecks.expression} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => setManualChecks((value) => ({ ...value, expression: event.target.checked }))} /><span>Espressione neutra, bocca chiusa, occhi visibili</span></label>
                 <label><input type="checkbox" checked={manualChecks.accessories} disabled={busy || checks.length === 0 || pendingPhotoshopChange} onChange={(event) => setManualChecks((value) => ({ ...value, accessories: event.target.checked }))} /><span>Sfondo, ombre, riflessi e accessori verificati dall’operatore</span></label>
+                {blockingFailures > 0 ? <label className="warning-ack"><input type="checkbox" checked={lowResolutionAccepted} disabled={busy || pendingPhotoshopChange} onChange={(event) => { setLowResolutionAccepted(event.target.checked); clearExportRecords(); }} /><span>La risoluzione è inferiore a quella richiesta dal profilo: la stampa potrebbe risultare meno nitida e un documento ufficiale potrebbe essere rifiutato. Procedo sotto la mia responsabilità.</span></label> : null}
                 {technicalWarnings > 0 ? <label className="warning-ack"><input type="checkbox" checked={technicalWarningsAccepted} disabled={busy || pendingPhotoshopChange} onChange={(event) => setTechnicalWarningsAccepted(event.target.checked)} /><span>Ho esaminato i {technicalWarnings} avvisi tecnici</span></label> : null}
               </div>
-              <div className={readyForExport ? "readiness ready" : "readiness warning"}><ShieldCheck size={22} /><div><strong>{readyForExport ? "Foto pronta per impaginazione, export e stampa" : "Intervento tecnico necessario"}</strong><span>{!selectedAsset ? "Importa una foto per iniziare." : pendingPhotoshopChange ? "Ricarica la modifica Photoshop prima di produrre l’output." : blockingFailures > 0 ? "La risoluzione utile è insufficiente per questo profilo." : "Gli altri indicatori e promemoria non bloccano il lavoro."}</span></div></div>
+              <div className={readyForExport ? "readiness ready" : "readiness warning"}><ShieldCheck size={22} /><div><strong>{readyForExport ? "Foto pronta per impaginazione, export e stampa" : "Intervento tecnico necessario"}</strong><span>{!selectedAsset ? "Importa una foto per iniziare." : pendingPhotoshopChange ? "Ricarica la modifica Photoshop prima di produrre l’output." : blockingFailures > 0 ? "Risoluzione insufficiente per questo profilo: conferma di voler procedere oppure cambia foto o zoom." : "Gli altri indicatori e promemoria non bloccano il lavoro."}</span></div></div>
               <div className="verification-source"><span>Profilo {profile.version} · fonte verificata {new Date(`${profile.sourceCheckedAt}T00:00:00`).toLocaleDateString("it-IT")}</span>{profile.sourceUrl ? <a href={profile.sourceUrl} target="_blank" rel="noreferrer">Consulta la fonte <ExternalLink size={12} /></a> : null}</div>
             </div>
           ) : null}
@@ -2629,7 +2649,7 @@ export function App() {
                 <label>Formato del foglio<select value={format} disabled={busy} onChange={(event) => { setFormat(event.target.value as ExportFormat); clearExportRecords(); }}><option value="pdf">Foglio PDF + foto singola JPG</option><option value="jpg">Foglio JPG + foto singola JPG</option></select></label>
                 <div className="output-box"><FolderOutput size={20} /><div><strong>Cartella di destinazione</strong><span>{outputDirectoryPath || "Download del browser"}</span></div><button className="secondary" onClick={chooseOutput} disabled={!window.filexDesktop || busy}>Scegli</button></div>
                 <div className="export-recap"><p><span>Commessa</span><b>{safeJobName(customer, jobName)}</b></p><p><span>Profilo</span><b>{profile.label}</b></p><p><span>Output</span><b>Foto singola JPG · {copies} copie · {pages.length} fogli {sheet.label}</b></p></div>
-                {!readyForExport ? <div className="inline-warning"><AlertTriangle size={17} /> {blockingFailures > 0 ? "La risoluzione utile blocca l'output." : "Ricarica la sorgente modificata prima di produrre l'output."}</div> : null}
+                {!readyForExport ? <div className="inline-warning"><AlertTriangle size={17} /> {blockingFailures > 0 ? "Risoluzione insufficiente: conferma la scelta nel controllo qualità (step 3)." : "Ricarica la sorgente modificata prima di produrre l'output."}</div> : null}
                 {currentLastExport ? <div className="last-export"><CheckCircle2 size={18} /><div><strong>Ultimo output verificato</strong><span>{new Date(currentLastExport.completedAt).toLocaleString("it-IT")} · {currentLastExport.files.join(", ")}</span></div></div> : null}
                 {contextualLastExport && lastExportVerification === "unavailable" ? <div className="inline-warning"><AlertTriangle size={17} /> Output registrato, ma verifica temporaneamente indisponibile. FileX conserva il record e riprova automaticamente.</div> : null}
                 {contextualPendingExport ? <div className="inline-warning"><AlertTriangle size={17} /> <span>File già pubblicati: {contextualPendingExport.files.join(", ")}. Non sono ancora marcati come pronti e FileX non li riesporterà.</span></div> : null}

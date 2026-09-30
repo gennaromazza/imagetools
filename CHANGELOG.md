@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-30 - FileX ID Photo 0.1.4
+
+- Il controllo di risoluzione ora misura i pixel reali della foto originale e non più quelli dell'anteprima: le foto ad alta risoluzione con ritaglio zoomato non vengono più bloccate per errore.
+- Se la risoluzione è davvero insufficiente, il messaggio indica pixel disponibili e richiesti; export e stampa restano possibili dopo una conferma esplicita dell'operatore.
+
 ## 2026-09-25 - Image Select Pro 0.1.41
 
 - Selezione e sfogliamento più fluidi: trascinamento multi-foto affidabile, copia dei nomi file e spostamento nel Cestino; feedback di selezione coerenti, classificazione senza interrompere la navigazione, rotazione automatica EXIF e rotazione batch, lasso più rapido e zoom mantenuto in Quick Preview.

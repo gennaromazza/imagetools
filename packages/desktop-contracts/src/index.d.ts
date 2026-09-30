@@ -369,6 +369,10 @@ export interface DesktopThumbnailBatchResult {
     id: string;
     image: DesktopRenderedImage | null;
 }
+export interface DesktopImageDimensions {
+    width: number;
+    height: number;
+}
 export interface DesktopPreviewOptions {
     maxDimension?: number;
     sourceFileKey?: string;
@@ -1304,6 +1308,7 @@ export interface FileXDesktopApi {
     getCacheLocationRecommendation: () => Promise<DesktopCacheLocationRecommendation>;
     migrateThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopCacheMigrationResult>;
     dismissCacheLocationRecommendation: () => Promise<void>;
+    getImageDimensions: (absolutePath: string) => Promise<DesktopImageDimensions | null>;
     getPreview: (absolutePath: string, options?: DesktopPreviewOptions) => Promise<DesktopRenderedImage | null>;
     startPsdJpegConversion: (request: DesktopPsdJpegConversionRequest) => Promise<DesktopPsdJpegConversionProgress>;
     getPsdJpegConversionProgress: () => Promise<DesktopPsdJpegConversionProgress>;

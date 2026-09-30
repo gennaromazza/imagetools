@@ -95,6 +95,7 @@ import {
   getDesktopImageCacheLimits,
   getDesktopQuickPreviewFrame,
   getDesktopPreview,
+  getDesktopImageDimensions,
   getDesktopThumbnail,
   getDesktopCachedThumbnailFrames,
   getDesktopThumbnailFrame,
@@ -1821,6 +1822,9 @@ function registerIpcHandlers(): void {
     return sanitizeDesktopPath(result.filePaths[0]);
   });
   ipcMain.handle("filex:get-installed-editor-candidates", () => getInstalledEditorCandidates());
+  ipcMain.handle("filex:get-image-dimensions", (_event, absolutePath: string) =>
+    getDesktopImageDimensions(absolutePath),
+  );
   ipcMain.handle(
     "filex:get-preview",
     (_event, absolutePath: string, options?: { maxDimension?: number; sourceFileKey?: string }) =>

@@ -72,6 +72,43 @@ describe("FileX ID Photo domain", () => {
     })).toEqual({ width: 800, height: 600 });
   });
 
+  it("con sorgente reale 6000×4000 il ritaglio zoomato non viene bloccato", () => {
+    const metrics = { meanLuma: 130, contrast: 40, sharpness: 150, backgroundUniformity: 90 };
+    const crop = { cropLeft: 0.3, cropTop: 0.1, cropWidth: 0.2, cropHeight: 0.6, rotation: 0 };
+    const real = evaluateTechnicalChecks({ ...metrics, width: 6000, height: 4000 }, DOCUMENT_PROFILES[0], crop);
+    expect(real.find((check) => check.id === "resolution")?.status).toBe("pass");
+    const preview = evaluateTechnicalChecks({ ...metrics, width: 1600, height: 1067 }, DOCUMENT_PROFILES[0], crop);
+    expect(preview.find((check) => check.id === "resolution")?.status).toBe("fail");
+  });
+
+  it("indica i pixel reali disponibili quando la risoluzione è davvero insufficiente", () => {
+    const checks = evaluateTechnicalChecks({
+      width: 500, height: 700, meanLuma: 130, contrast: 40, sharpness: 150, backgroundUniformity: 90,
+    }, DOCUMENT_PROFILES[0]);
+    const resolution = checks.find((check) => check.id === "resolution");
+    expect(resolution?.status).toBe("fail");
+    expect(resolution?.message).toContain("500×700");
+  });
+
+  it("senza dimensioni sorgente note non blocca l'output ma avvisa", () => {
+    const checks = evaluateTechnicalChecks({
+      width: 1600, height: 1067, meanLuma: 130, contrast: 40, sharpness: 150, backgroundUniformity: 90,
+    }, DOCUMENT_PROFILES[0], { cropLeft: 0.3, cropTop: 0.3, cropWidth: 0.2, cropHeight: 0.2, rotation: 0 }, { sourceDimensionsKnown: false });
+    expect(checks.find((check) => check.id === "resolution")?.status).toBe("warning");
+    expect(canProduceIdPhotoOutput({ hasAsset: true, hasCrop: true, pageCount: 1, pendingSourceChange: false, checks })).toBe(true);
+  });
+
+  it("la risoluzione insufficiente blocca l'output finché l'operatore non conferma", () => {
+    const checks = evaluateTechnicalChecks({
+      width: 500, height: 700, meanLuma: 130, contrast: 40, sharpness: 150, backgroundUniformity: 90,
+    }, DOCUMENT_PROFILES[0]);
+    const base = { hasAsset: true, hasCrop: true, pageCount: 1, pendingSourceChange: false, checks };
+    expect(canProduceIdPhotoOutput(base)).toBe(false);
+    expect(canProduceIdPhotoOutput({ ...base, lowResolutionAccepted: false })).toBe(false);
+    expect(canProduceIdPhotoOutput({ ...base, lowResolutionAccepted: true })).toBe(true);
+    expect(canProduceIdPhotoOutput({ ...base, lowResolutionAccepted: true, pendingSourceChange: true })).toBe(false);
+  });
+
   it("blocca lo stato pronto finché controlli e warning non sono confermati", () => {
     expect(deriveIdPhotoJobStatus({
       assetCount: 1,

@@ -116,6 +116,7 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:migrate-thumbnail-cache-directory", directoryPath),
   dismissCacheLocationRecommendation: () =>
     ipcRenderer.invoke("filex:dismiss-cache-location-recommendation"),
+  getImageDimensions: (absolutePath) => ipcRenderer.invoke("filex:get-image-dimensions", absolutePath),
   getPreview: (absolutePath, options) => ipcRenderer.invoke("filex:get-preview", absolutePath, options),
   startPsdJpegConversion: (request) => ipcRenderer.invoke("filex:start-psd-jpeg-conversion", request),
   getPsdJpegConversionProgress: () => ipcRenderer.invoke("filex:get-psd-jpeg-conversion-progress"),

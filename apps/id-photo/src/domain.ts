@@ -113,12 +113,15 @@ export function canProduceIdPhotoOutput(input: {
   pageCount: number;
   pendingSourceChange: boolean;
   checks: TechnicalCheck[];
+  /** Conferma esplicita dell'operatore a produrre con risoluzione inferiore al profilo. */
+  lowResolutionAccepted?: boolean;
 }): boolean {
   return input.hasAsset
     && input.hasCrop
     && input.pageCount > 0
     && !input.pendingSourceChange
-    && !input.checks.some((check) => check.id === "resolution" && check.status === "fail");
+    && (input.lowResolutionAccepted === true
+      || !input.checks.some((check) => check.id === "resolution" && check.status === "fail"));
 }
 
 export interface NormalizedCrop {
@@ -161,7 +164,11 @@ export function evaluateTechnicalChecks(
   metrics: ImageMetrics,
   profile: DocumentProfile,
   crop?: NormalizedCrop | null,
+  options: { sourceDimensionsKnown?: boolean } = {},
 ): TechnicalCheck[] {
+  // Se i pixel della sorgente non sono noti, metrics.width/height sono quelli di
+  // un'anteprima ridotta: il controllo non può dimostrare l'insufficienza.
+  const sourceDimensionsKnown = options.sourceDimensionsKnown ?? true;
   const requiredWidth = Math.ceil((profile.widthMm / 25.4) * (profile.digitalMinDpi ?? 300));
   const requiredHeight = Math.ceil((profile.heightMm / 25.4) * (profile.digitalMinDpi ?? 300));
   const effectiveSize = effectiveCropPixelSize(metrics.width, metrics.height, crop);
@@ -175,9 +182,13 @@ export function evaluateTechnicalChecks(
     {
       id: "resolution",
       label: "Risoluzione utile",
-      status: resolutionPass ? "pass" : "fail",
-      value: `${effectiveSize.width}×${effectiveSize.height} px utili`,
-      message: resolutionPass ? `Il ritaglio è sufficiente per ${profile.digitalMinDpi ?? 300} dpi.` : `Nel ritaglio servono almeno ${requiredWidth}×${requiredHeight} px per questo profilo.`,
+      status: resolutionPass ? "pass" : sourceDimensionsKnown ? "fail" : "warning",
+      value: sourceDimensionsKnown ? `${effectiveSize.width}×${effectiveSize.height} px utili` : "non verificabile",
+      message: resolutionPass
+        ? `Il ritaglio è sufficiente per ${profile.digitalMinDpi ?? 300} dpi.`
+        : sourceDimensionsKnown
+          ? `Nel ritaglio hai ${effectiveSize.width}×${effectiveSize.height} px, ne servono almeno ${requiredWidth}×${requiredHeight} per ${profile.digitalMinDpi ?? 300} dpi. Riduci lo zoom o usa una foto più grande.`
+          : `Dimensioni reali della foto non leggibili: servono almeno ${requiredWidth}×${requiredHeight} px nel ritaglio. Verifica manualmente.`,
     },
     {
       id: "brightness",

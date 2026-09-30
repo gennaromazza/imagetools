@@ -1507,6 +1507,31 @@ async function renderNativePreviewFromPath(
   }
 }
 
+/**
+ * Dimensioni reali (in pixel, già orientate secondo EXIF) del file sorgente,
+ * lette dai metadati senza decodificare l'immagine.
+ */
+export async function getDesktopImageDimensions(
+  absolutePath: string,
+): Promise<{ width: number; height: number } | null> {
+  if (typeof absolutePath !== "string" || absolutePath.length === 0) {
+    return null;
+  }
+  try {
+    const tags = await rawPreviewExifTool.read(absolutePath);
+    const width = Number(tags.ImageWidth ?? tags.ExifImageWidth);
+    const height = Number(tags.ImageHeight ?? tags.ExifImageHeight);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+      return null;
+    }
+    const orientation = Number(tags.Orientation);
+    const swapAxes = Number.isInteger(orientation) && orientation >= 5 && orientation <= 8;
+    return swapAxes ? { width: height, height: width } : { width, height };
+  } catch {
+    return null;
+  }
+}
+
 export async function getDesktopPreview(
   absolutePath: string,
   maxDimension = 0,

@@ -475,6 +475,11 @@ export interface DesktopThumbnailBatchResult {
   image: DesktopRenderedImage | null;
 }
 
+export interface DesktopImageDimensions {
+  width: number;
+  height: number;
+}
+
 export interface DesktopPreviewOptions {
   maxDimension?: number;
   sourceFileKey?: string;
@@ -1591,6 +1596,7 @@ export interface FileXDesktopApi {
   getCacheLocationRecommendation: () => Promise<DesktopCacheLocationRecommendation>;
   migrateThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopCacheMigrationResult>;
   dismissCacheLocationRecommendation: () => Promise<void>;
+  getImageDimensions: (absolutePath: string) => Promise<DesktopImageDimensions | null>;
   getPreview: (
     absolutePath: string,
     options?: DesktopPreviewOptions,
