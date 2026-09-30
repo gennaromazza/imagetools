@@ -325,6 +325,13 @@ function getSeriesKey(photo: ImageAsset): string {
   return normalized || stem;
 }
 
+// La formattazione localizzata (toLocaleDateString/TimeString) costa decine di
+// microsecondi per chiamata e veniva rifatta per ogni foto a ogni classificazione
+// (circa 70 ms per tasto su 1.200 foto). Il risultato dipende solo dall'intervallo
+// di 5 minuti, quindi lo memorizziamo per intervallo.
+const timeClusterLabelByBucket = new Map<number, string>();
+const TIME_CLUSTER_CACHE_MAX_ENTRIES = 20_000;
+
 function getTimeClusterKey(photo: ImageAsset): string {
   const timestamp = resolvePhotoCreatedAt(photo);
   if (!Number.isFinite(timestamp) || timestamp <= 0) {
@@ -336,12 +343,23 @@ function getTimeClusterKey(photo: ImageAsset): string {
   const bucket = new Date(date);
   bucket.setMinutes(bucketMinutes, 0, 0);
 
+  const bucketTime = bucket.getTime();
+  const cached = timeClusterLabelByBucket.get(bucketTime);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const day = bucket.toLocaleDateString("it-IT");
   const time = bucket.toLocaleTimeString("it-IT", {
     hour: "2-digit",
     minute: "2-digit",
   });
-  return `${day} ${time}`;
+  const label = `${day} ${time}`;
+  if (timeClusterLabelByBucket.size >= TIME_CLUSTER_CACHE_MAX_ENTRIES) {
+    timeClusterLabelByBucket.clear();
+  }
+  timeClusterLabelByBucket.set(bucketTime, label);
+  return label;
 }
 
 function formatBytes(totalBytes: number): string {

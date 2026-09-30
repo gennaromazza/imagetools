@@ -10,7 +10,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const port = 9333;
 (async () => {
   const t0 = Date.now();
-  const child = spawn(exe, [".", `--remote-debugging-port=${port}`, `--open-folder=${folder}`], { cwd: desktop, env: { ...process.env, FILEX_TOOL: "photo-selector-app" }, stdio: ["ignore", require("node:fs").openSync(process.env.BENCH_MAIN_LOG || "bench-main.log", "w"), require("node:fs").openSync(process.env.BENCH_MAIN_LOG || "bench-main.log", "a")] });
+  const child = spawn(exe, [".", "--disable-renderer-backgrounding", "--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", `--remote-debugging-port=${port}`, `--open-folder=${folder}`], { cwd: desktop, env: { ...process.env, FILEX_TOOL: "photo-selector-app" }, stdio: ["ignore", require("node:fs").openSync(process.env.BENCH_MAIN_LOG || "bench-main.log", "w"), require("node:fs").openSync(process.env.BENCH_MAIN_LOG || "bench-main.log", "a")] });
   let target;
   for (let i = 0; i < 200 && !target; i++) { await sleep(300); try { const l = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); target = l.find((t) => t.type === "page" && !t.url.startsWith("devtools")); } catch {} }
   if (!target) { console.log("pagina non trovata"); child.kill(); process.exit(1); }
@@ -22,7 +22,7 @@ const port = 9333;
   console.log(`processo avviato, pagina raggiungibile dopo ${Date.now() - t0} ms`);
   const cards = () => ev(`document.querySelectorAll('.photo-card img[src]').length`);
   let firstCard = null, snap = null;
-  for (let i = 0; i < 1500 && Date.now() - t0 < 900000; i++) {
+  for (let i = 0; i < 1500 && Date.now() - t0 < 200000; i++) {
     const n = await cards();
     if (n > 0 && firstCard === null) { firstCard = Date.now() - t0; console.log(`prima miniatura visibile: ${firstCard} ms dall'avvio`); }
     snap = await ev(`window.filexDesktop && window.filexDesktop.getDesktopPerformanceSnapshot ? window.filexDesktop.getDesktopPerformanceSnapshot() : null`);
@@ -36,8 +36,17 @@ const port = 9333;
       try { new PerformanceObserver((l) => l.getEntries().forEach((x) => window.__long.push(x.duration))).observe({ entryTypes: ['longtask'] }); } catch {} })()`);
     await ev(`document.querySelector('.photo-card')?.click(); document.querySelector('.photo-card')?.focus(); 1`);
     await sleep(500);
+    const prof = process.argv.includes('--profile');
+    if (prof) { await send('Profiler.enable'); await send('Profiler.setSamplingInterval', { interval: 500 }); await send('Profiler.start'); }
     const key = async (k, code, vk) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk, text: k.length === 1 ? k : undefined }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk }); };
     for (let i = 0; i < 40; i++) { await key(String((i % 5) + 1), `Digit${(i % 5) + 1}`, 49 + (i % 5)); await sleep(180); await key("ArrowRight", "ArrowRight", 39); await sleep(180); }
+    if (prof) {
+      const r = await send('Profiler.stop'); const nodes = r.result.profile.nodes; const self = new Map(); const byId = new Map(nodes.map((n) => [n.id, n]));
+      const dt = r.result.profile.timeDeltas; r.result.profile.samples.forEach((id, i) => { const n = byId.get(id); const k = `${n.callFrame.functionName || '(anon)'} ${n.callFrame.url.split('/').pop()}:${n.callFrame.lineNumber + 1}`; self.set(k, (self.get(k) || 0) + (dt[i] || 0)); });
+      const tot = [...self.values()].reduce((a, b) => a + b, 0);
+      console.log('--- profilo CPU (self time, top 25) totale ' + (tot / 1000).toFixed(0) + ' ms');
+      [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 25).forEach(([k, v]) => console.log(`${(v / 1000).toFixed(0).padStart(6)} ms  ${k}`));
+    }
     const lat = await ev(`JSON.stringify(window.__lat)`); const lg = await ev(`JSON.stringify(window.__long)`);
     const rate = JSON.parse(lat).filter((x) => /^[1-5]$/.test(x[0])).map((x) => x[1]).sort((a, b) => a - b);
     const nav = JSON.parse(lat).filter((x) => x[0] === "ArrowRight").map((x) => x[1]).sort((a, b) => a - b);

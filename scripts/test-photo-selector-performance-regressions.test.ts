@@ -147,3 +147,15 @@ test("la Quick Preview conserva la foto classificata e la rotazione EXIF nel per
   assert.match(css, /\.photo-card:focus-visible/);
   assert.match(css, /rgba\(255, 255, 255/);
 });
+
+test("la chiave dei gruppi orari non riformatta la data localizzata per ogni foto", () => {
+  const selector = source("apps/photo-selector-app/src/components/PhotoSelector.tsx");
+  const start = selector.indexOf("function getTimeClusterKey(");
+  assert.notEqual(start, -1);
+  const body = selector.slice(start, selector.indexOf("function formatBytes(", start));
+  assert.match(body, /timeClusterLabelByBucket\.get\(/, "l'etichetta va letta dalla cache per intervallo di 5 minuti");
+  assert.ok(
+    body.indexOf("timeClusterLabelByBucket.get(") < body.indexOf("toLocaleDateString"),
+    "la cache deve essere consultata prima della formattazione localizzata",
+  );
+});
