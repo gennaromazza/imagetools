@@ -1,4 +1,5 @@
 import type { ColorLabel, ImageAsset, PickStatus } from "@photo-tools/shared-types";
+import { isLabelTone, type LabelTone } from "./custom-label-tones";
 
 const RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const XMP_NS = "http://ns.adobe.com/xap/1.0/";
@@ -10,6 +11,8 @@ export interface XmpState {
   pickStatus?: PickStatus;
   colorLabel?: ColorLabel | null;
   customLabels?: string[];
+  /** Colore di ciascuna etichetta personalizzata (nome -> tono), se scritto da un altro PC. */
+  customLabelTones?: Record<string, LabelTone>;
   selected?: boolean;
   hasCameraRawAdjustments: boolean;
   hasPhotoshopAdjustments: boolean;
@@ -153,7 +156,7 @@ function readCustomLabels(el: Element): string[] | undefined {
 function upsertCustomLabels(doc: Document, desc: Element, labels: string[]): void {
   const existing = findDirectChildByNamespace(desc, PHOTOSUITE_NS, "CustomLabels");
   if (labels.length === 0) {
-    existing?.remove();
+    existing?.parentNode?.removeChild(existing);
     desc.removeAttribute("photosuite:CustomLabels");
     desc.removeAttributeNS(PHOTOSUITE_NS, "CustomLabels");
     return;
@@ -172,6 +175,57 @@ function upsertCustomLabels(doc: Document, desc: Element, labels: string[]): voi
   for (const label of labels) {
     const item = doc.createElementNS(RDF_NS, "rdf:li");
     item.textContent = label;
+    bag.appendChild(item);
+  }
+  container.appendChild(bag);
+}
+
+function readCustomLabelTones(el: Element): Record<string, LabelTone> | undefined {
+  const container = findDirectChildByNamespace(el, PHOTOSUITE_NS, "CustomLabelTones");
+  if (!container) {
+    return undefined;
+  }
+
+  const tones: Record<string, LabelTone> = {};
+  for (const node of Array.from(container.getElementsByTagNameNS(RDF_NS, "li"))) {
+    const text = node.textContent ?? "";
+    const separator = text.indexOf("|");
+    if (separator <= 0) continue;
+    const tone = text.slice(0, separator).trim();
+    const name = normalizeCustomLabelName(text.slice(separator + 1));
+    if (name && isLabelTone(tone)) {
+      tones[name] = tone;
+    }
+  }
+  return tones;
+}
+
+function upsertCustomLabelTones(
+  doc: Document,
+  desc: Element,
+  labels: string[],
+  tones: Readonly<Record<string, LabelTone>> | undefined,
+): void {
+  const existing = findDirectChildByNamespace(desc, PHOTOSUITE_NS, "CustomLabelTones");
+  const entries = labels
+    .map((label) => ({ label, tone: tones?.[label] }))
+    .filter((entry): entry is { label: string; tone: LabelTone } => Boolean(entry.tone));
+  if (entries.length === 0) {
+    existing?.parentNode?.removeChild(existing);
+    return;
+  }
+
+  const container = existing ?? doc.createElementNS(PHOTOSUITE_NS, "photosuite:CustomLabelTones");
+  if (!existing) {
+    desc.appendChild(container);
+  }
+  while (container.firstChild) {
+    container.removeChild(container.firstChild);
+  }
+  const bag = doc.createElementNS(RDF_NS, "rdf:Bag");
+  for (const { label, tone } of entries) {
+    const item = doc.createElementNS(RDF_NS, "rdf:li");
+    item.textContent = `${tone}|${label}`;
     bag.appendChild(item);
   }
   container.appendChild(bag);
@@ -282,6 +336,10 @@ export function parseXmpState(xml: string): XmpState {
     if (customLabels !== undefined) {
       result.customLabels = customLabels;
     }
+    const customLabelTones = readCustomLabelTones(el);
+    if (customLabelTones !== undefined) {
+      result.customLabelTones = customLabelTones;
+    }
   }
 
   // xmp:Label ha un solo posto: quando contiene Select/Rejected il colore vive
@@ -298,6 +356,7 @@ export function upsertXmpState(
   existingXml: string | null,
   asset: ImageAsset,
   selected: boolean,
+  customLabelTones?: Readonly<Record<string, LabelTone>>,
 ): string {
   const fallbackXml = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>\n<x:xmpmeta xmlns:x="adobe:ns:meta/">\n  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n    <rdf:Description rdf:about="" xmlns:xmp="${XMP_NS}" xmlns:photosuite="${PHOTOSUITE_NS}"/>\n  </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end="w"?>`;
 
@@ -362,7 +421,9 @@ export function upsertXmpState(
   }
 
   desc.setAttributeNS(PHOTOSUITE_NS, "photosuite:Selected", selected ? "True" : "False");
-  upsertCustomLabels(doc, desc, normalizeCustomLabels(asset.customLabels));
+  const normalizedLabels = normalizeCustomLabels(asset.customLabels);
+  upsertCustomLabels(doc, desc, normalizedLabels);
+  upsertCustomLabelTones(doc, desc, normalizedLabels, customLabelTones);
 
   return new XMLSerializer().serializeToString(doc);
 }

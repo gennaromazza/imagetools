@@ -58,6 +58,13 @@ import {
   type FolderOpenResult,
 } from "./services/folder-access";
 import { parseXmpState, upsertXmpState } from "./services/xmp-sidecar";
+import {
+  getFolderLabelTones,
+  mergeFolderLabelTones,
+  resolveLabelTone,
+  setFolderLabelTones,
+  type LabelTone,
+} from "./services/custom-label-tones";
 import { buildAlbumFlowManifest } from "./services/album-flow-manifest";
 import { getAssetRotation, normalizeImageRotation } from "./services/photo-rotation";
 import { shouldApplyExternalSelectionUpdate } from "./services/photo-selection";
@@ -1326,7 +1333,14 @@ export function App() {
 
             try {
               const existingXml = await readSidecarXmp(asset.id);
-              const nextXml = upsertXmpState(existingXml, asset, activeSet.has(asset.id));
+              const localLabelColors = loadPhotoSelectorPreferences().customLabelColors;
+              const folderLabelTones = getFolderLabelTones();
+              const labelTones: Record<string, LabelTone> = {};
+              for (const label of asset.customLabels ?? []) {
+                const tone = resolveLabelTone(label, localLabelColors, folderLabelTones);
+                if (tone) labelTones[label] = tone;
+              }
+              const nextXml = upsertXmpState(existingXml, asset, activeSet.has(asset.id), labelTones);
               if (existingXml === nextXml) {
                 return true;
               }
@@ -1416,6 +1430,7 @@ export function App() {
 
   const suspendActiveFolderWork = useCallback(() => {
     folderLoadSessionRef.current += 1;
+    setFolderLabelTones(new Map());
     localSelectionUpdatedAtByIdRef.current.clear();
     persistedStateHydrationRef.current = null;
     interactiveWorkUntilRef.current = 0;
@@ -2903,6 +2918,21 @@ export function App() {
             state: ReturnType<typeof parseXmpState>;
             lastModified: number;
           } => r !== null);
+          // Colori delle etichette personalizzate scritti da altri PC: il colore locale
+          // vince, per le etichette sconosciute vale quello della cartella.
+          const { folderTones, conflicts: labelToneConflicts } = mergeFolderLabelTones(
+            valid.map((record) => record.state.customLabelTones),
+            loadPhotoSelectorPreferences().customLabelColors,
+          );
+          setFolderLabelTones(folderTones);
+          if (labelToneConflicts.length > 0) {
+            const names = labelToneConflicts.slice(0, 3).map((conflict) => `"${conflict.label}"`).join(", ");
+            addToast(
+              `Colore etichetta diverso da quello della cartella per ${names}${labelToneConflicts.length > 3 ? " e altre" : ""}: uso il colore di questo PC.`,
+              "info",
+              7000,
+            );
+          }
           const shouldApplyXmpClassification = (record: typeof valid[number]) => {
             const localState = persistedAssetStateById.get(record.id);
             const locallyUpdatedAt = localState?.classificationUpdatedAt ?? localState?.updatedAt;

@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-30 - Image Select Pro 0.1.43
+
+- Assegnazione di rating, Pick ed etichette molto piu' reattiva: la latenza del tasto scende da circa 80 ms a 26 ms su 1.200 foto, senza blocchi dell'interfaccia.
+- Miniature decodificate fuori dal thread principale con sharp: interfaccia piu' fluida durante il caricamento di cartelle grandi.
+- Etichette personalizzate coerenti tra PC: il colore viaggia con la cartella nei sidecar XMP; il colore definito sul PC ha sempre la precedenza (con avviso in caso di differenza) e le scorciatoie restano personali.
+
 ## 2026-09-30 - FileX Suite 0.1.63
 
 - Aggiornamento dei tool: la Suite rileva subito la nuova versione appena installata, senza restare fino a 5 minuti su "Installazione..." e senza segnalare un falso errore.

@@ -77,6 +77,7 @@ import {
   type PhotoFilterPreset,
   type ThumbnailProfile,
 } from "../services/photo-selector-preferences";
+import { getFolderLabelTones, subscribeFolderLabelTones } from "../services/custom-label-tones";
 import {
   buildPhotoSortSignature,
   getSortTimestamp,
@@ -573,6 +574,20 @@ export function PhotoSelector({
   const [customLabelsCatalog, setCustomLabelsCatalog] = useState<string[]>([]);
   const [customLabelColors, setCustomLabelColors] = useState<Record<string, CustomLabelTone>>({});
   const [customLabelShortcuts, setCustomLabelShortcuts] = useState<Record<string, CustomLabelShortcut | null>>({});
+  const [folderLabelTones, setFolderLabelTonesState] = useState(getFolderLabelTones);
+  useEffect(() => subscribeFolderLabelTones(() => setFolderLabelTonesState(getFolderLabelTones())), []);
+  // Colori effettivi mostrati: quelli del PC prevalgono, per le etichette che il PC
+  // non conosce vale il colore scritto nella cartella da un altro PC.
+  const effectiveCustomLabelColors = useMemo(() => {
+    if (folderLabelTones.size === 0) {
+      return customLabelColors;
+    }
+    const merged: Record<string, CustomLabelTone> = {};
+    for (const { label, tone } of folderLabelTones.values()) {
+      merged[label] = tone;
+    }
+    return { ...merged, ...customLabelColors };
+  }, [customLabelColors, folderLabelTones]);
   const [filterPresets, setFilterPresets] = useState<PhotoFilterPreset[]>([]);
   const [selectedThumbnailProfile, setSelectedThumbnailProfile] = useState<ThumbnailProfile>(thumbnailProfile);
   const [isSortCacheEnabled, setIsSortCacheEnabled] = useState<boolean>(sortCacheEnabled);
@@ -1102,13 +1117,13 @@ export function PhotoSelector({
         assetIds: uniqueIds,
         kind: "label",
         label: normalized.length > 0 ? `Etichette: ${normalized.join(", ")}` : "Etichette personalizzate rimosse",
-        tone: firstLabel ? (customLabelColors[firstLabel] ?? DEFAULT_CUSTOM_LABEL_TONE) : undefined,
+        tone: firstLabel ? (effectiveCustomLabelColors[firstLabel] ?? DEFAULT_CUSTOM_LABEL_TONE) : undefined,
         labels: normalized.length > 0 ? normalized : undefined,
       };
     }
 
     return null;
-  }, [customLabelColors]);
+  }, [effectiveCustomLabelColors]);
 
   useEffect(() => {
     let active = true;
@@ -1376,7 +1391,7 @@ export function PhotoSelector({
       ([key]) => key.toLocaleLowerCase() === label.toLocaleLowerCase(),
     );
     return match?.[1] ?? DEFAULT_CUSTOM_LABEL_TONE;
-  }, [customLabelColors]);
+  }, [effectiveCustomLabelColors]);
 
   const resolveCustomLabelShortcut = useCallback((label: string): CustomLabelShortcut | null => {
     const match = Object.entries(customLabelShortcuts).find(
@@ -4369,7 +4384,7 @@ export function PhotoSelector({
                 onRotate={handleRotatePhoto}
                 onContextMenu={handleContextMenu}
                 onExternalDragStart={handleCardExternalDragStart}
-                customLabelColors={customLabelColors}
+                customLabelColors={effectiveCustomLabelColors}
                 customLabelShortcuts={customLabelShortcuts}
                 canExternalDrag={typeof window !== "undefined"
                   && typeof window.filexDesktop?.startDragOut === "function"
@@ -4732,7 +4747,7 @@ export function PhotoSelector({
         thumbnailProfile={selectedThumbnailProfile}
         startZoomed={previewStartsZoomed}
         customLabelsCatalog={customLabelsCatalog}
-        customLabelColors={customLabelColors}
+        customLabelColors={effectiveCustomLabelColors}
         customLabelShortcuts={customLabelShortcuts}
         externalFeedback={previewSyncFeedback}
         canExternalDrag={Boolean(previewAssetWithUrl ? getAssetAbsolutePath(previewAssetWithUrl.id) : null)}

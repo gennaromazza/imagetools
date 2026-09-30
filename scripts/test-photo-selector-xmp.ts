@@ -7,6 +7,7 @@ import { ExifTool } from "exiftool-vendored";
 import sharp from "sharp";
 import type { ImageAsset } from "@photo-tools/shared-types";
 import { parseXmpState, upsertXmpState } from "../apps/photo-selector-app/src/services/xmp-sidecar.ts";
+import { mergeFolderLabelTones, resolveLabelTone } from "../apps/photo-selector-app/src/services/custom-label-tones.ts";
 import {
   readEmbeddedStandardRating,
   shutdownXmpCompatibilityService,
@@ -83,6 +84,24 @@ assert.throws(
   /XMP/,
   "An unreadable existing sidecar must not be overwritten",
 );
+
+// Colori delle etichette personalizzate condivisi tra PC.
+const labeled = { ...asset, customLabels: ["Parenti", "Sposi"] } as unknown as ImageAsset;
+const tonedXml = upsertXmpState(null, labeled, false, { Parenti: "rose", Sposi: "blue" });
+assert.deepEqual(parseXmpState(tonedXml).customLabelTones, { Parenti: "rose", Sposi: "blue" }, "Label tones must round-trip");
+assert.deepEqual(parseXmpState(tonedXml).customLabels, ["Parenti", "Sposi"]);
+assert.equal(
+  parseXmpState(upsertXmpState(tonedXml, { ...labeled, customLabels: [] } as unknown as ImageAsset, false)).customLabelTones,
+  undefined,
+  "Removing every label must remove the tones too",
+);
+// PC1: A = Parenti rosa. PC2 conosce "Sposi" blu e non conosce "Parenti".
+const merged = mergeFolderLabelTones([{ Parenti: "rose", Sposi: "green" }, { parenti: "rose" }], { Sposi: "blue" });
+assert.equal(resolveLabelTone("Parenti", { Sposi: "blue" }, merged.folderTones), "rose", "Unknown labels use the folder color");
+assert.equal(resolveLabelTone("Sposi", { Sposi: "blue" }, merged.folderTones), "blue", "The local color always wins");
+assert.deepEqual(merged.conflicts, [{ label: "Sposi", localTone: "blue", folderTone: "green" }], "A differing local color is reported");
+assert.equal(mergeFolderLabelTones([{ Zio: "slate" }, { Zio: "rose" }, { zio: "rose" }], {}).folderTones.get("zio")?.tone, "rose", "Most frequent folder color wins");
+assert.equal(resolveLabelTone("Mai visto", {}, merged.folderTones), null);
 
 const canonicalXml = upsertXmpState(duplicateXml, asset, true);
 assert.equal(
