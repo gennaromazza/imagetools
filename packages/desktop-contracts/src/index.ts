@@ -944,6 +944,7 @@ export type ImageConverterPresetId =
   | "social"
   | "quick-preview"
   | "print-jpg"
+  | "raw-camera-jpg"
   | "raw-archive-lossless";
 
 export type ImageConverterOutputFormat = "jpg" | "webp" | "dng";

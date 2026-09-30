@@ -49,6 +49,14 @@ const fallbackPresets: ImageConverterPreset[] = [
     quality: 92,
   },
   {
+    id: "raw-camera-jpg",
+    name: "RAW in JPG massima qualita",
+    description: "JPG a risoluzione originale con il look della fotocamera (stile immagine, bilanciamento bianco) e tutti i metadati del RAW.",
+    maxLongEdge: 0,
+    format: "jpg",
+    quality: 100,
+  },
+  {
     id: "raw-archive-lossless",
     name: "Archivio RAW senza perdita",
     description: "DNG compresso, XMP copiati e originali sempre conservati.",
@@ -112,6 +120,10 @@ export default function App() {
   const [customMaxLongEdge, setCustomMaxLongEdge] = useState("");
   const [targetMaxBytesMb, setTargetMaxBytesMb] = useState("");
   const [openOutputWhenDone, setOpenOutputWhenDone] = useState(true);
+  const [formatOverride, setFormatOverride] = useState<"" | "jpg" | "webp">("");
+  const [qualityOverride, setQualityOverride] = useState("");
+  const [keepMetadata, setKeepMetadata] = useState(true);
+  const [outputDirectory, setOutputDirectory] = useState<string | null>(null);
 
   const selectedPreset = useMemo(
     () => presets.find((preset) => preset.id === selectedPresetId) ?? presets[0],
@@ -120,10 +132,20 @@ export default function App() {
   const isBusy = progress.status === "running" || progress.status === "scanning";
   const isRawArchive = selectedPreset?.format === "dng";
   const progressPct = progress.total > 0 ? Math.round((progress.completed / progress.total) * 100) : 0;
-  const eligibleImageCount = useMemo(
-    () => scan?.entries.filter((entry) => isRawArchive ? entry.sourceKind === "raw" : entry.sourceKind === "bitmap").length ?? 0,
-    [isRawArchive, scan],
-  );
+  const eligibleImageCount = useMemo(() => {
+    if (!scan) {
+      return 0;
+    }
+    const stem = (path: string) => path.replace(/\.[^.\/]+$/, "").toLowerCase();
+    const rawStems = new Set(scan.entries.filter((entry) => entry.sourceKind === "raw").map((entry) => stem(entry.absolutePath)));
+    return scan.entries.filter((entry) => {
+      if (isRawArchive) {
+        return entry.sourceKind === "raw" && !/\.dng$/i.test(entry.absolutePath);
+      }
+      // Come il motore: il JPG affiancato a un RAW non viene convertito.
+      return !(entry.sourceKind === "bitmap" && /\.jpe?g$/i.test(entry.absolutePath) && rawStems.has(stem(entry.absolutePath)));
+    }).length;
+  }, [isRawArchive, scan]);
 
   useEffect(() => {
     const desktopApi = getDesktopApi();
@@ -203,6 +225,23 @@ export default function App() {
     }
   }, [addPaths]);
 
+  const removePath = useCallback(
+    async (path: string) => {
+      if (isBusy) {
+        return;
+      }
+      const remaining = inputPaths.filter((item) => item !== path);
+      setInputPaths(remaining);
+      if (remaining.length === 0) {
+        setScan(null);
+        setNotice(null);
+        return;
+      }
+      await rescan(remaining);
+    },
+    [inputPaths, isBusy, rescan],
+  );
+
   const clearInputs = useCallback(() => {
     if (isBusy) {
       return;
@@ -225,13 +264,24 @@ export default function App() {
         maxLongEdge: customMaxLongEdge.trim() ? Number(customMaxLongEdge) : null,
         targetMaxBytesMb: targetMaxBytesMb.trim() ? Number(targetMaxBytesMb) : null,
         openOutputWhenDone,
+        format: formatOverride || null,
+        quality: qualityOverride.trim() ? Number(qualityOverride) : null,
+        keepMetadata,
+        outputDirectory,
       },
     });
     setProgress(result.progress);
     if (!result.ok) {
       setNotice(result.error ?? "Impossibile avviare la conversione.");
     }
-  }, [customMaxLongEdge, inputPaths, openOutputWhenDone, selectedPreset, targetMaxBytesMb]);
+  }, [customMaxLongEdge, formatOverride, inputPaths, keepMetadata, openOutputWhenDone, outputDirectory, qualityOverride, selectedPreset, targetMaxBytesMb]);
+
+  const chooseOutputDirectory = useCallback(async () => {
+    const folders = await getDesktopApi()?.chooseImageConverterFolders();
+    if (folders && folders.length > 0) {
+      setOutputDirectory(folders[0]);
+    }
+  }, []);
 
   const cancelJob = useCallback(async () => {
     await getDesktopApi()?.cancelImageConverterJob();
@@ -261,11 +311,12 @@ export default function App() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
+        <div className="brand-mark" aria-hidden="true">IC</div>
+        <div className="topbar-title">
           <p className="eyebrow">FileX Suite</p>
           <h1>Image Converter</h1>
         </div>
-        <div className="runtime-pill">{apiAvailable ? "Desktop ready" : "Modalita browser"}</div>
+        <div className={`runtime-pill${apiAvailable ? "" : " runtime-pill--offline"}`}>{apiAvailable ? "Desktop pronto" : "Modalita browser"}</div>
       </header>
 
       <section className="workspace">
@@ -303,22 +354,23 @@ export default function App() {
                   aria-checked={preset.id === selectedPresetId}
                   onClick={() => setSelectedPresetId(preset.id)}
                   disabled={isBusy}
+                  title={preset.description}
                 >
                   <span className="preset-name">{preset.name}</span>
                   <span className="preset-meta">
-                    {preset.format === "dng" ? "DNG | lossless | originali conservati" : `${preset.format.toUpperCase()} | ${preset.maxLongEdge}px | q${preset.quality}`}
+                    {preset.format === "dng" ? "DNG | lossless | originali conservati" : `${preset.format.toUpperCase()} | ${preset.maxLongEdge > 0 ? `${preset.maxLongEdge}px` : "originale"} | q${preset.quality}`}
                   </span>
-                  <span className="preset-description">{preset.description}</span>
                 </button>
               ))}
             </div>
+            {selectedPreset ? <p className="preset-detail">{selectedPreset.description}</p> : null}
           </div>
 
-          {!isRawArchive ? <div className="section-block">
-            <div className="section-heading">
-              <h2>Export</h2>
+          {!isRawArchive ? <details className="section-block collapsible">
+            <summary className="section-heading">
+              <h2>Opzioni di esportazione</h2>
               <span>opzionale</span>
-            </div>
+            </summary>
             <div className="field-grid">
               <label className="field">
                 <span>Lato lungo max</span>
@@ -327,7 +379,7 @@ export default function App() {
                   min="200"
                   max="12000"
                   step="50"
-                  placeholder={`${selectedPreset?.maxLongEdge ?? 2048}`}
+                  placeholder={selectedPreset?.maxLongEdge ? `${selectedPreset.maxLongEdge}` : "originale"}
                   value={customMaxLongEdge}
                   onChange={(event) => setCustomMaxLongEdge(event.target.value)}
                   disabled={isBusy}
@@ -346,27 +398,39 @@ export default function App() {
                   disabled={isBusy}
                 />
               </label>
+              <label className="field">
+                <span>Formato</span>
+                <select value={formatOverride} onChange={(event) => setFormatOverride(event.target.value as "" | "jpg" | "webp")} disabled={isBusy}>
+                  <option value="">Come preset</option>
+                  <option value="jpg">JPG</option>
+                  <option value="webp">WebP</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>Qualita (1-100)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  placeholder={`${selectedPreset?.quality ?? 85}`}
+                  value={qualityOverride}
+                  onChange={(event) => setQualityOverride(event.target.value)}
+                  disabled={isBusy}
+                />
+              </label>
             </div>
-          </div> : (
+            <label className="check-field">
+              <input type="checkbox" checked={keepMetadata} onChange={(event) => setKeepMetadata(event.target.checked)} disabled={isBusy} />
+              <span>
+                <strong>Conserva metadati</strong>
+                <small>Per i RAW copia EXIF, dati della fotocamera, GPS, IPTC e XMP affiancato.</small>
+              </span>
+            </label>
+          </details> : (
             <div className="section-block">
               <div className="notice">Richiede Adobe DNG Converter. I RAW originali non vengono mai cancellati e gli XMP affiancati vengono copiati.</div>
             </div>
           )}
-
-          <div className="section-block">
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={openOutputWhenDone}
-                onChange={(event) => setOpenOutputWhenDone(event.target.checked)}
-                disabled={isBusy}
-              />
-              <span>
-                <strong>Apri cartella al termine</strong>
-                <small>Mostra automaticamente in Esplora file la cartella con i risultati.</small>
-              </span>
-            </label>
-          </div>
         </aside>
 
         <section className="main-panel">
@@ -388,7 +452,7 @@ export default function App() {
             </div>
             <div className="metric">
               <span>Lato lungo</span>
-              <strong>{isRawArchive ? "Originale" : `${customMaxLongEdge.trim() || selectedPreset?.maxLongEdge || 2048}px`}</strong>
+              <strong>{isRawArchive ? "Originale" : customMaxLongEdge.trim() || selectedPreset?.maxLongEdge ? `${customMaxLongEdge.trim() || selectedPreset?.maxLongEdge}px` : "Originale"}</strong>
             </div>
           </div>
 
@@ -407,7 +471,10 @@ export default function App() {
               <div className="path-list">
                 {inputPaths.map((path) => (
                   <div className="path-row" key={path} title={path}>
-                    {shortPath(path)}
+                    <span>{shortPath(path)}</span>
+                    <button className="ghost-button" type="button" onClick={() => removePath(path)} disabled={isBusy} aria-label={`Rimuovi ${path}`}>
+                      Rimuovi
+                    </button>
                   </div>
                 ))}
               </div>
@@ -420,6 +487,30 @@ export default function App() {
                 ))}
               </div>
             ) : null}
+          </div>
+
+          <div className="section-block">
+            <div className="section-heading">
+              <h2>Destinazione</h2>
+              <span>{outputDirectory ? "personalizzata" : "accanto agli originali"}</span>
+            </div>
+            <div className="destination-row">
+              <button className="secondary-button" type="button" onClick={chooseOutputDirectory} disabled={isBusy}>Scegli cartella</button>
+              {outputDirectory ? <button className="ghost-button" type="button" onClick={() => setOutputDirectory(null)} disabled={isBusy}>Ripristina</button> : null}
+              {outputDirectory ? <div className="path-row" title={outputDirectory}>{shortPath(outputDirectory)}</div> : <span className="destination-hint">Se non scegli una cartella, i file vengono creati accanto agli originali.</span>}
+            </div>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={openOutputWhenDone}
+                onChange={(event) => setOpenOutputWhenDone(event.target.checked)}
+                disabled={isBusy}
+              />
+              <span>
+                <strong>Apri cartella al termine</strong>
+                <small>Mostra automaticamente in Esplora file la cartella con i risultati.</small>
+              </span>
+            </label>
           </div>
 
           <div className="section-block">

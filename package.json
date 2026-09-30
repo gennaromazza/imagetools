@@ -18,6 +18,7 @@
     "dev:archivio-flow": "npm --workspace @photo-tools/filex-desktop run dev:archivio-flow",
     "dev:album-flow": "npm --workspace @photo-tools/filex-desktop run dev:album-flow",
     "audit:photo-selector": "powershell -ExecutionPolicy Bypass -File scripts/audit-photo-selector.ps1",
+    "test:image-converter-raw": "tsx --test apps/filex-desktop/src/image-converter-raw.test.ts apps/filex-desktop/src/image-converter-output.test.ts",
     "test:photo-selector-workflow": "tsx scripts/test-photo-selector-workflow.ts",
     "test:photo-selector-free-mode": "tsx scripts/test-photo-selector-free-mode.ts",
     "test:photo-selector-package-runtime": "node scripts/test-photo-selector-package-runtime.mjs",

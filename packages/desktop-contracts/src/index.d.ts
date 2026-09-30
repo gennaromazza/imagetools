@@ -763,7 +763,7 @@ export interface DesktopQuickPreviewWarmResult {
     cacheHitCount: number;
     failedCount: number;
 }
-export type ImageConverterPresetId = "web-quality" | "web-light" | "social" | "quick-preview" | "print-jpg" | "raw-archive-lossless";
+export type ImageConverterPresetId = "web-quality" | "web-light" | "social" | "quick-preview" | "print-jpg" | "raw-camera-jpg" | "raw-archive-lossless";
 export type ImageConverterOutputFormat = "jpg" | "webp" | "dng";
 export type ImageConverterJobStatus = "idle" | "scanning" | "running" | "completed" | "cancelled" | "error";
 export interface ImageConverterPreset {

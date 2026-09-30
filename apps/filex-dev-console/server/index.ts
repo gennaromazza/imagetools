@@ -295,6 +295,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:batch-print-layout-bug-hunt" || name === "test:batch-print-layout-desktop-images") return "batch-print-layout";
   if (name === "test:id-photo" || name === "test:id-photo-working-files" || name === "test:id-photo-file-fingerprint" || name === "test:id-photo-unload-guard" || name === "test:id-photo-package-runtime" || name === "test:id-photo-background" || name === "test:id-photo-background-smoke") return "id-photo";
   if (name === "test:image-converter-bug-hunt") return "image-converter";
+  if (name === "test:image-converter-raw") return "image-converter";
   if (name === "test:image-file-finder-bug-hunt") return "image-file-finder";
   if (name === "test:cache-sweep-bug-hunt") return "cache-sweep";
   if (name === "test:filex-send-bug-hunt") return "filex-send";
@@ -349,7 +350,8 @@ function testDescription(name: string): string {
     "test:id-photo-package-runtime": "Controlla chiusura degli import ASAR di main e preload, assenza di artefatti di sviluppo e smoke reale delle API IPC fingerprint e transazioni.",
     "test:id-photo-background": "Verifica che lo scontorno usi esclusivamente il modello BiRefNet MIT fissato, con URL, dimensione e SHA-256 controllati, e rifiuti richieste non valide prima di leggere file.",
     "test:id-photo-background-smoke": "Scarica una sola volta il modello gratuito nella cache temporanea, esegue davvero BiRefNet su un ritratto sintetico e verifica maschera e composizione generate.",
-    "test:image-converter-bug-hunt": "Verifica limiti numerici e riconoscimento multipiattaforma degli output.",
+    "test:image-converter-raw": "Verifica la conversione RAW: scelta della preview incorporata a piu' alta risoluzione, avviso su anteprime troppo piccole e copia dei metadati della fotocamera (modello, obiettivo, ISO) senza orientamento/dimensioni errati. Verifica inoltre che conversioni parallele non si sovrascrivano, che un rilancio non duplichi i file e che i JPG affiancati ai RAW siano ignorati.",
+    "test:image-converter-bug-hunt": "Verifica limiti numerici, riconoscimento multipiattaforma degli output e che i campi lasciati vuoti dall'interfaccia (qualita, formato, destinazione) non alterino le impostazioni del preset.",
     "test:image-file-finder-bug-hunt": "Verifica che anteprima e copia interpretino allo stesso modo virgolette, separatori, percorsi e duplicati.",
     "test:cache-sweep-bug-hunt": "Verifica che la pulizia resti confinata alle directory cache consentite.",
     "test:filex-send-bug-hunt": "Verifica trasferimenti, autenticazione, rete e notifiche di ricezione nella dock: eventi completi, concorrenza e cronologia limitata.",

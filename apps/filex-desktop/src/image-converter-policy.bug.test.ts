@@ -3,6 +3,9 @@ import test from "node:test";
 import type { ImageConverterJobConfig, ImageConverterPreset } from "@photo-tools/desktop-contracts";
 import {
   isInsideImageConverterOutput,
+  resolveImageConverterFormat,
+  resolveImageConverterOutputDirectory,
+  resolveImageConverterQuality,
   resolveImageConverterMaxLongEdge,
   resolveImageConverterTargetMaxBytes,
 } from "./image-converter-policy.js";
@@ -36,4 +39,16 @@ test("bug hunt: riconosce output generati con separatori Windows, macOS e misti"
     "D:\\Foto/Image Converter Output\\web-quality",
   ]) assert.equal(isInsideImageConverterOutput(pathValue), true, pathValue);
   assert.equal(isInsideImageConverterOutput("D:/Foto/Image Converter Output Backup"), false);
+});
+
+test("bug hunt: override vuoti dalla UI (null) non alterano qualita, formato e destinazione", () => {
+  const raw: ImageConverterPreset = { ...preset, id: "raw-camera-jpg", maxLongEdge: 0, quality: 100 };
+  const empty = { inputPaths: ["D:/Foto"], presetId: raw.id, overrides: { quality: null, format: null, outputDirectory: null, maxLongEdge: null, targetMaxBytesMb: null } } as ImageConverterJobConfig;
+  assert.equal(resolveImageConverterQuality(empty, raw), 100);
+  assert.equal(resolveImageConverterFormat(empty, raw), "jpg");
+  assert.equal(resolveImageConverterOutputDirectory(empty), null);
+  assert.equal(resolveImageConverterMaxLongEdge(empty, raw), 0);
+  const custom = { ...empty, overrides: { ...empty.overrides, quality: 80, outputDirectory: ' "D:/Export" ' } } as ImageConverterJobConfig;
+  assert.equal(resolveImageConverterQuality(custom, raw), 80);
+  assert.equal(resolveImageConverterOutputDirectory(custom), "D:/Export");
 });

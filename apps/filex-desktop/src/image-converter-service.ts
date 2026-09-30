@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { execFile } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { availableParallelism } from "node:os";
 import sharp from "sharp";
 import type {
   ImageConverterInputEntry,
@@ -25,6 +26,15 @@ import {
   resolveImageConverterQuality,
   resolveImageConverterTargetMaxBytes,
 } from "./image-converter-policy.js";
+import { claimOutputPath, dropJpegsPairedWithRaw, isValidOutputDirectory } from "./image-converter-output.js";
+import {
+  copyRawMetadata,
+  disposeImageConverterExifTool,
+  extractLargestEmbeddedPreview,
+  formatRawLookSummary,
+  isPreviewTooSmall,
+  readRawLookSummary,
+} from "./image-converter-raw.js";
 
 const { dialog, shell } = electron;
 
@@ -32,8 +42,9 @@ const OUTPUT_ROOT_NAME = "Image Converter Output";
 const BITMAP_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"]);
 const RAW_EXTENSIONS = new Set([
   ".3fr", ".arw", ".cr2", ".cr3", ".dcr", ".erf", ".fff", ".iiq", ".kdc", ".mef",
-  ".mos", ".mrw", ".nef", ".nrw", ".orf", ".pef", ".raf", ".raw", ".rw2", ".rwl", ".sr2", ".srf", ".srw",
+  ".mos", ".mrw", ".nef", ".nrw", ".orf", ".pef", ".raf", ".raw", ".rw2", ".rwl", ".sr2", ".srf", ".srw", ".dng",
 ]);
+const RAW_CONVERSION_CONCURRENCY = Math.max(2, Math.min(4, Math.floor(availableParallelism() / 2)));
 const SUPPORTED_EXTENSIONS = new Set([...BITMAP_EXTENSIONS, ...RAW_EXTENSIONS]);
 const PRESETS: ImageConverterPreset[] = [
   {
@@ -77,6 +88,14 @@ const PRESETS: ImageConverterPreset[] = [
     quality: 92,
   },
   {
+    id: "raw-camera-jpg",
+    name: "RAW in JPG massima qualita",
+    description: "JPG a risoluzione originale con il look della fotocamera (stile immagine, bilanciamento bianco) e tutti i metadati del RAW.",
+    maxLongEdge: 0,
+    format: "jpg",
+    quality: 100,
+  },
+  {
     id: "raw-archive-lossless",
     name: "Archivio RAW senza perdita",
     description: "Converte i RAW in DNG compresso, copia gli XMP e conserva sempre gli originali.",
@@ -106,6 +125,9 @@ const idleProgress: ImageConverterProgressSnapshot = {
 let progress: ImageConverterProgressSnapshot = { ...idleProgress, logs: [] };
 let cancelRequested = false;
 let activeDngProcess: ChildProcess | null = null;
+let jobClaims = new Set<string>();
+let jobEvents: string[] = [];
+const MAX_VISIBLE_LOGS = 400;
 let cachedDngConverterPath: string | null = null;
 
 function normalizeSlashes(value: string): string {
@@ -118,8 +140,8 @@ function sanitizeDesktopPath(value: string): string {
   return process.platform === "win32" ? withoutQuotes.replace(/\//g, "\\") : withoutQuotes;
 }
 
-function getPreset(presetId: ImageConverterPresetId): ImageConverterPreset {
-  return PRESETS.find((preset) => preset.id === presetId) ?? PRESETS[0];
+function findPreset(presetId: ImageConverterPresetId): ImageConverterPreset | undefined {
+  return PRESETS.find((preset) => preset.id === presetId);
 }
 
 function isSupportedImage(filePath: string): boolean {
@@ -130,23 +152,27 @@ function getSourceKind(filePath: string): "bitmap" | "raw" {
   return RAW_EXTENSIONS.has(extname(filePath).toLowerCase()) ? "raw" : "bitmap";
 }
 
+function isEligibleForFormat(entry: ImageConverterInputEntry, format: ImageConverterPreset["format"]): boolean {
+  if (format === "dng") {
+    return entry.sourceKind === "raw" && extname(entry.absolutePath).toLowerCase() !== ".dng";
+  }
+  return true;
+}
+
 function toOutputFolderName(preset: ImageConverterPreset): string {
   return preset.id;
 }
 
 function log(level: ImageConverterProgressLogEntry["level"], message: string, path?: string): void {
-  progress = {
-    ...progress,
-    logs: [
-      ...progress.logs.slice(-79),
-      {
-        level,
-        message,
-        path,
-        timestamp: Date.now(),
-      },
-    ],
-  };
+  const timestamp = Date.now();
+  jobEvents.push(`${new Date(timestamp).toISOString()} [${level}] ${message}${path ? ` | ${path}` : ""}`);
+  let logs = [...progress.logs, { level, message, path, timestamp }];
+  // Con lotti grandi si scartano prima i messaggi informativi: errori e avvisi restano visibili.
+  while (logs.length > MAX_VISIBLE_LOGS) {
+    const index = logs.findIndex((entry) => entry.level === "info");
+    logs.splice(index >= 0 ? index : 0, 1);
+  }
+  progress = { ...progress, logs };
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -156,24 +182,6 @@ async function pathExists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-async function uniqueOutputPath(outputPath: string): Promise<string> {
-  if (!(await pathExists(outputPath))) {
-    return outputPath;
-  }
-
-  const folder = dirname(outputPath);
-  const extension = extname(outputPath);
-  const name = basename(outputPath, extension);
-  for (let index = 1; index < 10000; index += 1) {
-    const candidate = join(folder, `${name}-${index}${extension}`);
-    if (!(await pathExists(candidate))) {
-      return candidate;
-    }
-  }
-
-  return join(folder, `${name}-${Date.now()}${extension}`);
 }
 
 async function scanDirectory(
@@ -314,7 +322,7 @@ function buildOutputPath(entry: ImageConverterInputEntry, preset: ImageConverter
   const relativeWithoutExtension = normalizeSlashes(entry.relativePath).replace(/\.[^.\\/]+$/, "");
   const customDirectory = config ? resolveImageConverterOutputDirectory(config) : null;
   if (customDirectory) {
-    return join(customDirectory, `${basename(relativeWithoutExtension)}${parsedExtension}`);
+    return join(customDirectory, `${relativeWithoutExtension}${parsedExtension}`);
   }
   return join(
     entry.sourceRoot,
@@ -353,10 +361,15 @@ async function copyXmpSidecar(inputPath: string, targetPath: string): Promise<vo
   }
 }
 
-async function convertRawToDng(entry: ImageConverterInputEntry, preset: ImageConverterPreset): Promise<string> {
+async function convertRawToDng(
+  entry: ImageConverterInputEntry,
+  preset: ImageConverterPreset,
+  config: ImageConverterJobConfig,
+): Promise<{ targetPath: string; existing: boolean }> {
   if (entry.sourceKind !== "raw") throw new Error("Il preset Archivio RAW accetta soltanto file RAW.");
   const converterPath = await findAdobeDngConverter();
-  const targetPath = await uniqueOutputPath(buildOutputPath(entry, preset));
+  const { path: targetPath, existing } = await claimOutputPath(buildOutputPath(entry, preset, config), jobClaims);
+  if (existing) return { targetPath, existing };
   await mkdir(dirname(targetPath), { recursive: true });
   const temporaryFolder = await mkdtemp(join(dirname(targetPath), ".filex-dng-"));
   const temporaryOutput = join(temporaryFolder, `${basename(entry.absolutePath, extname(entry.absolutePath))}.dng`);
@@ -367,7 +380,7 @@ async function convertRawToDng(entry: ImageConverterInputEntry, preset: ImageCon
         timeout: 10 * 60 * 1000,
       }, (error) => {
         activeDngProcess = null;
-        if (error) reject(error);
+        if (error) reject(cancelRequested ? new Error("Elaborazione annullata.") : error);
         else resolve();
       });
       activeDngProcess = child;
@@ -389,30 +402,39 @@ async function convertRawToDng(entry: ImageConverterInputEntry, preset: ImageCon
   } catch (error) {
     log("warn", `DNG valido, ma copia XMP non riuscita: ${error instanceof Error ? error.message : String(error)}`, entry.absolutePath);
   }
-  return targetPath;
+  return { targetPath, existing: false };
+}
+
+function orientPipeline(pipeline: sharp.Sharp, orientation: number | null): sharp.Sharp {
+  if (!orientation) return pipeline.rotate();
+  // Le fotocamere scrivono solo 1, 3, 6 e 8: gli orientamenti speculari non si applicano.
+  const angles: Record<number, number> = { 3: 180, 6: 90, 8: 270 };
+  return pipeline.rotate(angles[orientation] ?? 0);
 }
 
 function createSharpPipeline(
-  inputPath: string,
+  input: string | Buffer,
   preset: ImageConverterPreset,
   maxLongEdge: number,
   quality: number,
   keepMetadata: boolean,
+  forcedOrientation: number | null = null,
 ) {
-  let pipeline = sharp(inputPath, { failOn: "none" })
-    .rotate()
-    .resize({
+  let pipeline = orientPipeline(sharp(input, { failOn: "none" }), forcedOrientation);
+  if (maxLongEdge > 0) {
+    pipeline = pipeline.resize({
       width: maxLongEdge,
       height: maxLongEdge,
       fit: "inside",
       withoutEnlargement: true,
     });
+  }
   if (keepMetadata) {
     pipeline = pipeline.withMetadata();
   }
 
   if (preset.format === "jpg") {
-    pipeline = pipeline.jpeg({ quality, mozjpeg: true });
+    pipeline = pipeline.flatten({ background: "#ffffff" }).jpeg({ quality, mozjpeg: true, chromaSubsampling: quality >= 90 ? "4:4:4" : "4:2:0" });
   } else {
     pipeline = pipeline.webp({ quality });
   }
@@ -422,13 +444,15 @@ function createSharpPipeline(
 
 async function renderWithSizeLimit(
   entry: ImageConverterInputEntry,
+  input: string | Buffer,
   preset: ImageConverterPreset,
   maxLongEdge: number,
   targetMaxBytes: number | null,
   keepMetadata: boolean,
+  forcedOrientation: number | null = null,
 ): Promise<Buffer> {
   if (!targetMaxBytes) {
-    return createSharpPipeline(entry.absolutePath, preset, maxLongEdge, preset.quality, keepMetadata).toBuffer();
+    return createSharpPipeline(input, preset, maxLongEdge, preset.quality, keepMetadata, forcedOrientation).toBuffer();
   }
 
   const minQuality = preset.format === "jpg" ? 45 : 40;
@@ -438,7 +462,7 @@ async function renderWithSizeLimit(
 
   for (let resizeAttempt = 0; resizeAttempt < 5; resizeAttempt += 1) {
     for (let quality = preset.quality; quality >= minQuality; quality -= 5) {
-      const buffer = await createSharpPipeline(entry.absolutePath, preset, nextLongEdge, quality, keepMetadata).toBuffer();
+      const buffer = await createSharpPipeline(input, preset, nextLongEdge, quality, keepMetadata, forcedOrientation).toBuffer();
       bestBuffer = buffer;
       bestQuality = quality;
       if (buffer.byteLength <= targetMaxBytes) {
@@ -473,28 +497,104 @@ async function renderWithSizeLimit(
     return bestBuffer;
   }
 
-  return bestBuffer ?? createSharpPipeline(entry.absolutePath, preset, maxLongEdge, minQuality, keepMetadata).toBuffer();
+  return bestBuffer ?? createSharpPipeline(input, preset, maxLongEdge, minQuality, keepMetadata, forcedOrientation).toBuffer();
 }
 
 async function convertOne(
   entry: ImageConverterInputEntry,
   preset: ImageConverterPreset,
   config: ImageConverterJobConfig,
-): Promise<string> {
-  if (preset.format === "dng") return convertRawToDng(entry, preset);
-  if (entry.sourceKind === "raw") throw new Error("Per i RAW seleziona il preset Archivio RAW senza perdita.");
-  const targetPath = await uniqueOutputPath(buildOutputPath(entry, preset, config));
-  await mkdir(dirname(targetPath), { recursive: true });
+): Promise<{ targetPath: string; detail?: string; existing?: boolean }> {
+  if (preset.format === "dng") return convertRawToDng(entry, preset, config);
+  const { path: targetPath, existing } = await claimOutputPath(buildOutputPath(entry, preset, config), jobClaims);
+  if (existing) return { targetPath, existing: true };
+  try {
+    return await renderInto(entry, preset, config, targetPath);
+  } catch (error) {
+    await rm(targetPath, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
 
+async function renderInto(
+  entry: ImageConverterInputEntry,
+  preset: ImageConverterPreset,
+  config: ImageConverterJobConfig,
+  targetPath: string,
+): Promise<{ targetPath: string; detail?: string }> {
+  const maxLongEdge = resolveImageConverterMaxLongEdge(config, preset);
+  const keepMetadata = resolveImageConverterKeepMetadata(config);
+  let input: string | Buffer = entry.absolutePath;
+  let detail: string | undefined;
+  let rawPath: string | null = null;
+  let forcedOrientation: number | null = null;
+
+  if (entry.sourceKind === "raw") {
+    const [preview, summary] = await Promise.all([
+      extractLargestEmbeddedPreview(entry.absolutePath),
+      readRawLookSummary(entry.absolutePath),
+    ]);
+    if (!preview) {
+      throw new Error("Nessuna anteprima JPEG incorporata nel RAW: usa il preset Archivio RAW (DNG).");
+    }
+    input = preview.buffer;
+    rawPath = entry.absolutePath;
+    // Le anteprime dei RAW spesso non portano l'orientamento: lo applichiamo dal RAW.
+    if (summary.orientation && summary.orientation !== 1) {
+      const previewMeta = await sharp(preview.buffer, { failOn: "none" }).metadata();
+      if (!previewMeta.orientation) forcedOrientation = summary.orientation;
+    }
+    detail = [formatRawLookSummary(summary), `anteprima ${preview.width}x${preview.height}`].filter(Boolean).join(" | ");
+    if (isPreviewTooSmall(preview, { width: summary.rawWidth, height: summary.rawHeight }, maxLongEdge)) {
+      log("warn", `Anteprima incorporata piu' piccola del richiesto (${preview.width}x${preview.height}): non viene ingrandita.`, entry.absolutePath);
+    }
+  }
+
+  await mkdir(dirname(targetPath), { recursive: true });
+  // Nessun ridimensionamento ne' limite di peso: il JPEG della fotocamera viene scritto
+  // cosi' com'e', senza ricompressione, identico a uno scatto in JPG.
+  const passthrough = Boolean(rawPath) && preset.format === "jpg" && maxLongEdge === 0
+    && preset.quality >= 100 && resolveImageConverterTargetMaxBytes(config) === null && input !== entry.absolutePath;
+  if (passthrough && rawPath && Buffer.isBuffer(input)) {
+    await writeFile(targetPath, input);
+    if (keepMetadata) {
+      try {
+        const previewOrientation = (await sharp(input, { failOn: "none" }).metadata()).orientation;
+        await copyRawMetadata(rawPath, targetPath, await findXmpSidecar(rawPath), previewOrientation ?? forcedOrientation ?? 1);
+      } catch (error) {
+        log("warn", `Immagine generata, ma copia metadati RAW non riuscita: ${error instanceof Error ? error.message : String(error)}`, entry.absolutePath);
+      }
+    }
+    return { targetPath, detail: `${detail ?? ""}${detail ? " | " : ""}JPEG originale della fotocamera, senza ricompressione` };
+  }
   const buffer = await renderWithSizeLimit(
     entry,
+    input,
     preset,
-    resolveImageConverterMaxLongEdge(config, preset),
+    maxLongEdge,
     resolveImageConverterTargetMaxBytes(config),
-    resolveImageConverterKeepMetadata(config),
+    keepMetadata,
+    forcedOrientation,
   );
   await writeFile(targetPath, buffer);
-  return targetPath;
+
+  if (rawPath && keepMetadata) {
+    try {
+      const sidecar = await findXmpSidecar(rawPath);
+      await copyRawMetadata(rawPath, targetPath, sidecar);
+    } catch (error) {
+      log("warn", `Immagine generata, ma copia metadati RAW non riuscita: ${error instanceof Error ? error.message : String(error)}`, entry.absolutePath);
+    }
+  }
+  return { targetPath, detail };
+}
+
+async function findXmpSidecar(inputPath: string): Promise<string | null> {
+  const base = inputPath.slice(0, -extname(inputPath).length);
+  for (const extension of [".xmp", ".XMP"]) {
+    if (await pathExists(`${base}${extension}`)) return `${base}${extension}`;
+  }
+  return null;
 }
 
 function makeProgress(jobId: string, presetId: ImageConverterPresetId): ImageConverterProgressSnapshot {
@@ -518,7 +618,10 @@ function makeProgress(jobId: string, presetId: ImageConverterPresetId): ImageCon
 
 async function runJob(jobId: string, config: ImageConverterJobConfig): Promise<void> {
   try {
-    const preset = getPreset(config.presetId);
+    const preset = findPreset(config.presetId);
+    if (!preset) throw new Error("Preset non valido.");
+    jobClaims = new Set<string>();
+    jobEvents = [];
     const effectivePreset: ImageConverterPreset = {
       ...preset,
       format: resolveImageConverterFormat(config, preset),
@@ -544,7 +647,16 @@ async function runJob(jobId: string, config: ImageConverterJobConfig): Promise<v
       }
     }
     const scan = await scanImageConverterInputsDesktop(config.inputPaths);
-    const eligibleEntries = scan.entries.filter((entry) => effectivePreset.format === "dng" ? entry.sourceKind === "raw" : entry.sourceKind === "bitmap");
+    const outputDirectoryKey = customOutputDirectory ? resolve(customOutputDirectory).toLowerCase() : null;
+    const pairing = effectivePreset.format === "dng"
+      ? { kept: scan.entries, dropped: 0 }
+      : dropJpegsPairedWithRaw(scan.entries);
+    const eligibleEntries = pairing.kept.filter((entry) => {
+      if (!isEligibleForFormat(entry, effectivePreset.format)) return false;
+      if (!outputDirectoryKey) return true;
+      const entryKey = resolve(entry.absolutePath).toLowerCase();
+      return !entryKey.startsWith(`${outputDirectoryKey}${sep}`);
+    });
     if (preset.format === "dng" && eligibleEntries.length > 0) await findAdobeDngConverter();
     const generatedOutputRoots = new Set<string>();
     progress = {
@@ -560,6 +672,9 @@ async function runJob(jobId: string, config: ImageConverterJobConfig): Promise<v
     if (scan.duplicateCount > 0) {
       log("info", `${scan.duplicateCount} duplicati ignorati.`);
     }
+    if (pairing.dropped > 0) {
+      log("info", `${pairing.dropped} JPG affiancati a un RAW ignorati: si converte solo il RAW.`);
+    }
     if (eligibleEntries.length === 0) {
       progress = {
         ...progress,
@@ -571,42 +686,60 @@ async function runJob(jobId: string, config: ImageConverterJobConfig): Promise<v
       return;
     }
 
-    for (const entry of eligibleEntries) {
-      if (cancelRequested || progress.jobId !== jobId) {
-        progress = {
-          ...progress,
-          status: "cancelled",
-          currentFile: null,
-          finishedAt: Date.now(),
-        };
-        log("warn", "Elaborazione annullata.");
-        return;
+    // Pool limitato: un lotto di centinaia di RAW non satura memoria e CPU e un file
+    // in errore non blocca gli altri.
+    const concurrency = effectivePreset.format === "dng" ? 1 : RAW_CONVERSION_CONCURRENCY;
+    let nextIndex = 0;
+    let stopped = false;
+    const isStopped = () => cancelRequested || progress.jobId !== jobId;
+    const worker = async (): Promise<void> => {
+      while (!stopped) {
+        if (isStopped()) {
+          stopped = true;
+          return;
+        }
+        const entry = eligibleEntries[nextIndex];
+        nextIndex += 1;
+        if (!entry) return;
+        progress = { ...progress, currentFile: entry.absolutePath };
+        try {
+          const { targetPath, detail, existing } = await convertOne(entry, effectivePreset, config);
+          if (existing) {
+            progress = { ...progress, completed: progress.completed + 1, skipped: progress.skipped + 1 };
+            log("info", "Output gia presente da una conversione precedente: file saltato.", targetPath);
+            continue;
+          }
+          generatedOutputRoots.add(customOutputDirectory ?? join(entry.sourceRoot, OUTPUT_ROOT_NAME, toOutputFolderName(effectivePreset)));
+          progress = {
+            ...progress,
+            completed: progress.completed + 1,
+            generated: progress.generated + 1,
+            outputRoots: Array.from(generatedOutputRoots),
+          };
+          log("info", effectivePreset.format === "dng"
+            ? "Generato e verificato DNG; originale conservato."
+            : `Generata immagine${detail ? ` (${detail})` : ""}.`, targetPath);
+        } catch (error) {
+          if (isStopped()) {
+            stopped = true;
+            return;
+          }
+          progress = {
+            ...progress,
+            completed: progress.completed + 1,
+            skipped: progress.skipped + 1,
+            errors: progress.errors + 1,
+          };
+          log("error", error instanceof Error ? error.message : "Conversione fallita.", entry.absolutePath);
+        }
       }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, eligibleEntries.length) }, () => worker()));
 
-      progress = {
-        ...progress,
-        currentFile: entry.absolutePath,
-      };
-
-      try {
-        const targetPath = await convertOne(entry, effectivePreset, config);
-        generatedOutputRoots.add(customOutputDirectory ?? join(entry.sourceRoot, OUTPUT_ROOT_NAME, toOutputFolderName(effectivePreset)));
-        progress = {
-          ...progress,
-          completed: progress.completed + 1,
-          generated: progress.generated + 1,
-          outputRoots: Array.from(generatedOutputRoots),
-        };
-        log("info", preset.format === "dng" ? "Generato e verificato DNG; originale conservato." : "Generata immagine.", targetPath);
-      } catch (error) {
-        progress = {
-          ...progress,
-          completed: progress.completed + 1,
-          skipped: progress.skipped + 1,
-          errors: progress.errors + 1,
-        };
-        log("error", error instanceof Error ? error.message : "Conversione fallita.", entry.absolutePath);
-      }
+    if (isStopped()) {
+      progress = { ...progress, status: "cancelled", currentFile: null, finishedAt: Date.now() };
+      log("warn", "Elaborazione annullata.");
+      return;
     }
 
     progress = {
@@ -615,7 +748,8 @@ async function runJob(jobId: string, config: ImageConverterJobConfig): Promise<v
       currentFile: null,
       finishedAt: Date.now(),
     };
-    log("info", "Conversione completata.");
+    log(progress.errors > 0 ? "warn" : "info",
+      `Conversione completata: ${progress.generated} generate, ${progress.skipped - progress.errors} gia presenti, ${progress.errors} errori.`);
     if (config.overrides?.openOutputWhenDone !== false && progress.generated > 0) {
       for (const outputRoot of generatedOutputRoots) {
         if (!(await pathExists(outputRoot))) continue;
@@ -635,6 +769,21 @@ async function runJob(jobId: string, config: ImageConverterJobConfig): Promise<v
     log("error", progress.error ?? "Errore imprevisto.");
   } finally {
     cancelRequested = false;
+    await disposeImageConverterExifTool();
+    await writeJobLogFiles(jobId);
+  }
+}
+
+/** Log completo del job (senza limite) accanto ai risultati, utile con centinaia di file. */
+async function writeJobLogFiles(jobId: string): Promise<void> {
+  if (progress.jobId !== jobId || progress.outputRoots.length === 0 || jobEvents.length === 0) return;
+  const content = `${jobEvents.join("\n")}\n`;
+  for (const root of progress.outputRoots) {
+    try {
+      await writeFile(join(root, `filex-conversion-log-${jobId.replace(/\D/g, "")}.txt`), content, "utf8");
+    } catch {
+      // il log su file e' un di piu': non deve rendere fallito un job riuscito
+    }
   }
 }
 
@@ -647,7 +796,8 @@ export function startImageConverterJobDesktop(config: ImageConverterJobConfig): 
     };
   }
 
-  const inputPaths = Array.isArray(config.inputPaths) ? config.inputPaths : [];
+  const inputPaths = (Array.isArray(config.inputPaths) ? config.inputPaths : [])
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
   if (inputPaths.length === 0) {
     progress = {
       ...idleProgress,
@@ -664,7 +814,17 @@ export function startImageConverterJobDesktop(config: ImageConverterJobConfig): 
     };
   }
 
-  const preset = getPreset(config.presetId);
+  const preset = findPreset(config.presetId);
+  const rawOutputDirectory = config.overrides?.outputDirectory;
+  const invalidReason = !preset
+    ? "Preset non valido."
+    : typeof rawOutputDirectory === "string" && rawOutputDirectory.trim().length > 0 && !isValidOutputDirectory(rawOutputDirectory)
+      ? "Cartella di destinazione non valida: serve un percorso assoluto."
+      : null;
+  if (invalidReason || !preset) {
+    progress = { ...idleProgress, status: "error", error: invalidReason ?? "Preset non valido.", finishedAt: Date.now(), logs: [] };
+    return { ok: false, progress, error: progress.error ?? undefined };
+  }
   const jobId = `image-converter-${Date.now()}`;
   cancelRequested = false;
   progress = makeProgress(jobId, preset.id);

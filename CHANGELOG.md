@@ -30,6 +30,14 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-30 - Image Converter 0.1.6
+
+- Nuovo preset "RAW in JPG massima qualita": JPG a risoluzione originale con il look della fotocamera e metadati del RAW (modello, obiettivo, ISO) senza orientamento o dimensioni errati.
+- Scelta della preview incorporata a piu' alta risoluzione, con avviso quando l'anteprima e troppo piccola.
+- Conversioni parallele senza sovrascritture, rilancio senza file duplicati e JPG affiancati ai RAW ignorati.
+- Campi lasciati vuoti (qualita, formato, destinazione) non alterano piu' le impostazioni del preset.
+- Interfaccia rinnovata e pagina prodotto del sito aggiornata.
+
 ## 2026-09-30 - FileX ID Photo 0.1.5
 
 - Flusso più semplice in quattro passaggi: eliminati il controllo qualità bloccante e la gestione commesse, così non compaiono più blocchi come «Ricarica la sorgente modificata».

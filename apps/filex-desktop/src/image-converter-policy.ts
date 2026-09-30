@@ -30,7 +30,8 @@ export function resolveImageConverterQuality(
   config: ImageConverterJobConfig,
   preset: ImageConverterPreset,
 ): number {
-  const value = Number(config.overrides?.quality);
+  const raw = config.overrides?.quality;
+  const value = raw === null || raw === undefined ? Number.NaN : Number(raw);
   if (Number.isFinite(value)) return Math.max(1, Math.min(100, Math.round(value)));
   return preset.quality;
 }
@@ -41,8 +42,9 @@ export function resolveImageConverterKeepMetadata(config: ImageConverterJobConfi
 
 export function resolveImageConverterOutputDirectory(config: ImageConverterJobConfig): string | null {
   const value = config.overrides?.outputDirectory;
-  if (typeof value !== "string" || value.trim().length === 0) return null;
-  return value;
+  if (typeof value !== "string") return null;
+  const cleaned = value.trim().replace(/^"+|"+$/g, "").trim();
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 export function isInsideImageConverterOutput(pathValue: string): boolean {
