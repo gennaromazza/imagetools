@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-09-30 - Image Select Pro 0.1.44
+
+- Durante la classificazione la vista resta ferma: con ordinamento per valutazione o filtri attivi le foto appena valutate non si spostano e non spariscono, finche' non cambi filtro, ordinamento o cartella oppure premi "Aggiorna vista".
+
 ## 2026-09-30 - Image Select Pro 0.1.43
 
 - Assegnazione di rating, Pick ed etichette molto piu' reattiva: la latenza del tasto scende da circa 80 ms a 26 ms su 1.200 foto, senza blocchi dell'interfaccia.

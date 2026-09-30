@@ -486,6 +486,9 @@
       "Assegnazione di rating, Pick ed etichette piu' reattiva: latenza del tasto da circa 80 a 26 ms su 1.200 foto.",
       "Miniature decodificate fuori dal thread principale per un caricamento piu' fluido.",
       "Colori delle etichette personalizzate condivisi tra PC tramite i sidecar XMP, con precedenza al colore locale."
+    ],
+    "0.1.44": [
+      "Vista ferma durante la classificazione: le foto valutate non si spostano e non spariscono dal filtro attivo finche' non premi Aggiorna vista o cambi filtro, ordinamento o cartella."
     ]
   },
   "id-photo": {
