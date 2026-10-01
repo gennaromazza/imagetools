@@ -41,6 +41,7 @@ const toolBranding = [
     toolId: "archivio-flow",
     sourceFile: "filex-generated/archivio-flow.png",
     pngSourcePath: generatedBrandingSource("archivio-flow.png"),
+    icoSourcePath: generatedBrandingSource("archivio-flow.ico"),
   },
   {
     toolId: "image-converter",

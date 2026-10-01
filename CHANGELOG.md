@@ -30,6 +30,10 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-10-01 - Archivio Flow 0.1.44
+
+- Nuova icona di Archivio Flow, applicata a finestra, barra delle applicazioni, area di notifica di Windows, installer, interfaccia e sito.
+
 ## 2026-09-30 - Image Select Pro 0.1.44
 
 - Durante la classificazione la vista resta ferma: con ordinamento per valutazione o filtri attivi le foto appena valutate non si spostano e non spariscono, finche' non cambi filtro, ordinamento o cartella oppure premi "Aggiorna vista".

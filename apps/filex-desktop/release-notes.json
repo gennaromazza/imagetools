@@ -216,6 +216,9 @@
     ]
   },
   "archivio-flow": {
+    "0.1.44": [
+      "Nuova icona di Archivio Flow, applicata a finestra, barra delle applicazioni, area di notifica di Windows, installer, interfaccia e sito."
+    ],
     "0.1.43": [
       "Migliorata la gestione delle destinazioni e dei percorsi durante l'importazione, con controlli più affidabili sui lavori e sulle cartelle suggerite."
     ],
