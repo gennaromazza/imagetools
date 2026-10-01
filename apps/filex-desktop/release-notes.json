@@ -526,6 +526,10 @@
       "Flusso più semplice in quattro passaggi: eliminati il controllo qualità bloccante e la gestione commesse, così non compaiono più blocchi come «Ricarica la sorgente modificata».",
       "Nello step Prepara puoi riposizionare la foto trascinandola e zoomare con la rotella del mouse.",
       "Ogni esportazione crea automaticamente una cartella con l'ID ordine (ID-AAAAMMGG-HHMMSS) nella destinazione scelta e la apre a verifica completata."
+    ],
+    "0.1.6": [
+      "Corretto il falso blocco «la foto sorgente è cambiata» che impediva l'esportazione e riportava allo step Foto: la verifica di integrità ora confronta la data di modifica con la stessa precisione dell'importazione.",
+      "Nello step Esporta il pulsante «Vai all'export» non compare più; compare nello step Impagina, dove serve."
     ]
   },
   "suite": {

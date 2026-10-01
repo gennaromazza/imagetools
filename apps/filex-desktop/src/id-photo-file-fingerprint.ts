@@ -105,7 +105,7 @@ export async function fingerprintFilesDesktop(
           name: basename(absolutePath),
           absolutePath,
           size: after.size,
-          lastModified: after.mtimeMs,
+          lastModified: Math.round(after.mtimeMs),
           sha256,
         });
       } catch (error) {

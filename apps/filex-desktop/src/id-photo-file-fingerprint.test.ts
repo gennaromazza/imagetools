@@ -29,7 +29,7 @@ test("calcola SHA-256 e metadati reali del file esportato", async (context) => {
   assert.equal(fingerprint.name, "Fototessera.pdf");
   assert.equal(fingerprint.absolutePath, resolve(filePath));
   assert.equal(fingerprint.size, bytes.length);
-  assert.equal(fingerprint.lastModified, fileStat.mtimeMs);
+  assert.equal(fingerprint.lastModified, Math.round(fileStat.mtimeMs));
   assert.equal(fingerprint.sha256, createHash("sha256").update(bytes).digest("hex"));
 });
 

@@ -63,6 +63,11 @@
 - Campi lasciati vuoti (qualita, formato, destinazione) non alterano piu' le impostazioni del preset.
 - Interfaccia rinnovata e pagina prodotto del sito aggiornata.
 
+## 2026-10-01 - FileX ID Photo 0.1.6
+
+- Corretto il falso blocco «la foto sorgente è cambiata» che impediva l'esportazione e riportava allo step Foto: la verifica di integrità ora confronta la data di modifica con la stessa precisione dell'importazione.
+- Nello step Esporta il pulsante «Vai all'export» non compare più; compare nello step Impagina, dove serve.
+
 ## 2026-09-30 - FileX ID Photo 0.1.5
 
 - Flusso più semplice in quattro passaggi: eliminati il controllo qualità bloccante e la gestione commesse, così non compaiono più blocchi come «Ricarica la sorgente modificata».
