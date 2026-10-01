@@ -30,6 +30,18 @@ Prima di modificare un'app, leggi il suo `package.json`, gli script disponibili 
 - Prima di dichiarare concluso un intervento esegui il test pertinente, `npm run check:git-hygiene` su un commit pulito e verifica che il branch pubblicato sia allineato con il remoto. Se è stato effettuato un push, attendi l'esito della CI pertinente: stato Git sporco o CI rossa impediscono la chiusura del lavoro.
 - Spegnimenti o riavvii richiesti dall'utente vanno eseguiti soltanto dopo avere salvato le modifiche, completato commit e push richiesti e concluso le verifiche remote.
 
+## Albero sporco: come risolvere senza perdere lavoro
+
+Lo sporco tipico è lavoro in corso di un altro tool (o di un'altra sessione) presente mentre si rilascia un componente diverso. Procedi così, nell'ordine:
+
+1. Leggi `git status -sb` e `git diff --stat`: attribuisci ogni file a un task. Se non sei certo di chi sia, non toccarlo e chiedi.
+2. Mai `git reset --hard`, `git checkout -- .`, `git clean`, `git stash` alla cieca: distruggono o nascondono lavoro altrui.
+3. Per rilasciare un solo componente, metti in stage solo i suoi file (`git add <file>`). Se un file condiviso (es. `package-lock.json`) contiene anche modifiche altrui, isola il tuo hunk: `git diff -U0 <file>` → tieni solo il tuo hunk → `git apply --cached --unidiff-zero <patch>`. Non usare `git add -A` né `git commit -a`. Metti i file temporanei nello scratchpad, non in `/tmp`.
+4. Prima del commit: `git diff --cached --stat` deve mostrare solo il componente rilasciato; eseguilo anche dopo.
+5. Il commit di release non può includere lavoro non finito di altri: se serve rilasciare anche quello, richiedi conferma esplicita all'utente. Il pulsante «Verifica e pubblica» della Dev Console include invece tutte le modifiche presenti (vedi `docs/GIT_WORKFLOW.md`): usalo solo ad albero pulito o con sporco interamente intenzionale.
+6. Dopo push e tag: `git fetch`, `git status -sb`, `git worktree list`; se un altro agente ha nel frattempo committato, non rifare il lavoro. Chiudi con `npm run check:git-hygiene` su albero pulito e attendi la CI (`gh run list`).
+7. Se lo sporco resta perché lavoro altrui non è ancora committato, dichiaralo nel report invece di pulirlo: la chiusura è «non conclusa per albero sporco non attribuibile».
+
 ## Comandi comuni
 
 ```powershell
