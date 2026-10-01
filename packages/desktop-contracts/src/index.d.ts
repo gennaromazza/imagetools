@@ -1297,6 +1297,7 @@ export interface FileXDesktopApi {
     getCachedThumbnailFrames: (entries: DesktopThumbnailCacheLookupEntry[], maxDimension: number, quality: number) => Promise<DesktopCachedThumbnailFrame[]>;
     getThumbnailCacheInfo: () => Promise<DesktopThumbnailCacheInfo>;
     readCaptureTimes: (absolutePaths: string[]) => Promise<DesktopCaptureTimeReading[]>;
+    revealInFolder: (absolutePath: string) => Promise<boolean>;
     chooseThumbnailCacheDirectory: () => Promise<DesktopThumbnailCacheInfo | null>;
     setThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopThumbnailCacheInfo>;
     resetThumbnailCacheDirectory: () => Promise<DesktopThumbnailCacheInfo>;

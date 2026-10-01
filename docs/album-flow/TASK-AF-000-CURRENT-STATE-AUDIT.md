@@ -1,11 +1,11 @@
 # TASK-AF-000 — Audit dello stato reale: FileX Album Flow
 
-Data audit: 14 settembre 2026  
+Data audit: 14 settembre 2026 · aggiornato il 30 settembre 2026 (editor completo, percorsi multipiattaforma, pagina sito) · aggiornato il 1 ottobre 2026 (versione 2: motore dinamico, editor a strisce, libreria in basso, pacchetto XMP condiviso)  
 Scope: solo `D:\IMAGETOOL_REMOTE`; `mnt/`, `worktrees/` e il progetto Memorie Sospese sono esclusi.
 
 ## Esito
 
-FileX possiede una base tecnica concreta per Album Flow e ora include uno scaffold eseguibile (`apps/album-flow`) registrato nel manifest desktop e nel Dev Console. Il riuso più solido resta il nucleo `@photo-tools/layout-engine` + `@photo-tools/core`; il contratto di handoff dedicato trasferisce già i metadati editoriali principali del Selector. Sono presenti export SVG, preflight iniziale, portabilità JSON e relink dei percorsi; restano renderer nativo/PDF, proofing completo e persistenza nativa.
+FileX possiede una base tecnica concreta per Album Flow e ora include uno scaffold eseguibile (`apps/album-flow`) registrato nel manifest desktop e nel Dev Console. Il riuso più solido resta il nucleo `@photo-tools/layout-engine` + `@photo-tools/core`; il contratto di handoff dedicato trasferisce già i metadati editoriali principali del Selector. Sono presenti export SVG, preflight iniziale, portabilità JSON e relink dei percorsi; l'editor (libreria, spread, Auto Build, ritaglio, annulla/ripeti, anteprima cliente, export JPG/SVG) è implementato; restano profili colore, printer marks, proofing completo e persistenza nativa.
 
 ## Fatti verificati
 
@@ -43,22 +43,23 @@ FileX possiede una base tecnica concreta per Album Flow e ora include uno scaffo
 - `@photo-tools/layout-engine` esporta template predefiniti, selezione template, assegnazione asset-slot e generazione di pagine. I tipi condivisi modellano slot, template, `GeneratedPageLayout`, crop, lato pagina e `spreadId`.
 - Il motore sceglie template considerando numero foto, orientamento, rapporto d'aspetto, perdita stimata di crop, lato/spread e riuso recente; l'assegnazione privilegia orientamento, rapporto, rating e priorità slot, poi applica scambi locali.
 - `@photo-tools/core` crea `AutoLayoutResult` e fornisce operazioni manuali (spostare, inserire, svuotare, cambiare template, riordinare, creare/rimuovere pagina e aggiornare crop). Auto e manuale usano già gli stessi `GeneratedPageLayout` e `LayoutAssignment`.
-- Album Flow include un renderer SVG di spread con dimensioni fisiche, bleed e safe area, oltre a preflight iniziale. Non esistono ancora rasterizzazione/PDF nativa, profili colore, printer marks o proofing completo.
+- Album Flow include un renderer SVG di spread con dimensioni fisiche, bleed e safe area, oltre a preflight iniziale. Esiste l'export JPG/SVG per spread; non esistono profili colore, profili colore, printer marks o proofing completo.
 
 ### UI FileX, console, licenza, distribuzione e sito
 
 - Il Selector ha token CSS reali in `styles.css`: shell scura `#1f2421/#232925`, pannelli `#2b312d`, testo `#f2ece5`, accento oro `#b89a63`, radii 26/18/12 px e font Segoe UI Variable Text/Segoe UI.
-- Il catalogo ufficiale è `apps/filex-desktop/src/tool-manifest.ts`. Album Flow non compare né nel tipo `DesktopToolId`, né nel manifest, né nella Dev Console.
-- La Dev Console deriva i tool dal manifest e richiede per ogni test uno script root, categoria e descrizione. Le categorie e i test del Selector esistono; Album Flow non ha ancora alcuna registrazione.
+- Il catalogo ufficiale è `apps/filex-desktop/src/tool-manifest.ts`. Album Flow è presente nel tipo `DesktopToolId`, nel manifest (`suiteVisible: false`, `licenseRuntime: shared-runtime` provvisorio) e nella Dev Console.
+- La Dev Console deriva i tool dal manifest e richiede per ogni test uno script root, categoria e descrizione. Le categorie e i test del Selector esistono; Album Flow ha la categoria `album-flow` con 11 script descritti (sistema, handoff, motore, modello, flussi, casi d'uso con fuzz, rendering, EXIF, cronologia, relink e gate completo) più `test:photo-metadata-xmp` per il pacchetto XMP condiviso.
 - La shell usa `electron-builder`, ASAR, allowlist dei file runtime, branding, NSIS per-user e `licenseRuntime` nel manifest. I tool della Suite usano in prevalenza `shared-runtime`; la policy di Album Flow è una decisione aperta.
-- Le workflow presenti sono `ci.yml`, `windows-release.yml`, `website-suite-sync.yml` e `pages.yml`. Il sito contiene pagine per i tool esistenti, ma non una pagina Album Flow.
+- Le workflow presenti sono `ci.yml`, `windows-release.yml`, `website-suite-sync.yml` e `pages.yml`. Il sito contiene la pagina `website/strumenti/album-flow/` (stato «in sviluppo»), il catalogo e la sitemap.
 
 ## Gap verificati
 
-1. Workspace, manifest desktop, IPC, bridge preload, script e test iniziali sono ora presenti; restano da completare release entry e pagina marketing del sito.
+1. Workspace, manifest desktop, IPC, bridge preload, script e test iniziali sono ora presenti; resta da completare la release entry (nessuna in `release-manifests`).
 2. Il contratto di handoff con metadati del Selector è presente e validato; resta da integrare con il salvataggio persistente nativo del progetto.
 3. `AlbumProject` e capitoli sono presenti nel workspace, con export/import JSON, relink validato e salvataggio locale a due fasi; mancano persistenza nativa, versioning/migrazioni e relink interattivo.
-4. Il workspace genera una prima bozza tramite il layout engine e un export SVG con bleed/safe area; renderer nativo/PDF, profili colore, printer marks e proofing completo restano da implementare.
+4. Il workspace genera una prima bozza tramite il layout engine, con export JPG/SVG per spread (bleed/safe area) ed editor interattivo; profili colore, printer marks e proofing completo restano da implementare.
+7. Multipiattaforma: relink, export e script di test di sistema non dipendono più da Windows. Il build macOS (`mac` universal dmg/zip) è previsto da `electron-builder.config.mjs`, ma non è stato eseguito né provato su un Mac; il solo hook NSIS e la voce menu Explorer restano Windows.
 5. Il raggruppamento del layout attuale è guidato dall'orientamento, non da cronologia, capitoli o gruppi narrativi.
 6. Il motore non esegue analisi semantica, rilevamento volti/soggetti o punteggio narrativo; il crop iniziale è geometrico con un bias per ritratti, non content-aware.
 

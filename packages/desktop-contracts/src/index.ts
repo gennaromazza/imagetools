@@ -1586,6 +1586,8 @@ export interface FileXDesktopApi {
   ) => Promise<DesktopCachedThumbnailFrame[]>;
   getThumbnailCacheInfo: () => Promise<DesktopThumbnailCacheInfo>;
   readCaptureTimes: (absolutePaths: string[]) => Promise<DesktopCaptureTimeReading[]>;
+  /** Mostra il file nella sua cartella (Esplora risorse, Finder). Restituisce false se il file non esiste. */
+  revealInFolder: (absolutePath: string) => Promise<boolean>;
   chooseThumbnailCacheDirectory: () => Promise<DesktopThumbnailCacheInfo | null>;
   setThumbnailCacheDirectory: (directoryPath: string) => Promise<DesktopThumbnailCacheInfo>;
   resetThumbnailCacheDirectory: () => Promise<DesktopThumbnailCacheInfo>;

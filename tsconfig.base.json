@@ -17,6 +17,7 @@
       "@photo-tools/desktop-contracts": ["./packages/desktop-contracts/src/index.d.ts"],
       "@photo-tools/filesystem": ["./packages/filesystem/src/index.ts"],
       "@photo-tools/layout-engine": ["./packages/layout-engine/src/index.ts"],
+      "@photo-tools/photo-metadata": ["./packages/photo-metadata/src/index.ts"],
       "@photo-tools/presets": ["./packages/presets/src/index.ts"],
       "@photo-tools/shared-types": ["./packages/shared-types/src/index.ts"],
       "@photo-tools/ui-schema": ["./packages/ui-schema/src/index.ts"]

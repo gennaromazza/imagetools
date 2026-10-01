@@ -2,6 +2,8 @@
 
 ## Decisioni aperte
 
+> Stato 2026-09-30: Album Flow deve restare multipiattaforma (Windows e macOS) per scelta dichiarata dall'utente. Il PDF non serve (richiesta dell'utente) e non è implementato; l'output attuale è JPG e SVG per spread più il file progetto. Vedi `AF-001-UX-SPEC.md`.
+
 > Stato 2026-09-14: G1/G2 hanno una prima implementazione verificabile nel workspace (`AlbumProject` + manifest handoff dedicato). Restano da approvare le policy di prodotto e stampa prima del renderer definitivo.
 
 1. **Handoff:** evolvere `DesktopPhotoToolHandoff` o creare un canale/manifest Album dedicato? La seconda opzione preserva la compatibilità dei consumer attuali.

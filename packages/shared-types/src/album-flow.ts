@@ -22,7 +22,13 @@ export interface AlbumChapter {
   source: "selector-label" | "manual";
 }
 
+/** Segnalazioni editoriali per l'Auto Build: copertina, panorama, foto principale (pagina dedicata). */
+export type AlbumAssetTag = "cover" | "panorama" | "main";
+
 export interface AlbumAsset extends ImageAsset {
+  albumTags?: AlbumAssetTag[];
+  /** Percorso assoluto sul disco quando la foto arriva dall'app desktop. */
+  absolutePath?: string;
   selected: boolean;
   selectionOrder: number;
   labelIds: string[];

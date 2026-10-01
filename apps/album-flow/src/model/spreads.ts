@@ -1,0 +1,113 @@
+import type { AlbumItem, AlbumSpread, AlbumSplitMode } from "@photo-tools/shared-types";
+import { areaOuterRects } from "../engine/geometry";
+import { MAX_SPREADS } from "./defaults";
+import { relayoutArea } from "./areas";
+import { newId } from "./ids";
+import { areaGeometry, createArea, createSpread, findSpread, mapSpread, normalizeArea, touch, type Project } from "./project";
+
+export function addSpread(project: Project, atIndex?: number, split: AlbumSplitMode = "half"): Project {
+  if (project.spreads.length >= MAX_SPREADS) return project;
+  const index = Math.min(Math.max(atIndex ?? project.spreads.length, 0), project.spreads.length);
+  const spreads = [...project.spreads];
+  spreads.splice(index, 0, createSpread(project, split));
+  return touch({ ...project, spreads });
+}
+
+export function removeSpread(project: Project, spreadId: string): Project {
+  if (!findSpread(project, spreadId)) return project;
+  return touch({ ...project, spreads: project.spreads.filter((spread) => spread.id !== spreadId) });
+}
+
+export function moveSpread(project: Project, from: number, to: number): Project {
+  if (from === to || from < 0 || to < 0 || from >= project.spreads.length || to >= project.spreads.length) return project;
+  const spreads = [...project.spreads];
+  const [moved] = spreads.splice(from, 1);
+  spreads.splice(to, 0, moved);
+  return touch({ ...project, spreads });
+}
+
+/** Copia uno spread subito dopo: stesse foto e stesso layout, elementi con identificativi nuovi. */
+export function duplicateSpread(project: Project, spreadId: string): Project {
+  const found = findSpread(project, spreadId);
+  if (!found || project.spreads.length >= MAX_SPREADS) return project;
+  const clone: AlbumSpread = {
+    ...found.spread,
+    id: newId("spread"),
+    areas: found.spread.areas.map((area) => {
+      const mapping = new Map(area.items.map((item) => [item.id, newId("it")]));
+      const rename = (node: NonNullable<typeof area.layout>): NonNullable<typeof area.layout> =>
+        node.kind === "leaf" ? { kind: "leaf", itemId: mapping.get(node.itemId) ?? node.itemId } : { ...node, first: rename(node.first), second: rename(node.second) };
+      return { ...area, id: newId("area"), items: area.items.map((item) => ({ ...item, id: mapping.get(item.id)! })), layout: area.layout ? rename(area.layout) : null };
+    }),
+  };
+  const spreads = [...project.spreads];
+  spreads.splice(found.index + 1, 0, clone);
+  return touch({ ...project, spreads });
+}
+
+/** Toglie tutte le foto dallo spread mantenendo divisione e stile. */
+export function clearSpread(project: Project, spreadId: string): Project {
+  return mapSpread(project, spreadId, (spread) => {
+    if (spread.areas.every((area) => area.items.length === 0)) return spread;
+    return { ...spread, areas: spread.areas.map((area) => ({ ...area, layout: null, items: [], seed: 0 })) };
+  });
+}
+
+export function swapAreas(project: Project, spreadId: string): Project {
+  return mapSpread(project, spreadId, (spread) => {
+    if (spread.areas.length < 2) return spread;
+    const [a, b] = spread.areas;
+    // Si scambiano foto e layout; lo stile resta legato alla posizione (sinistra/destra).
+    return { ...spread, areas: [{ ...a, layout: b.layout, items: b.items, seed: b.seed }, { ...b, layout: a.layout, items: a.items, seed: a.seed }] };
+  });
+}
+
+/**
+ * Cambia la divisione dello spread. Le foto restano nell'area in cui cade il loro centro (o tutte in un'area con "full"),
+ * l'ordine non cambia e i layout vengono rigenerati.
+ */
+export function setSplitMode(project: Project, spreadId: string, mode: AlbumSplitMode): Project {
+  const found = findSpread(project, spreadId);
+  if (!found || found.spread.split === mode) return project;
+  const { spread } = found;
+
+  // Foto in ordine di lettura globale, con il centro nello spread.
+  const placed: Array<{ item: AlbumItem; centerX: number }> = [];
+  spread.areas.forEach((area, areaIndex) => {
+    const geometry = areaGeometry(project, spread, areaIndex);
+    for (const item of area.items) {
+      const cell = geometry.cells.find((candidate) => candidate.itemId === item.id);
+      placed.push({ item, centerX: cell ? cell.rect.x + cell.rect.w / 2 : geometry.outer.x + geometry.outer.w / 2 });
+    }
+  });
+
+  const rects = areaOuterRects(project.settings.sheet, mode);
+  const style = (index: number) => ({ ...(spread.areas[index] ?? spread.areas[0]).style });
+  const buckets: AlbumItem[][] = rects.map(() => []);
+  if (rects.length === 1) buckets[0] = placed.map((entry) => entry.item);
+  else {
+    const boundary = rects[0].w;
+    for (const entry of placed) buckets[entry.centerX < boundary ? 0 : 1].push(entry.item);
+  }
+
+  const areas = rects.map((_, index) => {
+    const base = { ...createArea(style(index)), id: spread.areas[index]?.id ?? newId("area") };
+    return { ...base, items: buckets[index] };
+  });
+  // Layout provvisorio perché relayoutArea parta con le foto nell'ordine giusto.
+  const staged: AlbumSpread = {
+    ...spread,
+    split: mode,
+    areas: areas.map((area) => ({
+      ...area,
+      layout: area.items.length === 0 ? null : area.items.slice(1).reduce<NonNullable<typeof area.layout>>((acc, item) => ({ kind: "split", dir: "row", ratio: 0.5, first: acc, second: { kind: "leaf", itemId: item.id } }), { kind: "leaf", itemId: area.items[0].id }),
+    })),
+  };
+  const relaid: AlbumSpread = { ...staged, areas: staged.areas.map((_, index) => normalizeArea(relayoutArea(project, staged, index, 0))) };
+  return touch({ ...project, spreads: project.spreads.map((candidate) => (candidate.id === spreadId ? relaid : candidate)) });
+}
+
+/** Segna uno spread come finito (o lo riapre): Auto Build, Mescola e i layout automatici lo lasciano com'è. */
+export function setSpreadDone(project: Project, spreadId: string, done: boolean): Project {
+  return mapSpread(project, spreadId, (spread) => ((spread.done ?? false) === done ? spread : { ...spread, done }));
+}
