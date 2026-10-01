@@ -464,7 +464,7 @@
           await setOperation(id, { action, busy: true, type: "busy", message: "Avvio di Electron e del renderer in corso…" });
           const res = await api(`/api/tools/${id}/start`, { method: "POST" });
           if (!res.ok) throw new Error(res.error || "Errore durante l'avvio.");
-          await waitForStatus(id, ["running"], id === "suite-launcher" ? 180000 : 30000);
+          await waitForStatus(id, ["running"], id === "suite-launcher" ? 180000 : 120000);
           operations.set(id, { type: "success", message: "Avvio completato: finestra Electron e renderer attivi." });
           toast(`Avvio completato: ${id}`);
         } else if (action === "stop") {

@@ -63,6 +63,7 @@ const toolConfig = [
   { toolId: "filex-send", executableName: "FileX-Send" },
   { toolId: "backup-guard", executableName: "FileX-Backup-Guard" },
   { toolId: "photo-selector-app", executableName: "Image-Select-Pro" },
+  { toolId: "album-flow", executableName: "FileX-Album-Flow" },
 ];
 if (selectedToolId && !toolConfig.some((tool) => tool.toolId === selectedToolId)) {
   throw new Error(`Tool non supportato: ${selectedToolId}`);

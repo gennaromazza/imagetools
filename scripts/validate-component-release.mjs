@@ -11,6 +11,7 @@ const components = {
   "archivio-flow": ["Archivio Flow", "apps/archivio-flow/package.json"],
   "image-converter": ["Image Converter", "apps/image-converter/package.json"],
   "image-file-finder": ["Trova Foto da Lista", "apps/image-file-finder/package.json"],
+  "album-flow": ["Album Flow", "apps/album-flow/package.json"],
   "cache-sweep": ["FileX Adobe Cleaner", "apps/cache-sweep/package.json"],
   "filex-send": ["FileX Send", "apps/filex-send/package.json"],
   "backup-guard": ["FileX Backup Guard", "apps/backup-guard/package.json"],

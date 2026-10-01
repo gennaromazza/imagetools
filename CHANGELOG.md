@@ -30,6 +30,14 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-10-01 - FileX Suite 0.1.64
+
+- Nuovo strumento nella Suite: Album Flow, il software di impaginazione per album fotografici incluso in FileX All Access. Compare nell'elenco dei tool, nel dock e nelle notifiche come gli altri e si avvia dalla Suite con le stesse regole di licenza. Icona di Album Flow e controllo della licenza dentro l'app.
+
+## 2026-10-01 - Album Flow 0.1.0
+
+- Prima versione di Album Flow: software di impaginazione per album fotografici, incluso in FileX All Access. Riceve le foto scelte in Image Select Pro con stelle ed etichette, organizza i capitoli, calcola layout dinamici per ogni spread, permette di disegnare template propri, trascinare le foto con anteprima esatta del posto, mantiene le foto allineate in foto intera, mostra misure e risoluzione stampata e controlla tutto prima dell'export JPG e SVG.
+
 ## 2026-10-01 - Archivio Flow 0.1.44
 
 - Nuova icona di Archivio Flow, applicata a finestra, barra delle applicazioni, area di notifica di Windows, installer, interfaccia e sito.

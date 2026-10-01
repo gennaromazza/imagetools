@@ -2,7 +2,7 @@ import * as electron from "electron";
 import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState, startTrial, finishTrial, startLicenseExpiryWatchdog } from "./license-service.js";
 import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, rmdirSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, statSync } from "node:fs";
 import {
   mkdtemp,
   readFile as readFileAsync,
@@ -265,7 +265,15 @@ if (imagePartyFrameSessionToken) {
 }
 const shouldUseDevRenderer =
   process.env.FILEX_RENDERER_MODE === "dev" && typeof process.env.FILEX_RENDERER_URL === "string";
-const appUserModelId = `studio.filex.${requestedTool.id}${app.isPackaged ? "" : ".dev"}`;
+// In sviluppo Windows ricorda l'icona della barra per identificativo: includere l'impronta dell'icona la rinnova quando cambia.
+const devIconStamp = (): string => {
+  try {
+    return `.dev.${createHash("sha1").update(readFileSync(resolveWindowIcon())).digest("hex").slice(0, 8)}`;
+  } catch {
+    return ".dev";
+  }
+};
+const appUserModelId = `studio.filex.${requestedTool.id}${app.isPackaged ? "" : devIconStamp()}`;
 let mainWindow: BrowserWindowInstance | null = null;
 const idPhotoQuitCoordinator = createIdPhotoQuitCoordinator();
 const PHOTO_SELECTOR_CLOSE_PREPARATION_TIMEOUT_MS = 20_000;
@@ -1052,6 +1060,9 @@ const isArchivioFlowPackagedSmokeTest =
 const isImageFileFinderPackagedSmokeTest =
   requestedTool.id === "image-file-finder"
   && process.argv.includes("--filex-image-file-finder-packaged-smoke-test");
+const isAlbumFlowPackagedSmokeTest =
+  requestedTool.id === "album-flow"
+  && process.argv.includes("--filex-album-flow-packaged-smoke-test");
 const hasSingleInstanceLock = app.requestSingleInstanceLock({
   requestedToolId: requestedTool.id,
   openFolderPath: initialOpenFolderPath,
@@ -2286,6 +2297,12 @@ function registerIpcHandlers(): void {
     }
     return { ok: true };
   });
+  ipcMain.handle("filex:reveal-in-folder", (_event, absolutePath: string) => {
+    const normalizedPath = typeof absolutePath === "string" ? sanitizeDesktopPath(absolutePath) : "";
+    if (!normalizedPath || !existsSync(normalizedPath)) return false;
+    shell.showItemInFolder(normalizedPath);
+    return true;
+  });
   ipcMain.handle("filex:get-image-converter-presets", () => getImageConverterPresetsDesktop());
   ipcMain.handle("filex:choose-image-converter-folders", () => chooseImageConverterFoldersDesktop());
   ipcMain.handle("filex:scan-image-converter-inputs", (_event, paths: string[]) =>
@@ -2890,12 +2907,19 @@ process.on("uncaughtException", (error) => {
 if (hasSingleInstanceLock) {
   app.whenReady().then(async () => {
     writeBootLog(`App ready for tool ${requestedTool.id}`);
+    if (isAlbumFlowPackagedSmokeTest) {
+      // Il main process impacchettato è partito (gli import statici sono risolti): serve anche il renderer impacchettato.
+      if (!existsSync(resolveRendererEntry())) throw new Error(`Renderer di Album Flow non trovato: ${resolveRendererEntry()}`);
+      writeBootLog("Album Flow packaged main process smoke test passed");
+      app.exit(0);
+      return;
+    }
     if (isPhotoSelectorPackagedSmokeTest) {
       writeBootLog("Image Select Pro packaged smoke test passed");
       app.exit(0);
       return;
     }
-    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest && !isImageFileFinderPackagedSmokeTest) {
+    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest && !isImageFileFinderPackagedSmokeTest && !isAlbumFlowPackagedSmokeTest) {
       const license = await getLicenseState();
       if (!license.canUseTools) {
         dialog.showErrorBox("FileX All Access", "La licenza FileX non e' attiva. Apri FileX Suite per attivarla o aggiornare il pagamento.");

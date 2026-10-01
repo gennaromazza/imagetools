@@ -27,6 +27,7 @@ const COMPONENT_RELEASES = [
   { id: "archivio-flow", label: "Archivio Flow", packagePath: "apps/archivio-flow/package.json", artifactPrefix: "Archivio-Flow", minSuiteVersion: "0.1.26" },
   { id: "image-converter", label: "Image Converter", packagePath: "apps/image-converter/package.json", artifactPrefix: "Image-Converter", minSuiteVersion: "0.1.26" },
   { id: "image-file-finder", label: "Trova Foto da Lista", packagePath: "apps/image-file-finder/package.json", artifactPrefix: "Trova-Foto-da-Lista", minSuiteVersion: "0.1.26" },
+  { id: "album-flow", label: "Album Flow", packagePath: "apps/album-flow/package.json", artifactPrefix: "FileX-Album-Flow", minSuiteVersion: "0.1.64" },
   { id: "cache-sweep", label: "FileX Adobe Cleaner", packagePath: "apps/cache-sweep/package.json", artifactPrefix: "FileX-Adobe-Cleaner", minSuiteVersion: "0.1.28" },
   { id: "filex-send", label: "FileX Send", packagePath: "apps/filex-send/package.json", artifactPrefix: "FileX-Send", minSuiteVersion: "0.1.31" },
   { id: "backup-guard", label: "FileX Backup Guard", packagePath: "apps/backup-guard/package.json", artifactPrefix: "FileX-Backup-Guard", minSuiteVersion: "0.1.33" },
@@ -267,7 +268,7 @@ interface TestCategory {
 }
 
 const TEST_CATEGORIES: TestCategory[] = [
-  { id: "album-flow", title: "Album Flow — Importazione", description: "Handoff Selector, metadati, capitoli, ordine e integrità dei file ricevuti." },
+  { id: "album-flow", title: "Album Flow — Importazione, impaginazione ed editor", description: "Handoff Selector, capitoli, Auto Build, modifica degli spread, ritagli, annulla/ripeti, salvataggio, preflight e casi d'uso completi." },
   { id: "photo-selector", title: "Image Select Pro", description: "Modalità libera e progetto, prestazioni, cache, Drive, spostamenti e metadati XMP." },
   { id: "image-party-frame", title: "Image Party Frame — Affidabilità", description: "Progetti, crop, rendering, job export e completezza del pacchetto installato." },
   { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Geometria, memoria, export progressivo no-overwrite, rollback protetto dall’identità dei file e recovery sicuro degli staging." },
@@ -290,6 +291,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:filex-windows-icons") return "suite";
   if (name === "test:filex-suite-launcher") return "suite";
   if (name.startsWith("test:photo-selector-")) return "photo-selector";
+  if (name === "test:photo-metadata-xmp") return "photo-selector";
   if (name === "test:archivio-flow-preview-queue" || name === "test:archivio-flow-selection" || name === "test:archivio-flow-import-workflow" || name === "test:archivio-flow-bug-hunt" || name === "test:archivio-flow-drive-link" || name === "test:archivio-flow-package-runtime" || name === "test:archivio-flow-photo-routing" || name === "test:photo-tool-handoff") return "archivio-flow";
   if (name === "test:image-party-frame-bug-hunt" || name === "test:image-party-frame-server" || name === "test:image-party-frame-package-runtime") return "image-party-frame";
   if (name === "test:batch-print-layout-bug-hunt" || name === "test:batch-print-layout-desktop-images") return "batch-print-layout";
@@ -313,12 +315,20 @@ function testCategoryId(name: string): TestCategory["id"] {
 
 function testDescription(name: string): string {
   const descriptions: Record<string, string> = {
-    "test:album-flow-renderer": "Verifica geometria SVG, dimensioni fisiche, escaping XML e rifiuto degli slot mancanti. Non certifica la fedeltà di stampa.",
-    "test:album-flow-relink": "Verifica la risoluzione dei percorsi relativi e il rifiuto di traversal o file fuori dalla radice.",
-    "test:album-flow-all": "Gate completo Album Flow: handoff, capitoli, preflight, portabilità e controlli di sistema.",
-    "test:album-flow-chapters": "Verifica creazione, assegnazioni multiple, rimozione, ordine, riferimenti invalidi e conservazione dei metadati Selector.",
-    "test:album-flow-system": "Controlli statici di presenza: non verificano clic, flussi runtime o comportamento delle anteprime.",
+    "test:album-flow-engine": "Verifica il motore dinamico dei layout: alberi di divisione (inserimento accanto, scambio, specchio, forma dei preferiti), geometria di aree e spazio tra le foto, piega centrale, generazione ordinata e deterministica con la minima perdita di ritaglio, casi limite e regole di rilascio (centro, bordo, area vuota). Non prova l'interfaccia grafica.",
+    "test:album-flow-model": "Verifica le operazioni sull'album: spread (aggiungi, duplica, sposta, elimina, svuota), divisione foglio intero / metà / un terzo / due terzi, rilascio dalla libreria e dallo spread, scambio e rimozione, inquadratura e blocco, Shuffle e layout 1-9, stile collegato e copia sull'album, separatori, layout preferiti, allineamento, foto intera con ricalcolo del layout e template dell'utente (ad albero e liberi con foto sovrapposte, abbinamento foto-celle, archivio locale, cornici).",
+    "test:album-flow-flow": "Verifica Auto Build (foto per pagina scelte dall'utente, capitoli, panorami e copertine, solo foto non usate, 500 foto), capitoli, libreria (ordini, filtri, stelle, tag, rimozione), importazione con duplicati, salvataggio e file danneggiati, controlli prima dell'export, invio e reinvio dal Selector, formati e album di prova.",
+    "test:album-flow-scenarios": "Casi d'uso completi di un fotografo: matrimonio da 140 foto (cartelle in disordine, RAW+JPG, duplicati, capitoli, Auto Build, ritocchi a mano, preferiti, stile sull'album, foto tolte, salvataggio), foto difficili (panorami, miniature, ruotate), reportage da 320 foto, capitoli rimaneggiati, cambio formato e oltre mille operazioni casuali con controlli di coerenza. Non prova clic o trascinamenti nella finestra.",
+    "test:album-flow-render": "Verifica il posizionamento delle foto nelle celle (riempi/adatta, zoom, bordo, rotazione, dpi effettivi), la geometria degli slot e l'SVG di stampa (abbondanza, zona sicura, escaping). Non certifica la fedeltà di stampa.",
+    "test:album-flow-exif": "Verifica la lettura dell'ora di scatto e dell'orientamento dal JPEG (entrambe le codifiche dei byte), il ripiego sulla data del file e la tolleranza ai file troncati o con date assurde.",
+    "test:album-flow-freshness": "Verifica che una foto modificata fuori dal programma (per esempio salvata da Photoshop) venga riletta: impronta del file nelle richieste, cache scartata, nuova immagine e viste avvisate.",
+    "test:album-flow-license": "Verifica gli avvisi di licenza mostrati nell'app: nessun avviso con licenza attiva o fuori da FileX, errore con il lavoro al sicuro quando la licenza non è valida, tolleranza di pagamento con data limite e promemoria della prova gratuita solo nell'ultima settimana.",
+    "test:album-flow-history": "Verifica annulla/ripeti: ordine degli stati, ramo ripetibile cancellato da una nuova modifica e limite della cronologia.",
+    "test:album-flow-relink": "Verifica la risoluzione dei percorsi su Windows, macOS/Linux e UNC e il rifiuto di traversal o file fuori dalla radice.",
+    "test:album-flow-system": "Controlli statici di presenza e coerenza: funzioni dichiarate nel codice, contratti desktop, test raggiungibili da script e Dev Console, documentazione. Non verificano clic, flussi runtime o comportamento delle anteprime.",
     "test:album-flow-handoff": "Controlla ordine completo, etichette Unicode, capitoli, passaggio Electron, file modificati, payload non validi e chiusura degli import runtime.",
+    "test:album-flow-all": "Gate completo Album Flow: controlli di sistema, handoff, motore, modello, flussi, casi d'uso, rendering, EXIF, cronologia, relink multipiattaforma e metadati XMP condivisi.",
+    "test:photo-metadata-xmp": "Pacchetto condiviso da Image Select Pro e Album Flow: lettura e scrittura XMP (stelle, etichette, colori personalizzati) senza perdere i campi di altri programmi e senza sovrascrivere file illeggibili.",
     "test:photo-selector-workflow": "Controlla il flusso principale di Image Select Pro, inclusi click consecutivi, Ctrl+A nel perimetro filtrato, rotazione singola o batch e precedenza della selezione locale sugli XMP tardivi.",
     "test:photo-selector-free-mode": "Verifica che la modalità libera resti indipendente dai progetti, riconosca la sorgente anche se cambia lettera e mantenga XMP e backup Drive separati.",
     "test:photo-selector-package-runtime": "Controlla che il main process di Image Select Pro includa nell’ASAR tutte le dipendenze locali, compresi identità sorgenti e servizi PSD.",

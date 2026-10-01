@@ -48,6 +48,6 @@ for (const tool of Object.values(desktopToolManifest)) {
   for (const field of ["appId:", "appIconPath:", "relaunchCommand:", "relaunchDisplayName:"]) {
     assert.ok(main.includes(field), prefix + "missing " + field);
   }
-  assert.match(main, /app\.isPackaged\s*\?\s*""\s*:\s*"\.dev"/, prefix + "Dev identity must differ from installed identity");
+  assert.match(main, /app\.isPackaged\s*\?\s*""\s*:\s*(?:devIconStamp\(\)|"\.dev")/, prefix + "Dev identity must differ from installed identity");
   console.log("OK Windows branding: " + tool.id);
 }

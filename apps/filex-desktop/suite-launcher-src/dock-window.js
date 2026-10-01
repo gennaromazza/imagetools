@@ -20,6 +20,7 @@ const toolNames = {
   'archivio-flow': 'Archivio Flow',
   'image-converter': 'Image Converter',
   'image-file-finder': 'Trova Foto da Lista',
+  'album-flow': 'Album Flow',
   'cache-sweep': 'FileX Adobe Cleaner',
   'filex-send': 'FileX Send',
 };

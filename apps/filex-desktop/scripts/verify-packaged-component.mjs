@@ -18,6 +18,7 @@ const expectedPackages = {
   "archivio-flow": { name: "Archivio-Flow", main: ".output/electron/main.js" },
   "image-converter": { name: "Image-Converter", main: ".output/electron/main.js" },
   "image-file-finder": { name: "Trova-Foto-da-Lista", main: ".output/electron/main.js" },
+  "album-flow": { name: "FileX-Album-Flow", main: ".output/electron/main.js" },
   "cache-sweep": { name: "FileX-Adobe-Cleaner", main: ".output/electron/cache-sweep/electron/main.js" },
   "filex-send": { name: "FileX-Send", main: ".output/electron/filex-send/electron/main.js" },
   "backup-guard": { name: "FileX-Backup-Guard", main: ".output/electron/backup-guard/electron/main.js" },
@@ -117,6 +118,20 @@ if (args.component === "image-file-finder") {
   }
   verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
   verifyRelativeImportClosure(archivePath, entries, "/.output/electron/preload.js");
+}
+
+if (args.component === "album-flow") {
+  const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll("\\", "/")));
+  for (const requiredEntry of ["/.output/electron/main.js", "/.output/electron/preload.js"]) {
+    if (!entries.has(requiredEntry)) {
+      throw new Error(`Album Flow non contiene ${requiredEntry}`);
+    }
+  }
+  verifyRelativeImportClosure(archivePath, entries, "/.output/electron/main.js");
+  verifyRelativeImportClosure(archivePath, entries, "/.output/electron/preload.js");
+  // Il renderer è una risorsa accanto all'ASAR, non dentro: deve esserci nel pacchetto.
+  const rendererEntry = resolve(archivePath, "..", "apps", "album-flow", "web", "index.html");
+  if (!existsSync(rendererEntry)) throw new Error(`Album Flow non contiene il renderer: ${rendererEntry}`);
 }
 
 if (args.component === "id-photo") {

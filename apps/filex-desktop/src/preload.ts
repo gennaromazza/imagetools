@@ -102,6 +102,7 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:get-cached-thumbnail-frames", entries, maxDimension, quality),
   getThumbnailCacheInfo: () => ipcRenderer.invoke("filex:get-thumbnail-cache-info"),
   readCaptureTimes: (absolutePaths) => ipcRenderer.invoke("filex:read-capture-times", absolutePaths),
+  revealInFolder: (absolutePath) => ipcRenderer.invoke("filex:reveal-in-folder", absolutePath),
   chooseThumbnailCacheDirectory: () => ipcRenderer.invoke("filex:choose-thumbnail-cache-directory"),
   setThumbnailCacheDirectory: (directoryPath) =>
     ipcRenderer.invoke("filex:set-thumbnail-cache-directory", directoryPath),

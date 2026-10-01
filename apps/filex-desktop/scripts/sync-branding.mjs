@@ -23,8 +23,9 @@ const toolBranding = [
   { toolId: "suite-launcher", sourceFile: "filex-system/suite-launcher.png" },
   {
     toolId: "album-flow",
-    sourceFile: "filex-generated/photo-selector-app.png",
-    pngSourcePath: generatedBrandingSource("photo-selector-app.png"),
+    sourceFile: "filex-generated/album-flow.png",
+    pngSourcePath: generatedBrandingSource("album-flow.png"),
+    icoSourcePath: generatedBrandingSource("album-flow.ico"),
   },
   {
     toolId: "image-party-frame",

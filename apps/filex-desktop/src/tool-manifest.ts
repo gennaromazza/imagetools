@@ -46,7 +46,7 @@ export const desktopToolManifest = {
     devUrl: "http://127.0.0.1:4265",
     releaseChannelDefault: "stable",
     releaseManifestKey: "album-flow",
-    suiteVisible: false,
+    suiteVisible: true,
     licenseRuntime: "shared-runtime",
   },
   "suite-launcher": {

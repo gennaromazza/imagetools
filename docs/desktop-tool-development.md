@@ -29,6 +29,7 @@ Non duplicare questo catalogo in altri tool. I consumer, inclusa FileX Dev Conso
 | `filex-send` | 4245 | `npm --workspace @photo-tools/filex-desktop run dev:filex-send` |
 | `backup-guard` | 4255 | `npm --workspace @photo-tools/filex-desktop run dev:backup-guard` |
 | `photo-selector-app` | 5000 | `npm --workspace @photo-tools/filex-desktop run dev:photo-selector-app` |
+| `album-flow` | 4265 | `npm --workspace @photo-tools/filex-desktop run dev:album-flow` |
 
 Gli script avviano il renderer e poi Electron; chiudere il processo avvia anche la chiusura dei processi coordinati. Gli script storici possono restare come alias, ma le nuove integrazioni usano sempre il nome canonico.
 
