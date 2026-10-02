@@ -303,7 +303,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:filex-send-bug-hunt") return "filex-send";
   if (name === "test:filex-send-upload") return "filex-send";
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
-  if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-suite-dock-startup" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
+  if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-suite-dock-startup" || name === "test:filex-suite-license-sync" || name === "test:filex-suite-update-flow" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
   if (name === "test:filex-license-coverage") return "licenses";
   if (name === "test:filex-installed-licenses") return "licenses";
   if (name === "test:filex-trial") return "licenses";
@@ -377,6 +377,8 @@ function testDescription(name: string): string {
     "test:filex-windows-icons": "Controlla per ogni tool del catalogo, inclusi quelli nuovi, icone ICO alle diverse scale, identità distinta in Dev e configurazione della barra Windows e dei collegamenti installer.",
     "test:filex-suite-launcher": "Verifica in Electron dock orizzontale, tooltip, ricerca espandibile, temi, preferiti, notifiche FileX Send e rimozione persistente con dati simulati.",
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
+    "test:filex-suite-update-flow": "Verifica controllo periodico delle nuove versioni della Suite, avviso a dashboard chiusa, nessuna installazione automatica a sorpresa, tempi di chiusura dei tool coerenti con il loro arresto, nuovo tentativo del segnale cooperativo e blocco dei tool durante l'installazione.",
+    "test:filex-suite-license-sync": "Verifica che dashboard e dock restino allineati sulla licenza: evento di cambio, revalidazione periodica col server, richieste concorrenti unificate e notifica di licenza che ricompare dopo un ripristino.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
     "test:filex-trial": "Verifica prova di 30 giorni, account, firme, DPAPI Windows e migrazione fra profili, concorrenza, cache, avviso e chiusura dopo 60 secondi e annullamento dopo rinnovo.",

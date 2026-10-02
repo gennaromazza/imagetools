@@ -81,6 +81,8 @@
     "test:filex-windows-icons": "npm --workspace @photo-tools/filex-desktop run build:shell",
     "test:filex-suite-launcher": "npm --workspace @photo-tools/filex-desktop run build:suite && node scripts/test-filex-suite-launcher.mjs",
     "test:filex-independent-releases": "node scripts/test-filex-independent-releases.mjs",
+    "test:filex-suite-update-flow": "tsx --test apps/filex-desktop/src/suite-update-flow.test.ts",
+    "test:filex-suite-license-sync": "tsx --test apps/filex-desktop/src/single-flight.test.ts apps/filex-desktop/src/license-watcher.test.ts apps/filex-desktop/src/suite-license-sync.test.ts",
     "test:filex-component-release-flow": "node scripts/test-component-release-flow.mjs",
     "release:prepare-filex-suite-clean-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-filex-suite-clean-install.ps1 -Apply",
     "release:prepare-filex-full-clean-test": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-filex-full-clean-test.ps1 -Apply",

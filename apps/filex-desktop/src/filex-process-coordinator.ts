@@ -10,10 +10,14 @@ import {
 } from "./tool-manifest.js";
 import { ProcessSnapshotCache } from "./process-snapshot-cache.js";
 import { InstallerLaunchError, runWindowsInstaller } from "./windows-installer-runner.js";
-import { sendBoundedProcessSignal } from "./cooperative-process-signal.js";
+import { sendSignalWithRetry } from "./cooperative-process-signal.js";
+import {
+  COOPERATIVE_SIGNAL_ATTEMPTS,
+  TOOL_COOPERATIVE_SHUTDOWN_TIMEOUT_MS,
+  TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
+  usesWindowCloseFallback,
+} from "./update-shutdown-policy.js";
 
-const TOOL_COOPERATIVE_SHUTDOWN_TIMEOUT_MS = 9_000;
-const TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TOOL_FORCE_SHUTDOWN_TIMEOUT_MS = 3_000;
 const TOOL_SHUTDOWN_POLL_INTERVAL_MS = 250;
 const TOOL_POST_SHUTDOWN_SETTLE_MS = 2_500;
@@ -163,7 +167,7 @@ async function requestCooperativeShutdown(processNames: readonly string[]): Prom
   const executablePaths = await listRunningExecutablePaths(processNames);
   await Promise.all(executablePaths.map(async (executablePath) => {
     try {
-      await sendBoundedProcessSignal(executablePath, [UPDATE_SHUTDOWN_ARGUMENT]);
+      await sendSignalWithRetry(executablePath, [UPDATE_SHUTDOWN_ARGUMENT], COOPERATIVE_SIGNAL_ATTEMPTS);
     } catch (error) {
       console.warn(
         `Chiusura cooperativa non riuscita per ${executablePath}:`,
@@ -186,13 +190,16 @@ async function stopFileXTool(toolId: DesktopToolId): Promise<void> {
 
   // Compatibilita' con le versioni che non conoscono ancora il comando
   // cooperativo. Sono terminati solo il tool selezionato e i suoi nomi legacy,
-  // mai FileX Suite o altri prodotti FileX.
-  await Promise.all(processNames.map((name) => terminateProcess(name, false)));
-  if (await waitUntilProcessesExit(processNames, TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS)) {
-    return;
+  // mai FileX Suite o altri prodotti FileX. I tool che nascondono la finestra
+  // alla chiusura ignorano WM_CLOSE: per loro il passaggio sarebbe tempo perso.
+  if (usesWindowCloseFallback(toolId)) {
+    await Promise.all(processNames.map((name) => terminateProcess(name, false)));
+    if (await waitUntilProcessesExit(processNames, TOOL_GRACEFUL_SHUTDOWN_TIMEOUT_MS)) {
+      return;
+    }
   }
   throw new Error(
-    `${desktopToolManifest[toolId].displayName} non si è chiuso in tempo. ` +
+    `${desktopToolManifest[toolId].displayName} non si è chiuso in tempo: controlla se nel tool c'è una finestra di salvataggio in attesa. ` +
       "Premi ‘Forza chiusura’ per chiuderlo qui e continuare l’aggiornamento.",
   );
 }

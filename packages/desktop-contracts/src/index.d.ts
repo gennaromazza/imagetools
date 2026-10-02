@@ -1265,6 +1265,7 @@ export interface FileXDesktopApi {
   startTrial: () => Promise<void>;
   finishTrial: () => Promise<DesktopLicenseState | null>;
   getLicenseState: (refresh?: boolean) => Promise<DesktopLicenseState>;
+  onLicenseState?: (listener: (state: DesktopLicenseState) => void) => () => void;
     activateLicense: (licenseKey: string, deviceLabel?: string) => Promise<DesktopLicenseState>;
     deactivateLicense: () => Promise<DesktopLicenseState>;
     openLicenseCheckout: (billingPeriod: "monthly" | "annual") => Promise<void>;

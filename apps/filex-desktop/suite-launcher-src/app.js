@@ -1,3 +1,4 @@
+import { subscribeLicenseChanges, trialDaysLeft } from './license-sync.js';
 const api = window.filexDesktop;
 const toolsGrid = document.querySelector('#tools-grid');
 const nav = document.querySelector('#category-nav');
@@ -53,7 +54,6 @@ let favorites = new Set(JSON.parse(localStorage.getItem('filex-favorites') || '[
 let recent = JSON.parse(localStorage.getItem('filex-recent') || '[]');
 let suiteUpdateDeferred = false;
 let suiteInstallTimer = null;
-let suiteInstallSeconds = 0;
 let toastTimer = null;
 let renamingCategoryIndex = null;
 let pendingForceClose = null;
@@ -125,7 +125,7 @@ function renderLicense(state) {
   licenseActivationView.hidden = permitted;
   document.querySelector('#trial-purchase').hidden = !state?.trial;
   if (permitted) {
-    document.querySelector('#license-state-badge').textContent = state.trial ? `PROVA · ${Math.max(0, Math.ceil((state.validUntil - Date.now()) / 86400000))} GIORNI RIMASTI` : state.status === 'grace' ? 'PERIODO DI CORTESIA' : 'ATTIVA';
+    document.querySelector('#license-state-badge').textContent = state.trial ? `PROVA · ${trialDaysLeft(state)} GIORNI RIMASTI` : state.status === 'grace' ? 'PERIODO DI CORTESIA' : 'ATTIVA';
     document.querySelector('#license-state-message').textContent = state.message;
     document.querySelector('#license-devices').textContent = `${state.activation.current} di ${state.activation.limit}`;
     document.querySelector('#license-valid-until').textContent = formatLicenseDate(state.validUntil);
@@ -159,21 +159,6 @@ function formatDownloadSpeed(bytesPerSecond) {
   if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return '';
   const megabytes = bytesPerSecond / (1024 * 1024);
   return `${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB/s`;
-}
-
-function startSuiteInstallCountdown(version) {
-  if (suiteInstallTimer || suiteUpdateDeferred) return;
-  suiteInstallSeconds = 10;
-  suiteUpdateInstall.textContent = `Installa ora (${suiteInstallSeconds})`;
-  suiteInstallTimer = setInterval(() => {
-    suiteInstallSeconds -= 1;
-    suiteUpdateInstall.textContent = `Installa ora (${Math.max(0, suiteInstallSeconds)})`;
-    if (suiteInstallSeconds > 0) return;
-    stopSuiteInstallCountdown();
-    suiteUpdateTitle.textContent = `Installazione FileX ${version}`;
-    suiteUpdateMessage.textContent = 'FileX e tutti i tool aperti verranno chiusi e riavviati automaticamente.';
-    void requestSuiteInstall();
-  }, 1000);
 }
 
 function renderSuiteUpdate(state) {
@@ -210,11 +195,10 @@ function renderSuiteUpdate(state) {
   }
   if (status === 'ready') {
     suiteUpdateTitle.textContent = `FileX ${version} è pronto`;
-    suiteUpdateMessage.textContent = 'L’installazione partirà automaticamente. Windows potrebbe chiedere conferma.';
+    suiteUpdateMessage.textContent = 'Salva il lavoro nei tool aperti, poi premi “Installa ora”: FileX chiuderà i tool e Windows potrebbe mostrare l’installer.';
     suiteUpdateProgressBar.style.width = '100%';
     suiteUpdateLater.hidden = false;
     suiteUpdateInstall.hidden = false;
-    startSuiteInstallCountdown(version);
     return;
   }
   if (status === 'installing') {
@@ -682,5 +666,7 @@ suiteUpdateDismiss.addEventListener('click', () => {
 api.onSuiteUpdateState(renderSuiteUpdate);
 void api.getSuiteUpdateState().then(renderSuiteUpdate);
 renderNav();
+subscribeLicenseChanges(api, renderLicense);
+setInterval(() => { if (licenseState) renderLicense(licenseState); }, 60 * 60 * 1000);
 void refreshLicense().catch(error => renderLicense({ status:'unavailable', enforcement:'observe', activation:{current:0,limit:2}, message:error.message||String(error) }));
 refresh().catch(error => { document.querySelector('#runtime-info').textContent=`Errore: ${error.message||error}`; });

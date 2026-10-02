@@ -1,6 +1,7 @@
 import * as electron from "electron";
 import type {
   DesktopDockState,
+  DesktopLicenseState,
   DesktopReleaseChannel,
   DesktopSuiteUpdateState,
   DesktopToolId,
@@ -40,6 +41,11 @@ const suiteApi = {
   setSuiteDockEnabled: (enabled: boolean): Promise<DesktopDockState> =>
     ipcRenderer.invoke("filex:set-suite-dock-enabled", enabled),
   getLicenseState: (refresh?: boolean) => ipcRenderer.invoke("filex:get-license-state", refresh),
+  onLicenseState: (listener: (state: DesktopLicenseState) => void) => {
+    const wrappedListener = (_event: electron.IpcRendererEvent, state: DesktopLicenseState) => listener(state);
+    ipcRenderer.on("filex:license-state-changed", wrappedListener);
+    return () => ipcRenderer.removeListener("filex:license-state-changed", wrappedListener);
+  },
   activateLicense: (licenseKey: string, deviceLabel?: string) =>
     ipcRenderer.invoke("filex:activate-license", licenseKey, deviceLabel),
   deactivateLicense: () => ipcRenderer.invoke("filex:deactivate-license"),

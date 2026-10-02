@@ -8,6 +8,7 @@ import { readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
   DesktopDockState,
+  DesktopLicenseState,
   DesktopSuiteNotification,
   DesktopReleaseChannel,
   DesktopRuntimeInfo,
@@ -32,6 +33,13 @@ import {
 import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
 import { prepareFileXSuiteUpdate } from "./filex-process-coordinator.js";
 import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState, startTrial, finishTrial } from "./license-service.js";
+import { createLicenseWatcher, LICENSE_STATE_CHANGED_CHANNEL } from "./license-watcher.js";
+import {
+  isSuiteInstallInProgress,
+  shouldCheckSuiteUpdate,
+  shouldNotifySuiteReady,
+  SUITE_UPDATE_CHECK_INTERVAL_MS,
+} from "./suite-update-policy.js";
 import {
   resolveSuiteDockEnabled,
   resolveSuiteStartupPolicy,
@@ -50,7 +58,22 @@ let tray: TrayInstance | null = null;
 let dockEnabled = true;
 let toolUpdateTimer: NodeJS.Timeout | null = null;
 let lastNotifiedToolUpdateCount: number | null = null;
+let suiteUpdateTimer: NodeJS.Timeout | null = null;
+let lastNotifiedSuiteVersion: string | null = null;
 const TOOL_UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const LICENSE_CHECK_INTERVAL_MS = 30 * 1000;
+const LICENSE_REVALIDATE_INTERVAL_MS = 15 * 60 * 1000;
+// Dashboard e dock restano allineati: ogni cambio di licenza viene inviato a entrambe le finestre.
+const licenseWatcher = createLicenseWatcher({
+  read: getLicenseState,
+  intervalMs: LICENSE_CHECK_INTERVAL_MS,
+  revalidateEveryMs: LICENSE_REVALIDATE_INTERVAL_MS,
+  publish: (state) => {
+    for (const window of [mainWindow, dockWindow]) {
+      if (window && !window.isDestroyed()) window.webContents.send(LICENSE_STATE_CHANGED_CHANNEL, state);
+    }
+  },
+});
 const startsInBackground = process.argv.includes("--filex-background");
 const isPackagedSmokeTest = process.argv.includes("--filex-suite-packaged-smoke-test");
 
@@ -308,6 +331,10 @@ function updateTrayMenu(): void {
     ...getSuiteManagedTools().map((tool) => ({
       label: tool.displayName,
       click: async () => {
+        if (isSuiteInstallInProgress(getSuiteUpdateState().status)) {
+          dialog.showErrorBox("FileX Suite", "L'aggiornamento di FileX Suite e' in corso: attendi il riavvio prima di aprire un tool.");
+          return;
+        }
         const license = await getLicenseState();
         if (!license.canUseTools && tool.licenseRuntime !== "standalone") {
           dialog.showErrorBox("FileX Suite", "FileX All Access non e' attivo. Apri la Suite per gestire la licenza.");
@@ -405,6 +432,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:force-close-tool-for-update", (_event, toolId: DesktopToolId) =>
     forceCloseToolForUpdate(toolId));
   ipcMain.handle("filex:open-installed-tool", (_event, toolId: DesktopToolId, launchArgs?: string[]) => {
+    if (isSuiteInstallInProgress(getSuiteUpdateState().status)) {
+      return Promise.resolve({ ok: false, message: "L'aggiornamento di FileX Suite e' in corso: attendi il riavvio prima di aprire un tool." });
+    }
     const requiresLicense = desktopToolManifest[toolId]?.licenseRuntime !== "standalone";
     return getLicenseState().then((license) => !requiresLicense || license.canUseTools
       ? openInstalledTool(toolId, launchArgs)
@@ -421,11 +451,20 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:get-suite-dock-state", () => readDockState());
   ipcMain.handle("filex:save-suite-dock-state", (_event, state: Partial<DesktopDockState>) => saveDockState(state));
   ipcMain.handle("filex:set-suite-dock-enabled", (_event, enabled: boolean) => setDockEnabled(enabled !== false));
-  ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => getLicenseState(Boolean(refresh)));
-  ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) => activateLicense(licenseKey, deviceLabel));
-  ipcMain.handle("filex:deactivate-license", () => deactivateLicense());
+  const publishing = async (state: Promise<DesktopLicenseState>): Promise<DesktopLicenseState> => {
+    const resolved = await state;
+    licenseWatcher.notify(resolved);
+    return resolved;
+  };
+  ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => publishing(getLicenseState(Boolean(refresh))));
+  ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) => publishing(activateLicense(licenseKey, deviceLabel)));
+  ipcMain.handle("filex:deactivate-license", () => publishing(deactivateLicense()));
   ipcMain.handle("filex:start-trial", () => startTrial());
-  ipcMain.handle("filex:finish-trial", () => finishTrial());
+  ipcMain.handle("filex:finish-trial", async () => {
+    const state = await finishTrial();
+    if (state) licenseWatcher.notify(state);
+    return state;
+  });
   ipcMain.handle("filex:open-license-checkout", async (_event, billingPeriod: "monthly" | "annual") => {
     const checkout = await getCheckoutConfiguration();
     const destination = checkout[billingPeriod] ?? "https://filex-suite.web.app/#prezzi";
@@ -486,6 +525,18 @@ if (!hasSingleInstanceLock) {
       enabled: app.isPackaged && process.platform === "win32",
       allowPrerelease: releaseChannel() === "beta",
       onState: (state: DesktopSuiteUpdateState) => {
+        const dashboardVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !mainWindow.isMinimized());
+        if (Notification.isSupported() && shouldNotifySuiteReady({
+          status: state.status, version: state.availableVersion, lastNotifiedVersion: lastNotifiedSuiteVersion, dashboardVisible,
+        })) {
+          lastNotifiedSuiteVersion = state.availableVersion;
+          const notification = new Notification({
+            title: "FileX Suite",
+            body: `FileX ${state.availableVersion} e' pronto. Salva il lavoro e apri la Suite per installarlo.`,
+          });
+          notification.on("click", () => { void createMainWindow(); });
+          notification.show();
+        }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("filex:suite-update-state", state);
         }
@@ -502,7 +553,14 @@ if (!hasSingleInstanceLock) {
     createTray();
     if (startupPolicy.createDock) await createDock(!startsInBackground);
     startToolUpdateChecks();
-    if (app.isPackaged) setTimeout(() => { void checkSuiteUpdate(); }, 3500);
+    licenseWatcher.start();
+    if (app.isPackaged) {
+      setTimeout(() => { void checkSuiteUpdate(); }, 3500);
+      // La Suite resta aperta in background per giorni: senza un controllo periodico non vedrebbe mai le nuove versioni.
+      suiteUpdateTimer = setInterval(() => {
+        if (shouldCheckSuiteUpdate(getSuiteUpdateState().status)) void checkSuiteUpdate();
+      }, SUITE_UPDATE_CHECK_INTERVAL_MS);
+    }
   }).catch((error) => {
     console.error("FileX Suite failed to start", error);
     app.exit(1);
@@ -513,6 +571,9 @@ app.on("activate", () => { void openSuiteExperience(); });
 app.on("window-all-closed", () => undefined);
 app.on("before-quit", () => {
   if (toolUpdateTimer) clearInterval(toolUpdateTimer);
+  licenseWatcher.stop();
+  if (suiteUpdateTimer) clearInterval(suiteUpdateTimer);
+  suiteUpdateTimer = null;
   toolUpdateTimer = null;
   tray?.destroy();
   tray = null;

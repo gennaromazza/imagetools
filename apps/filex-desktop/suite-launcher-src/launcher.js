@@ -1,3 +1,4 @@
+import { pruneResolvedLicenseDismissals, subscribeLicenseChanges } from './license-sync.js';
 const api = window.filexDesktop;
 const root = document.querySelector('#tools');
 const search = document.querySelector('#search');
@@ -172,6 +173,7 @@ async function refreshNotifications() {
       api.getSuiteUpdateState?.().catch(()=>null)||null,
       api.getLicenseState?.().catch(()=>null)||null,
     ]);
+    if(pruneResolvedLicenseDismissals(dismissed,license))persist('filex-dock-dismissed',[...dismissed].slice(-500));
     const next=[...events];
     if(suite && ['available','downloading','ready','installing','error'].includes(suite.status)){
       const labels={available:'Aggiornamento Suite disponibile',downloading:'Download Suite in corso',ready:'Suite pronta da installare',installing:'Installazione Suite in corso',error:'Errore aggiornamento Suite'};
@@ -202,6 +204,7 @@ window.addEventListener('keydown',event=>{
 window.addEventListener('blur',()=>{tooltip.hidden=true;panel('',false);message();});
 window.addEventListener('focus',()=>{void refresh().then(refreshNotifications);});
 api.onSuiteUpdateState?.(()=>{void refreshNotifications();});
+subscribeLicenseChanges(api,()=>{void refreshNotifications();});
 applyTheme();
 void refresh().then(refreshNotifications);
 setInterval(()=>{void refreshNotifications();},5000);

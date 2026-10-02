@@ -9,6 +9,7 @@ import type {
   DesktopLicenseState,
   DesktopLicenseStatus,
 } from "@photo-tools/desktop-contracts";
+import { singleFlight } from "./single-flight.js";
 import { trialDeviceHash, verifyOfflineAttestation } from "./license-attestation.js";
 
 const { app, safeStorage, dialog } = electron;
@@ -334,7 +335,7 @@ async function usableOffline(store: StoredLicense, now = Date.now()): Promise<De
 
 const deniedCredentials = new Set<string | undefined>();
 
-export async function getLicenseState(refresh = false): Promise<DesktopLicenseState> {
+async function computeLicenseState(refresh = false): Promise<DesktopLicenseState> {
   const developmentState = developmentLicenseState();
   if (developmentState) return developmentState;
   const store = await readStore();
@@ -343,7 +344,7 @@ export async function getLicenseState(refresh = false): Promise<DesktopLicenseSt
     const previousCredential = store.activationTokenEncrypted;
     try {
       const migrated = encryptToken(token);
-      if (!await saveStore({ ...store, activationTokenEncrypted: migrated }, previousCredential)) return getLicenseState(refresh);
+      if (!await saveStore({ ...store, activationTokenEncrypted: migrated }, previousCredential)) return computeLicenseState(refresh);
       if (deniedCredentials.has(previousCredential)) deniedCredentials.add(migrated);
       store.activationTokenEncrypted = migrated;
     } catch { /* A read-only profile must not destroy a still-readable legacy token. */ }
@@ -368,7 +369,7 @@ export async function getLicenseState(refresh = false): Promise<DesktopLicenseSt
       lastCheckedAt: Date.now(),
       canUseTools: mode !== "enforce",
     };
-    if (!await saveStore({ ...store, state: updated }, store.activationTokenEncrypted ?? null)) return getLicenseState(true);
+    if (!await saveStore({ ...store, state: updated }, store.activationTokenEncrypted ?? null)) return computeLicenseState(true);
     return updated;
   }
   if (!refresh && !deniedCredentials.has(store.activationTokenEncrypted) && store.state?.lastCheckedAt && Date.now() - store.state.lastCheckedAt < 24 * 60 * 60 * 1000) {
@@ -382,14 +383,14 @@ export async function getLicenseState(refresh = false): Promise<DesktopLicenseSt
     if (state.canUseTools && state.enforcement === "enforce" && !await usableOffline({ ...store, attestation: typeof payload.attestation === "string" ? payload.attestation : undefined })) {
       throw new Error("Attestazione della licenza non valida. Verifica data e connessione del PC.");
     }
-    if (!await saveStore({ ...store, state, attestation: typeof payload.attestation === "string" ? payload.attestation : undefined }, store.activationTokenEncrypted ?? null)) return getLicenseState(true);
+    if (!await saveStore({ ...store, state, attestation: typeof payload.attestation === "string" ? payload.attestation : undefined }, store.activationTokenEncrypted ?? null)) return computeLicenseState(true);
     if (state.canUseTools) deniedCredentials.delete(store.activationTokenEncrypted);
     return state;
   } catch (error) {
     if (error instanceof LicenseRequestError && (error.status === 401 || error.status === 403)) {
       deniedCredentials.add(store.activationTokenEncrypted);
       const state = emptyState("revoked", error.message);
-      if (!await saveStore({ ...store, state, attestation: undefined, activationTokenEncrypted: undefined }, store.activationTokenEncrypted ?? null)) return getLicenseState(true);
+      if (!await saveStore({ ...store, state, attestation: undefined, activationTokenEncrypted: undefined }, store.activationTokenEncrypted ?? null)) return computeLicenseState(true);
       return state;
     }
     if (deniedCredentials.has(store.activationTokenEncrypted)) return emptyState("revoked", "Licenza rifiutata dal server. Riattivala dalla Suite.");
@@ -397,6 +398,13 @@ export async function getLicenseState(refresh = false): Promise<DesktopLicenseSt
     if (offline) return offline;
     return emptyState("unavailable", error instanceof Error ? error.message : "Servizio licenze non disponibile.");
   }
+}
+
+const sharedLicenseState = singleFlight(computeLicenseState);
+
+// Dock, dashboard e tool chiedono lo stato insieme: le richieste identiche condividono una sola verifica.
+export function getLicenseState(refresh = false): Promise<DesktopLicenseState> {
+  return sharedLicenseState(refresh);
 }
 
 export async function activateLicense(licenseKey: string, deviceLabel?: string): Promise<DesktopLicenseState> {

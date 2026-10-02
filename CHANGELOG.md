@@ -30,6 +30,12 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-10-02 - FileX Suite 0.1.65
+
+- Licenza sempre allineata: dashboard e dock ricevono subito attivazione, disattivazione, scadenza e revoca. Controllo locale ogni 30 secondi e verifica col server ogni 15 minuti; le richieste contemporanee condividono una sola verifica. La notifica di licenza rimossa ricompare se la licenza si perde di nuovo e i giorni di prova rimasti si aggiornano.
+- Aggiornamenti della Suite: controllo ogni 6 ore anche con la Suite aperta in background, notifica quando l'aggiornamento e' pronto e la finestra e' chiusa. L'installazione non parte piu' da sola dopo 10 secondi: la avvii tu con Installa ora e durante l'installazione i tool non si possono riaprire.
+- Chiusura dei tool per gli aggiornamenti: attesa di 15 secondi (prima 9) allineata al tempo di salvataggio dei tool, segnale di chiusura con 5 secondi e un secondo tentativo, nessun passaggio inutile per i tool che si nascondono alla chiusura e messaggio che segnala una finestra di salvataggio in attesa.
+
 ## 2026-10-01 - FileX Suite 0.1.64
 
 - Nuovo strumento nella Suite: Album Flow, il software di impaginazione per album fotografici incluso in FileX All Access. Compare nell'elenco dei tool, nel dock e nelle notifiche come gli altri e si avvia dalla Suite con le stesse regole di licenza. Icona di Album Flow e controllo della licenza dentro l'app.
