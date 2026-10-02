@@ -56,7 +56,7 @@ function runtime(path: string, store: any, now = issuedAt + 1000, machine = guid
       process: { platform: "win32", env: {} },
       Date: class extends Date { static now() { return now; } },
       fetch: transport,
-      require: (name: string) => name === "./license-attestation.js" ? load("apps/filex-desktop/src/license-attestation.ts") : mocks[name] ?? require(name),
+      require: (name: string) => name === "./license-attestation.js" ? load("apps/filex-desktop/src/license-attestation.ts") : name === "./single-flight.js" ? load("apps/filex-desktop/src/single-flight.ts") : mocks[name] ?? require(name),
     });
     return module.exports;
   }
