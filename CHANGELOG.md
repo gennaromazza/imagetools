@@ -31,6 +31,13 @@
 -->
 
 
+
+## 2026-10-03 - FileX Suite 0.1.67
+
+- Nuova voce «Assistenza» nella barra laterale: scrivi al supporto direttamente dalla Suite, scegliendo se hai un problema, un suggerimento o una domanda, lo strumento coinvolto, l'email per la risposta e il messaggio. Ricevi subito un numero richiesta.
+- Le informazioni tecniche (versione, sistema, stato della licenza) vengono inviate solo se lasci spuntata la casella e puoi vedere prima cosa parte. Non vengono mai inviati foto, nomi di file, cartelle né la chiave di licenza.
+- Se l'invio non riesce il testo resta nella finestra e puoi copiarlo o scrivere con la tua email. Funziona anche prima di avere una licenza.
+
 ## 2026-10-03 - Archivio Flow 0.1.46
 
 - Icona del software sempre presente: finestra, barra delle applicazioni, icona vicino all'orologio, finestre di avviso e di stampa usano il logo di Archivio Flow invece dell'icona generica di Electron, con ripiego automatico se un formato non si carica.
