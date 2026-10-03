@@ -30,6 +30,16 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-10-03 - Album Flow 0.2.0
+
+- Raddrizza le foto: nel ritaglio (doppio clic) Alt + rotella, il cursore «Raddrizza» o i tasti virgola e punto ruotano la foto fino a 45° per lato, con griglia a terzi; l'ingrandimento sale da solo per non lasciare angoli vuoti e il raddrizzamento è nel progetto, nell'anteprima e nell'esportazione.
+- Nuovo pannello «Personalizza»: sfondi a immagine (di serie o caricati da te) per spread o per pagina, e testi in stile rivista con stili di partenza (testata, titolo, occhiello, testo, capolettera, citazione, didascalia, firma) che creano più box separati, uno sotto l'altro, agganciati tra loro. I testi si trascinano, ridimensionano e ruotano sullo spread; con il pannello aperto le foto sono ferme.
+- Quindici famiglie di font, tutte open source (licenza SIL OFL) e incluse nell'app, incorporate negli SVG esportati. Archivio personale di frasi, stili di testo e grafiche (PNG, SVG) valido per tutti gli album. Il testo inserito sceglie un colore che si legge sullo sfondo della pagina.
+- Backup del solo progetto su Google Drive dal pulsante «Drive» (mai le foto), con elenco delle versioni e ripristino come copia che non sovrascrive l'album del computer; backup automatico alla chiusura attivabile dalla Home.
+- Ricollegamento delle foto su un altro computer o dopo uno spostamento: scegli la cartella e le foto si ritrovano per percorso, poi per nome e dimensione, senza mai indovinare tra nomi doppi.
+- Anteprima grande (Spazio): la foto si apre sempre intera, zoom con rotella, + e −, 1:1 e spostamento solo nell'anteprima, e i comandi non si confondono più con l'immagine.
+- Corretto: «Svuota spread» e «Scambia pagine» potevano lasciare cornici libere orfane che rendevano il progetto non riapribile.
+
 ## 2026-10-03 - Archivio Flow 0.1.45
 
 - Importazione guidata a domande in quattro tappe (scegli le foto, per quale lavoro, in che cartella, controlla e avvia): una domanda per schermata, Invio per avanzare, suggerimento del lavoro probabile con "Sì / No", ricerca del lavoro esistente e schermata finale con durata, apertura cartella, espulsione della scheda e apertura in Adobe Bridge se installato.
