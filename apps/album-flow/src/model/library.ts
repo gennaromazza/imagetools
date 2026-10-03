@@ -181,3 +181,11 @@ export function clearRatings(project: Project): Project {
   if (project.assets.every((asset) => (asset.rating ?? 0) === 0)) return project;
   return touch({ ...project, assets: project.assets.map((asset) => ((asset.rating ?? 0) === 0 ? asset : { ...asset, rating: 0 })) });
 }
+
+/** Misura (px) con cui mostrare la foto intera nell'anteprima al passaggio del mouse. */
+export function hoverPreviewSize(asset: Pick<AlbumAssetV2, "width" | "height" | "aspectRatio" | "rotationDegrees">, maxSide = 440): { width: number; height: number } {
+  const base = asset.aspectRatio > 0 ? asset.aspectRatio : asset.width > 0 && asset.height > 0 ? asset.width / asset.height : 1.5;
+  const turned = asset.rotationDegrees === 90 || asset.rotationDegrees === 270;
+  const aspect = turned ? 1 / base : base;
+  return aspect >= 1 ? { width: maxSide, height: Math.round(maxSide / aspect) } : { width: Math.round(maxSide * aspect), height: maxSide };
+}

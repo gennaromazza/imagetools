@@ -33,6 +33,7 @@ import type { DesignActions, DesignTab } from "./DesignPanel";
 import { CloudDialog } from "./CloudDialog";
 import { RelinkDialog } from "./RelinkDialog";
 import { useMissingPhotos } from "../hooks/useMissingPhotos";
+import { useNewFeature } from "../hooks/useNewFeature";
 import { applyRelink } from "../model/relinkAssets";
 import { driveAvailable } from "../desktop/cloud";
 import { addGraphicOverlay, addTextOverlay, addTextStack, duplicateOverlay, orderOverlay, groupOverlays, moveOverlayGroup, removeOverlay, setAlbumBackground, setSpreadBackground, ungroupOverlay, updateOverlay, updateSpreadBackground } from "../model/design";
@@ -642,6 +643,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
   };
 
   const { missingIds } = useMissingPhotos(project.assets);
+  const newDrive = useNewFeature("drive");
   const rename = (name: string) => commit((p) => ({ ...p, projectName: name, updatedAt: nowIso() }));
   const setStage = (stage: AlbumStage) => commit((p) => (p.stage === stage ? p : touch({ ...p, stage })));
   const hasPhotos = project.assets.length > 0;
@@ -702,7 +704,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
           </select>
         </label>
         {missingIds.size > 0 ? <button type="button" className="btn btn--warn" onClick={() => setDialog("relink")} title="Alcune foto non si trovano più sul disco: indica dove sono adesso">{missingIds.size} {missingIds.size === 1 ? "foto non trovata" : "foto non trovate"} · Ricollega</button> : null}
-        {driveAvailable() ? <button type="button" className="btn" onClick={() => setDialog("cloud")} title="Backup del progetto su Google Drive (le foto non vengono caricate)"><Icon name="archive" size={16} /> Drive</button> : null}
+        {driveAvailable() ? <button type="button" className="btn" onClick={() => { newDrive.markSeen(); setDialog("cloud"); }} title="Backup del progetto su Google Drive (le foto non vengono caricate)"><Icon name="archive" size={16} /> Drive{newDrive.isNew ? <span className="new-pill">Nuovo</span> : null}</button> : null}
         <button type="button" className="btn" onClick={() => setDialog("autobuild")} disabled={!hasPhotos} title="Auto Build (Ctrl/⌘+B)"><Icon name="wand" size={16} /> Auto Build</button>
         <IconButton icon="play" label="Anteprima per il cliente (F5)" onClick={() => setPresenting(true)} disabled={count === 0} size={20} className="icon-btn--round" />
         <button type="button" className="btn btn--primary" onClick={() => setDialog("export")} disabled={count === 0} title="Esporta (Ctrl/⌘+E)"><Icon name="export" size={16} /> Esporta</button>

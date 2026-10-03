@@ -7,6 +7,8 @@ import { Workspace } from "./components/Workspace";
 import { pushRecentFormat } from "./model/formats";
 import { parseAlbumProject, readEmbeddedMedia } from "./model/portability";
 import { restoreEmbeddedMedia } from "./model/mediaStore";
+import { WhatsNewDialog } from "./components/WhatsNewDialog";
+import { WHATS_NEW, lastSeenVersion, releasesToShow, rememberVersion, shouldShowWhatsNew, type WhatsNewRelease } from "./model/whatsNew";
 import { autoBackupEnabled, backupOnClose, projectsToBackup, loadBackupMarks, setAutoBackupEnabled } from "./desktop/autoBackup";
 import { backupToDrive, driveAvailable, driveStatus } from "./desktop/cloud";
 import { createEmptyProject, nowIso, touch } from "./model/project";
@@ -33,6 +35,15 @@ export function App() {
   const [revision, setRevision] = useState(0);
   const [banner, setBanner] = useState(WAITING);
   const [saveFailed, setSaveFailed] = useState(false);
+  // Dopo un aggiornamento: cosa c'è di nuovo e dove trovarlo. Si ripresenta fino a «Ho capito».
+  const currentVersion = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.0.0";
+  const [whatsNew, setWhatsNew] = useState<readonly WhatsNewRelease[] | null>(() => {
+    const seen = lastSeenVersion();
+    return shouldShowWhatsNew(seen, currentVersion, initial.projects.length > 0) ? releasesToShow(seen, currentVersion) : null;
+  });
+  useEffect(() => { if (!whatsNew && lastSeenVersion() === null) rememberVersion(currentVersion); }, [whatsNew, currentVersion]);
+  const closeWhatsNew = () => { rememberVersion(currentVersion); setWhatsNew(null); };
+  const openWhatsNew = () => { const latest = WHATS_NEW.find((release) => release.version === currentVersion) ?? WHATS_NEW[0]; setWhatsNew([latest]); };
   const projectInput = useRef<HTMLInputElement>(null);
   const license = useLicenseNotice();
 
@@ -174,6 +185,7 @@ export function App() {
   return (
     <div className="album-app">
       {license ? <div className={`license-notice license-notice--${license.level}`} role={license.level === "error" ? "alert" : "status"}>{license.text}</div> : null}
+      {whatsNew ? <WhatsNewDialog releases={whatsNew} onClose={closeWhatsNew} /> : null}
       {active ? (
         <Workspace key={`${active.projectId}:${revision}`} initial={active} onChange={onWorkspaceChange} onExit={() => setActiveId(null)} onOpenCopy={openCopy} />
       ) : (
@@ -185,6 +197,7 @@ export function App() {
           onOpen={setActiveId}
           autoBackup={autoBackup}
           onAutoBackup={driveAvailable() ? changeAutoBackup : undefined}
+          onWhatsNew={openWhatsNew}
           reopenLast={reopenLast}
           onReopenLast={changeReopenLast}
           onCreate={create}

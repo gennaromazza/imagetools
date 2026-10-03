@@ -11,6 +11,7 @@ import { AreaStrip } from "./AreaStrip";
 import { DesignPanel, type DesignActions, type DesignTab } from "./DesignPanel";
 import type { DesignHandlers } from "./DesignLayers";
 import { Icon } from "./icons";
+import { useNewFeature } from "../hooks/useNewFeature";
 import { LayoutBrowser } from "./LayoutBrowser";
 import { SpreadView, type Draft } from "./SpreadView";
 import { ColorDots, ContextMenu, IconButton, Popover, Stars, type MenuItem } from "./ui";
@@ -268,6 +269,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     );
   };
 
+  const newDesign = useNewFeature("personalizza");
   const bg = useMemo(() => BACKGROUND_SWATCHES, []);
   const where = !two ? "foglio intero" : areaIndex === 0 ? "pagina sinistra" : "pagina destra";
 
@@ -358,7 +360,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
           <IconButton icon="minus" label="Riduci (−)" onClick={() => actions.setZoom(Math.max(0.4, Number((zoom - 0.15).toFixed(2))))} size={15} />
           <button type="button" className="btn btn--sm" onClick={() => actions.setZoom(1)} title="Adatta alla finestra (0)">{Math.round(zoom * 100)}%</button>
           <IconButton icon="plus" label="Ingrandisci (+)" onClick={() => actions.setZoom(Math.min(3, Number((zoom + 0.15).toFixed(2))))} size={15} />
-          <button type="button" className={`chip${design.open ? " is-active" : ""}`} onClick={design.onToggle} aria-pressed={design.open} title="Sfondi a immagine, testi in stile rivista, frasi e grafiche">Personalizza</button>
+          <button type="button" className={`chip${design.open ? " is-active" : ""}`} onClick={design.onToggle} aria-pressed={design.open} title="Sfondi a immagine, testi in stile rivista, frasi e grafiche" onClickCapture={newDesign.markSeen}>Personalizza{newDesign.isNew ? <span className="new-pill">Nuovo</span> : null}</button>
           <button type="button" className={`chip${sizes ? " is-active" : ""}`} onClick={actions.toggleSizes} aria-pressed={sizes} title="Mostra su ogni foto la misura stampata e la risoluzione (S)">Misure</button>
           <button type="button" className={`chip${guides ? " is-active" : ""}`} onClick={actions.toggleGuides} aria-pressed={guides} title="Mostra zona sicura e piega (G)">Guide</button>
         </div>

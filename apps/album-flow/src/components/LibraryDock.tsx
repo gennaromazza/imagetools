@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { AlbumAssetTag, AlbumAssetV2, AlbumProjectV2, AlbumSortKey } from "@photo-tools/shared-types";
 import { hasDesktop } from "../desktop/api";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import { useStableCallbacks } from "../hooks/useStableCallbacks";
-import { assetsInTab, filterAssets, type AssetUsageRef, type LibraryTab } from "../model/library";
+import { assetsInTab, filterAssets, hoverPreviewSize, type AssetUsageRef, type LibraryTab } from "../model/library";
 import { beginDrag, currentDrag, endDrag } from "./dnd";
 import { Icon } from "./icons";
 import { ContextMenu, Popover, Stars, type MenuItem } from "./ui";
@@ -31,21 +32,59 @@ interface ThumbProps {
   onRate: (asset: AlbumAssetV2, rating: number) => void;
 }
 
+/** La foto intera, più grande, accanto alla miniatura (che la mostra in un riquadro fisso): compare dopo una breve sosta del mouse. */
+function HoverPreview({ asset, anchor }: { asset: AlbumAssetV2; anchor: DOMRect }) {
+  const src = useAssetSrc(asset, 720);
+  const size = hoverPreviewSize(asset);
+  const turned = asset.rotationDegrees === 90 || asset.rotationDegrees === 270;
+  const margin = 10;
+  const caption = 34;
+  const boxW = size.width + 2;
+  const boxH = size.height + caption;
+  const left = Math.min(Math.max(margin, anchor.left + anchor.width / 2 - boxW / 2), Math.max(margin, window.innerWidth - boxW - margin));
+  const above = anchor.top - boxH - margin;
+  const top = above >= margin ? above : Math.min(anchor.bottom + margin, Math.max(margin, window.innerHeight - boxH - margin));
+  return createPortal(
+    <div className="thumb-preview" style={{ left, top, width: boxW }} role="img" aria-label={`Anteprima intera di ${asset.fileName}`}>
+      <div className="thumb-preview__image" style={{ width: size.width, height: size.height }}>
+        {src ? (
+          <img src={src} alt="" draggable={false} style={{ width: turned ? size.height : size.width, height: turned ? size.width : size.height, transform: asset.rotationDegrees ? `rotate(${asset.rotationDegrees}deg)` : undefined }} />
+        ) : <span className="thumb__ph" />}
+      </div>
+      <div className="thumb-preview__caption"><strong>{asset.fileName.replace(/\.[^.]+$/, "")}</strong>{asset.width > 0 ? <span>{asset.width} × {asset.height} px</span> : null}</div>
+    </div>,
+    document.body,
+  );
+}
+
 const Thumb = memo(function Thumb({ asset, size, selected, uses, chapterColor, dropBefore, onPointer, onOpen, onPlace, onContext, onDragStart, onDragOver, onDrop, onRate }: ThumbProps) {
   const src = useAssetSrc(asset, Math.round(size * 1.5));
+  const [hover, setHover] = useState<DOMRect | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const hide = useCallback(() => { window.clearTimeout(timer.current); setHover(null); }, []);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => {
+    if (!hover) return;
+    // Scorrere la libreria o premere un tasto chiude l'anteprima: non deve restare a mezz'aria.
+    window.addEventListener("wheel", hide, { passive: true, capture: true });
+    window.addEventListener("keydown", hide, true);
+    return () => { window.removeEventListener("wheel", hide, true); window.removeEventListener("keydown", hide, true); };
+  }, [hover, hide]);
   return (
     <div
+      onMouseEnter={(event) => { const element = event.currentTarget; window.clearTimeout(timer.current); timer.current = window.setTimeout(() => { if (!currentDrag()) setHover(element.getBoundingClientRect()); }, 450); }}
+      onMouseLeave={hide}
       className={`thumb${selected ? " thumb--selected" : ""}${uses > 0 ? " thumb--used" : ""}${dropBefore ? " thumb--drop" : ""}`}
       style={{ width: size }}
       role="option"
       aria-selected={selected}
       data-asset-id={asset.id}
       draggable
-      onDragStart={(event) => onDragStart(event, asset)}
+      onDragStart={(event) => { hide(); onDragStart(event, asset); }}
       onDragEnd={endDrag}
       onDragOver={(event) => onDragOver(event, asset)}
       onDrop={(event) => onDrop(event, asset)}
-      onClick={(event) => onPointer(event, asset)}
+      onClick={(event) => { hide(); onPointer(event, asset); }}
       onDoubleClick={() => onPlace(asset)}
       onContextMenu={(event) => onContext(event, asset)}
       title={`${asset.fileName}${asset.width > 0 ? ` · ${asset.width} × ${asset.height} px (${(asset.width * asset.height / 1e6).toFixed(1)} MP)` : ""}${uses ? ` · usata ${uses === 1 ? "una volta" : `${uses} volte`}` : " · non ancora usata"}`}
@@ -57,6 +96,7 @@ const Thumb = memo(function Thumb({ asset, size, selected, uses, chapterColor, d
         {asset.albumTags?.length ? <span className="thumb__tags">{asset.albumTags.map((tag) => TAG_LABEL[tag]).join("")}</span> : null}
         <button type="button" className="thumb__view" aria-label="Guarda in grande (Spazio)" title="Guarda in grande (Spazio)" onClick={(event) => { event.stopPropagation(); onOpen(asset); }}><Icon name="eye" size={14} /></button>
       </div>
+      {hover ? <HoverPreview asset={asset} anchor={hover} /> : null}
       <div className="thumb__meta">
         <span className="thumb__name">{asset.fileName.replace(/\.[^.]+$/, "")}</span>
         <Stars value={asset.rating} size={11} onChange={(rating) => onRate(asset, rating)} label={`Valutazione di ${asset.fileName}`} />

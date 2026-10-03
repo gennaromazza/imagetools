@@ -9,6 +9,7 @@ import { findItem, itemAspect, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeAsset, makeProject } from "./fixtures";
 import { TEMPLATE_STORAGE_KEY, applyTemplate, applyTemplatesToAlbum, bestAssignment, loadTemplates, matchTemplates, removeTemplate, reorderFrame, saveTemplates, sanitizeTemplate, setFrame, templateFromArea, templateTarget, upsertTemplate } from "./templates";
 import { hasFreeLayout } from "./project";
+import { hoverPreviewSize } from "./library";
 import { placeItem } from "./placement";
 import { DEFAULT_AUTO_BUILD, autoBuildAlbum } from "./autobuild";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
@@ -898,4 +899,16 @@ test("raddrizzamento: sopravvive al salvataggio e il file con un angolo fuori sc
   const broken = JSON.parse(serializeAlbumProject(project));
   broken.project.spreads[0].areas[0].items[0].angle = 120;
   assert.throws(() => parseAlbumProject(JSON.stringify(broken)));
+});
+
+test("anteprima al passaggio del mouse: la foto intera, con le sue proporzioni e la rotazione, entro il lato massimo", () => {
+  const base = { width: 6000, height: 4000, aspectRatio: 1.5 };
+  assert.deepEqual(hoverPreviewSize(base), { width: 440, height: 293 });
+  assert.deepEqual(hoverPreviewSize({ width: 4000, height: 6000, aspectRatio: 2 / 3 }), { width: 293, height: 440 });
+  assert.deepEqual(hoverPreviewSize({ ...base, rotationDegrees: 90 }), { width: 293, height: 440 }, "ruotata di 90°: scambia le proporzioni");
+  assert.deepEqual(hoverPreviewSize({ ...base, rotationDegrees: 180 }), { width: 440, height: 293 });
+  assert.deepEqual(hoverPreviewSize({ width: 5000, height: 5000, aspectRatio: 1 }, 300), { width: 300, height: 300 });
+  assert.deepEqual(hoverPreviewSize({ width: 0, height: 0, aspectRatio: 0 }), { width: 440, height: 293 }, "misure ignote: proporzione 3:2");
+  const panorama = hoverPreviewSize({ width: 7000, height: 1000, aspectRatio: 7 });
+  assert.ok(panorama.width === 440 && panorama.height >= 60 && panorama.height <= 64);
 });
