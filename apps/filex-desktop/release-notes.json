@@ -321,6 +321,11 @@
       "Importazione SD più affidabile su schede grandi: inventario progressivo, paginazione cronologica e gruppi di scatto modificabili anche oltre la mezzanotte.",
       "Selezione esplicita dei file importati, protezione dalle richieste concorrenti e avanzamento correlato alla singola operazione; anteprime virtualizzate con coda annullabile e cache separata per scheda.",
       "Aggiornati i test disponibili dalla Dev Console e le pagine ufficiali con il nuovo flusso di importazione."
+    ],
+    "0.1.45": [
+      "Importazione guidata in quattro tappe: scegli le foto, per quale lavoro, in che cartella, controlla e avvia, con suggerimento del lavoro probabile, riepilogo con spazio e tempo e schermata finale.",
+      "Foto già in archivio riconosciute (anche da una scheda di backup) e file .xmp copiati insieme alla loro foto; miniature molto più veloci anche per i RAW e foto verticali raddrizzate.",
+      "Copia verificata sul contenuto, ripresa delle importazioni interrotte, ultime importazioni, più schede collegate ed espulsione della scheda."
     ]
   },
   "image-converter": {

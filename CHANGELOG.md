@@ -30,6 +30,18 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+## 2026-10-03 - Archivio Flow 0.1.45
+
+- Importazione guidata a domande in quattro tappe (scegli le foto, per quale lavoro, in che cartella, controlla e avvia): una domanda per schermata, Invio per avanzare, suggerimento del lavoro probabile con "Sì / No", ricerca del lavoro esistente e schermata finale con durata, apertura cartella, espulsione della scheda e apertura in Adobe Bridge se installato.
+- Riepilogo con dimensione, tempo stimato (impara dalle tue importazioni) e spazio libero in destinazione; "Avvia" si ferma con un motivo chiaro se il disco non basta.
+- Foto già in archivio riconosciute anche in un altro lavoro o da una scheda di backup (dimensione, impronta e conferma sul contenuto): etichetta in griglia, avviso se la scheda è già scaricata, "Solo le nuove" e salto facoltativo in importazione.
+- I file di accompagnamento (.xmp e simili) non compaiono più come foto e vengono copiati con la loro foto con lo stesso nome base, così Lightroom e Bridge li abbinano.
+- Miniature molto più veloci: miniatura EXIF dei RAW Sony ARW, Canon CR2, Nikon NEF, DNG e Fujifilm RAF letta da pochi KB invece dell'anteprima intera (da circa 1 secondo a pochi millisecondi per file sull'ARW provato); le foto verticali non compaiono più girate di lato.
+- Griglia della scheda più fluida con 20.000 foto: scorrimento e selezione senza ridisegni inutili, frecce/Home/Fine/Pagina su-giù, ingrandimento con Invio o doppio clic, scelte rapide (tutte, oggi, ultimo giorno, ultimi 100) e anteprima grande che parte dalla miniatura.
+- Copia più sicura: verifica SHA-256 del contenuto, ritentativi solo per errori transitori, messaggio chiaro a disco pieno, recupero dei file temporanei dopo un crash e rollback segnalato se una rinomina fallisce.
+- Ripresa di un'importazione interrotta dalla scheda, interruzione con conferma e messaggio rassicurante, elenco delle ultime importazioni, scelta tra più schede collegate senza perdere la selezione.
+- Server locale dell'app limitato a localhost, apertura cartelle solo su directory reali e senza comandi di shell; barra laterale compatta con voci ridotte durante il percorso.
+
 ## 2026-10-02 - FileX Suite 0.1.66
 
 - Licenza sempre allineata: dashboard e dock ricevono subito attivazione, disattivazione, scadenza e revoca. Controllo locale ogni 30 secondi e verifica col server ogni 15 minuti; le richieste contemporanee condividono una sola verifica. La notifica di licenza rimossa ricompare se la licenza si perde di nuovo e i giorni di prova rimasti si aggiornano.
