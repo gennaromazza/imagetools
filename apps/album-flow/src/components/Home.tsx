@@ -40,6 +40,9 @@ export interface HomeProps {
   onDemo: () => void;
   reopenLast: boolean;
   onReopenLast: (on: boolean) => void;
+  /** Solo nell'app desktop con Google Drive: backup automatico alla chiusura. */
+  autoBackup?: boolean;
+  onAutoBackup?: (on: boolean) => void;
 }
 
 /** Elenco degli album come bacheca a colonne (da iniziare, in lavorazione, in revisione, completati), con ricerca, ordinamento e viste. */
@@ -126,6 +129,7 @@ export function Home(props: HomeProps) {
       <div className="home__tools">
         <label className="home__search"><Icon name="search" size={16} /><input type="search" placeholder="Cerca un album" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Cerca un album" /></label>
         <label className="home__sort home__reopen" title="All'avvio apre direttamente l'ultimo album su cui stavi lavorando"><input type="checkbox" checked={props.reopenLast} onChange={(event) => props.onReopenLast(event.target.checked)} /> Riapri l'ultimo album all'avvio</label>
+        {props.onAutoBackup ? <label className="home__sort home__reopen" title="Quando chiudi il programma, salva su Google Drive il progetto degli album modificati (mai le foto). Serve aver collegato Drive dal pulsante «Drive» di un album."><input type="checkbox" checked={Boolean(props.autoBackup)} onChange={(event) => props.onAutoBackup?.(event.target.checked)} /> Backup su Drive alla chiusura</label> : null}
         <label className="home__sort"><Icon name="sort" size={16} />
           <select value={sort} onChange={(event) => setSort(event.target.value as Sort)} aria-label="Ordina gli album">
             <option value="updated">Ultima modifica</option>

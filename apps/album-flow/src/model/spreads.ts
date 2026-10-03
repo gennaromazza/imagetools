@@ -49,7 +49,7 @@ export function duplicateSpread(project: Project, spreadId: string): Project {
 export function clearSpread(project: Project, spreadId: string): Project {
   return mapSpread(project, spreadId, (spread) => {
     if (spread.areas.every((area) => area.items.length === 0)) return spread;
-    return { ...spread, areas: spread.areas.map((area) => ({ ...area, layout: null, items: [], seed: 0 })) };
+    return { ...spread, areas: spread.areas.map((area) => ({ ...area, layout: null, items: [], seed: 0, free: undefined })) };
   });
 }
 
@@ -58,7 +58,7 @@ export function swapAreas(project: Project, spreadId: string): Project {
     if (spread.areas.length < 2) return spread;
     const [a, b] = spread.areas;
     // Si scambiano foto e layout; lo stile resta legato alla posizione (sinistra/destra).
-    return { ...spread, areas: [{ ...a, layout: b.layout, items: b.items, seed: b.seed }, { ...b, layout: a.layout, items: a.items, seed: a.seed }] };
+    return { ...spread, areas: [{ ...a, layout: b.layout, items: b.items, seed: b.seed, free: b.free }, { ...b, layout: a.layout, items: a.items, seed: a.seed, free: a.free }] };
   });
 }
 

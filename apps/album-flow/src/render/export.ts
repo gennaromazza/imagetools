@@ -1,7 +1,10 @@
 import type { AlbumAssetV2, AlbumProjectV2, AlbumSpread } from "@photo-tools/shared-types";
 import { getDesktop } from "../desktop/api";
 import { assetToDataUrl } from "../hooks/useAssetSrc";
+import { mediaIdsOfSpread, mediaIdsOfProject, fontIdsOfSpread } from "../model/design";
+import { collectEmbeddedMedia, getMedia } from "../model/mediaStore";
 import { serializeAlbumProject } from "../model/portability";
+import { canvasMeasure, embeddedFontCss, loadFonts } from "./fonts";
 import { renderSpreadSvg, spreadSizeWithBleedMm } from "./spread-svg";
 
 export function safeFileName(name: string): string {
@@ -113,6 +116,18 @@ export interface ExportOptions {
   signal?: { cancelled: boolean };
 }
 
+/** Sfondi a immagine, testi e grafiche di uno spread, pronti per un SVG autonomo: immagini della libreria, font incorporati, testo misurato con i font veri. */
+async function designForExport(spread: AlbumSpread) {
+  const fonts = fontIdsOfSpread(spread);
+  await loadFonts(fonts);
+  const media = new Map<string, string>();
+  for (const id of mediaIdsOfSpread(spread)) {
+    const record = await getMedia(id);
+    if (record) media.set(id, record.dataUrl);
+  }
+  return { media, measure: canvasMeasure, fontCss: fonts.length ? await embeddedFontCss(fonts) : "" };
+}
+
 /** Esporta gli spread uno alla volta (incorporando le sole foto necessarie) per tenere bassa la memoria. */
 export async function exportSpreads(project: AlbumProjectV2, writer: ExportWriter, options: ExportOptions): Promise<{ written: string[]; count: number }> {
   const written: string[] = [];
@@ -123,7 +138,8 @@ export async function exportSpreads(project: AlbumProjectV2, writer: ExportWrite
     const spread = project.spreads[index];
     if (!spread) continue;
     const assets = await embedSpreadAssets(project, spread, embedDimensionFor(options.dpi));
-    const svg = renderSpreadSvg(project, spread, assets, { forPrint: true }, index);
+    const design = await designForExport(spread);
+    const svg = renderSpreadSvg(project, spread, assets, { forPrint: true, design }, index);
     if (options.kind === "svg") {
       const path = await writer.write(spreadFileName(project, index, "svg"), new TextEncoder().encode(svg), "image/svg+xml");
       if (path) written.push(path);
@@ -139,5 +155,6 @@ export async function exportSpreads(project: AlbumProjectV2, writer: ExportWrite
 }
 
 export async function exportProjectFile(project: AlbumProjectV2, writer: ExportWriter): Promise<string | null> {
-  return writer.write(`${safeFileName(project.projectName)}.filex-album.json`, new TextEncoder().encode(serializeAlbumProject(project)), "application/json");
+  const media = await collectEmbeddedMedia(mediaIdsOfProject(project));
+  return writer.write(`${safeFileName(project.projectName)}.filex-album.json`, new TextEncoder().encode(serializeAlbumProject(project, media)), "application/json");
 }

@@ -29,6 +29,13 @@ import { PhotoViewer } from "./PhotoViewer";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import type { Draft } from "./SpreadView";
 import { Stage, type StageActions } from "./Stage";
+import type { DesignActions, DesignTab } from "./DesignPanel";
+import { CloudDialog } from "./CloudDialog";
+import { RelinkDialog } from "./RelinkDialog";
+import { useMissingPhotos } from "../hooks/useMissingPhotos";
+import { applyRelink } from "../model/relinkAssets";
+import { driveAvailable } from "../desktop/cloud";
+import { addGraphicOverlay, addTextOverlay, addTextStack, duplicateOverlay, orderOverlay, groupOverlays, moveOverlayGroup, removeOverlay, setAlbumBackground, setSpreadBackground, ungroupOverlay, updateOverlay, updateSpreadBackground } from "../model/design";
 import { IconButton } from "./ui";
 import { useStableCallbacks } from "../hooks/useStableCallbacks";
 
@@ -49,12 +56,14 @@ export interface WorkspaceProps {
   initial: AlbumProjectV2;
   onChange: (project: AlbumProjectV2) => void;
   onExit: () => void;
+  /** Apre come album nuovo una copia (ripristino da Drive): quello attuale non viene toccato. */
+  onOpenCopy?: (copy: AlbumProjectV2) => void;
 }
 
 interface Toast { message: string; undo?: boolean }
 
 /** L'editor: cronologia, selezione, gesti sulle foto, libreria, importazione, esportazione. */
-export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
+export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspaceProps) {
   const [history, setHistoryState] = useState<History<AlbumProjectV2>>(() => createHistory(initial));
   // La cronologia più recente vive anche in una ref: i comandi si applicano in modo sincrono (una sola volta, anche in
   // StrictMode) e due modifiche nello stesso istante si compongono invece di sovrascriversi.
@@ -72,6 +81,14 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
   const [spreadIndex, setSpreadIndex] = useState(0);
   const [activeArea, setActiveArea] = useState(0);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  // «Personalizza»: pannello di sfondi, testi e libreria; il testo o la grafica selezionati stanno sopra le foto.
+  const [designOpen, setDesignOpen] = useState(false);
+  const [designTab, setDesignTab] = useState<DesignTab>("text");
+  const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
+  const [focusSignal, setFocusSignal] = useState(0);
+  // Elementi selezionati insieme al principale (Maiusc o Ctrl+clic), per agganciarli.
+  const [extraOverlayIds, setExtraOverlayIds] = useState<string[]>([]);
+  useEffect(() => { if (!selectedOverlayId) setExtraOverlayIds([]); }, [selectedOverlayId]);
   const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
   const [cropMode, setCropMode] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -89,7 +106,7 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
   const [sizes, setSizes] = useState(() => readNumber("filex.albumFlow.sizes", 0) === 1);
   const [layoutsOpen, setLayoutsOpen] = useState(false);
   const [zone, setZone] = useState<"stage" | "library">("stage");
-  const [dialog, setDialog] = useState<null | "autobuild" | "export" | "shortcuts" | "chapters" | "format" | "template">(null);
+  const [dialog, setDialog] = useState<null | "autobuild" | "export" | "shortcuts" | "chapters" | "format" | "template" | "cloud" | "relink">(null);
   const [templates, setTemplates] = useState<AreaTemplate[]>(() => loadTemplates());
   const [templateEdit, setTemplateEdit] = useState<{ initial?: AreaTemplate; seed?: TemplateSeed } | null>(null);
   const [viewer, setViewer] = useState<null | { ids: string[]; index: number }>(null);
@@ -182,7 +199,7 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
 
   const goTo = useCallback((next: number) => {
     setSpreadIndex(Math.min(Math.max(next, 0), Math.max(count - 1, 0)));
-    setSelectedItemId(null); setCropMode(false); setDraft(null); setActiveArea(0);
+    setSelectedItemId(null); setSelectedOverlayId(null); setCropMode(false); setDraft(null); setActiveArea(0);
   }, [count]);
 
   const doUndo = useCallback(() => { lastCoalesce.current = null; setHistory(undo(historyRef.current)); setDraft(null); }, [setHistory]);
@@ -355,7 +372,7 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
   const spreadId = spread?.id ?? "";
   const actions: StageActions = useMemo(() => ({
     activateArea: (i) => setActiveArea(i),
-    selectItem: (itemId, i) => { setZone("stage"); setActiveArea(i); setSelectedItemId(itemId); if (!itemId) setCropMode(false); else setCropMode((on) => (itemId === selectedItemId ? on : false)); },
+    selectItem: (itemId, i) => { setZone("stage"); setActiveArea(i); setSelectedOverlayId(null); setSelectedItemId(itemId); if (!itemId) setCropMode(false); else setCropMode((on) => (itemId === selectedItemId ? on : false)); },
     toggleCrop: (itemId) => {
       const found = findItem(project, itemId);
       if (!found) return;
@@ -376,7 +393,7 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
     setDraft,
     commitRatio: (i, path, ratio) => { setDraft(null); commit((p) => setDividerRatio(p, spreadId, i, path, ratio), `ratio:${spreadId}:${i}:${path}`); },
     resetRatio: (i, path) => commit((p) => resetDividerRatio(p, spreadId, i, path)),
-    commitView: (itemId, view) => { setDraft(null); commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy }), `view:${itemId}`); },
+    commitView: (itemId, view) => { setDraft(null); commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle }), `view:${itemId}`); },
     style: (i, changes, key) => commit((p) => setAreaStyle(p, spreadId, i, changes), key ? `style:${spreadId}:${i}:${key}` : undefined),
     align: (i, align) => commit((p) => alignArea(p, spreadId, i, align)),
     split: (mode) => { commit((p) => setSplitMode(p, spreadId, mode)); setActiveArea(0); setSelectedItemId(null); },
@@ -401,7 +418,7 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
       if (existing) { commit((p) => removeFavoriteLayout(p, existing.id)); notify("Layout tolto dai preferiti."); }
       else { commit((p) => saveFavoriteLayout(p, spreadId, i)); notify("Layout salvato nei preferiti: lo ritrovi tra i layout con lo stesso numero di foto."); }
     },
-    openLayouts: setLayoutsOpen,
+    openLayouts: (open) => { setLayoutsOpen(open); if (open) setDesignOpen(false); },
     applyLayout: (i, candidate) => commit((p) => applyCandidate(p, spreadId, i, candidate, templates)),
     newTemplate: (i) => { const area = spread?.areas[i]; setTemplateEdit({ seed: area && spread ? seedFromArea(area, templateTarget(spread, i)) ?? { kind: "tree", target: templateTarget(spread, i) } : undefined }); setDialog("template"); },
     editTemplate: (templateId, asCopy) => { const found = templates.find((candidate) => candidate.id === templateId); const initial = found && asCopy ? { ...found, id: createTemplateId(), name: `${found.name} (copia)`, createdAt: new Date().toISOString() } : found; if (initial) { setTemplateEdit({ initial }); setDialog("template"); } },
@@ -454,9 +471,57 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
     addSpreadAfter: () => { commit((p) => addSpread(p, index + 1)); setSpreadIndex(index + 1); setSelectedItemId(null); setActiveArea(0); },
   }), [commit, edit, goTo, index, notify, project, rate, selectedItemId, spread, spreadId, storeTemplates, templates, viewItem]);
 
+  // ------------------------------------------------------------- sfondi, testi e grafiche
+  const designActions: DesignActions = useMemo(() => ({
+    addText: (options) => {
+      if (!spreadId) return;
+      let created: string | null = null;
+      commit((p) => { const made = addTextStack(p, spreadId, options); created = made.overlayId; return made.project; });
+      if (!created) { notify("Su questo spread ci sono già troppi elementi."); return; }
+      setSelectedOverlayId(created); setSelectedItemId(null); setCropMode(false); setDesignTab("text"); setFocusSignal((value) => value + 1);
+    },
+    addGraphic: (options) => {
+      if (!spreadId) return;
+      let created: string | null = null;
+      commit((p) => { const made = addGraphicOverlay(p, spreadId, options); created = made.overlayId; return made.project; });
+      if (!created) { notify("Su questo spread ci sono già troppi elementi."); return; }
+      setSelectedOverlayId(created); setSelectedItemId(null); setCropMode(false); setDesignTab("text");
+    },
+    update: (overlayId, patch) => commit((p) => updateOverlay(p, spreadId, overlayId, patch), `ov:${overlayId}`),
+    remove: (overlayId) => { commit((p) => removeOverlay(p, spreadId, overlayId)); setSelectedOverlayId(null); },
+    duplicate: (overlayId) => {
+      let created: string | null = null;
+      commit((p) => { const made = duplicateOverlay(p, spreadId, overlayId); created = made.overlayId; return made.project; });
+      if (created) setSelectedOverlayId(created);
+    },
+    group: (overlayIds) => { commit((p) => groupOverlays(p, spreadId, overlayIds)); setExtraOverlayIds([]); notify("Elementi agganciati: ora si spostano insieme."); },
+    ungroup: (overlayId) => { commit((p) => ungroupOverlay(p, spreadId, overlayId)); notify("Elemento sganciato: ora si sposta da solo."); },
+    order: (overlayId, where) => commit((p) => orderOverlay(p, spreadId, overlayId, where)),
+    select: (overlayId) => { setSelectedOverlayId(overlayId); if (overlayId) { setSelectedItemId(null); setCropMode(false); } },
+    setBackground: (scope, choice, wholeAlbum) => {
+      if (wholeAlbum) { commit((p) => setAlbumBackground(p, scope, choice)); notify("Sfondo applicato a tutti gli spread (quelli finiti sono rimasti com'erano).", true); }
+      else commit((p) => setSpreadBackground(p, spreadId, scope, choice));
+    },
+    updateBackground: (scope, patch) => commit((p) => updateSpreadBackground(p, spreadId, scope, patch), `bg:${spreadId}:${scope}`),
+    notify,
+  }), [commit, notify, spreadId]);
+  const designHandlers = useMemo(() => ({
+    selectedId: selectedOverlayId,
+    extraIds: extraOverlayIds,
+    onSelect: (overlayId: string | null, additive?: boolean) => {
+      if (additive && overlayId && selectedOverlayId && overlayId !== selectedOverlayId) { setExtraOverlayIds((current) => (current.includes(overlayId) ? current.filter((id) => id !== overlayId) : [...current, overlayId])); return; }
+      if (additive && overlayId && !selectedOverlayId) { setSelectedOverlayId(overlayId); setSelectedItemId(null); setCropMode(false); setDesignOpen(true); setDesignTab("text"); return; }
+      setExtraOverlayIds([]);
+      setSelectedOverlayId(overlayId); if (overlayId) { setSelectedItemId(null); setCropMode(false); setDesignOpen(true); setDesignTab("text"); } },
+    onCommit: (overlayId: string, patch: Parameters<typeof updateOverlay>[3]) => commit((p) => updateOverlay(p, spreadId, overlayId, patch), `ov:${overlayId}`),
+    onMoveBy: (overlayId: string, dx: number, dy: number) => commit((p) => moveOverlayGroup(p, spreadId, overlayId, dx, dy), `ov:${overlayId}`),
+    onEdit: (overlayId: string) => { setSelectedOverlayId(overlayId); setDesignOpen(true); setDesignTab("text"); setFocusSignal((value) => value + 1); },
+  }), [commit, extraOverlayIds, selectedOverlayId, spreadId]);
+  useEffect(() => { if (designOpen) { setLayoutsOpen(false); setSelectedItemId(null); setCropMode(false); } }, [designOpen]);
+
   // --------------------------------------------------------------------- scorciatoie
-  const keys = useRef({ spread, areaIndex, selectedItemId, cropMode, count, index, zone, libSelection, layoutsOpen });
-  keys.current = { spread, areaIndex, selectedItemId, cropMode, count, index, zone, libSelection, layoutsOpen };
+  const keys = useRef({ spread, areaIndex, selectedItemId, selectedOverlayId, cropMode, count, index, zone, libSelection, layoutsOpen });
+  keys.current = { spread, areaIndex, selectedItemId, selectedOverlayId, cropMode, count, index, zone, libSelection, layoutsOpen };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (isTyping(event.target) || dialog || presenting || viewer || importSource) return;
@@ -489,10 +554,13 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
         case "ArrowDown": event.preventDefault(); if (state.spread) commit((p) => shuffleArea(p, state.spread!.id, state.areaIndex, -1, templates)); return;
         case "Home": event.preventDefault(); goTo(0); return;
         case "End": event.preventDefault(); goTo(state.count - 1); return;
-        case "Delete": case "Backspace": if (state.selectedItemId) { event.preventDefault(); actions.removeItem(state.selectedItemId); } return;
+        case "Delete": case "Backspace":
+          if (state.selectedOverlayId && state.spread) { event.preventDefault(); const target = state.selectedOverlayId; commit((p) => removeOverlay(p, state.spread!.id, target)); setSelectedOverlayId(null); return; }
+          if (state.selectedItemId) { event.preventDefault(); actions.removeItem(state.selectedItemId); } return;
         case "Enter": if (state.selectedItemId) { event.preventDefault(); actions.toggleCrop(state.selectedItemId); } return;
         case "Escape":
           if (state.cropMode) setCropMode(false);
+          else if (state.selectedOverlayId) setSelectedOverlayId(null);
           else if (state.selectedItemId) setSelectedItemId(null);
           else if (state.libSelection.length) setLibSelection([]);
           else if (state.layoutsOpen) setLayoutsOpen(false);
@@ -510,6 +578,10 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
       }
       if (/^[1-9]$/.test(event.key) && state.spread && state.spread.areas[state.areaIndex].items.length > 0) { commit((p) => applyCandidateByNumber(p, state.spread!.id, state.areaIndex, Number(event.key), templates)); return; }
       if (key === "0") { if (state.selectedItemId) commit((p) => resetItemView(p, state.selectedItemId!)); else setZoom(1); }
+      else if ((key === "," || key === ".") && state.cropMode && state.selectedItemId) {
+        const current = findItem(historyRef.current.present, state.selectedItemId)?.item.angle ?? 0;
+        commit((p) => setItemView(p, state.selectedItemId!, { angle: current + (key === "." ? 0.5 : -0.5) }), `view:${state.selectedItemId}`);
+      }
       else if (key === "g") setGuides((on) => !on);
       else if (key === "s") actions.toggleSizes();
       else if (key === "b" && state.spread) setLayoutsOpen((open) => !open);
@@ -569,6 +641,7 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
     preset: (preset: ChapterPreset) => commit((p) => applyChapterPreset(p, preset)),
   };
 
+  const { missingIds } = useMissingPhotos(project.assets);
   const rename = (name: string) => commit((p) => ({ ...p, projectName: name, updatedAt: nowIso() }));
   const setStage = (stage: AlbumStage) => commit((p) => (p.stage === stage ? p : touch({ ...p, stage })));
   const hasPhotos = project.assets.length > 0;
@@ -628,6 +701,8 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
             {STAGES.map((stage) => <option key={stage.id} value={stage.id}>{stage.label}</option>)}
           </select>
         </label>
+        {missingIds.size > 0 ? <button type="button" className="btn btn--warn" onClick={() => setDialog("relink")} title="Alcune foto non si trovano più sul disco: indica dove sono adesso">{missingIds.size} {missingIds.size === 1 ? "foto non trovata" : "foto non trovate"} · Ricollega</button> : null}
+        {driveAvailable() ? <button type="button" className="btn" onClick={() => setDialog("cloud")} title="Backup del progetto su Google Drive (le foto non vengono caricate)"><Icon name="archive" size={16} /> Drive</button> : null}
         <button type="button" className="btn" onClick={() => setDialog("autobuild")} disabled={!hasPhotos} title="Auto Build (Ctrl/⌘+B)"><Icon name="wand" size={16} /> Auto Build</button>
         <IconButton icon="play" label="Anteprima per il cliente (F5)" onClick={() => setPresenting(true)} disabled={count === 0} size={20} className="icon-btn--round" />
         <button type="button" className="btn btn--primary" onClick={() => setDialog("export")} disabled={count === 0} title="Esporta (Ctrl/⌘+E)"><Icon name="export" size={16} /> Esporta</button>
@@ -651,6 +726,7 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
           layoutsOpen={layoutsOpen}
           templates={templates}
           actions={actions}
+          design={{ open: designOpen, tab: designTab, focusSignal, selectedOverlayId, extraOverlayIds, actions: designActions, handlers: designHandlers, onToggle: () => { setDesignOpen((on) => { if (on) setSelectedOverlayId(null); return !on; }); }, onTab: setDesignTab }}
         />
       ) : (
         <main className="stage stage--empty" aria-label="Area di lavoro">
@@ -706,6 +782,8 @@ export function Workspace({ initial, onChange, onExit }: WorkspaceProps) {
       {dialog === "export" ? <ExportDialog project={project} currentIndex={index} onClose={() => setDialog(null)} onStatus={notify} onGoTo={goTo} /> : null}
       {dialog === "format" ? <FormatDialog sheet={project.settings.sheet} onClose={() => setDialog(null)} onApply={(sheet) => { commit((p) => touch({ ...p, settings: { ...p.settings, sheet } })); setDialog(null); notify("Formato cambiato: i layout si sono adattati al nuovo foglio.", true); }} /> : null}
       {dialog === "template" && templateEdit ? <TemplateEditor sheet={project.settings.sheet} style={project.settings.defaultStyle} initial={templateEdit.initial} seed={templateEdit.seed} onClose={() => { setDialog(null); setTemplateEdit(null); }} onSave={(template) => { try { storeTemplates(upsertTemplate(templates, template)); notify(`Template «${template.name}» salvato.`); setDialog(null); setTemplateEdit(null); } catch (error) { notify(error instanceof Error ? error.message : "Template non salvato."); } }} /> : null}
+      {dialog === "cloud" ? <CloudDialog project={project} onClose={() => setDialog(null)} onOpenCopy={(copy) => { setDialog(null); onOpenCopy?.(copy); }} /> : null}
+      {dialog === "relink" ? <RelinkDialog project={project} missingIds={missingIds} onClose={() => setDialog(null)} onApply={(result) => { commit((p) => applyRelink(p, result)); notify(`${result.found.size} ${result.found.size === 1 ? "foto ricollegata" : "foto ricollegate"}.`, true); }} /> : null}
       {dialog === "shortcuts" ? <ShortcutsDialog onClose={() => setDialog(null)} /> : null}
       {dialog === "chapters" ? (
         <ChapterManager project={project} onClose={() => setDialog(null)} onCreate={manage.create} onRename={manage.rename} onRecolor={manage.recolor} onMove={manage.move} onRemove={manage.remove} onApplyPreset={manage.preset} onError={notify} />

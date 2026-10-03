@@ -35,6 +35,8 @@ export const BACKGROUND_SWATCHES = ["#000000", "#ffffff", "#f4efe6", "#2b312d"] 
 
 export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 6;
+/** Raddrizzamento massimo della foto (gradi, per lato). */
+export const MAX_ANGLE = 45;
 export const MAX_ITEMS_PER_AREA = 12;
 export const MAX_SPREADS = 400;
 

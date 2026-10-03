@@ -169,9 +169,12 @@ import { prepareFileXSuiteUpdate } from "./filex-process-coordinator.js";
 import {
   connectGoogleDrive,
   disconnectGoogleDrive,
+  downloadAlbumFlowDriveVersion,
   downloadPhotoSelectorDriveVersion,
+  exportAlbumFlowProjectToDrive,
   exportPhotoSelectorProjectToDrive,
   getGoogleDriveStatus,
+  listAlbumFlowDriveVersions,
   listPhotoSelectorDriveVersions,
   uploadStudioFlowRegistryToDrive,
 } from "./google-drive-service.js";
@@ -277,6 +280,8 @@ const devIconStamp = (): string => {
 const appUserModelId = `studio.filex.${requestedTool.id}${app.isPackaged ? "" : devIconStamp()}`;
 let mainWindow: BrowserWindowInstance | null = null;
 const idPhotoQuitCoordinator = createIdPhotoQuitCoordinator();
+// Photo Selector e Album Flow chiedono al renderer di finire il lavoro (XMP, backup su Drive) prima di chiudere la finestra.
+const usesClosePreparation = requestedTool.id === "photo-selector-app" || requestedTool.id === "album-flow";
 const PHOTO_SELECTOR_CLOSE_PREPARATION_TIMEOUT_MS = 20_000;
 type PhotoSelectorClosePreparationState = "idle" | "pending" | "ready";
 let photoSelectorClosePreparationState: PhotoSelectorClosePreparationState = "idle";
@@ -333,7 +338,7 @@ function resetPhotoSelectorClosePreparation(): void {
 }
 
 function finishPhotoSelectorClosePreparation(reason: "renderer" | "timeout" | "send-failed"): void {
-  if (requestedTool.id !== "photo-selector-app" || photoSelectorClosePreparationState !== "pending") {
+  if (!usesClosePreparation || photoSelectorClosePreparationState !== "pending") {
     return;
   }
 
@@ -365,7 +370,7 @@ function requestPhotoSelectorClosePreparation(
   quitAfterPreparation: boolean,
 ): boolean {
   if (
-    requestedTool.id !== "photo-selector-app"
+    !usesClosePreparation
     || windowInstance !== mainWindow
     || windowInstance.isDestroyed()
     || windowInstance.webContents.isDestroyed()
@@ -1445,7 +1450,7 @@ function buildMissingRendererHtml(entryPath: string): string {
 function registerIpcHandlers(): void {
   ipcMain.handle("filex:get-party-frame-session-token", () => imagePartyFrameSessionToken);
   ipcMain.handle("filex:complete-close-preparation", (event) => {
-    if (requestedTool.id !== "photo-selector-app" || photoSelectorClosePreparationState !== "pending") {
+    if (!usesClosePreparation || photoSelectorClosePreparationState !== "pending") {
       return;
     }
     const windowForEvent = BrowserWindow.fromWebContents(event.sender);
@@ -1986,6 +1991,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:download-photo-selector-drive-version", (_event, versionId: string) =>
     downloadPhotoSelectorDriveVersion(versionId),
   );
+  ipcMain.handle("filex:export-album-flow-project-to-drive", (_event, input) => exportAlbumFlowProjectToDrive(input));
+  ipcMain.handle("filex:list-album-flow-drive-versions", (_event, projectName?: string) => listAlbumFlowDriveVersions(projectName));
+  ipcMain.handle("filex:download-album-flow-drive-version", (_event, versionId: string) => downloadAlbumFlowDriveVersion(versionId));
   ipcMain.handle("filex:get-desktop-session-state", () => getDesktopSessionState());
   ipcMain.handle("filex:save-desktop-session-state", (_event, state: DesktopPersistedState) =>
     saveDesktopSessionState(state),
@@ -2677,7 +2685,7 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow = windowInstance;
-  if (requestedTool.id === "photo-selector-app") {
+  if (usesClosePreparation) {
     resetPhotoSelectorClosePreparation();
   }
   isOpenFolderRequestRendererReady = false;
@@ -2720,7 +2728,7 @@ async function createMainWindow(): Promise<void> {
   });
 
   windowInstance.webContents.on("will-prevent-unload", (event) => {
-    if (requestedTool.id === "photo-selector-app") {
+    if (usesClosePreparation) {
       if (photoSelectorClosePreparationState === "ready") {
         // Electron otherwise honours the renderer's beforeunload cancellation.
         event.preventDefault();
@@ -2826,7 +2834,7 @@ async function createMainWindow(): Promise<void> {
     if (mainWindow === windowInstance) {
       mainWindow = null;
     }
-    if (requestedTool.id === "photo-selector-app") {
+    if (usesClosePreparation) {
       resetPhotoSelectorClosePreparation();
     }
     if (requestedTool.id === "id-photo" && idPhotoQuitCoordinator.hasPendingQuit()) {
@@ -3048,7 +3056,7 @@ app.on("before-quit", (event) => {
   }
 
   if (
-    requestedTool.id === "photo-selector-app"
+    usesClosePreparation
     && mainWindow
     && !mainWindow.isDestroyed()
     && photoSelectorClosePreparationState !== "ready"

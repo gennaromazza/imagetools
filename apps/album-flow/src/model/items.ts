@@ -4,7 +4,7 @@ import type { DropTarget } from "../engine/drop";
 import { insertAtNode, insertBeside, leaf, naturalRatios, removeLeaf, type InsertSide } from "../engine/tree";
 import { MAX_ITEMS_PER_AREA, MAX_ZOOM, MIN_ZOOM, clampNumber } from "./defaults";
 import { relayoutArea } from "./areas";
-import { placeItem } from "./placement";
+import { clampAngle, placeItem } from "./placement";
 import { alignChanged, areaGeometry, assetMap, createItem, findItem, findSpread, itemAspect, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
 import { cropCenter } from "../slot-geometry";
 import { addSpread } from "./spreads";
@@ -60,7 +60,7 @@ function replaceItemAssetRaw(project: Project, itemId: string, assetId: string):
   const found = findItem(project, itemId);
   if (!found || found.item.locked || found.item.assetId === assetId || !assetExists(project, assetId)) return project;
   const spread = found.spread;
-  const items = found.area.items.map((item) => (item.id === itemId ? { ...item, assetId, zoom: 1, cx: 0.5, cy: 0.5 } : item));
+  const items = found.area.items.map((item) => (item.id === itemId ? withAngle({ ...item, assetId, zoom: 1, cx: 0.5, cy: 0.5 }, 0) : item));
   return mapSpread(project, spread.id, (s) => replaceArea(s, found.areaIndex, { ...found.area, items }));
 }
 
@@ -79,9 +79,15 @@ function removeItemsRaw(project: Project, itemIds: readonly string[]): Project {
 
 function exchange(a: AlbumItem, b: AlbumItem): [AlbumItem, AlbumItem] {
   return [
-    { ...a, assetId: b.assetId, zoom: b.zoom, cx: b.cx, cy: b.cy, locked: b.locked },
-    { ...b, assetId: a.assetId, zoom: a.zoom, cx: a.cx, cy: a.cy, locked: a.locked },
+    withAngle({ ...a, assetId: b.assetId, zoom: b.zoom, cx: b.cx, cy: b.cy, locked: b.locked }, b.angle),
+    withAngle({ ...b, assetId: a.assetId, zoom: a.zoom, cx: a.cx, cy: a.cy, locked: a.locked }, a.angle),
   ];
+}
+
+/** Imposta il raddrizzamento di un elemento; a 0 la chiave sparisce, così i progetti senza inclinazione restano identici. */
+function withAngle(item: AlbumItem, angle: number | undefined): AlbumItem {
+  const { angle: _previous, ...rest } = item;
+  return angle ? { ...rest, angle } : rest;
 }
 
 /** Scambia due foto (anche tra aree e spread diversi): ognuna porta con sé inquadratura e blocco. */
@@ -205,27 +211,32 @@ export interface ItemViewChange {
   zoom?: number;
   cx?: number;
   cy?: number;
+  /** Raddrizzamento in gradi (-45…45). */
+  angle?: number;
 }
 
-/** Cambia zoom e centro di una foto; il centro resta sempre entro i bordi possibili dell'immagine. */
+/** Cambia zoom, centro e raddrizzamento di una foto; il centro resta sempre entro i bordi possibili dell'immagine. */
 export function setItemView(project: Project, itemId: string, change: ItemViewChange): Project {
   const found = findItem(project, itemId);
   if (!found || found.item.locked) return project;
   const geometry = areaGeometry(project, found.spread, found.areaIndex);
   const cell = geometry.cells.find((candidate) => candidate.itemId === itemId);
   if (!cell) return project;
-  const zoom = clampNumber(change.zoom ?? found.item.zoom, MIN_ZOOM, MAX_ZOOM);
   const asset = assetMap(project).get(found.item.assetId);
-  const placement = placeItem(cell.rect, found.item, asset, found.area.style, { zoom, cx: change.cx, cy: change.cy }, cell.anchor);
+  const angle = clampAngle(change.angle ?? found.item.angle);
+  const requested = clampNumber(change.zoom ?? found.item.zoom, MIN_ZOOM, MAX_ZOOM);
+  const placement = placeItem(cell.rect, found.item, asset, found.area.style, { zoom: requested, cx: change.cx, cy: change.cy, angle }, cell.anchor);
   const center = cropCenter(placement.crop);
-  const next = { ...found.item, zoom, cx: Number(center.x.toFixed(5)), cy: Number(center.y.toFixed(5)) };
-  if (next.zoom === found.item.zoom && next.cx === found.item.cx && next.cy === found.item.cy) return project;
+  // Si memorizza lo zoom chiesto: con la foto raddrizzata `placeItem` lo alza da solo quanto basta a coprire gli angoli,
+  // e tornando a 0° l'inquadratura di prima ricompare.
+  const next = withAngle({ ...found.item, zoom: requested, cx: Number(center.x.toFixed(5)), cy: Number(center.y.toFixed(5)) }, angle);
+  if (next.zoom === found.item.zoom && next.cx === found.item.cx && next.cy === found.item.cy && (next.angle ?? 0) === (found.item.angle ?? 0)) return project;
   return mapSpread(project, found.spread.id, (spread) =>
     replaceArea(spread, found.areaIndex, { ...found.area, items: found.area.items.map((item) => (item.id === itemId ? next : item)) }));
 }
 
 export function resetItemView(project: Project, itemId: string): Project {
-  return setItemView(project, itemId, { zoom: 1, cx: 0.5, cy: 0.5 });
+  return setItemView(project, itemId, { zoom: 1, cx: 0.5, cy: 0.5, angle: 0 });
 }
 
 export function toggleItemLock(project: Project, itemId: string): Project {

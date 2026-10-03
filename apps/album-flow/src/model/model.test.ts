@@ -833,3 +833,69 @@ test("file modificato sul disco: le misure della foto si aggiornano e le aree in
   assert.ok(Math.abs(rects[0].h - rects[1].h) < 0.01, `foto ancora allineate: ${rects.map((r) => r.h)}`);
   assertProjectInvariants(edited, "misure aggiornate");
 });
+
+test("raddrizzamento: la cella resta sempre coperta dalla foto, anche ai bordi e con zoom diversi", () => {
+  let project = filled(1, 0);
+  project = setAreaStyle(project, firstSpreadId(project), 0, { mode: "fill" });
+  const item = itemsOf(project, 0)[0];
+  const cell = spreadGeometry(project, project.spreads[0])[0].cells[0];
+  const asset = project.assets.find((candidate) => candidate.id === item.assetId);
+  for (const angle of [-45, -12.5, 0.4, 3, 20, 45]) {
+    for (const [zoom, cx, cy] of [[1, 0.5, 0.5], [1, 0, 0], [2.5, 1, 1], [6, 0.02, 0.97]] as const) {
+      const turned = setItemView(project, item.id, { zoom, cx, cy, angle });
+      const next = itemsOf(turned, 0)[0];
+      assert.equal(next.angle, angle);
+      const placement = placeItem(cell.rect, next, asset, project.spreads[0].areas[0].style);
+      const rad = (angle * Math.PI) / 180;
+      const centerX = placement.content.x + placement.content.w / 2;
+      const centerY = placement.content.y + placement.content.h / 2;
+      for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        const dx = (sx * placement.content.w) / 2;
+        const dy = (sy * placement.content.h) / 2;
+        // Angolo della cella riportato nel riferimento dell'immagine (ruotata di `angle`).
+        const x = centerX + dx * Math.cos(rad) + dy * Math.sin(rad);
+        const y = centerY - dx * Math.sin(rad) + dy * Math.cos(rad);
+        const eps = 1e-6;
+        assert.ok(x >= placement.image.x - eps && x <= placement.image.x + placement.image.w + eps && y >= placement.image.y - eps && y <= placement.image.y + placement.image.h + eps, `angolo scoperto (angolo ${angle}, zoom ${zoom})`);
+      }
+      assert.ok(placement.zoom >= 1 && placement.angle === angle);
+    }
+  }
+  assertProjectInvariants(setItemView(project, item.id, { angle: 30 }), "raddrizzamento");
+});
+
+test("raddrizzamento: limiti, azzeramento, blocco e conservazione dello zoom", () => {
+  let project = filled(1, 0);
+  project = setAreaStyle(project, firstSpreadId(project), 0, { mode: "fill" });
+  const item = itemsOf(project, 0)[0];
+  assert.equal(itemsOf(setItemView(project, item.id, { angle: 99 }), 0)[0].angle, 45);
+  assert.equal(itemsOf(setItemView(project, item.id, { angle: -99 }), 0)[0].angle, -45);
+  const tilted = setItemView(project, item.id, { angle: 8 });
+  assert.equal(setItemView(tilted, item.id, { angle: 8 }), tilted, "nessun cambiamento");
+  assert.equal(itemsOf(tilted, 0)[0].zoom, 1, "lo zoom salvato non cambia: la copertura degli angoli la calcola il posizionamento");
+  const straight = setItemView(tilted, item.id, { angle: 0 });
+  assert.ok(!("angle" in itemsOf(straight, 0)[0]), "a 0° la chiave sparisce");
+  assert.deepEqual(straight, project);
+  assert.ok(!("angle" in itemsOf(resetItemView(tilted, item.id), 0)[0]));
+  const locked = toggleItemLock(tilted, item.id);
+  assert.equal(setItemView(locked, item.id, { angle: 20 }), locked);
+  let pair = filled(2, 0);
+  pair = setAreaStyle(pair, firstSpreadId(pair), 0, { mode: "fill" });
+  const [first, second] = itemsOf(pair, 0);
+  pair = setItemView(pair, first.id, { angle: 10 });
+  const swapped = swapItems(pair, first.id, second.id);
+  assert.equal(itemsOf(swapped, 0)[1].angle, 10, "scambiando le foto il raddrizzamento le segue");
+  assert.ok(!("angle" in itemsOf(swapped, 0)[0]));
+});
+
+test("raddrizzamento: sopravvive al salvataggio e il file con un angolo fuori scala viene rifiutato", () => {
+  let project = filled(1, 0);
+  project = setAreaStyle(project, firstSpreadId(project), 0, { mode: "fill" });
+  const item = itemsOf(project, 0)[0];
+  project = setItemView(project, item.id, { angle: -7.5 });
+  const restored = parseAlbumProject(serializeAlbumProject(project));
+  assert.equal(itemsOf(restored, 0)[0].angle, -7.5);
+  const broken = JSON.parse(serializeAlbumProject(project));
+  broken.project.spreads[0].areas[0].items[0].angle = 120;
+  assert.throws(() => parseAlbumProject(JSON.stringify(broken)));
+});

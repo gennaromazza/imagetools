@@ -689,6 +689,26 @@ export interface DesktopCloudProjectVersion {
   selectedAssets?: number;
 }
 
+export interface DesktopAlbumBackupInput {
+  projectId: string;
+  projectName: string;
+  spreads: number;
+  photos: number;
+  /** Il file del progetto già serializzato (mai le foto). */
+  content: string;
+}
+
+export interface DesktopAlbumBackupVersion {
+  id: string;
+  name: string;
+  createdAt: string;
+  size: number;
+  projectName: string;
+  spreads?: number;
+  photos?: number;
+  driveUrl?: string;
+}
+
 export interface DesktopGoogleDriveStatus {
   configured: boolean;
   connected: boolean;
@@ -1713,6 +1733,9 @@ export interface FileXDesktopApi {
   downloadPhotoSelectorDriveVersion: (
     versionId: string,
   ) => Promise<DesktopCloudProjectManifest>;
+  exportAlbumFlowProjectToDrive: (input: DesktopAlbumBackupInput) => Promise<DesktopAlbumBackupVersion>;
+  listAlbumFlowDriveVersions: (projectName?: string) => Promise<DesktopAlbumBackupVersion[]>;
+  downloadAlbumFlowDriveVersion: (versionId: string) => Promise<string>;
   getDesktopSessionState: () => Promise<DesktopPersistedState | null>;
   saveDesktopSessionState: (state: DesktopPersistedState) => Promise<void>;
   getPartyFrameSessionToken: () => Promise<string | null>;

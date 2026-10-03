@@ -4,6 +4,8 @@ import { appendFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises
 import { join } from "node:path";
 import * as electron from "electron";
 import type {
+  DesktopAlbumBackupInput,
+  DesktopAlbumBackupVersion,
   DesktopCloudProjectManifest,
   DesktopCloudProjectVersion,
   DesktopGoogleDriveStatus,
@@ -13,6 +15,7 @@ import {
   GOOGLE_CLIENT_SECRET,
 } from "./google-drive-config.generated.js";
 import { googleDriveApiDisabledMessage, googleDriveFileUrl } from "./google-drive-link.js";
+import { ALBUM_FLOW_DRIVE_ROOT, albumBackupFileName, albumFolderName, checkAlbumBackupContent, parseAlbumBackupName } from "./album-flow-drive-names.js";
 
 const { app, safeStorage, shell } = electron;
 
@@ -1068,4 +1071,94 @@ export async function downloadPhotoSelectorDriveVersion(
   versionId: string,
 ): Promise<DesktopCloudProjectManifest> {
   return readDriveFile(versionId);
+}
+
+
+// ---------------------------------------------------------------------------
+// Album Flow: backup del solo progetto (mai le foto)
+// ---------------------------------------------------------------------------
+
+/** Carica un file JSON anche grande con il caricamento "resumable" di Drive (il multipart è pensato per file piccoli). */
+async function uploadLargeJson(parentId: string, fileName: string, content: string): Promise<DriveFile> {
+  const accessToken = await exchangeRefreshToken((await loadToken()) as StoredToken);
+  const start = await ensureResponse(await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,createdTime,size,webViewLink",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json; charset=UTF-8",
+        "X-Upload-Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name: fileName, mimeType: "application/json", parents: [parentId] }),
+    },
+  ));
+  const session = start.headers.get("location");
+  if (!session) throw new Error("Google Drive non ha avviato il caricamento.");
+  const response = await ensureResponse(await fetch(session, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: content,
+  }));
+  void writeDriveLog("Album Flow upload", `${fileName} -> ${response.status}`);
+  return await response.json() as DriveFile;
+}
+
+function albumVersionFromFile(file: DriveFile, fallbackProject: string): DesktopAlbumBackupVersion | null {
+  const parsed = parseAlbumBackupName(file.name ?? "");
+  if (!parsed) return null;
+  return {
+    id: file.id,
+    name: file.name ?? "",
+    createdAt: parsed.createdAt ?? file.createdTime ?? new Date().toISOString(),
+    size: Number(file.size ?? 0),
+    projectName: parsed.projectName || fallbackProject,
+    ...(parsed.spreads !== null ? { spreads: parsed.spreads } : {}),
+    ...(parsed.photos !== null ? { photos: parsed.photos } : {}),
+    driveUrl: googleDriveFileUrl(file.id, file.webViewLink),
+  };
+}
+
+export async function exportAlbumFlowProjectToDrive(input: DesktopAlbumBackupInput): Promise<DesktopAlbumBackupVersion> {
+  const status = await getGoogleDriveStatus();
+  if (!status.connected) throw new Error("Google Drive non è collegato.");
+  const projectName = typeof input?.projectName === "string" ? input.projectName.trim() : "";
+  if (!projectName) throw new Error("L'album non ha un nome.");
+  const check = checkAlbumBackupContent(input.content);
+  if (!check.ok) throw new Error(check.message);
+  const root = await ensureFolder(ALBUM_FLOW_DRIVE_ROOT);
+  const folder = await ensureFolder(albumFolderName(projectName), root.id);
+  const createdAt = new Date().toISOString();
+  const fileName = albumBackupFileName(projectName, createdAt, Number(input.spreads), Number(input.photos));
+  await writeDriveLog("Album Flow export started", `${fileName} (${input.content.length} chars)`);
+  const file = await uploadLargeJson(folder.id, fileName, input.content);
+  const version = albumVersionFromFile({ ...file, name: file.name ?? fileName }, projectName);
+  if (!version) throw new Error("Google Drive ha salvato il file ma il nome non è riconoscibile.");
+  return version;
+}
+
+export async function listAlbumFlowDriveVersions(projectName?: string): Promise<DesktopAlbumBackupVersion[]> {
+  const root = await ensureFolder(ALBUM_FLOW_DRIVE_ROOT);
+  const wanted = projectName?.trim();
+  const folders = wanted
+    ? await listFiles(`name = '${escapeDriveQuery(albumFolderName(wanted))}' and '${escapeDriveQuery(root.id)}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`)
+    : await listFiles(`'${escapeDriveQuery(root.id)}' in parents and mimeType = '${FOLDER_MIME}' and trashed = false`);
+  const versions: DesktopAlbumBackupVersion[] = [];
+  for (const folder of folders) {
+    const files = await listFiles(`'${escapeDriveQuery(folder.id)}' in parents and trashed = false and mimeType = 'application/json'`);
+    for (const file of files) {
+      const version = albumVersionFromFile(file, folder.name ?? "Album");
+      if (version) versions.push(version);
+    }
+  }
+  return versions.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+export async function downloadAlbumFlowDriveVersion(versionId: string): Promise<string> {
+  if (typeof versionId !== "string" || !/^[A-Za-z0-9_-]{8,200}$/.test(versionId)) throw new Error("Versione non valida.");
+  const response = await ensureResponse(await driveFetch(`/files/${encodeURIComponent(versionId)}?alt=media`));
+  const content = await response.text();
+  const check = checkAlbumBackupContent(content);
+  if (!check.ok) throw new Error(check.message);
+  return content;
 }

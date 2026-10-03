@@ -36,6 +36,8 @@ export interface AlbumItem {
   /** Centro normalizzato (0-1) della zona visibile. */
   cx: number;
   cy: number;
+  /** Raddrizzamento della foto dentro la cella, in gradi (-45…45); assente = 0. */
+  angle?: number;
   locked?: boolean;
 }
 
@@ -67,6 +69,76 @@ export interface AlbumArea {
   seed: number;
 }
 
+/** Aspetto di un testo: è lo stesso per un'impostazione salvata nella libreria e per un testo sullo spread. */
+export interface TextStyleSpec {
+  /** Identificativo di una famiglia della libreria dei font (solo font con licenza libera). */
+  font: string;
+  /** Corpo in punti tipografici. */
+  sizePt: number;
+  weight: 300 | 400 | 600 | 700;
+  italic: boolean;
+  color: string;
+  align: "left" | "center" | "right" | "justify";
+  /** Interlinea come multiplo del corpo. */
+  lineHeight: number;
+  /** Spaziatura tra le lettere in em (può essere negativa). */
+  trackingEm: number;
+  uppercase: boolean;
+  /** Spazio dopo ogni paragrafo, in punti. */
+  paragraphSpacePt: number;
+  /** Capolettera: numero di righe che occupa (0 = nessuno). */
+  dropCapLines: number;
+  opacity: number;
+}
+
+/** Testo libero sullo spread; l'altezza segue il contenuto. Misure in frazione dello spread (0-1). */
+export interface SpreadTextOverlay extends TextStyleSpec {
+  kind: "text";
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  rotation: number;
+  z: number;
+  text: string;
+  /** Nome dello stile della libreria da cui è partito, se c'è. */
+  styleName?: string;
+  /** Gli elementi con lo stesso gruppo si spostano insieme (finché non vengono sganciati). */
+  groupId?: string;
+}
+
+/** Elemento grafico (immagine, ornamento, filetto) preso dalla libreria. */
+export interface SpreadGraphicOverlay {
+  kind: "graphic";
+  id: string;
+  mediaId: string;
+  /** Proporzioni (larghezza / altezza) dell'immagine originale. */
+  aspect: number;
+  x: number;
+  y: number;
+  w: number;
+  rotation: number;
+  z: number;
+  opacity: number;
+  groupId?: string;
+}
+
+export type SpreadOverlay = SpreadTextOverlay | SpreadGraphicOverlay;
+
+/** Quale parte dello spread copre uno sfondo. */
+export type SpreadBackgroundScope = "spread" | "left" | "right";
+
+/** Sfondo a immagine di uno spread o di una sua pagina; la tinta dell'area resta sotto. */
+export interface SpreadBackground {
+  scope: SpreadBackgroundScope;
+  mediaId: string;
+  aspect: number;
+  fit: "cover" | "contain" | "tile";
+  opacity: number;
+  /** Lato della piastrella in cm, solo con fit "tile". */
+  tileCm?: number;
+}
+
 export interface AlbumSpread {
   id: string;
   split: AlbumSplitMode;
@@ -76,6 +148,10 @@ export interface AlbumSpread {
   areas: AlbumArea[];
   /** Segnato come finito: Auto Build, Mescola e i layout automatici non lo toccano. */
   done?: boolean;
+  /** Sfondi a immagine (al più uno per pagina, oppure uno su tutto lo spread). */
+  backgrounds?: SpreadBackground[];
+  /** Testi e grafiche sopra le foto, dal livello più basso al più alto. */
+  overlays?: SpreadOverlay[];
 }
 
 /** A che tipo di area si applica un template: pagina (metà spread), foglio intero, un terzo o due terzi. */

@@ -8,6 +8,8 @@ import { BACKGROUND_SWATCHES } from "../model/defaults";
 import { placeItem, type ItemView } from "../model/placement";
 import { areaGeometryFor, hasFreeLayout } from "../model/project";
 import { AreaStrip } from "./AreaStrip";
+import { DesignPanel, type DesignActions, type DesignTab } from "./DesignPanel";
+import type { DesignHandlers } from "./DesignLayers";
 import { Icon } from "./icons";
 import { LayoutBrowser } from "./LayoutBrowser";
 import { SpreadView, type Draft } from "./SpreadView";
@@ -83,6 +85,17 @@ export interface StageProps {
   layoutsOpen: boolean;
   templates: readonly AreaTemplate[];
   actions: StageActions;
+  design: {
+    open: boolean;
+    tab: DesignTab;
+    focusSignal: number;
+    selectedOverlayId: string | null;
+    extraOverlayIds: readonly string[];
+    actions: DesignActions;
+    handlers: DesignHandlers;
+    onToggle: () => void;
+    onTab: (tab: DesignTab) => void;
+  };
 }
 
 function useElementSize<T extends HTMLElement>() {
@@ -103,7 +116,7 @@ function formatTime(ms: number | undefined): string | null {
 }
 
 /** Zona di lavoro: spread grande al centro, una striscia di controlli per ogni pagina, barra inferiore con sfondo, navigazione e vista. */
-export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, cropMode, draft, zoom, guides, sizes, layoutsOpen, templates, actions }: StageProps) {
+export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, cropMode, draft, zoom, guides, sizes, layoutsOpen, templates, actions, design }: StageProps) {
   const [centerRef, centerSize] = useElementSize<HTMLDivElement>();
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
@@ -137,6 +150,14 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     return (
       <>
         <IconButton icon="crop" label={canCrop ? "Ritaglia e sposta nello slot (Invio)" : found.item.locked ? "Foto bloccata" : "Per ritagliare passa a «Riempi lo spazio»"} active={cropMode} disabled={!canCrop} onClick={() => actions.toggleCrop(itemId)} size={16} />
+        {cropMode && canCrop ? (
+          <label className="straighten" title="Raddrizza la foto: Alt + rotella (con Maiusc a passi più fini), oppure , e . da tastiera">
+            <span>Raddrizza</span>
+            <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
+            <output>{(found.item.angle ?? 0).toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}°</output>
+            <button type="button" className="icon-btn" title="Azzera il raddrizzamento" aria-label="Azzera il raddrizzamento" disabled={!found.item.angle} onClick={() => actions.commitView(itemId, { angle: 0 })}>0°</button>
+          </label>
+        ) : null}
         {hasFreeLayout(found.area) ? (
           <>
             <button type="button" className="icon-btn" title="Ruota a sinistra di 5°" aria-label="Ruota a sinistra" onClick={() => actions.rotateFrame(itemId, -5)}>↺</button>
@@ -280,10 +301,26 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               onCommitView={actions.commitView}
               onCommitFrame={actions.commitFrame}
               renderToolbar={toolbar}
+              design={design.handlers}
+              photosLocked={design.open}
             />
           </div>
         </div>
         {strip("right")}
+        {design.open ? (
+          <DesignPanel
+            spread={spread}
+            two={two}
+            areaIndex={areaIndex}
+            tab={design.tab}
+            onTab={design.onTab}
+            selectedOverlayId={design.selectedOverlayId}
+            extraOverlayIds={design.extraOverlayIds}
+            focusSignal={design.focusSignal}
+            actions={design.actions}
+            onClose={design.onToggle}
+          />
+        ) : null}
         {layoutsOpen ? (
           <LayoutBrowser
             project={project}
@@ -321,6 +358,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
           <IconButton icon="minus" label="Riduci (−)" onClick={() => actions.setZoom(Math.max(0.4, Number((zoom - 0.15).toFixed(2))))} size={15} />
           <button type="button" className="btn btn--sm" onClick={() => actions.setZoom(1)} title="Adatta alla finestra (0)">{Math.round(zoom * 100)}%</button>
           <IconButton icon="plus" label="Ingrandisci (+)" onClick={() => actions.setZoom(Math.min(3, Number((zoom + 0.15).toFixed(2))))} size={15} />
+          <button type="button" className={`chip${design.open ? " is-active" : ""}`} onClick={design.onToggle} aria-pressed={design.open} title="Sfondi a immagine, testi in stile rivista, frasi e grafiche">Personalizza</button>
           <button type="button" className={`chip${sizes ? " is-active" : ""}`} onClick={actions.toggleSizes} aria-pressed={sizes} title="Mostra su ogni foto la misura stampata e la risoluzione (S)">Misure</button>
           <button type="button" className={`chip${guides ? " is-active" : ""}`} onClick={actions.toggleGuides} aria-pressed={guides} title="Mostra zona sicura e piega (G)">Guide</button>
         </div>

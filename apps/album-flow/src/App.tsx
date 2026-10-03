@@ -5,7 +5,10 @@ import { Home } from "./components/Home";
 import type { NewAlbumResult } from "./components/NewAlbumDialog";
 import { Workspace } from "./components/Workspace";
 import { pushRecentFormat } from "./model/formats";
-import { parseAlbumProject } from "./model/portability";
+import { parseAlbumProject, readEmbeddedMedia } from "./model/portability";
+import { restoreEmbeddedMedia } from "./model/mediaStore";
+import { autoBackupEnabled, backupOnClose, projectsToBackup, loadBackupMarks, setAutoBackupEnabled } from "./desktop/autoBackup";
+import { backupToDrive, driveAvailable, driveStatus } from "./desktop/cloud";
 import { createEmptyProject, nowIso, touch } from "./model/project";
 import { newId } from "./model/ids";
 import { useLicenseNotice } from "./hooks/useLicense";
@@ -34,6 +37,30 @@ export function App() {
   const license = useLicenseNotice();
 
   useEffect(() => { setSaveFailed(!saveProjects(projects)); }, [projects]);
+
+  // Backup automatico su Drive alla chiusura (se attivato): la shell desktop aspetta che il programma finisca prima di chiudere.
+  const [autoBackup, setAutoBackup] = useState(() => autoBackupEnabled());
+  const changeAutoBackup = (on: boolean) => { setAutoBackup(on); setAutoBackupEnabled(on); };
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  useEffect(() => {
+    const api = window.filexDesktop;
+    if (!api?.onPrepareClose || !api.completeClosePreparation || !driveAvailable()) return;
+    const removePrepare = api.onPrepareClose(() => {
+      void backupOnClose(projectsRef.current, {
+        connected: async () => Boolean((await driveStatus())?.connected),
+        backup: (project) => backupToDrive(project),
+      }).catch(() => undefined).finally(() => { void api.completeClosePreparation(); });
+    });
+    // Se c'è qualcosa da salvare si chiede alla shell di aspettare; altrimenti la finestra si chiude subito.
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!autoBackupEnabled() || projectsToBackup(projectsRef.current, loadBackupMarks()).length === 0) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => { removePrepare(); window.removeEventListener("beforeunload", onBeforeUnload); };
+  }, []);
   useEffect(() => { saveActiveProjectId(activeId); }, [activeId]);
 
   const active = projects.find((project) => project.projectId === activeId) ?? null;
@@ -100,6 +127,14 @@ export function App() {
     setProjects((current) => [copy, ...current]);
   };
 
+  /** Ripristino da Drive: l'album scaricato diventa un album nuovo accanto agli altri, mai in sostituzione. */
+  const openCopy = (downloaded: AlbumProjectV2) => {
+    const copy: AlbumProjectV2 = { ...downloaded, projectId: newId("album"), projectName: `${downloaded.projectName} (da Drive)`, createdAt: nowIso(), updatedAt: nowIso() };
+    upsert(copy, true);
+    setActiveId(copy.projectId);
+    setBanner(`Copia di «${downloaded.projectName}» aperta da Google Drive.`);
+  };
+
   const remove = (projectId: string) => {
     setProjects((current) => current.filter((project) => project.projectId !== projectId));
     if (activeId === projectId) setActiveId(null);
@@ -125,7 +160,9 @@ export function App() {
   const importProjectFile = async (file: File | undefined) => {
     if (!file) return;
     try {
-      const project = parseAlbumProject(await file.text());
+      const raw = await file.text();
+      const project = parseAlbumProject(raw);
+      await restoreEmbeddedMedia(readEmbeddedMedia(raw));
       upsert(project, true);
       setActiveId(project.projectId);
       setBanner(`Progetto «${project.projectName}» aperto.`);
@@ -138,7 +175,7 @@ export function App() {
     <div className="album-app">
       {license ? <div className={`license-notice license-notice--${license.level}`} role={license.level === "error" ? "alert" : "status"}>{license.text}</div> : null}
       {active ? (
-        <Workspace key={`${active.projectId}:${revision}`} initial={active} onChange={onWorkspaceChange} onExit={() => setActiveId(null)} />
+        <Workspace key={`${active.projectId}:${revision}`} initial={active} onChange={onWorkspaceChange} onExit={() => setActiveId(null)} onOpenCopy={openCopy} />
       ) : (
         <Home
           projects={projects}
@@ -146,6 +183,8 @@ export function App() {
           legacy={initial.legacy}
           skipped={initial.skipped}
           onOpen={setActiveId}
+          autoBackup={autoBackup}
+          onAutoBackup={driveAvailable() ? changeAutoBackup : undefined}
           reopenLast={reopenLast}
           onReopenLast={changeReopenLast}
           onCreate={create}

@@ -169,6 +169,9 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:list-photo-selector-drive-versions", projectName),
   downloadPhotoSelectorDriveVersion: (versionId) =>
     ipcRenderer.invoke("filex:download-photo-selector-drive-version", versionId),
+  exportAlbumFlowProjectToDrive: (input) => ipcRenderer.invoke("filex:export-album-flow-project-to-drive", input),
+  listAlbumFlowDriveVersions: (projectName) => ipcRenderer.invoke("filex:list-album-flow-drive-versions", projectName),
+  downloadAlbumFlowDriveVersion: (versionId) => ipcRenderer.invoke("filex:download-album-flow-drive-version", versionId),
   getDesktopSessionState: () => ipcRenderer.invoke("filex:get-desktop-session-state"),
   saveDesktopSessionState: (state) => ipcRenderer.invoke("filex:save-desktop-session-state", state),
   getPartyFrameSessionToken: () => ipcRenderer.invoke("filex:get-party-frame-session-token"),

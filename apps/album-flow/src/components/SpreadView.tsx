@@ -4,7 +4,10 @@ import { dropHighlight, resolveDropTarget, type DropTarget } from "../engine/dro
 import { spreadSizeMm, type Divider, type LeafCell, type Rect } from "../engine/geometry";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import { previewDropRect } from "../model/items";
-import { describeSize, placeItem, type ItemView } from "../model/placement";
+import { clampAngle, describeSize, placeItem, type ItemView } from "../model/placement";
+import { mediaIdsOfSpread } from "../model/design";
+import { useMediaUrls } from "../hooks/useMedia";
+import { BackgroundLayer, OverlayLayer, type DesignHandlers } from "./DesignLayers";
 import { areaGeometryFor, hasFreeLayout, type AreaGeometry } from "../model/project";
 import { cropCenter } from "../slot-geometry";
 import { PhotoBox } from "./PhotoBox";
@@ -44,6 +47,10 @@ export interface SpreadViewProps {
   onCommitRatio?: (areaIndex: number, path: string, ratio: number) => void;
   onResetRatio?: (areaIndex: number, path: string) => void;
   onCommitView?: (itemId: string, view: Partial<ItemView>) => void;
+  /** Selezione e modifica di testi e grafiche (solo nell'area di lavoro). */
+  design?: DesignHandlers;
+  /** Con il pannello «Personalizza» aperto le foto non si selezionano né si spostano: si lavora solo su testi e grafiche. */
+  photosLocked?: boolean;
   /** Una foto di una disposizione libera è stata spostata o ridimensionata (frazioni dell'area utile). */
   onCommitFrame?: (itemId: string, frame: { x: number; y: number; w: number; h: number }) => void;
   /** Contenuto della barra che compare sulla foto selezionata. */
@@ -85,8 +92,9 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
   const contentRect = () => ref.current?.querySelector<HTMLElement>(".cell__content")?.getBoundingClientRect();
 
   // Zoom con la rotella durante il ritaglio: ascoltatore non passivo per bloccare lo scorrimento.
-  const live = useRef({ zoom: item.zoom, view, canCrop, handlers, itemId: item.id });
-  live.current = { zoom: view?.zoom ?? item.zoom, view, canCrop, handlers, itemId: item.id };
+  // Con Alt la rotella raddrizza la foto (0,5° a scatto, 0,1° con Maiusc).
+  const live = useRef({ zoom: placement.zoom, angle: placement.angle, view, canCrop, handlers, itemId: item.id });
+  live.current = { zoom: placement.zoom, angle: placement.angle, view, canCrop, handlers, itemId: item.id };
   useEffect(() => {
     const element = ref.current;
     if (!element || !interactive) return;
@@ -94,6 +102,13 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       const state = live.current;
       if (!state.canCrop) return;
       event.preventDefault();
+      if (event.altKey) {
+        const direction = (event.deltaY || event.deltaX) < 0 ? -1 : 1;
+        const angle = clampAngle(state.angle + direction * (event.shiftKey ? 0.1 : 0.5));
+        state.angle = angle; // gli scatti veloci della rotella si sommano anche prima del ridisegno
+        state.handlers.onCommitView?.(state.itemId, { angle });
+        return;
+      }
       state.handlers.onCommitView?.(state.itemId, { zoom: Math.min(6, Math.max(1, state.zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1))) });
     };
     element.addEventListener("wheel", onWheel, { passive: false });
@@ -145,10 +160,15 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     const state = pan.current;
     const box = contentRect();
     if (!state || !box) return null;
-    return {
-      cx: state.cx - ((event.clientX - state.x) / box.width) * placement.crop.cropWidth,
-      cy: state.cy - ((event.clientY - state.y) / box.height) * placement.crop.cropHeight,
-    };
+    // Il movimento sullo schermo si riporta nel riferimento dell'immagine (ruotata dal raddrizzamento).
+    const rad = (placement.angle * Math.PI) / 180;
+    const dx = event.clientX - state.x;
+    const dy = event.clientY - state.y;
+    const imageDx = dx * Math.cos(rad) + dy * Math.sin(rad);
+    const imageDy = -dx * Math.sin(rad) + dy * Math.cos(rad);
+    const imageWidthPx = (box.width * placement.image.w) / placement.content.w;
+    const imageHeightPx = (box.height * placement.image.h) / placement.content.h;
+    return { cx: state.cx - imageDx / imageWidthPx, cy: state.cy - imageDy / imageHeightPx };
   };
   const onPointerMove = (event: React.PointerEvent) => {
     if (frameDrag.current) { moveFrame(event); return; }
@@ -165,6 +185,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
   const classes = [
     selected ? "cell--selected" : "",
     canCrop ? "cell--cropping" : "",
+    canCrop && placement.angle ? "cell--straightening" : "",
     item.locked ? "cell--locked" : "",
     freeFrame ? "cell--free" : "",
     highlighted ? "cell--flash" : "",
@@ -196,6 +217,8 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
     >
+      {canCrop ? <span className="cell__grid" /> : null}
+      {canCrop && placement.angle ? <span className="cell__angle">{placement.angle.toLocaleString("it-IT")}°</span> : null}
       {freeFrame && selected && !canCrop ? <span className="cell__resize" title="Trascina per ridimensionare (le proporzioni restano)" onPointerDown={(event) => startFrame(event, "resize")} onPointerMove={moveFrame} onPointerUp={endFrame} /> : null}
       {interactive && selected ? <span className="cell__name">{asset?.fileName.replace(/\.[^.]+$/, "")}</span> : null}
       {interactive && item.locked ? <span className="cell__badge cell__badge--lock"><Icon name="lock" size={12} /></span> : null}
@@ -283,6 +306,7 @@ function SpreadViewInner(props: SpreadViewProps) {
   const origin: Rect = useMemo(() => ({ x: 0, y: 0, w: size.width, h: size.height }), [size.width, size.height]);
   const ref = useRef<HTMLDivElement>(null);
   const [hint, setHint] = useState<{ target: DropTarget; rect: Rect } | null>(null);
+  const media = useMediaUrls(mediaIdsOfSpread(spread));
 
   const overrides = useMemo(() => (draft?.kind === "ratio" ? { [draft.areaIndex]: { [draft.path]: draft.ratio } } : undefined), [draft]);
   const geometry: AreaGeometry[] = useMemo(() => spread.areas.map((_, index) => {
@@ -351,7 +375,7 @@ function SpreadViewInner(props: SpreadViewProps) {
   return (
     <div
       ref={ref}
-      className={`spread spread--${variant}${draft?.kind === "ratio" ? " is-resizing" : ""}`}
+      className={`spread spread--${variant}${draft?.kind === "ratio" ? " is-resizing" : ""}${props.photosLocked ? " is-photos-locked" : ""}`}
       style={{ aspectRatio: `${size.width} / ${size.height}` }}
       onClick={() => { if (interactive) props.onSelectItem?.(null, activeArea); }}
       onDragOver={onDragOver}
@@ -363,6 +387,8 @@ function SpreadViewInner(props: SpreadViewProps) {
         const outer = geometry[areaIndex].outer;
         return <div key={`bg-${area.id}`} className="spread__area" style={{ left: pct(((outer.x - origin.x) / origin.w) * 100), top: pct(((outer.y - origin.y) / origin.h) * 100), width: pct((outer.w / origin.w) * 100), height: pct((outer.h / origin.h) * 100), background: area.style.background }} />;
       })}
+
+      <BackgroundLayer sheet={sheet} spread={spread} media={media} />
 
       {spread.areas.map((area, areaIndex) => {
         const empty = area.items.length === 0;
@@ -404,6 +430,8 @@ function SpreadViewInner(props: SpreadViewProps) {
             />
           );
         }))}
+
+      <OverlayLayer sheet={sheet} spread={spread} media={media} interactive={interactive} handlers={props.design} />
 
       {interactive && selectedItemId && props.renderToolbar ? (() => {
         const rect = geometry.flatMap((g) => g.cells).find((cell) => cell.itemId === selectedItemId)?.rect;

@@ -2,12 +2,18 @@ import type { AlbumAssetV2, AlbumSpread } from "@photo-tools/shared-types";
 import { areaOuterRects, spreadSizeMm } from "../engine/geometry";
 import { placeItem } from "../model/placement";
 import { areaGeometry, assetMap, type Project } from "../model/project";
+import { renderBackgroundsSvg, renderOverlaysSvg, type DesignContext } from "./design-svg";
 
 export interface RenderOptions {
   /** Output per stampa: solo immagini incorporate (data URL), niente guide. */
   forPrint?: boolean;
   /** Mostra piega e zona sicura (solo anteprima). */
   showGuides?: boolean;
+  /** Sfondi a immagine, testi e grafiche: servono le immagini già caricate e come misurare il testo. Senza, restano fuori. */
+  design?: DesignContext & {
+    /** Regole @font-face (con i font incorporati come data URL) per un SVG autonomo. */
+    fontCss?: string;
+  };
 }
 
 const n = (value: number) => Number(value.toFixed(3));
@@ -38,6 +44,8 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
     return `<rect x="${n(x0)}" y="${n(-bleed)}" width="${n(x1 - x0)}" height="${n(height + bleed * 2)}" fill="${attr(area.style.background)}"/>`;
   }).join("");
 
+  const backgroundImages = options.design ? renderBackgroundsSvg(project, spread, options.design) : "";
+  const overlays = options.design ? renderOverlaysSvg(project, spread, options.design) : "";
   let needsMono = false;
   const cells = spread.areas.map((area, areaIndex) => {
     const geometry = areaGeometry(project, spread, areaIndex);
@@ -63,7 +71,13 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
       const rotate = asset.rotationDegrees ? ` transform="rotate(${asset.rotationDegrees} ${n(cx)} ${n(cy)})"` : "";
       if (area.style.mono) needsMono = true;
       const filter = area.style.mono ? ' filter="url(#mono)"' : "";
-      return turn(`${border}<clipPath id="${clipId}"><rect x="${n(content.x)}" y="${n(content.y)}" width="${n(content.w)}" height="${n(content.h)}"/></clipPath>`
+      const clip = `<clipPath id="${clipId}"><rect x="${n(content.x)}" y="${n(content.y)}" width="${n(content.w)}" height="${n(content.h)}"/></clipPath>`;
+      if (placement.angle) {
+        // Foto raddrizzata: il ritaglio resta dritto, l'immagine ruota attorno al centro della parte visibile.
+        return turn(`${border}${clip}<g clip-path="url(#${clipId})"><g transform="rotate(${n(placement.angle)} ${n(content.x + content.w / 2)} ${n(content.y + content.h / 2)})">`
+          + `<image href="${attr(url)}" x="${n(cx - elementW / 2)}" y="${n(cy - elementH / 2)}" width="${n(elementW)}" height="${n(elementH)}" preserveAspectRatio="none"${rotate}${filter}/></g></g>`);
+      }
+      return turn(`${border}${clip}`
         + `<image href="${attr(url)}" x="${n(cx - elementW / 2)}" y="${n(cy - elementH / 2)}" width="${n(elementW)}" height="${n(elementH)}" preserveAspectRatio="none"${rotate}${filter} clip-path="url(#${clipId})"/>`);
     }).join("");
   }).join("");
@@ -75,6 +89,8 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
     guides = [0, 1].map((side) => `<rect x="${n(side * page + margin)}" y="${n(margin)}" width="${n(Math.max(0, page - margin * 2))}" height="${n(Math.max(0, height - margin * 2))}" fill="none" stroke="#c8a800" stroke-dasharray="3 2" stroke-width="0.5" data-safe-area="true"/>`).join("")
       + `<line x1="${n(page)}" y1="0" x2="${n(page)}" y2="${n(height)}" stroke="#000000" stroke-opacity="0.25" stroke-width="0.4" data-fold="true"/>`;
   }
-  const defs = needsMono ? '<defs><filter id="mono" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/></filter></defs>' : "";
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(-bleed)} ${n(-bleed)} ${n(width + bleed * 2)} ${n(height + bleed * 2)}" width="${n(width + bleed * 2)}mm" height="${n(height + bleed * 2)}mm" role="img" aria-label="Spread ${spreadIndex + 1}">${defs}${backgrounds}${cells}${guides}</svg>`;
+  const monoFilter = needsMono ? '<filter id="mono" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/></filter>' : "";
+  const fontStyle = options.design?.fontCss && overlays ? `<style>${options.design.fontCss}</style>` : "";
+  const defs = monoFilter || fontStyle ? `<defs>${fontStyle}${monoFilter}</defs>` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(-bleed)} ${n(-bleed)} ${n(width + bleed * 2)} ${n(height + bleed * 2)}" width="${n(width + bleed * 2)}mm" height="${n(height + bleed * 2)}mm" role="img" aria-label="Spread ${spreadIndex + 1}">${defs}${backgrounds}${backgroundImages}${cells}${overlays}${guides}</svg>`;
 }

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { describeSize, imageBox, placeItem } from "../model/placement";
 import { addSpread } from "../model/spreads";
-import { appendAssets } from "../model/items";
+import { appendAssets, setItemView } from "../model/items";
 import { setAreaStyle } from "../model/areas";
 import { assertProjectInvariants, makeAsset, makeProject } from "../model/fixtures";
 import { findSpread, itemAspect, type Project } from "../model/project";
@@ -204,4 +204,17 @@ test("bordo con «foto intera»: sta attorno alla foto, non attorno all'intera c
   const cellGeometry = project.spreads[0].areas[0].items.length;
   assert.equal(cellGeometry, 1);
   assert.ok(Number(border[3]) > 0 && Number(border[4]) > 0);
+});
+
+test("SVG: la foto raddrizzata ruota dentro un ritaglio che resta dritto", () => {
+  let project = built();
+  const id = project.spreads[0].id;
+  project = setAreaStyle(project, id, 0, { mode: "fill" });
+  const item = project.spreads[0].areas[0].items[0];
+  const plain = renderSpreadSvg(project, project.spreads[0], undefined, { forPrint: true });
+  assert.ok(!plain.includes("<g clip-path"), "senza inclinazione l'SVG non cambia");
+  const tilted = setItemView(project, item.id, { angle: 6 });
+  const svg = renderSpreadSvg(tilted, tilted.spreads[0], undefined, { forPrint: true });
+  assert.equal(svg.match(/<g clip-path="url\(#c0-[^)]+\)"><g transform="rotate\(6 /g)?.length, 1);
+  assert.equal(svg.match(/<image /g)?.length, plain.match(/<image /g)?.length);
 });
