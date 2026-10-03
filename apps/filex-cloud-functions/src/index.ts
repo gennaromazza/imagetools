@@ -10,6 +10,7 @@ import { onRequest, type Request } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { DOWNLOADED_RETENTION_MS, MAX_FILE_BYTES, createSessionIdentity, createToken, downloadContentDisposition, hashToken, normalizeLinkExpiry, publicUploadAllowed, sanitizeFileName, sanitizeLabel, sessionCredential, tokensEqual } from "./core.js";
 import { handleLicensingRequest } from "./licensing-api.js";
+import { purgeExpiredSupportMessages } from "./support-service.js";
 import { sendDownloadRange } from "./download-response.js";
 import type { ServerResponse } from "node:http";
 
@@ -305,6 +306,8 @@ async function deleteSession(id: string, request: Request, response: HttpRespons
 
 export const cleanupExpiredSessions = onSchedule({ schedule: "every 15 minutes", region: "europe-west1", timeZone: "Europe/Rome", timeoutSeconds: 540, memory: "256MiB" }, async () => {
   const now = Timestamp.now();
+  // Un errore qui non deve fermare la pulizia di FileX Send.
+  const supportMessagesRemoved = await purgeExpiredSupportMessages(db, now).catch((cause) => { logger.warn("Support retention cleanup failed", cause); return 0; });
   const downloadedCutoff = Timestamp.fromMillis(now.toMillis() - DOWNLOADED_RETENTION_MS);
   const downloaded = await db.collectionGroup("files").where("downloadedAt", "<=", downloadedCutoff).limit(200).get();
   for (const fileSnapshot of downloaded.docs) {
@@ -327,7 +330,7 @@ export const cleanupExpiredSessions = onSchedule({ schedule: "every 15 minutes",
     await purgeSession(session.id, session.ref);
     expiredSessionsRemoved += 1;
   }
-  logger.info("FileX Send cleanup completed", { downloadedFilesRemoved: downloaded.size, expiredSessionsRemoved, pendingSessionsRetained });
+  logger.info("FileX Send cleanup completed", { supportMessagesRemoved, downloadedFilesRemoved: downloaded.size, expiredSessionsRemoved, pendingSessionsRetained });
 });
 
 async function purgeSession(id: string, ref: FirebaseFirestore.DocumentReference) {

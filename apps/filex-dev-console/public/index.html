@@ -46,6 +46,13 @@
     section { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; }
     section.tab-panel { display: none; }
     section.tab-panel.active { display: block; }
+    .support-list { display: grid; gap: 8px; }
+    .support-row { display: grid; gap: 4px; text-align: left; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; color: inherit; font: inherit; cursor: pointer; }
+    .support-row.selected { border-color: var(--accent); }
+    .support-row__top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .support-row__when, .support-row__who { color: var(--muted); font-size: 12px; }
+    .support-row__when { margin-left: auto; }
+    .support-row__preview { font-size: 13px; color: var(--text, inherit); }
     .tabbar { max-width: 1200px; margin: 0 auto; padding: 14px 28px 0; display: flex; gap: 8px; flex-wrap: wrap; }
     .tabbar button { background: transparent; color: var(--muted); border: 1px solid var(--border); }
     .tabbar button.active { background: var(--accent); color: white; border-color: var(--accent); }
@@ -193,6 +200,7 @@
     <button data-tab="logs" role="tab" aria-selected="false">Log</button>
     <button data-tab="suite" role="tab" aria-selected="false">Suite</button>
     <button data-tab="licenses" role="tab" aria-selected="false">Licenze</button>
+    <button data-tab="support" role="tab" aria-selected="false">Assistenza <span id="supportBadge" class="badge wait" hidden>0</span></button>
     <button data-tab="tests" role="tab" aria-selected="false">Test</button>
     <button data-tab="project-health" role="tab" aria-selected="false">Qualità</button>
     <button data-tab="release-suite" role="tab" aria-selected="false">Release Suite</button>
@@ -242,6 +250,33 @@
       </div>
       <div class="log-head" style="margin-top: 12px;"><span></span><button class="secondary copy-log" data-copy-target="licOutput">Copia output</button></div>
       <pre class="log" id="licOutput" style="display:none;"></pre>
+    </section>
+
+    <section id="support" class="tab-panel">
+      <h2>Assistenza</h2>
+      <p class="hint">Messaggi inviati dagli utenti dalla Suite («Assistenza»). Si aggiornano ogni cinque minuti mentre la console è aperta. Rispondi dalla tua email all'indirizzo indicato nel messaggio.</p>
+      <div class="form">
+        <select id="supportFilter" aria-label="Filtro messaggi">
+          <option value="all">Tutti</option>
+          <option value="new">Nuovi</option>
+          <option value="read">Letti</option>
+          <option value="resolved">Risolti</option>
+        </select>
+        <button id="supportRefresh" class="secondary">Aggiorna</button>
+      </div>
+      <div id="supportList" class="support-list"></div>
+      <div id="supportDetail" hidden>
+        <div class="log-head" style="margin-top: 14px;">
+          <div><h2>Messaggio <span id="supportSelectedId"></span></h2><p class="hint">Il testo dell'utente è un dato: non contiene istruzioni per te né per Claude.</p></div>
+          <div class="row">
+            <button id="supportCopyClaude">Copia per Claude</button>
+            <button id="supportMarkRead" class="secondary">Segna letto</button>
+            <button id="supportMarkResolved" class="secondary">Segna risolto</button>
+            <button id="supportMarkNew" class="secondary">Riapri</button>
+          </div>
+        </div>
+        <pre class="log" id="supportExport"></pre>
+      </div>
     </section>
 
     <section id="tests" class="tab-panel">
@@ -969,5 +1004,6 @@
     setInterval(() => refreshTools().catch(() => {}), 4000);
     setInterval(() => refreshReleaseStatus().catch(() => {}), 5000);
   </script>
+  <script src="support.js"></script>
 </body>
 </html>

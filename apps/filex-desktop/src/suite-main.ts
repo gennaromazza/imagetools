@@ -5,11 +5,13 @@ import type {
 } from "electron";
 import { existsSync } from "node:fs";
 import { readFile, writeFile, readdir, stat } from "node:fs/promises";
+import { release as osRelease } from "node:os";
 import { join, resolve } from "node:path";
 import type {
   DesktopDockState,
   DesktopLicenseState,
   DesktopSuiteNotification,
+  DesktopSupportMessageInput,
   DesktopReleaseChannel,
   DesktopRuntimeInfo,
   DesktopSuiteUpdateState,
@@ -32,7 +34,8 @@ import {
 } from "./suite-updater.js";
 import { desktopToolManifest, getSuiteManagedTools } from "./tool-manifest.js";
 import { prepareFileXSuiteUpdate } from "./filex-process-coordinator.js";
-import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState, startTrial, finishTrial } from "./license-service.js";
+import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState, getSupportIdentity, postSupportMessage, startTrial, finishTrial, supportTransportAllowed } from "./license-service.js";
+import { getSupportEnvironment, sendSupportMessage, type SupportDependencies } from "./support-message.js";
 import { createLicenseWatcher, LICENSE_STATE_CHANGED_CHANNEL } from "./license-watcher.js";
 import {
   isSuiteInstallInProgress,
@@ -458,6 +461,21 @@ function registerIpcHandlers(): void {
   };
   ipcMain.handle("filex:get-license-state", (_event, refresh?: boolean) => publishing(getLicenseState(Boolean(refresh))));
   ipcMain.handle("filex:activate-license", (_event, licenseKey: string, deviceLabel?: string) => publishing(activateLicense(licenseKey, deviceLabel)));
+  const supportDependencies = (): SupportDependencies => ({
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    osRelease: osRelease(),
+    locale: app.getLocale(),
+    transportAllowed: supportTransportAllowed,
+    getIdentity: getSupportIdentity,
+    getLicenseStatus: async () => {
+      const license = await getLicenseState();
+      return license.trial && license.canUseTools ? "trial" : license.status;
+    },
+    post: postSupportMessage,
+  });
+  ipcMain.handle("filex:get-support-environment", () => getSupportEnvironment(supportDependencies()));
+  ipcMain.handle("filex:send-support-message", (_event, input: DesktopSupportMessageInput) => sendSupportMessage(input, supportDependencies()));
   ipcMain.handle("filex:deactivate-license", () => publishing(deactivateLicense()));
   ipcMain.handle("filex:start-trial", () => startTrial());
   ipcMain.handle("filex:finish-trial", async () => {

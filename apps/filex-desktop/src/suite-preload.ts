@@ -3,6 +3,9 @@ import type {
   DesktopDockState,
   DesktopLicenseState,
   DesktopReleaseChannel,
+  DesktopSupportEnvironment,
+  DesktopSupportMessageInput,
+  DesktopSupportMessageResult,
   DesktopSuiteUpdateState,
   DesktopToolId,
 } from "@photo-tools/desktop-contracts";
@@ -51,6 +54,9 @@ const suiteApi = {
   deactivateLicense: () => ipcRenderer.invoke("filex:deactivate-license"),
   startTrial: () => ipcRenderer.invoke("filex:start-trial"),
   finishTrial: () => ipcRenderer.invoke("filex:finish-trial"),
+  getSupportEnvironment: (): Promise<DesktopSupportEnvironment> => ipcRenderer.invoke("filex:get-support-environment"),
+  sendSupportMessage: (input: DesktopSupportMessageInput): Promise<DesktopSupportMessageResult> =>
+    ipcRenderer.invoke("filex:send-support-message", input),
   openLicenseCheckout: (billingPeriod: "monthly" | "annual") =>
     ipcRenderer.invoke("filex:open-license-checkout", billingPeriod),
 };

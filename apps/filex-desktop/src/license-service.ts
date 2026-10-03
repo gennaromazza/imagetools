@@ -444,6 +444,21 @@ export async function deactivateLicense(): Promise<DesktopLicenseState> {
   return state;
 }
 
+// Assistenza: il messaggio viaggia con la stessa identita' della licenza, ma il PC senza licenza puo' scrivere comunque.
+export async function getSupportIdentity(): Promise<{ installationId: string; activationToken: string | null }> {
+  const store = await readStore();
+  return { installationId: store.installationId, activationToken: await decryptToken(store.activationTokenEncrypted) };
+}
+
+export function supportTransportAllowed(): boolean {
+  // Una build di sviluppo non scrive al backend di produzione, salvo un'API di prova dichiarata.
+  return app.isPackaged || Boolean(process.env.FILEX_LICENSE_API_URL);
+}
+
+export function postSupportMessage(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  return request("/support/message", body);
+}
+
 let pendingTrial: { code: string; pollSecret: string; expiresAt: number; installationId: string } | null = null;
 
 // Keeps the management Suite available; tools call this only after startup authorization.

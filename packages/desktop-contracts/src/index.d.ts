@@ -611,6 +611,24 @@ export interface DesktopLicenseState {
     message: string;
     canUseTools: boolean;
 }
+export type DesktopSupportMessageKind = "problem" | "suggestion" | "question";
+export interface DesktopSupportMessageInput {
+    kind: DesktopSupportMessageKind;
+    toolId: string;
+    email: string;
+    name?: string;
+    message: string;
+    includeDiagnostics: boolean;
+}
+export interface DesktopSupportMessageResult {
+    ticketId: string;
+}
+export interface DesktopSupportEnvironment {
+    suiteVersion: string;
+    system: string;
+    licenseStatus: string;
+}
+
 export interface DesktopCheckoutConfiguration {
     monthly: string | null;
     annual: string | null;
@@ -1320,6 +1338,8 @@ export interface FileXDesktopApi {
     activateLicense: (licenseKey: string, deviceLabel?: string) => Promise<DesktopLicenseState>;
     deactivateLicense: () => Promise<DesktopLicenseState>;
     openLicenseCheckout: (billingPeriod: "monthly" | "annual") => Promise<void>;
+    sendSupportMessage?: (input: DesktopSupportMessageInput) => Promise<DesktopSupportMessageResult>;
+    getSupportEnvironment?: () => Promise<DesktopSupportEnvironment>;
     openFolder: (options?: DesktopFolderOpenOptions) => Promise<DesktopFolderOpenResult | null>;
     reopenFolder: (rootPath: string, options?: DesktopFolderOpenOptions) => Promise<DesktopFolderOpenResult | null>;
     consumePendingOpenFolderPath: () => Promise<string | null>;

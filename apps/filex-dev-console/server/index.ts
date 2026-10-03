@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { DEV_TOOLS, SUITE_TOOL, type DevTool } from "./tools.js";
 import { PKG_DIR, ROOT, focusElectronWindow, getManagedPid, getPortProcess,readLog, startProcess, stopProcess, stopAllProcesses, stopPortProcess, isPortOpen, isRunning, listRunning } from "./processes.js";
 import { execFileHidden } from "./hidden-exec.js";
+import { registerSupportRoutes } from "./support.js";
 
 const execFileP = execFileHidden;
 const NODE = process.execPath;
@@ -283,6 +284,7 @@ const TEST_CATEGORIES: TestCategory[] = [
   { id: "suite", title: "FileX Suite e aggiornamenti", description: "Protezione updater, cataloghi e release indipendenti." },
   { id: "licenses", title: "Licenze FileX", description: "Copertura dei controlli licenza nei tool." },
   { id: "dev-console", title: "FileX Dev Console", description: "Affidabilità della console di sviluppo stessa: nessuna finestra di terminale aperta dai controlli di stato e avvio pulito senza fermare processi che non le appartengono." },
+  { id: "support", title: "FileX Assistenza clienti", description: "Messaggi degli utenti dalla Suite: validazione, limiti di invio, lettura protetta nella Dev Console e pacchetto della Suite." },
   { id: "cloud", title: "Servizi cloud", description: "Funzioni Firebase e servizi FileX Cloud." },
   { id: "other", title: "Altri controlli", description: "Test non ancora associati a una categoria di prodotto." },
 ];
@@ -307,6 +309,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
   if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-suite-dock-startup" || name === "test:filex-suite-license-sync" || name === "test:filex-suite-update-flow" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
   if (name === "test:filex-dev-console-hidden-windows" || name === "test:filex-dev-console-launcher") return "dev-console";
+  if (name === "test:filex-support" || name === "test:filex-support-emulator") return "support";
   if (name === "test:filex-license-coverage") return "licenses";
   if (name === "test:filex-installed-licenses") return "licenses";
   if (name === "test:filex-trial") return "licenses";
@@ -392,6 +395,8 @@ function testDescription(name: string): string {
     "test:filex-suite-launcher": "Verifica in Electron dock orizzontale, tooltip, ricerca espandibile, temi, preferiti, notifiche FileX Send e rimozione persistente con dati simulati.",
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
+    "test:filex-support": "Verifica il canale «Scrivici» della Suite: il backend valida tipo, email e lunghezza, pulisce i caratteri di controllo, limita gli invii ripetuti (cinque ogni dieci minuti per rete) e salva un messaggio con numero richiesta senza chiavi o token; la Suite non scrive mai al servizio reale in sviluppo, spiega gli errori di rete e conserva il testo; l'interfaccia ha tutti gli elementi che il codice cerca; il modulo è incluso nel pacchetto; la Dev Console legge i messaggi solo dalla propria pagina (rifiuta altre origini e host diversi), tratta il testo dell'utente come dato e non come istruzione. Non invia messaggi veri né prova il servizio pubblicato.",
+    "test:filex-support-emulator": "Prova il canale «Scrivici» sul vero database Firestore di prova (emulatore locale, nessun dato reale): salvataggio con numero richiesta e scadenza a un anno, messaggio collegato alla licenza solo con token e PC corretti, il token non viene mai conservato, dati non validi senza effetti, al massimo cinque messaggi per rete anche con otto invii simultanei, dieci al giorno per PC anche cambiando rete e lettura dei messaggi come la fa la Dev Console. Richiede Java 21; non invia nulla al servizio pubblicato.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
     "test:filex-trial": "Verifica prova di 30 giorni, account, firme, DPAPI Windows e migrazione fra profili, concorrenza, cache, avviso e chiusura dopo 60 secondi e annullamento dopo rinnovo.",
     "test:filex-installed-licenses": "Avvia gli installer con profili isolati: controlla import, versione, licenza reale, blocchi, migrazione dei vecchi token e validazione online obbligatoria. Richiede componenti aggiornati, rete e licenza reale attiva.",
@@ -627,6 +632,8 @@ app.get("/api/license/status", async (_req, res) => {
     });
   }
 });
+
+registerSupportRoutes(app, PORT);
 
 app.get("/api/tests", async (_req, res) => {
   try {

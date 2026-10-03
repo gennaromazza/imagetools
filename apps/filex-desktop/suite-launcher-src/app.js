@@ -1,4 +1,5 @@
 import { subscribeLicenseChanges, trialDaysLeft } from './license-sync.js';
+import { initSupport } from './support.js';
 const api = window.filexDesktop;
 const toolsGrid = document.querySelector('#tools-grid');
 const nav = document.querySelector('#category-nav');
@@ -666,6 +667,7 @@ suiteUpdateDismiss.addEventListener('click', () => {
 api.onSuiteUpdateState(renderSuiteUpdate);
 void api.getSuiteUpdateState().then(renderSuiteUpdate);
 renderNav();
+initSupport({ api, getTools: () => states.map(state => ({ id: state.toolId, name: state.toolName })), showToast });
 subscribeLicenseChanges(api, renderLicense);
 setInterval(() => { if (licenseState) renderLicense(licenseState); }, 60 * 60 * 1000);
 void refreshLicense().catch(error => renderLicense({ status:'unavailable', enforcement:'observe', activation:{current:0,limit:2}, message:error.message||String(error) }));

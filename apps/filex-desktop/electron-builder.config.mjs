@@ -440,6 +440,7 @@ export default {
         ".output/electron/update-shutdown-policy.js",
         ".output/electron/suite-update-policy.js",
         ".output/electron/license-public-key.js",
+        ".output/electron/support-message.js",
         "package.json",
         "!node_modules/@img{,/**/*}",
         "!node_modules/cors{,/**/*}",

@@ -158,6 +158,7 @@ if (args.component === "suite") {
     "/.output/electron/license-service.js",
     "/.output/electron/license-attestation.js",
     "/.output/electron/license-public-key.js",
+    "/.output/electron/support-message.js",
   ]) {
     if (!entries.includes(requiredEntry)) throw new Error(`La Suite non contiene ${requiredEntry}`);
   }

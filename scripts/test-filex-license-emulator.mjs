@@ -22,5 +22,6 @@ if (!env.JAVA_HOME && await access(join(portableJava,"bin/java.exe")).then(()=>t
 const pathVariable = Object.keys(env).find(key => key.toLowerCase() === "path") ?? "PATH";
 env[pathVariable] = [dirname(process.execPath), ...(env.JAVA_HOME ? [join(env.JAVA_HOME,"bin")] : []), env[pathVariable]].join(process.platform === "win32" ? ";" : ":");
 const firebaseBin = join(dirname(require.resolve("firebase-tools/package.json")), "lib/bin/firebase.js");
-const child = spawn(process.execPath,[firebaseBin,"emulators:exec","--project","demo-filex-license-audit","--config",config,"--only","firestore,auth",`"${process.execPath}" --import tsx scripts/test-filex-license-emulator.ts`],{cwd:root,env,stdio:"inherit",windowsHide:true});
+const scenario = process.argv[2] ?? "scripts/test-filex-license-emulator.ts";
+const child = spawn(process.execPath,[firebaseBin,"emulators:exec","--project","demo-filex-license-audit","--config",config,"--only","firestore,auth",`"${process.execPath}" --import tsx ${scenario}`],{cwd:root,env,stdio:"inherit",windowsHide:true});
 await new Promise((resolve,reject)=>{child.on("error",reject);child.on("exit",code=>code===0?resolve():reject(new Error(`Emulator audit failed: ${code}`)));});

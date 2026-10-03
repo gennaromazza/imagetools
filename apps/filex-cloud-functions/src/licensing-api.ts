@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { approveTrial, pollTrial, startTrialSession, TrialError } from "./trial-service.js";
+import { createSupportRecord, createTicketId, parseSupportMessage, SupportInputError } from "./support-service.js";
 import { getAuth } from "firebase-admin/auth";
 import { FieldValue, Timestamp, type Firestore } from "firebase-admin/firestore";
 import type { Request } from "firebase-functions/v2/https";
@@ -97,6 +98,7 @@ export async function handleLicensingRequest(db: Firestore, request: Request, re
       throw error;
     }
   }
+  if (request.method === "POST" && path === "/support/message") return submitSupportMessage(db, request, response);
   if (request.method === "GET" && path === "/account") return accountOverview(db, request, response, secrets);
   if (request.method === "POST" && path === "/account/devices/deactivate") return deactivateAccountDevice(db, request, response);
   if (request.method === "POST" && path === "/activate") return activate(db, request, response, secrets.signingPrivateKey ?? "");
@@ -463,6 +465,44 @@ async function activate(db: Firestore, request: Request, response: HttpResponse,
   const count = result.count;
   const entitlement = createEntitlement(data, count);
   return json(response, 200, { activationToken, entitlement, attestation: attest(entitlement, installationHash, signingPrivateKey), enforcement: (await readPublicConfiguration(db)).enforcement });
+}
+
+async function submitSupportMessage(db: Firestore, request: Request, response: HttpResponse) {
+  const ip = String(request.ip || request.get("x-forwarded-for") || "unknown").split(",")[0].trim();
+  if (!(await consumeRateLimit(db, `support-ip:${ip}`, 5, 10 * 60 * 1000))) return json(response, 429, { error: "Hai inviato troppi messaggi. Attendi qualche minuto e riprova." });
+  const installationId = normalizeInstallationId(request.body?.installationId);
+  if (installationId && !(await consumeRateLimit(db, `support-installation:${installationId}`, 10, 24 * 60 * 60 * 1000))) return json(response, 429, { error: "Hai raggiunto il limite giornaliero di messaggi. Riprova domani o scrivici via email." });
+  let input;
+  try { input = parseSupportMessage(request.body); }
+  catch (error) {
+    if (error instanceof SupportInputError) return json(response, 400, { error: error.message });
+    throw error;
+  }
+  // Se il PC ha una licenza valida il messaggio e' marcato come verificato: aiuta il triage, non e' obbligatorio per scrivere.
+  const authorized = request.body?.activationToken ? await authorizeActivation(db, request.body.activationToken, installationId) : null;
+  const record = createSupportRecord(input, { verifiedSubscriptionId: authorized?.data.subscriptionId ?? null });
+  const ticketId = createTicketId();
+  const { createdAtMs, retentionExpiresAtMs, ...fields } = record;
+  await db.collection("supportMessages").doc(ticketId).create({
+    ...fields,
+    createdAt: Timestamp.fromMillis(createdAtMs),
+    retentionExpiresAt: Timestamp.fromMillis(retentionExpiresAtMs),
+    readAt: null,
+    resolvedAt: null,
+  });
+  return json(response, 201, { ok: true, ticketId });
+}
+
+async function consumeRateLimit(db: Firestore, key: string, limit: number, windowMs: number): Promise<boolean> {
+  const bucket = Math.floor(Date.now() / windowMs);
+  const ref = db.collection("licenseRateLimits").doc(hashLicenseSecret(`${key}:${bucket}`));
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const count = Number(snapshot.data()?.count ?? 0);
+    if (count >= limit) return false;
+    transaction.set(ref, { count: count + 1, expiresAt: Timestamp.fromMillis((bucket + 2) * windowMs), updatedAt: Timestamp.now() }, { merge: true });
+    return true;
+  });
 }
 
 async function consumeActivationAttempt(db: Firestore, request: Request): Promise<boolean> {

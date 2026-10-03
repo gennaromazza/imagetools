@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="./styles.css" />
   <link rel="stylesheet" href="./components.css" />
   <link rel="stylesheet" href="./update.css" />
+  <link rel="stylesheet" href="./support.css" />
 </head>
 <body>
   <svg class="svg-sprite" aria-hidden="true">
@@ -25,6 +26,7 @@
       <nav id="category-nav"></nav>
       <button id="manage-sections-btn" class="manage-sections" type="button">+ Organizza sezioni</button>
       <button id="license-btn" class="license-sidebar" type="button"><span id="license-dot"></span><div><strong>Licenza</strong><small id="license-sidebar-status">Verifica...</small></div></button>
+      <button id="support-btn" class="support-sidebar" type="button"><span aria-hidden="true">✉</span><div><strong>Assistenza</strong><small>Scrivici o segnala un problema</small></div></button>
       <div class="sidebar-foot"><span id="suite-version">Versione...</span><button id="refresh-btn" class="icon-btn" title="Controlla aggiornamenti dei tool">↻</button></div>
     </aside>
     <main class="content">
@@ -94,6 +96,33 @@
       </div>
       <div id="trial-purchase" class="license-buy" hidden><span>Continua dopo la prova: 12 EUR/mese o 100 EUR/anno.</span><button id="trial-buy" type="button">Scegli abbonamento</button><button id="trial-enter-key" type="button">Ho acquistato: inserisci chiave</button></div>
       <footer><span class="license-mode" id="license-mode"></span><button class="secondary-action" value="cancel">Chiudi</button></footer>
+    </form>
+  </dialog>
+  <dialog id="support-dialog" class="sections-dialog support-dialog">
+    <form method="dialog" class="sections-dialog-card">
+      <header><div><p class="eyebrow">ASSISTENZA</p><h2>Scrivici</h2></div><button class="dialog-close" value="cancel" aria-label="Chiudi">×</button></header>
+      <div id="support-form-view">
+        <p class="dialog-help">Racconta cosa è successo o cosa vorresti: leggiamo ogni messaggio e rispondiamo all'email che indichi.</p>
+        <div class="support-row">
+          <label class="license-field"><span>Di cosa si tratta</span><select id="support-kind"><option value="problem">Ho un problema</option><option value="suggestion">Ho un suggerimento</option><option value="question">Ho una domanda</option></select></label>
+          <label class="license-field"><span>Strumento</span><select id="support-tool"></select></label>
+        </div>
+        <div class="support-row">
+          <label class="license-field"><span>La tua email (per la risposta)</span><input id="support-email" type="email" autocomplete="email" spellcheck="false" placeholder="nome@esempio.it"></label>
+          <label class="license-field"><span>Nome (facoltativo)</span><input id="support-name" maxlength="80" autocomplete="name"></label>
+        </div>
+        <label class="license-field"><span>Messaggio</span><textarea id="support-message" rows="6" maxlength="4200" placeholder="Cosa stavi facendo, cosa ti aspettavi e cosa è successo (anche il messaggio d'errore, se c'è)."></textarea><small id="support-counter" class="support-counter">0 / 4000</small></label>
+        <label class="license-consent"><input id="support-diagnostics" type="checkbox" checked><span>Includi informazioni tecniche (versione, sistema, stato licenza) per aiutarci a capire prima il problema.</span></label>
+        <details class="support-details"><summary>Cosa viene inviato</summary><pre id="support-diagnostics-preview"></pre></details>
+        <p id="support-status" class="license-error" hidden role="alert"></p>
+        <button id="support-send" class="license-primary" type="button">Invia messaggio</button>
+        <p class="dialog-help">Usiamo email e messaggio solo per risponderti, come spiegato nella <a href="https://filex-suite.web.app/privacy/" target="_blank" rel="noreferrer">privacy</a>. Se preferisci, puoi anche <button id="support-mailto" class="support-link" type="button">scrivere con la tua email</button> o <button id="support-copy" class="support-link" type="button">copiare il testo</button>.</p>
+      </div>
+      <div id="support-done-view" hidden>
+        <div class="license-state-card"><span>MESSAGGIO RICEVUTO</span><h3>Grazie, ti risponderemo presto</h3><p>Il tuo numero di richiesta è <strong id="support-ticket"></strong>. Conservalo: ci aiuta a ritrovare subito la tua segnalazione.</p></div>
+        <div class="license-actions"><button id="support-another" class="secondary-action" type="button">Scrivi un altro messaggio</button></div>
+      </div>
+      <footer><span class="license-mode">Rispondiamo di norma entro pochi giorni lavorativi.</span><button class="secondary-action" value="cancel">Chiudi</button></footer>
     </form>
   </dialog>
   <div id="suite-toast" class="suite-toast" role="status" aria-live="polite" hidden></div>
