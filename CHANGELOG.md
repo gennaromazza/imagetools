@@ -35,6 +35,10 @@
 
 - Icona del software sempre presente: finestra, barra delle applicazioni, icona vicino all'orologio, finestre di avviso e di stampa usano il logo di Archivio Flow invece dell'icona generica di Electron, con ripiego automatico se un formato non si carica.
 
+## 2026-10-03 - Album Flow 0.2.2
+
+- Corretto: il logo di Album Flow nella Home non si vedeva nel programma installato (percorso assoluto che puntava alla radice del disco); ora è sempre visibile e un controllo automatico impedisce che si ripeta.
+
 ## 2026-10-03 - Album Flow 0.2.1
 
 - Anteprima intera al passaggio del mouse sulle miniature della libreria: foto verticali e panorami si vedono completi, più grandi, con nome e dimensioni.

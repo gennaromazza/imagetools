@@ -572,6 +572,9 @@
       "Anteprima intera al passaggio del mouse sulle miniature della libreria: foto verticali e panorami si vedono completi, più grandi, con nome e dimensioni.",
       "Finestra «Novità» dopo ogni aggiornamento, con i nomi dei pulsanti dove trovare le funzioni nuove; etichetta «Nuovo» sui pulsanti aggiunti (Personalizza, Drive) e pulsante «Novità» nella Home per rivederla.",
       "Corretto: con un testo sopra una foto, la barra della foto (Raddrizza, anteprima, blocco) veniva coperta dal testo."
+    ],
+    "0.2.2": [
+      "Corretto: il logo di Album Flow nella Home non si vedeva nel programma installato (percorso assoluto che puntava alla radice del disco); ora è sempre visibile e un controllo automatico impedisce che si ripeta."
     ]
   }
 }
