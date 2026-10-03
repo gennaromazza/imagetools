@@ -215,7 +215,7 @@ import {
 } from "./id-photo-print-service.js";
 import { OpenProjectRequestQueue, PhotoToolHandoffManager } from "./photo-tool-handoff.js";
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, screen, session, shell, Tray } = electron;
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, protocol, screen, session, shell, Tray } = electron;
 
 const EARLY_BOOT_LOG_PATH = join(process.env.TEMP || process.cwd(), "filex-image-party-frame-early.log");
 
@@ -611,6 +611,8 @@ app.setName(requestedTool.productName);
 if (process.platform === "win32") {
   app.setAppUserModelId(appUserModelId);
   app.on("browser-window-created", (_event, window) => {
+    const toolIcon = loadToolIcon();
+    if (toolIcon) window.setIcon(toolIcon);
     window.setAppDetails({
       appId: appUserModelId,
       appIconPath: resolveWindowIcon(),
@@ -618,6 +620,31 @@ if (process.platform === "win32") {
       ...(app.isPackaged ? { relaunchCommand: `"${process.execPath}"`, relaunchDisplayName: requestedTool.productName } : {}),
     });
   });
+}
+
+/**
+ * Icona del software come NativeImage. Preferisce l'.ico (Windows) e ripiega
+ * sul PNG, cosi' finestre, tray, dialog e notifiche non cadono mai
+ * sull'icona generica di Electron anche se un formato non si carica.
+ */
+let cachedToolIcon: Electron.NativeImage | null = null;
+function loadToolIcon(): Electron.NativeImage | undefined {
+  if (cachedToolIcon && !cachedToolIcon.isEmpty()) return cachedToolIcon;
+  const primary = resolveWindowIcon();
+  const candidates = [primary, primary.replace(/\.(ico|png)$/i, (_m, ext: string) => (ext.toLowerCase() === "ico" ? ".png" : ".ico"))];
+  for (const candidate of candidates) {
+    try {
+      const image = nativeImage.createFromPath(candidate);
+      if (!image.isEmpty()) {
+        cachedToolIcon = image;
+        return image;
+      }
+    } catch {
+      // prova il formato successivo
+    }
+  }
+  writeBootLog(`Icona del software non caricabile: ${primary}`);
+  return undefined;
 }
 
 function resolveWindowIcon(): string {
@@ -1692,6 +1719,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     "filex:print-id-photo-pages",
     (_event, request: DesktopIdPhotoPrintRequest) => printIdPhotoPagesDesktop(request, () => new BrowserWindow({
+      icon: loadToolIcon() ?? resolveWindowIcon(),
       show: false,
       width: 900,
       height: 700,
@@ -2533,7 +2561,7 @@ async function ensureMainWindow(): Promise<void> {
 
 function createSuiteTray(): void {
   if (requestedTool.id !== "suite-launcher" || suiteTray) return;
-  suiteTray = new Tray(resolveWindowIcon());
+  suiteTray = new Tray(loadToolIcon() ?? resolveWindowIcon());
   suiteTray.setToolTip("FileX Suite");
   const toolItems = getSuiteManagedTools().map((tool) => ({
     label: tool.displayName,
@@ -2575,6 +2603,7 @@ async function createSuiteDock(): Promise<void> {
     ? display.workArea.y + display.workAreaSize.height - height - 18
     : Math.round(display.workArea.y + (display.workAreaSize.height - height) / 2);
   suiteDockWindow = new BrowserWindow({
+    icon: loadToolIcon() ?? resolveWindowIcon(),
     width,
     height,
     x: isBottomAnchor ? dockState.x || defaultX : defaultX,
@@ -2619,7 +2648,7 @@ function stopArchivioFlowSdWatcher(): void {
 function createArchivioFlowTray(): void {
   if (requestedTool.id !== "archivio-flow" || archivioFlowTray) return;
 
-  archivioFlowTray = new Tray(resolveWindowIcon());
+  archivioFlowTray = new Tray(loadToolIcon() ?? resolveWindowIcon());
   archivioFlowTray.setToolTip("Archivio Flow — rilevamento SD attivo");
   archivioFlowTray.setContextMenu(Menu.buildFromTemplate([
     {
@@ -2675,7 +2704,7 @@ async function createMainWindow(): Promise<void> {
     minHeight: requestedTool.minWindowHeight,
     autoHideMenuBar: true,
     backgroundColor: "#181d1a",
-    icon: resolveWindowIcon(),
+    icon: loadToolIcon() ?? resolveWindowIcon(),
     webPreferences: {
       preload: join(app.getAppPath(), ".output", "electron", "preload.js"),
       contextIsolation: true,
@@ -2745,6 +2774,7 @@ async function createMainWindow(): Promise<void> {
       idPhotoUnloadGuard.handlePreventedUnload({
         requestDecision: async () => {
           const { response } = await dialog.showMessageBox(windowInstance, {
+            icon: loadToolIcon(),
             type: "warning",
             title: "Modifiche non salvate",
             message: "FileX ID Photo non è riuscito a salvare tutte le modifiche.",
@@ -2942,7 +2972,7 @@ if (hasSingleInstanceLock) {
         return;
       }
     }
-    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest && !isImageFileFinderPackagedSmokeTest) startLicenseExpiryWatchdog();
+    if (requestedTool.id !== "suite-launcher" && !isIdPhotoPackagedSmokeTest && !isArchivioFlowPackagedSmokeTest && !isImageFileFinderPackagedSmokeTest) startLicenseExpiryWatchdog(loadToolIcon());
     // Apply the persisted RAM budget before registering IPC handlers so that
     // the cache limits are already in effect when the first thumbnail request arrives.
     const savedPreset = await loadRamBudgetPreset();

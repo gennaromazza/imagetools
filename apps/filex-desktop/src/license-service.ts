@@ -447,7 +447,7 @@ export async function deactivateLicense(): Promise<DesktopLicenseState> {
 let pendingTrial: { code: string; pollSecret: string; expiresAt: number; installationId: string } | null = null;
 
 // Keeps the management Suite available; tools call this only after startup authorization.
-export function startLicenseExpiryWatchdog(): () => void {
+export function startLicenseExpiryWatchdog(dialogIcon?: electron.NativeImage): () => void {
   if (!app.isPackaged) return () => {};
   let busy = false;
   let stopped = false;
@@ -463,6 +463,7 @@ export function startLicenseExpiryWatchdog(): () => void {
       if (!closeAt) {
         closeAt = Date.now() + 60000;
         void dialog.showMessageBox({
+          ...(dialogIcon ? { icon: dialogIcon } : {}),
           type: "warning", title: "FileX All Access",
           message: "La licenza non e' piu' valida. Il tool si chiudera' tra 60 secondi.",
           detail: "Premi Ho capito e salva subito il lavoro. Puoi riattivare la licenza da FileX Suite: se torna valida prima della chiusura, il tool rimane aperto.",

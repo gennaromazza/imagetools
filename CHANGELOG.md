@@ -30,6 +30,11 @@
   release-filex-suite.bat, sezione "4. Richiesta nuova versione".
 -->
 
+
+## 2026-10-03 - Archivio Flow 0.1.46
+
+- Icona del software sempre presente: finestra, barra delle applicazioni, icona vicino all'orologio, finestre di avviso e di stampa usano il logo di Archivio Flow invece dell'icona generica di Electron, con ripiego automatico se un formato non si carica.
+
 ## 2026-10-03 - Album Flow 0.2.0
 
 - Raddrizza le foto: nel ritaglio (doppio clic) Alt + rotella, il cursore «Raddrizza» o i tasti virgola e punto ruotano la foto fino a 45° per lato, con griglia a terzi; l'ingrandimento sale da solo per non lasciare angoli vuoti e il raddrizzamento è nel progetto, nell'anteprima e nell'esportazione.

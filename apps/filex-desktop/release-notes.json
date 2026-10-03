@@ -326,6 +326,9 @@
       "Importazione guidata in quattro tappe: scegli le foto, per quale lavoro, in che cartella, controlla e avvia, con suggerimento del lavoro probabile, riepilogo con spazio e tempo e schermata finale.",
       "Foto già in archivio riconosciute (anche da una scheda di backup) e file .xmp copiati insieme alla loro foto; miniature molto più veloci anche per i RAW e foto verticali raddrizzate.",
       "Copia verificata sul contenuto, ripresa delle importazioni interrotte, ultime importazioni, più schede collegate ed espulsione della scheda."
+    ],
+    "0.1.46": [
+      "Icona del software sempre presente: finestra, barra delle applicazioni, icona vicino all'orologio, finestre di avviso e di stampa usano il logo di Archivio Flow invece dell'icona generica di Electron, con ripiego automatico se un formato non si carica."
     ]
   },
   "image-converter": {
