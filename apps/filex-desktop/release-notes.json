@@ -567,6 +567,11 @@
       "Quindici famiglie di font, tutte open source (licenza SIL OFL) e incluse nell'app, incorporate negli SVG esportati. Archivio personale di frasi, stili di testo e grafiche (PNG, SVG) valido per tutti gli album. Il testo inserito sceglie un colore che si legge sullo sfondo della pagina.",
       "Backup del solo progetto su Google Drive dal pulsante «Drive» (mai le foto), con elenco delle versioni e ripristino come copia che non sovrascrive l'album del computer; backup automatico alla chiusura attivabile dalla Home.",
       "Ricollegamento delle foto su un altro computer o dopo uno spostamento: scegli la cartella e le foto si ritrovano per percorso, poi per nome e dimensione, senza mai indovinare tra nomi doppi."
+    ],
+    "0.2.1": [
+      "Anteprima intera al passaggio del mouse sulle miniature della libreria: foto verticali e panorami si vedono completi, più grandi, con nome e dimensioni.",
+      "Finestra «Novità» dopo ogni aggiornamento, con i nomi dei pulsanti dove trovare le funzioni nuove; etichetta «Nuovo» sui pulsanti aggiunti (Personalizza, Drive) e pulsante «Novità» nella Home per rivederla.",
+      "Corretto: con un testo sopra una foto, la barra della foto (Raddrizza, anteprima, blocco) veniva coperta dal testo."
     ]
   }
 }

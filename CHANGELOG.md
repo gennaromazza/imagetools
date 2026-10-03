@@ -35,6 +35,12 @@
 
 - Icona del software sempre presente: finestra, barra delle applicazioni, icona vicino all'orologio, finestre di avviso e di stampa usano il logo di Archivio Flow invece dell'icona generica di Electron, con ripiego automatico se un formato non si carica.
 
+## 2026-10-03 - Album Flow 0.2.1
+
+- Anteprima intera al passaggio del mouse sulle miniature della libreria: foto verticali e panorami si vedono completi, più grandi, con nome e dimensioni.
+- Finestra «Novità» dopo ogni aggiornamento, con i nomi dei pulsanti dove trovare le funzioni nuove; etichetta «Nuovo» sui pulsanti aggiunti (Personalizza, Drive) e pulsante «Novità» nella Home per rivederla.
+- Corretto: con un testo sopra una foto, la barra della foto (Raddrizza, anteprima, blocco) veniva coperta dal testo.
+
 ## 2026-10-03 - Album Flow 0.2.0
 
 - Raddrizza le foto: nel ritaglio (doppio clic) Alt + rotella, il cursore «Raddrizza» o i tasti virgola e punto ruotano la foto fino a 45° per lato, con griglia a terzi; l'ingrandimento sale da solo per non lasciare angoli vuoti e il raddrizzamento è nel progetto, nell'anteprima e nell'esportazione.
