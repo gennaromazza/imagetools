@@ -13,7 +13,7 @@ export default defineConfig({
     port: 4175,
     strictPort: true,
     proxy: {
-      "/api": "http://localhost:3003",
+      "/api": "http://127.0.0.1:3003",
     },
   },
 });

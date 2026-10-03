@@ -1,4 +1,5 @@
 import * as electron from "electron";
+import { findPhotoApps, openFolderInPhotoApp } from "./photo-apps.js";
 import { activateLicense, deactivateLicense, getCheckoutConfiguration, getLicenseState, startTrial, finishTrial, startLicenseExpiryWatchdog } from "./license-service.js";
 import type { BrowserWindow as BrowserWindowInstance, Tray as TrayInstance } from "electron";
 import { execSync, spawn } from "node:child_process";
@@ -2147,6 +2148,12 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:check-archivio-safe-to-format", async (_event, sdPath: string) => {
     const archivio = await loadArchivioFlowModule();
     return await archivio.checkSafeToFormatService(sdPath);
+  });
+  ipcMain.handle("filex:list-archivio-photo-apps", async () => (await findPhotoApps()).map(({ id, label }) => ({ id, label })));
+  ipcMain.handle("filex:open-archivio-folder-in-app", async (_event, appId: string, folderPath: string) => openFolderInPhotoApp(appId, folderPath));
+  ipcMain.handle("filex:get-archivio-preflight", async (_event, input: { sdPath: string; filePaths?: string[]; destinationPath?: string }) => {
+    const archivio = await loadArchivioFlowModule();
+    return await archivio.preflightService(input);
   });
   ipcMain.handle("filex:get-archivio-studioflow-status", async () => {
     const archivio = await loadArchivioFlowModule();

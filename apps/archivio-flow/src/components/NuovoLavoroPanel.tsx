@@ -1,3 +1,13 @@
+import { ImportStepper } from "./ImportStepper";
+import { WhoStep } from "./steps/WhoStep";
+import { PickJobStep } from "./steps/PickJobStep";
+import { NewJobStep } from "./steps/NewJobStep";
+import { FolderStep } from "./steps/FolderStep";
+import { ConfirmStep } from "./steps/ConfirmStep";
+import { DoneStep, type FormatCheckState } from "./steps/DoneStep";
+import { CancelImport } from "./steps/CancelImport";
+import { loadCopySpeed, saveCopySpeed } from "../copySpeed";
+import { checkSpace, describeCancelled, describeDuration, formatBytes as formatCopySize, formatItalianDate, shortPath, issuesForScreen, summarizeArchived, lastPathSegment, macroStepOf, nextScreen, screenForStep, selectionSummary, type FlowContext, type WizardScreen, type WizardStep } from "../wizardModel";
 import { suggestImportJobs, type ImportSelection } from "../importSelection";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SdCard, SdPreview, SafeToFormatResult, StudioFlowStatus, ArchivioFlowSettings, ImportRequest, ImportResult, Job, ImportProgressSnapshot, FilterPreviewData } from "../types";
@@ -6,6 +16,9 @@ import {
   cancelArchivioImport,
   checkArchivioSafeToFormat,
   getArchivioFilterPreview,
+  getArchivioPreflight,
+  listArchivioPhotoApps,
+  openArchivioFolderInApp,
   getArchivioImportProgress,
   getArchivioJobs,
   getArchivioFolders,
@@ -41,6 +54,8 @@ interface Props {
   initialSelection?: ImportSelection | null;
   onEditSelection?: () => void;
   onImportingChange?: (busy: boolean) => void;
+  /** Dalla schermata finale: apre l'archivio dei lavori. */
+  onOpenArchive?: () => void;
   sourceRevision?: number;
   selectionRevision?: number;
   newJobRevision?: number;
@@ -110,6 +125,8 @@ interface ImportValidationIssue {
 
 interface ImportUiPreferences {
   autore: string;
+  /** Ultima cartella base scelta a mano: si ripropone alla prossima importazione. */
+  destinazione?: string;
   sottoCartella: string;
   rinominaFile: boolean;
   generaJpg: boolean;
@@ -240,7 +257,7 @@ async function showCompletionDesktopNotification(title: string, body: string) {
   }
 }
 
-export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible = true, existingJobImportId = null, initialSdPath = null, initialDateFilter = null, initialSelection = null, onEditSelection, sourceRevision = 0, selectionRevision = 0, newJobRevision = 0, onImportingChange }: Props) {
+export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible = true, existingJobImportId = null, initialSdPath = null, initialDateFilter = null, initialSelection = null, onEditSelection, sourceRevision = 0, selectionRevision = 0, newJobRevision = 0, onImportingChange, onOpenArchive }: Props) {
   const initialImportPreferencesRef = useRef(readImportUiPreferences());
   // ── SD detection ────────────────────────────────────────────────────────────
   const [sdCards, setSdCards] = useState<SdCard[]>([]);
@@ -286,7 +303,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
   const [dataLavoro, setDataLavoro] = useState(() => initialDateFilter ?? todayIso());
   const [autore, setAutore] = useState(() => initialImportPreferencesRef.current.autore);
   const [contrattoLink, setContrattoLink] = useState("");
-  const [destinazione, setDestinazione] = useState("");
+  const [destinazione, setDestinazione] = useState(() => initialImportPreferencesRef.current.destinazione ?? "");
   const [sottoCartella, setSottoCartella] = useState(() => initialImportPreferencesRef.current.sottoCartella);
   const [rinominaFile, setRinominaFile] = useState(() => initialImportPreferencesRef.current.rinominaFile);
   const [generaJpg, setGeneraJpg] = useState(() => initialImportPreferencesRef.current.generaJpg);
@@ -317,8 +334,16 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
   const [soundNotifyOnFinish, setSoundNotifyOnFinish] = useState(() => initialImportPreferencesRef.current.soundNotifyOnFinish);
   const [showAdvancedImportOptions, setShowAdvancedImportOptions] = useState(false);
   const [showQuickAddSetup, setShowQuickAddSetup] = useState(false);
-  const [pendingSubfolderParent, setPendingSubfolderParent] = useState<string | null>(null);
-  const [newNestedSubfolder, setNewNestedSubfolder] = useState("");
+  const [screen, setScreen] = useState<WizardScreen>("who");
+  const [screenHistory, setScreenHistory] = useState<WizardScreen[]>([]);
+  const [flowMode, setFlowMode] = useState<"new" | "existing" | null>(null);
+  const [skipArchived, setSkipArchived] = useState(true);
+  const [importStats, setImportStats] = useState<{ elapsedMs: number; bytes: number } | null>(null);
+  const [cancelNotice, setCancelNotice] = useState<string | null>(null);
+  const [photoApps, setPhotoApps] = useState<Array<{ id: string; label: string }>>([]);
+  const [bridgeMessage, setBridgeMessage] = useState<string | null>(null);
+  const [freeBytes, setFreeBytes] = useState<number | null>(null);
+  const [formatCheck, setFormatCheck] = useState<FormatCheckState>({ checking: false, result: null, error: null });
   const autoOpenedJobRef = useRef<string | null>(null);
   const notifiedJobRef = useRef<string | null>(null);
   const sourceStepRef = useRef<HTMLDivElement | null>(null);
@@ -407,25 +432,25 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
       if (hasOverlap && !allowRangeOverlap) {
         issues.push({
           field: "rangeOverlap",
-          message: "Il range selezionato si sovrappone a un intervallo usato in questa sessione; non è una verifica dei file archiviati.",
+          message: "Questo intervallo si sovrappone a uno già usato poco fa. Non significa che le foto siano già in archivio.",
         });
       }
     }
 
     if (!usaLavoroEsistente && !nomeLavoro.trim()) {
-      issues.push({ field: "nomeLavoro", message: "Inserisci il nome del lavoro." });
+      issues.push({ field: "nomeLavoro", message: "Scrivi il nome del cliente o del lavoro." });
     }
     if (usaLavoroEsistente && !existingJobId) {
-      issues.push({ field: "existingJobId", message: "Seleziona un lavoro esistente." });
+      issues.push({ field: "existingJobId", message: "Scegli il lavoro a cui aggiungere le foto." });
     }
     if (!dataLavoro) {
-      issues.push({ field: "dataLavoro", message: "Inserisci la data del lavoro." });
+      issues.push({ field: "dataLavoro", message: "Scegli il giorno del lavoro." });
     }
     if (!autore.trim()) {
-      issues.push({ field: "autore", message: "Inserisci il nome dell'autore." });
+      issues.push({ field: "autore", message: "Scrivi il nome del fotografo (in «Altre impostazioni»)." });
     }
     if (!usaLavoroEsistente && !effectiveDestinazione) {
-      issues.push({ field: "destinazione", message: "Inserisci la cartella di destinazione." });
+      issues.push({ field: "destinazione", message: "Scegli la cartella base dove creare il lavoro (in «Altre impostazioni»)." });
     }
 
     return issues;
@@ -597,6 +622,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
   useEffect(() => {
     const preferences: ImportUiPreferences = {
       autore, sottoCartella, rinominaFile, generaJpg,
+      destinazione: destinazione.trim() || initialImportPreferencesRef.current.destinazione || "",
       openFolderOnFinish, desktopNotifyOnFinish, soundNotifyOnFinish,
     };
     try {
@@ -604,7 +630,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
     } catch {
       /* local storage non disponibile: l'importazione continua normalmente */
     }
-  }, [autore, sottoCartella, rinominaFile, generaJpg, openFolderOnFinish, desktopNotifyOnFinish, soundNotifyOnFinish]);
+  }, [autore, destinazione, sottoCartella, rinominaFile, generaJpg, openFolderOnFinish, desktopNotifyOnFinish, soundNotifyOnFinish]);
 
   const fetchSdCards = useCallback(async () => {
     setRefreshingSd(true);
@@ -666,7 +692,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
       const message = error instanceof Error ? error.message : "Stato locale non disponibile";
       setStudioFlowError(
         !window.filexDesktop || /failed to fetch|richiesta api fallita/i.test(message)
-          ? "Backend locale non raggiungibile. Avvia Archivio Flow dalla dashboard FileX per usare database, indice e Drive."
+          ? "Non riesco a collegarmi ad Archivio Flow. Avvialo dalla dashboard FileX per usare archivio e Drive."
           : message,
       );
     }
@@ -699,6 +725,8 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
     try {
       const result = await resumeArchivioImport(sessionId);
       setImportSuccess(result);
+      setScreenHistory([]);
+      setScreen("done");
       onImportDone(result);
       await refreshStudioFlowStatus();
     } catch (error) {
@@ -873,6 +901,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
     setImportProgress(null);
     setImportStartedAt(null);
 
+    setCancelNotice(null);
     const validationIssues = collectImportValidationIssues(effectiveDestinazione);
     if (validationIssues.length > 0) {
       setImportValidationState(validationIssues);
@@ -887,6 +916,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
 
 
     importOperationRef.current = crypto.randomUUID();
+    const copyStartedAt = Date.now();
     setImportStartedAt(Date.now());
     setImporting(true);
     onImportingChange?.(true);
@@ -909,6 +939,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
         mtimeTo: explicitFiles ? undefined : mtimeToFilter.trim() || undefined,
         categoryKey: categoryKey || undefined,
         destinationOverride,
+        skipArchived: skippingArchived || undefined,
       } satisfies ImportRequest);
         const fromMsDone = mtimeFromFilter.trim() ? Date.parse(mtimeFromFilter.trim()) : NaN;
         const toMsDone = mtimeToFilter.trim() ? Date.parse(mtimeToFilter.trim()) : NaN;
@@ -934,7 +965,12 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
         }
         setUsaLavoroEsistente(true);
         setExistingJobId(importResult.job.id);
+        if (!importResult.incomplete) saveCopySpeed(neededBytes, Date.now() - copyStartedAt);
+        setImportStats({ elapsedMs: Date.now() - copyStartedAt, bytes: neededBytes });
+        setBridgeMessage(null);
         setImportSuccess(importResult);
+        setScreenHistory([]);
+        setScreen("done");
         try {
           await notifyBackupGuardProject(importResult);
         } catch {
@@ -959,7 +995,14 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
         }]);
         await refreshExistingJobs();
       }
-      setImportError(message);
+      if (/annullat/i.test(message)) {
+        // Si rilegge l'avanzamento: l'ultimo salvato nello stato potrebbe essere indietro di qualche file.
+        const last = await getArchivioImportProgress().catch(() => null) ?? importProgressRef.current;
+        setCancelNotice(describeCancelled(last?.copiedFiles ?? 0, last?.plannedFiles ?? 0));
+        setImportError(null);
+      } else {
+        setImportError(message);
+      }
     } finally {
       setImporting(false);
       onImportingChange?.(false);
@@ -970,7 +1013,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
   async function handleCancelRunningImport() {
     try {
       await cancelArchivioImport();
-      setImportError("Importazione annullata");
+      setCancelNotice("Sto fermando l'importazione…");
     } catch (error) {
       setImportError(error instanceof Error ? error.message : "Impossibile annullare l'importazione.");
     }
@@ -1372,6 +1415,125 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
     target.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  const selectionText = selectionSummary({
+    explicitCount: explicitFiles ? explicitFiles.length : null,
+    filtered: hasActiveImportFilter,
+    matchedCount: initialPlannedFiles > 0 ? initialPlannedFiles : null,
+  });
+
+  const importProgressRef = useRef(importProgress);
+  importProgressRef.current = importProgress;
+  useEffect(() => { void listArchivioPhotoApps().then(setPhotoApps).catch(() => setPhotoApps([])); }, []);
+
+  const flowContext: FlowContext = { mode: flowMode, jobChosen: Boolean(existingJobId), hasFolderChoices: cartellePredefinite.length > 0 };
+
+  function go(next: WizardScreen) {
+    setScreenHistory((history) => [...history, screen]);
+    setScreen(next);
+    window.scrollTo?.({ top: 0 });
+  }
+
+  function goBack() {
+    const previous = screenHistory[screenHistory.length - 1];
+    if (previous === undefined) { (onEditSelection ?? (() => undefined))(); return; }
+    setScreenHistory((history) => history.slice(0, -1));
+    setScreen(previous);
+  }
+
+  function changePhotos() { (onEditSelection ?? (() => setSourceDetailsOpen(true)))(); }
+
+  function goToStep(step: WizardStep) {
+    if (step === 1) { changePhotos(); return; }
+    const target = screenForStep(step, flowContext);
+    if (!target) return;
+    setScreenHistory((history) => { const index = history.lastIndexOf(target); return index >= 0 ? history.slice(0, index) : history; });
+    setScreen(target);
+  }
+
+  function chooseNewJob() {
+    setFlowMode("new");
+    setUsaLavoroEsistente(false);
+    setExistingJobId("");
+    setNomeLavoro("");
+    setDataLavoro(initialSelection?.suggestedJobDate ?? initialDateFilter ?? todayIso());
+    jobDateInitializedRef.current = false;
+    setContrattoLink("");
+    setSottoCartella("");
+    setImportValidationState([]);
+    go("newjob");
+  }
+
+  function chooseExistingJob() {
+    setFlowMode("existing");
+    setUsaLavoroEsistente(true);
+    setSottoCartella("");
+    setImportValidationState([]);
+    go("pick");
+  }
+
+  function acceptSuggestedJob(job: Job) {
+    setFlowMode("existing");
+    setUsaLavoroEsistente(true);
+    setExistingJobId(job.id);
+    setSottoCartella("");
+    setImportValidationState([]);
+    go("folder");
+  }
+
+  /** Si lascia una schermata solo se i campi di quella schermata sono a posto. */
+  function advanceFrom(current: WizardScreen) {
+    const issues = issuesForScreen(current, collectImportValidationIssues(effectiveDestinazione));
+    setImportError(null);
+    if (issues.length > 0) { setImportValidationState(issues); return; }
+    setImportValidationState([]);
+    go(nextScreen(current, flowContext));
+  }
+  const nextFromPick = () => advanceFrom("pick");
+  const nextFromNewJob = () => advanceFrom("newjob");
+
+  async function checkFormatAfterImport() {
+    setFormatCheck({ checking: true, result: null, error: null });
+    try {
+      setFormatCheck({ checking: false, result: await checkArchivioSafeToFormat(sdPath.trim()), error: null });
+    } catch (error) {
+      setFormatCheck({ checking: false, result: null, error: error instanceof Error ? error.message : "Controllo non riuscito." });
+    }
+  }
+
+  const archivedChoice = useMemo(
+    () => summarizeArchived(initialSelection?.archived ?? [], explicitFiles ? new Set(explicitFiles) : null),
+    [initialSelection?.archived, explicitFiles],
+  );
+  const skippingArchived = Boolean(archivedChoice) && skipArchived;
+  const selectedBytes = initialSelection?.selectedBytes ?? 0;
+  const neededBytes = Math.max(0, selectedBytes - (skippingArchived ? (archivedChoice?.bytes ?? 0) : 0));
+  const allArchived = skippingArchived && explicitFiles !== null && (archivedChoice?.count ?? 0) >= explicitFiles.length;
+  const spaceCheck = checkSpace(neededBytes, freeBytes);
+  const spaceTarget = usaLavoroEsistente && selectedExistingJob ? selectedExistingJob.percorsoCartella : (categoryKey && !destinationOverride ? mappedParentPreview : effectiveDestinazione);
+
+  useEffect(() => {
+    if (screen !== "confirm" || !spaceTarget) return;
+    let active = true;
+    setFreeBytes(null);
+    void getArchivioPreflight({ sdPath: sdPath.trim() || "-", destinationPath: spaceTarget })
+      .then((result) => { if (active) setFreeBytes(result.freeBytes); })
+      .catch(() => { if (active) setFreeBytes(null); });
+    return () => { active = false; };
+  }, [screen, spaceTarget, sdPath]);
+
+  // Ogni nuova scelta di foto riparte dalla prima domanda; dall'archivio si entra direttamente dove serve.
+  useEffect(() => {
+    setScreenHistory([]);
+    setImportSuccess(null);
+    setImportError(null);
+    setImportProgress(null);
+    setFormatCheck({ checking: false, result: null, error: null });
+    setSkipArchived(true);
+    if (!initialSelection && existingJobImportId) { setFlowMode("existing"); setScreen("folder"); }
+    else if (!initialSelection && newJobRevision) { setFlowMode("new"); setScreen("newjob"); }
+    else { setFlowMode(initialSelection?.existingJobId ? "existing" : null); setScreen(initialSelection?.existingJobId ? "folder" : "who"); }
+  }, [selectionRevision, newJobRevision, existingJobImportId]);
+
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="stack">
@@ -1383,35 +1545,14 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
             {activeView === "impostazioni"
               ? "Configura la radice archivio e i preset rapidi usati durante l'importazione."
               : existingJobImportId
-                ? "Aggiungi nuovi file al lavoro selezionato: scegli una cartella rapida o inseriscine una nuova, poi avvia l'importazione."
-                : "Importa foto da SD card, organizza automaticamente le cartelle e registra il lavoro."}
+                ? "Stai aggiungendo foto a un lavoro già nell'archivio."
+                : "Ti accompagno passo dopo passo: scegli le foto, dove salvarle e avvia."}
           </p>
         </div>
       </div>
 
       {activeView === "nuovo" && (
-        <div className="message-box" role="status">
-          <strong>Selezione da importare: </strong>
-          {explicitFiles ? `${explicitFiles.length} file selezionati singolarmente: verranno importati soltanto questi file.` : hasActiveImportFilter ? `${mtimeFromFilter ? formatPreviewDateTime(Date.parse(mtimeFromFilter)) : "inizio scheda"} → ${mtimeToFilter ? formatPreviewDateTime(Date.parse(mtimeToFilter)) : "fine scheda"}${fileNameIncludesFilter ? ` · Nome: ${fileNameIncludesFilter}` : ""}` : "Tutti i file della scheda"}
-          <p>Le date dei file non cambiano la data del lavoro. Puoi includere più giorni nello stesso evento.</p>
-          <button className="secondary-button" onClick={onEditSelection ?? (() => { setSourceDetailsOpen(true); setShowSelectionFilters(true); })}>Modifica selezione sulla scheda</button>
-          <button className="ghost-button" onClick={openVisualRangePicker} disabled={Boolean(explicitFiles) || loadingVisualPicker || !sdPath || importing}>Scegli primo e ultimo scatto</button>
-          {visualPickerError && <p>{visualPickerError}</p>}
-        </div>
-      )}
-
-      {activeView === "nuovo" && (
-        <nav className="import-flow-nav" aria-label="Percorso di importazione">
-          <button type="button" onClick={() => scrollToImportStep(destinationStepRef)}>
-            <span>1</span><strong>Lavoro</strong><small>Nome e dati essenziali</small>
-          </button>
-          <button type="button" onClick={() => scrollToImportStep(sourceStepRef)}>
-            <span>2</span><strong>Origine</strong><small>SD e filtro</small>
-          </button>
-          <button type="button" onClick={() => scrollToImportStep(confirmStepRef)}>
-            <span>3</span><strong>Conferma</strong><small>Riepilogo e import</small>
-          </button>
-        </nav>
+        <ImportStepper narrow current={screen === "done" ? 4 : macroStepOf(screen)} onGoTo={screen === "done" ? undefined : goToStep} />
       )}
 
       {activeView === "impostazioni" && (
@@ -1813,324 +1954,303 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
 
       {activeView === "nuovo" && (
         <>
-      {/* SD Card section */}
-      {/* Job data */}
-      <div ref={destinationStepRef} className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
-        <div className="stack">
-          <div>
-            <span className="import-step__eyebrow">Lavoro</span>
-            <strong>Dove salvare i file</strong>
-            <p className="import-step__description">Crea un lavoro o aggiungi gli scatti a un lavoro già presente.</p>
-          </div>
-
-          <div className="button-row" role="group" aria-label="Lavoro di destinazione">
-            <button className={!usaLavoroEsistente ? "primary-button" : "secondary-button"} aria-pressed={!usaLavoroEsistente} onClick={() => {
-              if (!usaLavoroEsistente) return;
-              setUsaLavoroEsistente(false);
-              setExistingJobId("");
-              setNomeLavoro("");
-              setDataLavoro(initialSelection?.suggestedJobDate ?? initialDateFilter ?? todayIso());
-              jobDateInitializedRef.current = false;
-              setContrattoLink("");
-              setSottoCartella("");
-              setImportValidationState([]);
-            }}>Nuovo lavoro</button>
-            <button className={usaLavoroEsistente ? "primary-button" : "secondary-button"} aria-pressed={usaLavoroEsistente} onClick={() => {
-              setUsaLavoroEsistente(true);
-              setSottoCartella("");
-              setImportValidationState([]);
-            }}>Lavoro esistente</button>
-          </div>
-
-          {explicitFiles && jobSuggestions.length > 0 && <details className="import-advanced-panel">
-            <summary>Lavori suggeriti · {jobSuggestions[0]!.job.nomeLavoro}</summary>
-            <p>Conferma il lavoro: gli orari e le importazioni precedenti sono indizi.</p>
-            {jobSuggestions.map(({ job, reason }) => <div key={job.id} style={{ marginBottom: ".6rem" }}><button className="secondary-button" onClick={() => { setUsaLavoroEsistente(true); setExistingJobId(job.id); setSottoCartella(""); setImportValidationState([]); }}>Usa {job.nomeLavoro} · {job.dataLavoro}</button><small style={{ display: "block" }}>{reason}</small></div>)}
-          </details>}
-          {usaLavoroEsistente && (
-            <div className="stack" style={{ gap: "0.55rem" }}>
-              <label className="field">
-                <span>Cerca lavoro esistente</span>
-                <input
-                  type="text"
-                  value={existingJobSearch}
-                  onChange={(e) => setExistingJobSearch(e.target.value)}
-                  placeholder="es. Ferdinando, 2026-06, matrimoni"
-                />
-              </label>
-
-              <label className="field">
-                <span>Seleziona lavoro esistente</span>
-                <select
-                  value={existingJobId}
-                  onChange={(e) => {
-                    setExistingJobId(e.target.value);
-                    clearImportValidationField("existingJobId");
-                  }}
-                  style={getInvalidInputStyle("existingJobId")}
-                >
-                  <option value="">-- seleziona --</option>
-                  {existingJobsForSelect.map((job) => (
-                    <option key={job.id} value={job.id}>
-                      {job.nomeLavoro} · {job.dataLavoro} · {job.autore}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <span style={{ fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                {filteredExistingJobs.length} risultati su {jobsEsistenti.length} lavori esistenti.
-              </span>
+      {screen === "who" && (
+        <WhoStep
+          photosText={selectionText}
+          onChangePhotos={changePhotos}
+          suggestions={explicitFiles ? jobSuggestions.filter((item) => item.score >= 2) : []}
+          onAcceptSuggestion={acceptSuggestedJob}
+          onNew={chooseNewJob}
+          onExisting={chooseExistingJob}
+          extra={!explicitFiles ? (
+            <div className="button-row">
+              <button type="button" className="ghost-button" onClick={openVisualRangePicker} disabled={loadingVisualPicker || !sdPath || importing}>Scegli primo e ultimo scatto</button>
+              {visualPickerError && <span role="alert" style={{ color: "var(--danger)", fontSize: "0.85rem" }}>{visualPickerError}</span>}
             </div>
-          )}
+          ) : undefined}
+        />
+      )}
 
-          {!usaLavoroEsistente && categoryMappings.length > 0 && (
+      {screen === "pick" && (
+        <PickJobStep
+          photosText={selectionText}
+          onChangePhotos={changePhotos}
+          jobs={jobsEsistenti}
+          selectedId={existingJobId}
+          query={existingJobSearch}
+          onQueryChange={setExistingJobSearch}
+          invalid={Boolean(invalidImportFields.existingJobId)}
+          onPick={(job) => { setExistingJobId(job.id); clearImportValidationField("existingJobId"); }}
+          issues={issuesForScreen("pick", importValidationIssues)}
+          onBack={goBack}
+          onNext={nextFromPick}
+        />
+      )}
+
+      {screen === "newjob" && (
+        <NewJobStep
+          photosText={selectionText}
+          onChangePhotos={changePhotos}
+          name={nomeLavoro}
+          onName={(value) => { setNomeLavoro(value); clearImportValidationField("nomeLavoro"); }}
+          day={dataLavoro}
+          onDay={(value) => { jobDateInitializedRef.current = true; setDataLavoro(value); clearImportValidationField("dataLavoro"); }}
+          dayHint={initialSelection?.suggestedJobDate && dataLavoro === initialSelection.suggestedJobDate ? "È il giorno delle foto: cambialo se il lavoro è di un altro giorno." : undefined}
+          categories={categoryMappings.filter((item) => item.enabled).map((mapping) => ({ key: mapping.categoryKey, label: mapping.displayName }))}
+          categoryKey={categoryKey}
+          onCategory={(value) => { setCategoryKey(value); setDestinationOverride(false); setDestinazione(""); clearImportValidationField("destinazione"); }}
+          invalidName={Boolean(invalidImportFields.nomeLavoro)}
+          invalidDay={Boolean(invalidImportFields.dataLavoro)}
+          issues={issuesForScreen("newjob", importValidationIssues)}
+          onBack={goBack}
+          onNext={nextFromNewJob}
+        />
+      )}
+
+      {screen === "folder" && (
+        <FolderStep
+          photosText={selectionText}
+          onChangePhotos={changePhotos}
+          existingJobName={usaLavoroEsistente ? (selectedExistingJob?.nomeLavoro ?? "il lavoro scelto") : undefined}
+          folders={existingJobFolders}
+          presets={cartellePredefinite}
+          value={sottoCartella}
+          onChange={setSottoCartella}
+          similar={similarExistingFolders}
+          loading={loadingExistingJobFolders}
+          error={existingJobFoldersError}
+          where={folderPreview !== "—" ? (
+            <div className="wizard-where">
+              <span>{usaLavoroEsistente ? "Lavoro scelto" : "Verrà creata la cartella"}</span>
+              <strong>{lastPathSegment(folderPreview)}</strong>
+              <small>Foto in {fotoDestFullPreview}</small>
+            </div>
+          ) : undefined}
+          onBack={goBack}
+          onNext={() => go("confirm")}
+        />
+      )}
+
+      {screen === "confirm" && (
+        <ConfirmStep
+          photosText={selectionText}
+          onChangePhotos={changePhotos}
+          rows={[
+            { label: "Foto", value: selectionText },
+            { label: "Lavoro", value: `${usaLavoroEsistente ? (selectedExistingJob?.nomeLavoro ?? "—") : (nomeLavoro.trim() || "—")}${dataLavoro ? ` · ${formatItalianDate(dataLavoro)}` : ""}` },
+            { label: "Cartella", value: `${lastPathSegment(folderPreview)}${sottoCartella.trim() ? ` / ${sottoCartella.trim()}` : ""}` },
+            { label: "Dove finiscono", value: <>Foto in <span title={fotoDestFullPreview}>{shortPath(fotoDestFullPreview)}</span><br />Video in <span title={videoDestFullPreview}>{shortPath(videoDestFullPreview)}</span></> },
+            ...(neededBytes > 0 ? [{ label: "Spazio e tempo", value: <>{formatCopySize(neededBytes)} · {describeDuration(neededBytes / loadCopySpeed())}{spaceCheck.level !== "unknown" ? <><br /><span className={`wizard-space wizard-space--${spaceCheck.level}`}>{spaceCheck.text}</span></> : null}</> }] : []),
+          ]}
+          skipArchived={archivedChoice ? { count: archivedChoice.count, where: archivedChoice.where, value: skipArchived, onChange: setSkipArchived } : undefined}
+          startBlockedReason={spaceCheck.level === "insufficient" ? "Non c'è abbastanza spazio sul disco di destinazione." : allArchived ? "Tutte le foto sono già in archivio: togli la spunta per copiarle comunque." : undefined}
+          rename={rinominaFile}
+          onRename={setRinominaFile}
+          lightCopies={generaJpg}
+          onLightCopies={setGeneraJpg}
+          moreSettingsOpen={!autore.trim() || Boolean(invalidImportFields.autore) || Boolean(invalidImportFields.destinazione)}
+          moreSettings={<>
             <label className="field">
-              <span>Categoria</span>
-              <select value={categoryKey} onChange={(event) => { setCategoryKey(event.target.value); setDestinationOverride(false); setDestinazione(""); clearImportValidationField("destinazione"); }}>
-                <option value="">Nessuna categoria automatica</option>
-                {categoryMappings.filter((item) => item.enabled).map((mapping) => (
-                  <option key={mapping.id} value={mapping.categoryKey}>{mapping.displayName} → {mapping.relativePathPattern}</option>
-                ))}
-              </select>
+              <span>Fotografo</span>
+              <input type="text" value={autore} onChange={(e) => { setAutore(e.target.value); clearImportValidationField("autore"); }} placeholder="es. Gennaro" style={getInvalidInputStyle("autore")} />
             </label>
-          )}
-
-          <div className="inline-grid inline-grid--2">
             <label className="field">
-              <span>Nome lavoro / cliente</span>
-              <input
-                type="text"
-                value={nomeLavoro}
-                onChange={(e) => {
-                  setNomeLavoro(e.target.value);
-                  clearImportValidationField("nomeLavoro");
-                }}
-                placeholder="es. Maria Rossi Shooting"
-                disabled={usaLavoroEsistente}
-                style={getInvalidInputStyle("nomeLavoro")}
-              />
+              <span>Link al contratto <small style={{ color: "var(--text-muted)" }}>(facoltativo)</small></span>
+              <input type="url" value={contrattoLink} onChange={(e) => setContrattoLink(e.target.value)} placeholder="https://..." />
             </label>
-
-            <label className="field">
-              <span>Data del lavoro (indipendente dai file selezionati)</span>
-              <input
-                type="date"
-                value={dataLavoro}
-                disabled={usaLavoroEsistente}
-                onChange={(e) => {
-                  jobDateInitializedRef.current = true;
-                  setDataLavoro(e.target.value);
-                  clearImportValidationField("dataLavoro");
-                }}
-                style={getInvalidInputStyle("dataLavoro")}
-              />
-            </label>
-          </div>
-
-          <label className="field">
-            <span>Autore / fotografo</span>
-            <input
-              type="text"
-              value={autore}
-              onChange={(e) => {
-                setAutore(e.target.value);
-                clearImportValidationField("autore");
-              }}
-              placeholder="es. Gennaro"
-              style={getInvalidInputStyle("autore")}
-            />
-          </label>
-
-          <label className="field">
-            <span>Link contratto (opzionale)</span>
-            <input
-              type="url"
-              value={contrattoLink}
-              onChange={(e) => setContrattoLink(e.target.value)}
-              placeholder="https://..."
-            />
-          </label>
-
-          <details><summary>Percorsi e opzioni di importazione</summary>
-          {!usaLavoroEsistente && (
-            <div className="field">
-              <span>{categoryKey && !destinationOverride ? "Destinazione automatica (override opzionale)" : "Cartella di destinazione"}</span>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <input
-                  type="text"
-                  value={categoryKey && !destinationOverride ? mappedParentPreview : destinazione}
-                  onChange={(e) => {
-                    setDestinazione(e.target.value);
-                    setDestinationOverride(true);
-                    clearImportValidationField("destinazione");
-                  }}
-                  placeholder="C:\\Foto\\Lavori"
-                  style={{ flex: 1, ...getInvalidInputStyle("destinazione") }}
-                  disabled={Boolean(categoryKey) && !destinationOverride}
-                />
-                <button
-                  className="secondary-button"
-                  onClick={() => handleBrowse("dest")}
-                  disabled={browsingField === "dest"}
-                  style={{ flexShrink: 0, padding: "0.7rem 1rem", whiteSpace: "nowrap" }}
-                >
-                  {browsingField === "dest" ? "…" : categoryKey && !destinationOverride ? "Modifica destinazione" : "Sfoglia"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {usaLavoroEsistente && selectedExistingJob && (
-            <div className="message-box" style={{ background: "rgba(184, 154, 99, 0.08)", borderColor: "var(--line-strong)" }}>
-              <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--text-muted)" }}>
-                Stai aggiungendo file a <strong>{selectedExistingJob.nomeLavoro}</strong>. Cartella principale riutilizzata: <strong>{selectedExistingJob.percorsoCartella}</strong>
-              </p>
-            </div>
-          )}
-
-          <div className="stack" style={{ gap: "0.45rem" }}>
-            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Scegli dove mettere questi file:</span>
-            <div className="import-folder-choices">
-              <button
-                type="button"
-                className={sottoCartella ? "ghost-button" : "secondary-button"}
-                onClick={() => setSottoCartella("")}
-              >
-                <strong>Cartella principale</strong>
-                <small>{usaLavoroEsistente ? "Aggiungi senza creare una sottocartella" : "Usa direttamente la cartella dell'autore"}</small>
-              </button>
-              <label className="import-folder-choices__new">
-                <span>Nuova cartella</span>
-                <input
-                  type="text"
-                  value={sottoCartella}
-                  onChange={(e) => setSottoCartella(e.target.value)}
-                  placeholder="es. Promessa"
-                />
-              </label>
-            </div>
-            {usaLavoroEsistente && similarExistingFolders.length > 0 && !existingJobFolders.includes(sottoCartella) && (
-              <div className="message-box" style={{ background: "rgba(184,154,99,0.1)", borderColor: "var(--line-strong)" }}>
-                <p style={{ margin: 0, fontSize: "0.84rem" }}>Esiste già una cartella con nome simile. Puoi riutilizzarla:</p>
-                <div className="button-row" style={{ marginTop: "0.45rem" }}>
-                  {similarExistingFolders.map((folder) => (
-                    <button type="button" key={folder} className="secondary-button" onClick={() => setSottoCartella(folder)}>Usa “{folder}”</button>
-                  ))}
+            {!usaLavoroEsistente && (
+              <div className="field">
+                <span>{categoryKey && !destinationOverride ? "Cartella base (automatica)" : "Cartella base dove creare il lavoro"}</span>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <input
+                    type="text"
+                    value={categoryKey && !destinationOverride ? mappedParentPreview : destinazione}
+                    onChange={(e) => { setDestinazione(e.target.value); setDestinationOverride(true); clearImportValidationField("destinazione"); }}
+                    placeholder="C:\\Foto\\Lavori"
+                    style={{ flex: 1, ...getInvalidInputStyle("destinazione") }}
+                    disabled={Boolean(categoryKey) && !destinationOverride}
+                  />
+                  <button className="secondary-button" onClick={() => handleBrowse("dest")} disabled={browsingField === "dest"} style={{ flexShrink: 0, whiteSpace: "nowrap" }}>
+                    {browsingField === "dest" ? "…" : categoryKey && !destinationOverride ? "Cambia" : "Sfoglia"}
+                  </button>
                 </div>
               </div>
             )}
-          </div>
+          </>}
+          finish={<>
+            <label className="check-row" style={{ cursor: "pointer" }}>
+              <input type="checkbox" checked={openFolderOnFinish} onChange={(e) => setOpenFolderOnFinish(e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+              <span>Apri la cartella</span>
+            </label>
+            <label className="check-row" style={{ cursor: "pointer" }}>
+              <input type="checkbox" checked={desktopNotifyOnFinish} onChange={(e) => setDesktopNotifyOnFinish(e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+              <span>Mostra una notifica</span>
+            </label>
+            <label className="check-row" style={{ cursor: "pointer" }}>
+              <input type="checkbox" checked={soundNotifyOnFinish} onChange={(e) => setSoundNotifyOnFinish(e.target.checked)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+              <span>Riproduci un suono</span>
+            </label>
+            <p className="import-preferences-note">Le scelte vengono ricordate per la prossima volta.</p>
+          </>}
+          importing={importing}
+          onBack={goBack}
+          onStart={() => { void handleImport(); }}
+        >
+      {importing && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(7, 10, 9, 0.72)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 60,
+            padding: "1rem",
+          }}
+        >
+          <div
+            className="panel-section"
+            style={{
+              width: "min(760px, 100%)",
+              padding: "1.1rem",
+              borderColor: "var(--line-strong)",
+              background: "rgba(27, 33, 30, 0.98)",
+            }}
+          >
+            <div className="stack" style={{ gap: "0.8rem" }}>
+              <strong style={{ fontSize: "1.02rem" }}>Stato import in corso</strong>
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>
+                {progressPhaseLabel}
+              </p>
 
-          {usaLavoroEsistente && selectedExistingJob && (
-            <div className="stack" style={{ gap: "0.45rem" }}>
-              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>Cartelle già presenti nel lavoro:</span>
-              {loadingExistingJobFolders ? (
-                <span style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>Lettura cartelle…</span>
-              ) : existingJobFoldersError ? (
-                <span style={{ fontSize: "0.84rem", color: "var(--danger)" }}>{existingJobFoldersError}</span>
-              ) : existingJobFolders.length > 0 ? (
-                <div className="button-row" style={{ flexWrap: "wrap" }}>
-                  {existingJobFolders.map((folder) => (
-                    <button type="button" key={folder} className={sottoCartella === folder ? "secondary-button" : "ghost-button"} onClick={() => setSottoCartella(folder)} style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}>
-                      📁 {folder}
-                    </button>
-                  ))}
+              <div style={{ display: "grid", gap: "0.35rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem" }}>
+                  <span>Avanzamento totale</span>
+                  <strong>{overallProgressPct}%</strong>
                 </div>
-              ) : (
-                <span style={{ fontSize: "0.84rem", color: "var(--text-muted)" }}>Nessuna sottocartella presente per {autore || "questo autore"}.</span>
-              )}
-            </div>
-          )}
-
-          {cartellePredefinite.length > 0 && (
-            <div className="stack" style={{ gap: "0.45rem" }}>
-              <span style={{ fontSize: "0.85rem", color: "var(--text-muted)" }}>{usaLavoroEsistente ? "Oppure scegli una cartella predefinita:" : "Cartelle predefinite:"}</span>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
-                {cartellePredefinite.map((cartella) => (
-                  <button
-                    key={cartella}
-                    className={sottoCartella === cartella ? "secondary-button" : "ghost-button"}
-                    onClick={() => {
-                      if (usaLavoroEsistente) {
-                        setNewNestedSubfolder("");
-                        setPendingSubfolderParent(cartella);
-                      } else {
-                        setSottoCartella(cartella);
-                      }
+                <div style={{ width: "100%", height: 12, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${overallProgressPct}%`,
+                      height: "100%",
+                      background: "linear-gradient(90deg, #b89a63, #9ac69a)",
+                      transition: "width 220ms ease",
                     }}
-                    style={{ padding: "0.45rem 0.75rem", fontSize: "0.84rem" }}
-                  >
-                    {cartella}
-                  </button>
-                ))}
+                  />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", color: "var(--text-muted)", fontSize: "0.82rem" }}>
+                  <span>
+                    {displayedCompletedFiles}/{displayedPlannedFiles} file completati
+                  </span>
+                  <span>Restano {Math.max(0, displayedPlannedFiles - displayedCompletedFiles)}</span>
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gap: "0.55rem" }}>
+                <div style={{ display: "grid", gap: "0.35rem" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.86rem" }}>
+                    <span style={{ color: copyStepDone ? "var(--success)" : "var(--text)" }}>
+                      {copyStepDone ? "✓" : "⏳"} Copia file
+                    </span>
+                    <span style={{ color: "var(--text-muted)" }}>{copyProgressPct}%</span>
+                  </div>
+                  <div style={{ width: "100%", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                    <div
+                      style={{
+                        width: `${copyProgressPct}%`,
+                        height: "100%",
+                        background: "linear-gradient(90deg, #b89a63, #d4c1aa)",
+                        transition: "width 220ms ease",
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {bqStepVisible && (
+                  <div style={{ display: "grid", gap: "0.35rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.86rem" }}>
+                      <span style={{ color: bqStepDone ? "var(--success)" : "var(--text)" }}>
+                        {bqStepDone ? "✓" : "⏳"} Export Bassa Qualita
+                      </span>
+                      <span style={{ color: "var(--text-muted)" }}>{bqProgressPct}%</span>
+                    </div>
+                    <div style={{ width: "100%", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                      <div
+                        style={{
+                          width: `${Math.max(0, bqProgressPct)}%`,
+                          height: "100%",
+                          background: "linear-gradient(90deg, #7ea37e, #9ac69a)",
+                          transition: "width 220ms ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+                <div className="stat-card">
+                  <span>File totali</span>
+                  <strong style={{ fontSize: "1.05rem" }}>
+                    {displayedCompletedFiles}/{displayedPlannedFiles}
+                  </strong>
+                </div>
+                <div className="stat-card">
+                  <span>Velocita</span>
+                  <strong style={{ fontSize: "1.05rem" }}>
+                    {formatItemsPerSecond(importProgress?.currentSpeedFilesPerSec)}
+                  </strong>
+                </div>
+                <div className="stat-card">
+                  <span>Tempo stimato</span>
+                  <strong style={{ fontSize: "1.05rem" }}>
+                    {importProgress?.estimatedRemainingSec !== null
+                      ? formatDurationSeconds(importProgress?.estimatedRemainingSec ?? 0)
+                      : "in attesa dati reali"}
+                  </strong>
+                </div>
+              </div>
+
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
+                Trascorso {formatDurationSeconds(displayedElapsedMs / 1000)} · Copiati {importProgress?.copiedFiles ?? 0} · Saltati {importProgress?.skippedFiles ?? 0}
+              </p>
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
+                Velocita trasferimento {formatTransferRate(importProgress?.currentSpeedBytesPerSec)} | File corrente {(importProgress?.currentFileName ?? "").trim() || "calcolo file corrente..."} | JPG BQ {importProgress?.jpgDone ?? 0}/{Math.max(importProgress?.jpgPlanned ?? 0, 0)}
+              </p>
+              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", wordBreak: "break-all" }}>
+                Destinazione: {importProgress?.targetFolder || initialImportTargetFolder}
+              </p>
+              <div className="button-row" style={{ marginTop: "0.5rem" }}>
+                <CancelImport onCancel={() => { void handleCancelRunningImport(); }} />
               </div>
             </div>
-          )}
-
-          <p style={{ margin: 0, fontSize: "0.86rem", color: "var(--text-muted)" }}>
-            Foto in: <strong>{fotoDestFullPreview}</strong> · Video in: <strong>{videoDestFullPreview}</strong>
-          </p>
-
-          {!usaLavoroEsistente && (
-            <p style={{ margin: 0, fontSize: "0.82rem", color: "var(--text-muted)" }}>
-              Destinazione effettiva: <strong>{folderPreview}</strong>
-              {savedAutore && <> · autore: <strong>{savedAutore}</strong></>}
-            </p>
-          )}
-
-          {/* Folder name preview */}
-          {folderPreview !== "—" && (
-            <div className="message-box">
-              <p>
-                <span style={{ color: "var(--text-muted)", fontSize: "0.88rem" }}>
-                  {usaLavoroEsistente ? "Cartella del lavoro esistente:  " : "Cartella che verrà creata:  "}
-                </span>
-                <strong style={{ fontFamily: "monospace", fontSize: "0.9rem" }}>{folderPreview}</strong>
-              </p>
-            </div>
-          )}
-
-          <details className="import-advanced-panel" open={showAdvancedImportOptions} onToggle={(event) => setShowAdvancedImportOptions((event.currentTarget as HTMLDetailsElement).open)}>
-            <summary>Opzioni avanzate di importazione</summary>
-            <div className="stack" style={{ gap: "0.6rem", marginTop: "0.75rem" }}>
-            <label className="check-row" style={{ cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={rinominaFile}
-                onChange={(e) => setRinominaFile(e.target.checked)}
-                style={{ width: 16, height: 16, cursor: "pointer" }}
-              />
-              <span>
-                Rinomina file —{" "}
-                <small style={{ color: "var(--text-muted)" }}>
-                  es. MariaRossi_20260321_Gennaro_DSCF1234.RAF
-                </small>
-              </span>
-            </label>
-
-            <label className="check-row" style={{ cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={generaJpg}
-                onChange={(e) => setGeneraJpg(e.target.checked)}
-                style={{ width: 16, height: 16, cursor: "pointer" }}
-              />
-              <span>
-                Genera JPG compressi in BASSA_QUALITA —{" "}
-                <small style={{ color: "var(--text-muted)" }}>max 1920px, qualità 70%</small>
-              </span>
-            </label>
-            </div>
-          </details>
-          </details>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Error / result feedback */}
+      {cancelNotice && !importing && (
+        <div className="message-box" role="status"><p style={{ margin: 0 }}>{cancelNotice}</p></div>
+      )}
+
+      {importError && (
+        <div
+          className="message-box"
+          style={{ borderColor: "rgba(212, 163, 156, 0.4)", background: "rgba(212, 163, 156, 0.08)" }}
+        >
+          <p style={{ color: "var(--danger)" }}>⚠ {importError}</p>
+          {importValidationIssues.length > 0 && (
+            <ul className="import-validation-list">
+              {importValidationIssues.map((issue, idx) => (
+                <li key={`${issue.field}-${idx}`}>{issue.message}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+          {!explicitFiles && (
       <div ref={sourceStepRef} className="panel-section import-step" style={{ padding: "var(--space-4)" }}>
         <details open={sourceDetailsOpen} onToggle={(event) => setSourceDetailsOpen(event.currentTarget.open)}>
-          <summary>Origine, conteggi e filtri avanzati</summary>
+          <summary>Cambia scheda o limita i file (facoltativo)</summary>
         <div className="stack">
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
@@ -2318,7 +2438,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
               {showSelectionFilters === true && (
                 <div className="stack" style={{ marginTop: "0.55rem", gap: "0.45rem" }}>
                   <p style={{ margin: 0, fontSize: "0.84rem", color: "var(--text-muted)" }}>
-                    Orari basati sulla modifica dei file (mtime), non sui dati EXIF. Inizio e fine inclusi, anche oltre mezzanotte; i file con lo stesso orario sono inclusi insieme.
+                    Gli orari sono quelli di salvataggio dei file sulla scheda. Inizio e fine sono inclusi, anche oltre mezzanotte; i file con lo stesso orario vengono presi insieme.
                   </p>
 
                   <label className="field">
@@ -2371,7 +2491,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
                       }}
                       style={{ width: 16, height: 16, cursor: "pointer" }}
                     />
-                    <span>Consenti sovrapposizione con intervalli usati in questa sessione</span>
+                    <span>Consenti intervalli già usati poco fa</span>
                   </label>
 
                   <div className="button-row">
@@ -2453,7 +2573,7 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
                       {importedRangesForCurrentSd.length > 0 && (
                         <div style={{ marginTop: "0.6rem" }}>
                           <p style={{ margin: "0 0 0.35rem", fontSize: "0.82rem", color: "var(--text-muted)" }}>
-                            Intervalli usati in questa sessione (non attestano una copia verificata):
+                            Intervalli usati poco fa (non provano che le foto siano già copiate):
                           </p>
                           <div className="stack" style={{ gap: "0.35rem" }}>
                             {importedRangesForCurrentSd.map((r, i) => (
@@ -2552,266 +2672,27 @@ export function NuovoLavoroPanel({ onImportDone, activeView = "nuovo", isVisible
         </div>
         </details>
       </div>
-
-      {importing && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(7, 10, 9, 0.72)",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 60,
-            padding: "1rem",
-          }}
-        >
-          <div
-            className="panel-section"
-            style={{
-              width: "min(760px, 100%)",
-              padding: "1.1rem",
-              borderColor: "var(--line-strong)",
-              background: "rgba(27, 33, 30, 0.98)",
-            }}
-          >
-            <div className="stack" style={{ gap: "0.8rem" }}>
-              <strong style={{ fontSize: "1.02rem" }}>Stato import in corso</strong>
-              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.9rem" }}>
-                {progressPhaseLabel}
-              </p>
-
-              <div style={{ display: "grid", gap: "0.35rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.9rem" }}>
-                  <span>Avanzamento totale</span>
-                  <strong>{overallProgressPct}%</strong>
-                </div>
-                <div style={{ width: "100%", height: 12, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                  <div
-                    style={{
-                      width: `${overallProgressPct}%`,
-                      height: "100%",
-                      background: "linear-gradient(90deg, #b89a63, #9ac69a)",
-                      transition: "width 220ms ease",
-                    }}
-                  />
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: "0.8rem", color: "var(--text-muted)", fontSize: "0.82rem" }}>
-                  <span>
-                    {displayedCompletedFiles}/{displayedPlannedFiles} file completati
-                  </span>
-                  <span>Restano {Math.max(0, displayedPlannedFiles - displayedCompletedFiles)}</span>
-                </div>
-              </div>
-
-              <div style={{ display: "grid", gap: "0.55rem" }}>
-                <div style={{ display: "grid", gap: "0.35rem" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.86rem" }}>
-                    <span style={{ color: copyStepDone ? "var(--success)" : "var(--text)" }}>
-                      {copyStepDone ? "✓" : "⏳"} Copia file
-                    </span>
-                    <span style={{ color: "var(--text-muted)" }}>{copyProgressPct}%</span>
-                  </div>
-                  <div style={{ width: "100%", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                    <div
-                      style={{
-                        width: `${copyProgressPct}%`,
-                        height: "100%",
-                        background: "linear-gradient(90deg, #b89a63, #d4c1aa)",
-                        transition: "width 220ms ease",
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {bqStepVisible && (
-                  <div style={{ display: "grid", gap: "0.35rem" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.86rem" }}>
-                      <span style={{ color: bqStepDone ? "var(--success)" : "var(--text)" }}>
-                        {bqStepDone ? "✓" : "⏳"} Export Bassa Qualita
-                      </span>
-                      <span style={{ color: "var(--text-muted)" }}>{bqProgressPct}%</span>
-                    </div>
-                    <div style={{ width: "100%", height: 10, borderRadius: 999, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                      <div
-                        style={{
-                          width: `${Math.max(0, bqProgressPct)}%`,
-                          height: "100%",
-                          background: "linear-gradient(90deg, #7ea37e, #9ac69a)",
-                          transition: "width 220ms ease",
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="stats-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-                <div className="stat-card">
-                  <span>File totali</span>
-                  <strong style={{ fontSize: "1.05rem" }}>
-                    {displayedCompletedFiles}/{displayedPlannedFiles}
-                  </strong>
-                </div>
-                <div className="stat-card">
-                  <span>Velocita</span>
-                  <strong style={{ fontSize: "1.05rem" }}>
-                    {formatItemsPerSecond(importProgress?.currentSpeedFilesPerSec)}
-                  </strong>
-                </div>
-                <div className="stat-card">
-                  <span>Tempo stimato</span>
-                  <strong style={{ fontSize: "1.05rem" }}>
-                    {importProgress?.estimatedRemainingSec !== null
-                      ? formatDurationSeconds(importProgress?.estimatedRemainingSec ?? 0)
-                      : "in attesa dati reali"}
-                  </strong>
-                </div>
-              </div>
-
-              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
-                Trascorso {formatDurationSeconds(displayedElapsedMs / 1000)} · Copiati {importProgress?.copiedFiles ?? 0} · Saltati {importProgress?.skippedFiles ?? 0}
-              </p>
-              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.84rem" }}>
-                Velocita trasferimento {formatTransferRate(importProgress?.currentSpeedBytesPerSec)} | File corrente {(importProgress?.currentFileName ?? "").trim() || "calcolo file corrente..."} | JPG BQ {importProgress?.jpgDone ?? 0}/{Math.max(importProgress?.jpgPlanned ?? 0, 0)}
-              </p>
-              <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", wordBreak: "break-all" }}>
-                Destinazione: {importProgress?.targetFolder || initialImportTargetFolder}
-              </p>
-              <div className="button-row" style={{ marginTop: "0.5rem" }}>
-                <button
-                  className="ghost-button"
-                  onClick={() => { void handleCancelRunningImport(); }}
-                  style={{ padding: "0.5rem 0.8rem", fontSize: "0.84rem" }}
-                >
-                  Interrompi importazione
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+          )}
+        </ConfirmStep>
       )}
 
-      {importError && (
-        <div
-          className="message-box"
-          style={{ borderColor: "rgba(212, 163, 156, 0.4)", background: "rgba(212, 163, 156, 0.08)" }}
-        >
-          <p style={{ color: "var(--danger)" }}>⚠ {importError}</p>
-          {importValidationIssues.length > 0 && (
-            <ul className="import-validation-list">
-              {importValidationIssues.map((issue, idx) => (
-                <li key={`${issue.field}-${idx}`}>{issue.message}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+      {screen === "done" && importSuccess && (
+        <DoneStep
+          result={importSuccess}
+          onOpenFolders={() => { void openImportDestinationFolders(importSuccess); }}
+          onAnother={() => { (onEditSelection ?? (() => undefined))(); }}
+          onArchive={() => { onOpenArchive?.(); }}
+          sdAvailable={Boolean(sdPath.trim())}
+          format={formatCheck}
+          onCheckFormat={() => { void checkFormatAfterImport(); }}
+          stats={importStats ?? undefined}
+          eject={{ ejecting: ejectingSd, message: sdFeedback, onEject: () => { void handleEjectSd(); } }}
+          bridge={photoApps.some((app) => app.id === "bridge") ? {
+            message: bridgeMessage,
+            onOpen: () => { void openArchivioFolderInApp("bridge", importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella).then((result) => setBridgeMessage(result.message)).catch(() => setBridgeMessage("Non sono riuscito ad aprire Adobe Bridge.")); },
+          } : undefined}
+        />
       )}
-
-      {importSuccess && (
-        <div
-          className="message-box"
-          style={{
-            borderColor: importSuccess.incomplete ? "rgba(184, 154, 99, 0.45)" : "rgba(142, 178, 142, 0.4)",
-            background: importSuccess.incomplete ? "rgba(184, 154, 99, 0.1)" : "rgba(142, 178, 142, 0.08)",
-          }}
-        >
-          <p style={{ color: importSuccess.incomplete ? "var(--accent-strong)" : "var(--success)" }}>
-            {importSuccess.incomplete ? "Importazione incompleta" : "✓ Importazione completata"} — {importSuccess.copiedFiles} file copiati
-            {importSuccess.jpgGenerati > 0 && `, ${importSuccess.jpgGenerati} JPG compressi`}
-            {importSuccess.errors.length > 0 && ` (${importSuccess.errors.length} errori)`}
-          </p>
-          {importSuccess.errors.length > 0 && (
-            <ul style={{ margin: "0.45rem 0 0", paddingLeft: "1.1rem", color: "var(--danger)", fontSize: "0.8rem" }}>
-              {importSuccess.errors.slice(0, 20).map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}
-            </ul>
-          )}
-          <p style={{ margin: "0.4rem 0 0", fontSize: "0.88rem", color: "var(--text-muted)" }}>
-            Foto: {importSuccess.cartellaFotoFinale || importSuccess.job.percorsoCartella}
-            {importSuccess.videoFiles > 0 && <> · Video: {importSuccess.cartellaVideoFinale}</>}
-          </p>
-          {importSuccess.job.contrattoLink && (
-            <p style={{ margin: "0.35rem 0 0", fontSize: "0.88rem" }}>
-              <a
-                href={importSuccess.job.contrattoLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "var(--accent-strong)", wordBreak: "break-all" }}
-              >
-                Apri contratto: {importSuccess.job.contrattoLink}
-              </a>
-            </p>
-          )}
-          <div className="button-row" style={{ marginTop: "0.6rem" }}>
-            <button
-              className="secondary-button"
-              style={{ padding: "0.5rem 0.8rem", fontSize: "0.86rem" }}
-              onClick={() => { void openImportDestinationFolders(importSuccess); }}
-            >
-              📂 Apri cartelle importate
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Import CTA */}
-      <div ref={confirmStepRef} className="setup-footer import-step import-step--confirm">
-        <div>
-          <span className="import-step__eyebrow">Passo 3</span>
-          <strong>Controlla e importa</strong>
-          <p>
-            Foto in <code style={{ fontSize: "0.88rem" }}>{fotoDestFullPreview}</code> e video in <code style={{ fontSize: "0.88rem" }}>{videoDestFullPreview}</code>.
-          </p>
-          <div className="import-summary" aria-label="Riepilogo importazione">
-            <div><span>Origine</span><strong>{sdPath.trim() || "SD da selezionare"}</strong></div>
-            <div><span>File</span><strong>{explicitFiles ? `${explicitFiles.length} selezionati esattamente` : hasActiveImportFilter && loadingFilterPreview ? "Calcolo selezione…" : filterPreview ? `${filterPreview.matchedFiles} filtrati` : hasActiveImportFilter ? "Selezione da calcolare" : sdPreview ? `${sdPreview.totalFiles} totali · ${sdPreview.rawFiles} RAW · ${sdPreview.jpgFiles} JPG` : "Da rilevare"}</strong></div>
-            <div><span>Destinazione</span><strong>{folderPreview}</strong></div>
-            <div><span>Opzioni</span><strong>{rinominaFile ? "Rinomina attiva" : "Nessuna rinomina"}{generaJpg ? " · JPG BQ" : ""}</strong></div>
-          </div>
-          {!canImport && !importing && (
-            <p style={{ marginTop: "0.45rem", color: "var(--danger)", fontSize: "0.85rem" }}>
-              Mancano campi obbligatori. Premi IMPORTA per vedere esattamente cosa completare.
-            </p>
-          )}
-          <label className="check-row" style={{ marginTop: "0.45rem", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={openFolderOnFinish}
-              onChange={(e) => setOpenFolderOnFinish(e.target.checked)}
-              style={{ width: 16, height: 16, cursor: "pointer" }}
-            />
-            <span>Apri automaticamente la cartella al termine</span>
-          </label>
-          <label className="check-row" style={{ marginTop: "0.35rem", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={desktopNotifyOnFinish}
-              onChange={(e) => setDesktopNotifyOnFinish(e.target.checked)}
-              style={{ width: 16, height: 16, cursor: "pointer" }}
-            />
-            <span>Mostra notifica desktop a fine import</span>
-          </label>
-          <label className="check-row" style={{ marginTop: "0.35rem", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={soundNotifyOnFinish}
-              onChange={(e) => setSoundNotifyOnFinish(e.target.checked)}
-              style={{ width: 16, height: 16, cursor: "pointer" }}
-            />
-            <span>Riproduci suono a fine import</span>
-          </label>
-          <p className="import-preferences-note">Le opzioni di importazione vengono ricordate su questo computer.</p>
-        </div>
-        <div className="setup-footer__action">
-          <button
-            className="primary-button"
-            style={{ width: "100%" }}
-            onClick={() => { void handleImport(); }}
-            disabled={importing}
-          >
-            {importing ? "Importazione in corso…" : "▶ IMPORTA"}
-          </button>
-        </div>
-      </div>
         </>
       )}
 

@@ -1,11 +1,15 @@
 import type { DesktopArchivioDriveRegistrySyncResult } from "@photo-tools/desktop-contracts";
 import type { PhotoToolTargetId } from "./photoToolRouting";
+import { ByteLruCache } from "./byteLruCache";
 import type {
   ArchiveAnalysisResult,
   ArchiveRenameResult,
   ArchiveRenameRequest,
   ArchiveRenameProgress,
   ArchivioFlowSettings,
+  ArchivioPhotoApp,
+  ArchivioPreflightRequest,
+  ArchivioPreflightResult,
   FilterPreviewData,
   ImportRequest,
   ImportResult,
@@ -164,6 +168,29 @@ export async function checkArchivioSafeToFormat(sdPath: string): Promise<SafeToF
   const desktopApi = getDesktopApi();
   if (desktopApi) return await desktopApi.checkArchivioSafeToFormat(sdPath);
   return await apiPost<SafeToFormatResult>("/api/sd/safe-to-format", { sdPath });
+}
+
+/** Programmi di foto in cui si puo' aprire la cartella importata (oggi Adobe Bridge). Vuoto fuori dall'app installata. */
+export async function listArchivioPhotoApps(): Promise<ArchivioPhotoApp[]> {
+  const desktopApi = getDesktopApi();
+  if (!desktopApi || typeof desktopApi.listArchivioPhotoApps !== "function") return [];
+  try { return await desktopApi.listArchivioPhotoApps(); } catch { return []; }
+}
+
+export async function openArchivioFolderInApp(appId: string, folderPath: string): Promise<{ ok: boolean; message: string }> {
+  const desktopApi = getDesktopApi();
+  if (!desktopApi || typeof desktopApi.openArchivioFolderInApp !== "function") return { ok: false, message: "Disponibile solo nell'app installata." };
+  return await desktopApi.openArchivioFolderInApp(appId, folderPath);
+}
+
+/** Prima di importare: quali foto sono gia' in archivio e quanto spazio libero c'e' in destinazione. */
+export async function getArchivioPreflight(input: ArchivioPreflightRequest): Promise<ArchivioPreflightResult> {
+  const desktopApi = getDesktopApi();
+  if (desktopApi) {
+    if (typeof desktopApi.getArchivioPreflight !== "function") return { checkedFiles: 0, archived: [], freeBytes: null };
+    return await desktopApi.getArchivioPreflight(input);
+  }
+  return await apiPost<ArchivioPreflightResult>("/api/preflight", input);
 }
 
 export async function getArchivioStudioFlowStatus(): Promise<StudioFlowStatus> {
@@ -352,10 +379,12 @@ export async function deleteArchivioJob(jobId: string) {
   return await apiDelete<{ ok: true }>(`/api/jobs/${encodeURIComponent(jobId)}`);
 }
 
-const PREVIEW_CACHE_LIMIT = 512;
-const PREVIEW_CACHE_BYTES = 32 * 1024 * 1024;
+// Una miniatura pesa pochi KB: con 512 voci scorrere avanti e indietro su una SD grande rifaceva le richieste.
+const PREVIEW_CACHE_LIMIT = 3000;
+const PREVIEW_CACHE_BYTES = 64 * 1024 * 1024;
+// Il processo principale limita gia' le decodifiche (4 standard, 2 RAW).
 const PREVIEW_CONCURRENCY = 6;
-const previewBlobCache = new Map<string, Blob>();
+const previewBlobCache = new ByteLruCache<Blob>(PREVIEW_CACHE_LIMIT, PREVIEW_CACHE_BYTES);
 const SKIPPED_PREVIEW = Symbol("skipped-preview");
 const previewBlobRequests = new Map<string, Promise<Blob | null | typeof SKIPPED_PREVIEW>>();
 const previewDemand = new Map<string, Set<AbortSignal | undefined>>();
@@ -378,26 +407,19 @@ function runPreviewTask<T>(task: () => Promise<T>): Promise<T> {
   });
 }
 
-function rememberPreviewBlob(cacheKey: string, blob: Blob): void {
-  previewBlobCache.delete(cacheKey);
-  previewBlobCache.set(cacheKey, blob);
-  let bytes = [...previewBlobCache.values()].reduce((total, item) => total + item.size, 0);
-  while (previewBlobCache.size > PREVIEW_CACHE_LIMIT || bytes > PREVIEW_CACHE_BYTES) {
-    const oldestKey = previewBlobCache.keys().next().value as string | undefined;
-    if (!oldestKey) break;
-    bytes -= previewBlobCache.get(oldestKey)!.size;
-    previewBlobCache.delete(oldestKey);
-  }
+function previewCacheKey(sdPath: string, filePath: string, sourceFileKey?: string): string {
+  return `${sdPath}\0${filePath}\0${sourceFileKey ?? ""}`;
+}
+
+/** True se la miniatura e' gia' in memoria: il componente la mostra subito, senza attese. */
+export function hasArchivioPreviewCached(sdPath: string, filePath: string, sourceFileKey?: string): boolean {
+  return previewBlobCache.has(previewCacheKey(sdPath, filePath, sourceFileKey));
 }
 
 async function loadArchivioPreviewBlob(sdPath: string, filePath: string, sourceFileKey?: string, signal?: AbortSignal): Promise<Blob | null> {
-  const cacheKey = `${sdPath}\0${filePath}\0${sourceFileKey ?? ""}`;
+  const cacheKey = previewCacheKey(sdPath, filePath, sourceFileKey);
   const cached = previewBlobCache.get(cacheKey);
-  if (cached) {
-    previewBlobCache.delete(cacheKey);
-    previewBlobCache.set(cacheKey, cached);
-    return cached;
-  }
+  if (cached) return cached;
   const pending = previewBlobRequests.get(cacheKey);
   if (pending) {
     previewDemand.get(cacheKey)?.add(signal);
@@ -414,10 +436,15 @@ async function loadArchivioPreviewBlob(sdPath: string, filePath: string, sourceF
     const desktopApi = getDesktopApi();
     const isVideo = /\.(mp4|mov|m4v|avi|mkv|mts|m2ts|mpg|mpeg|3gp|webm)$/i.test(filePath);
     if (desktopApi && !isVideo) {
-      const rendered = await desktopApi.getThumbnail(filePath, 220, 54, sourceFileKey, {
+      // Griglia: basta la miniatura EXIF (160x120, ~10 KB) invece dei 3-4 MB dell'anteprima RAW;
+      // l'anteprima grande si legge solo nell'ingrandimento (getArchivioFullPreviewBlob).
+      // Qualita' 55 (e non 54): la chiave della cache su disco include la qualita', cosi' le miniature verticali salvate
+      // di lato dalle versioni precedenti non vengono riusate.
+      const rendered = await desktopApi.getThumbnail(filePath, 160, 55, sourceFileKey, {
           profile: "fast",
           preferEmbeddedPreview: true,
           allowDirectEmbeddedJpeg: true,
+          minimumEmbeddedShortSide: 96,
         }).catch(() => null);
       if (rendered) {
         const ownedBytes = new Uint8Array(rendered.bytes.byteLength);
@@ -442,7 +469,7 @@ async function loadArchivioPreviewBlob(sdPath: string, filePath: string, sourceF
   try {
     const blob = await request;
     if (blob === SKIPPED_PREVIEW) return null;
-    if (blob) rememberPreviewBlob(cacheKey, blob);
+    if (blob) previewBlobCache.set(cacheKey, blob);
     return blob;
   } finally {
     previewBlobRequests.delete(cacheKey);

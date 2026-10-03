@@ -10,6 +10,10 @@ export interface ImportSelection {
   suggestedFiles?: PreviewMediaFile[];
   sourceSummary?: SdPreview;
   sourceIdentity?: string;
+  /** Peso totale di quanto si importa (foto e video), per stimare spazio e tempo. */
+  selectedBytes?: number;
+  /** Foto della scheda che risultano gia' in archivio, con il lavoro in cui sono. */
+  archived?: Array<{ filePath: string; jobName: string | null; size: number }>;
 }
 
 export function localTimestamp(ms: number): string {
@@ -38,8 +42,8 @@ export function suggestImportJobs(jobs: Job[], sessions: StudioFlowStatus["sessi
     const recent = Math.max(0, ...completed.map((session) => session.completedAt ?? session.startedAt));
     const sameDay = job.dataLavoro === day;
     return { job, score: overlapCount ? 3 + overlapCount / selected.length : sameDay ? 2 : recent ? 1 : 0, recent,
-      reason: overlapCount ? `Gli orari di ${overlapCount}/${selected.length} file si sovrappongono a un’importazione già completata in questo lavoro (mtime).`
-        : sameDay ? "La data del lavoro coincide con quella dei file: potrebbe comunque essere un evento diverso."
-        : `Importazione completata il ${new Date(recent).toLocaleDateString("it-IT")}; verifica che sia lo stesso evento.` };
+      reason: overlapCount ? `Gli orari di ${overlapCount} foto su ${selected.length} coincidono con foto già salvate in questo lavoro.`
+        : sameDay ? "Il giorno del lavoro è lo stesso delle foto: potrebbe comunque essere un evento diverso."
+        : `Hai salvato altre foto in questo lavoro il ${new Date(recent).toLocaleDateString("it-IT")}: controlla che sia lo stesso evento.` };
   }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || b.recent - a.recent || a.job.id.localeCompare(b.job.id)).slice(0, 3);
 }

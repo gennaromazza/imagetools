@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PreviewMediaFile } from "../previewPolicy";
 import { buildPreviewSourceKey } from "../previewPolicy";
-import { getArchivioFullPreviewBlob, warmArchivioFullPreview } from "../archivioDesktopApi";
+import { getArchivioFullPreviewBlob, getArchivioPreviewImageUrl, warmArchivioFullPreview } from "../archivioDesktopApi";
+import { lightboxView } from "../wizardModel";
 
 interface Props {
+  /** Serve per mostrare subito la miniatura gia' in memoria mentre arriva la foto grande. */
+  sdPath?: string;
   files: PreviewMediaFile[];
   sourceIdentity?: string;
   index: number;
@@ -17,11 +20,12 @@ function fitMaxDimension(): number {
   return Math.min(2560, Math.ceil(viewport * ratio));
 }
 
-export function SdLightbox({ files, sourceIdentity, index, onIndexChange, onClose }: Props) {
+export function SdLightbox({ sdPath, files, sourceIdentity, index, onIndexChange, onClose }: Props) {
   const file = files[index] ?? null;
   const [blob, setBlob] = useState<Blob | null>(null);
   const [src, setSrc] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "error" | "ready">("loading");
+  const [thumbSrc, setThumbSrc] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [waAskPhone, setWaAskPhone] = useState(false);
@@ -76,6 +80,18 @@ export function SdLightbox({ files, sourceIdentity, index, onIndexChange, onClos
     };
   }, [file, files, index, maxDimension, sourceIdentity]);
 
+  // La miniatura e' quasi sempre gia' in memoria (e' quella della griglia): compare subito, poi arriva la foto grande.
+  useEffect(() => {
+    setThumbSrc(null);
+    if (!file || !sdPath) return;
+    let alive = true;
+    let url: string | null = null;
+    void getArchivioPreviewImageUrl(sdPath, file.filePath, buildPreviewSourceKey(file, sourceIdentity))
+      .then((next) => { if (!alive) { if (next) URL.revokeObjectURL(next); return; } url = next; setThumbSrc(next); })
+      .catch(() => undefined);
+    return () => { alive = false; if (url) URL.revokeObjectURL(url); };
+  }, [file, sdPath, sourceIdentity]);
+
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -99,6 +115,7 @@ export function SdLightbox({ files, sourceIdentity, index, onIndexChange, onClos
   }, [goTo, index, onClose]);
 
   if (!file) return null;
+  const view = lightboxView(status, Boolean(src), Boolean(thumbSrc));
 
   async function blobToPngClipboardItem(source: Blob): Promise<ClipboardItem | null> {
     try {
@@ -309,9 +326,18 @@ export function SdLightbox({ files, sourceIdentity, index, onIndexChange, onClos
           ‹
         </button>
         <div style={{ flex: 1, minWidth: 0, height: "100%", display: "grid", placeItems: "center" }}>
-          {status !== "ready" || !src ? (
+          {view === "progressive" || view === "thumb-fallback" ? (
+            <div className="lightbox-progressive">
+              <img src={thumbSrc ?? undefined} alt={file.fileName} className={view === "progressive" ? "is-loading" : undefined} />
+              <div className="lightbox-progressive__status" role="status">
+                {view === "progressive"
+                  ? <><span className="media-preview-loading__spinner" aria-hidden="true" />Carico la foto a piena qualità…<progress aria-label="Caricamento della foto" /></>
+                  : <>Mostro l’anteprima ridotta: quella a schermo intero non è disponibile per questo file.</>}
+              </div>
+            </div>
+          ) : view !== "full" || !src ? (
             <div style={{ color: "var(--text-muted)", fontSize: "0.9rem", display: "grid", placeItems: "center", gap: "0.6rem" }}>
-              {status === "error" ? (
+              {view === "error" ? (
                 <span>Anteprima a schermo intero non disponibile per questo file.</span>
               ) : (
                 <span className="media-preview-loading">

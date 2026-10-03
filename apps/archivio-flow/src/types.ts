@@ -6,6 +6,9 @@ import type {
   ArchivioArchiveRenameRequest,
   ArchivioArchiveRenameProgress,
   ArchivioFilterPreviewData,
+  ArchivioPhotoApp as ContractPhotoApp,
+  ArchivioPreflightRequest as ContractPreflightRequest,
+  ArchivioPreflightResult as ContractPreflightResult,
   ArchivioImportProgressSnapshot,
   ArchivioImportRequest,
   ArchivioImportResult,
@@ -39,3 +42,6 @@ export type ArchiveAnalysisResult = ArchivioArchiveAnalysisResult;
 export type ArchiveRenameResult = ArchivioArchiveRenameResult;
 export type ArchiveRenameRequest = ArchivioArchiveRenameRequest;
 export type ArchiveRenameProgress = ArchivioArchiveRenameProgress;
+export type ArchivioPreflightRequest = ContractPreflightRequest;
+export type ArchivioPreflightResult = ContractPreflightResult;
+export type ArchivioPhotoApp = ContractPhotoApp;

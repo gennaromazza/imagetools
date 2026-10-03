@@ -1355,6 +1355,38 @@ export interface ArchivioSettings {
   categoryMappings: Array<{ id: string; categoryKey: string; displayName: string; relativePathPattern: string; jobFolderPattern: string; enabled: boolean }>;
 }
 
+export interface ArchivioPhotoApp {
+  id: "bridge";
+  label: string;
+}
+
+export interface ArchivioOpenInAppResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface ArchivioPreflightRequest {
+  sdPath: string;
+  /** File della scheda da controllare (foto e video): si cerca se sono gia' in archivio. */
+  filePaths?: string[];
+  /** Cartella dove andranno le foto: serve per sapere quanto spazio libero c'e'. */
+  destinationPath?: string;
+}
+
+export interface ArchivioArchivedFile {
+  filePath: string;
+  /** Lavoro in cui il file e' gia' salvato, se riconosciuto. */
+  jobName: string | null;
+  destinationPath: string;
+}
+
+export interface ArchivioPreflightResult {
+  checkedFiles: number;
+  archived: ArchivioArchivedFile[];
+  /** Spazio libero (byte) sul disco della destinazione, se calcolabile. */
+  freeBytes: number | null;
+}
+
 export interface ArchivioImportRequest {
   /** Elenco esplicito: nessun file esterno a questa selezione viene importato. */
   selectedFilePaths?: string[];
@@ -1375,6 +1407,8 @@ export interface ArchivioImportRequest {
   mtimeTo?: string;
   categoryKey?: string;
   destinationOverride?: boolean;
+  /** Non ricopia le foto che risultano gia' in archivio (anche in un altro lavoro). */
+  skipArchived?: boolean;
 }
 
 export interface ArchivioImportResult {
@@ -1728,6 +1762,9 @@ export interface FileXDesktopApi {
   showArchivioFlowWindow: () => Promise<{ ok: true }>;
   getArchivioSdPreview: (sdPath: string) => Promise<ArchivioSdPreview>;
   checkArchivioSafeToFormat: (sdPath: string) => Promise<ArchivioSafeToFormatResult>;
+  getArchivioPreflight: (input: ArchivioPreflightRequest) => Promise<ArchivioPreflightResult>;
+  listArchivioPhotoApps: () => Promise<ArchivioPhotoApp[]>;
+  openArchivioFolderInApp: (appId: string, folderPath: string) => Promise<ArchivioOpenInAppResult>;
   getArchivioStudioFlowStatus: () => Promise<ArchivioStudioFlowStatus>;
   reconcileArchivioIndex: () => Promise<ArchivioStudioFlowStatus["archiveIndex"]>;
   resumeArchivioImport: (sessionId: string) => Promise<ArchivioImportResult>;

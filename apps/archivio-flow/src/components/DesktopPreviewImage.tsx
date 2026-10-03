@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { getArchivioPreviewImageUrl } from "../archivioDesktopApi";
+import { getArchivioPreviewImageUrl, hasArchivioPreviewCached } from "../archivioDesktopApi";
+
+/** Attesa prima di chiedere una miniatura non in cache: scorrendo veloce le celle che passano non fanno nessuna lettura dalla SD. */
+const PREVIEW_SETTLE_MS = 90;
 
 interface Props {
   sdPath: string;
@@ -21,7 +24,7 @@ export function DesktopPreviewImage({ sdPath, filePath, sourceFileKey, alt, styl
     setSrc(null);
     setStatus("loading");
 
-    void getArchivioPreviewImageUrl(sdPath, filePath, sourceFileKey, controller.signal)
+    const start = () => void getArchivioPreviewImageUrl(sdPath, filePath, sourceFileKey, controller.signal)
       .then((nextUrl) => {
         if (!alive) { if (nextUrl) URL.revokeObjectURL(nextUrl); return; }
         if (!nextUrl) { setStatus("error"); return; }
@@ -36,8 +39,12 @@ export function DesktopPreviewImage({ sdPath, filePath, sourceFileKey, alt, styl
         }
       });
 
+    const timer = hasArchivioPreviewCached(sdPath, filePath, sourceFileKey) ? null : setTimeout(start, PREVIEW_SETTLE_MS);
+    if (timer === null) start();
+
     return () => {
       alive = false;
+      if (timer !== null) clearTimeout(timer);
       controller.abort();
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);

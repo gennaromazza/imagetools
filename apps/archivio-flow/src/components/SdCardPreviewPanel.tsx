@@ -1,18 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { FilterPreviewData, SafeToFormatResult, Job } from "../types";
-import { checkArchivioSafeToFormat, getArchivioFilterPreview, listPhotoToolInstallStates, openFileXSuite, sendArchivioPhotoSelectionToTool } from "../archivioDesktopApi";
+import type { FilterPreviewData, ImportResult, SafeToFormatResult, Job, SdCard } from "../types";
+import { checkArchivioSafeToFormat, getArchivioFilterPreview, getArchivioPreflight, listPhotoToolInstallStates, openFileXSuite, sendArchivioPhotoSelectionToTool } from "../archivioDesktopApi";
 import { DateFilterPicker } from "./DateFilterPicker";
 import { FilterRangePickerModal } from "./FilterRangePickerModal";
 import { localTimestamp, selectImportRange, type ImportSelection } from "../importSelection";
 import { SdLightbox } from "./SdLightbox";
 import { localIsoDate } from "../previewPolicy";
+import { describeArchivedNote, describeCardStatus, shouldShowShiftTip, summarizeArchived } from "../wizardModel";
 import { PHOTO_TOOL_TARGETS, isPhotoToolCompatible, validatePhotoToolSelection, type PhotoToolTargetId } from "../photoToolRouting";
-import { groupSdFiles, orderSdFiles, type SdFile } from "../sdBrowserModel";
+import { groupSdFiles, mediaCount, mediaOnly, orderSdFiles, quickSelections, sameSdFileList, type QuickSelection, type SdFile } from "../sdBrowserModel";
 import { SdVirtualGrid } from "./SdVirtualGrid";
+import { ImportStepper } from "./ImportStepper";
+import { ResumeBanner } from "./ResumeBanner";
+import { CardChooser } from "./CardChooser";
+import { RecentImports } from "./RecentImports";
 
-interface Props { sdPath: string | null; sourceIdentity?: string; jobs: Job[]; onStartImport: (selection: ImportSelection, jobId?: string | null) => void; }
+interface Props { sdPath: string | null; sourceIdentity?: string; jobs: Job[]; onStartImport: (selection: ImportSelection, jobId?: string | null) => void; onResumed?: (result: ImportResult) => void; cards?: SdCard[]; onChooseCard?: (path: string) => void; }
 
-export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Props) {
+export function SdCardPreviewPanel({ sdPath, sourceIdentity, jobs, onStartImport, onResumed, cards, onChooseCard }: Props) {
   const [revision, setRevision] = useState(0);
   const session = useMemo(() => crypto.randomUUID(), [sdPath, revision, sourceIdentity]);
   const [files, setFiles] = useState<SdFile[]>([]);
@@ -35,6 +40,9 @@ export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Pr
   const [sending, setSending] = useState<PhotoToolTargetId | null>(null);
   const [toolStates, setToolStates] = useState<Record<string, boolean>>({});
   const [lightboxPath, setLightboxPath] = useState<string | null>(null);
+  const [archived, setArchived] = useState<Map<string, { jobName: string | null; size: number }>>(() => new Map());
+  const [archivedChecking, setArchivedChecking] = useState(false);
+  const [shiftUsed, setShiftUsed] = useState(() => { try { return window.localStorage.getItem("filex.archivio-flow.shift-tip-used") === "1"; } catch { return false; } });
   const anchor = useRef<string | null>(null);
   const generation = useRef(0);
   const filterKey = JSON.stringify([date, range, groupFilter, revision, sdPath]);
@@ -67,13 +75,15 @@ export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Pr
         setInventory(data);
         if (!data.inventoryComplete) {
           // Provisional pages are replaced: discovery can change their sort order.
-          setFiles(data.sampleFiles);
+          // Stessa pagina di prima: niente nuovo array, niente ordinamenti e ridisegni inutili durante la lettura.
+          const media = mediaOnly(data.sampleFiles);
+          setFiles(previous => sameSdFileList(previous, media) ? previous : media);
           timer = setTimeout(() => { void read(); }, 250);
           return;
         }
-        if (offset && data.inventoryRevision !== stableRevision) throw new Error("La sessione di lettura è cambiata. Aggiorna la scheda prima di continuare.");
+        if (offset && data.inventoryRevision !== stableRevision) throw new Error("La scheda è cambiata durante la lettura. Premi «Rileggi la scheda» e riprova.");
         stableRevision = data.inventoryRevision;
-        completeFiles = [...completeFiles, ...data.sampleFiles];
+        completeFiles = [...completeFiles, ...mediaOnly(data.sampleFiles)];
         setFiles(completeFiles);
         if (data.nextSampleOffset != null) { offset = data.nextSampleOffset; timer = setTimeout(() => { void read(); }, 0); }
         else setReading(false);
@@ -82,6 +92,29 @@ export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Pr
     void read();
     return () => { active = false; clearTimeout(timer); };
   }, [sdPath, revision, session]);
+
+  // A lettura finita si chiede all'archivio quali foto sono gia' state salvate (anche in un altro lavoro).
+  // Le dimensioni sconosciute non richiedono nessuna lettura dalla scheda: su una scheda nuova e' istantaneo.
+  useEffect(() => {
+    setArchived(new Map());
+    if (!sdPath || reading || !inventory?.inventoryComplete || error) { setArchivedChecking(false); return; }
+    let active = true;
+    const sizeByPath = new Map(files.map(file => [file.filePath, file.size]));
+    const paths = files.map(file => file.filePath);
+    setArchivedChecking(paths.length > 0);
+    void (async () => {
+      const found = new Map<string, { jobName: string | null; size: number }>();
+      try {
+        for (let offset = 0; offset < paths.length && active; offset += 400) {
+          const result = await getArchivioPreflight({ sdPath, filePaths: paths.slice(offset, offset + 400) });
+          for (const entry of result.archived) found.set(entry.filePath, { jobName: entry.jobName, size: sizeByPath.get(entry.filePath) ?? 0 });
+          if (active && result.archived.length > 0) setArchived(new Map(found));
+        }
+      } catch { /* il controllo e' un aiuto: se non riesce, la griglia resta com'e' */ }
+      if (active) setArchivedChecking(false);
+    })();
+    return () => { active = false; };
+  }, [sdPath, reading, inventory?.inventoryComplete, error, session]);
 
   const fileMap = useMemo(() => new Map(files.map(file => [file.filePath, file])), [files]);
   const dates = useMemo(() => {
@@ -101,6 +134,19 @@ export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Pr
   const lightboxPhotos = useMemo(() => displayFiles.filter(file => file.mediaType === "photo"), [displayFiles]);
   const lightboxIndex = lightboxPhotos.findIndex(file => file.filePath === lightboxPath);
   const complete = !reading && Boolean(inventory?.inventoryComplete) && !error;
+  const archivedPaths = useMemo(() => new Set(archived.keys()), [archived]);
+  const quick = useMemo(() => complete ? quickSelections(files, new Date(), 100, archivedPaths) : [], [complete, files, archivedPaths]);
+  const cardStatus = useMemo(
+    () => complete && !archivedChecking ? describeCardStatus(files.length, summarizeArchived([...archived].map(([filePath, value]) => ({ filePath, ...value })), null)) : null,
+    [complete, archivedChecking, files.length, archived],
+  );
+  const archivedLabels = useMemo(() => new Map([...archived].map(([path, info]) => [path, info.jobName ? `Già in «${info.jobName}»` : "Già in archivio"])), [archived]);
+  function applyQuick(choice: QuickSelection) {
+    if (sending) return;
+    if (choice.paths.length > 50_000) { setFeedback("Puoi importare fino a 50.000 file alla volta. Scegli un giorno o un gruppo."); return; }
+    setSelected(new Set(choice.paths)); setFeedback(null); anchor.current = null;
+    if (choice.day) { setDate(choice.day); setRange({ from: "", to: "" }); setGroupFilter(null); } else chooseDate("");
+  }
   function selectFiles(paths: string[]) {
     const next = new Set([...selected, ...paths]);
     if (next.size > 50_000) { setFeedback("Puoi importare fino a 50.000 file alla volta. Restringi la selezione per data o gruppo."); return; }
@@ -108,6 +154,7 @@ export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Pr
   }
   function selectOne(path: string, shift: boolean, ordered: string[]) {
     if (sending) return;
+    if (shift && complete && !shiftUsed) { setShiftUsed(true); try { window.localStorage.setItem("filex.archivio-flow.shift-tip-used", "1"); } catch { /* il suggerimento tornera' */ } }
     const next = selectImportRange(selected, ordered, anchor.current, path, shift && complete);
     if (next.size > 50_000) { setFeedback("Limite di 50.000 file per importazione."); return; }
     setSelected(next); setFeedback(null);
@@ -115,11 +162,17 @@ export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Pr
   }
   function chooseDate(value: string) { setDate(value); setRange({ from: "", to: "" }); setGroupFilter(null); }
   function applyRange(start: number, end: number) { setRange({ from: localTimestamp(Math.floor(start)), to: localTimestamp(Math.ceil(end)) }); setDate(""); setGroupFilter(null); setShowRangePicker(false); }
+  function archivedFor(paths: readonly string[]) {
+    return paths.flatMap(path => { const info = archived.get(path); return info ? [{ filePath: path, jobName: info.jobName, size: info.size }] : []; });
+  }
+  function importAll() {
+    onStartImport({ sourceIdentity: sourceIdentity || session, selectedBytes: files.reduce((total, file) => total + file.size, 0), archived: archivedFor(files.map(file => file.filePath)) });
+  }
   function importFiles(paths: string[]) {
     if (!paths.length || !complete) return;
     if (paths.length > 50_000) { setFeedback("Seleziona al massimo 50.000 file per importazione."); return; }
     const first = paths.reduce((min, path) => Math.min(min, fileMap.get(path)?.mtimeMs ?? Infinity), Infinity);
-    onStartImport({ sourceIdentity: sourceIdentity || session, selectedFilePaths: paths, suggestedJobDate: Number.isFinite(first) ? localIsoDate(first) : undefined, suggestedFiles: paths.flatMap(path => fileMap.get(path) ?? []), sourceSummary: inventory ? { totalFiles: inventory.matchedFiles, rawFiles: inventory.matchedRawFiles, jpgFiles: inventory.matchedJpgFiles, videoFiles: inventory.matchedVideoFiles, otherFiles: inventory.matchedOtherFiles } : undefined });
+    onStartImport({ sourceIdentity: sourceIdentity || session, selectedFilePaths: paths, suggestedJobDate: Number.isFinite(first) ? localIsoDate(first) : undefined, suggestedFiles: paths.flatMap(path => fileMap.get(path) ?? []), selectedBytes: paths.reduce((total, path) => total + (fileMap.get(path)?.size ?? 0), 0), archived: archivedFor(paths), sourceSummary: inventory ? { totalFiles: inventory.matchedFiles, rawFiles: inventory.matchedRawFiles, jpgFiles: inventory.matchedJpgFiles, videoFiles: inventory.matchedVideoFiles, otherFiles: inventory.matchedOtherFiles } : undefined });
   }
   async function verifySd() {
     if (!sdPath) return;
@@ -145,16 +198,19 @@ export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Pr
     finally { if (generation.current === current) setSending(null); }
   }
   return <div className="stack sd-browser">
+    <ImportStepper current={1} />
+    {sdPath && onResumed && <ResumeBanner sdPath={sdPath} jobs={jobs} onFinished={onResumed} />}
+    {cards && onChooseCard && <CardChooser cards={cards} activePath={sdPath} onChoose={onChooseCard} />}
     <section className="panel-section">
       <header className="sd-browser-header">
-        <div><strong>{sdPath ? `Scheda SD · ${sdPath}` : "In attesa di una scheda"}</strong><div role="status">{reading ? `Lettura in corso · ${files.length.toLocaleString("it-IT")} file disponibili · conteggi provvisori` : inventory ? `${inventory.matchedFiles.toLocaleString("it-IT")} file sulla scheda` : "Inserisci una SD per iniziare."}</div></div>
-        <div className="button-row"><button className="ghost-button" onClick={() => setRevision(value => value + 1)} disabled={!sdPath || Boolean(sending)}>Aggiorna scheda</button><button className="secondary-button" onClick={() => { void verifySd(); }} disabled={!sdPath || checkingSafe || reading}>{checkingSafe ? "Verifica…" : "Verifica SD"}</button></div>
+        <div><strong>{sdPath ? `Scheda SD · ${sdPath}` : "Inserisci la scheda SD"}</strong><div role="status">{reading ? `Sto leggendo la scheda… ${files.length.toLocaleString("it-IT")} file trovati finora` : inventory ? `${mediaCount(inventory).toLocaleString("it-IT")} foto e video sulla scheda. Clicca quelli che vuoi importare.` : "Inserisci la scheda nel computer: la riconosco da sola."}</div></div>
+        <div className="button-row"><button className="ghost-button" onClick={() => setRevision(value => value + 1)} disabled={!sdPath || Boolean(sending)}>Rileggi la scheda</button><button className="ghost-button" onClick={() => { void verifySd(); }} disabled={!sdPath || checkingSafe || reading} title="Facoltativo: controlla che ogni foto della scheda sia già salvata in archivio">{checkingSafe ? "Controllo…" : "Controlla che sia tutto salvato"}</button></div>
       </header>
       {sdPath && <>
         <div className="sd-browser-layout">
-          <nav className="sd-browser-dates" aria-label="Date sulla scheda"><strong>Date {reading ? "· provvisorie" : ""}</strong><button className={!date && !groupFilter && !range.from && !range.to ? "primary-button" : "ghost-button"} onClick={() => chooseDate("")}>Tutte · {files.length.toLocaleString("it-IT")}</button>{dates.map(([day,count]) => <button key={day} className={date === day ? "primary-button" : "ghost-button"} onClick={() => chooseDate(day)}>{new Date(`${day}T12:00`).toLocaleDateString("it-IT")} · {count.toLocaleString("it-IT")}</button>)}</nav>
+          <nav className="sd-browser-dates" aria-label="Date sulla scheda"><strong>Giorni {reading ? "(in aggiornamento)" : ""}</strong><button className={!date && !groupFilter && !range.from && !range.to ? "primary-button" : "ghost-button"} onClick={() => chooseDate("")}>Tutti i giorni · {files.length.toLocaleString("it-IT")}</button>{dates.map(([day,count]) => <button key={day} className={date === day ? "primary-button" : "ghost-button"} onClick={() => chooseDate(day)}>{new Date(`${day}T12:00`).toLocaleDateString("it-IT")} · {count.toLocaleString("it-IT")}</button>)}</nav>
           <div className="sd-browser-main">
-            <div className="sd-browser-controls"><span>{visible.length.toLocaleString("it-IT")} file {activeGroup ? "nel gruppo" : date ? "nella data" : "nella vista"}</span><button className="ghost-button" disabled={!complete || !visible.length || Boolean(sending)} onClick={() => selectFiles(visible.map(file => file.filePath))}>{activeGroup ? "Seleziona questo gruppo" : date ? "Seleziona tutta questa data" : "Seleziona tutta la vista"}</button><details onToggle={event => setAdvancedOpen(event.currentTarget.open)}><summary>Intervallo e gruppi</summary>
+            <div className="sd-browser-controls"><span>{visible.length.toLocaleString("it-IT")} foto {activeGroup ? "in questo gruppo" : date ? "in questo giorno" : "da guardare"}</span><button className="ghost-button" disabled={!complete || !visible.length || Boolean(sending)} onClick={() => selectFiles(visible.map(file => file.filePath))}>{activeGroup ? "Scegli tutto il gruppo" : date ? "Scegli tutto il giorno" : "Scegli tutte"}</button><details onToggle={event => setAdvancedOpen(event.currentTarget.open)}><summary>Altri modi per scegliere (orari, gruppi)</summary>
               {advancedOpen && <div className="sd-browser-options">
                 <div className="inline-grid inline-grid--2"><DateFilterPicker label="Da" value={range.from} boundary="start" onChange={from => { setRange(value => ({ ...value, from })); setDate(""); setGroupFilter(null); }} /><DateFilterPicker label="A" value={range.to} boundary="end" onChange={to => { setRange(value => ({ ...value, to })); setDate(""); setGroupFilter(null); }} /></div>
                 {!validRange && <p role="alert">L’inizio deve precedere la fine dell’intervallo.</p>}
@@ -165,16 +221,20 @@ export function SdCardPreviewPanel({ sdPath, sourceIdentity, onStartImport }: Pr
                 <div className="button-row"><button className="secondary-button" disabled={!complete || selected.size !== 1} onClick={() => { setSplitBefore(value => new Set([...value, [...selected][0]!])); setGroupFilter(null); }}>Dividi prima della foto selezionata</button><button className="ghost-button" onClick={() => { setSplitBefore(new Set()); setJoinedBefore(new Set()); setGroupFilter(null); }}>Ripristina gruppi automatici</button></div>
               </div>}
             </details></div>
-            <SdVirtualGrid files={displayFiles} selected={selected} session={sourceIdentity || session} sdPath={sdPath} filterKey={filterKey} onSelect={selectOne} onOpen={file => setLightboxPath(file.filePath)} />
+            {cardStatus && <div className={`card-status card-status--${cardStatus.level}`} role="status"><span>{cardStatus.text}</span>{cardStatus.level !== "all" && quick.some(choice => choice.id === "new") && <button type="button" className="secondary-button" onClick={() => applyQuick(quick.find(choice => choice.id === "new")!)}>Scegli solo le nuove</button>}</div>}
+            {(quick.length > 1 || archivedChecking || archived.size > 0) && <div className="sd-quick" role="group" aria-label="Scelte rapide"><span>Scegli in fretta:</span>{quick.map(choice => <button key={choice.id} type="button" className={`wizard-chip${selected.size === choice.paths.length && choice.paths.every(path => selected.has(path)) ? " is-active" : ""}`} onClick={() => applyQuick(choice)} disabled={Boolean(sending)}>{choice.label}</button>)}{archivedChecking && <span className="sd-quick__note">Controllo quali foto hai già salvato…</span>}{!archivedChecking && archived.size > 0 && <span className="sd-quick__note">{(() => { const info = summarizeArchived([...archived].map(([filePath, value]) => ({ filePath, ...value })), null); return info ? describeArchivedNote(info) : ""; })()}</span>}</div>}
+            {shouldShowShiftTip(selected.size, shiftUsed) && <p className="sd-browser-tip" role="note">💡 Per sceglierne molte di fila: tieni premuto <kbd>Maiusc</kbd> e clicca l’ultima foto dell’intervallo.</p>}
+            <p className="sd-browser-hint">{reading ? "Puoi già scegliere qualche foto; per sceglierne molte di fila aspetta la fine della lettura." : "Clicca una foto per sceglierla. Tieni premuto Maiusc e clicca un’altra foto per sceglierne molte di fila. La scelta resta anche cambiando giorno."}{incompatible ? " Per gli altri programmi servono foto JPG: i RAW e i video non sono compatibili." : ""}</p>
+            <SdVirtualGrid files={displayFiles} archivedLabels={archivedLabels} selected={selected} session={sourceIdentity || session} sdPath={sdPath} filterKey={filterKey} onSelect={selectOne} onOpen={file => setLightboxPath(file.filePath)} />
           </div>
         </div>
-        <footer className="sd-browser-actions"><div className="button-row"><strong aria-live="polite">{selected.size.toLocaleString("it-IT")} selezionati{outside > 0 ? ` · ${outside} fuori vista` : ""}</strong><button className="ghost-button" disabled={Boolean(sending) || !selected.size} onClick={() => { setSelected(new Set()); anchor.current = null; }}>Deseleziona</button><button className="primary-button" disabled={!complete || !selected.size || Boolean(sending)} onClick={() => importFiles([...selected])}>Importa selezionati</button>
-          {PHOTO_TOOL_TARGETS.map(target => { const validation = validatePhotoToolSelection(target.id, selected.size); return <button key={target.id} className="secondary-button" disabled={!complete || Boolean(sending) || incompatible || !validation.valid} title={incompatible ? "La selezione contiene RAW, video o file non compatibili con i tool." : !validation.valid ? validation.message : toolStates[target.id] === false ? "Apri FileX Suite per installare il tool" : `Apri ${target.label}`} onClick={() => { void sendToTool(target.id); }}>{sending === target.id ? "Apertura…" : target.label}{toolStates[target.id] === false ? " · Da installare" : ""}</button>; })}
-        </div><small>{reading ? "Puoi selezionare singole foto; selezione completa e Maiusc saranno disponibili al termine della lettura." : "Più recenti prima · Clic per selezionare · Maiusc + clic per un intervallo · La selezione resta cambiando data."} {incompatible ? "Tool: seleziona foto compatibili, escludendo RAW e video." : "Party Frame e Batch Layout: massimo 500 foto. Photo ID: una foto."}</small>{feedback && <p role="status">{feedback}</p>}{error && <p role="alert">{error}</p>}</footer>
+        <footer className="sd-browser-actions"><div className="sd-browser-actions__row"><strong aria-live="polite">{selected.size === 0 ? "Nessuna foto scelta" : selected.size === 1 ? "1 foto scelta" : `${selected.size.toLocaleString("it-IT")} foto scelte`}{outside > 0 ? ` (${outside} in altri giorni)` : ""}</strong><div className="button-row"><button className="ghost-button" disabled={Boolean(sending) || !selected.size} onClick={() => { setSelected(new Set()); anchor.current = null; }}>Svuota la scelta</button><button className="primary-button" disabled={!complete || !selected.size || Boolean(sending)} onClick={() => importFiles([...selected])}>Continua →</button></div></div>{feedback && <p role="status">{feedback}</p>}{error && <p role="alert">{error}</p>}</footer>
       </>}
     </section>
-    {sdPath && <details className="import-advanced-panel"><summary>Sicurezza e impostazioni SD</summary><div className="stack" style={{ padding: "1rem 0" }}><div><strong>Sicurezza formattazione</strong><p>{checkingSafe ? "Verifica in corso…" : safeCheck?.status === "SAFE" ? `Tutti i ${safeCheck.totalFiles} file risultano verificati nell’archivio.` : safeCheck ? `${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file verificati. ${safeCheck.reason ?? "Non formattare la SD."}` : "Usa Verifica SD per controllare i file realmente archiviati prima di formattare."}</p></div><button className="secondary-button" disabled={!complete || Boolean(sending)} onClick={() => onStartImport({})}>Importa tutta la SD</button><div><strong>Apertura di Esplora risorse</strong><p>In AutoPlay di Windows puoi scegliere “Nessuna azione”.</p><a className="secondary-button" href="ms-settings:autoplay" target="_blank" rel="noreferrer">Apri impostazioni AutoPlay</a></div><div><strong>Avvio con Windows</strong><p>Puoi attivarlo o disattivarlo nella schermata Impostazioni.</p></div></div></details>}
+    {!sdPath && <RecentImports jobs={jobs} />}
+    {sdPath && <RecentImports jobs={jobs} collapsed />}
+    {sdPath && <details className="import-advanced-panel"><summary>Altre opzioni</summary><div className="stack" style={{ padding: "1rem 0" }}><div><strong>Usare le foto in un altro programma</strong><p>Serve una selezione di foto JPG: i RAW e i video non sono compatibili.</p><div className="button-row">          {PHOTO_TOOL_TARGETS.map(target => { const validation = validatePhotoToolSelection(target.id, selected.size); return <button key={target.id} className="secondary-button" disabled={!complete || Boolean(sending) || incompatible || !validation.valid} title={incompatible ? "La selezione contiene RAW, video o file non compatibili con i tool." : !validation.valid ? validation.message : toolStates[target.id] === false ? "Apri FileX Suite per installare il tool" : `Apri ${target.label}`} onClick={() => { void sendToTool(target.id); }}>{sending === target.id ? "Apertura…" : target.label}{toolStates[target.id] === false ? " · Da installare" : ""}</button>; })}</div></div><div><strong>Tutto salvato in archivio?</strong><p>{checkingSafe ? "Verifica in corso…" : safeCheck?.status === "SAFE" ? `Tutti i ${safeCheck.totalFiles} file risultano verificati nell’archivio.` : safeCheck ? `${safeCheck.verifiedFiles}/${safeCheck.totalFiles} file verificati. ${safeCheck.reason ?? "Non formattare la SD."}` : "Premi «Controlla che sia tutto salvato» per verificare che ogni foto della scheda sia già in archivio. È facoltativo."}</p></div><button className="secondary-button" disabled={!complete || Boolean(sending)} onClick={importAll}>Importa tutta la scheda</button><div><strong>Apertura di Esplora risorse</strong><p>In AutoPlay di Windows puoi scegliere “Nessuna azione”.</p><a className="secondary-button" href="ms-settings:autoplay" target="_blank" rel="noreferrer">Apri impostazioni AutoPlay</a></div><div><strong>Avvio con Windows</strong><p>Puoi attivarlo o disattivarlo nella schermata Impostazioni.</p></div></div></details>}
     <FilterRangePickerModal sourceIdentity={sourceIdentity || session} open={showRangePicker} sdPath={sdPath ?? ""} samples={visible} importedRanges={[]} truncated={reading} onClose={() => setShowRangePicker(false)} onApplyRange={applyRange} />
-    {lightboxIndex >= 0 && <SdLightbox sourceIdentity={sourceIdentity || session} files={lightboxPhotos} index={lightboxIndex} onIndexChange={index => setLightboxPath(lightboxPhotos[index]!.filePath)} onClose={() => setLightboxPath(null)} />}
+    {lightboxIndex >= 0 && <SdLightbox sdPath={sdPath ?? undefined} sourceIdentity={sourceIdentity || session} files={lightboxPhotos} index={lightboxIndex} onIndexChange={index => setLightboxPath(lightboxPhotos[index]!.filePath)} onClose={() => setLightboxPath(null)} />}
   </div>;
 }

@@ -61,7 +61,7 @@ test("suggerimenti: matrimonio oltre mezzanotte e altro evento nello stesso gior
   const sessions = [session("Matrimonio", "2026-09-06T20:00", "2026-09-07T03:00"), session("Comunioni", "2026-09-07T09:00", "2026-09-07T12:00")];
   const night = suggestImportJobs(jobs, sessions, [photo("2026-09-07T01:30")]);
   assert.equal(night[0]?.job.id, "Matrimonio");
-  assert.match(night[0]!.reason, /orari.*sovrappongono/);
+  assert.match(night[0]!.reason, /orari.*coincidono/);
   assert.equal(suggestImportJobs(jobs, sessions, [photo("2026-09-07T10:00")])[0]?.job.id, "Comunioni");
   assert.equal(suggestImportJobs(jobs, sessions, [photo("2026-09-07T18:00")]).length, 2);
   assert.equal(suggestImportJobs(jobs.map((j) => ({ ...j, folderExists: false })), sessions, [photo("2026-09-07T01:30")]).length, 0);
@@ -82,5 +82,5 @@ test("un lavoro della stessa giornata precede una vecchia importazione senza sov
   const selected = [photo("2026-09-07T10:00")];
   const result = suggestImportJobs([job("Vecchio", "2025-01-01"), job("Oggi", "2026-09-07")], [session("Vecchio", "2025-01-01T10:00", "2025-01-01T11:00")], selected);
   assert.equal(result[0]?.job.id, "Oggi");
-  assert.match(result[0]!.reason, /data del lavoro coincide/);
+  assert.match(result[0]!.reason, /giorno del lavoro è lo stesso/);
 });

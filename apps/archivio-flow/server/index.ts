@@ -1,6 +1,6 @@
 import express, { type Request, type Response } from "express";
 import cors from "cors";
-import { execFile, execFileSync, execSync } from "child_process";
+import { execFile, execFileSync } from "child_process";
 import { promisify } from "util";
 import { createHash, randomUUID } from "crypto";
 import fs from "fs";
@@ -12,10 +12,20 @@ import { fileURLToPath, pathToFileURL } from "url";
 import { StudioFlowStore, type ImportSessionRecord } from "./studioflow-store.js";
 import { resolveDestination, type CategoryMapping } from "./destination-resolver.js";
 import { createBloomFilter } from "./bloom-filter.js";
-import type { ArchivioArchiveRenameProgress, ArchivioImportRequest, ArchivioFilterPreviewData } from "@photo-tools/desktop-contracts";
+import {
+  copyFileVerified, createTemporaryPath, filesHaveSameContent, isTemporaryArtifactName,
+  recoverOrphanTemporaryFiles, replaceFileAtomically, resolveOpenableFolder,
+} from "./file-safety.js";
+import { corsOptions, createLocalOnlyGuard } from "./http-guard.js";
+import { buildDestinationFileName, shortStableSuffix } from "./destination-name.js";
+import { expandWithSidecars } from "./sidecars.js";
+import { findArchivedFiles, jobNameForPath, type DuplicateCheckDeps } from "./duplicate-check.js";
+import { freeSpaceFor } from "./disk-space.js";
+import type { ArchivioArchiveRenameProgress, ArchivioImportRequest, ArchivioFilterPreviewData, ArchivioPreflightRequest, ArchivioPreflightResult } from "@photo-tools/desktop-contracts";
 
 const app = express();
-app.use(cors());
+app.use(createLocalOnlyGuard());
+app.use(cors(corsOptions));
 app.use("/api/import", express.json({ limit: "16mb" }));
 app.use(express.json({ limit: "1mb" }));
 
@@ -58,6 +68,10 @@ function writeStudioFlowLog(level: "info" | "warn" | "error", event: string, det
   try {
     fs.appendFileSync(LOG_FILE, `${JSON.stringify({ at:new Date().toISOString(), level, event, ...details })}\n`, "utf8");
   } catch { /* logging never blocks the workflow */ }
+}
+
+function logWarning(event: string, details: Record<string, unknown> = {}): void {
+  writeStudioFlowLog("warn", event, details);
 }
 
 app.use((req, res, next) => {
@@ -471,6 +485,32 @@ function computeCardFingerprint(fingerprints: FileFingerprint[]): string {
   return createHash("sha256").update(normalized).digest("hex");
 }
 
+/**
+ * Dipendenze per riconoscere i file gia' archiviati. `certain` aggiunge la conferma sul contenuto completo:
+ * serve quando il risultato decide cosa NON copiare; per l'etichetta in griglia basta l'impronta veloce.
+ */
+function buildDuplicateDeps(certain: boolean): DuplicateCheckDeps {
+  const knownSizes = new Set(
+    studioFlowStore.listVerifiedFingerprintKeys()
+      .map((key) => Number(key.slice(0, key.indexOf(":"))))
+      .filter((size) => Number.isFinite(size)),
+  );
+  const archiveRoot = loadSettings().archiveRoot.trim();
+  let archiveRootNorm = "";
+  try { archiveRootNorm = archiveRoot ? resolveAndValidate(archiveRoot) : ""; } catch { archiveRootNorm = ""; }
+  return {
+    knownSizes,
+    findEvidence: (size, fingerprint) => studioFlowStore.findSafeEvidence(size, fingerprint)
+      .map((evidence) => ({ destinationPath: evidence.destinationPath, sessionId: evidence.sessionId })),
+    fingerprint: computeFastFingerprint,
+    stat: (filePath) => fs.promises.stat(filePath),
+    fullHash: certain ? computeFullHash : undefined,
+    isAllowedDestination: archiveRootNorm
+      ? (destinationPath) => { try { return isSameOrNestedPath(archiveRootNorm, resolveAndValidate(destinationPath)); } catch { return false; } }
+      : undefined,
+  };
+}
+
 /** Safe-to-format verification algorithm (spec §63) */
 async function checkSafeToFormat(
   sdPath: string,
@@ -762,7 +802,7 @@ async function collectFiles(dir: string): Promise<string[]> {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   const result: string[] = [];
   for (const entry of entries) {
-    if (entry.isSymbolicLink()) continue;
+    if (entry.isSymbolicLink() || isTemporaryArtifactName(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       result.push(...(await collectFiles(full)));
@@ -776,7 +816,7 @@ async function collectFiles(dir: string): Promise<string[]> {
 async function* walkFiles(dir: string): AsyncGenerator<string> {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
-    if (entry.isSymbolicLink()) continue;
+    if (entry.isSymbolicLink() || isTemporaryArtifactName(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       yield* walkFiles(full);
@@ -791,7 +831,7 @@ async function collectSampleFiles(dir: string, limit: number, acc: string[] = []
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
     if (acc.length >= limit) break;
-    if (entry.isSymbolicLink()) continue;
+    if (entry.isSymbolicLink() || isTemporaryArtifactName(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       await collectSampleFiles(full, limit, acc);
@@ -832,28 +872,6 @@ async function saveImportManifestAsync(filePath: string, manifest: ImportManifes
   const payload = JSON.stringify(manifest, null, 2);
   await fs.promises.writeFile(tempPath, payload, "utf-8");
   await fs.promises.rename(tempPath, filePath);
-}
-
-function shortStableSuffix(input: string): string {
-  return createHash("sha1").update(input).digest("hex").slice(0, 8);
-}
-
-function buildDestinationFileName(params: {
-  originalName: string;
-  sourceRelativePath: string;
-  rinominaFile: boolean;
-  safeNome: string;
-  safeData: string;
-  safeAutore: string;
-}): string {
-  const { originalName, sourceRelativePath, rinominaFile, safeNome, safeData, safeAutore } = params;
-  const ext = path.extname(originalName);
-  const stem = path.basename(originalName, ext);
-  const suffix = shortStableSuffix(sourceRelativePath);
-  const base = rinominaFile
-    ? `${safeNome}_${safeData}_${safeAutore}_${stem}`
-    : stem;
-  return rinominaFile ? `${base}_${suffix}${ext}` : `${base}${ext}`;
 }
 
 function isCopyableFile(filePath: string): boolean {
@@ -1002,55 +1020,13 @@ async function runWithConcurrency<T>(
   await Promise.all(Array.from({ length: workerCount }, () => runner()));
 }
 
-async function copyFileWithRetry(src: string, dest: string, retries = 2): Promise<void> {
-  let attempt = 0;
-  for (;;) {
-    try {
-      await fs.promises.copyFile(src, dest);
-      return;
-    } catch (error) {
-      if (attempt >= retries) throw error;
-      attempt += 1;
-      await new Promise((resolve) => setTimeout(resolve, 120 * attempt));
-    }
-  }
-}
-
 async function safeCopyFileVerified(
   src: string,
   dest: string,
   sourceSize: number,
   retries = 2
 ): Promise<"copied" | "skipped"> {
-  try {
-    const destStat = await fs.promises.stat(dest);
-    if (destStat.size === sourceSize && await filesHaveSameContent(src, dest)) {
-      return "skipped";
-    }
-  } catch {
-    /* dest does not exist */
-  }
-
-  let attempt = 0;
-  for (;;) {
-    const tmp = `${dest}.part.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-    try {
-      await copyFileWithRetry(src, tmp, 0);
-
-      const tmpStat = await fs.promises.stat(tmp);
-      if (tmpStat.size !== sourceSize) {
-        throw new Error(`Verifica size fallita (${sourceSize} != ${tmpStat.size})`);
-      }
-
-      await replaceFileAtomically(tmp, dest);
-      return "copied";
-    } catch (error) {
-      try { await fs.promises.unlink(tmp); } catch { /* ignore */ }
-      if (attempt >= retries) throw error;
-      attempt += 1;
-      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
-    }
-  }
+  return copyFileVerified(src, dest, sourceSize, { retries, onWarn: logWarning });
 }
 
 export function loadJobs(): Job[] {
@@ -2154,9 +2130,25 @@ function startArchiveFallbackReconciliation(): void {
     const settings = loadSettings();
     void reconcileDiscoveredArchiveJobs(settings)
       .then(() => invalidateJobsListCache())
-      .catch(() => undefined);
+      .catch((error) => logWarning("archive_fallback_reconcile_failed", { error: String(error) }));
   }, ARCHIVE_FALLBACK_RECONCILE_MS);
   archiveReconcileInterval.unref();
+}
+
+const orphanRecoveryScheduled = new Set<string>();
+
+/** Una sola volta per radice e per processo: ripulisce i residui di un crash precedente senza bloccare l'avvio. */
+function scheduleOrphanRecovery(root: string): void {
+  const key = root.toLowerCase();
+  if (orphanRecoveryScheduled.has(key)) return;
+  orphanRecoveryScheduled.add(key);
+  void recoverOrphanTemporaryFiles(root, { onWarn: logWarning })
+    .then((result) => {
+      if (result.removed.length || result.restored.length || result.renameDirectories.length) {
+        writeStudioFlowLog("info", "orphan_recovery", { root, removed: result.removed.length, restored: result.restored.length, renameDirectories: result.renameDirectories });
+      }
+    })
+    .catch((error) => logWarning("orphan_recovery_failed", { root, error: String(error) }));
 }
 
 export function configureArchiveWatcher(settings = loadSettings()): void {
@@ -2167,6 +2159,7 @@ export function configureArchiveWatcher(settings = loadSettings()): void {
   const root = settings.archiveRoot.trim();
   if (!root || !fs.existsSync(root)) return;
   const normalizedRoot = path.resolve(root);
+  scheduleOrphanRecovery(normalizedRoot);
   const archiveId = archiveIdForRoot(normalizedRoot);
   const cached = studioFlowStore.getArchiveStatus(archiveId);
   const scanForCurrentArchiveIsRunning = Boolean(
@@ -2382,47 +2375,14 @@ async function renameDirectoryPreservingCaseSupport(sourcePath: string, targetPa
   try {
     await fs.promises.rename(temporaryPath, targetPath);
   } catch (error) {
-    await fs.promises.rename(temporaryPath, sourcePath).catch(() => undefined);
+    try {
+      await fs.promises.rename(temporaryPath, sourcePath);
+    } catch (rollbackError) {
+      logWarning("rename_directory_rollback_failed", { sourcePath, temporaryPath, error: String(rollbackError) });
+      throw new Error(`${error instanceof Error ? error.message : String(error)}. La cartella è rimasta come "${temporaryPath}" e non è stata ripristinata.`);
+    }
     throw error;
   }
-}
-
-async function hashFile(filePath: string): Promise<string> {
-  const hash = createHash("sha256");
-  const stream = fs.createReadStream(filePath);
-  for await (const chunk of stream) {
-    hash.update(chunk as Buffer);
-  }
-  return hash.digest("hex");
-}
-
-async function filesHaveSameContent(firstPath: string, secondPath: string): Promise<boolean> {
-  const [firstHash, secondHash] = await Promise.all([hashFile(firstPath), hashFile(secondPath)]);
-  return firstHash === secondHash;
-}
-
-async function replaceFileAtomically(temporaryPath: string, destinationPath: string): Promise<void> {
-  let destinationExists = false;
-  try {
-    destinationExists = (await fs.promises.stat(destinationPath)).isFile();
-  } catch {
-    destinationExists = false;
-  }
-
-  if (!destinationExists) {
-    await fs.promises.rename(temporaryPath, destinationPath);
-    return;
-  }
-
-  const backupPath = `${destinationPath}.backup.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
-  await fs.promises.rename(destinationPath, backupPath);
-  try {
-    await fs.promises.rename(temporaryPath, destinationPath);
-  } catch (error) {
-    await fs.promises.rename(backupPath, destinationPath).catch(() => undefined);
-    throw error;
-  }
-  await fs.promises.unlink(backupPath).catch(() => undefined);
 }
 
 async function isUsableJpeg(filePath: string): Promise<boolean> {
@@ -2438,17 +2398,36 @@ async function isUsableJpeg(filePath: string): Promise<boolean> {
 
 async function writeLowQualityJpeg(sourcePath: string, destinationPath: string): Promise<void> {
   await fs.promises.mkdir(path.dirname(destinationPath), { recursive: true });
-  const temporaryPath = `${destinationPath}.part.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  const temporaryPath = createTemporaryPath(destinationPath, "part");
   try {
     await sharp(sourcePath)
       .resize({ width: 1920, withoutEnlargement: true })
       .jpeg({ quality: 70 })
       .toFile(temporaryPath);
-    await replaceFileAtomically(temporaryPath, destinationPath);
+    await replaceFileAtomically(temporaryPath, destinationPath, logWarning);
   } catch (error) {
-    await fs.promises.unlink(temporaryPath).catch(() => undefined);
+    await fs.promises.unlink(temporaryPath).catch((cleanupError) => logWarning("low_quality_temp_cleanup_failed", { temporaryPath, error: String(cleanupError) }));
     throw error;
   }
+}
+
+async function rollbackRenames(operations: Array<{ source: string; target: string }>): Promise<string[]> {
+  const failures: string[] = [];
+  for (const operation of operations) {
+    try {
+      await renameDirectoryPreservingCaseSupport(operation.target, operation.source);
+    } catch (error) {
+      failures.push(operation.target);
+      logWarning("rename_rollback_failed", { source: operation.source, target: operation.target, error: String(error) });
+    }
+  }
+  return failures;
+}
+
+function withRollbackFailures(error: unknown, failures: string[]): unknown {
+  if (failures.length === 0) return error;
+  const message = error instanceof Error ? error.message : String(error);
+  return new Error(`${message}. Ripristino non riuscito per: ${failures.join(", ")}`);
 }
 
 export async function renameAnalyzedArchiveJobs(
@@ -2565,10 +2544,8 @@ export async function renameAnalyzedArchiveJobs(
           renamedCount: completed.length,
         };
       } catch (error) {
-        for (const renamedOperation of completed.reverse()) {
-          await renameDirectoryPreservingCaseSupport(renamedOperation.target, renamedOperation.source).catch(() => undefined);
-        }
-        throw error;
+        const rollbackFailures = await rollbackRenames([...completed].reverse());
+        throw withRollbackFailures(error, rollbackFailures);
       }
     }
 
@@ -2615,10 +2592,8 @@ export async function renameAnalyzedArchiveJobs(
     try {
       saveJobs(updatedJobs);
     } catch (error) {
-      for (const renamedOperation of [...operations].reverse()) {
-        await renameDirectoryPreservingCaseSupport(renamedOperation.target, renamedOperation.source).catch(() => undefined);
-      }
-      throw error;
+      const rollbackFailures = await rollbackRenames([...operations].reverse());
+      throw withRollbackFailures(error, rollbackFailures);
     }
     invalidateJobsListCache();
     const result: ArchiveRenameResult = {
@@ -2735,7 +2710,7 @@ export function saveSettings(s: Settings): void {
     if (nextRoot && fs.existsSync(nextRoot)) {
       const archiveId = archiveIdForRoot(path.resolve(nextRoot));
       if (!studioFlowStore.getArchiveStatus(archiveId).lastFullScanAt) {
-        void rebuildArchiveIndex(s).catch(() => undefined);
+        void rebuildArchiveIndex(s).catch((error) => logWarning("archive_index_rebuild_failed", { error: String(error) }));
       }
     }
   }
@@ -2964,7 +2939,7 @@ export async function cancelImportService(): Promise<{ ok: boolean; active: bool
  * POST /api/browse-folder
  * Opens a native Windows folder browser dialog and returns the selected path.
  */
-const browseFolderHandler = (req: Request, res: Response) => {
+const browseFolderHandler = async (req: Request, res: Response) => {
   const scriptPath = path.join(os.tmpdir(), `archivio-browse-${Date.now()}.ps1`);
   const script = [
     "Add-Type -AssemblyName System.Windows.Forms",
@@ -2975,16 +2950,17 @@ const browseFolderHandler = (req: Request, res: Response) => {
   ].join("\n");
 
   try {
-    fs.writeFileSync(scriptPath, script, "utf-8");
-    const output = execSync(
-      `powershell -NoProfile -ExecutionPolicy Bypass -File "${scriptPath}"`,
-      { encoding: "utf-8", timeout: 120000 }
-    ).trim();
-    try { fs.unlinkSync(scriptPath); } catch { /* ignore */ }
-    res.json({ path: output || null });
+    await fs.promises.writeFile(scriptPath, script, "utf-8");
+    const { stdout } = await execFileAsync(
+      "powershell",
+      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+      { encoding: "utf-8", timeout: 120000 },
+    );
+    res.json({ path: stdout.trim() || null });
   } catch {
-    try { fs.unlinkSync(scriptPath); } catch { /* ignore */ }
     res.status(500).json({ error: "Impossibile aprire il selettore cartelle" });
+  } finally {
+    await fs.promises.unlink(scriptPath).catch(() => undefined);
   }
 };
 app.post("/api/browse-folder", browseFolderHandler);
@@ -3095,7 +3071,7 @@ app.post("/api/settings", saveSettingsHandler);
  * Lists removable drives on Windows via PowerShell + WMI.
  * Returns empty array if none found or command unavailable.
  */
-const getSdCardsHandler = (_req: Request, res: Response) => {
+const getSdCardsHandler = async (_req: Request, res: Response) => {
   const scriptPath = path.join(os.tmpdir(), `archivio-sd-cards-${Date.now()}.ps1`);
   try {
     const script = [
@@ -3105,11 +3081,12 @@ const getSdCardsHandler = (_req: Request, res: Response) => {
       "}",
     ].join("\n");
 
-    fs.writeFileSync(scriptPath, script, "utf-8");
-    const raw = execSync(`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${scriptPath}"`, {
-      encoding: "utf-8",
-      timeout: 7000,
-    });
+    await fs.promises.writeFile(scriptPath, script, "utf-8");
+    const { stdout: raw } = await execFileAsync(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath],
+      { encoding: "utf-8", timeout: 7000 },
+    );
 
     const sdCards: SdCard[] = raw
       .split(/\r?\n/)
@@ -3133,10 +3110,40 @@ const getSdCardsHandler = (_req: Request, res: Response) => {
   } catch {
     res.json({ sdCards: [] });
   } finally {
-    try { fs.unlinkSync(scriptPath); } catch { /* ignore */ }
+    await fs.promises.unlink(scriptPath).catch(() => undefined);
   }
 };
 app.get("/api/sd-cards", getSdCardsHandler);
+
+/**
+ * POST /api/preflight
+ * Controlli prima di importare: quali foto della scheda sono gia' in archivio e quanto spazio libero c'e'
+ * sul disco di destinazione. Solo lettura: non copia e non modifica nulla.
+ */
+const preflightHandler = async (req: Request, res: Response) => {
+  const { sdPath, filePaths, destinationPath } = (req.body ?? {}) as Partial<ArchivioPreflightRequest>;
+  if (!sdPath || typeof sdPath !== "string") return void res.status(400).json({ error: "sdPath mancante" });
+  let sdNorm: string;
+  try {
+    sdNorm = resolveAndValidate(sdPath);
+  } catch (error) {
+    return void res.status(400).json({ error: String(error) });
+  }
+  if (filePaths !== undefined && (!Array.isArray(filePaths) || filePaths.length > 5000 || filePaths.some((value) => typeof value !== "string"))) {
+    return void res.status(400).json({ error: "Elenco file non valido (massimo 5000 per richiesta)" });
+  }
+
+  const inside = (filePaths ?? []).map((value) => path.resolve(value)).filter((candidate) => isSameOrNestedPath(sdNorm, candidate));
+  const matches = inside.length > 0 ? await findArchivedFiles(inside, buildDuplicateDeps(false), { concurrency: 4 }) : [];
+  const jobs = loadJobs();
+  const result: ArchivioPreflightResult = {
+    checkedFiles: inside.length,
+    archived: matches.map((match) => ({ filePath: match.filePath, jobName: jobNameForPath(match.destinationPath, jobs), destinationPath: match.destinationPath })),
+    freeBytes: destinationPath ? ((await freeSpaceFor(destinationPath))?.freeBytes ?? null) : null,
+  };
+  res.json(result);
+};
+app.post("/api/preflight", preflightHandler);
 
 /**
  * GET /api/sd-preview?path=E:\
@@ -3569,6 +3576,7 @@ const runImportHandler = async (req: Request, res: Response) => {
     mtimeTo,
     categoryKey,
     destinationOverride,
+    skipArchived,
   } = req.body as ImportRequest;
   const requestedExistingJobId = typeof existingJobId === "string" ? existingJobId.trim() : "";
   const settings = loadSettings();
@@ -3634,6 +3642,8 @@ const runImportHandler = async (req: Request, res: Response) => {
         const key = process.platform === "win32" ? candidate.toLowerCase() : candidate;
         if (!seen.has(key)) { seen.add(key); selectedSourcePaths.push(candidate); }
       }
+      // I file .xmp (e simili) non si scelgono nella griglia: seguono la loro foto.
+      selectedSourcePaths = await expandWithSidecars(selectedSourcePaths);
     } catch (error) {
       return void res.status(400).json({ error: `Selezione non più valida: ${String(error)}. Torna alla scheda e seleziona di nuovo i file.` });
     }
@@ -3977,7 +3987,37 @@ const runImportHandler = async (req: Request, res: Response) => {
       totalPlannedBytes += sourceSize;
     }
 
-    plannedFiles = plannedSources.length;
+    let archivedSkipped = 0;
+    if (skipArchived === true && plannedSources.length > 0) {
+      // Foto gia' presenti in archivio (anche in un altro lavoro): conferma sul contenuto completo prima di saltarle.
+      const matches = await findArchivedFiles(plannedSources.map((source) => source.srcFile), buildDuplicateDeps(true), {
+        concurrency: 3,
+        isCancelled: () => importCancelRequested,
+      });
+      if (importCancelRequested) {
+        throw new Error("Importazione annullata");
+      }
+      const archivedByPath = new Map(matches.map((match) => [match.filePath, match]));
+      for (let index = plannedSources.length - 1; index >= 0; index -= 1) {
+        const planned = plannedSources[index]!;
+        const archived = archivedByPath.get(planned.srcFile);
+        if (!archived) continue;
+        plannedSources.splice(index, 1);
+        totalPlannedBytes -= planned.sourceSize;
+        skippedCount += 1;
+        archivedSkipped += 1;
+        studioFlowStore.upsertImportFile({
+          sessionId: importSessionId, sourceRelativePath: planned.sourceRelativePath, sourceSize: planned.sourceSize,
+          sourceMtimeMs: planned.sourceMtimeMs, fastFingerprint: archived.fingerprint, fullHash: null,
+          destinationPath: archived.destinationPath, destinationSize: planned.sourceSize, destinationFingerprint: archived.fingerprint,
+          status: "DUPLICATE_ACCEPTED", errorMessage: null, updatedAt: Date.now(),
+        });
+      }
+      updateImportProgress({ skippedFiles: skippedCount });
+    }
+
+    // I file gia' in archivio restano nel totale (come "saltati"): cosi' copiati + saltati = previsti e l'importazione risulta completa.
+    plannedFiles = plannedSources.length + archivedSkipped;
     plannedVideoFiles = plannedSources.filter((source) => isVideoFile(source.srcFile)).length;
     updateImportProgress({ plannedFiles, scannedFiles, currentFileName: null });
 
@@ -4793,21 +4833,14 @@ const openFolderHandler = (req: Request, res: Response) => {
 
   let normalized: string;
   try {
-    normalized = resolveAndValidate(folderPath);
+    normalized = resolveOpenableFolder(folderPath);
   } catch (e) {
-    return void res.status(400).json({ error: String(e) });
+    const notFound = (e as { code?: string }).code === "ENOENT";
+    return void res.status(notFound ? 404 : 400).json({ error: e instanceof Error ? e.message : String(e) });
   }
 
-  if (!fs.existsSync(normalized)) {
-    return void res.status(404).json({ error: "Cartella non trovata" });
-  }
-
-  try {
-    // explorer.exe returns non-zero exit codes normally; ignore them
-    execSync(`explorer "${normalized}"`);
-  } catch {
-    /* intentionally ignored */
-  }
+  // Nessuna shell: il percorso è un argomento, non testo interpretato. explorer.exe esce spesso con codice 1.
+  execFile("explorer.exe", [normalized], () => undefined);
   res.json({ ok: true });
 };
 app.post("/api/open-folder", openFolderHandler);
@@ -4978,6 +5011,10 @@ export async function resumeImportService(sessionId: string): Promise<Awaited<Re
   return unwrapInvocationResult(await invokeHandler(resumeImportHandler, { params: { id: sessionId } }));
 }
 
+export async function preflightService(input: ArchivioPreflightRequest): Promise<ArchivioPreflightResult> {
+  return unwrapInvocationResult(await invokeHandler(preflightHandler, { body: input }));
+}
+
 export async function checkSafeToFormatService(sdPath: string): Promise<{
   status: "SAFE" | "PARTIAL" | "UNSAFE" | "UNKNOWN";
   totalFiles: number;
@@ -5036,7 +5073,7 @@ const isDirectRun = process.argv[1]
   : false;
 
 if (isDirectRun || process.env.ARCHIVIO_FLOW_HTTP_SERVER === "1") {
-app.listen(PORT, () => {
-  console.log(`\n🗂️  Archivio Flow Server  →  http://localhost:${PORT}\n`);
+app.listen(PORT, "127.0.0.1", () => {
+  console.log(`\n🗂️  Archivio Flow Server  →  http://127.0.0.1:${PORT}\n`);
 });
 }

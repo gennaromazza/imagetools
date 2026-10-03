@@ -9,9 +9,11 @@ import archivioLogo from "./assets/photo_Archivie.png";
 import archivioPackage from "../package.json";
 
 import type { ImportSelection } from "./importSelection";
+import { initialSidebarCollapsed, isGuidedFlow, shouldSwitchToNewCard } from "./wizardModel";
+import { SidebarNav } from "./components/SidebarNav";
 
 type Screen = "sd" | "nuovo" | "archivio" | "drive" | "impostazioni";
-const SIDEBAR_COLLAPSED_KEY = "filex.archivio-flow.sidebar-collapsed";
+const SIDEBAR_COLLAPSED_KEY = "filex.archivio-flow.sidebar-collapsed-v2";
 const ONBOARDING_SEEN_KEY = "filex.archivio-flow.onboarding-seen";
 
 export default function App() {
@@ -21,12 +23,13 @@ export default function App() {
   const [archiveAnalyzing, setArchiveAnalyzing] = useState(false);
   const [existingJobImportId, setExistingJobImportId] = useState<string | null>(null);
   const [detectedSdPath, setDetectedSdPath] = useState<string | null>(null);
+  const [availableCards, setAvailableCards] = useState<SdCard[]>([]);
   const [newJobRevision, setNewJobRevision] = useState(0);
   const [sourceRevision, setSourceRevision] = useState(0);
   const [selectionRevision, setSelectionRevision] = useState(0);
   const [pendingImportSelection, setPendingImportSelection] = useState<ImportSelection | null>(null);
   const [pendingImportDateFilter, setPendingImportDateFilter] = useState<string | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "true");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => initialSidebarCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY)));
   const [backupGuardFeedback, setBackupGuardFeedback] = useState<string | null>(null);
   const [openingBackupGuard, setOpeningBackupGuard] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -114,6 +117,7 @@ export default function App() {
           ? cards[0]
           : cards.find((card) => previousIdentities.get(card.path) !== sdIdentity(card));
         knownSdIdentitiesRef.current = new Map(cards.map((card) => [card.path, sdIdentity(card)]));
+        setAvailableCards((previous) => previous.length === cards.length && previous.every((card, index) => sdIdentity(card) === sdIdentity(cards[index]!)) ? previous : cards);
         if (!detectedCard && detectedSdIdentityRef.current) {
           detectedSdIdentityRef.current = null;
           setDetectedSdPath(null);
@@ -122,7 +126,8 @@ export default function App() {
           setPendingImportSelection(null);
           void showArchivioFlowWindow().catch(() => undefined);
         }
-        if (newCard) {
+        // Una seconda scheda inserita mentre se ne usa gia' una non toglie la scelta: compare nell'elenco delle schede.
+        if (newCard && shouldSwitchToNewCard({ hasActive: detectedSdIdentityRef.current !== null, activePresent: detectedCard !== undefined, hasNewCard: true })) {
           detectedSdIdentityRef.current = sdIdentity(newCard);
           setDetectedSdPath(newCard.path);
           setSourceRevision((value) => value + 1);
@@ -143,6 +148,17 @@ export default function App() {
     };
   }, []);
 
+  function chooseCard(path: string) {
+    const card = availableCards.find((item) => item.path.toLowerCase() === path.toLowerCase());
+    if (!card || importBusyRef.current) return;
+    detectedSdIdentityRef.current = sdIdentity(card);
+    setDetectedSdPath(card.path);
+    setSourceRevision((value) => value + 1);
+    setPendingImportDateFilter(null);
+    setPendingImportSelection(null);
+    setScreen("sd");
+  }
+
   function handleImportDone(result: ImportResult) {
     setJobs((prev) => {
       const idx = prev.findIndex((j) => j.id === result.job.id);
@@ -153,10 +169,7 @@ export default function App() {
       next[idx] = result.job;
       return next;
     });
-    setExistingJobImportId(result.job.id);
-    if (!result.incomplete) {
-      setScreen("archivio");
-    }
+    // Resta sulla schermata finale ("Fatto!"): da li' si sceglie se aprire la cartella, l'archivio o un'altra scheda.
   }
 
   async function handleOpenBackupGuard() {
@@ -177,7 +190,7 @@ export default function App() {
       {/* ── Sidebar ─────────────────────────────────────────────────── */}
       <aside className="sidebar">
         <div className="sidebar__brand-row">
-        <button className="sidebar__brand" onClick={() => setSidebarCollapsed((value) => !value)} aria-label={sidebarCollapsed ? "Espandi barra laterale" : "Riduci barra laterale"}>
+        <button className="sidebar__brand" onClick={() => setSidebarCollapsed((value) => !value)} aria-label={sidebarCollapsed ? "Espandi barra laterale" : "Riduci barra laterale"} title={`Archivio Flow v${archivioPackage.version} · ${sidebarCollapsed ? "Espandi" : "Riduci"} la barra`}>
           <img
             src={archivioLogo}
             alt="Archivio Flow"
@@ -188,63 +201,21 @@ export default function App() {
         <button className="sidebar__help" onClick={openOnboarding} title="Guida e configurazione" aria-label="Apri guida e configurazione">?</button>
         </div>
 
-        <nav className="stack">
-          <button
-            className={screen === "sd" || screen === "nuovo" ? "workflow-step workflow-step--active" : "workflow-step"}
-            onClick={() => setScreen("sd")}
-            title="Nuovo lavoro"
-          >
-            <span aria-hidden="true">＋</span>
-            <strong>Nuovo lavoro</strong>
-            <small>Importa da SD card</small>
-          </button>
+        <SidebarNav
+          screen={screen}
+          inGuidedFlow={isGuidedFlow(screen)}
+          archiveSummary={archiveAnalyzing ? "Controllo nomi in corso…" : (jobs.length > 0 ? `${jobs.length} lavori salvati` : "Nessun lavoro ancora")}
+          backupBusy={openingBackupGuard}
+          onSelect={(id) => {
+            if (id === "import") setScreen("sd");
+            else if (id === "exit") setScreen("sd");
+            else if (id === "archive") setScreen("archivio");
+            else if (id === "drive") setScreen("drive");
+            else if (id === "settings") setScreen("impostazioni");
+            else void handleOpenBackupGuard();
+          }}
+        />
 
-          <button
-            className={screen === "archivio" ? "workflow-step workflow-step--active" : "workflow-step"}
-            onClick={() => setScreen("archivio")}
-            title="Archivio lavori"
-          >
-            <span aria-hidden="true">▦</span>
-            <strong>Archivio lavori</strong>
-            <small>{archiveAnalyzing ? "Controllo nomi in corso…" : (jobs.length > 0 ? `${jobs.length} lavori salvati` : "Nessun lavoro ancora")}</small>
-          </button>
-
-          <button
-            className={screen === "drive" ? "workflow-step workflow-step--active" : "workflow-step"}
-            onClick={() => setScreen("drive")}
-            title="Google Drive"
-          >
-            <span aria-hidden="true">☁</span>
-            <strong>Google Drive</strong>
-            <small>Registro remoto StudioFlow</small>
-          </button>
-
-          <button
-            className="workflow-step"
-            onClick={() => { void handleOpenBackupGuard(); }}
-            title="Apri Backup Guard"
-            disabled={openingBackupGuard}
-          >
-            <span aria-hidden="true">⧉</span>
-            <strong>{openingBackupGuard ? "Apro Backup Guard…" : "Backup Guard"}</strong>
-            <small>Seconda copia di sicurezza</small>
-          </button>
-
-          <button
-            className={screen === "impostazioni" ? "workflow-step workflow-step--active" : "workflow-step"}
-            onClick={() => setScreen("impostazioni")}
-            title="Impostazioni"
-          >
-            <span aria-hidden="true">⚙</span>
-            <strong>Impostazioni</strong>
-            <small>Radice archivio e preset rapidi</small>
-          </button>
-        </nav>
-
-        <div className="tool-pill" style={{ marginTop: "auto" }}>
-          <span>Archivio Flow</span>
-          <strong>v{archivioPackage.version}</strong>
-        </div>
       </aside>
 
       {/* ── Main workspace ──────────────────────────────────────────── */}
@@ -271,6 +242,9 @@ export default function App() {
             sdPath={detectedSdPath}
             sourceIdentity={detectedSdIdentityRef.current ?? undefined}
             jobs={jobs}
+            onResumed={handleImportDone}
+            cards={availableCards}
+            onChooseCard={chooseCard}
             onStartImport={(selection, jobId) => {
               setPendingImportSelection({ ...selection, existingJobId: jobId });
               if (jobId !== undefined) setExistingJobImportId(jobId);
@@ -295,6 +269,7 @@ export default function App() {
             initialDateFilter={pendingImportDateFilter}
             initialSelection={pendingImportSelection}
             onEditSelection={() => setScreen("sd")}
+            onOpenArchive={() => setScreen("archivio")}
           />
         </div>
         <div style={{ display: screen === "archivio" ? "block" : "none" }} aria-hidden={screen !== "archivio"}>

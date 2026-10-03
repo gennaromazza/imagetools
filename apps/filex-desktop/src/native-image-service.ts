@@ -17,7 +17,15 @@ import type {
   DesktopThumbnailRequestOptions,
 } from "@photo-tools/desktop-contracts";
 import { ExifTool } from "exiftool-vendored";
-import { extractEmbeddedJpeg, locateEmbeddedJpegRange, locateJpegExifThumbnailRange } from "./raw-jpeg-extractor.js";
+import {
+  extractEmbeddedJpeg,
+  locateEmbeddedJpegRange,
+  locateJpegExifThumbnailRange,
+  locateJpegExifThumbnailWithOrientation,
+  locateTiffRootThumbnail,
+  readJpegExifOrientation,
+} from "./raw-jpeg-extractor.js";
+import { applyExifOrientation } from "./exif-orientation.js";
 import { isPsdPath, renderPsdCompositeToJpeg } from "./psd-image-service.js";
 
 const { app, nativeImage } = electron;
@@ -1113,6 +1121,111 @@ async function tryReadEmbeddedPreviewBuffer(
   return previewBuffer.byteLength >= MIN_EMBEDDED_JPEG_BYTES ? previewBuffer : null;
 }
 
+/**
+ * Fast-path RAW: invece dei 3-4 MB dell'anteprima incorporata legge soltanto i primi 64 KB
+ * del suo JPEG e ne estrae la miniatura EXIF (IFD1, tipicamente 160x120, ~10 KB).
+ * Usata solo quando il chiamante dichiara di accettare un'anteprima piccola
+ * (minimumEmbeddedShortSide esplicito e basso): su una SD questo evita quasi tutta la lettura.
+ *
+ * Due strade: i RAW basati su TIFF (ARW, CR2, NEF, DNG) hanno la miniatura (~10 KB) nelle directory iniziali del file,
+ * letta con 128 KB; i Fujifilm RAF la hanno nell'Exif del JPEG incorporato. Restituisce anche l'orientamento EXIF,
+ * perche' la miniatura e' salvata per traverso.
+ */
+const RAW_TIFF_THUMBNAIL_HEADER_BYTES = 128 * 1024;
+
+/** Raddrizza una miniatura estratta dal file: dall'EXIF arriva sempre "per traverso" per le foto verticali. */
+async function orientThumbnail(buffer: Buffer, orientation: number): Promise<Buffer> {
+  if (orientation <= 1) {
+    return buffer;
+  }
+  const sharpMod = await getSharp();
+  if (!sharpMod) {
+    return buffer;
+  }
+  try {
+    return await applyExifOrientation(sharpMod as never, buffer, orientation);
+  } catch {
+    return buffer;
+  }
+}
+
+async function readFileJpegOrientation(handle: FileHandle, fileSize: number): Promise<number> {
+  const header = await readFileSlice(handle, 0, Math.min(fileSize, JPEG_EXIF_HEADER_READ_BYTES));
+  recordDesktopBytesRead("standard", header.byteLength);
+  return readJpegExifOrientation(toArrayBufferView(header));
+}
+
+async function tryReadRawExifThumbnail(
+  handle: FileHandle,
+  fileSize: number,
+  sourceCacheKey: string | undefined,
+  minimumEmbeddedShortSide: number,
+): Promise<{ buffer: Buffer; orientation: number } | null> {
+  const tiffHeadLength = Math.min(fileSize, RAW_TIFF_THUMBNAIL_HEADER_BYTES);
+  if (tiffHeadLength >= 12) {
+    const head = await readFileSlice(handle, 0, tiffHeadLength);
+    recordDesktopBytesRead("raw", head.byteLength);
+    const location = locateTiffRootThumbnail(toArrayBufferView(head));
+    if (location) {
+      const candidate = Buffer.from(head.buffer, head.byteOffset + location.offset, location.length);
+      const dimensions = readJpegDimensionsOrDecode(candidate);
+      if (dimensions && Math.min(dimensions.width, dimensions.height) >= minimumEmbeddedShortSide) {
+        return { buffer: candidate, orientation: location.orientation };
+      }
+    }
+  }
+
+  await ensureRawEmbeddedRangeCacheLoaded();
+
+  let range = getCachedRawEmbeddedRange(sourceCacheKey);
+  if (!range) {
+    const headerLength = Math.min(fileSize, RAW_HEADER_READ_BYTES);
+    if (headerLength < 12) {
+      return null;
+    }
+    const headerBuffer = await readFileSlice(handle, 0, headerLength);
+    recordDesktopBytesRead("raw", headerBuffer.byteLength);
+    const candidate = locateEmbeddedJpegRange(toArrayBufferView(headerBuffer));
+    if (!candidate) {
+      return null;
+    }
+    range = { offset: candidate.offset, length: candidate.length };
+    if (
+      range.offset >= 0
+      && range.length >= MIN_EMBEDDED_JPEG_BYTES
+      && range.length <= RAW_FAST_PREVIEW_MAX_BYTES
+      && range.offset + range.length <= fileSize
+    ) {
+      setCachedRawEmbeddedRange(sourceCacheKey, range);
+    }
+  }
+
+  if (
+    range.offset < 0
+    || range.length < MIN_EMBEDDED_JPEG_BYTES
+    || range.length > RAW_FAST_PREVIEW_MAX_BYTES
+    || range.offset + range.length > fileSize
+  ) {
+    return null;
+  }
+
+  const probe = await readFileSlice(handle, range.offset, Math.min(range.length, JPEG_EXIF_HEADER_READ_BYTES));
+  recordDesktopBytesRead("raw", probe.byteLength);
+  const thumbnailRange = locateJpegExifThumbnailWithOrientation(toArrayBufferView(probe));
+  if (!thumbnailRange || thumbnailRange.offset + thumbnailRange.length > probe.byteLength) {
+    return null;
+  }
+
+  const thumbnail = Buffer.from(probe.buffer, probe.byteOffset + thumbnailRange.offset, thumbnailRange.length);
+  if (thumbnail[0] !== 0xff || thumbnail[1] !== 0xd8) {
+    return null;
+  }
+  const dimensions = readJpegDimensionsOrDecode(thumbnail);
+  return dimensions && Math.min(dimensions.width, dimensions.height) >= minimumEmbeddedShortSide
+    ? { buffer: thumbnail, orientation: thumbnailRange.orientation }
+    : null;
+}
+
 async function resolvePreviewSourceFromBuffer(
   buffer: Buffer,
   mimeType: string,
@@ -2008,6 +2121,79 @@ function resolveMinimumEmbeddedShortSide(
   return Math.max(1, Math.round(maxDimension));
 }
 
+/** Oltre questa soglia una miniatura EXIF (160-320 px) non basta: si legge l'anteprima completa. */
+const RAW_EXIF_THUMBNAIL_MAX_SHORT_SIDE = 240;
+
+async function renderRawExifThumbnail(
+  absolutePath: string,
+  maxDimension: number,
+  quality: number,
+  sourceFileKey: string | undefined,
+  minimumEmbeddedShortSide: number,
+  dedupeKey: string,
+  options?: DesktopThumbnailRequestOptions,
+): Promise<DesktopRenderedImage | null> {
+  let handle: FileHandle | null = null;
+  try {
+    handle = await open(absolutePath, "r");
+    const stats = await handle.stat();
+    const found = await tryReadRawExifThumbnail(
+      handle,
+      stats.size,
+      getPreviewSourceCacheKey(absolutePath, sourceFileKey),
+      minimumEmbeddedShortSide,
+    );
+    if (!found) {
+      return null;
+    }
+    const thumbnail = await orientThumbnail(found.buffer, found.orientation);
+    const orientedSource = await resolveEmbeddedPreviewSourceFromBufferWithBudget(
+      thumbnail,
+      getMimeTypeForBuffer(thumbnail),
+      false,
+    );
+    const dimensions = orientedSource
+      ? { width: orientedSource.width, height: orientedSource.height }
+      : readJpegDimensionsOrDecode(thumbnail);
+    let rendered: DesktopRenderedImage | null = null;
+    if (
+      options?.allowDirectEmbeddedJpeg
+      && orientedSource
+      && dimensions
+      && Math.max(dimensions.width, dimensions.height) <= maxDimension
+    ) {
+      rendered = {
+        bytes: toOwnedUint8Array(orientedSource.buffer),
+        mimeType: orientedSource.mimeType,
+        width: dimensions.width,
+        height: dimensions.height,
+      };
+    } else {
+      const source: ResolvedPreviewSourceResult = {
+        source: orientedSource ?? {
+          buffer: thumbnail,
+          mimeType: getMimeTypeForBuffer(thumbnail),
+          width: dimensions?.width ?? 0,
+          height: dimensions?.height ?? 0,
+        },
+        origin: "embedded-preview",
+        cacheHit: false,
+      };
+      rendered = await runDecodeTask(false, () => renderThumbnailFromResolvedSource(source, maxDimension, quality));
+    }
+    if (!rendered) {
+      return null;
+    }
+    const cachedRendered = cacheThumbnailInMemory(dedupeKey, rendered);
+    void storeThumbnailInDiskCache(absolutePath, sourceFileKey, maxDimension, quality, cachedRendered);
+    return cachedRendered;
+  } catch {
+    return null; // best effort: si prosegue con l'anteprima completa
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
 async function computeDesktopThumbnail(
   absolutePath: string,
   maxDimension: number,
@@ -2066,12 +2252,16 @@ async function computeDesktopThumbnail(
       handle = await open(absolutePath, "r");
       const stats = await handle.stat();
       const sourceCacheKey = getPreviewSourceCacheKey(absolutePath, sourceFileKey);
-      const exifThumbnailBuffer = await tryReadJpegExifThumbnail(
+      const rawExifThumbnail = await tryReadJpegExifThumbnail(
         handle,
         stats.size,
         sourceCacheKey,
         minimumEmbeddedShortSide,
       );
+      // Le foto verticali hanno la miniatura EXIF salvata in orizzontale: si raddrizza con l'orientamento del file.
+      const exifThumbnailBuffer = rawExifThumbnail
+        ? await orientThumbnail(rawExifThumbnail, await readFileJpegOrientation(handle, stats.size))
+        : null;
       if (exifThumbnailBuffer) {
         // Read metadata first so thumbnails already in the correct orientation
         // stay on the zero-copy fast path; only rotated EXIF previews are decoded.
@@ -2152,6 +2342,16 @@ async function computeDesktopThumbnail(
     }
 
     return null; // unreachable but satisfies TypeScript
+  }
+
+  if (
+    typeof options?.minimumEmbeddedShortSide === "number"
+    && minimumEmbeddedShortSide <= RAW_EXIF_THUMBNAIL_MAX_SHORT_SIDE
+  ) {
+    const rendered = await renderRawExifThumbnail(absolutePath, maxDimension, quality, sourceFileKey, minimumEmbeddedShortSide, dedupeKey, options);
+    if (rendered) {
+      return rendered;
+    }
   }
 
   let source = await resolvePreviewBuffer(absolutePath, {

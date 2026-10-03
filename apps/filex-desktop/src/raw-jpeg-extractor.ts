@@ -124,9 +124,9 @@ export function locateJpegExifThumbnailRange(buffer: ArrayBuffer): EmbeddedJpegR
 
         // Pass a subarray that looks like its own TIFF file from offset 0
         const tiffSlice = data.subarray(tiffAbsoluteOffset, tiffBoundedEnd);
-        const range = tryTiffLocate(tiffSlice);
+        const range = tryTiffLocate(tiffSlice, MIN_EXIF_THUMBNAIL_BYTES);
 
-        if (!range || range.offset < 0 || range.length < 1000) {
+        if (!range || range.offset < 0 || range.length < MIN_EXIF_THUMBNAIL_BYTES) {
           return null; // No IFD1 thumbnail or too small to be useful
         }
 
@@ -332,17 +332,23 @@ function extractJpegSliceAtOffset(
 
 // ── TIFF-based extraction ──────────────────────────────────────────────
 
+/** Sotto questa soglia un JPEG e' una miniatura, non l'anteprima di un RAW. */
+const MIN_PREVIEW_JPEG_BYTES = 10_001;
+/** Le miniature EXIF IFD1 (es. Fujifilm 160x120) pesano anche solo 9 KB. */
+const MIN_EXIF_THUMBNAIL_BYTES = 1_000;
+
 function pushCandidateRange(
   candidates: EmbeddedJpegRange[],
   offset: number,
   length: number,
+  minLength: number = MIN_PREVIEW_JPEG_BYTES,
 ): void {
-  if (offset > 0 && length > 10_000) {
+  if (offset > 0 && length >= minLength) {
     candidates.push({ offset, length });
   }
 }
 
-function tryTiffLocate(data: Uint8Array): EmbeddedJpegRange | null {
+function tryTiffLocate(data: Uint8Array, minLength: number = MIN_PREVIEW_JPEG_BYTES): EmbeddedJpegRange | null {
   const b0 = data[0];
   const b1 = data[1];
   let le: boolean;
@@ -374,8 +380,8 @@ function tryTiffLocate(data: Uint8Array): EmbeddedJpegRange | null {
     ifdCount++;
     const result = parseIfd(data, new ArrayBuffer(0), ifdOffset, le);
 
-    pushCandidateRange(candidates, result.jpegOffset, result.jpegLength);
-    pushCandidateRange(candidates, result.stripOffset, result.stripLength);
+    pushCandidateRange(candidates, result.jpegOffset, result.jpegLength, minLength);
+    pushCandidateRange(candidates, result.stripOffset, result.stripLength, minLength);
 
     for (const subOffset of result.subIfdOffsets) {
       if (subOffset <= 0 || subOffset >= data.length - 2) {
@@ -383,8 +389,8 @@ function tryTiffLocate(data: Uint8Array): EmbeddedJpegRange | null {
       }
 
       const sub = parseIfd(data, new ArrayBuffer(0), subOffset, le);
-      pushCandidateRange(candidates, sub.jpegOffset, sub.jpegLength);
-      pushCandidateRange(candidates, sub.stripOffset, sub.stripLength);
+      pushCandidateRange(candidates, sub.jpegOffset, sub.jpegLength, minLength);
+      pushCandidateRange(candidates, sub.stripOffset, sub.stripLength, minLength);
     }
 
     ifdOffset = result.nextIfdOffset;
@@ -514,6 +520,8 @@ interface IfdResult {
   stripLength: number;
   subIfdOffsets: number[];
   nextIfdOffset: number;
+  /** Orientamento EXIF 1-8 (1 se assente). */
+  orientation: number;
 }
 
 function parseIfd(
@@ -529,6 +537,7 @@ function parseIfd(
     stripLength: 0,
     subIfdOffsets: [],
     nextIfdOffset: 0,
+    orientation: 1,
   };
 
   if (offset + 2 > data.length) return result;
@@ -557,6 +566,11 @@ function parseIfd(
       case TAG_STRIP_BYTE_COUNTS:
         result.stripLength = readValueU32(data, valueOffset, type, count, le);
         break;
+      case TAG_ORIENTATION: {
+        const value = readValueU32(data, valueOffset, type, count, le);
+        if (value >= 1 && value <= 8) result.orientation = value;
+        break;
+      }
       case TAG_SUB_IFD: {
         // SubIFD can contain multiple offsets
         if (count === 1) {
@@ -944,4 +958,121 @@ function isDecodableJpeg(data: Uint8Array, offset: number, length: number): bool
     i += segLen;
   }
   return false;
+}
+
+// ── Miniature con orientazione ──────────────────────────────────────────────
+
+const TAG_ORIENTATION = 0x0112;
+/** Oltre questa dimensione un JPEG incorporato e' un'anteprima, non una miniatura. */
+const MAX_THUMBNAIL_BYTES = 100_000;
+
+export interface ThumbnailLocation {
+  /** Posizione della miniatura nel buffer passato (per i JPEG con Exif: assoluta nel file passato). */
+  offset: number;
+  length: number;
+  /** Orientamento EXIF (1-8) da applicare: la miniatura e' quasi sempre salvata "per traverso". */
+  orientation: number;
+}
+
+function readTiffHeader(data: Uint8Array): { le: boolean; firstIfd: number } | null {
+  if (data.length < 8) return null;
+  let le: boolean;
+  if (data[0] === 0x49 && data[1] === 0x49) le = true;
+  else if (data[0] === 0x4d && data[1] === 0x4d) le = false;
+  else return null;
+  const magic = readU16(data, 2, le);
+  if (magic !== 42 && magic !== 0x4f52 && magic !== 0x5352) return null;
+  const firstIfd = readU32(data, 4, le);
+  return firstIfd > 0 && firstIfd < data.length - 2 ? { le, firstIfd } : null;
+}
+
+/** Posizione dei dati TIFF dentro l'APP1 Exif di un JPEG (stessa scansione di locateJpegExifThumbnailRange). */
+function findExifTiff(data: Uint8Array): Uint8Array | null {
+  if (data.length < 4 || data[0] !== JPEG_SOI_0 || data[1] !== JPEG_SOI_1) return null;
+  let pos = 2;
+  while (pos < data.length - 4) {
+    if (data[pos] !== 0xff) break;
+    const marker = data[pos + 1];
+    if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) { pos += 2; continue; }
+    if (pos + 3 >= data.length) break;
+    const segLen = (data[pos + 2] << 8) | data[pos + 3];
+    if (segLen < 2) break;
+    if (marker === 0xe1 && segLen >= 8
+      && data[pos + 4] === 0x45 && data[pos + 5] === 0x78 && data[pos + 6] === 0x69 && data[pos + 7] === 0x66
+      && data[pos + 8] === 0 && data[pos + 9] === 0) {
+      const start = pos + 10;
+      const end = Math.min(pos + 2 + segLen, data.length);
+      return start < end ? data.subarray(start, end) : null;
+    }
+    if (marker === 0xda) break;
+    pos += 2 + segLen;
+  }
+  return null;
+}
+
+function tiffBase(data: Uint8Array, tiff: Uint8Array): number {
+  return tiff.byteOffset - data.byteOffset;
+}
+
+/**
+ * Orientamento EXIF (1-8) dell'immagine principale di un JPEG, letto dai suoi primi 64 KB.
+ * 1 se manca: e' il valore da assumere quando il file non dice nulla.
+ */
+export function readJpegExifOrientation(buffer: ArrayBuffer): number {
+  const data = new Uint8Array(buffer);
+  const tiff = findExifTiff(data);
+  const header = tiff ? readTiffHeader(tiff) : null;
+  if (!tiff || !header) return 1;
+  return parseIfd(tiff, new ArrayBuffer(0), header.firstIfd, header.le).orientation;
+}
+
+/**
+ * Come locateJpegExifThumbnailRange, ma restituisce anche l'orientamento: le miniature EXIF di una foto
+ * verticale sono salvate in orizzontale (160x120) e senza l'orientamento resterebbero girate di lato.
+ */
+export function locateJpegExifThumbnailWithOrientation(buffer: ArrayBuffer): ThumbnailLocation | null {
+  const data = new Uint8Array(buffer);
+  const tiff = findExifTiff(data);
+  const header = tiff ? readTiffHeader(tiff) : null;
+  if (!tiff || !header) return null;
+  const ifd0 = parseIfd(tiff, new ArrayBuffer(0), header.firstIfd, header.le);
+  if (!ifd0.nextIfdOffset || ifd0.nextIfdOffset >= tiff.length - 2) return null;
+  const ifd1 = parseIfd(tiff, new ArrayBuffer(0), ifd0.nextIfdOffset, header.le);
+  if (ifd1.jpegOffset <= 0 || ifd1.jpegLength < MIN_EXIF_THUMBNAIL_BYTES) return null;
+  return {
+    offset: tiffBase(data, tiff) + ifd1.jpegOffset,
+    length: ifd1.jpegLength,
+    orientation: ifd0.orientation !== 1 ? ifd0.orientation : ifd1.orientation,
+  };
+}
+
+/**
+ * Miniatura dei RAW basati su TIFF (ARW, CR2, NEF, DNG...): sta nella catena delle directory iniziali del file,
+ * a pochi KB dall'inizio, ed e' lunga ~10 KB invece dei 400 KB-4 MB dell'anteprima. Il buffer deve partire dall'inizio del file.
+ */
+export function locateTiffRootThumbnail(buffer: ArrayBuffer): ThumbnailLocation | null {
+  const data = new Uint8Array(buffer);
+  const header = readTiffHeader(data);
+  if (!header) return null;
+  let best: { offset: number; length: number } | null = null;
+  let orientation = 1;
+  const consider = (offset: number, length: number) => {
+    if (offset <= 0 || length < MIN_EXIF_THUMBNAIL_BYTES || length > MAX_THUMBNAIL_BYTES || offset + length > data.length) return;
+    if (data[offset] !== 0xff || data[offset + 1] !== 0xd8) return;
+    if (!best || length > best.length) best = { offset, length };
+  };
+  let ifdOffset = header.firstIfd;
+  for (let count = 0; count < 10 && ifdOffset > 0 && ifdOffset < data.length - 2; count++) {
+    const ifd = parseIfd(data, new ArrayBuffer(0), ifdOffset, header.le);
+    if (count === 0) orientation = ifd.orientation;
+    consider(ifd.jpegOffset, ifd.jpegLength);
+    for (const sub of ifd.subIfdOffsets) {
+      if (sub > 0 && sub < data.length - 2) {
+        const subIfd = parseIfd(data, new ArrayBuffer(0), sub, header.le);
+        consider(subIfd.jpegOffset, subIfd.jpegLength);
+      }
+    }
+    ifdOffset = ifd.nextIfdOffset;
+  }
+  return best ? { ...(best as { offset: number; length: number }), orientation } : null;
 }
