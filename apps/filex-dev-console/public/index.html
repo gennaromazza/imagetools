@@ -184,7 +184,8 @@
       <h1>FileX Dev Console</h1>
       <div class="sub">Dashboard locale — avvio e verifica Electron dei tool FileX</div>
     </div>
-    <button id="shutdownConsole" class="danger" style="margin-left: auto;">Ferma tool e chiudi console</button>
+    <button id="restartConsole" class="secondary" style="margin-left: auto;">Riavvia console</button>
+    <button id="shutdownConsole" class="danger">Ferma tool e chiudi console</button>
   </header>
 
   <nav class="tabbar" aria-label="Sezioni Dev Console" role="tablist">
@@ -414,7 +415,7 @@
             <button class="secondary" data-action="stop" data-id="${tool.id}" ${tool.canStop && !operation?.busy ? "" : "disabled"}>${operation?.action === 'stop' ? 'Arresto…' : 'Ferma'}</button>
             <button class="secondary" data-action="check" data-id="${tool.id}" ${operation?.busy ? 'disabled' : ''}>Verifica build</button>
             <button class="secondary" data-action="log" data-id="${tool.id}" ${operation?.busy ? 'disabled' : ''}>Log</button>
-            ${tool.portOpen ? `<a class="button-link" href="${tool.url}" target="_blank" rel="noopener noreferrer">Apri interfaccia</a>` : ''}
+            ${tool.canStop ? `<button class="secondary" data-action="focus" data-id="${tool.id}" ${operation?.busy ? 'disabled' : ''}>Apri interfaccia</button>` : ''}
           </div>
         `;
         grid.appendChild(card);
@@ -474,6 +475,9 @@
           await waitForStatus(id, ["stopped"], 15000);
           operations.set(id, { type: "success", message: "Arresto completato. Il tool è fermo." });
           toast(`Arresto completato: ${id}`);
+        } else if (action === "focus") {
+          const res = await api(`/api/tools/${id}/focus`, { method: "POST" });
+          if (!res.ok) throw new Error(res.error || "Impossibile aprire la finestra Electron.");
         } else if (action === "log") {
           await showLog(id);
         } else if (action === "check") {
@@ -914,6 +918,29 @@
         toast("Workflow GitHub arrestato.");
         await refreshComponentReleases();
       } catch (error) { toast(error.message, true); }
+    };
+
+    $("#restartConsole").onclick = async () => {
+      if (!confirm("Riavviare la Dev Console? I tool già avviati restano attivi; eventuali test o release in corso nella console vengono interrotti.")) return;
+      const button = $("#restartConsole");
+      button.disabled = true;
+      button.textContent = "Riavvio…";
+      try {
+        await api("/api/dev/restart", { method: "POST" });
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        for (let attempt = 0; attempt < 30; attempt++) {
+          try {
+            await api("/api/tools");
+            location.reload();
+            return;
+          } catch { await new Promise((resolve) => setTimeout(resolve, 1000)); }
+        }
+        throw new Error("La console non è tornata online entro 30 secondi.");
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = "Riavvia console";
+        toast(error.message, true);
+      }
     };
 
     $("#shutdownConsole").onclick = async () => {

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
 import { promisify } from "node:util";
+import { execFileHidden } from "./hidden-exec.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const PKG_DIR = join(here, "..");
@@ -12,7 +13,7 @@ const RUNTIME_DIR = join(PKG_DIR, ".runtime");
 const LOG_DIR = join(RUNTIME_DIR, "logs");
 const REGISTRY_FILE = join(RUNTIME_DIR, "processes.json");
 
-const execFileP = promisify(execFile);
+const execFileP = execFileHidden;
 let registryMutation: Promise<void> = Promise.resolve();
 
 export interface ProcessCommand {
@@ -148,6 +149,50 @@ export async function getPortProcess(port: number): Promise<PortProcessInfo | nu
   } catch {
     return null;
   }
+}
+
+const FOCUS_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+Add-Type -Namespace Win -Name Native -MemberDefinition @'
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);
+[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int cmd);
+[DllImport("user32.dll")] public static extern bool IsIconic(System.IntPtr h);
+[DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, int flags, int extra);
+'@
+$all = Get-CimInstance Win32_Process
+$ids = New-Object System.Collections.Generic.List[int]
+$ids.Add($rootPid)
+for ($i = 0; $i -lt $ids.Count; $i++) {
+  foreach ($child in $all | Where-Object { $_.ParentProcessId -eq $ids[$i] }) { $ids.Add([int]$child.ProcessId) }
+}
+$window = Get-Process -Id $ids -ErrorAction SilentlyContinue |
+  Where-Object { $_.ProcessName -eq 'electron' -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+if ($null -eq $window) { Write-Output 'none'; exit 0 }
+$handle = $window.MainWindowHandle
+if ([Win.Native]::IsIconic($handle)) { [void][Win.Native]::ShowWindow($handle, 9) }
+[Win.Native]::keybd_event(0x12, 0, 0, 0)
+[Win.Native]::keybd_event(0x12, 0, 2, 0)
+[void][Win.Native]::SetForegroundWindow($handle)
+Write-Output 'ok'
+`;
+
+/** Porta in primo piano la finestra Electron avviata sotto `rootPid`. */
+export async function focusElectronWindow(rootPid: number): Promise<{ ok: boolean; error?: string }> {
+  if (process.platform !== "win32" || !Number.isInteger(rootPid) || rootPid < 1) {
+    return { ok: false, error: "Funzione disponibile solo su Windows." };
+  }
+  const script = `$rootPid = ${rootPid}\n${FOCUS_SCRIPT}`;
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  try {
+    const { stdout } = await execFileP("powershell", ["-NoProfile", "-EncodedCommand", encoded], { timeout: 10_000 });
+    return stdout.trim() === "ok" ? { ok: true } : { ok: false, error: "Nessuna finestra Electron trovata per questo tool." };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+export async function getManagedPid(id: string): Promise<number | null> {
+  return (await currentRecord(id))?.pid ?? null;
 }
 
 export async function isRunning(id: string): Promise<boolean> {

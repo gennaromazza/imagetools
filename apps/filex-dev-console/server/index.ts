@@ -1,13 +1,14 @@
 import express from "express";
 import cors from "cors";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEV_TOOLS, SUITE_TOOL, type DevTool } from "./tools.js";
-import { PKG_DIR, ROOT, getPortProcess, readLog, startProcess, stopProcess, stopAllProcesses, stopPortProcess, isPortOpen, isRunning, listRunning } from "./processes.js";
+import { PKG_DIR, ROOT, focusElectronWindow, getManagedPid, getPortProcess,readLog, startProcess, stopProcess, stopAllProcesses, stopPortProcess, isPortOpen, isRunning, listRunning } from "./processes.js";
+import { execFileHidden } from "./hidden-exec.js";
 
-const execFileP = promisify(execFile);
+const execFileP = execFileHidden;
 const NODE = process.execPath;
 const PORT = Number(process.env.FILEX_CONSOLE_PORT ?? 4390);
 const HOST = "127.0.0.1";
@@ -281,6 +282,7 @@ const TEST_CATEGORIES: TestCategory[] = [
   { id: "backup-guard", title: "FileX Backup Guard — Caccia bug", description: "Conflitti, cancellazioni, rinomine, checksum e recupero." },
   { id: "suite", title: "FileX Suite e aggiornamenti", description: "Protezione updater, cataloghi e release indipendenti." },
   { id: "licenses", title: "Licenze FileX", description: "Copertura dei controlli licenza nei tool." },
+  { id: "dev-console", title: "FileX Dev Console", description: "Affidabilità della console di sviluppo stessa: nessuna finestra di terminale aperta dai controlli di stato e avvio pulito senza fermare processi che non le appartengono." },
   { id: "cloud", title: "Servizi cloud", description: "Funzioni Firebase e servizi FileX Cloud." },
   { id: "other", title: "Altri controlli", description: "Test non ancora associati a una categoria di prodotto." },
 ];
@@ -304,6 +306,7 @@ function testCategoryId(name: string): TestCategory["id"] {
   if (name === "test:filex-send-upload") return "filex-send";
   if (name === "test:backup-guard-bug-hunt") return "backup-guard";
   if (name === "test:filex-updater-lock" || name === "test:filex-update-shutdown" || name === "test:filex-process-snapshot-cache" || name === "test:filex-installer-runner" || name === "test:filex-cooperative-signal" || name === "test:filex-suite-package-imports" || name === "test:filex-suite-dock-startup" || name === "test:filex-suite-license-sync" || name === "test:filex-suite-update-flow" || name === "test:filex-independent-releases" || name === "test:filex-component-release-flow") return "suite";
+  if (name === "test:filex-dev-console-hidden-windows" || name === "test:filex-dev-console-launcher") return "dev-console";
   if (name === "test:filex-license-coverage") return "licenses";
   if (name === "test:filex-installed-licenses") return "licenses";
   if (name === "test:filex-trial") return "licenses";
@@ -320,12 +323,12 @@ function testDescription(name: string): string {
     "test:album-flow-flow": "Verifica Auto Build (foto per pagina scelte dall'utente, capitoli, panorami e copertine, solo foto non usate, 500 foto), capitoli, libreria (ordini, filtri, stelle, tag, rimozione), importazione con duplicati, salvataggio e file danneggiati, controlli prima dell'export, invio e reinvio dal Selector, formati e album di prova.",
     "test:album-flow-scenarios": "Casi d'uso completi di un fotografo: matrimonio da 140 foto (cartelle in disordine, RAW+JPG, duplicati, capitoli, Auto Build, ritocchi a mano, preferiti, stile sull'album, foto tolte, salvataggio), foto difficili (panorami, miniature, ruotate), reportage da 320 foto, capitoli rimaneggiati, cambio formato e oltre mille operazioni casuali con controlli di coerenza. Non prova clic o trascinamenti nella finestra.",
     "test:album-flow-render": "Verifica il posizionamento delle foto nelle celle (riempi/adatta, zoom, bordo, rotazione, dpi effettivi), la geometria degli slot e l'SVG di stampa (abbondanza, zona sicura, escaping). Non certifica la fedeltà di stampa.",
-    "test:album-flow-exif": "Verifica la lettura dell'ora di scatto e dell'orientamento dal JPEG (entrambe le codifiche dei byte), il ripiego sulla data del file e la tolleranza ai file troncati o con date assurde.",
-    "test:album-flow-freshness": "Verifica che una foto modificata fuori dal programma (per esempio salvata da Photoshop) venga riletta: impronta del file nelle richieste, cache scartata, nuova immagine e viste avvisate.",
-    "test:album-flow-license": "Verifica gli avvisi di licenza mostrati nell'app: nessun avviso con licenza attiva o fuori da FileX, errore con il lavoro al sicuro quando la licenza non è valida, tolleranza di pagamento con data limite e promemoria della prova gratuita solo nell'ultima settimana.",
     "test:album-flow-drive": "Verifica i nomi dei backup di Album Flow su Google Drive (cartella pulita da caratteri vietati, data, spread e foto leggibili dal nome, ordine cronologico, date impossibili ignorate) e che si carichi o si scarichi solo un vero progetto di Album Flow, non un manifest del Selector o un file qualsiasi. Verifica anche il backup automatico alla chiusura: spento di serie, solo gli album modificati dopo l'ultimo salvataggio (i tre più recenti), tempo massimo rispettato, un caricamento lento o un errore non bloccano mai la chiusura e vengono ritentati. Non parla con Google: il collegamento reale e la chiusura della finestra nel pacchetto installato vanno provati a mano.",
     "test:album-flow-whatsnew": "Verifica la finestra «Novità» dopo un aggiornamento: la versione nel package.json ha la sua voce in whatsNew.ts (senza, la release non è completa), voci complete con i nomi dei pulsanti, versioni confrontate correttamente, mostrate a chi aggiorna anche saltando versioni ma non al primo avvio assoluto, e l'etichetta «Nuovo» dei pulsanti che sparisce dopo il primo uso.",
     "test:album-flow-design": "Verifica «Personalizza»: testi in stile rivista (stili, font open source con file e licenza presenti, limiti dei valori), impaginazione del testo (a capo, giustificato, capolettera, paragrafi, parole più larghe della cornice, prova casuale: mai testo perso né righe fuori cornice), sfondi a immagine per pagina o per spread (nessun conflitto, spread finiti intatti), grafiche, SVG di esportazione con font incorporati e testo protetto, salvataggio/riapertura con rifiuto dei file non validi e archivio personale di frasi e stili (anche con dati rovinati).",
+    "test:album-flow-exif": "Verifica la lettura dell'ora di scatto e dell'orientamento dal JPEG (entrambe le codifiche dei byte), il ripiego sulla data del file e la tolleranza ai file troncati o con date assurde.",
+    "test:album-flow-freshness": "Verifica che una foto modificata fuori dal programma (per esempio salvata da Photoshop) venga riletta: impronta del file nelle richieste, cache scartata, nuova immagine e viste avvisate.",
+    "test:album-flow-license": "Verifica gli avvisi di licenza mostrati nell'app: nessun avviso con licenza attiva o fuori da FileX, errore con il lavoro al sicuro quando la licenza non è valida, tolleranza di pagamento con data limite e promemoria della prova gratuita solo nell'ultima settimana.",
     "test:album-flow-history": "Verifica annulla/ripeti: ordine degli stati, ramo ripetibile cancellato da una nuova modifica e limite della cronologia.",
     "test:album-flow-relink": "Verifica la risoluzione dei percorsi su Windows, macOS/Linux e UNC con il rifiuto di traversal o file fuori dalla radice, e il ricollegamento delle foto su un altro computer: stesso percorso relativo, poi nome e dimensione, mai a caso tra nomi doppi, un file non va a due foto, radice ricavata, foto richieste soltanto.",
     "test:album-flow-system": "Controlli statici di presenza e coerenza: funzioni dichiarate nel codice, contratti desktop, test raggiungibili da script e Dev Console, documentazione. Non verificano clic, flussi runtime o comportamento delle anteprime.",
@@ -344,6 +347,8 @@ function testDescription(name: string): string {
     "test:photo-selector-rename": "Verifica anteprima rinomina batch con data scatto, sequenze, collisioni e nomi Windows.",
     "test:archivio-flow-raw-thumbnail": "Verifica le miniature veloci della griglia della SD: miniatura EXIF dei RAW Fujifilm (RAF) e dei RAW basati su TIFF come Sony ARW, Canon CR2, Nikon NEF e DNG (circa 10 KB letti da 128 KB invece di 0,4-4 MB), scelta della miniatura e non dell'anteprima, byte order little e big endian, rifiuto di miniature mancanti, troppo grandi o non JPEG, e raddrizzamento secondo l'orientamento EXIF (le foto verticali hanno la miniatura in orizzontale) verificato per tutti gli 8 orientamenti contro la lettura del tag di sharp.",
     "test:archivio-flow-wizard": "Verifica il percorso guidato a domande e le sue funzioni di contorno: quattro tappe stabili, una domanda per schermata (Invio avanza, mai dai pulsanti), suggerimento del lavoro probabile, ricerca del lavoro esistente, cartella facoltativa con clic sui pulsanti predefiniti, riepilogo con dimensioni, tempo, spazio libero e percorsi accorciati, foto già in archivio con avviso se la scheda è già scaricata, ripresa di un'importazione interrotta, stop con conferma e messaggio rassicurante, più schede collegate senza perdere la scelta, ultime importazioni, schermata finale con durata, espulsione della scheda e apertura in Bridge, e movimento con le frecce nella griglia (tipo di file, video, suggerimento Maiusc).",
+    "test:filex-dev-console-launcher": "Verifica l'avvio pulito di avvia-progetto.bat: chiude la console precedente e i tool che aveva avviato, riconoscendo la console giusta dalla sua dichiarazione (non dal solo testo del comando), e non uccide mai un altro programma, nemmeno se prende la sua porta durante l'attesa. Controlla anche che il file non usi chiusure per nome e che il browser si apra solo quando la console risponde.",
+    "test:filex-dev-console-hidden-windows": "Verifica che ogni programma lanciato dalla console (gh, git, powershell, taskkill) parta senza finestra: su Windows, senza questa opzione ogni controllo di stato apriva un terminale e lo schermo si riempiva. Controlla anche che nessun file lanci programmi in modo da riaprire finestre o bloccare la console.",
     "test:archivio-flow-photo-apps": "Verifica che Archivio Flow trovi Adobe Bridge installato (versione più recente, 64 e 32 bit) e apra la cartella importata solo con programmi trovati e cartelle reali, senza mai eseguire comandi arbitrari. Lightroom Classic non è incluso perché non accetta una cartella dalla riga di comando.",
     "test:archivio-flow-sd-performance": "Verifica la griglia della scheda SD con 20.000-50.000 foto: finestra di scroll identica all'algoritmo lineare ma a costo logaritmico, righe senza doppio ordinamento, file di servizio (.xmp, .dat) fuori dalla griglia e dai conteggi, pagine provvisorie invariate riconosciute, cache miniature (voci e byte, ordine d'uso), nessuna rilettura della SD tornando indietro e scelte rapide (tutte, oggi, ultimo giorno, ultimi N scatti, solo le nuove).",
     "test:archivio-flow-preview-queue": "Verifica errori condivisi senza richieste ripetute, cancellazione delle miniature fuori vista, rimontaggi e cache distinta tra schede.",
@@ -381,11 +386,11 @@ function testDescription(name: string): string {
     "test:filex-cooperative-signal": "Verifica che una versione legacy non possa bloccare indefinitamente il comando di chiusura cooperativa prima del fallback.",
     "test:filex-suite-package-imports": "Controlla gli import runtime nel pacchetto ASAR reale e avvia il main process della Suite impacchettata.",
     "test:filex-suite-dock-startup": "Verifica avvio del launcher e posizione sopra il clic nella barra Windows, mantenuta quando cambiano larghezza, monitor e spazio disponibile.",
+    "test:filex-suite-update-flow": "Verifica controllo periodico delle nuove versioni della Suite, avviso a dashboard chiusa, nessuna installazione automatica a sorpresa, tempi di chiusura dei tool coerenti con il loro arresto, nuovo tentativo del segnale cooperativo e blocco dei tool durante l'installazione.",
+    "test:filex-suite-license-sync": "Verifica che dashboard e dock restino allineati sulla licenza: evento di cambio, revalidazione periodica col server, richieste concorrenti unificate e notifica di licenza che ricompare dopo un ripristino.",
     "test:filex-windows-icons": "Controlla per ogni tool del catalogo, inclusi quelli nuovi, icone ICO alle diverse scale, identità distinta in Dev e configurazione della barra Windows e dei collegamenti installer.",
     "test:filex-suite-launcher": "Verifica in Electron dock orizzontale, tooltip, ricerca espandibile, temi, preferiti, notifiche FileX Send e rimozione persistente con dati simulati.",
     "test:filex-independent-releases": "Controlla feed, manifest e release indipendenti dei componenti FileX.",
-    "test:filex-suite-update-flow": "Verifica controllo periodico delle nuove versioni della Suite, avviso a dashboard chiusa, nessuna installazione automatica a sorpresa, tempi di chiusura dei tool coerenti con il loro arresto, nuovo tentativo del segnale cooperativo e blocco dei tool durante l'installazione.",
-    "test:filex-suite-license-sync": "Verifica che dashboard e dock restino allineati sulla licenza: evento di cambio, revalidazione periodica col server, richieste concorrenti unificate e notifica di licenza che ricompare dopo un ripristino.",
     "test:filex-component-release-flow": "Verifica preparazione atomica, note di rilascio, idempotenza e blocco delle versioni non valide.",
     "test:filex-license-coverage": "Verifica che i percorsi di licenza richiesti siano coperti.",
     "test:filex-trial": "Verifica prova di 30 giorni, account, firme, DPAPI Windows e migrazione fra profili, concorrenza, cache, avviso e chiusura dopo 60 secondi e annullamento dopo rinnovo.",
@@ -485,6 +490,22 @@ app.post("/api/tools/:id/start", async (req, res) => {
   res.json({ ok: result.ok, error: result.error, id: tool.id, url, kind: tool.kind });
 });
 
+app.post("/api/tools/:id/focus", async (req, res) => {
+  const tool = DEV_TOOLS.find((t) => t.id === req.params.id);
+  if (!tool) {
+    res.status(404).json({ error: `Tool sconosciuto: ${req.params.id}` });
+    return;
+  }
+  const rootPid = await getManagedPid(tool.id)
+    ?? (tool.port !== null ? (await getPortProcess(tool.port))?.killPid ?? null : null);
+  if (rootPid === null) {
+    res.status(409).json({ ok: false, error: "Il tool non è in esecuzione." });
+    return;
+  }
+  const result = await focusElectronWindow(rootPid);
+  res.json({ ok: result.ok, error: result.error });
+});
+
 app.post("/api/tools/:id/stop", async (req, res) => {
   const tool = DEV_TOOLS.find((t) => t.id === req.params.id);
   if (!tool) {
@@ -533,6 +554,11 @@ app.post("/api/tools/stop-all", async (_req, res) => {
     stopped: managed.stopped + externalStopped,
     error: managed.error ?? failure?.error,
   });
+});
+
+/** Dichiara quale processo e' questa console: lo usa avvia-progetto.bat per fermare solo la console giusta. */
+app.get("/api/dev/identity", (_req, res) => {
+  res.json({ app: "filex-dev-console", pid: process.pid });
 });
 
 app.post("/api/dev/shutdown", async (_req, res) => {
@@ -1011,8 +1037,26 @@ app.use(express.static(join(PKG_DIR, "public"), {
   setHeaders: (response) => response.setHeader("Cache-Control", "no-store"),
 }));
 
-app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log(`\n  FILEX DEV CONSOLE`);
   console.log(`  Dashboard: http://${HOST}:${PORT}`);
   console.log(`  Root repo : ${ROOT}\n`);
+});
+
+// Riavvio della sola console: i tool gestiti restano attivi (il registro è su
+// file). Il nuovo processo parte solo dopo che la porta è stata liberata.
+app.post("/api/dev/restart", (_req, res) => {
+  res.json({ ok: true });
+  setTimeout(() => {
+    server.close(() => {
+      spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
+        cwd: PKG_DIR,
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }).unref();
+      process.exit(0);
+    });
+    server.closeAllConnections();
+  }, 250);
 });
