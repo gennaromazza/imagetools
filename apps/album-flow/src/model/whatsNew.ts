@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.2",
+    date: "2026-10-03",
+    headline: "Il logo torna nella Home",
+    items: [
+      {
+        title: "Corretto: logo di Album Flow nella Home",
+        text: "Nel programma installato il logo in alto nella Home non si vedeva (compariva solo una cornice vuota). Ora il logo è sempre visibile.",
+        where: ["Home"],
+      },
+    ],
+  },
+  {
     version: "0.2.1",
     date: "2026-10-03",
     headline: "Anteprima intera nella libreria, finestra Novità e barra della foto sempre visibile",

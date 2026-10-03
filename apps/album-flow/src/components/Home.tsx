@@ -105,7 +105,7 @@ export function Home(props: HomeProps) {
     <div className="home" data-testid="home">
       <header className="home__head">
         <div className="home__brand">
-          <span className="home__logo" aria-hidden="true"><img src="/album-flow.png" alt="" width={56} height={56} /></span>
+          <span className="home__logo" aria-hidden="true"><img src={`${import.meta.env.BASE_URL}album-flow.png`} alt="" width={56} height={56} /></span>
           <div>
             <p className="eyebrow">FileX Suite</p>
             <h1>Album Flow</h1>

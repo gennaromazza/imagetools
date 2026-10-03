@@ -95,6 +95,15 @@ const tests = walk(join(root, "apps", "album-flow", "src")).filter((file) => fil
 assert.ok(tests.length >= 8, "ci si aspettano almeno otto file di test per Album Flow");
 for (const file of tests) assert.ok(referenced.has(file), `test non raggiungibile da nessuno script (e quindi dalla Dev Console): ${file}`);
 
+// ------------------------------------------------- percorsi dei file statici
+// Nel pacchetto Electron la pagina si carica da file: un percorso assoluto come "/logo.png" punta alla radice del disco e
+// l'immagine non si vede (in sviluppo invece funziona). I file di `public/` vanno citati con `import.meta.env.BASE_URL`.
+for (const file of walk(join(root, "apps", "album-flow", "src")).filter((candidate) => /\.(tsx?|css)$/.test(candidate) && !candidate.endsWith(".test.ts"))) {
+  const source = readFileSync(file, "utf8");
+  const absolute = source.match(/(?:src|href)=["']\/[A-Za-z0-9_.-]+\.(?:png|svg|jpe?g|ico|webp)["']|url\(\s*["']?\/[A-Za-z0-9_.-]+\.(?:png|svg|jpe?g|ico|webp)/);
+  assert.equal(absolute, null, `${relative(root, file)}: percorso assoluto a un file statico (${absolute?.[0]}); usa import.meta.env.BASE_URL`);
+}
+
 // ---------------------------------------------------------------- documentazione
 const docs = join(root, "docs", "album-flow");
 for (const file of ["AF-000-OPEN-DECISIONS.md", "TASK-AF-000-CURRENT-STATE-AUDIT.md", "AF-000-TEST-SYSTEM.md", "AF-001-UX-SPEC.md", "AF-002-ENGINE-V2-SPEC.md"]) {

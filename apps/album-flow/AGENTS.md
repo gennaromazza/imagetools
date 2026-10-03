@@ -45,6 +45,11 @@ npm --workspace @photo-tools/album-flow run build
 
 **Prova visiva**: `npm --workspace @photo-tools/album-flow run dev -- --host 127.0.0.1 --port 4265`, poi `http://127.0.0.1:4265/` («Album di prova» crea 36 foto sintetiche in 4 capitoli). Per verificare a risoluzione piena senza il pannello del browser integrato si può pilotare Chrome via DevTools Protocol da uno script nella cartella di lavoro dell'agente (finestre di riferimento: 1540×980, 1366×768, 1100×740). Per le foto reali usa **solo anteprime ridotte** copiate fuori dal repository: gli originali dell'utente non si spostano, modificano o copiano nel progetto. Dalla Dev Console l'avvio Electron richiede circa 30-40 s (build della shell + Vite): attendi, non rilanciare.
 
+## Novità e file statici
+
+- Ogni release aggiunge in `src/model/whatsNew.ts` la voce della nuova versione (titolo e spiegazione per ogni miglioramento, e in `where` i nomi esatti dei pulsanti, schede o scorciatoie dove trovarli). Gli utenti la vedono dopo l'aggiornamento e dal pulsante «Novità» della Home. Un pulsante nuovo porta l'etichetta «Nuovo» con `useNewFeature`. `npm run test:album-flow-whatsnew` fallisce se manca la voce della versione del `package.json`.
+- I file di `public/` si citano con `import.meta.env.BASE_URL`, mai con `/nome.png`: nel pacchetto la pagina si carica da file e il percorso assoluto non funziona (lo controlla `npm run test:album-flow-system`).
+
 ## Nuovi test
 
 Ogni test nuovo: script `test:album-flow-*` in `package.json` radice, dentro `test:album-flow-all`, descrizione in `apps/filex-dev-console/server/index.ts` (la categoria `album-flow` è automatica dal prefisso) e verifica del typecheck della Dev Console. `scripts/test-album-flow-system.mjs` fallisce se un file di test non è raggiungibile da uno script o se manca la descrizione nella Dev Console.
