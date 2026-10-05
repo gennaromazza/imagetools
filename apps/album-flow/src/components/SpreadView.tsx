@@ -1,3 +1,4 @@
+import { snapMove, snapResize, type SnapGuide } from "../engine/snap";
 import { type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetV2, AlbumItem, AlbumArea, AlbumSpread, SheetSpec } from "@photo-tools/shared-types";
 import { dropHighlight, resolveDropTarget, type DropTarget } from "../engine/drop";
@@ -20,7 +21,7 @@ export type SpreadVariant = "stage" | "thumb" | "present";
 export type Draft =
   | { kind: "ratio"; areaIndex: number; path: string; ratio: number }
   | { kind: "view"; itemId: string; view: Partial<ItemView> }
-  | { kind: "frame"; itemId: string; rect: Rect };
+  | { kind: "frame"; itemId: string; rect: Rect; guides?: SnapGuide[] };
 
 export interface SpreadViewProps {
   sheet: SheetSpec;
@@ -59,6 +60,8 @@ export interface SpreadViewProps {
 
 const pct = (value: number) => `${Number(value.toFixed(4))}%`;
 const SNAPS = [0.5, 1 / 3, 2 / 3];
+/** Distanza (pixel sullo schermo) entro cui una foto si aggancia alle altre durante lo spostamento. */
+const SNAP_PX = 6;
 
 interface CellProps {
   cell: LeafCell;
@@ -76,10 +79,12 @@ interface CellProps {
   showSizes: boolean;
   /** La disposizione dell'area è libera: la foto si sposta e si ridimensiona trascinandola. */
   free: boolean;
+  /** Rettangoli a cui la foto si aggancia spostandola (altre foto, bordi e centro dell'area, piega); solo nelle disposizioni libere. */
+  snapTargets?: Array<{ id: string; rect: Rect }>;
   handlers: Pick<SpreadViewProps, "onSelectItem" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar"> & { onCommitFrameRect?: (itemId: string, rect: Rect) => void };
 }
 
-const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, cropActive, view, lowDpi, showSizes, free, handlers }: CellProps) {
+const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, cropActive, view, lowDpi, showSizes, free, snapTargets, handlers }: CellProps) {
   // Lavorazione veloce: anteprime leggere; la qualità piena solo per la foto selezionata o in ritaglio e nell'anteprima cliente.
   const pixels = variant === "thumb" ? 200 : variant === "present" ? 2400 : selected || cropActive ? 1400 : 720;
   const src = useAssetSrc(asset, pixels);
@@ -130,19 +135,27 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     frameDrag.current = { mode, x: event.clientX, y: event.clientY, rect: cell.rect, mmPerPx: origin.w / parent.width, moved: false };
     if (mode === "move") handlers.onSelectItem?.(item.id, areaIndex);
   };
+  const snapGuides = useRef<SnapGuide[]>([]);
   const frameRect = (event: React.PointerEvent): Rect | null => {
     const drag = frameDrag.current;
+    snapGuides.current = [];
     if (!drag) return null;
     const dx = (event.clientX - drag.x) * drag.mmPerPx;
     const dy = (event.clientY - drag.y) * drag.mmPerPx;
     if (Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) > 2) drag.moved = true;
-    if (drag.mode === "move") return { ...drag.rect, x: drag.rect.x + dx, y: drag.rect.y + dy };
-    const w = Math.max(8, drag.rect.w + Math.max(dx, (dy * drag.rect.w) / drag.rect.h));
-    return { ...drag.rect, w, h: (w * drag.rect.h) / drag.rect.w };
+    const raw: Rect = drag.mode === "move"
+      ? { ...drag.rect, x: drag.rect.x + dx, y: drag.rect.y + dy }
+      : (() => { const w = Math.max(8, drag.rect.w + Math.max(dx, (dy * drag.rect.w) / drag.rect.h)); return { ...drag.rect, w, h: (w * drag.rect.h) / drag.rect.w }; })();
+    // Aggancio come negli editor grafici: bordi e centri si attaccano a quelli delle altre foto e dell'area, con una linea guida. Alt = senza aggancio.
+    if (event.altKey || !snapTargets) return raw;
+    const targets = snapTargets.filter((target) => target.id !== item.id).map((target) => target.rect);
+    const snapped = (drag.mode === "move" ? snapMove : snapResize)(raw, targets, SNAP_PX * drag.mmPerPx);
+    snapGuides.current = snapped.guides;
+    return snapped.rect;
   };
   const moveFrame = (event: React.PointerEvent) => {
     const rect = frameRect(event);
-    if (rect) handlers.onDraft?.({ kind: "frame", itemId: item.id, rect });
+    if (rect) handlers.onDraft?.({ kind: "frame", itemId: item.id, rect, guides: snapGuides.current });
   };
   const endFrame = (event: React.PointerEvent) => {
     const drag = frameDrag.current;
@@ -319,6 +332,16 @@ function SpreadViewInner(props: SpreadViewProps) {
       ? { ...base, cells: base.cells.map((cell) => (cell.itemId === draft.itemId ? { ...cell, rect: draft.rect } : cell)) }
       : base;
   }), [sheet, spread, overrides, draft]);
+  // Punti di aggancio per le foto delle disposizioni libere: le altre foto, il bordo e il centro dell'area utile e la piega al centro.
+  const snapTargetsByArea = useMemo(() => spread.areas.map((area, index) => {
+    if (!interactive || !hasFreeLayout(area)) return undefined;
+    const base = areaGeometryFor(sheet, spread, index);
+    return [
+      ...base.cells.map((cell) => ({ id: cell.itemId, rect: cell.rect })),
+      { id: "__area", rect: base.inner },
+      { id: "__fold", rect: { x: size.width / 2, y: base.inner.y, w: 0, h: base.inner.h } },
+    ];
+  }), [interactive, sheet, spread, size.width]);
   const latest = useRef({ geometry, onCommitFrame: props.onCommitFrame });
   latest.current = { geometry, onCommitFrame: props.onCommitFrame };
   const commitFrameRect = useCallback((itemId: string, rect: Rect) => {
@@ -430,10 +453,22 @@ function SpreadViewInner(props: SpreadViewProps) {
               lowDpi={lowDpi}
               showSizes={showSizes}
               free={hasFreeLayout(area)}
+              snapTargets={snapTargetsByArea[areaIndex]}
               handlers={handlers}
             />
           );
         }))}
+
+      {draft?.kind === "frame" && draft.guides?.length ? draft.guides.map((guide, index) => (
+        <span
+          key={`${guide.axis}-${index}`}
+          className={`spread__snap spread__snap--${guide.axis}`}
+          aria-hidden="true"
+          style={guide.axis === "x"
+            ? { left: pct((guide.at / size.width) * 100), top: pct((guide.from / size.height) * 100), height: pct(((guide.to - guide.from) / size.height) * 100) }
+            : { top: pct((guide.at / size.height) * 100), left: pct((guide.from / size.width) * 100), width: pct(((guide.to - guide.from) / size.width) * 100) }}
+        />
+      )) : null}
 
       <OverlayLayer sheet={sheet} spread={spread} media={media} interactive={interactive} handlers={props.design} />
 

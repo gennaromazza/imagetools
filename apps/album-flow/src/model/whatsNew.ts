@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.7",
+    date: "2026-10-05",
+    headline: "Calamita e linee guida nei template liberi",
+    items: [
+      {
+        title: "Le foto si agganciano e mostrano l'allineamento",
+        text: "Spostando o ridimensionando una foto di un template libero, i suoi bordi e il suo centro si attaccano a quelli delle altre foto, ai margini dell'area e alla piega, e una linea guida mostra che sono allineati. Tieni premuto Alt per muoverla senza aggancio.",
+        where: ["Trascina una foto di un template libero", "Alt = senza aggancio"],
+      },
+    ],
+  },
+  {
     version: "0.2.6",
     date: "2026-10-05",
     headline: "La cella segue la forma della foto",
