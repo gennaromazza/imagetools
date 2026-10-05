@@ -19,7 +19,7 @@ function Group({ caption, children }: { caption: string; children: ReactNode }) 
   return <div className="strip__group"><span className="strip__caption">{caption}</span>{children}</div>;
 }
 
-function StripButton({ icon, label, onClick, active, disabled, tone }: { icon: IconName; label: string; onClick?: () => void; active?: boolean; disabled?: boolean; tone?: "gold" | "danger" }) {
+function StripButton({ icon, label, onClick, active, disabled, tone }: { icon: IconName; label: string; onClick?: (event: React.MouseEvent) => void; active?: boolean; disabled?: boolean; tone?: "gold" | "danger" }) {
   return (
     <button type="button" className={`strip__btn${active ? " is-active" : ""}${tone ? ` strip__btn--${tone}` : ""}`} title={label} aria-label={label} aria-pressed={active} disabled={disabled} onClick={onClick}>
       <Icon name={icon} size={20} />
@@ -36,7 +36,7 @@ export interface AreaStripProps {
   twoAreas: boolean;
   onActivate: () => void;
   onShuffle: () => void;
-  onStyle: (changes: Partial<AreaStyle>, coalesceKey?: string) => void;
+  onStyle: (changes: Partial<AreaStyle>, coalesceKey?: string, relayout?: boolean) => void;
   onAlign: (align: AreaAlign) => void;
   onSplit: (mode: AlbumSplitMode) => void;
   onLink: () => void;
@@ -67,7 +67,7 @@ export function AreaStrip(props: AreaStripProps) {
         <ColorDots value={style.borderColor} swatches={["#000000", "#ffffff"]} onChange={(color) => props.onStyle({ borderColor: color })} label="Colore del bordo" />
       </Group>
       <Group caption="MODO">
-        <StripButton icon={style.mode === "fill" ? "fill" : "fit"} label={style.mode === "fill" ? "Riempi lo spazio ritagliando: clic per mostrare la foto intera" : "Foto intera: clic per riempire lo spazio ritagliando"} onClick={() => props.onStyle({ mode: style.mode === "fill" ? "fit" : "fill" })} active={style.mode === "fill"} />
+        <StripButton icon={style.mode === "fill" ? "fill" : "fit"} label={style.mode === "fill" ? "Riempi lo spazio ritagliando: clic per mostrare la foto intera (Alt + clic: ridisegna anche la disposizione)" : "Foto intera: clic per riempire gli spazi bianchi tenendo la disposizione (Alt + clic: ridisegna la disposizione per riempire al meglio)"} onClick={(event) => props.onStyle({ mode: style.mode === "fill" ? "fit" : "fill" }, undefined, event.altKey)} active={style.mode === "fill"} />
       </Group>
       <Group caption="ALLINEA">
         <div className="anchor">

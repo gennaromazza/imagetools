@@ -124,10 +124,12 @@ export function sanitizeStyle(style: AreaStyle): AreaStyle {
  * Quando cambia il modo (riempi ↔ foto intera) la disposizione resta la stessa: con «riempi» le celle occupano tutto lo
  * spazio (spariscono i bordi vuoti sopra e sotto), con la foto intera le divisioni si regolano sulle proporzioni delle foto.
  */
-function adaptToMode(project: Project, spread: AlbumSpread, before: AlbumSpread): AlbumSpread {
+function adaptToMode(project: Project, spread: AlbumSpread, before: AlbumSpread, relayout = false): AlbumSpread {
   if (spread.done) return spread;
   const areas = spread.areas.map((area, index) => {
     if (!before.areas[index] || before.areas[index].style.mode === area.style.mode || area.items.length === 0) return area;
+    // Con `relayout` (Alt + clic su «Modo») si sceglie anche la disposizione migliore per il nuovo modo.
+    if (relayout) return relayoutArea(project, spread, index, 0);
     const geometry = areaGeometry(project, spread, index);
     return alignedForFit(project, area, geometry.inner, geometry.gapMm);
   });
@@ -135,7 +137,7 @@ function adaptToMode(project: Project, spread: AlbumSpread, before: AlbumSpread)
 }
 
 /** Cambia lo stile di un'area; con "linked" la modifica vale per tutte le aree dello spread. */
-export function setAreaStyle(project: Project, spreadId: string, areaIndex: number, changes: Partial<AreaStyle>): Project {
+export function setAreaStyle(project: Project, spreadId: string, areaIndex: number, changes: Partial<AreaStyle>, relayout = false): Project {
   return mapSpread(project, spreadId, (spread) => {
     if (!spread.areas[areaIndex]) return spread;
     const targets = spread.linked ? spread.areas.map((_, index) => index) : [areaIndex];
@@ -149,7 +151,7 @@ export function setAreaStyle(project: Project, spreadId: string, areaIndex: numb
     });
     if (!changed) return spread;
     const next = { ...spread, areas };
-    return adaptToMode(project, next, spread);
+    return adaptToMode(project, next, spread, relayout);
   });
 }
 

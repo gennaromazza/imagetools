@@ -395,7 +395,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     commitRatio: (i, path, ratio) => { setDraft(null); commit((p) => setDividerRatio(p, spreadId, i, path, ratio), `ratio:${spreadId}:${i}:${path}`); },
     resetRatio: (i, path) => commit((p) => resetDividerRatio(p, spreadId, i, path)),
     commitView: (itemId, view) => { setDraft(null); commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle, shape: view.shape }), `view:${itemId}`); },
-    style: (i, changes, key) => commit((p) => setAreaStyle(p, spreadId, i, changes), key ? `style:${spreadId}:${i}:${key}` : undefined),
+    style: (i, changes, key, relayout) => commit((p) => setAreaStyle(p, spreadId, i, changes, relayout), key ? `style:${spreadId}:${i}:${key}` : undefined),
     align: (i, align) => commit((p) => alignArea(p, spreadId, i, align)),
     split: (mode) => { commit((p) => setSplitMode(p, spreadId, mode)); setActiveArea(0); setSelectedItemId(null); },
     link: () => commit((p) => setLinked(p, spreadId, !spread?.linked)),

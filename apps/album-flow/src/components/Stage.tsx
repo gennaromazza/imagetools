@@ -28,7 +28,7 @@ export interface StageActions {
   commitRatio: (areaIndex: number, path: string, ratio: number) => void;
   resetRatio: (areaIndex: number, path: string) => void;
   commitView: (itemId: string, view: Partial<ItemView>) => void;
-  style: (areaIndex: number, changes: Partial<AreaStyle>, coalesceKey?: string) => void;
+  style: (areaIndex: number, changes: Partial<AreaStyle>, coalesceKey?: string, relayout?: boolean) => void;
   align: (areaIndex: number, align: AreaAlign) => void;
   split: (mode: AlbumSplitMode) => void;
   link: () => void;
@@ -279,7 +279,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         twoAreas={two}
         onActivate={() => actions.activateArea(index)}
         onShuffle={() => actions.shuffleArea(index)}
-        onStyle={(changes, key) => actions.style(index, changes, key)}
+        onStyle={(changes, key, relayout) => actions.style(index, changes, key, relayout)}
         onAlign={(align) => actions.align(index, align)}
         onSplit={actions.split}
         onLink={actions.link}

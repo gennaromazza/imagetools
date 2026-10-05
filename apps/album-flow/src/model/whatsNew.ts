@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.4",
+    date: "2026-10-05",
+    headline: "Riempi gli spazi bianchi senza cambiare la disposizione",
+    items: [
+      {
+        title: "Modo: tieni la disposizione o ridisegnala",
+        text: "Un clic su Modo (Riempi / Foto intera) cambia il modo e tiene la disposizione, riempiendo solo gli spazi bianchi. Con Alt + clic il programma ridisegna anche la disposizione migliore per il nuovo modo.",
+        where: ["MODO", "Alt + clic su MODO"],
+      },
+    ],
+  },
+  {
     version: "0.2.3",
     date: "2026-10-05",
     headline: "Forma di ogni foto, zoom e raddrizzamento con la rotella",

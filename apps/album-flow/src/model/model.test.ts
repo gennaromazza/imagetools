@@ -565,6 +565,20 @@ test("foto intera: una foto ingrandita o raddrizzata riempie la sua cella, le al
   assertProjectInvariants(turned, "raddrizzata in foto intera");
 });
 
+test("Modo con Alt + clic: ridisegna la disposizione migliore, il clic semplice la tiene", () => {
+  let project = addSpread(makeProject(10));
+  const id = project.spreads[0].id;
+  project = dropOnSpread(project, id, { areaIndex: 0, itemId: null, zone: "area" }, { kind: "assets", assetIds: ["a0", "a1", "a2", "a3", "a4"] });
+  project = setAreaStyle(project, id, 0, { mode: "fill" });
+  const last = areaCandidates(project, project.spreads[0], 0, 24).length - 1;
+  const manual = applyCandidate(project, id, 0, last);
+  const kept = setAreaStyle(manual, id, 0, { mode: "fit" });
+  assert.equal(kept.spreads[0].areas[0].seed, last, "clic semplice: la disposizione scelta resta");
+  const redone = setAreaStyle(manual, id, 0, { mode: "fit" }, true);
+  assert.equal(redone.spreads[0].areas[0].seed, 0, "Alt + clic: ricalcolata con la migliore");
+  assertProjectInvariants(redone, "Alt + clic su Modo");
+});
+
 // ------------------------------------------------------------------ template dell'utente
 
 const frame = (x: number, y: number, w: number, h: number, z = 0, rotation = 0) => ({ x, y, w, h, z, rotation });
