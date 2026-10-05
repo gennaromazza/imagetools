@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-05 - Album Flow 0.2.9
+
+- Nuovo: copertina del progetto. Clic destro su una foto (nella libreria o nello spread) e «Imposta come copertina»: la foto compare nella Home, nella lista dei progetti. Senza una scelta resta la prima foto impaginata.
+
 ## 2026-10-05 - Album Flow 0.2.8
 
 - Nuovo: vista a provino. Il pulsante «Provino» (tasto V) mostra tutti gli spread dell'album in una sola schermata: si trascinano, anche più d'uno insieme (Maiusc o Ctrl/⌘), per cambiare l'ordine; Alt + ← → li sposta di un posto, doppio clic o Invio aprono lo spread. L'esportazione e il file di progetto seguono l'ordine assegnato.
