@@ -145,6 +145,8 @@ function validateProject(value: unknown): asserts value is AlbumProjectV2 {
     if (asset.labelIds !== undefined) list(asset.labelIds, `assets[${index}].labelIds`).forEach((label) => text(label, "labelIds"));
   }
 
+  if (p.coverAssetId !== undefined && (typeof p.coverAssetId !== "string" || !assetIds.has(p.coverAssetId))) fail("La copertina usa una foto che non esiste nella libreria.");
+
   const labelIds = new Set<string>();
   for (const raw of list(p.labels, "labels")) {
     const label = record(raw, "labels[]");

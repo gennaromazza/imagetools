@@ -43,6 +43,7 @@ function assertInside(inner: Rect, rect: Rect, label: string) {
 export function assertProjectInvariants(project: Project, label = ""): void {
   const assetIds = new Set(project.assets.map((asset) => asset.id));
   assert.equal(assetIds.size, project.assets.length, `${label}: foto duplicate`);
+  if (project.coverAssetId !== undefined) assert.ok(assetIds.has(project.coverAssetId), `${label}: la copertina punta a una foto che non esiste`);
   const spreadIds = new Set<string>();
   const areaIds = new Set<string>();
   const itemIds = new Set<string>();

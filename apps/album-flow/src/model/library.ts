@@ -155,11 +155,31 @@ export function removeAssets(project: Project, assetIds: readonly string[]): Pro
   if (![...doomed].some((id) => project.assets.some((asset) => asset.id === id))) return project;
   const itemIds = project.spreads.flatMap((spread) => spread.areas.flatMap((area) => area.items.filter((item) => doomed.has(item.assetId)).map((item) => item.id)));
   const cleaned = removeItems(project, itemIds);
+  const { coverAssetId, ...withoutCover } = cleaned;
   return touch({
-    ...cleaned,
+    ...(coverAssetId && !doomed.has(coverAssetId) ? cleaned : withoutCover),
     assets: cleaned.assets.filter((asset) => !doomed.has(asset.id)),
     chapters: cleaned.chapters.map((chapter) => ({ ...chapter, assetIds: chapter.assetIds.filter((id) => !doomed.has(id)) })),
   });
+}
+
+/** Sceglie (o toglie, con null) la foto di copertina del progetto. Senza copertina scelta la Home usa la prima foto impaginata. */
+export function setCoverAsset(project: Project, assetId: string | null): Project {
+  if (assetId === null) {
+    if (project.coverAssetId === undefined) return project;
+    const { coverAssetId: _removed, ...rest } = project;
+    return touch(rest);
+  }
+  if (!project.assets.some((asset) => asset.id === assetId) || project.coverAssetId === assetId) return project;
+  return touch({ ...project, coverAssetId: assetId });
+}
+
+/** Foto che rappresenta il progetto: la copertina scelta, altrimenti la prima foto impaginata, altrimenti la prima della libreria. */
+export function coverAssetOf(project: Project): AlbumAssetV2 | undefined {
+  const chosen = project.coverAssetId ? project.assets.find((asset) => asset.id === project.coverAssetId) : undefined;
+  if (chosen) return chosen;
+  const first = project.spreads.flatMap((spread) => spread.areas.flatMap((area) => area.items))[0];
+  return (first && project.assets.find((asset) => asset.id === first.assetId)) ?? project.assets[0];
 }
 
 /** Primo spread (e foto) che usa questa foto, per «Localizza». */

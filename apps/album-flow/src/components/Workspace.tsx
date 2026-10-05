@@ -8,7 +8,7 @@ import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type Aut
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
 import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemView, toggleItemLock } from "../model/items";
-import { assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
+import { setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
 import { findItem, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, swapAreas } from "../model/spreads";
 import { STAGES } from "../model/store";
@@ -446,6 +446,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     viewItem,
     revealItem: (itemId) => { const found = findItem(project, itemId); if (found) void reveal(found.item.assetId); },
     copyItemName: (itemId) => { const found = findItem(project, itemId); if (found) void copyName([found.item.assetId]); },
+    setCover: (itemId) => { const found = findItem(project, itemId); if (!found) return; commit((p) => setCoverAsset(p, found.item.assetId)); notify("Copertina del progetto impostata: la vedi nella Home.", true); },
     locateInLibrary: (itemId) => {
       const found = findItem(project, itemId);
       if (!found) return;
@@ -672,6 +673,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     onCopyName: (ids: string[]) => void copyName(ids),
     onRemove: (ids: string[]) => { commit((p) => removeAssets(p, ids)); setLibSelection([]); notify(`${ids.length === 1 ? "Foto rimossa" : `${ids.length} foto rimosse`} dall'album (i file restano sul disco).`, true); },
     onLocalize: localize,
+    onSetCover: (assetId: string) => { commit((p) => setCoverAsset(p, assetId)); notify("Copertina del progetto impostata: la vedi nella Home.", true); },
     onSetSort: (key: AlbumSortKey) => commit((p) => setSortKey(p, key)),
     onReorder: (visibleIds: string[], moving: string[], before: string | null) => { commit((p) => reorderAssets(p, visibleIds, moving, before)); notify("Ordine manuale attivato."); },
     onTag: tagMany,

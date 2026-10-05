@@ -126,6 +126,8 @@ export interface LibraryDockProps {
   onCopyName: (assetIds: string[]) => void;
   onRemove: (assetIds: string[]) => void;
   onLocalize: (assetId: string) => void;
+  /** Imposta la foto come copertina del progetto (mostrata nella Home). */
+  onSetCover: (assetId: string) => void;
   onSetSort: (key: AlbumSortKey) => void;
   onReorder: (visibleIds: string[], movingIds: string[], beforeId: string | null) => void;
   onTag: (assetIds: string[], tag: AlbumAssetTag) => void;
@@ -272,6 +274,7 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
       { label: "Guarda in grande", icon: "eye", hint: "Spazio", onClick: () => props.onOpenViewer(asset.id, visibleIds) },
       { label: many ? `Aggiungi ${ids.length} foto allo spread` : "Aggiungi allo spread", icon: "plus", hint: "Invio", onClick: () => props.onPlace(ids) },
       { label: "Mostra nello spread", icon: "image", disabled: uses === 0 || many, onClick: () => props.onLocalize(asset.id) },
+      { label: props.project.coverAssetId === asset.id ? "È la copertina del progetto" : "Imposta come copertina", icon: "book", disabled: many || props.project.coverAssetId === asset.id, onClick: () => props.onSetCover(asset.id) },
       { separator: true, label: "-" },
       { label: "Modifica nell'editor", icon: "pencil", disabled: !desktop || !asset.absolutePath || many, onClick: () => props.onEdit(asset.id) },
       { label: "Apri la cartella", icon: "folder", disabled: !desktop || !asset.absolutePath || many, onClick: () => props.onReveal(asset.id) },

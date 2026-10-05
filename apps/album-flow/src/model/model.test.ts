@@ -9,7 +9,7 @@ import { findItem, itemAspect, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeAsset, makeProject } from "./fixtures";
 import { TEMPLATE_STORAGE_KEY, applyTemplate, applyTemplatesToAlbum, bestAssignment, loadTemplates, matchTemplates, removeTemplate, reorderFrame, saveTemplates, sanitizeTemplate, setFrame, templateFromArea, templateTarget, upsertTemplate } from "./templates";
 import { hasFreeLayout } from "./project";
-import { hoverPreviewSize } from "./library";
+import { coverAssetOf, hoverPreviewSize, removeAssets, setCoverAsset } from "./library";
 import { placeItem } from "./placement";
 import { DEFAULT_AUTO_BUILD, autoBuildAlbum } from "./autobuild";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
@@ -621,6 +621,26 @@ test("provino: 300 riordini casuali coincidono con il calcolo di riferimento e n
     assert.deepEqual(project.spreads.map((spread) => spread.id), expected, `passo ${step}`);
   }
   assertProjectInvariants(project, "dopo 300 riordini");
+});
+
+test("copertina del progetto: si sceglie una foto, si toglie, segue il salvataggio e sparisce se la foto viene tolta dall'album", () => {
+  let project = withSpread(5);
+  project = appendAssets(project, firstSpreadId(project), 0, ["a2", "a3"]);
+  assert.equal(coverAssetOf(project)?.id, "a2", "senza scelta: la prima foto impaginata");
+  const chosen = setCoverAsset(project, "a4");
+  assert.equal(chosen.coverAssetId, "a4");
+  assert.equal(coverAssetOf(chosen)?.id, "a4", "la copertina scelta vince, anche se non è impaginata");
+  assert.equal(setCoverAsset(chosen, "a4"), chosen, "stessa foto: nessun cambiamento");
+  assert.equal(setCoverAsset(project, "inesistente"), project);
+  assert.equal("coverAssetId" in setCoverAsset(chosen, null), false);
+  assert.equal(setCoverAsset(project, null), project);
+  assertProjectInvariants(chosen, "copertina");
+  assert.equal(parseAlbumProject(serializeAlbumProject(chosen)).coverAssetId, "a4", "salvataggio e riapertura");
+  assert.throws(() => parseAlbumProject(serializeAlbumProject({ ...chosen, coverAssetId: "x" })), "copertina verso una foto inesistente");
+  const removed = removeAssets(chosen, ["a4"]);
+  assert.equal(removed.coverAssetId, undefined, "tolta la foto, la copertina torna automatica");
+  assert.equal(removeAssets(chosen, ["a0"]).coverAssetId, "a4", "togliere altre foto non la tocca");
+  assertProjectInvariants(removed, "copertina rimossa");
 });
 
 // ------------------------------------------------------------------ template dell'utente

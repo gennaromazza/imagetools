@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.9",
+    date: "2026-10-05",
+    headline: "Scegli la copertina del progetto",
+    items: [
+      {
+        title: "Una foto come copertina nella Home",
+        text: "Clic destro su una foto della libreria o di uno spread e «Imposta come copertina»: la foto compare nella lista dei Progetti della Home. Se non scegli niente resta la prima foto impaginata.",
+        where: ["Clic destro sulla foto", "Imposta come copertina", "Home"],
+      },
+    ],
+  },
+  {
     version: "0.2.8",
     date: "2026-10-05",
     headline: "Provino: tutti gli spread in una vista",

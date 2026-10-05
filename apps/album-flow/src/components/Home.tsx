@@ -1,3 +1,4 @@
+import { coverAssetOf } from "../model/library";
 import { memo, useMemo, useState } from "react";
 import type { AlbumAssetV2, AlbumProjectV2, AlbumStage } from "@photo-tools/shared-types";
 import { useAssetSrc } from "../hooks/useAssetSrc";
@@ -9,10 +10,7 @@ import { ContextMenu, Modal, type MenuItem } from "./ui";
 type View = "columns" | "list" | "grid";
 type Sort = "updated" | "name" | "created";
 
-function coverAsset(project: AlbumProjectV2): AlbumAssetV2 | undefined {
-  const first = project.spreads.flatMap((spread) => spread.areas.flatMap((area) => area.items))[0];
-  return (first && project.assets.find((asset) => asset.id === first.assetId)) ?? project.assets[0];
-}
+const coverAsset = coverAssetOf;
 
 const Cover = memo(function Cover({ project }: { project: AlbumProjectV2 }) {
   const asset = coverAsset(project);

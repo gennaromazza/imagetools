@@ -52,6 +52,7 @@ export interface StageActions {
   revealItem: (itemId: string) => void;
   copyItemName: (itemId: string) => void;
   locateInLibrary: (itemId: string) => void;
+  setCover: (itemId: string) => void;
   resetItemView: (itemId: string) => void;
   replaceWithSelection: (itemId: string) => void;
   rate: (assetId: string, rating: number) => void;
@@ -218,6 +219,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     return [
       { label: "Guarda in grande", icon: "eye", hint: "Spazio", onClick: () => actions.viewItem(itemId) },
       { label: "Trova nella libreria", icon: "search", onClick: () => actions.locateInLibrary(itemId) },
+      { label: project.coverAssetId === found.item.assetId ? "È la copertina del progetto" : "Imposta come copertina", icon: "book", disabled: project.coverAssetId === found.item.assetId, onClick: () => actions.setCover(itemId) },
       { separator: true, label: "-" },
       { label: cropMode && selectedItemId === itemId ? "Chiudi il ritaglio" : "Ritaglia e sposta nello slot", icon: "crop", hint: "Invio", disabled: !canCrop, onClick: () => actions.toggleCrop(itemId) },
       { label: "Ripristina ritaglio, zoom e forma", icon: "undo", hint: "0", disabled: found.item.locked, onClick: () => actions.resetItemView(itemId) },

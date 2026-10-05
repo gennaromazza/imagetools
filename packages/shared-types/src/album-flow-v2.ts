@@ -222,6 +222,8 @@ export interface AlbumProjectV2 {
   updatedAt: string;
   stage: AlbumStage;
   selectorRevision?: string;
+  /** Foto scelta come copertina del progetto (mostrata nella Home); assente = la prima foto impaginata. */
+  coverAssetId?: string;
   assets: AlbumAssetV2[];
   labels: AlbumLabelDefinition[];
   chapters: AlbumChapterV2[];
