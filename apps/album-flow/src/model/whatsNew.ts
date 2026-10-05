@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.5",
+    date: "2026-10-05",
+    headline: "I layout tengono conto della forma delle foto",
+    items: [
+      {
+        title: "Layout calcolati con la forma scelta",
+        text: "Se tagli una foto orizzontale in verticale con il menu Forma, i layout proposti la trattano come verticale: Mescola, le frecce, i tasti 1-9 e il browser dei layout scelgono disposizioni adatte alla forma che hai dato.",
+        where: ["Menu Forma", "Mescola", "Browser dei layout"],
+      },
+    ],
+  },
+  {
     version: "0.2.4",
     date: "2026-10-05",
     headline: "Riempi gli spazi bianchi senza cambiare la disposizione",

@@ -2,8 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendAssets, resetItemView, setItemView, swapItems } from "./items";
 import { addSpread } from "./spreads";
-import { setAreaStyle } from "./areas";
-import { itemAspect, spreadGeometry, type Project } from "./project";
+import { areaCandidates, setAreaStyle } from "./areas";
+import { areaPhotos, effectiveAspect, itemAspect, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { placeItem } from "./placement";
 import { SHAPE_PRESETS, presetForShape } from "./shapes";
@@ -104,4 +104,27 @@ test("forme predefinite: rapporti distinti e riconoscimento con tolleranza", () 
   assert.equal(presetForShape(0.8)?.id, "4:5");
   assert.equal(presetForShape(1.1), null);
   assert.equal(presetForShape(undefined), null);
+});
+
+test("forma per foto: i layout proposti la trattano con la forma scelta, non con quella dell'originale", () => {
+  let project = album(4);
+  const target = itemsOf(project)[0];
+  const asset = project.assets.find((candidate) => candidate.id === target.assetId)!;
+  assert.ok(itemAspect(asset) > 1, "la foto di prova è orizzontale");
+  const before = areaCandidates(project, project.spreads[0], 0, 24);
+  project = setItemView(project, target.id, { shape: 0.5 });
+  const area = project.spreads[0].areas[0];
+  const photo = areaPhotos(project, area).find((candidate) => candidate.id === target.id)!;
+  assert.equal(photo.aspect, 0.5, "il generatore riceve la forma scelta");
+  assert.equal(effectiveAspect(itemsOf(project)[0], asset), 0.5);
+  assert.equal(effectiveAspect(itemsOf(project)[1], asset), itemAspect(asset), "le altre restano con l'originale");
+  const after = areaCandidates(project, project.spreads[0], 0, 24);
+  assert.notEqual(JSON.stringify(after.map((candidate) => candidate.tree)), JSON.stringify(before.map((candidate) => candidate.tree)), "i layout cambiano");
+  // la foto verticale riceve nel miglior layout una cella più stretta di quella che avrebbe da orizzontale
+  const ratioOf = (candidates: typeof after) => {
+    const spread = { ...project.spreads[0], areas: [{ ...area, layout: candidates[0].tree as never }, project.spreads[0].areas[1]] };
+    const rect = spreadGeometry({ ...project, spreads: [spread] }, spread)[0].cells.find((c) => c.itemId === target.id)!.rect;
+    return rect.w / rect.h;
+  };
+  assert.ok(ratioOf(after) < ratioOf(before), `cella più alta che larga rispetto a prima: ${ratioOf(after)} vs ${ratioOf(before)}`);
 });

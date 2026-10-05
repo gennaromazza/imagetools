@@ -5,7 +5,7 @@ import { insertAtNode, insertBeside, leaf, naturalRatios, removeLeaf, type Inser
 import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, clampNumber } from "./defaults";
 import { relayoutArea } from "./areas";
 import { clampAngle, placeItem } from "./placement";
-import { alignChanged, areaGeometry, assetMap, createItem, findItem, findSpread, itemAspect, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
+import { alignChanged, areaGeometry, assetMap, createItem, findItem, effectiveAspect, findSpread, itemAspect, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
 import { cropCenter } from "../slot-geometry";
 import { addSpread } from "./spreads";
 
@@ -341,7 +341,7 @@ export function previewDropRect(
   } else return null;
   if (area.style.mode === "fit") {
     // Come nel rilascio vero: con «foto intera» le divisioni si regolano perché le foto risultino allineate.
-    const aspects = new Map(area.items.map((item) => [item.id, itemAspect(assets.get(item.assetId))] as const));
+    const aspects = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))] as const));
     aspects.set(TMP, itemAspect(assets.get(dragged.assetId)));
     layout = naturalRatios(layout, (id) => aspects.get(id) ?? 1.5, inner, Math.max(0, area.style.gapCm * 10));
   }

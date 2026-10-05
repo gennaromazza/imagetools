@@ -6,7 +6,7 @@ import { STYLE_LIMITS, clampNumber } from "./defaults";
 import { newId } from "./ids";
 import { orientationOf } from "./import";
 import { matchTemplates, templateArea, type TemplateMatch } from "./templates";
-import { alignedForFit, areaGeometry, areaPhotos, assetMap, hasFreeLayout, itemAspect, mapSpread, normalizeArea, replaceArea, touch, findSpread, type Project } from "./project";
+import { alignedForFit, areaGeometry, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, mapSpread, normalizeArea, replaceArea, touch, findSpread, type Project } from "./project";
 
 const MAX_CANDIDATES = 24;
 
@@ -19,7 +19,7 @@ export function areaCandidates(project: Project, spread: AlbumSpread, areaIndex:
   if (area.style.mode !== "fit") return candidates;
   // «Foto intera»: stessa disposizione, ma con le divisioni regolate perché le foto risultino allineate.
   const assets = assetMap(project);
-  const byItem = new Map(area.items.map((item) => [item.id, itemAspect(assets.get(item.assetId))]));
+  const byItem = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))]));
   return candidates.map((candidate) => ({ ...candidate, tree: naturalRatios(candidate.tree, (id) => byItem.get(id) ?? 1.5, geometry.inner, geometry.gapMm) }));
 }
 
@@ -211,7 +211,7 @@ export function resetDividerRatio(project: Project, spreadId: string, areaIndex:
   if (!node || node.kind !== "split") return project;
   const assets = assetMap(project);
   const aspectOf = (n: LayoutNode): number => {
-    if (n.kind === "leaf") return itemAspect(assets.get(area.items.find((item) => item.id === n.itemId)?.assetId ?? ""));
+    if (n.kind === "leaf") { const leaf = area.items.find((item) => item.id === n.itemId); return leaf ? effectiveAspect(leaf, assets.get(leaf.assetId)) : 1; }
     const a = aspectOf(n.first);
     const b = aspectOf(n.second);
     return n.dir === "row" ? a + b : 1 / (1 / a + 1 / b);

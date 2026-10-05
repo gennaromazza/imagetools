@@ -4,7 +4,7 @@ import { cropFraction } from "../engine/generate";
 import { applyShape, countLeaves, leaf, leafIds, shapeOfTree, split } from "../engine/tree";
 import { newId } from "./ids";
 import { MAX_ITEMS_PER_AREA } from "./defaults";
-import { areaGeometry, assetMap, hasFreeLayout, itemAspect, mapSpread, nowIso, normalizeArea, replaceArea, touch, findItem, type Project } from "./project";
+import { areaGeometry, assetMap, effectiveAspect, hasFreeLayout, mapSpread, nowIso, normalizeArea, replaceArea, touch, findItem, type Project } from "./project";
 
 /**
  * Template disegnati dall'utente: si salvano nel computer (valgono per tutti gli album), si riconoscono dal numero di foto e
@@ -163,7 +163,7 @@ export function bestAssignment(cellAspects: readonly number[], photoAspects: rea
 }
 
 function itemAspects(area: AlbumArea, assets: ReadonlyMap<string, AlbumAssetV2>): number[] {
-  return area.items.map((item) => itemAspect(assets.get(item.assetId)));
+  return area.items.map((item) => effectiveAspect(item, assets.get(item.assetId)));
 }
 
 /** Template adatti a un'area (stesso tipo e numero di foto), dal migliore. */

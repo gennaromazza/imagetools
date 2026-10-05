@@ -51,6 +51,11 @@ export function itemAspect(asset: AlbumAssetV2 | undefined): number {
   return isQuarterTurn(asset) ? 1 / safe : safe;
 }
 
+/** Proporzioni con cui una foto conta per i layout: la forma scelta per la foto, altrimenti quelle dell'originale. */
+export function effectiveAspect(item: Pick<AlbumItem, "shape">, asset: AlbumAssetV2 | undefined): number {
+  return item.shape && item.shape > 0 ? item.shape : itemAspect(asset);
+}
+
 // ---------------------------------------------------------------------------
 // Aree e spread
 // ---------------------------------------------------------------------------
@@ -187,7 +192,7 @@ export function spreadGeometry(project: Project, spread: AlbumSpread, overrides?
 /** Foto di un'area, nell'ordine di lettura, con le proporzioni per il generatore di layout. */
 export function areaPhotos(project: Project, area: AlbumArea): LayoutPhoto[] {
   const assets = assetMap(project);
-  return area.items.map((item) => ({ id: item.id, aspect: itemAspect(assets.get(item.assetId)) }));
+  return area.items.map((item) => ({ id: item.id, aspect: effectiveAspect(item, assets.get(item.assetId)) }));
 }
 
 /** Tutte le foto (assetId) usate nello spread, con il numero di comparse. */
@@ -206,7 +211,7 @@ export function countItems(project: Project): number {
 export function alignedForFit(project: Project, area: AlbumArea, inner: { w: number; h: number }, gapMm: number): AlbumArea {
   if (area.style.mode !== "fit" || !area.layout || area.items.length < 2 || hasFreeLayout(area)) return area;
   const assets = assetMap(project);
-  const byItem = new Map(area.items.map((item) => [item.id, itemAspect(assets.get(item.assetId))]));
+  const byItem = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))]));
   const layout = naturalRatios(area.layout, (id) => byItem.get(id) ?? 1.5, inner, gapMm);
   return layout === area.layout ? area : { ...area, layout };
 }
