@@ -5,25 +5,12 @@ import { mediaIdsOfSpread, mediaIdsOfProject, fontIdsOfSpread } from "../model/d
 import { collectEmbeddedMedia, getMedia } from "../model/mediaStore";
 import { serializeAlbumProject } from "../model/portability";
 import { canvasMeasure, embeddedFontCss, loadFonts } from "./fonts";
-import { renderSpreadSvg, spreadSizeWithBleedMm } from "./spread-svg";
+import { exportSpreadsWith, safeFileName, type ExportOptions, type ExportWriter } from "./export-core";
 
-export function safeFileName(name: string): string {
-  return name.replace(/[^\p{L}\p{N}_-]+/gu, "-").replace(/^-+|-+$/g, "") || "album";
-}
+export { safeFileName, spreadFileName } from "./export-core";
 
-export function spreadFileName(project: AlbumProjectV2, index: number, extension: string): string {
-  return `${safeFileName(project.projectName)}-spread-${String(index + 1).padStart(2, "0")}.${extension}`;
-}
+export { spreadPixelSize } from "./export-core";
 
-/** Dimensioni in pixel di uno spread (abbondanza compresa) a una data risoluzione, limitate al lato massimo. */
-export function spreadPixelSize(project: AlbumProjectV2, dpi: number, maxSide = 12000): { width: number; height: number } {
-  const { width, height } = spreadSizeWithBleedMm(project);
-  const wanted = Math.max((width / 25.4) * dpi, (height / 25.4) * dpi);
-  const scale = Math.min(1, maxSide / wanted);
-  return { width: Math.round((width / 25.4) * dpi * scale), height: Math.round((height / 25.4) * dpi * scale) };
-}
-
-/** Lato lungo delle foto da incorporare in base alla risoluzione richiesta. */
 export function embedDimensionFor(dpi: number): number {
   return Math.min(5000, Math.max(1600, Math.round((dpi / 300) * 4200)));
 }
@@ -66,12 +53,7 @@ export async function svgToJpegBytes(svg: string, width: number, height: number,
 // Dove si scrivono i file
 // ---------------------------------------------------------------------------
 
-export interface ExportWriter {
-  /** Scrive un file e restituisce il percorso finale, se noto. */
-  write(fileName: string, bytes: Uint8Array, mime: string): Promise<string | null>;
-  /** Descrizione di dove sono finiti i file, per il messaggio finale. */
-  where(): string;
-}
+export type { ExportWriter, ExportOptions } from "./export-core";
 
 /** Nel browser ogni file è un download. */
 export function browserWriter(): ExportWriter {
@@ -106,16 +88,6 @@ export async function chooseDesktopWriter(): Promise<(ExportWriter & { directory
   };
 }
 
-export interface ExportOptions {
-  kind: "jpg" | "svg";
-  dpi: number;
-  quality: number;
-  /** Indici degli spread da esportare. */
-  spreads: number[];
-  onProgress?: (done: number, total: number) => void;
-  signal?: { cancelled: boolean };
-}
-
 /** Sfondi a immagine, testi e grafiche di uno spread, pronti per un SVG autonomo: immagini della libreria, font incorporati, testo misurato con i font veri. */
 async function designForExport(spread: AlbumSpread) {
   const fonts = fontIdsOfSpread(spread);
@@ -130,28 +102,10 @@ async function designForExport(spread: AlbumSpread) {
 
 /** Esporta gli spread uno alla volta (incorporando le sole foto necessarie) per tenere bassa la memoria. */
 export async function exportSpreads(project: AlbumProjectV2, writer: ExportWriter, options: ExportOptions): Promise<{ written: string[]; count: number }> {
-  const written: string[] = [];
-  const size = spreadPixelSize(project, options.dpi);
-  let done = 0;
-  for (const index of options.spreads) {
-    if (options.signal?.cancelled) break;
-    const spread = project.spreads[index];
-    if (!spread) continue;
-    const assets = await embedSpreadAssets(project, spread, embedDimensionFor(options.dpi));
-    const design = await designForExport(spread);
-    const svg = renderSpreadSvg(project, spread, assets, { forPrint: true, design }, index);
-    if (options.kind === "svg") {
-      const path = await writer.write(spreadFileName(project, index, "svg"), new TextEncoder().encode(svg), "image/svg+xml");
-      if (path) written.push(path);
-    } else {
-      const bytes = await svgToJpegBytes(svg, size.width, size.height, options.quality);
-      const path = await writer.write(spreadFileName(project, index, "jpg"), bytes, "image/jpeg");
-      if (path) written.push(path);
-    }
-    done += 1;
-    options.onProgress?.(done, options.spreads.length);
-  }
-  return { written, count: done };
+  return exportSpreadsWith(project, writer, options, {
+    prepare: async (spread) => ({ assets: await embedSpreadAssets(project, spread, embedDimensionFor(options.dpi)), design: await designForExport(spread) }),
+    toJpeg: svgToJpegBytes,
+  });
 }
 
 export async function exportProjectFile(project: AlbumProjectV2, writer: ExportWriter): Promise<string | null> {

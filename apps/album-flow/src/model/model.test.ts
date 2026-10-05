@@ -4,7 +4,7 @@ import { resolveDropTarget, type DropTarget } from "../engine/drop";
 import { leafIds } from "../engine/tree";
 import { TEMPLATE_SEED_BASE, layoutChoices, alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, areaCandidates, favoritesFor, isFavoriteLayout, mirrorArea, removeFavoriteLayout, resetDividerRatio, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "./areas";
 import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, previewDropRect, removeItem, replaceItemAsset, resetItemView, setItemView, swapItems, toggleItemLock } from "./items";
-import { addSpread, clearSpread, duplicateSpread, moveSpread, removeSpread, setSplitMode, swapAreas } from "./spreads";
+import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSplitMode, swapAreas } from "./spreads";
 import { findItem, itemAspect, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeAsset, makeProject } from "./fixtures";
 import { TEMPLATE_STORAGE_KEY, applyTemplate, applyTemplatesToAlbum, bestAssignment, loadTemplates, matchTemplates, removeTemplate, reorderFrame, saveTemplates, sanitizeTemplate, setFrame, templateFromArea, templateTarget, upsertTemplate } from "./templates";
@@ -577,6 +577,50 @@ test("Modo con Alt + clic: ridisegna la disposizione migliore, il clic semplice 
   const redone = setAreaStyle(manual, id, 0, { mode: "fit" }, true);
   assert.equal(redone.spreads[0].areas[0].seed, 0, "Alt + clic: ricalcolata con la migliore");
   assertProjectInvariants(redone, "Alt + clic su Modo");
+});
+
+test("provino: spostare più spread insieme davanti a una posizione tiene l'ordine e non perde né duplica nulla", () => {
+  let project = makeProject(4);
+  for (let i = 0; i < 7; i += 1) project = addSpread(project);
+  const ids = project.spreads.map((spread) => spread.id);
+  const order = (p: Project) => p.spreads.map((spread) => ids.indexOf(spread.id));
+  assert.deepEqual(order(moveSpreads(project, [4, 5], 1)), [0, 4, 5, 1, 2, 3, 6]);
+  assert.deepEqual(order(moveSpreads(project, [1, 3], 7)), [0, 2, 4, 5, 6, 1, 3]);
+  assert.deepEqual(order(moveSpreads(project, [2], 0)), [2, 0, 1, 3, 4, 5, 6]);
+  assert.deepEqual(order(moveSpreads(project, [5, 1], 3)), [0, 2, 1, 5, 3, 4, 6], "gli spostati tengono l'ordine reciproco");
+  // lasciare gli spread dove sono non cambia nulla
+  assert.equal(moveSpreads(project, [2], 2), project);
+  assert.equal(moveSpreads(project, [2], 3), project);
+  assert.equal(moveSpreads(project, [], 1), project);
+  assert.equal(moveSpreads(project, [99], 1), project);
+  assert.equal(moveSpreads(project, [1], 99), project);
+  for (const move of [[0, 1, 2], [3], [6, 0], [2, 4, 5]]) {
+    for (let before = 0; before <= 7; before += 1) {
+      const result = moveSpreads(project, move, before);
+      assert.equal(new Set(result.spreads.map((spread) => spread.id)).size, 7);
+      assertProjectInvariants(result, `provino ${move}→${before}`);
+    }
+  }
+});
+
+test("provino: 300 riordini casuali coincidono con il calcolo di riferimento e non perdono né duplicano spread", () => {
+  let project = makeProject(4);
+  for (let i = 0; i < 12; i += 1) project = addSpread(project);
+  let seed = 12345;
+  const random = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  let expected = project.spreads.map((spread) => spread.id);
+  for (let step = 0; step < 300; step += 1) {
+    const count = 1 + Math.floor(random() * 4);
+    const indices = Array.from({ length: count }, () => Math.floor(random() * expected.length));
+    const before = Math.floor(random() * (expected.length + 1));
+    const moving = [...new Set(indices)].sort((x, y) => x - y);
+    const rest = expected.filter((_, index) => !moving.includes(index));
+    const at = expected.slice(0, before).filter((_, index) => !moving.includes(index)).length;
+    expected = [...rest.slice(0, at), ...moving.map((index) => expected[index]), ...rest.slice(at)];
+    project = moveSpreads(project, indices, before);
+    assert.deepEqual(project.spreads.map((spread) => spread.id), expected, `passo ${step}`);
+  }
+  assertProjectInvariants(project, "dopo 300 riordini");
 });
 
 // ------------------------------------------------------------------ template dell'utente

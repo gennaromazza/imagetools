@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.8",
+    date: "2026-10-05",
+    headline: "Provino: tutti gli spread in una vista",
+    items: [
+      {
+        title: "Cambia l'ordine dell'album da una sola schermata",
+        text: "Il Provino mostra tutti gli spread insieme, come i provini di stampa. Trascinali per riordinarli, anche più d'uno alla volta (Maiusc o Ctrl/⌘ per sceglierli). Alt + ← → sposta di un posto, doppio clic o Invio aprono lo spread. L'esportazione segue l'ordine che hai dato.",
+        where: ["Provino", "tasto V"],
+      },
+    ],
+  },
+  {
     version: "0.2.7",
     date: "2026-10-05",
     headline: "Calamita e linee guida nei template liberi",

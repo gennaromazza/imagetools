@@ -750,3 +750,25 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .thumb-preview__image img { max-width: none; flex: none; }
 .thumb-preview__caption { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; font-size: 12px; color: var(--text-muted); }
 .thumb-preview__caption strong { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* provino: tutti gli spread in una sola vista */
+.sheet { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: var(--bg); }
+.sheet__head { display: flex; align-items: center; gap: 18px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.sheet__head > div { flex: 1; min-width: 0; }
+.sheet__head h2 { margin: 0; font-size: 18px; }
+.sheet__zoom { display: inline-flex; align-items: center; gap: 8px; color: var(--text-muted); }
+.sheet__zoom input { width: 140px; }
+.sheet__grid { flex: 1; overflow: auto; display: grid; gap: 14px 12px; align-content: start; padding: 18px 20px 28px; }
+.sheet__item { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 8px; border-radius: 10px; cursor: pointer; background: var(--bg-panel); border: 1px solid transparent; }
+.sheet__item:hover { background: var(--bg-hover); }
+.sheet__item.is-selected { border-color: var(--accent-bright); background: var(--accent-soft); }
+.sheet__item.is-current .sheet__num { color: var(--accent-bright); font-weight: 700; }
+.sheet__item.is-drop-before { box-shadow: -5px 0 0 var(--accent-bright); }
+.sheet__item.is-drop-after { box-shadow: 5px 0 0 var(--accent-bright); }
+.sheet__after { position: absolute; right: -8px; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: var(--accent-bright); pointer-events: none; }
+.sheet__num { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.sheet__thumb .spread { width: 100%; height: auto; pointer-events: none; }
+.sheet__bar { display: block; height: 3px; border-radius: 2px; }
+.sheet__meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet__actions { position: absolute; top: 4px; right: 4px; display: none; gap: 2px; }
+.sheet__item:hover .sheet__actions { display: flex; }

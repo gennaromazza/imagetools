@@ -218,3 +218,60 @@ test("SVG: la foto raddrizzata ruota dentro un ritaglio che resta dritto", () =>
   assert.equal(svg.match(/<g clip-path="url\(#c0-[^)]+\)"><g transform="rotate\(6 /g)?.length, 1);
   assert.equal(svg.match(/<image /g)?.length, plain.match(/<image /g)?.length);
 });
+
+test("provino ed esportazione: dopo avere riordinato gli spread i file escono nell'ordine assegnato, con il contenuto giusto", async () => {
+  const { moveSpreads } = await import("../model/spreads");
+  const { exportSpreadsWith, spreadFileName } = await import("./export-core");
+  const { parseAlbumProject, serializeAlbumProject } = await import("../model/portability");
+  // sei spread, ognuno con una foto sua e riconoscibile (immagine incorporata diversa)
+  let project = makeProject(6);
+  project = { ...project, assets: project.assets.map((asset, index) => ({ ...asset, previewUrl: `data:image/png;base64,TAG${index}` })) };
+  for (let i = 0; i < 6; i += 1) {
+    project = addSpread(project);
+    project = appendAssets(project, project.spreads[i].id, 0, [`a${i}`]);
+  }
+  const photoOf = (p: Project, index: number) => p.spreads[index].areas.flatMap((area) => area.items).map((item) => item.assetId);
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map((i) => photoOf(project, i)[0]), ["a0", "a1", "a2", "a3", "a4", "a5"]);
+
+  // il provino sposta gli spread 5 e 6 davanti al 2, poi il 1 in fondo
+  let reordered = moveSpreads(project, [4, 5], 1);
+  reordered = moveSpreads(reordered, [0], reordered.spreads.length);
+  const expected = ["a4", "a5", "a1", "a2", "a3", "a0"];
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map((i) => photoOf(reordered, i)[0]), expected);
+  assertProjectInvariants(reordered, "dopo il provino");
+
+  const files = new Map<string, string>();
+  const writer = {
+    async write(fileName: string, bytes: Uint8Array) { files.set(fileName, new TextDecoder().decode(bytes)); return fileName; },
+    where: () => "memoria",
+  };
+  const deps = {
+    prepare: async (spread: Project["spreads"][number]) => ({ assets: new Map(reordered.assets.filter((asset) => spread.areas.some((area) => area.items.some((entry) => entry.assetId === asset.id))).map((asset) => [asset.id, asset])) }),
+    toJpeg: async () => new Uint8Array(),
+  };
+  const result = await exportSpreadsWith(reordered, writer, { kind: "svg", dpi: 150, quality: 0.9, spreads: [0, 1, 2, 3, 4, 5] }, deps);
+  assert.equal(result.count, 6);
+  assert.deepEqual([...files.keys()], [0, 1, 2, 3, 4, 5].map((i) => spreadFileName(reordered, i, "svg")), "i file seguono la numerazione dell'ordine nuovo");
+  expected.forEach((asset, position) => {
+    const svg = files.get(spreadFileName(reordered, position, "svg"))!;
+    assert.ok(svg.includes(`TAG${asset.slice(1)}`), `file ${position + 1}: contiene la foto ${asset}`);
+    for (const other of expected.filter((id) => id !== asset)) assert.ok(!svg.includes(`TAG${other.slice(1)}"`), `file ${position + 1}: non contiene la foto ${other}`);
+    assert.ok(svg.includes(`aria-label="Spread ${position + 1}"`), `file ${position + 1}: numero dello spread`);
+  });
+
+  // esportare solo alcuni spread mantiene il loro numero nell'ordine nuovo
+  files.clear();
+  await exportSpreadsWith(reordered, writer, { kind: "svg", dpi: 150, quality: 0.9, spreads: [5, 0] }, deps);
+  assert.deepEqual([...files.keys()], [spreadFileName(reordered, 5, "svg"), spreadFileName(reordered, 0, "svg")]);
+  assert.ok(files.get(spreadFileName(reordered, 5, "svg"))!.includes("TAG0"));
+
+  // anche in JPG: stesso ordine e stessa numerazione
+  files.clear();
+  await exportSpreadsWith(reordered, writer, { kind: "jpg", dpi: 150, quality: 0.9, spreads: [0, 1, 2, 3, 4, 5] }, { ...deps, toJpeg: async () => new Uint8Array([1]) });
+  assert.deepEqual([...files.keys()], [0, 1, 2, 3, 4, 5].map((i) => spreadFileName(reordered, i, "jpg")));
+
+  // il file di progetto salvato e riaperto conserva l'ordine
+  const reopened = parseAlbumProject(serializeAlbumProject(reordered));
+  assert.deepEqual(reopened.spreads.map((spread) => spread.id), reordered.spreads.map((spread) => spread.id));
+  assert.deepEqual([0, 1, 2, 3, 4, 5].map((i) => photoOf(reopened, i)[0]), expected);
+});

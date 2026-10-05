@@ -10,9 +10,10 @@ import { applyImport, folderOf, planImport } from "../model/import";
 import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemView, toggleItemLock } from "../model/items";
 import { assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
 import { findItem, nowIso, touch } from "../model/project";
-import { addSpread, clearSpread, duplicateSpread, moveSpread, removeSpread, setSpreadDone, setSplitMode, swapAreas } from "../model/spreads";
+import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, swapAreas } from "../model/spreads";
 import { STAGES } from "../model/store";
 import { canRedo, canUndo, createHistory, pushHistory, redo, replacePresent, undo, type History } from "../history";
+import { ContactSheet } from "./ContactSheet";
 import { AutoBuildDialog } from "./AutoBuildDialog";
 import { ChapterManager } from "./ChapterManager";
 import { ClientPreview } from "./ClientPreview";
@@ -107,7 +108,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
   const [sizes, setSizes] = useState(() => readNumber("filex.albumFlow.sizes", 0) === 1);
   const [layoutsOpen, setLayoutsOpen] = useState(false);
   const [zone, setZone] = useState<"stage" | "library">("stage");
-  const [dialog, setDialog] = useState<null | "autobuild" | "export" | "shortcuts" | "chapters" | "format" | "template" | "cloud" | "relink">(null);
+  const [dialog, setDialog] = useState<null | "autobuild" | "export" | "shortcuts" | "chapters" | "format" | "template" | "cloud" | "relink" | "contact">(null);
   const [templates, setTemplates] = useState<AreaTemplate[]>(() => loadTemplates());
   const [templateEdit, setTemplateEdit] = useState<{ initial?: AreaTemplate; seed?: TemplateSeed } | null>(null);
   const [viewer, setViewer] = useState<null | { ids: string[]; index: number }>(null);
@@ -532,6 +533,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
       if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) doRedo(); else doUndo(); return; }
       if (mod && key === "y") { event.preventDefault(); doRedo(); return; }
       if (mod && key === "d") { event.preventDefault(); if (state.spread) actions.duplicateSpread(); return; }
+      if (!mod && key === "v" && state.count > 1) { event.preventDefault(); setDialog("contact"); return; }
       if (mod && key === "b") { event.preventDefault(); setDialog("autobuild"); return; }
       if (mod && key === "e") { event.preventDefault(); setDialog("export"); return; }
       if (mod && key === "l") { event.preventDefault(); if (state.spread && state.spread.areas.length > 1) actions.link(); return; }
@@ -705,6 +707,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
         </label>
         {missingIds.size > 0 ? <button type="button" className="btn btn--warn" onClick={() => setDialog("relink")} title="Alcune foto non si trovano più sul disco: indica dove sono adesso">{missingIds.size} {missingIds.size === 1 ? "foto non trovata" : "foto non trovate"} · Ricollega</button> : null}
         {driveAvailable() ? <button type="button" className="btn" onClick={() => { newDrive.markSeen(); setDialog("cloud"); }} title="Backup del progetto su Google Drive (le foto non vengono caricate)"><Icon name="archive" size={16} /> Drive{newDrive.isNew ? <span className="new-pill">Nuovo</span> : null}</button> : null}
+        <button type="button" className="btn" onClick={() => setDialog("contact")} disabled={count < 2} title="Provino: tutti gli spread in una vista, per cambiare l'ordine (V)"><Icon name="grid" size={16} /> Provino</button>
         <button type="button" className="btn" onClick={() => setDialog("autobuild")} disabled={!hasPhotos} title="Auto Build (Ctrl/⌘+B)"><Icon name="wand" size={16} /> Auto Build</button>
         <IconButton icon="play" label="Anteprima per il cliente (F5)" onClick={() => setPresenting(true)} disabled={count === 0} size={20} className="icon-btn--round" />
         <button type="button" className="btn btn--primary" onClick={() => setDialog("export")} disabled={count === 0} title="Esporta (Ctrl/⌘+E)"><Icon name="export" size={16} /> Esporta</button>
@@ -780,6 +783,23 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
       {dropOverlay ? <div className="drop-overlay" aria-hidden="true"><Icon name="import" size={44} /><strong>Rilascia per importare</strong><span>Foto o cartelle intere: potrai scegliere il capitolo</span></div> : null}
       {toast ? <div className={`toast${viewer ? " toast--high" : ""}`} role="status">{toast.message}{toast.undo ? <button type="button" className="toast__action" onClick={() => { doUndo(); setToast(null); }}>Annulla</button> : null}</div> : null}
 
+      {dialog === "contact" ? (
+        <ContactSheet
+          project={project}
+          assets={assets}
+          current={index}
+          onClose={() => setDialog(null)}
+          onOpen={(i) => { goTo(i); setDialog(null); }}
+          onMove={(indices, before) => {
+            const currentId = project.spreads[index]?.id;
+            commit((p) => moveSpreads(p, indices, before));
+            const moved = historyRef.current.present.spreads.findIndex((candidate) => candidate.id === currentId);
+            if (moved >= 0) setSpreadIndex(moved);
+          }}
+          onDuplicate={(i) => commit((p) => duplicateSpread(p, p.spreads[i].id))}
+          onRemove={(i) => { commit((p) => removeSpread(p, p.spreads[i].id)); notify(`Spread ${i + 1} eliminato.`, true); }}
+        />
+      ) : null}
       {dialog === "autobuild" ? <AutoBuildDialog project={project} templateCount={templates.length} onClose={() => setDialog(null)} onRun={runAutoBuild} /> : null}
       {dialog === "export" ? <ExportDialog project={project} currentIndex={index} onClose={() => setDialog(null)} onStatus={notify} onGoTo={goTo} /> : null}
       {dialog === "format" ? <FormatDialog sheet={project.settings.sheet} onClose={() => setDialog(null)} onApply={(sheet) => { commit((p) => touch({ ...p, settings: { ...p.settings, sheet } })); setDialog(null); notify("Formato cambiato: i layout si sono adattati al nuovo foglio.", true); }} /> : null}

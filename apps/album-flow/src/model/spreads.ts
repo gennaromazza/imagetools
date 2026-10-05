@@ -26,6 +26,23 @@ export function moveSpread(project: Project, from: number, to: number): Project 
   return touch({ ...project, spreads });
 }
 
+/**
+ * Sposta più spread insieme davanti alla posizione `before` (0 = in testa, numero di spread = in coda, indice dello spread
+ * di partenza). Gli spread spostati mantengono tra loro l'ordine che avevano. Restituisce lo stesso progetto se nulla cambia.
+ */
+export function moveSpreads(project: Project, indices: readonly number[], before: number): Project {
+  const total = project.spreads.length;
+  const moving = [...new Set(indices)].filter((index) => Number.isInteger(index) && index >= 0 && index < total).sort((a, b) => a - b);
+  if (moving.length === 0 || before < 0 || before > total) return project;
+  const movingSet = new Set(moving);
+  const rest = project.spreads.filter((_, index) => !movingSet.has(index));
+  // posizione nella lista senza gli spostati: tanti spread rimasti quanti ne precedono `before`
+  const at = project.spreads.slice(0, before).filter((_, index) => !movingSet.has(index)).length;
+  const next = [...rest.slice(0, at), ...moving.map((index) => project.spreads[index]), ...rest.slice(at)];
+  if (next.every((spread, index) => spread === project.spreads[index])) return project;
+  return touch({ ...project, spreads: next });
+}
+
 /** Copia uno spread subito dopo: stesse foto e stesso layout, elementi con identificativi nuovi. */
 export function duplicateSpread(project: Project, spreadId: string): Project {
   const found = findSpread(project, spreadId);
