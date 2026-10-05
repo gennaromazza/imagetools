@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-05 - Album Flow 0.2.5
+
+- Corretto: i layout proposti (Mescola, frecce, tasti 1-9, browser dei layout, allineamento di «Foto intera» e abbinamento dei template) ora tengono conto della forma scelta per la foto con il menu «Forma»: una foto orizzontale tagliata in verticale viene trattata come verticale.
+
 ## 2026-10-05 - Album Flow 0.2.4
 
 - Nuovo: Alt + clic sul pulsante Modo (Riempi / Foto intera) cambia modo e ridisegna anche la disposizione migliore; il clic semplice tiene la disposizione e riempie solo gli spazi bianchi.
