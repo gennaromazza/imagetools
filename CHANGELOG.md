@@ -32,6 +32,15 @@
 
 
 
+## 2026-10-05 - Album Flow 0.2.3
+
+- Nuovo: forma per foto. Dalla barra della foto, il menu «Forma» cambia la proporzione di una singola foto (quadrata, verticale, orizzontale, panoramica o come l'originale) senza cambiare il layout; zoom, spostamento e raddrizzamento valgono dentro la forma e «Ripristina» la toglie.
+- Nuovo: Alt + rotella sulla foto la ingrandisce direttamente nel suo spazio, senza aprire il ritaglio; Ctrl/⌘ + Alt + rotella la raddrizza (Maiusc per passi più fini). Ruotando, la foto si ingrandisce da sola quanto serve per coprire lo spazio.
+- Zoom, ritaglio e raddrizzamento funzionano anche in «Foto intera»: la foto modificata riempie la sua cella e le altre restano intere.
+- Cambiando modo tra «Riempi» e «Foto intera» la disposizione resta la stessa (prima veniva ricalcolata), e con «Riempi» spariscono le fasce vuote sopra e sotto.
+- Corretto: trascinando una foto in «Foto intera», il riquadro di anteprima era un'enorme striscia che non corrispondeva allo spazio reale; ora mostra lo spazio che la foto occuperà davvero.
+- Corretto: dopo avere trascinato più foto dalla libreria la selezione restava attiva e il trascinamento successivo portava di nuovo tutte le stesse foto, creando un nuovo foglio con foto già usate.
+
 ## 2026-10-03 - FileX Suite 0.1.67
 
 - Nuova voce «Assistenza» nella barra laterale: scrivi al supporto direttamente dalla Suite, scegliendo se hai un problema, un suggerimento o una domanda, lo strumento coinvolto, l'email per la risposta e il messaggio. Ricevi subito un numero richiesta.
