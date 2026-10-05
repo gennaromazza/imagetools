@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-05 - Album Flow 0.2.8
+
+- Nuovo: vista a provino. Il pulsante «Provino» (tasto V) mostra tutti gli spread dell'album in una sola schermata: si trascinano, anche più d'uno insieme (Maiusc o Ctrl/⌘), per cambiare l'ordine; Alt + ← → li sposta di un posto, doppio clic o Invio aprono lo spread. L'esportazione e il file di progetto seguono l'ordine assegnato.
+
 ## 2026-10-05 - Album Flow 0.2.7
 
 - Nuovo: aggancio (calamita) e linee guida spostando o ridimensionando le foto di un template libero: bordi e centri si attaccano a quelli delle altre foto, dell'area e della piega, con una linea che mostra l'allineamento. Alt durante il trascinamento disattiva l'aggancio.
