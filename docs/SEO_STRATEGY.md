@@ -36,7 +36,7 @@ Ogni nuova guida deve avere una sola query primaria, un titolo descrittivo, un H
 
 ## Distribuzione e autorevolezza
 
-1. Rivendicare e verificare il dominio in Google Search Console; inviare `https://filex-suite.web.app/sitemap.xml` e controllare copertura e problemi almeno mensilmente.
+1. Rivendicare e verificare il dominio in Google Search Console; inviare `https://filex-suite.web.app/sitemap-filex-suite.xml` (la vecchia `sitemap.xml` resta pubblicata ma non va più inviata) e controllare copertura e problemi almeno mensilmente.
 2. Aprire o allineare profili ufficiali del titolare/brand solo dove saranno mantenuti (GitHub, LinkedIn, Instagram o YouTube). Usare sempre nome, URL e contatto coerenti.
 3. Cercare citazioni editoriali pertinenti: blog di fotografia, associazioni locali, formatori, laboratori di stampa e beta tester reali. Non acquistare backlink, recensioni o traffico.
 4. Raccogliere testimonianze verificabili con consenso esplicito, indicando contesto d'uso e senza alterarne il contenuto.
@@ -57,7 +57,7 @@ Ogni nuova guida deve avere una sola query primaria, un titolo descrittivo, un H
 - Un solo H1 e testo utile visibile senza JavaScript.
 - Immagine Open Graph e dati strutturati coerenti con la pagina.
 - Link a tool, supporto/sicurezza e una pagina correlata.
-- Pagina inclusa in `website/sitemap.xml` solo se deve essere indicizzata.
+- Pagina inclusa in `website/sitemap-filex-suite.xml` solo se deve essere indicizzata.
 - Verifica con Rich Results Test e URL Inspection dopo il deploy.
 
 ## Vincoli
