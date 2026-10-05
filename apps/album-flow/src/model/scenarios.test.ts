@@ -374,6 +374,7 @@ const OPERATIONS: Operation[] = [
     },
   },
   { name: "inquadratura", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setItemView(p, entry.item.id, { zoom: 1 + r() * 4, cx: r(), cy: r() }) : p; } },
+  { name: "forma della foto", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setItemView(p, entry.item.id, { shape: r() < 0.3 ? null : 0.2 + r() * 4.8 }) : p; } },
   { name: "raddrizzamento", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setItemView(p, entry.item.id, { angle: (r() - 0.5) * 100 }) : p; } },
   { name: "reimposta inquadratura", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? resetItemView(p, entry.item.id) : p; } },
   { name: "blocca foto", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? toggleItemLock(p, entry.item.id) : p; } },

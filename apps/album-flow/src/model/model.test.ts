@@ -258,6 +258,7 @@ test("shuffle: passa da un layout all'altro mantenendo l'ordine, torna al punto 
   let project = filled(4, 3);
   const id = firstSpreadId(project);
   project = setAreaStyle(project, id, 0, { mode: "fill" });
+  project = applyCandidate(project, id, 0, 0);
   const order = itemsOf(project, 0).map((i) => i.id);
   const candidates = areaCandidates(project, project.spreads[0], 0);
   assert.ok(candidates.length >= 5, `candidati: ${candidates.length}`);
@@ -501,14 +502,17 @@ test("anteprima del rilascio: il riquadro mostrato coincide con il posto che la 
       assert.ok(preview, `anteprima per ${target.zone}/${target.node}`);
       const after = dropOnSpread(project, id, target, { kind: "assets", assetIds: [asset] });
       const added = after.spreads[0].areas[0].items.find((item) => !project.spreads[0].areas[0].items.some((old) => old.id === item.id))!;
-      const real = spreadGeometry(after, after.spreads[0])[0].cells.find((cell) => cell.itemId === added.id)!.rect;
+      const realCell = spreadGeometry(after, after.spreads[0])[0].cells.find((cell) => cell.itemId === added.id)!;
+      const areaAfter = after.spreads[0].areas[0];
+      // In «foto intera» l'anteprima mostra lo spazio della foto, non quello dell'intera cella.
+      const real = placeItem(realCell.rect, added, after.assets.find((candidate) => candidate.id === added.assetId), areaAfter.style, null, realCell.anchor).content;
       for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(preview[key] - real[key]) < 1e-6, `${target.zone}/${target.node} ${asset}: ${key} ${preview[key]} ≠ ${real[key]}`);
     }
   }
   assert.equal(previewDropRect(project.settings.sheet, project.spreads[0], assets, { areaIndex: 0, itemId: project.spreads[0].areas[0].items[0].id, zone: "center" }, { assetId: "a3" }), null, "al centro si evidenzia la foto");
 });
 
-test("foto intera: cambiando il modo il layout si ricalcola e i bordi vuoti diminuiscono", () => {
+test("foto intera: cambiando il modo la disposizione resta e i bordi vuoti non aumentano", () => {
   let project = addSpread(makeProject(10));
   const id = project.spreads[0].id;
   project = dropOnSpread(project, id, { areaIndex: 0, itemId: null, zone: "area" }, { kind: "assets", assetIds: ["a0", "a1", "a2", "a3", "a4"] });
@@ -528,17 +532,37 @@ test("foto intera: cambiando il modo il layout si ricalcola e i bordi vuoti dimi
   const bad = applyCandidate(project, id, 0, areaCandidates(project, project.spreads[0], 0, 24).length - 1);
   const fitted = setAreaStyle(bad, id, 0, { mode: "fit" });
   assert.equal(fitted.spreads[0].areas[0].style.mode, "fit");
-  assert.equal(fitted.spreads[0].areas[0].seed, 0, "ricalcolato con il layout migliore");
+  assert.equal(fitted.spreads[0].areas[0].seed, bad.spreads[0].areas[0].seed, "la disposizione scelta resta");
   assert.ok(waste(fitted) <= waste(bad) + 1e-6, `bordi vuoti: ${waste(bad)} → ${waste(fitted)}`);
   assertProjectInvariants(fitted, "foto intera");
   const back = setAreaStyle(fitted, id, 0, { mode: "fill" });
-  assert.equal(back.spreads[0].areas[0].seed, 0);
+  assert.equal(back.spreads[0].areas[0].seed, bad.spreads[0].areas[0].seed, "tornando a «riempi» la disposizione non cambia");
   // se il modo non cambia, il layout scelto a mano resta
   const kept = setAreaStyle(bad, id, 0, { gapCm: 0.5 });
   assert.deepEqual(kept.spreads[0].areas[0].layout !== null && JSON.stringify(kept.spreads[0].areas[0].layout) === JSON.stringify(bad.spreads[0].areas[0].layout), true);
   // su tutto l'album
   const album = applyStyleToAlbum(setAreaStyle(bad, id, 0, { mode: "fit" }), id, 0);
   assertProjectInvariants(album, "album in foto intera");
+});
+
+test("foto intera: una foto ingrandita o raddrizzata riempie la sua cella, le altre restano intere", () => {
+  let project = addSpread(makeProject(10));
+  const id = project.spreads[0].id;
+  project = dropOnSpread(project, id, { areaIndex: 0, itemId: null, zone: "area" }, { kind: "assets", assetIds: ["a0", "a1"] });
+  project = setAreaStyle(project, id, 0, { mode: "fit" });
+  const [first, second] = itemsOf(project, 0);
+  const place = (p: Project, itemId: string) => {
+    const area = p.spreads[0].areas[0];
+    const cell = spreadGeometry(p, p.spreads[0])[0].cells.find((c) => c.itemId === itemId)!;
+    return placeItem(cell.rect, area.items.find((i) => i.id === itemId)!, p.assets.find((a) => a.id === area.items.find((i) => i.id === itemId)!.assetId), area.style, null, cell.anchor);
+  };
+  const zoomed = setItemView(project, first.id, { zoom: 2 });
+  assert.equal(itemsOf(zoomed, 0)[0].zoom, 2, "lo zoom si memorizza anche in foto intera");
+  assert.ok(place(zoomed, first.id).crop.cropWidth < 1 || place(zoomed, first.id).crop.cropHeight < 1, "la foto ingrandita è ritagliata");
+  assert.equal(place(zoomed, second.id).crop.cropWidth, 1, "l'altra resta intera");
+  const turned = setItemView(project, first.id, { angle: 3 });
+  assert.equal(place(turned, first.id).angle, 3, "il raddrizzamento vale anche in foto intera");
+  assertProjectInvariants(turned, "raddrizzata in foto intera");
 });
 
 // ------------------------------------------------------------------ template dell'utente

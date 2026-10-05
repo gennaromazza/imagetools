@@ -37,6 +37,9 @@ export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 6;
 /** Raddrizzamento massimo della foto (gradi, per lato). */
 export const MAX_ANGLE = 45;
+/** Limiti del rapporto larghezza/altezza scelto per una foto. */
+export const MIN_SHAPE = 0.2;
+export const MAX_SHAPE = 5;
 export const MAX_ITEMS_PER_AREA = 12;
 export const MAX_SPREADS = 400;
 

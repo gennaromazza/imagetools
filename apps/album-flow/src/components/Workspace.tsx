@@ -378,7 +378,6 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
       const found = findItem(project, itemId);
       if (!found) return;
       if (found.item.locked) { notify("La foto è bloccata: sbloccala per ritagliarla."); return; }
-      if (found.area.style.mode !== "fill") { notify("Per ritagliare passa a «Riempi lo spazio» (pulsante MODO)."); return; }
       setSelectedItemId(itemId);
       setActiveArea(found.areaIndex);
       setCropMode((on) => (selectedItemId === itemId ? !on : true));
@@ -386,6 +385,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     dropAssets: (target, ids) => {
       const area = spread?.areas[target.areaIndex];
       commit((p) => dropOnSpread(p, spreadId, target, { kind: "assets", assetIds: ids }));
+      setLibSelection([]); // la selezione non deve restare: il trascinamento successivo porterebbe di nuovo tutte le stesse foto
       setActiveArea(target.areaIndex);
       if (area && area.items.length + ids.length > 12 && target.zone !== "center") notify("Un'area contiene al massimo 12 foto.");
       else { const note = usedNote(ids, index); if (note) notify(`Foto aggiunta.${note}`, true); }
@@ -394,7 +394,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     setDraft,
     commitRatio: (i, path, ratio) => { setDraft(null); commit((p) => setDividerRatio(p, spreadId, i, path, ratio), `ratio:${spreadId}:${i}:${path}`); },
     resetRatio: (i, path) => commit((p) => resetDividerRatio(p, spreadId, i, path)),
-    commitView: (itemId, view) => { setDraft(null); commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle }), `view:${itemId}`); },
+    commitView: (itemId, view) => { setDraft(null); commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle, shape: view.shape }), `view:${itemId}`); },
     style: (i, changes, key) => commit((p) => setAreaStyle(p, spreadId, i, changes), key ? `style:${spreadId}:${i}:${key}` : undefined),
     align: (i, align) => commit((p) => alignArea(p, spreadId, i, align)),
     split: (mode) => { commit((p) => setSplitMode(p, spreadId, mode)); setActiveArea(0); setSelectedItemId(null); },
@@ -756,8 +756,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
           onAdd={() => { commit((p) => addSpread(p)); setSpreadIndex(count); setSelectedItemId(null); setActiveArea(0); }}
           onDuplicate={(i) => { commit((p) => duplicateSpread(p, p.spreads[i].id)); setSpreadIndex(i + 1); }}
           onRemove={(i) => { commit((p) => removeSpread(p, p.spreads[i].id)); notify(`Spread ${i + 1} eliminato.`, true); }}
-          onDropOn={(at, payload) => { const before = historyRef.current.present; commit((p) => moveToSpread(p, p.spreads[at].id, payload)); if (historyRef.current.present === before) return; setSpreadIndex(at); setSelectedItemId(null); setActiveArea(0); notify(`Foto aggiunta allo spread ${at + 1}.${payload.kind === "assets" ? usedNote(payload.assetIds, at) : ""}`, true); }}
-          onDropNew={(at, payload) => { let created = false; commit((p) => { const made = moveToNewSpread(p, at, payload); created = made.spreadId !== null; return made.project; }); if (!created) return; setSpreadIndex(at); setSelectedItemId(null); setActiveArea(0); notify(`Nuovo spread ${at + 1} con la foto.${payload.kind === "assets" ? usedNote(payload.assetIds, at) : ""}`, true); }}
+          onDropOn={(at, payload) => { const before = historyRef.current.present; commit((p) => moveToSpread(p, p.spreads[at].id, payload)); if (historyRef.current.present === before) return; if (payload.kind === "assets") setLibSelection([]); setSpreadIndex(at); setSelectedItemId(null); setActiveArea(0); notify(`Foto aggiunta allo spread ${at + 1}.${payload.kind === "assets" ? usedNote(payload.assetIds, at) : ""}`, true); }}
+          onDropNew={(at, payload) => { let created = false; commit((p) => { const made = moveToNewSpread(p, at, payload); created = made.spreadId !== null; return made.project; }); if (!created) return; if (payload.kind === "assets") setLibSelection([]); setSpreadIndex(at); setSelectedItemId(null); setActiveArea(0); notify(`Nuovo spread ${at + 1} con la foto.${payload.kind === "assets" ? usedNote(payload.assetIds, at) : ""}`, true); }}
           onMove={(from, to) => { commit((p) => moveSpread(p, from, to)); setSpreadIndex(to); }}
         />
       </div>

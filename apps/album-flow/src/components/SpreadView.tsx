@@ -87,22 +87,26 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
   const interactive = variant === "stage";
   const ref = useRef<HTMLDivElement>(null);
   const pan = useRef<{ x: number; y: number; cx: number; cy: number } | null>(null);
-  const canCrop = selected && cropActive && !item.locked && area.style.mode === "fill";
+  const canCrop = selected && cropActive && !item.locked;
 
   const contentRect = () => ref.current?.querySelector<HTMLElement>(".cell__content")?.getBoundingClientRect();
 
-  // Zoom con la rotella durante il ritaglio: ascoltatore non passivo per bloccare lo scorrimento.
-  // Con Alt la rotella raddrizza la foto (0,5° a scatto, 0,1° con Maiusc).
-  const live = useRef({ zoom: placement.zoom, angle: placement.angle, view, canCrop, handlers, itemId: item.id });
-  live.current = { zoom: placement.zoom, angle: placement.angle, view, canCrop, handlers, itemId: item.id };
+  // Rotella: ascoltatore non passivo per bloccare lo scorrimento.
+  // In ritaglio la rotella zooma e con Alt raddrizza (0,5° a scatto, 0,1° con Maiusc).
+  // Fuori dal ritaglio, sulla cella: Alt + rotella zooma, Ctrl/⌘ + Alt + rotella raddrizza (stessi scatti).
+  const canAdjust = !item.locked;
+  const live = useRef({ zoom: placement.zoom, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id });
+  live.current = { zoom: placement.zoom, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id };
   useEffect(() => {
     const element = ref.current;
     if (!element || !interactive) return;
     const onWheel = (event: WheelEvent) => {
       const state = live.current;
-      if (!state.canCrop) return;
+      const quick = !state.canCrop && state.canAdjust && event.altKey;
+      if (!state.canCrop && !quick) return;
       event.preventDefault();
-      if (event.altKey) {
+      const rotate = state.canCrop ? event.altKey : event.ctrlKey || event.metaKey;
+      if (rotate) {
         const direction = (event.deltaY || event.deltaX) < 0 ? -1 : 1;
         const angle = clampAngle(state.angle + direction * (event.shiftKey ? 0.1 : 0.5));
         state.angle = angle; // gli scatti veloci della rotella si sommano anche prima del ridisegno

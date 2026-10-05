@@ -121,12 +121,16 @@ export function sanitizeStyle(style: AreaStyle): AreaStyle {
 }
 
 /**
- * Quando cambia il modo (riempi ↔ foto intera) il layout si ricalcola da solo: con la foto intera le celle devono seguire le
- * proporzioni delle foto, altrimenti restano bordi vuoti; con «riempi» si torna al layout che ritaglia meno.
+ * Quando cambia il modo (riempi ↔ foto intera) la disposizione resta la stessa: con «riempi» le celle occupano tutto lo
+ * spazio (spariscono i bordi vuoti sopra e sotto), con la foto intera le divisioni si regolano sulle proporzioni delle foto.
  */
 function adaptToMode(project: Project, spread: AlbumSpread, before: AlbumSpread): AlbumSpread {
   if (spread.done) return spread;
-  const areas = spread.areas.map((area, index) => (before.areas[index] && before.areas[index].style.mode !== area.style.mode && area.items.length > 0 ? relayoutArea(project, spread, index, 0) : area));
+  const areas = spread.areas.map((area, index) => {
+    if (!before.areas[index] || before.areas[index].style.mode === area.style.mode || area.items.length === 0) return area;
+    const geometry = areaGeometry(project, spread, index);
+    return alignedForFit(project, area, geometry.inner, geometry.gapMm);
+  });
   return areas.some((area, index) => area !== spread.areas[index]) ? { ...spread, areas } : spread;
 }
 

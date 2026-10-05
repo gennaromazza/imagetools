@@ -1,6 +1,6 @@
 import type { AlbumAssetV2, AlbumItem, AreaStyle } from "@photo-tools/shared-types";
 import type { Rect } from "../engine/geometry";
-import { MAX_ANGLE, MAX_ZOOM, MIN_ZOOM, clampNumber } from "./defaults";
+import { MAX_ANGLE, MAX_SHAPE, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, clampNumber } from "./defaults";
 import { itemAspect } from "./project";
 import { cropForView, effectiveDpi, imageRectInSlot, type CropRect } from "../slot-geometry";
 
@@ -27,6 +27,8 @@ export interface ItemView {
   cx: number;
   cy: number;
   angle: number;
+  /** Rapporto larghezza/altezza scelto per la foto; `null` toglie la forma e la foto torna a seguire la cella. */
+  shape: number | null;
 }
 
 export const clampAngle = (angle: number | undefined): number => {
@@ -63,42 +65,52 @@ function straightView(content: Rect, aspect: number, zoom: number, cx: number, c
   return { zoom: z, crop, image: { x: content.x + content.w / 2 - centerX * W, y: content.y + content.h / 2 - centerY * H, w: W, h: H } };
 }
 
-export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy" | "angle">, asset: AlbumAssetV2 | undefined, style: Pick<AreaStyle, "borderCm" | "mode" | "align">, view?: Partial<ItemView> | null, anchor?: { x: number; y: number }): Placement {
+export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy" | "angle"> & { shape?: number }, asset: AlbumAssetV2 | undefined, style: Pick<AreaStyle, "borderCm" | "mode" | "align">, view?: Partial<ItemView> | null, anchor?: { x: number; y: number }): Placement {
   const borderMm = Math.max(0, Math.min(style.borderCm * 10, Math.min(frame.w, frame.h) / 4));
   const content: Rect = { x: frame.x + borderMm, y: frame.y + borderMm, w: Math.max(frame.w - borderMm * 2, 0.1), h: Math.max(frame.h - borderMm * 2, 0.1) };
   const aspect = itemAspect(asset);
-  const contentAspect = content.w / content.h;
   const zoom = clampNumber(view?.zoom ?? item.zoom, MIN_ZOOM, MAX_ZOOM);
   const cx = clampNumber(view?.cx ?? item.cx, 0, 1);
   const cy = clampNumber(view?.cy ?? item.cy, 0, 1);
-  const angle = style.mode === "fit" ? 0 : clampAngle(view?.angle ?? item.angle);
+  const requestedAngle = clampAngle(view?.angle ?? item.angle);
+  const rawShape = view?.shape !== undefined ? view.shape : item.shape;
+  const shape = rawShape ? clampNumber(rawShape, MIN_SHAPE, MAX_SHAPE) : 0;
+  // «Foto intera» vale per le foto lasciate com'erano: una foto con una forma scelta, ingrandita o raddrizzata riempie il suo spazio, come negli altri programmi di impaginazione.
+  const fitted = style.mode === "fit" && !shape && zoom <= MIN_ZOOM + 1e-6 && requestedAngle === 0;
+  const angle = fitted ? 0 : requestedAngle;
+  const factor = style.align === "start" ? 0 : style.align === "end" ? 1 : 0.5;
+  const auto = !style.align || style.align === "center";
+  // Posiziona nella cella un rettangolo con le proporzioni date (la foto intera, oppure la forma scelta).
+  const inside = (ratio: number): Rect => {
+    const w = ratio > content.w / content.h ? content.w : content.h * ratio;
+    const h = ratio > content.w / content.h ? content.w / ratio : content.h;
+    return { x: content.x + (content.w - w) * (auto && anchor ? anchor.x : factor), y: content.y + (content.h - h) * (auto && anchor ? anchor.y : factor), w, h };
+  };
+  // Con una forma scelta la parte visibile è una finestra di quella forma dentro la cella; la foto la riempie.
+  const view2 = shape ? inside(shape) : content;
+  const viewAspect = view2.w / view2.h;
 
   let image: Rect;
   let crop: CropRect;
   let appliedZoom = zoom;
-  if (style.mode === "fit") {
+  if (fitted) {
     crop = { cropLeft: 0, cropTop: 0, cropWidth: 1, cropHeight: 1 };
-    const fitW = aspect > contentAspect ? content.w : content.h * aspect;
-    const fitH = aspect > contentAspect ? content.w / aspect : content.h;
-    const freeX = content.w - fitW;
-    const freeY = content.h - fitH;
-    const factor = style.align === "start" ? 0 : style.align === "end" ? 1 : 0.5;
-    const auto = !style.align || style.align === "center";
-    image = { x: content.x + freeX * (auto && anchor ? anchor.x : factor), y: content.y + freeY * (auto && anchor ? anchor.y : factor), w: fitW, h: fitH };
+    image = inside(aspect);
   } else if (angle !== 0) {
-    const straight = straightView(content, aspect, zoom, cx, cy, angle);
+    const straight = straightView(view2, aspect, zoom, cx, cy, angle);
     appliedZoom = straight.zoom;
     crop = straight.crop;
     image = straight.image;
   } else {
-    crop = cropForView(aspect, contentAspect, zoom, cx, cy);
-    image = imageRectInSlot(content, crop, "fill", aspect);
+    crop = cropForView(aspect, viewAspect, zoom, cx, cy);
+    image = imageRectInSlot(view2, crop, "fill", aspect);
   }
+  const visible = fitted ? image : view2;
   const dpi = asset && asset.width > 0 && asset.height > 0
-    ? effectiveDpi(isRotatedQuarter(asset) ? asset.height : asset.width, isRotatedQuarter(asset) ? asset.width : asset.height, crop, style.mode === "fit" ? image : content)
+    ? effectiveDpi(isRotatedQuarter(asset) ? asset.height : asset.width, isRotatedQuarter(asset) ? asset.width : asset.height, crop, visible)
     : Infinity;
-  // «Foto intera»: la parte visibile è la foto stessa, così il bordo le sta attorno e non attorno all'intera cella.
-  return { frame, content: style.mode === "fit" ? image : content, borderMm, image, crop, dpi, zoom: appliedZoom, angle };
+  // «Foto intera» o forma scelta: la parte visibile è la foto stessa, così il bordo le sta attorno e non attorno all'intera cella.
+  return { frame, content: visible, borderMm, image, crop, dpi, zoom: appliedZoom, angle };
 }
 
 function isRotatedQuarter(asset: AlbumAssetV2): boolean {

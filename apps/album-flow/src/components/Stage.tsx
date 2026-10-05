@@ -6,6 +6,8 @@ import { hasDesktop } from "../desktop/api";
 import { isFavoriteLayout } from "../model/areas";
 import { BACKGROUND_SWATCHES } from "../model/defaults";
 import { placeItem, type ItemView } from "../model/placement";
+import { itemAspect } from "../model/project";
+import { SHAPE_PRESETS, presetForShape } from "../model/shapes";
 import { areaGeometryFor, hasFreeLayout } from "../model/project";
 import { AreaStrip } from "./AreaStrip";
 import { DesignPanel, type DesignActions, type DesignTab } from "./DesignPanel";
@@ -139,6 +141,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   // Chiude i pannelli quando si cambia spread.
   useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setPhotoMenu(null); }, [spread.id]);
 
+  const newShape = useNewFeature("forma-foto");
   const toolbar = useCallback((itemId: string): ReactNode => {
     const found = spread.areas.flatMap((candidate, index) => candidate.items.map((item) => ({ item, area: candidate, index }))).find((entry) => entry.item.id === itemId);
     if (!found) return null;
@@ -146,11 +149,27 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     const geometry = areaGeometryFor(sheet, spread, found.index);
     const cell = geometry.cells.find((candidate) => candidate.itemId === itemId);
     const placement = cell ? placeItem(cell.rect, found.item, asset, found.area.style, null, cell.anchor) : null;
-    const canCrop = found.area.style.mode === "fill" && !found.item.locked;
+    const canCrop = !found.item.locked;
     const captured = formatTime(asset?.captureTimeMs);
     return (
       <>
         <IconButton icon="crop" label={canCrop ? "Ritaglia e sposta nello slot (Invio)" : found.item.locked ? "Foto bloccata" : "Per ritagliare passa a «Riempi lo spazio»"} active={cropMode} disabled={!canCrop} onClick={() => actions.toggleCrop(itemId)} size={16} />
+        {canCrop ? (
+          <label className="straighten" title="Forma della foto: la foto prende questa proporzione dentro la sua cella (ritaglio)">
+            <span>Forma{newShape.isNew ? <span className="new-pill">Nuovo</span> : null}</span>
+            <select aria-label="Forma della foto" onFocus={newShape.markSeen} value={found.item.shape ? (presetForShape(found.item.shape)?.id ?? (Math.abs(found.item.shape / itemAspect(asset) - 1) < 0.01 ? "original" : "custom")) : "cell"} onChange={(event) => {
+              const value = event.target.value;
+              if (value === "cell") actions.commitView(itemId, { shape: null });
+              else if (value === "original") actions.commitView(itemId, { shape: Number(itemAspect(asset).toFixed(4)) });
+              else { const preset = SHAPE_PRESETS.find((candidate) => candidate.id === value); if (preset) actions.commitView(itemId, { shape: preset.ratio }); }
+            }}>
+              <option value="cell">Come la cella</option>
+              <option value="original">Originale della foto</option>
+              {SHAPE_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+              {found.item.shape && !presetForShape(found.item.shape) && Math.abs(found.item.shape / itemAspect(asset) - 1) >= 0.01 ? <option value="custom">Personalizzata</option> : null}
+            </select>
+          </label>
+        ) : null}
         {cropMode && canCrop ? (
           <label className="straighten" title="Raddrizza la foto: Alt + rotella (con Maiusc a passi più fini), oppure , e . da tastiera">
             <span>Raddrizza</span>
@@ -186,7 +205,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         <IconButton icon="trash" label="Togli dallo spread (Canc)" danger onClick={() => actions.removeItem(itemId)} size={16} />
       </>
     );
-  }, [actions, assets, cropMode, desktop, infoFor, sheet, spread]);
+  }, [actions, assets, cropMode, desktop, infoFor, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */
   const photoMenuItems = (itemId: string): MenuItem[] => {
@@ -194,7 +213,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     if (!found) return [];
     const asset = assets.get(found.item.assetId);
     const hasFile = desktop && Boolean(asset?.absolutePath);
-    const canCrop = found.area.style.mode === "fill" && !found.item.locked;
+    const canCrop = !found.item.locked;
     const free = hasFreeLayout(found.area);
     return [
       { label: "Guarda in grande", icon: "eye", hint: "Spazio", onClick: () => actions.viewItem(itemId) },

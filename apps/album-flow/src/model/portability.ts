@@ -1,7 +1,7 @@
 import type { AlbumProjectV2, LayoutNode } from "@photo-tools/shared-types";
 import { SPLIT_MODES } from "../engine/geometry";
 import { leafIds, validateTree } from "../engine/tree";
-import { MAX_ANGLE, MAX_ITEMS_PER_AREA, MAX_ZOOM, MIN_ZOOM, STYLE_LIMITS } from "./defaults";
+import { MAX_ANGLE, MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, STYLE_LIMITS } from "./defaults";
 import { normalizeArea, type Project } from "./project";
 
 export const PROJECT_FORMAT = "filex-album-project";
@@ -208,6 +208,7 @@ function validateProject(value: unknown): asserts value is AlbumProjectV2 {
         num(item.cx, `${path}.items[].cx`, 0, 1);
         num(item.cy, `${path}.items[].cy`, 0, 1);
         if (item.angle !== undefined) num(item.angle, `${path}.items[].angle`, -MAX_ANGLE, MAX_ANGLE);
+        if (item.shape !== undefined) num(item.shape, `${path}.items[].shape`, MIN_SHAPE, MAX_SHAPE);
         if (item.locked !== undefined) oneOf(item.locked, [true, false], `${path}.items[].locked`);
       }
       if (area.free !== undefined) {

@@ -21,6 +21,33 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.3",
+    date: "2026-10-05",
+    headline: "Forma di ogni foto, zoom e raddrizzamento con la rotella",
+    items: [
+      {
+        title: "Cambia la forma di una foto",
+        text: "Una foto orizzontale può diventare quadrata, verticale o panoramica senza cambiare il layout: la foto prende la proporzione scelta dentro la sua cella. Zoom, spostamento e raddrizzamento valgono dentro quella forma; «Ripristina ritaglio e zoom» la toglie.",
+        where: ["Barra della foto", "menu Forma"],
+      },
+      {
+        title: "Zoom e raddrizzamento senza aprire il ritaglio",
+        text: "Alt + rotella sulla foto la ingrandisce direttamente nel suo spazio. Ctrl/⌘ + Alt + rotella la raddrizza (con Maiusc a passi più fini) e la foto si ingrandisce da sola quanto serve per coprire lo spazio.",
+        where: ["Alt + rotella", "Ctrl/⌘ + Alt + rotella"],
+      },
+      {
+        title: "Ritaglio anche in «Foto intera»",
+        text: "Non serve più passare a «Riempi» per ritagliare, ingrandire o raddrizzare: la foto modificata riempie la sua cella e le altre restano intere. Passando tra «Riempi» e «Foto intera» la disposizione resta la stessa.",
+        where: ["MODO", "Doppio clic sulla foto"],
+      },
+      {
+        title: "Anteprima del trascinamento più fedele",
+        text: "In «Foto intera», trascinando una foto il riquadro mostra lo spazio che occuperà davvero, non un'enorme striscia. Dopo avere trascinato foto dalla libreria la selezione si azzera, così il trascinamento successivo porta solo la foto scelta.",
+        where: ["Trascinamento delle foto"],
+      },
+    ],
+  },
+  {
     version: "0.2.2",
     date: "2026-10-03",
     headline: "Il logo torna nella Home",

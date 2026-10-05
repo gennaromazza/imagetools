@@ -38,6 +38,8 @@ export interface AlbumItem {
   cy: number;
   /** Raddrizzamento della foto dentro la cella, in gradi (-45…45); assente = 0. */
   angle?: number;
+  /** Forma della foto: rapporto larghezza/altezza (0,2…5). La foto occupa nella cella una finestra di questa forma, ritagliata; assente = segue la cella. */
+  shape?: number;
   locked?: boolean;
 }
 
