@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-05 - Album Flow 0.2.7
+
+- Nuovo: aggancio (calamita) e linee guida spostando o ridimensionando le foto di un template libero: bordi e centri si attaccano a quelli delle altre foto, dell'area e della piega, con una linea che mostra l'allineamento. Alt durante il trascinamento disattiva l'aggancio.
+
 ## 2026-10-05 - Album Flow 0.2.6
 
 - Forma per foto: cambiando la forma di una foto la sua cella segue la nuova proporzione e le altre foto si adattano; se la disposizione attuale non lo permette si passa a un layout che lo permette. Se la cella ha già quasi la forma scelta la foto la riempie, senza fasce bianche, anche passando a «Riempi».
