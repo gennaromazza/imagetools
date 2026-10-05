@@ -6,7 +6,7 @@ import { STYLE_LIMITS, clampNumber } from "./defaults";
 import { newId } from "./ids";
 import { orientationOf } from "./import";
 import { matchTemplates, templateArea, type TemplateMatch } from "./templates";
-import { alignedForFit, areaGeometry, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, mapSpread, normalizeArea, replaceArea, touch, findSpread, type Project } from "./project";
+import { alignedForFit, areaGeometry, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, mapSpread, needsShapeAlignment, normalizeArea, replaceArea, touch, findSpread, type Project } from "./project";
 
 const MAX_CANDIDATES = 24;
 
@@ -16,8 +16,8 @@ export function areaCandidates(project: Project, spread: AlbumSpread, areaIndex:
   if (!area || area.items.length === 0) return [];
   const geometry = areaGeometry(project, spread, areaIndex);
   const candidates = generateLayoutsCached(areaPhotos(project, area), { rect: geometry.inner, gapMm: geometry.gapMm, limit });
-  if (area.style.mode !== "fit") return candidates;
-  // «Foto intera»: stessa disposizione, ma con le divisioni regolate perché le foto risultino allineate.
+  if (!needsShapeAlignment(area)) return candidates;
+  // «Foto intera» (o foto con una forma scelta): stessa disposizione, ma con le divisioni regolate perché le foto risultino allineate.
   const assets = assetMap(project);
   const byItem = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))]));
   return candidates.map((candidate) => ({ ...candidate, tree: naturalRatios(candidate.tree, (id) => byItem.get(id) ?? 1.5, geometry.inner, geometry.gapMm) }));

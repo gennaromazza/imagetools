@@ -204,12 +204,17 @@ export function countItems(project: Project): number {
   return project.spreads.reduce((total, spread) => total + spread.areas.reduce((sum, area) => sum + area.items.length, 0), 0);
 }
 
+/** Le celle seguono le proporzioni delle foto: in «foto intera», oppure in «riempi» quando una foto ha una forma scelta (così la sua cella ha quella forma). */
+export function needsShapeAlignment(area: AlbumArea): boolean {
+  return area.style.mode === "fit" || area.items.some((item) => Boolean(item.shape));
+}
+
 /**
  * Regola di impaginazione: con «foto intera» le foto devono risultare allineate (stessa altezza in una riga, stessa larghezza
  * in una colonna). L'area si regola sulle proporzioni reali delle foto; le aree libere e il modo «riempi» non cambiano.
  */
 export function alignedForFit(project: Project, area: AlbumArea, inner: { w: number; h: number }, gapMm: number): AlbumArea {
-  if (area.style.mode !== "fit" || !area.layout || area.items.length < 2 || hasFreeLayout(area)) return area;
+  if (!needsShapeAlignment(area) || !area.layout || area.items.length < 2 || hasFreeLayout(area)) return area;
   const assets = assetMap(project);
   const byItem = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))]));
   const layout = naturalRatios(area.layout, (id) => byItem.get(id) ?? 1.5, inner, gapMm);

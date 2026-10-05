@@ -65,6 +65,9 @@ function straightView(content: Rect, aspect: number, zoom: number, cx: number, c
   return { zoom: z, crop, image: { x: content.x + content.w / 2 - centerX * W, y: content.y + content.h / 2 - centerY * H, w: W, h: H } };
 }
 
+/** Scarto relativo sotto il quale la cella conta già come «della forma scelta». */
+export const SHAPE_SNAP = 0.12;
+
 export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy" | "angle"> & { shape?: number }, asset: AlbumAssetV2 | undefined, style: Pick<AreaStyle, "borderCm" | "mode" | "align">, view?: Partial<ItemView> | null, anchor?: { x: number; y: number }): Placement {
   const borderMm = Math.max(0, Math.min(style.borderCm * 10, Math.min(frame.w, frame.h) / 4));
   const content: Rect = { x: frame.x + borderMm, y: frame.y + borderMm, w: Math.max(frame.w - borderMm * 2, 0.1), h: Math.max(frame.h - borderMm * 2, 0.1) };
@@ -87,7 +90,8 @@ export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy
     return { x: content.x + (content.w - w) * (auto && anchor ? anchor.x : factor), y: content.y + (content.h - h) * (auto && anchor ? anchor.y : factor), w, h };
   };
   // Con una forma scelta la parte visibile è una finestra di quella forma dentro la cella; la foto la riempie.
-  const view2 = shape ? inside(shape) : content;
+  // Se la cella ha già (quasi) quella forma la foto la riempie tutta: niente sottili fasce bianche sopra e sotto.
+  const view2 = shape && Math.abs(content.w / content.h / shape - 1) >= SHAPE_SNAP ? inside(shape) : content;
   const viewAspect = view2.w / view2.h;
 
   let image: Rect;

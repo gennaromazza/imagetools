@@ -3,9 +3,9 @@ import { areaOuterRects, insetRect, layoutCells, type Rect } from "../engine/geo
 import type { DropTarget } from "../engine/drop";
 import { insertAtNode, insertBeside, leaf, naturalRatios, removeLeaf, type InsertSide } from "../engine/tree";
 import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, clampNumber } from "./defaults";
-import { relayoutArea } from "./areas";
-import { clampAngle, placeItem } from "./placement";
-import { alignChanged, areaGeometry, assetMap, createItem, findItem, effectiveAspect, findSpread, itemAspect, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
+import { areaCandidates, relayoutArea } from "./areas";
+import { SHAPE_SNAP, clampAngle, placeItem } from "./placement";
+import { alignChanged, alignedForFit, areaGeometry, assetMap, createItem, findItem, effectiveAspect, hasFreeLayout, needsShapeAlignment, findSpread, itemAspect, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
 import { cropCenter } from "../slot-geometry";
 import { addSpread } from "./spreads";
 
@@ -234,8 +234,32 @@ export function setItemView(project: Project, itemId: string, change: ItemViewCh
   // e tornando a 0° l'inquadratura di prima ricompare.
   const next = withAngle({ ...found.item, zoom: requested, cx: Number(center.x.toFixed(5)), cy: Number(center.y.toFixed(5)) }, angle, shape);
   if (next.zoom === found.item.zoom && next.cx === found.item.cx && next.cy === found.item.cy && (next.angle ?? 0) === (found.item.angle ?? 0) && next.shape === found.item.shape) return project;
-  return mapSpread(project, found.spread.id, (spread) =>
-    replaceArea(spread, found.areaIndex, { ...found.area, items: found.area.items.map((item) => (item.id === itemId ? next : item)) }));
+  const changedArea = { ...found.area, items: found.area.items.map((item) => (item.id === itemId ? next : item)) };
+  // Cambiando la forma di una foto la sua cella segue la nuova proporzione (le altre si adattano), così non restano spazi bianchi.
+  const shapeChanged = next.shape !== found.item.shape;
+  const aligned = shapeChanged ? alignedForFit(project, changedArea, geometry.inner, geometry.gapMm) : changedArea;
+  const area = shapeChanged && next.shape ? withReachableShape(project, found.spread, found.areaIndex, aligned, itemId, next.shape, geometry) : aligned;
+  return mapSpread(project, found.spread.id, (spread) => replaceArea(spread, found.areaIndex, area));
+}
+
+/**
+ * Con una forma scelta la cella della foto dovrebbe avere quella proporzione. Se la disposizione attuale non lo permette
+ * (per esempio la foto occupa tutta la larghezza), si passa al primo layout proposto che lo permette; se nessuno lo permette
+ * la disposizione resta com'è e la foto mostra la finestra della forma dentro la cella.
+ */
+function withReachableShape(project: Project, spread: AlbumSpread, areaIndex: number, area: AlbumArea, itemId: string, shape: number, geometry: { inner: Rect; gapMm: number }): AlbumArea {
+  if (!area.layout || area.items.length < 2 || hasFreeLayout(area)) return area;
+  const ratioIn = (tree: LayoutNode): number | null => {
+    const rect = layoutCells(tree, geometry.inner, geometry.gapMm).cells.find((cell) => cell.itemId === itemId)?.rect;
+    return rect && rect.h > 0 ? rect.w / rect.h : null;
+  };
+  const reaches = (tree: LayoutNode) => { const ratio = ratioIn(tree); return ratio !== null && Math.abs(ratio / shape - 1) < SHAPE_SNAP; };
+  if (reaches(area.layout)) return area;
+  const probe: Project = { ...project, spreads: project.spreads.map((candidate) => (candidate.id === spread.id ? replaceArea(spread, areaIndex, area) : candidate)) };
+  const probeSpread = probe.spreads.find((candidate) => candidate.id === spread.id)!;
+  const candidates = areaCandidates(probe, probeSpread, areaIndex);
+  const index = candidates.findIndex((candidate) => reaches(candidate.tree));
+  return index < 0 ? area : normalizeArea({ ...area, layout: candidates[index].tree, seed: index, free: undefined });
 }
 
 export function resetItemView(project: Project, itemId: string): Project {
@@ -279,8 +303,18 @@ export function moveToNewSpread(project: Project, atIndex: number, source: DropS
   const spreadId = created.spreads[at]?.id;
   if (!spreadId || created === project) return { project, spreadId: null };
   let next = dropOnSpread(created, spreadId, { areaIndex: 0, itemId: null, zone: "area" }, { kind: "assets", assetIds });
-  if (source.kind === "item") next = removeItem(next, source.itemId);
+  if (source.kind === "item") {
+    next = withMovedShape(next, spreadId, new Set(), findItem(project, source.itemId)?.item.shape);
+    next = removeItem(next, source.itemId);
+  }
   return { project: alignChanged(project, next), spreadId };
+}
+
+/** La foto spostata in un altro spread tiene la forma che aveva: si applica alla foto appena arrivata nello spread di destinazione. */
+function withMovedShape(project: Project, spreadId: string, before: ReadonlySet<string>, shape: number | undefined): Project {
+  if (!shape) return project;
+  const added = findSpread(project, spreadId)?.spread.areas.flatMap((area) => area.items).find((item) => !before.has(item.id));
+  return added ? setItemView(project, added.id, { shape }) : project;
 }
 
 /**
@@ -300,11 +334,15 @@ function moveToSpreadRaw(project: Project, spreadId: string, source: DropSource)
   if (assetIds.length === 0) return project;
   const areaIndex = spread.areas.reduce((best, area, index) => (area.items.length < spread.areas[best].items.length ? index : best), 0);
   const area = spread.areas[areaIndex];
+  const existing = new Set(spread.areas.flatMap((candidate) => candidate.items.map((item) => item.id)));
   let next = area.items.length === 0
     ? dropOnSpread(project, spreadId, { areaIndex, itemId: null, zone: "area" }, { kind: "assets", assetIds })
     : appendAssets(project, spreadId, areaIndex, assetIds);
   if (next === project) return project;
-  if (source.kind === "item") next = removeItem(next, source.itemId);
+  if (source.kind === "item") {
+    next = withMovedShape(next, spreadId, existing, findItem(project, source.itemId)?.item.shape);
+    next = removeItem(next, source.itemId);
+  }
   return next;
 }
 
@@ -339,8 +377,8 @@ export function previewDropRect(
     if (!targetItem) return null;
     layout = insertBeside(layout, target.itemId, TMP, side, keepRatio(assets, targetItem.assetId, dragged.assetId, side));
   } else return null;
-  if (area.style.mode === "fit") {
-    // Come nel rilascio vero: con «foto intera» le divisioni si regolano perché le foto risultino allineate.
+  if (needsShapeAlignment(area)) {
+    // Come nel rilascio vero: con «foto intera» (o foto con una forma scelta) le divisioni si regolano perché le foto risultino allineate.
     const aspects = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))] as const));
     aspects.set(TMP, itemAspect(assets.get(dragged.assetId)));
     layout = naturalRatios(layout, (id) => aspects.get(id) ?? 1.5, inner, Math.max(0, area.style.gapCm * 10));

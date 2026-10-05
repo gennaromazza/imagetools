@@ -914,7 +914,7 @@ test("raddrizzamento: limiti, azzeramento, blocco e conservazione dello zoom", (
   assert.equal(itemsOf(tilted, 0)[0].zoom, 1, "lo zoom salvato non cambia: la copertura degli angoli la calcola il posizionamento");
   const straight = setItemView(tilted, item.id, { angle: 0 });
   assert.ok(!("angle" in itemsOf(straight, 0)[0]), "a 0° la chiave sparisce");
-  assert.deepEqual(straight, project);
+  assert.deepEqual({ ...straight, updatedAt: "" }, { ...project, updatedAt: "" }); // updatedAt può differire di 1 ms
   assert.ok(!("angle" in itemsOf(resetItemView(tilted, item.id), 0)[0]));
   const locked = toggleItemLock(tilted, item.id);
   assert.equal(setItemView(locked, item.id, { angle: 20 }), locked);

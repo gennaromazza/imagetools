@@ -220,7 +220,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       { label: "Trova nella libreria", icon: "search", onClick: () => actions.locateInLibrary(itemId) },
       { separator: true, label: "-" },
       { label: cropMode && selectedItemId === itemId ? "Chiudi il ritaglio" : "Ritaglia e sposta nello slot", icon: "crop", hint: "Invio", disabled: !canCrop, onClick: () => actions.toggleCrop(itemId) },
-      { label: "Ripristina ritaglio e zoom", icon: "undo", hint: "0", disabled: found.item.locked, onClick: () => actions.resetItemView(itemId) },
+      { label: "Ripristina ritaglio, zoom e forma", icon: "undo", hint: "0", disabled: found.item.locked, onClick: () => actions.resetItemView(itemId) },
       { label: "Sostituisci con la foto scelta in libreria", icon: "image", disabled: found.item.locked, onClick: () => actions.replaceWithSelection(itemId) },
       ...(free ? [
         { label: "Porta davanti alle altre", icon: "chevronUp" as const, onClick: () => actions.orderFrame(itemId, "front") },

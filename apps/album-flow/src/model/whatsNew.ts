@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.6",
+    date: "2026-10-05",
+    headline: "La cella segue la forma della foto",
+    items: [
+      {
+        title: "Cella e forma vanno d'accordo",
+        text: "Quando dai una forma a una foto, la sua cella prende quella proporzione e le altre foto si adattano; se il layout attuale non lo permette, il programma passa a uno che lo permette. Se la cella ha già quasi la forma scelta, la foto la riempie senza fasce bianche, anche con Riempi.",
+        where: ["Menu Forma", "MODO"],
+      },
+      {
+        title: "La forma segue la foto",
+        text: "Spostando una foto in un altro spread o in uno nuovo, la forma resta con lei. «Ripristina ritaglio, zoom e forma» (tasto 0) la toglie.",
+        where: ["Trascinamento tra gli spread", "tasto 0"],
+      },
+    ],
+  },
+  {
     version: "0.2.5",
     date: "2026-10-05",
     headline: "I layout tengono conto della forma delle foto",
