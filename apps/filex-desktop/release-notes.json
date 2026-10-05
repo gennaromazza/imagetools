@@ -583,6 +583,9 @@
       "Cambiando modo tra «Riempi» e «Foto intera» la disposizione resta la stessa (prima veniva ricalcolata), e con «Riempi» spariscono le fasce vuote sopra e sotto.",
       "Corretto: trascinando una foto in «Foto intera», il riquadro di anteprima era un'enorme striscia che non corrispondeva allo spazio reale; ora mostra lo spazio che la foto occuperà davvero.",
       "Corretto: dopo avere trascinato più foto dalla libreria la selezione restava attiva e il trascinamento successivo portava di nuovo tutte le stesse foto, creando un nuovo foglio con foto già usate."
+    ],
+    "0.2.4": [
+      "Nuovo: Alt + clic sul pulsante Modo (Riempi / Foto intera) cambia modo e ridisegna anche la disposizione migliore; il clic semplice tiene la disposizione e riempie solo gli spazi bianchi."
     ]
   }
 }

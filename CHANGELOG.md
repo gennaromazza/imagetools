@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-05 - Album Flow 0.2.4
+
+- Nuovo: Alt + clic sul pulsante Modo (Riempi / Foto intera) cambia modo e ridisegna anche la disposizione migliore; il clic semplice tiene la disposizione e riempie solo gli spazi bianchi.
+
 ## 2026-10-05 - Album Flow 0.2.3
 
 - Nuovo: forma per foto. Dalla barra della foto, il menu «Forma» cambia la proporzione di una singola foto (quadrata, verticale, orizzontale, panoramica o come l'originale) senza cambiare il layout; zoom, spostamento e raddrizzamento valgono dentro la forma e «Ripristina» la toglie.
