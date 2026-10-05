@@ -1,6 +1,6 @@
 import type { AlbumProjectV2, LayoutNode } from "@photo-tools/shared-types";
 import { SPLIT_MODES } from "../engine/geometry";
-import { leafIds, validateTree } from "../engine/tree";
+import { leafIds, removeLeaf, validateTree } from "../engine/tree";
 import { MAX_ANGLE, MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, STYLE_LIMITS } from "./defaults";
 import { normalizeArea, type Project } from "./project";
 
@@ -281,6 +281,32 @@ export function parseAlbumProject(raw: string): Project {
     if (error instanceof Invalid) throw new Error(error.message);
     throw error;
   }
+}
+
+/**
+ * Un album con più di MAX_ITEMS_PER_AREA foto in una pagina (difetto del cambio di divisione nelle versioni precedenti) non passerebbe
+ * il controllo e sparirebbe dalla Home. Qui lo si ripara togliendo dalla pagina le foto in eccesso, le ultime: restano nella libreria.
+ * Restituisce null se non c'era nulla da riparare o il valore non ha la forma attesa.
+ */
+export function repairOversizedAreas(value: unknown): Project | null {
+  const project = value as Project | null;
+  if (!project || !Array.isArray(project.spreads)) return null;
+  let changed = false;
+  const spreads = project.spreads.map((spread) => {
+    if (!spread || !Array.isArray(spread.areas)) return spread;
+    let spreadChanged = false;
+    const areas = spread.areas.map((area) => {
+      if (!area || !Array.isArray(area.items) || area.items.length <= MAX_ITEMS_PER_AREA || !area.layout) return area;
+      const ordered = normalizeArea(area);
+      let layout: LayoutNode | null = ordered.layout;
+      for (const extra of ordered.items.slice(MAX_ITEMS_PER_AREA)) layout = layout ? removeLeaf(layout, extra.id) : null;
+      spreadChanged = true;
+      return normalizeArea({ ...ordered, layout, items: ordered.items.slice(0, MAX_ITEMS_PER_AREA) });
+    });
+    if (spreadChanged) changed = true;
+    return spreadChanged ? { ...spread, areas } : spread;
+  });
+  return changed ? { ...project, spreads } : null;
 }
 
 /** Verifica un progetto già in memoria o letto dal salvataggio locale. Restituisce l'errore, o null se valido. */

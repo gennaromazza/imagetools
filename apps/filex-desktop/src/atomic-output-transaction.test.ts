@@ -136,6 +136,90 @@ test("un filesystem senza hard link fallisce in sicurezza e non pubblica nomi fi
   assert.deepEqual(await readdir(outputPath), []);
 });
 
+/** Un volume exFAT/FAT32: l'hard link fallisce (su Windows Node lo riporta come EISDIR). */
+function linklessDependencies() {
+  return createNodeAtomicOutputTransactionDependencies({
+    linkFile: async () => {
+      const error = new Error("hard link non supportato") as NodeJS.ErrnoException;
+      error.code = process.platform === "win32" ? "EISDIR" : "EPERM";
+      throw error;
+    },
+  });
+}
+
+test("su un volume senza hard link (exFAT) pubblica per copia verificata, senza sovrascrivere e senza residui", async (context) => {
+  const outputPath = await createSandbox(context);
+  const dependencies = linklessDependencies();
+  let id = 40;
+  const manager = new AtomicOutputTransactionManager({ ...dependencies, createTransactionId: () => transactionId(id++) });
+  await dependencies.writeFileExclusive(join(outputPath, "Album.filex-album.json"), new Uint8Array([0x01]));
+  const currentTransactionId = await manager.begin(outputPath, OWNER_ID);
+  await manager.stage(OWNER_ID, currentTransactionId, "Album.filex-album.json", new Uint8Array([0x02, 0x03]));
+  await manager.stage(OWNER_ID, currentTransactionId, "pagina.jpg", new Uint8Array([0x04]));
+
+  const savedNames = await manager.commit(OWNER_ID, currentTransactionId);
+  await manager.finalize(OWNER_ID, currentTransactionId);
+
+  assert.deepEqual(savedNames, ["Album.filex-album-2.json", "pagina.jpg"]);
+  assert.deepEqual(await readFile(join(outputPath, "Album.filex-album.json")), Buffer.from([0x01]), "l'omonimo non si sovrascrive");
+  assert.deepEqual(await readFile(join(outputPath, "Album.filex-album-2.json")), Buffer.from([0x02, 0x03]));
+  assert.deepEqual(await readFile(join(outputPath, "pagina.jpg")), Buffer.from([0x04]));
+  assert.deepEqual((await readdir(outputPath)).sort(), ["Album.filex-album-2.json", "Album.filex-album.json", "pagina.jpg"], "né staging né file provvisori");
+});
+
+test("senza hard link, un omonimo creato tra controllo e pubblicazione non viene sovrascritto", async (context) => {
+  const outputPath = await createSandbox(context);
+  const dependencies = linklessDependencies();
+  const racedBytes = Buffer.from([0xde, 0xad]);
+  let injectedRace = false;
+  const manager = new AtomicOutputTransactionManager({
+    ...dependencies,
+    createTransactionId: () => transactionId(41),
+    publishFile: async (stagedPath, destinationPath) => {
+      if (!injectedRace && destinationPath.endsWith("stampa.jpg")) {
+        injectedRace = true;
+        await writeFile(destinationPath, racedBytes, { flag: "wx" });
+      }
+      await dependencies.publishFile(stagedPath, destinationPath);
+    },
+  });
+  const currentTransactionId = await manager.begin(outputPath, OWNER_ID);
+  await manager.stage(OWNER_ID, currentTransactionId, "stampa.jpg", new Uint8Array([0x01, 0x02, 0x03]));
+
+  const savedNames = await manager.commit(OWNER_ID, currentTransactionId);
+  await manager.finalize(OWNER_ID, currentTransactionId);
+
+  assert.deepEqual(savedNames, ["stampa-2.jpg"]);
+  assert.deepEqual(await readFile(join(outputPath, "stampa.jpg")), racedBytes);
+  assert.deepEqual(await readFile(join(outputPath, "stampa-2.jpg")), Buffer.from([0x01, 0x02, 0x03]));
+  assert.equal((await readdir(outputPath)).some((name) => name.startsWith(".filex-")), false);
+});
+
+test("senza hard link, un errore alla seconda pubblicazione rimuove la prima e lo staging", async (context) => {
+  const outputPath = await createSandbox(context);
+  const dependencies = linklessDependencies();
+  let publishCount = 0;
+  const manager = new AtomicOutputTransactionManager({
+    ...dependencies,
+    createTransactionId: () => transactionId(42),
+    publishFile: async (stagedPath, destinationPath) => {
+      publishCount += 1;
+      if (publishCount === 2) {
+        const error = new Error("errore disco simulato") as NodeJS.ErrnoException;
+        error.code = "EIO";
+        throw error;
+      }
+      await dependencies.publishFile(stagedPath, destinationPath);
+    },
+  });
+  const currentTransactionId = await manager.begin(outputPath, OWNER_ID);
+  await manager.stage(OWNER_ID, currentTransactionId, "a.jpg", new Uint8Array([0x01]));
+  await manager.stage(OWNER_ID, currentTransactionId, "b.jpg", new Uint8Array([0x02]));
+
+  await assert.rejects(manager.commit(OWNER_ID, currentTransactionId), /errore disco simulato/);
+  assert.deepEqual(await readdir(outputPath), []);
+});
+
 test("un errore dopo una pubblicazione rimuove ogni nome finale e lo staging", async (context) => {
   const outputPath = await createSandbox(context);
   const dependencies = createNodeAtomicOutputTransactionDependencies();

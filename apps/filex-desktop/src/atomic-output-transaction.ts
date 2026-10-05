@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { link, lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream, constants as fsConstants } from "node:fs";
+import { copyFile, link, lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, parse, resolve } from "node:path";
 
 const TRANSACTION_ID_PATTERN = /^[a-f0-9]{32}$/;
@@ -109,6 +110,11 @@ export interface AtomicOutputTransactionDependencies {
   writeTextFileExclusive: (filePath: string, contents: string) => Promise<void>;
   readTextFile: (filePath: string) => Promise<string>;
   publishFile: (stagedPath: string, destinationPath: string) => Promise<void>;
+  /**
+   * Verifica se il volume della cartella supporta gli hard link e, se non li supporta (exFAT, FAT32, alcuni NAS),
+   * passa a identità del file basata sul contenuto e a una pubblicazione per copia. Facoltativa: senza, vale il comportamento a hard link.
+   */
+  probeHardLinkSupport?: (directoryPath: string) => Promise<boolean>;
   movePath: (sourcePath: string, destinationPath: string) => Promise<void>;
   removePath: (path: string, recursive: boolean) => Promise<void>;
   removeEmptyDirectory: (directoryPath: string) => Promise<void>;
@@ -139,6 +145,13 @@ export class AtomicOutputUnsupportedFileSystemError extends Error {
     );
     this.name = "AtomicOutputUnsupportedFileSystemError";
   }
+}
+
+const LINK_UNSUPPORTED_CODES = ["EPERM", "ENOSYS", "ENOTSUP", "EOPNOTSUPP", "EXDEV"];
+
+/** Su Windows un volume senza hard link (exFAT, FAT32) risponde ERROR_INVALID_FUNCTION, che Node riporta come EISDIR. */
+function isLinkUnsupportedError(error: unknown): boolean {
+  return hasErrorCode(error, LINK_UNSUPPORTED_CODES) || (process.platform === "win32" && hasErrorCode(error, ["EISDIR"]));
 }
 
 function hasErrorCode(error: unknown, codes: readonly string[]): boolean {
@@ -192,7 +205,59 @@ async function isProcessActiveOnHost(processId: number): Promise<boolean> {
   }
 }
 
-export function createNodeAtomicOutputTransactionDependencies(): AtomicOutputTransactionDependencies {
+async function hashFileContent(path: string): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path)) hash.update(chunk as Buffer);
+  return hash.digest("hex");
+}
+
+export interface NodeAtomicOutputDependencyOptions {
+  /** Sostituisce `fs.link`: serve ai test per simulare un volume senza hard link. */
+  linkFile?: (existingPath: string, newPath: string) => Promise<void>;
+}
+
+export function createNodeAtomicOutputTransactionDependencies(
+  options: NodeAtomicOutputDependencyOptions = {},
+): AtomicOutputTransactionDependencies {
+  const linkFile = options.linkFile ?? link;
+  /** Volumi (campo `dev` di lstat) che hanno rifiutato un hard link: lì l'identità del file è il suo contenuto. */
+  const linklessDevices = new Set<string>();
+  const contentIdentityCache = new Map<string, string>();
+
+  const contentIdentity = async (path: string, size: bigint, mtimeNs: bigint): Promise<string> => {
+    const key = `${path}|${size}|${mtimeNs}`;
+    const cached = contentIdentityCache.get(key);
+    if (cached) return cached;
+    const identity = `sha256:${size}:${await hashFileContent(path)}`;
+    if (contentIdentityCache.size > 2048) contentIdentityCache.clear();
+    contentIdentityCache.set(key, identity);
+    return identity;
+  };
+
+  /**
+   * Senza hard link la pubblicazione copia il file in un nome provvisorio nella cartella di destinazione e lo rinomina solo a
+   * copia completa e sincronizzata: sul nome finale non compare mai un file parziale e un omonimo già presente non si sovrascrive.
+   */
+  const publishByCopy = async (stagedPath: string, destinationPath: string): Promise<void> => {
+    const partialPath = resolve(dirname(destinationPath), `.filex-part-${randomUUID().replaceAll("-", "")}.tmp`);
+    try {
+      await copyFile(stagedPath, partialPath, fsConstants.COPYFILE_EXCL);
+      const handle = await open(partialPath, "r+");
+      try {
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      if (await pathExistsOnDisk(destinationPath)) {
+        throw Object.assign(new Error(`EEXIST: il file esiste già, ${basename(destinationPath)}`), { code: "EEXIST" });
+      }
+      await rename(partialPath, destinationPath);
+    } catch (error) {
+      await rm(partialPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  };
+
   return {
     createTransactionId: () => randomUUID().replaceAll("-", ""),
     isDirectory: async (directoryPath) => {
@@ -207,7 +272,9 @@ export function createNodeAtomicOutputTransactionDependencies(): AtomicOutputTra
     getFileIdentity: async (path) => {
       try {
         const entry = await lstat(path, { bigint: true });
-        return entry.isFile() ? `${entry.dev}:${entry.ino}` : null;
+        if (!entry.isFile()) return null;
+        if (linklessDevices.has(entry.dev.toString())) return contentIdentity(path, entry.size, entry.mtimeNs);
+        return `${entry.dev}:${entry.ino}`;
       } catch (error) {
         if (hasErrorCode(error, ["ENOENT", "ENOTDIR"])) return null;
         throw error;
@@ -239,14 +306,39 @@ export function createNodeAtomicOutputTransactionDependencies(): AtomicOutputTra
       }
     },
     readTextFile: async (filePath) => readFile(filePath, "utf8"),
+    probeHardLinkSupport: async (directoryPath) => {
+      const id = randomUUID().replaceAll("-", "");
+      const source = resolve(directoryPath, `.filex-probe-${id}-a.tmp`);
+      const target = resolve(directoryPath, `.filex-probe-${id}-b.tmp`);
+      try {
+        await writeFile(source, "x", { flag: "wx" });
+        try {
+          await linkFile(source, target);
+        } catch (error) {
+          if (!isLinkUnsupportedError(error)) return true; // un altro errore lo deciderà la pubblicazione vera
+          linklessDevices.add((await lstat(source, { bigint: true })).dev.toString());
+          return false;
+        }
+        return true;
+      } catch {
+        return true;
+      } finally {
+        await rm(target, { force: true }).catch(() => undefined);
+        await rm(source, { force: true }).catch(() => undefined);
+      }
+    },
     publishFile: async (stagedPath, destinationPath) => {
+      if (linklessDevices.has((await lstat(stagedPath, { bigint: true })).dev.toString())) {
+        await publishByCopy(stagedPath, destinationPath);
+        return;
+      }
       try {
         // A hard link publishes the already-complete staged file atomically and
         // refuses to overwrite a file created between the collision check and
         // this call. Both names are on the same filesystem by construction.
-        await link(stagedPath, destinationPath);
+        await linkFile(stagedPath, destinationPath);
       } catch (error) {
-        if (hasErrorCode(error, ["EPERM", "ENOSYS", "ENOTSUP", "EOPNOTSUPP", "EXDEV"])) {
+        if (isLinkUnsupportedError(error)) {
           throw new AtomicOutputUnsupportedFileSystemError(destinationPath, error);
         }
         throw error;
@@ -602,6 +694,9 @@ export class AtomicOutputTransactionManager {
         }
         throw error;
       }
+
+      // Il volume decide come si pubblica: hard link dove ci sono, copia verificata dove non ci sono (exFAT, FAT32).
+      await this.dependencies.probeHardLinkSupport?.(stagingDirectoryPath).catch(() => true);
 
       this.transactions.set(id, {
         id,

@@ -603,6 +603,9 @@
     ],
     "0.2.9": [
       "Nuovo: copertina del progetto. Clic destro su una foto (nella libreria o nello spread) e «Imposta come copertina»: la foto compare nella Home, nella lista dei progetti. Senza una scelta resta la prima foto impaginata."
+    ],
+    "0.2.10": [
+      "Correzioni: l'album non sparisce più dalla Home se dopo un cambio di divisione una pagina supera le 12 foto (il cambio viene rifiutato con un messaggio; un album già in quello stato viene riparato all'apertura). Il pannello «Personalizza» non copre più lo spread e non si apre più mentre trascini un testo. Salvataggi ed esportazioni funzionano ora anche su dischi exFAT/FAT32 (senza hard link)."
     ]
   }
 }

@@ -310,6 +310,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .stage__row { flex: 1; min-height: 0; display: flex; align-items: stretch; position: relative; }
 .stage__center { flex: 1; min-width: 0; overflow: auto; display: grid; place-items: center; padding: 10px 12px; }
 .stage__spread { margin: auto; }
+/* Con «Personalizza» aperto lo spread si sposta nello spazio libero: il pannello (stessa larghezza di .layouts) non deve coprire ciò che si sta modificando. */
+.stage__center--drawer { padding-right: min(430px, 44%); }
 .stage__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; height: 42px; border-top: 1px solid var(--line); background: rgba(24, 28, 25, 0.6); flex: none; }
 .stage__bar-group { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .stage__bar-group--center { justify-content: center; }

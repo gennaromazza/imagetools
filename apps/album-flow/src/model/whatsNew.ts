@@ -21,6 +21,27 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.10",
+    date: "2026-10-05",
+    headline: "Più sicurezza e il testo che non scappa",
+    items: [
+      {
+        title: "L'album non sparisce più dalla Home",
+        text: "Se cambiando la divisione di uno spread le foto non stanno in una pagina (il massimo è 12), il cambio viene rifiutato con un messaggio. Un album già finito in questa situazione viene riparato quando lo riapri, senza perdere le foto: restano nella libreria.",
+        where: ["Divisione dello spread", "Home"],
+      },
+      {
+        title: "Il testo si sposta senza intoppi",
+        text: "Il pannello Personalizza non copre più lo spread: la pagina si sposta nello spazio libero. Afferrare e trascinare un testo non apre più il pannello a metà gesto; si apre con un clic.",
+        where: ["Personalizza", "Trascina il testo"],
+      },
+      {
+        title: "Salvataggi ed esportazioni anche su dischi exFAT",
+        text: "Il progetto e le immagini si possono ora salvare su dischi formattati exFAT o FAT32 (molti dischi esterni): prima il salvataggio falliva con un errore.",
+      },
+    ],
+  },
+  {
     version: "0.2.9",
     date: "2026-10-05",
     headline: "Scegli la copertina del progetto",

@@ -1,7 +1,7 @@
 import type { DesktopPhotoToolHandoff } from "@photo-tools/desktop-contracts";
 import type { AlbumAssetV2, AlbumChapterV2, AlbumProjectV2, AlbumStage } from "@photo-tools/shared-types";
 import { removeAssets } from "./library";
-import { projectProblem } from "./portability";
+import { projectProblem, repairOversizedAreas } from "./portability";
 import { chapterColor, createChapter, applyChapterPreset, BUILTIN_CHAPTER_PRESETS, assignAssets } from "./chapters";
 import { newId } from "./ids";
 import { orientationOf } from "./import";
@@ -37,15 +37,25 @@ export function loadProjects(): LoadResult {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return result;
     const quarantined: unknown[] = [];
+    let repairedAny = false;
     for (const candidate of parsed) {
-      if (projectProblem(candidate) === null) result.projects.push(candidate as Project);
+      if (projectProblem(candidate) === null) { result.projects.push(candidate as Project); continue; }
+      // Troppe foto in una pagina: l'album si ripara e resta nella Home; l'originale va comunque in quarantena.
+      const repaired = repairOversizedAreas(candidate);
+      if (repaired && projectProblem(repaired) === null) { result.projects.push(repaired); quarantined.push(candidate); repairedAny = true; }
       else { result.skipped += 1; quarantined.push(candidate); }
     }
+    let quarantineSaved = quarantined.length === 0;
     if (quarantined.length) {
       try {
         const previous = JSON.parse(localStorage.getItem(KEYS.quarantine) ?? "[]") as unknown[];
         localStorage.setItem(KEYS.quarantine, JSON.stringify([...previous, ...quarantined].slice(-5)));
+        quarantineSaved = true;
       } catch { /* la quarantena è un di più */ }
+    }
+    // Gli album riparati si salvano subito (solo con l'originale al sicuro in quarantena), così la riparazione non si ripete a ogni avvio.
+    if (repairedAny && quarantineSaved) {
+      try { localStorage.setItem(KEYS.projects, JSON.stringify(result.projects)); } catch { /* ritenterà al prossimo salvataggio */ }
     }
     // Un'istantanea pendente valida viene promossa dopo un arresto durante il commit finale.
     if (localStorage.getItem(KEYS.pending)) {

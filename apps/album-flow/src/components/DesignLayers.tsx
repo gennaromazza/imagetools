@@ -16,7 +16,8 @@ export interface DesignHandlers {
   selectedId: string | null;
   /** Altri elementi selezionati insieme al principale (per agganciarli). */
   extraIds: readonly string[];
-  onSelect: (overlayId: string | null, additive?: boolean) => void;
+  /** `openPanel` false = seleziona soltanto: l'afferrare un elemento non deve aprire il pannello, che cambierebbe la misura dello spread a metà trascinamento. */
+  onSelect: (overlayId: string | null, additive?: boolean, openPanel?: boolean) => void;
   onCommit: (overlayId: string, patch: OverlayPatch) => void;
   /** Sposta l'elemento e, se è in un gruppo, tutto il gruppo (scarto in frazioni dello spread). */
   onMoveBy: (overlayId: string, dx: number, dy: number) => void;
@@ -53,6 +54,8 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
   const rootRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ id: string; patch: OverlayPatch; move: boolean } | null>(null);
   const gesture = useRef<Gesture | null>(null);
+  /** Il clic che segue un trascinamento non deve aprire il pannello. */
+  const dragged = useRef(false);
 
   const shown = useMemo(() => {
     if (!draft) return overlays;
@@ -91,7 +94,8 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
     event.stopPropagation();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     const additive = mode === "move" && (event.shiftKey || event.ctrlKey || event.metaKey);
-    handlers?.onSelect(overlay.id, additive);
+    dragged.current = false;
+    handlers?.onSelect(overlay.id, additive, false);
     if (additive) return;
     const cx = metrics.rect.left + ((box.x + box.w / 2) / size.width) * metrics.rect.width;
     const cy = metrics.rect.top + ((box.y + box.h / 2) / size.height) * metrics.rect.height;
@@ -131,6 +135,7 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
     gesture.current = null;
     setDraft(null);
     if (!current?.moved || !patch) return;
+    dragged.current = true;
     if (current.mode === "move" && patch.x !== undefined && patch.y !== undefined) handlers?.onMoveBy(current.id, patch.x - current.base.x, patch.y - current.base.y);
     else handlers?.onCommit(current.id, patch);
   };
@@ -147,7 +152,11 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
             className={`design-box${selected ? " is-selected" : ""}${sibling ? " is-sibling" : ""}${handlers?.extraIds.includes(overlay.id) ? " is-multi" : ""}`}
             style={{ left: `${(box.x / size.width) * 100}%`, top: `${(box.y / size.height) * 100}%`, width: `${(box.w / size.width) * 100}%`, height: `${(box.h / size.height) * 100}%`, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }}
             data-overlay-id={overlay.id}
-            onClick={(event) => { event.stopPropagation(); if (!(event.shiftKey || event.ctrlKey || event.metaKey)) handlers?.onSelect(overlay.id); }}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (dragged.current) { dragged.current = false; return; }
+              if (!(event.shiftKey || event.ctrlKey || event.metaKey)) handlers?.onSelect(overlay.id);
+            }}
             onDoubleClick={(event) => { event.stopPropagation(); handlers?.onEdit(overlay.id); }}
             onPointerDown={(event) => begin(event, overlay, "move", box)}
             onPointerMove={move}

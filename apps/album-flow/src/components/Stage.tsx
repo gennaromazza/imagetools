@@ -298,7 +298,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     <main className="stage" aria-label="Area di lavoro">
       <div className="stage__row">
         {strip("left")}
-        <div className="stage__center" ref={centerRef} data-testid="stage-center">
+        <div className={`stage__center${design.open ? " stage__center--drawer" : ""}`} ref={centerRef} data-testid="stage-center">
           <div className="stage__spread" style={{ width: width || undefined }}>
             <SpreadView
               sheet={sheet}

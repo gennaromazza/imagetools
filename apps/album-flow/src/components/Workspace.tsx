@@ -10,7 +10,7 @@ import { applyImport, folderOf, planImport } from "../model/import";
 import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemView, toggleItemLock } from "../model/items";
 import { setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
 import { findItem, nowIso, touch } from "../model/project";
-import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, swapAreas } from "../model/spreads";
+import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas } from "../model/spreads";
 import { STAGES } from "../model/store";
 import { canRedo, canUndo, createHistory, pushHistory, redo, replacePresent, undo, type History } from "../history";
 import { ContactSheet } from "./ContactSheet";
@@ -398,7 +398,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     commitView: (itemId, view) => { setDraft(null); commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle, shape: view.shape }), `view:${itemId}`); },
     style: (i, changes, key, relayout) => commit((p) => setAreaStyle(p, spreadId, i, changes, relayout), key ? `style:${spreadId}:${i}:${key}` : undefined),
     align: (i, align) => commit((p) => alignArea(p, spreadId, i, align)),
-    split: (mode) => { commit((p) => setSplitMode(p, spreadId, mode)); setActiveArea(0); setSelectedItemId(null); },
+    split: (mode) => {
+      const refusal = splitRefusal(historyRef.current.present, spreadId, mode);
+      if (refusal) { notify(refusal); return; }
+      commit((p) => setSplitMode(p, spreadId, mode)); setActiveArea(0); setSelectedItemId(null);
+    },
     link: () => commit((p) => setLinked(p, spreadId, !spread?.linked)),
     swapAreas: () => commit((p) => swapAreas(p, spreadId)),
     shuffleArea: (i) => { if (spread?.done) { notify("Spread finito: riaprilo (D) per cambiare il layout."); return; } commit((p) => shuffleArea(p, spreadId, i, 1, templates)); },
@@ -511,11 +515,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
   const designHandlers = useMemo(() => ({
     selectedId: selectedOverlayId,
     extraIds: extraOverlayIds,
-    onSelect: (overlayId: string | null, additive?: boolean) => {
+    onSelect: (overlayId: string | null, additive?: boolean, openPanel = true) => {
       if (additive && overlayId && selectedOverlayId && overlayId !== selectedOverlayId) { setExtraOverlayIds((current) => (current.includes(overlayId) ? current.filter((id) => id !== overlayId) : [...current, overlayId])); return; }
-      if (additive && overlayId && !selectedOverlayId) { setSelectedOverlayId(overlayId); setSelectedItemId(null); setCropMode(false); setDesignOpen(true); setDesignTab("text"); return; }
+      if (additive && overlayId && !selectedOverlayId) { setSelectedOverlayId(overlayId); setSelectedItemId(null); setCropMode(false); if (openPanel) { setDesignOpen(true); setDesignTab("text"); } return; }
       setExtraOverlayIds([]);
-      setSelectedOverlayId(overlayId); if (overlayId) { setSelectedItemId(null); setCropMode(false); setDesignOpen(true); setDesignTab("text"); } },
+      setSelectedOverlayId(overlayId); if (overlayId) { setSelectedItemId(null); setCropMode(false); if (openPanel) { setDesignOpen(true); setDesignTab("text"); } } },
     onCommit: (overlayId: string, patch: Parameters<typeof updateOverlay>[3]) => commit((p) => updateOverlay(p, spreadId, overlayId, patch), `ov:${overlayId}`),
     onMoveBy: (overlayId: string, dx: number, dy: number) => commit((p) => moveOverlayGroup(p, spreadId, overlayId, dx, dy), `ov:${overlayId}`),
     onEdit: (overlayId: string) => { setSelectedOverlayId(overlayId); setDesignOpen(true); setDesignTab("text"); setFocusSignal((value) => value + 1); },

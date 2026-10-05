@@ -1,6 +1,6 @@
 import type { AlbumItem, AlbumSpread, AlbumSplitMode } from "@photo-tools/shared-types";
 import { areaOuterRects } from "../engine/geometry";
-import { MAX_SPREADS } from "./defaults";
+import { MAX_ITEMS_PER_AREA, MAX_SPREADS } from "./defaults";
 import { relayoutArea } from "./areas";
 import { newId } from "./ids";
 import { areaGeometry, createArea, createSpread, findSpread, mapSpread, normalizeArea, touch, type Project } from "./project";
@@ -79,6 +79,34 @@ export function swapAreas(project: Project, spreadId: string): Project {
   });
 }
 
+/** Foto di ogni area dopo il cambio di divisione, in ordine di lettura: il centro decide la pagina, con un foglio intero vanno tutte insieme. */
+function splitBuckets(project: Project, spread: AlbumSpread, mode: AlbumSplitMode): AlbumItem[][] {
+  const placed: Array<{ item: AlbumItem; centerX: number }> = [];
+  spread.areas.forEach((area, areaIndex) => {
+    const geometry = areaGeometry(project, spread, areaIndex);
+    for (const item of area.items) {
+      const cell = geometry.cells.find((candidate) => candidate.itemId === item.id);
+      placed.push({ item, centerX: cell ? cell.rect.x + cell.rect.w / 2 : geometry.outer.x + geometry.outer.w / 2 });
+    }
+  });
+  const rects = areaOuterRects(project.settings.sheet, mode);
+  const buckets: AlbumItem[][] = rects.map(() => []);
+  if (rects.length === 1) buckets[0] = placed.map((entry) => entry.item);
+  else {
+    const boundary = rects[0].w;
+    for (const entry of placed) buckets[entry.centerX < boundary ? 0 : 1].push(entry.item);
+  }
+  return buckets;
+}
+
+/** Perché il cambio di divisione non avrebbe effetto, in una frase; null se si può fare. */
+export function splitRefusal(project: Project, spreadId: string, mode: AlbumSplitMode): string | null {
+  const found = findSpread(project, spreadId);
+  if (!found || found.spread.split === mode) return null;
+  const biggest = Math.max(...splitBuckets(project, found.spread, mode).map((bucket) => bucket.length));
+  return biggest > MAX_ITEMS_PER_AREA ? `Con questa divisione una pagina avrebbe ${biggest} foto: il massimo è ${MAX_ITEMS_PER_AREA}. Togline qualcuna e riprova.` : null;
+}
+
 /**
  * Cambia la divisione dello spread. Le foto restano nell'area in cui cade il loro centro (o tutte in un'area con "full"),
  * l'ordine non cambia e i layout vengono rigenerati.
@@ -88,24 +116,11 @@ export function setSplitMode(project: Project, spreadId: string, mode: AlbumSpli
   if (!found || found.spread.split === mode) return project;
   const { spread } = found;
 
-  // Foto in ordine di lettura globale, con il centro nello spread.
-  const placed: Array<{ item: AlbumItem; centerX: number }> = [];
-  spread.areas.forEach((area, areaIndex) => {
-    const geometry = areaGeometry(project, spread, areaIndex);
-    for (const item of area.items) {
-      const cell = geometry.cells.find((candidate) => candidate.itemId === item.id);
-      placed.push({ item, centerX: cell ? cell.rect.x + cell.rect.w / 2 : geometry.outer.x + geometry.outer.w / 2 });
-    }
-  });
-
   const rects = areaOuterRects(project.settings.sheet, mode);
   const style = (index: number) => ({ ...(spread.areas[index] ?? spread.areas[0]).style });
-  const buckets: AlbumItem[][] = rects.map(() => []);
-  if (rects.length === 1) buckets[0] = placed.map((entry) => entry.item);
-  else {
-    const boundary = rects[0].w;
-    for (const entry of placed) buckets[entry.centerX < boundary ? 0 : 1].push(entry.item);
-  }
+  const buckets = splitBuckets(project, spread, mode);
+  // Il tetto per area vale anche qui: con troppe foto in una sola pagina l'album non si riaprirebbe più.
+  if (buckets.some((bucket) => bucket.length > MAX_ITEMS_PER_AREA)) return project;
 
   const areas = rects.map((_, index) => {
     const base = { ...createArea(style(index)), id: spread.areas[index]?.id ?? newId("area") };

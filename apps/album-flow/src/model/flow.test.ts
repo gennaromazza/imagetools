@@ -6,14 +6,14 @@ import { BUILTIN_CHAPTER_PRESETS, CHAPTER_COLORS, applyChapterPreset, assignAsse
 import { COMMON_FORMATS, formatKey, formatLabel, fromCm, isValidFormat, loadFavoriteFormats, loadRecentFormats, pushRecentFormat, sheetFromFormat, toCm, toggleFavoriteFormat } from "./formats";
 import { IMAGE_EXTENSIONS, applyImport, assetFromCandidate, candidateKey, folderGroups, isImageFileName, normalizePathKey, planImport, withoutFolders, type ImportCandidate } from "./import";
 import { assetUsage, clearRatings, setRatingPolicy, assetsInTab, compareAssets, duplicatedAssetIds, filterAssets, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, sortAssets, toggleAssetTag, unusedAssets } from "./library";
-import { parseAlbumProject, projectProblem, serializeAlbumProject } from "./portability";
+import { parseAlbumProject, projectProblem, repairOversizedAreas, serializeAlbumProject } from "./portability";
 import { preflightReport } from "./preflight";
 import { createDemoProject, loadProjects, mergeIncomingProject, projectFromHandoff, saveProjects, STAGES, stageLabel } from "./store";
 import { appendAssets, toggleItemLock } from "./items";
-import { addSpread, setSplitMode, setSpreadDone } from "./spreads";
+import { addSpread, setSplitMode, setSpreadDone, splitRefusal } from "./spreads";
 import { setAreaStyle, shuffleSpread, applyCandidateByNumber } from "./areas";
 import { assertProjectInvariants, makeAsset, makeProject } from "./fixtures";
-import { findItem, itemAspect, type Project } from "./project";
+import { createItem, findItem, itemAspect, type Project } from "./project";
 
 // Il salvataggio locale non esiste in Node: una memoria semplice basta per provare caricamento e salvataggio.
 class MemoryStorage {
@@ -527,6 +527,54 @@ test("salvataggio locale: legge e scrive, mette in quarantena i progetti non val
   storage().setItem("filex.albumFlow.v2.projects.pending", JSON.stringify([good]));
   assert.equal(loadProjects().projects.length, 1, "l'istantanea pendente viene promossa");
   assert.equal(storage().getItem("filex.albumFlow.v2.projects.pending"), null);
+});
+
+test("salvataggio locale: un album con troppe foto in una pagina viene riparato e resta nella Home, con l'originale in quarantena", () => {
+  storage().clear();
+  let project = addSpread(makeProject(30), 0, "full");
+  const id = project.spreads[0].id;
+  project = appendAssets(project, id, 0, Array.from({ length: 12 }, (_, index) => `a${index}`));
+  const area = project.spreads[0].areas[0];
+  const extra = ["a12", "a13", "a14"].map(createItem);
+  let layout = area.layout!;
+  for (const item of extra) layout = { kind: "split", dir: "row", ratio: 0.5, first: layout, second: { kind: "leaf", itemId: item.id } };
+  const broken = { ...project, spreads: [{ ...project.spreads[0], areas: [{ ...area, layout, items: [...area.items, ...extra] }] }] } as Project;
+  assert.match(projectProblem(broken) ?? "", /Troppe foto/);
+  assert.equal(repairOversizedAreas(project), null, "un album in regola non si tocca");
+
+  storage().setItem("filex.albumFlow.v2.projects", JSON.stringify([broken]));
+  const loaded = loadProjects();
+  assert.equal(loaded.projects.length, 1, "l'album non sparisce");
+  assert.equal(loaded.skipped, 0);
+  const fixed = loaded.projects[0];
+  assert.equal(fixed.spreads[0].areas[0].items.length, 12);
+  assert.deepEqual(fixed.spreads[0].areas[0].items.map((item) => item.assetId), area.items.map((item) => item.assetId), "restano le prime 12 foto, in ordine");
+  assert.equal(projectProblem(fixed), null);
+  assertProjectInvariants(fixed, "album riparato");
+  assert.equal(fixed.assets.length, 30, "le foto in eccesso restano nella libreria");
+  const quarantine = () => JSON.parse(storage().getItem("filex.albumFlow.v2.quarantine")!) as unknown[];
+  assert.equal(quarantine().length, 1, "l'originale è conservato a parte");
+  assert.equal(loadProjects().projects.length, 1);
+  assert.equal(quarantine().length, 1, "la riparazione è stata salvata: non si ripete a ogni avvio");
+});
+
+test("divisione: se le foto non stanno in una pagina il cambio si rifiuta con un messaggio e non supera mai il tetto", () => {
+  let project = addSpread(makeProject(30));
+  const id = project.spreads[0].id;
+  project = appendAssets(project, id, 0, Array.from({ length: 7 }, (_, index) => `a${index}`));
+  project = appendAssets(project, id, 1, Array.from({ length: 8 }, (_, index) => `a${index + 7}`));
+  assert.equal(setSplitMode(project, id, "full"), project, "7 + 8 foto non stanno in un foglio solo");
+  assert.match(splitRefusal(project, id, "full") ?? "", /15 foto.*12/);
+  assert.equal(splitRefusal(project, id, "half"), null, "stessa divisione: niente da dire");
+
+  let small = addSpread(makeProject(30));
+  const smallId = small.spreads[0].id;
+  small = appendAssets(small, smallId, 0, Array.from({ length: 6 }, (_, index) => `a${index}`));
+  small = appendAssets(small, smallId, 1, Array.from({ length: 6 }, (_, index) => `a${index + 6}`));
+  assert.equal(splitRefusal(small, smallId, "full"), null, "6 + 6 = 12 stanno");
+  const merged = setSplitMode(small, smallId, "full");
+  assert.equal(merged.spreads[0].areas[0].items.length, 12);
+  assertProjectInvariants(merged, "dodici in un foglio");
 });
 
 test("formati: conversioni di unità, chiavi, recenti e preferiti", () => {
