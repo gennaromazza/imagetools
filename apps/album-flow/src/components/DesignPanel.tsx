@@ -4,13 +4,20 @@ import { BUILTIN_BACKGROUNDS, builtinDataUrl } from "../model/builtinMedia";
 import { backgroundsOf, groupMembers, overlaysOf, type BackgroundChoice, type NewGraphicOptions, type NewTextOptions, type OverlayPatch } from "../model/design";
 import { addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle, type Phrase, type SavedTextStyle } from "../model/designLibrary";
 import { importMediaFile, listMedia, mediaVersion, removeMedia, subscribeMedia, type MediaKind, type MediaRecord } from "../model/mediaStore";
-import { FONT_CATEGORY_LABEL, FONT_FAMILIES, TEXT_PRESETS, fontInfo, fontStack, nearestFace, textPreset } from "../model/typography";
+import { BASE_GROUP, FONT_CATEGORY_LABEL, FONT_FAMILIES, TEXT_PRESETS, fontInfo, fontStack, nearestFace, textPreset, type TextPreset } from "../model/typography";
 import { forgetMediaUrl } from "../hooks/useMedia";
 import { installFonts, loadFonts } from "../render/fonts";
 import { Icon } from "./icons";
 import { IconButton } from "./ui";
 
 export type DesignTab = "backgrounds" | "text" | "library";
+
+/** Gli stili di testo raggruppati per sezione, nell'ordine in cui compaiono. */
+const PRESET_GROUPS: ReadonlyArray<readonly [string, readonly TextPreset[]]> = (() => {
+  const groups = new Map<string, TextPreset[]>();
+  for (const preset of TEXT_PRESETS) groups.set(preset.group ?? BASE_GROUP, [...(groups.get(preset.group ?? BASE_GROUP) ?? []), preset]);
+  return [...groups];
+})();
 
 export interface DesignActions {
   addText: (options: NewTextOptions) => void;
@@ -279,8 +286,11 @@ function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle
       ) : (
         <div className="design__section">
           <p className="small muted">Scegli uno stile per aggiungere un testo allo spread. Poi trascinalo, ridimensionalo e cambia il carattere. {count ? `Su questo spread ci sono ${count} elementi: clic per modificarli.` : ""}</p>
+          {PRESET_GROUPS.map(([group, presets]) => (
+          <div key={group} className="design__preset-group">
+            <h4 className="design__preset-heading">{group}</h4>
           <div className="design__presets">
-            {TEXT_PRESETS.map((preset) => (
+            {presets.map((preset) => (
               <button key={preset.id} type="button" className="design__preset" onClick={() => actions.addText({ presetId: preset.id, at: insertAt })} title={preset.use}>
                 <small className="design__preset-label">{preset.name}{preset.stack ? ` · ${preset.stack.length} testi` : ""}</small>
                 {/* L'anteprima è proprio ciò che verrà inserito: tutti i pezzi, ciascuno nel suo carattere. */}
@@ -292,6 +302,8 @@ function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle
               </button>
             ))}
           </div>
+          </div>
+          ))}
           {savedStyles.length ? (
             <>
               <h4>I tuoi stili</h4>

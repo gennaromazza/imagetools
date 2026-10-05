@@ -27,7 +27,7 @@ function Gap({ index, onDropNew }: { index: number; onDropNew: FilmstripProps["o
     <div
       className="film__gap"
       aria-hidden="true"
-      onDragOver={(event) => { if (accepts()) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; event.currentTarget.classList.add("is-drop"); } }}
+      onDragOver={(event) => { if (accepts()) { event.preventDefault(); event.dataTransfer.dropEffect = currentDrag()?.kind === "item" ? "move" : "copy"; event.currentTarget.classList.add("is-drop"); } }}
       onDragLeave={(event) => event.currentTarget.classList.remove("is-drop")}
       onDrop={(event) => {
         event.currentTarget.classList.remove("is-drop");
@@ -67,7 +67,7 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onDuplica
               draggable
               onDragStart={(event) => beginDrag(event, { kind: "spread", index })}
               onDragEnd={endDrag}
-              onDragOver={(event) => { const kind = currentDrag()?.kind; if (kind === "spread" || kind === "item" || kind === "assets") { event.preventDefault(); event.currentTarget.classList.add("is-drop"); } }}
+              onDragOver={(event) => { const kind = currentDrag()?.kind; if (kind === "spread" || kind === "item" || kind === "assets") { event.preventDefault(); event.dataTransfer.dropEffect = kind === "assets" ? "copy" : "move"; event.currentTarget.classList.add("is-drop"); } }}
               onDragLeave={(event) => event.currentTarget.classList.remove("is-drop")}
               onDrop={(event) => {
                 event.preventDefault();

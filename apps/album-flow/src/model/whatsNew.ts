@@ -21,6 +21,38 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.11",
+    date: "2026-10-05",
+    headline: "Raddrizza con una linea, testi già pronti per il matrimonio",
+    items: [
+      {
+        title: "Raddrizza l'orizzonte con una linea",
+        text: "Apri il ritaglio con un doppio clic sulla foto, premi il pulsante «linea» e trascina lungo l'orizzonte (o lungo un lato che deve essere verticale): l'angolo si calcola da solo. Puoi anche scriverlo nel campo e cambiarlo di 0,1° con ↑ ↓ (1° con Maiusc).",
+        where: ["Doppio clic sulla foto", "linea", "Raddrizza"],
+      },
+      {
+        title: "Ruota le foto di 90°",
+        text: "I pulsanti ↺ ↻ nella barra della foto, e le voci nei menu a clic destro, ruotano la foto in tutto l'album: il ritaglio ruota con l'immagine e le miniature della libreria mostrano la foto ruotata.",
+        where: ["↺ ↻", "Clic destro sulla foto"],
+      },
+      {
+        title: "Spostare le foto è più sicuro",
+        text: "Nessuna foto sparisce più dallo spread, nemmeno trascinata sul separatore accanto. Una foto bloccata resta ferma. Se uno spread è pieno ti avvisa. Riordinare un elenco filtrato non rimescola più il resto della libreria, e spostando una foto su un altro spread la vista resta dove eri.",
+        where: ["Trascina sullo spread", "Miniature degli spread"],
+      },
+      {
+        title: "Zoom e ritaglio più precisi",
+        text: "La parte visibile della foto sta sempre dentro la cella, senza angoli vuoti e senza deformarsi, anche con la foto raddrizzata. Ingrandire di pochissimo non fa più saltare la foto.",
+        where: ["Rotella sulla foto"],
+      },
+      {
+        title: "31 modelli di testo per il matrimonio",
+        text: "Capitoli (La storia, I dettagli, Le mani…), copertine, citazioni, didascalie e dediche, già composti in stile rivista: si inseriscono con tutti i loro pezzi e si modificano come vuoi. Nella Libreria trovi anche 45 frasi nuove.",
+        where: ["Personalizza", "Testo", "Libreria"],
+      },
+    ],
+  },
+  {
     version: "0.2.10",
     date: "2026-10-05",
     headline: "Più sicurezza e il testo che non scappa",

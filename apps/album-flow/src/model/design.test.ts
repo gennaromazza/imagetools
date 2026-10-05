@@ -5,11 +5,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SpreadTextOverlay } from "@photo-tools/shared-types";
 import { MAX_OVERLAYS_PER_SPREAD, addGraphicOverlay, addTextOverlay, addTextStack, backgroundsOf, duplicateOverlay, fontIdsOfSpread, mediaIdsOfSpread, orderOverlay, overlaysInPaintOrder, overlaysOf, removeOverlay, groupMembers, groupOverlays, moveOverlayGroup, ungroupOverlay, setAlbumBackground, setSpreadBackground, updateOverlay, updateSpreadBackground } from "./design";
-import { LIBRARY_KEYS, SEED_PHRASES, addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle } from "./designLibrary";
+import { LIBRARY_KEYS, NEW_SEED_PHRASES, SEED_PHRASES, SEED_VERSION, addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle } from "./designLibrary";
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
 import { addSpread, setSpreadDone } from "./spreads";
-import { FONT_FAMILIES, TEXT_PRESETS, contrastRatio, fontInfo, nearestFace, readableOn, sanitizeTextStyle } from "./typography";
+import { BASE_GROUP, FONT_FAMILIES, TEXT_PRESETS, WEDDING_TEXT_TEMPLATES, contrastRatio, fontInfo, nearestFace, readableOn, sanitizeTextStyle } from "./typography";
 import { renderBackgroundsSvg, renderOverlaysSvg, overlayBox } from "../render/design-svg";
 import { approximateMeasure, layoutText } from "../render/text-layout";
 import { renderSpreadSvg } from "../render/spread-svg";
@@ -330,7 +330,7 @@ test("archivio: frasi di partenza, aggiungere senza doppioni, modificare, raggru
 
 test("archivio: dati rovinati non rompono nulla e gli stili salvati restano in regola", () => {
   assert.equal(loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: "{non json" })).length, SEED_PHRASES.length);
-  assert.equal(loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "a", text: "ok", group: 5 }, { id: 7 }, null, "x"]) })).length, 1);
+  assert.equal(loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "a", text: "ok", group: 5 }, { id: 7 }, null, "x"]) })).length, 1 + NEW_SEED_PHRASES.length, "una libreria già salvata riceve le frasi nuove");
   assert.deepEqual(loadPhrases(null).length, SEED_PHRASES.length);
   assert.deepEqual(loadSavedStyles(memoryStorage({ [LIBRARY_KEYS.styles]: "[1,2]" })), []);
 
@@ -450,4 +450,35 @@ test("gruppi: si possono agganciare più testi, anche di gruppi diversi, e poi s
   const shifted = moveOverlayGroup(everything, spreadId, ids[1], 0.05, 0.02);
   for (const [index, item] of overlaysOf(shifted.spreads[0]).entries()) assert.ok(Math.abs(item.x - overlaysOf(everything.spreads[0])[index].x - 0.05) < 1e-4);
   assertProjectInvariants(everything, "agganciati");
+});
+
+test("modelli per il matrimonio: più di trenta, tutti validi, con testi già scritti e carattere esistente", () => {
+  assert.ok(WEDDING_TEXT_TEMPLATES.length >= 30, `solo ${WEDDING_TEXT_TEMPLATES.length} modelli`);
+  const ids = TEXT_PRESETS.map((preset) => preset.id);
+  assert.equal(new Set(ids).size, ids.length, "identificativi unici");
+  const groups = new Set(TEXT_PRESETS.map((preset) => preset.group));
+  assert.ok(groups.has(BASE_GROUP) && groups.size >= 6, "sezioni distinte");
+  for (const preset of WEDDING_TEXT_TEMPLATES) {
+    assert.ok(preset.stack && preset.stack.length >= 2 && preset.stack.length <= 4, `${preset.id}: composizione da 2 a 4 pezzi`);
+    assert.equal(preset.stack!.filter((part) => part.presetId === preset.id).length, 1, `${preset.id}: un solo pezzo principale`);
+    assert.ok(FONT_FAMILIES.some((font) => font.id === preset.style.font), `${preset.id}: carattere inesistente`);
+    for (const part of preset.stack!) {
+      assert.ok(TEXT_PRESETS.some((candidate) => candidate.id === part.presetId), `${preset.id}: stile ${part.presetId} inesistente`);
+      assert.ok(part.text.trim().length > 0 && part.text.length < 400, `${preset.id}: testo vuoto o troppo lungo`);
+    }
+  }
+});
+
+test("archivio: le frasi di partenza nuove si aggiungono una sola volta e una cancellazione resta cancellata", () => {
+  const storage = memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "mia", text: "Una frase mia", group: "Le mie" }]) });
+  const first = loadPhrases(storage);
+  assert.equal(first.length, 1 + NEW_SEED_PHRASES.length);
+  assert.equal(first[0].text, "Una frase mia", "le tue restano al loro posto");
+  assert.equal(storage.getItem(LIBRARY_KEYS.seedVersion), String(SEED_VERSION));
+  assert.equal(loadPhrases(storage).length, first.length, "il secondo caricamento non aggiunge nulla");
+  const removed = removePhrase(first, first[1].id);
+  assert.equal(savePhrases(removed, storage), true);
+  assert.equal(loadPhrases(storage).length, removed.length, "la frase cancellata non ricompare");
+  const twice = loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "x", text: NEW_SEED_PHRASES[0].text, group: NEW_SEED_PHRASES[0].group }]) }));
+  assert.equal(twice.length, NEW_SEED_PHRASES.length, "niente doppioni con una frase già presente");
 });

@@ -69,6 +69,11 @@ export interface StageActions {
   commitFrame: (itemId: string, frame: { x: number; y: number; w: number; h: number }) => void;
   orderFrame: (itemId: string, where: "front" | "back") => void;
   rotateFrame: (itemId: string, deltaDeg: number) => void;
+  /** Ruota la foto (in tutto l'album) di un quarto di giro: 1 = orario, -1 = antiorario. */
+  rotatePhoto: (itemId: string, quarter: 1 | -1) => void;
+  /** Accende o spegne lo strumento «linea»: si traccia una linea lungo l'orizzonte e la foto si raddrizza. */
+  toggleLineTool: () => void;
+  finishLineTool: () => void;
   fillSpread: () => void;
   toggleDone: () => void;
 }
@@ -82,6 +87,8 @@ export interface StageProps {
   selectedItemId: string | null;
   highlightItemId: string | null;
   cropMode: boolean;
+  /** Lo strumento «linea» del raddrizzamento è acceso. */
+  lineTool: boolean;
   draft: Draft | null;
   zoom: number;
   guides: boolean;
@@ -120,7 +127,44 @@ function formatTime(ms: number | undefined): string | null {
 }
 
 /** Zona di lavoro: spread grande al centro, una striscia di controlli per ogni pagina, barra inferiore con sfondo, navigazione e vista. */
-export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, cropMode, draft, zoom, guides, sizes, layoutsOpen, templates, actions, design }: StageProps) {
+/** Campo dell'angolo di raddrizzamento: si scrive il valore (virgola o punto), con le frecce ↑↓ si cambia di 0,1° (1° con Maiusc). */
+function AngleField({ value, onChange }: { value: number; onChange: (angle: number) => void }) {
+  const format = (angle: number) => angle.toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+  const [text, setText] = useState(() => format(value));
+  const editing = useRef(false);
+  useEffect(() => { if (!editing.current) setText(format(value)); }, [value]);
+  const commit = () => {
+    const parsed = Number(text.trim().replace(",", "."));
+    if (text.trim() !== "" && Number.isFinite(parsed)) onChange(parsed);
+    else setText(format(value));
+  };
+  return (
+    <span className="straighten__field">
+      <input
+        className="straighten__num"
+        inputMode="decimal"
+        aria-label="Angolo di raddrizzamento in gradi"
+        title="Angolo in gradi: scrivilo oppure usa ↑ e ↓ (Maiusc = 1°)"
+        value={text}
+        onFocus={(event) => { editing.current = true; event.currentTarget.select(); }}
+        onChange={(event) => setText(event.target.value)}
+        onBlur={() => { editing.current = false; commit(); }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") { event.preventDefault(); commit(); event.currentTarget.blur(); }
+          else if (event.key === "Escape") { event.stopPropagation(); setText(format(value)); event.currentTarget.blur(); }
+          else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+            event.preventDefault();
+            const step = (event.shiftKey ? 1 : 0.1) * (event.key === "ArrowUp" ? 1 : -1);
+            onChange(Number((value + step).toFixed(2)));
+          }
+        }}
+      />
+      <span aria-hidden="true">°</span>
+    </span>
+  );
+}
+
+export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, cropMode, lineTool, draft, zoom, guides, sizes, layoutsOpen, templates, actions, design }: StageProps) {
   const [centerRef, centerSize] = useElementSize<HTMLDivElement>();
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
@@ -171,13 +215,20 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
             </select>
           </label>
         ) : null}
+        {canCrop ? (
+          <>
+            <IconButton icon="rotateLeft" label="Ruota la foto di 90° a sinistra (in tutto l'album)" onClick={() => actions.rotatePhoto(itemId, -1)} size={16} />
+            <IconButton icon="rotateRight" label="Ruota la foto di 90° a destra (in tutto l'album)" onClick={() => actions.rotatePhoto(itemId, 1)} size={16} />
+          </>
+        ) : null}
         {cropMode && canCrop ? (
-          <label className="straighten" title="Raddrizza la foto: Alt + rotella (con Maiusc a passi più fini), oppure , e . da tastiera">
-            <span>Raddrizza</span>
-            <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
-            <output>{(found.item.angle ?? 0).toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}°</output>
+          <div className="straighten" role="group" aria-label="Raddrizza la foto">
+            <IconButton icon="level" label="Raddrizza con una linea: trascina lungo l'orizzonte o lungo un lato che deve essere verticale" active={lineTool} onClick={actions.toggleLineTool} size={16} />
+            <span className="straighten__label">Raddrizza</span>
+            <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" title="Alt + rotella (Maiusc = passi più fini), oppure , e . da tastiera. Doppio clic: azzera" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
+            <AngleField value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })} />
             <button type="button" className="icon-btn" title="Azzera il raddrizzamento" aria-label="Azzera il raddrizzamento" disabled={!found.item.angle} onClick={() => actions.commitView(itemId, { angle: 0 })}>0°</button>
-          </label>
+          </div>
         ) : null}
         {hasFreeLayout(found.area) ? (
           <>
@@ -206,7 +257,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         <IconButton icon="trash" label="Togli dallo spread (Canc)" danger onClick={() => actions.removeItem(itemId)} size={16} />
       </>
     );
-  }, [actions, assets, cropMode, desktop, infoFor, newShape.isNew, newShape.markSeen, sheet, spread]);
+  }, [actions, assets, cropMode, desktop, infoFor, lineTool, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */
   const photoMenuItems = (itemId: string): MenuItem[] => {
@@ -223,6 +274,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       { separator: true, label: "-" },
       { label: cropMode && selectedItemId === itemId ? "Chiudi il ritaglio" : "Ritaglia e sposta nello slot", icon: "crop", hint: "Invio", disabled: !canCrop, onClick: () => actions.toggleCrop(itemId) },
       { label: "Ripristina ritaglio, zoom e forma", icon: "undo", hint: "0", disabled: found.item.locked, onClick: () => actions.resetItemView(itemId) },
+      { label: "Ruota a sinistra di 90°", icon: "rotateLeft", disabled: found.item.locked, onClick: () => actions.rotatePhoto(itemId, -1) },
+      { label: "Ruota a destra di 90°", icon: "rotateRight", disabled: found.item.locked, onClick: () => actions.rotatePhoto(itemId, 1) },
       { label: "Sostituisci con la foto scelta in libreria", icon: "image", disabled: found.item.locked, onClick: () => actions.replaceWithSelection(itemId) },
       ...(free ? [
         { label: "Porta davanti alle altre", icon: "chevronUp" as const, onClick: () => actions.orderFrame(itemId, "front") },
@@ -311,6 +364,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               selectedItemId={selectedItemId}
               highlightItemId={highlightItemId}
               cropMode={cropMode}
+              straightenTool={lineTool && cropMode}
+              onStraightenDone={actions.finishLineTool}
               draft={draft}
               onActivateArea={actions.activateArea}
               onSelectItem={actions.selectItem}

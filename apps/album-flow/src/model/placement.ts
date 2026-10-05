@@ -2,7 +2,7 @@ import type { AlbumAssetV2, AlbumItem, AreaStyle } from "@photo-tools/shared-typ
 import type { Rect } from "../engine/geometry";
 import { MAX_ANGLE, MAX_SHAPE, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, clampNumber } from "./defaults";
 import { itemAspect } from "./project";
-import { cropForView, effectiveDpi, imageRectInSlot, type CropRect } from "../slot-geometry";
+import { cropForView, imageRectInSlot, type CropRect } from "../slot-geometry";
 
 /** Come una foto sta dentro la sua cella: cornice, area visibile e posizione dell'immagine intera (millimetri). */
 export interface Placement {
@@ -78,7 +78,8 @@ export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy
   const requestedAngle = clampAngle(view?.angle ?? item.angle);
   const rawShape = view?.shape !== undefined ? view.shape : item.shape;
   const shape = rawShape ? clampNumber(rawShape, MIN_SHAPE, MAX_SHAPE) : 0;
-  // «Foto intera» vale per le foto lasciate com'erano: una foto con una forma scelta, ingrandita o raddrizzata riempie il suo spazio, come negli altri programmi di impaginazione.
+  // «Foto intera» vale per le foto lasciate com'erano: una foto con una forma scelta, ingrandita o raddrizzata diventa una finestra
+  // ritagliata (zoom e raddrizzamento lavorano dentro la finestra), come negli altri programmi di impaginazione.
   const fitted = style.mode === "fit" && !shape && zoom <= MIN_ZOOM + 1e-6 && requestedAngle === 0;
   const angle = fitted ? 0 : requestedAngle;
   const factor = style.align === "start" ? 0 : style.align === "end" ? 1 : 0.5;
@@ -89,9 +90,13 @@ export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy
     const h = ratio > content.w / content.h ? content.w / ratio : content.h;
     return { x: content.x + (content.w - w) * (auto && anchor ? anchor.x : factor), y: content.y + (content.h - h) * (auto && anchor ? anchor.y : factor), w, h };
   };
-  // Con una forma scelta la parte visibile è una finestra di quella forma dentro la cella; la foto la riempie.
-  // Se la cella ha già (quasi) quella forma la foto la riempie tutta: niente sottili fasce bianche sopra e sotto.
-  const view2 = shape && Math.abs(content.w / content.h / shape - 1) >= SHAPE_SNAP ? inside(shape) : content;
+  // La finestra: la parte della cella in cui si vede la foto (la foto la riempie).
+  // - forma scelta: una finestra di quella forma; se la cella ha già (quasi) quella forma la foto riempie tutta la cella (niente fasce bianche sottili);
+  // - «foto intera»: il rettangolo della foto intera, uguale con o senza zoom, così ingrandire non fa saltare la foto a riempire la cella;
+  // - «riempi»: tutta la cella.
+  const view2 = shape
+    ? (Math.abs(content.w / content.h / shape - 1) >= SHAPE_SNAP ? inside(shape) : content)
+    : style.mode === "fit" ? inside(aspect) : content;
   const viewAspect = view2.w / view2.h;
 
   let image: Rect;
@@ -99,7 +104,7 @@ export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy
   let appliedZoom = zoom;
   if (fitted) {
     crop = { cropLeft: 0, cropTop: 0, cropWidth: 1, cropHeight: 1 };
-    image = inside(aspect);
+    image = view2;
   } else if (angle !== 0) {
     const straight = straightView(view2, aspect, zoom, cx, cy, angle);
     appliedZoom = straight.zoom;
@@ -109,12 +114,51 @@ export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy
     crop = cropForView(aspect, viewAspect, zoom, cx, cy);
     image = imageRectInSlot(view2, crop, "fill", aspect);
   }
-  const visible = fitted ? image : view2;
-  const dpi = asset && asset.width > 0 && asset.height > 0
-    ? effectiveDpi(isRotatedQuarter(asset) ? asset.height : asset.width, isRotatedQuarter(asset) ? asset.width : asset.height, crop, visible)
-    : Infinity;
-  // «Foto intera» o forma scelta: la parte visibile è la foto stessa, così il bordo le sta attorno e non attorno all'intera cella.
-  return { frame, content: visible, borderMm, image, crop, dpi, zoom: appliedZoom, angle };
+  // Risoluzione vera: pixel dell'originale per pollice dell'immagine così com'è disposta (vale anche con la foto raddrizzata e ingrandita).
+  const widthPx = asset && asset.width > 0 && asset.height > 0 ? (isRotatedQuarter(asset) ? asset.height : asset.width) : 0;
+  const dpi = widthPx > 0 && image.w > 0 ? widthPx / (image.w / 25.4) : Infinity;
+  // La parte visibile è la finestra: il bordo le sta attorno e non attorno all'intera cella.
+  return { frame, content: view2, borderMm, image, crop, dpi, zoom: appliedZoom, angle };
+}
+
+/**
+ * Angolo di raddrizzamento che rende orizzontale (o verticale, se la linea è più verticale che orizzontale) una linea tracciata
+ * sullo schermo sopra la foto, per esempio lungo l'orizzonte. `start` e `end` sono punti dello schermo (y verso il basso);
+ * `currentAngle` è il raddrizzamento già applicato, perché la linea è disegnata sulla foto così com'è adesso.
+ * Restituisce null se i due punti coincidono.
+ */
+export function angleFromLine(start: { x: number; y: number }, end: { x: number; y: number }, currentAngle: number): number | null {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.hypot(dx, dy) < 1e-9) return null;
+  const screen = (Math.atan2(dy, dx) * 180) / Math.PI;
+  // scarto dall'asse più vicino (orizzontale o verticale), in gradi tra -45 e 45; tracciare la linea da destra a sinistra non cambia nulla
+  const off = screen - 90 * Math.round(screen / 90);
+  return clampAngle(currentAngle - off);
+}
+
+/** Passo dello zoom con la rotella. */
+export const WHEEL_ZOOM_STEP = 1.1;
+
+/**
+ * Zoom richiesto dopo uno scatto di rotella. Ingrandendo si parte da ciò che si vede (con la foto raddrizzata lo zoom applicato
+ * può superare quello salvato per coprire gli angoli); riducendo si parte dallo zoom salvato, così tornando a 0° ricompare
+ * l'inquadratura di prima e lo zoom salvato non si gonfia con il raddrizzamento.
+ */
+export function nextWheelZoom(storedZoom: number, appliedZoom: number, zoomIn: boolean, notches = 1): number {
+  const base = zoomIn ? Math.max(storedZoom, appliedZoom) : storedZoom;
+  const step = WHEEL_ZOOM_STEP ** clampNumber(notches, 0.05, 1);
+  return clampNumber(base * (zoomIn ? step : 1 / step), MIN_ZOOM, MAX_ZOOM);
+}
+
+/**
+ * Quanto vale un evento della rotella in «scatti»: un classico scatto del mouse (spostamento di 100) vale 1, un touchpad o un
+ * mouse a scorrimento fluido, che mandano molti eventi piccoli, valgono una frazione, così lo zoom per scatto resta lo stesso.
+ */
+export function wheelNotches(delta: number): number {
+  const magnitude = Math.abs(delta);
+  if (!Number.isFinite(magnitude) || magnitude === 0) return 1;
+  return clampNumber(magnitude / 100, 0.05, 1);
 }
 
 function isRotatedQuarter(asset: AlbumAssetV2): boolean {

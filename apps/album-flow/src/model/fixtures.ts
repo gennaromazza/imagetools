@@ -3,7 +3,8 @@ import type { AlbumAssetV2 } from "@photo-tools/shared-types";
 import type { Rect } from "../engine/geometry";
 import { leafIds, validateTree } from "../engine/tree";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
-import { areaGeometry, createEmptyProject, hasFreeLayout, type Project } from "./project";
+import { areaGeometry, createEmptyProject, hasFreeLayout, itemAspect, type Project } from "./project";
+import { SHAPE_SNAP, placeItem } from "./placement";
 
 /** Dati di prova e controlli di coerenza condivisi dai test del modello v2 (non usato dall'app). */
 
@@ -39,6 +40,46 @@ function assertInside(inner: Rect, rect: Rect, label: string) {
   assert.ok(rect.x >= inner.x - EPS && rect.y >= inner.y - EPS && rect.x + rect.w <= inner.x + inner.w + EPS && rect.y + rect.h <= inner.y + inner.h + EPS, `${label}: cella fuori dall'area`);
 }
 
+/**
+ * Regole che valgono per ogni foto di ogni progetto, qualunque sia la strada con cui ci si è arrivati: la parte visibile sta dentro la cella,
+ * l'immagine la copre (anche raddrizzata) senza deformarsi, la risoluzione è quella vera, la forma scelta è rispettata e ingrandire o
+ * raddrizzare di pochissimo non fa saltare la foto.
+ */
+export function assertPlacement(project: Project, style: Parameters<typeof placeItem>[3], cell: { rect: Rect; anchor?: { x: number; y: number } }, item: Project["spreads"][number]["areas"][number]["items"][number], where: string): void {
+  const asset = project.assets.find((candidate) => candidate.id === item.assetId);
+  const p = placeItem(cell.rect, item, asset, style, null, cell.anchor);
+  assertInside(cell.rect, p.content, `${where} (parte visibile)`);
+  assert.ok(p.content.w > 0 && p.content.h > 0, `${where}: parte visibile vuota`);
+  // l'immagine copre la parte visibile anche inclinata
+  const cx = p.content.x + p.content.w / 2;
+  const cy = p.content.y + p.content.h / 2;
+  const rad = (p.angle * Math.PI) / 180;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const dx = (sx * p.content.w) / 2;
+    const dy = (sy * p.content.h) / 2;
+    const x = cx + dx * Math.cos(rad) + dy * Math.sin(rad);
+    const y = cy - dx * Math.sin(rad) + dy * Math.cos(rad);
+    assert.ok(x >= p.image.x - 1e-3 && x <= p.image.x + p.image.w + 1e-3 && y >= p.image.y - 1e-3 && y <= p.image.y + p.image.h + 1e-3, `${where}: angolo vuoto (angolo ${p.angle}°, zoom ${p.zoom})`);
+  }
+  // nessuna deformazione
+  assert.ok(Math.abs(p.image.w / p.image.h / itemAspect(asset) - 1) < 1e-6, `${where}: foto deformata`);
+  // risoluzione vera
+  if (asset && asset.width > 0 && asset.height > 0) {
+    const widthPx = asset.rotationDegrees === 90 || asset.rotationDegrees === 270 ? asset.height : asset.width;
+    assert.ok(Math.abs(p.dpi / (widthPx / (p.image.w / 25.4)) - 1) < 1e-6, `${where}: risoluzione non vera`);
+  }
+  // forma scelta: la finestra ha quella forma, oppure la cella la ha già quasi (la foto la riempie)
+  if (item.shape) {
+    const window = p.content.w / p.content.h;
+    const cell = (p.frame.w - p.borderMm * 2) / (p.frame.h - p.borderMm * 2);
+    assert.ok(Math.abs(window / item.shape - 1) < 1e-6 || (Math.abs(cell / item.shape - 1) < SHAPE_SNAP && Math.abs(window / cell - 1) < 1e-6), `${where}: la forma ${item.shape} non è rispettata (finestra ${window})`);
+  }
+  // continuità: un piccolo zoom o un piccolo raddrizzamento non cambiano la finestra
+  const near = (a: Rect, b: Rect) => ["x", "y", "w", "h"].every((key) => Math.abs(a[key as keyof Rect] - b[key as keyof Rect]) < 1e-2);
+  if (item.zoom < 5.99) assert.ok(near(p.content, placeItem(cell.rect, { ...item, zoom: item.zoom + 1e-4 }, asset, style, null, cell.anchor).content), `${where}: la foto salta cambiando di pochissimo lo zoom`);
+  if (!item.angle) assert.ok(near(p.content, placeItem(cell.rect, { ...item, angle: 0.01 }, asset, style, null, cell.anchor).content), `${where}: la foto salta raddrizzando di pochissimo`);
+}
+
 /** Invarianti che devono valere dopo QUALSIASI operazione: identificativi, alberi, geometria, riferimenti, salvataggio. */
 export function assertProjectInvariants(project: Project, label = ""): void {
   const assetIds = new Set(project.assets.map((asset) => asset.id));
@@ -65,6 +106,7 @@ export function assertProjectInvariants(project: Project, label = ""): void {
         assert.ok(assetIds.has(item.assetId), `${where}: foto inesistente`);
         assert.ok(item.zoom >= 1 && item.zoom <= 6, `${where}: zoom fuori limite`);
         assert.ok(item.cx >= 0 && item.cx <= 1 && item.cy >= 0 && item.cy <= 1, `${where}: centro fuori limite`);
+        if (item.shape !== undefined) assert.ok(item.shape >= 0.2 && item.shape <= 5, `${where}: forma fuori limite`);
       }
       const geometry = areaGeometry(project, spread, areaIndex);
       assert.equal(geometry.cells.length, area.items.length, `${where}: celle diverse dalle foto`);
@@ -72,6 +114,8 @@ export function assertProjectInvariants(project: Project, label = ""): void {
       geometry.cells.forEach((cell, i) => {
         assert.ok(cell.rect.w > 0 && cell.rect.h > 0, `${where}: cella vuota`);
         assertInside(geometry.inner, cell.rect, where);
+        const item = area.items.find((candidate) => candidate.id === cell.itemId)!;
+        assertPlacement(project, area.style, cell, item, `${where} foto ${i + 1}`);
         for (let j = i + 1; !overlapAllowed && j < geometry.cells.length; j += 1) {
           const other = geometry.cells[j].rect;
           const overlapX = Math.min(cell.rect.x + cell.rect.w, other.x + other.w) - Math.max(cell.rect.x, other.x);

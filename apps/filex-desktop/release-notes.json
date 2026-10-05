@@ -606,6 +606,9 @@
     ],
     "0.2.10": [
       "Correzioni: l'album non sparisce più dalla Home se dopo un cambio di divisione una pagina supera le 12 foto (il cambio viene rifiutato con un messaggio; un album già in quello stato viene riparato all'apertura). Il pannello «Personalizza» non copre più lo spread e non si apre più mentre trascini un testo. Salvataggi ed esportazioni funzionano ora anche su dischi exFAT/FAT32 (senza hard link)."
+    ],
+    "0.2.11": [
+      "Nuovo: raddrizza con una linea (pulsante «linea» nel ritaglio: tracci l'orizzonte e l'angolo si calcola da solo), campo numerico per l'angolo e rotazione di 90° delle foto (↺ ↻ nella barra della foto e nei menu). Spostare le foto: nessuna foto sparisce più (anche trascinata sul separatore accanto), le foto bloccate restano ferme, compaiono avvisi quando uno spread è pieno, l'ordine di un elenco filtrato non rimescola il resto e, spostando una foto su un altro spread, la vista resta dov'eri. Zoom e ritaglio più precisi: la parte visibile sta sempre dentro la cella, senza angoli vuoti. Personalizza: 31 modelli di testo già composti per il matrimonio (capitoli, copertine, citazioni, didascalie, dediche) e 45 frasi nuove nella libreria."
     ]
   }
 }

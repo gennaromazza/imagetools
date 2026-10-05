@@ -90,7 +90,7 @@ const Thumb = memo(function Thumb({ asset, size, selected, uses, chapterColor, d
       title={`${asset.fileName}${asset.width > 0 ? ` · ${asset.width} × ${asset.height} px (${(asset.width * asset.height / 1e6).toFixed(1)} MP)` : ""}${uses ? ` · usata ${uses === 1 ? "una volta" : `${uses} volte`}` : " · non ancora usata"}`}
     >
       <div className="thumb__frame" style={{ height: Math.round(size * 0.75) }}>
-        {src ? <img src={src} alt="" draggable={false} loading="lazy" /> : <span className="thumb__ph" />}
+        {src ? <img src={src} alt="" draggable={false} loading="lazy" style={asset.rotationDegrees ? { transform: `rotate(${asset.rotationDegrees}deg)`, ...(asset.rotationDegrees === 90 || asset.rotationDegrees === 270 ? { width: "100cqh", height: "100cqw" } : {}) } : undefined} /> : <span className="thumb__ph" />}
         {chapterColor ? <span className="thumb__chapter" style={{ background: chapterColor }} /> : null}
         {uses > 0 ? <span className="thumb__check" aria-label="Già usata nell'album">{uses > 1 ? uses : <Icon name="check" size={11} strokeWidth={2.6} />}</span> : null}
         {asset.albumTags?.length ? <span className="thumb__tags">{asset.albumTags.map((tag) => TAG_LABEL[tag]).join("")}</span> : null}
@@ -128,6 +128,8 @@ export interface LibraryDockProps {
   onLocalize: (assetId: string) => void;
   /** Imposta la foto come copertina del progetto (mostrata nella Home). */
   onSetCover: (assetId: string) => void;
+  /** Ruota le foto di un quarto di giro (1 = a destra, -1 = a sinistra) dappertutto nell'album. */
+  onRotate: (assetIds: string[], quarter: 1 | -1) => void;
   onSetSort: (key: AlbumSortKey) => void;
   onReorder: (visibleIds: string[], movingIds: string[], beforeId: string | null) => void;
   onTag: (assetIds: string[], tag: AlbumAssetTag) => void;
@@ -158,6 +160,7 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
   const [menu, setMenu] = useState<{ x: number; y: number; asset: AlbumAssetV2 } | null>(null);
   const [dropTab, setDropTab] = useState<string | null>(null);
   const [dropBefore, setDropBefore] = useState<string | null>(null);
+  const [dropEnd, setDropEnd] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
   const revealN = props.revealAsset?.n;
   useEffect(() => {
@@ -173,6 +176,14 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
   const tabAssets = useMemo(() => assetsInTab(project, tab), [project, tab]);
   const visible = useMemo(() => filterAssets(project, tabAssets, { query, ...(stars === "any" ? {} : atLeast && stars !== "0" ? { minRating: Number(stars) } : { exactRating: Number(stars) }), labelId: labelId || undefined, origin, usage: usageFilter }), [project, tabAssets, query, stars, atLeast, labelId, origin, usageFilter]);
   const visibleIds = useMemo(() => visible.map((asset) => asset.id), [visible]);
+  // La selezione riguarda solo le foto che si vedono: cambiando scheda, ricerca o filtri (o quando una foto sparisce perché ora è usata)
+  // le foto nascoste non restano selezionate, altrimenti trascinare o aggiungere porterebbe con sé anche quelle.
+  useEffect(() => {
+    if (selection.length === 0) return;
+    const shown = new Set(visibleIds);
+    if (selection.some((id) => !shown.has(id))) props.onSelection(selection.filter((id) => shown.has(id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleIds]);
   const chapterOf = useMemo(() => {
     const map = new Map<string, string>();
     for (const chapter of project.chapters) for (const id of chapter.assetIds) map.set(id, chapter.color);
@@ -208,6 +219,24 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
     if (!selected.has(asset.id)) props.onSelection([asset.id]);
     beginDrag(event, { kind: "assets", assetIds: ids });
   }, [props, selected, selection]);
+
+  /** Rilascio sul fondo dell'elenco: le foto trascinate vanno in coda (nell'ordine a mano). */
+  const overEnd = (event: React.DragEvent) => {
+    if (currentDrag()?.kind !== "assets") return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropBefore(null);
+    setDropEnd(true);
+  };
+  const dropAtEnd = (event: React.DragEvent) => {
+    const payload = currentDrag();
+    setDropEnd(false);
+    if (payload?.kind !== "assets") return;
+    event.preventDefault();
+    event.stopPropagation();
+    endDrag();
+    props.onReorder(visibleIds, payload.assetIds, null);
+  };
 
   const columns = () => {
     const box = gridRef.current;
@@ -275,6 +304,8 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
       { label: many ? `Aggiungi ${ids.length} foto allo spread` : "Aggiungi allo spread", icon: "plus", hint: "Invio", onClick: () => props.onPlace(ids) },
       { label: "Mostra nello spread", icon: "image", disabled: uses === 0 || many, onClick: () => props.onLocalize(asset.id) },
       { label: props.project.coverAssetId === asset.id ? "È la copertina del progetto" : "Imposta come copertina", icon: "book", disabled: many || props.project.coverAssetId === asset.id, onClick: () => props.onSetCover(asset.id) },
+      { label: many ? `Ruota ${ids.length} foto a sinistra (90°)` : "Ruota a sinistra (90°)", icon: "rotateLeft", onClick: () => props.onRotate(ids, -1) },
+      { label: many ? `Ruota ${ids.length} foto a destra (90°)` : "Ruota a destra (90°)", icon: "rotateRight", onClick: () => props.onRotate(ids, 1) },
       { separator: true, label: "-" },
       { label: "Modifica nell'editor", icon: "pencil", disabled: !desktop || !asset.absolutePath || many, onClick: () => props.onEdit(asset.id) },
       { label: "Apri la cartella", icon: "folder", disabled: !desktop || !asset.absolutePath || many, onClick: () => props.onReveal(asset.id) },
@@ -428,7 +459,9 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
         aria-multiselectable="true"
         aria-label="Foto"
         onClick={(event) => { if (event.target === event.currentTarget) props.onSelection([]); }}
-        onDragLeave={() => setDropBefore(null)}
+        onDragOver={(event) => { if (event.target === event.currentTarget) overEnd(event); }}
+        onDrop={(event) => { if (event.target === event.currentTarget) dropAtEnd(event); }}
+        onDragLeave={(event) => { setDropBefore(null); if (event.target === event.currentTarget) setDropEnd(false); }}
         style={{ "--thumb": `${thumbSize}px` } as React.CSSProperties}
       >
         {visible.map((asset) => (
@@ -443,6 +476,7 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
             {...thumbHandlers}
           />
         ))}
+        {visible.length > 1 ? <div className={`dock__end${dropEnd ? " is-drop" : ""}`} aria-hidden="true" onDragOver={overEnd} onDragLeave={() => setDropEnd(false)} onDrop={dropAtEnd} /> : null}
         {visible.length === 0 ? (
           <div className="dock__empty">
             {project.assets.length === 0 ? (

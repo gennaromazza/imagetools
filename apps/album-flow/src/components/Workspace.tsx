@@ -7,9 +7,9 @@ import { alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumb
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
-import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemView, toggleItemLock } from "../model/items";
-import { setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
-import { findItem, nowIso, touch } from "../model/project";
+import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemView, toggleItemLock } from "../model/items";
+import { rotateAssetQuarter, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
+import { countItems, findItem, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas } from "../model/spreads";
 import { STAGES } from "../model/store";
 import { canRedo, canUndo, createHistory, pushHistory, redo, replacePresent, undo, type History } from "../history";
@@ -93,6 +93,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
   useEffect(() => { if (!selectedOverlayId) setExtraOverlayIds([]); }, [selectedOverlayId]);
   const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
   const [cropMode, setCropMode] = useState(false);
+  const [lineTool, setLineTool] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [libTab, setLibTab] = useState<LibraryTab>("all");
   const [libSelection, setLibSelection] = useState<string[]>([]);
@@ -155,6 +156,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     if (selectedItemId && !spread?.areas.some((area) => area.items.some((item) => item.id === selectedItemId))) { setSelectedItemId(null); setCropMode(false); }
   }, [selectedItemId, spread]);
   useEffect(() => { if (activeArea !== areaIndex) setActiveArea(areaIndex); }, [activeArea, areaIndex]);
+  // Lo strumento «linea» vale solo per la foto in ritaglio: cambiando foto o chiudendo il ritaglio si spegne.
+  useEffect(() => { setLineTool(false); }, [selectedItemId, cropMode]);
 
   // Un file modificato fuori dal programma (per esempio salvato da Photoshop): al ritorno nella finestra le foto si rileggono
   // e, se le misure sono cambiate, i layout si riallineano.
@@ -445,8 +448,21 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     clearSpread: () => { commit((p) => clearSpread(p, spreadId)); setSelectedItemId(null); notify("Spread svuotato.", true); },
     mirror: (i) => commit((p) => mirrorArea(p, spreadId, i, "horizontal")),
     editItem: (itemId) => { const found = findItem(project, itemId); if (found) void edit(found.item.assetId); },
-    removeItem: (itemId) => { commit((p) => removeItem(p, itemId)); setSelectedItemId(null); setCropMode(false); },
+    removeItem: (itemId) => {
+      if (findItem(project, itemId)?.item.locked) { notify("La foto è bloccata: sbloccala (L) per toglierla dallo spread."); return; }
+      commit((p) => removeItem(p, itemId));
+      setSelectedItemId(null);
+      setCropMode(false);
+    },
     lockItem: (itemId) => commit((p) => toggleItemLock(p, itemId)),
+    rotatePhoto: (itemId, quarter) => {
+      const found = findItem(project, itemId);
+      if (!found) return;
+      if (found.item.locked) { notify("La foto è bloccata: sbloccala (L) per ruotarla."); return; }
+      commit((p) => rotateAssetQuarter(p, found.item.assetId, quarter));
+    },
+    toggleLineTool: () => setLineTool((on) => !on),
+    finishLineTool: () => setLineTool(false),
     viewItem,
     revealItem: (itemId) => { const found = findItem(project, itemId); if (found) void reveal(found.item.assetId); },
     copyItemName: (itemId) => { const found = findItem(project, itemId); if (found) void copyName([found.item.assetId]); },
@@ -527,8 +543,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
   useEffect(() => { if (designOpen) { setLayoutsOpen(false); setSelectedItemId(null); setCropMode(false); } }, [designOpen]);
 
   // --------------------------------------------------------------------- scorciatoie
-  const keys = useRef({ spread, areaIndex, selectedItemId, selectedOverlayId, cropMode, count, index, zone, libSelection, layoutsOpen });
-  keys.current = { spread, areaIndex, selectedItemId, selectedOverlayId, cropMode, count, index, zone, libSelection, layoutsOpen };
+  const keys = useRef({ spread, areaIndex, selectedItemId, selectedOverlayId, cropMode, lineTool, count, index, zone, libSelection, layoutsOpen });
+  keys.current = { spread, areaIndex, selectedItemId, selectedOverlayId, cropMode, lineTool, count, index, zone, libSelection, layoutsOpen };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (isTyping(event.target) || dialog || presenting || viewer || importSource) return;
@@ -564,10 +580,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
         case "End": event.preventDefault(); goTo(state.count - 1); return;
         case "Delete": case "Backspace":
           if (state.selectedOverlayId && state.spread) { event.preventDefault(); const target = state.selectedOverlayId; commit((p) => removeOverlay(p, state.spread!.id, target)); setSelectedOverlayId(null); return; }
-          if (state.selectedItemId) { event.preventDefault(); actions.removeItem(state.selectedItemId); } return;
+          if (state.selectedItemId && state.zone === "stage") { event.preventDefault(); actions.removeItem(state.selectedItemId); } return;
         case "Enter": if (state.selectedItemId) { event.preventDefault(); actions.toggleCrop(state.selectedItemId); } return;
         case "Escape":
-          if (state.cropMode) setCropMode(false);
+          if (state.lineTool) setLineTool(false);
+          else if (state.cropMode) setCropMode(false);
           else if (state.selectedOverlayId) setSelectedOverlayId(null);
           else if (state.selectedItemId) setSelectedItemId(null);
           else if (state.libSelection.length) setLibSelection([]);
@@ -677,6 +694,10 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     onCopyName: (ids: string[]) => void copyName(ids),
     onRemove: (ids: string[]) => { commit((p) => removeAssets(p, ids)); setLibSelection([]); notify(`${ids.length === 1 ? "Foto rimossa" : `${ids.length} foto rimosse`} dall'album (i file restano sul disco).`, true); },
     onLocalize: localize,
+    onRotate: (assetIds: string[], quarter: 1 | -1) => {
+      commit((p) => assetIds.reduce((current, id) => rotateAssetQuarter(current, id, quarter), p));
+      notify(`${assetIds.length === 1 ? "Foto ruotata" : `${assetIds.length} foto ruotate`} di 90° a ${quarter === 1 ? "destra" : "sinistra"}.`, true);
+    },
     onSetCover: (assetId: string) => { commit((p) => setCoverAsset(p, assetId)); notify("Copertina del progetto impostata: la vedi nella Home.", true); },
     onSetSort: (key: AlbumSortKey) => commit((p) => setSortKey(p, key)),
     onReorder: (visibleIds: string[], moving: string[], before: string | null) => { commit((p) => reorderAssets(p, visibleIds, moving, before)); notify("Ordine manuale attivato."); },
@@ -730,6 +751,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
           selectedItemId={selectedItemId}
           highlightItemId={highlightItemId}
           cropMode={cropMode}
+          lineTool={lineTool}
           draft={draft}
           zoom={zoom}
           guides={guides}
@@ -765,8 +787,38 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
           onAdd={() => { commit((p) => addSpread(p)); setSpreadIndex(count); setSelectedItemId(null); setActiveArea(0); }}
           onDuplicate={(i) => { commit((p) => duplicateSpread(p, p.spreads[i].id)); setSpreadIndex(i + 1); }}
           onRemove={(i) => { commit((p) => removeSpread(p, p.spreads[i].id)); notify(`Spread ${i + 1} eliminato.`, true); }}
-          onDropOn={(at, payload) => { const before = historyRef.current.present; commit((p) => moveToSpread(p, p.spreads[at].id, payload)); if (historyRef.current.present === before) return; if (payload.kind === "assets") setLibSelection([]); setSpreadIndex(at); setSelectedItemId(null); setActiveArea(0); notify(`Foto aggiunta allo spread ${at + 1}.${payload.kind === "assets" ? usedNote(payload.assetIds, at) : ""}`, true); }}
-          onDropNew={(at, payload) => { let created = false; commit((p) => { const made = moveToNewSpread(p, at, payload); created = made.spreadId !== null; return made.project; }); if (!created) return; if (payload.kind === "assets") setLibSelection([]); setSpreadIndex(at); setSelectedItemId(null); setActiveArea(0); notify(`Nuovo spread ${at + 1} con la foto.${payload.kind === "assets" ? usedNote(payload.assetIds, at) : ""}`, true); }}
+          onDropOn={(at, payload) => {
+            const before = historyRef.current.present;
+            const targetId = before.spreads[at]?.id;
+            if (!targetId) return;
+            commit((p) => moveToSpread(p, targetId, payload));
+            const after = historyRef.current.present;
+            if (after === before) { const why = moveRefusal(before, targetId, payload); if (why) notify(why); return; }
+            if (payload.kind === "assets") setLibSelection([]);
+            // Una foto presa dallo spread aperto: si resta lì, per continuare a spostare le altre. Dalla libreria si va a vedere dove è finita.
+            if (payload.kind === "assets") { setSpreadIndex(at); setActiveArea(0); }
+            setSelectedItemId(null);
+            const wanted = payload.kind === "assets" ? payload.assetIds.filter((id) => before.assets.some((asset) => asset.id === id)).length : 1;
+            const added = payload.kind === "assets" ? countItems(after) - countItems(before) : 1;
+            notify(added < wanted
+              ? `${added} ${added === 1 ? "foto aggiunta" : "foto aggiunte"} su ${wanted} allo spread ${at + 1}: ogni pagina contiene al massimo 12 foto.`
+              : `${payload.kind === "item" ? "Foto spostata" : "Foto aggiunta"} allo spread ${at + 1}.${payload.kind === "assets" ? usedNote(payload.assetIds, at) : ""}`, true);
+          }}
+          onDropNew={(at, payload) => {
+            let created = false;
+            const before = historyRef.current.present;
+            commit((p) => { const made = moveToNewSpread(p, at, payload); created = made.spreadId !== null; return made.project; });
+            if (!created) { const why = moveRefusal(before, null, payload); if (why) notify(why); return; }
+            if (payload.kind === "assets") setLibSelection([]);
+            if (payload.kind === "assets") { setSpreadIndex(at); setActiveArea(0); }
+            else setSpreadIndex(at <= index ? index + 1 : index); // il nuovo spread può finire davanti a quello aperto: si resta su quello
+            setSelectedItemId(null);
+            const wanted = payload.kind === "assets" ? payload.assetIds.filter((id) => before.assets.some((asset) => asset.id === id)).length : 1;
+            const added = payload.kind === "assets" ? countItems(historyRef.current.present) - countItems(before) : 1;
+            notify(added < wanted
+              ? `Nuovo spread ${at + 1} con ${added} foto su ${wanted}: un'area contiene al massimo 12 foto.`
+              : `Nuovo spread ${at + 1} con ${wanted === 1 ? "la foto" : `${wanted} foto`}.${payload.kind === "assets" ? usedNote(payload.assetIds, at) : ""}`, true);
+          }}
           onMove={(from, to) => { commit((p) => moveSpread(p, from, to)); setSpreadIndex(to); }}
         />
       </div>

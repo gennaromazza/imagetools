@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { snapMove, snapResize, type SnapGuide } from "../engine/snap";
 import { type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetV2, AlbumItem, AlbumArea, AlbumSpread, SheetSpec } from "@photo-tools/shared-types";
@@ -5,7 +6,7 @@ import { dropHighlight, resolveDropTarget, type DropTarget } from "../engine/dro
 import { spreadSizeMm, type Divider, type LeafCell, type Rect } from "../engine/geometry";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import { previewDropRect } from "../model/items";
-import { clampAngle, describeSize, placeItem, type ItemView } from "../model/placement";
+import { angleFromLine, clampAngle, describeSize, nextWheelZoom, placeItem, wheelNotches, type ItemView } from "../model/placement";
 import { mediaIdsOfSpread } from "../model/design";
 import { useMediaUrls } from "../hooks/useMedia";
 import { BackgroundLayer, OverlayLayer, type DesignHandlers } from "./DesignLayers";
@@ -48,6 +49,10 @@ export interface SpreadViewProps {
   onCommitRatio?: (areaIndex: number, path: string, ratio: number) => void;
   onResetRatio?: (areaIndex: number, path: string) => void;
   onCommitView?: (itemId: string, view: Partial<ItemView>) => void;
+  /** Lo strumento «linea» del raddrizzamento è acceso: la foto selezionata si raddrizza tracciandovi sopra una linea. */
+  straightenTool?: boolean;
+  /** Il gesto dello strumento «linea» è finito (con o senza linea valida): lo strumento si spegne. */
+  onStraightenDone?: () => void;
   /** Selezione e modifica di testi e grafiche (solo nell'area di lavoro). */
   design?: DesignHandlers;
   /** Con il pannello «Personalizza» aperto le foto non si selezionano né si spostano: si lavora solo su testi e grafiche. */
@@ -81,10 +86,12 @@ interface CellProps {
   free: boolean;
   /** Rettangoli a cui la foto si aggancia spostandola (altre foto, bordi e centro dell'area, piega); solo nelle disposizioni libere. */
   snapTargets?: Array<{ id: string; rect: Rect }>;
-  handlers: Pick<SpreadViewProps, "onSelectItem" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar"> & { onCommitFrameRect?: (itemId: string, rect: Rect) => void };
+  /** Lo strumento «linea» del raddrizzamento è acceso per questa foto. */
+  lineTool: boolean;
+  handlers: Pick<SpreadViewProps, "onSelectItem" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & { onCommitFrameRect?: (itemId: string, rect: Rect) => void };
 }
 
-const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, cropActive, view, lowDpi, showSizes, free, snapTargets, handlers }: CellProps) {
+const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, cropActive, view, lowDpi, showSizes, free, snapTargets, lineTool, handlers }: CellProps) {
   // Lavorazione veloce: anteprime leggere; la qualità piena solo per la foto selezionata o in ritaglio e nell'anteprima cliente.
   const pixels = variant === "thumb" ? 200 : variant === "present" ? 2400 : selected || cropActive ? 1400 : 720;
   const src = useAssetSrc(asset, pixels);
@@ -100,8 +107,9 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
   // In ritaglio la rotella zooma e con Alt raddrizza (0,5° a scatto, 0,1° con Maiusc).
   // Fuori dal ritaglio, sulla cella: Alt + rotella zooma, Ctrl/⌘ + Alt + rotella raddrizza (stessi scatti).
   const canAdjust = !item.locked;
-  const live = useRef({ zoom: placement.zoom, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id });
-  live.current = { zoom: placement.zoom, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id };
+  const stored = view?.zoom ?? item.zoom;
+  const live = useRef({ zoom: placement.zoom, stored, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id });
+  live.current = { zoom: placement.zoom, stored, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id };
   useEffect(() => {
     const element = ref.current;
     if (!element || !interactive) return;
@@ -112,13 +120,17 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       event.preventDefault();
       const rotate = state.canCrop ? event.altKey : event.ctrlKey || event.metaKey;
       if (rotate) {
-        const direction = (event.deltaY || event.deltaX) < 0 ? -1 : 1;
-        const angle = clampAngle(state.angle + direction * (event.shiftKey ? 0.1 : 0.5));
+        const delta = event.deltaY || event.deltaX;
+        const direction = delta < 0 ? -1 : 1;
+        const angle = clampAngle(state.angle + direction * (event.shiftKey ? 0.1 : 0.5) * wheelNotches(delta));
         state.angle = angle; // gli scatti veloci della rotella si sommano anche prima del ridisegno
         state.handlers.onCommitView?.(state.itemId, { angle });
         return;
       }
-      state.handlers.onCommitView?.(state.itemId, { zoom: Math.min(6, Math.max(1, state.zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1))) });
+      const zoom = nextWheelZoom(state.stored, state.zoom, event.deltaY < 0, wheelNotches(event.deltaY));
+      state.stored = zoom; // come per il raddrizzamento: gli scatti veloci si sommano anche prima del ridisegno
+      state.zoom = zoom;
+      state.handlers.onCommitView?.(state.itemId, { zoom });
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
@@ -165,7 +177,40 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     if (drag?.moved && rect) handlers.onCommitFrameRect?.(item.id, rect);
   };
 
+  // Strumento «linea»: si traccia una linea sullo schermo lungo l'orizzonte (o un lato che deve essere verticale) e la foto si raddrizza di conseguenza.
+  const lineActive = canCrop && lineTool;
+  const [line, setLine] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const lineRef = useRef<typeof line>(null);
+  const startLine = (event: React.PointerEvent) => {
+    event.preventDefault();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    lineRef.current = { x1: event.clientX, y1: event.clientY, x2: event.clientX, y2: event.clientY };
+    setLine(lineRef.current);
+  };
+  const moveLine = (event: React.PointerEvent) => {
+    if (!lineRef.current) return;
+    lineRef.current = { ...lineRef.current, x2: event.clientX, y2: event.clientY };
+    setLine(lineRef.current);
+  };
+  const endLine = (event: React.PointerEvent) => {
+    const drawn = lineRef.current;
+    lineRef.current = null;
+    setLine(null);
+    if (!drawn) return;
+    const dx = event.clientX - drawn.x1;
+    const dy = event.clientY - drawn.y1;
+    if (lineActive && Math.hypot(dx, dy) >= 12) {
+      // la linea in riferimento alla cornice: una cornice libera può essere ruotata
+      const rad = ((cell.rotation ?? 0) * Math.PI) / 180;
+      const local = { x: dx * Math.cos(rad) + dy * Math.sin(rad), y: -dx * Math.sin(rad) + dy * Math.cos(rad) };
+      const angle = angleFromLine({ x: 0, y: 0 }, local, placement.angle);
+      if (angle !== null) handlers.onCommitView?.(item.id, { angle });
+    }
+    handlers.onStraightenDone?.();
+  };
+
   const onPointerDown = (event: React.PointerEvent) => {
+    if (lineActive) { startLine(event); return; }
     if (freeFrame && !canCrop) { startFrame(event, "move"); return; }
     if (!canCrop) return;
     event.preventDefault();
@@ -188,11 +233,13 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     return { cx: state.cx - imageDx / imageWidthPx, cy: state.cy - imageDy / imageHeightPx };
   };
   const onPointerMove = (event: React.PointerEvent) => {
+    if (lineRef.current) { moveLine(event); return; }
     if (frameDrag.current) { moveFrame(event); return; }
     const next = moved(event);
     if (next) handlers.onDraft?.({ kind: "view", itemId: item.id, view: next });
   };
   const onPointerUp = (event: React.PointerEvent) => {
+    if (lineRef.current) { endLine(event); return; }
     if (frameDrag.current) { endFrame(event); return; }
     const next = moved(event);
     pan.current = null;
@@ -203,6 +250,8 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     selected ? "cell--selected" : "",
     canCrop ? "cell--cropping" : "",
     canCrop && placement.angle ? "cell--straightening" : "",
+    canCrop && (placement.angle || lineActive) ? "cell--fine" : "",
+    lineActive ? "cell--line" : "",
     item.locked ? "cell--locked" : "",
     freeFrame ? "cell--free" : "",
     highlighted ? "cell--flash" : "",
@@ -235,7 +284,17 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       onPointerUp={onPointerUp}
     >
       {canCrop ? <span className="cell__grid" /> : null}
+      {lineActive ? <span className="cell__hint">Trascina lungo l'orizzonte, o lungo un lato che deve essere verticale</span> : null}
+      {line ? createPortal(
+        <svg className="straight-line" aria-hidden="true">
+          <line x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+          <circle cx={line.x1} cy={line.y1} r={4} />
+          <circle cx={line.x2} cy={line.y2} r={4} />
+        </svg>,
+        document.body,
+      ) : null}
       {canCrop && placement.angle ? <span className="cell__angle">{placement.angle.toLocaleString("it-IT")}°</span> : null}
+      {canCrop && placement.zoom > 1.005 ? <span className="cell__zoom" title="Ingrandimento rispetto alla foto che riempie lo spazio">×{placement.zoom.toLocaleString("it-IT", { maximumFractionDigits: 2 })}</span> : null}
       {freeFrame && selected && !canCrop ? <span className="cell__resize" title="Trascina per ridimensionare (le proporzioni restano)" onPointerDown={(event) => startFrame(event, "resize")} onPointerMove={moveFrame} onPointerUp={endFrame} /> : null}
       {interactive && selected ? <span className="cell__name">{asset?.fileName.replace(/\.[^.]+$/, "")}</span> : null}
       {interactive && item.locked ? <span className="cell__badge cell__badge--lock"><Icon name="lock" size={12} /></span> : null}
@@ -372,14 +431,16 @@ function SpreadViewInner(props: SpreadViewProps) {
     return { target, rect: preview ?? dropHighlight({ ...target, highlight: undefined }, cell, geometry[target.areaIndex].outer) };
   }, [geometry, toMm, sheet, spread, assets]);
 
-  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onCommitFrameRect: commitFrameRect }),
-    [props.onSelectItem, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, commitFrameRect]);
+  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect }),
+    [props.onSelectItem, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect]);
 
   const onDragOver = (event: React.DragEvent) => {
     const payload = currentDrag();
     if (!interactive || !payload || payload.kind === "spread") return;
     const found = targetAt(event.clientX, event.clientY);
     if (!found || (payload.kind === "item" && found.target.itemId === payload.itemId)) { setHint(null); return; }
+    // Sul centro di una foto bloccata non si sostituisce né si scambia: il cursore lo dice e il rilascio non parte.
+    if (found.target.zone === "center" && found.target.itemId && spread.areas[found.target.areaIndex]?.items.find((candidate) => candidate.id === found.target.itemId)?.locked) { setHint(null); return; }
     event.preventDefault();
     event.dataTransfer.dropEffect = payload.kind === "assets" ? "copy" : "move";
     setHint((previous) => (previous && previous.target.areaIndex === found.target.areaIndex && previous.target.itemId === found.target.itemId && previous.target.zone === found.target.zone && previous.target.node === found.target.node ? previous : found));
@@ -454,6 +515,7 @@ function SpreadViewInner(props: SpreadViewProps) {
               showSizes={showSizes}
               free={hasFreeLayout(area)}
               snapTargets={snapTargetsByArea[areaIndex]}
+              lineTool={Boolean(props.straightenTool) && selectedItemId === item.id}
               handlers={handlers}
             />
           );

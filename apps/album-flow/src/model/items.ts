@@ -1,12 +1,12 @@
 import type { AlbumArea, AlbumAssetV2, AlbumItem, AlbumSpread, LayoutNode, SheetSpec } from "@photo-tools/shared-types";
 import { areaOuterRects, insetRect, layoutCells, type Rect } from "../engine/geometry";
 import type { DropTarget } from "../engine/drop";
-import { insertAtNode, insertBeside, leaf, naturalRatios, removeLeaf, type InsertSide } from "../engine/tree";
-import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, clampNumber } from "./defaults";
+import { insertAtNode, insertBeside, leaf, leafIds, naturalRatios, removeLeaf, renameLeaf, type InsertSide } from "../engine/tree";
+import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_SPREADS, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, clampNumber } from "./defaults";
 import { areaCandidates, relayoutArea } from "./areas";
 import { SHAPE_SNAP, clampAngle, placeItem } from "./placement";
 import { alignChanged, alignedForFit, areaGeometry, assetMap, createItem, findItem, effectiveAspect, hasFreeLayout, needsShapeAlignment, findSpread, itemAspect, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
-import { cropCenter } from "../slot-geometry";
+import { cropCenter, cropForView } from "../slot-geometry";
 import { addSpread } from "./spreads";
 
 /** Da dove arriva una foto trascinata sullo spread. */
@@ -97,17 +97,24 @@ function swapItemsRaw(project: Project, itemIdA: string, itemIdB: string): Proje
   const b = findItem(project, itemIdB);
   if (!a || !b || a.item.locked || b.item.locked) return project;
   const [nextA, nextB] = exchange(a.item, b.item);
-  const spreads = project.spreads.map((spread) => ({
-    ...spread,
-    areas: spread.areas.map((area) =>
-      area.items.some((item) => item.id === itemIdA || item.id === itemIdB)
+  // Solo gli spread coinvolti cambiano oggetto: gli altri restano gli stessi e non vengono ridisegnati.
+  const involves = (area: AlbumArea) => area.items.some((item) => item.id === itemIdA || item.id === itemIdB);
+  const spreads = project.spreads.map((spread) => (spread.areas.some(involves)
+    ? {
+      ...spread,
+      areas: spread.areas.map((area) => (involves(area)
         ? { ...area, items: area.items.map((item) => (item.id === itemIdA ? nextA : item.id === itemIdB ? nextB : item)) }
-        : area),
-  }));
+        : area)),
+    }
+    : spread));
   return touch({ ...project, spreads });
 }
 
-/** Mette una foto già presente nel bersaglio indicato (spostamento: sparisce dal posto di partenza). */
+/**
+ * Mette una foto già presente nel bersaglio indicato (spostamento: sparisce dal posto di partenza, mantiene identità e inquadratura).
+ * L'operazione è «tutto o niente»: prima si costruisce la nuova area di arrivo e si controlla che la foto ci sia davvero, solo dopo la si
+ * toglie dal posto di partenza. Così un bersaglio non più valido non può far sparire la foto.
+ */
 function moveItem(project: Project, itemId: string, spreadId: string, target: DropTarget): Project {
   const source = findItem(project, itemId);
   const targetSpread = findSpread(project, spreadId)?.spread;
@@ -118,25 +125,37 @@ function moveItem(project: Project, itemId: string, spreadId: string, target: Dr
   const sameArea = source.spread.id === spreadId && source.areaIndex === target.areaIndex;
   if (!sameArea && capacity(targetArea) === 0) return project;
 
-  // 1) toglie la foto dall'origine
-  const next = removeItem(project, itemId);
-  // 2) la reinserisce nel bersaglio mantenendone identità e inquadratura
-  const side = target.zone;
-  return updateArea(next, spreadId, target.areaIndex, (area) => {
-    if (target.zone === "area" || (!target.itemId && target.node === undefined) || !area.layout) {
-      return normalizeArea({ ...area, layout: leaf(source.item.id), items: [source.item], seed: 0 });
-    }
-    if (target.node !== undefined) {
-      const layout = insertAtNode(area.layout, target.node, source.item.id, side as InsertSide);
-      return normalizeArea({ ...area, layout, items: [...area.items, source.item] });
-    }
-    if (target.zone === "center") return area;
-    const targetItem = area.items.find((item) => item.id === target.itemId);
-    if (!targetItem) return area;
-    const layout = insertBeside(area.layout, targetItem.id, source.item.id, side as InsertSide, keepRatio(assetMap(project), targetItem.assetId, source.item.assetId, side as InsertSide));
-    const items = [...area.items, source.item];
-    return normalizeArea({ ...area, layout, items });
-  });
+  const moved = source.item;
+  const side = target.zone as InsertSide;
+  // Nella stessa area la foto è ancora nel suo albero: va tolta dal vecchio posto (per id) prima di reinserirla accanto a un'altra foto.
+  const others = sameArea ? targetArea.items.filter((item) => item.id !== moved.id) : targetArea.items;
+  let arrival: AlbumArea;
+  if (targetArea.items.length === 0 || !targetArea.layout) {
+    arrival = normalizeArea({ ...targetArea, layout: leaf(moved.id), items: [moved], seed: 0 });
+  } else if (target.zone === "area") {
+    return project; // il bersaglio «area» vale solo per un'area vuota: una con foto non si svuota
+  } else if (target.node !== undefined) {
+    // Il percorso del ramo vale per l'albero com'è ADESSO: si inserisce prima (con un nome provvisorio) e si toglie dopo la foto dal vecchio posto.
+    const TEMP = `${moved.id}~arrivo`;
+    const inserted = insertAtNode(targetArea.layout, target.node, TEMP, side);
+    if (inserted === targetArea.layout) return project;
+    const cleaned = sameArea ? removeLeaf(inserted, moved.id) : inserted;
+    if (!cleaned) return project;
+    arrival = normalizeArea({ ...targetArea, layout: renameLeaf(cleaned, TEMP, moved.id), items: [...others, moved] });
+  } else {
+    const targetItem = others.find((item) => item.id === target.itemId);
+    const base = sameArea ? removeLeaf(targetArea.layout, moved.id) : targetArea.layout;
+    if (!targetItem || !base) return project;
+    const layout = insertBeside(base, targetItem.id, moved.id, side, keepRatio(assetMap(project), targetItem.assetId, moved.assetId, side));
+    if (layout === base) return project;
+    arrival = normalizeArea({ ...targetArea, layout, items: [...others, moved] });
+  }
+  if (!leafIds(arrival.layout).includes(moved.id) || arrival.items.length !== others.length + 1) return project;
+
+  if (sameArea) return mapSpread(project, spreadId, (spread) => replaceArea(spread, target.areaIndex, arrival));
+  const departure = normalizeArea({ ...source.area, layout: removeLeaf(source.area.layout, moved.id), items: source.area.items.filter((item) => item.id !== moved.id) });
+  const without = mapSpread(project, source.spread.id, (spread) => replaceArea(spread, source.areaIndex, departure));
+  return mapSpread(without, spreadId, (spread) => replaceArea(spread, target.areaIndex, arrival));
 }
 
 /** Foto dalla libreria rilasciate lungo il bordo dell'area o tra due foto: la prima si infila accanto al ramo, le altre la seguono. */
@@ -180,6 +199,8 @@ function dropOnSpreadRaw(project: Project, spreadId: string, target: DropTarget,
   if (target.node !== undefined) return insertAssetsAtNode(project, spreadId, target, assetIds);
 
   if (target.zone === "center" && target.itemId) {
+    // Una foto bloccata non si sostituisce: il rilascio si rifiuta per intero (non finirebbe sola la prima foto fuori).
+    if (area.items.find((item) => item.id === target.itemId)?.locked) return project;
     const replaced = replaceItemAsset(project, target.itemId, assetIds[0]);
     return assetIds.length > 1 ? appendAssets(replaced, spreadId, target.areaIndex, assetIds.slice(1), target.itemId) : replaced;
   }
@@ -229,7 +250,9 @@ export function setItemView(project: Project, itemId: string, change: ItemViewCh
   const requested = clampNumber(change.zoom ?? found.item.zoom, MIN_ZOOM, MAX_ZOOM);
   const shape = change.shape === undefined ? found.item.shape : change.shape === null ? undefined : clampNumber(Number(change.shape.toFixed(4)), MIN_SHAPE, MAX_SHAPE);
   const placement = placeItem(cell.rect, found.item, asset, found.area.style, { zoom: requested, cx: change.cx, cy: change.cy, angle, shape: shape ?? null }, cell.anchor);
-  const center = cropCenter(placement.crop);
+  // Il centro si memorizza come per la foto dritta: il raddrizzamento restringe i centri possibili solo alla visualizzazione,
+  // così tornando a 0° la foto è dov'era (non spostata dal limite che valeva da inclinata).
+  const center = cropCenter(cropForView(itemAspect(asset), placement.content.w / placement.content.h, requested, change.cx ?? found.item.cx, change.cy ?? found.item.cy));
   // Si memorizza lo zoom chiesto: con la foto raddrizzata `placeItem` lo alza da solo quanto basta a coprire gli angoli,
   // e tornando a 0° l'inquadratura di prima ricompare.
   const next = withAngle({ ...found.item, zoom: requested, cx: Number(center.x.toFixed(5)), cy: Number(center.y.toFixed(5)) }, angle, shape);
@@ -296,7 +319,7 @@ export function alignArea(project: Project, spreadId: string, areaIndex: number,
 export function moveToNewSpread(project: Project, atIndex: number, source: DropSource): { project: Project; spreadId: string | null } {
   const assetIds = source.kind === "assets"
     ? source.assetIds.filter((id) => assetExists(project, id))
-    : (() => { const found = findItem(project, source.itemId); return found ? [found.item.assetId] : []; })();
+    : (() => { const found = findItem(project, source.itemId); return found && !found.item.locked ? [found.item.assetId] : []; })();
   if (assetIds.length === 0) return { project, spreadId: null };
   const at = Math.max(0, Math.min(atIndex, project.spreads.length));
   const created = addSpread(project, at);
@@ -304,17 +327,22 @@ export function moveToNewSpread(project: Project, atIndex: number, source: DropS
   if (!spreadId || created === project) return { project, spreadId: null };
   let next = dropOnSpread(created, spreadId, { areaIndex: 0, itemId: null, zone: "area" }, { kind: "assets", assetIds });
   if (source.kind === "item") {
-    next = withMovedShape(next, spreadId, new Set(), findItem(project, source.itemId)?.item.shape);
+    next = withMovedView(next, spreadId, new Set(), findItem(project, source.itemId)?.item);
     next = removeItem(next, source.itemId);
   }
   return { project: alignChanged(project, next), spreadId };
 }
 
-/** La foto spostata in un altro spread tiene la forma che aveva: si applica alla foto appena arrivata nello spread di destinazione. */
-function withMovedShape(project: Project, spreadId: string, before: ReadonlySet<string>, shape: number | undefined): Project {
-  if (!shape) return project;
+/**
+ * La foto spostata in un altro spread tiene la sua inquadratura (zoom, centro, raddrizzamento e forma): si applica alla foto appena
+ * arrivata nello spread di destinazione, che è l'unica con un id che prima non c'era.
+ */
+function withMovedView(project: Project, spreadId: string, before: ReadonlySet<string>, from: AlbumItem | undefined): Project {
+  if (!from) return project;
   const added = findSpread(project, spreadId)?.spread.areas.flatMap((area) => area.items).find((item) => !before.has(item.id));
-  return added ? setItemView(project, added.id, { shape }) : project;
+  if (!added) return project;
+  if (from.zoom === 1 && !from.angle && !from.shape && from.cx === 0.5 && from.cy === 0.5) return project;
+  return setItemView(project, added.id, { zoom: from.zoom, cx: from.cx, cy: from.cy, angle: from.angle ?? 0, shape: from.shape ?? null });
 }
 
 /**
@@ -328,7 +356,7 @@ function moveToSpreadRaw(project: Project, spreadId: string, source: DropSource)
   if (source.kind === "assets") assetIds = source.assetIds.filter((id) => assetExists(project, id));
   else {
     const found = findItem(project, source.itemId);
-    if (!found || spread.areas.some((area) => area.items.some((item) => item.id === source.itemId))) return project;
+    if (!found || found.item.locked || spread.areas.some((area) => area.items.some((item) => item.id === source.itemId))) return project;
     assetIds = [found.item.assetId];
   }
   if (assetIds.length === 0) return project;
@@ -340,10 +368,27 @@ function moveToSpreadRaw(project: Project, spreadId: string, source: DropSource)
     : appendAssets(project, spreadId, areaIndex, assetIds);
   if (next === project) return project;
   if (source.kind === "item") {
-    next = withMovedShape(next, spreadId, existing, findItem(project, source.itemId)?.item.shape);
+    next = withMovedView(next, spreadId, existing, findItem(project, source.itemId)?.item);
     next = removeItem(next, source.itemId);
   }
   return next;
+}
+
+/**
+ * Perché un trascinamento verso uno spread (miniatura o spazio tra le miniature) non ha avuto effetto, in una frase per chi lo ha
+ * fatto; null se non c'è niente da spiegare (per esempio la foto è già in quello spread). `spreadId` null = nuovo spread.
+ */
+export function moveRefusal(project: Project, spreadId: string | null, source: DropSource): string | null {
+  if (source.kind === "item") {
+    const found = findItem(project, source.itemId);
+    if (!found) return null;
+    if (found.item.locked) return "La foto è bloccata: sbloccala per spostarla.";
+    if (spreadId !== null && found.spread.id === spreadId) return null;
+  }
+  if (spreadId === null) return project.spreads.length >= MAX_SPREADS ? `Un album può avere al massimo ${MAX_SPREADS} spread.` : null;
+  const spread = findSpread(project, spreadId)?.spread;
+  if (!spread) return null;
+  return spread.areas.every((area) => capacity(area) === 0) ? `Le pagine di questo spread hanno già ${MAX_ITEMS_PER_AREA} foto.` : null;
 }
 
 /**
@@ -365,14 +410,18 @@ export function previewDropRect(
   if (!area.layout || target.zone === "center") return null;
   const TMP = "__anteprima__";
   let layout: LayoutNode | null = area.layout;
-  if (dragged.itemId && area.items.some((item) => item.id === dragged.itemId)) {
-    if (dragged.itemId === target.itemId) return null;
-    layout = removeLeaf(layout, dragged.itemId);
-  }
-  if (!layout) return inner;
+  const draggedHere = Boolean(dragged.itemId && area.items.some((item) => item.id === dragged.itemId));
+  if (draggedHere && dragged.itemId === target.itemId) return null;
   const side = target.zone;
-  if (target.node !== undefined) layout = insertAtNode(layout, target.node, TMP, side);
-  else if (target.itemId) {
+  if (target.node !== undefined) {
+    // Come nel rilascio vero: il percorso del ramo vale per l'albero com'è adesso, la foto trascinata si toglie dopo.
+    const inserted = insertAtNode(layout, target.node, TMP, side);
+    if (inserted === layout) return null;
+    layout = draggedHere ? removeLeaf(inserted, dragged.itemId!) : inserted;
+    if (!layout) return inner;
+  } else if (target.itemId) {
+    if (draggedHere) layout = removeLeaf(layout, dragged.itemId!);
+    if (!layout) return inner;
     const targetItem = area.items.find((item) => item.id === target.itemId);
     if (!targetItem) return null;
     layout = insertBeside(layout, target.itemId, TMP, side, keepRatio(assets, targetItem.assetId, dragged.assetId, side));

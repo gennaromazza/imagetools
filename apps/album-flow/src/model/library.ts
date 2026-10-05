@@ -1,6 +1,6 @@
 import type { AlbumAssetTag, AlbumAssetV2, AlbumSortKey } from "@photo-tools/shared-types";
 import { removeItems } from "./items";
-import { touch, type Project } from "./project";
+import { alignChanged, touch, type Project } from "./project";
 
 const collator = new Intl.Collator("it", { numeric: true, sensitivity: "base" });
 
@@ -137,10 +137,15 @@ export function reorderAssets(project: Project, visibleIds: readonly string[], m
   const rest = visibleIds.filter((id) => !moving.includes(id));
   const at = beforeAssetId === null ? rest.length : rest.indexOf(beforeAssetId);
   const ordered = [...rest.slice(0, at < 0 ? rest.length : at), ...moving, ...rest.slice(at < 0 ? rest.length : at)];
-  // Le foto fuori dall'elenco visibile mantengono il loro ordine relativo, dopo quelle riordinate.
-  const orderedSet = new Set(ordered);
-  const others = sortAssets(project.assets, project.settings.sortKey).filter((asset) => !orderedSet.has(asset.id)).map((asset) => asset.id);
-  const finalOrder = [...ordered, ...others];
+  // Riordinare un elenco filtrato (un capitolo, una ricerca, le stelle…) permuta solo quelle foto fra i posti che già occupavano
+  // nell'ordine di tutto l'album: le altre restano dove sono e «Tutte» non si rimescola.
+  const global = sortAssets(project.assets, project.settings.sortKey).map((asset) => asset.id);
+  const known = new Set(global);
+  const arranged = ordered.filter((id) => known.has(id));
+  const arrangedSet = new Set(arranged);
+  const slots = global.flatMap((id, index) => (arrangedSet.has(id) ? [index] : []));
+  const finalOrder = [...global];
+  slots.forEach((slot, index) => { finalOrder[slot] = arranged[index]; });
   const rank = new Map(finalOrder.map((id, index) => [id, index]));
   return touch({
     ...project,
@@ -161,6 +166,32 @@ export function removeAssets(project: Project, assetIds: readonly string[]): Pro
     assets: cleaned.assets.filter((asset) => !doomed.has(asset.id)),
     chapters: cleaned.chapters.map((chapter) => ({ ...chapter, assetIds: chapter.assetIds.filter((id) => !doomed.has(id)) })),
   });
+}
+
+/**
+ * Ruota una foto di un quarto di giro (1 = in senso orario, -1 = antiorario) dappertutto: libreria, spread ed esportazione.
+ * Le inquadrature seguono la foto: il centro del ritaglio ruota con l'immagine; zoom, raddrizzamento e forma restano quelli scelti.
+ */
+export function rotateAssetQuarter(project: Project, assetId: string, quarter: 1 | -1): Project {
+  const asset = project.assets.find((candidate) => candidate.id === assetId);
+  if (!asset) return project;
+  const rotationDegrees = ((((asset.rotationDegrees ?? 0) + 90 * quarter) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
+  const round = (value: number) => Number(Math.min(1, Math.max(0, value)).toFixed(5));
+  const turn = (cx: number, cy: number): [number, number] => (quarter === 1 ? [1 - cy, cx] : [cy, 1 - cx]);
+  const assets = project.assets.map((candidate) => (candidate.id !== assetId ? candidate : {
+    ...candidate,
+    rotationDegrees,
+    orientation: candidate.orientation === "horizontal" ? "vertical" as const : candidate.orientation === "vertical" ? "horizontal" as const : candidate.orientation,
+  }));
+  const spreads = project.spreads.map((spread) => (spread.areas.some((area) => area.items.some((item) => item.assetId === assetId))
+    ? {
+      ...spread,
+      areas: spread.areas.map((area) => (area.items.some((item) => item.assetId === assetId)
+        ? { ...area, items: area.items.map((item) => { if (item.assetId !== assetId) return item; const [cx, cy] = turn(item.cx, item.cy); return { ...item, cx: round(cx), cy: round(cy) }; }) }
+        : area)),
+    }
+    : spread));
+  return alignChanged(project, touch({ ...project, assets, spreads }));
 }
 
 /** Sceglie (o toglie, con null) la foto di copertina del progetto. Senza copertina scelta la Home usa la prima foto impaginata. */

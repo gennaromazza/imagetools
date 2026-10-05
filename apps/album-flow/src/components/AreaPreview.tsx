@@ -30,7 +30,7 @@ export const AreaPreview = memo(function AreaPreview({ sheet, spread, areaIndex,
         const item = area.items.find((candidate) => candidate.id === cell.itemId);
         if (!item) return null;
         const asset = assets.get(item.assetId);
-        const placement = placeItem(cell.rect, { zoom: 1, cx: 0.5, cy: 0.5 }, asset, area.style, null, cell.anchor);
+        const placement = placeItem(cell.rect, { zoom: 1, cx: 0.5, cy: 0.5, shape: item.shape }, asset, area.style, null, cell.anchor);
         return <PreviewCell key={cell.itemId} asset={asset} placement={placement} mono={area.style.mono} borderColor={area.style.borderColor} origin={outer} style={cell.rotation ? { transform: `rotate(${cell.rotation}deg)` } : undefined} />;
       })}
     </div>
