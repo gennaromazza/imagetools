@@ -589,6 +589,11 @@
     ],
     "0.2.5": [
       "Corretto: i layout proposti (Mescola, frecce, tasti 1-9, browser dei layout, allineamento di «Foto intera» e abbinamento dei template) ora tengono conto della forma scelta per la foto con il menu «Forma»: una foto orizzontale tagliata in verticale viene trattata come verticale."
+    ],
+    "0.2.6": [
+      "Forma per foto: cambiando la forma di una foto la sua cella segue la nuova proporzione e le altre foto si adattano; se la disposizione attuale non lo permette si passa a un layout che lo permette. Se la cella ha già quasi la forma scelta la foto la riempie, senza fasce bianche, anche passando a «Riempi».",
+      "La forma resta alla foto quando la sposti in un altro spread o in uno spread nuovo; «Ripristina ritaglio, zoom e forma» la toglie.",
+      "Anteprima del trascinamento fedele anche in «Riempi» quando nell'area ci sono foto con una forma scelta."
     ]
   }
 }
