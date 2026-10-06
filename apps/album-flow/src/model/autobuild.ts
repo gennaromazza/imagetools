@@ -87,7 +87,8 @@ export function orderedGroups(project: Project, pool: readonly AlbumAssetV2[], r
 /** Costruisce l'album: gruppi per capitolo, aree scelte con il costo minore e layout con ritmo vario. */
 export function autoBuildAlbum(project: Project, options: AutoBuildOptions): Project {
   // Gli spread segnati come finiti non si toccano: le loro foto restano fuori dalla ricostruzione.
-  const frozen = options.scope === "all" ? project.spreads.filter((spread) => spread.done) : [];
+  // Gli spread finiti e quelli con una pagina bloccata non si ricostruiscono.
+  const frozen = options.scope === "all" ? project.spreads.filter((spread) => spread.done || spread.areas.some((area) => area.locked)) : [];
   const frozenAssets = new Set(frozen.flatMap((spread) => spread.areas.flatMap((area) => area.items.map((item) => item.assetId))));
   const pool = options.scope === "unused" ? unusedAssets(project) : project.assets.filter((asset) => !frozenAssets.has(asset.id));
   if (project.assets.length === 0) throw new Error("La libreria è vuota: importa delle foto prima di impaginare.");
@@ -164,7 +165,7 @@ export function autoBuildAlbum(project: Project, options: AutoBuildOptions): Pro
   let result = [...existing, ...spreads];
   if (frozen.length) {
     // Gli spread finiti tornano nella posizione di prima; quelli nuovi riempiono gli altri posti, il resto in coda.
-    const keep = project.spreads.map((spread, index) => ({ spread, index })).filter((entry) => entry.spread.done);
+    const keep = project.spreads.map((spread, index) => ({ spread, index })).filter((entry) => entry.spread.done || entry.spread.areas.some((area) => area.locked));
     const queue = [...spreads];
     result = [];
     let k = 0;

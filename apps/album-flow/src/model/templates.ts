@@ -208,7 +208,7 @@ export function templateArea(area: AlbumArea, template: AreaTemplate, order?: re
 export function applyTemplate(project: Project, spreadId: string, areaIndex: number, template: AreaTemplate, order?: readonly number[]): Project {
   return mapSpread(project, spreadId, (spread) => {
     const area = spread.areas[areaIndex];
-    if (!area || spread.done) return spread;
+    if (!area || spread.done || area.locked) return spread;
     const next = templateArea(area, template, order);
     return next ? replaceArea(spread, areaIndex, next) : spread;
   });
@@ -280,7 +280,7 @@ export function applyTemplatesToAlbum(project: Project, templates: readonly Area
   for (const spread of project.spreads) {
     if (spread.done || (onlySpreadIds && !onlySpreadIds.has(spread.id))) continue;
     spread.areas.forEach((area, areaIndex) => {
-      if (area.items.length === 0) return;
+      if (area.items.length === 0 || area.locked) return;
       const current = next.spreads.find((candidate) => candidate.id === spread.id)!;
       const [best] = matchTemplates(next, current, areaIndex, templates);
       if (!best || best.cost > areaCost(next, current, areaIndex) + tolerance) return;

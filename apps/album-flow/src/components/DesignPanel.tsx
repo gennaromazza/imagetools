@@ -13,7 +13,7 @@ import type { SuggestOptions, SuggestResult } from "../model/story";
 import { IconButton } from "./ui";
 import { StoryTab } from "./StoryPanel";
 
-export type DesignTab = "backgrounds" | "text" | "story" | "library";
+export type DesignTab = "backgrounds" | "text" | "story" | "library" | "graphics";
 
 /** Gli stili di testo raggruppati per sezione, nell'ordine in cui compaiono. */
 const PRESET_GROUPS: ReadonlyArray<readonly [string, readonly TextPreset[]]> = (() => {
@@ -358,7 +358,6 @@ function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle
 // ---------------------------------------------------------------------------
 
 function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles, insertAt }: { actions: DesignActions; phrases: Phrase[]; setPhrases: (next: Phrase[]) => void; savedStyles: SavedTextStyle[]; setSavedStyles: (next: SavedTextStyle[]) => void; insertAt: { x: number; y: number } }) {
-  const graphics = useMediaList("graphic");
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("tutte");
   const [draft, setDraft] = useState("");
@@ -371,11 +370,6 @@ function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles,
     const saved = savedStyles.find((entry) => entry.id === styleId);
     actions.addText(saved ? { presetId: "body", style: saved.style, styleName: saved.name, text: phrase.text, at: insertAt } : { presetId: styleId, text: phrase.text, at: insertAt });
   };
-  const uploadGraphics = async (files: File[]) => {
-    try { for (const file of files) await importMediaFile(file, "graphic"); actions.notify(files.length === 1 ? "Grafica aggiunta alla libreria." : `${files.length} grafiche aggiunte alla libreria.`); }
-    catch (error) { actions.notify(error instanceof Error ? error.message : "Grafica non caricata."); }
-  };
-
   return (
     <div className="design__section">
       <div className="design__head"><h4>Le mie frasi</h4><span className="small muted">{phrases.length}</span></div>
@@ -430,9 +424,22 @@ function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles,
           ))}
         </ul>
       )}
+    </div>
+  );
+}
 
+/** Grafiche e ornamenti: PNG (anche con trasparenza), SVG, WebP o JPG come loghi, filetti e ornamenti da posizionare liberamente sopra le foto. */
+function GraphicsTab({ actions, insertAt }: { actions: DesignActions; insertAt: { x: number; y: number } }) {
+  const graphics = useMediaList("graphic");
+  const uploadGraphics = async (files: File[]) => {
+    try { for (const file of files) await importMediaFile(file, "graphic"); actions.notify(files.length === 1 ? "Grafica aggiunta alla libreria." : `${files.length} grafiche aggiunte alla libreria.`); }
+    catch (error) { actions.notify(error instanceof Error ? error.message : "Grafica non caricata."); }
+  };
+
+  return (
+    <div className="design__section">
       <div className="design__head">
-        <h4>Grafiche e ornamenti</h4>
+        <h4>Loghi e ornamenti</h4>
         <FileButton label="Carica grafica" accept="image/png,image/svg+xml,image/webp,image/jpeg,.svg" multiple onFiles={(files) => void uploadGraphics(files)} />
       </div>
       {graphics.length === 0 ? <p className="small muted">PNG con trasparenza o SVG: filetti, ornamenti, logo dello studio, firme scansionate.</p> : (
@@ -447,6 +454,7 @@ function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles,
           ))}
         </div>
       )}
+      <p className="small muted">Un clic inserisce la grafica nella pagina attiva, sopra le foto. Poi la trascini dove vuoi, la ridimensioni, la ruoti e ne regoli la visibilità.</p>
     </div>
   );
 }
@@ -492,7 +500,7 @@ export function DesignPanel({ project, spread, two, areaIndex, tab, onTab, selec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusSignal]);
 
-  const tabs: Array<{ value: DesignTab; label: string }> = [{ value: "backgrounds", label: "Sfondi" }, { value: "text", label: "Testo" }, { value: "story", label: "Racconto" }, { value: "library", label: "Libreria" }];
+  const tabs: Array<{ value: DesignTab; label: string }> = [{ value: "backgrounds", label: "Sfondi" }, { value: "text", label: "Testo" }, { value: "story", label: "Racconto" }, { value: "library", label: "Libreria" }, { value: "graphics", label: "Grafiche" }];
   return (
     <aside className="layouts design" aria-label="Personalizza lo spread">
       <header className="layouts__head">
@@ -513,6 +521,7 @@ export function DesignPanel({ project, spread, two, areaIndex, tab, onTab, selec
             onSavePhrase={(text) => { if (!text.trim()) return; setPhrases(addPhrase(phrases, text)); actions.notify("Frase aggiunta al tuo archivio."); }} />
         ) : null}
         {tab === "story" ? <StoryTab project={project} spread={spread} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} selected={selected} actions={designActions} /> : null}
+        {tab === "graphics" ? <GraphicsTab actions={designActions} insertAt={insertAt} /> : null}
         {tab === "library" ? <LibraryTab actions={designActions} phrases={phrases} setPhrases={setPhrases} savedStyles={savedStyles} setSavedStyles={setSavedStyles} insertAt={insertAt} /> : null}
       </div>
     </aside>

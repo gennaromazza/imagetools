@@ -38,6 +38,7 @@ import { useNewFeature } from "../hooks/useNewFeature";
 import { applyRelink } from "../model/relinkAssets";
 import { driveAvailable } from "../desktop/cloud";
 import { alignOverlayToPage } from "../model/designAlign";
+import { makeAreaFree, restoreAutomatic, setAreaLocked, setSpreadLock } from "../model/layoutLock";
 import { canvasMeasure } from "../render/fonts";
 import { insertStory, planAlbumStories, proposalFromUnit, replaceWithStory, suggestStoryForSpread, type SuggestResult } from "../model/story";
 import { storyById } from "../model/storyLibrary";
@@ -412,8 +413,24 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
     },
     link: () => commit((p) => setLinked(p, spreadId, !spread?.linked)),
     swapAreas: () => commit((p) => swapAreas(p, spreadId)),
-    shuffleArea: (i) => { if (spread?.done) { notify("Spread finito: riaprilo (D) per cambiare il layout."); return; } commit((p) => shuffleArea(p, spreadId, i, 1, templates)); },
-    shuffleSpread: () => { if (spread?.done) { notify("Spread finito: riaprilo (D) per cambiare il layout."); return; } commit((p) => shuffleSpread(p, spreadId, 1, templates)); },
+    shuffleArea: (i) => {
+      if (spread?.done) { notify("Spread finito: riaprilo (D) per cambiare il layout."); return; }
+      if (spread?.areas[i]?.locked) { notify("Layout bloccato: sbloccalo (lucchetto) per cambiarlo."); return; }
+      commit((p) => shuffleArea(p, spreadId, i, 1, templates));
+    },
+    shuffleSpread: () => {
+      if (spread?.done) { notify("Spread finito: riaprilo (D) per cambiare il layout."); return; }
+      if (spread?.areas.every((area) => area.locked)) { notify("Layout bloccato: sbloccalo (lucchetto) per cambiarlo."); return; }
+      commit((p) => shuffleSpread(p, spreadId, 1, templates));
+    },
+    lockArea: (i, locked) => { commit((p) => setAreaLocked(p, spreadId, i, locked)); notify(locked ? "Layout bloccato: Mescola e Auto Build non lo toccano." : "Layout sbloccato."); },
+    lockSpread: (scope, locked) => { commit((p) => setSpreadLock(p, spreadId, scope, locked)); notify(locked ? "Layout bloccato: Mescola e Auto Build non lo toccano." : "Layout sbloccato."); },
+    freeArea: (i) => {
+      const before = historyRef.current.present;
+      commit((p) => makeAreaFree(p, spreadId, i));
+      notify(historyRef.current.present === before ? "Non c'è nulla da liberare: la pagina è vuota o bloccata." : "Ora puoi spostare e ridimensionare le foto a piacere (Ctrl/⌘ + Z per annullare).");
+    },
+    restoreArea: (i) => { commit((p) => restoreAutomatic(p, spreadId, i)); notify("Tornato al layout di prima."); },
     fillSpread: () => {
       if (!spread) return;
       if (spread.done) { notify("Spread finito: riaprilo (D) per modificarlo."); return; }

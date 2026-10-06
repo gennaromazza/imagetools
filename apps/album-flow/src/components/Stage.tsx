@@ -8,6 +8,7 @@ import { BACKGROUND_SWATCHES } from "../model/defaults";
 import { placeItem, type ItemView } from "../model/placement";
 import { itemAspect } from "../model/project";
 import { SHAPE_PRESETS, presetForShape } from "../model/shapes";
+import { isScopeLocked, type LockScope } from "../model/layoutLock";
 import { areaGeometryFor, hasFreeLayout } from "../model/project";
 import { AreaStrip } from "./AreaStrip";
 import { DesignPanel, type DesignActions, type DesignTab } from "./DesignPanel";
@@ -35,6 +36,10 @@ export interface StageActions {
   swapAreas: () => void;
   shuffleArea: (areaIndex: number) => void;
   shuffleSpread: () => void;
+  lockArea: (areaIndex: number, locked: boolean) => void;
+  lockSpread: (scope: LockScope, locked: boolean) => void;
+  freeArea: (areaIndex: number) => void;
+  restoreArea: (areaIndex: number) => void;
   toggleFavorite: (areaIndex: number) => void;
   openLayouts: (open: boolean) => void;
   applyLayout: (areaIndex: number, candidateIndex: number) => void;
@@ -169,6 +174,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [lockOpen, setLockOpen] = useState(false);
   const desktop = hasDesktop();
   const [photoMenu, setPhotoMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
 
@@ -184,7 +190,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const two = spread.areas.length > 1;
 
   // Chiude i pannelli quando si cambia spread.
-  useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setPhotoMenu(null); }, [spread.id]);
+  useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setLockOpen(false); setPhotoMenu(null); }, [spread.id]);
 
   const newShape = useNewFeature("forma-foto");
   const toolbar = useCallback((itemId: string): ReactNode => {
@@ -308,6 +314,18 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         </Popover>
       </div>
       <div className="anchor">
+        <button type="button" className={`bar-btn${lockOpen || spread.areas.some((candidate) => candidate.locked) ? " is-active" : ""}`} title="Blocca o sblocca il layout: pagina sinistra, pagina destra o tutto il foglio" aria-label="Layout bloccato o sbloccato" onClick={() => setLockOpen(!lockOpen)}><Icon name={spread.areas.every((candidate) => candidate.locked) ? "lock" : "unlock"} size={18} /></button>
+        <Popover open={lockOpen} onClose={() => setLockOpen(false)} side="top" className="popover--wide">
+          <p className="popover__title">Layout dello spread</p>
+          {(two ? (["left", "right", "all"] as const) : (["all"] as const)).map((scope) => {
+            const closed = isScopeLocked(spread, scope);
+            const name = scope === "left" ? "della pagina sinistra" : scope === "right" ? "della pagina destra" : two ? "di tutto il foglio" : "della pagina";
+            return <button key={scope} type="button" className="popover__row" onClick={() => { actions.lockSpread(scope, !closed); setLockOpen(false); }}><Icon name={closed ? "unlock" : "lock"} size={15} /> {closed ? "Sblocca" : "Blocca"} il layout {name}</button>;
+          })}
+          <p className="popover__hint">Un layout bloccato non cambia con Mescola, con i layout proposti né con Auto Build.</p>
+        </Popover>
+      </div>
+      <div className="anchor">
         <button type="button" className={`bar-btn${settingsOpen ? " is-active" : ""}`} title="Altre azioni sullo spread" aria-label="Altre azioni sullo spread" onClick={() => setSettingsOpen(!settingsOpen)}><Icon name="sliders" size={18} /></button>
         <Popover open={settingsOpen} onClose={() => setSettingsOpen(false)} side="top" className="popover--wide">
           <button type="button" className="popover__row" onClick={() => { actions.alignPhotos("spread"); setSettingsOpen(false); }}><Icon name="alignCenter" size={15} /> Allinea le foto di questo spread</button>
@@ -339,6 +357,11 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         onSplit={actions.split}
         onLink={actions.link}
         onSwapAreas={actions.swapAreas}
+        locked={Boolean(spread.areas[index]?.locked)}
+        free={hasFreeLayout(spread.areas[index])}
+        onLock={(locked) => actions.lockArea(index, locked)}
+        onFree={() => actions.freeArea(index)}
+        onRestore={() => actions.restoreArea(index)}
       />
     );
   };

@@ -354,6 +354,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .spread__empty.is-active { border-color: var(--accent); background: rgba(184, 154, 99, 0.06); }
 .spread__safe { position: absolute; border: 1px dashed rgba(200, 168, 0, 0.7); pointer-events: none; z-index: 5; }
 .spread__active { position: absolute; border: 2px solid rgba(184, 154, 99, 0.5); pointer-events: none; z-index: 5; }
+/* Segnalino sulla pagina con il layout bloccato (diverso dal lucchetto delle singole foto). */
+.spread__locked { position: absolute; z-index: 38; display: inline-flex; align-items: center; gap: 4px; margin: 6px; padding: 2px 8px; border-radius: 999px; font-size: 10.5px; letter-spacing: 0.04em; color: var(--accent-bright); background: rgba(20, 24, 21, 0.78); border: 1px solid var(--accent); pointer-events: none; }
 .spread__snap { position: absolute; z-index: 40; pointer-events: none; background: var(--accent-bright); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); }
 .spread__snap--x { width: 1px; margin-left: -0.5px; }
 .spread__snap--y { height: 1px; margin-top: -0.5px; }

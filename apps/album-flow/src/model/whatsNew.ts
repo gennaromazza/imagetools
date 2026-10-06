@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.13",
+    date: "2026-10-06",
+    headline: "Il lucchetto del layout e la scheda Grafiche",
+    items: [
+      {
+        title: "Layout libero o bloccato, pagina per pagina",
+        text: "Sotto «Mescola», in ogni striscia laterale, il pulsante «Layout» rende libera la pagina (sposti e ridimensioni le foto a piacere, anche se il layout l'ha proposto il programma) oppure la protegge: una pagina bloccata non cambia con Mescola, con i layout proposti né con Auto Build. Dalla barra in basso blocchi la pagina sinistra, la destra o tutto il foglio. Tornando al layout automatico scegli se tornare a prima o tenere la disposizione nuova.",
+        where: ["LAYOUT", "Sposta le foto liberamente", "Proteggi il layout", "Layout bloccato"],
+      },
+      {
+        title: "Loghi e ornamenti in una scheda tutta loro",
+        text: "In Personalizza, accanto a Libreria, la scheda «Grafiche» raccoglie le immagini da mettere sopra le foto: PNG con trasparenza, SVG, WebP o JPG. Un clic le inserisce nella pagina attiva e poi le sposti, ridimensioni e ruoti liberamente. Quelle già caricate ci sono già.",
+        where: ["Personalizza", "Grafiche", "Carica grafica"],
+      },
+    ],
+  },
+  {
     version: "0.2.12",
     date: "2026-10-06",
     headline: "Testi narrativi pronti e calamite per i testi",

@@ -9,6 +9,8 @@ import { findItem, itemAspect, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeAsset, makeProject } from "./fixtures";
 import { TEMPLATE_STORAGE_KEY, applyTemplate, applyTemplatesToAlbum, bestAssignment, loadTemplates, matchTemplates, removeTemplate, reorderFrame, saveTemplates, sanitizeTemplate, setFrame, templateFromArea, templateTarget, upsertTemplate } from "./templates";
 import { hasFreeLayout } from "./project";
+import { areaIndexesOf, isScopeLocked, makeAreaFree, restoreAutomatic, setAreaLocked, setSpreadLock } from "./layoutLock";
+import { areaGeometry } from "./project";
 import { coverAssetOf, hoverPreviewSize, removeAssets, setCoverAsset } from "./library";
 import { placeItem } from "./placement";
 import { DEFAULT_AUTO_BUILD, autoBuildAlbum } from "./autobuild";
@@ -1013,4 +1015,87 @@ test("anteprima al passaggio del mouse: la foto intera, con le sue proporzioni e
   assert.deepEqual(hoverPreviewSize({ width: 0, height: 0, aspectRatio: 0 }), { width: 440, height: 293 }, "misure ignote: proporzione 3:2");
   const panorama = hoverPreviewSize({ width: 7000, height: 1000, aspectRatio: 7 });
   assert.ok(panorama.width === 440 && panorama.height >= 60 && panorama.height <= 64);
+});
+
+// ------------------------------------------------------------------ layout libero e bloccato
+
+test("layout libero: una pagina automatica diventa libera senza cambiare a vista, le foto si spostano e si può tornare indietro", () => {
+  const project = filled(4, 3);
+  const id = firstSpreadId(project);
+  const spread = project.spreads[0];
+  const before = areaGeometry(project, spread, 0).cells.map((cell) => ({ id: cell.itemId, rect: cell.rect }));
+
+  const free = makeAreaFree(project, id, 0);
+  assert.notEqual(free, project);
+  const area = free.spreads[0].areas[0];
+  assert.ok(hasFreeLayout(area), "ogni foto ha la sua cornice");
+  assert.ok(area.layout, "il layout ad albero resta come riserva");
+  assertProjectInvariants(free, "pagina resa libera");
+  const after = areaGeometry(free, free.spreads[0], 0).cells;
+  for (const cell of before) {
+    const now = after.find((candidate) => candidate.itemId === cell.id)!;
+    for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(now.rect[key] - cell.rect[key]) < 0.05, `${cell.id}: ${key} cambiata a vista`);
+  }
+  assert.equal(makeAreaFree(free, id, 0), free, "già libera: nessun cambiamento");
+  assert.equal(makeAreaFree(project, id, 7), project);
+  const sparse = filled(2, 0);
+  assert.equal(makeAreaFree(sparse, firstSpreadId(sparse), 1), sparse, "pagina vuota: niente da liberare");
+
+  const itemId = area.items[0].id;
+  const moved = setFrame(free, itemId, { x: 0.3, y: 0.2 });
+  assert.equal(moved.spreads[0].areas[0].free![itemId].x, 0.3, "la foto si sposta a piacere");
+  assertProjectInvariants(moved, "foto spostata");
+
+  const back = restoreAutomatic(moved, id, 0);
+  assert.ok(!hasFreeLayout(back.spreads[0].areas[0]));
+  const restored = areaGeometry(back, back.spreads[0], 0).cells;
+  for (const cell of before) {
+    const now = restored.find((candidate) => candidate.itemId === cell.id)!;
+    assert.ok(Math.abs(now.rect.x - cell.rect.x) < 1e-6 && Math.abs(now.rect.w - cell.rect.w) < 1e-6, "tornata al layout di prima");
+  }
+  assert.equal(restoreAutomatic(project, id, 0), project, "non era libera: nessun cambiamento");
+});
+
+test("layout bloccato: Mescola, layout proposti, template e Auto Build non lo toccano; sbloccato torna tutto come prima", () => {
+  const project = filled(4, 4);
+  const id = firstSpreadId(project);
+  const locked = setSpreadLock(project, id, "left", true);
+  assert.ok(locked.spreads[0].areas[0].locked && !locked.spreads[0].areas[1].locked, "solo la pagina sinistra");
+  assert.equal(shuffleArea(locked, id, 0), locked, "Mescola non tocca una pagina bloccata");
+  assert.equal(applyCandidate(locked, id, 0, 1), locked, "neanche un layout proposto");
+  assert.notEqual(shuffleArea(locked, id, 1), locked, "l'altra pagina si mescola");
+  assert.equal(makeAreaFree(locked, id, 0), locked, "una pagina bloccata non si rende libera: prima si sblocca");
+  const open = setAreaLocked(locked, id, 0, false);
+  assert.ok(!("locked" in open.spreads[0].areas[0]), "sbloccata: il campo sparisce");
+  assert.notEqual(shuffleArea(open, id, 0), open, "sbloccata si mescola di nuovo");
+  assert.equal(setAreaLocked(project, id, 0, false), project);
+
+  const built = autoBuildAlbum(makeProject(24), { ...DEFAULT_AUTO_BUILD, respectChapters: false });
+  const protectedBuilt = setSpreadLock(built, built.spreads[1].id, "all", true);
+  const rebuilt = autoBuildAlbum(protectedBuilt, { ...DEFAULT_AUTO_BUILD, respectChapters: false, scope: "all", photosPerArea: 5 });
+  assert.deepEqual(rebuilt.spreads[1], protectedBuilt.spreads[1], "lo spread con pagine bloccate resta uguale");
+  assertProjectInvariants(rebuilt, "dopo Auto Build con spread bloccato");
+});
+
+test("blocco: pagina sinistra, destra o tutto il foglio, e salvataggio nel file", () => {
+  const project = filled(2, 2);
+  const id = firstSpreadId(project);
+  assert.deepEqual(areaIndexesOf(project.spreads[0], "left"), [0]);
+  assert.deepEqual(areaIndexesOf(project.spreads[0], "right"), [1]);
+  assert.deepEqual(areaIndexesOf(project.spreads[0], "all"), [0, 1]);
+  const full = setSplitMode(project, id, "full");
+  assert.deepEqual(areaIndexesOf(full.spreads[0], "right"), [0], "con un foglio intero c'è una sola pagina");
+
+  const right = setSpreadLock(project, id, "right", true);
+  assert.ok(isScopeLocked(right.spreads[0], "right") && !isScopeLocked(right.spreads[0], "left") && !isScopeLocked(right.spreads[0], "all"));
+  const all = setSpreadLock(right, id, "all", true);
+  assert.ok(isScopeLocked(all.spreads[0], "all"));
+  assert.ok(!isScopeLocked(setSpreadLock(all, id, "all", false).spreads[0], "right"));
+  assert.equal(setSpreadLock(project, "x", "all", true), project);
+
+  const reread = parseAlbumProject(serializeAlbumProject(all));
+  assert.ok(reread.spreads[0].areas.every((area) => area.locked), "il blocco resta dopo il salvataggio");
+  const broken = JSON.parse(serializeAlbumProject(all));
+  broken.project.spreads[0].areas[0].locked = "sì";
+  assert.throws(() => parseAlbumProject(JSON.stringify(broken)), /locked/);
 });

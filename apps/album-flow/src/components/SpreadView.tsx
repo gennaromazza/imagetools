@@ -549,6 +549,12 @@ function SpreadViewInner(props: SpreadViewProps) {
         <div key={side} className="spread__safe" style={{ left: pct(((side * page + margin) / size.width) * 100), top: pct((margin / size.height) * 100), width: pct(((page - margin * 2) / size.width) * 100), height: pct(((size.height - margin * 2) / size.height) * 100) }} />
       )) : null}
 
+      {interactive ? spread.areas.map((area, areaIndex) => (area.locked ? (
+        <span key={`lock-${area.id}`} className="spread__locked" title="Layout bloccato: Mescola e Auto Build non lo toccano" style={{ left: pct((geometry[areaIndex].outer.x / size.width) * 100), top: pct((geometry[areaIndex].outer.y / size.height) * 100) }}>
+          <Icon name="lock" size={12} /> Layout bloccato
+        </span>
+      ) : null)) : null}
+
       {interactive && spread.areas.length > 1 ? (() => {
         const outer = geometry[Math.min(activeArea, spread.areas.length - 1)].outer;
         return <div className="spread__active" style={{ left: pct((outer.x / size.width) * 100), top: pct((outer.y / size.height) * 100), width: pct((outer.w / size.width) * 100), height: pct((outer.h / size.height) * 100) }} />;

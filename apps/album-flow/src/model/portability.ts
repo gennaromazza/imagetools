@@ -213,6 +213,7 @@ function validateProject(value: unknown): asserts value is AlbumProjectV2 {
         if (item.shape !== undefined) num(item.shape, `${path}.items[].shape`, MIN_SHAPE, MAX_SHAPE);
         if (item.locked !== undefined) oneOf(item.locked, [true, false], `${path}.items[].locked`);
       }
+      if (area.locked !== undefined && typeof area.locked !== "boolean") fail(`${path}.locked: valore non valido.`);
       if (area.free !== undefined) {
         const free = record(area.free, `${path}.free`);
         for (const [key, rawFrame] of Object.entries(free)) {

@@ -41,12 +41,20 @@ export interface AreaStripProps {
   onSplit: (mode: AlbumSplitMode) => void;
   onLink: () => void;
   onSwapAreas: () => void;
+  /** Layout protetto da Mescola, layout proposti e Auto Build. */
+  locked: boolean;
+  /** Disposizione libera: le foto si spostano e ridimensionano a piacere. */
+  free: boolean;
+  onLock: (locked: boolean) => void;
+  onFree: () => void;
+  onRestore: () => void;
 }
 
 /** Striscia verticale di controlli di un'area di lavoro: mescola, spazio, margine, bordo, modo, allineamento, divisione. */
 export function AreaStrip(props: AreaStripProps) {
   const { side, area, split, linked, active, twoAreas } = props;
-  const [popover, setPopover] = useState<null | "align" | "split">(null);
+  const [popover, setPopover] = useState<null | "align" | "split" | "layout">(null);
+  const [confirmBack, setConfirmBack] = useState(false);
   const popoverSide = side === "left" ? "right" : "left";
   const style = area.style;
   const empty = area.items.length === 0;
@@ -55,6 +63,37 @@ export function AreaStrip(props: AreaStripProps) {
     <aside className={`strip strip--${side}${active ? " is-active" : ""}`} aria-label={`Controlli ${side === "left" ? "della pagina sinistra" : "della pagina destra"}`} onPointerDownCapture={props.onActivate}>
       <Group caption="MESCOLA">
         <StripButton icon="shuffle" label="Cambia disposizione delle foto (↑ ↓)" onClick={props.onShuffle} disabled={empty} />
+      </Group>
+      <Group caption="LAYOUT">
+        <div className="anchor">
+          <StripButton
+            icon={props.locked ? "lock" : "unlock"}
+            label={props.locked ? "Layout bloccato: Mescola e Auto Build non lo toccano. Clic per le opzioni" : props.free ? "Layout libero: sposta le foto a piacere. Clic per le opzioni" : "Layout della pagina: sblocca per spostare le foto a piacere o proteggilo"}
+            active={props.locked}
+            tone={props.locked ? "gold" : undefined}
+            onClick={() => { setConfirmBack(false); setPopover(popover === "layout" ? null : "layout"); }}
+          />
+          <Popover open={popover === "layout"} onClose={() => { setPopover(null); setConfirmBack(false); }} side={popoverSide} className="popover--wide">
+            <p className="popover__title">Layout di questa pagina</p>
+            {props.free ? (
+              confirmBack ? (
+                <>
+                  <p className="popover__hint">Le foto che hai spostato a mano tornano dove le aveva messe il programma?</p>
+                  <button type="button" className="popover__row" onClick={() => { props.onRestore(); setPopover(null); setConfirmBack(false); }}>Torna al layout di prima</button>
+                  <button type="button" className="popover__row" onClick={() => { setPopover(null); setConfirmBack(false); }}>Tieni la disposizione nuova</button>
+                </>
+              ) : (
+                <button type="button" className="popover__row" disabled={props.locked} onClick={() => setConfirmBack(true)}>Torna al layout automatico…</button>
+              )
+            ) : (
+              <button type="button" className="popover__row" disabled={props.locked || empty} onClick={() => { props.onFree(); setPopover(null); }}><Icon name="unlock" size={15} /> Sposta le foto liberamente</button>
+            )}
+            <button type="button" className="popover__row" onClick={() => { props.onLock(!props.locked); setPopover(null); }}>
+              <Icon name={props.locked ? "unlock" : "lock"} size={15} /> {props.locked ? "Sblocca il layout" : "Proteggi il layout"}
+            </button>
+            <p className="popover__hint">{props.locked ? "Bloccato: Mescola, i layout proposti e Auto Build lasciano questa pagina com'è." : "Proteggi il layout per non perdere le posizioni quando usi Mescola o Auto Build. Sbloccata, la pagina si può ridisegnare."}</p>
+          </Popover>
+        </div>
       </Group>
       <Group caption="SPAZIO">
         <NumberField label="cm" value={style.gapCm} {...STYLE_LIMITS.gapCm} onChange={(value) => props.onStyle({ gapCm: value }, "gap")} title="Spazio tra le foto (cm). Trascina verso l'alto o il basso per cambiarlo." />

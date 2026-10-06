@@ -70,7 +70,7 @@ function currentPosition(area: AlbumArea, choices: readonly LayoutChoice[]): num
 export function shuffleArea(project: Project, spreadId: string, areaIndex: number, direction: 1 | -1 = 1, templates: readonly AreaTemplate[] = []): Project {
   return mapSpread(project, spreadId, (spread) => {
     const area = spread.areas[areaIndex];
-    if (spread.done || !area || area.items.length < 1) return spread;
+    if (spread.done || !area || area.locked || area.items.length < 1) return spread;
     const choices = layoutChoices(project, spread, areaIndex, templates);
     if (choices.length < 2) return spread;
     const next = (currentPosition(area, choices) + direction + choices.length * 2) % choices.length;
@@ -91,7 +91,7 @@ export function shuffleSpread(project: Project, spreadId: string, direction: 1 |
 export function applyCandidate(project: Project, spreadId: string, areaIndex: number, candidateIndex: number, templates: readonly AreaTemplate[] = []): Project {
   return mapSpread(project, spreadId, (spread) => {
     const area = spread.areas[areaIndex];
-    if (spread.done || !area) return spread;
+    if (spread.done || !area || area.locked) return spread;
     const choice = layoutChoices(project, spread, areaIndex, templates)[candidateIndex];
     if (!choice) return spread;
     const result = choiceAsArea(area, choice);

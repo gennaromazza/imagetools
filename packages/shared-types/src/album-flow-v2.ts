@@ -65,6 +65,8 @@ export interface AlbumArea {
    * per qualche foto vale il layout ad albero, che resta sempre coerente come riserva.
    */
   free?: Record<string, FreeFrame>;
+  /** Layout protetto: Mescola, i layout proposti e Auto Build non lo toccano. */
+  locked?: boolean;
   /** Nell'ordine di lettura delle foglie del layout. */
   items: AlbumItem[];
   /** Seme dello shuffle: indice nella lista dei layout candidati. */

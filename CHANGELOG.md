@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-06 - Album Flow 0.2.13
+
+- Nuovo: lucchetto del layout per pagina (striscia laterale, etichetta LAYOUT) e per tutto il foglio (barra in basso): «Sposta le foto liberamente» rende libera la pagina, «Proteggi il layout» impedisce a Mescola, ai layout proposti e ad Auto Build di cambiarla (segnalino «Layout bloccato» in pagina); tornando al layout automatico si sceglie se tornare a prima o tenere la disposizione nuova. Personalizza: nuova scheda «Grafiche» accanto a Libreria per caricare PNG (con trasparenza), SVG, WebP o JPG come loghi e ornamenti da posizionare liberamente sopra le foto.
+
 ## 2026-10-06 - Album Flow 0.2.12
 
 - Nuovo: scheda «Racconto» in Personalizza con una libreria di oltre 300 testi narrativi per i matrimoni (aperture, preparativi, cerimonia, festa, finale…): «Proponi un testo» sceglie in base alla fase dell'album e allo spazio, «Rigenera testo» ne propone un altro, «Proponi i testi per l'album» li mette sulle pagine libere senza mai ripetere; filtri per categoria, tipo, lunghezza, tono, intensità e origine. Testi e grafiche: calamite con linee guida (bordi, centro, piega, margini, foto, altri testi; Alt le esclude), pulsanti «Allinea alla pagina», gruppi che si fermano insieme al bordo, un elemento non esce più del tutto dalla pagina, ridimensionare un testo ruotato non lo fa più scappare e il testo incollato viene ripulito.
