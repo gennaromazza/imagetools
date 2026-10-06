@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import type { FileXDesktopApi } from "@photo-tools/desktop-contracts";
 import { App } from "./App";
 import { ToastProvider } from "./components/ToastProvider";
+import { startPerfDiagnostics } from "./services/perf-diagnostics";
 import "./styles.css";
 
 const REQUIRED_DESKTOP_METHODS: Array<keyof FileXDesktopApi> = [
@@ -116,6 +117,8 @@ function DesktopOnlyBlockedScreen({ missingMethods }: { missingMethods: string[]
 }
 
 const desktopGuard = getDesktopApiGuard();
+
+startPerfDiagnostics();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

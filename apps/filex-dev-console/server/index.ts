@@ -351,6 +351,8 @@ function testDescription(name: string): string {
     "test:photo-selector-xmp": "Controlla lettura e aggiornamento dei metadati XMP.",
     "test:photo-selector-psd": "Verifica importazione PSD, anteprima del composito e conversione JPEG senza sovrascrivere gli originali.",
     "test:photo-selector-performance": "Verifica code prioritarie, budget cache, orientamento EXIF, lasso con autoscroll, azioni rapide e continuità della Quick Preview.",
+    "test:photo-selector-quick-zoom": "Verifica che in Quick Preview con zoom le frecce sinistra/destra cambino foto mantenendo lo zoom, che lo zoom carichi la foto a qualità piena (fino a 8000 px) e che per i RAW si usi il JPEG incorporato più grande invece di un'anteprima ridotta.",
+    "test:photo-selector-diagnostics": "Verifica la diagnostica prestazioni di Image Select Pro: statistiche sui frame durante lo scroll (rotella contro barra), registro solo locale senza rete né percorsi, interruttore ed esportazione nelle impostazioni.",
     "test:photo-selector-duplicates": "Verifica il raggruppamento dei probabili duplicati per peso e dimensioni, senza falsi positivi.",
     "test:photo-selector-capture-time": "Verifica il parser delle date di scatto EXIF con subsecondi, fusi e valori corrotti.",
     "test:photo-selector-rename": "Verifica anteprima rinomina batch con data scatto, sequenze, collisioni e nomi Windows.",

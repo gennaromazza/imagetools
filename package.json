@@ -26,6 +26,8 @@
     "test:photo-selector-relocation": "tsx scripts/test-photo-selector-relocation.ts",
     "test:photo-selector-xmp": "tsx scripts/test-photo-selector-xmp.ts",
     "test:photo-selector-psd": "tsx scripts/test-photo-selector-psd.ts",
+    "test:photo-selector-quick-zoom": "tsx --test scripts/test-photo-selector-quick-zoom.test.ts",
+    "test:photo-selector-diagnostics": "tsx --test apps/photo-selector-app/src/services/perf-diagnostics.test.ts",
     "test:photo-selector-performance": "tsx --test apps/filex-desktop/src/thumbnail-cache-policy.test.ts apps/photo-selector-app/src/services/performance-work-coordinator.test.ts apps/photo-selector-app/src/services/thumbnail-view-store.test.ts scripts/test-photo-selector-performance-regressions.test.ts",
     "test:photo-selector-duplicates": "tsx --test apps/photo-selector-app/src/services/duplicate-groups.test.ts",
     "test:photo-selector-capture-time": "tsx --test apps/filex-desktop/src/capture-time-parser.test.ts",

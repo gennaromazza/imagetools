@@ -141,6 +141,8 @@ const DOCK_THUMB_ESTIMATED_SIZE = 81;
 const DOCK_THUMB_OVERSCAN = 4;
 const QUICK_PREVIEW_DESKTOP_FALLBACK_DELAY_MS = 80;
 const QUICK_PREVIEW_DETAIL_IDLE_DELAY_MS = 160;
+// Lato lungo massimo della foto a qualità piena caricata durante lo zoom.
+const FULL_QUALITY_PREVIEW_MAX_DIMENSION = 8000;
 const QUICK_PREVIEW_INTERACTIVE_ZOOM = 2.2;
 const UI_SEPARATOR = " | ";
 const STAR_SYMBOL = "\u2605";
@@ -557,11 +559,6 @@ export function PhotoQuickPreviewModal({
     : thumbnailProfile === "fast"
       ? 1920
       : 2560;
-  const detailPreviewCap = thumbnailProfile === "ultra-fast"
-    ? 2800
-    : thumbnailProfile === "fast"
-      ? 3200
-      : 4096;
   const stageBaseDimension = useMemo(() => {
     const effectiveWidth = compareMode ? Math.max(0, stageViewport.width / 2) : stageViewport.width;
     const basePixels = Math.ceil(
@@ -575,12 +572,9 @@ export function PhotoQuickPreviewModal({
     }
     return fitPreviewCap;
   }, [fitPreviewCap, stageBaseDimension]);
-  const detailPreviewMaxDimension = useMemo(() => {
-    if (stageBaseDimension > 0) {
-      return Math.min(detailPreviewCap, Math.max(stageBaseDimension, fitPreviewMaxDimension));
-    }
-    return detailPreviewCap;
-  }, [detailPreviewCap, fitPreviewMaxDimension, stageBaseDimension]);
+  // Con lo zoom attivo si carica la foto a qualità piena (fino al tetto), non solo
+  // alla dimensione dello stage: altrimenti l'ingrandimento sarebbe solo CSS e sfocato.
+  const detailPreviewMaxDimension = FULL_QUALITY_PREVIEW_MAX_DIMENSION;
   const adjacentPreviewWarmupDelayMs = desktopQuickPreviewEnabled
     ? 24
     : thumbnailProfile === "ultra-fast"
@@ -2097,13 +2091,15 @@ export function PhotoQuickPreviewModal({
       }
 
       if (!compareMode && zoomLevel > 1.05) {
+        // Con zoom attivo ←/→ cambiano foto (lo zoom resta); la foto si sposta
+        // con ↑/↓ oppure con Alt+frecce su tutti e quattro gli assi.
         const step = event.shiftKey ? 180 : 90;
-        if (event.key === "ArrowLeft") {
+        if (event.altKey && event.key === "ArrowLeft") {
           event.preventDefault();
           panBy(step, 0);
           return;
         }
-        if (event.key === "ArrowRight") {
+        if (event.altKey && event.key === "ArrowRight") {
           event.preventDefault();
           panBy(-step, 0);
           return;
@@ -3263,6 +3259,10 @@ export function PhotoQuickPreviewModal({
               <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(0, 160)} aria-label="Sposta in basso">↓</button>
               <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(160, 0)} aria-label="Sposta a destra">→</button>
             </div>
+          ) : null}
+
+          {zoomLevel > 1.05 && !compareMode && activePreviewAssetNeedsManagedPreview && !activeResolvedDetailPreview ? (
+            <div className="quick-preview__quality-badge" role="status">Caricamento qualità piena…</div>
           ) : null}
 
           {previousAsset ? (

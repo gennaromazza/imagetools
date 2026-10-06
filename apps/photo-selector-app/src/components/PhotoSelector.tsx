@@ -103,6 +103,12 @@ import { PhotoFilterPanel } from "./selector/PhotoFilterPanel";
 import { QuickStatsPanel } from "./selector/QuickStatsPanel";
 import { SelectionActionsPanel } from "./selector/SelectionActionsPanel";
 import { ViewControlsPanel } from "./selector/ViewControlsPanel";
+import {
+  exportPerfDiagnosticsReport,
+  isPerfDiagnosticsEnabled,
+  notePerfScrollEvent,
+  setPerfDiagnosticsEnabled,
+} from "../services/perf-diagnostics";
 
 interface PhotoSelectorProps {
   photos: ImageAsset[];
@@ -2330,7 +2336,27 @@ export function PhotoSelector({
     }
   }, [onScrollLiteActiveMsChange]);
 
+  const [perfDiagnosticsEnabled, setPerfDiagnosticsEnabledState] = useState(() => isPerfDiagnosticsEnabled());
+  const [perfDiagnosticsFeedback, setPerfDiagnosticsFeedback] = useState<string | null>(null);
+  const handlePerfDiagnosticsToggle = useCallback((enabled: boolean) => {
+    setPerfDiagnosticsEnabled(enabled);
+    setPerfDiagnosticsEnabledState(enabled);
+    setPerfDiagnosticsFeedback(null);
+  }, []);
+  const handlePerfDiagnosticsExport = useCallback(() => {
+    const fileName = exportPerfDiagnosticsReport({
+      photoCount: visiblePhotoIds.length,
+      gridColumnCount,
+      cardSize,
+      thumbnailProfile: selectedThumbnailProfile,
+      graphics: desktopGraphicsStatus,
+      thumbnailCache: desktopThumbnailCacheInfo ?? null,
+      thumbnailPerformance: performanceSnapshot ?? null,
+    });
+    setPerfDiagnosticsFeedback(`Salvato ${fileName} nella cartella Download.`);
+  }, [cardSize, desktopGraphicsStatus, desktopThumbnailCacheInfo, gridColumnCount, performanceSnapshot, selectedThumbnailProfile, visiblePhotoIds.length]);
   const handleGridScroll = useCallback(() => {
+    notePerfScrollEvent();
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (fastScrollStartedAtRef.current === null) {
       fastScrollStartedAtRef.current = now;
@@ -5224,6 +5250,23 @@ export function PhotoSelector({
                 </p>
               </>
             ) : null}
+            <div className="photo-selector__settings-diagnostics">
+              <label className="photo-selector__settings-toggle">
+                <span>Registra dati tecnici sulle prestazioni (solo in locale)</span>
+                <input
+                  type="checkbox"
+                  checked={perfDiagnosticsEnabled}
+                  onChange={(event) => handlePerfDiagnosticsToggle(event.target.checked)}
+                />
+              </label>
+              <p className="photo-selector__settings-empty">
+                Misura scatti dell’interfaccia e caratteristiche del PC. Non contiene nomi di file né percorsi e non viene mai inviato: puoi esportarlo e mandarlo tu all’assistenza.
+              </p>
+              <button type="button" className="icon-button" onClick={handlePerfDiagnosticsExport} disabled={!perfDiagnosticsEnabled}>
+                Esporta diagnostica
+              </button>
+              {perfDiagnosticsFeedback ? <small role="status">{perfDiagnosticsFeedback}</small> : null}
+            </div>
             {desktopThumbnailCacheInfo?.systemTotalMemoryBytes != null && onRamBudgetPresetChange ? (
               <RamBudgetSection
                 systemTotalMemoryBytes={desktopThumbnailCacheInfo.systemTotalMemoryBytes}

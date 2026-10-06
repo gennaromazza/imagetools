@@ -1322,6 +1322,42 @@ async function tryExtractEmbeddedPreviewFromPrefix(
   return jpegBuffer ? Buffer.from(jpegBuffer) : null;
 }
 
+/**
+ * Per lo zoom (stage "detail") serve il JPEG incorporato più grande del RAW:
+ * il percorso veloce prende il primo trovato, spesso un'anteprima ridotta.
+ * Il risultato non entra nella cache delle sorgenti, per non sostituire quella
+ * più leggera usata dalla vista adattata.
+ */
+async function tryExtractLargestEmbeddedPreviewWithExifTool(
+  absolutePath: string,
+): Promise<ResolvedPreviewSourceResult | null> {
+  if (!isRawPath(absolutePath)) {
+    return null;
+  }
+
+  let largest: ResolvedPreviewSource | null = null;
+  for (const tag of ["JpgFromRaw", "PreviewImage"] as const) {
+    try {
+      const previewBuffer = await rawPreviewExifTool.extractBinaryTagToBuffer(tag, absolutePath);
+      if (previewBuffer.byteLength < MIN_EMBEDDED_JPEG_BYTES) {
+        continue;
+      }
+      const resolved = await resolvePreviewSourceFromBufferWithBudget(
+        previewBuffer,
+        getMimeTypeForBuffer(previewBuffer),
+        true,
+      );
+      if (resolved && (!largest || resolved.width * resolved.height > largest.width * largest.height)) {
+        largest = resolved;
+      }
+    } catch {
+      // Tag assente in questo formato: si prova il successivo.
+    }
+  }
+
+  return largest ? { source: largest, origin: "embedded-preview", cacheHit: false } : null;
+}
+
 async function tryExtractEmbeddedPreviewWithExifTool(
   absolutePath: string,
 ): Promise<ResolvedPreviewSource | null> {
@@ -1658,6 +1694,7 @@ async function getDesktopPreviewInternal(
   absolutePath: string,
   maxDimension = 0,
   sourceFileKey?: string,
+  stage?: DesktopQuickPreviewRequest["stage"],
 ): Promise<DesktopPreviewRenderResult | null> {
   const cacheKey = getRenderedPreviewCacheKey(absolutePath, maxDimension, sourceFileKey);
   const rawPath = isRawPath(absolutePath);
@@ -1726,7 +1763,10 @@ async function getDesktopPreviewInternal(
       }
     }
 
-    const source = await resolvePreviewBuffer(absolutePath, { sourceFileKey });
+    const largestEmbedded = rawPath && stage === "detail"
+      ? await tryExtractLargestEmbeddedPreviewWithExifTool(absolutePath)
+      : null;
+    const source = largestEmbedded ?? await resolvePreviewBuffer(absolutePath, { sourceFileKey });
     if (!source && rawPath) {
       const nativePreview = await runDecodeTask(true, () => renderNativePreviewFromPath(absolutePath, maxDimension));
       if (nativePreview) {
@@ -1870,6 +1910,7 @@ export async function getDesktopQuickPreviewFrame(
     request.absolutePath,
     request.maxDimension,
     request.sourceFileKey,
+    request.stage,
   );
   if (!result) {
     return null;
@@ -2017,6 +2058,7 @@ export async function warmDesktopQuickPreviewFrames(
         request.absolutePath,
         request.maxDimension,
         request.sourceFileKey,
+        request.stage,
       );
       if (!result) {
         failedCount += 1;
