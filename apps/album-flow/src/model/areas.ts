@@ -311,3 +311,26 @@ export function refreshAssetShapes(project: Project, updates: ReadonlyArray<{ as
   if (!changed) return project;
   return alignFitAreas(touch({ ...project, assets }));
 }
+
+/**
+ * Spazio tra le foto predefinito di tutto l'album. Si applica alle pagine che hanno ancora lo spazio di prima: chi lo ha cambiato a mano
+ * (foglio per foglio) lo conserva. Gli spread finiti non cambiano. Restituisce anche quante pagine sono state aggiornate.
+ */
+export function setAlbumGap(project: Project, gapCm: number): { project: Project; updated: number } {
+  const next = clampNumber(gapCm, STYLE_LIMITS.gapCm.min, STYLE_LIMITS.gapCm.max);
+  const previous = project.settings.defaultStyle.gapCm;
+  if (next === previous) return { project, updated: 0 };
+  let updated = 0;
+  const spreads = project.spreads.map((spread) => {
+    if (spread.done) return spread;
+    let changed = false;
+    const areas = spread.areas.map((area) => {
+      if (Math.abs(area.style.gapCm - previous) > 1e-9) return area;
+      changed = true;
+      updated += 1;
+      return { ...area, style: { ...area.style, gapCm: next } };
+    });
+    return changed ? { ...spread, areas } : spread;
+  });
+  return { project: touch({ ...project, settings: { ...project.settings, defaultStyle: { ...project.settings.defaultStyle, gapCm: next } }, spreads }), updated };
+}

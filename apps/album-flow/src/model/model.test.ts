@@ -9,6 +9,8 @@ import { findItem, itemAspect, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeAsset, makeProject } from "./fixtures";
 import { TEMPLATE_STORAGE_KEY, applyTemplate, applyTemplatesToAlbum, bestAssignment, loadTemplates, matchTemplates, removeTemplate, reorderFrame, saveTemplates, sanitizeTemplate, setFrame, templateFromArea, templateTarget, upsertTemplate } from "./templates";
 import { hasFreeLayout } from "./project";
+import { setAlbumGap } from "./areas";
+import { setSpreadDone } from "./spreads";
 import { areaIndexesOf, isScopeLocked, makeAreaFree, restoreAutomatic, setAreaLocked, setSpreadLock } from "./layoutLock";
 import { areaGeometry } from "./project";
 import { coverAssetOf, hoverPreviewSize, removeAssets, setCoverAsset } from "./library";
@@ -1098,4 +1100,25 @@ test("blocco: pagina sinistra, destra o tutto il foglio, e salvataggio nel file"
   const broken = JSON.parse(serializeAlbumProject(all));
   broken.project.spreads[0].areas[0].locked = "sì";
   assert.throws(() => parseAlbumProject(JSON.stringify(broken)), /locked/);
+});
+
+test("spazio tra le foto dell'album: cambia dove non l'hai toccato a mano, conserva i fogli personalizzati e gli spread finiti", () => {
+  const built = autoBuildAlbum(makeProject(24), { ...DEFAULT_AUTO_BUILD, respectChapters: false });
+  const before = built.settings.defaultStyle.gapCm;
+  const manual = setAreaStyle(built, built.spreads[1].id, 0, { gapCm: 1 });
+  const finished = setSpreadDone(manual, manual.spreads[2].id, true);
+  const result = setAlbumGap(finished, 0.6);
+  assert.equal(result.project.settings.defaultStyle.gapCm, 0.6, "diventa il valore predefinito");
+  assert.equal(result.project.spreads[1].areas[0].style.gapCm, 1, "il foglio personalizzato resta com'è");
+  assert.equal(result.project.spreads[2].areas[0].style.gapCm, before, "lo spread finito non cambia");
+  assert.equal(result.project.spreads[0].areas[0].style.gapCm, 0.6);
+  assert.ok(result.updated > 0);
+  const total = finished.spreads.reduce((sum, spread) => sum + spread.areas.length, 0);
+  assert.equal(result.updated, total - 1 - finished.spreads[2].areas.length, "tutte tranne il foglio a mano e lo spread finito");
+  assert.equal(setAlbumGap(finished, before).updated, 0);
+  assert.equal(setAlbumGap(finished, before).project, finished, "stesso valore: nessun cambiamento");
+  assert.equal(setAlbumGap(finished, 99).project.settings.defaultStyle.gapCm, 3, "entro i limiti");
+  // un nuovo spread nasce con lo spazio dell'album
+  assert.equal(addSpread(result.project).spreads.at(-1)!.areas[0].style.gapCm, 0.6);
+  assertProjectInvariants(result.project, "spazio dell'album");
 });

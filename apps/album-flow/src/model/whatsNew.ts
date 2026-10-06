@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.14",
+    date: "2026-10-06",
+    headline: "Lo spazio tra le foto per tutto l'album",
+    items: [
+      {
+        title: "Spazio tra le foto predefinito dell'album",
+        text: "Dalla finestra che si apre cliccando il formato in alto scegli lo spazio tra le foto di tutto l'album. Vale per le pagine dove non l'avevi cambiato a mano: i fogli che hai personalizzato dalla striscia «Spazio» e gli spread finiti restano come sono. I nuovi spread nascono con il nuovo spazio.",
+        where: ["Formato e spazi dell'album", "Spazio tra le foto (cm)", "Spazio"],
+      },
+    ],
+  },
+  {
     version: "0.2.13",
     date: "2026-10-06",
     headline: "Il lucchetto del layout e la scheda Grafiche",

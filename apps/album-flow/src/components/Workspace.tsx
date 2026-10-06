@@ -3,7 +3,7 @@ import type { AlbumAssetTag, AlbumProjectV2, AlbumSortKey, AlbumStage, AreaTempl
 import { shapeOfTree } from "../engine/tree";
 import { getDesktop, hasDesktop, openInEditor, refreshChangedFiles, revealInFolder, writeRatingToXmp } from "../desktop/api";
 import { candidatesFromFiles, chooseFolderAndScan, fileKey, scanDroppedPaths } from "../desktop/importer";
-import { alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, mirrorArea, removeFavoriteLayout, resetDividerRatio, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "../model/areas";
+import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, mirrorArea, removeFavoriteLayout, resetDividerRatio, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "../model/areas";
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
@@ -766,7 +766,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
             onBlur={(event) => { const value = event.target.value.trim(); if (value && value !== project.projectName) rename(value); else event.target.value = project.projectName; }}
             onKeyDown={(event) => { if (event.key === "Enter") (event.target as HTMLInputElement).blur(); }}
           />
-          <button type="button" className="topbar__meta topbar__meta--btn" onClick={() => setDialog("format")} title="Cambia il formato dell'album">{subtitle}</button>
+          <button type="button" className="topbar__meta topbar__meta--btn" onClick={() => setDialog("format")} title="Formato e spazio tra le foto dell'album">{subtitle}</button>
         </div>
         <div className="btn-group">
           <IconButton icon="undo" label="Annulla (Ctrl/⌘+Z)" onClick={doUndo} disabled={!canUndo(history)} />
@@ -907,7 +907,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
       ) : null}
       {dialog === "autobuild" ? <AutoBuildDialog project={project} templateCount={templates.length} onClose={() => setDialog(null)} onRun={runAutoBuild} /> : null}
       {dialog === "export" ? <ExportDialog project={project} currentIndex={index} onClose={() => setDialog(null)} onStatus={notify} onGoTo={goTo} /> : null}
-      {dialog === "format" ? <FormatDialog sheet={project.settings.sheet} onClose={() => setDialog(null)} onApply={(sheet) => { commit((p) => touch({ ...p, settings: { ...p.settings, sheet } })); setDialog(null); notify("Formato cambiato: i layout si sono adattati al nuovo foglio.", true); }} /> : null}
+      {dialog === "format" ? <FormatDialog sheet={project.settings.sheet} gapCm={project.settings.defaultStyle.gapCm} onClose={() => setDialog(null)} onApply={(sheet, gapCm) => { const out = { updated: 0 }; commit((p) => { const gapped = setAlbumGap(touch({ ...p, settings: { ...p.settings, sheet } }), gapCm); out.updated = gapped.updated; return gapped.project; }); setDialog(null); notify(out.updated > 0 ? `Formato e spazio aggiornati: ${out.updated} ${out.updated === 1 ? "pagina" : "pagine"} con il nuovo spazio tra le foto.` : "Formato cambiato: i layout si sono adattati al nuovo foglio.", true); }} /> : null}
       {dialog === "template" && templateEdit ? <TemplateEditor sheet={project.settings.sheet} style={project.settings.defaultStyle} initial={templateEdit.initial} seed={templateEdit.seed} onClose={() => { setDialog(null); setTemplateEdit(null); }} onSave={(template) => { try { storeTemplates(upsertTemplate(templates, template)); notify(`Template «${template.name}» salvato.`); setDialog(null); setTemplateEdit(null); } catch (error) { notify(error instanceof Error ? error.message : "Template non salvato."); } }} /> : null}
       {dialog === "cloud" ? <CloudDialog project={project} onClose={() => setDialog(null)} onOpenCopy={(copy) => { setDialog(null); onOpenCopy?.(copy); }} /> : null}
       {dialog === "relink" ? <RelinkDialog project={project} missingIds={missingIds} onClose={() => setDialog(null)} onApply={(result) => { commit((p) => applyRelink(p, result)); notify(`${result.found.size} ${result.found.size === 1 ? "foto ricollegata" : "foto ricollegate"}.`, true); }} /> : null}

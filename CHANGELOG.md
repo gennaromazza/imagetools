@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-06 - Album Flow 0.2.14
+
+- Nuovo: spazio tra le foto predefinito di tutto l'album. Si cambia dalla finestra «Formato e spazi dell'album» (clic sul formato in alto) e si applica alle pagine dove non l'hai modificato a mano; i fogli personalizzati dalla striscia «Spazio» e gli spread finiti restano come sono, e i nuovi spread nascono con il nuovo spazio.
+
 ## 2026-10-06 - Album Flow 0.2.13
 
 - Nuovo: lucchetto del layout per pagina (striscia laterale, etichetta LAYOUT) e per tutto il foglio (barra in basso): «Sposta le foto liberamente» rende libera la pagina, «Proteggi il layout» impedisce a Mescola, ai layout proposti e ad Auto Build di cambiarla (segnalino «Layout bloccato» in pagina); tornando al layout automatico si sceglie se tornare a prima o tenere la disposizione nuova. Personalizza: nuova scheda «Grafiche» accanto a Libreria per caricare PNG (con trasparenza), SVG, WebP o JPG come loghi e ornamenti da posizionare liberamente sopra le foto.
