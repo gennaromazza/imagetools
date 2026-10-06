@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-06 - Album Flow 0.2.16
+
+- Nuovo: caroselli e storie per Instagram dal tuo album. Dal pulsante «Carosello» (o da «Nuovo carosello» nella Home) Album Flow propone subito 10 slide con le foto migliori già in pagina, in quattro stili e 50 modelli: copertine tipografiche, foto tra due parole, collage con bordo bianco, polaroid, foto ad arco, panorama su più slide e le pagine vere dell'album in una scena. Formati Post 4:5, quadrato e Storia 9:16, da 2 a 20 slide con il cursore «Numero di slide»; esporti un JPG numerato per slide e il testo del post. Le foto si segnano «Per i social» (tasto destro, «Segna come», o il tasto I, anche dallo spread) e «Riscegli le foto» aggiorna la scelta quando cambiano stelle o segnalini. Le foto si inquadrano nello spazio (trascinamento, rotella, forma 1:1, 4:5, 3:2, 16:9), i testi si ritoccano (carattere, dimensione, colore, allineamento) e «Suggerisci» propone titoli e frasi dalla libreria editoriale. Ogni carosello esce con un ordine diverso dei modelli; «Altra variante» lo rifà tenendo foto e testi. I caroselli restano sul computer in cui li crei (non nel file progetto né nel backup Drive) e Album Flow non pubblica su Instagram: esporta le immagini.
+
 ## 2026-10-06 - Album Flow 0.2.15
 
 - Nuovo: la rotella del mouse raddrizza la foto. Nel ritaglio, con il puntatore sul cursore «Raddrizza», sul campo dell'angolo o sull'etichetta, la rotella cambia l'angolo (0,1° a scatto, 1° con Maiusc) senza scrivere i numeri; Ctrl/⌘ + rotella sulla foto raddrizza e, con lo strumento «linea» acceso, basta la rotella. Spostare le foto è più fluido: interruttore «Calamite» nella barra in basso (vale anche per testi e grafiche), calamite più leggere sulle foto libere (solo bordi e piega), foto libere che possono uscire in parte dal margine e barra delle azioni che non compare più mentre trascini.
