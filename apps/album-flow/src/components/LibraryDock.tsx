@@ -9,8 +9,8 @@ import { beginDrag, currentDrag, endDrag } from "./dnd";
 import { Icon } from "./icons";
 import { ContextMenu, Popover, Stars, type MenuItem } from "./ui";
 
-const TAG_LABEL: Record<AlbumAssetTag, string> = { cover: "K", panorama: "P", main: "M" };
-const TAG_NAME: Record<AlbumAssetTag, string> = { cover: "Copertina", panorama: "Panorama", main: "Principale" };
+const TAG_LABEL: Record<AlbumAssetTag, string> = { cover: "K", panorama: "P", main: "M", social: "I" };
+const TAG_NAME: Record<AlbumAssetTag, string> = { cover: "Copertina", panorama: "Panorama", main: "Principale", social: "Per i social" };
 const SORT_LABELS: Record<AlbumSortKey, string> = { "capture-time": "Ora di scatto", "file-name": "Nome file", "selector-order": "Ordine di Image Select Pro", manual: "Ordine manuale" };
 export const THUMB_MIN = 90;
 export const THUMB_MAX = 260;
@@ -321,7 +321,7 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
         ],
       },
       { label: "Valuta", icon: "star", children: [0, 1, 2, 3, 4, 5].map((rating) => ({ label: rating === 0 ? "Nessuna stella" : "★".repeat(rating), onClick: () => props.onRateMany(ids, rating) })) },
-      { label: "Segna come", icon: "tag", children: (["cover", "panorama", "main"] as AlbumAssetTag[]).map((tag) => ({ label: `${TAG_NAME[tag]} (${TAG_LABEL[tag]})`, onClick: () => props.onTag(ids, tag) })) },
+      { label: "Segna come", icon: "tag", children: (["cover", "panorama", "main", "social"] as AlbumAssetTag[]).map((tag) => ({ label: `${TAG_NAME[tag]} (${TAG_LABEL[tag]})`, onClick: () => props.onTag(ids, tag) })) },
       { separator: true, label: "-" },
       { label: many ? `Rimuovi ${ids.length} foto dall'album` : "Rimuovi dall'album", icon: "trash", danger: true, onClick: () => props.onRemove(ids) },
     ];

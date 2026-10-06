@@ -19,6 +19,7 @@ import { ChapterManager } from "./ChapterManager";
 import { ClientPreview } from "./ClientPreview";
 import { isExternalFileDrag } from "./dnd";
 import { ExportDialog } from "./ExportDialog";
+import { SocialStudio } from "./SocialStudio";
 import { FormatDialog } from "./FormatDialog";
 import { TemplateEditor, seedFromArea, type TemplateSeed } from "./TemplateEditor";
 import { applyTemplate as applyTemplateModel, applyTemplatesToAlbum, createTemplateId, loadTemplates, removeTemplate, reorderFrame, saveTemplates, setFrame, templateFromArea, templateTarget, upsertTemplate } from "../model/templates";
@@ -65,12 +66,14 @@ export interface WorkspaceProps {
   onExit: () => void;
   /** Apre come album nuovo una copia (ripristino da Drive): quello attuale non viene toccato. */
   onOpenCopy?: (copy: AlbumProjectV2) => void;
+  /** Il progetto nasce da «Nuovo carosello»: si apre subito la finestra dei social. */
+  startInSocial?: boolean;
 }
 
 interface Toast { message: string; undo?: boolean }
 
 /** L'editor: cronologia, selezione, gesti sulle foto, libreria, importazione, esportazione. */
-export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspaceProps) {
+export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial = false }: WorkspaceProps) {
   const [history, setHistoryState] = useState<History<AlbumProjectV2>>(() => createHistory(initial));
   // La cronologia più recente vive anche in una ref: i comandi si applicano in modo sincrono (una sola volta, anche in
   // StrictMode) e due modifiche nello stesso istante si compongono invece di sovrascriversi.
@@ -114,7 +117,9 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
   const [sizes, setSizes] = useState(() => readNumber("filex.albumFlow.sizes", 0) === 1);
   const [layoutsOpen, setLayoutsOpen] = useState(false);
   const [zone, setZone] = useState<"stage" | "library">("stage");
-  const [dialog, setDialog] = useState<null | "autobuild" | "export" | "shortcuts" | "chapters" | "format" | "template" | "cloud" | "relink" | "contact">(null);
+  const [dialog, setDialog] = useState<null | "autobuild" | "export" | "shortcuts" | "chapters" | "format" | "template" | "cloud" | "relink" | "contact" | "social">(startInSocial ? "social" : null);
+  /** Dopo aver importato le prime foto dalla finestra dei social, ci si ritorna da soli. */
+  const reopenSocial = useRef(false);
   const [templates, setTemplates] = useState<AreaTemplate[]>(() => loadTemplates());
   const [templateEdit, setTemplateEdit] = useState<{ initial?: AreaTemplate; seed?: TemplateSeed } | null>(null);
   const [viewer, setViewer] = useState<null | { ids: string[]; index: number }>(null);
@@ -249,7 +254,9 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
   const rateMany = useCallback((ids: string[], rating: number) => commit((p) => ids.reduce((current, id) => setRating(current, id, rating), p)), [commit]);
   const tagMany = useCallback((ids: string[], tag: AlbumAssetTag) => {
     commit((p) => ids.reduce((current, id) => toggleAssetTag(current, id, tag), p));
-    notify("Segnalazione aggiornata: con Auto Build le foto «copertina» e «principale» hanno un'area propria, il «panorama» un foglio intero.");
+    notify(tag === "social"
+      ? "Segnalazione aggiornata: nel carosello le foto «Per i social» vengono scelte per prime (pulsante «Riscegli le foto» se ne hai già uno)."
+      : "Segnalazione aggiornata: con Auto Build le foto «copertina» e «principale» hanno un'area propria, il «panorama» un foglio intero.");
   }, [commit, notify]);
 
   const assign = useCallback((ids: string[], chapterId: string | null) => {
@@ -503,6 +510,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
       commit((p) => replaceItemAsset(p, itemId, chosen[0]));
     },
     rate,
+    toggleSocial: (assetId: string) => tagMany([assetId], "social"),
     goTo,
     setZoom,
     toggleGuides: () => setGuides((on) => !on),
@@ -513,7 +521,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
       notify(historyRef.current.present === before ? "Le foto sono già allineate (l'allineamento vale per le aree in «foto intera»)." : scope === "spread" ? "Foto dello spread allineate." : "Foto di tutto l'album allineate.", historyRef.current.present !== before);
     },
     addSpreadAfter: () => { commit((p) => addSpread(p, index + 1)); setSpreadIndex(index + 1); setSelectedItemId(null); setActiveArea(0); },
-  }), [commit, edit, goTo, index, notify, project, rate, selectedItemId, spread, spreadId, storeTemplates, templates, viewItem]);
+  }), [commit, edit, goTo, index, notify, project, rate, selectedItemId, spread, spreadId, storeTemplates, tagMany, templates, viewItem]);
 
   // ------------------------------------------------------------- sfondi, testi e grafiche
   const designActions: DesignActions = useMemo(() => ({
@@ -658,8 +666,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
       else if (key === "s") actions.toggleSizes();
       else if (key === "b" && state.spread) setLayoutsOpen((open) => !open);
       else if (key === "l" && state.selectedItemId) actions.lockItem(state.selectedItemId);
-      else if ((key === "k" || key === "p" || key === "m")) {
-        const tag: AlbumAssetTag = key === "k" ? "cover" : key === "p" ? "panorama" : "main";
+      else if ((key === "k" || key === "p" || key === "m" || key === "i")) {
+        const tag: AlbumAssetTag = key === "k" ? "cover" : key === "p" ? "panorama" : key === "i" ? "social" : "main";
         const ids = state.libSelection.length ? state.libSelection : state.selectedItemId ? [findItem(historyRef.current.present, state.selectedItemId)?.item.assetId ?? ""].filter(Boolean) : [];
         if (ids.length) tagMany(ids, tag);
       }
@@ -714,7 +722,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
   };
 
   const { missingIds } = useMissingPhotos(project.assets);
+  useEffect(() => {
+    if (reopenSocial.current && project.assets.length > 0 && !importSource && !dialog) { reopenSocial.current = false; setDialog("social"); }
+  }, [project.assets.length, importSource, dialog]);
   const newDrive = useNewFeature("drive");
+  const newSocial = useNewFeature("carosello");
   const rename = (name: string) => commit((p) => ({ ...p, projectName: name, updatedAt: nowIso() }));
   const setStage = (stage: AlbumStage) => commit((p) => (p.stage === stage ? p : touch({ ...p, stage })));
   const hasPhotos = project.assets.length > 0;
@@ -782,6 +794,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
         {missingIds.size > 0 ? <button type="button" className="btn btn--warn" onClick={() => setDialog("relink")} title="Alcune foto non si trovano più sul disco: indica dove sono adesso">{missingIds.size} {missingIds.size === 1 ? "foto non trovata" : "foto non trovate"} · Ricollega</button> : null}
         {driveAvailable() ? <button type="button" className="btn" onClick={() => { newDrive.markSeen(); setDialog("cloud"); }} title="Backup del progetto su Google Drive (le foto non vengono caricate)"><Icon name="archive" size={16} /> Drive{newDrive.isNew ? <span className="new-pill">Nuovo</span> : null}</button> : null}
         <button type="button" className="btn" onClick={() => setDialog("contact")} disabled={count < 2} title="Provino: tutti gli spread in una vista, per cambiare l'ordine (V)"><Icon name="grid" size={16} /> Provino</button>
+        <button type="button" className="btn" onClick={() => { newSocial.markSeen(); reopenSocial.current = false; setDialog("social"); }} title="Crea un carosello o una storia per Instagram con le foto di questo album"><Icon name="image" size={16} /> Carosello{newSocial.isNew ? <span className="new-pill">Nuovo</span> : null}</button>
         <button type="button" className="btn" onClick={() => setDialog("autobuild")} disabled={!hasPhotos} title="Auto Build (Ctrl/⌘+B)"><Icon name="wand" size={16} /> Auto Build</button>
         <IconButton icon="play" label="Anteprima per il cliente (F5)" onClick={() => setPresenting(true)} disabled={count === 0} size={20} className="icon-btn--round" />
         <button type="button" className="btn btn--primary" onClick={() => setDialog("export")} disabled={count === 0} title="Esporta (Ctrl/⌘+E)"><Icon name="export" size={16} /> Esporta</button>
@@ -906,6 +919,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
         />
       ) : null}
       {dialog === "autobuild" ? <AutoBuildDialog project={project} templateCount={templates.length} onClose={() => setDialog(null)} onRun={runAutoBuild} /> : null}
+      {dialog === "social" ? <SocialStudio project={project} onClose={() => setDialog(null)} onStatus={notify} onImportFolder={() => { reopenSocial.current = true; setDialog(null); if (desktop) void importFolder(); else fileInput.current?.click(); }} onImportFiles={() => { reopenSocial.current = true; setDialog(null); fileInput.current?.click(); }} /> : null}
       {dialog === "export" ? <ExportDialog project={project} currentIndex={index} onClose={() => setDialog(null)} onStatus={notify} onGoTo={goTo} /> : null}
       {dialog === "format" ? <FormatDialog sheet={project.settings.sheet} gapCm={project.settings.defaultStyle.gapCm} onClose={() => setDialog(null)} onApply={(sheet, gapCm) => { const out = { updated: 0 }; commit((p) => { const gapped = setAlbumGap(touch({ ...p, settings: { ...p.settings, sheet } }), gapCm); out.updated = gapped.updated; return gapped.project; }); setDialog(null); notify(out.updated > 0 ? `Formato e spazio aggiornati: ${out.updated} ${out.updated === 1 ? "pagina" : "pagine"} con il nuovo spazio tra le foto.` : "Formato cambiato: i layout si sono adattati al nuovo foglio.", true); }} /> : null}
       {dialog === "template" && templateEdit ? <TemplateEditor sheet={project.settings.sheet} style={project.settings.defaultStyle} initial={templateEdit.initial} seed={templateEdit.seed} onClose={() => { setDialog(null); setTemplateEdit(null); }} onSave={(template) => { try { storeTemplates(upsertTemplate(templates, template)); notify(`Template «${template.name}» salvato.`); setDialog(null); setTemplateEdit(null); } catch (error) { notify(error instanceof Error ? error.message : "Template non salvato."); } }} /> : null}

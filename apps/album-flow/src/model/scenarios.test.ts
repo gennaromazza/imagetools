@@ -443,7 +443,7 @@ const OPERATIONS: Operation[] = [
     },
   },
   { name: "stelle", run: (p, r) => { const asset = maybe(r, p.assets); return asset ? setRating(p, asset.id, Math.floor(r() * 6)) : p; } },
-  { name: "tag", run: (p, r) => { const asset = maybe(r, p.assets); return asset ? toggleAssetTag(p, asset.id, pick(r, ["cover", "panorama", "main"] as AlbumAssetTag[])) : p; } },
+  { name: "tag", run: (p, r) => { const asset = maybe(r, p.assets); return asset ? toggleAssetTag(p, asset.id, pick(r, ["cover", "panorama", "main", "social"] as AlbumAssetTag[])) : p; } },
   { name: "ordine libreria", run: (p, r) => setSortKey(p, pick(r, ["capture-time", "file-name", "selector-order", "manual"] as AlbumSortKey[])) },
   {
     name: "riordina libreria",

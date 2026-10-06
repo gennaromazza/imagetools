@@ -30,6 +30,8 @@ export interface HomeProps {
   skipped: number;
   onOpen: (projectId: string) => void;
   onCreate: (result: NewAlbumResult) => void;
+  /** Parte direttamente da un carosello per i social, senza impaginare un album. */
+  onCreateCarousel: () => void;
   onDelete: (projectId: string) => void;
   onDuplicate: (projectId: string) => void;
   onStage: (projectId: string, stage: AlbumStage) => void;
@@ -111,6 +113,7 @@ export function Home(props: HomeProps) {
         </div>
         <div className="btn-row">
           <button type="button" className="btn btn--primary btn--lg" onClick={() => setCreating(true)}><Icon name="plus" size={17} /> Nuovo album</button>
+          <button type="button" className="btn btn--lg" onClick={props.onCreateCarousel} title="Crea un carosello o una storia per Instagram partendo dalle foto, senza impaginare un album"><Icon name="image" size={17} /> Nuovo carosello</button>
           <button type="button" className="btn btn--lg" onClick={props.onImportProject}><Icon name="folder" size={17} /> Apri progetto…</button>
         </div>
       </header>
@@ -154,6 +157,7 @@ export function Home(props: HomeProps) {
           <p className="muted">Invia una selezione da Image Select Pro, crea un album vuoto, oppure prova l'editor con foto di esempio.</p>
           <div className="btn-row btn-row--center">
             <button type="button" className="btn btn--primary" onClick={() => setCreating(true)}>Nuovo album</button>
+            <button type="button" className="btn" onClick={props.onCreateCarousel}>Nuovo carosello</button>
             <button type="button" className="btn" onClick={props.onDemo}>Album di prova</button>
           </div>
         </div>

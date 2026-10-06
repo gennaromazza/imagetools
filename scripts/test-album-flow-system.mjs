@@ -40,6 +40,44 @@ assert.ok(src("components/ClientPreview.tsx").length > 100, "anteprima cliente a
 assert.ok(src("components/Home.tsx").includes("board"), "Home a colonne assente");
 assert.ok(src("components/NewAlbumDialog.tsx").includes("Formati comuni"), "finestra Nuovo album con i formati assente");
 assert.ok(src("render/spread-svg.ts").includes("data-safe-area"), "zona sicura nel rendering assente");
+// Caroselli e storie per i social: motore, finestra e ingressi. Lo schema del progetto non deve conoscerli (archivio locale).
+assert.ok(src("social/plan.ts").includes("export function planCarousel"), "piano automatico dei caroselli assente");
+assert.ok(src("social/render.ts").includes("export function renderSlideSvg"), "disegno delle slide per i social assente");
+assert.ok(src("social/export-core.ts").includes("export async function exportCarouselWith"), "esportazione dei caroselli assente");
+assert.ok(src("components/SocialStudio.tsx").includes("Carosello per i social"), "finestra dei caroselli assente");
+assert.ok(workspace.includes("SocialStudio") && workspace.includes("startInSocial"), "ingresso «Carosello» nel Workspace assente");
+assert.ok(src("components/Home.tsx").includes("Nuovo carosello"), "ingresso «Nuovo carosello» nella Home assente");
+assert.ok(!/carousel|carosell/i.test(read("packages", "shared-types", "src", "album-flow-v2.ts")), "i caroselli non devono entrare nello schema v2 senza una decisione dell'utente");
+// Inquadratura, stile dei testi, suggerimenti e varietà dei caroselli: motore e interfaccia.
+assert.ok(src("social/framing.ts").includes("export function normalizeFraming") && src("social/usePreviewInteraction.ts").includes("data-photo-slot"), "inquadratura delle foto nei caroselli assente");
+assert.ok(src("social/suggest.ts").includes("export function suggestText") && src("components/SocialTextFields.tsx").includes("Suggerisci"), "suggerimenti dei testi nei caroselli assenti");
+assert.ok(src("components/SocialStudio.tsx").includes("Altra variante") && src("social/plan.ts").includes("export function freshSeed"), "varietà dei caroselli (altra variante, seme) assente");
+assert.ok(src("components/SocialFraming.tsx").includes("Inquadratura") && src("components/SocialTextFields.tsx").includes("Carattere"), "pannelli di inquadratura e stile dei testi assenti");
+// Pagina del sito sui caroselli Instagram: esiste, è coerente e non rimanda a file mancanti.
+const carouselPagePath = join(root, "website", "strumenti", "album-flow", "caroselli-instagram");
+assert.ok(existsSync(join(carouselPagePath, "index.html")), "pagina del sito sui caroselli assente");
+const carouselPage = readFileSync(join(carouselPagePath, "index.html"), "utf8");
+assert.ok(carouselPage.includes('rel="canonical" href="https://filex-suite.web.app/strumenti/album-flow/caroselli-instagram/"'), "canonical della pagina caroselli errato");
+assert.ok(carouselPage.includes("Album Flow") && carouselPage.includes("Image Select Pro") && carouselPage.includes("FileX All Access"), "la pagina deve dire che è parte di Album Flow, da dove arrivano le foto e che è inclusa in All Access");
+assert.ok(carouselPage.includes("Ancora da completare") && carouselPage.includes("Pubblicazione diretta"), "la pagina deve dichiarare i limiti attuali");
+for (const block of carouselPage.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
+for (const reference of carouselPage.matchAll(/(?:src|href)="((?:\.\.\/)+(?:assets|strumenti|guide|supporto|privacy|termini)[^"#]*)"/g)) {
+  const target = join(carouselPagePath, reference[1]);
+  assert.ok(existsSync(target) || existsSync(join(target, "index.html")), `la pagina caroselli rimanda a un file che non c'è: ${reference[1]}`);
+}
+for (const sitemap of ["sitemap.xml", "sitemap-filex-suite.xml"]) {
+  assert.ok(readFileSync(join(root, "website", sitemap), "utf8").includes("/strumenti/album-flow/caroselli-instagram/"), `la pagina caroselli manca in ${sitemap}`);
+}
+assert.ok(readFileSync(join(root, "website", "strumenti", "album-flow", "index.html"), "utf8").includes("caroselli-instagram/index.html"), "la pagina di Album Flow deve rimandare a quella dei caroselli");
+// Le lettere mostrate nel menu «Segna come» (K, P, M, I) devono essere davvero i tasti che segnano la foto, in libreria, sullo spread e
+// nel visualizzatore, e non devono coincidere con altre scorciatoie (es. S = misure delle foto).
+const tagLetters = [...src("components/LibraryDock.tsx").matchAll(/(?:cover|panorama|main|social): "([A-Z])"/g)].map((match) => match[1].toLowerCase());
+assert.deepEqual(tagLetters.sort(), ["i", "k", "m", "p"], "lettere dei segnalini non attese");
+for (const letter of tagLetters) {
+  assert.ok(workspace.includes(`key === "${letter}"`), `il tasto ${letter.toUpperCase()} non segna le foto in Workspace`);
+  assert.ok(src("components/PhotoViewer.tsx").includes('"kpmi"') , "il visualizzatore non conosce tutti i tasti dei segnalini");
+}
+assert.ok(!tagLetters.includes("s") && workspace.includes('key === "s") actions.toggleSizes()'), "S è riservato alle misure delle foto");
 
 // ---------------------------------------------------------------- stile FileX
 const css = src("styles.css");

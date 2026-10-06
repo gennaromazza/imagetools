@@ -89,7 +89,7 @@ export async function chooseDesktopWriter(): Promise<(ExportWriter & { directory
 }
 
 /** Sfondi a immagine, testi e grafiche di uno spread, pronti per un SVG autonomo: immagini della libreria, font incorporati, testo misurato con i font veri. */
-async function designForExport(spread: AlbumSpread) {
+export async function designForExport(spread: AlbumSpread) {
   const fonts = fontIdsOfSpread(spread);
   await loadFonts(fonts);
   const media = new Map<string, string>();

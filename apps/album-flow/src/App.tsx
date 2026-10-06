@@ -34,6 +34,8 @@ export function App() {
   /** Cambia quando un progetto viene sostituito dall'esterno (nuovo invio dal Selector): rimonta l'editor. */
   const [revision, setRevision] = useState(0);
   const [banner, setBanner] = useState(WAITING);
+  /** Un progetto nato da «Nuovo carosello» si apre direttamente sulla finestra dei social. */
+  const [startInSocial, setStartInSocial] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   // Dopo un aggiornamento: cosa c'è di nuovo e dove trovarlo. Si ripresenta fino a «Ho capito».
   const currentVersion = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.0.0";
@@ -125,6 +127,13 @@ export function App() {
     setActiveId(project.projectId);
   };
 
+  const createCarousel = () => {
+    const project = createEmptyProject("Nuovo carosello");
+    upsert(project, true);
+    setStartInSocial(true);
+    setActiveId(project.projectId);
+  };
+
   const demo = () => {
     const project = createDemoProject();
     upsert(project, true);
@@ -187,20 +196,21 @@ export function App() {
       {license ? <div className={`license-notice license-notice--${license.level}`} role={license.level === "error" ? "alert" : "status"}>{license.text}</div> : null}
       {whatsNew ? <WhatsNewDialog releases={whatsNew} onClose={closeWhatsNew} /> : null}
       {active ? (
-        <Workspace key={`${active.projectId}:${revision}`} initial={active} onChange={onWorkspaceChange} onExit={() => setActiveId(null)} onOpenCopy={openCopy} />
+        <Workspace key={`${active.projectId}:${revision}`} initial={active} startInSocial={startInSocial} onChange={onWorkspaceChange} onExit={() => { setStartInSocial(false); setActiveId(null); }} onOpenCopy={openCopy} />
       ) : (
         <Home
           projects={projects}
           banner={saveFailed ? "Spazio di salvataggio locale esaurito: salva i progetti importanti in un file." : banner}
           legacy={initial.legacy}
           skipped={initial.skipped}
-          onOpen={setActiveId}
+          onOpen={(id) => { setStartInSocial(false); setActiveId(id); }}
           autoBackup={autoBackup}
           onAutoBackup={driveAvailable() ? changeAutoBackup : undefined}
           onWhatsNew={openWhatsNew}
           reopenLast={reopenLast}
           onReopenLast={changeReopenLast}
           onCreate={create}
+          onCreateCarousel={createCarousel}
           onDelete={remove}
           onDuplicate={duplicate}
           onStage={setStage}

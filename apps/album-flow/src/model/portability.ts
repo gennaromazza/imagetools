@@ -141,7 +141,7 @@ function validateProject(value: unknown): asserts value is AlbumProjectV2 {
     optionalNumber(asset.rating, `assets[${index}].rating`, 0, 5);
     if (asset.rotationDegrees !== undefined) oneOf(asset.rotationDegrees, [0, 90, 180, 270], `assets[${index}].rotationDegrees`);
     optionalNumber(asset.captureTimeMs, `assets[${index}].captureTimeMs`, 0);
-    if (asset.albumTags !== undefined) for (const tag of list(asset.albumTags, `assets[${index}].albumTags`)) oneOf(tag, ["cover", "panorama", "main"], "albumTags");
+    if (asset.albumTags !== undefined) for (const tag of list(asset.albumTags, `assets[${index}].albumTags`)) oneOf(tag, ["cover", "panorama", "main", "social"], "albumTags");
     if (asset.labelIds !== undefined) list(asset.labelIds, `assets[${index}].labelIds`).forEach((label) => text(label, "labelIds"));
   }
 

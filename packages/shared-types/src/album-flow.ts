@@ -23,7 +23,8 @@ export interface AlbumChapter {
 }
 
 /** Segnalazioni editoriali per l'Auto Build: copertina, panorama, foto principale (pagina dedicata). */
-export type AlbumAssetTag = "cover" | "panorama" | "main";
+/** `social`: foto segnata come adatta ai caroselli per i social (la usano per prime). */
+export type AlbumAssetTag = "cover" | "panorama" | "main" | "social";
 
 export interface AlbumAsset extends ImageAsset {
   albumTags?: AlbumAssetTag[];

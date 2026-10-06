@@ -62,6 +62,8 @@ export interface StageActions {
   resetItemView: (itemId: string) => void;
   replaceWithSelection: (itemId: string) => void;
   rate: (assetId: string, rating: number) => void;
+  /** Segna o toglie «Per i social» a una foto: il carosello la userà per prima. */
+  toggleSocial: (assetId: string) => void;
   goTo: (index: number) => void;
   setZoom: (zoom: number) => void;
   toggleGuides: () => void;
@@ -319,6 +321,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       { label: "Apri la cartella del file", icon: "folder", disabled: !hasFile, onClick: () => actions.revealItem(itemId) },
       { label: "Copia il nome del file", icon: "copy", onClick: () => actions.copyItemName(itemId) },
       { label: "Valuta", icon: "star", disabled: !asset, children: [0, 1, 2, 3, 4, 5].map((rating) => ({ label: rating === 0 ? "Nessuna stella" : "★".repeat(rating), onClick: () => asset && actions.rate(asset.id, rating) })) },
+      { label: asset?.albumTags?.includes("social") ? "Togli da «Per i social»" : "Segna «Per i social»", icon: "image", hint: "I", disabled: !asset, onClick: () => asset && actions.toggleSocial(asset.id) },
       { separator: true, label: "-" },
       { label: found.item.locked ? "Sblocca la foto" : "Blocca la foto", icon: found.item.locked ? "unlock" : "lock", hint: "L", onClick: () => actions.lockItem(itemId) },
       { label: "Togli dallo spread", icon: "trash", danger: true, hint: "Canc", onClick: () => actions.removeItem(itemId) },

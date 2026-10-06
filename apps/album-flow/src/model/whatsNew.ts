@@ -21,6 +21,33 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.16",
+    date: "2026-10-06",
+    headline: "Caroselli e storie per Instagram, dal tuo album",
+    items: [
+      {
+        title: "Un carosello Instagram con le foto già scelte",
+        text: "Dall'album aperto, il pulsante «Carosello» propone subito 10 slide con le foto migliori già in pagina, in quattro stili (Editoriale, Galleria, Moda, Cinema) e 50 modelli: copertine tipografiche, foto tra due parole, collage con bordo bianco, polaroid, foto ad arco, panorama su più slide e le pagine vere del tuo album in una scena. Formati Post 4:5, quadrato e Storia 9:16, da 2 a 20 slide con il cursore «Numero di slide». Esporti un JPG per slide, numerati, più il testo del post. Dalla Home, «Nuovo carosello» parte direttamente dalle foto, senza impaginare un album.",
+        where: ["Carosello", "Nuovo carosello", "Numero di slide", "Esporta"],
+      },
+      {
+        title: "Segna le foto «Per i social»",
+        text: "Tasto destro su una foto, in libreria o sullo spread, poi «Segna come» e «Per i social» (oppure il tasto I): il carosello usa quelle foto per prime, poi quelle con più stelle. Se cambi stelle o segnalini dopo aver creato il carosello, Album Flow te lo dice e «Riscegli le foto» aggiorna la scelta tenendo stile e testi.",
+        where: ["Segna come", "Per i social", "I", "Riscegli le foto"],
+      },
+      {
+        title: "Inquadra le foto e ritocca i testi",
+        text: "Trascina la foto nel suo spazio e ingrandiscila con la rotella; scegli la forma (1:1, 4:5, 3:2, 16:9…) e specchia la slide. Clicca un testo nell'anteprima per cambiarne carattere, dimensione, colore, allineamento e maiuscole, oppure premi «Suggerisci» per avere titoli, parole e frasi dalla libreria editoriale dei fotolibri.",
+        where: ["Inquadratura", "Forma della foto", "Specchiata", "Aa", "Suggerisci"],
+      },
+      {
+        title: "Ogni carosello è diverso dall'altro",
+        text: "Ogni carosello nuovo mette i modelli in un ordine diverso e specchia alcune slide, così quelli di settimane diverse non escono uguali. «Altra variante» rifà l'ordine tenendo foto e testi; nome, profilo, colori e font si scrivono una volta e restano per i caroselli successivi.",
+        where: ["Altra variante", "Il tuo studio", "Colori", "Caratteri"],
+      },
+    ],
+  },
+  {
     version: "0.2.15",
     date: "2026-10-06",
     headline: "Raddrizza con la rotella e spostamenti più fluidi",

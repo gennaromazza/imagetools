@@ -1,0 +1,115 @@
+/* Pagina «Caroselli Instagram» di Album Flow: usa le variabili e i blocchi di site.css. */
+
+.tool-hero-grid.has-photo h1 { font-size: clamp(36px, 4.3vw, 54px); }
+.car-hero-stack { position: relative; min-height: 560px; }
+.car-hero-stack img {
+  position: absolute;
+  width: 56%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: 0 34px 80px rgba(0, 0, 0, .45);
+  background: #14271f;
+}
+.car-hero-stack img:nth-child(1) { left: 0; top: 56px; transform: rotate(-5deg); }
+.car-hero-stack img:nth-child(2) { left: 22%; top: 0; z-index: 2; transform: rotate(1.5deg); }
+.car-hero-stack img:nth-child(3) { right: 0; top: 78px; z-index: 1; transform: rotate(6deg); }
+
+.car-note { margin-top: 22px; color: #b7c9bf; font-size: 13px; }
+.car-note strong { color: #fff; }
+
+/* Striscia di slide, come le vedresti su Instagram */
+.slide-rail { display: flex; gap: 16px; overflow-x: auto; padding: 8px 4px 24px; scroll-snap-type: x mandatory; }
+.slide-rail figure, .style-grid figure, .variant-row figure { margin: 0; }
+.slide-rail figure { flex: 0 0 min(270px, 68vw); scroll-snap-align: start; }
+.slide-rail img, .style-grid img, .variant-row img, .feature-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  box-shadow: 0 18px 44px rgba(18, 56, 39, .14);
+  background: var(--cream);
+}
+figcaption { margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+figcaption strong { display: block; color: var(--ink); font-size: 14px; }
+
+/* Flusso a passi */
+.steps { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; counter-reset: step; }
+.step { position: relative; padding: 26px 24px 24px 74px; border: 1px solid var(--line); border-radius: 17px; background: rgba(255, 255, 255, .92); box-shadow: 0 12px 30px rgba(18, 56, 39, .05); }
+.step::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: 22px;
+  top: 22px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: #13241c;
+  background: var(--gold);
+  font: 800 16px var(--display);
+}
+.step h3 { margin: 0 0 6px; font-size: 18px; }
+.step p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.step p:last-child { margin-bottom: 0; }
+.step kbd, .scenario kbd { padding: 1px 7px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; background: white; font: 700 12px var(--display); }
+
+/* Piccole riproduzioni dei pannelli del programma */
+.ui-mock { margin-top: 14px; padding: 12px; border: 1px solid #2d3a33; border-radius: 12px; color: #e9e2d8; background: #1f2421; font-size: 12.5px; box-shadow: 0 14px 30px rgba(16, 32, 25, .22); }
+.ui-mock .ui-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; border-radius: 8px; }
+.ui-mock .ui-row.is-on { background: rgba(184, 154, 99, .22); color: #f3dcae; }
+.ui-mock .ui-row small { opacity: .6; }
+.ui-mock .ui-label { margin: 2px 10px 6px; color: #8f9a93; font-size: 10.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.ui-mock .ui-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; }
+.ui-mock .ui-chip { padding: 3px 10px; border: 1px solid #3b473f; border-radius: 999px; color: #c9c1b7; }
+.ui-mock .ui-chip.is-on { border-color: #b89a63; color: #f3dcae; background: rgba(184, 154, 99, .16); }
+.ui-mock .ui-swatches { display: flex; gap: 8px; padding: 2px 10px 8px; }
+.ui-mock .ui-swatches i { width: 20px; height: 20px; border-radius: 50%; border: 2px solid #3b473f; }
+.ui-mock .ui-swatches i.is-on { border-color: #f3dcae; }
+.ui-mock .ui-slider { margin: 4px 10px 10px; height: 6px; border-radius: 999px; background: #3b473f; }
+.ui-mock .ui-slider b { display: block; width: 62%; height: 100%; border-radius: 999px; background: #b89a63; }
+
+/* Quattro stili */
+.style-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; }
+
+/* Stesso album, tre caroselli */
+.variant-rows { display: grid; gap: 26px; }
+.variant-row { display: grid; grid-template-columns: 150px repeat(3, minmax(0, 1fr)); gap: 16px; align-items: center; }
+.variant-row .variant-label { color: var(--muted); font-size: 13px; }
+.variant-row .variant-label strong { display: block; margin-bottom: 4px; color: var(--ink); font: 800 15px var(--display); }
+.variant-row img { box-shadow: 0 10px 26px rgba(18, 56, 39, .12); }
+
+/* Funzione in evidenza con immagine */
+.feature-shot { margin: 0; }
+.scenarios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.scenario { display: flex; flex-direction: column; padding: 26px 24px; border: 1px solid var(--line); border-radius: 17px; background: white; box-shadow: 0 12px 30px rgba(18, 56, 39, .05); }
+.scenario .scenario-tag { align-self: flex-start; margin-bottom: 12px; padding: 4px 11px; border-radius: 999px; color: var(--green); background: var(--mint); font: 800 11px var(--display); letter-spacing: .08em; text-transform: uppercase; }
+.scenario h3 { margin: 0 0 8px; font-size: 19px; }
+.scenario p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+.scenario ol { margin: 0; padding-left: 20px; color: #52625a; font-size: 13.5px; }
+.scenario li { margin-bottom: 6px; }
+.scenario .scenario-result { margin-top: auto; padding-top: 14px; color: var(--green); font-size: 13px; font-weight: 800; }
+
+.spec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+@media (max-width: 900px) {
+  .car-hero-stack { min-height: 440px; }
+  .style-grid { grid-template-columns: repeat(2, 1fr); }
+  .scenarios, .spec-grid { grid-template-columns: 1fr; }
+  .steps { grid-template-columns: 1fr; }
+  .variant-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .variant-row .variant-label { grid-column: 1 / -1; }
+}
+
+@media (max-width: 560px) {
+  .car-hero-stack { min-height: 380px; }
+  .style-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .step { padding-left: 66px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .car-hero-stack img { transform: none !important; }
+}

@@ -100,7 +100,7 @@ export function PhotoViewer(props: PhotoViewerProps) {
       else if (event.key === "-" || event.key === "_") { stop(); zoomTo(view.zoom / 1.25); }
       else if (event.key === "Enter" && asset) { stop(); props.onPlace(asset.id); }
       else if (/^[0-5]$/.test(event.key) && asset) { stop(); props.onRate(asset.id, Number(event.key)); }
-      else if (asset && "kpm".includes(event.key.toLowerCase()) && event.key.length === 1) { stop(); props.onTag(asset.id, event.key.toLowerCase() === "k" ? "cover" : event.key.toLowerCase() === "p" ? "panorama" : "main"); }
+      else if (asset && "kpmi".includes(event.key.toLowerCase()) && event.key.length === 1) { stop(); props.onTag(asset.id, event.key.toLowerCase() === "k" ? "cover" : event.key.toLowerCase() === "p" ? "panorama" : event.key.toLowerCase() === "i" ? "social" : "main"); }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
