@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SpreadTextOverlay } from "@photo-tools/shared-types";
-import { MAX_OVERLAYS_PER_SPREAD, addGraphicOverlay, addTextOverlay, addTextStack, backgroundsOf, duplicateOverlay, fontIdsOfSpread, mediaIdsOfSpread, orderOverlay, overlaysInPaintOrder, overlaysOf, removeOverlay, groupMembers, groupOverlays, moveOverlayGroup, ungroupOverlay, setAlbumBackground, setSpreadBackground, updateOverlay, updateSpreadBackground } from "./design";
+import { MAX_OVERLAYS_PER_SPREAD, cleanText, overlayLimits, addGraphicOverlay, addTextOverlay, addTextStack, backgroundsOf, duplicateOverlay, fontIdsOfSpread, mediaIdsOfSpread, orderOverlay, overlaysInPaintOrder, overlaysOf, removeOverlay, groupMembers, groupOverlays, moveOverlayGroup, ungroupOverlay, setAlbumBackground, setSpreadBackground, updateOverlay, updateSpreadBackground } from "./design";
 import { LIBRARY_KEYS, NEW_SEED_PHRASES, SEED_PHRASES, SEED_VERSION, addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle } from "./designLibrary";
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
@@ -13,6 +13,10 @@ import { BASE_GROUP, FONT_FAMILIES, TEXT_PRESETS, WEDDING_TEXT_TEMPLATES, contra
 import { renderBackgroundsSvg, renderOverlaysSvg, overlayBox } from "../render/design-svg";
 import { approximateMeasure, layoutText } from "../render/text-layout";
 import { renderSpreadSvg } from "../render/spread-svg";
+import { alignOverlayToPage, groupFrame, overlayFrame, overlaySnapTargets, pageForFrame, resizeKeepingCorner } from "./designAlign";
+import { spreadSizeMm } from "../engine/geometry";
+import { snapMove } from "../engine/snap";
+import { appendAssets } from "./items";
 import type { Project } from "./project";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -81,7 +85,7 @@ test("testi: si aggiungono con lo stile scelto, si modificano entro i limiti e s
   const edited = updateOverlay(project, spreadId, text.id, { sizePt: 5000, x: 9, rotation: 500, color: "x", text: "y".repeat(20000) });
   const after = textOf(edited, text.id);
   assert.equal(after.sizePt, 400);
-  assert.equal(after.x, 1.5);
+  assert.ok(Math.abs(after.x - overlayLimits({ w: after.w }).maxX) < 1e-4, "oltre il bordo si ferma al limite: resta sempre una parte in pagina");
   assert.equal(after.rotation, 180);
   assert.equal(after.color, "#1c1c1c");
   assert.equal(after.text.length, 6000);
@@ -481,4 +485,177 @@ test("archivio: le frasi di partenza nuove si aggiungono una sola volta e una ca
   assert.equal(loadPhrases(storage).length, removed.length, "la frase cancellata non ricompare");
   const twice = loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "x", text: NEW_SEED_PHRASES[0].text, group: NEW_SEED_PHRASES[0].group }]) }));
   assert.equal(twice.length, NEW_SEED_PHRASES.length, "niente doppioni con una frase già presente");
+});
+
+// ------------------------------------------------------------------ posizione, contenuto e allineamenti
+
+test("posizione: un elemento non esce mai del tutto dalla pagina, né a sinistra né in basso né in alto", () => {
+  const { project, spreadId } = withSpread();
+  const made = addTextOverlay(project, spreadId, { presetId: "body", text: "Ciao" });
+  const id = made.overlayId!;
+  const text = textOf(made.project, id);
+  const limits = overlayLimits({ w: text.w });
+  const far = textOf(updateOverlay(made.project, spreadId, id, { x: -9, y: -9 }), id);
+  assert.ok(Math.abs(far.x - limits.minX) < 1e-4 && far.x + far.w >= 0.05 - 1e-4, "a sinistra resta almeno il 5% dello spread");
+  assert.ok(Math.abs(far.y - limits.minY) < 1e-4);
+  const low = textOf(updateOverlay(made.project, spreadId, id, { x: 9, y: 9 }), id);
+  assert.ok(Math.abs(low.x - limits.maxX) < 1e-4 && Math.abs(low.y - limits.maxY) < 1e-4);
+  const inside = textOf(updateOverlay(made.project, spreadId, id, { x: 0.3, y: 0.4 }), id);
+  assert.deepEqual([inside.x, inside.y], [0.3, 0.4], "dentro la pagina non cambia nulla");
+
+  const graphic = addGraphicOverlay(made.project, spreadId, { mediaId: "media-1", aspect: 1.5 });
+  const placed = overlaysOf(updateOverlay(graphic.project, spreadId, graphic.overlayId!, { x: -50, y: 50 }).spreads[0]).find((overlay) => overlay.id === graphic.overlayId)!;
+  assert.ok(placed.x + placed.w >= 0.05 - 1e-4 && placed.y <= 0.97 + 1e-4, "vale anche per le grafiche");
+});
+
+test("contenuto: il testo incollato ha gli a capo uniformi e niente caratteri di controllo che rompono l'esportazione", () => {
+  assert.equal(cleanText("Uno\r\nDue\rTre"), "Uno\nDue\nTre");
+  assert.equal(cleanText("a\u0000b\u0007c\u001fd\u007fe"), "abcde");
+  assert.equal(cleanText("tab\tok\nsì"), "tab\tok\nsì", "tabulazioni e a capo restano");
+  const { project, spreadId } = withSpread();
+  const made = addTextOverlay(project, spreadId, { presetId: "body", text: "Riga\r\nDue\u0000" });
+  assert.equal(textOf(made.project, made.overlayId!).text, "Riga\nDue");
+  const edited = updateOverlay(made.project, spreadId, made.overlayId!, { text: "Nuova\r\nriga\u0008!" });
+  assert.equal(textOf(edited, made.overlayId!).text, "Nuova\nriga!");
+  const svg = renderOverlaysSvg(edited, edited.spreads[0], { media: new Map(), measure: approximateMeasure });
+  assert.doesNotMatch(svg, /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/, "l'SVG non contiene caratteri non validi");
+});
+
+test("spostamento di gruppo: arrivati al bordo si fermano tutti insieme e le distanze tra i pezzi non cambiano", () => {
+  const { project, spreadId } = withSpread();
+  const stack = addTextStack(project, spreadId, { presetId: "headline", at: { x: 0.5, y: 0.3 } });
+  const before = overlaysOf(stack.project.spreads[0]) as SpreadTextOverlay[];
+  assert.ok(before.length >= 3);
+  const moved = moveOverlayGroup(stack.project, spreadId, before[0].id, 5, 5);
+  const after = overlaysOf(moved.spreads[0]) as SpreadTextOverlay[];
+  for (let index = 1; index < before.length; index += 1) {
+    assert.ok(Math.abs(after[index].x - after[0].x - (before[index].x - before[0].x)) < 3e-5, "distanza orizzontale invariata");
+    assert.ok(Math.abs(after[index].y - after[0].y - (before[index].y - before[0].y)) < 3e-5, "distanza verticale invariata");
+  }
+  for (const overlay of after) assert.ok(overlay.x <= overlayLimits(overlay).maxX + 1e-4 && overlay.y <= overlayLimits(overlay).maxY + 1e-4);
+  assert.ok(after.some((overlay) => Math.abs(overlay.y - overlayLimits(overlay).maxY) < 1e-4), "il più basso ha toccato il limite e ha fermato gli altri");
+  const back = moveOverlayGroup(moved, spreadId, before[0].id, -0.2, -0.2);
+  const backTexts = overlaysOf(back.spreads[0]) as SpreadTextOverlay[];
+  assert.ok(backTexts[0].x < after[0].x && backTexts[0].y < after[0].y, "si può tornare indietro");
+
+  // Un file con un testo già fuori pagina (versioni precedenti) rientra al primo spostamento verso l'interno.
+  const legacy = { ...project, spreads: project.spreads.map((spread) => ({ ...spread, overlays: (overlaysOf(stack.project.spreads[0]) as SpreadTextOverlay[]).slice(0, 1).map((overlay) => ({ ...overlay, x: 1.4 })) })) } as Project;
+  const rescued = overlaysOf(moveOverlayGroup(legacy, spreadId, before[0].id, -0.01, 0).spreads[0])[0] as SpreadTextOverlay;
+  assert.ok(Math.abs(rescued.x - overlayLimits(rescued).maxX) < 1e-4);
+});
+
+test("allinea alla pagina: sinistra, centro, destra, alto, metà e basso, con il margine di sicurezza", () => {
+  const { project, spreadId } = withSpread();
+  const sheet = project.settings.sheet;
+  const { width } = spreadSizeMm(sheet);
+  const measure = approximateMeasure;
+  const made = addTextOverlay(project, spreadId, { presetId: "caption", text: "Una didascalia abbastanza lunga", at: { x: 0.2, y: 0.3 } });
+  const id = made.overlayId!;
+  const frameOf = (p: Project) => overlayFrame(sheet, textOf(p, id), measure);
+  const page = pageForFrame(sheet, project.spreads[0], frameOf(made.project));
+  assert.ok(page.x >= sheet.marginCm * 10 - 1e-6 && page.x + page.w <= width / 2 + 1e-6, "pagina sinistra, ristretta dal margine");
+
+  const near = (a: number, b: number, label: string) => assert.ok(Math.abs(a - b) < 0.02, `${label}: ${a} ≠ ${b}`);
+  near(frameOf(alignOverlayToPage(made.project, spreadId, id, "left", measure)).x, page.x, "sinistra");
+  const centered = frameOf(alignOverlayToPage(made.project, spreadId, id, "center", measure));
+  near(centered.x + centered.w / 2, page.x + page.w / 2, "centro");
+  const right = frameOf(alignOverlayToPage(made.project, spreadId, id, "right", measure));
+  near(right.x + right.w, page.x + page.w, "destra");
+  near(frameOf(alignOverlayToPage(made.project, spreadId, id, "top", measure)).y, page.y, "alto");
+  const middle = frameOf(alignOverlayToPage(made.project, spreadId, id, "middle", measure));
+  near(middle.y + middle.h / 2, page.y + page.h / 2, "metà");
+  const bottom = frameOf(alignOverlayToPage(made.project, spreadId, id, "bottom", measure));
+  near(bottom.y + bottom.h, page.y + page.h, "basso");
+
+  const again = alignOverlayToPage(made.project, spreadId, id, "left", measure);
+  assert.equal(alignOverlayToPage(again, spreadId, id, "left", measure), again, "già allineato: nessun cambiamento");
+  assert.equal(alignOverlayToPage(made.project, spreadId, "x", "left", measure), made.project);
+  assert.equal(alignOverlayToPage(made.project, "x", id, "left", measure), made.project);
+
+  // Sulla pagina destra il riferimento è la pagina destra.
+  const onRight = addTextOverlay(project, spreadId, { presetId: "caption", text: "A destra", at: { x: 0.8, y: 0.3 } });
+  const rightPage = pageForFrame(sheet, project.spreads[0], overlayFrame(sheet, textOf(onRight.project, onRight.overlayId!), measure));
+  assert.ok(rightPage.x >= width / 2);
+  const rightEdge = overlayFrame(sheet, textOf(alignOverlayToPage(onRight.project, spreadId, onRight.overlayId!, "right", measure), onRight.overlayId!), measure);
+  near(rightEdge.x + rightEdge.w, rightPage.x + rightPage.w, "destra, pagina destra");
+});
+
+test("allinea alla pagina: un gruppo si allinea tutto insieme e un testo ruotato per il suo ingombro", () => {
+  const { project, spreadId } = withSpread();
+  const sheet = project.settings.sheet;
+  const measure = approximateMeasure;
+  const stack = addTextStack(project, spreadId, { presetId: "headline", at: { x: 0.2, y: 0.3 } });
+  const first = (overlaysOf(stack.project.spreads[0]) as SpreadTextOverlay[])[0];
+  const frame = groupFrame(sheet, stack.project.spreads[0], first.id, measure)!;
+  const page = pageForFrame(sheet, project.spreads[0], frame);
+  const aligned = alignOverlayToPage(stack.project, spreadId, first.id, "center", measure);
+  const after = groupFrame(sheet, aligned.spreads[0], first.id, measure)!;
+  assert.ok(Math.abs(after.x + after.w / 2 - (page.x + page.w / 2)) < 0.02, "il gruppo è al centro della pagina");
+  const members = overlaysOf(aligned.spreads[0]) as SpreadTextOverlay[];
+  const original = overlaysOf(stack.project.spreads[0]) as SpreadTextOverlay[];
+  const shift = members[0].x - original[0].x;
+  for (let index = 1; index < members.length; index += 1) assert.ok(Math.abs(members[index].x - original[index].x - shift) < 3e-5, "i compagni si muovono dello stesso scarto");
+
+  const single = addTextOverlay(project, spreadId, { presetId: "caption", text: "Ruotata di lato", at: { x: 0.3, y: 0.3 } });
+  const turned = updateOverlay(single.project, spreadId, single.overlayId!, { rotation: 40 });
+  const turnedFrame = overlayFrame(sheet, textOf(turned, single.overlayId!), measure);
+  const plain = overlayFrame(sheet, { ...textOf(turned, single.overlayId!), rotation: 0 }, measure);
+  assert.ok(turnedFrame.h > plain.h && turnedFrame.w * turnedFrame.h > plain.w * plain.h, "l'ingombro di un testo ruotato è più alto e più esteso della cornice dritta");
+  const turnedPage = pageForFrame(sheet, project.spreads[0], turnedFrame);
+  const left = overlayFrame(sheet, textOf(alignOverlayToPage(turned, spreadId, single.overlayId!, "left", measure), single.overlayId!), measure);
+  assert.ok(Math.abs(left.x - turnedPage.x) < 0.02, "si allinea il bordo dell'ingombro, non quello della cornice dritta");
+});
+
+test("dimensione: allargare o restringere un testo ruotato tiene fermo l'angolo in alto a sinistra", () => {
+  const { project, spreadId } = withSpread();
+  const sheet = project.settings.sheet;
+  const measure = approximateMeasure;
+  const made = addTextOverlay(project, spreadId, { presetId: "body", text: "Un paragrafo abbastanza lungo da andare a capo più volte quando la cornice si restringe parecchio.", at: { x: 0.3, y: 0.3 }, width: 0.3 });
+  const id = made.overlayId!;
+  const overlay = textOf(updateOverlay(made.project, spreadId, id, { rotation: 35 }), id);
+  const corner = (value: SpreadTextOverlay) => {
+    const box = overlayBox({ settings: { sheet } } as Project, value, measure);
+    const rad = (value.rotation * Math.PI) / 180;
+    const cx = box.x + box.w / 2;
+    const cy = box.y + box.h / 2;
+    return { x: cx + (-box.w / 2) * Math.cos(rad) - (-box.h / 2) * Math.sin(rad), y: cy + (-box.w / 2) * Math.sin(rad) + (-box.h / 2) * Math.cos(rad) };
+  };
+  const before = corner(overlay);
+  for (const width of [0.2, 0.12, 0.45]) {
+    const patch = resizeKeepingCorner(sheet, overlay, width, measure);
+    const after = corner({ ...overlay, ...patch });
+    assert.ok(Math.hypot(after.x - before.x, after.y - before.y) < 1e-6, `larghezza ${width}: l'angolo si è mosso`);
+  }
+  const naive = corner({ ...overlay, w: 0.12 });
+  assert.ok(Math.hypot(naive.x - before.x, naive.y - before.y) > 1, "senza la correzione l'angolo si sposta davvero");
+  const flat = textOf(made.project, id);
+  assert.deepEqual(resizeKeepingCorner(sheet, flat, 0.2, measure), { x: flat.x, y: flat.y, w: 0.2 }, "senza rotazione la posizione non cambia");
+});
+
+test("calamite: i bersagli sono i bordi e il centro dello spread, la piega, i margini di pagina, le foto e gli altri testi (non quello che si sposta)", () => {
+  let project = makeProject(6);
+  project = addSpread(project, 0, "half");
+  const spreadId = project.spreads[0].id;
+  project = appendAssets(project, spreadId, 0, ["a0", "a1"]);
+  const a = addTextOverlay(project, spreadId, { presetId: "caption", text: "A", at: { x: 0.3, y: 0.2 } });
+  const b = addTextOverlay(a.project, spreadId, { presetId: "caption", text: "B", at: { x: 0.7, y: 0.6 } });
+  const sheet = b.project.settings.sheet;
+  const { width, height } = spreadSizeMm(sheet);
+  const measure = approximateMeasure;
+  const spread = b.project.spreads[0];
+  const targets = overlaySnapTargets(sheet, spread, new Set([a.overlayId!]), measure);
+  const has = (rect: { x: number; y: number; w: number; h: number }) => targets.some((target) => [target.x - rect.x, target.y - rect.y, target.w - rect.w, target.h - rect.h].every((delta) => Math.abs(delta) < 1e-6));
+  assert.ok(has({ x: 0, y: 0, w: width, h: height }), "lo spread intero");
+  assert.ok(has({ x: width / 2, y: 0, w: 0, h: height }), "la piega al centro");
+  const margin = sheet.marginCm * 10;
+  assert.ok(has({ x: margin, y: margin, w: width / 2 - margin * 2, h: height - margin * 2 }), "il margine di sicurezza della pagina sinistra");
+  assert.ok(has(overlayFrame(sheet, textOf(b.project, b.overlayId!), measure)), "gli altri testi");
+  assert.ok(!has(overlayFrame(sheet, textOf(b.project, a.overlayId!), measure)), "non quello che si sposta");
+  assert.ok(targets.length > 6, "ci sono anche le foto");
+
+  // Con questi bersagli il centro di un testo si aggancia alla piega.
+  const snapped = snapMove({ x: width / 2 - 2.1, y: height * 0.4, w: 4, h: 3 }, targets, 3);
+  assert.ok(Math.abs(snapped.rect.x + snapped.rect.w / 2 - width / 2) < 1e-6, "il centro va sulla piega");
+  assert.ok(snapped.guides.some((guide) => guide.axis === "x" && Math.abs(guide.at - width / 2) < 1e-6), "con la sua linea guida");
+  assert.deepEqual(snapMove({ x: width * 0.3, y: height * 0.45, w: 4, h: 3 }, [], 3).guides, [], "senza bersagli nessun aggancio");
 });

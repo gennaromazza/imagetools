@@ -37,6 +37,10 @@ import { useMissingPhotos } from "../hooks/useMissingPhotos";
 import { useNewFeature } from "../hooks/useNewFeature";
 import { applyRelink } from "../model/relinkAssets";
 import { driveAvailable } from "../desktop/cloud";
+import { alignOverlayToPage } from "../model/designAlign";
+import { canvasMeasure } from "../render/fonts";
+import { insertStory, planAlbumStories, proposalFromUnit, replaceWithStory, suggestStoryForSpread, type SuggestResult } from "../model/story";
+import { storyById } from "../model/storyLibrary";
 import { addGraphicOverlay, addTextOverlay, addTextStack, duplicateOverlay, orderOverlay, groupOverlays, moveOverlayGroup, removeOverlay, setAlbumBackground, setSpreadBackground, ungroupOverlay, updateOverlay, updateSpreadBackground } from "../model/design";
 import { IconButton } from "./ui";
 import { useStableCallbacks } from "../hooks/useStableCallbacks";
@@ -526,6 +530,32 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy }: WorkspacePr
       else commit((p) => setSpreadBackground(p, spreadId, scope, choice));
     },
     updateBackground: (scope, patch) => commit((p) => updateSpreadBackground(p, spreadId, scope, patch), `bg:${spreadId}:${scope}`),
+    alignTo: (overlayId, where) => commit((p) => alignOverlayToPage(p, spreadId, overlayId, where, canvasMeasure)),
+    suggestStory: (areaIndex, options) => {
+      if (!spreadId) return null;
+      const out: { value: SuggestResult | null } = { value: null };
+      commit((p) => { out.value = suggestStoryForSpread(p, spreadId, areaIndex, options); return out.value ? out.value.project : p; });
+      if (out.value) setSelectedOverlayId(null);
+      return out.value;
+    },
+    insertStoryUnit: (unitId, areaIndex) => {
+      const unit = storyById(unitId);
+      if (!spreadId || !unit) return false;
+      const out = { ok: false };
+      commit((p) => { const made = insertStory(p, spreadId, areaIndex, proposalFromUnit(unit)); out.ok = Boolean(made); return made ? made.project : p; });
+      if (!out.ok) notify("Su questo spread ci sono già troppi elementi.");
+      return out.ok;
+    },
+    replaceWithStoryUnit: (overlayId, unitId) => {
+      const unit = storyById(unitId);
+      if (unit) commit((p) => replaceWithStory(p, spreadId, overlayId, unit));
+    },
+    planStories: () => {
+      const out = { count: 0 };
+      commit((p) => { const plan = planAlbumStories(p); out.count = plan.planned.length; return plan.planned.length ? plan.project : p; });
+      return out.count;
+    },
+    removeOverlays: (overlayIds) => { commit((p) => overlayIds.reduce((current, id) => removeOverlay(current, spreadId, id), p)); setSelectedOverlayId(null); },
     notify,
   }), [commit, notify, spreadId]);
   const designHandlers = useMemo(() => ({

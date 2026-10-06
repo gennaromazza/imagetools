@@ -21,6 +21,27 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.12",
+    date: "2026-10-06",
+    headline: "Testi narrativi pronti e calamite per i testi",
+    items: [
+      {
+        title: "Racconto: testi che accompagnano le foto",
+        text: "Oltre 300 testi scritti per i matrimoni, divisi per momento: aperture, preparativi, cerimonia, festa, finale. «Proponi un testo» sceglie quello adatto alla pagina, «Rigenera testo» ne propone un altro, «Proponi i testi per l'album» li mette sulle pagine libere senza ripeterne nessuno. Puoi anche sfogliare la libreria con i filtri e usare un testo a mano.",
+        where: ["Personalizza", "Racconto", "Rigenera testo"],
+      },
+      {
+        title: "Calamite e allineamenti per testi e grafiche",
+        text: "Trascinando, un testo si aggancia a bordi, centro, piega, margini, foto e altri testi, con le linee guida (tieni premuto Alt per muoverlo senza calamite). Nuovi pulsanti per allinearlo alla pagina: sinistra, centro, destra, alto, metà, basso.",
+        where: ["Personalizza", "Allinea alla pagina", "Alt"],
+      },
+      {
+        title: "Testi più facili da gestire",
+        text: "Un testo non esce più del tutto dalla pagina, un gruppo si ferma tutto insieme al bordo, ridimensionare un testo ruotato non lo fa più scappare e il testo incollato da altrove viene ripulito.",
+      },
+    ],
+  },
+  {
     version: "0.2.11",
     date: "2026-10-05",
     headline: "Raddrizza con una linea, testi già pronti per il matrimonio",

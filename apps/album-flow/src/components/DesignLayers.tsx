@@ -1,13 +1,19 @@
 import { useMemo, useRef, useState } from "react";
 import type { AlbumSpread, SpreadOverlay } from "@photo-tools/shared-types";
-import { spreadSizeMm } from "../engine/geometry";
+import { spreadSizeMm, type Rect } from "../engine/geometry";
+import { snapMove, type SnapGuide } from "../engine/snap";
 import { fontIdsOfSpread, groupMembers, overlaysOf, type OverlayPatch } from "../model/design";
+import { groupFrame, overlaySnapTargets, resizeKeepingCorner } from "../model/designAlign";
+import { TEXT_LIMITS } from "../model/typography";
 import type { Project } from "../model/project";
 import { canvasMeasure } from "../render/fonts";
 import { overlayBox, renderBackgroundsSvg, renderOverlaysSvg, type DesignContext } from "../render/design-svg";
 import { useFontsReady } from "../hooks/useFonts";
 
 type Sheet = Project["settings"]["sheet"];
+
+/** A quanti pixel dal bordo o dal centro di un altro elemento scatta la calamita. */
+const SNAP_PX = 6;
 
 /** Un progetto minimo con il solo foglio: basta alle funzioni che misurano e disegnano testi e sfondi. */
 const sheetProject = (sheet: Sheet) => ({ settings: { sheet } }) as unknown as Project;
@@ -44,6 +50,10 @@ interface Gesture {
   base: SpreadOverlay;
   box: { cx: number; cy: number };
   moved: boolean;
+  /** Spostamento: ingombro (mm) dell'elemento e del suo gruppo alla partenza, e ciò a cui può agganciarsi. */
+  frame?: Rect;
+  targets?: Rect[];
+  guides?: SnapGuide[];
 }
 
 /** Testi e grafiche sopra le foto, con i comandi per spostarli, ridimensionarli e ruotarli. */
@@ -52,7 +62,7 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
   const overlays = overlaysOf(spread);
   const ready = useFontsReady(fontIdsOfSpread(spread));
   const rootRef = useRef<HTMLDivElement>(null);
-  const [draft, setDraft] = useState<{ id: string; patch: OverlayPatch; move: boolean } | null>(null);
+  const [draft, setDraft] = useState<{ id: string; patch: OverlayPatch; move: boolean; guides: SnapGuide[] } | null>(null);
   const gesture = useRef<Gesture | null>(null);
   /** Il clic che segue un trascinamento non deve aprire il pannello. */
   const dragged = useRef(false);
@@ -100,6 +110,12 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
     const cx = metrics.rect.left + ((box.x + box.w / 2) / size.width) * metrics.rect.width;
     const cy = metrics.rect.top + ((box.y + box.h / 2) / size.height) * metrics.rect.height;
     gesture.current = { mode, id: overlay.id, startX: event.clientX, startY: event.clientY, base: overlay, box: { cx, cy }, moved: false };
+    if (mode === "move") {
+      // Calamite: bordi, centro e piega dello spread, margini, foto e altri testi (non il gruppo che si sposta). Alt le esclude.
+      const members = new Set(groupMembers(spread, overlay.id).map((member) => member.id));
+      gesture.current.frame = groupFrame(sheet, spread, overlay.id, canvasMeasure) ?? undefined;
+      gesture.current.targets = overlaySnapTargets(sheet, spread, members, canvasMeasure);
+    }
   };
 
   const patchFor = (event: React.PointerEvent): OverlayPatch | null => {
@@ -110,13 +126,27 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
     const dyPx = event.clientY - current.startY;
     if (Math.abs(dxPx) + Math.abs(dyPx) > 2) current.moved = true;
     if (current.mode === "move") {
-      return { x: current.base.x + dxPx / metrics.rect.width, y: current.base.y + dyPx / metrics.rect.height };
+      let dx = dxPx / metrics.rect.width;
+      let dy = dyPx / metrics.rect.height;
+      current.guides = [];
+      if (!event.altKey && current.frame && current.targets) {
+        const rect: Rect = { ...current.frame, x: current.frame.x + dx * size.width, y: current.frame.y + dy * size.height };
+        const snapped = snapMove(rect, current.targets, SNAP_PX * metrics.perPx);
+        dx += (snapped.rect.x - rect.x) / size.width;
+        dy += (snapped.rect.y - rect.y) / size.height;
+        current.guides = snapped.guides;
+      }
+      return { x: current.base.x + dx, y: current.base.y + dy };
     }
     if (current.mode === "resize") {
       // Si misura lo spostamento lungo l'asse orizzontale dell'elemento, che può essere ruotato.
       const rad = (current.base.rotation * Math.PI) / 180;
       const along = dxPx * Math.cos(rad) + dyPx * Math.sin(rad);
-      return { w: Math.max(0.02, current.base.w + along / metrics.rect.width) };
+      const text = current.base.kind === "text";
+      const w = Math.min(text ? TEXT_LIMITS.width.max : 2, Math.max(text ? TEXT_LIMITS.width.min : 0.02, current.base.w + along / metrics.rect.width));
+      // Un elemento ruotato gira attorno al proprio centro: con la nuova larghezza il centro si sposterebbe e l'elemento «scapperebbe».
+      if (current.base.rotation) return resizeKeepingCorner(sheet, current.base, w, canvasMeasure);
+      return { w };
     }
     let degrees = (Math.atan2(event.clientY - current.box.cy, event.clientX - current.box.cx) * 180) / Math.PI + 90;
     if (degrees > 180) degrees -= 360;
@@ -127,7 +157,7 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
 
   const move = (event: React.PointerEvent) => {
     const patch = patchFor(event);
-    if (patch && gesture.current) setDraft({ id: gesture.current.id, patch, move: gesture.current.mode === "move" });
+    if (patch && gesture.current) setDraft({ id: gesture.current.id, patch, move: gesture.current.mode === "move", guides: gesture.current.guides ?? [] });
   };
   const end = (event: React.PointerEvent) => {
     const current = gesture.current;
@@ -143,6 +173,16 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
   return (
     <div ref={rootRef} className="spread__design-root" aria-hidden={interactive ? undefined : true}>
       <svg className="spread__design spread__design--above" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />
+      {draft?.guides.map((guide, index) => (
+        <span
+          key={`${guide.axis}-${index}`}
+          className={`spread__snap spread__snap--${guide.axis}`}
+          aria-hidden="true"
+          style={guide.axis === "x"
+            ? { left: `${(guide.at / size.width) * 100}%`, top: `${(guide.from / size.height) * 100}%`, height: `${((guide.to - guide.from) / size.height) * 100}%` }
+            : { top: `${(guide.at / size.height) * 100}%`, left: `${(guide.from / size.width) * 100}%`, width: `${((guide.to - guide.from) / size.width) * 100}%` }}
+        />
+      ))}
       {boxes.map(({ overlay, box }) => {
         const selected = handlers?.selectedId === overlay.id;
         const sibling = !selected && Boolean(overlay.groupId) && overlays.find((other) => other.id === handlers?.selectedId)?.groupId === overlay.groupId;

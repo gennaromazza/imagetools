@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { AlbumSpread, SpreadBackground, SpreadBackgroundScope, SpreadOverlay, SpreadTextOverlay, TextStyleSpec } from "@photo-tools/shared-types";
+import type { AlbumProjectV2, AlbumSpread, SpreadBackground, SpreadBackgroundScope, SpreadOverlay, SpreadTextOverlay, TextStyleSpec } from "@photo-tools/shared-types";
 import { BUILTIN_BACKGROUNDS, builtinDataUrl } from "../model/builtinMedia";
 import { backgroundsOf, groupMembers, overlaysOf, type BackgroundChoice, type NewGraphicOptions, type NewTextOptions, type OverlayPatch } from "../model/design";
 import { addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle, type Phrase, type SavedTextStyle } from "../model/designLibrary";
@@ -8,9 +8,12 @@ import { BASE_GROUP, FONT_CATEGORY_LABEL, FONT_FAMILIES, TEXT_PRESETS, fontInfo,
 import { forgetMediaUrl } from "../hooks/useMedia";
 import { installFonts, loadFonts } from "../render/fonts";
 import { Icon } from "./icons";
+import type { AlignTo } from "../model/designAlign";
+import type { SuggestOptions, SuggestResult } from "../model/story";
 import { IconButton } from "./ui";
+import { StoryTab } from "./StoryPanel";
 
-export type DesignTab = "backgrounds" | "text" | "library";
+export type DesignTab = "backgrounds" | "text" | "story" | "library";
 
 /** Gli stili di testo raggruppati per sezione, nell'ordine in cui compaiono. */
 const PRESET_GROUPS: ReadonlyArray<readonly [string, readonly TextPreset[]]> = (() => {
@@ -32,6 +35,17 @@ export interface DesignActions {
   setBackground: (scope: SpreadBackgroundScope, choice: BackgroundChoice | null, wholeAlbum: boolean) => void;
   updateBackground: (scope: SpreadBackgroundScope, patch: Partial<Pick<SpreadBackground, "fit" | "opacity" | "tileCm">>) => void;
   notify: (message: string) => void;
+  /** Allinea l'elemento (e il suo gruppo) al margine o al centro della pagina in cui si trova. */
+  alignTo: (overlayId: string, where: AlignTo) => void;
+  /** Propone e inserisce un testo narrativo per la pagina; con `replace` toglie prima la proposta precedente («Rigenera testo»). */
+  suggestStory: (areaIndex: number, options: SuggestOptions) => SuggestResult | null;
+  /** Aggiunge alla pagina una voce della libreria narrativa. Restituisce false se non c'è posto. */
+  insertStoryUnit: (unitId: string, areaIndex: number) => boolean;
+  /** Cambia il testo di un elemento con quello di una voce della libreria, lasciandone lo stile. */
+  replaceWithStoryUnit: (overlayId: string, unitId: string) => void;
+  /** Mette i testi narrativi sulle pagine libere di tutto l'album; restituisce quanti ne ha aggiunti. */
+  planStories: () => number;
+  removeOverlays: (overlayIds: readonly string[]) => void;
 }
 
 /** Colore dominante degli sfondi di serie: serve a scegliere un testo che si legga. */
@@ -237,6 +251,28 @@ function TextEditor({ overlay, actions, savedStyles, onSaveStyle, onSavePhrase, 
   );
 }
 
+const ALIGNMENTS: ReadonlyArray<readonly [AlignTo, string, string]> = [
+  ["left", "Sinistra", "Porta al margine sinistro della pagina"],
+  ["center", "Centro", "Centra nella pagina, da sinistra a destra"],
+  ["right", "Destra", "Porta al margine destro della pagina"],
+  ["top", "Alto", "Porta al margine alto della pagina"],
+  ["middle", "Metà", "Centra nella pagina, dall'alto in basso"],
+  ["bottom", "Basso", "Porta al margine basso della pagina"],
+];
+
+/** Allineamento alla pagina (con il margine di sicurezza): vale anche per un gruppo, che si muove tutto insieme. */
+function AlignControls({ overlay, actions }: { overlay: SpreadOverlay; actions: DesignActions }) {
+  return (
+    <div className="design__section">
+      <h4>Allinea alla pagina</h4>
+      <div className="design__chips" role="group" aria-label="Allinea alla pagina">
+        {ALIGNMENTS.map(([where, label, hint]) => <button key={where} type="button" className="chip" title={hint} onClick={() => actions.alignTo(overlay.id, where)}>{label}</button>)}
+      </div>
+      <p className="small muted">Trascinando, l'elemento si aggancia a bordi, centro, piega, margini, foto e altri testi: tieni premuto Alt per spostarlo senza calamite.</p>
+    </div>
+  );
+}
+
 function ElementActions({ overlay, actions, groupSize }: { overlay: SpreadOverlay; actions: DesignActions; groupSize: number }) {
   return (
     <div className="design__actions">
@@ -280,6 +316,7 @@ function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle
       {selected ? (
         <>
           <ElementActions overlay={selected} actions={actions} groupSize={groupMembers(spread, selected.id).length} />
+          <AlignControls overlay={selected} actions={actions} />
           {selected.kind === "text" ? <TextEditor overlay={selected} actions={actions} savedStyles={savedStyles} onSaveStyle={onSaveStyle} onSavePhrase={onSavePhrase} textRef={textRef} /> : <GraphicEditor overlay={selected} actions={actions} />}
           <div className="design__section"><button type="button" className="btn btn--sm" onClick={() => actions.select(null)}>Fatto: torna agli stili</button></div>
         </>
@@ -419,7 +456,8 @@ function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles,
 // ---------------------------------------------------------------------------
 
 /** «Personalizza»: sfondi a immagine, testi in stile rivista e il tuo archivio di frasi, stili e grafiche. */
-export function DesignPanel({ spread, two, areaIndex, tab, onTab, selectedOverlayId, extraOverlayIds, focusSignal, actions, onClose }: {
+export function DesignPanel({ project, spread, two, areaIndex, tab, onTab, selectedOverlayId, extraOverlayIds, focusSignal, actions, onClose }: {
+  project: AlbumProjectV2;
   spread: AlbumSpread;
   two: boolean;
   areaIndex: number;
@@ -454,7 +492,7 @@ export function DesignPanel({ spread, two, areaIndex, tab, onTab, selectedOverla
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusSignal]);
 
-  const tabs: Array<{ value: DesignTab; label: string }> = [{ value: "backgrounds", label: "Sfondi" }, { value: "text", label: "Testo" }, { value: "library", label: "Libreria" }];
+  const tabs: Array<{ value: DesignTab; label: string }> = [{ value: "backgrounds", label: "Sfondi" }, { value: "text", label: "Testo" }, { value: "story", label: "Racconto" }, { value: "library", label: "Libreria" }];
   return (
     <aside className="layouts design" aria-label="Personalizza lo spread">
       <header className="layouts__head">
@@ -474,6 +512,7 @@ export function DesignPanel({ spread, two, areaIndex, tab, onTab, selectedOverla
             onSaveStyle={(name, style) => { setSavedStyles(upsertSavedStyle(savedStyles, name, style)); actions.notify(`Stile «${name.trim()}» salvato.`); }}
             onSavePhrase={(text) => { if (!text.trim()) return; setPhrases(addPhrase(phrases, text)); actions.notify("Frase aggiunta al tuo archivio."); }} />
         ) : null}
+        {tab === "story" ? <StoryTab project={project} spread={spread} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} selected={selected} actions={designActions} /> : null}
         {tab === "library" ? <LibraryTab actions={designActions} phrases={phrases} setPhrases={setPhrases} savedStyles={savedStyles} setSavedStyles={setSavedStyles} insertAt={insertAt} /> : null}
       </div>
     </aside>

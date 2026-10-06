@@ -711,6 +711,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .design__presets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
 .design__preset-group { display: grid; gap: 8px; margin-top: 6px; }
 .design__preset-heading { margin: 8px 0 0; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-muted); font-weight: 600; }
+/* Scheda «Racconto»: proposta, filtri e voci della libreria narrativa. */
+.design__check { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+.design__link { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; }
+.story__summary { white-space: pre-line; font-size: 13px; line-height: 1.45; margin: 0 0 8px; }
+.story__filters { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.story__select { display: grid; gap: 4px; }
+.story__select > span { font-size: 11px; color: var(--text-muted); }
+.story__list { display: grid; gap: 8px; }
+.story__card { display: grid; gap: 6px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.22); }
+.story__meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.story__used { color: var(--text-faint); }
+.story__title { font-size: 14px; line-height: 1.25; }
+.story__text { margin: 0; white-space: pre-line; font-size: 12.5px; line-height: 1.4; color: var(--text-muted); max-height: 8.4em; overflow: hidden; }
 .design__preset { display: grid; gap: 4px; padding: 10px; text-align: left; border-radius: 10px; border: 1px solid var(--line); background: rgba(0, 0, 0, 0.22); color: var(--text); }
 .design__preset:hover { border-color: var(--accent-bright); background: var(--accent-soft); }
 .design__preset-label { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); }

@@ -609,6 +609,9 @@
     ],
     "0.2.11": [
       "Nuovo: raddrizza con una linea (pulsante «linea» nel ritaglio: tracci l'orizzonte e l'angolo si calcola da solo), campo numerico per l'angolo e rotazione di 90° delle foto (↺ ↻ nella barra della foto e nei menu). Spostare le foto: nessuna foto sparisce più (anche trascinata sul separatore accanto), le foto bloccate restano ferme, compaiono avvisi quando uno spread è pieno, l'ordine di un elenco filtrato non rimescola il resto e, spostando una foto su un altro spread, la vista resta dov'eri. Zoom e ritaglio più precisi: la parte visibile sta sempre dentro la cella, senza angoli vuoti. Personalizza: 31 modelli di testo già composti per il matrimonio (capitoli, copertine, citazioni, didascalie, dediche) e 45 frasi nuove nella libreria."
+    ],
+    "0.2.12": [
+      "Nuovo: scheda «Racconto» in Personalizza con una libreria di oltre 300 testi narrativi per i matrimoni (aperture, preparativi, cerimonia, festa, finale…): «Proponi un testo» sceglie in base alla fase dell'album e allo spazio, «Rigenera testo» ne propone un altro, «Proponi i testi per l'album» li mette sulle pagine libere senza mai ripetere; filtri per categoria, tipo, lunghezza, tono, intensità e origine. Testi e grafiche: calamite con linee guida (bordi, centro, piega, margini, foto, altri testi; Alt le esclude), pulsanti «Allinea alla pagina», gruppi che si fermano insieme al bordo, un elemento non esce più del tutto dalla pagina, ridimensionare un testo ruotato non lo fa più scappare e il testo incollato viene ripulito."
     ]
   }
 }

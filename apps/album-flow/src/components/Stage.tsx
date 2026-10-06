@@ -387,6 +387,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         {strip("right")}
         {design.open ? (
           <DesignPanel
+            project={project}
             spread={spread}
             two={two}
             areaIndex={areaIndex}

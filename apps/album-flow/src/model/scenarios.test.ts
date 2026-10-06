@@ -15,6 +15,7 @@ import { parseAlbumProject, serializeAlbumProject } from "./portability";
 import { preflightReport } from "./preflight";
 import { areaGeometry, createEmptyProject, type Project } from "./project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, removeSpread, setSpreadDone, setSplitMode, swapAreas } from "./spreads";
+import { suggestStoryForSpread } from "./story";
 
 /**
  * Casi d'uso dell'intero modello di Album Flow, dalla cartella di foto all'album pronto da esportare.
@@ -327,6 +328,17 @@ const OPERATIONS: Operation[] = [
   { name: "svuota spread", run: (p, r) => (p.spreads.length ? clearSpread(p, pick(r, p.spreads).id) : p) },
   { name: "scambia pagine", run: (p, r) => (p.spreads.length ? swapAreas(p, pick(r, p.spreads).id) : p) },
   { name: "divisione", run: (p, r) => (p.spreads.length ? setSplitMode(p, pick(r, p.spreads).id, pick(r, MODES)) : p) },
+  {
+    name: "testo narrativo",
+    run: (p, r) => {
+      const spread = maybe(r, p.spreads);
+      if (!spread) return p;
+      const first = suggestStoryForSpread(p, spread.id, Math.floor(r() * spread.areas.length), { attempt: Math.floor(r() * 4) });
+      // «Rigenera»: sostituisce la proposta appena fatta con un'altra, senza lasciare elementi orfani.
+      const again = first && r() < 0.5 ? suggestStoryForSpread(first.project, spread.id, Math.floor(r() * spread.areas.length), { attempt: 1, replace: first.overlayIds }) : null;
+      return again?.project ?? first?.project ?? p;
+    },
+  },
   {
     name: "aggiungi foto",
     run: (p, r) => {
