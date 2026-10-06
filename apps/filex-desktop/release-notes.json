@@ -500,6 +500,11 @@
     ],
     "0.1.44": [
       "Vista ferma durante la classificazione: le foto valutate non si spostano e non spariscono dal filtro attivo finche' non premi Aggiorna vista o cambi filtro, ordinamento o cartella."
+    ],
+    "0.1.45": [
+      "Quick Preview con zoom attivo: le frecce sinistra e destra cambiano foto mantenendo lo zoom; per spostare la foto usa le frecce su e giu', Alt+frecce, il trascinamento o i pulsanti a schermo.",
+      "Zoom a qualita' piena: la foto viene caricata fino a 8000 px sul lato lungo, con indicatore di caricamento; per i RAW si usa il JPEG incorporato piu' grande del file.",
+      "Diagnostica prestazioni solo locale, con interruttore ed esportazione in Impostazioni, per capire i rallentamenti dello scorrimento senza inviare dati."
     ]
   },
   "id-photo": {

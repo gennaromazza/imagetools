@@ -32,6 +32,12 @@
 
 
 
+## 2026-10-06 - Image Select Pro 0.1.45
+
+- Quick Preview con zoom attivo: le frecce sinistra e destra cambiano foto mantenendo lo zoom; la foto si sposta con le frecce su e giu', con Alt+frecce, trascinando o con i pulsanti a schermo.
+- Zoom a qualita' piena: quando ingrandisci viene caricata la foto fino a 8000 px sul lato lungo (prima restava alla dimensione della finestra) e compare l'indicatore "Caricamento qualita' piena...". Per i RAW si usa il JPEG incorporato piu' grande disponibile nel file.
+- Diagnostica prestazioni solo locale (Impostazioni, sezione prestazioni): registra scatti dell'interfaccia durante lo scroll e caratteristiche del PC, senza nomi di file ne' percorsi e senza inviare nulla; il file si esporta con "Esporta diagnostica" e si puo' disattivare.
+
 ## 2026-10-06 - Album Flow 0.2.14
 
 - Nuovo: spazio tra le foto predefinito di tutto l'album. Si cambia dalla finestra «Formato e spazi dell'album» (clic sul formato in alto) e si applica alle pagine dove non l'hai modificato a mano; i fogli personalizzati dalla striscia «Spazio» e gli spread finiti restano come sono, e i nuovi spread nascono con il nuovo spazio.
