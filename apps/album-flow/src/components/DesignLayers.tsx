@@ -4,6 +4,7 @@ import { spreadSizeMm, type Rect } from "../engine/geometry";
 import { snapMove, type SnapGuide } from "../engine/snap";
 import { fontIdsOfSpread, groupMembers, overlaysOf, type OverlayPatch } from "../model/design";
 import { groupFrame, overlaySnapTargets, resizeKeepingCorner } from "../model/designAlign";
+import { getSnapEnabled } from "../model/snapSettings";
 import { TEXT_LIMITS } from "../model/typography";
 import type { Project } from "../model/project";
 import { canvasMeasure } from "../render/fonts";
@@ -129,7 +130,7 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
       let dx = dxPx / metrics.rect.width;
       let dy = dyPx / metrics.rect.height;
       current.guides = [];
-      if (!event.altKey && current.frame && current.targets) {
+      if (!event.altKey && getSnapEnabled() && current.frame && current.targets) {
         const rect: Rect = { ...current.frame, x: current.frame.x + dx * size.width, y: current.frame.y + dy * size.height };
         const snapped = snapMove(rect, current.targets, SNAP_PX * metrics.perPx);
         dx += (snapped.rect.x - rect.x) / size.width;

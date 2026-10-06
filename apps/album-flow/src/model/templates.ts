@@ -47,8 +47,9 @@ export function sanitizeFrame(frame: FreeFrame): FreeFrame {
   const w = clamp(frame.w, 0.04, 1);
   const h = clamp(frame.h, 0.04, 1);
   return {
-    x: Number(clamp(frame.x, 0, 1 - w).toFixed(5)),
-    y: Number(clamp(frame.y, 0, 1 - h).toFixed(5)),
+    // Una foto libera può uscire in parte dall'area (come i testi), ma almeno un quarto resta dentro.
+    x: Number(clamp(frame.x, -0.75 * w, 1 - 0.25 * w).toFixed(5)),
+    y: Number(clamp(frame.y, -0.75 * h, 1 - 0.25 * h).toFixed(5)),
     w: Number(w.toFixed(5)),
     h: Number(h.toFixed(5)),
     rotation: Number(clamp(frame.rotation, -180, 180).toFixed(2)),

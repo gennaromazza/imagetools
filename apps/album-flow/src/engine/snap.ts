@@ -63,9 +63,12 @@ const guidesFor = (rect: Rect, hits: readonly Hit[], axis: "x" | "y"): SnapGuide
  * Aggancio (calamita) durante lo spostamento: bordo sinistro/centro/destro e alto/centro/basso della foto si attaccano a quelli
  * delle altre foto e dei bordi dell'area (`targets`) entro `threshold` mm. Restituisce il rettangolo agganciato e le linee guida.
  */
-export function snapMove(rect: Rect, targets: readonly Rect[], threshold: number): SnapResult {
-  const hitsX = nearest(xs(rect), targets, xs, threshold);
-  const hitsY = nearest(ys(rect), targets, ys, threshold);
+export function snapMove(rect: Rect, targets: readonly Rect[], threshold: number, options: { targetCenters?: boolean } = {}): SnapResult {
+  // Senza i centri degli altri elementi l'aggancio resta ai soli bordi (e alla piega): meno scatti quando ci sono molte foto.
+  const edgesX = options.targetCenters === false ? (r: Rect) => [r.x, r.x + r.w] : xs;
+  const edgesY = options.targetCenters === false ? (r: Rect) => [r.y, r.y + r.h] : ys;
+  const hitsX = nearest(xs(rect), targets, edgesX, threshold);
+  const hitsY = nearest(ys(rect), targets, edgesY, threshold);
   const snapped: Rect = { ...rect, x: rect.x + (hitsX[0]?.delta ?? 0), y: rect.y + (hitsY[0]?.delta ?? 0) };
   return { rect: snapped, guides: [...guidesFor(snapped, hitsX, "x"), ...guidesFor(snapped, hitsY, "y")] };
 }

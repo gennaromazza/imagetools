@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AlbumAssetV2, AlbumProjectV2, AlbumSpread, AlbumSplitMode, AreaAlign, AreaStyle, AreaTemplate } from "@photo-tools/shared-types";
 import type { DropTarget } from "../engine/drop";
 import { spreadSizeMm } from "../engine/geometry";
 import { hasDesktop } from "../desktop/api";
 import { isFavoriteLayout } from "../model/areas";
 import { BACKGROUND_SWATCHES } from "../model/defaults";
-import { placeItem, type ItemView } from "../model/placement";
+import { clampAngle, placeItem, wheelNotches, type ItemView } from "../model/placement";
 import { itemAspect } from "../model/project";
 import { SHAPE_PRESETS, presetForShape } from "../model/shapes";
 import { isScopeLocked, type LockScope } from "../model/layoutLock";
+import { getSnapEnabled, setSnapEnabled, subscribeSnap } from "../model/snapSettings";
 import { areaGeometryFor, hasFreeLayout } from "../model/project";
 import { AreaStrip } from "./AreaStrip";
 import { DesignPanel, type DesignActions, type DesignTab } from "./DesignPanel";
@@ -133,6 +134,31 @@ function formatTime(ms: number | undefined): string | null {
 
 /** Zona di lavoro: spread grande al centro, una striscia di controlli per ogni pagina, barra inferiore con sfondo, navigazione e vista. */
 /** Campo dell'angolo di raddrizzamento: si scrive il valore (virgola o punto), con le frecce ↑↓ si cambia di 0,1° (1° con Maiusc). */
+/**
+ * Zona del raddrizzamento: la rotella del mouse, con il puntatore sul cursore, sul numero o sull'etichetta, cambia l'angolo
+ * (0,1° a scatto, 1° con Maiusc) senza dover scrivere i numeri. Ascoltatore non passivo per bloccare lo scorrimento.
+ */
+function WheelAngle({ value, onChange, children }: { value: number; onChange: (angle: number) => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const live = useRef({ value, onChange });
+  live.current = { value, onChange };
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const onWheel = (event: WheelEvent) => {
+      const delta = event.deltaY || event.deltaX;
+      if (!delta) return;
+      event.preventDefault();
+      const angle = Number(clampAngle(live.current.value + (delta < 0 ? -1 : 1) * (event.shiftKey ? 1 : 0.1) * wheelNotches(delta)).toFixed(2));
+      live.current.value = angle; // gli scatti veloci si sommano anche prima del ridisegno
+      live.current.onChange(angle);
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, []);
+  return <div ref={ref} className="straighten" role="group" aria-label="Raddrizza la foto">{children}</div>;
+}
+
 function AngleField({ value, onChange }: { value: number; onChange: (angle: number) => void }) {
   const format = (angle: number) => angle.toLocaleString("it-IT", { minimumFractionDigits: 1, maximumFractionDigits: 2 });
   const [text, setText] = useState(() => format(value));
@@ -174,6 +200,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const snapOn = useSyncExternalStore(subscribeSnap, getSnapEnabled);
   const [lockOpen, setLockOpen] = useState(false);
   const desktop = hasDesktop();
   const [photoMenu, setPhotoMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
@@ -228,13 +255,13 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
           </>
         ) : null}
         {cropMode && canCrop ? (
-          <div className="straighten" role="group" aria-label="Raddrizza la foto">
+          <WheelAngle value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })}>
             <IconButton icon="level" label="Raddrizza con una linea: trascina lungo l'orizzonte o lungo un lato che deve essere verticale" active={lineTool} onClick={actions.toggleLineTool} size={16} />
             <span className="straighten__label">Raddrizza</span>
-            <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" title="Alt + rotella (Maiusc = passi più fini), oppure , e . da tastiera. Doppio clic: azzera" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
+            <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" title="Rotella del mouse qui sopra: 0,1° a scatto (Maiusc: 1°). Anche , e . da tastiera. Doppio clic: azzera" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
             <AngleField value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })} />
             <button type="button" className="icon-btn" title="Azzera il raddrizzamento" aria-label="Azzera il raddrizzamento" disabled={!found.item.angle} onClick={() => actions.commitView(itemId, { angle: 0 })}>0°</button>
-          </div>
+          </WheelAngle>
         ) : null}
         {hasFreeLayout(found.area) ? (
           <>
@@ -462,6 +489,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
           <IconButton icon="plus" label="Ingrandisci (+)" onClick={() => actions.setZoom(Math.min(3, Number((zoom + 0.15).toFixed(2))))} size={15} />
           <button type="button" className={`chip${design.open ? " is-active" : ""}`} onClick={design.onToggle} aria-pressed={design.open} title="Sfondi a immagine, testi in stile rivista, frasi e grafiche" onClickCapture={newDesign.markSeen}>Personalizza{newDesign.isNew ? <span className="new-pill">Nuovo</span> : null}</button>
           <button type="button" className={`chip${sizes ? " is-active" : ""}`} onClick={actions.toggleSizes} aria-pressed={sizes} title="Mostra su ogni foto la misura stampata e la risoluzione (S)">Misure</button>
+          <button type="button" className={`chip${snapOn ? " is-active" : ""}`} onClick={() => setSnapEnabled(!snapOn)} aria-pressed={snapOn} title="Calamite: le foto libere, i testi e le grafiche si agganciano a bordi, centro e piega mentre li sposti. Spegnile per muoverli senza scatti">Calamite</button>
           <button type="button" className={`chip${guides ? " is-active" : ""}`} onClick={actions.toggleGuides} aria-pressed={guides} title="Mostra zona sicura e piega (G)">Guide</button>
         </div>
       </footer>

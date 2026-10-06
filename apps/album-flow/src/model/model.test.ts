@@ -723,7 +723,8 @@ test("template libero: foto che si sovrappongono, rotazione e livelli, e cosa lo
   assert.equal(mirrored.free![area.items[1].id].rotation, -area.free![area.items[1].id].rotation);
   const moved = setFrame(project, itemId, { x: 5, y: -3, rotation: 400 });
   const f = moved.spreads[0].areas[0].free![itemId];
-  assert.ok(f.x + f.w <= 1 + 1e-9 && f.y >= 0 && f.rotation === 180, "la cornice resta nell'area");
+  assert.ok(f.x <= 1 - 0.25 * f.w + 1e-9 && f.y >= -0.75 * f.h - 1e-9 && f.rotation === 180, "la cornice può uscire in parte, ma almeno un quarto resta nell'area");
+  assert.ok(f.x + f.w > 1 && f.y < 0, "uscire in parte dal margine è consentito");
   const front = reorderFrame(project, itemId, "front").spreads[0].areas[0];
   assert.ok(Math.max(...Object.values(front.free!).map((x) => x.z)) === front.free![itemId].z);
   assert.equal(setFrame(project, itemId, {}), project, "nessun cambio");

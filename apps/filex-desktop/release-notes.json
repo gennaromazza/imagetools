@@ -623,6 +623,9 @@
     ],
     "0.2.14": [
       "Nuovo: spazio tra le foto predefinito di tutto l'album. Si cambia dalla finestra «Formato e spazi dell'album» (clic sul formato in alto) e si applica alle pagine dove non l'hai modificato a mano; i fogli personalizzati dalla striscia «Spazio» e gli spread finiti restano come sono, e i nuovi spread nascono con il nuovo spazio."
+    ],
+    "0.2.15": [
+      "Nuovo: la rotella del mouse raddrizza la foto. Nel ritaglio, con il puntatore sul cursore «Raddrizza», sul campo dell'angolo o sull'etichetta, la rotella cambia l'angolo (0,1° a scatto, 1° con Maiusc) senza scrivere i numeri; Ctrl/⌘ + rotella sulla foto raddrizza e, con lo strumento «linea» acceso, basta la rotella. Spostare le foto è più fluido: interruttore «Calamite» nella barra in basso (vale anche per testi e grafiche), calamite più leggere sulle foto libere (solo bordi e piega), foto libere che possono uscire in parte dal margine e barra delle azioni che non compare più mentre trascini."
     ]
   }
 }

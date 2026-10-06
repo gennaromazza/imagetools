@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-06 - Album Flow 0.2.15
+
+- Nuovo: la rotella del mouse raddrizza la foto. Nel ritaglio, con il puntatore sul cursore «Raddrizza», sul campo dell'angolo o sull'etichetta, la rotella cambia l'angolo (0,1° a scatto, 1° con Maiusc) senza scrivere i numeri; Ctrl/⌘ + rotella sulla foto raddrizza e, con lo strumento «linea» acceso, basta la rotella. Spostare le foto è più fluido: interruttore «Calamite» nella barra in basso (vale anche per testi e grafiche), calamite più leggere sulle foto libere (solo bordi e piega), foto libere che possono uscire in parte dal margine e barra delle azioni che non compare più mentre trascini.
+
 ## 2026-10-06 - Image Select Pro 0.1.45
 
 - Quick Preview con zoom attivo: le frecce sinistra e destra cambiano foto mantenendo lo zoom; la foto si sposta con le frecce su e giu', con Alt+frecce, trascinando o con i pulsanti a schermo.

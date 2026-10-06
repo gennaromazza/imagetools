@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import { snapMove, snapResize, type SnapGuide } from "../engine/snap";
+import { getSnapEnabled } from "../model/snapSettings";
 import { type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetV2, AlbumItem, AlbumArea, AlbumSpread, SheetSpec } from "@photo-tools/shared-types";
 import { dropHighlight, resolveDropTarget, type DropTarget } from "../engine/drop";
@@ -67,6 +68,8 @@ const pct = (value: number) => `${Number(value.toFixed(4))}%`;
 const SNAPS = [0.5, 1 / 3, 2 / 3];
 /** Distanza (pixel sullo schermo) entro cui una foto si aggancia alle altre durante lo spostamento. */
 const SNAP_PX = 6;
+/** Le foto delle disposizioni libere si agganciano da più vicino e ai soli bordi: lo spostamento resta fluido. */
+const FRAME_SNAP_PX = 4;
 
 interface CellProps {
   cell: LeafCell;
@@ -108,8 +111,8 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
   // Fuori dal ritaglio, sulla cella: Alt + rotella zooma, Ctrl/⌘ + Alt + rotella raddrizza (stessi scatti).
   const canAdjust = !item.locked;
   const stored = view?.zoom ?? item.zoom;
-  const live = useRef({ zoom: placement.zoom, stored, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id });
-  live.current = { zoom: placement.zoom, stored, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id };
+  const live = useRef({ zoom: placement.zoom, stored, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id, lineTool });
+  live.current = { zoom: placement.zoom, stored, angle: placement.angle, view, canCrop, canAdjust, handlers, itemId: item.id, lineTool };
   useEffect(() => {
     const element = ref.current;
     if (!element || !interactive) return;
@@ -118,7 +121,8 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       const quick = !state.canCrop && state.canAdjust && event.altKey;
       if (!state.canCrop && !quick) return;
       event.preventDefault();
-      const rotate = state.canCrop ? event.altKey : event.ctrlKey || event.metaKey;
+      // In ritaglio: Ctrl/⌘ o Alt + rotella (e la sola rotella con lo strumento «linea» acceso) raddrizzano; la rotella semplice zooma.
+      const rotate = state.canCrop ? event.altKey || event.ctrlKey || event.metaKey || state.lineTool : event.ctrlKey || event.metaKey;
       if (rotate) {
         const delta = event.deltaY || event.deltaX;
         const direction = delta < 0 ? -1 : 1;
@@ -159,9 +163,9 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       ? { ...drag.rect, x: drag.rect.x + dx, y: drag.rect.y + dy }
       : (() => { const w = Math.max(8, drag.rect.w + Math.max(dx, (dy * drag.rect.w) / drag.rect.h)); return { ...drag.rect, w, h: (w * drag.rect.h) / drag.rect.w }; })();
     // Aggancio come negli editor grafici: bordi e centri si attaccano a quelli delle altre foto e dell'area, con una linea guida. Alt = senza aggancio.
-    if (event.altKey || !snapTargets) return raw;
+    if (event.altKey || !snapTargets || !getSnapEnabled()) return raw;
     const targets = snapTargets.filter((target) => target.id !== item.id).map((target) => target.rect);
-    const snapped = (drag.mode === "move" ? snapMove : snapResize)(raw, targets, SNAP_PX * drag.mmPerPx);
+    const snapped = drag.mode === "move" ? snapMove(raw, targets, FRAME_SNAP_PX * drag.mmPerPx, { targetCenters: false }) : snapResize(raw, targets, FRAME_SNAP_PX * drag.mmPerPx);
     snapGuides.current = snapped.guides;
     return snapped.rect;
   };
@@ -534,7 +538,7 @@ function SpreadViewInner(props: SpreadViewProps) {
 
       <OverlayLayer sheet={sheet} spread={spread} media={media} interactive={interactive} handlers={props.design} />
 
-      {interactive && selectedItemId && props.renderToolbar ? (() => {
+      {interactive && selectedItemId && props.renderToolbar && draft?.kind !== "frame" ? (() => {
         const rect = geometry.flatMap((g) => g.cells).find((cell) => cell.itemId === selectedItemId)?.rect;
         return rect ? <FloatingToolbar rect={rect} size={size} container={ref}>{props.renderToolbar(selectedItemId)}</FloatingToolbar> : null;
       })() : null}

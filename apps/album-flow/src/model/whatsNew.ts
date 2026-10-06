@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.15",
+    date: "2026-10-06",
+    headline: "Raddrizza con la rotella e spostamenti più fluidi",
+    items: [
+      {
+        title: "La rotella del mouse raddrizza la foto",
+        text: "Nel ritaglio (doppio clic sulla foto), porta il puntatore sul cursore «Raddrizza», sul campo dell'angolo o sull'etichetta e gira la rotella: l'angolo cambia di 0,1° a scatto (1° tenendo premuto Maiusc), senza scrivere i numeri. Ctrl/⌘ + rotella sulla foto raddrizza ugualmente, e con lo strumento «linea» acceso basta la rotella.",
+        where: ["Doppio clic sulla foto", "Raddrizza", "Rotella del mouse"],
+      },
+      {
+        title: "Calamite a interruttore e foto libere più scorrevoli",
+        text: "Nella barra in basso, accanto a «Guide», il nuovo interruttore «Calamite» attiva o spegne l'aggancio di foto libere, testi e grafiche. Sulle foto libere le calamite sono più leggere (solo i bordi e la piega), le foto possono uscire in parte dal margine e la barra delle azioni non compare più mentre le sposti.",
+        where: ["Calamite", "Guide"],
+      },
+    ],
+  },
+  {
     version: "0.2.14",
     date: "2026-10-06",
     headline: "Lo spazio tra le foto per tutto l'album",
