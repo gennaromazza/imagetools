@@ -180,4 +180,17 @@ describe("print planner", () => {
     expect(evaluation.perPage).toBe(2);
     expect(suggestBorderless({ kind: "count", count: 2, aspectId: "free" }, paper, DEFAULT_PAPER_CHOICE, 300)).toBeNull();
   });
+
+  it("avoids thin strips for free proportions", () => {
+    const a4 = resolvePaperOption({ kind: "count", count: 1, aspectId: "free" }, { ...DEFAULT_PAPER_CHOICE, paperId: "a4" }, "a4");
+    const sheet = toSheetSpec(a4, DEFAULT_PAPER_CHOICE);
+    for (const count of [2, 3, 4, 5, 6, 8, 9, 12]) {
+      const result = resolvePhotoSpec({ kind: "count", count, aspectId: "free" }, sheet, 300);
+      expect(result.fits).toBe(true);
+      const { widthCm, heightCm } = result.spec!;
+      expect(Math.max(widthCm, heightCm) / Math.min(widthCm, heightCm)).toBeLessThanOrEqual(2.001);
+    }
+    const three = resolvePhotoSpec({ kind: "count", count: 3, aspectId: "free" }, sheet, 300).spec!;
+    expect(three.widthCm * three.heightCm).toBeGreaterThan(100);
+  });
 });

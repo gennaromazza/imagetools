@@ -330,6 +330,13 @@ export function useWorkbench() {
     );
   }, [activeAsset, activeIndex, assets, pageIndexOfAsset, writeCrop]);
 
+  /** Il clic che segue un trascinamento non deve cancellare il messaggio di fine trascinamento. */
+  const lastDragEndRef = useRef(0);
+  const handleSlotClick = useCallback((assetId: string) => {
+    if (Date.now() - lastDragEndRef.current < 400) return;
+    selectAssetById(assetId);
+  }, [selectAssetById]);
+
   const startSheetSlotDrag = (event: ReactPointerEvent<HTMLButtonElement>, assetId: string) => {
     const crop = cropsById.get(assetId);
     if (!crop) return;
@@ -366,6 +373,7 @@ export function useWorkbench() {
     const drag = dragStateRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     writeCrop(drag.assetId, (crop) => ({ ...crop, reviewed: true }));
+    lastDragEndRef.current = Date.now();
     dragStateRef.current = null;
     setIsDraggingCrop(false);
     setInteractionHint("Foto riposizionata. Premi Invio per confermare e passare alla prossima.");
@@ -662,7 +670,8 @@ export function useWorkbench() {
   }, []);
 
   const choosePaper = useCallback((paperId: string) => {
-    setPaperChoice((current) => ({ ...current, paperId }));
+    // Margini e distanza sono propri di ogni carta: cambiando carta tornano quelli standard.
+    setPaperChoice((current) => ({ ...current, paperId, marginMm: null, gapMm: null }));
     setPreviewPageIndex(0);
   }, []);
 
@@ -1112,6 +1121,7 @@ export function useWorkbench() {
     rotateActiveCrop,
     markReviewedAndMove,
     selectAssetById,
+    handleSlotClick,
     startSheetSlotDrag,
     moveSheetSlotDrag,
     stopSheetSlotDrag,

@@ -1,6 +1,6 @@
 import { CUSTOM_PAPER_ID, getMediaPapers, getStandardPapers, type PaperOption } from "../../print-planner";
 import type { Workbench } from "../../hooks/useWorkbench";
-import { NumberField, SegmentedField } from "../ui";
+import { Callout, NumberField, SegmentedField } from "../ui";
 
 function formatCm(value: number): string {
   return String(Math.round(value * 100) / 100).replace(".", ",");
@@ -72,6 +72,12 @@ export function PaperStep({ wb }: { wb: Workbench }) {
             ))}
           </div>
         </section>
+      ) : null}
+
+      {!wb.ready && wb.goalValid ? (
+        <Callout tone="warning">
+          Con questa carta il formato che avevi scelto ({formatCm(wb.printSpec.widthCm)} × {formatCm(wb.printSpec.heightCm)} cm) non entra. Scegli un'altra carta, oppure vai avanti e scegli un altro formato.
+        </Callout>
       ) : null}
 
       <section className="slide__section">

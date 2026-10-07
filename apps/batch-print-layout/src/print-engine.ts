@@ -478,6 +478,9 @@ export interface PhotoCountResult {
  * Misura più grande possibile per far stare esattamente `count` foto su ogni
  * foglio, rispettando orientamento, margini e distanza impostati.
  */
+/** Rapporto massimo lato lungo/corto accettato per le foto con proporzioni libere. */
+const FREE_MAX_CELL_ASPECT = 2;
+
 export function calculatePhotoSizeForCount(
   sheet: PrintSheetSpec,
   count: number,
@@ -493,8 +496,12 @@ export function calculatePhotoSizeForCount(
   if (orientation !== "landscape") sheets.push(portrait);
   if (orientation !== "portrait") sheets.push([portrait[1], portrait[0]]);
 
+  // Con proporzioni libere l'area massima premia strisce (es. 6 foto 21×5 cm): si preferiscono
+  // celle con rapporto lato lungo/corto fino a 2, e solo se non esistono si accetta altro.
   let best: PhotoCountResult | null = null;
   let bestArea = 0;
+  let bestReasonable: PhotoCountResult | null = null;
+  let bestReasonableArea = 0;
   for (const [width, height] of sheets) {
     const usableWidth = width - margin * 2;
     const usableHeight = height - margin * 2;
@@ -521,9 +528,17 @@ export function calculatePhotoSizeForCount(
           bestArea = area;
           best = { widthCm: w, heightCm: h, cols, rows };
         }
+        const aspect = Math.max(w, h) / Math.max(0.001, Math.min(w, h));
+        if (ratio !== null || aspect <= FREE_MAX_CELL_ASPECT) {
+          if (area > bestReasonableArea + 1e-9) {
+            bestReasonableArea = area;
+            bestReasonable = { widthCm: w, heightCm: h, cols, rows };
+          }
+        }
       }
     }
   }
+  best = bestReasonable ?? best;
   if (!best) return null;
 
   // Arrotonda per difetto al centesimo di cm e verifica con il motore reale

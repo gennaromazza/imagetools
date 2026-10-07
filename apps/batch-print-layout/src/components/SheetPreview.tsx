@@ -104,7 +104,7 @@ export function SheetPreview({ wb, interactive, caption }: { wb: Workbench; inte
           <span>
             {wb.ready
               ? `${layout.sheetWidthCm} × ${layout.sheetHeightCm} cm · ${wb.perPage} foto per foglio`
-              : "Completa i passi precedenti per vedere il foglio"}
+              : wb.goalValid && wb.assets.length > 0 ? "Il formato scelto non entra in questa carta" : "Completa i passi precedenti per vedere il foglio"}
           </span>
         </div>
         <div className="sheet-nav">
@@ -120,7 +120,7 @@ export function SheetPreview({ wb, interactive, caption }: { wb: Workbench; inte
         {hasSheet && currentPage ? (
           <div
             className="sheet-surface"
-            style={{ width: size ? `${size.width}px` : undefined, height: size ? `${size.height}px` : undefined }}
+            style={{ width: size ? `${size.width}px` : undefined, height: size ? `${size.height}px` : undefined, visibility: size ? "visible" : "hidden" }}
           >
             <canvas ref={canvasRef} />
             <div className={interactive ? "sheet-slot-layer" : "sheet-slot-layer sheet-slot-layer--passive"} aria-label="Foto sul foglio">
@@ -140,7 +140,7 @@ export function SheetPreview({ wb, interactive, caption }: { wb: Workbench; inte
                     type="button"
                     className={isActive ? "sheet-slot sheet-slot--active" : "sheet-slot"}
                     style={style}
-                    onClick={() => wb.selectAssetById(slot.assetId)}
+                    onClick={() => wb.handleSlotClick(slot.assetId)}
                     onPointerDown={(event) => wb.startSheetSlotDrag(event, slot.assetId)}
                     onPointerMove={wb.moveSheetSlotDrag}
                     onPointerUp={wb.stopSheetSlotDrag}
