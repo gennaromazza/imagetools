@@ -4,6 +4,7 @@ import type { DesktopPhotoToolHandoff } from "@photo-tools/desktop-contracts";
 import {
   calculateGridLayout,
   createDefaultCrop,
+  getFrameGeometry,
   normalizeCrop,
   paginateAssets,
   type BatchCropState,
@@ -581,7 +582,7 @@ export function useWorkbench() {
   const selectFormatPreset = useCallback((presetId: string) => {
     setFormatPresetId(presetId);
     setPreviewPageIndex(0);
-    if (getPhotoPreset(presetId)?.frameStyle === "polaroid-go") {
+    if (getFrameGeometry(getPhotoPreset(presetId)?.frameStyle)) {
       // La cornice bianca su foglio bianco non si vede: servono i segni di taglio.
       setAdjustments((current) => ({ ...current, fitMode: "cover", autoRotateBySourceOrientation: false }));
       setFinishing((current) => ({ ...current, cutGuidesEnabled: true }));

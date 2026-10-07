@@ -1,6 +1,6 @@
 import { LayoutGrid, Ruler, Square } from "lucide-react";
 import type { ReactNode } from "react";
-import { PHOTO_COUNT_ASPECTS } from "../../print-engine";
+import { getFrameGeometry, PHOTO_COUNT_ASPECTS } from "../../print-engine";
 import { MAX_PHOTO_EDGE_CM, MAX_PHOTOS_PER_PAGE, MIN_PHOTO_EDGE_CM, getPhotoPreset } from "../../print-planner";
 import type { GoalKind, Workbench } from "../../hooks/useWorkbench";
 import { Callout, NumberField, SegmentedField, SelectField } from "../ui";
@@ -109,6 +109,7 @@ export function GoalStep({ wb }: { wb: Workbench }) {
           <div className="format-grid" role="radiogroup" aria-label="Formato istantaneo">
             {wb.formatEvaluations.map(({ preset, evaluation }) => {
               const active = wb.formatPresetId === preset.presetId;
+              const frame = getFrameGeometry(preset.frameStyle);
               const classes = ["format-card", active ? "format-card--active" : "", evaluation.fits ? "" : "format-card--off"].filter(Boolean).join(" ");
               return (
                 <button
@@ -120,7 +121,18 @@ export function GoalStep({ wb }: { wb: Workbench }) {
                   disabled={!evaluation.fits}
                   onClick={() => wb.selectFormatPreset(preset.presetId)}
                 >
-                  <span className="format-card__shape" style={{ aspectRatio: `${preset.widthCm} / ${preset.heightCm}` }} aria-hidden="true" />
+                  <span className={frame ? "format-card__shape format-card__shape--framed" : "format-card__shape"} style={{ aspectRatio: `${preset.widthCm} / ${preset.heightCm}` }} aria-hidden="true">
+                    {frame ? (
+                      <i
+                        style={{
+                          left: `${(frame.imageX / frame.outerWidth) * 100}%`,
+                          top: `${(frame.imageY / frame.outerHeight) * 100}%`,
+                          width: `${(frame.imageWidth / frame.outerWidth) * 100}%`,
+                          height: `${(frame.imageHeight / frame.outerHeight) * 100}%`,
+                        }}
+                      />
+                    ) : null}
+                  </span>
                   <strong>{preset.label.replace(/\s*\(.*\)$/, "")}</strong>
                   <span>{formatCm(preset.widthCm)} × {formatCm(preset.heightCm)} cm</span>
                   <span className={evaluation.fits ? "format-card__count" : "format-card__none"}>

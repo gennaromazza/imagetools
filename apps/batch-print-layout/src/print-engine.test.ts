@@ -7,6 +7,7 @@ import {
   createDefaultCrop,
   getCenteredPagePositions,
   getPhotoContentRectCm,
+  FRAME_GEOMETRY_CM,
   getPreviewRenderDpi,
   getRenderSafetyError,
   mmToPx,
@@ -359,5 +360,20 @@ describe("batch print layout engine", () => {
     expect(five.widthCm * five.heightCm).toBeGreaterThan(4.19 * 2.79);
     const pages = paginateAssets(fakeAssets(11), layout, 5);
     expect(pages.map((page) => page.slots.length)).toEqual([5, 5, 1]);
+  });
+
+  it("gives every instant film a frame with the photo high and a wider bottom border", () => {
+    for (const preset of PHOTO_PRESETS.filter((item) => item.frameStyle)) {
+      const frame = FRAME_GEOMETRY_CM[preset.frameStyle as Exclude<typeof preset.frameStyle, "none" | undefined>];
+      expect(frame.outerWidth).toBeCloseTo(preset.widthCm, 2);
+      expect(frame.outerHeight).toBeCloseTo(preset.heightCm, 2);
+      const rect = getPhotoContentRectCm({ widthCm: preset.widthCm, heightCm: preset.heightCm, dpi: 300, frameStyle: preset.frameStyle });
+      const bottom = preset.heightCm - (rect.y + rect.height);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(preset.widthCm + 1e-9);
+      expect(bottom).toBeGreaterThan(rect.y * 2);
+      expect(rect.x).toBeCloseTo(preset.widthCm - (rect.x + rect.width), 1);
+    }
+    expect(PHOTO_PRESETS.find((preset) => preset.presetId === "polaroid-integral")?.frameStyle).toBe("polaroid-classic");
+    expect(FRAME_GEOMETRY_CM["polaroid-classic"].imageWidth).toBeCloseTo(7.9, 2);
   });
 });

@@ -1,7 +1,7 @@
 export type ExportFormat = "jpg" | "png" | "pdf" | "tif";
 export type PhotoFitMode = "cover" | "contain";
 export type SheetOrientation = "auto" | "portrait" | "landscape";
-export type PhotoFrameStyle = "none" | "polaroid-go";
+export type PhotoFrameStyle = "none" | "polaroid-go" | "polaroid-classic" | "instax-mini" | "instax-square" | "instax-wide";
 
 export interface PhysicalRectCm {
   x: number;
@@ -20,6 +20,33 @@ export const POLAROID_GO_GEOMETRY_CM = {
   // Questo valore resta quindi un parametro esplicito del preset.
   imageY: 0.32,
 } as const;
+
+export interface FrameGeometryCm {
+  outerWidth: number;
+  outerHeight: number;
+  imageX: number;
+  imageY: number;
+  imageWidth: number;
+  imageHeight: number;
+}
+
+/**
+ * Cornice delle pellicole istantanee: l'immagine sta in alto e il bordo basso è più ampio.
+ * Ingombro esterno e area immagine vengono dalle schede ufficiali dei produttori;
+ * la distanza dal bordo superiore (imageY) non è pubblicata ed è una stima ragionevole,
+ * esattamente come per Polaroid Go. L'immagine è centrata in orizzontale.
+ */
+export const FRAME_GEOMETRY_CM: Record<Exclude<PhotoFrameStyle, "none">, FrameGeometryCm> = {
+  "polaroid-go": { ...POLAROID_GO_GEOMETRY_CM },
+  "polaroid-classic": { outerWidth: 8.85, outerHeight: 10.75, imageWidth: 7.9, imageHeight: 7.9, imageX: 0.475, imageY: 0.6 },
+  "instax-mini": { outerWidth: 5.4, outerHeight: 8.6, imageWidth: 4.6, imageHeight: 6.2, imageX: 0.4, imageY: 0.5 },
+  "instax-square": { outerWidth: 7.2, outerHeight: 8.6, imageWidth: 6.2, imageHeight: 6.2, imageX: 0.5, imageY: 0.5 },
+  "instax-wide": { outerWidth: 10.8, outerHeight: 8.6, imageWidth: 9.9, imageHeight: 6.2, imageX: 0.45, imageY: 0.5 },
+};
+
+export function getFrameGeometry(frameStyle: PhotoFrameStyle | undefined): FrameGeometryCm | null {
+  return frameStyle && frameStyle !== "none" ? FRAME_GEOMETRY_CM[frameStyle] : null;
+}
 
 export interface PhotoAsset {
   id: string;
@@ -143,14 +170,16 @@ export const PHOTO_PRESETS: PhotoPreset[] = [
     label: "Polaroid classica (SX-70 / 600 / i-Type / I-2 / Now / Now+ / OneStep+)",
     widthCm: 8.85,
     heightCm: 10.75,
-    description: "Ingombro esterno 107,5 × 88,5 mm. La cornice interna non è applicata automaticamente perché il posizionamento non è ancora verificato nel preset.",
+    description: "Pellicola 88,5 × 107,5 mm con area immagine 79 × 79 mm: foto in alto e bordo inferiore ampio, come la vera Polaroid. La distanza dal bordo superiore è una stima.",
+    frameStyle: "polaroid-classic",
   },
   {
     presetId: "polaroid-round-frame",
     label: "Polaroid Round Frame",
     widthCm: 8.85,
     heightCm: 10.75,
-    description: "Ingombro esterno della Polaroid classica. Il ritaglio circolare non è applicato automaticamente.",
+    description: "Stessa pellicola della Polaroid classica (foto in alto, bordo inferiore ampio). La finestra circolare non è riprodotta: l'immagine resta quadrata.",
+    frameStyle: "polaroid-classic",
   },
   {
     presetId: "polaroid-go",
@@ -165,21 +194,24 @@ export const PHOTO_PRESETS: PhotoPreset[] = [
     label: "Fujifilm Instax Mini",
     widthCm: 5.4,
     heightCm: 8.6,
-    description: "Ingombro pellicola 86 × 54 mm; cornice interna non applicata automaticamente.",
+    description: "Pellicola 54 × 86 mm con area immagine 46 × 62 mm e bordo inferiore ampio. La distanza dal bordo superiore è una stima.",
+    frameStyle: "instax-mini",
   },
   {
     presetId: "instax-square",
     label: "Fujifilm Instax SQUARE",
     widthCm: 7.2,
     heightCm: 8.6,
-    description: "Ingombro pellicola 86 × 72 mm; cornice interna non applicata automaticamente.",
+    description: "Pellicola 72 × 86 mm con area immagine 62 × 62 mm e bordo inferiore ampio. La distanza dal bordo superiore è una stima.",
+    frameStyle: "instax-square",
   },
   {
     presetId: "instax-wide",
     label: "Fujifilm Instax WIDE",
     widthCm: 10.8,
     heightCm: 8.6,
-    description: "Ingombro pellicola 108 × 86 mm; cornice interna non applicata automaticamente.",
+    description: "Pellicola 108 × 86 mm con area immagine 99 × 62 mm e bordo inferiore ampio. La distanza dal bordo superiore è una stima.",
+    frameStyle: "instax-wide",
   },
   {
     presetId: "polaroid-hi-print-2x3",
@@ -232,13 +264,9 @@ function finiteNonNegative(value: number): number {
 }
 
 export function getPhotoContentRectCm(printSpec: PhotoPrintSpec): PhysicalRectCm {
-  if (printSpec.frameStyle === "polaroid-go") {
-    return {
-      x: POLAROID_GO_GEOMETRY_CM.imageX,
-      y: POLAROID_GO_GEOMETRY_CM.imageY,
-      width: POLAROID_GO_GEOMETRY_CM.imageWidth,
-      height: POLAROID_GO_GEOMETRY_CM.imageHeight,
-    };
+  const frame = getFrameGeometry(printSpec.frameStyle);
+  if (frame) {
+    return { x: frame.imageX, y: frame.imageY, width: frame.imageWidth, height: frame.imageHeight };
   }
 
   return {
