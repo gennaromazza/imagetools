@@ -57,7 +57,7 @@ assert.ok(src("components/SocialFraming.tsx").includes("Inquadratura") && src("c
 const carouselPagePath = join(root, "website", "strumenti", "album-flow", "caroselli-instagram");
 assert.ok(existsSync(join(carouselPagePath, "index.html")), "pagina del sito sui caroselli assente");
 const carouselPage = readFileSync(join(carouselPagePath, "index.html"), "utf8");
-assert.ok(carouselPage.includes('rel="canonical" href="https://filex-suite.web.app/strumenti/album-flow/caroselli-instagram/"'), "canonical della pagina caroselli errato");
+assert.ok(carouselPage.includes('rel="canonical" href="https://filexsuite.com/strumenti/album-flow/caroselli-instagram/"'), "canonical della pagina caroselli errato");
 assert.ok(carouselPage.includes("Album Flow") && carouselPage.includes("Image Select Pro") && carouselPage.includes("FileX All Access"), "la pagina deve dire che è parte di Album Flow, da dove arrivano le foto e che è inclusa in All Access");
 assert.ok(carouselPage.includes("Ancora da completare") && carouselPage.includes("Pubblicazione diretta"), "la pagina deve dichiarare i limiti attuali");
 for (const block of carouselPage.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
