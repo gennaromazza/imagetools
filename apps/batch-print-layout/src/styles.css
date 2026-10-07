@@ -1300,3 +1300,25 @@ kbd {
   font-weight: 700;
   pointer-events: none;
 }
+
+.result-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid #cfe5d8;
+  border-radius: 10px;
+  background: #eef6f1;
+}
+
+.result-card span,
+.result-card small {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.result-card strong {
+  color: #11644e;
+  font-size: 19px;
+  font-variant-numeric: tabular-nums;
+}

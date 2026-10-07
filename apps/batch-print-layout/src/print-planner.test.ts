@@ -13,6 +13,7 @@ import {
   resolvePaperOption,
   resolvePhotoSpec,
   shrinkGoalToSheet,
+  suggestBorderless,
   toSheetSpec,
   type PrintGoal,
 } from "./print-planner";
@@ -166,5 +167,17 @@ describe("print planner", () => {
     const paper = resolvePaperOption({ kind: "count", count: 1, aspectId: "free" }, { ...DEFAULT_PAPER_CHOICE, paperId: media[0].id }, "a4");
     expect(paper.kind).toBe("media");
     expect(toSheetSpec(paper, DEFAULT_PAPER_CHOICE).marginMm).toBe(0);
+  });
+
+  it("suggests borderless printing when two 10x15 almost fit a 15x20", () => {
+    const goal: PrintGoal = { kind: "custom", widthCm: 10, heightCm: 15 };
+    const paper = resolvePaperOption(goal, { ...DEFAULT_PAPER_CHOICE, paperId: "15x20" }, "a4");
+    const suggestion = suggestBorderless(goal, paper, DEFAULT_PAPER_CHOICE, 300);
+    expect(suggestion).toEqual({ currentPerPage: 1, borderlessPerPage: 2 });
+    const borderless = { ...DEFAULT_PAPER_CHOICE, marginMm: 0, gapMm: 0 };
+    expect(suggestBorderless(goal, paper, borderless, 300)).toBeNull();
+    const evaluation = evaluatePapers(goal, borderless, OPTIONS).find((item) => item.paper.id === "15x20")!;
+    expect(evaluation.perPage).toBe(2);
+    expect(suggestBorderless({ kind: "count", count: 2, aspectId: "free" }, paper, DEFAULT_PAPER_CHOICE, 300)).toBeNull();
   });
 });

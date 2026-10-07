@@ -176,6 +176,14 @@ export function GoalStep({ wb }: { wb: Workbench }) {
         </section>
       ) : null}
 
+      {wb.borderlessSuggestion ? (
+        <Callout tone="advice">
+          Con i margini attuali su {wb.paper.label} {wb.borderlessSuggestion.currentPerPage === 0 ? "questa misura non entra" : `ne entra ${wb.borderlessSuggestion.currentPerPage} per foglio`}.
+          Stampando a bordo vivo (margine e distanza a zero) ne entrano {wb.borderlessSuggestion.borderlessPerPage}: serve una stampante che stampi senza bordi.
+          <button type="button" className="link-button" onClick={wb.useBorderless}>Usa margini a zero</button>
+        </Callout>
+      ) : null}
+
       {wb.goalKind === "format" && wb.goalValid && !wb.ready ? (
         <Callout tone="warning">Questo formato non entra in {wb.paper.label}: scegline un altro oppure torna indietro e cambia carta.</Callout>
       ) : null}

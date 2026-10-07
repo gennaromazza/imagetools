@@ -33,6 +33,7 @@ import {
   resolvePaperOption,
   resolvePhotoSpec,
   shrinkGoalToSheet,
+  suggestBorderless,
   toSheetSpec,
   type PaperChoice,
   type PrintGoal,
@@ -192,6 +193,10 @@ export function useWorkbench() {
     if (!best || best.paper.id === paper.id || best.perPage <= perPage) return null;
     return { paperId: best.paper.id, label: best.paper.label, perPage: best.perPage, sheetsNeeded: best.sheetsNeeded };
   }, [evaluations, goal.kind, paper.id, paper.kind, perPage, ready]);
+  const borderlessSuggestion = useMemo(
+    () => suggestBorderless(goal, paper, paperChoice, dpi),
+    [dpi, goal, paper, paperChoice],
+  );
   const orientationAdvice = useMemo(
     () => (goalValid ? adviseOrientation(goal, paper, paperChoice, dpi) : null),
     [dpi, goal, goalValid, paper, paperChoice],
@@ -677,6 +682,11 @@ export function useWorkbench() {
   }, []);
 
   const setMarginMm = useCallback((marginMm: number) => setPaperChoice((current) => ({ ...current, marginMm })), []);
+  /** Stampa a bordo vivo: azzera margine esterno e distanza tra le foto. */
+  const useBorderless = useCallback(() => {
+    setPaperChoice((current) => ({ ...current, marginMm: 0, gapMm: 0 }));
+    setPreviewPageIndex(0);
+  }, []);
   const setGapMm = useCallback((gapMm: number) => setPaperChoice((current) => ({ ...current, gapMm })), []);
 
   /** Riduce la misura personalizzata finché entra nella carta scelta. */
@@ -1018,6 +1028,8 @@ export function useWorkbench() {
     recommendedPaperId,
     formatEvaluations,
     paperSuggestion,
+    borderlessSuggestion,
+    useBorderless,
     choosePaper,
     setCustomPaperSize,
     setOrientation,

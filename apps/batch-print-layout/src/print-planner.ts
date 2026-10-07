@@ -303,6 +303,35 @@ export function evaluateFormats(
   }));
 }
 
+export interface BorderlessSuggestion {
+  currentPerPage: number;
+  borderlessPerPage: number;
+}
+
+/**
+ * Con margini e distanza a zero (stampa a bordo vivo) entrano più foto?
+ * È il caso tipico di due 10×15 su un 15×20, che con 3 mm di margine mancano per pochi millimetri.
+ */
+export function suggestBorderless(
+  goal: PrintGoal,
+  paper: PaperOption,
+  choice: PaperChoice,
+  dpi: number,
+): BorderlessSuggestion | null {
+  if (goal.kind === "count" || paper.kind === "media" || !isGoalValid(goal)) return null;
+  const perPage = (candidate: PaperChoice): number => {
+    const sheet = toSheetSpec(paper, candidate);
+    const resolved = resolvePhotoSpec(goal, sheet, dpi);
+    if (!resolved.spec || !resolved.fits) return 0;
+    return getPerPage(goal, calculateGridLayout(resolved.spec, sheet));
+  };
+  const currentPerPage = perPage(choice);
+  const borderlessPerPage = perPage({ ...choice, marginMm: 0, gapMm: 0 });
+  const alreadyBorderless = (choice.marginMm ?? paper.marginMm) === 0 && (choice.gapMm ?? paper.gapMm) === 0;
+  if (alreadyBorderless || borderlessPerPage <= currentPerPage) return null;
+  return { currentPerPage, borderlessPerPage };
+}
+
 export interface OrientationAdvice {
   portraitCount: number;
   landscapeCount: number;
