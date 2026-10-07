@@ -32,6 +32,14 @@
 
 
 
+## 2026-10-07 - Print Flow 0.2.0
+
+- Nuovo nome e nuova interfaccia: Batch Print Layout diventa Print Flow e ti guida passo dopo passo: Foto, Carta, Cosa stampi, Impagina, Esporta. Scegli la carta che hai (anche una misura tua o la carta Hi-Print) e il programma ti dice quante foto entrano, consiglia la carta che spreca meno e suggerisce se stampare in verticale o in orizzontale.
+- Nuovo: «Più foto su ogni pagina». Scegli 1, 2, 3, 4, 6, 8, 9, 12 o un altro numero e Print Flow calcola la misura più grande che ci sta, senza strisce. Con il formato istantaneo (Polaroid, Instax, Hi-Print) vedi su ogni formato quante foto entrano nella carta scelta; se con i margini standard ne manca una per pochi millimetri, ti propone la stampa a bordo vivo.
+- Nuovo: Polaroid classica, Polaroid Round Frame e Instax Mini, Square e Wide hanno la cornice vera, con la foto in alto e il bordo inferiore ampio, insieme alla Polaroid Go.
+- Nuovo: ogni foto ha le sue copie, le foto si riordinano trascinandole e si aggiungono trascinando file o intere cartelle sulla pagina. In «Impagina» regoli margini e distanze con il conteggio dei fogli dal vivo, inquadri trascinando le foto e rifinisci con bianco e nero, logo, bordo e segni di taglio.
+- Corretto: i campi numerici non permettevano di scrivere misure come 15, l'anteprima non rispettava le misure del foglio e il numero di foto per pagina non veniva rispettato.
+
 ## 2026-10-06 - Album Flow 0.2.16
 
 - Nuovo: caroselli e storie per Instagram dal tuo album. Dal pulsante «Carosello» (o da «Nuovo carosello» nella Home) Album Flow propone subito 10 slide con le foto migliori già in pagina, in quattro stili e 50 modelli: copertine tipografiche, foto tra due parole, collage con bordo bianco, polaroid, foto ad arco, panorama su più slide e le pagine vere dell'album in una scena. Formati Post 4:5, quadrato e Storia 9:16, da 2 a 20 slide con il cursore «Numero di slide»; esporti un JPG numerato per slide e il testo del post. Le foto si segnano «Per i social» (tasto destro, «Segna come», o il tasto I, anche dallo spread) e «Riscegli le foto» aggiorna la scelta quando cambiano stelle o segnalini. Le foto si inquadrano nello spazio (trascinamento, rotella, forma 1:1, 4:5, 3:2, 16:9), i testi si ritoccano (carattere, dimensione, colore, allineamento) e «Suggerisci» propone titoli e frasi dalla libreria editoriale. Ogni carosello esce con un ordine diverso dei modelli; «Altra variante» lo rifà tenendo foto e testi. I caroselli restano sul computer in cui li crei (non nel file progetto né nel backup Drive) e Album Flow non pubblica su Instagram: esporta le immagini.
