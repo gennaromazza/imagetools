@@ -681,13 +681,40 @@ export function useWorkbench() {
     setPreviewPageIndex(0);
   }, []);
 
-  const setMarginMm = useCallback((marginMm: number) => setPaperChoice((current) => ({ ...current, marginMm })), []);
+  /**
+   * Applica margine o distanza solo fin dove la foto entra ancora nel foglio:
+   * oltre, si usa il massimo possibile e lo si dice, invece di bloccare il percorso.
+   */
+  const updateSpacing = useCallback((key: "marginMm" | "gapMm", requested: number) => {
+    const fitsWith = (value: number): boolean => {
+      const candidate = { ...paperChoice, [key]: value };
+      const candidateSheet = toSheetSpec(paper, candidate);
+      const resolved = resolvePhotoSpec(goal, candidateSheet, dpi);
+      return Boolean(resolved.fits && resolved.spec && calculateGridLayout(resolved.spec, candidateSheet).photosPerSheet > 0);
+    };
+    let applied = requested;
+    if (!fitsWith(requested) && fitsWith(0)) {
+      let low = 0;
+      let high = requested;
+      for (let step = 0; step < 20; step += 1) {
+        const mid = (low + high) / 2;
+        if (fitsWith(mid)) low = mid;
+        else high = mid;
+      }
+      applied = Math.floor(low * 10) / 10;
+      setStatus(`Oltre ${applied} mm la foto non entrerebbe più nel foglio: ho usato ${applied} mm.`);
+    }
+    setPaperChoice((current) => ({ ...current, [key]: applied }));
+    setPreviewPageIndex(0);
+  }, [dpi, goal, paper, paperChoice]);
+
+  const setMarginMm = useCallback((value: number) => updateSpacing("marginMm", value), [updateSpacing]);
   /** Stampa a bordo vivo: azzera margine esterno e distanza tra le foto. */
   const useBorderless = useCallback(() => {
     setPaperChoice((current) => ({ ...current, marginMm: 0, gapMm: 0 }));
     setPreviewPageIndex(0);
   }, []);
-  const setGapMm = useCallback((gapMm: number) => setPaperChoice((current) => ({ ...current, gapMm })), []);
+  const setGapMm = useCallback((value: number) => updateSpacing("gapMm", value), [updateSpacing]);
 
   /** Riduce la misura personalizzata finché entra nella carta scelta. */
   const shrinkCustomGoalToPaper = useCallback(() => {

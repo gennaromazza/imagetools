@@ -20,7 +20,7 @@ const LAST_STEP = STEPS.length - 1;
 
 const PREVIEW_CAPTIONS: Record<string, string> = {
   paper: "Anteprima di esempio sulla carta scelta (4 foto per pagina). Al prossimo passo decidi cosa stampare.",
-  goal: "Trascina una foto sull'anteprima per riposizionarla.",
+  goal: "Anteprima di esempio. Inquadratura, margini e ritocchi si sistemano al passo «Impagina».",
 };
 
 export function App() {
@@ -72,7 +72,7 @@ export function App() {
             {stepId === "export" ? <ExportStep wb={wb} /> : null}
           </aside>
           <section className="stage">
-            <SheetPreview wb={wb} interactive={stepId !== "export"} caption={PREVIEW_CAPTIONS[stepId]} />
+            <SheetPreview wb={wb} interactive={stepId === "layout"} caption={PREVIEW_CAPTIONS[stepId]} />
             {stepId === "layout" ? <PhotoEditor wb={wb} /> : null}
           </section>
         </main>

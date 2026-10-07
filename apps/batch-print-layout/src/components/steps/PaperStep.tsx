@@ -1,6 +1,6 @@
 import { CUSTOM_PAPER_ID, getMediaPapers, getStandardPapers, type PaperOption } from "../../print-planner";
 import type { Workbench } from "../../hooks/useWorkbench";
-import { Fold, NumberField, SegmentedField } from "../ui";
+import { NumberField, SegmentedField } from "../ui";
 
 function formatCm(value: number): string {
   return String(Math.round(value * 100) / 100).replace(".", ",");
@@ -90,15 +90,7 @@ export function PaperStep({ wb }: { wb: Workbench }) {
             ? "Con «Scegli tu per me» il programma userà l'orientamento che fa entrare più foto e te lo dirà."
             : <>Si stampa <strong>{printsPortrait ? "in verticale" : "in orizzontale"}</strong>: foglio {formatCm(wb.layout.sheetWidthCm)} × {formatCm(wb.layout.sheetHeightCm)} cm.</>}
         </p>
-        <Fold title="Margini e distanze tra le foto">
-          <div className="grid-two">
-            <NumberField label="Margine esterno" suffix="mm" value={wb.sheet.marginMm} min={0} max={100} step={0.5} disabled={wb.paper.kind === "media"} onChange={wb.setMarginMm} />
-            <NumberField label="Distanza tra foto" suffix="mm" value={wb.sheet.gapMm} min={0} max={100} step={0.5} disabled={wb.paper.kind === "media"} onChange={wb.setGapMm} />
-          </div>
-          <p className="slide__hint">
-            Il margine è la distanza minima dal bordo della carta (molte stampanti non arrivano al bordo); la distanza è lo spazio vuoto tra due foto, utile per ritagliare.
-          </p>
-        </Fold>
+        <p className="slide__hint">Margini e distanze tra le foto li regoli al passo «Impagina», guardando il foglio.</p>
       </section>
     </div>
   );

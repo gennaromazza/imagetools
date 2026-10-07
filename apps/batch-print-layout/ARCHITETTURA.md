@@ -3,6 +3,16 @@
 Percorso guidato a 5 passi: **Foto → Carta → Cosa stampi → Impagina → Esporta**.
 Ogni passo si sblocca quando il precedente è completo (`App.tsx`, array `gates`).
 
+## Una responsabilità per passo
+
+| Passo | Decide | Non tocca |
+|---|---|---|
+| Carta | carta e orientamento | margini, foto |
+| Cosa stampi | quante foto o che formato/misura; mostra quante ne entrano e i consigli (altra carta, orientamento, bordo vivo) | inquadratura, margini, ritocchi |
+| Impagina | margini e distanze, riempimento, inquadratura, bianco e nero, logo, bordo, segni di taglio | quantità e misura |
+
+I margini cambiano il conteggio: `updateSpacing` (in `useWorkbench`) li limita al massimo per cui la foto entra ancora nel foglio, così il percorso non si blocca.
+
 ## Principio di progetto
 
 Tutto discende da quattro dati dell'utente e viene **derivato**, mai sincronizzato con effetti:

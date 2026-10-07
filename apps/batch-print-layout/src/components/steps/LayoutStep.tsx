@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { ChevronLeft, ChevronRight, ExternalLink, FolderOpen, ImagePlus, Info, Keyboard, RefreshCw, RotateCcw } from "lucide-react";
 import type { LogoOverlaySpec } from "../../print-engine";
 import type { Workbench } from "../../hooks/useWorkbench";
-import { Fold, NumberField, RangeField, SegmentedField, SelectField } from "../ui";
+import { Callout, Fold, NumberField, RangeField, SegmentedField, SelectField } from "../ui";
 
 /** Impostazioni che valgono per tutte le foto: adattamento, bianco e nero, logo, bordo, segni di taglio. */
 export function LayoutControls({ wb }: { wb: Workbench }) {
@@ -15,6 +15,29 @@ export function LayoutControls({ wb }: { wb: Workbench }) {
         <h2>Impagina e rifinisci</h2>
         <p>Trascina le foto sul foglio per inquadrarle meglio. Le impostazioni qui sotto valgono per tutte.</p>
       </header>
+
+      <section className="slide__section">
+        <h3>Margini e distanze</h3>
+        <div className="grid-two">
+          <NumberField label="Margine esterno" suffix="mm" value={wb.sheet.marginMm} min={0} max={100} step={0.5} disabled={wb.paper.kind === "media"} onChange={wb.setMarginMm} />
+          <NumberField label="Distanza tra foto" suffix="mm" value={wb.sheet.gapMm} min={0} max={100} step={0.5} disabled={wb.paper.kind === "media"} onChange={wb.setGapMm} />
+        </div>
+        <div className="result-card">
+          <span>Con questi margini</span>
+          <strong>{wb.perPage} per foglio · {wb.pages.length} {wb.pages.length === 1 ? "foglio" : "fogli"}</strong>
+          <small>
+            {wb.goalKind === "count"
+              ? `Ogni foto ${String(wb.printSpec.widthCm).replace(".", ",")} × ${String(wb.printSpec.heightCm).replace(".", ",")} cm: cambiando i margini la misura si ricalcola e le inquadrature tornano automatiche.`
+              : "Il margine è la distanza minima dal bordo della carta; la distanza è lo spazio tra due foto."}
+          </small>
+        </div>
+        {wb.borderlessSuggestion ? (
+          <Callout tone="advice">
+            A margini zero ne entrerebbero {wb.borderlessSuggestion.borderlessPerPage} per foglio (serve una stampante senza bordi).
+            <button type="button" className="link-button" onClick={wb.useBorderless}>Usa margini a zero</button>
+          </Callout>
+        ) : null}
+      </section>
 
       <section className="slide__section">
         <SegmentedField

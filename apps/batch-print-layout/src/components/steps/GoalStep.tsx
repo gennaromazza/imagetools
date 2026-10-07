@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { getFrameGeometry, PHOTO_COUNT_ASPECTS } from "../../print-engine";
 import { MAX_PHOTO_EDGE_CM, MAX_PHOTOS_PER_PAGE, MIN_PHOTO_EDGE_CM, getPhotoPreset } from "../../print-planner";
 import type { GoalKind, Workbench } from "../../hooks/useWorkbench";
-import { Callout, NumberField, SegmentedField, SelectField } from "../ui";
+import { Callout, NumberField, SelectField } from "../ui";
 
 const QUICK_COUNTS = [1, 2, 3, 4, 6, 8, 9, 12];
 
@@ -51,7 +51,7 @@ export function GoalStep({ wb }: { wb: Workbench }) {
     <div className="slide">
       <header className="slide__intro">
         <h2>Che cosa stampi su {wb.paper.label}?</h2>
-        <p>Scegli come vuoi decidere la misura delle foto: ti mostro sempre quante ne entrano su questa carta.</p>
+        <p>Scegli quante foto vuoi e di che misura: ti mostro sempre quante ne entrano su questa carta. Inquadratura e margini li sistemi al passo dopo.</p>
       </header>
 
       <div className="choice-grid" role="radiogroup" aria-label="Cosa vuoi stampare">
@@ -187,21 +187,6 @@ export function GoalStep({ wb }: { wb: Workbench }) {
       {wb.goalKind === "format" && wb.goalValid && !wb.ready ? (
         <Callout tone="warning">Questo formato non entra in {wb.paper.label}: scegline un altro oppure torna indietro e cambia carta.</Callout>
       ) : null}
-
-      <section className="slide__section">
-        <h3>Come riempire ogni foto?</h3>
-        <SegmentedField
-          value={wb.adjustments.fitMode}
-          onChange={(value) => wb.handleFitModeChange(value as "cover" | "contain")}
-          options={[
-            { value: "cover", label: "Riempi e ritaglia" },
-            { value: "contain", label: "Tutta la foto, senza ritaglio" },
-          ]}
-        />
-        <p className="slide__hint">
-          «Riempi» taglia l'eccedenza per coprire tutto lo spazio: trascina le foto sull'anteprima per scegliere l'inquadratura. «Tutta la foto» la mostra intera e lascia un bordo bianco dove serve.
-        </p>
-      </section>
 
       {adviceText ? (
         <Callout tone="advice">
