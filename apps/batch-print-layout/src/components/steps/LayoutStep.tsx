@@ -23,7 +23,7 @@ export function LayoutControls({ wb }: { wb: Workbench }) {
           onChange={(value) => wb.handleFitModeChange(value as "cover" | "contain")}
           options={[
             { value: "cover", label: "Riempi e ritaglia" },
-            { value: "contain", label: "Tutta, con bordo" },
+            { value: "contain", label: "Tutta la foto, senza ritaglio" },
           ]}
         />
         <label className="check-row">

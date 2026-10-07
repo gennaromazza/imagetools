@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { PHOTO_COUNT_ASPECTS, PHOTO_PRESETS } from "../../print-engine";
 import { MAX_PHOTO_EDGE_CM, MAX_PHOTOS_PER_PAGE, MIN_PHOTO_EDGE_CM, getPhotoPreset } from "../../print-planner";
 import type { GoalKind, Workbench } from "../../hooks/useWorkbench";
-import { Callout, NumberField, SelectField } from "../ui";
+import { Callout, NumberField, SegmentedField, SelectField } from "../ui";
 
 const QUICK_COUNTS = [1, 2, 3, 4, 6, 8, 9, 12];
 
@@ -134,6 +134,21 @@ export function GoalStep({ wb }: { wb: Workbench }) {
           <p className="slide__hint">Al prossimo passo vedrai su quali carte questa misura entra e quante foto ci stanno.</p>
         </section>
       ) : null}
+
+      <section className="slide__section">
+        <h3>Come riempire ogni foto?</h3>
+        <SegmentedField
+          value={wb.adjustments.fitMode}
+          onChange={(value) => wb.handleFitModeChange(value as "cover" | "contain")}
+          options={[
+            { value: "cover", label: "Riempi e ritaglia" },
+            { value: "contain", label: "Tutta la foto, senza ritaglio" },
+          ]}
+        />
+        <p className="slide__hint">
+          «Riempi» taglia l'eccedenza per coprire tutto lo spazio: trascina le foto sull'anteprima per scegliere l'inquadratura. «Tutta la foto» la mostra intera e lascia un bordo bianco dove serve.
+        </p>
+      </section>
 
       {wb.goalValid && !wb.evaluations.some((evaluation) => evaluation.fits) ? (
         <Callout tone="warning">

@@ -19,8 +19,8 @@ const STEPS: StepDefinition[] = [
 const LAST_STEP = STEPS.length - 1;
 
 const PREVIEW_CAPTIONS: Record<string, string> = {
-  goal: "Anteprima con la carta consigliata: la scegli al prossimo passo.",
-  paper: "Anteprima con la carta selezionata.",
+  goal: "Anteprima con la carta consigliata (la scegli al prossimo passo). Trascina una foto per riposizionarla.",
+  paper: "Anteprima con la carta selezionata. Trascina una foto per riposizionarla.",
 };
 
 export function App() {
@@ -72,7 +72,7 @@ export function App() {
             {stepId === "export" ? <ExportStep wb={wb} /> : null}
           </aside>
           <section className="stage">
-            <SheetPreview wb={wb} interactive={stepId === "layout"} caption={PREVIEW_CAPTIONS[stepId]} />
+            <SheetPreview wb={wb} interactive={stepId !== "export"} caption={PREVIEW_CAPTIONS[stepId]} />
             {stepId === "layout" ? <PhotoEditor wb={wb} /> : null}
           </section>
         </main>
