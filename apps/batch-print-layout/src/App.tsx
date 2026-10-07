@@ -11,16 +11,16 @@ import { ExportStep } from "./components/steps/ExportStep";
 
 const STEPS: StepDefinition[] = [
   { id: "photos", label: "Foto" },
-  { id: "goal", label: "Cosa stampi" },
   { id: "paper", label: "Carta" },
+  { id: "goal", label: "Cosa stampi" },
   { id: "layout", label: "Impagina" },
   { id: "export", label: "Esporta" },
 ];
 const LAST_STEP = STEPS.length - 1;
 
 const PREVIEW_CAPTIONS: Record<string, string> = {
-  goal: "Anteprima con la carta consigliata (la scegli al prossimo passo). Trascina una foto per riposizionarla.",
-  paper: "Anteprima con la carta selezionata. Trascina una foto per riposizionarla.",
+  paper: "Anteprima di esempio sulla carta scelta (4 foto per pagina). Al prossimo passo decidi cosa stampare.",
+  goal: "Trascina una foto sull'anteprima per riposizionarla.",
 };
 
 export function App() {
@@ -30,8 +30,8 @@ export function App() {
   // Ogni passo si sblocca quando il precedente è completo.
   const gates = [
     { ok: wb.assets.length > 0, hint: "Scegli almeno una foto per continuare." },
-    { ok: wb.goalValid, hint: wb.goalKind === "format" ? "Scegli un formato per continuare." : "Inserisci una misura valida per continuare." },
-    { ok: wb.ready, hint: "Scegli una carta in cui la foto entra." },
+    { ok: true, hint: "" },
+    { ok: wb.goalValid && wb.ready, hint: !wb.goalValid ? (wb.goalKind === "format" ? "Scegli un formato per continuare." : "Inserisci una misura valida per continuare.") : "La foto non entra nella carta: scegli un altro formato o cambia carta." },
     { ok: true, hint: "" },
     { ok: wb.ready, hint: "" },
   ];

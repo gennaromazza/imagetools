@@ -3,7 +3,9 @@ import { photoFitsSheet } from "./print-engine";
 import {
   adviseOrientation,
   DEFAULT_PAPER_CHOICE,
+  evaluateFormats,
   evaluatePapers,
+  getAllPapers,
   getAvailablePapers,
   getThumbnailSlots,
   isGoalValid,
@@ -146,5 +148,23 @@ describe("print planner", () => {
     const consumed = (evaluation: (typeof seven)[number]) => evaluation.sheetsNeeded * evaluation.paper.widthCm * evaluation.paper.heightCm;
     const cheapest = Math.min(...seven.filter((evaluation) => evaluation.fits && evaluation.paper.id !== "letter").map(consumed));
     expect(consumed(recommended)).toBeLessThanOrEqual(cheapest * 1.08);
+  });
+
+  it("lists every format with how many fit on the paper chosen first", () => {
+    const a4 = resolvePaperOption({ kind: "count", count: 1, aspectId: "free" }, { ...DEFAULT_PAPER_CHOICE, paperId: "a4" }, "a4");
+    const formats = evaluateFormats(a4, DEFAULT_PAPER_CHOICE, OPTIONS);
+    expect(formats.length).toBeGreaterThan(5);
+    expect(formats.every((item) => item.evaluation.fits && item.evaluation.perPage >= 1)).toBe(true);
+    const small = resolvePaperOption({ kind: "count", count: 1, aspectId: "free" }, { ...DEFAULT_PAPER_CHOICE, paperId: "10x15" }, "a4");
+    const onSmall = new Map(evaluateFormats(small, DEFAULT_PAPER_CHOICE, OPTIONS).map((item) => [item.preset.presetId, item.evaluation]));
+    expect(onSmall.get("polaroid-go")!.perPage).toBeGreaterThan(onSmall.get("polaroid-integral")!.perPage);
+  });
+
+  it("offers Hi-Print supports as papers of their own, one photo per sheet", () => {
+    const media = getAllPapers().filter((paper) => paper.kind === "media");
+    expect(media.length).toBe(3);
+    const paper = resolvePaperOption({ kind: "count", count: 1, aspectId: "free" }, { ...DEFAULT_PAPER_CHOICE, paperId: media[0].id }, "a4");
+    expect(paper.kind).toBe("media");
+    expect(toSheetSpec(paper, DEFAULT_PAPER_CHOICE).marginMm).toBe(0);
   });
 });

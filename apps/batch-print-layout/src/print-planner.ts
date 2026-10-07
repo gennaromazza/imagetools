@@ -35,7 +35,8 @@ export interface PaperOption {
 }
 
 export const CUSTOM_PAPER_ID = "custom";
-export const MEDIA_PAPER_ID = "media";
+export const MEDIA_PAPER_PREFIX = "media:";
+export const DEFAULT_PAPER_ID = "a4";
 
 export interface PaperChoice {
   /** null = nessuna scelta ancora: vale la carta consigliata per l'obiettivo. */
@@ -91,14 +92,10 @@ export function isGoalValid(goal: PrintGoal): boolean {
     && goal.heightCm <= MAX_PHOTO_EDGE_CM;
 }
 
-/** Il preset è un supporto reale (carta adesiva Hi-Print): ha senso usarlo come foglio. */
-export function goalOffersMediaPaper(goal: PrintGoal): PaperOption | null {
-  if (goal.kind !== "format") return null;
-  const preset = getPhotoPreset(goal.presetId);
-  if (!preset?.media) return null;
+function mediaPaperFor(preset: PhotoPreset): PaperOption {
   return {
-    id: MEDIA_PAPER_ID,
-    label: `Supporto originale ${preset.widthCm} × ${preset.heightCm} cm`,
+    id: `${MEDIA_PAPER_PREFIX}${preset.presetId}`,
+    label: `Carta ${preset.label} (${preset.widthCm} × ${preset.heightCm} cm)`,
     widthCm: preset.widthCm,
     heightCm: preset.heightCm,
     marginMm: 0,
@@ -107,6 +104,24 @@ export function goalOffersMediaPaper(goal: PrintGoal): PaperOption | null {
   };
 }
 
+/** Supporti reali (carta adesiva Hi-Print): si scelgono come carta, una foto per foglio. */
+export function getMediaPapers(): PaperOption[] {
+  return PHOTO_PRESETS.filter((preset) => preset.media).map(mediaPaperFor);
+}
+
+/** Tutte le carte tra cui l'utente può scegliere al passo «Carta». */
+export function getAllPapers(): PaperOption[] {
+  return [...getStandardPapers(), ...getMediaPapers()];
+}
+
+/** Il preset è un supporto reale: ha senso usarlo come foglio. */
+export function goalOffersMediaPaper(goal: PrintGoal): PaperOption | null {
+  if (goal.kind !== "format") return null;
+  const preset = getPhotoPreset(goal.presetId);
+  return preset?.media ? mediaPaperFor(preset) : null;
+}
+
+/** Carte confrontate per consigliare un'alternativa all'obiettivo: standard, più il supporto del formato scelto. */
 export function getAvailablePapers(goal: PrintGoal): PaperOption[] {
   const media = goalOffersMediaPaper(goal);
   return media ? [media, ...getStandardPapers()] : getStandardPapers();
@@ -125,9 +140,10 @@ export function buildCustomPaper(choice: PaperChoice): PaperOption {
 }
 
 export function resolvePaperOption(goal: PrintGoal, choice: PaperChoice, recommendedId: string): PaperOption {
+  void goal;
   const id = choice.paperId ?? recommendedId;
   if (id === CUSTOM_PAPER_ID) return buildCustomPaper(choice);
-  const papers = getAvailablePapers(goal);
+  const papers = getAllPapers();
   return papers.find((paper) => paper.id === id) ?? papers.find((paper) => paper.id === recommendedId) ?? papers[0];
 }
 
@@ -268,6 +284,23 @@ export function recommendPaperId(goal: PrintGoal, evaluations: PaperEvaluation[]
   const candidates = pool.filter((evaluation) => consumed(evaluation) <= minConsumed * PAPER_AREA_TOLERANCE);
   candidates.sort((a, b) => (a.sheetsNeeded - b.sheetsNeeded) || (sheetArea(a) - sheetArea(b)));
   return candidates[0].paper.id;
+}
+
+export interface FormatEvaluation {
+  preset: PhotoPreset;
+  evaluation: PaperEvaluation;
+}
+
+/** Quanti esemplari di ogni formato istantaneo entrano nella carta scelta. */
+export function evaluateFormats(
+  paper: PaperOption,
+  choice: PaperChoice,
+  options: { dpi: number; printCount: number },
+): FormatEvaluation[] {
+  return PHOTO_PRESETS.map((preset) => ({
+    preset,
+    evaluation: evaluatePaper({ kind: "format", presetId: preset.presetId }, paper, choice, options),
+  }));
 }
 
 export interface OrientationAdvice {

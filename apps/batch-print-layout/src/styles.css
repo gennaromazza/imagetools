@@ -1188,3 +1188,19 @@ kbd {
     display: inline;
   }
 }
+
+.format-card--off {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.format-card__count {
+  color: #11644e;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.format-card__none {
+  color: var(--ink-faint);
+  font-size: 12px;
+}

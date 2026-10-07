@@ -1,6 +1,6 @@
 # Batch Print Layout — architettura
 
-Percorso guidato a 5 passi: **Foto → Cosa stampi → Carta → Impagina → Esporta**.
+Percorso guidato a 5 passi: **Foto → Carta → Cosa stampi → Impagina → Esporta**.
 Ogni passo si sblocca quando il precedente è completo (`App.tsx`, array `gates`).
 
 ## Principio di progetto

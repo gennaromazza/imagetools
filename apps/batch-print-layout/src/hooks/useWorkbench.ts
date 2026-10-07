@@ -20,6 +20,8 @@ import {
   adviseOrientation,
   CUSTOM_PAPER_ID,
   DEFAULT_PAPER_CHOICE,
+  DEFAULT_PAPER_ID,
+  evaluateFormats,
   evaluatePapers,
   getPerPage,
   getPhotoPreset,
@@ -157,12 +159,17 @@ export function useWorkbench() {
     () => evaluatePapers(goal, paperChoice, { dpi, printCount }),
     [dpi, goal, paperChoice, printCount],
   );
-  const recommendedPaperId = evaluations.find((evaluation) => evaluation.recommended)?.paper.id ?? "a4";
+  const recommendedPaperId = evaluations.find((evaluation) => evaluation.recommended)?.paper.id ?? DEFAULT_PAPER_ID;
+  // La carta si sceglie prima dell'obiettivo: non dipende mai da esso.
   const paper = useMemo(
-    () => resolvePaperOption(goal, paperChoice, recommendedPaperId),
-    [goal, paperChoice, recommendedPaperId],
+    () => resolvePaperOption(goal, paperChoice, DEFAULT_PAPER_ID),
+    [goal, paperChoice],
   );
   const sheet = useMemo(() => toSheetSpec(paper, paperChoice), [paper, paperChoice]);
+  const formatEvaluations = useMemo(
+    () => evaluateFormats(paper, paperChoice, { dpi, printCount }),
+    [dpi, paper, paperChoice, printCount],
+  );
   const resolvedPhoto = useMemo(() => resolvePhotoSpec(goal, sheet, dpi), [dpi, goal, sheet]);
   const printSpec = resolvedPhoto.spec ?? { ...PLACEHOLDER_PHOTO, dpi };
   const layout = useMemo(() => calculateGridLayout(printSpec, sheet), [printSpec, sheet]);
@@ -176,6 +183,13 @@ export function useWorkbench() {
     () => (ready && assets.length > 0 ? paginateAssets(printAssets, layout, perPage) : []),
     [assets.length, layout, perPage, printAssets, ready],
   );
+  // Alternativa più efficiente alla carta scelta, solo se fa entrare più foto.
+  const paperSuggestion = useMemo(() => {
+    if (!ready || goal.kind === "count" || paper.kind === "media") return null;
+    const best = evaluations.find((evaluation) => evaluation.recommended && evaluation.fits);
+    if (!best || best.paper.id === paper.id || best.perPage <= perPage) return null;
+    return { paperId: best.paper.id, label: best.paper.label, perPage: best.perPage, sheetsNeeded: best.sheetsNeeded };
+  }, [evaluations, goal.kind, paper.id, paper.kind, perPage, ready]);
   const orientationAdvice = useMemo(
     () => (goalValid ? adviseOrientation(goal, paper, paperChoice, dpi) : null),
     [dpi, goal, goalValid, paper, paperChoice],
@@ -938,6 +952,8 @@ export function useWorkbench() {
     sheet,
     evaluations,
     recommendedPaperId,
+    formatEvaluations,
+    paperSuggestion,
     choosePaper,
     setCustomPaperSize,
     setOrientation,
