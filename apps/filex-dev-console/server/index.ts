@@ -24,7 +24,7 @@ const SUITE_CHANGELOG_PATH = join(ROOT, "CHANGELOG.md");
 const COMPONENT_RELEASES = [
   { id: "photo-selector-app", label: "Image Select Pro", packagePath: "apps/photo-selector-app/package.json", artifactPrefix: "Image-Select-Pro", minSuiteVersion: "0.1.26" },
   { id: "image-party-frame", label: "Image Party Frame", packagePath: "apps/image-party-frame/package.json", artifactPrefix: "Image-Party-Frame", minSuiteVersion: "0.1.26" },
-  { id: "batch-print-layout", label: "Batch Print Layout", packagePath: "apps/batch-print-layout/package.json", artifactPrefix: "Batch-Print-Layout", minSuiteVersion: "0.1.26" },
+  { id: "batch-print-layout", label: "Print Flow", packagePath: "apps/batch-print-layout/package.json", artifactPrefix: "Batch-Print-Layout", minSuiteVersion: "0.1.26" },
   { id: "id-photo", label: "FileX ID Photo", packagePath: "apps/id-photo/package.json", artifactPrefix: "FileX-ID-Photo", minSuiteVersion: "0.1.61" },
   { id: "archivio-flow", label: "Archivio Flow", packagePath: "apps/archivio-flow/package.json", artifactPrefix: "Archivio-Flow", minSuiteVersion: "0.1.26" },
   { id: "image-converter", label: "Image Converter", packagePath: "apps/image-converter/package.json", artifactPrefix: "Image-Converter", minSuiteVersion: "0.1.26" },
@@ -273,7 +273,7 @@ const TEST_CATEGORIES: TestCategory[] = [
   { id: "album-flow", title: "Album Flow — Importazione, impaginazione ed editor", description: "Handoff Selector, capitoli, Auto Build, modifica degli spread, ritagli, annulla/ripeti, salvataggio, preflight e casi d'uso completi." },
   { id: "photo-selector", title: "Image Select Pro", description: "Modalità libera e progetto, prestazioni, cache, Drive, spostamenti e metadati XMP." },
   { id: "image-party-frame", title: "Image Party Frame — Affidabilità", description: "Progetti, crop, rendering, job export e completezza del pacchetto installato." },
-  { id: "batch-print-layout", title: "Batch Print Layout — Caccia bug", description: "Geometria, memoria, export progressivo no-overwrite, rollback protetto dall’identità dei file e recovery sicuro degli staging." },
+  { id: "batch-print-layout", title: "Print Flow — Caccia bug", description: "Geometria, memoria, export progressivo no-overwrite, rollback protetto dall’identità dei file e recovery sicuro degli staging." },
   { id: "id-photo", title: "FileX ID Photo — Workflow e integrità", description: "Importazione singola, cartella e drag and drop; foto singola JPG e foglio PDF/JPG; pannello stampa nativo visibile, copie Photoshop e output verificati senza duplicati." },
   { id: "archivio-flow", title: "Archivio Flow — Caccia bug", description: "Casi avversariali su percorsi, nomi Windows, fingerprint e stati di importazione." },
   { id: "image-converter", title: "Image Converter — Caccia bug", description: "Limiti export e riconoscimento sicuro delle cartelle generate." },

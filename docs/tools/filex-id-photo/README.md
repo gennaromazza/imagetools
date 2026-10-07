@@ -34,7 +34,7 @@ Il renderer è in `apps/id-photo`; catalogo, script e metadati di distribuzione 
 - passaggio Photoshop su copia atomica gestita da FileX, rilevamento della modifica, snapshot reali ripristinabili e rientro sullo stesso file o tramite “Salva con nome” flattenato;
 - comando separato per eliminare copie e revisioni Photoshop mantenendo commessa, originali e output;
 - output scritto senza sovrascrivere file esistenti, registrato subito come verifica in attesa e promosso a pronto solo dopo SHA-256; alla riapertura e durante la sessione il retry usa gli stessi file, senza riesportazioni o suffissi;
-- impaginazione condivisa con Batch Print Layout su 10×15 e 15×20;
+- impaginazione condivisa con Print Flow su 10×15 e 15×20;
 - export della foto singola in JPG e del foglio PDF o JPG con dimensioni fisiche/DPI e indicatori di taglio opzionali;
 - apertura del pannello di stampa nativo Windows/macOS con fogli renderizzati alla risoluzione del profilo selezionato;
 - integrazione Suite, licenza, Dev Console, CI, pipeline di release, icona, pagina marketing e guida pubblica.

@@ -1,4 +1,4 @@
-# Batch Print Layout — architettura
+# Print Flow (workspace batch-print-layout) — architettura
 
 Percorso guidato a 5 passi: **Foto → Carta → Cosa stampi → Impagina → Esporta**.
 Ogni passo si sblocca quando il precedente è completo (`App.tsx`, array `gates`).
@@ -47,4 +47,4 @@ npm --workspace @photo-tools/batch-print-layout run test
 npx tsc --noEmit -p apps/batch-print-layout
 ```
 
-La suite è raggiungibile dalla Dev Console come «Batch Print Layout — Caccia bug» (`npm run test:batch-print-layout-bug-hunt`).
+La suite è raggiungibile dalla Dev Console come «Print Flow — Caccia bug» (`npm run test:batch-print-layout-bug-hunt`).

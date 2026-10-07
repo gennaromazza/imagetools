@@ -21,7 +21,7 @@ Dalla griglia della scheda SD, Archivio Flow può aprire FileX ID Photo con esat
 
 Prima dell'avvio la shell verifica che la foto sia un file reale sotto la radice della scheda, rifiuta duplicati, symlink o junction e registra dimensione e data di modifica. Al consumo ripete le verifiche e rifiuta una sorgente cambiata. ID Photo salva la commessa corrente, apre una nuova commessa con la foto ricevuta e avverte l'operatore di non rimuovere la scheda fino alla conclusione o alla creazione della copia Photoshop.
 
-Lo stesso canale serve Party Frame e Batch Print Layout con selezioni da 1 a 500 foto. Le immagini non vengono incorporate nel manifest, caricate in cloud o copiate automaticamente: i tool continuano a leggere le sorgenti selezionate finché il supporto rimane collegato.
+Lo stesso canale serve Party Frame e Print Flow con selezioni da 1 a 500 foto. Le immagini non vengono incorporate nel manifest, caricate in cloud o copiate automaticamente: i tool continuano a leggere le sorgenti selezionate finché il supporto rimane collegato.
 
 ## Licenza
 
@@ -34,9 +34,9 @@ La policy configurata è **shared-runtime**, coerente con il piano FileX All Acc
 
 La configurazione è implementata; la prova senza/con licenza sull'installer reale resta un gate obbligatorio della prima release.
 
-## Capacità riusabili di Batch Print Layout
+## Capacità riusabili di Print Flow
 
-Batch Print Layout è il riferimento operativo per il foglio fotografico. Il suo dominio contiene:
+Print Flow è il riferimento operativo per il foglio fotografico. Il suo dominio contiene:
 
 - preset foglio 10×15, 13×18, 15×20, 20×30, A4, A3, Letter e personalizzato;
 - margini e spaziature espressi in millimetri;
@@ -49,7 +49,7 @@ Batch Print Layout è il riferimento operativo per il foglio fotografico. Il suo
 
 FileX ID Photo riusa oggi `@photo-tools/batch-print-layout/print-engine` e `@photo-tools/batch-print-layout/render-export` tramite gli export pubblici del workspace, senza duplicare il motore. I test dei due prodotti devono continuare a proteggere questo contratto condiviso.
 
-## Limiti di Batch Print Layout da non ereditare senza verifica
+## Limiti di Print Flow da non ereditare senza verifica
 
 - non conserva commesse o clienti;
 - l'export richiede preview ad alta risoluzione e non è un pass-through garantito dell'originale;

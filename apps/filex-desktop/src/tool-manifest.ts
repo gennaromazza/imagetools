@@ -96,8 +96,8 @@ export const desktopToolManifest = {
   },
   "batch-print-layout": {
     id: "batch-print-layout",
-    displayName: "Batch Print Layout",
-    productName: "Batch Print Layout",
+    displayName: "Print Flow",
+    productName: "Print Flow",
     executableName: "Batch-Print-Layout",
     legacyUpgradeDisplayNames: ["Batch Print Layout"],
     workspacePackageName: "@photo-tools/batch-print-layout",

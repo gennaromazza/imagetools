@@ -13,6 +13,7 @@ if (-not $Apply) {
 $productNames = @(
   "FileX Suite",
   "Image Party Frame",
+  "Print Flow",
   "Batch Print Layout",
   "FileX ID Photo",
   "Archivio Flow",

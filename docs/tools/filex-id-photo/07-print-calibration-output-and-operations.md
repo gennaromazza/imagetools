@@ -29,7 +29,7 @@ La preview usa una risoluzione limitata per restare fluida. L'export usa la riso
 | TIFF | Supportato solo con metadati e decoder verificati |
 | PNG | Non deve essere promesso come output a DPI affidabile senza contratto e test specifici |
 
-Batch Print Layout produce PDF, JPG, PNG e TIFF, ma oggi imposta in modo esplicito le dimensioni PDF e il DPI JPG. Per PNG e TIFF i metadati DPI non sono una capacità verificata del motore attuale. FileX ID Photo deve stabilire test per ogni output prima di promuoverlo.
+Print Flow produce PDF, JPG, PNG e TIFF, ma oggi imposta in modo esplicito le dimensioni PDF e il DPI JPG. Per PNG e TIFF i metadati DPI non sono una capacità verificata del motore attuale. FileX ID Photo deve stabilire test per ogni output prima di promuoverlo.
 
 ## Integrità persistente dell'output
 

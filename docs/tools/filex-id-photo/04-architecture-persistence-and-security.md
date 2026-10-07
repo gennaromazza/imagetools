@@ -38,7 +38,7 @@ Un'eventuale estrazione futura in `packages/id-photo-domain` o `packages/id-phot
 2. Il renderer non riceve primitive arbitrarie per leggere, scrivere, eseguire processi o stampare.
 3. Le mutazioni filesystem, il lancio Photoshop e l'eventuale stampa nativa risiedono nel processo desktop e passano da contratti tipizzati.
 4. I tipi IPC comuni sono importati da **@photo-tools/desktop-contracts**; non sono duplicati nell'app.
-5. L'estrazione del motore da Batch Print Layout deve mantenere i suoi test e la compatibilità del tool esistente.
+5. L'estrazione del motore da Print Flow deve mantenere i suoi test e la compatibilità del tool esistente.
 
 ## Modello dati persistito nel MVP
 

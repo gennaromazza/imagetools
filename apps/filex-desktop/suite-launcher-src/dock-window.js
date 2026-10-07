@@ -15,7 +15,7 @@ const notificationClearAll = document.querySelector('#dock-notifications-clear')
 const toolNames = {
   'photo-selector-app': 'Image Select Pro',
   'image-party-frame': 'Image Party Frame',
-  'batch-print-layout': 'Batch Print Layout',
+  'batch-print-layout': 'Print Flow',
   'id-photo': 'FileX ID Photo',
   'archivio-flow': 'Archivio Flow',
   'image-converter': 'Image Converter',

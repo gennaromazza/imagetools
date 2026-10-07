@@ -48,7 +48,7 @@ jobs:
       - name: Validate FileX ID Photo unsaved-close guard
         run: npm.cmd run test:id-photo-unload-guard
 
-      - name: Validate Batch Print Layout and atomic output transactions
+      - name: Validate Print Flow and atomic output transactions
         run: npm.cmd run test:batch-print-layout-bug-hunt
 
       - name: Validate Archivio Flow packaged runtime

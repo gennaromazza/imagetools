@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { isNativeFolderImageFile } from "../apps/filex-desktop/src/native-folder-service.js";
 
-describe("Batch Print Layout — policy immagini desktop", () => {
+describe("Print Flow — policy immagini desktop", () => {
   it("mantiene compatibili formati standard e RAW", () => {
     assert.equal(isNativeFolderImageFile("foto.JPG"), true);
     assert.equal(isNativeFolderImageFile("scatto.CR3"), true);

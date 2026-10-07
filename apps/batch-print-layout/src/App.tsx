@@ -50,8 +50,8 @@ export function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <h1>Batch Print Layout</h1>
-          <span>Foto pronte da stampare</span>
+          <h1>Print Flow</h1>
+          <span>Più stampe su ogni foglio, senza sprechi di carta</span>
         </div>
         <Stepper steps={STEPS} current={current} reachable={reachable} onGo={goTo} />
       </header>

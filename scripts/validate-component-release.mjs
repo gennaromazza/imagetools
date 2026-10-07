@@ -6,7 +6,7 @@ const [componentId, expectedVersion] = process.argv.slice(2);
 const components = {
   "photo-selector-app": ["Image Select Pro", "apps/photo-selector-app/package.json"],
   "image-party-frame": ["Image Party Frame", "apps/image-party-frame/package.json"],
-  "batch-print-layout": ["Batch Print Layout", "apps/batch-print-layout/package.json"],
+  "batch-print-layout": ["Print Flow", "apps/batch-print-layout/package.json"],
   "id-photo": ["FileX ID Photo", "apps/id-photo/package.json"],
   "archivio-flow": ["Archivio Flow", "apps/archivio-flow/package.json"],
   "image-converter": ["Image Converter", "apps/image-converter/package.json"],

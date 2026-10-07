@@ -136,7 +136,7 @@ Le API IPC sono gia' separate, ma la UX le presenta come una sola azione. Il con
 
 ### 8. Alcuni tool del manifest non hanno sorgenti versionate attive
 
-Batch Print Layout, Image Converter e Trova Foto da Lista compaiono nel manifest e nel lockfile, ma nelle rispettive directory locali non e' presente un `package.json` tracciato con il sorgente applicativo. Le loro voci storiche possono essere conservate, ma non devono essere selezionabili in una nuova pipeline finche' i workspace non vengono ripristinati.
+Print Flow, Image Converter e Trova Foto da Lista compaiono nel manifest e nel lockfile, ma nelle rispettive directory locali non e' presente un `package.json` tracciato con il sorgente applicativo. Le loro voci storiche possono essere conservate, ma non devono essere selezionabili in una nuova pipeline finche' i workspace non vengono ripristinati.
 
 ## Architettura target
 

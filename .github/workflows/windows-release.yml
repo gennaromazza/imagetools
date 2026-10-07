@@ -178,7 +178,7 @@ jobs:
         if: steps.release.outputs.component == 'id-photo'
         run: npm.cmd run test:id-photo
 
-      - name: Test atomic output transactions for ID Photo and Batch Print Layout
+      - name: Test atomic output transactions for ID Photo and Print Flow
         if: steps.release.outputs.component == 'id-photo' || steps.release.outputs.component == 'batch-print-layout'
         run: npm.cmd run test:batch-print-layout-bug-hunt
 
