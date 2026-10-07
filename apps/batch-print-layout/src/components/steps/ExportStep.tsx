@@ -20,7 +20,7 @@ export function ExportStep({ wb }: { wb: Workbench }) {
       </header>
 
       <dl className="summary-list">
-        <div><dt>Foto</dt><dd>{wb.assets.length}{wb.copies > 1 ? ` × ${wb.copies} copie = ${wb.printCount} stampe` : ""}</dd></div>
+        <div><dt>Foto</dt><dd>{wb.assets.length}{wb.printCount !== wb.assets.length ? ` (${wb.printCount} stampe con le copie)` : ""}</dd></div>
         <div><dt>Misura di ogni foto</dt><dd>{formatCm(printSpec.widthCm)} × {formatCm(printSpec.heightCm)} cm</dd></div>
         <div><dt>Carta</dt><dd>{wb.paper.label} · {layout.sheetWidthCm <= layout.sheetHeightCm ? "verticale" : "orizzontale"}</dd></div>
         <div><dt>Foto per foglio</dt><dd>{wb.perPage}</dd></div>

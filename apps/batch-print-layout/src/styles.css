@@ -654,7 +654,7 @@ summary:focus-visible {
   background: #e9ede8;
 }
 
-.thumb span {
+.thumb__name {
   overflow: hidden;
   color: var(--ink-soft);
   font-size: 11.5px;
@@ -662,7 +662,7 @@ summary:focus-visible {
   white-space: nowrap;
 }
 
-.thumb button {
+.thumb__remove {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -677,8 +677,8 @@ summary:focus-visible {
   cursor: pointer;
 }
 
-.thumb:hover button,
-.thumb button:focus-visible {
+.thumb:hover .thumb__remove,
+.thumb__remove:focus-visible {
   display: inline-flex;
 }
 
@@ -1217,4 +1217,86 @@ kbd {
 .format-card__shape--framed i {
   position: absolute;
   background: linear-gradient(135deg, #8dc9b0, #4fa585);
+}
+
+.thumb {
+  cursor: grab;
+}
+
+.thumb--dragging {
+  opacity: 0.4;
+}
+
+.thumb--over img {
+  outline: 3px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.thumb__copies {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.thumb__copies output {
+  flex: 1;
+  color: var(--ink-soft);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.thumb__copies button {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: #eef2ee;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.thumb__copies button:hover:not(:disabled) {
+  background: var(--brand-tint);
+}
+
+.thumb__copies--custom {
+  border-color: var(--brand);
+  background: #f2faf5;
+}
+
+.thumb__copies--custom output {
+  color: #11644e;
+  font-weight: 700;
+}
+
+.slide--drop .dropzone,
+.dropzone--over {
+  border-color: var(--brand);
+  background: var(--brand-tint);
+}
+
+.slide--wide {
+  position: relative;
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: 70px 0 60px 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px dashed var(--brand);
+  background: rgba(229, 242, 234, 0.82);
+  color: #11644e;
+  font-size: 20px;
+  font-weight: 700;
+  pointer-events: none;
 }

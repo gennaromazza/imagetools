@@ -205,3 +205,43 @@ export async function importDesktopHandoffFiles(
   );
   return { assets: loaded.assets, failedPreviewCount: loaded.failedPreviewCount };
 }
+
+interface FileSystemEntryLike {
+  isFile: boolean;
+  isDirectory: boolean;
+  file?: (success: (file: File) => void, failure: (error: unknown) => void) => void;
+  createReader?: () => { readEntries: (success: (entries: FileSystemEntryLike[]) => void, failure: (error: unknown) => void) => void };
+}
+
+async function readAllEntries(entry: FileSystemEntryLike): Promise<File[]> {
+  if (entry.isFile && entry.file) {
+    const file = await new Promise<File | null>((resolve) => entry.file!(resolve, () => resolve(null)));
+    return file ? [file] : [];
+  }
+  if (!entry.isDirectory || !entry.createReader) return [];
+  const reader = entry.createReader();
+  const files: File[] = [];
+  // readEntries restituisce al massimo ~100 voci per chiamata: si ripete fino a esaurimento.
+  for (;;) {
+    const batch = await new Promise<FileSystemEntryLike[]>((resolve) => reader.readEntries(resolve, () => resolve([])));
+    if (batch.length === 0) break;
+    for (const child of batch) files.push(...await readAllEntries(child));
+  }
+  return files;
+}
+
+/** Raccoglie i file trascinati sulla pagina, entrando anche nelle cartelle. */
+export async function collectDroppedFiles(dataTransfer: DataTransfer): Promise<File[]> {
+  const entries = Array.from(dataTransfer.items ?? [])
+    .map((item) => (item as unknown as { webkitGetAsEntry?: () => FileSystemEntryLike | null }).webkitGetAsEntry?.() ?? null)
+    .filter((entry): entry is FileSystemEntryLike => Boolean(entry));
+  if (entries.length === 0) return Array.from(dataTransfer.files ?? []);
+  const files: File[] = [];
+  for (const entry of entries) files.push(...await readAllEntries(entry));
+  return files;
+}
+
+/** True se il trascinamento porta file dal sistema (non lo spostamento interno di una miniatura). */
+export function dragCarriesFiles(dataTransfer: DataTransfer | null): boolean {
+  return Boolean(dataTransfer && Array.from(dataTransfer.types ?? []).includes("Files"));
+}

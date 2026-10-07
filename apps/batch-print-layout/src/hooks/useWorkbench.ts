@@ -40,6 +40,7 @@ import {
 import { exportBatch } from "../render-export";
 import {
   bytesToObjectUrl,
+  collectDroppedFiles,
   DESKTOP_PREVIEW_MAX_DIMENSION,
   fileNameFromPath,
   fileToAsset,
@@ -48,6 +49,7 @@ import {
   revokeAssetUrls,
   revokeBlobUrl,
 } from "../lib/assets";
+import { clampCopies, copiesFor, expandAssetsByCopies, moveItem, totalPrintCount } from "../lib/copies";
 import { applyZoomToCrop, cropGeometryKey, getZoomFromCrop, normalizeRotationDegrees } from "../lib/crop-math";
 
 export type GoalKind = PrintGoal["kind"];
@@ -112,6 +114,8 @@ export function useWorkbench() {
   // ---- foto ----
   const [assets, setAssets] = useState<PhotoAsset[]>([]);
   const [copies, setCopies] = useState(1);
+  /** Copie scelte per la singola foto: prevalgono su quelle generali. */
+  const [copiesById, setCopiesById] = useState<Record<string, number>>({});
   const [storedCrops, setStoredCrops] = useState<Record<string, StoredCrop>>({});
   const [activeIndex, setActiveIndex] = useState(0);
   const [previewPageIndex, setPreviewPageIndex] = useState(0);
@@ -154,7 +158,7 @@ export function useWorkbench() {
     return { kind: "custom", widthCm: customSize.widthCm, heightCm: customSize.heightCm };
   }, [countAspectId, customSize.heightCm, customSize.widthCm, formatPresetId, goalKind, photosPerPage]);
   const goalValid = isGoalValid(goal);
-  const printCount = assets.length * copies;
+  const printCount = useMemo(() => totalPrintCount(assets, copies, copiesById), [assets, copies, copiesById]);
 
   const evaluations = useMemo(
     () => evaluatePapers(goal, paperChoice, { dpi, printCount }),
@@ -176,10 +180,7 @@ export function useWorkbench() {
   const layout = useMemo(() => calculateGridLayout(printSpec, sheet), [printSpec, sheet]);
   const ready = goalValid && resolvedPhoto.fits && layout.photosPerSheet > 0;
   const perPage = ready ? getPerPage(goal, layout) : 0;
-  const printAssets = useMemo(
-    () => (copies > 1 ? assets.flatMap((asset) => Array.from({ length: copies }, () => asset)) : assets),
-    [assets, copies],
-  );
+  const printAssets = useMemo(() => expandAssetsByCopies(assets, copies, copiesById), [assets, copies, copiesById]);
   const pages = useMemo(
     () => (ready && assets.length > 0 ? paginateAssets(printAssets, layout, perPage) : []),
     [assets.length, layout, perPage, printAssets, ready],
@@ -410,6 +411,7 @@ export function useWorkbench() {
     for (const asset of assetsRef.current) revokeAssetUrls(asset);
     setAssets(nextAssets);
     setStoredCrops({});
+    setCopiesById({});
     setActiveIndex(0);
     setPreviewPageIndex(0);
     setStatus(nextAssets.length ? `${nextAssets.length} foto pronte.` : "Nessuna foto importata.");
@@ -426,7 +428,64 @@ export function useWorkbench() {
       delete next[assetId];
       return next;
     });
+    setCopiesById((current) => {
+      const next = { ...current };
+      delete next[assetId];
+      return next;
+    });
     setActiveIndex((index) => Math.max(0, Math.min(index, assetsRef.current.length - 2)));
+  }, []);
+
+  const copiesOf = useCallback((assetId: string) => copiesFor(assetId, copies, copiesById), [copies, copiesById]);
+
+  const setAssetCopies = useCallback((assetId: string, value: number) => {
+    const next = clampCopies(value);
+    setCopiesById((current) => {
+      const updated = { ...current };
+      // Se coincide con il valore generale non serve ricordarla a parte.
+      if (next === copies) delete updated[assetId];
+      else updated[assetId] = next;
+      return updated;
+    });
+  }, [copies]);
+
+  /** Imposta le copie di tutte le foto e azzera le scelte fatte sulle singole. */
+  const setAllCopies = useCallback((value: number) => {
+    setCopies(clampCopies(value));
+    setCopiesById({});
+  }, []);
+
+  const moveAsset = useCallback((fromId: string, toId: string) => {
+    setAssets((current) => moveItem(current, fromId, toId));
+    setPreviewPageIndex(0);
+  }, []);
+
+  /** Aggiunge alle foto già presenti i file trascinati sulla pagina (cartelle comprese). */
+  const addDroppedFiles = useCallback(async (dataTransfer: DataTransfer) => {
+    setIsBusy(true);
+    setStatus("Leggo i file trascinati...");
+    try {
+      const files = await collectDroppedFiles(dataTransfer);
+      const settled = await Promise.allSettled(files.map(fileToAsset));
+      const incoming = settled
+        .filter((result): result is PromiseFulfilledResult<PhotoAsset | null> => result.status === "fulfilled")
+        .map((result) => result.value)
+        .filter((asset): asset is PhotoAsset => Boolean(asset));
+      const known = new Set(assetsRef.current.map((asset) => asset.id));
+      const fresh = incoming.filter((asset) => !known.has(asset.id));
+      incoming.filter((asset) => known.has(asset.id)).forEach(revokeAssetUrls);
+      if (fresh.length > 0) setAssets((current) => [...current, ...fresh]);
+      const skipped = files.length - incoming.length;
+      setStatus(
+        fresh.length > 0
+          ? `${fresh.length} foto aggiunte.${incoming.length - fresh.length ? ` ${incoming.length - fresh.length} già presenti.` : ""}${skipped ? ` ${skipped} file non supportati ignorati.` : ""}`
+          : skipped ? "Nessuna foto trascinata è supportata (JPG, PNG o WebP)." : "Le foto trascinate erano già presenti.",
+      );
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Impossibile leggere i file trascinati.");
+    } finally {
+      setIsBusy(false);
+    }
   }, []);
 
   // Selezione ricevuta da Archivio Flow.
@@ -924,7 +983,11 @@ export function useWorkbench() {
     // foto
     assets,
     copies,
-    setCopies,
+    setAllCopies,
+    copiesOf,
+    setAssetCopies,
+    moveAsset,
+    addDroppedFiles,
     printCount,
     activeIndex,
     setActiveIndex,
