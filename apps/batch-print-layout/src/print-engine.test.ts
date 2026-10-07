@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateGridLayout,
+  calculatePhotoSizeForCount,
+  photoFitsSheet,
+  shrinkPhotoToFitSheet,
   createDefaultCrop,
   getCenteredPagePositions,
   getPhotoContentRectCm,
@@ -293,5 +296,68 @@ describe("batch print layout engine", () => {
     expect(sanitizeFileNamePrefix(" ../CON:<foto>?* ")).toBe("-CON-foto-");
     expect(sanitizeFileNamePrefix("CON")).toBe("batch-print");
     expect(buildPageFileName("album/clienti", 2, ".JPG")).toBe("album-clienti-002.jpg");
+  });
+
+  it("respects the requested sheet orientation instead of silently rotating the sheet", () => {
+    const photo = { widthCm: 12, heightCm: 8, dpi: 300 };
+    const a4 = { presetId: "a4", label: "A4", widthCm: 21, heightCm: 29.7, marginMm: 5, gapMm: 1.5 };
+
+    const portrait = calculateGridLayout(photo, { ...a4, orientation: "portrait" });
+    expect(portrait.sheetWidthCm).toBe(21);
+    expect(portrait.sheetHeightCm).toBe(29.7);
+
+    const landscape = calculateGridLayout(photo, { ...a4, orientation: "landscape" });
+    expect(landscape.sheetWidthCm).toBe(29.7);
+    expect(landscape.sheetHeightCm).toBe(21);
+
+    const auto = calculateGridLayout(photo, a4);
+    expect(auto.photosPerSheet).toBeGreaterThanOrEqual(Math.max(portrait.photosPerSheet, landscape.photosPerSheet));
+  });
+
+  it("keeps every slot inside the sheet for any photo size", () => {
+    const sheet = { presetId: "10x15", label: "10x15 cm", widthCm: 10, heightCm: 15, marginMm: 3, gapMm: 1, orientation: "portrait" as const };
+    for (const [widthCm, heightCm] of [[5, 5], [4.5, 6.5], [9.4, 14.4], [3.3, 2.2], [14, 9]]) {
+      const layout = calculateGridLayout({ widthCm, heightCm, dpi: 300 }, sheet);
+      for (const position of layout.positions) {
+        expect(position.x).toBeGreaterThanOrEqual(layout.marginPx - 1);
+        expect(position.y).toBeGreaterThanOrEqual(layout.marginPx - 1);
+        expect(position.x + layout.photoWidthPx).toBeLessThanOrEqual(layout.sheetWidthPx - layout.marginPx + 1);
+        expect(position.y + layout.photoHeightPx).toBeLessThanOrEqual(layout.sheetHeightPx - layout.marginPx + 1);
+      }
+    }
+  });
+
+  it("computes the biggest photo that fits exactly N per page", () => {
+    const a4 = { presetId: "a4", label: "A4", widthCm: 21, heightCm: 29.7, marginMm: 5, gapMm: 1.5, orientation: "auto" as const };
+    for (const count of [1, 2, 3, 4, 6, 8, 9, 12]) {
+      for (const ratio of [null, 3 / 2, 1]) {
+        const result = calculatePhotoSizeForCount(a4, count, ratio);
+        expect(result).not.toBeNull();
+        const layout = calculateGridLayout({ widthCm: result!.widthCm, heightCm: result!.heightCm, dpi: 300 }, a4);
+        expect(layout.photosPerSheet).toBeGreaterThanOrEqual(count);
+      }
+    }
+    const two = calculatePhotoSizeForCount({ ...a4, orientation: "portrait" }, 2, null)!;
+    expect(two.cols * two.rows).toBe(2);
+    expect(two.widthCm).toBeCloseTo(20, 0);
+  });
+
+  it("shrinks an oversized photo until it fits the sheet", () => {
+    const sheet = { presetId: "10x15", label: "10x15", widthCm: 10, heightCm: 15, marginMm: 3, gapMm: 1 };
+    const big = { widthCm: 20, heightCm: 12, dpi: 300 };
+    expect(photoFitsSheet(big, sheet)).toBe(false);
+    const fitted = shrinkPhotoToFitSheet(big, sheet);
+    expect(photoFitsSheet(fitted, sheet)).toBe(true);
+    expect(fitted.widthCm / fitted.heightCm).toBeCloseTo(20 / 12, 1);
+  });
+
+  it("fits odd counts with empty cells and paginates by the requested count", () => {
+    const sheet = { presetId: "10x15", label: "10x15", widthCm: 10, heightCm: 15, marginMm: 3, gapMm: 1, orientation: "portrait" as const };
+    const five = calculatePhotoSizeForCount(sheet, 5, 3 / 2)!;
+    const layout = calculateGridLayout({ widthCm: five.widthCm, heightCm: five.heightCm, dpi: 300 }, sheet);
+    expect(layout.photosPerSheet).toBeGreaterThanOrEqual(5);
+    expect(five.widthCm * five.heightCm).toBeGreaterThan(4.19 * 2.79);
+    const pages = paginateAssets(fakeAssets(11), layout, 5);
+    expect(pages.map((page) => page.slots.length)).toEqual([5, 5, 1]);
   });
 });

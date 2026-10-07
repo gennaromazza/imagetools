@@ -1,5 +1,7 @@
 # Batch Print Layout — audit e piano di implementazione
 
+> **Nota:** questo documento è storico. L'interfaccia è stata poi riscritta come percorso guidato a passi; per la struttura attuale vedi `ARCHITETTURA.md`.
+
 ## Obiettivo e metodo
 
 Rendere Batch Print Layout affidabile per lavori di stampa reali, mantenendo la compatibilità con FileX Suite e senza attribuire al software capacità non verificate.

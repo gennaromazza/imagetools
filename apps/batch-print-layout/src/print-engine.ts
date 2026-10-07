@@ -1,5 +1,6 @@
 export type ExportFormat = "jpg" | "png" | "pdf" | "tif";
 export type PhotoFitMode = "cover" | "contain";
+export type SheetOrientation = "auto" | "portrait" | "landscape";
 export type PhotoFrameStyle = "none" | "polaroid-go";
 
 export interface PhysicalRectCm {
@@ -47,6 +48,8 @@ export interface PrintSheetSpec {
   heightCm: number;
   marginMm: number;
   gapMm: number;
+  /** Orientamento del foglio: "auto" sceglie quello che contiene più foto. Se assente equivale a "auto". */
+  orientation?: SheetOrientation;
 }
 
 export interface PhotoPreset {
@@ -56,6 +59,8 @@ export interface PhotoPreset {
   heightCm: number;
   description: string;
   frameStyle?: PhotoFrameStyle;
+  /** Il formato è anche un supporto reale (carta adesiva): si può usare come foglio, una foto per foglio. */
+  media?: boolean;
 }
 
 export interface LogoOverlaySpec {
@@ -182,6 +187,7 @@ export const PHOTO_PRESETS: PhotoPreset[] = [
     widthCm: 5.4,
     heightCm: 8.6,
     description: "Carta adesiva 54 x 86 mm.",
+    media: true,
   },
   {
     presetId: "polaroid-hi-print-3x3",
@@ -189,6 +195,7 @@ export const PHOTO_PRESETS: PhotoPreset[] = [
     widthCm: 7.62,
     heightCm: 7.62,
     description: "Carta quadrata 76,2 x 76,2 mm.",
+    media: true,
   },
   {
     presetId: "polaroid-hi-print-4x6",
@@ -196,6 +203,7 @@ export const PHOTO_PRESETS: PhotoPreset[] = [
     widthCm: 10,
     heightCm: 14.8,
     description: "Carta 100 x 148 mm.",
+    media: true,
   },
 ];
 
@@ -384,7 +392,123 @@ export function calculateGridLayout(photo: PhotoPrintSpec, sheet: PrintSheetSpec
     buildCandidate(portraitSheetHeightPx, portraitSheetWidthPx, sheet.heightCm, sheet.widthCm, photoHeightPx, photoWidthPx, marginPx, gapPx, true, true),
   ];
 
-  return candidates.reduce((best, current) => (isBetterLayout(current, best) ? current : best));
+  const orientation = sheet.orientation ?? "auto";
+  const allowed = candidates.filter((candidate) => {
+    if (orientation === "portrait") return candidate.sheetWidthCm <= candidate.sheetHeightCm;
+    if (orientation === "landscape") return candidate.sheetWidthCm >= candidate.sheetHeightCm;
+    return true;
+  });
+
+  return allowed.reduce((best, current) => (isBetterLayout(current, best) ? current : best));
+}
+
+export function photoFitsSheet(photo: PhotoPrintSpec, sheet: PrintSheetSpec): boolean {
+  return calculateGridLayout(photo, sheet).photosPerSheet > 0;
+}
+
+/**
+ * Riduce proporzionalmente la foto finché entra nel foglio (margini inclusi).
+ * Restituisce la misura invariata se già compatibile.
+ */
+export function shrinkPhotoToFitSheet<T extends PhotoPrintSpec>(photo: T, sheet: PrintSheetSpec): T {
+  if (photoFitsSheet(photo, sheet)) return photo;
+  let low = 0;
+  let high = 1;
+  for (let step = 0; step < 24; step += 1) {
+    const mid = (low + high) / 2;
+    const candidate = { ...photo, widthCm: photo.widthCm * mid, heightCm: photo.heightCm * mid };
+    if (photoFitsSheet(candidate, sheet)) low = mid;
+    else high = mid;
+  }
+  const floor2 = (value: number) => Math.max(0.1, Math.floor(value * low * 100) / 100);
+  return { ...photo, widthCm: floor2(photo.widthCm), heightCm: floor2(photo.heightCm) };
+}
+
+export interface PhotoCountAspect {
+  id: string;
+  label: string;
+  /** larghezza / altezza; null = la foto riempie tutta la cella disponibile. */
+  ratio: number | null;
+}
+
+export const PHOTO_COUNT_ASPECTS: PhotoCountAspect[] = [
+  { id: "free", label: "Libero (riempie lo spazio)", ratio: null },
+  { id: "3:2", label: "3:2 (foto classica)", ratio: 3 / 2 },
+  { id: "4:3", label: "4:3", ratio: 4 / 3 },
+  { id: "5:4", label: "5:4", ratio: 5 / 4 },
+  { id: "1:1", label: "1:1 (quadrata)", ratio: 1 },
+];
+
+export interface PhotoCountResult {
+  widthCm: number;
+  heightCm: number;
+  cols: number;
+  rows: number;
+}
+
+/**
+ * Misura più grande possibile per far stare esattamente `count` foto su ogni
+ * foglio, rispettando orientamento, margini e distanza impostati.
+ */
+export function calculatePhotoSizeForCount(
+  sheet: PrintSheetSpec,
+  count: number,
+  ratio: number | null,
+): PhotoCountResult | null {
+  const total = Math.floor(count);
+  if (!Number.isFinite(total) || total < 1 || total > 200) return null;
+  const orientation = sheet.orientation ?? "auto";
+  const margin = finiteNonNegative(sheet.marginMm) / 10;
+  const gap = finiteNonNegative(sheet.gapMm) / 10;
+  const sheets: Array<[number, number]> = [];
+  const portrait: [number, number] = [Math.min(sheet.widthCm, sheet.heightCm), Math.max(sheet.widthCm, sheet.heightCm)];
+  if (orientation !== "landscape") sheets.push(portrait);
+  if (orientation !== "portrait") sheets.push([portrait[1], portrait[0]]);
+
+  let best: PhotoCountResult | null = null;
+  let bestArea = 0;
+  for (const [width, height] of sheets) {
+    const usableWidth = width - margin * 2;
+    const usableHeight = height - margin * 2;
+    for (let cols = 1; cols <= total; cols += 1) {
+      // Ammette celle vuote (es. 5 foto in 2x3) purché nessuna riga o colonna resti vuota.
+      const rows = Math.ceil(total / cols);
+      const empty = cols * rows - total;
+      if (empty >= cols || empty >= rows) continue;
+      const cellWidth = (usableWidth - (cols - 1) * gap) / cols;
+      const cellHeight = (usableHeight - (rows - 1) * gap) / rows;
+      if (cellWidth <= 0 || cellHeight <= 0) continue;
+      const shapes: Array<[number, number]> = [];
+      if (ratio === null) {
+        shapes.push([cellWidth, cellHeight]);
+      } else {
+        for (const r of [ratio, 1 / ratio]) {
+          const w = Math.min(cellWidth, cellHeight * r);
+          shapes.push([w, w / r]);
+        }
+      }
+      for (const [w, h] of shapes) {
+        const area = w * h;
+        if (area > bestArea + 1e-9) {
+          bestArea = area;
+          best = { widthCm: w, heightCm: h, cols, rows };
+        }
+      }
+    }
+  }
+  if (!best) return null;
+
+  // Arrotonda per difetto al centesimo di cm e verifica con il motore reale
+  // (tolleranze di pixel incluse) che ci stiano davvero `count` foto.
+  let widthCm = Math.floor(best.widthCm * 100) / 100;
+  let heightCm = Math.floor(best.heightCm * 100) / 100;
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    const layout = calculateGridLayout({ widthCm, heightCm, dpi: 300 }, sheet);
+    if (layout.photosPerSheet >= total) break;
+    widthCm = Math.max(0.1, Math.round((widthCm - 0.01) * 100) / 100);
+    heightCm = Math.max(0.1, Math.round((heightCm - 0.01) * 100) / 100);
+  }
+  return { ...best, widthCm, heightCm };
 }
 
 function shouldAutoRotateSource(asset: PhotoAsset, printSpec: PhotoPrintSpec, autoRotateBySourceOrientation: boolean): boolean {
@@ -514,14 +638,17 @@ export function getCenteredPagePositions(layout: GridLayout, itemCount: number):
   return positions;
 }
 
-export function paginateAssets(assets: PhotoAsset[], layout: GridLayout): BatchPrintPage[] {
+export function paginateAssets(assets: PhotoAsset[], layout: GridLayout, maxPerPage?: number): BatchPrintPage[] {
   if (layout.photosPerSheet <= 0) {
     return [];
   }
 
+  const perPage = maxPerPage && maxPerPage > 0
+    ? Math.min(Math.floor(maxPerPage), layout.photosPerSheet)
+    : layout.photosPerSheet;
   const pages: BatchPrintPage[] = [];
-  for (let index = 0; index < assets.length; index += layout.photosPerSheet) {
-    const pageAssets = assets.slice(index, index + layout.photosPerSheet);
+  for (let index = 0; index < assets.length; index += perPage) {
+    const pageAssets = assets.slice(index, index + perPage);
     const pagePositions = getCenteredPagePositions(layout, pageAssets.length);
     pages.push({
       pageNumber: pages.length + 1,
