@@ -40,6 +40,14 @@
 - Ctrl+A seleziona le foto visibili e, se lo sono già tutte, le deseleziona. Dopo lasso o Ctrl+A il focus e il punto di partenza di Maiusc+clic passano a una foto selezionata.
 - Scorciatoie di classificazione (1-5, P, X, U, colori): con più foto selezionate valgono per tutta la selezione, anche se il focus è rimasto su un'altra foto; con una sola foto valgono per quella col focus.
 
+## 2026-10-08 - Album Flow 0.2.23
+
+- Nuovo: bordo per singola foto. Dalla barra della foto, il pulsante «Bordo» imposta spessore e colore di quella foto; «Come l'area» la fa tornare al bordo dell'area. Vale in tutti i layout, anche nel disegno libero, e anche nell'esportazione. Un album con bordi per foto non si apre con le versioni precedenti.
+- Corretto: spostando o ridimensionando una foto nel disegno libero la foto inseguiva il mouse con ritardo e la maniglia di ridimensionamento compariva fuori dal bordo. Ora il movimento è immediato e la maniglia resta sull'angolo (vale anche per lo spostamento dentro il ritaglio).
+- Corretto: nel Template libero le foto aggiunte («+ 1:1 quadrata», «+ 3:4 verticale»…) uscivano sempre con proporzioni sbagliate (il quadrato diventava 4:3) su fogli larghi. Ora mantengono le proporzioni scelte.
+- Nuovo: nel Template libero «Avanti di uno» e «Indietro di uno» portano una foto sopra o sotto un'altra un livello alla volta; «Porta davanti» e «Porta dietro» restano. Prima, premendo più volte «Porta dietro», la foto poteva sparire.
+- Corretto: duplicando uno spread con disposizione libera la copia poteva risultare non valida e dare errore al salvataggio o alla riapertura.
+
 ## 2026-10-08 - Album Flow 0.2.22
 
 - Corretto: «Ricollega le foto» non ritrovava le foto che erano state ri-salvate dopo la creazione dell'album (per esempio da Lightroom o Camera Raw), perché cercava nome e peso identici e un file modificato ha un peso diverso. Ora, se il peso non corrisponde, la foto si ritrova per nome purché in quella cartella ci sia un solo file con quel nome; con nomi doppi non si indovina.

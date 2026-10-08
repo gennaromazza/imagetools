@@ -21,6 +21,27 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.23",
+    date: "2026-10-08",
+    headline: "Bordo per singola foto e disegno libero più fluido",
+    items: [
+      {
+        title: "Bordo solo su una foto",
+        text: "Ogni foto può avere il suo bordo, con spessore e colore propri, in tutti i layout e anche nel disegno libero. Se non lo imposti vale quello dell'area; «Come l'area» la fa tornare com'era. Un album con bordi per foto non si apre con le versioni precedenti di Album Flow.",
+        where: ["Bordo (barra della foto)", "Come l'area"],
+      },
+      {
+        title: "Spostare le foto in modo libero senza ritardo",
+        text: "Trascinando o ridimensionando una foto nel disegno libero il movimento è immediato e la maniglia di ridimensionamento sta sull'angolo della foto.",
+      },
+      {
+        title: "Template libero: proporzioni e livelli",
+        text: "Le foto aggiunte («+ 1:1 quadrata», «+ 3:4 verticale»…) mantengono le proporzioni scelte anche su un foglio largo. Con «Avanti di uno» e «Indietro di uno» porti una foto sopra o sotto un'altra un livello alla volta.",
+        where: ["Avanti di uno", "Indietro di uno", "Porta davanti", "Porta dietro"],
+      },
+    ],
+  },
+  {
     version: "0.2.22",
     date: "2026-10-08",
     headline: "Ricollega ritrova anche le foto ri-salvate",

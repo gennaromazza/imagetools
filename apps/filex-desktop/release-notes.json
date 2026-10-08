@@ -659,6 +659,12 @@
     ],
     "0.2.22": [
       "Corretto: «Ricollega le foto» non ritrovava le foto ri-salvate dopo la creazione dell'album (per esempio da Lightroom o Camera Raw), perché cercava nome e peso identici. Ora, se il peso non corrisponde, la foto si ritrova per nome purché nella cartella scelta ci sia un solo file con quel nome; con nomi doppi non si indovina."
+    ],
+    "0.2.23": [
+      "Nuovo: bordo per singola foto, dal pulsante «Bordo» nella barra della foto (spessore e colore, «Come l'area» per tornare al bordo dell'area), in tutti i layout.",
+      "Disegno libero piu' fluido: spostando o ridimensionando una foto non c'e' piu' ritardo e la maniglia resta sull'angolo.",
+      "Template libero: le foto aggiunte mantengono le proporzioni scelte e «Avanti di uno» / «Indietro di uno» le portano sopra o sotto un livello alla volta.",
+      "Corretto: duplicare uno spread con disposizione libera non produce piu' una copia non valida."
     ]
   }
 }
