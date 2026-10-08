@@ -96,8 +96,14 @@ import { getAssetRotation, rotateImage, type RotationDirection } from "../servic
 import {
   buildToggleAllSelection,
   countSelectionOutsideFilter,
+  findLassoHitIds,
+  pickSelectionAnchor,
+  resolveClassificationTargetIds,
+  resolveLassoSelection,
   resolveRotationTargetIds,
+  shouldSelectAllVisible,
   togglePhotoSelection,
+  type LassoRect,
 } from "../services/photo-selection";
 import { PhotoFilterPanel } from "./selector/PhotoFilterPanel";
 import { QuickStatsPanel } from "./selector/QuickStatsPanel";
@@ -792,11 +798,17 @@ export function PhotoSelector({
   const frozenDynamicSortOrderRef = useRef<{ sortBy: SortMode; signature: string; ids: string[] } | null>(null);
   const batchPulseTokenRef = useRef(0);
   const batchPulseClearTimerRef = useRef<number | null>(null);
+  // Il lasso lavora in coordinate del contenuto della griglia (scroll incluso), così
+  // l'angolo di partenza resta sulla stessa foto anche con l'autoscroll.
   const dragOriginRef = useRef<{ x: number; y: number } | null>(null);
   const [dragRect, setDragRect] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
   const lassoPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const lassoStartClientRef = useRef<{ x: number; y: number } | null>(null);
+  const lassoDraggingRef = useRef(false);
   const lassoAutoScrollFrameRef = useRef<number | null>(null);
   const lassoAdditiveRef = useRef(false);
+  const lassoBaseIdsRef = useRef<string[]>([]);
+  const lassoCardRectsRef = useRef<Map<string, LassoRect>>(new Map());
   const lassoHitIdsRef = useRef<Set<string>>(new Set());
   const [gridViewport, setGridViewport] = useState({ width: 0, height: 720 });
   const [batchPulseState, setBatchPulseState] = useState<{
@@ -1043,21 +1055,53 @@ export function PhotoSelector({
     }, 1200);
   }, []);
 
-  const collectLassoHits = useCallback((selRect: { left: number; top: number; right: number; bottom: number }) => {
+  // Ricalcola da zero le foto toccate dal rettangolo (non accumula): restringere il lasso
+  // le toglie. Le card già viste restano in mappa anche quando la griglia virtuale le smonta.
+  const updateLassoSelection = useCallback(() => {
     const grid = gridRef.current;
-    if (!grid) return;
+    const origin = dragOriginRef.current;
+    const pointer = lassoPointerRef.current;
+    const start = lassoStartClientRef.current;
+    if (!grid || !origin || !pointer || !start) return;
+    if (!lassoDraggingRef.current) {
+      if (Math.abs(pointer.x - start.x) < 6 && Math.abs(pointer.y - start.y) < 6) return;
+      lassoDraggingRef.current = true;
+    }
+
+    const bounds = grid.getBoundingClientRect();
+    const offsetX = bounds.left - grid.scrollLeft;
+    const offsetY = bounds.top - grid.scrollTop;
+    const cardRects = lassoCardRectsRef.current;
     const cards = grid.querySelectorAll<HTMLElement>("[data-preview-asset-id]");
     for (let index = 0; index < cards.length; index += 1) {
       const card = cards[index];
-      const cardRect = card.getBoundingClientRect();
-      const overlaps =
-        cardRect.left < selRect.right
-        && cardRect.right > selRect.left
-        && cardRect.top < selRect.bottom
-        && cardRect.bottom > selRect.top;
       const id = card.dataset.previewAssetId;
-      if (overlaps && id) lassoHitIdsRef.current.add(id);
+      if (!id) continue;
+      const rect = card.getBoundingClientRect();
+      cardRects.set(id, {
+        left: rect.left - offsetX,
+        top: rect.top - offsetY,
+        right: rect.right - offsetX,
+        bottom: rect.bottom - offsetY,
+      });
     }
+
+    const pointerX = pointer.x - offsetX;
+    const pointerY = pointer.y - offsetY;
+    const selection: LassoRect = {
+      left: Math.min(origin.x, pointerX),
+      top: Math.min(origin.y, pointerY),
+      right: Math.max(origin.x, pointerX),
+      bottom: Math.max(origin.y, pointerY),
+    };
+    lassoHitIdsRef.current = findLassoHitIds(cardRects, selection);
+
+    // Il rettangolo disegnato resta dentro la griglia anche se l'angolo di partenza è scrollato fuori.
+    const left = Math.max(bounds.left, selection.left + offsetX);
+    const top = Math.max(bounds.top, selection.top + offsetY);
+    const right = Math.min(bounds.right, selection.right + offsetX);
+    const bottom = Math.min(bounds.bottom, selection.bottom + offsetY);
+    setDragRect({ left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) });
   }, []);
 
   const scheduleLassoAutoScroll = useCallback(() => {
@@ -1078,26 +1122,29 @@ export function PhotoSelector({
       if (delta === 0) return;
       const previousScrollTop = grid.scrollTop;
       grid.scrollTop += delta;
-      const origin = dragOriginRef.current;
-      if (origin) {
-        collectLassoHits({
-          left: Math.min(origin.x, pointer.x),
-          top: Math.min(origin.y, pointer.y),
-          right: Math.max(origin.x, pointer.x),
-          bottom: Math.max(origin.y, pointer.y),
-        });
-      }
       if (grid.scrollTop === previousScrollTop) return;
+      updateLassoSelection();
       lassoAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
     };
     lassoAutoScrollFrameRef.current = window.requestAnimationFrame(tick);
-  }, [collectLassoHits]);
+  }, [updateLassoSelection]);
   const cancelLassoAutoScroll = useCallback(() => {
     if (lassoAutoScrollFrameRef.current !== null) {
       window.cancelAnimationFrame(lassoAutoScrollFrameRef.current);
       lassoAutoScrollFrameRef.current = null;
     }
   }, []);
+  const resetLasso = useCallback(() => {
+    dragOriginRef.current = null;
+    lassoPointerRef.current = null;
+    lassoStartClientRef.current = null;
+    lassoDraggingRef.current = false;
+    lassoBaseIdsRef.current = [];
+    lassoCardRectsRef.current.clear();
+    lassoHitIdsRef.current = new Set();
+    setDragRect(null);
+    cancelLassoAutoScroll();
+  }, [cancelLassoAutoScroll]);
   const emitPreviewSyncFeedback = useCallback((feedback: Omit<PreviewSyncFeedback, "token"> | null) => {
     if (!feedback || feedback.assetIds.length === 0) {
       return;
@@ -2564,13 +2611,9 @@ export function PhotoSelector({
     // When context menu opens, cancel any active lasso drag to prevent
     // pointer capture from routing events away from the menu.
     if (contextMenuState) {
-      dragOriginRef.current = null;
-      lassoPointerRef.current = null;
-      lassoHitIdsRef.current.clear();
-      setDragRect(null);
-      cancelLassoAutoScroll();
+      resetLasso();
     }
-  }, [cancelLassoAutoScroll, contextMenuState]);
+  }, [contextMenuState, resetLasso]);
 
   // Sposta il focus alla foto successiva (o alla precedente se in fondo).
   // Usato dall'auto-advance dopo una classificazione tramite scorciatoia,
@@ -2677,7 +2720,10 @@ export function PhotoSelector({
         const normalizedKey = event.key.toLowerCase();
         if (normalizedKey === "a") {
           event.preventDefault();
-          toggleAll(true);
+          if (visiblePhotoIds.length === 0) {
+            return;
+          }
+          toggleAll(shouldSelectAllVisible(visiblePhotoIds, selectedSetRef.current));
           return;
         }
         if (normalizedKey === "b") {
@@ -2915,6 +2961,13 @@ export function PhotoSelector({
     commitSelection(nextSelection);
 
     if (selectAll) {
+      // Focus e ancora di Maiusc+click vanno su una foto della nuova selezione: le scorciatoie
+      // e gli intervalli non devono restare agganciati a una foto scelta prima.
+      const anchorId = pickSelectionAnchor(new Set(nextSelection), visiblePhotoIds, focusedPhotoId);
+      if (anchorId) {
+        setFocusedPhotoId(anchorId);
+        lastClickedIdRef.current = anchorId;
+      }
       const selectedCount = hasActiveFilters ? visiblePhotoIds.length : allPhotoIds.length;
       pushTimelineEntry(
         hasActiveFilters
@@ -3328,15 +3381,11 @@ export function PhotoSelector({
     applyPhotoChanges(id, changes, "grid");
   });
 
-  // Bersaglio esplicito: se la foto attiva fa parte di una selezione multipla
-  // l'azione vale per tutta la selezione, altrimenti solo per la foto attiva.
+  // Bersaglio esplicito: con più foto selezionate l'azione vale per tutta la selezione,
+  // con una sola (o nessuna) vale per la foto attiva.
   classifyFromKeyboardRef.current = (changes) => {
     if (!onPhotosChange) return;
-    const currentSelection = selectedIdsRef.current;
-    const anchorId = focusedPhotoId;
-    const targetIds = anchorId
-      ? (currentSelection.length > 1 && currentSelection.includes(anchorId) ? [...currentSelection] : [anchorId])
-      : currentSelection.length > 0 ? [...currentSelection] : [];
+    const targetIds = resolveClassificationTargetIds(selectedIdsRef.current, focusedPhotoId);
     if (targetIds.length === 0) {
       pushTimelineEntry("Nessuna foto attiva: seleziona o clicca una foto prima di classificare");
       return;
@@ -4382,74 +4431,68 @@ export function PhotoSelector({
           const eventTarget = e.target;
           if (eventTarget instanceof HTMLElement && eventTarget.closest(".photo-card")) return;
           if (e.button !== 0) return;
-          dragOriginRef.current = { x: e.clientX, y: e.clientY };
+          const grid = e.currentTarget as HTMLDivElement;
+          const bounds = grid.getBoundingClientRect();
+          // Un clic sulla barra di scorrimento non è un clic sullo sfondo: non deve deselezionare.
+          if (e.clientX - bounds.left >= grid.clientWidth || e.clientY - bounds.top >= grid.clientHeight) return;
+          resetLasso();
+          dragOriginRef.current = {
+            x: e.clientX - bounds.left + grid.scrollLeft,
+            y: e.clientY - bounds.top + grid.scrollTop,
+          };
+          lassoStartClientRef.current = { x: e.clientX, y: e.clientY };
           lassoPointerRef.current = { x: e.clientX, y: e.clientY };
-          lassoAdditiveRef.current = e.shiftKey;
-          lassoHitIdsRef.current.clear();
-          setDragRect(null);
-          (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+          // Maiusc, Ctrl e Cmd aggiungono alla selezione; senza modificatori il lasso la sostituisce.
+          lassoAdditiveRef.current = e.shiftKey || e.ctrlKey || e.metaKey;
+          lassoBaseIdsRef.current = lassoAdditiveRef.current ? [...selectedIdsRef.current] : [];
+          grid.setPointerCapture(e.pointerId);
         }}
         onPointerMove={(e) => {
           if (!dragOriginRef.current) return;
           lassoPointerRef.current = { x: e.clientX, y: e.clientY };
           scheduleLassoAutoScroll();
-          const ox = dragOriginRef.current.x;
-          const oy = dragOriginRef.current.y;
-          const cx = e.clientX;
-          const cy = e.clientY;
-          const threshold = 6;
-          if (Math.abs(cx - ox) < threshold && Math.abs(cy - oy) < threshold) return;
-          const nextRect = {
-            left: Math.min(ox, cx),
-            top: Math.min(oy, cy),
-            width: Math.abs(cx - ox),
-            height: Math.abs(cy - oy),
-          };
-          setDragRect(nextRect);
-          collectLassoHits({
-            left: nextRect.left,
-            top: nextRect.top,
-            right: nextRect.left + nextRect.width,
-            bottom: nextRect.top + nextRect.height,
-          });
+          updateLassoSelection();
         }}
-        onPointerUp={() => {
+        onPointerUp={(e) => {
           if (!dragOriginRef.current) return;
-          dragOriginRef.current = null;
-          lassoPointerRef.current = null;
-          cancelLassoAutoScroll();
+          lassoPointerRef.current = { x: e.clientX, y: e.clientY };
+          const wasDragging = lassoDraggingRef.current;
+          if (wasDragging) {
+            updateLassoSelection();
+          }
+          const hitIds = lassoHitIdsRef.current;
+          const additive = lassoAdditiveRef.current;
+          const baseIds = lassoBaseIdsRef.current;
+          resetLasso();
 
-          if (!dragRect) {
-            lassoHitIdsRef.current.clear();
-            setDragRect(null);
+          if (!wasDragging) {
+            // Clic sullo sfondo senza trascinare: deseleziona, salvo con un modificatore.
+            if (!additive && selectedIdsRef.current.length > 0) {
+              clearSelection();
+            }
             return;
           }
 
-          const selRect = {
-            left: dragRect.left,
-            top: dragRect.top,
-            right: dragRect.left + dragRect.width,
-            bottom: dragRect.top + dragRect.height,
-          };
-          collectLassoHits(selRect);
-          setDragRect(null);
-
-          const newIds = Array.from(lassoHitIdsRef.current);
-          lassoHitIdsRef.current.clear();
-          if (newIds.length > 0) {
-            const base = lassoAdditiveRef.current ? new Set(selectedIdsRef.current) : new Set<string>();
-            for (const id of newIds) base.add(id);
-            commitSelection(Array.from(base));
-            pushTimelineEntry(`Selezionate ${newIds.length} foto con lasso`);
+          const nextSelection = resolveLassoSelection(baseIds, hitIds, additive);
+          const currentSelection = selectedIdsRef.current;
+          const unchanged = nextSelection.length === currentSelection.length
+            && nextSelection.every((id) => selectedSetRef.current.has(id));
+          if (unchanged) {
+            return;
           }
+          commitSelection(nextSelection);
+          const anchorId = pickSelectionAnchor(new Set(nextSelection), visiblePhotoIds, focusedPhotoId);
+          if (anchorId) {
+            setFocusedPhotoId(anchorId);
+            lastClickedIdRef.current = anchorId;
+          }
+          pushTimelineEntry(
+            additive
+              ? `Lasso: selezione ora di ${nextSelection.length} foto`
+              : `Selezionate ${nextSelection.length} foto con lasso`,
+          );
         }}
-        onPointerCancel={() => {
-          dragOriginRef.current = null;
-          lassoPointerRef.current = null;
-          lassoHitIdsRef.current.clear();
-          setDragRect(null);
-          cancelLassoAutoScroll();
-        }}
+        onPointerCancel={resetLasso}
         onScroll={handleGridScroll}
       >
         {visiblePhotoIds.length === 0 ? (

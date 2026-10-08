@@ -30,6 +30,7 @@
     "test:photo-selector-diagnostics": "tsx --test apps/photo-selector-app/src/services/perf-diagnostics.test.ts",
     "test:photo-selector-performance": "tsx --test apps/filex-desktop/src/thumbnail-cache-policy.test.ts apps/photo-selector-app/src/services/performance-work-coordinator.test.ts apps/photo-selector-app/src/services/thumbnail-view-store.test.ts scripts/test-photo-selector-performance-regressions.test.ts",
     "test:photo-selector-duplicates": "tsx --test apps/photo-selector-app/src/services/duplicate-groups.test.ts",
+    "test:photo-selector-selection": "tsx --test apps/photo-selector-app/src/services/photo-selection.test.ts",
     "test:photo-selector-capture-time": "tsx --test apps/filex-desktop/src/capture-time-parser.test.ts",
     "test:photo-selector-rename": "tsx --test apps/photo-selector-app/src/services/rename-pattern.test.ts",
     "test:album-flow-handoff": "tsx --test apps/filex-desktop/src/album-flow-handoff.test.ts",
