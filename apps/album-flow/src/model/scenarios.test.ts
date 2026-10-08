@@ -9,7 +9,7 @@ import { applyTemplate, matchTemplates, reorderFrame, sanitizeTemplate, setFrame
 import { applyChapterPreset, assignAssets, BUILTIN_CHAPTER_PRESETS, createChapter, moveChapter, removeChapter } from "./chapters";
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { applyImport, dedupeRawJpgPairs, planImport, type ImportCandidate } from "./import";
-import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemView, swapItems, toggleItemLock } from "./items";
+import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, swapItems, toggleItemLock } from "./items";
 import { assetUsage, duplicatedAssetIds, removeAssets, reorderAssets, setRating, setSortKey, sortAssets, toggleAssetTag, unusedAssets } from "./library";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
 import { preflightReport } from "./preflight";
@@ -315,6 +315,7 @@ const FUZZ_TEMPLATES = [
 
 const OPERATIONS: Operation[] = [
   { name: "applica un template", run: (p, r) => { const spread = maybe(r, p.spreads); if (!spread) return p; const areaIndex = Math.floor(r() * spread.areas.length); const match = pick(r, [undefined, ...matchTemplates(p, spread, areaIndex, FUZZ_TEMPLATES)]); return match ? applyTemplate(p, spread.id, areaIndex, match.template, match.order) : p; } },
+  { name: "bordo di una foto", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setItemBorder(p, entry.item.id, r() < 0.2 ? { cm: null, color: null } : { cm: r() * 1.6, color: pick(r, ["#000000", "#ffffff", "#aa2233"]) }) : p; } },
   { name: "sposta una cornice", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setFrame(p, entry.item.id, { x: r(), y: r(), w: 0.1 + r() * 0.8, h: 0.1 + r() * 0.8, rotation: (r() - 0.5) * 90 }) : p; } },
   { name: "cornice davanti o dietro", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? reorderFrame(p, entry.item.id, r() < 0.5 ? "front" : "back") : p; } },
   { name: "riempi spread", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? fillSpread(p, spread.id, 1 + Math.floor(r() * 4)) : p; } },

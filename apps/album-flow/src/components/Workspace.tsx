@@ -7,7 +7,7 @@ import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCa
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
-import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemView, toggleItemLock } from "../model/items";
+import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
 import { rotateAssetQuarter, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
 import { countItems, findItem, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas } from "../model/spreads";
@@ -483,6 +483,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       setCropMode(false);
     },
     lockItem: (itemId) => commit((p) => toggleItemLock(p, itemId)),
+    setItemBorder: (itemId, change) => commit((p) => setItemBorder(p, itemId, change), `border:${itemId}`),
     rotatePhoto: (itemId, quarter) => {
       const found = findItem(project, itemId);
       if (!found) return;

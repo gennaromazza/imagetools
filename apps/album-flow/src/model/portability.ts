@@ -211,6 +211,8 @@ function validateProject(value: unknown): asserts value is AlbumProjectV2 {
         num(item.cy, `${path}.items[].cy`, 0, 1);
         if (item.angle !== undefined) num(item.angle, `${path}.items[].angle`, -MAX_ANGLE, MAX_ANGLE);
         if (item.shape !== undefined) num(item.shape, `${path}.items[].shape`, MIN_SHAPE, MAX_SHAPE);
+        if (item.borderCm !== undefined) num(item.borderCm, `${path}.items[].borderCm`, STYLE_LIMITS.borderCm.min, STYLE_LIMITS.borderCm.max);
+        if (item.borderColor !== undefined) text(item.borderColor, `${path}.items[].borderColor`);
         if (item.locked !== undefined) oneOf(item.locked, [true, false], `${path}.items[].locked`);
       }
       if (area.locked !== undefined && typeof area.locked !== "boolean") fail(`${path}.locked: valore non valido.`);

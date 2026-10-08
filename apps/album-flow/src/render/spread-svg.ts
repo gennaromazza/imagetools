@@ -1,6 +1,6 @@
 import type { AlbumAssetV2, AlbumSpread } from "@photo-tools/shared-types";
 import { areaOuterRects, spreadSizeMm } from "../engine/geometry";
-import { placeItem } from "../model/placement";
+import { itemBorderColor, placeItem } from "../model/placement";
 import { areaGeometry, assetMap, type Project } from "../model/project";
 import { renderBackgroundsSvg, renderOverlaysSvg, type DesignContext } from "./design-svg";
 
@@ -57,7 +57,7 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
       const asset = assets.get(item.assetId);
       const placement = placeItem(cell.rect, item, asset, area.style, null, cell.anchor);
       const { frame, content, borderMm } = placement;
-      const border = borderMm > 0 ? `<rect x="${n(content.x - borderMm)}" y="${n(content.y - borderMm)}" width="${n(content.w + borderMm * 2)}" height="${n(content.h + borderMm * 2)}" fill="${attr(area.style.borderColor)}"/>` : "";
+      const border = borderMm > 0 ? `<rect x="${n(content.x - borderMm)}" y="${n(content.y - borderMm)}" width="${n(content.w + borderMm * 2)}" height="${n(content.h + borderMm * 2)}" fill="${attr(itemBorderColor(item, area.style))}"/>` : "";
       const url = asset?.previewUrl;
       const usable = url && (!options.forPrint || url.startsWith("data:image/"));
       const turn = (inner: string) => (cell.rotation ? `<g transform="rotate(${n(cell.rotation)} ${n(cell.rect.x + cell.rect.w / 2)} ${n(cell.rect.y + cell.rect.h / 2)})">${inner}</g>` : inner);

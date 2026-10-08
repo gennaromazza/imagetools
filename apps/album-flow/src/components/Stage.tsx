@@ -4,8 +4,8 @@ import type { DropTarget } from "../engine/drop";
 import { spreadSizeMm } from "../engine/geometry";
 import { hasDesktop } from "../desktop/api";
 import { isFavoriteLayout } from "../model/areas";
-import { BACKGROUND_SWATCHES } from "../model/defaults";
-import { clampAngle, placeItem, wheelNotches, type ItemView } from "../model/placement";
+import { BACKGROUND_SWATCHES, STYLE_LIMITS } from "../model/defaults";
+import { clampAngle, itemBorderColor, placeItem, wheelNotches, type ItemView } from "../model/placement";
 import { itemAspect } from "../model/project";
 import { SHAPE_PRESETS, presetForShape } from "../model/shapes";
 import { isScopeLocked, type LockScope } from "../model/layoutLock";
@@ -18,7 +18,7 @@ import { Icon } from "./icons";
 import { useNewFeature } from "../hooks/useNewFeature";
 import { LayoutBrowser } from "./LayoutBrowser";
 import { SpreadView, type Draft } from "./SpreadView";
-import { ColorDots, ContextMenu, IconButton, Popover, Stars, type MenuItem } from "./ui";
+import { ColorDots, ContextMenu, IconButton, NumberField, Popover, Stars, type MenuItem } from "./ui";
 
 export interface StageActions {
   activateArea: (areaIndex: number) => void;
@@ -54,6 +54,7 @@ export interface StageActions {
   editItem: (itemId: string) => void;
   removeItem: (itemId: string) => void;
   lockItem: (itemId: string) => void;
+  setItemBorder: (itemId: string, change: { cm?: number | null; color?: string | null }) => void;
   viewItem: (itemId: string) => void;
   revealItem: (itemId: string) => void;
   copyItemName: (itemId: string) => void;
@@ -219,9 +220,11 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const two = spread.areas.length > 1;
 
   // Chiude i pannelli quando si cambia spread.
-  useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setLockOpen(false); setPhotoMenu(null); }, [spread.id]);
+  useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setLockOpen(false); setPhotoMenu(null); setBorderFor(null); }, [spread.id]);
 
   const newShape = useNewFeature("forma-foto");
+  const newBorder = useNewFeature("bordo-foto");
+  const [borderFor, setBorderFor] = useState<string | null>(null);
   const toolbar = useCallback((itemId: string): ReactNode => {
     const found = spread.areas.flatMap((candidate, index) => candidate.items.map((item) => ({ item, area: candidate, index }))).find((entry) => entry.item.id === itemId);
     if (!found) return null;
@@ -273,6 +276,18 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
             <IconButton icon="chevronDown" label="Porta dietro le altre" onClick={() => actions.orderFrame(itemId, "back")} size={16} />
           </>
         ) : null}
+        {canCrop ? (
+          <div className="anchor">
+            <button type="button" className={`icon-btn${found.item.borderCm !== undefined || found.item.borderColor !== undefined ? " is-active" : ""}`} title="Bordo di questa foto (spessore e colore)" aria-label="Bordo di questa foto" onClick={() => { newBorder.markSeen(); setBorderFor(borderFor === itemId ? null : itemId); }}>Bordo{newBorder.isNew ? <span className="new-pill">Nuovo</span> : null}</button>
+            <Popover open={borderFor === itemId} onClose={() => setBorderFor(null)} side="top" className="popover--info">
+              <div className="straighten" style={{ gap: 8 }}>
+                <NumberField label="cm" value={found.item.borderCm ?? found.area.style.borderCm} {...STYLE_LIMITS.borderCm} onChange={(value) => actions.setItemBorder(itemId, { cm: value })} title="Spessore del bordo di questa foto (cm)" />
+                <ColorDots value={itemBorderColor(found.item, found.area.style)} swatches={["#000000", "#ffffff"]} onChange={(color) => actions.setItemBorder(itemId, { color })} label="Colore del bordo di questa foto" />
+                <button type="button" className="icon-btn" title="La foto torna a seguire il bordo dell'area" disabled={found.item.borderCm === undefined && found.item.borderColor === undefined} onClick={() => actions.setItemBorder(itemId, { cm: null, color: null })}>Come l'area</button>
+              </div>
+            </Popover>
+          </div>
+        ) : null}
         <IconButton icon="eye" label="Guarda in grande (Spazio)" onClick={() => actions.viewItem(itemId)} size={16} />
         {desktop && asset?.absolutePath ? <IconButton icon="pencil" label="Modifica nell'editor" onClick={() => actions.editItem(itemId)} size={16} /> : null}
         <div className="anchor">
@@ -292,7 +307,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         <IconButton icon="trash" label="Togli dallo spread (Canc)" danger onClick={() => actions.removeItem(itemId)} size={16} />
       </>
     );
-  }, [actions, assets, cropMode, desktop, infoFor, lineTool, newShape.isNew, newShape.markSeen, sheet, spread]);
+  }, [actions, assets, borderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */
   const photoMenuItems = (itemId: string): MenuItem[] => {

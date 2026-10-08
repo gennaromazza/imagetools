@@ -2,7 +2,7 @@ import type { AlbumArea, AlbumAssetV2, AlbumItem, AlbumSpread, LayoutNode, Sheet
 import { areaOuterRects, insetRect, layoutCells, type Rect } from "../engine/geometry";
 import type { DropTarget } from "../engine/drop";
 import { insertAtNode, insertBeside, leaf, leafIds, naturalRatios, removeLeaf, renameLeaf, type InsertSide } from "../engine/tree";
-import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_SPREADS, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, clampNumber } from "./defaults";
+import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_SPREADS, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, STYLE_LIMITS, clampNumber } from "./defaults";
 import { areaCandidates, relayoutArea } from "./areas";
 import { SHAPE_SNAP, clampAngle, placeItem } from "./placement";
 import { alignChanged, alignedForFit, areaGeometry, assetMap, createItem, findItem, effectiveAspect, hasFreeLayout, needsShapeAlignment, findSpread, itemAspect, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
@@ -287,6 +287,21 @@ function withReachableShape(project: Project, spread: AlbumSpread, areaIndex: nu
 
 export function resetItemView(project: Project, itemId: string): Project {
   return setItemView(project, itemId, { zoom: 1, cx: 0.5, cy: 0.5, angle: 0, shape: null });
+}
+
+/**
+ * Bordo di una sola foto: spessore (cm) e colore. `null` toglie la scelta e la foto torna a seguire il bordo dell'area.
+ * Una foto bloccata non cambia.
+ */
+export function setItemBorder(project: Project, itemId: string, change: { cm?: number | null; color?: string | null }): Project {
+  const found = findItem(project, itemId);
+  if (!found || found.item.locked) return project;
+  const { borderCm: _cm, borderColor: _color, ...rest } = found.item;
+  const cm = change.cm === undefined ? found.item.borderCm : change.cm === null ? undefined : clampNumber(Number(change.cm.toFixed(2)), STYLE_LIMITS.borderCm.min, STYLE_LIMITS.borderCm.max);
+  const color = change.color === undefined ? found.item.borderColor : change.color === null || !change.color.trim() ? undefined : change.color.trim();
+  if (cm === found.item.borderCm && color === found.item.borderColor) return project;
+  const next: AlbumItem = { ...rest, ...(cm !== undefined ? { borderCm: cm } : {}), ...(color !== undefined ? { borderColor: color } : {}) };
+  return mapSpread(project, found.spread.id, (spread) => replaceArea(spread, found.areaIndex, { ...found.area, items: found.area.items.map((item) => (item.id === itemId ? next : item)) }));
 }
 
 export function toggleItemLock(project: Project, itemId: string): Project {

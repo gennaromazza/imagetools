@@ -68,8 +68,11 @@ function straightView(content: Rect, aspect: number, zoom: number, cx: number, c
 /** Scarto relativo sotto il quale la cella conta già come «della forma scelta». */
 export const SHAPE_SNAP = 0.12;
 
-export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy" | "angle"> & { shape?: number }, asset: AlbumAssetV2 | undefined, style: Pick<AreaStyle, "borderCm" | "mode" | "align">, view?: Partial<ItemView> | null, anchor?: { x: number; y: number }): Placement {
-  const borderMm = Math.max(0, Math.min(style.borderCm * 10, Math.min(frame.w, frame.h) / 4));
+/** Colore del bordo di una foto: il suo, se l'ha, altrimenti quello dell'area. */
+export const itemBorderColor = (item: Pick<AlbumItem, "borderColor">, style: Pick<AreaStyle, "borderColor">): string => item.borderColor ?? style.borderColor;
+
+export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy" | "angle"> & { shape?: number; borderCm?: number }, asset: AlbumAssetV2 | undefined, style: Pick<AreaStyle, "borderCm" | "mode" | "align">, view?: Partial<ItemView> | null, anchor?: { x: number; y: number }): Placement {
+  const borderMm = Math.max(0, Math.min((item.borderCm ?? style.borderCm) * 10, Math.min(frame.w, frame.h) / 4));
   const content: Rect = { x: frame.x + borderMm, y: frame.y + borderMm, w: Math.max(frame.w - borderMm * 2, 0.1), h: Math.max(frame.h - borderMm * 2, 0.1) };
   const aspect = itemAspect(asset);
   const zoom = clampNumber(view?.zoom ?? item.zoom, MIN_ZOOM, MAX_ZOOM);

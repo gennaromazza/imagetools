@@ -36,6 +36,13 @@ export function makeProject(photoCount: number, overrides: Partial<Project> = {}
 
 const EPS = 1e-6;
 
+/** Una foto di una disposizione libera può uscire in parte dall'area (come i testi), ma almeno un quarto per lato resta dentro (`sanitizeFrame`). */
+function assertMostlyInside(inner: Rect, rect: Rect, label: string) {
+  const insideW = Math.min(rect.x + rect.w, inner.x + inner.w) - Math.max(rect.x, inner.x);
+  const insideH = Math.min(rect.y + rect.h, inner.y + inner.h) - Math.max(rect.y, inner.y);
+  assert.ok(insideW >= rect.w * 0.25 - EPS && insideH >= rect.h * 0.25 - EPS, `${label}: cella quasi tutta fuori dall'area`);
+}
+
 function assertInside(inner: Rect, rect: Rect, label: string) {
   assert.ok(rect.x >= inner.x - EPS && rect.y >= inner.y - EPS && rect.x + rect.w <= inner.x + inner.w + EPS && rect.y + rect.h <= inner.y + inner.h + EPS, `${label}: cella fuori dall'area`);
 }
@@ -107,13 +114,15 @@ export function assertProjectInvariants(project: Project, label = ""): void {
         assert.ok(item.zoom >= 1 && item.zoom <= 6, `${where}: zoom fuori limite`);
         assert.ok(item.cx >= 0 && item.cx <= 1 && item.cy >= 0 && item.cy <= 1, `${where}: centro fuori limite`);
         if (item.shape !== undefined) assert.ok(item.shape >= 0.2 && item.shape <= 5, `${where}: forma fuori limite`);
+        if (item.borderCm !== undefined) assert.ok(item.borderCm >= 0 && item.borderCm <= 1.5, `${where}: bordo della foto fuori limite`);
       }
       const geometry = areaGeometry(project, spread, areaIndex);
       assert.equal(geometry.cells.length, area.items.length, `${where}: celle diverse dalle foto`);
       const overlapAllowed = hasFreeLayout(area);
       geometry.cells.forEach((cell, i) => {
         assert.ok(cell.rect.w > 0 && cell.rect.h > 0, `${where}: cella vuota`);
-        assertInside(geometry.inner, cell.rect, where);
+        if (overlapAllowed) assertMostlyInside(geometry.inner, cell.rect, where);
+        else assertInside(geometry.inner, cell.rect, where);
         const item = area.items.find((candidate) => candidate.id === cell.itemId)!;
         assertPlacement(project, area.style, cell, item, `${where} foto ${i + 1}`);
         for (let j = i + 1; !overlapAllowed && j < geometry.cells.length; j += 1) {

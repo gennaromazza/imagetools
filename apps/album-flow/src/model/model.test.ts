@@ -7,7 +7,9 @@ import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, p
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSplitMode, swapAreas } from "./spreads";
 import { findItem, itemAspect, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeAsset, makeProject } from "./fixtures";
-import { TEMPLATE_STORAGE_KEY, applyTemplate, applyTemplatesToAlbum, bestAssignment, loadTemplates, matchTemplates, removeTemplate, reorderFrame, saveTemplates, sanitizeTemplate, setFrame, templateFromArea, templateTarget, upsertTemplate } from "./templates";
+import { setItemBorder } from "./items";
+import { itemBorderColor, placeItem as placeItemForBorder } from "./placement";
+import { TEMPLATE_STORAGE_KEY, applyTemplate, frameForAspect, restackFrames, applyTemplatesToAlbum, bestAssignment, loadTemplates, matchTemplates, removeTemplate, reorderFrame, saveTemplates, sanitizeTemplate, setFrame, templateFromArea, templateTarget, upsertTemplate } from "./templates";
 import { hasFreeLayout } from "./project";
 import { setAlbumGap } from "./areas";
 import { setSpreadDone } from "./spreads";
@@ -1122,4 +1124,55 @@ test("spazio tra le foto dell'album: cambia dove non l'hai toccato a mano, conse
   // un nuovo spread nasce con lo spazio dell'album
   assert.equal(addSpread(result.project).spreads.at(-1)!.areas[0].style.gapCm, 0.6);
   assertProjectInvariants(result.project, "spazio dell'album");
+});
+
+test("una cornice libera aggiunta nel template ha le proporzioni chieste anche su un foglio molto largo", () => {
+  for (const canvasRatio of [0.7, 1, 1.4, 2.82, 4]) {
+    for (const aspect of [3 / 2, 2 / 3, 4 / 3, 3 / 4, 1, 16 / 9]) {
+      const { w, h } = frameForAspect(aspect, canvasRatio);
+      assert.ok(Math.abs((w * canvasRatio) / h / aspect - 1) < 1e-9, `rapporto ${aspect} su tela ${canvasRatio}`);
+      assert.ok(w <= 0.6 + 1e-9 && h <= 0.9, `dentro l'area: ${w} x ${h}`);
+    }
+  }
+});
+
+test("il bordo di una sola foto non cambia le altre e si toglie tornando a quello dell'area", () => {
+  const base = filled(3, 3);
+  const items = base.spreads[0].areas[0].items;
+  const [first, second] = items;
+  assert.ok(items.length >= 2, "servono almeno due foto");
+  const style = base.spreads[0].areas[0].style;
+  const edited = setItemBorder(base, first.id, { cm: 0.5, color: "#aa2233" });
+  const area = edited.spreads[0].areas[0];
+  assert.equal(area.items[0].borderCm, 0.5);
+  assert.equal(area.items[0].borderColor, "#aa2233");
+  assert.equal(area.items[1].borderCm, undefined, "le altre foto restano com'erano");
+  assert.equal(area.style.borderCm, style.borderCm, "lo stile dell'area non cambia");
+  const cell = (project: typeof base, id: string) => areaGeometry(project, project.spreads[0], 0).cells.find((candidate) => candidate.itemId === id)!;
+  const asset = (id: string) => base.assets.find((candidate) => candidate.id === items.find((item) => item.id === id)!.assetId);
+  const placed = placeItemForBorder(cell(edited, first.id).rect, area.items[0], asset(first.id), area.style);
+  assert.ok(Math.abs(placed.borderMm - 5) < 1e-9, "il bordo della foto vale 5 mm");
+  assert.equal(itemBorderColor(area.items[0], area.style), "#aa2233");
+  assert.equal(itemBorderColor(area.items[1], area.style), style.borderColor);
+  assert.equal(setItemBorder(edited, first.id, { cm: 99 }).spreads[0].areas[0].items[0].borderCm, 1.5, "entro i limiti");
+  const cleared = setItemBorder(edited, first.id, { cm: null, color: null });
+  assert.equal("borderCm" in cleared.spreads[0].areas[0].items[0], false);
+  assert.equal("borderColor" in cleared.spreads[0].areas[0].items[0], false);
+  assert.equal(setItemBorder(base, second.id, { cm: null }), base, "nessun cambiamento = stesso progetto");
+  assertProjectInvariants(edited, "bordo di una foto");
+});
+
+test("template libero: la sovrapposizione si cambia un livello alla volta e i livelli restano 0…n-1", () => {
+  const frames = [{ id: "a", z: 5 }, { id: "b", z: -3 }, { id: "c", z: 9 }];
+  const order = (list: { id: string; z: number }[]) => [...list].sort((x, y) => x.z - y.z).map((frame) => frame.id).join("");
+  assert.equal(order(frames), "bac");
+  assert.equal(order(restackFrames(frames, "b", "front")), "acb");
+  assert.equal(order(restackFrames(frames, "c", "back")), "cba");
+  assert.equal(order(restackFrames(frames, "b", "forward")), "abc");
+  assert.equal(order(restackFrames(frames, "a", "backward")), "abc");
+  assert.equal(order(restackFrames(frames, "b", "backward")), "bac", "già in fondo: resta com'è");
+  assert.equal(order(restackFrames(frames, "c", "forward")), "bac", "già davanti: resta com'è");
+  let moving = frames;
+  for (let step = 0; step < 6; step += 1) moving = restackFrames(moving, "a", "back");
+  assert.deepEqual(moving.map((frame) => frame.z).sort(), [0, 1, 2], "ripetere «porta dietro» non fa scendere i livelli sotto zero");
 });

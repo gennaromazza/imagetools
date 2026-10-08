@@ -32,6 +32,7 @@ assert.ok(dock.includes("data-asset-id"), "miniature della libreria non identifi
 assert.ok(dock.includes("onKeyDown"), "navigazione da tastiera nella libreria assente");
 assert.ok(src("components/SpreadView.tsx").includes("draggable"), "trascinamento delle foto nello spread assente");
 assert.ok(src("components/SpreadView.tsx").includes("DividerHandle"), "separatori trascinabili assenti");
+assert.match(src("components/SpreadView.tsx"), /draft\?\.kind === "frame"[^`]*is-resizing/, "durante lo spostamento libero le transizioni vanno spente (is-resizing): altrimenti la foto insegue il mouse e la maniglia resta indietro");
 const workspace = src("components/Workspace.tsx");
 assert.ok(workspace.includes("ArrowLeft") && workspace.includes("\"?\""), "scorciatoie da tastiera assenti");
 assert.ok(workspace.includes("writeRatingToXmp"), "scrittura delle stelle nel file XMP assente");

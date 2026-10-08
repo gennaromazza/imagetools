@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { AlbumArea, AreaTemplate, AreaStyle, FreeFrame, LayoutNode, SheetSpec, TemplateTarget } from "@photo-tools/shared-types";
 import { layoutCells, type Rect } from "../engine/geometry";
 import { applyShape, leaf, leafIds, removeLeaf, setRatioAt, shapeOfTree, split } from "../engine/tree";
-import { TARGET_LABELS, createTemplateId, sanitizeFrame, targetInner } from "../model/templates";
+import { TARGET_LABELS, createTemplateId, frameForAspect, restackFrames, sanitizeFrame, targetInner, type StackMove } from "../model/templates";
 import { Icon } from "./icons";
 import { Field, Modal, Segmented, Switch } from "./ui";
 
@@ -121,14 +121,15 @@ export function TemplateEditor({ sheet, style, initial, seed, onSave, onClose }:
 
   // ------------------------------------------------------------ cornici libere
   const addFrame = (aspect: number) => {
-    const w = aspect >= 1 ? 0.42 : 0.28;
-    const h = (w * canvasRatio) / aspect;
+    const { w, h } = frameForAspect(aspect, canvasRatio);
     const level = frames.length ? Math.max(...frames.map((frame) => frame.z)) + 1 : 0;
     const offset = (frames.length % 5) * 0.05;
-    const frame: EditorFrame = { id: uid(), aspect, ...sanitizeFrame({ x: 0.1 + offset, y: 0.1 + offset, w, h: Math.min(h, 0.9), rotation: 0, z: level }) };
+    const frame: EditorFrame = { id: uid(), aspect, ...sanitizeFrame({ x: 0.1 + offset, y: 0.1 + offset, w, h, rotation: 0, z: level }) };
     setFrames([...frames, frame]);
     setSelected(frame.id);
   };
+  const restack = (id: string, move: StackMove) => setFrames((current) => restackFrames(current, id, move));
+  const stackAt = (id: string) => [...frames].sort((a, b) => a.z - b.z).findIndex((frame) => frame.id === id);
   const patchFrame = (id: string, change: Partial<EditorFrame>) => setFrames((current) => current.map((frame) => (frame.id === id ? { ...frame, ...change, ...sanitizeFrame({ ...frame, ...change }) } : frame)));
   const startFrameDrag = (frame: EditorFrame, mode: "move" | "resize", event: React.PointerEvent) => {
     event.preventDefault();
@@ -264,8 +265,10 @@ export function TemplateEditor({ sheet, style, initial, seed, onSave, onClose }:
                   <input type="range" min={-45} max={45} step={1} disabled={!current} value={current?.rotation ?? 0} onChange={(event) => current && patchFrame(current.id, { rotation: Number(event.target.value) })} aria-label="Rotazione" />
                 </Field>
                 <div className="btn-row">
-                  <button type="button" className="btn btn--sm" disabled={!current} onClick={() => current && patchFrame(current.id, { z: Math.max(...frames.map((frame) => frame.z)) + 1 })}>Porta davanti</button>
-                  <button type="button" className="btn btn--sm" disabled={!current} onClick={() => current && patchFrame(current.id, { z: Math.min(...frames.map((frame) => frame.z)) - 1 })}>Porta dietro</button>
+                  <button type="button" className="btn btn--sm" disabled={!current || stackAt(current.id) === frames.length - 1} onClick={() => current && restack(current.id, "front")} title="In primo piano, sopra tutte le altre">Porta davanti</button>
+                  <button type="button" className="btn btn--sm" disabled={!current || stackAt(current.id) === frames.length - 1} onClick={() => current && restack(current.id, "forward")} title="Sale di un livello">Avanti di uno</button>
+                  <button type="button" className="btn btn--sm" disabled={!current || stackAt(current.id) === 0} onClick={() => current && restack(current.id, "backward")} title="Scende di un livello">Indietro di uno</button>
+                  <button type="button" className="btn btn--sm" disabled={!current || stackAt(current.id) === 0} onClick={() => current && restack(current.id, "back")} title="In fondo, sotto tutte le altre">Porta dietro</button>
                   <button type="button" className="btn btn--sm" disabled={!current} onClick={() => { if (!current) return; const copy: EditorFrame = { ...current, id: uid(), x: Math.min(0.9, current.x + 0.04), y: Math.min(0.9, current.y + 0.04), z: Math.max(...frames.map((frame) => frame.z)) + 1 }; setFrames([...frames, copy]); setSelected(copy.id); }}><Icon name="copy" size={13} /> Duplica</button>
                   <button type="button" className="btn btn--sm btn--danger" disabled={!current} onClick={() => { if (!current) return; setFrames(frames.filter((frame) => frame.id !== current.id)); setSelected(null); }}>Togli</button>
                 </div>

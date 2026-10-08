@@ -43,6 +43,38 @@ export function targetInner(sheet: Pick<SheetSpec, "widthCm" | "heightCm">, targ
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Number.isFinite(value) ? value : min));
 
+/**
+ * Misure (frazione dell'area utile) di una nuova cornice libera con il rapporto `aspect` (larghezza/altezza della foto)
+ * su un'area con rapporto `canvasRatio`: le proporzioni sono sempre quelle chieste, anche su un foglio molto largo.
+ */
+export function frameForAspect(aspect: number, canvasRatio: number): { w: number; h: number } {
+  const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 1;
+  const safeCanvas = Number.isFinite(canvasRatio) && canvasRatio > 0 ? canvasRatio : 1;
+  let h = 0.7;
+  let w = (h * safeAspect) / safeCanvas;
+  if (w > 0.6) {
+    w = 0.6;
+    h = (w * safeCanvas) / safeAspect;
+  }
+  return { w, h };
+}
+
+export type StackMove = "front" | "back" | "forward" | "backward";
+
+/**
+ * Cambia la sovrapposizione di una cornice (in primo piano, in fondo, o di un livello alla volta) e restituisce
+ * tutte le cornici con i livelli rinumerati 0…n-1, così i livelli non crescono né scendono sotto zero a ogni clic.
+ */
+export function restackFrames<T extends { id: string; z: number }>(frames: readonly T[], id: string, move: StackMove): T[] {
+  const order = frames.map((frame, index) => ({ frame, index })).sort((a, b) => a.frame.z - b.frame.z || a.index - b.index).map((entry) => entry.frame.id);
+  const at = order.indexOf(id);
+  if (at < 0) return [...frames];
+  order.splice(at, 1);
+  const target = move === "front" ? order.length : move === "back" ? 0 : move === "forward" ? Math.min(order.length, at + 1) : Math.max(0, at - 1);
+  order.splice(target, 0, id);
+  return frames.map((frame) => ({ ...frame, z: order.indexOf(frame.id) }));
+}
+
 export function sanitizeFrame(frame: FreeFrame): FreeFrame {
   const w = clamp(frame.w, 0.04, 1);
   const h = clamp(frame.h, 0.04, 1);

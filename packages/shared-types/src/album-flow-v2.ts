@@ -40,6 +40,10 @@ export interface AlbumItem {
   angle?: number;
   /** Forma della foto: rapporto larghezza/altezza (0,2…5). La foto occupa nella cella una finestra di questa forma, ritagliata; assente = segue la cella. */
   shape?: number;
+  /** Bordo di questa foto (cm); assente = vale quello dell'area. */
+  borderCm?: number;
+  /** Colore del bordo di questa foto; assente = vale quello dell'area. */
+  borderColor?: string;
   locked?: boolean;
 }
 

@@ -7,7 +7,7 @@ import { dropHighlight, resolveDropTarget, type DropTarget } from "../engine/dro
 import { spreadSizeMm, type Divider, type LeafCell, type Rect } from "../engine/geometry";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import { previewDropRect } from "../model/items";
-import { angleFromLine, clampAngle, describeSize, nextWheelZoom, placeItem, wheelNotches, type ItemView } from "../model/placement";
+import { angleFromLine, clampAngle, describeSize, itemBorderColor, nextWheelZoom, placeItem, wheelNotches, type ItemView } from "../model/placement";
 import { mediaIdsOfSpread } from "../model/design";
 import { useMediaUrls } from "../hooks/useMedia";
 import { BackgroundLayer, OverlayLayer, type DesignHandlers } from "./DesignLayers";
@@ -270,7 +270,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       src={src}
       rotation={asset?.rotationDegrees}
       mono={area.style.mono}
-      borderColor={area.style.borderColor}
+      borderColor={itemBorderColor(item, area.style)}
       className={classes}
       style={cell.z !== undefined ? { zIndex: selected ? 30 : Math.min(25, Math.max(2, 10 + cell.z)), transform: cell.rotation ? `rotate(${cell.rotation}deg)` : undefined } : undefined}
       alt={asset?.fileName}
@@ -467,7 +467,7 @@ function SpreadViewInner(props: SpreadViewProps) {
   return (
     <div
       ref={ref}
-      className={`spread spread--${variant}${draft?.kind === "ratio" ? " is-resizing" : ""}${props.photosLocked ? " is-photos-locked" : ""}`}
+      className={`spread spread--${variant}${draft?.kind === "ratio" || draft?.kind === "frame" || draft?.kind === "view" ? " is-resizing" : ""}${props.photosLocked ? " is-photos-locked" : ""}`}
       style={{ aspectRatio: `${size.width} / ${size.height}` }}
       onClick={() => { if (interactive) props.onSelectItem?.(null, activeArea); }}
       onDragOver={onDragOver}

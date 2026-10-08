@@ -54,7 +54,9 @@ export function duplicateSpread(project: Project, spreadId: string): Project {
       const mapping = new Map(area.items.map((item) => [item.id, newId("it")]));
       const rename = (node: NonNullable<typeof area.layout>): NonNullable<typeof area.layout> =>
         node.kind === "leaf" ? { kind: "leaf", itemId: mapping.get(node.itemId) ?? node.itemId } : { ...node, first: rename(node.first), second: rename(node.second) };
-      return { ...area, id: newId("area"), items: area.items.map((item) => ({ ...item, id: mapping.get(item.id)! })), layout: area.layout ? rename(area.layout) : null };
+      // Le cornici delle disposizioni libere sono indicizzate per id della foto: vanno rinominate insieme alle foto.
+      const free = area.free ? Object.fromEntries(Object.entries(area.free).map(([itemId, frame]) => [mapping.get(itemId) ?? itemId, frame])) : area.free;
+      return { ...area, id: newId("area"), items: area.items.map((item) => ({ ...item, id: mapping.get(item.id)! })), layout: area.layout ? rename(area.layout) : null, ...(area.free ? { free } : {}) };
     }),
   };
   const spreads = [...project.spreads];
