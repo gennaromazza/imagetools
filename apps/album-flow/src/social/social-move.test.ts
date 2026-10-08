@@ -1,15 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assertCarouselInvariants } from "./check";
-import { addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, setFreeFrame, setTextOffset, swapPhotos, usedAssetIds } from "./edit";
+import { addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, resetMovedElements, setFreeFrame, setLayerOffset, setTextOffset, swapPhotos, usedAssetIds } from "./edit";
 import { TEMPLATES, templateOf } from "./templates";
 import { restyle } from "./plan";
-import { photoAt } from "./hit";
-import { MAX_SLIDES, MIN_SLIDES, type PhotoLayer } from "./types";
+import { graphicAt, photoAt } from "./hit";
+import { MAX_SLIDES, MIN_SLIDES, formatOf, type PhotoLayer } from "./types";
+import { renderSlideSvg } from "./render";
 import { buildSlide } from "./build";
 import { suggestSlideCount, photosUsedAt } from "./plan";
 import { parseCarousels, serializeCarousels } from "./store";
-import { album, envOf, plan } from "./testkit";
+import { album, allMedia, envOf, measure, plan, withSlides } from "./testkit";
 
 const project = album();
 const base = () => plan(project, { count: 14, seed: 0 });
@@ -156,4 +157,39 @@ test("testi spostati a mano: scostamento salvato, applicato e riportabile al pos
   assert.equal(serializeCarousels(parseCarousels(text)), text);
   assert.equal(setTextOffset(moved, slide.id, key, null).slides[target].textOffset, undefined);
   assert.equal(setTextOffset(carousel, slide.id, "campo-che-non-esiste", { dx: 0.2, dy: 0 }), carousel);
+});
+
+test("elementi del modello spostati a mano: livelli traslati, salvati, riportabili al posto", () => {
+  const carousel = base();
+  const env = envOf(project);
+  const target = carousel.slides.findIndex((slide) => !slide.span && slide.templateId !== "sh-mockup" && buildSlide(carousel, carousel.slides.indexOf(slide), env).layers.some((layer) => layer.kind === "rect" || layer.kind === "line" || layer.kind === "path"));
+  assert.ok(target >= 0);
+  const layers = buildSlide(carousel, target, env).layers;
+  const movable = layers.find((layer) => (layer.kind === "line" || layer.kind === "rect" || layer.kind === "path") && graphicAt(layers, 0, 0, measure, 1080, 1350) !== undefined)!;
+  const moved = setLayerOffset(carousel, carousel.slides[target].id, movable.id, { dx: 0.1, dy: 0.2 });
+  const after = buildSlide(moved, target, env).layers.find((layer) => layer.id === movable.id)!;
+  assert.ok(Math.abs((after.dx ?? 0) - 108) < 0.5 && Math.abs((after.dy ?? 0) - 270) < 0.5);
+  assertCarouselInvariants(moved);
+  const svg = renderSlideSvg(moved, target, env, allMedia(project), { idPrefix: "t" });
+  assert.match(svg, /translate\(108 270\)/);
+  const text = serializeCarousels([moved]);
+  assert.deepEqual(JSON.parse(serializeCarousels(parseCarousels(text))), JSON.parse(text));
+  assert.equal(resetMovedElements(moved, carousel.slides[target].id).slides[target].layerOffset, undefined);
+  assert.equal(setLayerOffset(carousel, carousel.slides[target].id, movable.id, null), carousel);
+});
+
+test("modelli semplici a una foto: foto intera, margine, bordo bianco, cornice, tonda, con didascalia", () => {
+  const solos = TEMPLATES.filter((template) => template.id.startsWith("sh-solo-"));
+  assert.ok(solos.length >= 8);
+  for (const template of solos) assert.deepEqual(template.slots, ["any"]);
+  for (const format of ["feed", "square", "story"] as const) {
+    for (const template of solos) {
+      const carousel = withSlides(plan(project, { count: 4 }), [{ id: "s", templateId: template.id, photos: [project.assets[1].id], texts: {} }, { id: "s2", templateId: template.id, photos: [project.assets[3].id], texts: {} }], format);
+      const layers = buildSlide(carousel, 0, envOf(project)).layers;
+      const photo = layers.find((layer): layer is PhotoLayer => layer.kind === "photo");
+      assert.ok(photo && photo.w > 0 && photo.h > 0, `${template.id}/${format}: manca la foto`);
+      const { width, height } = formatOf(format);
+      assert.ok(photo.x >= -1 && photo.y >= -1 && photo.x + photo.w <= width + 1 && photo.y + photo.h <= height + 1, `${template.id}/${format}: foto fuori dalla tela`);
+    }
+  }
 });

@@ -1,3 +1,5 @@
+import type { TextMeasure } from "../render/text-layout";
+import { layoutOf } from "./kit";
 import type { Layer, PhotoLayer } from "./types";
 
 /**
@@ -36,4 +38,48 @@ export function photoAt(layers: readonly Layer[], x: number, y: number): PhotoLa
 /** Il testo (campo del modello) più in alto sotto il punto, in base a un ingombro stimato dal chiamante. */
 export function boxContains(box: { x: number; y: number; w: number; h: number }, x: number, y: number): boolean {
   return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
+}
+
+// ---------------------------------------------------------------------------
+// Elementi del modello che si possono spostare (modo «Testo/grafiche»)
+// ---------------------------------------------------------------------------
+
+export interface Box { x: number; y: number; w: number; h: number }
+
+/** Ingombro di un livello sulla tela, compreso lo spostamento a mano; `null` se non ha un ingombro utile (sfumature, sfondi a tutta tela). */
+export function boundsOf(layer: Layer, measure: TextMeasure, width: number, height: number): Box | null {
+  const dx = layer.dx ?? 0;
+  const dy = layer.dy ?? 0;
+  let box: Box | null = null;
+  switch (layer.kind) {
+    case "rect": case "ellipse": box = { x: layer.x, y: layer.y, w: layer.w, h: layer.h }; break;
+    case "line": box = { x: Math.min(layer.x1, layer.x2), y: Math.min(layer.y1, layer.y2), w: Math.abs(layer.x2 - layer.x1), h: Math.abs(layer.y2 - layer.y1) }; break;
+    case "spread": box = { x: layer.x, y: layer.y, w: layer.w, h: layer.w / layer.aspect }; break;
+    case "text": box = { x: layer.x, y: layer.y, w: layer.w, h: layoutOf(layer, measure).height }; break;
+    case "path": {
+      const numbers = (layer.d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+      if (numbers.length < 4) return null;
+      const xs: number[] = [], ys: number[] = [];
+      for (let index = 0; index + 1 < numbers.length; index += 2) { xs.push(numbers[index]); ys.push(numbers[index + 1]); }
+      box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+      break;
+    }
+    default: return null; // foto e sfumature non si afferrano come grafiche
+  }
+  // Uno sfondo a tutta tela non si sposta: coprirebbe ogni altro elemento.
+  if (box.w >= width * 0.92 && box.h >= height * 0.92) return null;
+  return { x: box.x + dx, y: box.y + dy, w: box.w, h: box.h };
+}
+
+const GRAB = 14;
+
+/** L'elemento (non foto) più in alto sotto il punto, con un po' di tolleranza per le linee sottili. */
+export function graphicAt(layers: readonly Layer[], x: number, y: number, measure: TextMeasure, width: number, height: number): { layer: Layer; box: Box } | null {
+  for (let index = layers.length - 1; index >= 0; index -= 1) {
+    const box = boundsOf(layers[index], measure, width, height);
+    if (!box) continue;
+    const padX = Math.max(0, GRAB - box.w / 2), padY = Math.max(0, GRAB - box.h / 2);
+    if (x >= box.x - padX && x <= box.x + box.w + padX && y >= box.y - padY && y <= box.y + box.h + padY) return { layer: layers[index], box };
+  }
+  return null;
 }

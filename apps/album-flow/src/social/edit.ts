@@ -241,7 +241,7 @@ export function setSlideTemplate(carousel: Carousel, project: Project, slideId: 
     const ranked = template.needsSpread ? rankSpreads(project, pool) : [];
     const spreadId = template.needsSpread ? slide.spreadId ?? ranked[0] ?? null : null;
     const spreadId2 = template.needsSpread ? slide.spreadId2 ?? ranked.find((id) => id !== spreadId) ?? null : null;
-    const { span: _span, spreadId: _spread, spreadId2: _spread2, framing: _framing, textStyle: _style, free: _free, textOffset: _offset, ...rest } = slide;
+    const { span: _span, spreadId: _spread, spreadId2: _spread2, framing: _framing, textStyle: _style, free: _free, textOffset: _offset, layerOffset: _layerOffset, ...rest } = slide;
     const textStyle = normalizeTextStyles(slide.textStyle, template.fields.map((field) => field.key));
     return { ...rest, templateId, photos, texts, ...(textStyle ? { textStyle } : {}), ...(spreadId ? { spreadId } : {}), ...(spreadId2 ? { spreadId2 } : {}) };
   });
@@ -513,3 +513,28 @@ export function setFreeFramePhoto(carousel: Carousel, slideId: string, frameId: 
 }
 
 export { photosShown };
+
+/** Sposta un elemento del modello (riquadro, linea, ornamento, numero di pagina…) per identificativo del livello. `null` lo riporta al suo posto. */
+export function setLayerOffset(carousel: Carousel, slideId: string, layerId: string, offset: { dx: number; dy: number } | null): Carousel {
+  return mapSlide(carousel, slideId, (slide) => {
+    if (slide.span || !layerId || layerId.length > 40) return slide;
+    const round4 = (value: number) => Math.max(-1, Math.min(1, Math.round(value * 10000) / 10000));
+    const clean = offset ? { dx: round4(offset.dx), dy: round4(offset.dy) } : null;
+    const next = clean && (Math.abs(clean.dx) > 0.0005 || Math.abs(clean.dy) > 0.0005) ? clean : null;
+    const before = slide.layerOffset?.[layerId];
+    if ((before?.dx ?? 0) === (next?.dx ?? 0) && (before?.dy ?? 0) === (next?.dy ?? 0)) return slide;
+    const merged = { ...(slide.layerOffset ?? {}) };
+    if (next) merged[layerId] = next; else delete merged[layerId];
+    const { layerOffset: _old, ...rest } = slide;
+    return Object.keys(merged).length ? { ...rest, layerOffset: merged } : rest;
+  });
+}
+
+/** Riporta al loro posto tutti i testi e gli elementi spostati a mano. */
+export function resetMovedElements(carousel: Carousel, slideId: string): Carousel {
+  return mapSlide(carousel, slideId, (slide) => {
+    if (!slide.textOffset && !slide.layerOffset) return slide;
+    const { textOffset: _t, layerOffset: _l, ...rest } = slide;
+    return rest;
+  });
+}

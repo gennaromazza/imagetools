@@ -259,7 +259,7 @@ export function reselectPhotos(project: Project, carousel: Carousel): Carousel {
     if (!before || !template || before.templateId !== slide.templateId) return slide;
     // Le foto si riscelgono; tutto il resto (testi e loro stile, fondo, specchio) resta com'era.
     const { flip: _flip, tone: _tone, ...clean } = slide;
-    return { ...clean, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.tone ? { tone: before.tone } : {}), ...(before.flip ? { flip: true } : {}), ...(before.free && !slide.span ? { free: before.free } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}) };
+    return { ...clean, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.tone ? { tone: before.tone } : {}), ...(before.flip ? { flip: true } : {}), ...(before.free && !slide.span ? { free: before.free } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}) };
   });
   return { ...next, id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
 }
@@ -281,7 +281,7 @@ export function variation(project: Project, carousel: Carousel, seed = freshSeed
   for (const slide of carousel.slides) byTemplate.set(slide.templateId, [...(byTemplate.get(slide.templateId) ?? []), slide]);
   const slides = next.slides.map((slide) => {
     const before = byTemplate.get(slide.templateId)?.shift();
-    return before && Object.keys(before.texts).length ? { ...slide, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}) } : slide;
+    return before && Object.keys(before.texts).length ? { ...slide, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}) } : slide;
   });
   const { basis: _basis, ...rest } = next;
   return { ...rest, ...(carousel.basis !== undefined ? { basis: carousel.basis } : {}), id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
@@ -298,7 +298,7 @@ export function restyle(project: Project, carousel: Carousel, setId: SetId): Car
     if (!before || !template) return slide;
     const texts: Record<string, string> = {};
     for (const field of template.fields) if (before.texts[field.key] !== undefined) texts[field.key] = before.texts[field.key];
-    return { ...slide, texts, ...(before.free && !slide.span && !before.span ? { free: before.free } : {}), ...(before.textOffset && before.templateId === slide.templateId ? { textOffset: before.textOffset } : {}) };
+    return { ...slide, texts, ...(before.free && !slide.span && !before.span ? { free: before.free } : {}), ...(before.textOffset && before.templateId === slide.templateId ? { textOffset: before.textOffset } : {}), ...(before.layerOffset && before.templateId === slide.templateId ? { layerOffset: before.layerOffset } : {}) };
   });
   // Cambiare stile non riscegle le foto: l'impronta resta quella di prima, così l'avviso «le stelle sono cambiate» non sparisce.
   const { basis: _basis, ...rest } = next;

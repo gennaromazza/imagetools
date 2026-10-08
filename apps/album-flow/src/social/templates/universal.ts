@@ -3,6 +3,7 @@ import type { SlideTemplate } from "../types";
 import { field, has, studioOf } from "./common";
 import { UNIVERSAL_MORE } from "./more";
 import { MULTI } from "./multi";
+import { SOLO } from "./solo";
 
 /**
  * Modelli universali: si vestono dei colori e dei font di qualsiasi stile. Il tono (scuro o chiaro) lo decide lo stile,
@@ -185,7 +186,7 @@ const arch: SlideTemplate = {
   },
 };
 
-export const UNIVERSAL: readonly SlideTemplate[] = [full, split, grid, trio, statement, duo, polaroid, arch, ...UNIVERSAL_MORE, ...MULTI];
+export const UNIVERSAL: readonly SlideTemplate[] = [full, split, grid, trio, statement, duo, polaroid, arch, ...UNIVERSAL_MORE, ...MULTI, ...SOLO];
 
 /** I modelli dove il tono lo sceglie lo stile (alternando fondo scuro e chiaro per dare ritmo). */
 export const FLEX_TONE_IDS: ReadonlySet<string> = new Set(UNIVERSAL.map((template) => template.id));

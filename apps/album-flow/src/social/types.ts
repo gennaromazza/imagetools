@@ -71,6 +71,9 @@ export interface BrandKit {
 
 interface LayerBase {
   id: string;
+  /** Spostamento a mano dell'elemento, in pixel della tela (non cambia le sue misure). */
+  dx?: number;
+  dy?: number;
   /** Gradi, attorno al centro dell'elemento. */
   rotation?: number;
   opacity?: number;
@@ -319,6 +322,8 @@ export interface Slide {
   flip?: boolean;
   spreadId?: string | null;
   spreadId2?: string | null;
+  /** Altri elementi del modello spostati a mano (riquadri, linee, ornamenti, numero di pagina…), per identificativo del livello: scostamento in frazioni della tela. */
+  layerOffset?: Record<string, { dx: number; dy: number }>;
   /** Testi spostati a mano: scostamento dal posto del modello, in frazioni della larghezza (dx) e dell'altezza (dy) della tela. */
   textOffset?: Record<string, { dx: number; dy: number }>;
   /**

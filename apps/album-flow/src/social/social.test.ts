@@ -749,7 +749,7 @@ test("numero di slide: si aggiungono e si tolgono prima della chiusura, senza to
 
 test("varianti: ogni modello che può tornare due volte in un carosello ha testi alternativi, e le copie sono diverse", () => {
   const exempt = new Set(["sh-pano", "sh-mockup", "sh-closing", "ed-cover", "ed-cta", "ga-collage", "mo-cover"]);
-  for (const template of TEMPLATES) if (!exempt.has(template.id)) assert.ok((template.variants?.length ?? 0) > 0, `${template.id} non ha varianti dei testi`);
+  for (const template of TEMPLATES) if (!exempt.has(template.id) && template.fields.length > 0) assert.ok((template.variants?.length ?? 0) > 0, `${template.id} non ha varianti dei testi`);
   const project = album();
   for (const set of SETS) {
     const carousel = plan(project, { setId: set.id, count: 20 });

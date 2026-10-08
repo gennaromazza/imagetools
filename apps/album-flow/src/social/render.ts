@@ -44,7 +44,9 @@ interface Box { x: number; y: number; w: number; h: number }
 
 /** Racchiude un elemento con rotazione e trasparenza proprie, attorno al suo centro. */
 function wrap(layer: Layer, box: Box, inner: string): string {
-  const turn = layer.rotation ? ` transform="rotate(${n(layer.rotation)} ${n(box.x + box.w / 2)} ${n(box.y + box.h / 2)})"` : "";
+  const move = layer.dx || layer.dy ? `translate(${n(layer.dx ?? 0)} ${n(layer.dy ?? 0)})` : "";
+  const spin = layer.rotation ? `rotate(${n(layer.rotation)} ${n(box.x + box.w / 2)} ${n(box.y + box.h / 2)})` : "";
+  const turn = move || spin ? ` transform="${[move, spin].filter(Boolean).join(" ")}"` : "";
   const opacity = layer.opacity !== undefined && layer.opacity < 1 ? ` opacity="${n(layer.opacity)}"` : "";
   return turn || opacity ? `<g${turn}${opacity}>${inner}</g>` : inner;
 }

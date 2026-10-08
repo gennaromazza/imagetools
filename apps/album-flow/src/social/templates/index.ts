@@ -29,22 +29,22 @@ export const SETS: readonly SetInfo[] = [
   {
     id: "editoriale", label: "Editoriale", note: "Titoli giganti, fondi scuri e crema, testo dietro la foto",
     paletteId: "bosco", fontPairId: "moda", flexTone: "alternate",
-    arc: { open: "ed-cover", middle: ["ed-hero", "ed-sandwich", "sh-mosaic4", "ed-quote", "ed-list", "sh-hero3", "sh-grid", "sh-polaroid", "sh-polaroid3", "sh-full", "sh-statement", "sh-wall4", "sh-split", "sh-arch", "sh-duo", "sh-trio", "ed-numbers", "ed-caption", "ed-triptych", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-columns4", "sh-polaroid4", "sh-film4", "sh-row3", "sh-circles3", "sh-stack4", "sh-arches3", "sh-lead3", "sh-letter3"], close: "ed-cta" },
+    arc: { open: "ed-cover", middle: ["ed-hero", "ed-sandwich", "sh-mosaic4", "ed-quote", "ed-list", "sh-hero3", "sh-grid", "sh-polaroid", "sh-polaroid3", "sh-full", "sh-statement", "sh-wall4", "sh-split", "sh-arch", "sh-duo", "sh-trio", "ed-numbers", "ed-caption", "ed-triptych", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-columns4", "sh-polaroid4", "sh-film4", "sh-row3", "sh-circles3", "sh-stack4", "sh-arches3", "sh-lead3", "sh-letter3", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "ed-cta" },
   },
   {
     id: "galleria", label: "Galleria", note: "Carta chiara, cornice sottile, foto sfalsate con bordo bianco",
     paletteId: "avorio", fontPairId: "galleria", flexTone: "light",
-    arc: { open: "ga-collage", middle: ["ga-solo", "ga-savedate", "sh-hero3", "ga-editorial", "ga-pair", "sh-polaroid3", "sh-grid", "sh-polaroid", "sh-arch", "sh-stack4", "sh-statement", "sh-columns4", "sh-split", "sh-duo", "sh-full", "sh-trio", "ga-film", "ga-letter", "ga-stack", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-mosaic4", "sh-polaroid4", "sh-film4", "sh-row3", "sh-circles3", "sh-arches3", "sh-lead3", "sh-wall4", "sh-letter3"], close: "sh-closing" },
+    arc: { open: "ga-collage", middle: ["ga-solo", "ga-savedate", "sh-hero3", "ga-editorial", "ga-pair", "sh-polaroid3", "sh-grid", "sh-polaroid", "sh-arch", "sh-stack4", "sh-statement", "sh-columns4", "sh-split", "sh-duo", "sh-full", "sh-trio", "ga-film", "ga-letter", "ga-stack", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-mosaic4", "sh-polaroid4", "sh-film4", "sh-row3", "sh-circles3", "sh-arches3", "sh-lead3", "sh-wall4", "sh-letter3", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "sh-closing" },
   },
   {
     id: "moda", label: "Moda", note: "Riquadri colorati, ritagli tondi, badge e pulsanti",
     paletteId: "salvia", fontPairId: "classico", flexTone: "dark",
-    arc: { open: "mo-cover", middle: ["mo-offset", "mo-circle", "sh-circles3", "mo-lookbook", "mo-panel", "sh-mosaic4", "sh-grid", "sh-arch", "sh-arches3", "sh-polaroid", "sh-statement", "sh-lead3", "sh-split", "sh-duo", "sh-full", "sh-trio", "mo-stripes", "mo-sticker", "mo-duo-circle", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-columns4", "sh-hero3", "sh-polaroid3", "sh-polaroid4", "sh-film4", "sh-row3", "sh-stack4", "sh-wall4", "sh-letter3"], close: "sh-closing" },
+    arc: { open: "mo-cover", middle: ["mo-offset", "mo-circle", "sh-circles3", "mo-lookbook", "mo-panel", "sh-mosaic4", "sh-grid", "sh-arch", "sh-arches3", "sh-polaroid", "sh-statement", "sh-lead3", "sh-split", "sh-duo", "sh-full", "sh-trio", "mo-stripes", "mo-sticker", "mo-duo-circle", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-columns4", "sh-hero3", "sh-polaroid3", "sh-polaroid4", "sh-film4", "sh-row3", "sh-stack4", "sh-wall4", "sh-letter3", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "sh-closing" },
   },
   {
     id: "cinema", label: "Cinema", note: "Sfondi sfocati, strisce di foto, bande da pellicola",
     paletteId: "notte", fontPairId: "solenne", flexTone: "dark",
-    arc: { open: "ci-full", middle: ["ci-strip", "sh-film4", "ci-scope", "ci-duo", "sh-lead3", "ci-quote", "sh-statement", "sh-letter3", "sh-split", "sh-row3", "sh-grid", "sh-arch", "sh-trio", "sh-polaroid", "sh-duo", "sh-full", "ci-letterbox", "ci-diptych", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-mosaic4", "sh-columns4", "sh-hero3", "sh-polaroid3", "sh-polaroid4", "sh-circles3", "sh-stack4", "sh-arches3", "sh-wall4"], close: "sh-closing" },
+    arc: { open: "ci-full", middle: ["ci-strip", "sh-film4", "ci-scope", "ci-duo", "sh-lead3", "ci-quote", "sh-statement", "sh-letter3", "sh-split", "sh-row3", "sh-grid", "sh-arch", "sh-trio", "sh-polaroid", "sh-duo", "sh-full", "ci-letterbox", "ci-diptych", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-mosaic4", "sh-columns4", "sh-hero3", "sh-polaroid3", "sh-polaroid4", "sh-circles3", "sh-stack4", "sh-arches3", "sh-wall4", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "sh-closing" },
     closeAlt: ["ci-credits"],
   },
 ];
@@ -96,5 +96,7 @@ export function setInfo(id: SetId): SetInfo {
 
 /** Modelli tra cui scegliere in uno stile: i suoi, poi quelli comuni (panorama, album, chiusura). */
 export function templatesForSet(id: SetId): SlideTemplate[] {
-  return TEMPLATES.filter((template) => template.set === id || template.set === "shared");
+  const own = TEMPLATES.filter((template) => template.set === id || template.set === "shared");
+  // I modelli più semplici (una foto, quasi senza testo) stanno in testa: sono quelli che si cercano per primi.
+  return [...own.filter((template) => template.id.startsWith("sh-solo-")), ...own.filter((template) => !template.id.startsWith("sh-solo-"))];
 }

@@ -44,6 +44,14 @@ export function withFreeFrames(layers: Layer[], frames: readonly FreeFrame[], wi
   return [...rest.slice(0, before), ...free, ...rest.slice(before)];
 }
 
+/** Gli altri elementi spostati a mano: il livello si disegna traslato, senza cambiare le sue misure. */
+export function withLayerOffsets(layers: Layer[], offsets: Readonly<Record<string, { dx: number; dy: number }>>, width: number, height: number): Layer[] {
+  return layers.map((layer) => {
+    const offset = offsets[layer.id];
+    return offset ? { ...layer, dx: (layer.dx ?? 0) + offset.dx * width, dy: (layer.dy ?? 0) + offset.dy * height } : layer;
+  });
+}
+
 /** I testi spostati a mano: tutti i livelli di quel campo si muovono insieme. */
 export function withTextOffsets(layers: Layer[], offsets: Readonly<Record<string, { dx: number; dy: number }>>, width: number, height: number): Layer[] {
   return layers.map((layer) => {
@@ -83,5 +91,6 @@ export function buildSlide(carousel: Carousel, index: number, env: BuildEnv): Sl
   let layers = slide.flip && !slide.span ? mirrorLayers(built.layers, format.width) : built.layers;
   if (slide.free && !slide.span) layers = withFreeFrames(layers, slide.free, format.width, format.height);
   if (slide.textOffset && !slide.span) layers = withTextOffsets(layers, slide.textOffset, format.width, format.height);
+  if (slide.layerOffset && !slide.span) layers = withLayerOffsets(layers, slide.layerOffset, format.width, format.height);
   return { ...built, layers, template };
 }

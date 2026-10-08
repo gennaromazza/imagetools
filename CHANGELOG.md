@@ -40,6 +40,10 @@
 - Nuovo: ogni foto ha le sue copie, le foto si riordinano trascinandole e si aggiungono trascinando file o intere cartelle sulla pagina. In «Impagina» regoli margini e distanze con il conteggio dei fogli dal vivo, inquadri trascinando le foto e rifinisci con bianco e nero, logo, bordo e segni di taglio.
 - Corretto: i campi numerici non permettevano di scrivere misure come 15, l'anteprima non rispettava le misure del foglio e il numero di foto per pagina non veniva rispettato.
 
+## 2026-10-08 - Album Flow 0.2.19
+
+- Nuovo: nei caroselli il modo «Testo/grafiche» sposta testi, linee, riquadri, ornamenti, numero di pagina e doppie pagine del modello senza toccare le foto, con contorno sull'elemento scelto e «Riporta tutto al posto». Il trascinamento del testo non si confonde più con quello delle foto: i modi sotto l'anteprima sono «Inquadra», «Sposta foto», «Scambia» e «Testo/grafiche». Otto nuovi modelli semplici a una foto, in testa all'elenco: foto intera, foto con margine, bordo bianco, cornice sottile, foto e didascalia, foto tonda, foto con banda e foto su riquadro.
+
 ## 2026-10-08 - Album Flow 0.2.18
 
 - Nuovo: nei caroselli ogni foto si ridimensiona con le maniglie ai bordi e si gira con il cerchio in alto; usando una maniglia la slide passa da sola alla disposizione libera, dove sposti le foto dove vuoi, le sovrapponi, scegli forma (rettangolo, tonda, arco), bordo bianco e ombra, e porti davanti o dietro. Nella scheda «Foto» compaiono le altre foto disponibili, cioè quelle segnate «Per i social» non ancora usate, da aggiungere con un clic. I testi si trascinano dove vuoi sulla slide (un clic li modifica ancora) e «riporta al posto» li rimette nel modello. Tredici nuovi modelli con tre o quattro foto: mosaico, colonne, polaroid, pellicola, cerchi, archi, collage sovrapposto e altri. Sotto l'anteprima i modi sono «Inquadra», «Sposta» e «Scambia». I caroselli già salvati si aprono come prima.

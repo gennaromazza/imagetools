@@ -1,7 +1,7 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { BuildEnv } from "./build";
 import { focusRange, rotateDelta } from "./framing";
-import { photoAt } from "./hit";
+import { graphicAt, photoAt } from "./hit";
 import { coverFit } from "./kit";
 import type { Layer, PhotoFraming } from "./types";
 
@@ -12,7 +12,10 @@ import type { Layer, PhotoFraming } from "./types";
  * si modifica con un clic e, trascinando, muove la foto.
  */
 
-export type PreviewMode = "frame" | "place" | "swap";
+export type PreviewMode = "frame" | "place" | "swap" | "text";
+
+/** «field» = un testo del modello (per campo); «layer» = qualunque altro elemento (per identificativo del livello). */
+export type ElementKind = "field" | "layer";
 
 export interface PreviewInteraction {
   wrapRef: RefObject<HTMLDivElement | null>;
@@ -30,10 +33,11 @@ export interface PreviewInteraction {
   onEmptySlot: (slot: number) => void;
   /** Altezza della tela: serve a trasformare lo spostamento di un testo in frazioni della slide. */
   canvasHeight: number;
-  /** I testi si possono spostare (non nei panorami). Trascinare un testo lo sposta, un semplice clic lo modifica. */
-  textMovable: boolean;
-  textOffsetOf: (field: string) => { dx: number; dy: number };
-  onTextMove: (field: string, offset: { dx: number; dy: number }, coalesceKey: string) => void;
+  /** Modo «Testo/grafiche»: il trascinamento sposta testi e altri elementi del modello (non nei panorami); un clic su un testo lo modifica. */
+  elementMode: boolean;
+  elementOffsetOf: (kind: ElementKind, id: string) => { dx: number; dy: number };
+  onElementMove: (kind: ElementKind, id: string, offset: { dx: number; dy: number }, coalesceKey: string) => void;
+  onElementSelect: (element: { kind: ElementKind; id: string } | null) => void;
   /** Inizia lo spostamento libero di una foto nella slide (modo «place»). */
   onPlaceStart: (slot: number, event: { clientX: number; clientY: number; pointerId: number }) => void;
   /** Inizia lo scambio di una foto con un'altra (modo «swap»): da qui in poi se ne occupa chi ascolta la finestra. */
@@ -72,7 +76,7 @@ export function usePreviewInteraction(options: PreviewInteraction) {
   const latest = useRef(options);
   latest.current = options;
   const drag = useRef<Drag | null>(null);
-  const textDrag = useRef<null | { field: string; startX: number; startY: number; scale: number; start: { dx: number; dy: number }; pointer: number; started: boolean }>(null);
+  const textDrag = useRef<null | { kind: ElementKind; id: string; startX: number; startY: number; scale: number; start: { dx: number; dy: number }; pointer: number; started: boolean }>(null);
   const frame = useRef(0);
   const pending = useRef<null | { slot: number; cx: number; cy: number }>(null);
 
@@ -127,8 +131,14 @@ export function usePreviewInteraction(options: PreviewInteraction) {
       const target = event.target as Element | null;
       const field = target?.closest?.("[data-field]")?.getAttribute("data-field") ?? null;
       const point = toSlide(event.clientX, event.clientY);
-      if (field && current.textMovable) {
-        textDrag.current = { field, startX: event.clientX, startY: event.clientY, scale: point?.scale ?? 1, start: current.textOffsetOf(field), pointer: event.pointerId, started: false };
+      if (current.elementMode) {
+        const hit = point ? graphicAt(current.layers, point.x, point.y, current.env.measure, current.canvasWidth, current.canvasHeight) : null;
+        const target: { kind: ElementKind; id: string } | null = hit
+          ? (hit.layer.kind === "text" && hit.layer.field ? { kind: "field", id: hit.layer.field } : { kind: "layer", id: hit.layer.id })
+          : field ? { kind: "field", id: field } : null;
+        current.onElementSelect(target);
+        if (!target) return;
+        textDrag.current = { ...target, startX: event.clientX, startY: event.clientY, scale: point?.scale ?? 1, start: current.elementOffsetOf(target.kind, target.id), pointer: event.pointerId, started: false };
         capture(event.currentTarget, event.pointerId);
         event.preventDefault();
         return;
@@ -160,10 +170,10 @@ export function usePreviewInteraction(options: PreviewInteraction) {
         }
         const current = latest.current;
         if (current.slideId) {
-          current.onTextMove(moving.field, {
+          current.onElementMove(moving.kind, moving.id, {
             dx: moving.start.dx + ((event.clientX - moving.startX) * moving.scale) / current.canvasWidth,
             dy: moving.start.dy + ((event.clientY - moving.startY) * moving.scale) / current.canvasHeight,
-          }, `tmove:${current.slideId}:${moving.field}`);
+          }, `emove:${current.slideId}:${moving.kind}:${moving.id}`);
         }
         return;
       }
@@ -193,7 +203,7 @@ export function usePreviewInteraction(options: PreviewInteraction) {
       if (moving) {
         textDrag.current = null;
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-        if (!moving.started && event.type === "pointerup") latest.current.onField(moving.field);
+        if (!moving.started && event.type === "pointerup" && moving.kind === "field") latest.current.onField(moving.id);
         return;
       }
       const state = drag.current;

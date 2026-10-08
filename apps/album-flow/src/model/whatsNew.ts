@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.19",
+    date: "2026-10-08",
+    headline: "Caroselli: sposta testi e grafiche, modelli semplici a una foto",
+    items: [
+      {
+        title: "Un modo solo per testi e grafiche",
+        text: "Sotto l'anteprima scegli «Testo/grafiche» e il trascinamento sposta solo testi, linee, riquadri, ornamenti, numero di pagina e doppie pagine del modello: le foto restano ferme e il testo non si confonde più con la foto. L'elemento scelto ha un contorno tratteggiato; un clic su un testo lo modifica, «Riporta tutto al posto» rimette tutto nel modello.",
+        where: ["Inquadra", "Sposta foto", "Scambia", "Testo/grafiche", "Riporta tutto al posto"],
+      },
+      {
+        title: "Otto modelli semplici a una foto",
+        text: "In testa all'elenco «Modello»: Foto intera (a tutta slide, senza testo), Foto con margine, Bordo bianco, Cornice sottile, Foto e didascalia, Foto tonda, Foto con banda e Foto su riquadro. Si vestono dei colori dello stile e funzionano in tutti i formati.",
+        where: ["Modello", "Foto intera", "Bordo bianco", "Cornice sottile", "Foto tonda"],
+      },
+    ],
+  },
+  {
     version: "0.2.18",
     date: "2026-10-08",
     headline: "Caroselli: foto libere, maniglie per ridimensionare, testi spostabili",

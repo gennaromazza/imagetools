@@ -66,6 +66,15 @@ function parseSlide(raw: unknown): Slide | null {
     }
     if (Object.keys(offsets).length > 0) slide.textOffset = offsets;
   }
+  if (isRecord(raw.layerOffset) && !span) {
+    const offsets: Record<string, { dx: number; dy: number }> = {};
+    for (const [id, value] of Object.entries(raw.layerOffset).slice(0, 200)) {
+      if (!isRecord(value) || id.length > 40) continue;
+      const dx = num(value.dx, -1, 1, 0), dy = num(value.dy, -1, 1, 0);
+      if (Math.abs(dx) > 0.0005 || Math.abs(dy) > 0.0005) offsets[id] = { dx, dy };
+    }
+    if (Object.keys(offsets).length > 0) slide.layerOffset = offsets;
+  }
   const free = parseFreeFrames(raw.free);
   if (free && !span) slide.free = free;
   if (typeof raw.spreadId === "string" && raw.spreadId) slide.spreadId = raw.spreadId;

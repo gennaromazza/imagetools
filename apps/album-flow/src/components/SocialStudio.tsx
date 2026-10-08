@@ -9,15 +9,15 @@ import { carouselReport } from "../social/check";
 import { FONT_PAIRS, PALETTES, brandFontIds, defaultBrand, fontPairOf } from "../social/brand";
 import {
   acceptSelection, addPanorama, addSlide, duplicateSlide, moveSlide, removeSlide, renameCarousel, replacePhoto, resetSlideText, setCaption, setFormat, setSlideSpread,
-  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, resizeCarousel, setFreeFrame, setFreeFramePhoto, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
+  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, resizeCarousel, resetMovedElements, setFreeFrame, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
 } from "../social/edit";
 import { setSlideTextStyle, suggestCarouselTexts, suggestFieldText, suggestSlideTexts } from "../social/edit-text";
 import { buildSlide } from "../social/build";
 import { rotateDelta } from "../social/framing";
-import { grabbablePhotos, photoAt } from "../social/hit";
+import { boundsOf, grabbablePhotos, photoAt } from "../social/hit";
 import { layoutOf } from "../social/kit";
 import { usePhotoDrag, type DropTarget } from "../social/usePhotoDrag";
-import { usePreviewInteraction, type PreviewMode } from "../social/usePreviewInteraction";
+import { usePreviewInteraction, type ElementKind, type PreviewMode } from "../social/usePreviewInteraction";
 import { envFor, rankPhotos, reselectPhotos, restyle, selectionBasis, selectionChanged, variation } from "../social/plan";
 import { renderSlideSvg } from "../social/render";
 import { loadCarousels, saveBrand, saveCarousels } from "../social/store";
@@ -80,6 +80,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const [inlineField, setInlineField] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<PreviewMode>("frame");
+  const [selElement, setSelElement] = useState<{ kind: ElementKind; id: string } | null>(null);
   const frameDrag = useRef(0);
   const [scope, setScope] = useState<"slide" | "all">("slide");
   const [tab, setTab] = useState<"model" | "photos" | "texts" | "look">("model");
@@ -190,14 +191,16 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     try { return buildSlide(carousel, selectedIndex, env).layers; } catch { return []; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [carousel, selectedIndex, env, fontTick, setFontTick]);
-  useEffect(() => { setActiveSlot(0); setActiveField(null); setInlineField(null); }, [slide?.id]);
+  useEffect(() => { setActiveSlot(0); setActiveField(null); setInlineField(null); setSelElement(null); }, [slide?.id]);
   const canvasWidth = carousel ? formatOf(carousel.format).width : 1080;
   const canvasHeight = carousel ? formatOf(carousel.format).height : 1350;
   const interaction = usePreviewInteraction({
     wrapRef: mainRef, layers: mainLayers, env, canvasWidth, slideId: slide?.id,
     mode,
-    canvasHeight, textMovable: !slide?.span, textOffsetOf: (field) => slide?.textOffset?.[field] ?? { dx: 0, dy: 0 },
-    onTextMove: (field, offset, key) => commit((current) => setTextOffset(current, slide!.id, field, offset), key),
+    canvasHeight, elementMode: mode === "text" && !slide?.span,
+    elementOffsetOf: (kind, id) => (kind === "field" ? slide?.textOffset?.[id] : slide?.layerOffset?.[id]) ?? { dx: 0, dy: 0 },
+    onElementMove: (kind, id, offset, key) => commit((current) => (kind === "field" ? setTextOffset(current, slide!.id, id, offset) : setLayerOffset(current, slide!.id, id, offset)), key),
+    onElementSelect: setSelElement,
     onPlaceStart: (photoSlot, pointer) => { const layer = grabbablePhotos(mainLayers).find((item) => item.slot === photoSlot); if (layer) startGesture("move", layer, pointer); },
     onFraming: (photoSlot, patch, key) => commit((current) => {
       const target = current.slides.find((item) => item.id === slide!.id);
@@ -378,10 +381,22 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     const below = svgBox.top + textLayer.y * px + textHeight + 10;
     editorBox = { left: Math.max(8, Math.min(window.innerWidth - 340, svgBox.left + textLayer.x * px)), top: below + 176 > window.innerHeight ? Math.max(8, svgBox.top + textLayer.y * px - 186) : below };
   }
-  const selLayer = !inPanorama && mode !== "swap" && !drag ? grabbablePhotos(mainLayers).find((layer) => layer.slot === framingSlot && Boolean(layer.assetId)) : undefined;
+  const selLayer = !inPanorama && mode !== "swap" && mode !== "text" && !drag ? grabbablePhotos(mainLayers).find((layer) => layer.slot === framingSlot && Boolean(layer.assetId)) : undefined;
   const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
+  const elementBox = (() => {
+    if (!selElement || mode !== "text" || inPanorama) return null;
+    const boxes = mainLayers
+      .filter((layer) => (selElement.kind === "field" ? layer.kind === "text" && layer.field === selElement.id : layer.id === selElement.id))
+      .map((layer) => boundsOf(layer, env.measure, canvasWidth, canvasHeight))
+      .filter((box): box is NonNullable<typeof box> => Boolean(box));
+    if (boxes.length === 0) return null;
+    const x1 = Math.min(...boxes.map((box) => box.x)), y1 = Math.min(...boxes.map((box) => box.y));
+    const x2 = Math.max(...boxes.map((box) => box.x + box.w)), y2 = Math.max(...boxes.map((box) => box.y + box.h));
+    return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
+  })();
   const overlays = (
     <>
+      {elementBox && svgBox ? <div className="social-elsel" style={{ left: svgBox.left + elementBox.x * px - 4, top: svgBox.top + elementBox.y * px - 4, width: elementBox.w * px + 8, height: elementBox.h * px + 8 }} /> : null}
       {selLayer && svgBox ? (
         <div className="social-sel" style={{ left: svgBox.left + selLayer.x * px, top: svgBox.top + selLayer.y * px, width: selLayer.w * px, height: selLayer.h * px, transform: selLayer.rotation ? `rotate(${selLayer.rotation}deg)` : undefined }}>
           {HANDLES.map((handle) => (
@@ -536,8 +551,9 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           {overlays}
           <div className="social__tools">
             <Segmented<PreviewMode> label="Trascinando una foto nella slide" value={mode} onChange={setMode}
-              options={[{ value: "frame", label: "Inquadra" }, { value: "place", label: "Sposta" }, { value: "swap", label: "Scambia" }]} />
-            <span className="muted small">{mode === "frame" ? "Trascina la foto per inquadrarla, rotella per lo zoom; le maniglie la ridimensionano. Trascina un testo per spostarlo, clicca per scriverlo." : mode === "place" ? "Trascina la foto dove vuoi nella slide, anche sopra le altre." : "Trascina una foto su un'altra foto, su uno spazio vuoto o su una slide qui sotto."}</span>
+              options={[{ value: "frame", label: "Inquadra" }, { value: "place", label: "Sposta foto" }, { value: "swap", label: "Scambia" }, { value: "text", label: "Testo/grafiche" }]} />
+            {mode === "text" && (slide.textOffset || slide.layerOffset) ? <button type="button" className="btn btn--sm" onClick={() => commit((current) => resetMovedElements(current, slide.id))} title="Riporta testi ed elementi al posto del modello">Riporta tutto al posto</button> : null}
+            <span className="muted small">{mode === "frame" ? "Trascina la foto per inquadrarla, rotella per lo zoom; le maniglie la ridimensionano. Clic su un testo per scriverlo." : mode === "place" ? "Trascina la foto dove vuoi nella slide, anche sopra le altre." : mode === "text" ? "Trascina testi, linee, riquadri e ornamenti dove vuoi. Clic su un testo per scriverlo. Le foto non si muovono." : "Trascina una foto su un'altra foto, su uno spazio vuoto o su una slide qui sotto."}</span>
           </div>
           <div className="social__strip-wrap">
             <div className="social__strip" role="listbox" aria-label="Slide del carosello">
