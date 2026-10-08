@@ -241,7 +241,7 @@ export function setSlideTemplate(carousel: Carousel, project: Project, slideId: 
     const ranked = template.needsSpread ? rankSpreads(project, pool) : [];
     const spreadId = template.needsSpread ? slide.spreadId ?? ranked[0] ?? null : null;
     const spreadId2 = template.needsSpread ? slide.spreadId2 ?? ranked.find((id) => id !== spreadId) ?? null : null;
-    const { span: _span, spreadId: _spread, spreadId2: _spread2, framing: _framing, textStyle: _style, free: _free, textOffset: _offset, layerOffset: _layerOffset, ...rest } = slide;
+    const { span: _span, spreadId: _spread, spreadId2: _spread2, framing: _framing, textStyle: _style, free: _free, textOffset: _offset, layerOffset: _layerOffset, hidden: _hidden, ...rest } = slide;
     const textStyle = normalizeTextStyles(slide.textStyle, template.fields.map((field) => field.key));
     return { ...rest, templateId, photos, texts, ...(textStyle ? { textStyle } : {}), ...(spreadId ? { spreadId } : {}), ...(spreadId2 ? { spreadId2 } : {}) };
   });
@@ -530,11 +530,32 @@ export function setLayerOffset(carousel: Carousel, slideId: string, layerId: str
   });
 }
 
-/** Riporta al loro posto tutti i testi e gli elementi spostati a mano. */
+/** Riporta al loro posto tutti i testi e gli elementi spostati a mano, e rimette quelli cancellati. */
 export function resetMovedElements(carousel: Carousel, slideId: string): Carousel {
   return mapSlide(carousel, slideId, (slide) => {
-    if (!slide.textOffset && !slide.layerOffset) return slide;
-    const { textOffset: _t, layerOffset: _l, ...rest } = slide;
+    if (!slide.textOffset && !slide.layerOffset && !slide.hidden) return slide;
+    const { textOffset: _t, layerOffset: _l, hidden: _h, ...rest } = slide;
+    return rest;
+  });
+}
+
+/** Toglie dalla slide un testo (per campo) o un altro elemento del modello (per identificativo del livello). Non vale per i panorami né per le foto. */
+export function hideElement(carousel: Carousel, slideId: string, kind: "field" | "layer", id: string): Carousel {
+  return mapSlide(carousel, slideId, (slide) => {
+    const template = templateOf(slide.templateId);
+    if (slide.span || !id || id.length > 40) return slide;
+    if (kind === "field" && !template?.fields.some((field) => field.key === id)) return slide;
+    const entry = `${kind === "field" ? "f" : "l"}:${id}`;
+    if (slide.hidden?.includes(entry)) return slide;
+    return { ...slide, hidden: [...(slide.hidden ?? []), entry].slice(-100) };
+  });
+}
+
+/** Rimette tutti gli elementi cancellati (testi e spostamenti restano come sono). */
+export function showHiddenElements(carousel: Carousel, slideId: string): Carousel {
+  return mapSlide(carousel, slideId, (slide) => {
+    if (!slide.hidden) return slide;
+    const { hidden: _h, ...rest } = slide;
     return rest;
   });
 }

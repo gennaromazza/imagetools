@@ -9,12 +9,13 @@ import { carouselReport } from "../social/check";
 import { FONT_PAIRS, PALETTES, brandFontIds, defaultBrand, fontPairOf } from "../social/brand";
 import {
   acceptSelection, addPanorama, addSlide, duplicateSlide, moveSlide, removeSlide, renameCarousel, replacePhoto, resetSlideText, setCaption, setFormat, setSlideSpread,
-  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, resizeCarousel, resetMovedElements, setFreeFrame, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
+  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, resizeCarousel, hideElement, resetMovedElements, setFreeFrame, showHiddenElements, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
 } from "../social/edit";
-import { setSlideTextStyle, suggestCarouselTexts, suggestFieldText, suggestSlideTexts } from "../social/edit-text";
+import { dedupeTexts, repeatedTexts, setSlideTextStyle, suggestCarouselTexts, suggestFieldText, suggestSlideTexts } from "../social/edit-text";
 import { buildSlide } from "../social/build";
 import { rotateDelta } from "../social/framing";
 import { boundsOf, grabbablePhotos, photoAt } from "../social/hit";
+import { SNAP_MARGIN, snapBox, snapLines, snapTargets, snapValue, type Guide } from "../social/snap";
 import { layoutOf } from "../social/kit";
 import { usePhotoDrag, type DropTarget } from "../social/usePhotoDrag";
 import { usePreviewInteraction, type ElementKind, type PreviewMode } from "../social/usePreviewInteraction";
@@ -33,6 +34,8 @@ import { SocialFraming } from "./SocialFraming";
 import { SocialTextFields } from "./SocialTextFields";
 import { SocialPhotoPicker } from "./SocialPhotoPicker";
 import { Segmented } from "./ui";
+
+const MAGNETS_KEY = "filex.albumFlow.social.magnets";
 
 /** Un SVG già pronto, disegnato dentro un riquadro. */
 function SlideView({ svg, className = "" }: { svg: string; className?: string }) {
@@ -80,6 +83,10 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const [inlineField, setInlineField] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<PreviewMode>("frame");
+  const [magnets, setMagnets] = useState(() => { try { return localStorage.getItem(MAGNETS_KEY) !== "0"; } catch { return true; } });
+  const [grid, setGrid] = useState(false);
+  const [guides, setGuides] = useState<Guide[]>([]);
+  const [gestureInfo, setGestureInfo] = useState("");
   const [selElement, setSelElement] = useState<{ kind: ElementKind; id: string } | null>(null);
   const frameDrag = useRef(0);
   const [scope, setScope] = useState<"slide" | "all">("slide");
@@ -201,6 +208,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     elementOffsetOf: (kind, id) => (kind === "field" ? slide?.textOffset?.[id] : slide?.layerOffset?.[id]) ?? { dx: 0, dy: 0 },
     onElementMove: (kind, id, offset, key) => commit((current) => (kind === "field" ? setTextOffset(current, slide!.id, id, offset) : setLayerOffset(current, slide!.id, id, offset)), key),
     onElementSelect: setSelElement,
+    magnets, onGuides: setGuides,
     onPlaceStart: (photoSlot, pointer) => { const layer = grabbablePhotos(mainLayers).find((item) => item.slot === photoSlot); if (layer) startGesture("move", layer, pointer); },
     onFraming: (photoSlot, patch, key) => commit((current) => {
       const target = current.slides.find((item) => item.id === slide!.id);
@@ -260,6 +268,9 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     const sign = { nw: [-1, -1], n: [0, -1], ne: [1, -1], e: [1, 0], se: [1, 1], s: [0, 1], sw: [-1, 1], w: [-1, 0] } as const;
     const minPx = 0.06 * canvasWidth;
     const key = `gesture:${slideId}:${frameId}:${++gesture.current}`;
+    const targets = snapTargets(snapshot, (item) => item.id === layer.id, env.measure, canvasWidth, canvasHeight);
+    const lines = snapLines(targets, canvasWidth, canvasHeight);
+    const threshold = 8 * scale;
     setActiveSlot(layer.slot);
     const apply = (patch: { x: number; y: number; w: number; h: number; rotation?: number }) => {
       commit((current) => setFreeFrame(enterFreeMode(current, slideId, snapshot), slideId, frameId, {
@@ -269,7 +280,16 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     const onMove = (event: PointerEvent) => {
       const dx = (event.clientX - pointer.clientX) * scale;
       const dy = (event.clientY - pointer.clientY) * scale;
-      if (kind === "move") { apply({ ...start, x: start.x + dx, y: start.y + dy }); return; }
+      if (kind === "move") {
+        let x = start.x + dx, y = start.y + dy;
+        if (magnets && !rotation && !event.altKey) {
+          const snapped = snapBox({ x, y, w: start.w, h: start.h }, targets, canvasWidth, canvasHeight, threshold);
+          x += snapped.dx; y += snapped.dy;
+          setGuides(snapped.guides);
+        } else setGuides([]);
+        apply({ ...start, x, y });
+        return;
+      }
       if (kind === "rot") {
         const px = (event.clientX - rect.left) * scale, py = (event.clientY - rect.top) * scale;
         let degrees = (Math.atan2(py - cy0, px - cx0) * 180) / Math.PI + 90;
@@ -283,10 +303,25 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
       let w = Math.max(minPx, start.w + sx * local.dx);
       let h = Math.max(minPx, start.h + sy * local.dy);
       if (sx !== 0 && sy !== 0) { const factor = Math.max(w / start.w, h / start.h); w = Math.max(minPx, start.w * factor); h = Math.max(minPx, start.h * factor); }
+      const edgeGuides: Guide[] = [];
+      if (magnets && !rotation && !event.altKey) {
+        if (sx !== 0 && sy === 0) {
+          const edge = sx > 0 ? start.x + w : start.x + start.w - w;
+          const line = snapValue(edge, lines.xs, threshold);
+          if (line !== null) { w = Math.max(minPx, sx > 0 ? line - start.x : start.x + start.w - line); edgeGuides.push({ axis: "x", pos: line }); }
+        }
+        if (sy !== 0 && sx === 0) {
+          const edge = sy > 0 ? start.y + h : start.y + start.h - h;
+          const line = snapValue(edge, lines.ys, threshold);
+          if (line !== null) { h = Math.max(minPx, sy > 0 ? line - start.y : start.y + start.h - line); edgeGuides.push({ axis: "y", pos: line }); }
+        }
+      }
+      setGuides(edgeGuides);
+      setGestureInfo(`${Math.round(w)} × ${Math.round(h)} px · proporzioni ${(w / h).toFixed(2).replace(".", ",")} : 1`);
       const shift = rotateDelta((sx * (w - start.w)) / 2, (sy * (h - start.h)) / 2, -rotation);
       apply({ x: cx0 + shift.dx - w / 2, y: cy0 + shift.dy - h / 2, w, h });
     };
-    const stop = () => { window.removeEventListener("pointermove", onMove, true); window.removeEventListener("pointerup", stop, true); window.removeEventListener("pointercancel", stop, true); };
+    const stop = () => { setGuides([]); setGestureInfo(""); window.removeEventListener("pointermove", onMove, true); window.removeEventListener("pointerup", stop, true); window.removeEventListener("pointercancel", stop, true); };
     window.addEventListener("pointermove", onMove, true);
     window.addEventListener("pointerup", stop, true);
     window.addEventListener("pointercancel", stop, true);
@@ -299,6 +334,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   };
 
   const report = useMemo(() => (carousel ? carouselReport(carousel, project) : null), [carousel, project]);
+  const repeats = useMemo(() => (carousel ? repeatedTexts(carousel, project.projectName) : []), [carousel, project.projectName]);
 
   // ----------------------------------------------------------------- tastiera
   useEffect(() => {
@@ -316,12 +352,18 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
       if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) doRedo(); else doUndo(); return; }
       if (mod && key === "y") { event.preventDefault(); doRedo(); return; }
       if (!carousel) return;
+      if ((event.key === "Delete" || event.key === "Backspace") && mode === "text" && selElement && slide && !slide.span) {
+        event.preventDefault();
+        commit((current) => hideElement(current, slide.id, selElement.kind, selElement.id));
+        setSelElement(null);
+        return;
+      }
       if (event.key === "ArrowLeft" && selectedIndex > 0) { event.preventDefault(); setSelectedId(carousel.slides[selectedIndex - 1].id); }
       if (event.key === "ArrowRight" && selectedIndex < carousel.slides.length - 1) { event.preventDefault(); setSelectedId(carousel.slides[selectedIndex + 1].id); }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [picker, adding, exporting, creating, inlineField, carousel, selectedIndex, onClose]);
+  }, [picker, adding, exporting, creating, inlineField, carousel, selectedIndex, onClose, mode, selElement, slide, commit]);
 
   // ----------------------------------------------------------------- vuoto
   if ((!carousel || !slide) && project.assets.length > 0) {
@@ -396,6 +438,16 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   })();
   const overlays = (
     <>
+      {grid && svgBox ? (
+        <>
+          {[1 / 3, 1 / 2, 2 / 3].map((fraction) => <div key={`gx${fraction}`} className={`social-grid social-grid--v${fraction === 1 / 2 ? " is-center" : ""}`} style={{ left: svgBox.left + fraction * canvasWidth * px, top: svgBox.top, height: svgBox.height }} />)}
+          {[1 / 3, 1 / 2, 2 / 3].map((fraction) => <div key={`gy${fraction}`} className={`social-grid social-grid--h${fraction === 1 / 2 ? " is-center" : ""}`} style={{ top: svgBox.top + fraction * canvasHeight * px, left: svgBox.left, width: svgBox.width }} />)}
+          <div className="social-grid social-grid--margin" style={{ left: svgBox.left + SNAP_MARGIN * px, top: svgBox.top + SNAP_MARGIN * px, width: (canvasWidth - 2 * SNAP_MARGIN) * px, height: (canvasHeight - 2 * SNAP_MARGIN) * px }} />
+        </>
+      ) : null}
+      {svgBox ? guides.map((guide, index) => (guide.axis === "x"
+        ? <div key={`g${index}`} className="social-guide social-guide--v" style={{ left: svgBox.left + guide.pos * px, top: svgBox.top, height: svgBox.height }} />
+        : <div key={`g${index}`} className="social-guide social-guide--h" style={{ top: svgBox.top + guide.pos * px, left: svgBox.left, width: svgBox.width }} />)) : null}
       {elementBox && svgBox ? <div className="social-elsel" style={{ left: svgBox.left + elementBox.x * px - 4, top: svgBox.top + elementBox.y * px - 4, width: elementBox.w * px + 8, height: elementBox.h * px + 8 }} /> : null}
       {selLayer && svgBox ? (
         <div className="social-sel" style={{ left: svgBox.left + selLayer.x * px, top: svgBox.top + selLayer.y * px, width: selLayer.w * px, height: selLayer.h * px, transform: selLayer.rotation ? `rotate(${selLayer.rotation}deg)` : undefined }}>
@@ -524,6 +576,10 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           }} title="Propone titoli, parole e frasi dalla libreria editoriale dei fotolibri. Sostituisce i testi attuali: puoi annullare.">
             <Icon name="wand" size={14} /> Suggerisci i testi
           </button>
+          <button type="button" className="btn btn--sm social__full social-auto" disabled={repeats.length === 0} onClick={() => commit((current) => dedupeTexts(current, project.projectName))}
+            title="Cerca le frasi che compaiono più volte nel carosello e sostituisce le ripetizioni con frasi nuove, diverse da tutte le altre">
+            <Icon name="shuffle" size={14} /> Evita frasi ripetute{repeats.length > 0 ? ` (${repeats.length})` : ""}
+          </button>
           <p className="muted small social-hint">{scope === "all"
             ? "Agisce su tutte le slide. Le foto segnate «Per i social» (clic destro in libreria → «Segna come») vengono usate per prime, poi quelle con più stelle."
             : `Agisce solo sulla slide ${selectedIndex + 1}. Ogni clic propone qualcosa di nuovo.`}</p>
@@ -552,8 +608,13 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           <div className="social__tools">
             <Segmented<PreviewMode> label="Trascinando una foto nella slide" value={mode} onChange={setMode}
               options={[{ value: "frame", label: "Inquadra" }, { value: "place", label: "Sposta foto" }, { value: "swap", label: "Scambia" }, { value: "text", label: "Testo/grafiche" }]} />
-            {mode === "text" && (slide.textOffset || slide.layerOffset) ? <button type="button" className="btn btn--sm" onClick={() => commit((current) => resetMovedElements(current, slide.id))} title="Riporta testi ed elementi al posto del modello">Riporta tutto al posto</button> : null}
-            <span className="muted small">{mode === "frame" ? "Trascina la foto per inquadrarla, rotella per lo zoom; le maniglie la ridimensionano. Clic su un testo per scriverlo." : mode === "place" ? "Trascina la foto dove vuoi nella slide, anche sopra le altre." : mode === "text" ? "Trascina testi, linee, riquadri e ornamenti dove vuoi. Clic su un testo per scriverlo. Le foto non si muovono." : "Trascina una foto su un'altra foto, su uno spazio vuoto o su una slide qui sotto."}</span>
+            <button type="button" className={`chip${magnets ? " is-active" : ""}`} aria-pressed={magnets} onClick={() => { const next = !magnets; setMagnets(next); try { localStorage.setItem(MAGNETS_KEY, next ? "1" : "0"); } catch { /* preferenza non salvata */ } }} title="Calamite: spostando o ridimensionando ci si aggancia a centro, margini e altri elementi (Alt = senza)">Calamite</button>
+            <button type="button" className={`chip${grid ? " is-active" : ""}`} aria-pressed={grid} onClick={() => setGrid((value) => !value)} title="Mostra centro, terzi e margini della slide">Griglia</button>
+            {mode === "text" && selElement ? <button type="button" className="btn btn--sm btn--danger" onClick={() => { commit((current) => hideElement(current, slide.id, selElement.kind, selElement.id)); setSelElement(null); }} title="Toglie l'elemento dalla slide (Canc)"><Icon name="trash" size={13} /> Elimina elemento</button> : null}
+            {slide.hidden ? <button type="button" className="btn btn--sm" onClick={() => commit((current) => showHiddenElements(current, slide.id))} title="Rimette gli elementi cancellati">Rimetti eliminati ({slide.hidden.length})</button> : null}
+            {mode === "text" && (slide.textOffset || slide.layerOffset) ? <button type="button" className="btn btn--sm" onClick={() => commit((current) => resetMovedElements(current, slide.id))} title="Riporta testi ed elementi al posto del modello, rimettendo anche quelli eliminati">Riporta tutto al posto</button> : null}
+            {gestureInfo ? <strong className="social__info">{gestureInfo}</strong> : null}
+            <span className="muted small">{mode === "frame" ? "Trascina la foto per inquadrarla, rotella per lo zoom; le maniglie la ridimensionano. Clic su un testo per scriverlo." : mode === "place" ? "Trascina la foto dove vuoi nella slide, anche sopra le altre." : mode === "text" ? "Clicca un elemento per sceglierlo: trascinalo o eliminalo con Canc. Clic su un testo per scriverlo. Le foto non si muovono." : "Trascina una foto su un'altra foto, su uno spazio vuoto o su una slide qui sotto."}</span>
           </div>
           <div className="social__strip-wrap">
             <div className="social__strip" role="listbox" aria-label="Slide del carosello">
@@ -666,6 +727,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
                 activeField={activeField} onActiveField={setActiveField}
                 onText={(key, value) => commit((current) => setSlideText(current, slide.id, key, value), `t:${slide.id}:${key}`)}
                 onReset={(key) => commit((current) => resetSlideText(current, slide.id, key))}
+                repeatOf={Object.fromEntries(repeats.filter((repeat) => repeat.slideIndex === selectedIndex).map((repeat) => [repeat.key, repeat.firstIndex + 1]))}
                 moved={slide.textOffset ? Object.keys(slide.textOffset) : []}
                 onResetPosition={(key) => commit((current) => setTextOffset(current, slide.id, key, null))}
                 onStyle={(key, patch) => commit((current) => setSlideTextStyle(current, slide.id, key, patch), patch && "scale" in patch ? `style:${slide.id}:${key}` : undefined)}

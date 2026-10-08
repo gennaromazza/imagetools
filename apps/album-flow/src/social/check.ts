@@ -1,5 +1,6 @@
 import { itemAspect, type Project } from "../model/project";
 import { approximateMeasure } from "../render/text-layout";
+import { repeatedTexts } from "./edit-text";
 import { buildSlide } from "./build";
 import { envFor } from "./plan";
 import { templateOf } from "./templates";
@@ -23,6 +24,9 @@ export function carouselReport(carousel: Carousel, project: Project): SocialRepo
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   if (carousel.slides.length < MIN_SLIDES) issues.push({ level: "error", message: `Un carosello ha almeno ${MIN_SLIDES} slide.` });
   if (carousel.slides.length > MAX_SLIDES) issues.push({ level: "error", message: `Instagram accetta al massimo ${MAX_SLIDES} slide: ne hai ${carousel.slides.length}.` });
+  for (const repeat of repeatedTexts(carousel, project.projectName)) {
+    issues.push({ level: "warning", message: `Slide ${repeat.slideIndex + 1}: la frase «${repeat.text.replace(/\s+/g, " ").slice(0, 50)}» c'è già nella slide ${repeat.firstIndex + 1}.`, slideIndex: repeat.slideIndex });
+  }
   const env = envFor(project, approximateMeasure);
   const seen = new Map<string, number>();
   carousel.slides.forEach((slide, index) => {

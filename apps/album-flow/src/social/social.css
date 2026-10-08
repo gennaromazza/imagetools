@@ -189,3 +189,16 @@
 .social-avail__plus, .social-free__n { position: absolute; right: 4px; bottom: 4px; display: grid; place-items: center; min-width: 18px; height: 18px; border-radius: 9px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 11px; }
 
 .social-elsel { position: fixed; z-index: 118; pointer-events: none; border: 2px dashed var(--accent-bright); border-radius: 4px; box-sizing: border-box; }
+
+/* Calamite: linee guida e griglia */
+.social-guide { position: fixed; z-index: 119; pointer-events: none; background: #ff3d8b; }
+.social-guide--v { width: 1px; }
+.social-guide--h { height: 1px; }
+.social-grid { position: fixed; z-index: 117; pointer-events: none; background: rgba(255, 255, 255, 0.35); }
+.social-grid--v { width: 1px; }
+.social-grid--h { height: 1px; }
+.social-grid.is-center { background: rgba(255, 61, 139, 0.55); }
+.social-grid--margin { background: transparent; border: 1px dashed rgba(255, 255, 255, 0.4); box-sizing: border-box; }
+.social__info { font-size: 12px; color: var(--accent-bright); }
+
+.social-field__repeat { color: var(--warning, #e0b050); }

@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertCarouselInvariants } from "./check";
+import { assertCarouselInvariants, carouselReport } from "./check";
+import { dedupeTexts, repeatedTexts } from "./edit-text";
+import { snapBox, snapValue } from "./snap";
+import { hideElement, showHiddenElements } from "./edit";
 import { addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, resetMovedElements, setFreeFrame, setLayerOffset, setTextOffset, swapPhotos, usedAssetIds } from "./edit";
 import { TEMPLATES, templateOf } from "./templates";
 import { restyle } from "./plan";
@@ -192,4 +195,57 @@ test("modelli semplici a una foto: foto intera, margine, bordo bianco, cornice, 
       assert.ok(photo.x >= -1 && photo.y >= -1 && photo.x + photo.w <= width + 1 && photo.y + photo.h <= height + 1, `${template.id}/${format}: foto fuori dalla tela`);
     }
   }
+});
+
+test("calamite: si agganciano a centro, margini e altri elementi, solo entro la soglia", () => {
+  const near = snapBox({ x: 444, y: 300, w: 192, h: 100 }, [], 1080, 1350, 8);
+  assert.equal(near.dx, 0, "il centro e gia a 540");
+  const off = snapBox({ x: 448, y: 300, w: 192, h: 100 }, [], 1080, 1350, 8);
+  assert.equal(off.dx, -4, "il centro (544) si aggancia a 540");
+  assert.ok(off.guides.some((guide) => guide.axis === "x" && guide.pos === 540));
+  const far = snapBox({ x: 200, y: 300, w: 192, h: 100 }, [], 1080, 1350, 8);
+  assert.equal(far.dx, 0);
+  assert.ok(!far.guides.some((guide) => guide.axis === "x"));
+  const other = snapBox({ x: 301, y: 500, w: 100, h: 100 }, [{ x: 300, y: 100, w: 100, h: 100 }], 1080, 1350, 8);
+  assert.equal(other.dx, -1, "il bordo sinistro si allinea a un altro elemento");
+  assert.equal(snapValue(100, [90, 130], 8), null);
+  assert.equal(snapValue(100, [90, 104], 8), 104);
+});
+
+test("elementi eliminati dalla slide: spariscono dal disegno, si rimettono, si salvano", () => {
+  const carousel = base();
+  const env = envOf(project);
+  const target = carousel.slides.findIndex((slide) => !slide.span && templateOf(slide.templateId)!.fields.length > 0 && buildSlide(carousel, carousel.slides.indexOf(slide), env).layers.some((layer) => layer.kind === "text" && layer.field));
+  const slide = carousel.slides[target];
+  const layers = buildSlide(carousel, target, env).layers;
+  const field = (layers.find((layer) => layer.kind === "text" && layer.field) as { field: string }).field;
+  const hidden = hideElement(carousel, slide.id, "field", field);
+  assert.ok(!buildSlide(hidden, target, env).layers.some((layer) => layer.kind === "text" && layer.field === field));
+  const decor = layers.find((layer) => layer.kind === "line" || layer.kind === "rect");
+  if (decor) assert.ok(!buildSlide(hideElement(carousel, slide.id, "layer", decor.id), target, env).layers.some((layer) => layer.id === decor.id));
+  assertCarouselInvariants(hidden);
+  assert.equal(hideElement(hidden, slide.id, "field", field), hidden, "gia eliminato");
+  assert.equal(hideElement(carousel, slide.id, "field", "campo-inesistente"), carousel);
+  const text = serializeCarousels([hidden]);
+  assert.deepEqual(JSON.parse(serializeCarousels(parseCarousels(text))), JSON.parse(text));
+  assert.equal(showHiddenElements(hidden, slide.id).slides[target].hidden, undefined);
+  // le foto non si eliminano da qui
+  assert.equal(buildSlide(hideElement(carousel, slide.id, "layer", "l0"), target, env).layers.filter((layer) => layer.kind === "photo").length, layers.filter((layer) => layer.kind === "photo").length);
+});
+
+test("frasi ripetute: si riconoscono, si segnalano e si sostituiscono con frasi diverse", () => {
+  const carousel = base();
+  const withRepeat = { ...carousel, slides: carousel.slides.map((slide, index) => {
+    const template = templateOf(slide.templateId)!;
+    const key = template.fields.find((item) => ["title", "caption", "text", "heading"].includes(item.key))?.key;
+    return key && index > 0 && !slide.span ? { ...slide, texts: { ...slide.texts, [key]: "Una frase che torna sempre uguale" } } : slide;
+  }) };
+  const repeats = repeatedTexts(withRepeat, project.projectName);
+  assert.ok(repeats.length >= 1, "nessuna ripetizione trovata");
+  assert.ok(carouselReport(withRepeat, project).issues.some((issue) => issue.message.includes("c'è già nella slide")));
+  const fixed = dedupeTexts(withRepeat, project.projectName);
+  assert.equal(repeatedTexts(fixed, project.projectName).length, 0, "restano frasi ripetute");
+  assertCarouselInvariants(fixed);
+  // un carosello nuovo non ha ripetizioni
+  for (const setId of ["editoriale", "galleria", "moda", "cinema"] as const) assert.equal(repeatedTexts(plan(project, { setId, count: 20 }), project.projectName).length, 0, `${setId}: frasi ripetute in un carosello nuovo`);
 });

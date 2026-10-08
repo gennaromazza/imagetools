@@ -66,6 +66,10 @@ function parseSlide(raw: unknown): Slide | null {
     }
     if (Object.keys(offsets).length > 0) slide.textOffset = offsets;
   }
+  if (Array.isArray(raw.hidden) && !span) {
+    const hidden = [...new Set(raw.hidden.filter((item): item is string => typeof item === "string" && /^[fl]:.{1,40}$/.test(item)))].slice(0, 100);
+    if (hidden.length > 0) slide.hidden = hidden;
+  }
   if (isRecord(raw.layerOffset) && !span) {
     const offsets: Record<string, { dx: number; dy: number }> = {};
     for (const [id, value] of Object.entries(raw.layerOffset).slice(0, 200)) {

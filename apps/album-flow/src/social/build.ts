@@ -23,6 +23,12 @@ export function resolveTexts(template: SlideTemplate, slide: Slide, brand: Brand
   return result;
 }
 
+/** Toglie gli elementi che l'utente ha cancellato dalla slide. Le foto non si cancellano da qui. */
+export function withoutHidden(layers: Layer[], hidden: readonly string[]): Layer[] {
+  const gone = new Set(hidden);
+  return layers.filter((layer) => layer.kind === "photo" || !(gone.has(`l:${layer.id}`) || (layer.kind === "text" && layer.field && gone.has(`f:${layer.field}`))));
+}
+
 /** Al posto degli spazi foto del modello ci sono le cornici libere, nello stesso punto dell'ordine di disegno (le decorazioni e i testi restano). */
 export function withFreeFrames(layers: Layer[], frames: readonly FreeFrame[], width: number, height: number): Layer[] {
   const free: Layer[] = frames.map((frame, index) => ({
@@ -89,6 +95,7 @@ export function buildSlide(carousel: Carousel, index: number, env: BuildEnv): Sl
   const built = template.build(ctx);
   // Un panorama non si specchia: le sue parti devono continuare l'una nell'altra.
   let layers = slide.flip && !slide.span ? mirrorLayers(built.layers, format.width) : built.layers;
+  if (slide.hidden && !slide.span) layers = withoutHidden(layers, slide.hidden);
   if (slide.free && !slide.span) layers = withFreeFrames(layers, slide.free, format.width, format.height);
   if (slide.textOffset && !slide.span) layers = withTextOffsets(layers, slide.textOffset, format.width, format.height);
   if (slide.layerOffset && !slide.span) layers = withLayerOffsets(layers, slide.layerOffset, format.width, format.height);

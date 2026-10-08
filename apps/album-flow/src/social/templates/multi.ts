@@ -80,8 +80,8 @@ const hero3: SlideTemplate = {
 
 const polaroid3: SlideTemplate = {
   id: "sh-polaroid3", set: "shared", role: "moment", label: "Tre polaroid", note: "Tre foto con cornice bianca, sparse e inclinate", tone: "light", slots: ["any", "any", "any"],
-  variants: [{ script: "ricordi sparsi", label: "Sul tavolo" }],
-  fields: [field("script", "Parola calligrafica", "ricordi"), field("label", "Didascalia", "Dal nostro archivio")],
+  variants: [{ script: "ricordi sparsi", label: "Sparsi sul tavolo" }],
+  fields: [field("script", "Parola calligrafica", "momenti sparsi"), field("label", "Didascalia", "Dal nostro tavolo")],
   build(ctx) {
     const s = new Scene(ctx);
     const { width: W, height: H, pal } = ctx;
@@ -101,8 +101,8 @@ const polaroid3: SlideTemplate = {
 
 const polaroid4: SlideTemplate = {
   id: "sh-polaroid4", set: "shared", role: "moment", label: "Quattro polaroid", note: "Quattro stampe con cornice bianca, due per due", tone: "dark", slots: ["any", "any", "any", "any"],
-  variants: [{ script: "tutti insieme", label: "Una pila di ricordi" }],
-  fields: [field("script", "Parola calligrafica", "insieme"), field("label", "Didascalia", "Una pila di ricordi")],
+  variants: [{ script: "un mucchio di gioia", label: "Una pila di scatti" }],
+  fields: [field("script", "Parola calligrafica", "tutti insieme"), field("label", "Didascalia", "Una pila di ricordi")],
   build(ctx) {
     const s = new Scene(ctx);
     const { width: W, height: H, pal } = ctx;

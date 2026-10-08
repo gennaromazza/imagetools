@@ -8,7 +8,7 @@ const FONT_LABEL: Record<TextFontChoice, string> = { display: "Titolo", script: 
 const ALIGN_LABEL = { left: "Sinistra", center: "Centro", right: "Destra" } as const;
 
 /** Testi di una slide: scrittura, suggerimenti dalla libreria editoriale e stile (carattere, dimensione, colore, allineamento, maiuscole). */
-export function SocialTextFields({ slide, template, brand, albumName, tone, activeField, onActiveField, onText, onReset, moved, onResetPosition, onStyle, onSuggest, onSuggestAll }: {
+export function SocialTextFields({ slide, template, brand, albumName, tone, activeField, onActiveField, onText, onReset, repeatOf, moved, onResetPosition, onStyle, onSuggest, onSuggestAll }: {
   slide: Slide;
   template: SlideTemplate;
   brand: BrandKit;
@@ -19,6 +19,8 @@ export function SocialTextFields({ slide, template, brand, albumName, tone, acti
   onActiveField: (field: string | null) => void;
   onText: (key: string, value: string) => void;
   onReset: (key: string) => void;
+  /** Campi con una frase già usata in una slide precedente: numero di quella slide. */
+  repeatOf: Readonly<Record<string, number>>;
   /** Campi spostati a mano sulla slide. */
   moved: readonly string[];
   onResetPosition: (key: string) => void;
@@ -60,6 +62,7 @@ export function SocialTextFields({ slide, template, brand, albumName, tone, acti
                 <button type="button" className={`icon-btn icon-btn--sm${open || style ? " is-active" : ""}`} aria-pressed={open} onClick={() => onActiveField(open ? null : field.key)} aria-label={`Stile del testo: ${field.label}`} title="Carattere, dimensione, colore, allineamento"><span className="social-field__aa">Aa</span></button>
               </span>
             </div>
+            {repeatOf[field.key] ? <span className="field__hint social-field__repeat">Questa frase c'è già nella slide {repeatOf[field.key]}: «Suggerisci» ne propone un'altra.</span> : null}
             {field.multiline
               ? <textarea id={`sf-${field.key}`} ref={set} className="input" rows={3} value={value} onChange={(event) => onText(field.key, event.target.value)} />
               : <input id={`sf-${field.key}`} ref={set} className="input" value={value} onChange={(event) => onText(field.key, event.target.value)} />}

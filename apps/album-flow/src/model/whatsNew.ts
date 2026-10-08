@@ -21,6 +21,28 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.20",
+    date: "2026-10-08",
+    headline: "Caroselli: elimina elementi, calamite e griglia, niente frasi ripetute",
+    items: [
+      {
+        title: "Elimina testi ed elementi dei modelli",
+        text: "Nel modo «Testo/grafiche» clicca un testo, una linea, un riquadro o un ornamento e premi Canc (o «Elimina elemento»). «Rimetti eliminati» li riporta, «Riporta tutto al posto» rimette tutto come nel modello.",
+        where: ["Testo/grafiche", "Elimina elemento", "Rimetti eliminati", "Riporta tutto al posto"],
+      },
+      {
+        title: "Calamite e griglia per allineare",
+        text: "Spostando o ridimensionando foto, testi e grafiche ci si aggancia a centro, margini e altri elementi, con linee guida rosa; tieni premuto Alt per muovere senza aggancio. «Griglia» mostra centro, terzi e margini, e ridimensionando una foto vedi misura e proporzioni.",
+        where: ["Calamite", "Griglia", "Alt"],
+      },
+      {
+        title: "Mai la stessa frase due volte",
+        text: "Un carosello nuovo non ripete la stessa frase. Se ne scrivi una già usata, sotto il campo compare l'avviso con il numero della slide; «Evita frasi ripetute» le sostituisce con frasi nuove e il controllo prima di esportare le segnala.",
+        where: ["Evita frasi ripetute", "Suggerisci", "Esporta"],
+      },
+    ],
+  },
+  {
     version: "0.2.19",
     date: "2026-10-08",
     headline: "Caroselli: sposta testi e grafiche, modelli semplici a una foto",

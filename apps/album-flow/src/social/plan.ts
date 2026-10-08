@@ -5,6 +5,9 @@ import { newId } from "../model/ids";
 import type { TextMeasure } from "../render/text-layout";
 import type { BuildEnv } from "./build";
 import { mulberry32 } from "../engine/rng";
+import { resolveTexts } from "./build";
+import { normalizeText } from "./kit";
+import { suggestKindOf, suggestText } from "./suggest";
 import { FLEX_TONE_IDS, arcFor, setInfo, templateOf, toneForFlex } from "./templates";
 import { MAX_SLIDES, MIN_SLIDES, photosShown, type BrandKit, type Carousel, type PhotoRef, type Slide, type SlotKind, type SetId, type SocialFormatId, type SpreadRef } from "./types";
 
@@ -176,6 +179,34 @@ export function suggestSlideCount(project: Project, assetIds: readonly string[],
   return firstFull || MAX_SLIDES;
 }
 
+/**
+ * Due modelli diversi possono proporre la stessa frase: nel carosello nuovo ogni frase compare una volta sola.
+ * Si usa prima una variante del modello, poi una proposta dalla libreria editoriale. Nome dello studio e dell'album restano com'è giusto.
+ */
+function avoidRepeatedPhrases(slides: Slide[], brand: BrandKit, albumName: string, setId: SetId): void {
+  const identity = new Set([brand.name, brand.handle, albumName].map(normalizeText).filter(Boolean));
+  const seen = new Set<string>();
+  const used = new Set<string>();
+  for (const slide of slides) {
+    const template = templateOf(slide.templateId);
+    if (!template || slide.span) continue;
+    const shown = resolveTexts(template, slide, brand, albumName);
+    for (const field of template.fields) {
+      const kind = suggestKindOf(field.key);
+      const text = shown[field.key] ?? "";
+      const key = normalizeText(text);
+      if (kind === null || key.length < 6 || identity.has(key)) continue;
+      if (!seen.has(key)) { seen.add(key); used.add(text); continue; }
+      const options = (template.variants ?? []).map((variant) => variant[field.key]).filter((value): value is string => Boolean(value) && !seen.has(normalizeText(value)));
+      const replacement = options[0] ?? suggestText(kind, { seed: `${slide.id}:${field.key}`, attempt: 0, current: text, avoid: used, setId, multiline: field.multiline });
+      if (!replacement) continue;
+      slide.texts = { ...slide.texts, [field.key]: replacement };
+      seen.add(normalizeText(replacement));
+      used.add(replacement);
+    }
+  }
+}
+
 /** Il carosello proposto: la trama dello stile, le foto migliori per ogni spazio, panorama e album quando l'album li offre. */
 export function planCarousel(project: Project, options: PlanOptions): Carousel {
   const count = clampCount(options.count);
@@ -236,6 +267,7 @@ export function planCarousel(project: Project, options: PlanOptions): Carousel {
       if (pick.chapterId) perChapter.set(pick.chapterId, (perChapter.get(pick.chapterId) ?? 0) + 1);
     });
   }
+  avoidRepeatedPhrases(slides, options.brand, project.projectName, options.setId);
   const now = nowIso();
   return { id: newId("car"), name: options.name?.trim() || "Carosello", format: options.format, setId: options.setId, brand: options.brand, slides, ...(seed ? { seed } : {}), basis: selectionBasis(project), caption: "", createdAt: now, updatedAt: now };
 }
@@ -259,7 +291,7 @@ export function reselectPhotos(project: Project, carousel: Carousel): Carousel {
     if (!before || !template || before.templateId !== slide.templateId) return slide;
     // Le foto si riscelgono; tutto il resto (testi e loro stile, fondo, specchio) resta com'era.
     const { flip: _flip, tone: _tone, ...clean } = slide;
-    return { ...clean, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.tone ? { tone: before.tone } : {}), ...(before.flip ? { flip: true } : {}), ...(before.free && !slide.span ? { free: before.free } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}) };
+    return { ...clean, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.tone ? { tone: before.tone } : {}), ...(before.flip ? { flip: true } : {}), ...(before.free && !slide.span ? { free: before.free } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}), ...(before.hidden ? { hidden: before.hidden } : {}) };
   });
   return { ...next, id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
 }
@@ -281,7 +313,7 @@ export function variation(project: Project, carousel: Carousel, seed = freshSeed
   for (const slide of carousel.slides) byTemplate.set(slide.templateId, [...(byTemplate.get(slide.templateId) ?? []), slide]);
   const slides = next.slides.map((slide) => {
     const before = byTemplate.get(slide.templateId)?.shift();
-    return before && Object.keys(before.texts).length ? { ...slide, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}) } : slide;
+    return before && Object.keys(before.texts).length ? { ...slide, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}), ...(before.hidden ? { hidden: before.hidden } : {}) } : slide;
   });
   const { basis: _basis, ...rest } = next;
   return { ...rest, ...(carousel.basis !== undefined ? { basis: carousel.basis } : {}), id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
@@ -298,7 +330,7 @@ export function restyle(project: Project, carousel: Carousel, setId: SetId): Car
     if (!before || !template) return slide;
     const texts: Record<string, string> = {};
     for (const field of template.fields) if (before.texts[field.key] !== undefined) texts[field.key] = before.texts[field.key];
-    return { ...slide, texts, ...(before.free && !slide.span && !before.span ? { free: before.free } : {}), ...(before.textOffset && before.templateId === slide.templateId ? { textOffset: before.textOffset } : {}), ...(before.layerOffset && before.templateId === slide.templateId ? { layerOffset: before.layerOffset } : {}) };
+    return { ...slide, texts, ...(before.free && !slide.span && !before.span ? { free: before.free } : {}), ...(before.textOffset && before.templateId === slide.templateId ? { textOffset: before.textOffset } : {}), ...(before.layerOffset && before.templateId === slide.templateId ? { layerOffset: before.layerOffset } : {}), ...(before.hidden && before.templateId === slide.templateId ? { hidden: before.hidden } : {}) };
   });
   // Cambiare stile non riscegle le foto: l'impronta resta quella di prima, così l'avviso «le stelle sono cambiate» non sparisce.
   const { basis: _basis, ...rest } = next;

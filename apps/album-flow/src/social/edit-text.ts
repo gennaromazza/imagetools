@@ -1,4 +1,6 @@
+import { resolveTexts, templateForSlide } from "./build";
 import { mapGroup, spanRange } from "./edit";
+import { normalizeText } from "./kit";
 import { suggestForTemplate, suggestKindOf, suggestText } from "./suggest";
 import { normalizeTextStyle } from "./textstyle";
 import { templateOf } from "./templates";
@@ -18,6 +20,64 @@ export function setSlideTextStyle(carousel: Carousel, slideId: string, key: stri
     if (next) merged[key] = next; else delete merged[key];
     return Object.keys(merged).length ? { ...rest, textStyle: merged } : rest;
   });
+}
+
+export interface TextRepeat {
+  /** Slide (da 0) dove la frase compare di nuovo. */
+  slideIndex: number;
+  key: string;
+  /** Prima slide (da 0) dove compare. */
+  firstIndex: number;
+  text: string;
+}
+
+/**
+ * Le frasi che compaiono più volte nel carosello (titoli, parole, frasi e testi: non nomi, date o luoghi, che è giusto ripetere).
+ * Si conta ciò che si vede, compresi i testi proposti dal modello; le parti di un panorama contano una volta sola.
+ */
+export function repeatedTexts(carousel: Carousel, albumName: string): TextRepeat[] {
+  const first = new Map<string, number>();
+  const repeats: TextRepeat[] = [];
+  // Nome dello studio, profilo e nome dell'album compaiono in più slide per scelta: non sono ripetizioni.
+  const identity = new Set([carousel.brand.name, carousel.brand.handle, albumName].map(normalizeText).filter(Boolean));
+  carousel.slides.forEach((slide, slideIndex) => {
+    if (slide.span && slide.span.index > 0) return;
+    const template = templateForSlide(carousel, slide);
+    const shown = resolveTexts(template, slide, carousel.brand, albumName);
+    for (const field of template.fields) {
+      if (suggestKindOf(field.key) === null || slide.hidden?.includes(`f:${field.key}`)) continue;
+      const text = shown[field.key] ?? "";
+      const key = normalizeText(text);
+      if (key.length < 6 || identity.has(key)) continue;
+      const before = first.get(key);
+      if (before === undefined) first.set(key, slideIndex);
+      else if (before !== slideIndex) repeats.push({ slideIndex, key: field.key, firstIndex: before, text });
+    }
+  });
+  return repeats;
+}
+
+/** Sostituisce ogni frase ripetuta (dalla seconda volta in poi) con un'altra proposta dalla libreria, diversa da tutte quelle del carosello. */
+export function dedupeTexts(carousel: Carousel, albumName: string): Carousel {
+  let next = carousel;
+  for (let round = 0; round < 3; round += 1) {
+    const repeats = repeatedTexts(next, albumName);
+    if (repeats.length === 0) break;
+    const before = next;
+    for (const repeat of repeats) {
+      const slide = next.slides[repeat.slideIndex];
+      const field = templateOf(slide.templateId)?.fields.find((candidate) => candidate.key === repeat.key);
+      const kind = suggestKindOf(repeat.key);
+      if (!field || !kind) continue;
+      const avoid = usedTexts(next);
+      for (const other of next.slides) { const template = templateOf(other.templateId); if (template) for (const value of Object.values(resolveTexts(template, other, next.brand, albumName))) if (value.trim()) avoid.add(value); }
+      const text = suggestText(kind, { seed: `${slide.id}:${repeat.key}:dedupe:${round}`, attempt: 0, current: repeat.text, avoid, setId: next.setId, multiline: field.multiline });
+      if (!text) continue;
+      next = mapGroup(next, slide.id, (target) => ({ ...target, texts: { ...target.texts, [repeat.key]: text } }));
+    }
+    if (next === before) break;
+  }
+  return next;
 }
 
 /** I testi già scritti nel carosello, per non riproporli. */

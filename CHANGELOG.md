@@ -40,6 +40,10 @@
 - Nuovo: ogni foto ha le sue copie, le foto si riordinano trascinandole e si aggiungono trascinando file o intere cartelle sulla pagina. In «Impagina» regoli margini e distanze con il conteggio dei fogli dal vivo, inquadri trascinando le foto e rifinisci con bianco e nero, logo, bordo e segni di taglio.
 - Corretto: i campi numerici non permettevano di scrivere misure come 15, l'anteprima non rispettava le misure del foglio e il numero di foto per pagina non veniva rispettato.
 
+## 2026-10-08 - Album Flow 0.2.20
+
+- Nuovo: nei caroselli si possono eliminare testi ed elementi del modello (linee, riquadri, ornamenti, numero di pagina) dal modo «Testo/grafiche» con Canc o «Elimina elemento», e rimetterli con «Rimetti eliminati». Calamite e griglia: spostando o ridimensionando foto, testi e grafiche ci si aggancia a centro, margini e altri elementi con linee guida (Alt per spostare senza aggancio); «Griglia» mostra centro, terzi e margini e, ridimensionando, si vedono misura e proporzioni della foto. Niente più frasi ripetute: un carosello nuovo non ripete la stessa frase, sotto un campo compare un avviso se è già usata in un'altra slide, «Evita frasi ripetute» le sostituisce con frasi nuove e il controllo prima dell'esportazione le segnala.
+
 ## 2026-10-08 - Album Flow 0.2.19
 
 - Nuovo: nei caroselli il modo «Testo/grafiche» sposta testi, linee, riquadri, ornamenti, numero di pagina e doppie pagine del modello senza toccare le foto, con contorno sull'elemento scelto e «Riporta tutto al posto». Il trascinamento del testo non si confonde più con quello delle foto: i modi sotto l'anteprima sono «Inquadra», «Sposta foto», «Scambia» e «Testo/grafiche». Otto nuovi modelli semplici a una foto, in testa all'elenco: foto intera, foto con margine, bordo bianco, cornice sottile, foto e didascalia, foto tonda, foto con banda e foto su riquadro.

@@ -322,6 +322,8 @@ export interface Slide {
   flip?: boolean;
   spreadId?: string | null;
   spreadId2?: string | null;
+  /** Elementi del modello tolti dalla slide: «f:campo» per un testo, «l:identificativo» per ogni altro elemento. */
+  hidden?: string[];
   /** Altri elementi del modello spostati a mano (riquadri, linee, ornamenti, numero di pagina…), per identificativo del livello: scostamento in frazioni della tela. */
   layerOffset?: Record<string, { dx: number; dy: number }>;
   /** Testi spostati a mano: scostamento dal posto del modello, in frazioni della larghezza (dx) e dell'altezza (dy) della tela. */

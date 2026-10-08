@@ -58,7 +58,7 @@ const frame: SlideTemplate = {
 const caption: SlideTemplate = {
   id: "sh-solo-caption", set: "shared", role: "hero", label: "Foto e didascalia", note: "La foto grande e una riga di testo sotto", tone: "light", slots: ["any"],
   variants: [{ caption: "Il momento che racconta tutto" }],
-  fields: [field("caption", "Didascalia", "Un momento, per sempre")],
+  fields: [field("caption", "Didascalia", "Un momento da tenere")],
   build(ctx) {
     const s = new Scene(ctx);
     const { width: W, height: H } = ctx;

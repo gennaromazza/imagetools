@@ -1,7 +1,8 @@
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { BuildEnv } from "./build";
 import { focusRange, rotateDelta } from "./framing";
-import { graphicAt, photoAt } from "./hit";
+import { boundsOf, graphicAt, photoAt, type Box } from "./hit";
+import { snapBox, snapTargets, unionBox, type Guide } from "./snap";
 import { coverFit } from "./kit";
 import type { Layer, PhotoFraming } from "./types";
 
@@ -38,6 +39,10 @@ export interface PreviewInteraction {
   elementOffsetOf: (kind: ElementKind, id: string) => { dx: number; dy: number };
   onElementMove: (kind: ElementKind, id: string, offset: { dx: number; dy: number }, coalesceKey: string) => void;
   onElementSelect: (element: { kind: ElementKind; id: string } | null) => void;
+  /** Calamite attive: spostando un elemento ci si aggancia a centro, margini e altri elementi. */
+  magnets: boolean;
+  /** Le linee guida da mostrare mentre ci si aggancia (vuoto quando si smette). */
+  onGuides: (guides: Guide[]) => void;
   /** Inizia lo spostamento libero di una foto nella slide (modo «place»). */
   onPlaceStart: (slot: number, event: { clientX: number; clientY: number; pointerId: number }) => void;
   /** Inizia lo scambio di una foto con un'altra (modo «swap»): da qui in poi se ne occupa chi ascolta la finestra. */
@@ -76,7 +81,7 @@ export function usePreviewInteraction(options: PreviewInteraction) {
   const latest = useRef(options);
   latest.current = options;
   const drag = useRef<Drag | null>(null);
-  const textDrag = useRef<null | { kind: ElementKind; id: string; startX: number; startY: number; scale: number; start: { dx: number; dy: number }; pointer: number; started: boolean }>(null);
+  const textDrag = useRef<null | { kind: ElementKind; id: string; startX: number; startY: number; scale: number; start: { dx: number; dy: number }; pointer: number; started: boolean; startBox: Box | null; targets: Box[] }>(null);
   const frame = useRef(0);
   const pending = useRef<null | { slot: number; cx: number; cy: number }>(null);
 
@@ -138,7 +143,11 @@ export function usePreviewInteraction(options: PreviewInteraction) {
           : field ? { kind: "field", id: field } : null;
         current.onElementSelect(target);
         if (!target) return;
-        textDrag.current = { ...target, startX: event.clientX, startY: event.clientY, scale: point?.scale ?? 1, start: current.elementOffsetOf(target.kind, target.id), pointer: event.pointerId, started: false };
+        const own = (layer: Layer) => (target.kind === "field" ? layer.kind === "text" && layer.field === target.id : layer.id === target.id);
+        const measure = current.env.measure;
+        const startBox = unionBox(current.layers.filter(own).map((layer) => boundsOf(layer, measure, current.canvasWidth, current.canvasHeight)).filter((box): box is Box => Boolean(box)));
+        const targets = snapTargets(current.layers, own, measure, current.canvasWidth, current.canvasHeight);
+        textDrag.current = { ...target, startX: event.clientX, startY: event.clientY, scale: point?.scale ?? 1, start: current.elementOffsetOf(target.kind, target.id), pointer: event.pointerId, started: false, startBox, targets };
         capture(event.currentTarget, event.pointerId);
         event.preventDefault();
         return;
@@ -170,9 +179,17 @@ export function usePreviewInteraction(options: PreviewInteraction) {
         }
         const current = latest.current;
         if (current.slideId) {
+          let moveX = (event.clientX - moving.startX) * moving.scale;
+          let moveY = (event.clientY - moving.startY) * moving.scale;
+          if (current.magnets && moving.startBox && !event.altKey) {
+            const snapped = snapBox({ ...moving.startBox, x: moving.startBox.x + moveX, y: moving.startBox.y + moveY }, moving.targets, current.canvasWidth, current.canvasHeight, 8 * moving.scale);
+            moveX += snapped.dx;
+            moveY += snapped.dy;
+            current.onGuides(snapped.guides);
+          } else current.onGuides([]);
           current.onElementMove(moving.kind, moving.id, {
-            dx: moving.start.dx + ((event.clientX - moving.startX) * moving.scale) / current.canvasWidth,
-            dy: moving.start.dy + ((event.clientY - moving.startY) * moving.scale) / current.canvasHeight,
+            dx: moving.start.dx + moveX / current.canvasWidth,
+            dy: moving.start.dy + moveY / current.canvasHeight,
           }, `emove:${current.slideId}:${moving.kind}:${moving.id}`);
         }
         return;
@@ -202,6 +219,7 @@ export function usePreviewInteraction(options: PreviewInteraction) {
       const moving = textDrag.current;
       if (moving) {
         textDrag.current = null;
+        latest.current.onGuides([]);
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
         if (!moving.started && event.type === "pointerup" && moving.kind === "field") latest.current.onField(moving.id);
         return;
