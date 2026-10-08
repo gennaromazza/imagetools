@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-08 - Album Flow 0.2.21
+
+- Corretto: Photoshop (o un altro programma) poteva non riuscire a salvare una foto mentre Album Flow ne generava le miniature o le anteprime, soprattutto con TIFF e PNG grandi: ora Album Flow tiene la foto occupata solo il tempo di leggerla e non più per tutta l'elaborazione, e le dimensioni di JPEG, PNG e WebP si leggono dall'intestazione senza exiftool. L'ora di scatto, letta all'importazione, usa ancora exiftool.
+
 ## 2026-10-07 - Print Flow 0.2.0
 
 - Nuovo nome e nuova interfaccia: Batch Print Layout diventa Print Flow e ti guida passo dopo passo: Foto, Carta, Cosa stampi, Impagina, Esporta. Scegli la carta che hai (anche una misura tua o la carta Hi-Print) e il programma ti dice quante foto entrano, consiglia la carta che spreca meno e suggerisce se stampare in verticale o in orizzontale.

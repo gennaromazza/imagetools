@@ -648,6 +648,9 @@
     ],
     "0.2.20": [
       "Nuovo: nei caroselli si possono eliminare testi ed elementi del modello (linee, riquadri, ornamenti, numero di pagina) dal modo «Testo/grafiche» con Canc o «Elimina elemento», e rimetterli con «Rimetti eliminati». Calamite e griglia: spostando o ridimensionando foto, testi e grafiche ci si aggancia a centro, margini e altri elementi con linee guida (Alt per spostare senza aggancio); «Griglia» mostra centro, terzi e margini e, ridimensionando, si vedono misura e proporzioni della foto. Niente più frasi ripetute: un carosello nuovo non ripete la stessa frase, sotto un campo compare un avviso se è già usata in un'altra slide, «Evita frasi ripetute» le sostituisce con frasi nuove e il controllo prima dell'esportazione le segnala."
+    ],
+    "0.2.21": [
+      "Corretto: Photoshop (o un altro programma) poteva non riuscire a salvare una foto mentre Album Flow ne generava le miniature o le anteprime, soprattutto con TIFF e PNG grandi: ora Album Flow tiene la foto occupata solo il tempo di leggerla e non più per tutta l'elaborazione, e le dimensioni di JPEG, PNG e WebP si leggono dall'intestazione senza exiftool. L'ora di scatto, letta all'importazione, usa ancora exiftool."
     ]
   }
 }

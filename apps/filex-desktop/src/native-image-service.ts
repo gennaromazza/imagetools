@@ -1611,7 +1611,11 @@ async function renderNativePreviewFromPath(
   const sharpMod = await getSharp();
   if (sharpMod) {
     try {
-      const { data, info } = await sharpMod(absolutePath)
+      // Il file si legge con Node e a sharp si passa il contenuto: con `sharp(percorso)` libvips su Windows tiene il file
+      // aperto senza permettere di rinominarlo/sostituirlo per tutta la decodifica, e Photoshop non riesce a salvare la foto
+      // (EPERM) mentre le miniature o le anteprime vengono generate. Così resta occupato solo il tempo della lettura.
+      const fileBuffer = await readFile(absolutePath);
+      const { data, info } = await sharpMod(fileBuffer)
         .rotate() // honour EXIF orientation
         .resize(maxDimension, maxDimension, { fit: "inside", withoutEnlargement: true })
         .jpeg({ quality: 90 })
@@ -1665,6 +1669,27 @@ export async function getDesktopImageDimensions(
 ): Promise<{ width: number; height: number } | null> {
   if (typeof absolutePath !== "string" || absolutePath.length === 0) {
     return null;
+  }
+  // JPEG/PNG/WebP: l'intestazione sta all'inizio. La si legge con Node (condivide la sostituzione) invece che con exiftool,
+  // che su Windows tiene il file aperto senza permettere a Photoshop di salvarlo.
+  if (/\.(jpe?g|png|webp)$/i.test(absolutePath)) {
+    let handle: FileHandle | null = null;
+    try {
+      const sharpMod = await getSharp();
+      if (sharpMod) {
+        handle = await open(absolutePath, "r");
+        const head = await readFileSlice(handle, 0, 1024 * 1024);
+        const meta = await sharpMod(head, { failOn: "none" }).metadata();
+        if (meta.width && meta.height) {
+          const swap = typeof meta.orientation === "number" && meta.orientation >= 5 && meta.orientation <= 8;
+          return swap ? { width: meta.height, height: meta.width } : { width: meta.width, height: meta.height };
+        }
+      }
+    } catch {
+      // Intestazione non leggibile: si passa a exiftool.
+    } finally {
+      await handle?.close().catch(() => {});
+    }
   }
   try {
     const tags = await rawPreviewExifTool.read(absolutePath);

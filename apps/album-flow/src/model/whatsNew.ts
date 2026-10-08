@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.21",
+    date: "2026-10-08",
+    headline: "Photoshop salva le foto anche mentre Album Flow è aperto",
+    items: [
+      {
+        title: "Salvataggio da Photoshop senza blocchi",
+        text: "Prima Photoshop poteva non riuscire a salvare una foto mentre Album Flow ne generava le miniature o le anteprime, soprattutto con TIFF e PNG grandi. Ora Album Flow occupa la foto solo il tempo di leggerla, non per tutta l'elaborazione: modifichi, salvi e al ritorno in Album Flow la foto si aggiorna da sola.",
+        where: ["Modifica nell'editor"],
+      },
+    ],
+  },
+  {
     version: "0.2.20",
     date: "2026-10-08",
     headline: "Caroselli: elimina elementi, calamite e griglia, niente frasi ripetute",
