@@ -29,8 +29,17 @@ test("ricollego: cartelle riordinate → nome e dimensione; nomi doppi o foto as
   const result = relinkAssets(assets, ids("a", "b", "c", "d"), files, "D:\\Old");
   assert.equal(result.found.get("a")?.how, "nome e dimensione");
   assert.deepEqual(result.ambiguous, ["b"], "due file uguali: non sceglie");
-  assert.deepEqual(result.missing, ["c", "d"], "C non c'è e D ha un'altra dimensione");
+  assert.deepEqual(result.missing, ["c"], "C non c'è");
+  assert.equal(result.found.get("d")?.how, "nome", "D è stata ri-salvata (peso diverso) ma il nome è unico");
   assert.equal(result.newRoot, null);
+});
+
+test("ricollego: foto ri-salvata dopo l'album (peso cambiato) si ritrova per nome unico, mai con nomi doppi", () => {
+  const assets = [asset("a", "E:\\Battesimo\\selezionate\\_IMAG5106_4bc96760.jpg", 20000000), asset("b", "E:\\Battesimo\\selezionate\\_IMAG5284_346046a1.jpg", 20000000)];
+  const files = [file("/n/selezionate", "_IMAG5106_4bc96760.jpg", 21602826), file("/n/selezionate", "_IMAG5284_346046a1.jpg", 23808997), file("/n/vecchie", "_IMAG5284_346046a1.jpg", 1)];
+  const result = relinkAssets(assets, ids("a", "b"), files, "D:\\Altro");
+  assert.equal(result.found.get("a")?.how, "nome");
+  assert.deepEqual(result.ambiguous, ["b"], "due file con quel nome: non sceglie");
 });
 
 test("ricollego: un file non va a due foto, e la dimensione sbagliata sul percorso giusto non basta", () => {
@@ -41,7 +50,9 @@ test("ricollego: un file non va a due foto, e la dimensione sbagliata sul percor
   assert.equal(result.found.get("a")?.how, "percorso", "il percorso ha la precedenza");
   assert.deepEqual(result.ambiguous.concat(result.missing), ["b"]);
   const wrongSize = relinkAssets([asset("a", "D:\\R\\IMG.jpg", 99)], ids("a"), files, "D:\\R");
-  assert.equal(wrongSize.found.size, 0, "stesso nome ma dimensione diversa: è un'altra foto");
+  assert.equal(wrongSize.found.get("a")?.how, "nome", "peso diverso (foto ri-salvata): si ritrova per nome unico");
+  const twins = relinkAssets([asset("a", "D:\\R\\IMG.jpg", 99)], ids("a"), [file("/n", "uno/IMG.jpg", 10), file("/n", "due/IMG.jpg", 11)], "D:\\R");
+  assert.equal(twins.found.size, 0, "stesso nome ovunque e pesi diversi: non si indovina");
 });
 
 test("ricollego: foto senza dimensione solo per nome unico; maiuscole ignorate; solo le foto richieste", () => {

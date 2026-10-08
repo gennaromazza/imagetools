@@ -2,7 +2,7 @@
 
 <!--
   FORMATO OBBLIGATORIO PER GLI HEADER DI VERSIONE "FileX Suite"
-  ================================================================
+  =========================================================
   release-filex-suite.bat legge automaticamente da qui la versione piu
   recente della FileX Suite: cerca la prima riga che rispetta ESATTAMENTE
   questo pattern (regex, ancorata a inizio riga):
@@ -39,6 +39,10 @@
 - Il lasso sostituisce la selezione; con Maiusc, Ctrl o Cmd premuto la aggiunge. Un lasso che non tocca nulla o un clic sullo sfondo deselezionano tutto (il clic sulla barra di scorrimento no).
 - Ctrl+A seleziona le foto visibili e, se lo sono già tutte, le deseleziona. Dopo lasso o Ctrl+A il focus e il punto di partenza di Maiusc+clic passano a una foto selezionata.
 - Scorciatoie di classificazione (1-5, P, X, U, colori): con più foto selezionate valgono per tutta la selezione, anche se il focus è rimasto su un'altra foto; con una sola foto valgono per quella col focus.
+
+## 2026-10-08 - Album Flow 0.2.22
+
+- Corretto: «Ricollega le foto» non ritrovava le foto che erano state ri-salvate dopo la creazione dell'album (per esempio da Lightroom o Camera Raw), perché cercava nome e peso identici e un file modificato ha un peso diverso. Ora, se il peso non corrisponde, la foto si ritrova per nome purché in quella cartella ci sia un solo file con quel nome; con nomi doppi non si indovina.
 
 ## 2026-10-08 - Album Flow 0.2.21
 
