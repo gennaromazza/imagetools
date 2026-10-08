@@ -32,6 +32,15 @@
 
 
 
+## 2026-10-08 - Album Flow 0.2.24
+
+- Nuovo: in libreria, accanto a «N da usare», il pulsante «N usate» mostra solo le foto già usate nell'album (il filtro «Usate» era già in Filtri → Uso).
+- Nuovo: Maiusc+clic seleziona più foto dello spread; tasto destro → «Modifica N foto nell'editor» le apre insieme in Photoshop (o nell'editor scelto). «Modifica tutte le foto dello spread nell'editor» le apre tutte, anche da «Altre azioni sullo spread».
+- Nuovo: Alt + trascinamento riposiziona la foto nella sua cella senza aprire il ritaglio (con Alt + rotella che ingrandisce), come in AlbumTeller.
+- Corretto: premendo Alt la pagina si spostava di qualche pixel perché compariva la barra dei menu di Windows. Ora Alt da solo non la mostra più.
+- Migliorato: il pulsante «Bordo» della barra della foto è un'icona compatta e occupa meno spazio.
+- Migliorato: duplica ed elimina spread non compaiono più sopra le miniature; sono nel tasto destro sulla miniatura (insieme a «Sposta all'inizio» e «Sposta in fondo»).
+
 ## 2026-10-08 - Image Select Pro 0.1.46
 
 - Selezione della griglia più coerente: lasso e Ctrl+A seguono le stesse regole e non si ostacolano più.

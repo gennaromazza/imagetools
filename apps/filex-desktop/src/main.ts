@@ -2714,6 +2714,10 @@ async function createMainWindow(): Promise<void> {
   });
 
   mainWindow = windowInstance;
+  // Alt da solo non deve far comparire la barra dei menu di Windows: sposterebbe tutta la pagina. Alt+clic, Alt+rotella e Alt+tasto restano intatti.
+  windowInstance.webContents.on("before-input-event", (event, input) => {
+    if (input.key === "Alt" && !input.control && !input.shift && !input.meta) event.preventDefault();
+  });
   if (usesClosePreparation) {
     resetPhotoSelectorClosePreparation();
   }

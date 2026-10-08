@@ -441,9 +441,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .film__done { position: absolute; top: 18px; left: 7px; width: 14px; height: 14px; display: grid; place-items: center; border-radius: 50%; background: var(--success); color: #16201a; box-shadow: 0 0 0 2px var(--bg-elevated); }
 .stage__done { font-style: normal; color: var(--success); }
 .film__warn { position: absolute; top: 19px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--bg-elevated); }
-.film__actions { position: absolute; top: 18px; right: 4px; display: none; gap: 2px; }
-.film__item:hover .film__actions { display: flex; }
-.film__actions .icon-btn { background: rgba(24, 28, 25, 0.92); }
 .film__add { align-self: center; flex: none; width: 40px; height: 50px; display: grid; place-items: center; border: 1px dashed var(--line-strong); border-radius: 10px; background: transparent; color: var(--text-muted); }
 .film__add:hover { color: var(--accent-bright); background: var(--accent-soft); }
 
@@ -769,6 +766,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .relink__list { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; font-size: 12px; }
 
 /* Novità dopo un aggiornamento */
+.new-dot { position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-bright); pointer-events: none; }
 .new-pill { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--accent-bright); color: #1c211e; font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: middle; }
 .whatsnew { display: grid; gap: 18px; max-height: 60vh; overflow: auto; padding-right: 4px; }
 .whatsnew__release h3 { font-size: 14px; margin: 0 0 8px; }

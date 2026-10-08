@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useMemo, useRef } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetV2, AlbumProjectV2 } from "@photo-tools/shared-types";
 import { beginDrag, currentDrag, endDrag } from "./dnd";
 import { Icon } from "./icons";
 import { SpreadView } from "./SpreadView";
+import { ContextMenu } from "./ui";
 
 export interface FilmstripProps {
   project: AlbumProjectV2;
@@ -43,6 +44,7 @@ function Gap({ index, onDropNew }: { index: number; onDropNew: FilmstripProps["o
 
 export function Filmstrip({ project, assets, current, onSelect, onAdd, onDuplicate, onRemove, onMove, onDropNew, onDropOn }: FilmstripProps) {
   const currentRef = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   useEffect(() => { currentRef.current?.scrollIntoView?.({ block: "nearest", inline: "center", behavior: "smooth" }); }, [current]);
 
   const chapterByAsset = useMemo(() => {
@@ -78,6 +80,7 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onDuplica
                 else if (payload?.kind === "item" || payload?.kind === "assets") onDropOn(index, payload);
               }}
               onClick={() => onSelect(index)}
+              onContextMenu={(event) => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, index }); }}
               role="button"
               tabIndex={0}
               onKeyDown={(event) => { if (event.key === "Enter") onSelect(index); }}
@@ -91,10 +94,6 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onDuplica
               <span className="film__bar" style={{ background: chapter?.color ?? "transparent" }} />
               {empty && photos > 0 ? <span className="film__warn" aria-label="Pagina vuota" /> : null}
               {spread.done ? <span className="film__done" aria-label="Spread finito" title="Finito"><Icon name="check" size={9} strokeWidth={3} /></span> : null}
-              <div className="film__actions">
-                <button type="button" className="icon-btn icon-btn--sm" title="Duplica lo spread" aria-label="Duplica lo spread" onClick={(event) => { event.stopPropagation(); onDuplicate(index); }}><Icon name="copy" size={12} /></button>
-                <button type="button" className="icon-btn icon-btn--sm" title="Elimina lo spread" aria-label="Elimina lo spread" onClick={(event) => { event.stopPropagation(); onRemove(index); }}><Icon name="trash" size={12} /></button>
-              </div>
             </div>
             </Fragment>
           );
@@ -102,6 +101,21 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onDuplica
         <Gap index={project.spreads.length} onDropNew={onDropNew} />
         <button type="button" className="film__add" onClick={onAdd} title="Aggiungi uno spread vuoto" aria-label="Aggiungi uno spread"><Icon name="plus" size={18} /></button>
       </div>
+      {menu ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: `Spread ${menu.index + 1}`, disabled: true },
+            { label: "Duplica lo spread", icon: "copy", onClick: () => onDuplicate(menu.index) },
+            { label: "Sposta all'inizio", icon: "chevronUp", disabled: menu.index === 0, onClick: () => onMove(menu.index, 0) },
+            { label: "Sposta in fondo", icon: "chevronDown", disabled: menu.index === project.spreads.length - 1, onClick: () => onMove(menu.index, project.spreads.length - 1) },
+            { separator: true, label: "-" },
+            { label: "Elimina lo spread", icon: "trash", danger: true, onClick: () => onRemove(menu.index) },
+          ]}
+        />
+      ) : null}
     </nav>
   );
 }

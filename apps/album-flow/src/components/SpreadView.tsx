@@ -34,6 +34,10 @@ export interface SpreadViewProps {
   activeArea?: number;
   selectedItemId?: string | null;
   highlightItemId?: string | null;
+  /** Foto aggiunte alla selezione con Maiusc+clic (per azioni su più foto, come aprirle nell'editor). */
+  pickedItemIds?: readonly string[];
+  /** Maiusc+clic su una foto: la aggiunge o la toglie dalla selezione multipla. */
+  onTogglePick?: (itemId: string, areaIndex: number) => void;
   cropMode?: boolean;
   draft?: Draft | null;
   lowDpi?: number;
@@ -81,6 +85,8 @@ interface CellProps {
   variant: SpreadVariant;
   selected: boolean;
   highlighted: boolean;
+  /** Fa parte della selezione multipla (Maiusc+clic). */
+  picked: boolean;
   cropActive: boolean;
   view: Partial<ItemView> | null;
   lowDpi: number;
@@ -91,10 +97,10 @@ interface CellProps {
   snapTargets?: Array<{ id: string; rect: Rect }>;
   /** Lo strumento «linea» del raddrizzamento è acceso per questa foto. */
   lineTool: boolean;
-  handlers: Pick<SpreadViewProps, "onSelectItem" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & { onCommitFrameRect?: (itemId: string, rect: Rect) => void };
+  handlers: Pick<SpreadViewProps, "onSelectItem" | "onTogglePick" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & { onCommitFrameRect?: (itemId: string, rect: Rect) => void };
 }
 
-const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, cropActive, view, lowDpi, showSizes, free, snapTargets, lineTool, handlers }: CellProps) {
+const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, picked, cropActive, view, lowDpi, showSizes, free, snapTargets, lineTool, handlers }: CellProps) {
   // Lavorazione veloce: anteprime leggere; la qualità piena solo per la foto selezionata o in ritaglio e nell'anteprima cliente.
   const pixels = variant === "thumb" ? 200 : variant === "present" ? 2400 : selected || cropActive ? 1400 : 720;
   const src = useAssetSrc(asset, pixels);
@@ -215,8 +221,11 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
 
   const onPointerDown = (event: React.PointerEvent) => {
     if (lineActive) { startLine(event); return; }
+    // Alt + trascinamento (come in AlbumTeller): riposiziona la foto nella cella senza aprire il ritaglio, così come Alt + rotella la ingrandisce.
+    const quickPan = event.altKey && !canCrop && interactive && !item.locked && !freeFrame && event.button === 0 && Boolean(asset);
     if (freeFrame && !canCrop) { startFrame(event, "move"); return; }
-    if (!canCrop) return;
+    if (!canCrop && !quickPan) return;
+    if (quickPan) handlers.onSelectItem?.(item.id, areaIndex);
     event.preventDefault();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     const center = cropCenter(placement.crop);
@@ -246,12 +255,14 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     if (lineRef.current) { endLine(event); return; }
     if (frameDrag.current) { endFrame(event); return; }
     const next = moved(event);
+    const start = pan.current;
     pan.current = null;
-    if (next) handlers.onCommitView?.(item.id, next);
+    if (next && start && Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) > 1) handlers.onCommitView?.(item.id, next);
+    else if (next) handlers.onDraft?.(null);
   };
 
   const classes = [
-    selected ? "cell--selected" : "",
+    selected || picked ? "cell--selected" : "",
     canCrop ? "cell--cropping" : "",
     canCrop && placement.angle ? "cell--straightening" : "",
     canCrop && (placement.angle || lineActive) ? "cell--fine" : "",
@@ -278,11 +289,12 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       data-asset-id={item.assetId}
       data-area-index={areaIndex}
       draggable={interactive && !canCrop && !item.locked && !freeFrame}
-      onDragStart={(event) => beginDrag(event, { kind: "item", itemId: item.id })}
+      onDragStart={(event) => { if (pan.current || event.altKey) { event.preventDefault(); return; } beginDrag(event, { kind: "item", itemId: item.id }); }}
+      onMouseMove={(event) => { if (!interactive) return; const grab = event.altKey && !canCrop && !item.locked && !freeFrame; if (grab !== (event.currentTarget.style.cursor === "grab")) event.currentTarget.style.cursor = grab ? "grab" : ""; }}
       onDragEnd={endDrag}
-      onClick={(event) => { if (interactive) { event.stopPropagation(); handlers.onSelectItem?.(item.id, areaIndex); } }}
+      onClick={(event) => { if (interactive) { event.stopPropagation(); if (event.shiftKey && handlers.onTogglePick) handlers.onTogglePick(item.id, areaIndex); else handlers.onSelectItem?.(item.id, areaIndex); } }}
       onDoubleClick={(event) => { if (interactive) { event.stopPropagation(); handlers.onToggleCrop?.(item.id); } }}
-      onContextMenu={(event) => { if (!interactive || !handlers.onContextItem) return; event.preventDefault(); event.stopPropagation(); handlers.onSelectItem?.(item.id, areaIndex); handlers.onContextItem(item.id, areaIndex, event.clientX, event.clientY); }}
+      onContextMenu={(event) => { if (!interactive || !handlers.onContextItem) return; event.preventDefault(); event.stopPropagation(); if (!picked) handlers.onSelectItem?.(item.id, areaIndex); handlers.onContextItem(item.id, areaIndex, event.clientX, event.clientY); }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -435,8 +447,8 @@ function SpreadViewInner(props: SpreadViewProps) {
     return { target, rect: preview ?? dropHighlight({ ...target, highlight: undefined }, cell, geometry[target.areaIndex].outer) };
   }, [geometry, toMm, sheet, spread, assets]);
 
-  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect }),
-    [props.onSelectItem, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect]);
+  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect }),
+    [props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect]);
 
   const onDragOver = (event: React.DragEvent) => {
     const payload = currentDrag();
@@ -513,6 +525,7 @@ function SpreadViewInner(props: SpreadViewProps) {
               variant={variant}
               selected={selectedItemId === item.id}
               highlighted={highlightItemId === item.id}
+              picked={Boolean(props.pickedItemIds?.includes(item.id))}
               cropActive={cropMode}
               view={draft?.kind === "view" && draft.itemId === item.id ? draft.view : null}
               lowDpi={lowDpi}

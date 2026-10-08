@@ -204,7 +204,8 @@ export async function revealInFolder(path: string): Promise<boolean> {
 const EDITOR_KEY = "filex.albumFlow.editorPath";
 
 /** Apre la foto nell'editor esterno (Photoshop o altro). Chiede quale usare la prima volta. */
-export async function openInEditor(path: string): Promise<{ ok: boolean; message: string }> {
+export async function openInEditor(paths: string | readonly string[]): Promise<{ ok: boolean; message: string }> {
+  const list = Array.isArray(paths) ? [...paths] : [paths as string];
   const api = getDesktop();
   if (!api) return { ok: false, message: "La modifica in un editor richiede l'app desktop FileX." };
   let editor = "";
@@ -215,9 +216,9 @@ export async function openInEditor(path: string): Promise<{ ok: boolean; message
     if (!editor) return { ok: false, message: "Nessun editor scelto." };
     try { localStorage.setItem(EDITOR_KEY, editor); } catch { /* preferenza non critica */ }
   }
-  const result = await api.openWithEditor(editor, [path]).catch((error: unknown) => ({ ok: false, error: String(error) }));
+  const result = await api.openWithEditor(editor, list).catch((error: unknown) => ({ ok: false, error: String(error) }));
   const ok = Boolean((result as { ok?: boolean }).ok);
-  return { ok, message: ok ? "Foto aperta nell'editor." : "Non sono riuscito ad aprire l'editor." };
+  return { ok, message: ok ? (list.length > 1 ? `${list.length} foto aperte nell'editor.` : "Foto aperta nell'editor.") : "Non sono riuscito ad aprire l'editor." };
 }
 
 export function forgetEditor(): void {

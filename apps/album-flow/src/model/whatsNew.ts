@@ -21,6 +21,37 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.24",
+    date: "2026-10-08",
+    headline: "Più foto in Photoshop in un colpo solo e filtro «Usate»",
+    items: [
+      {
+        title: "Aprire più foto dello spread in Photoshop",
+        text: "Tieni premuto Maiusc e clicca le foto dello spread che vuoi ritoccare, poi clic destro e «Modifica N foto nell'editor»: si aprono tutte insieme. Per aprire l'intero spread usa «Modifica tutte le foto dello spread nell'editor». Salvi in Photoshop e le foto si aggiornano da sole al ritorno.",
+        where: ["Maiusc + clic", "Modifica N foto nell'editor", "Modifica tutte le foto dello spread nell'editor", "Altre azioni sullo spread"],
+      },
+      {
+        title: "Vedere solo le foto già usate",
+        text: "Accanto a «N da usare» c'è ora «N usate»: un clic e la libreria mostra solo le foto che hai già messo nell'album; un secondo clic le mostra di nuovo tutte.",
+        where: ["N usate", "N da usare"],
+      },
+      {
+        title: "Riposizionare la foto con Alt",
+        text: "Tieni premuto Alt e trascina una foto per spostarla dentro la sua cella senza aprire il ritaglio. Con Alt e la rotella la ingrandisci, come prima.",
+        where: ["Alt + trascinamento", "Alt + rotella"],
+      },
+      {
+        title: "Premendo Alt la pagina non si sposta più",
+        text: "Prima, premendo Alt, compariva la barra dei menu di Windows e tutta la pagina scendeva di qualche pixel. Ora resta ferma.",
+      },
+      {
+        title: "Barra della foto più compatta e spread più comodi",
+        text: "Il pulsante del bordo è un'icona piccola. Duplica ed elimina non coprono più le miniature degli spread: li trovi col clic destro sulla miniatura, insieme a «Sposta all'inizio» e «Sposta in fondo».",
+        where: ["Bordo (icona nella barra della foto)", "Clic destro su uno spread"],
+      },
+    ],
+  },
+  {
     version: "0.2.23",
     date: "2026-10-08",
     headline: "Bordo per singola foto e disegno libero più fluido",

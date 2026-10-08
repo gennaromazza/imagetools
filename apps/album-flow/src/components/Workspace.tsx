@@ -72,6 +72,8 @@ export interface WorkspaceProps {
 
 interface Toast { message: string; undo?: boolean }
 
+const EMPTY_IDS: readonly string[] = [];
+
 /** L'editor: cronologia, selezione, gesti sulle foto, libreria, importazione, esportazione. */
 export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial = false }: WorkspaceProps) {
   const [history, setHistoryState] = useState<History<AlbumProjectV2>>(() => createHistory(initial));
@@ -91,6 +93,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   const [spreadIndex, setSpreadIndex] = useState(0);
   const [activeArea, setActiveArea] = useState(0);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  // Selezione multipla dello spread (Maiusc+clic): vale per «Modifica nell'editor»; un clic normale la azzera.
+  const [pickedItemIds, setPickedItemIds] = useState<string[]>([]);
   // «Personalizza»: pannello di sfondi, testi e libreria; il testo o la grafica selezionati stanno sopra le foto.
   const [designOpen, setDesignOpen] = useState(false);
   const [designTab, setDesignTab] = useState<DesignTab>("text");
@@ -165,6 +169,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   useEffect(() => {
     if (selectedItemId && !spread?.areas.some((area) => area.items.some((item) => item.id === selectedItemId))) { setSelectedItemId(null); setCropMode(false); }
   }, [selectedItemId, spread]);
+  useEffect(() => {
+    if (pickedItemIds.length === 0) return;
+    const present = new Set(spread?.areas.flatMap((area) => area.items.map((item) => item.id)));
+    if (pickedItemIds.some((id) => !present.has(id))) setPickedItemIds((ids) => ids.filter((id) => present.has(id)));
+  }, [pickedItemIds, spread]);
   useEffect(() => { if (activeArea !== areaIndex) setActiveArea(areaIndex); }, [activeArea, areaIndex]);
   // Lo strumento «linea» vale solo per la foto in ritaglio: cambiando foto o chiudendo il ritaglio si spegne.
   useEffect(() => { setLineTool(false); }, [selectedItemId, cropMode]);
@@ -214,7 +223,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
 
   const goTo = useCallback((next: number) => {
     setSpreadIndex(Math.min(Math.max(next, 0), Math.max(count - 1, 0)));
-    setSelectedItemId(null); setSelectedOverlayId(null); setCropMode(false); setDraft(null); setActiveArea(0);
+    setSelectedItemId(null); setPickedItemIds([]); setSelectedOverlayId(null); setCropMode(false); setDraft(null); setActiveArea(0);
   }, [count]);
 
   const doUndo = useCallback(() => { lastCoalesce.current = null; setHistory(undo(historyRef.current)); setDraft(null); }, [setHistory]);
@@ -292,6 +301,19 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     const asset = assets.get(assetId);
     if (!asset?.absolutePath) return;
     const result = await openInEditor(asset.absolutePath);
+    notify(result.message);
+  }, [assets, notify]);
+
+  /** Apre in un colpo solo più foto dello spread nell'editor esterno (senza ripetizioni dello stesso file). */
+  const editMany = useCallback(async (itemIds: string[]) => {
+    const paths = new Set<string>();
+    for (const itemId of itemIds) {
+      const found = findItem(historyRef.current.present, itemId);
+      const path = found ? assets.get(found.item.assetId)?.absolutePath : undefined;
+      if (path) paths.add(path);
+    }
+    if (paths.size === 0) { notify("Queste foto non hanno un file sul disco da aprire."); return; }
+    const result = await openInEditor([...paths]);
     notify(result.message);
   }, [assets, notify]);
 
@@ -389,7 +411,15 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   const spreadId = spread?.id ?? "";
   const actions: StageActions = useMemo(() => ({
     activateArea: (i) => setActiveArea(i),
-    selectItem: (itemId, i) => { setZone("stage"); setActiveArea(i); setSelectedOverlayId(null); setSelectedItemId(itemId); if (!itemId) setCropMode(false); else setCropMode((on) => (itemId === selectedItemId ? on : false)); },
+    togglePick: (itemId, i) => {
+      setZone("stage"); setActiveArea(i); setSelectedOverlayId(null); setCropMode(false);
+      setPickedItemIds((previous) => {
+        const base = previous.length > 0 ? previous : selectedItemId ? [selectedItemId] : [];
+        return base.includes(itemId) ? base.filter((id) => id !== itemId) : [...base, itemId];
+      });
+    },
+    editItems: (itemIds) => void editMany(itemIds),
+    selectItem: (itemId, i) => { setPickedItemIds([]); setZone("stage"); setActiveArea(i); setSelectedOverlayId(null); setSelectedItemId(itemId); if (!itemId) setCropMode(false); else setCropMode((on) => (itemId === selectedItemId ? on : false)); },
     toggleCrop: (itemId) => {
       const found = findItem(project, itemId);
       if (!found) return;
@@ -522,7 +552,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       notify(historyRef.current.present === before ? "Le foto sono già allineate (l'allineamento vale per le aree in «foto intera»)." : scope === "spread" ? "Foto dello spread allineate." : "Foto di tutto l'album allineate.", historyRef.current.present !== before);
     },
     addSpreadAfter: () => { commit((p) => addSpread(p, index + 1)); setSpreadIndex(index + 1); setSelectedItemId(null); setActiveArea(0); },
-  }), [commit, edit, goTo, index, notify, project, rate, selectedItemId, spread, spreadId, storeTemplates, tagMany, templates, viewItem]);
+  }), [commit, edit, editMany, goTo, index, notify, project, rate, selectedItemId, spread, spreadId, storeTemplates, tagMany, templates, viewItem]);
 
   // ------------------------------------------------------------- sfondi, testi e grafiche
   const designActions: DesignActions = useMemo(() => ({
@@ -811,6 +841,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           activeArea={areaIndex}
           selectedItemId={selectedItemId}
           highlightItemId={highlightItemId}
+          pickedItemIds={pickedItemIds.length > 1 ? pickedItemIds : EMPTY_IDS}
           cropMode={cropMode}
           lineTool={lineTool}
           draft={draft}

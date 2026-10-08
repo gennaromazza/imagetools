@@ -52,6 +52,10 @@ export interface StageActions {
   clearSpread: () => void;
   mirror: (areaIndex: number) => void;
   editItem: (itemId: string) => void;
+  /** Maiusc+clic: aggiunge o toglie una foto dalla selezione multipla dello spread. */
+  togglePick: (itemId: string, areaIndex: number) => void;
+  /** Apre nell'editor esterno (Photoshop o altro) le foto indicate, in un'unica richiesta. */
+  editItems: (itemIds: string[]) => void;
   removeItem: (itemId: string) => void;
   lockItem: (itemId: string) => void;
   setItemBorder: (itemId: string, change: { cm?: number | null; color?: string | null }) => void;
@@ -95,6 +99,8 @@ export interface StageProps {
   activeArea: number;
   selectedItemId: string | null;
   highlightItemId: string | null;
+  /** Foto aggiunte alla selezione con Maiusc+clic (la foto selezionata ne fa sempre parte). */
+  pickedItemIds: readonly string[];
   cropMode: boolean;
   /** Lo strumento «linea» del raddrizzamento è acceso. */
   lineTool: boolean;
@@ -198,7 +204,7 @@ function AngleField({ value, onChange }: { value: number; onChange: (angle: numb
   );
 }
 
-export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, cropMode, lineTool, draft, zoom, guides, sizes, layoutsOpen, templates, actions, design }: StageProps) {
+export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, pickedItemIds, cropMode, lineTool, draft, zoom, guides, sizes, layoutsOpen, templates, actions, design }: StageProps) {
   const [centerRef, centerSize] = useElementSize<HTMLDivElement>();
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
@@ -278,7 +284,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         ) : null}
         {canCrop ? (
           <div className="anchor">
-            <button type="button" className={`icon-btn${found.item.borderCm !== undefined || found.item.borderColor !== undefined ? " is-active" : ""}`} title="Bordo di questa foto (spessore e colore)" aria-label="Bordo di questa foto" onClick={() => { newBorder.markSeen(); setBorderFor(borderFor === itemId ? null : itemId); }}>Bordo{newBorder.isNew ? <span className="new-pill">Nuovo</span> : null}</button>
+            <IconButton icon="frame" label={newBorder.isNew ? "Bordo di questa foto (spessore e colore) — novità" : "Bordo di questa foto (spessore e colore)"} active={found.item.borderCm !== undefined || found.item.borderColor !== undefined || borderFor === itemId} onClick={() => { newBorder.markSeen(); setBorderFor(borderFor === itemId ? null : itemId); }} size={16} />
+            {newBorder.isNew ? <span className="new-dot" aria-hidden="true" /> : null}
             <Popover open={borderFor === itemId} onClose={() => setBorderFor(null)} side="top" className="popover--info">
               <div className="straighten" style={{ gap: 8 }}>
                 <NumberField label="cm" value={found.item.borderCm ?? found.area.style.borderCm} {...STYLE_LIMITS.borderCm} onChange={(value) => actions.setItemBorder(itemId, { cm: value })} title="Spessore del bordo di questa foto (cm)" />
@@ -317,6 +324,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     const hasFile = desktop && Boolean(asset?.absolutePath);
     const canCrop = !found.item.locked;
     const free = hasFreeLayout(found.area);
+    const spreadItemIds = spread.areas.flatMap((candidate) => candidate.items.map((item) => item.id));
+    const multi = pickedItemIds.length > 1 && pickedItemIds.includes(itemId) ? pickedItemIds : null;
     return [
       { label: "Guarda in grande", icon: "eye", hint: "Spazio", onClick: () => actions.viewItem(itemId) },
       { label: "Trova nella libreria", icon: "search", onClick: () => actions.locateInLibrary(itemId) },
@@ -332,7 +341,10 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         { label: "Porta dietro le altre", icon: "chevronDown" as const, onClick: () => actions.orderFrame(itemId, "back") },
       ] : []),
       { separator: true, label: "-" },
-      { label: "Modifica nell'editor", icon: "pencil", disabled: !hasFile, onClick: () => actions.editItem(itemId) },
+      multi
+        ? { label: `Modifica ${multi.length} foto nell'editor`, icon: "pencil", disabled: !desktop, onClick: () => actions.editItems([...multi]) }
+        : { label: "Modifica nell'editor", icon: "pencil", disabled: !hasFile, onClick: () => actions.editItem(itemId) },
+      { label: "Modifica tutte le foto dello spread nell'editor", icon: "pencil", disabled: !desktop || spreadItemIds.length < 2, onClick: () => actions.editItems(spreadItemIds) },
       { label: "Apri la cartella del file", icon: "folder", disabled: !hasFile, onClick: () => actions.revealItem(itemId) },
       { label: "Copia il nome del file", icon: "copy", onClick: () => actions.copyItemName(itemId) },
       { label: "Valuta", icon: "star", disabled: !asset, children: [0, 1, 2, 3, 4, 5].map((rating) => ({ label: rating === 0 ? "Nessuna stella" : "★".repeat(rating), onClick: () => asset && actions.rate(asset.id, rating) })) },
@@ -375,6 +387,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         <Popover open={settingsOpen} onClose={() => setSettingsOpen(false)} side="top" className="popover--wide">
           <button type="button" className="popover__row" onClick={() => { actions.alignPhotos("spread"); setSettingsOpen(false); }}><Icon name="alignCenter" size={15} /> Allinea le foto di questo spread</button>
           <button type="button" className="popover__row" onClick={() => { actions.alignPhotos("album"); setSettingsOpen(false); }}><Icon name="alignCenter" size={15} /> Allinea le foto di tutto l'album</button>
+          <button type="button" className="popover__row" disabled={!desktop || spread.areas.every((candidate) => candidate.items.length === 0)} onClick={() => { actions.editItems(spread.areas.flatMap((candidate) => candidate.items.map((item) => item.id))); setSettingsOpen(false); }}><Icon name="pencil" size={15} /> Apri le foto dello spread nell'editor</button>
           <button type="button" className="popover__row" onClick={() => { actions.toggleDone(); setSettingsOpen(false); }}><Icon name="check" size={15} /> {spread.done ? "Riapri lo spread" : "Segna come finito"} <kbd>D</kbd></button>
           <button type="button" className="popover__row" onClick={() => { actions.duplicateSpread(); setSettingsOpen(false); }}><Icon name="copy" size={15} /> Duplica lo spread <kbd>Ctrl/⌘ D</kbd></button>
           <button type="button" className="popover__row" disabled={area.items.length < 2} onClick={() => { actions.mirror(areaIndex); setSettingsOpen(false); }}><Icon name="mirror" size={15} /> Specchia il layout</button>
@@ -431,6 +444,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               activeArea={areaIndex}
               selectedItemId={selectedItemId}
               highlightItemId={highlightItemId}
+              pickedItemIds={pickedItemIds}
+              onTogglePick={actions.togglePick}
               cropMode={cropMode}
               straightenTool={lineTool && cropMode}
               onStraightenDone={actions.finishLineTool}

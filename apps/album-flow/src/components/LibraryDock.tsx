@@ -154,7 +154,7 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
   const [labelId, setLabelId] = useState("");
   const [origin, setOrigin] = useState<"all" | "selector" | "manual">("all");
   const [usageFilter, setUsageFilter] = useState<"all" | "unused" | "used">("all");
-  const filtersOn = (stars !== "any" ? 1 : 0) + (labelId ? 1 : 0) + (origin !== "all" ? 1 : 0) + (usageFilter === "used" ? 1 : 0);
+  const filtersOn = (stars !== "any" ? 1 : 0) + (labelId ? 1 : 0) + (origin !== "all" ? 1 : 0);
   const resetFilters = () => { setStars("any"); setAtLeast(false); setLabelId(""); setOrigin("all"); setUsageFilter("all"); setQuery(""); };
   const [popover, setPopover] = useState<null | "filter" | "import" | "sort">(null);
   const [menu, setMenu] = useState<{ x: number; y: number; asset: AlbumAssetV2 } | null>(null);
@@ -380,6 +380,10 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
           <button type="button" className={`dock__unused${usageFilter === "unused" ? " is-active" : ""}`} onClick={() => setUsageFilter(usageFilter === "unused" ? "all" : "unused")} title="Mostra solo le foto non ancora usate" aria-pressed={usageFilter === "unused"}>
             {unusedCount > 0 ? <Icon name="warning" size={14} /> : <Icon name="check" size={14} />}
             {unusedCount} da usare
+          </button>
+          <button type="button" className={`dock__unused${usageFilter === "used" ? " is-active" : ""}`} onClick={() => setUsageFilter(usageFilter === "used" ? "all" : "used")} title="Mostra solo le foto già usate nell'album" aria-pressed={usageFilter === "used"}>
+            <Icon name="check" size={14} />
+            {project.assets.length - unusedCount} usate
           </button>
           <div className="dock__zoom" title="Dimensione delle miniature">
             <button type="button" className="icon-btn icon-btn--sm" onClick={() => props.onThumbSize(Math.max(THUMB_MIN, thumbSize - 25))} aria-label="Miniature più piccole"><Icon name="minus" size={13} /></button>
