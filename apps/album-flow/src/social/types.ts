@@ -282,6 +282,28 @@ export interface SlideTemplate {
 // Documento
 // ---------------------------------------------------------------------------
 
+/**
+ * Una foto in «modo libero»: si mette dove si vuole nella slide, anche sovrapposta alle altre.
+ * Le misure sono frazioni della tela (0-1), così cambiando formato la disposizione si adatta.
+ */
+export interface FreeFrame {
+  id: string;
+  assetId: string | null;
+  x: number; y: number; w: number; h: number;
+  /** Gradi, attorno al centro. */
+  rotation?: number;
+  zoom: number;
+  cx: number;
+  cy: number;
+  mask: PhotoMask;
+  /** Cornice bianca, come una stampa. */
+  border?: boolean;
+  shadow?: boolean;
+}
+
+export const FREE_MIN_SIZE = 0.06;
+export const MAX_FREE_FRAMES = 12;
+
 export interface Slide {
   id: string;
   templateId: string;
@@ -297,6 +319,13 @@ export interface Slide {
   flip?: boolean;
   spreadId?: string | null;
   spreadId2?: string | null;
+  /** Testi spostati a mano: scostamento dal posto del modello, in frazioni della larghezza (dx) e dell'altezza (dy) della tela. */
+  textOffset?: Record<string, { dx: number; dy: number }>;
+  /**
+   * Modo libero: se presente, le foto del modello non si mostrano e al loro posto ci sono queste cornici (l'ultima sta sopra).
+   * I testi e il resto del modello restano; `photos` conserva le foto del modello per quando si torna indietro.
+   */
+  free?: FreeFrame[];
   /** Panorama: questa slide mostra la parte `index` di un'immagine distesa su `count` slide. */
   span?: { index: number; count: number };
 }
@@ -316,4 +345,10 @@ export interface Carousel {
   caption: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Le foto che una slide mostra davvero: quelle delle cornici libere se e in modo libero, altrimenti quelle del modello. */
+export function photosShown(slide: Slide): string[] {
+  const ids = slide.free ? slide.free.map((frame) => frame.assetId) : slide.photos;
+  return ids.filter((id): id is string => Boolean(id));
 }

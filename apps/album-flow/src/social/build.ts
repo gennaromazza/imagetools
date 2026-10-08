@@ -2,7 +2,7 @@ import type { TextMeasure } from "../render/text-layout";
 import { fontPairOf, paletteOf } from "./brand";
 import { mirrorLayers } from "./kit";
 import { TEMPLATES, setInfo, templateOf } from "./templates";
-import { formatOf, type BrandKit, type Carousel, type PhotoRef, type Slide, type SlideBuild, type SlideTemplate, type SpreadRef, type TemplateCtx } from "./types";
+import { formatOf, type BrandKit, type Carousel, type FreeFrame, type Layer, type PhotoRef, type Slide, type SlideBuild, type SlideTemplate, type SpreadRef, type TemplateCtx } from "./types";
 
 export interface BuildEnv {
   albumName: string;
@@ -21,6 +21,36 @@ export function resolveTexts(template: SlideTemplate, slide: Slide, brand: Brand
   const result: Record<string, string> = {};
   for (const field of template.fields) result[field.key] = slide.texts[field.key] ?? field.fallback({ brand, albumName });
   return result;
+}
+
+/** Al posto degli spazi foto del modello ci sono le cornici libere, nello stesso punto dell'ordine di disegno (le decorazioni e i testi restano). */
+export function withFreeFrames(layers: Layer[], frames: readonly FreeFrame[], width: number, height: number): Layer[] {
+  const free: Layer[] = frames.map((frame, index) => ({
+    kind: "photo", id: `free-${frame.id}`, slot: index, assetId: frame.assetId,
+    x: frame.x * width, y: frame.y * height, w: frame.w * width, h: frame.h * height, mask: frame.mask,
+    zoom: frame.zoom, cx: frame.cx, cy: frame.cy,
+    ...(frame.rotation ? { rotation: frame.rotation } : {}),
+    ...(frame.border ? { border: { w: Math.max(8, Math.round(Math.min(frame.w * width, frame.h * height) * 0.04)), color: "#ffffff" } } : {}),
+    ...(frame.shadow ? { shadow: true } : {}),
+  }));
+  const at = layers.findIndex((layer) => layer.kind === "photo");
+  const rest = layers.filter((layer) => layer.kind !== "photo");
+  if (at < 0) {
+    const firstText = rest.findIndex((layer) => layer.kind === "text");
+    const insert = firstText < 0 ? rest.length : firstText;
+    return [...rest.slice(0, insert), ...free, ...rest.slice(insert)];
+  }
+  const before = layers.slice(0, at).filter((layer) => layer.kind !== "photo").length;
+  return [...rest.slice(0, before), ...free, ...rest.slice(before)];
+}
+
+/** I testi spostati a mano: tutti i livelli di quel campo si muovono insieme. */
+export function withTextOffsets(layers: Layer[], offsets: Readonly<Record<string, { dx: number; dy: number }>>, width: number, height: number): Layer[] {
+  return layers.map((layer) => {
+    if (layer.kind !== "text" || !layer.field) return layer;
+    const offset = offsets[layer.field];
+    return offset ? { ...layer, x: layer.x + offset.dx * width, y: layer.y + offset.dy * height } : layer;
+  });
 }
 
 export function buildSlide(carousel: Carousel, index: number, env: BuildEnv): SlideBuild & { template: SlideTemplate } {
@@ -50,6 +80,8 @@ export function buildSlide(carousel: Carousel, index: number, env: BuildEnv): Sl
   };
   const built = template.build(ctx);
   // Un panorama non si specchia: le sue parti devono continuare l'una nell'altra.
-  const layers = slide.flip && !slide.span ? mirrorLayers(built.layers, format.width) : built.layers;
+  let layers = slide.flip && !slide.span ? mirrorLayers(built.layers, format.width) : built.layers;
+  if (slide.free && !slide.span) layers = withFreeFrames(layers, slide.free, format.width, format.height);
+  if (slide.textOffset && !slide.span) layers = withTextOffsets(layers, slide.textOffset, format.width, format.height);
   return { ...built, layers, template };
 }

@@ -29,8 +29,8 @@ export function carouselReport(carousel: Carousel, project: Project): SocialRepo
     const template = templateOf(slide.templateId);
     if (!template) { issues.push({ level: "error", message: `La slide ${index + 1} usa un modello che non esiste più.`, slideIndex: index }); return; }
     const built = buildSlide(carousel, index, env);
-    template.slots.forEach((_, slot) => {
-      const id = slide.photos[slot];
+    const slotIds = slide.free ? slide.free.map((frame) => frame.assetId) : template.slots.map((_, slot) => slide.photos[slot]);
+    slotIds.forEach((id, slot) => {
       if (!id) issues.push({ level: "warning", message: `Slide ${index + 1}: manca una foto (spazio ${slot + 1}).`, slideIndex: index });
       else if (!assets.has(id)) issues.push({ level: "warning", message: `Slide ${index + 1}: una foto non è più nell'album.`, slideIndex: index });
       else if (!slide.span) seen.set(id, (seen.get(id) ?? 0) + 1);
@@ -80,6 +80,12 @@ export function assertCarouselInvariants(carousel: Carousel, project?: Project):
         if (framing.shape !== undefined && (slide.span || !(framing.shape >= 0.2 && framing.shape <= 5))) fail(`forma non valida alla slide ${index + 1}`);
       }
     }
+    if (slide.free) {
+      if (slide.span) fail(`un panorama non ha il modo libero (slide ${index + 1})`);
+      if (new Set(slide.free.map((frame) => frame.id)).size !== slide.free.length) fail(`cornici libere con id doppio alla slide ${index + 1}`);
+      for (const frame of slide.free) if (!(frame.w > 0 && frame.h > 0 && frame.zoom >= 1 && frame.zoom <= 4)) fail(`cornice libera non valida alla slide ${index + 1}`);
+    }
+    for (const key of Object.keys(slide.textOffset ?? {})) if (!template.fields.some((field) => field.key === key)) fail(`testo spostato per un campo che non esiste (${key}) alla slide ${index + 1}`);
     if (slide.textStyle) {
       for (const [key, style] of Object.entries(slide.textStyle)) {
         if (!template.fields.some((field) => field.key === key)) fail(`stile per un campo che non esiste (${key}) alla slide ${index + 1}`);
@@ -100,6 +106,7 @@ export function assertCarouselInvariants(carousel: Carousel, project?: Project):
     }
     if (project) {
       for (const id of slide.photos) if (id && !project.assets.some((asset) => asset.id === id)) fail(`foto inesistente ${id}`);
+      for (const frame of slide.free ?? []) if (frame.assetId && !project.assets.some((asset) => asset.id === frame.assetId)) fail(`foto inesistente ${frame.assetId}`);
       for (const spreadId of [slide.spreadId, slide.spreadId2]) if (spreadId && !project.spreads.some((spread) => spread.id === spreadId)) fail(`spread inesistente ${spreadId}`);
     }
   });

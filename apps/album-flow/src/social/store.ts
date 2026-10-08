@@ -2,7 +2,7 @@ import { PALETTES, FONT_PAIRS } from "./brand";
 import { normalizeFramingList } from "./framing";
 import { normalizeTextStyles } from "./textstyle";
 import { SETS, templateOf } from "./templates";
-import { MAX_SLIDES, SOCIAL_FORMATS, type BrandKit, type Carousel, type PhotoFraming, type Slide } from "./types";
+import { FREE_MIN_SIZE, MAX_FREE_FRAMES, MAX_SLIDES, SOCIAL_FORMATS, type BrandKit, type Carousel, type FreeFrame, type PhotoFraming, type Slide } from "./types";
 
 /**
  * Archivio locale dei caroselli di un album (come i template dell'utente): non tocca lo schema del progetto.
@@ -15,6 +15,30 @@ const VERSION = 1;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const str = (value: unknown, fallback = "", max = 600): string => (typeof value === "string" ? value.slice(0, max) : fallback);
+
+const num = (value: unknown, low: number, high: number, fallback: number) => (typeof value === "number" && Number.isFinite(value) ? Math.min(high, Math.max(low, value)) : fallback);
+
+/** Una cornice del modo libero; ciò che non è valido si corregge o si scarta, mai l'intera slide. */
+export function parseFreeFrames(raw: unknown): FreeFrame[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const frames: FreeFrame[] = [];
+  for (const item of raw.slice(0, MAX_FREE_FRAMES)) {
+    if (!isRecord(item)) continue;
+    const w = num(item.w, FREE_MIN_SIZE, 2, 0.4);
+    const h = num(item.h, FREE_MIN_SIZE, 2, 0.4);
+    frames.push({
+      id: str(item.id, "", 80) || `fr-${Math.random().toString(36).slice(2, 10)}`,
+      assetId: typeof item.assetId === "string" && item.assetId ? item.assetId : null,
+      x: num(item.x, -2, 2, 0.1), y: num(item.y, -2, 2, 0.1), w, h,
+      ...(typeof item.rotation === "number" && Number.isFinite(item.rotation) && item.rotation !== 0 ? { rotation: num(item.rotation, -180, 180, 0) } : {}),
+      zoom: num(item.zoom, 1, 4, 1), cx: num(item.cx, 0, 1, 0.5), cy: num(item.cy, 0, 1, 0.5),
+      mask: item.mask === "ellipse" || item.mask === "arch" ? item.mask : "rect",
+      ...(item.border === true ? { border: true } : {}),
+      ...(item.shadow === true ? { shadow: true } : {}),
+    });
+  }
+  return frames;
+}
 
 function parseSlide(raw: unknown): Slide | null {
   if (!isRecord(raw)) return null;
@@ -32,6 +56,18 @@ function parseSlide(raw: unknown): Slide | null {
   const textStyle = normalizeTextStyles(raw.textStyle, template.fields.map((field) => field.key));
   if (textStyle) slide.textStyle = textStyle;
   if (raw.tone === "dark" || raw.tone === "light") slide.tone = raw.tone;
+  if (isRecord(raw.textOffset)) {
+    const offsets: Record<string, { dx: number; dy: number }> = {};
+    for (const field of template.fields) {
+      const value = raw.textOffset[field.key];
+      if (!isRecord(value) || span) continue;
+      const dx = num(value.dx, -1, 1, 0), dy = num(value.dy, -1, 1, 0);
+      if (Math.abs(dx) > 0.0005 || Math.abs(dy) > 0.0005) offsets[field.key] = { dx, dy };
+    }
+    if (Object.keys(offsets).length > 0) slide.textOffset = offsets;
+  }
+  const free = parseFreeFrames(raw.free);
+  if (free && !span) slide.free = free;
   if (typeof raw.spreadId === "string" && raw.spreadId) slide.spreadId = raw.spreadId;
   if (typeof raw.spreadId2 === "string" && raw.spreadId2) slide.spreadId2 = raw.spreadId2;
   if (isRecord(raw.span) && Number.isInteger(raw.span.index) && Number.isInteger(raw.span.count) && (raw.span.count as number) >= 2 && (raw.span.count as number) <= 4

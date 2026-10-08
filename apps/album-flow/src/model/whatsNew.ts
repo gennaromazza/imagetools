@@ -21,6 +21,38 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.18",
+    date: "2026-10-08",
+    headline: "Caroselli: foto libere, maniglie per ridimensionare, testi spostabili",
+    items: [
+      {
+        title: "Ridimensiona e gira le foto con le maniglie",
+        text: "Clicca una foto nell'anteprima: le maniglie ai bordi la allargano e la stringono (gli angoli mantengono le proporzioni) e il cerchio in alto la gira. Usando una maniglia la slide passa da sola alla disposizione libera, senza spostare nulla.",
+        where: ["Inquadra", "Sposta", "Scambia"],
+      },
+      {
+        title: "Disposizione libera, anche con le foto sovrapposte",
+        text: "Nella scheda «Foto» scegli «Libera»: sposti le foto dove vuoi, le sovrapponi, scegli la forma (rettangolo, tonda, arco), il bordo bianco e l'ombra, e le porti «Davanti» o «Dietro». «Del modello» riporta le foto negli spazi del modello.",
+        where: ["Foto", "Disposizione", "Libera", "Davanti", "Dietro", "Cambia foto…", "Raddrizza"],
+      },
+      {
+        title: "Altre foto disponibili",
+        text: "In fondo alla scheda «Foto» vedi le foto segnate «Per i social» che il carosello non usa ancora: un clic le aggiunge alla slide (o le mette nello spazio selezionato).",
+        where: ["Foto", "Altre foto disponibili", "Segna come", "Per i social"],
+      },
+      {
+        title: "Sposta i testi dove vuoi",
+        text: "Trascina un testo sulla slide per metterlo dove preferisci; un semplice clic lo modifica come prima. Nella scheda «Testi», «riporta al posto» lo rimette nel modello.",
+        where: ["Testi", "riporta al posto"],
+      },
+      {
+        title: "Tredici nuovi modelli con tre o quattro foto",
+        text: "Mosaico a quattro, quattro colonne, una grande e due piccole, tre e quattro polaroid, pellicola a quattro, tre ritratti con titolo, tre cerchi, collage sovrapposto, tre archi, una alta e due basse, quattro cornici e tre fotogrammi larghi: utili quando le foto sono tante e le slide poche.",
+        where: ["Modello", "Slide"],
+      },
+    ],
+  },
+  {
     version: "0.2.17",
     date: "2026-10-08",
     headline: "Caroselli: sposta le foto, scrivi sulla slide, scegli quante slide",

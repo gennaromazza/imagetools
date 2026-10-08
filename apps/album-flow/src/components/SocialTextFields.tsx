@@ -8,7 +8,7 @@ const FONT_LABEL: Record<TextFontChoice, string> = { display: "Titolo", script: 
 const ALIGN_LABEL = { left: "Sinistra", center: "Centro", right: "Destra" } as const;
 
 /** Testi di una slide: scrittura, suggerimenti dalla libreria editoriale e stile (carattere, dimensione, colore, allineamento, maiuscole). */
-export function SocialTextFields({ slide, template, brand, albumName, tone, activeField, onActiveField, onText, onReset, onStyle, onSuggest, onSuggestAll }: {
+export function SocialTextFields({ slide, template, brand, albumName, tone, activeField, onActiveField, onText, onReset, moved, onResetPosition, onStyle, onSuggest, onSuggestAll }: {
   slide: Slide;
   template: SlideTemplate;
   brand: BrandKit;
@@ -19,6 +19,9 @@ export function SocialTextFields({ slide, template, brand, albumName, tone, acti
   onActiveField: (field: string | null) => void;
   onText: (key: string, value: string) => void;
   onReset: (key: string) => void;
+  /** Campi spostati a mano sulla slide. */
+  moved: readonly string[];
+  onResetPosition: (key: string) => void;
   /** `null` toglie ogni ritocco di stile al campo. */
   onStyle: (key: string, patch: Partial<TextStyleChoice> | null) => void;
   onSuggest: (key: string) => void;
@@ -51,6 +54,7 @@ export function SocialTextFields({ slide, template, brand, albumName, tone, acti
             <div className="social-field__label">
               <label htmlFor={`sf-${field.key}`}>{field.label}</label>
               <span className="social-field__tools">
+                {moved.includes(field.key) ? <button type="button" className="link-btn" onClick={() => onResetPosition(field.key)} title="Riporta il testo al suo posto nel modello">riporta al posto</button> : null}
                 {edited ? <button type="button" className="link-btn" onClick={() => onReset(field.key)}>ripristina</button> : null}
                 {canSuggest ? <button type="button" className="icon-btn icon-btn--sm" onClick={() => onSuggest(field.key)} aria-label={`Suggerisci: ${field.label}`} title="Suggerisci un testo (clic di nuovo per un altro)"><Icon name="wand" size={13} /></button> : null}
                 <button type="button" className={`icon-btn icon-btn--sm${open || style ? " is-active" : ""}`} aria-pressed={open} onClick={() => onActiveField(open ? null : field.key)} aria-label={`Stile del testo: ${field.label}`} title="Carattere, dimensione, colore, allineamento"><span className="social-field__aa">Aa</span></button>

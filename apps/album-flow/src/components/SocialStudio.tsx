@@ -9,23 +9,25 @@ import { carouselReport } from "../social/check";
 import { FONT_PAIRS, PALETTES, brandFontIds, defaultBrand, fontPairOf } from "../social/brand";
 import {
   acceptSelection, addPanorama, addSlide, duplicateSlide, moveSlide, removeSlide, renameCarousel, replacePhoto, resetSlideText, setCaption, setFormat, setSlideSpread,
-  bestSlotFor, reselectSlidePhotos, resizeCarousel, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
+  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, resizeCarousel, setFreeFrame, setFreeFramePhoto, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
 } from "../social/edit";
 import { setSlideTextStyle, suggestCarouselTexts, suggestFieldText, suggestSlideTexts } from "../social/edit-text";
 import { buildSlide } from "../social/build";
-import { photoAt } from "../social/hit";
+import { rotateDelta } from "../social/framing";
+import { grabbablePhotos, photoAt } from "../social/hit";
 import { layoutOf } from "../social/kit";
 import { usePhotoDrag, type DropTarget } from "../social/usePhotoDrag";
 import { usePreviewInteraction, type PreviewMode } from "../social/usePreviewInteraction";
-import { envFor, reselectPhotos, restyle, selectionBasis, selectionChanged, variation } from "../social/plan";
+import { envFor, rankPhotos, reselectPhotos, restyle, selectionBasis, selectionChanged, variation } from "../social/plan";
 import { renderSlideSvg } from "../social/render";
 import { loadCarousels, saveBrand, saveCarousels } from "../social/store";
 import { SETS, setInfo, templateOf, templatesForSet } from "../social/templates";
-import { MAX_SLIDES, SOCIAL_FORMATS, formatOf, type Carousel, type Slide, type Tone } from "../social/types";
+import { MAX_SLIDES, SOCIAL_FORMATS, formatOf, type Carousel, type PhotoLayer, type Slide, type Tone } from "../social/types";
 import { clearPreviewCache, useBrandFonts, usePreviewMedia } from "../social/useSocialMedia";
 import "../social/social.css";
 import { Icon } from "./icons";
 import { SocialExportDialog } from "./SocialExportDialog";
+import { SocialFreePanel } from "./SocialFreePanel";
 import { SocialNewDialog } from "./SocialNewDialog";
 import { SocialFraming } from "./SocialFraming";
 import { SocialTextFields } from "./SocialTextFields";
@@ -78,6 +80,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const [inlineField, setInlineField] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [mode, setMode] = useState<PreviewMode>("frame");
+  const frameDrag = useRef(0);
   const [scope, setScope] = useState<"slide" | "all">("slide");
   const [tab, setTab] = useState<"model" | "photos" | "texts" | "look">("model");
   const suggestions = useRef(new Map<string, number>());
@@ -125,7 +128,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const slide = carousel?.slides[selectedIndex] ?? null;
   const template = slide && carousel ? templateOf(slide.templateId) ?? templateOf(setInfo(carousel.setId).arc.open) : undefined;
 
-  const photosSignature = carousel ? carousel.slides.map((item) => item.photos.join(",")).join(";") : "";
+  const photosSignature = carousel ? carousel.slides.map((item) => item.photos.join(",") + (item.free ? `|${item.free.map((frame) => frame.assetId).join(",")}` : "")).join(";") : "";
   const setPreviews = useMemo(() => (carousel ? SETS.map((set) => ({ set, carousel: restyle(project, carousel, set.id) })) : []),
     // La proposta dei set dipende dalle foto scelte e dalla marca, non dai testi.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,10 +192,17 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   }, [carousel, selectedIndex, env, fontTick, setFontTick]);
   useEffect(() => { setActiveSlot(0); setActiveField(null); setInlineField(null); }, [slide?.id]);
   const canvasWidth = carousel ? formatOf(carousel.format).width : 1080;
+  const canvasHeight = carousel ? formatOf(carousel.format).height : 1350;
   const interaction = usePreviewInteraction({
     wrapRef: mainRef, layers: mainLayers, env, canvasWidth, slideId: slide?.id,
     mode,
-    onFraming: (photoSlot, patch, key) => commit((current) => setSlideFraming(current, slide!.id, photoSlot, patch), key),
+    canvasHeight, textMovable: !slide?.span, textOffsetOf: (field) => slide?.textOffset?.[field] ?? { dx: 0, dy: 0 },
+    onTextMove: (field, offset, key) => commit((current) => setTextOffset(current, slide!.id, field, offset), key),
+    onPlaceStart: (photoSlot, pointer) => { const layer = grabbablePhotos(mainLayers).find((item) => item.slot === photoSlot); if (layer) startGesture("move", layer, pointer); },
+    onFraming: (photoSlot, patch, key) => commit((current) => {
+      const target = current.slides.find((item) => item.id === slide!.id);
+      return target?.free ? (target.free[photoSlot] ? setFreeFrame(current, slide!.id, target.free[photoSlot].id, patch) : current) : setSlideFraming(current, slide!.id, photoSlot, patch);
+    }, key),
     onSlot: setActiveSlot,
     onField: (field) => { setInlineField(field); },
     onEmptySlot: (photoSlot) => setPicker({ kind: "slot", slideId: slide!.id, slot: photoSlot }),
@@ -218,6 +228,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   };
   const dropPhoto = (from: PhotoSpot, assetId: string, target: DropTarget) => {
     if (!carousel) return;
+    if (carousel.slides.find((item) => item.id === target.slideId)?.free || slide?.free) { onStatus("Una slide con la disposizione libera non scambia le foto: spostale direttamente nell'anteprima."); return; }
     const slot = target.kind === "slot" ? target.slot : bestSlotFor(carousel, target.slideId, env.photos.get(assetId)?.aspect);
     if (slot === null) { onStatus("Questa slide non ha spazi per le foto (o è un panorama): scegli un'altra slide."); return; }
     const to: PhotoSpot = { slideId: target.slideId, slot };
@@ -226,6 +237,57 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     commit((current) => swapPhotos(current, from, to));
   };
   const { drag, begin: beginDrag } = usePhotoDrag({ resolve: resolveDrop, onDrop: dropPhoto });
+  // Maniglie sulla foto: spostare, ridimensionare, girare. Da una slide con il modello si passa da sola alla disposizione libera.
+  const gesture = useRef(0);
+  const startGesture = (kind: "move" | "rot" | "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w", layer: PhotoLayer, pointer: { clientX: number; clientY: number }) => {
+    const svg = mainRef.current?.querySelector("svg");
+    if (!svg || !slide || slide.span) return;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const index = grabbablePhotos(mainLayers).findIndex((item) => item.slot === layer.slot);
+    if (index < 0) return;
+    const slideId = slide.id;
+    const snapshot = mainLayers;
+    const frameId = slide.free ? slide.free[index]?.id : `fr-${index}`;
+    if (!frameId) return;
+    const scale = canvasWidth / rect.width;
+    const rotation = layer.rotation ?? 0;
+    const start = { x: layer.x, y: layer.y, w: layer.w, h: layer.h };
+    const cx0 = start.x + start.w / 2, cy0 = start.y + start.h / 2;
+    const sign = { nw: [-1, -1], n: [0, -1], ne: [1, -1], e: [1, 0], se: [1, 1], s: [0, 1], sw: [-1, 1], w: [-1, 0] } as const;
+    const minPx = 0.06 * canvasWidth;
+    const key = `gesture:${slideId}:${frameId}:${++gesture.current}`;
+    setActiveSlot(layer.slot);
+    const apply = (patch: { x: number; y: number; w: number; h: number; rotation?: number }) => {
+      commit((current) => setFreeFrame(enterFreeMode(current, slideId, snapshot), slideId, frameId, {
+        x: patch.x / canvasWidth, y: patch.y / canvasHeight, w: patch.w / canvasWidth, h: patch.h / canvasHeight, ...(patch.rotation !== undefined ? { rotation: patch.rotation } : {}),
+      }), key);
+    };
+    const onMove = (event: PointerEvent) => {
+      const dx = (event.clientX - pointer.clientX) * scale;
+      const dy = (event.clientY - pointer.clientY) * scale;
+      if (kind === "move") { apply({ ...start, x: start.x + dx, y: start.y + dy }); return; }
+      if (kind === "rot") {
+        const px = (event.clientX - rect.left) * scale, py = (event.clientY - rect.top) * scale;
+        let degrees = (Math.atan2(py - cy0, px - cx0) * 180) / Math.PI + 90;
+        if (degrees > 180) degrees -= 360;
+        for (const snap of [0, 90, -90, 180, -180]) if (Math.abs(degrees - snap) < 4) degrees = snap;
+        apply({ ...start, rotation: Math.round(degrees * 10) / 10 });
+        return;
+      }
+      const [sx, sy] = sign[kind];
+      const local = rotateDelta(dx, dy, rotation);
+      let w = Math.max(minPx, start.w + sx * local.dx);
+      let h = Math.max(minPx, start.h + sy * local.dy);
+      if (sx !== 0 && sy !== 0) { const factor = Math.max(w / start.w, h / start.h); w = Math.max(minPx, start.w * factor); h = Math.max(minPx, start.h * factor); }
+      const shift = rotateDelta((sx * (w - start.w)) / 2, (sy * (h - start.h)) / 2, -rotation);
+      apply({ x: cx0 + shift.dx - w / 2, y: cy0 + shift.dy - h / 2, w, h });
+    };
+    const stop = () => { window.removeEventListener("pointermove", onMove, true); window.removeEventListener("pointerup", stop, true); window.removeEventListener("pointercancel", stop, true); };
+    window.addEventListener("pointermove", onMove, true);
+    window.addEventListener("pointerup", stop, true);
+    window.addEventListener("pointercancel", stop, true);
+  };
   const startDrag = (photoSlot: number, assetId: string, pointer: { clientX: number; clientY: number }, immediate = true) => {
     if (!slide) return;
     if (slide.span) { onStatus("Un panorama si sposta insieme: usa le frecce «Sposta prima / dopo»."); return; }
@@ -291,8 +353,10 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const assetOf = (id: string | null | undefined) => (id ? project.assets.find((asset) => asset.id === id) : undefined);
   const usedNow = usedAssetIds(carousel);
   const inPanorama = Boolean(slide.span);
-  const framingSlot = Math.min(activeSlot, Math.max(0, slide.photos.length - 1));
-  const hasFramingPhoto = Boolean(slide.photos[framingSlot]);
+  const framingSlot = slide.free ? Math.min(activeSlot, Math.max(0, slide.free.length - 1)) : Math.min(activeSlot, Math.max(0, slide.photos.length - 1));
+  const hasFramingPhoto = slide.free ? false : Boolean(slide.photos[framingSlot]);
+  const availablePhotos = rankPhotos(project).map((ranked) => assetOf(ranked.assetId)).filter((asset): asset is AlbumAssetV2 => Boolean(asset && asset.albumTags?.includes("social") && !usedNow.has(asset.id)));
+  const hasMarked = project.assets.some((asset) => asset.albumTags?.includes("social"));
   const toneNow: Tone = slide.tone ?? template?.tone ?? "dark";
 
   const afterEdit = (next: Carousel, pickId?: (before: Set<string>) => string | undefined) => {
@@ -314,8 +378,19 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     const below = svgBox.top + textLayer.y * px + textHeight + 10;
     editorBox = { left: Math.max(8, Math.min(window.innerWidth - 340, svgBox.left + textLayer.x * px)), top: below + 176 > window.innerHeight ? Math.max(8, svgBox.top + textLayer.y * px - 186) : below };
   }
+  const selLayer = !inPanorama && mode !== "swap" && !drag ? grabbablePhotos(mainLayers).find((layer) => layer.slot === framingSlot && Boolean(layer.assetId)) : undefined;
+  const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
   const overlays = (
     <>
+      {selLayer && svgBox ? (
+        <div className="social-sel" style={{ left: svgBox.left + selLayer.x * px, top: svgBox.top + selLayer.y * px, width: selLayer.w * px, height: selLayer.h * px, transform: selLayer.rotation ? `rotate(${selLayer.rotation}deg)` : undefined }}>
+          {HANDLES.map((handle) => (
+            <span key={handle} className={`social-sel__h social-sel__h--${handle}`} onPointerDown={(event) => { event.stopPropagation(); event.preventDefault(); startGesture(handle, selLayer, event); }} />
+          ))}
+          <span className="social-sel__stem" />
+          <span className="social-sel__rot" title="Gira la foto" onPointerDown={(event) => { event.stopPropagation(); event.preventDefault(); startGesture("rot", selLayer, event); }} />
+        </div>
+      ) : null}
       {drag && svgBox && overSlot && overSlot.kind === "photo" ? <div className="social-drop" style={{ left: svgBox.left + overSlot.x * px, top: svgBox.top + overSlot.y * px, width: overSlot.w * px, height: overSlot.h * px }} /> : null}
       {drag ? <div className="social-ghost" style={{ left: drag.x + 14, top: drag.y + 14 }}>{media.photos.get(drag.assetId) ? <img src={media.photos.get(drag.assetId)!.url} alt="" draggable={false} /> : null}</div> : null}
       {editorBox && textField ? (
@@ -461,8 +536,8 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           {overlays}
           <div className="social__tools">
             <Segmented<PreviewMode> label="Trascinando una foto nella slide" value={mode} onChange={setMode}
-              options={[{ value: "frame", label: "Inquadra" }, { value: "move", label: "Sposta" }]} />
-            <span className="muted small">{mode === "frame" ? "Trascina la foto per inquadrarla, rotella per lo zoom. Clic su un testo per scriverlo." : "Trascina una foto su un'altra foto, su uno spazio vuoto o su una slide qui sotto."}</span>
+              options={[{ value: "frame", label: "Inquadra" }, { value: "place", label: "Sposta" }, { value: "swap", label: "Scambia" }]} />
+            <span className="muted small">{mode === "frame" ? "Trascina la foto per inquadrarla, rotella per lo zoom; le maniglie la ridimensionano. Trascina un testo per spostarlo, clicca per scriverlo." : mode === "place" ? "Trascina la foto dove vuoi nella slide, anche sopra le altre." : "Trascina una foto su un'altra foto, su uno spazio vuoto o su una slide qui sotto."}</span>
           </div>
           <div className="social__strip-wrap">
             <div className="social__strip" role="listbox" aria-label="Slide del carosello">
@@ -535,7 +610,21 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             </>
           )}
 
-          {tab === "photos" && template && template.slots.length > 0 ? (
+          {tab === "photos" && !inPanorama && template ? (
+            <SocialFreePanel
+              slide={slide} selected={framingSlot} onSelect={setActiveSlot} assetOf={assetOf} available={availablePhotos} hasMarked={hasMarked}
+              onEnter={() => commit((current) => enterFreeMode(current, slide.id, mainLayers))}
+              onLeave={() => commit((current) => leaveFreeMode(current, slide.id))}
+              onPatch={(frameId, patch, key) => commit((current) => setFreeFrame(current, slide.id, frameId, patch), key)}
+              onRemove={(frameId) => commit((current) => removeFreeFrame(current, slide.id, frameId))}
+              onReorder={(frameId, to) => commit((current) => reorderFreeFrame(current, slide.id, frameId, to))}
+              onAdd={(assetId) => commit((current) => addFreePhoto(current, slide.id, assetId, env.photos.get(assetId)?.aspect ?? 1))}
+              onUseHere={(assetId) => commit((current) => replacePhoto(current, slide.id, framingSlot, assetId))}
+              onPick={(index) => setPicker({ kind: "slot", slideId: slide.id, slot: index })}
+            />
+          ) : null}
+
+          {tab === "photos" && template && !slide.free && template.slots.length > 0 ? (
             <>
               <h4>{inPanorama ? "Foto del panorama" : "Foto"}</h4>
               <div className="social-slots">
@@ -561,6 +650,8 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
                 activeField={activeField} onActiveField={setActiveField}
                 onText={(key, value) => commit((current) => setSlideText(current, slide.id, key, value), `t:${slide.id}:${key}`)}
                 onReset={(key) => commit((current) => resetSlideText(current, slide.id, key))}
+                moved={slide.textOffset ? Object.keys(slide.textOffset) : []}
+                onResetPosition={(key) => commit((current) => setTextOffset(current, slide.id, key, null))}
                 onStyle={(key, patch) => commit((current) => setSlideTextStyle(current, slide.id, key, patch), patch && "scale" in patch ? `style:${slide.id}:${key}` : undefined)}
                 onSuggest={(key) => { const attempt = (suggestions.current.get(`${slide.id}:${key}`) ?? -1) + 1; suggestions.current.set(`${slide.id}:${key}`, attempt); commit((current) => suggestFieldText(current, slide.id, key, attempt)); }}
                 onSuggestAll={() => { const attempt = (suggestions.current.get(`${slide.id}:*`) ?? -1) + 1; suggestions.current.set(`${slide.id}:*`, attempt); commit((current) => suggestSlideTexts(current, slide.id, attempt)); }}
@@ -595,7 +686,10 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           onClose={() => setPicker(null)}
           onPick={(assetId) => {
             if (picker.kind === "panorama") { setPicker(null); afterEdit(addPanorama(carousel, assetId, Number(panoCount), slide.id)); return; }
-            commit((current) => replacePhoto(current, picker.slideId, picker.slot, assetId));
+            commit((current) => {
+              const target = current.slides.find((item) => item.id === picker.slideId);
+              return target?.free ? (target.free[picker.slot] ? setFreeFramePhoto(current, picker.slideId, target.free[picker.slot].id, assetId) : current) : replacePhoto(current, picker.slideId, picker.slot, assetId);
+            });
             setPicker(null);
           }}
           footer={picker.kind === "panorama" ? (

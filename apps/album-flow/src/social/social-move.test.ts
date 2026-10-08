@@ -1,16 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assertCarouselInvariants } from "./check";
-import { bestSlotFor, reselectSlidePhotos, swapPhotos, usedAssetIds } from "./edit";
+import { addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, setFreeFrame, setTextOffset, swapPhotos, usedAssetIds } from "./edit";
+import { TEMPLATES, templateOf } from "./templates";
+import { restyle } from "./plan";
 import { photoAt } from "./hit";
-import { MAX_SLIDES, MIN_SLIDES } from "./types";
+import { MAX_SLIDES, MIN_SLIDES, type PhotoLayer } from "./types";
 import { buildSlide } from "./build";
 import { suggestSlideCount, photosUsedAt } from "./plan";
 import { parseCarousels, serializeCarousels } from "./store";
 import { album, envOf, plan } from "./testkit";
 
 const project = album();
-const base = () => plan(project, { count: 8, seed: 0 });
+const base = () => plan(project, { count: 14, seed: 0 });
 const twoSlides = (carousel: ReturnType<typeof base>) => carousel.slides.filter((slide) => !slide.span && slide.photos.length > 0);
 
 test("sposta foto: scambio tra slide diverse e nella stessa slide", () => {
@@ -91,4 +93,67 @@ test("caroselli già salvati: si rileggono identici e il formato resta lo stesso
   const text = serializeCarousels([carousel]);
   assert.equal(serializeCarousels(parseCarousels(text)), text);
   assert.equal(JSON.parse(text).version, 1);
+});
+
+test("modelli: almeno dieci modelli con tre o quattro foto", () => {
+  const many = TEMPLATES.filter((template) => template.slots.length >= 3 && template.slots.length <= 4);
+  assert.ok(many.length >= 10, `solo ${many.length} modelli con 3-4 foto`);
+});
+
+test("modo libero: si entra senza spostare nulla, si sposta, si aggiunge, si sovrappone e si torna al modello", () => {
+  const carousel = base();
+  const env = envOf(project);
+  const target = carousel.slides.findIndex((slide) => !slide.span && slide.photos.filter(Boolean).length >= 2);
+  const id = carousel.slides[target].id;
+  const layers = buildSlide(carousel, target, env).layers;
+  const free = enterFreeMode(carousel, id, layers);
+  const slide = free.slides[target];
+  assert.ok(slide.free && slide.free.length >= 2);
+  // stesse posizioni di prima
+  const photosOf = (list: typeof layers) => list.filter((layer): layer is PhotoLayer => layer.kind === "photo" && !layer.blur);
+  const after = photosOf(buildSlide(free, target, env).layers);
+  const before = photosOf(layers);
+  assert.equal(after.length, before.length);
+  for (let i = 0; i < before.length; i += 1) {
+    assert.ok(Math.abs(after[i].x - before[i].x) < 1 && Math.abs(after[i].y - before[i].y) < 1 && Math.abs(after[i].w - before[i].w) < 1, "il modo libero ha spostato una foto");
+  }
+  assertCarouselInvariants(free);
+  const frame = slide.free![0];
+  const moved = setFreeFrame(free, id, frame.id, { x: 0.3, y: 0.2, w: 0.5, h: 0.3, rotation: 12 });
+  assert.equal(moved.slides[target].free![0].rotation, 12);
+  assert.equal(setFreeFrame(moved, id, frame.id, { x: 0.3 }), moved, "una modifica senza effetto restituisce lo stesso carosello");
+  const extra = project.assets.find((asset) => asset.pickStatus !== "rejected" && !usedAssetIds(moved).has(asset.id))!;
+  const added = addFreePhoto(moved, id, extra.id, 1.5);
+  assert.equal(added.slides[target].free!.length, slide.free!.length + 1);
+  assert.ok(usedAssetIds(added).has(extra.id));
+  const front = reorderFreeFrame(added, id, frame.id, "front");
+  assert.equal(front.slides[target].free!.at(-1)!.id, frame.id);
+  assert.equal(removeFreeFrame(front, id, frame.id).slides[target].free!.length, slide.free!.length);
+  assertCarouselInvariants(front);
+  assert.deepEqual(leaveFreeMode(front, id).slides[target].photos, carousel.slides[target].photos);
+  // un salvataggio vecchio e uno con modo libero si rileggono uguali
+  const text = serializeCarousels([front]);
+  assert.deepEqual(JSON.parse(serializeCarousels(parseCarousels(text))), JSON.parse(text));
+  // cambiare stile non butta via la disposizione libera
+  const styled = restyle(project, front, "galleria");
+  assert.ok(styled.slides.some((item) => item.free));
+});
+
+test("testi spostati a mano: scostamento salvato, applicato e riportabile al posto", () => {
+  const carousel = base();
+  const env = envOf(project);
+  const target = carousel.slides.findIndex((slide) => !slide.span && templateOf(slide.templateId)!.fields.length > 0);
+  const slide = carousel.slides[target];
+  const key = templateOf(slide.templateId)!.fields[0].key;
+  const textOf = (c: typeof carousel) => buildSlide(c, target, env).layers.filter((layer) => layer.kind === "text" && layer.field === key) as Array<{ x: number; y: number }>;
+  const baseline = textOf(carousel);
+  if (baseline.length === 0) return;
+  const moved = setTextOffset(carousel, slide.id, key, { dx: 0.1, dy: -0.05 });
+  const shifted = textOf(moved);
+  assert.ok(Math.abs(shifted[0].x - baseline[0].x - 108) < 1 && Math.abs(shifted[0].y - baseline[0].y + 67.5) < 1);
+  assertCarouselInvariants(moved);
+  const text = serializeCarousels([moved]);
+  assert.equal(serializeCarousels(parseCarousels(text)), text);
+  assert.equal(setTextOffset(moved, slide.id, key, null).slides[target].textOffset, undefined);
+  assert.equal(setTextOffset(carousel, slide.id, "campo-che-non-esiste", { dx: 0.2, dy: 0 }), carousel);
 });

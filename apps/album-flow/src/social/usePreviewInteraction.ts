@@ -12,7 +12,7 @@ import type { Layer, PhotoFraming } from "./types";
  * si modifica con un clic e, trascinando, muove la foto.
  */
 
-export type PreviewMode = "frame" | "move";
+export type PreviewMode = "frame" | "place" | "swap";
 
 export interface PreviewInteraction {
   wrapRef: RefObject<HTMLDivElement | null>;
@@ -21,19 +21,32 @@ export interface PreviewInteraction {
   /** Larghezza della tela in pixel (1080): serve a passare dai pixel dello schermo a quelli della slide. */
   canvasWidth: number;
   slideId: string | undefined;
-  /** «frame» = il trascinamento inquadra la foto nel suo spazio; «move» = la sposta su un'altra foto o slide. */
+  /** «frame» = il trascinamento inquadra la foto nel suo spazio; «place» = sposta la foto dove si vuole nella slide; «swap» = la scambia con un'altra foto o slide. */
   mode: PreviewMode;
   onFraming: (slot: number, patch: Partial<PhotoFraming>, coalesceKey: string) => void;
   onSlot: (slot: number) => void;
   onField: (field: string) => void;
   /** Clic su uno spazio foto vuoto. */
   onEmptySlot: (slot: number) => void;
-  /** Inizia lo spostamento di una foto (modo «move»): da qui in poi se ne occupa chi ascolta la finestra. */
+  /** Altezza della tela: serve a trasformare lo spostamento di un testo in frazioni della slide. */
+  canvasHeight: number;
+  /** I testi si possono spostare (non nei panorami). Trascinare un testo lo sposta, un semplice clic lo modifica. */
+  textMovable: boolean;
+  textOffsetOf: (field: string) => { dx: number; dy: number };
+  onTextMove: (field: string, offset: { dx: number; dy: number }, coalesceKey: string) => void;
+  /** Inizia lo spostamento libero di una foto nella slide (modo «place»). */
+  onPlaceStart: (slot: number, event: { clientX: number; clientY: number; pointerId: number }) => void;
+  /** Inizia lo scambio di una foto con un'altra (modo «swap»): da qui in poi se ne occupa chi ascolta la finestra. */
   onMoveStart: (slot: number, assetId: string, event: { clientX: number; clientY: number; pointerId: number }) => void;
 }
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 const THRESHOLD = 4;
+
+/** Il puntatore resta agganciato all'anteprima durante il trascinamento (se il browser non lo consente si prosegue senza). */
+function capture(element: HTMLElement, pointerId: number): void {
+  try { element.setPointerCapture(pointerId); } catch { /* puntatore non attivo */ }
+}
 
 interface Drag {
   slot: number;
@@ -59,6 +72,7 @@ export function usePreviewInteraction(options: PreviewInteraction) {
   const latest = useRef(options);
   latest.current = options;
   const drag = useRef<Drag | null>(null);
+  const textDrag = useRef<null | { field: string; startX: number; startY: number; scale: number; start: { dx: number; dy: number }; pointer: number; started: boolean }>(null);
   const frame = useRef(0);
   const pending = useRef<null | { slot: number; cx: number; cy: number }>(null);
 
@@ -113,6 +127,12 @@ export function usePreviewInteraction(options: PreviewInteraction) {
       const target = event.target as Element | null;
       const field = target?.closest?.("[data-field]")?.getAttribute("data-field") ?? null;
       const point = toSlide(event.clientX, event.clientY);
+      if (field && current.textMovable) {
+        textDrag.current = { field, startX: event.clientX, startY: event.clientY, scale: point?.scale ?? 1, start: current.textOffsetOf(field), pointer: event.pointerId, started: false };
+        capture(event.currentTarget, event.pointerId);
+        event.preventDefault();
+        return;
+      }
       const layer = point ? photoAt(current.layers, point.x, point.y) : null;
       if (!layer || !point) { if (field) current.onField(field); return; }
       if (!layer.assetId) {
@@ -128,16 +148,36 @@ export function usePreviewInteraction(options: PreviewInteraction) {
         field, started: false, captured: false,
       };
       current.onSlot(layer.slot);
-      if (current.mode === "frame") { event.currentTarget.setPointerCapture(event.pointerId); drag.current.captured = true; }
+      if (current.mode === "frame") { capture(event.currentTarget, event.pointerId); drag.current.captured = true; }
       event.preventDefault();
     },
     onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+      const moving = textDrag.current;
+      if (moving && event.pointerId === moving.pointer) {
+        if (!moving.started) {
+          if (Math.hypot(event.clientX - moving.startX, event.clientY - moving.startY) < THRESHOLD) return;
+          moving.started = true;
+        }
+        const current = latest.current;
+        if (current.slideId) {
+          current.onTextMove(moving.field, {
+            dx: moving.start.dx + ((event.clientX - moving.startX) * moving.scale) / current.canvasWidth,
+            dy: moving.start.dy + ((event.clientY - moving.startY) * moving.scale) / current.canvasHeight,
+          }, `tmove:${current.slideId}:${moving.field}`);
+        }
+        return;
+      }
       const state = drag.current;
       if (!state || event.pointerId !== state.pointer) return;
       if (!state.started) {
         if (Math.hypot(event.clientX - state.startX, event.clientY - state.startY) < THRESHOLD) return;
         state.started = true;
-        if (latest.current.mode === "move") {
+        if (latest.current.mode === "place") {
+          drag.current = null;
+          latest.current.onPlaceStart(state.slot, { clientX: state.startX, clientY: state.startY, pointerId: state.pointer });
+          return;
+        }
+        if (latest.current.mode === "swap") {
           drag.current = null;
           latest.current.onMoveStart(state.slot, state.assetId, { clientX: state.startX, clientY: state.startY, pointerId: state.pointer });
           return;
@@ -149,6 +189,13 @@ export function usePreviewInteraction(options: PreviewInteraction) {
       if (!frame.current) frame.current = requestAnimationFrame(flush);
     },
     onPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+      const moving = textDrag.current;
+      if (moving) {
+        textDrag.current = null;
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+        if (!moving.started && event.type === "pointerup") latest.current.onField(moving.field);
+        return;
+      }
       const state = drag.current;
       if (!state) return;
       if (frame.current) { cancelAnimationFrame(frame.current); flush(); }
