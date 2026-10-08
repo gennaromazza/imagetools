@@ -147,3 +147,27 @@
 .social-style__swatches button { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--line); padding: 0; }
 .social-style__swatches button.is-active { border-color: var(--accent-bright); box-shadow: 0 0 0 2px var(--accent-soft); }
 .social-style__swatches .social-style__none { display: grid; place-items: center; background: transparent; color: var(--text-muted); font-size: 14px; line-height: 1; }
+
+/* Spostare le foto, scrivere sulla slide, schede del pannello destro, creazione guidata */
+.social__tools { display: flex; align-items: center; gap: 12px; padding: 6px 16px; border-top: 1px solid var(--line); background: var(--bg-elevated); flex-wrap: wrap; }
+.social__thumb.is-drop, .social-slot.is-drop .social-slot__img { outline: 3px solid var(--accent-bright); outline-offset: 1px; }
+.social-slot__img.is-draggable { cursor: grab; touch-action: none; }
+.social-drop { position: fixed; z-index: 120; pointer-events: none; border: 3px solid var(--accent-bright); background: rgba(184, 154, 99, 0.25); border-radius: 4px; }
+.social-ghost { position: fixed; z-index: 140; pointer-events: none; width: 64px; height: 64px; border-radius: 8px; overflow: hidden; box-shadow: var(--shadow); opacity: 0.92; }
+.social-ghost img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.social-inline { position: fixed; z-index: 125; width: 330px; display: grid; gap: 8px; padding: 10px; background: var(--bg-elevated); border: 1px solid var(--accent); border-radius: var(--radius-sm, 12px); box-shadow: var(--shadow); }
+.social-inline label { font-size: 12px; color: var(--muted, #aaa); }
+.social-inline__row { display: flex; align-items: center; gap: 6px; }
+.social__tabs { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px 0 8px; background: var(--bg-panel); }
+.social__tabs button { padding: 7px 4px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: inherit; font-size: 13px; }
+.social__tabs button.is-active { background: var(--accent-soft); border-color: var(--accent); }
+.social-auto { margin-top: 6px; }
+.social-new { display: grid; gap: 16px; }
+.social-new__block { display: grid; gap: 8px; }
+.social-new__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.social-new__minis { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.social-new__mini { width: 48px; height: 48px; border-radius: 8px; overflow: hidden; background: rgba(0, 0, 0, 0.25); }
+.social-new__mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.social-new__more { padding: 0 8px; font-size: 13px; }
+.social-new__count { font-size: 20px; }
+.social-new__warn { display: flex; gap: 8px; align-items: flex-start; }

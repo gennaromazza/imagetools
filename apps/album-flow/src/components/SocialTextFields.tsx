@@ -37,7 +37,7 @@ export function SocialTextFields({ slide, template, brand, albumName, tone, acti
     <div className="social-texts">
       <div className="social-texts__head">
         <h4>Testi</h4>
-        <button type="button" className="btn btn--sm" onClick={onSuggestAll} title="Propone un testo per ogni campo di questa slide, dalla libreria editoriale (la stessa dei fotolibri)"><Icon name="wand" size={13} /> Suggerisci</button>
+        <button type="button" className="btn btn--sm" onClick={onSuggestAll} title="Propone un testo per ogni campo di questa slide, dalla libreria editoriale (la stessa dei fotolibri)"><Icon name="wand" size={13} /> Suggerisci per questa slide</button>
       </div>
       {template.fields.map((field) => {
         const value = slide.texts[field.key] ?? field.fallback({ brand, albumName });

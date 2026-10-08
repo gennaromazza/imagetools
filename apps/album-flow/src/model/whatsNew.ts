@@ -21,6 +21,33 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.17",
+    date: "2026-10-08",
+    headline: "Caroselli: sposta le foto, scrivi sulla slide, scegli quante slide",
+    items: [
+      {
+        title: "Crea il carosello dalle foto che hai scelto",
+        text: "«Nuovo carosello» mostra le foto segnate «Per i social» (o, se non ce ne sono, le migliori dell'album) e propone quante slide servono per usarle tutte. Cambi il numero con il cursore, aggiungi o togli foto con «Scegli le foto…» e solo allora crei il carosello.",
+        where: ["Nuovo", "Nuovo carosello", "Scegli le foto…", "Numero di slide"],
+      },
+      {
+        title: "Sposta le foto tra le slide",
+        text: "Con l'interruttore «Sposta» sotto l'anteprima trascini una foto su un'altra foto, su uno spazio vuoto o su una slide della striscia: le due foto si scambiano. Puoi trascinarle anche dalle miniature «Foto 1», «Foto 2» a destra. «Inquadra» resta il modo per muovere e ingrandire la foto nel suo spazio, anche sotto i testi.",
+        where: ["Sposta", "Inquadra", "Foto 1", "Foto 2"],
+      },
+      {
+        title: "Scrivi direttamente sulla slide",
+        text: "Clicca un testo nell'anteprima: si apre un riquadro dove scrivi, premi «Suggerisci» per una proposta nuova o «Stile» per carattere, dimensione e colore.",
+        where: ["Suggerisci", "Stile", "Fine"],
+      },
+      {
+        title: "Pannello a schede e aiuto automatico per slide",
+        text: "A destra le funzioni sono divise in Modello, Foto, Testi e Aspetto, così i testi non sono più in fondo a un elenco di modelli. A sinistra «Aiuto automatico» applica «Riscegli le foto» e «Suggerisci i testi» alla slide selezionata oppure a tutto il carosello.",
+        where: ["Modello", "Foto", "Testi", "Aspetto", "Aiuto automatico", "Tutto il carosello"],
+      },
+    ],
+  },
+  {
     version: "0.2.16",
     date: "2026-10-06",
     headline: "Caroselli e storie per Instagram, dal tuo album",

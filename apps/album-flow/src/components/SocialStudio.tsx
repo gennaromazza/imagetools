@@ -3,25 +3,30 @@ import type { AlbumAssetV2 } from "@photo-tools/shared-types";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import { canRedo, canUndo, createHistory, pushHistory, redo, replacePresent, undo, type History } from "../history";
 import type { Project } from "../model/project";
+import { suggestKindOf } from "../social/suggest";
 import { canvasMeasure, loadFonts } from "../render/fonts";
 import { carouselReport } from "../social/check";
 import { FONT_PAIRS, PALETTES, brandFontIds, defaultBrand, fontPairOf } from "../social/brand";
 import {
   acceptSelection, addPanorama, addSlide, duplicateSlide, moveSlide, removeSlide, renameCarousel, replacePhoto, resetSlideText, setCaption, setFormat, setSlideSpread,
-  resizeCarousel, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
+  bestSlotFor, reselectSlidePhotos, resizeCarousel, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
 } from "../social/edit";
 import { setSlideTextStyle, suggestCarouselTexts, suggestFieldText, suggestSlideTexts } from "../social/edit-text";
 import { buildSlide } from "../social/build";
-import { usePreviewInteraction } from "../social/usePreviewInteraction";
-import { envFor, freshSeed, planCarousel, reselectPhotos, restyle, selectionBasis, selectionChanged, setBrand, variation } from "../social/plan";
+import { photoAt } from "../social/hit";
+import { layoutOf } from "../social/kit";
+import { usePhotoDrag, type DropTarget } from "../social/usePhotoDrag";
+import { usePreviewInteraction, type PreviewMode } from "../social/usePreviewInteraction";
+import { envFor, reselectPhotos, restyle, selectionBasis, selectionChanged, variation } from "../social/plan";
 import { renderSlideSvg } from "../social/render";
-import { loadBrand, loadCarousels, saveBrand, saveCarousels } from "../social/store";
+import { loadCarousels, saveBrand, saveCarousels } from "../social/store";
 import { SETS, setInfo, templateOf, templatesForSet } from "../social/templates";
-import { MAX_SLIDES, SOCIAL_FORMATS, formatOf, type Carousel, type SetId, type Slide, type Tone } from "../social/types";
+import { MAX_SLIDES, SOCIAL_FORMATS, formatOf, type Carousel, type Slide, type Tone } from "../social/types";
 import { clearPreviewCache, useBrandFonts, usePreviewMedia } from "../social/useSocialMedia";
 import "../social/social.css";
 import { Icon } from "./icons";
 import { SocialExportDialog } from "./SocialExportDialog";
+import { SocialNewDialog } from "./SocialNewDialog";
 import { SocialFraming } from "./SocialFraming";
 import { SocialTextFields } from "./SocialTextFields";
 import { SocialPhotoPicker } from "./SocialPhotoPicker";
@@ -32,24 +37,21 @@ function SlideView({ svg, className = "" }: { svg: string; className?: string })
   return <div className={`social-slide ${className}`} dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
-function SlotThumb({ asset, label, onPick, onClear }: { asset: AlbumAssetV2 | undefined; label: string; onPick: () => void; onClear?: () => void }) {
+function SlotThumb({ asset, label, slot, dropping, onPick, onClear, onDragBegin }: {
+  asset: AlbumAssetV2 | undefined; label: string; slot: number; dropping: boolean;
+  onPick: () => void; onClear?: () => void; onDragBegin?: (event: { clientX: number; clientY: number; pointerId: number }) => void;
+}) {
   const src = useAssetSrc(asset, 200);
   return (
-    <div className="social-slot">
-      <button type="button" className="social-slot__img" onClick={onPick} title="Cambia foto" aria-label={`${label}: cambia foto`}>
+    <div className={`social-slot${dropping ? " is-drop" : ""}`} data-slot-thumb={slot}>
+      <button type="button" className={`social-slot__img${asset && onDragBegin ? " is-draggable" : ""}`} onClick={onPick} title={asset && onDragBegin ? "Clic per cambiare foto · trascinala su un'altra foto o su una slide per spostarla" : "Cambia foto"} aria-label={`${label}: cambia foto`}
+        onPointerDown={(event) => { if (asset && onDragBegin && event.button === 0) onDragBegin(event); }}>
         {src ? <img src={src} alt="" draggable={false} /> : <span className="social-slot__empty"><Icon name="plus" size={18} /></span>}
       </button>
       <span className="social-slot__label">{label}</span>
       {asset && onClear ? <button type="button" className="icon-btn icon-btn--sm social-slot__clear" onClick={onClear} aria-label={`${label}: togli la foto`}><Icon name="close" size={12} /></button> : null}
     </div>
   );
-}
-
-function newCarousel(project: Project, name: string, setId: SetId = "editoriale"): Carousel {
-  // Nome, profilo, colori e font scelti in un altro album si ricordano; altrimenti si parte dai colori consigliati dello stile.
-  const remembered = loadBrand();
-  const brand = remembered ?? setBrand(defaultBrand(""), setId);
-  return planCarousel(project, { setId, format: "feed", count: 10, brand, name, seed: freshSeed() });
 }
 
 export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImportFiles }: {
@@ -59,10 +61,8 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   onImportFolder: () => void;
   onImportFiles: () => void;
 }) {
-  const [hist, setHist] = useState<History<Carousel[]>>(() => {
-    const saved = loadCarousels(project.projectId);
-    return createHistory(saved.length > 0 || project.assets.length === 0 ? saved : [newCarousel(project, "Carosello 1")]);
-  });
+  // I caroselli salvati si rileggono così come sono; il primo carosello nasce dalla creazione guidata, non da solo.
+  const [hist, setHist] = useState<History<Carousel[]>>(() => createHistory(loadCarousels(project.projectId)));
   const list = hist.present;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -75,6 +75,11 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const mainRef = useRef<HTMLDivElement>(null);
   const [activeSlot, setActiveSlot] = useState(0);
   const [activeField, setActiveField] = useState<string | null>(null);
+  const [inlineField, setInlineField] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [mode, setMode] = useState<PreviewMode>("frame");
+  const [scope, setScope] = useState<"slide" | "all">("slide");
+  const [tab, setTab] = useState<"model" | "photos" | "texts" | "look">("model");
   const suggestions = useRef(new Map<string, number>());
   const [textAttempt, setTextAttempt] = useState(0);
 
@@ -86,10 +91,6 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   useEffect(() => { saveCarousels(project.projectId, list); }, [project.projectId, list]);
   useEffect(() => () => clearPreviewCache(), []);
 
-  // Dopo aver importato le prime foto dalla finestra vuota nasce il primo carosello.
-  useEffect(() => {
-    if (list.length === 0 && project.assets.length > 0) setHist((current) => pushHistory(current, [newCarousel(project, "Carosello 1")]));
-  }, [list.length, project]);
 
   const commit = useCallback((fn: (current: Carousel) => Carousel, coalesce?: string) => {
     const now = Date.now();
@@ -186,13 +187,51 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     try { return buildSlide(carousel, selectedIndex, env).layers; } catch { return []; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [carousel, selectedIndex, env, fontTick, setFontTick]);
-  useEffect(() => { setActiveSlot(0); setActiveField(null); }, [slide?.id]);
+  useEffect(() => { setActiveSlot(0); setActiveField(null); setInlineField(null); }, [slide?.id]);
+  const canvasWidth = carousel ? formatOf(carousel.format).width : 1080;
   const interaction = usePreviewInteraction({
-    wrapRef: mainRef, layers: mainLayers, env, canvasWidth: carousel ? formatOf(carousel.format).width : 1080, slideId: slide?.id,
+    wrapRef: mainRef, layers: mainLayers, env, canvasWidth, slideId: slide?.id,
+    mode,
     onFraming: (photoSlot, patch, key) => commit((current) => setSlideFraming(current, slide!.id, photoSlot, patch), key),
     onSlot: setActiveSlot,
-    onField: setActiveField,
+    onField: (field) => { setInlineField(field); },
+    onEmptySlot: (photoSlot) => setPicker({ kind: "slot", slideId: slide!.id, slot: photoSlot }),
+    onMoveStart: (photoSlot, assetId, pointer) => startDrag(photoSlot, assetId, pointer),
   });
+
+  // Spostare le foto: dall'anteprima (modo «Sposta») o dalle miniature a destra, su un'altra foto, su uno spazio vuoto o su una slide della striscia.
+  const resolveDrop = (clientX: number, clientY: number): DropTarget | null => {
+    const hit = document.elementFromPoint(clientX, clientY);
+    if (!hit || !slide) return null;
+    const strip = hit.closest("[data-strip-slide]");
+    if (strip) return { kind: "slide", slideId: strip.getAttribute("data-strip-slide")! };
+    const thumb = hit.closest("[data-slot-thumb]");
+    if (thumb) return { kind: "slot", slideId: slide.id, slot: Number(thumb.getAttribute("data-slot-thumb")) };
+    const svg = mainRef.current?.querySelector("svg");
+    if (svg && mainRef.current?.contains(hit)) {
+      const rect = svg.getBoundingClientRect();
+      const scale = rect.width > 0 ? canvasWidth / rect.width : 1;
+      const layer = photoAt(mainLayers, (clientX - rect.left) * scale, (clientY - rect.top) * scale);
+      if (layer) return { kind: "slot", slideId: slide.id, slot: layer.slot };
+    }
+    return null;
+  };
+  const dropPhoto = (from: PhotoSpot, assetId: string, target: DropTarget) => {
+    if (!carousel) return;
+    const slot = target.kind === "slot" ? target.slot : bestSlotFor(carousel, target.slideId, env.photos.get(assetId)?.aspect);
+    if (slot === null) { onStatus("Questa slide non ha spazi per le foto (o è un panorama): scegli un'altra slide."); return; }
+    const to: PhotoSpot = { slideId: target.slideId, slot };
+    if (to.slideId === from.slideId && to.slot === from.slot) return;
+    if (swapPhotos(carousel, from, to) === carousel) { onStatus("Non posso spostarla qui: la slide ha già questa foto, oppure è un panorama."); return; }
+    commit((current) => swapPhotos(current, from, to));
+  };
+  const { drag, begin: beginDrag } = usePhotoDrag({ resolve: resolveDrop, onDrop: dropPhoto });
+  const startDrag = (photoSlot: number, assetId: string, pointer: { clientX: number; clientY: number }, immediate = true) => {
+    if (!slide) return;
+    if (slide.span) { onStatus("Un panorama si sposta insieme: usa le frecce «Sposta prima / dopo»."); return; }
+    setActiveSlot(photoSlot);
+    beginDrag({ slideId: slide.id, slot: photoSlot }, assetId, pointer, immediate);
+  };
 
   const report = useMemo(() => (carousel ? carouselReport(carousel, project) : null), [carousel, project]);
 
@@ -203,10 +242,10 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
       const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable);
       if (event.key === "Escape") {
         event.stopPropagation();
-        if (picker) setPicker(null); else if (adding) setAdding(false); else if (!exporting) onClose();
+        if (picker) setPicker(null); else if (inlineField) setInlineField(null); else if (creating) setCreating(false); else if (adding) setAdding(false); else if (!exporting) onClose();
         return;
       }
-      if (typing || exporting || picker) return;
+      if (typing || exporting || picker || creating) return;
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
       if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) doRedo(); else doUndo(); return; }
@@ -217,9 +256,13 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [picker, adding, exporting, carousel, selectedIndex, onClose]);
+  }, [picker, adding, exporting, creating, inlineField, carousel, selectedIndex, onClose]);
 
   // ----------------------------------------------------------------- vuoto
+  if ((!carousel || !slide) && project.assets.length > 0) {
+    return <SocialNewDialog project={project} name="Carosello 1" setId="editoriale" onCancel={onClose}
+      onCreate={(created) => { commitList((current) => [...current, created]); setActiveId(created.id); setSelectedId(null); }} />;
+  }
   if (!carousel || !slide) {
     return (
       <div className="social" role="dialog" aria-label="Carosello per i social">
@@ -259,6 +302,44 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
     if (added) setSelectedId(added);
   };
 
+  // Sopra l'anteprima: lo spazio su cui si sta per rilasciare la foto, la foto che si trascina e il campo del testo in modifica.
+  const svgBox = mainRef.current?.querySelector("svg")?.getBoundingClientRect();
+  const px = svgBox && svgBox.width > 0 ? svgBox.width / canvasWidth : 1;
+  const overSlot = drag?.over?.kind === "slot" && drag.over.slideId === slide.id ? mainLayers.find((layer) => layer.kind === "photo" && !layer.blur && layer.slot === (drag.over as { slot: number }).slot) : undefined;
+  const textField = inlineField ? template?.fields.find((field) => field.key === inlineField) : undefined;
+  const textLayer = textField ? mainLayers.find((layer) => layer.kind === "text" && layer.field === textField.key) : undefined;
+  let editorBox: { left: number; top: number } | null = null;
+  if (svgBox && textLayer && textLayer.kind === "text") {
+    const textHeight = layoutOf(textLayer, env.measure).height * px;
+    const below = svgBox.top + textLayer.y * px + textHeight + 10;
+    editorBox = { left: Math.max(8, Math.min(window.innerWidth - 340, svgBox.left + textLayer.x * px)), top: below + 176 > window.innerHeight ? Math.max(8, svgBox.top + textLayer.y * px - 186) : below };
+  }
+  const overlays = (
+    <>
+      {drag && svgBox && overSlot && overSlot.kind === "photo" ? <div className="social-drop" style={{ left: svgBox.left + overSlot.x * px, top: svgBox.top + overSlot.y * px, width: overSlot.w * px, height: overSlot.h * px }} /> : null}
+      {drag ? <div className="social-ghost" style={{ left: drag.x + 14, top: drag.y + 14 }}>{media.photos.get(drag.assetId) ? <img src={media.photos.get(drag.assetId)!.url} alt="" draggable={false} /> : null}</div> : null}
+      {editorBox && textField ? (
+        <div className="social-inline" style={editorBox} role="group" aria-label={`Scrivi: ${textField.label}`}
+          onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setInlineField(null); }}>
+          <label htmlFor="social-inline-input">{textField.label}</label>
+          {(() => {
+            const value = slide.texts[textField.key] ?? textField.fallback({ brand: carousel.brand, albumName: project.projectName });
+            const write = (next: string) => commit((current) => setSlideText(current, slide.id, textField.key, next), `t:${slide.id}:${textField.key}`);
+            return textField.multiline
+              ? <textarea id="social-inline-input" className="input" rows={3} autoFocus value={value} onChange={(event) => write(event.target.value)} />
+              : <input id="social-inline-input" className="input" autoFocus value={value} onChange={(event) => write(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") setInlineField(null); }} />;
+          })()}
+          <div className="social-inline__row">
+            {suggestKindOf(textField.key) ? <button type="button" className="btn btn--sm" onClick={() => { const attempt = (suggestions.current.get(`${slide.id}:${textField.key}`) ?? -1) + 1; suggestions.current.set(`${slide.id}:${textField.key}`, attempt); commit((current) => suggestFieldText(current, slide.id, textField.key, attempt)); }}><Icon name="wand" size={13} /> Suggerisci</button> : null}
+            <button type="button" className="btn btn--sm btn--ghost" onClick={() => { setActiveField(textField.key); setTab("texts"); setInlineField(null); }} title="Carattere, dimensione, colore, allineamento">Aa Stile</button>
+            <span className="spacer" />
+            <button type="button" className="btn btn--sm btn--primary" onClick={() => setInlineField(null)}>Fine</button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <div className="social" role="dialog" aria-label="Carosello per i social" style={{ ["--ratio" as string]: ratio }}>
       <header className="social__bar">
@@ -271,7 +352,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             {list.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
         ) : null}
-        <button type="button" className="btn btn--sm" onClick={() => { const next = newCarousel(project, `Carosello ${list.length + 1}`, carousel.setId); commitList((current) => [...current, next]); setActiveId(next.id); setSelectedId(null); }} title="Un altro carosello dallo stesso album"><Icon name="plus" size={14} /> Nuovo</button>
+        <button type="button" className="btn btn--sm" onClick={() => setCreating(true)} title="Un altro carosello dallo stesso album, scegliendo foto e numero di slide"><Icon name="plus" size={14} /> Nuovo</button>
         <button type="button" className={`btn btn--sm btn--danger${confirmDelete ? " is-armed" : ""}`} onClick={() => {
           if (!confirmDelete) { setConfirmDelete(true); window.setTimeout(() => setConfirmDelete(false), 3000); return; }
           setConfirmDelete(false);
@@ -338,17 +419,24 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           </select>
           <p className="muted small social-hint">Titoli {fontPairOf(carousel.brand.fontPairId).display.replaceAll("-", " ")}, parole calligrafiche e testi piccoli: tutti inclusi nell'app.</p>
 
-          <h3>Foto</h3>
-          <button type="button" className="btn btn--sm social__full" onClick={() => commit((current) => reselectPhotos(project, current))} title="Sceglie di nuovo le foto con le stelle e i segnalini di adesso. Sostituisce le foto che hai scelto a mano: puoi annullare.">
+          <h3>Aiuto automatico</h3>
+          <Segmented<"slide" | "all"> label="A cosa si applica" value={scope} onChange={setScope}
+            options={[{ value: "slide", label: `Slide ${selectedIndex + 1}` }, { value: "all", label: "Tutto il carosello" }]} />
+          <button type="button" className="btn btn--sm social__full social-auto" onClick={() => commit((current) => (scope === "all" ? reselectPhotos(project, current) : reselectSlidePhotos(current, project, slide.id)))}
+            title="Sceglie di nuovo le foto con le stelle e i segnalini di adesso. Sostituisce le foto scelte a mano: puoi annullare.">
             <Icon name="wand" size={14} /> Riscegli le foto
           </button>
-          <p className="muted small social-hint">Usa prima le foto segnate «Per i social» (clic destro sulla foto in libreria → «Segna come»), poi quelle con più stelle.</p>
-
-          <h3>Testi</h3>
-          <button type="button" className="btn btn--sm social__full" onClick={() => { const next = textAttempt; setTextAttempt(next + 1); commit((current) => suggestCarouselTexts(current, next)); }} title="Propone titoli, parole e frasi per tutte le slide, dalla libreria editoriale dei fotolibri. Sostituisce i testi attuali: puoi annullare.">
-            <Icon name="wand" size={14} /> Suggerisci i testi del carosello
+          <button type="button" className="btn btn--sm social__full social-auto" onClick={() => {
+            const key = scope === "all" ? "*" : slide.id;
+            const attempt = (suggestions.current.get(`${key}:all`) ?? -1) + 1;
+            suggestions.current.set(`${key}:all`, attempt);
+            commit((current) => (scope === "all" ? suggestCarouselTexts(current, attempt) : suggestSlideTexts(current, slide.id, attempt)));
+          }} title="Propone titoli, parole e frasi dalla libreria editoriale dei fotolibri. Sostituisce i testi attuali: puoi annullare.">
+            <Icon name="wand" size={14} /> Suggerisci i testi
           </button>
-          <p className="muted small social-hint">Ogni clic ne propone di nuovi. Poi li ritocchi slide per slide, con carattere, dimensione e colore.</p>
+          <p className="muted small social-hint">{scope === "all"
+            ? "Agisce su tutte le slide. Le foto segnate «Per i social» (clic destro in libreria → «Segna come») vengono usate per prime, poi quelle con più stelle."
+            : `Agisce solo sulla slide ${selectedIndex + 1}. Ogni clic propone qualcosa di nuovo.`}</p>
 
           <h3>Il tuo studio</h3>
           <label className="field"><span className="field__label">Nome</span>
@@ -370,10 +458,16 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             </div>
             <button type="button" className="icon-btn icon-btn--round social__nav social__nav--next" disabled={selectedIndex >= carousel.slides.length - 1} onClick={() => selectSlide(carousel.slides[selectedIndex + 1].id)} aria-label="Slide successiva"><Icon name="chevronRight" /></button>
           </div>
+          {overlays}
+          <div className="social__tools">
+            <Segmented<PreviewMode> label="Trascinando una foto nella slide" value={mode} onChange={setMode}
+              options={[{ value: "frame", label: "Inquadra" }, { value: "move", label: "Sposta" }]} />
+            <span className="muted small">{mode === "frame" ? "Trascina la foto per inquadrarla, rotella per lo zoom. Clic su un testo per scriverlo." : "Trascina una foto su un'altra foto, su uno spazio vuoto o su una slide qui sotto."}</span>
+          </div>
           <div className="social__strip-wrap">
             <div className="social__strip" role="listbox" aria-label="Slide del carosello">
               {carousel.slides.map((item, index) => (
-                <button key={item.id} type="button" role="option" aria-selected={index === selectedIndex} className={`social__thumb${index === selectedIndex ? " is-selected" : ""}${item.span && item.span.index > 0 ? " is-joined" : ""}`} onClick={() => selectSlide(item.id)} aria-label={`Slide ${index + 1}`}>
+                <button key={item.id} type="button" role="option" aria-selected={index === selectedIndex} data-strip-slide={item.id} className={`social__thumb${index === selectedIndex ? " is-selected" : ""}${item.span && item.span.index > 0 ? " is-joined" : ""}${drag?.over?.kind === "slide" && drag.over.slideId === item.id ? " is-drop" : ""}`} onClick={() => selectSlide(item.id)} aria-label={`Slide ${index + 1}`}>
                   <SlideView svg={thumbSvgs[index] ?? ""} className="social-slide--thumb" />
                   <span className="social__num">{index + 1}</span>
                 </button>
@@ -405,7 +499,13 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             </div>
           </div>
 
-          {inPanorama ? (
+          <div className="social__tabs" role="tablist" aria-label="Cosa modificare in questa slide">
+            {([["model", "Modello"], ["photos", "Foto"], ["texts", "Testi"], ["look", "Aspetto"]] as const).map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? "is-active" : ""} onClick={() => setTab(id)}>{label}</button>
+            ))}
+          </div>
+
+          {tab !== "model" ? null : inPanorama ? (
             <p className="notice social-hint">Questa slide è la parte {slide.span!.index + 1} di {slide.span!.count} di un <strong>panorama</strong>: la foto continua da una slide all'altra. Cambiando foto cambia su tutte le parti; spostarla o eliminarla riguarda l'intero panorama.</p>
           ) : (
             <>
@@ -421,7 +521,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             </>
           )}
 
-          {template && !template.needsSpread ? null : (
+          {tab !== "photos" || (template && !template.needsSpread) ? null : (
             <>
               <h4>Pagine dell'album</h4>
               {([1, 2] as const).map((which) => (
@@ -435,12 +535,14 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             </>
           )}
 
-          {template && template.slots.length > 0 ? (
+          {tab === "photos" && template && template.slots.length > 0 ? (
             <>
               <h4>{inPanorama ? "Foto del panorama" : "Foto"}</h4>
               <div className="social-slots">
                 {(inPanorama ? [slide.photos[0] ?? null] : slide.photos).map((assetId, slot) => (
-                  <SlotThumb key={slot} asset={assetOf(assetId)} label={inPanorama ? "Panorama" : `Foto ${slot + 1}`}
+                  <SlotThumb key={slot} asset={assetOf(assetId)} label={inPanorama ? "Panorama" : `Foto ${slot + 1}`} slot={slot}
+                    dropping={drag?.over?.kind === "slot" && drag.over.slideId === slide.id && drag.over.slot === slot}
+                    onDragBegin={inPanorama || !assetId ? undefined : (pointer) => startDrag(slot, assetId, pointer, false)}
                     onPick={() => setPicker({ kind: "slot", slideId: slide.id, slot })}
                     onClear={inPanorama ? undefined : () => commit((current) => replacePhoto(current, slide.id, slot, null))} />
                 ))}
@@ -452,7 +554,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             </>
           ) : null}
 
-          {template ? (
+          {template && tab === "texts" ? (
             <>
               <SocialTextFields
                 slide={slide} template={template} brand={carousel.brand} albumName={project.projectName} tone={toneNow}
@@ -463,6 +565,11 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
                 onSuggest={(key) => { const attempt = (suggestions.current.get(`${slide.id}:${key}`) ?? -1) + 1; suggestions.current.set(`${slide.id}:${key}`, attempt); commit((current) => suggestFieldText(current, slide.id, key, attempt)); }}
                 onSuggestAll={() => { const attempt = (suggestions.current.get(`${slide.id}:*`) ?? -1) + 1; suggestions.current.set(`${slide.id}:*`, attempt); commit((current) => suggestSlideTexts(current, slide.id, attempt)); }}
               />
+            </>
+          ) : null}
+
+          {template && tab === "look" ? (
+            <>
               <h4>Fondo</h4>
               <Segmented<"auto" | Tone> label="Fondo della slide" value={slide.tone ?? "auto"} onChange={(value) => commit((current) => setSlideTone(current, slide.id, value === "auto" ? undefined : value))}
                 options={[{ value: "auto", label: "Del modello" }, { value: "dark", label: "Scuro" }, { value: "light", label: "Chiaro" }]} />
@@ -500,6 +607,8 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
         />
       ) : null}
 
+      {creating ? <SocialNewDialog project={project} name={`Carosello ${list.length + 1}`} setId={carousel.setId} onCancel={() => setCreating(false)}
+        onCreate={(created) => { setCreating(false); commitList((current) => [...current, created]); setActiveId(created.id); setSelectedId(null); }} /> : null}
       {exporting ? <SocialExportDialog project={project} carousel={carousel} onClose={() => setExporting(false)} onStatus={onStatus} onGoTo={(index) => setSelectedId(carousel.slides[index]?.id ?? null)} /> : null}
     </div>
   );

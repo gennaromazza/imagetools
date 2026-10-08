@@ -145,6 +145,37 @@ function blankSlide(templateId: string): Slide {
   return { id: newId("sl"), templateId, photos: (template?.slots ?? []).map(() => null), texts: {} };
 }
 
+const NO_BRAND: BrandKit = { name: "", handle: "", paletteId: "", fontPairId: "" };
+
+/** Quante delle foto date finiscono davvero nel carosello se ha `count` slide, e quante compaiono più di una volta. */
+export function planCoverage(project: Project, assetIds: readonly string[], count: number, setId: SetId = "editoriale", seed = 0): { used: number; repeated: number } {
+  const planned = planCarousel(project, { setId, format: "feed", count, brand: NO_BRAND, assetIds, seed });
+  const wanted = new Set(assetIds);
+  const uses = new Map<string, number>();
+  for (const slide of planned.slides) if (!slide.span || slide.span.index === 0) for (const id of slide.photos) if (id && wanted.has(id)) uses.set(id, (uses.get(id) ?? 0) + 1);
+  return { used: uses.size, repeated: [...uses.values()].filter((times) => times > 1).length };
+}
+
+export const photosUsedAt = (project: Project, assetIds: readonly string[], count: number, setId: SetId = "editoriale", seed = 0): number =>
+  planCoverage(project, assetIds, count, setId, seed).used;
+
+/**
+ * Il numero di slide che serve perché tutte le foto scelte trovino posto: il più piccolo che le contiene tutte senza ripeterne,
+ * oppure, se ripetere è inevitabile, il più piccolo che le contiene tutte (almeno `MIN_SLIDES`, al massimo `MAX_SLIDES`).
+ */
+export function suggestSlideCount(project: Project, assetIds: readonly string[], setId: SetId = "editoriale", seed = 0): number {
+  const wanted = new Set(project.assets.filter((asset) => asset.pickStatus !== "rejected" && assetIds.includes(asset.id)).map((asset) => asset.id)).size;
+  if (wanted <= MIN_SLIDES) return MIN_SLIDES;
+  let firstFull = 0;
+  for (let count = MIN_SLIDES; count <= MAX_SLIDES; count += 1) {
+    const { used, repeated } = planCoverage(project, assetIds, count, setId, seed);
+    if (used < wanted) continue;
+    if (repeated === 0) return count;
+    if (!firstFull) firstFull = count;
+  }
+  return firstFull || MAX_SLIDES;
+}
+
 /** Il carosello proposto: la trama dello stile, le foto migliori per ogni spazio, panorama e album quando l'album li offre. */
 export function planCarousel(project: Project, options: PlanOptions): Carousel {
   const count = clampCount(options.count);

@@ -48,7 +48,7 @@
     "test:album-flow-drive": "tsx --test apps/filex-desktop/src/album-flow-drive.test.ts apps/album-flow/src/desktop/autoBackup.test.ts",
     "test:album-flow-whatsnew": "tsx --test apps/album-flow/src/model/whatsNew.test.ts",
     "test:album-flow-design": "tsx --test apps/album-flow/src/model/design.test.ts",
-    "test:album-flow-social": "tsx --test apps/album-flow/src/social/social.test.ts apps/album-flow/src/social/social-framing.test.ts apps/album-flow/src/social/social-text.test.ts apps/album-flow/src/social/social-variety.test.ts",
+    "test:album-flow-social": "tsx --test apps/album-flow/src/social/social.test.ts apps/album-flow/src/social/social-framing.test.ts apps/album-flow/src/social/social-text.test.ts apps/album-flow/src/social/social-variety.test.ts apps/album-flow/src/social/social-move.test.ts",
     "test:album-flow-exif": "tsx --test apps/album-flow/src/model/exif.test.ts",
     "test:album-flow-history": "tsx --test apps/album-flow/src/history.test.ts",
     "test:album-flow-freshness": "tsx --test apps/album-flow/src/desktop/freshness.test.ts",

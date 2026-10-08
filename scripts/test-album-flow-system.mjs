@@ -49,7 +49,7 @@ assert.ok(workspace.includes("SocialStudio") && workspace.includes("startInSocia
 assert.ok(src("components/Home.tsx").includes("Nuovo carosello"), "ingresso «Nuovo carosello» nella Home assente");
 assert.ok(!/carousel|carosell/i.test(read("packages", "shared-types", "src", "album-flow-v2.ts")), "i caroselli non devono entrare nello schema v2 senza una decisione dell'utente");
 // Inquadratura, stile dei testi, suggerimenti e varietà dei caroselli: motore e interfaccia.
-assert.ok(src("social/framing.ts").includes("export function normalizeFraming") && src("social/usePreviewInteraction.ts").includes("data-photo-slot"), "inquadratura delle foto nei caroselli assente");
+assert.ok(src("social/framing.ts").includes("export function normalizeFraming") && src("social/usePreviewInteraction.ts").includes("photoAt") && src("social/hit.ts").includes("export function photoAt"), "inquadratura delle foto nei caroselli assente");
 assert.ok(src("social/suggest.ts").includes("export function suggestText") && src("components/SocialTextFields.tsx").includes("Suggerisci"), "suggerimenti dei testi nei caroselli assenti");
 assert.ok(src("components/SocialStudio.tsx").includes("Altra variante") && src("social/plan.ts").includes("export function freshSeed"), "varietà dei caroselli (altra variante, seme) assente");
 assert.ok(src("components/SocialFraming.tsx").includes("Inquadratura") && src("components/SocialTextFields.tsx").includes("Carattere"), "pannelli di inquadratura e stile dei testi assenti");

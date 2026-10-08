@@ -2,7 +2,7 @@ import { newId } from "../model/ids";
 import { nowIso, type Project } from "../model/project";
 import { framingEquals, normalizeFraming } from "./framing";
 import { normalizeTextStyles } from "./textstyle";
-import { pickForSlot, pickReused, rankPhotos, rankSpreads, type RankedPhoto } from "./plan";
+import { pickForSlot, pickReused, rankPhotos, rankSpreads, slotFit, type RankedPhoto } from "./plan";
 import { FLEX_TONE_IDS, arcFor, setInfo, templateOf, toneForFlex } from "./templates";
 import { MAX_SLIDES, MIN_SLIDES, type BrandKit, type Carousel, type PhotoFraming, type Slide, type SlotKind, type SocialFormatId, type Tone } from "./types";
 
@@ -97,6 +97,58 @@ export function setSlidePhoto(carousel: Carousel, slideId: string, slot: number,
   });
 }
 
+export interface PhotoSpot { slideId: string; slot: number }
+
+/**
+ * Scambia due foto, nella stessa slide o tra slide diverse; se la destinazione è vuota la foto ci si sposta.
+ * Restituisce lo stesso carosello (nessuna modifica) se uno dei due spazi è in un panorama, se manca uno spazio, o se la slide di
+ * arrivo avrebbe due volte la stessa foto. Tra slide diverse l'inquadratura torna quella predefinita (gli spazi hanno forme diverse).
+ */
+export function swapPhotos(carousel: Carousel, from: PhotoSpot, to: PhotoSpot): Carousel {
+  const a = carousel.slides.findIndex((slide) => slide.id === from.slideId);
+  const b = carousel.slides.findIndex((slide) => slide.id === to.slideId);
+  if (a < 0 || b < 0) return carousel;
+  const slideA = carousel.slides[a];
+  const slideB = carousel.slides[b];
+  if (slideA.span || slideB.span) return carousel;
+  if (from.slot < 0 || from.slot >= slideA.photos.length || to.slot < 0 || to.slot >= slideB.photos.length) return carousel;
+  if (a === b && from.slot === to.slot) return carousel;
+  const idA = slideA.photos[from.slot];
+  const idB = slideB.photos[to.slot];
+  if (idA === idB) return carousel;
+  if (a === b) {
+    const photos = [...slideA.photos];
+    const framing = slideA.framing ? [...slideA.framing] : null;
+    [photos[from.slot], photos[to.slot]] = [idB, idA];
+    if (framing) [framing[from.slot], framing[to.slot]] = [framing[to.slot] ?? null, framing[from.slot] ?? null];
+    const { framing: _old, ...rest } = slideA;
+    const slides = carousel.slides.map((slide, index) => (index === a ? { ...rest, photos, ...(framing && framing.some(Boolean) ? { framing } : {}) } : slide));
+    return touch({ ...carousel, slides });
+  }
+  // La foto che arriva non deve già essere nella slide di destinazione (e viceversa).
+  if ((idA && slideB.photos.some((id, slot) => slot !== to.slot && id === idA)) || (idB && slideA.photos.some((id, slot) => slot !== from.slot && id === idB))) return carousel;
+  const place = (slide: Slide, slot: number, id: string | null): Slide => {
+    const photos = [...slide.photos];
+    photos[slot] = id;
+    const framing = slide.framing ? slide.framing.map((item, index) => (index === slot ? null : item)) : null;
+    const { framing: _old, ...rest } = slide;
+    return { ...rest, photos, ...(framing && framing.some(Boolean) ? { framing } : {}) };
+  };
+  const slides = carousel.slides.map((slide, index) => (index === a ? place(slideA, from.slot, idB) : index === b ? place(slideB, to.slot, idA) : slide));
+  return touch({ ...carousel, slides });
+}
+
+/** Lo spazio di una slide dove far cadere una foto: uno vuoto se c'è, altrimenti il più adatto alla sua forma. `null` per i panorami. */
+export function bestSlotFor(carousel: Carousel, slideId: string, aspect?: number): number | null {
+  const slide = carousel.slides.find((item) => item.id === slideId);
+  const template = slide ? templateOf(slide.templateId) : undefined;
+  if (!slide || !template || slide.span || template.slots.length === 0) return null;
+  const score = (slot: number) => (slide.photos[slot] ? 0 : 10) + (aspect ? slotFit(template.slots[slot], aspect) : 0);
+  let best = 0;
+  for (let slot = 1; slot < template.slots.length; slot += 1) if (score(slot) > score(best)) best = slot;
+  return best;
+}
+
 /** Le foto di una slide da usare per i panorami: tutte le slide dello stesso panorama devono mostrare la stessa foto. */
 export function spanRange(carousel: Carousel, index: number): [number, number] {
   const slide = carousel.slides[index];
@@ -135,6 +187,31 @@ function choosePhoto(kind: SlotKind, pool: readonly RankedPhoto[], taken: Readon
   const uses = new Map<string, number>();
   for (const slide of carousel.slides) for (const id of slide.photos) if (id) uses.set(id, (uses.get(id) ?? 0) + 1);
   return pickForSlot(kind, pool, taken, new Map()) ?? pickReused(kind, pool, uses, new Set(current.filter((id): id is string => Boolean(id))));
+}
+
+/**
+ * Riscegli le foto di una sola slide: per ogni spazio la migliore foto non usata altrove nel carosello (e diversa da quelle di adesso, così
+ * a ogni clic ne esce una nuova); se le foto nuove finiscono, la meno ripetuta. L'inquadratura torna quella predefinita. Un panorama non cambia.
+ */
+export function reselectSlidePhotos(carousel: Carousel, project: Project, slideId: string): Carousel {
+  return mapSlide(carousel, slideId, (slide) => {
+    const template = templateOf(slide.templateId);
+    if (!template || slide.span || template.slots.length === 0) return slide;
+    const pool = rankPhotos(project);
+    const taken = usedAssetIds(carousel);
+    const before = new Set(slide.photos.filter((id): id is string => Boolean(id)));
+    const chosen: Array<string | null> = [];
+    const photos = template.slots.map((kind, index) => {
+      const pick = pickForSlot(kind, pool, taken, new Map())
+        ?? pickReused(kind, pool, new Map(), new Set([...chosen.filter((id): id is string => Boolean(id)), ...(index < slide.photos.length ? [] : before)]));
+      chosen.push(pick?.assetId ?? slide.photos[index] ?? null);
+      if (pick) taken.add(pick.assetId);
+      return pick?.assetId ?? slide.photos[index] ?? null;
+    });
+    if (photos.every((id, index) => id === slide.photos[index])) return slide;
+    const { framing: _framing, ...rest } = slide;
+    return { ...rest, photos };
+  });
 }
 
 /** Foto dell'album non ancora usate nel carosello, dalla più adatta. */
