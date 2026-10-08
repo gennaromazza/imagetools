@@ -42,7 +42,7 @@ export function relativeToRoot(absolutePath: string, oldRoot: string): string | 
 
 /**
  * Abbina le foto indicate (`assetIds`: quelle non trovate) ai file della nuova cartella.
- * Ordine: stesso percorso relativo → stesso nome e stessa dimensione (se unico) → stesso nome (solo se la dimensione non è nota e il nome è unico).
+ * Ordine: stesso percorso relativo → stesso nome e stessa dimensione (se unico) → stesso nome (solo se il nome è unico: copre le foto ri-salvate dopo la creazione dell'album, che hanno un peso diverso).
  * Un file già assegnato a una foto non viene dato a un'altra.
  */
 export function relinkAssets(assets: readonly AlbumAssetV2[], assetIds: ReadonlySet<string>, files: readonly FoundFile[], oldRoot: string): RelinkResult {
@@ -89,8 +89,13 @@ export function relinkAssets(assets: readonly AlbumAssetV2[], assetIds: Readonly
     const name = lower(asset.fileName);
     let outcome: "ok" | "ambiguous" | "none" = "none";
     if (asset.size !== undefined) outcome = take(asset, byNameSize.get(`${name}|${asset.size}`), "nome e dimensione");
-    else if ((byName.get(name)?.length ?? 0) === 1) outcome = take(asset, byName.get(name), "nome");
-    else if ((byName.get(name)?.length ?? 0) > 1) outcome = "ambiguous";
+    // Foto ri-salvata dopo la creazione dell'album (Lightroom, Camera Raw…): il peso è cambiato ma il nome è lo stesso.
+    // Vale solo se il nome è unico nella nuova cartella; con nomi doppi non si indovina.
+    if (outcome === "none") {
+      const sameName = byName.get(name) ?? [];
+      if (sameName.length === 1) outcome = take(asset, sameName, "nome");
+      else if (sameName.length > 1) outcome = "ambiguous";
+    }
     if (outcome === "ambiguous") ambiguous.push(asset.id);
     else if (outcome === "none") missing.push(asset.id);
   }

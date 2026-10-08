@@ -656,6 +656,9 @@
     ],
     "0.2.21": [
       "Corretto: Photoshop (o un altro programma) poteva non riuscire a salvare una foto mentre Album Flow ne generava le miniature o le anteprime, soprattutto con TIFF e PNG grandi: ora Album Flow tiene la foto occupata solo il tempo di leggerla e non più per tutta l'elaborazione, e le dimensioni di JPEG, PNG e WebP si leggono dall'intestazione senza exiftool. L'ora di scatto, letta all'importazione, usa ancora exiftool."
+    ],
+    "0.2.22": [
+      "Corretto: «Ricollega le foto» non ritrovava le foto ri-salvate dopo la creazione dell'album (per esempio da Lightroom o Camera Raw), perché cercava nome e peso identici. Ora, se il peso non corrisponde, la foto si ritrova per nome purché nella cartella scelta ci sia un solo file con quel nome; con nomi doppi non si indovina."
     ]
   }
 }

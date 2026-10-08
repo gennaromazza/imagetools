@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.22",
+    date: "2026-10-08",
+    headline: "Ricollega ritrova anche le foto ri-salvate",
+    items: [
+      {
+        title: "Foto modificate dopo l'album: ora si ritrovano",
+        text: "Se una foto è stata ri-salvata dopo aver creato l'album (Lightroom, Camera Raw, Photoshop), il suo peso è cambiato e «Ricollega le foto» non la riconosceva. Ora la ritrova dal nome, purché nella cartella scelta ci sia un solo file con quel nome. Con nomi doppi non sceglie al posto tuo.",
+        where: ["Ricollega le foto"],
+      },
+    ],
+  },
+  {
     version: "0.2.21",
     date: "2026-10-08",
     headline: "Photoshop salva le foto anche mentre Album Flow è aperto",
