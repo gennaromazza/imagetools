@@ -512,6 +512,11 @@
       "Quick Preview con zoom attivo: le frecce sinistra e destra cambiano foto mantenendo lo zoom; per spostare la foto usa le frecce su e giu', Alt+frecce, il trascinamento o i pulsanti a schermo.",
       "Zoom a qualita' piena: la foto viene caricata fino a 8000 px sul lato lungo, con indicatore di caricamento; per i RAW si usa il JPEG incorporato piu' grande del file.",
       "Diagnostica prestazioni solo locale, con interruttore ed esportazione in Impostazioni, per capire i rallentamenti dello scorrimento senza inviare dati."
+    ],
+    "0.1.46": [
+      "Selezione della griglia piu' coerente: il lasso ricalcola le foto a ogni movimento (restringerlo toglie le foto non piu' toccate), sostituisce la selezione e con Maiusc, Ctrl o Cmd la aggiunge; un clic sullo sfondo o un lasso vuoto deselezionano tutto.",
+      "Ctrl+A seleziona le foto visibili e, premuto di nuovo, le deseleziona. Dopo lasso o Ctrl+A il focus passa a una foto selezionata.",
+      "Le scorciatoie di classificazione valgono per tutta la selezione quando contiene piu' foto, anche se il focus e' altrove; con una sola foto valgono per quella col focus."
     ]
   },
   "id-photo": {

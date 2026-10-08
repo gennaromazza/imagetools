@@ -32,6 +32,14 @@
 
 
 
+## 2026-10-08 - Image Select Pro 0.1.46
+
+- Selezione della griglia più coerente: lasso e Ctrl+A seguono le stesse regole e non si ostacolano più.
+- Il lasso ricalcola le foto a ogni movimento: restringere il rettangolo toglie le foto che non tocca più (prima restavano selezionate). Resta agganciato alle foto anche quando la griglia scorre da sola ai bordi.
+- Il lasso sostituisce la selezione; con Maiusc, Ctrl o Cmd premuto la aggiunge. Un lasso che non tocca nulla o un clic sullo sfondo deselezionano tutto (il clic sulla barra di scorrimento no).
+- Ctrl+A seleziona le foto visibili e, se lo sono già tutte, le deseleziona. Dopo lasso o Ctrl+A il focus e il punto di partenza di Maiusc+clic passano a una foto selezionata.
+- Scorciatoie di classificazione (1-5, P, X, U, colori): con più foto selezionate valgono per tutta la selezione, anche se il focus è rimasto su un'altra foto; con una sola foto valgono per quella col focus.
+
 ## 2026-10-08 - Album Flow 0.2.21
 
 - Corretto: Photoshop (o un altro programma) poteva non riuscire a salvare una foto mentre Album Flow ne generava le miniature o le anteprime, soprattutto con TIFF e PNG grandi: ora Album Flow tiene la foto occupata solo il tempo di leggerla e non più per tutta l'elaborazione, e le dimensioni di JPEG, PNG e WebP si leggono dall'intestazione senza exiftool. L'ora di scatto, letta all'importazione, usa ancora exiftool.

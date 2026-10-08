@@ -76,7 +76,7 @@ Il controllo statico verifica:
 | SELECT-04 | `Ctrl+B` nella griglia | Apre e richiude Confronta; con meno di 2 o più di 4 foto visibili mostra un messaggio operativo. |
 | SELECT-05 | Scroll con foto selezionate o colorate | I bordi restano visibili e le ombre diffuse vengono sospese fino al termine dello scroll. |
 | SELECT-06 | Click consecutivi su più card e successiva deselezione | Ogni click usa lo stato più recente: le foto si aggiungono o si rimuovono senza ripristinare selezioni precedenti. |
-| SELECT-07 | `Ctrl+A` con filtro e ambito cartella attivi | La selezione viene sostituita con tutte e sole le foto visibili nel perimetro indicato; trascinamento e Batch mostrano lo stesso totale. |
+| SELECT-07 | `Ctrl+A` con filtro e ambito cartella attivi | La selezione diventa tutte e sole le foto visibili nel perimetro indicato (un secondo Ctrl+A le deseleziona); trascinamento e Batch mostrano lo stesso totale. |
 | SELECT-08 | Rotazione dalla card o dalla Quick Preview con più foto selezionate | Ruota soltanto la foto corrente; la rotazione dell'intera selezione è disponibile esclusivamente nel menu Azioni con conteggio esplicito. |
 | SELECT-09 | Doppio click sulla card o sul checkbox | La selezione cambia una sola volta e l'anteprima si apre senza un secondo toggle. |
 | SELECT-10 | Import XMP in background durante una modifica locale della selezione | La modifica locale più recente non viene sovrascritta da un record XMP letto in precedenza. |
