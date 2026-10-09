@@ -17,7 +17,7 @@ import type { DesignHandlers } from "./DesignLayers";
 import { Icon } from "./icons";
 import { useNewFeature } from "../hooks/useNewFeature";
 import { LayoutBrowser } from "./LayoutBrowser";
-import { SpreadView, type Draft } from "./SpreadView";
+import { SpreadView, type Draft, type ToolbarParts } from "./SpreadView";
 import { ColorDots, ContextMenu, IconButton, NumberField, Popover, Stars, type MenuItem } from "./ui";
 
 export interface StageActions {
@@ -255,7 +255,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const newShape = useNewFeature("forma-foto");
   const newBorder = useNewFeature("bordo-foto");
   const [borderFor, setBorderFor] = useState<string | null>(null);
-  const toolbar = useCallback((itemId: string): { left: ReactNode; right: ReactNode } | null => {
+  const toolbar = useCallback((itemId: string): ToolbarParts | null => {
     const found = spread.areas.flatMap((candidate, index) => candidate.items.map((item) => ({ item, area: candidate, index }))).find((entry) => entry.item.id === itemId);
     if (!found) return null;
     const asset = assets.get(found.item.assetId);
@@ -264,8 +264,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     const placement = cell ? placeItem(cell.rect, found.item, asset, found.area.style, null, cell.anchor) : null;
     const canCrop = !found.item.locked;
     const captured = formatTime(asset?.captureTimeMs);
-    // A sinistra ciò che cambia l'aspetto della foto, a destra le azioni: due barre piccole ai lati della foto invece di una sola larga sopra.
-    const left = (
+    // Quattro lati: sopra l'inquadratura, a sinistra rotazione e bordo, a destra guarda/modifica/info, sotto raddrizza (in ritaglio), blocco e cestino.
+    const top = (
       <>
         <IconButton icon="crop" label={canCrop ? "Ritaglia e sposta nello slot (Invio)" : found.item.locked ? "Foto bloccata" : "Per ritagliare passa a «Riempi lo spazio»"} active={cropMode} disabled={!canCrop} onClick={() => actions.toggleCrop(itemId)} size={16} />
         {canCrop ? (
@@ -284,20 +284,15 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
             </select>
           </label>
         ) : null}
+      </>
+    );
+    const left = canCrop || hasFreeLayout(found.area) ? (
+      <>
         {canCrop ? (
           <>
             <IconButton icon="rotateLeft" label="Ruota la foto di 90° a sinistra (in tutto l'album)" onClick={() => actions.rotatePhoto(itemId, -1)} size={16} />
             <IconButton icon="rotateRight" label="Ruota la foto di 90° a destra (in tutto l'album)" onClick={() => actions.rotatePhoto(itemId, 1)} size={16} />
           </>
-        ) : null}
-        {cropMode && canCrop ? (
-          <WheelAngle value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })}>
-            <IconButton icon="level" label="Raddrizza con una linea: trascina lungo l'orizzonte o lungo un lato che deve essere verticale" active={lineTool} onClick={actions.toggleLineTool} size={16} />
-            <span className="straighten__label">Raddrizza</span>
-            <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" title="Rotella del mouse qui sopra: 0,1° a scatto (Maiusc: 1°). Anche , e . da tastiera. Doppio clic: azzera" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
-            <AngleField value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })} />
-            <button type="button" className="icon-btn" title="Azzera il raddrizzamento" aria-label="Azzera il raddrizzamento" disabled={!found.item.angle} onClick={() => actions.commitView(itemId, { angle: 0 })}>0°</button>
-          </WheelAngle>
         ) : null}
         {hasFreeLayout(found.area) ? (
           <>
@@ -321,7 +316,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
           </div>
         ) : null}
       </>
-    );
+    ) : null;
     const right = (
       <>
         <IconButton icon="eye" label="Guarda in grande (Spazio)" onClick={() => actions.viewItem(itemId)} size={16} />
@@ -339,11 +334,28 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
             </dl>
           </Popover>
         </div>
+      </>
+    );
+    const straighten = cropMode && canCrop ? (
+      <>
+        {cropMode && canCrop ? (
+          <WheelAngle value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })}>
+            <IconButton icon="level" label="Raddrizza con una linea: trascina lungo l'orizzonte o lungo un lato che deve essere verticale" active={lineTool} onClick={actions.toggleLineTool} size={16} />
+            <span className="straighten__label">Raddrizza</span>
+            <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" title="Rotella del mouse qui sopra: 0,1° a scatto (Maiusc: 1°). Anche , e . da tastiera. Doppio clic: azzera" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
+            <AngleField value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })} />
+            <button type="button" className="icon-btn" title="Azzera il raddrizzamento" aria-label="Azzera il raddrizzamento" disabled={!found.item.angle} onClick={() => actions.commitView(itemId, { angle: 0 })}>0°</button>
+          </WheelAngle>
+        ) : null}
+      </>
+    ) : null;
+    const bottom = (
+      <>
         <IconButton icon={found.item.locked ? "lock" : "unlock"} label={found.item.locked ? "Sblocca la foto (L)" : "Blocca la foto (L)"} active={found.item.locked} onClick={() => actions.lockItem(itemId)} size={16} />
         <IconButton icon="trash" label="Togli dallo spread (Canc)" danger onClick={() => actions.removeItem(itemId)} size={16} />
       </>
     );
-    return { left, right };
+    return { top, left, right, bottom, straighten };
   }, [actions, assets, borderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */

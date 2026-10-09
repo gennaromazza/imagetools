@@ -1,9 +1,10 @@
 import type { AlbumItem, AlbumSpread, AlbumSplitMode } from "@photo-tools/shared-types";
-import { areaOuterRects } from "../engine/geometry";
+import { areaOuterRects, type Rect } from "../engine/geometry";
 import { MAX_ITEMS_PER_AREA, MAX_SPREADS } from "./defaults";
 import { relayoutArea } from "./areas";
 import { newId } from "./ids";
-import { areaGeometry, createArea, createSpread, findSpread, mapSpread, normalizeArea, touch, type Project } from "./project";
+import { areaGeometry, areaGeometryFor, createArea, createSpread, findSpread, hasFreeLayout, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
+import { sanitizeFrame } from "./templates";
 
 export function addSpread(project: Project, atIndex?: number, split: AlbumSplitMode = "half"): Project {
   if (project.spreads.length >= MAX_SPREADS) return project;
@@ -137,7 +138,22 @@ export function setSplitMode(project: Project, spreadId: string, mode: AlbumSpli
       layout: area.items.length === 0 ? null : area.items.slice(1).reduce<NonNullable<typeof area.layout>>((acc, item) => ({ kind: "split", dir: "row", ratio: 0.5, first: acc, second: { kind: "leaf", itemId: item.id } }), { kind: "leaf", itemId: area.items[0].id }),
     })),
   };
-  const relaid: AlbumSpread = { ...staged, areas: staged.areas.map((_, index) => normalizeArea(relayoutArea(project, staged, index, 0))) };
+  let relaid: AlbumSpread = { ...staged, areas: staged.areas.map((_, index) => normalizeArea(relayoutArea(project, staged, index, 0))) };
+  // Con la disposizione libera le foto restano dove sono: ogni cornice si ricalcola sulla nuova pagina in cui cade, a vista non si muove nulla.
+  if (spread.areas.some((area) => hasFreeLayout(area))) {
+    const placed = new Map<string, { rect: Rect; rotation: number; z: number }>();
+    spread.areas.forEach((_, areaIndex) => areaGeometry(project, spread, areaIndex).cells.forEach((cell, index) => placed.set(cell.itemId, { rect: cell.rect, rotation: cell.rotation ?? 0, z: cell.z ?? index })));
+    relaid.areas.forEach((area, areaIndex) => {
+      if (area.items.length === 0) return;
+      const { inner } = areaGeometryFor(project.settings.sheet, relaid, areaIndex);
+      if (inner.w <= 0 || inner.h <= 0 || area.items.some((item) => !placed.has(item.id))) return;
+      const free = Object.fromEntries(area.items.map((item) => {
+        const old = placed.get(item.id)!;
+        return [item.id, sanitizeFrame({ x: (old.rect.x - inner.x) / inner.w, y: (old.rect.y - inner.y) / inner.h, w: old.rect.w / inner.w, h: old.rect.h / inner.h, rotation: old.rotation, z: old.z })];
+      }));
+      relaid = replaceArea(relaid, areaIndex, { ...area, free });
+    });
+  }
   return touch({ ...project, spreads: project.spreads.map((candidate) => (candidate.id === spreadId ? relaid : candidate)) });
 }
 

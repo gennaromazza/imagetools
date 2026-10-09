@@ -76,8 +76,9 @@ export function restackFrames<T extends { id: string; z: number }>(frames: reado
 }
 
 export function sanitizeFrame(frame: FreeFrame): FreeFrame {
-  const w = clamp(frame.w, 0.04, 1);
-  const h = clamp(frame.h, 0.04, 1);
+  // Fino a 3 volte l'area: una foto libera può diventare più grande della sua pagina (per esempio uno sfondo che passa anche sull'altra metà del foglio).
+  const w = clamp(frame.w, 0.04, 3);
+  const h = clamp(frame.h, 0.04, 3);
   return {
     // Una foto libera può uscire in parte dall'area (come i testi), ma almeno un quarto resta dentro.
     x: Number(clamp(frame.x, -0.75 * w, 1 - 0.25 * w).toFixed(5)),
@@ -279,7 +280,8 @@ export function reorderFrame(project: Project, itemId: string, where: "front" | 
   const found = findItem(project, itemId);
   if (!found || !hasFreeLayout(found.area)) return project;
   const levels = Object.values(found.area.free!).map((frame) => frame.z);
-  const z = where === "front" ? Math.max(...levels) + 1 : Math.min(...levels) - 1;
+  // Dietro: sotto anche le foto dell'altra pagina (a schermo le foto non libere stanno a livello 2, le libere a 10 + z).
+  const z = where === "front" ? Math.max(...levels) + 1 : Math.min(Math.min(...levels) - 1, -9);
   return setFrame(project, itemId, { z });
 }
 

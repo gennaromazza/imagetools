@@ -32,6 +32,14 @@
 
 
 
+## 2026-10-09 - Album Flow 0.2.27
+
+- Migliorato: i comandi della foto selezionata sono divisi sui quattro lati della foto (sopra ritaglio e forma, a sinistra rotazione e bordo, a destra guarda/editor/info, sotto lucchetto e cestino); sulle foto piccole diventano due colonne. Si nascondono mentre trascini o sposti e restano staccati dai bordi, così non si sbaglia clic.
+- Corretto: nella disposizione libera la maniglia per ingrandire la foto era a qualche millimetro dal bordo; ora sta sull'angolo della foto.
+- Corretto: cambiando la divisione dello spread (foglio intero, metà, un terzo) le foto con disposizione libera restano dove sono invece di essere rimpaginate.
+- Corretto: in modalità libera «Porta davanti» e «Porta dietro le altre» (le frecce su e giù) sembravano non fare nulla perché la foto selezionata restava sempre in primo piano; ora l'ordine si vede subito.
+- Nuovo: nella disposizione libera una foto si può ingrandire oltre la sua pagina (fino a tre volte), per esempio uno sfondo che passa anche sull'altra metà del foglio; «Porta dietro le altre» la manda sotto anche le foto dell'altra pagina.
+
 ## 2026-10-09 - Album Flow 0.2.26
 
 - Migliorato: la barra della foto selezionata è divisa in due barre piccole ai lati della foto: a sinistra ritaglio, forma, rotazione e bordo; a destra anteprima, editor, info, lucchetto e cestino. Non copre più il centro della foto; nelle celle strette la barra di destra sale sopra l'altra.

@@ -398,6 +398,17 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .cell__toolbar { position: absolute; z-index: 20; bottom: 26px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 12px; background: rgba(24, 28, 25, 0.94); backdrop-filter: blur(6px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); cursor: default; }
 
 .spread__toolbar { bottom: auto; transform: none; z-index: 60; flex-wrap: wrap; align-items: center; justify-content: center; max-width: calc(100% - 8px); }
+.spread__toolbar .icon-btn--danger { margin-left: 10px; }
+.spread__toolbar--col .icon-btn--danger { margin-left: 0; margin-top: 10px; }
+.spread__toolbar label.straighten > span { display: none; }
+.spread__toolbar label.straighten select { width: 96px; }
+.spread__toolbar--col label.straighten select { width: 38px; }
+.spread__toolbar.is-away { opacity: 0; pointer-events: none; }
+.spread__toolbar { transition: opacity 0.12s; }
+.spread__toolbar--col { flex-direction: column; flex-wrap: nowrap; padding: 6px 4px; }
+.spread__toolbar--col .straighten { flex-direction: column; padding: 2px 0; gap: 3px; }
+.spread__toolbar--col .straighten > span { display: none; }
+.spread__toolbar--col .straighten select { width: 38px; padding: 3px 2px; font-size: 10px; text-overflow: ellipsis; }
 .divider { position: absolute; z-index: 7; touch-action: none; }
 .divider__bar { position: absolute; border-radius: 4px; background: transparent; transition: background 0.12s; }
 .divider--row { cursor: col-resize; }

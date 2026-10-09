@@ -1024,6 +1024,31 @@ test("anteprima al passaggio del mouse: la foto intera, con le sue proporzioni e
 
 // ------------------------------------------------------------------ layout libero e bloccato
 
+test("layout libero e divisione dello spread: le foto restano dove sono, una foto libera può diventare più grande della sua pagina", () => {
+  const project = filled(4, 3);
+  const id = firstSpreadId(project);
+  const freed = makeAreaFree(makeAreaFree(project, id, 0), id, 1);
+  assert.ok(hasFreeLayout(freed.spreads[0].areas[0]) && hasFreeLayout(freed.spreads[0].areas[1]));
+  const rects = (p: Project) => p.spreads[0].areas.flatMap((_, index) => areaGeometry(p, p.spreads[0], index).cells).map((cell) => ({ id: cell.itemId, rect: cell.rect }));
+  const before = rects(freed);
+  for (const mode of ["full", "half", "third"] as const) {
+    const changed = setSplitMode(freed, id, mode);
+    assertProjectInvariants(changed, `divisione ${mode} con layout libero`);
+    assert.ok(changed.spreads[0].areas.filter((area) => area.items.length > 0).every((area) => hasFreeLayout(area)), `${mode}: il layout libero resta libero`);
+    for (const cell of before) {
+      const now = rects(changed).find((candidate) => candidate.id === cell.id)!;
+      for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(now.rect[key] - cell.rect[key]) < 0.1, `${mode}: ${cell.id} si è spostata (${key})`);
+    }
+  }
+  // Una foto libera si può ingrandire oltre la sua pagina (sfondo che passa anche sull'altra metà) e portare dietro le foto dell'altra pagina.
+  const itemId = freed.spreads[0].areas[0].items[0].id;
+  const big = setFrame(freed, itemId, { x: 0, y: 0, w: 2.1, h: 1.05 });
+  const frame = big.spreads[0].areas[0].free![itemId];
+  assert.ok(frame.w > 2 && frame.h > 1, "più grande della pagina");
+  assertProjectInvariants(big, "foto più grande della pagina");
+  assert.ok(reorderFrame(big, itemId, "back").spreads[0].areas[0].free![itemId].z <= -9, "dietro anche alle foto dell'altra pagina");
+});
+
 test("layout libero: una pagina automatica diventa libera senza cambiare a vista, le foto si spostano e si può tornare indietro", () => {
   const project = filled(4, 3);
   const id = firstSpreadId(project);

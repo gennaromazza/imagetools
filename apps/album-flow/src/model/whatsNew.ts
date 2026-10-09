@@ -21,6 +21,32 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.27",
+    date: "2026-10-09",
+    headline: "Comandi della foto sui quattro lati e posizionamento libero più libero",
+    items: [
+      {
+        title: "Comandi della foto sui quattro lati",
+        text: "Selezionando una foto, i comandi si dividono attorno a lei: sopra ritaglio e forma, a sinistra rotazione e bordo, a destra anteprima, editor e informazioni, sotto lucchetto e cestino. Sulle foto piccole diventano due colonne. Spariscono mentre trascini una foto, così non si sbaglia clic.",
+        where: ["Barre ai lati della foto"],
+      },
+      {
+        title: "Foto libere più grandi della pagina",
+        text: "Con «Sposta le foto liberamente» puoi ingrandire una foto oltre la sua pagina, per esempio uno sfondo che passa anche sull'altra metà del foglio, e portarla dietro le altre con «Porta dietro le altre». Se poi cambi la divisione dello spread, le foto restano dove sono.",
+        where: ["Sposta le foto liberamente", "Porta dietro le altre", "Dividi"],
+      },
+      {
+        title: "Porta davanti e dietro funzionano subito",
+        text: "In modalità libera, le frecce «Porta davanti alle altre» e «Porta dietro le altre» ora mostrano subito l'effetto: prima la foto selezionata restava sempre in primo piano e sembrava che non succedesse nulla.",
+        where: ["Porta davanti alle altre", "Porta dietro le altre"],
+      },
+      {
+        title: "Maniglia di ingrandimento sul bordo",
+        text: "Il triangolino per ingrandire la foto nella disposizione libera ora sta proprio sull'angolo della foto, non più qualche millimetro più in là.",
+      },
+    ],
+  },
+  {
     version: "0.2.26",
     date: "2026-10-09",
     headline: "Barra della foto divisa in due, senza coprire l'immagine",

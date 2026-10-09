@@ -65,7 +65,7 @@ export interface SpreadViewProps {
   /** Una foto di una disposizione libera è stata spostata o ridimensionata (frazioni dell'area utile). */
   onCommitFrame?: (itemId: string, frame: { x: number; y: number; w: number; h: number }) => void;
   /** Contenuto della barra che compare sulla foto selezionata. */
-  renderToolbar?: (itemId: string) => { left: ReactNode; right: ReactNode } | null;
+  renderToolbar?: (itemId: string) => ToolbarParts | null;
 }
 
 const pct = (value: number) => `${Number(value.toFixed(4))}%`;
@@ -283,7 +283,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       mono={area.style.mono}
       borderColor={itemBorderColor(item, area.style)}
       className={classes}
-      style={cell.z !== undefined ? { zIndex: selected ? 30 : Math.min(25, Math.max(2, 10 + cell.z)), transform: cell.rotation ? `rotate(${cell.rotation}deg)` : undefined } : undefined}
+      style={cell.z !== undefined ? { zIndex: Math.min(25, Math.max(1, 10 + cell.z)), transform: cell.rotation ? `rotate(${cell.rotation}deg)` : undefined } : undefined}
       alt={asset?.fileName}
       data-item-id={item.id}
       data-asset-id={item.assetId}
@@ -311,7 +311,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       ) : null}
       {canCrop && placement.angle ? <span className="cell__angle">{placement.angle.toLocaleString("it-IT")}°</span> : null}
       {canCrop && placement.zoom > 1.005 ? <span className="cell__zoom" title="Ingrandimento rispetto alla foto che riempie lo spazio">×{placement.zoom.toLocaleString("it-IT", { maximumFractionDigits: 2 })}</span> : null}
-      {freeFrame && selected && !canCrop ? <span className="cell__resize" title="Trascina per ridimensionare (le proporzioni restano)" onPointerDown={(event) => startFrame(event, "resize")} onPointerMove={moveFrame} onPointerUp={endFrame} /> : null}
+      {freeFrame && selected && !canCrop ? <span className="cell__resize" style={{ right: pct(((placement.frame.x + placement.frame.w - placement.content.x - placement.content.w) / placement.frame.w) * 100), bottom: pct(((placement.frame.y + placement.frame.h - placement.content.y - placement.content.h) / placement.frame.h) * 100) }} title="Trascina per ridimensionare (le proporzioni restano)" onPointerDown={(event) => startFrame(event, "resize")} onPointerMove={moveFrame} onPointerUp={endFrame} /> : null}
       {interactive && selected ? <span className="cell__name">{asset?.fileName.replace(/\.[^.]+$/, "")}</span> : null}
       {interactive && item.locked ? <span className="cell__badge cell__badge--lock"><Icon name="lock" size={12} /></span> : null}
       {interactive && showSizes ? (() => { const size = describeSize(placement); return <span className={`cell__size cell__size--${size.level}`} title="Misura stampata della foto e risoluzione effettiva">{size.widthCm.toLocaleString("it-IT")} × {size.heightCm.toLocaleString("it-IT")} cm · {size.dpi} dpi</span>; })() : null}
@@ -320,16 +320,37 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
   );
 });
 
+/** I comandi della foto selezionata, divisi per lato: ogni lato è una barra piccola (null = nessuna barra). */
+export interface ToolbarParts { top: ReactNode; bottom: ReactNode; left: ReactNode; right: ReactNode; /** Cursore del raddrizzamento (solo in ritaglio): barra larga, sempre orizzontale. */ straighten: ReactNode }
+type ToolbarSide = "top" | "bottom" | "left" | "right";
+/** Distanza dai bordi della foto: i separatori e le zone di rilascio sui bordi restano raggiungibili. */
+const INSET = 16;
+const TOOLBAR_SIDES: readonly ToolbarSide[] = ["top", "bottom", "left", "right"];
+
 /**
  * Barre della foto selezionata: vivono sopra lo spread (non dentro la cella, che ritaglia) e restano dentro i suoi bordi.
- * Sono due, piccole, ai lati della foto (aspetto a sinistra, azioni a destra) così non coprono il centro; se la cella è stretta la barra di destra sale sopra l'altra.
+ * Sono quattro, una per lato della foto (sopra, sotto, sinistra, destra, ognuna con 2-3 comandi) così nessuna è grande e il centro resta libero.
  */
-function FloatingToolbar({ rect, size, container, left, right }: { rect: Rect; size: { width: number; height: number }; container: React.RefObject<HTMLDivElement | null>; left: ReactNode; right: ReactNode }) {
-  const leftRef = useRef<HTMLDivElement>(null);
-  const rightRef = useRef<HTMLDivElement>(null);
-  type Place = { left: { x: number; y: number }; right: { x: number; y: number } };
-  const [pos, setPos] = useState<Place | null>(null);
+function FloatingToolbar({ rect, size, container, parts, away }: { rect: Rect; size: { width: number; height: number }; container: React.RefObject<HTMLDivElement | null>; parts: ToolbarParts; away: boolean }) {
+  // Foto piccola (sullo schermo): quattro barre non ci stanno senza sovrapporsi, quindi due colonne ai lati; il raddrizzamento resta in una barra orizzontale sotto.
+  const [boxWidth, setBoxWidth] = useState(0);
+  const compact = boxWidth > 0 && ((rect.w * boxWidth) / size.width < 190 || (rect.h * boxWidth) / size.width < 270);
+  const bars: Partial<Record<ToolbarSide, ReactNode>> = compact
+    ? { left: parts.top || parts.left ? <>{parts.top}{parts.left}</> : null, right: <>{parts.right}{parts.bottom}</>, bottom: parts.straighten }
+    : { top: parts.top, left: parts.left, right: parts.right, bottom: parts.straighten || parts.bottom ? <>{parts.straighten}{parts.bottom}</> : null };
+  const refs = useRef<Partial<Record<ToolbarSide, HTMLDivElement | null>>>({});
+  const [pos, setPos] = useState<Partial<Record<ToolbarSide, { x: number; y: number }>> | null>(null);
   const [tick, setTick] = useState(0);
+  // Mentre una foto viene trascinata (o spostata, ridimensionata) le barre si fanno da parte e non intercettano né clic né rilasci.
+  const [dragging, setDragging] = useState(false);
+  useEffect(() => {
+    const start = () => setDragging(true);
+    const end = () => setDragging(false);
+    document.addEventListener("dragstart", start, true);
+    document.addEventListener("dragend", end, true);
+    document.addEventListener("drop", end, true);
+    return () => { document.removeEventListener("dragstart", start, true); document.removeEventListener("dragend", end, true); document.removeEventListener("drop", end, true); };
+  }, []);
   useEffect(() => {
     const element = container.current;
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -339,22 +360,31 @@ function FloatingToolbar({ rect, size, container, left, right }: { rect: Rect; s
   }, [container]);
   useLayoutEffect(() => {
     const box = container.current?.getBoundingClientRect();
-    const l = leftRef.current;
-    const r = rightRef.current;
-    if (!box || !l || !r || box.width === 0) return;
+    if (!box || box.width === 0) return;
+    setBoxWidth((previous) => (Math.abs(previous - box.width) < 0.5 ? previous : box.width));
     const k = box.width / size.width;
     const cellLeft = rect.x * k;
     const cellRight = (rect.x + rect.w) * k;
-    const bottom = (rect.y + rect.h) * k - 26;
+    const cellTop = rect.y * k;
+    const cellBottom = (rect.y + rect.h) * k;
     const clampX = (x: number, w: number) => Math.min(Math.max(0, x), Math.max(0, box.width - w));
     const clampY = (y: number, h: number) => Math.min(Math.max(4, y), Math.max(4, box.height - h - 4));
-    const stacked = l.offsetWidth + r.offsetWidth + 20 > cellRight - cellLeft;
-    const next: Place = {
-      left: { x: clampX(cellLeft + 6, l.offsetWidth), y: clampY(bottom - l.offsetHeight, l.offsetHeight) },
-      right: { x: clampX(cellRight - r.offsetWidth - 6, r.offsetWidth), y: clampY(bottom - r.offsetHeight - (stacked ? l.offsetHeight + 4 : 0), r.offsetHeight) },
-    };
-    setPos((previous) => (previous && Math.abs(previous.left.x - next.left.x) < 0.5 && Math.abs(previous.left.y - next.left.y) < 0.5 && Math.abs(previous.right.x - next.right.x) < 0.5 && Math.abs(previous.right.y - next.right.y) < 0.5 ? previous : next));
-  }, [rect.x, rect.y, rect.w, rect.h, size.width, size.height, container, tick, left, right]);
+    const next: Partial<Record<ToolbarSide, { x: number; y: number }>> = {};
+    for (const side of TOOLBAR_SIDES) {
+      const element = refs.current[side];
+      if (!element) continue;
+      const w = element.offsetWidth;
+      const h = element.offsetHeight;
+      const centerX = clampX((cellLeft + cellRight) / 2 - w / 2, w);
+      const centerY = clampY((cellTop + cellBottom) / 2 - h / 2, h);
+      next[side] =
+        side === "top" ? { x: centerX, y: clampY(cellTop + INSET, h) }
+        : side === "bottom" ? { x: centerX, y: clampY(cellBottom - h - 30, h) }
+        : side === "left" ? { x: clampX(cellLeft + INSET, w), y: centerY }
+        : { x: clampX(cellRight - w - INSET, w), y: centerY };
+    }
+    setPos((previous) => (previous && TOOLBAR_SIDES.every((side) => Math.abs((previous[side]?.x ?? 0) - (next[side]?.x ?? 0)) < 0.5 && Math.abs((previous[side]?.y ?? 0) - (next[side]?.y ?? 0)) < 0.5) ? previous : next));
+  }, [rect.x, rect.y, rect.w, rect.h, size.width, size.height, container, tick, parts, compact]);
   const stop = {
     onClick: (event: React.MouseEvent) => event.stopPropagation(),
     onDoubleClick: (event: React.MouseEvent) => event.stopPropagation(),
@@ -364,8 +394,9 @@ function FloatingToolbar({ rect, size, container, left, right }: { rect: Rect; s
   };
   return (
     <>
-      <div ref={leftRef} className="cell__toolbar spread__toolbar" style={{ left: pos?.left.x ?? 0, top: pos?.left.y ?? 0, visibility: pos ? "visible" : "hidden" }} {...stop}>{left}</div>
-      <div ref={rightRef} className="cell__toolbar spread__toolbar" style={{ left: pos?.right.x ?? 0, top: pos?.right.y ?? 0, visibility: pos ? "visible" : "hidden" }} {...stop}>{right}</div>
+      {TOOLBAR_SIDES.map((side) => bars[side] ? (
+        <div key={side} ref={(element) => { refs.current[side] = element; }} className={`cell__toolbar spread__toolbar${side === "left" || side === "right" ? " spread__toolbar--col" : ""}${away || dragging ? " is-away" : ""}`} style={{ left: pos?.[side]?.x ?? 0, top: pos?.[side]?.y ?? 0, visibility: pos?.[side] ? "visible" : "hidden" }} {...stop}>{bars[side]}</div>
+      ) : null)}
     </>
   );
 }
@@ -574,7 +605,7 @@ function SpreadViewInner(props: SpreadViewProps) {
       {interactive && selectedItemId && props.renderToolbar && draft?.kind !== "frame" ? (() => {
         const rect = geometry.flatMap((g) => g.cells).find((cell) => cell.itemId === selectedItemId)?.rect;
         const parts = rect ? props.renderToolbar(selectedItemId) : null;
-        return rect && parts ? <FloatingToolbar rect={rect} size={size} container={ref} left={parts.left} right={parts.right} /> : null;
+        return rect && parts ? <FloatingToolbar rect={rect} size={size} container={ref} parts={parts} away={draft !== null} /> : null;
       })() : null}
 
       <div className="spread__fold" aria-hidden="true" />
