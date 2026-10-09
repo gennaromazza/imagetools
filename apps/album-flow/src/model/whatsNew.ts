@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.26",
+    date: "2026-10-09",
+    headline: "Barra della foto divisa in due, senza coprire l'immagine",
+    items: [
+      {
+        title: "Due barre ai lati della foto",
+        text: "Selezionando una foto, i comandi non stanno più in una sola barra larga al centro: a sinistra trovi ritaglio, forma, rotazione e bordo; a destra anteprima, editor, informazioni, lucchetto e cestino. Nelle celle strette la barra di destra sale sopra quella di sinistra.",
+        where: ["Barra a sinistra della foto", "Barra a destra della foto"],
+      },
+    ],
+  },
+  {
     version: "0.2.25",
     date: "2026-10-09",
     headline: "Aggiungi spread con un «+» e sfoglia con la rotella",

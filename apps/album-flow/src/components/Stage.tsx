@@ -255,7 +255,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const newShape = useNewFeature("forma-foto");
   const newBorder = useNewFeature("bordo-foto");
   const [borderFor, setBorderFor] = useState<string | null>(null);
-  const toolbar = useCallback((itemId: string): ReactNode => {
+  const toolbar = useCallback((itemId: string): { left: ReactNode; right: ReactNode } | null => {
     const found = spread.areas.flatMap((candidate, index) => candidate.items.map((item) => ({ item, area: candidate, index }))).find((entry) => entry.item.id === itemId);
     if (!found) return null;
     const asset = assets.get(found.item.assetId);
@@ -264,7 +264,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     const placement = cell ? placeItem(cell.rect, found.item, asset, found.area.style, null, cell.anchor) : null;
     const canCrop = !found.item.locked;
     const captured = formatTime(asset?.captureTimeMs);
-    return (
+    // A sinistra ciò che cambia l'aspetto della foto, a destra le azioni: due barre piccole ai lati della foto invece di una sola larga sopra.
+    const left = (
       <>
         <IconButton icon="crop" label={canCrop ? "Ritaglia e sposta nello slot (Invio)" : found.item.locked ? "Foto bloccata" : "Per ritagliare passa a «Riempi lo spazio»"} active={cropMode} disabled={!canCrop} onClick={() => actions.toggleCrop(itemId)} size={16} />
         {canCrop ? (
@@ -319,6 +320,10 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
             </Popover>
           </div>
         ) : null}
+      </>
+    );
+    const right = (
+      <>
         <IconButton icon="eye" label="Guarda in grande (Spazio)" onClick={() => actions.viewItem(itemId)} size={16} />
         {desktop && asset?.absolutePath ? <IconButton icon="pencil" label="Modifica nell'editor" onClick={() => actions.editItem(itemId)} size={16} /> : null}
         <div className="anchor">
@@ -338,6 +343,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         <IconButton icon="trash" label="Togli dallo spread (Canc)" danger onClick={() => actions.removeItem(itemId)} size={16} />
       </>
     );
+    return { left, right };
   }, [actions, assets, borderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */

@@ -678,6 +678,9 @@
       "Nuovo: nella striscia delle miniature, passando il mouse tra due spread (o dopo l'ultimo) compare un «+» che aggiunge uno spread vuoto proprio lì.",
       "Nuovo: la rotella del mouse sopra lo spread sfoglia l'album, uno spread alla volta (Ctrl/⌘, Alt e Maiusc con la rotella restano per zoom e raddrizzamento).",
       "Migliorato: su una pagina che ha già il testo del template ma nessuna foto, «Trascina qui le foto» non si sovrappone più al testo: resta il bordo tratteggiato e un'icona nell'angolo, la scritta compare al passaggio del mouse o trascinando una foto."
+    ],
+    "0.2.26": [
+      "Migliorato: la barra della foto selezionata è divisa in due barre piccole ai lati della foto: a sinistra ritaglio, forma, rotazione e bordo; a destra anteprima, editor, info, lucchetto e cestino. Non copre più il centro della foto; nelle celle strette la barra di destra sale sopra l'altra."
     ]
   }
 }

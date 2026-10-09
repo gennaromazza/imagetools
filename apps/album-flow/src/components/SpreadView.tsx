@@ -65,7 +65,7 @@ export interface SpreadViewProps {
   /** Una foto di una disposizione libera è stata spostata o ridimensionata (frazioni dell'area utile). */
   onCommitFrame?: (itemId: string, frame: { x: number; y: number; w: number; h: number }) => void;
   /** Contenuto della barra che compare sulla foto selezionata. */
-  renderToolbar?: (itemId: string) => ReactNode;
+  renderToolbar?: (itemId: string) => { left: ReactNode; right: ReactNode } | null;
 }
 
 const pct = (value: number) => `${Number(value.toFixed(4))}%`;
@@ -320,10 +320,15 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
   );
 });
 
-/** Barra della foto selezionata: vive sopra lo spread (non dentro la cella, che ritaglia) e resta sempre dentro i suoi bordi. */
-function FloatingToolbar({ rect, size, container, children }: { rect: Rect; size: { width: number; height: number }; container: React.RefObject<HTMLDivElement | null>; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+/**
+ * Barre della foto selezionata: vivono sopra lo spread (non dentro la cella, che ritaglia) e restano dentro i suoi bordi.
+ * Sono due, piccole, ai lati della foto (aspetto a sinistra, azioni a destra) così non coprono il centro; se la cella è stretta la barra di destra sale sopra l'altra.
+ */
+function FloatingToolbar({ rect, size, container, left, right }: { rect: Rect; size: { width: number; height: number }; container: React.RefObject<HTMLDivElement | null>; left: ReactNode; right: ReactNode }) {
+  const leftRef = useRef<HTMLDivElement>(null);
+  const rightRef = useRef<HTMLDivElement>(null);
+  type Place = { left: { x: number; y: number }; right: { x: number; y: number } };
+  const [pos, setPos] = useState<Place | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const element = container.current;
@@ -334,19 +339,34 @@ function FloatingToolbar({ rect, size, container, children }: { rect: Rect; size
   }, [container]);
   useLayoutEffect(() => {
     const box = container.current?.getBoundingClientRect();
-    const element = ref.current;
-    if (!box || !element || box.width === 0) return;
+    const l = leftRef.current;
+    const r = rightRef.current;
+    if (!box || !l || !r || box.width === 0) return;
     const k = box.width / size.width;
-    const w = element.offsetWidth;
-    const h = element.offsetHeight;
-    const left = Math.min(Math.max(0, (rect.x + rect.w / 2) * k - w / 2), Math.max(0, box.width - w));
-    const top = Math.min(Math.max(4, (rect.y + rect.h) * k - h - 26), Math.max(4, box.height - h - 4));
-    setPos((previous) => (previous && Math.abs(previous.left - left) < 0.5 && Math.abs(previous.top - top) < 0.5 ? previous : { left, top }));
-  }, [rect.x, rect.y, rect.w, rect.h, size.width, size.height, container, tick, children]);
+    const cellLeft = rect.x * k;
+    const cellRight = (rect.x + rect.w) * k;
+    const bottom = (rect.y + rect.h) * k - 26;
+    const clampX = (x: number, w: number) => Math.min(Math.max(0, x), Math.max(0, box.width - w));
+    const clampY = (y: number, h: number) => Math.min(Math.max(4, y), Math.max(4, box.height - h - 4));
+    const stacked = l.offsetWidth + r.offsetWidth + 20 > cellRight - cellLeft;
+    const next: Place = {
+      left: { x: clampX(cellLeft + 6, l.offsetWidth), y: clampY(bottom - l.offsetHeight, l.offsetHeight) },
+      right: { x: clampX(cellRight - r.offsetWidth - 6, r.offsetWidth), y: clampY(bottom - r.offsetHeight - (stacked ? l.offsetHeight + 4 : 0), r.offsetHeight) },
+    };
+    setPos((previous) => (previous && Math.abs(previous.left.x - next.left.x) < 0.5 && Math.abs(previous.left.y - next.left.y) < 0.5 && Math.abs(previous.right.x - next.right.x) < 0.5 && Math.abs(previous.right.y - next.right.y) < 0.5 ? previous : next));
+  }, [rect.x, rect.y, rect.w, rect.h, size.width, size.height, container, tick, left, right]);
+  const stop = {
+    onClick: (event: React.MouseEvent) => event.stopPropagation(),
+    onDoubleClick: (event: React.MouseEvent) => event.stopPropagation(),
+    onPointerDown: (event: React.PointerEvent) => event.stopPropagation(),
+    draggable: true,
+    onDragStart: (event: React.DragEvent) => { event.preventDefault(); event.stopPropagation(); },
+  };
   return (
-    <div ref={ref} className="cell__toolbar spread__toolbar" style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }} onClick={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} draggable onDragStart={(event) => { event.preventDefault(); event.stopPropagation(); }}>
-      {children}
-    </div>
+    <>
+      <div ref={leftRef} className="cell__toolbar spread__toolbar" style={{ left: pos?.left.x ?? 0, top: pos?.left.y ?? 0, visibility: pos ? "visible" : "hidden" }} {...stop}>{left}</div>
+      <div ref={rightRef} className="cell__toolbar spread__toolbar" style={{ left: pos?.right.x ?? 0, top: pos?.right.y ?? 0, visibility: pos ? "visible" : "hidden" }} {...stop}>{right}</div>
+    </>
   );
 }
 
@@ -553,7 +573,8 @@ function SpreadViewInner(props: SpreadViewProps) {
 
       {interactive && selectedItemId && props.renderToolbar && draft?.kind !== "frame" ? (() => {
         const rect = geometry.flatMap((g) => g.cells).find((cell) => cell.itemId === selectedItemId)?.rect;
-        return rect ? <FloatingToolbar rect={rect} size={size} container={ref}>{props.renderToolbar(selectedItemId)}</FloatingToolbar> : null;
+        const parts = rect ? props.renderToolbar(selectedItemId) : null;
+        return rect && parts ? <FloatingToolbar rect={rect} size={size} container={ref} left={parts.left} right={parts.right} /> : null;
       })() : null}
 
       <div className="spread__fold" aria-hidden="true" />

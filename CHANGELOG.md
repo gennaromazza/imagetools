@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-09 - Album Flow 0.2.26
+
+- Migliorato: la barra della foto selezionata è divisa in due barre piccole ai lati della foto: a sinistra ritaglio, forma, rotazione e bordo; a destra anteprima, editor, info, lucchetto e cestino. Non copre più il centro della foto; nelle celle strette la barra di destra sale sopra l'altra.
+
 ## 2026-10-09 - Album Flow 0.2.25
 
 - Nuovo: nella striscia delle miniature, passando il mouse tra due spread (o dopo l'ultimo) compare un «+» che aggiunge uno spread vuoto proprio lì.
