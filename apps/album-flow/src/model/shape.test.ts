@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, previewDropRect, replaceItemAsset, resetItemView, setItemView, swapItems, toggleItemLock } from "./items";
+import { appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, previewDropRect, replaceItemAsset, resetItemView, setItemView, shapeKeepsAlignment, swapItems, toggleItemLock } from "./items";
 import { addSpread, duplicateSpread } from "./spreads";
 import { renderSpreadSvg } from "../render/spread-svg";
 import { applyCandidate, areaCandidates, setAreaStyle } from "./areas";
@@ -48,6 +48,29 @@ for (const mode of ["fill", "fit"] as const) {
     }
   });
 }
+
+test("forma per foto: shapeKeepsAlignment dice se la forma lascia le foto allineate (cella con quella forma) e vale sempre per foto sola o pagina libera", () => {
+  for (const mode of ["fit", "fill"] as const) {
+    for (const count of [2, 3, 4, 5]) {
+      const base = album(count, mode);
+      for (const preset of SHAPE_PRESETS) {
+        for (const item of itemsOf(base)) {
+          const changed = setItemView(base, item.id, { shape: preset.ratio });
+          assertProjectInvariants(changed, `${mode}/${count}/${preset.id}`);
+          const cell = spreadGeometry(changed, changed.spreads[0]).flatMap((geometry) => geometry.cells).find((candidate) => candidate.itemId === item.id)!;
+          const aligned = Math.abs(cell.rect.w / cell.rect.h / preset.ratio - 1) < SHAPE_SNAP;
+          assert.equal(shapeKeepsAlignment(base, item.id, preset.ratio), aligned, `${mode}/${count}/${preset.id}: la risposta non corrisponde alla cella`);
+        }
+      }
+    }
+  }
+});
+
+test("forma per foto: una foto sola nella pagina o una disposizione libera non hanno vincoli di allineamento", () => {
+  const single = album(1, "fit");
+  for (const preset of SHAPE_PRESETS) assert.equal(shapeKeepsAlignment(single, itemsOf(single)[0].id, preset.ratio), true);
+  assert.equal(shapeKeepsAlignment(single, "nessuna", 1), true);
+});
 
 test("forma per foto: le altre foto non cambiano, «Come la cella» e il ripristino la tolgono", () => {
   const base = album(3, "fit");

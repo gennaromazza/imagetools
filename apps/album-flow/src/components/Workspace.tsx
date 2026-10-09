@@ -7,7 +7,7 @@ import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCa
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
-import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
+import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, shapeKeepsAlignment, toggleItemLock } from "../model/items";
 import { rotateAssetQuarter, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
 import { countItems, findItem, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas } from "../model/spreads";
@@ -440,7 +440,15 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     setDraft,
     commitRatio: (i, path, ratio) => { setDraft(null); commit((p) => setDividerRatio(p, spreadId, i, path, ratio), `ratio:${spreadId}:${i}:${path}`); },
     resetRatio: (i, path) => commit((p) => resetDividerRatio(p, spreadId, i, path)),
-    commitView: (itemId, view) => { setDraft(null); commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle, shape: view.shape }), `view:${itemId}`); },
+    commitView: (itemId, view) => {
+      setDraft(null);
+      // Le foto restano allineate: una forma che nessuna disposizione allineata permette non si applica (lo si dice); per metterla a piacere si sblocca il layout.
+      if (view.shape && !shapeKeepsAlignment(historyRef.current.present, itemId, view.shape)) {
+        notify("Con questa disposizione la forma non entra senza disallineare le foto. Cambia layout, oppure sblocca il layout della pagina («Sposta le foto liberamente») per metterla dove vuoi.");
+        return;
+      }
+      commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle, shape: view.shape }), `view:${itemId}`);
+    },
     style: (i, changes, key, relayout) => commit((p) => setAreaStyle(p, spreadId, i, changes, relayout), key ? `style:${spreadId}:${i}:${key}` : undefined),
     align: (i, align) => commit((p) => alignArea(p, spreadId, i, align)),
     split: (mode) => {

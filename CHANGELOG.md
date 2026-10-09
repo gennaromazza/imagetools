@@ -32,6 +32,12 @@
 
 
 
+## 2026-10-09 - Album Flow 0.2.28
+
+- Cambiato: la rotella non sfoglia più l'album dallo spread (si confondeva con le azioni sulle foto): ora scorre le miniature in basso, con il puntatore sulla striscia delle pagine.
+- Corretto: trascinando una foto sul centro di un'altra, il riquadro verde mostra ora lo spazio che la foto occuperà davvero dopo il rilascio (con le sue proporzioni e gli altri spostamenti già applicati), non più un riquadro più largo e scostato.
+- Migliorato: le foto restano sempre allineate. Se scegli una forma (2:3, 3:4…) che con il layout attuale non si può ottenere senza disallineare le foto, la forma non viene applicata e ti dice come procedere: cambia layout oppure sblocca il layout della pagina con «Sposta le foto liberamente» per metterla dove vuoi.
+
 ## 2026-10-09 - Album Flow 0.2.27
 
 - Migliorato: i comandi della foto selezionata sono divisi sui quattro lati della foto (sopra ritaglio e forma, a sinistra rotazione e bordo, a destra guarda/editor/info, sotto lucchetto e cestino); sulle foto piccole diventano due colonne. Si nascondono mentre trascini o sposti e restano staccati dai bordi, così non si sbaglia clic.

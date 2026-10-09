@@ -219,30 +219,6 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const ratio = size.width / size.height;
   const fit = Math.max(0, Math.min(centerSize.width - 24, (centerSize.height - 20) * ratio));
   const width = fit * zoom;
-  // Rotella semplice sullo spread = sfoglia l'album (ctrl/alt/maiusc restano a zoom e raddrizzamento; non agisce con zoom oltre il 100% o in ritaglio).
-  const wheelNav = useRef({ index: spreadIndex, count: project.spreads.length, enabled: false, goTo: actions.goTo, at: 0, acc: 0 });
-  wheelNav.current = { ...wheelNav.current, index: spreadIndex, count: project.spreads.length, enabled: !cropMode && !draft && zoom <= 1, goTo: actions.goTo };
-  useEffect(() => {
-    const element = centerRef.current;
-    if (!element) return;
-    const onWheel = (event: WheelEvent) => {
-      const state = wheelNav.current;
-      if (event.defaultPrevented || !state.enabled || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
-      const delta = event.deltaY || event.deltaX;
-      if (!delta) return;
-      event.preventDefault();
-      const now = Date.now();
-      if (now - state.at > 400) state.acc = 0;
-      state.acc += delta;
-      if (Math.abs(state.acc) < 40 || now - state.at < 220) return;
-      const target = state.index + (state.acc > 0 ? 1 : -1);
-      state.acc = 0;
-      state.at = now;
-      if (target >= 0 && target < state.count) state.goTo(target);
-    };
-    element.addEventListener("wheel", onWheel, { passive: false });
-    return () => element.removeEventListener("wheel", onWheel);
-  }, [centerRef]);
   const area = spread.areas[Math.min(activeArea, spread.areas.length - 1)];
   const areaIndex = Math.min(activeArea, spread.areas.length - 1);
   const favorite = isFavoriteLayout(project, area);

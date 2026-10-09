@@ -49,6 +49,21 @@ function Gap({ index, onDropNew, onAddAt }: { index: number; onDropNew: Filmstri
 export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, onDuplicate, onRemove, onMove, onDropNew, onDropOn }: FilmstripProps) {
   const currentRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; index: number } | null>(null);
+  // La rotella sulla striscia sfoglia le miniature (scorrimento orizzontale); sullo spread la rotella resta per zoom e raddrizzamento, così non si confonde con le azioni sulle foto.
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = navRef.current;
+    if (!element) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey || element.scrollWidth <= element.clientWidth) return;
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+      if (!delta) return;
+      event.preventDefault();
+      element.scrollLeft += delta;
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, []);
   useEffect(() => { currentRef.current?.scrollIntoView?.({ block: "nearest", inline: "center", behavior: "smooth" }); }, [current]);
 
   const chapterByAsset = useMemo(() => {
@@ -58,7 +73,7 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, 
   }, [project.chapters]);
 
   return (
-    <nav className="film" aria-label="Spread dell'album">
+    <nav ref={navRef} className="film" aria-label="Spread dell'album">
       <div className="film__track">
         {project.spreads.map((spread, index) => {
           const chapter = spread.areas.flatMap((area) => area.items).map((item) => chapterByAsset.get(item.assetId)).find(Boolean);

@@ -688,6 +688,11 @@
       "Corretto: cambiando la divisione dello spread (foglio intero, metà, un terzo) le foto con disposizione libera restano dove sono invece di essere rimpaginate.",
       "Corretto: in modalità libera «Porta davanti» e «Porta dietro le altre» (le frecce su e giù) sembravano non fare nulla perché la foto selezionata restava sempre in primo piano; ora l'ordine si vede subito.",
       "Nuovo: nella disposizione libera una foto si può ingrandire oltre la sua pagina (fino a tre volte), per esempio uno sfondo che passa anche sull'altra metà del foglio; «Porta dietro le altre» la manda sotto anche le foto dell'altra pagina."
+    ],
+    "0.2.28": [
+      "Cambiato: la rotella non sfoglia più l'album dallo spread (si confondeva con le azioni sulle foto): ora scorre le miniature in basso, con il puntatore sulla striscia delle pagine.",
+      "Corretto: trascinando una foto sul centro di un'altra, il riquadro verde mostra ora lo spazio che la foto occuperà davvero dopo il rilascio (con le sue proporzioni e gli altri spostamenti già applicati), non più un riquadro più largo e scostato.",
+      "Migliorato: le foto restano sempre allineate. Se scegli una forma (2:3, 3:4…) che con il layout attuale non si può ottenere senza disallineare le foto, la forma non viene applicata e ti dice come procedere: cambia layout oppure sblocca il layout della pagina con «Sposta le foto liberamente» per metterla dove vuoi."
     ]
   }
 }

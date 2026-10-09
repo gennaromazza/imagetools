@@ -21,6 +21,27 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.28",
+    date: "2026-10-09",
+    headline: "Anteprima di rilascio fedele e foto sempre allineate",
+    items: [
+      {
+        title: "Il riquadro di rilascio mostra dove finirà la foto",
+        text: "Quando trascini una foto sul centro di un'altra, il riquadro verde ora è esattamente lo spazio che la foto occuperà dopo il rilascio, già con gli altri aggiustamenti: niente più riquadro scostato che non fa capire dove va.",
+      },
+      {
+        title: "La rotella sfoglia le miniature",
+        text: "Con il puntatore sulla striscia delle miniature in basso, la rotella del mouse scorre le pagine dell'album. Sullo spread la rotella non cambia più pagina, così non si confonde con le azioni sulle foto.",
+        where: ["Striscia delle miniature"],
+      },
+      {
+        title: "Le foto restano allineate quando cambi la forma",
+        text: "Se scegli una forma (2:3, 3:4…) che con il layout attuale scomporrebbe l'allineamento, la forma non viene applicata e un messaggio ti spiega come fare: cambia layout oppure sblocca il layout della pagina per posizionare la foto a piacere.",
+        where: ["Forma", "Sposta le foto liberamente"],
+      },
+    ],
+  },
+  {
     version: "0.2.27",
     date: "2026-10-09",
     headline: "Comandi della foto sui quattro lati e posizionamento libero più libero",

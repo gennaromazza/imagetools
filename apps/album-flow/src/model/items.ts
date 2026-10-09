@@ -285,6 +285,21 @@ function withReachableShape(project: Project, spread: AlbumSpread, areaIndex: nu
   return index < 0 ? area : normalizeArea({ ...area, layout: candidates[index].tree, seed: index, free: undefined });
 }
 
+/**
+ * Vero se dare alla foto questa forma lascia le foto allineate: la sua cella (dopo che le altre si sono adattate, o dopo il cambio di layout
+ * proposto) ha davvero quella proporzione. Se è falso la foto mostrerebbe una finestra più piccola della cella, fuori allineamento con le altre:
+ * l'interfaccia non la applica e suggerisce di sbloccare il layout. Disposizione libera, foto sola nella pagina o foto bloccata: sempre vero.
+ */
+export function shapeKeepsAlignment(project: Project, itemId: string, shape: number): boolean {
+  const found = findItem(project, itemId);
+  if (!found || found.item.locked || !found.area.layout || found.area.items.length < 2 || hasFreeLayout(found.area)) return true;
+  const next = setItemView(project, itemId, { shape });
+  const after = findItem(next, itemId);
+  if (!after || !after.item.shape) return true;
+  const cell = areaGeometry(next, after.spread, after.areaIndex).cells.find((candidate) => candidate.itemId === itemId);
+  return Boolean(cell) && cell!.rect.h > 0 && Math.abs(cell!.rect.w / cell!.rect.h / after.item.shape - 1) < SHAPE_SNAP;
+}
+
 export function resetItemView(project: Project, itemId: string): Project {
   return setItemView(project, itemId, { zoom: 1, cx: 0.5, cy: 0.5, angle: 0, shape: null });
 }
@@ -407,6 +422,28 @@ export function moveRefusal(project: Project, spreadId: string | null, source: D
 }
 
 /**
+ * Sul centro di una foto la trascinata la sostituisce (o si scambia con lei): si mostra la finestra che la nuova foto occuperà,
+ * già con le celle riallineate come dopo il rilascio vero, non l'intera cella di prima (che in «foto intera» o con una forma è più larga).
+ */
+function previewReplaceRect(area: AlbumArea, inner: Rect, assets: ReadonlyMap<string, AlbumAssetV2>, targetId: string, dragged: { assetId: string; itemId?: string }): Rect | null {
+  const target = area.items.find((item) => item.id === targetId);
+  if (!area.layout || !target || target.locked || dragged.itemId === targetId) return null;
+  const source = dragged.itemId ? area.items.find((item) => item.id === dragged.itemId) : undefined;
+  const fresh = (item: AlbumItem, assetId: string): AlbumItem => ({ ...item, assetId, zoom: 1, cx: 0.5, cy: 0.5, angle: undefined });
+  const items = area.items.map((item) => (item.id === targetId ? fresh(item, dragged.assetId) : source && item.id === source.id ? fresh(item, target.assetId) : item));
+  const gap = Math.max(0, area.style.gapCm * 10);
+  let layout = area.layout;
+  if (needsShapeAlignment({ ...area, items })) {
+    const aspects = new Map(items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))] as const));
+    layout = naturalRatios(layout, (id) => aspects.get(id) ?? 1.5, inner, gap);
+  }
+  const cell = layoutCells(layout, inner, gap).cells.find((candidate) => candidate.itemId === targetId);
+  const placed = items.find((item) => item.id === targetId);
+  if (!cell || !placed) return null;
+  return placeItem(cell.rect, placed, assets.get(dragged.assetId), area.style, null, cell.anchor).content;
+}
+
+/**
  * Rettangolo che la foto trascinata occuperà davvero dopo il rilascio (stesse proporzioni e stessa divisione del rilascio vero),
  * per mostrarlo mentre si trascina. Restituisce null quando non c'è nulla di meglio da mostrare (centro di una foto, spread senza layout).
  */
@@ -422,6 +459,7 @@ export function previewDropRect(
   if (!area || !outer) return null;
   const inner = insetRect(outer, area.style.paddingCm * 10);
   if (target.zone === "area") return inner;
+  if (target.zone === "center" && target.itemId && area.layout && !hasFreeLayout(area)) return previewReplaceRect(area, inner, assets, target.itemId, dragged);
   if (!area.layout || target.zone === "center") return null;
   const TMP = "__anteprima__";
   let layout: LayoutNode | null = area.layout;

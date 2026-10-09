@@ -515,7 +515,17 @@ test("anteprima del rilascio: il riquadro mostrato coincide con il posto che la 
       for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(preview[key] - real[key]) < 1e-6, `${target.zone}/${target.node} ${asset}: ${key} ${preview[key]} ≠ ${real[key]}`);
     }
   }
-  assert.equal(previewDropRect(project.settings.sheet, project.spreads[0], assets, { areaIndex: 0, itemId: project.spreads[0].areas[0].items[0].id, zone: "center" }, { assetId: "a3" }), null, "al centro si evidenzia la foto");
+  // Al centro di una foto l'anteprima è la finestra che la nuova foto occuperà davvero (non l'intera cella di prima).
+  const centerId = project.spreads[0].areas[0].items[0].id;
+  for (const asset of ["a3", "a4", "a7"]) {
+    const preview = previewDropRect(project.settings.sheet, project.spreads[0], assets, { areaIndex: 0, itemId: centerId, zone: "center" }, { assetId: asset });
+    assert.ok(preview, `anteprima al centro con ${asset}`);
+    const after = dropOnSpread(project, id, { areaIndex: 0, itemId: centerId, zone: "center" }, { kind: "assets", assetIds: [asset] });
+    const replaced = after.spreads[0].areas[0].items.find((item) => item.id === centerId)!;
+    const cell = spreadGeometry(after, after.spreads[0])[0].cells.find((candidate) => candidate.itemId === centerId)!;
+    const real = placeItem(cell.rect, replaced, after.assets.find((candidate) => candidate.id === replaced.assetId), after.spreads[0].areas[0].style, null, cell.anchor).content;
+    for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(preview[key] - real[key]) < 1e-6, `centro ${asset}: ${key} ${preview[key]} ≠ ${real[key]}`);
+  }
 });
 
 test("foto intera: cambiando il modo la disposizione resta e i bordi vuoti non aumentano", () => {
