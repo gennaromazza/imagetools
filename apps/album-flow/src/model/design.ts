@@ -229,6 +229,49 @@ export function updateOverlay(project: Project, spreadId: string, overlayId: str
   return mapSpread(project, spreadId, (spread) => withOverlays(spread, overlaysOf(spread).map((overlay) => (overlay.id === overlayId ? next : overlay))));
 }
 
+/** Punto in cui un testo nuovo finisce: al centro (in orizzontale) della pagina attiva, a due quinti dall'alto. Lo usano il pannello e il segnaposto sul foglio. */
+export function textInsertionPoint(pageCount: number, areaIndex: number): { x: number; y: number } {
+  return { x: pageCount < 2 ? 0.5 : areaIndex === 0 ? 0.25 : 0.75, y: 0.4 };
+}
+
+/**
+ * Ingrandisce o riduce insieme più elementi (un gruppo, o più testi selezionati) come in un programma di grafica: corpo del testo, larghezza,
+ * spazio tra paragrafi e distanze si moltiplicano per lo stesso fattore. Il blocco resta centrato sul suo asse e cresce verso il basso
+ * (così un titolo con il sottotitolo sotto resta in asse); con `pivot` (frazioni dello spread) l'angolo scelto resta fermo, come trascinando la maniglia del riquadro.
+ * Se un elemento arriva a un limite, tutti si fermano lì e le proporzioni non si deformano.
+ */
+export function scaleOverlays(project: Project, spreadId: string, overlayIds: readonly string[], factor: number, pivot?: { x: number; y: number }): Project {
+  const found = findSpread(project, spreadId);
+  if (!found || !Number.isFinite(factor) || factor <= 0) return project;
+  const ids = new Set(overlayIds);
+  const members = overlaysOf(found.spread).filter((overlay) => ids.has(overlay.id));
+  if (members.length === 0) return project;
+  // Il fattore si ferma dove il primo elemento tocca un limite.
+  let low = 0.05;
+  let high = 20;
+  for (const overlay of members) {
+    const [minW, maxW] = overlay.kind === "text" ? [TEXT_LIMITS.width.min, TEXT_LIMITS.width.max] : [0.01, 2];
+    low = Math.max(low, minW / overlay.w);
+    high = Math.min(high, maxW / overlay.w);
+    if (overlay.kind === "text") { low = Math.max(low, TEXT_LIMITS.sizePt.min / overlay.sizePt); high = Math.min(high, TEXT_LIMITS.sizePt.max / overlay.sizePt); }
+  }
+  const f = low > high ? 1 : clamp(factor, low, high);
+  if (Math.abs(f - 1) < 1e-9) return project;
+  const left = Math.min(...members.map((overlay) => overlay.x));
+  const right = Math.max(...members.map((overlay) => overlay.x + overlay.w));
+  const pivotX = pivot?.x ?? (left + right) / 2;
+  const pivotY = pivot?.y ?? Math.min(...members.map((overlay) => overlay.y));
+  let next = project;
+  for (const overlay of members) {
+    const centerX = pivotX + (overlay.x + overlay.w / 2 - pivotX) * f;
+    const w = overlay.w * f;
+    const patch: OverlayPatch = { w, x: centerX - w / 2, y: pivotY + (overlay.y - pivotY) * f };
+    if (overlay.kind === "text") { patch.sizePt = round(overlay.sizePt * f, 2); patch.paragraphSpacePt = round(overlay.paragraphSpacePt * f, 2); }
+    next = updateOverlay(next, spreadId, overlay.id, patch);
+  }
+  return next;
+}
+
 /** Un gruppo con un solo elemento non ha senso: l'ultimo rimasto torna libero. */
 function dropLoneGroups(overlays: SpreadOverlay[]): SpreadOverlay[] {
   const counts = new Map<string, number>();

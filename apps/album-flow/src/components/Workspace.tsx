@@ -43,7 +43,7 @@ import { makeAreaFree, restoreAutomatic, setAreaLocked, setSpreadLock } from "..
 import { canvasMeasure } from "../render/fonts";
 import { insertStory, planAlbumStories, proposalFromUnit, replaceWithStory, suggestStoryForSpread, type SuggestResult } from "../model/story";
 import { storyById } from "../model/storyLibrary";
-import { addGraphicOverlay, addTextOverlay, addTextStack, duplicateOverlay, orderOverlay, groupOverlays, moveOverlayGroup, removeOverlay, setAlbumBackground, setSpreadBackground, ungroupOverlay, updateOverlay, updateSpreadBackground } from "../model/design";
+import { addGraphicOverlay, addTextOverlay, addTextStack, duplicateOverlay, orderOverlay, groupOverlays, moveOverlayGroup, removeOverlay, scaleOverlays, setAlbumBackground, setSpreadBackground, ungroupOverlay, updateOverlay, updateSpreadBackground } from "../model/design";
 import { IconButton } from "./ui";
 import { useStableCallbacks } from "../hooks/useStableCallbacks";
 
@@ -126,7 +126,9 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   const reopenSocial = useRef(false);
   const [templates, setTemplates] = useState<AreaTemplate[]>(() => loadTemplates());
   const [templateEdit, setTemplateEdit] = useState<{ initial?: AreaTemplate; seed?: TemplateSeed } | null>(null);
-  const [viewer, setViewer] = useState<null | { ids: string[]; index: number }>(null);
+  const [viewer, setViewer] = useState<null | { ids: string[]; index: number; fromLibrary: boolean }>(null);
+  /** Ultima foto guardata nella vista grande: alla chiusura la libreria si porta lì (e la seleziona), così non si perde il punto. */
+  const lastViewedRef = useRef<string | null>(null);
   const [presenting, setPresenting] = useState(false);
   const [importSource, setImportSource] = useState<ImportSource | null>(null);
   const [dropOverlay, setDropOverlay] = useState(false);
@@ -285,16 +287,17 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     flashTimer.current = window.setTimeout(() => setHighlightItemId(null), 1800);
   }, [goTo, notify, project]);
 
-  const openViewer = useCallback((assetId: string, ids: string[]) => {
+  const openViewer = useCallback((assetId: string, ids: string[], fromLibrary = true) => {
     const at = ids.indexOf(assetId);
-    setViewer({ ids: ids.length ? ids : [assetId], index: Math.max(0, at) });
+    lastViewedRef.current = assetId;
+    setViewer({ ids: ids.length ? ids : [assetId], index: Math.max(0, at), fromLibrary });
   }, []);
 
   const viewItem = useCallback((itemId: string) => {
     if (!spread) return;
     const ids = spread.areas.flatMap((area) => area.items.map((item) => item.assetId));
     const found = findItem(project, itemId);
-    if (found) openViewer(found.item.assetId, Array.from(new Set(ids)));
+    if (found) openViewer(found.item.assetId, Array.from(new Set(ids)), false);
   }, [openViewer, project, spread]);
 
   const edit = useCallback(async (assetId: string) => {
@@ -619,6 +622,9 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       commit((p) => { const plan = planAlbumStories(p); out.count = plan.planned.length; return plan.planned.length ? plan.project : p; });
       return out.count;
     },
+    scale: (overlayIds, factor, pivot) => commit((p) => scaleOverlays(p, spreadId, overlayIds, factor, pivot)),
+    styleMany: (overlayIds, patch) => commit((p) => overlayIds.reduce((current, id) => updateOverlay(current, spreadId, id, patch), p), `ovs:${overlayIds.join(",")}`),
+    setArea: (areaIndex) => { setActiveArea(areaIndex); },
     removeOverlays: (overlayIds) => { commit((p) => overlayIds.reduce((current, id) => removeOverlay(current, spreadId, id), p)); setSelectedOverlayId(null); },
     notify,
   }), [commit, notify, spreadId]);
@@ -632,6 +638,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       setSelectedOverlayId(overlayId); if (overlayId) { setSelectedItemId(null); setCropMode(false); if (openPanel) { setDesignOpen(true); setDesignTab("text"); } } },
     onCommit: (overlayId: string, patch: Parameters<typeof updateOverlay>[3]) => commit((p) => updateOverlay(p, spreadId, overlayId, patch), `ov:${overlayId}`),
     onMoveBy: (overlayId: string, dx: number, dy: number) => commit((p) => moveOverlayGroup(p, spreadId, overlayId, dx, dy), `ov:${overlayId}`),
+    onScale: (overlayIds: readonly string[], factor: number, pivot: { x: number; y: number }) => commit((p) => scaleOverlays(p, spreadId, overlayIds, factor, pivot)),
     onEdit: (overlayId: string) => { setSelectedOverlayId(overlayId); setDesignOpen(true); setDesignTab("text"); setFocusSignal((value) => value + 1); },
   }), [commit, extraOverlayIds, selectedOverlayId, spreadId]);
   useEffect(() => { if (designOpen) { setLayoutsOpen(false); setSelectedItemId(null); setCropMode(false); } }, [designOpen]);
@@ -977,7 +984,14 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           ids={viewer.ids}
           startIndex={viewer.index}
           usage={usage}
-          onClose={() => setViewer(null)}
+          onIndex={(assetId) => { lastViewedRef.current = assetId; }}
+          onClose={() => {
+            const last = lastViewedRef.current;
+            const fromLibrary = viewer.fromLibrary;
+            setViewer(null);
+            // Dalla libreria: si torna alla foto in cui si era arrivati scorrendo (selezionata e portata in vista).
+            if (fromLibrary && last) { setLibSelection((previous) => (previous.includes(last) ? previous : [last])); setRevealAsset((previous) => ({ id: last, n: (previous?.n ?? 0) + 1 })); }
+          }}
           onRate={rate}
           onPlace={(id) => placeAssets([id])}
           onReveal={(id) => void reveal(id)}

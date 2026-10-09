@@ -9,6 +9,7 @@ import { clampAngle, itemBorderColor, placeItem, wheelNotches, type ItemView } f
 import { itemAspect } from "../model/project";
 import { SHAPE_PRESETS, presetForShape } from "../model/shapes";
 import { isScopeLocked, type LockScope } from "../model/layoutLock";
+import { textInsertionPoint } from "../model/design";
 import { getSnapEnabled, setSnapEnabled, subscribeSnap } from "../model/snapSettings";
 import { areaGeometryFor, hasFreeLayout } from "../model/project";
 import { AreaStrip } from "./AreaStrip";
@@ -460,6 +461,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               showGuides={guides}
               showSizes={sizes}
               activeArea={areaIndex}
+              insertMarker={design.open && !design.selectedOverlayId && design.tab !== "backgrounds" && design.tab !== "story" ? { ...textInsertionPoint(spread.areas.length, areaIndex), label: `Il testo va qui · ${where}` } : undefined}
               selectedItemId={selectedItemId}
               highlightItemId={highlightItemId}
               pickedItemIds={pickedItemIds}

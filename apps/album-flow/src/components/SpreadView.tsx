@@ -32,6 +32,8 @@ export interface SpreadViewProps {
   variant: SpreadVariant;
   showGuides?: boolean;
   activeArea?: number;
+  /** Dove finirà il prossimo testo: segnaposto sul foglio finché il pannello «Personalizza» è aperto e nessun testo è selezionato (fraz. dello spread). */
+  insertMarker?: { x: number; y: number; label: string };
   selectedItemId?: string | null;
   highlightItemId?: string | null;
   /** Foto aggiunte alla selezione con Maiusc+clic (per azioni su più foto, come aprirle nell'editor). */
@@ -628,6 +630,12 @@ function SpreadViewInner(props: SpreadViewProps) {
         const outer = geometry[Math.min(activeArea, spread.areas.length - 1)].outer;
         return <div className="spread__active" style={{ left: pct((outer.x / size.width) * 100), top: pct((outer.y / size.height) * 100), width: pct((outer.w / size.width) * 100), height: pct((outer.h / size.height) * 100) }} />;
       })() : null}
+
+      {interactive && props.insertMarker ? (
+        <div className="spread__insert" style={{ left: pct(props.insertMarker.x * 100), top: pct(props.insertMarker.y * 100) }} aria-hidden="true">
+          <span>+ {props.insertMarker.label}</span>
+        </div>
+      ) : null}
 
       {hint ? <div className={`spread__hint spread__hint--${hint.target.zone}`} style={{ left: pct((hint.rect.x / size.width) * 100), top: pct((hint.rect.y / size.height) * 100), width: pct((hint.rect.w / size.width) * 100), height: pct((hint.rect.h / size.height) * 100) }} /> : null}
     </div>

@@ -51,6 +51,19 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, 
   const [menu, setMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   // La rotella sulla striscia sfoglia le miniature (scorrimento orizzontale); sullo spread la rotella resta per zoom e raddrizzamento, così non si confonde con le azioni sulle foto.
   const navRef = useRef<HTMLElement>(null);
+  // Durante un trascinamento il «+» sparisce (la zona accetta la foto e basta), e un clic subito dopo un rilascio non aggiunge uno spread vuoto: niente doppia azione.
+  const [dragging, setDragging] = useState(false);
+  const lastDropAt = useRef(0);
+  useEffect(() => {
+    const start = () => setDragging(true);
+    const end = () => setDragging(false);
+    const drop = () => { lastDropAt.current = Date.now(); setDragging(false); };
+    document.addEventListener("dragstart", start, true);
+    document.addEventListener("dragend", end, true);
+    document.addEventListener("drop", drop, true);
+    return () => { document.removeEventListener("dragstart", start, true); document.removeEventListener("dragend", end, true); document.removeEventListener("drop", drop, true); };
+  }, []);
+  const addAt = (index: number) => { if (Date.now() - lastDropAt.current > 700) onAddAt(index); };
   useEffect(() => {
     const element = navRef.current;
     if (!element) return;
@@ -73,7 +86,7 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, 
   }, [project.chapters]);
 
   return (
-    <nav ref={navRef} className="film" aria-label="Spread dell'album">
+    <nav ref={navRef} className={`film${dragging ? " film--dragging" : ""}`} aria-label="Spread dell'album">
       <div className="film__track">
         {project.spreads.map((spread, index) => {
           const chapter = spread.areas.flatMap((area) => area.items).map((item) => chapterByAsset.get(item.assetId)).find(Boolean);
@@ -81,7 +94,7 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, 
           const empty = spread.areas.some((area) => area.items.length === 0);
           return (
             <Fragment key={spread.id}>
-            <Gap index={index} onDropNew={onDropNew} onAddAt={onAddAt} />
+            <Gap index={index} onDropNew={onDropNew} onAddAt={addAt} />
             <div
               ref={index === current ? currentRef : undefined}
               className={`film__item${index === current ? " is-current" : ""}`}
@@ -117,8 +130,8 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, 
             </Fragment>
           );
         })}
-        <Gap index={project.spreads.length} onDropNew={onDropNew} onAddAt={onAddAt} />
-        <button type="button" className="film__add" onClick={onAdd} title="Aggiungi uno spread vuoto" aria-label="Aggiungi uno spread"><Icon name="plus" size={18} /></button>
+        <Gap index={project.spreads.length} onDropNew={onDropNew} onAddAt={addAt} />
+        <button type="button" className="film__add" onClick={() => { if (Date.now() - lastDropAt.current > 700) onAdd(); }} title="Aggiungi uno spread vuoto" aria-label="Aggiungi uno spread"><Icon name="plus" size={18} /></button>
       </div>
       {menu ? (
         <ContextMenu

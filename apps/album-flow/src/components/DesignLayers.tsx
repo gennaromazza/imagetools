@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { AlbumSpread, SpreadOverlay } from "@photo-tools/shared-types";
 import { spreadSizeMm, type Rect } from "../engine/geometry";
 import { snapMove, type SnapGuide } from "../engine/snap";
-import { fontIdsOfSpread, groupMembers, overlaysOf, type OverlayPatch } from "../model/design";
+import { fontIdsOfSpread, groupMembers, overlaysOf, scaleOverlays, type OverlayPatch } from "../model/design";
 import { groupFrame, overlaySnapTargets, resizeKeepingCorner } from "../model/designAlign";
 import { getSnapEnabled } from "../model/snapSettings";
 import { TEXT_LIMITS } from "../model/typography";
@@ -28,6 +28,8 @@ export interface DesignHandlers {
   onCommit: (overlayId: string, patch: OverlayPatch) => void;
   /** Sposta l'elemento e, se è in un gruppo, tutto il gruppo (scarto in frazioni dello spread). */
   onMoveBy: (overlayId: string, dx: number, dy: number) => void;
+  /** Ingrandisce o riduce insieme più elementi attorno a un angolo fermo (frazioni dello spread). */
+  onScale: (overlayIds: readonly string[], factor: number, pivot: { x: number; y: number }) => void;
   onEdit: (overlayId: string) => void;
 }
 
@@ -64,11 +66,15 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
   const ready = useFontsReady(fontIdsOfSpread(spread));
   const rootRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<{ id: string; patch: OverlayPatch; move: boolean; guides: SnapGuide[] } | null>(null);
+  /** Maniglia del riquadro del gruppo: anteprima in tempo reale mentre si trascina. */
+  const [scaling, setScaling] = useState<{ ids: string[]; factor: number; pivot: { x: number; y: number } } | null>(null);
+  const scaleGesture = useRef<{ startX: number; startY: number; ids: string[]; frame: Rect; pivot: { x: number; y: number }; factor: number } | null>(null);
   const gesture = useRef<Gesture | null>(null);
   /** Il clic che segue un trascinamento non deve aprire il pannello. */
   const dragged = useRef(false);
 
   const shown = useMemo(() => {
+    if (scaling) return overlaysOf(scaleOverlays({ settings: { sheet }, spreads: [spread] } as unknown as Project, spread.id, scaling.ids, scaling.factor, scaling.pivot).spreads[0]);
     if (!draft) return overlays;
     const dragged = overlays.find((overlay) => overlay.id === draft.id);
     const dx = draft.patch.x !== undefined && dragged ? draft.patch.x - dragged.x : 0;
@@ -78,7 +84,7 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
       if (moving?.has(overlay.id)) return { ...overlay, x: overlay.x + dx, y: overlay.y + dy } as SpreadOverlay;
       return draft.id === overlay.id ? ({ ...overlay, ...draft.patch } as SpreadOverlay) : overlay;
     });
-  }, [overlays, draft, spread]);
+  }, [overlays, draft, spread, scaling, sheet]);
   const project = useMemo(() => sheetProject(sheet), [sheet]);
   const html = useMemo(() => {
     if (!shown.length) return "";
@@ -171,6 +177,44 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
     else handlers?.onCommit(current.id, patch);
   };
 
+  // Riquadro del gruppo (o della selezione multipla): una maniglia in basso a destra ingrandisce e riduce tutti insieme, con l'angolo in alto a sinistra fermo.
+  const selectedOverlay = overlays.find((overlay) => overlay.id === handlers?.selectedId);
+  const groupIds = selectedOverlay ? Array.from(new Set([...groupMembers(spread, selectedOverlay.id).map((overlay) => overlay.id), selectedOverlay.id, ...(handlers?.extraIds ?? [])])) : [];
+  const groupBoxes = boxes.filter(({ overlay }) => groupIds.includes(overlay.id));
+  const groupRect: Rect | null = groupIds.length >= 2 && groupBoxes.length >= 2 ? (() => {
+    const left = Math.min(...groupBoxes.map(({ box }) => box.x));
+    const top = Math.min(...groupBoxes.map(({ box }) => box.y));
+    return { x: left, y: top, w: Math.max(...groupBoxes.map(({ box }) => box.x + box.w)) - left, h: Math.max(...groupBoxes.map(({ box }) => box.y + box.h)) - top };
+  })() : null;
+  const scaleFactor = (event: React.PointerEvent): number | null => {
+    const current = scaleGesture.current;
+    const metrics = unit();
+    if (!current || !metrics) return null;
+    const dx = (event.clientX - current.startX) * metrics.perPx;
+    const dy = (event.clientY - current.startY) * metrics.perPx;
+    const { w, h } = current.frame;
+    return Math.min(8, Math.max(0.1, 1 + (dx * w + dy * h) / (w * w + h * h)));
+  };
+  const beginScale = (event: React.PointerEvent) => {
+    if (!groupRect) return;
+    event.preventDefault();
+    event.stopPropagation();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    scaleGesture.current = { startX: event.clientX, startY: event.clientY, ids: groupIds, frame: groupRect, pivot: { x: groupRect.x / size.width, y: groupRect.y / size.height }, factor: 1 };
+  };
+  const moveScale = (event: React.PointerEvent) => {
+    const current = scaleGesture.current;
+    const factor = scaleFactor(event);
+    if (current && factor !== null) { current.factor = factor; setScaling({ ids: current.ids, factor, pivot: current.pivot }); }
+  };
+  const endScale = (event: React.PointerEvent) => {
+    const current = scaleGesture.current;
+    const factor = scaleFactor(event);
+    scaleGesture.current = null;
+    setScaling(null);
+    if (current && factor !== null && Math.abs(factor - 1) > 0.005) handlers?.onScale(current.ids, factor, current.pivot);
+  };
+
   return (
     <div ref={rootRef} className="spread__design-root" aria-hidden={interactive ? undefined : true}>
       <svg className="spread__design spread__design--above" viewBox={`0 0 ${size.width} ${size.height}`} preserveAspectRatio="none" aria-hidden="true" dangerouslySetInnerHTML={{ __html: html }} />
@@ -184,6 +228,11 @@ export function OverlayLayer({ sheet, spread, media, interactive, handlers }: { 
             : { top: `${(guide.at / size.height) * 100}%`, left: `${(guide.from / size.width) * 100}%`, width: `${((guide.to - guide.from) / size.width) * 100}%` }}
         />
       ))}
+      {groupRect ? (
+        <div className="design-group" style={{ left: `${(groupRect.x / size.width) * 100}%`, top: `${(groupRect.y / size.height) * 100}%`, width: `${(groupRect.w / size.width) * 100}%`, height: `${(groupRect.h / size.height) * 100}%` }} aria-hidden="true">
+          <span className="design-group__handle" onPointerDown={beginScale} onPointerMove={moveScale} onPointerUp={endScale} title="Trascina per ingrandire o ridurre tutto il gruppo in proporzione" />
+        </div>
+      ) : null}
       {boxes.map(({ overlay, box }) => {
         const selected = handlers?.selectedId === overlay.id;
         const sibling = !selected && Boolean(overlay.groupId) && overlays.find((other) => other.id === handlers?.selectedId)?.groupId === overlay.groupId;

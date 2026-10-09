@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { AlbumProjectV2, AlbumSpread, SpreadBackground, SpreadBackgroundScope, SpreadOverlay, SpreadTextOverlay, TextStyleSpec } from "@photo-tools/shared-types";
 import { BUILTIN_BACKGROUNDS, builtinDataUrl } from "../model/builtinMedia";
-import { backgroundsOf, groupMembers, overlaysOf, type BackgroundChoice, type NewGraphicOptions, type NewTextOptions, type OverlayPatch } from "../model/design";
+import { backgroundsOf, groupMembers, overlaysOf, textInsertionPoint, type BackgroundChoice, type NewGraphicOptions, type NewTextOptions, type OverlayPatch } from "../model/design";
 import { addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle, type Phrase, type SavedTextStyle } from "../model/designLibrary";
 import { importMediaFile, listMedia, mediaVersion, removeMedia, subscribeMedia, type MediaKind, type MediaRecord } from "../model/mediaStore";
 import { BASE_GROUP, FONT_CATEGORY_LABEL, FONT_FAMILIES, TEXT_PRESETS, fontInfo, fontStack, nearestFace, textPreset, type TextPreset } from "../model/typography";
@@ -46,6 +46,12 @@ export interface DesignActions {
   /** Mette i testi narrativi sulle pagine libere di tutto l'album; restituisce quanti ne ha aggiunti. */
   planStories: () => number;
   removeOverlays: (overlayIds: readonly string[]) => void;
+  /** Ingrandisce (fattore > 1) o riduce insieme più elementi: corpo, larghezza e distanze in proporzione. */
+  scale: (overlayIds: readonly string[], factor: number, pivot?: { x: number; y: number }) => void;
+  /** Applica lo stesso carattere, colore, allineamento o visibilità a tutti gli elementi di testo indicati. */
+  styleMany: (overlayIds: readonly string[], patch: OverlayPatch) => void;
+  /** Sceglie la pagina attiva, dove vanno i nuovi testi. */
+  setArea: (areaIndex: number) => void;
 }
 
 /** Colore dominante degli sfondi di serie: serve a scegliere un testo che si legga. */
@@ -302,7 +308,53 @@ function GraphicEditor({ overlay, actions }: { overlay: Extract<SpreadOverlay, {
   );
 }
 
-function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle, onSavePhrase, textRef, insertAt }: { spread: AlbumSpread; selected: SpreadOverlay | undefined; extraIds: readonly string[]; actions: DesignActions; savedStyles: SavedTextStyle[]; onSaveStyle: (name: string, style: TextStyleSpec) => void; onSavePhrase: (text: string) => void; textRef: React.RefObject<HTMLTextAreaElement | null>; insertAt: { x: number; y: number } }) {
+/** Dove va il prossimo testo: pagina attiva (evidenziata sul foglio con il segnaposto «Il testo va qui»), cambiabile con un clic. */
+function InsertTarget({ two, areaIndex, actions }: { two: boolean; areaIndex: number; actions: DesignActions }) {
+  return (
+    <div className="design__target" role="group" aria-label="Dove inserire il testo">
+      <span className="small"><strong>Dove va il testo:</strong> {two ? (areaIndex === 0 ? "pagina sinistra" : "pagina destra") : "foglio intero"}. Il segnaposto «+ Il testo va qui» sul foglio mostra il punto esatto.</span>
+      {two ? (
+        <div className="design__chips">
+          <button type="button" className={`chip${areaIndex === 0 ? " is-active" : ""}`} aria-pressed={areaIndex === 0} onClick={() => actions.setArea(0)}>Pagina sinistra</button>
+          <button type="button" className={`chip${areaIndex === 1 ? " is-active" : ""}`} aria-pressed={areaIndex === 1} onClick={() => actions.setArea(1)}>Pagina destra</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Più elementi insieme (un gruppo, o più testi selezionati): si ingrandiscono e si riducono in proporzione, come in Canva. */
+function ScaleControls({ spread, selected, extraIds, actions }: { spread: AlbumSpread; selected: SpreadOverlay; extraIds: readonly string[]; actions: DesignActions }) {
+  const ids = Array.from(new Set([...groupMembers(spread, selected.id).map((overlay) => overlay.id), selected.id, ...extraIds]));
+  if (ids.length < 2) return null;
+  const texts = overlaysOf(spread).filter((overlay): overlay is SpreadTextOverlay => overlay.kind === "text" && ids.includes(overlay.id));
+  const textIds = texts.map((overlay) => overlay.id);
+  const steps: ReadonlyArray<readonly [number, string, string]> = [[0.75, "−25%", "Riduci di un quarto"], [0.9, "−10%", "Riduci del 10%"], [1.1, "+10%", "Ingrandisci del 10%"], [1.25, "+25%", "Ingrandisci di un quarto"]];
+  return (
+    <div className="design__section design__scale">
+      <h4>Ingrandisci o riduci insieme</h4>
+      <p className="small muted">Valgono per tutti i {ids.length} elementi {extraIds.length ? "selezionati" : "del gruppo"}: corpo, larghezza e distanze cambiano in proporzione e il blocco resta in asse.</p>
+      <div className="design__chips" role="group" aria-label="Ingrandisci o riduci insieme">
+        {steps.map(([factor, label, hint]) => <button key={label} type="button" className="chip" title={hint} onClick={() => actions.scale(ids, factor)}>{label}</button>)}
+      </div>
+      <p className="small muted">Oppure trascina la maniglia tonda sull'angolo in basso a destra del riquadro tratteggiato sul foglio.</p>
+      {textIds.length > 0 ? (
+        <>
+          <h4>Stile per tutti i testi</h4>
+          <FontPicker value={(selected.kind === "text" ? selected : texts[0]).font} onChange={(fontId) => actions.styleMany(textIds, { font: fontId })} />
+          <div className="design__colors">
+            {COLOR_SWATCHES.map((color) => <button key={color} type="button" className="design__swatch" style={{ background: color }} aria-label={`Colore ${color} per tutti`} onClick={() => actions.styleMany(textIds, { color })} />)}
+          </div>
+          <div className="design__chips" role="group" aria-label="Allineamento per tutti">
+            {([["left", "Sinistra"], ["center", "Centro"], ["right", "Destra"]] as const).map(([align, label]) => <button key={align} type="button" className="chip" onClick={() => actions.styleMany(textIds, { align })}>{label}</button>)}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle, onSavePhrase, textRef, insertAt, two, areaIndex }: { two: boolean; areaIndex: number; spread: AlbumSpread; selected: SpreadOverlay | undefined; extraIds: readonly string[]; actions: DesignActions; savedStyles: SavedTextStyle[]; onSaveStyle: (name: string, style: TextStyleSpec) => void; onSavePhrase: (text: string) => void; textRef: React.RefObject<HTMLTextAreaElement | null>; insertAt: { x: number; y: number } }) {
   const count = overlaysOf(spread).length;
   useEffect(() => { installFonts(); void loadFonts(TEXT_PRESETS.map((preset) => preset.style.font)); }, []);
   return (
@@ -313,6 +365,7 @@ function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle
           <button type="button" className="btn btn--sm btn--primary" onClick={() => actions.group([selected.id, ...extraIds])}>Aggancia insieme</button>
         </div>
       ) : selected ? <p className="small muted design__hint">Maiusc o Ctrl + clic su altri testi per selezionarne più d'uno e agganciarli.</p> : null}
+      {selected ? <ScaleControls spread={spread} selected={selected} extraIds={extraIds} actions={actions} /> : null}
       {selected ? (
         <>
           <ElementActions overlay={selected} actions={actions} groupSize={groupMembers(spread, selected.id).length} />
@@ -322,6 +375,7 @@ function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle
         </>
       ) : (
         <div className="design__section">
+          <InsertTarget two={two} areaIndex={areaIndex} actions={actions} />
           <p className="small muted">Scegli uno stile per aggiungere un testo allo spread. Poi trascinalo, ridimensionalo e cambia il carattere. {count ? `Su questo spread ci sono ${count} elementi: clic per modificarli.` : ""}</p>
           {PRESET_GROUPS.map(([group, presets]) => (
           <div key={group} className="design__preset-group">
@@ -482,7 +536,7 @@ export function DesignPanel({ project, spread, two, areaIndex, tab, onTab, selec
   const [savedStyles, setSavedStylesState] = useState<SavedTextStyle[]>(() => loadSavedStyles());
   const textRef = useRef<HTMLTextAreaElement>(null);
   const selected = overlaysOf(spread).find((overlay) => overlay.id === selectedOverlayId);
-  const insertAt = useMemo(() => ({ x: !two ? 0.5 : areaIndex === 0 ? 0.25 : 0.75, y: 0.4 }), [two, areaIndex]);
+  const insertAt = useMemo(() => textInsertionPoint(two ? 2 : 1, areaIndex), [two, areaIndex]);
   // Colore della pagina dove finisce il testo (uno sfondo di serie conta come il suo colore dominante).
   const scopeOf = !two ? "spread" : areaIndex === 0 ? "left" : "right";
   const pictured = backgroundsOf(spread).find((background) => background.scope === "spread" || background.scope === scopeOf);
@@ -516,11 +570,11 @@ export function DesignPanel({ project, spread, two, areaIndex, tab, onTab, selec
       <div className="layouts__body design__body">
         {tab === "backgrounds" ? <BackgroundsTab spread={spread} two={two} actions={actions} /> : null}
         {tab === "text" ? (
-          <TextTab spread={spread} selected={selected} extraIds={extraOverlayIds} actions={designActions} savedStyles={savedStyles} textRef={textRef} insertAt={insertAt}
+          <TextTab spread={spread} selected={selected} extraIds={extraOverlayIds} actions={designActions} savedStyles={savedStyles} textRef={textRef} insertAt={insertAt} two={two} areaIndex={areaIndex}
             onSaveStyle={(name, style) => { setSavedStyles(upsertSavedStyle(savedStyles, name, style)); actions.notify(`Stile «${name.trim()}» salvato.`); }}
             onSavePhrase={(text) => { if (!text.trim()) return; setPhrases(addPhrase(phrases, text)); actions.notify("Frase aggiunta al tuo archivio."); }} />
         ) : null}
-        {tab === "story" ? <StoryTab project={project} spread={spread} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} selected={selected} actions={designActions} /> : null}
+        {tab === "story" ? <><div className="design__section"><InsertTarget two={two} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} actions={designActions} /></div><StoryTab project={project} spread={spread} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} selected={selected} actions={designActions} /></> : null}
         {tab === "graphics" ? <GraphicsTab actions={designActions} insertAt={insertAt} /> : null}
         {tab === "library" ? <LibraryTab actions={designActions} phrases={phrases} setPhrases={setPhrases} savedStyles={savedStyles} setSavedStyles={setSavedStyles} insertAt={insertAt} /> : null}
       </div>

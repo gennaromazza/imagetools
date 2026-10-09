@@ -1034,6 +1034,26 @@ test("anteprima al passaggio del mouse: la foto intera, con le sue proporzioni e
 
 // ------------------------------------------------------------------ layout libero e bloccato
 
+test("nuovo spread: eredita divisione e stile (spazio, margine, bordo, modo) dello spread precedente, non foto né layout", () => {
+  let project = filled(4, 3);
+  const id = firstSpreadId(project);
+  project = setSplitMode(project, id, "full");
+  const style = { ...project.spreads[0].areas[0].style, gapCm: 0.5, paddingCm: 1.2, borderCm: 0.3, mode: "fit" as const };
+  project = { ...project, spreads: project.spreads.map((spread, index) => (index === 0 ? { ...spread, areas: spread.areas.map((area) => ({ ...area, style })) } : spread)) };
+  const after = addSpread(project, 1);
+  const created = after.spreads[1];
+  assert.equal(created.split, "full", "stessa divisione: foglio intero");
+  assert.equal(created.areas.length, 1);
+  assert.deepEqual(created.areas[0].style, style, "stessi spazi, margini e bordo");
+  assert.equal(created.areas[0].items.length, 0);
+  assert.equal(created.areas[0].layout, null);
+  assert.equal(addSpread(project, 1, "half").spreads[1].areas.length, 2, "una divisione esplicita vince");
+  assert.deepEqual(addSpread(project, 1, "half").spreads[1].areas[1].style, style, "gli stili si ereditano anche con un'altra divisione");
+  // in testa eredita dallo spread che segue
+  assert.equal(addSpread(project, 0).spreads[0].split, "full");
+  assertProjectInvariants(after, "nuovo spread ereditato");
+});
+
 test("layout libero e divisione dello spread: le foto restano dove sono, una foto libera può diventare più grande della sua pagina", () => {
   const project = filled(4, 3);
   const id = firstSpreadId(project);

@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SpreadTextOverlay } from "@photo-tools/shared-types";
-import { MAX_OVERLAYS_PER_SPREAD, cleanText, overlayLimits, addGraphicOverlay, addTextOverlay, addTextStack, backgroundsOf, duplicateOverlay, fontIdsOfSpread, mediaIdsOfSpread, orderOverlay, overlaysInPaintOrder, overlaysOf, removeOverlay, groupMembers, groupOverlays, moveOverlayGroup, ungroupOverlay, setAlbumBackground, setSpreadBackground, updateOverlay, updateSpreadBackground } from "./design";
+import { MAX_OVERLAYS_PER_SPREAD, cleanText, overlayLimits, addGraphicOverlay, addTextOverlay, addTextStack, backgroundsOf, duplicateOverlay, fontIdsOfSpread, mediaIdsOfSpread, orderOverlay, overlaysInPaintOrder, overlaysOf, removeOverlay, scaleOverlays, textInsertionPoint, groupMembers, groupOverlays, moveOverlayGroup, ungroupOverlay, setAlbumBackground, setSpreadBackground, updateOverlay, updateSpreadBackground } from "./design";
 import { LIBRARY_KEYS, NEW_SEED_PHRASES, SEED_PHRASES, SEED_VERSION, addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle } from "./designLibrary";
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
@@ -658,4 +658,48 @@ test("calamite: i bersagli sono i bordi e il centro dello spread, la piega, i ma
   assert.ok(Math.abs(snapped.rect.x + snapped.rect.w / 2 - width / 2) < 1e-6, "il centro va sulla piega");
   assert.ok(snapped.guides.some((guide) => guide.axis === "x" && Math.abs(guide.at - width / 2) < 1e-6), "con la sua linea guida");
   assert.deepEqual(snapMove({ x: width * 0.3, y: height * 0.45, w: 4, h: 3 }, [], 3).guides, [], "senza bersagli nessun aggancio");
+});
+
+test("ingrandire e ridurre insieme: titolo e sottotitolo scalano in proporzione e restano in asse; ai limiti si fermano tutti", () => {
+  const { project, spreadId } = withSpread();
+  const made = addTextStack(project, spreadId, { presetId: "headline", at: { x: 0.5, y: 0.3 } });
+  const parts = overlaysOf(made.project.spreads[0]);
+  assert.ok(parts.length >= 2, "lo stile ha titolo e riga piccola");
+  const ids = parts.map((part) => part.id);
+  const before = parts as SpreadTextOverlay[];
+  const axis = (items: SpreadTextOverlay[]) => items.map((item) => Number((item.x + item.w / 2).toFixed(3)));
+  const bigger = scaleOverlays(made.project, spreadId, ids, 1.25);
+  const after = overlaysOf(bigger.spreads[0]) as SpreadTextOverlay[];
+  for (const [index, item] of after.entries()) {
+    assert.ok(Math.abs(item.sizePt / before[index].sizePt - 1.25) < 0.01, "il corpo cresce dello stesso fattore");
+    assert.ok(Math.abs(item.w / before[index].w - 1.25) < 0.01, "la larghezza cresce dello stesso fattore");
+  }
+  assert.deepEqual(axis(after).map((value, index) => Math.abs(value - axis(before)[index]) < 0.002), after.map(() => true), "il blocco resta sul suo asse");
+  const rounded = overlaysOf(scaleOverlays(bigger, spreadId, ids, 1 / 1.25).spreads[0]) as SpreadTextOverlay[];
+  for (const [index, item] of rounded.entries()) assert.ok(Math.abs(item.sizePt - before[index].sizePt) < 0.05, "ridurre dopo ingrandire torna alla misura di prima");
+  const huge = overlaysOf(scaleOverlays(made.project, spreadId, ids, 50).spreads[0]) as SpreadTextOverlay[];
+  const ratios = huge.map((item, index) => item.sizePt / before[index].sizePt);
+  assert.ok(ratios.every((ratio) => Math.abs(ratio - ratios[0]) < 0.01), "al limite tutti si fermano insieme: le proporzioni restano");
+  assert.equal(scaleOverlays(made.project, spreadId, ids, 1), made.project, "fattore 1: nessun cambiamento");
+  assert.equal(scaleOverlays(made.project, spreadId, [], 2), made.project);
+  assert.equal(scaleOverlays(made.project, "x", ids, 2), made.project);
+});
+
+test("punto di inserimento dei testi: centro della pagina attiva", () => {
+  assert.deepEqual(textInsertionPoint(1, 0), { x: 0.5, y: 0.4 });
+  assert.deepEqual(textInsertionPoint(2, 0), { x: 0.25, y: 0.4 });
+  assert.deepEqual(textInsertionPoint(2, 1), { x: 0.75, y: 0.4 });
+});
+
+test("scala con un angolo fermo: il punto di rotazione resta dov'è e il blocco cresce da lì", () => {
+  const { project, spreadId } = withSpread();
+  const made = addTextStack(project, spreadId, { presetId: "headline", at: { x: 0.5, y: 0.3 } });
+  const before = overlaysOf(made.project.spreads[0]) as SpreadTextOverlay[];
+  const ids = before.map((item) => item.id);
+  const left = Math.min(...before.map((item) => item.x));
+  const top = Math.min(...before.map((item) => item.y));
+  const after = overlaysOf(scaleOverlays(made.project, spreadId, ids, 1.2, { x: left, y: top }).spreads[0]) as SpreadTextOverlay[];
+  assert.ok(Math.abs(Math.min(...after.map((item) => item.x)) - left) < 0.002, "il bordo sinistro non si muove");
+  assert.ok(Math.abs(Math.min(...after.map((item) => item.y)) - top) < 0.002, "il bordo alto non si muove");
+  assert.ok(Math.max(...after.map((item) => item.x + item.w)) > Math.max(...before.map((item) => item.x + item.w)), "il blocco cresce verso destra");
 });

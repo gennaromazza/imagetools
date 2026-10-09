@@ -32,6 +32,14 @@
 
 
 
+## 2026-10-09 - Album Flow 0.2.29
+
+- Nuovo: i testi hanno un segnaposto sul foglio, «+ Il testo va qui», che mostra la pagina e il punto esatto dove finirà il prossimo testo; nel pannello «Personalizza» (Testo e Racconto) puoi scegliere «Pagina sinistra» o «Pagina destra», e la pagina attiva è evidenziata.
+- Nuovo: un gruppo di testi (per esempio titolo e sottotitolo dello stile) o più testi selezionati hanno un riquadro tratteggiato con una maniglia tonda sull'angolo in basso a destra: trascinandola si ingrandiscono o riducono tutti insieme in proporzione, come in Canva. Nel pannello ci sono anche «Ingrandisci o riduci insieme» (−25%, −10%, +10%, +25%) e «Stile per tutti i testi» (carattere, colore, allineamento).
+- Nuovo: un nuovo spread eredita la divisione e lo stile (spazio, margine, bordo, modo, sfondo) dello spread precedente, invece di partire sempre da «metà» con le impostazioni di base.
+- Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.
+- Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più.
+
 ## 2026-10-09 - Album Flow 0.2.28
 
 - Cambiato: la rotella non sfoglia più l'album dallo spread (si confondeva con le azioni sulle foto): ora scorre le miniature in basso, con il puntatore sulla striscia delle pagine.

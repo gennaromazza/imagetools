@@ -21,6 +21,33 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.29",
+    date: "2026-10-09",
+    headline: "Testi più chiari da inserire e da ingrandire, nuovi spread coerenti",
+    items: [
+      {
+        title: "Si vede dove va il testo",
+        text: "Con «Personalizza» aperto compare sul foglio il segnaposto «+ Il testo va qui»: indica la pagina e il punto esatto in cui verrà inserito il prossimo testo. Nel pannello scegli «Pagina sinistra» o «Pagina destra»; la pagina attiva è evidenziata.",
+        where: ["Personalizza", "Testo", "Racconto", "Pagina sinistra", "Pagina destra"],
+      },
+      {
+        title: "Ingrandisci o riduci titolo e sottotitolo insieme",
+        text: "Un gruppo di testi (come titolo e riga piccola di uno stile), o più testi selezionati con Maiusc o Ctrl + clic, hanno un riquadro tratteggiato con una maniglia tonda in basso a destra: trascinala per ingrandirli o ridurli tutti in proporzione, come in Canva. Nel pannello trovi anche «Ingrandisci o riduci insieme» (−25%, −10%, +10%, +25%) e «Stile per tutti i testi» per carattere, colore e allineamento.",
+        where: ["Maniglia tonda del riquadro", "Ingrandisci o riduci insieme", "Stile per tutti i testi"],
+      },
+      {
+        title: "Il nuovo spread eredita il precedente",
+        text: "Un nuovo spread parte con la stessa divisione (foglio intero, metà…) e lo stesso stile (spazio, margine, bordo, modo, sfondo) dello spread che lo precede, così non devi ripetere le impostazioni.",
+        where: ["+ tra le miniature", "Aggiungi uno spread"],
+      },
+      {
+        title: "La libreria ricorda dove eri arrivato",
+        text: "Chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria si porta sull'ultima foto guardata e la seleziona, senza dover scorrere di nuovo.",
+        where: ["Spazio"],
+      },
+    ],
+  },
+  {
     version: "0.2.28",
     date: "2026-10-09",
     headline: "Anteprima di rilascio fedele e foto sempre allineate",

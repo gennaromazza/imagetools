@@ -6,11 +6,19 @@ import { newId } from "./ids";
 import { areaGeometry, areaGeometryFor, createArea, createSpread, findSpread, hasFreeLayout, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
 import { sanitizeFrame } from "./templates";
 
-export function addSpread(project: Project, atIndex?: number, split: AlbumSplitMode = "half"): Project {
+/**
+ * Aggiunge uno spread vuoto. Senza una divisione esplicita eredita quella dello spread che lo precede (o, in testa, di quello che lo segue),
+ * e le pagine ereditano lo stile (spazio, margine, bordo, modo, sfondo) della pagina corrispondente: l'album resta coerente senza ripetere i comandi.
+ * Foto, disposizione, blocchi, testi e sfondi a immagine non si ereditano.
+ */
+export function addSpread(project: Project, atIndex?: number, split?: AlbumSplitMode): Project {
   if (project.spreads.length >= MAX_SPREADS) return project;
   const index = Math.min(Math.max(atIndex ?? project.spreads.length, 0), project.spreads.length);
+  const reference = project.spreads[index - 1] ?? project.spreads[index];
+  const created = createSpread(project, split ?? reference?.split ?? "half");
+  const spread: AlbumSpread = reference ? { ...created, areas: created.areas.map((area, areaIndex) => ({ ...area, style: { ...(reference.areas[areaIndex] ?? reference.areas[0]).style } })) } : created;
   const spreads = [...project.spreads];
-  spreads.splice(index, 0, createSpread(project, split));
+  spreads.splice(index, 0, spread);
   return touch({ ...project, spreads });
 }
 
