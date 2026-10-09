@@ -21,6 +21,27 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.25",
+    date: "2026-10-09",
+    headline: "Aggiungi spread con un «+» e sfoglia con la rotella",
+    items: [
+      {
+        title: "Un «+» per aggiungere uno spread dove vuoi",
+        text: "Passa il mouse tra due miniature nella striscia in basso (o dopo l'ultima): compare un «+». Un clic crea uno spread vuoto proprio in quel punto e lo apre.",
+        where: ["+ tra le miniature"],
+      },
+      {
+        title: "Sfoglia l'album con la rotella",
+        text: "Con il puntatore sopra lo spread, la rotella del mouse passa allo spread precedente o successivo. Con Ctrl, ⌘, Alt o Maiusc la rotella fa ancora zoom e raddrizzamento.",
+        where: ["Rotella sullo spread"],
+      },
+      {
+        title: "Pagine con solo testo più pulite",
+        text: "Se una pagina ha già il testo del template e nessuna foto, «Trascina qui le foto» non copre più il titolo: resta il bordo tratteggiato e una piccola icona nell'angolo; la scritta compare al passaggio del mouse o quando trascini una foto.",
+      },
+    ],
+  },
+  {
     version: "0.2.24",
     date: "2026-10-08",
     headline: "Più foto in Photoshop in un colpo solo e filtro «Usate»",

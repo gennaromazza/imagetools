@@ -877,6 +877,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           current={index}
           onSelect={goTo}
           onAdd={() => { commit((p) => addSpread(p)); setSpreadIndex(count); setSelectedItemId(null); setActiveArea(0); }}
+          onAddAt={(at) => { commit((p) => addSpread(p, at)); setSpreadIndex(at); setSelectedItemId(null); setActiveArea(0); }}
           onDuplicate={(i) => { commit((p) => duplicateSpread(p, p.spreads[i].id)); setSpreadIndex(i + 1); }}
           onRemove={(i) => { commit((p) => removeSpread(p, p.spreads[i].id)); notify(`Spread ${i + 1} eliminato.`, true); }}
           onDropOn={(at, payload) => {

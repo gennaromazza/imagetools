@@ -673,6 +673,11 @@
       "Corretto: premendo Alt la pagina si spostava di qualche pixel perché compariva la barra dei menu di Windows. Ora Alt da solo non la mostra più.",
       "Migliorato: il pulsante «Bordo» della barra della foto è un'icona compatta e occupa meno spazio.",
       "Migliorato: duplica ed elimina spread non compaiono più sopra le miniature; sono nel tasto destro sulla miniatura (insieme a «Sposta all'inizio» e «Sposta in fondo»)."
+    ],
+    "0.2.25": [
+      "Nuovo: nella striscia delle miniature, passando il mouse tra due spread (o dopo l'ultimo) compare un «+» che aggiunge uno spread vuoto proprio lì.",
+      "Nuovo: la rotella del mouse sopra lo spread sfoglia l'album, uno spread alla volta (Ctrl/⌘, Alt e Maiusc con la rotella restano per zoom e raddrizzamento).",
+      "Migliorato: su una pagina che ha già il testo del template ma nessuna foto, «Trascina qui le foto» non si sovrappone più al testo: resta il bordo tratteggiato e un'icona nell'angolo, la scritta compare al passaggio del mouse o trascinando una foto."
     ]
   }
 }

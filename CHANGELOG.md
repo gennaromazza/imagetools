@@ -32,6 +32,12 @@
 
 
 
+## 2026-10-09 - Album Flow 0.2.25
+
+- Nuovo: nella striscia delle miniature, passando il mouse tra due spread (o dopo l'ultimo) compare un «+» che aggiunge uno spread vuoto proprio lì.
+- Nuovo: la rotella del mouse sopra lo spread sfoglia l'album, uno spread alla volta (Ctrl/⌘, Alt e Maiusc con la rotella restano per zoom e raddrizzamento).
+- Migliorato: su una pagina che ha già il testo del template ma nessuna foto, «Trascina qui le foto» non si sovrappone più al testo: resta il bordo tratteggiato e un'icona nell'angolo, la scritta compare al passaggio del mouse o trascinando una foto.
+
 ## 2026-10-08 - Album Flow 0.2.24
 
 - Nuovo: in libreria, accanto a «N da usare», il pulsante «N usate» mostra solo le foto già usate nell'album (il filtro «Usate» era già in Filtri → Uso).

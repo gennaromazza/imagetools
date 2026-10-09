@@ -11,6 +11,8 @@ export interface FilmstripProps {
   current: number;
   onSelect: (index: number) => void;
   onAdd: () => void;
+  /** Il «+» che compare tra due miniature: nuovo spread vuoto in quella posizione. */
+  onAddAt: (index: number) => void;
   onDuplicate: (index: number) => void;
   onRemove: (index: number) => void;
   onMove: (from: number, to: number) => void;
@@ -22,7 +24,7 @@ export interface FilmstripProps {
 
 /** Striscia sottile con tutti gli spread: numero, miniatura, colore del capitolo; trascina per riordinare. */
 /** Zona stretta tra due spread (e in fondo): rilasciandovi una foto si crea un nuovo spread in quel punto. */
-function Gap({ index, onDropNew }: { index: number; onDropNew: FilmstripProps["onDropNew"] }) {
+function Gap({ index, onDropNew, onAddAt }: { index: number; onDropNew: FilmstripProps["onDropNew"]; onAddAt: FilmstripProps["onAddAt"] }) {
   const accepts = () => { const kind = currentDrag()?.kind; return kind === "assets" || kind === "item"; };
   return (
     <div
@@ -38,11 +40,13 @@ function Gap({ index, onDropNew }: { index: number; onDropNew: FilmstripProps["o
         endDrag();
         onDropNew(index, payload);
       }}
-    />
+    >
+      <button type="button" className="film__gap-add" onClick={() => onAddAt(index)} title="Aggiungi uno spread vuoto qui" aria-label="Aggiungi uno spread qui" tabIndex={-1}><Icon name="plus" size={12} strokeWidth={3} /></button>
+    </div>
   );
 }
 
-export function Filmstrip({ project, assets, current, onSelect, onAdd, onDuplicate, onRemove, onMove, onDropNew, onDropOn }: FilmstripProps) {
+export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, onDuplicate, onRemove, onMove, onDropNew, onDropOn }: FilmstripProps) {
   const currentRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   useEffect(() => { currentRef.current?.scrollIntoView?.({ block: "nearest", inline: "center", behavior: "smooth" }); }, [current]);
@@ -62,7 +66,7 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onDuplica
           const empty = spread.areas.some((area) => area.items.length === 0);
           return (
             <Fragment key={spread.id}>
-            <Gap index={index} onDropNew={onDropNew} />
+            <Gap index={index} onDropNew={onDropNew} onAddAt={onAddAt} />
             <div
               ref={index === current ? currentRef : undefined}
               className={`film__item${index === current ? " is-current" : ""}`}
@@ -98,7 +102,7 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onDuplica
             </Fragment>
           );
         })}
-        <Gap index={project.spreads.length} onDropNew={onDropNew} />
+        <Gap index={project.spreads.length} onDropNew={onDropNew} onAddAt={onAddAt} />
         <button type="button" className="film__add" onClick={onAdd} title="Aggiungi uno spread vuoto" aria-label="Aggiungi uno spread"><Icon name="plus" size={18} /></button>
       </div>
       {menu ? (

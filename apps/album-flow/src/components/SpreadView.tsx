@@ -479,7 +479,7 @@ function SpreadViewInner(props: SpreadViewProps) {
   return (
     <div
       ref={ref}
-      className={`spread spread--${variant}${draft?.kind === "ratio" || draft?.kind === "frame" || draft?.kind === "view" ? " is-resizing" : ""}${props.photosLocked ? " is-photos-locked" : ""}`}
+      className={`spread spread--${variant}${draft?.kind === "ratio" || draft?.kind === "frame" || draft?.kind === "view" ? " is-resizing" : ""}${props.photosLocked ? " is-photos-locked" : ""}${hint ? " is-dropping" : ""}`}
       style={{ aspectRatio: `${size.width} / ${size.height}` }}
       onClick={() => { if (interactive) props.onSelectItem?.(null, activeArea); }}
       onDragOver={onDragOver}
@@ -504,7 +504,7 @@ function SpreadViewInner(props: SpreadViewProps) {
             style={{ left: pct(((inner.x - origin.x) / origin.w) * 100), top: pct(((inner.y - origin.y) / origin.h) * 100), width: pct((inner.w / origin.w) * 100), height: pct((inner.h / origin.h) * 100) }}
             onClick={(event) => { if (interactive) { event.stopPropagation(); props.onActivateArea?.(areaIndex); props.onSelectItem?.(null, areaIndex); } }}
           >
-            {interactive ? <span><Icon name="image" size={22} />Trascina qui le foto</span> : null}
+            {interactive ? <span className="spread__empty-chip" onClick={(event) => { event.stopPropagation(); props.onActivateArea?.(areaIndex); props.onSelectItem?.(null, areaIndex); }}><Icon name="image" size={16} /><em>Trascina qui le foto</em></span> : null}
           </div>
         ) : null;
       })}
