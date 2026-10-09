@@ -575,6 +575,9 @@
     ]
   },
   "album-flow": {
+    "0.2.30": [
+      "Aggiornati i materiali editoriali e la copertina ufficiale di Album Flow."
+    ],
     "0.1.0": [
       "Prima versione di Album Flow: software di impaginazione per album fotografici, incluso in FileX All Access. Riceve le foto scelte in Image Select Pro con stelle ed etichette, organizza i capitoli, calcola layout dinamici per ogni spread, permette di disegnare template propri, trascinare le foto con anteprima esatta del posto, mantiene le foto allineate in foto intera, mostra misure e risoluzione stampata e controlla tutto prima dell'export JPG e SVG."
     ],

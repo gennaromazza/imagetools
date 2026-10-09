@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-09 - Album Flow 0.2.30
+
+- Aggiornati i materiali editoriali e la copertina ufficiale di Album Flow.
+
 ## 2026-10-09 - Album Flow 0.2.29
 
 - Nuovo: i testi hanno un segnaposto sul foglio, «+ Il testo va qui», che mostra la pagina e il punto esatto dove finirà il prossimo testo; nel pannello «Personalizza» (Testo e Racconto) puoi scegliere «Pagina sinistra» o «Pagina destra», e la pagina attiva è evidenziata.

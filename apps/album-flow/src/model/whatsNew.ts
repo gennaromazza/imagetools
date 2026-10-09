@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.30",
+    date: "2026-10-09",
+    headline: "Presentazione di Album Flow aggiornata",
+    items: [
+      {
+        title: "Nuovi materiali di presentazione",
+        text: "La presentazione di Album Flow è stata aggiornata con nuovi materiali editoriali e una nuova copertina, così il prodotto è più facile da riconoscere e scoprire.",
+        where: ["Novità", "Home"],
+      },
+    ],
+  },
+  {
     version: "0.2.29",
     date: "2026-10-09",
     headline: "Testi più chiari da inserire e da ingrandire, nuovi spread coerenti",
