@@ -21,6 +21,47 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.31",
+    date: "2026-10-10",
+    headline: "Foto sempre allineate, formati esatti e comandi più leggeri",
+    items: [
+      {
+        title: "Foto sempre allineate, formati esatti",
+        text: "Il formato scelto per una foto è esatto: un 1:1 è davvero quadrato, anche con bordo e in qualunque layout. Cambiando bordo, spazio tra le foto o «Allinea» le foto si riallineano da sole. In «foto intera» i separatori non si trascinano: le divisioni seguono le proporzioni delle foto.",
+        where: ["Forma", "Bordo", "Spazio", "Allinea"],
+      },
+      {
+        title: "Layout libero senza sorprese",
+        text: "«Sposta le foto liberamente» non sposta più le foto; aggiungere una foto a una pagina libera non azzera le posizioni, e puoi rilasciare una foto su uno spazio vuoto. Una foto più grande del foglio si vede solo dentro il foglio.",
+        where: ["Sposta le foto liberamente", "Layout della pagina"],
+      },
+      {
+        title: "Il lucchetto protegge il layout",
+        text: "Con il layout bloccato forma, sostituzioni, rilasci e cambio di divisione non lo cambiano, e un messaggio spiega perché un'azione non si può fare. I layout proposti non sono più doppioni.",
+        where: ["Proteggi il layout", "Mescola"],
+      },
+      {
+        title: "Striscia delle miniature più chiara",
+        text: "Lo spread aperto ha una cornice, una freccia e il numero evidenziato; sulla sua miniatura vedi anche quale pagina (sinistra o destra) è attiva.",
+        where: ["Striscia delle miniature"],
+      },
+      {
+        title: "Comandi della foto più compatti",
+        text: "Il formato si sceglie con piccole icone in scala, il raddrizzamento si adatta alla foto e sulle foto piccole i comandi diventano due colonne o un solo «⋯» che si apre fuori dalla foto.",
+        where: ["Formato della foto", "Raddrizza", "Comandi della foto"],
+      },
+      {
+        title: "Più foto rilasciate insieme",
+        text: "Trascinando più foto sul bordo di una foto, le successive stanno affiancate sul lato perpendicolare: due foto sotto una foto larga formano una riga sotto di essa.",
+      },
+      {
+        title: "90 nuovi testi per i racconti",
+        text: "Nella scheda Racconto di «Personalizza» trovi nove nuovi temi con dieci testi ciascuno: Mani, Amore, Racconto, Storia, Emozioni, Ritratti di coppia, Bellezza ed essenza, Fotografia, Ricordo ed eternità.",
+        where: ["Personalizza", "Racconto"],
+      },
+    ],
+  },
+  {
     version: "0.2.30",
     date: "2026-10-09",
     headline: "Presentazione di Album Flow aggiornata",

@@ -1,7 +1,7 @@
 import type { AlbumAssetV2, AlbumSpread } from "@photo-tools/shared-types";
 import { areaOuterRects, spreadSizeMm } from "../engine/geometry";
 import { itemBorderColor, placeItem } from "../model/placement";
-import { areaGeometry, assetMap, type Project } from "../model/project";
+import { areaGeometry, assetMap, placementStyle, type Project } from "../model/project";
 import { renderBackgroundsSvg, renderOverlaysSvg, type DesignContext } from "./design-svg";
 
 export interface RenderOptions {
@@ -55,7 +55,7 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
       const item = area.items.find((candidate) => candidate.id === cell.itemId);
       if (!item) throw new Error("Elemento mancante nel layout.");
       const asset = assets.get(item.assetId);
-      const placement = placeItem(cell.rect, item, asset, area.style, null, cell.anchor);
+      const placement = placeItem(cell.rect, item, asset, placementStyle(area, cell), null, cell.anchor);
       const { frame, content, borderMm } = placement;
       const border = borderMm > 0 ? `<rect x="${n(content.x - borderMm)}" y="${n(content.y - borderMm)}" width="${n(content.w + borderMm * 2)}" height="${n(content.h + borderMm * 2)}" fill="${attr(itemBorderColor(item, area.style))}"/>` : "";
       const url = asset?.previewUrl;

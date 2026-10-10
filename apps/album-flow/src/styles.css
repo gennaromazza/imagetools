@@ -456,12 +456,18 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .film__gap.is-drop { width: 22px; background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--accent-bright); }
 .film__item { position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 2px 5px 4px; border-radius: 8px; cursor: pointer; flex: none; }
 .film__item:hover { background: var(--bg-hover); }
-.film__item.is-current { background: var(--accent-soft); }
+.film__item { transition: transform 0.12s; }
+.film__item.is-current { background: var(--accent-soft); outline: 2px solid var(--accent-bright); outline-offset: -2px; transform: translateY(-1px); z-index: 1; }
+.film__item.is-current::before { content: ""; position: absolute; top: -6px; left: 50%; border: 5px solid transparent; border-bottom: 0; border-top-color: var(--accent-bright); transform: translateX(-50%); pointer-events: none; }
 .film__item.is-drop { box-shadow: -3px 0 0 var(--accent-bright); }
 .film__num { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; border-bottom: 2px solid transparent; padding: 0 4px; line-height: 1.3; }
-.film__item.is-current .film__num { color: var(--accent-bright); border-bottom-color: var(--accent-bright); font-weight: 700; }
+.film__item.is-current .film__num { color: #1f2421; background: var(--accent-bright); border-bottom-color: transparent; border-radius: 999px; padding: 0 8px; font-weight: 800; }
+.film__thumb { position: relative; }
+.film__pages { position: absolute; inset: 0; display: flex; pointer-events: none; }
+.film__pages i { display: block; box-shadow: inset 0 0 0 0 transparent; background: rgba(0, 0, 0, 0.38); }
+.film__pages i.is-active { background: rgba(184, 154, 99, 0.16); box-shadow: inset 0 0 0 2px var(--accent-bright); }
 .film__thumb .spread { height: 42px; width: auto; }
-.film__bar { display: block; height: 3px; width: 100%; border-radius: 2px; }
+.film__bar { display: block; height: 2px; width: 100%; border-radius: 2px; opacity: 0.85; }
 .film__done { position: absolute; top: 18px; left: 7px; width: 14px; height: 14px; display: grid; place-items: center; border-radius: 50%; background: var(--success); color: #16201a; box-shadow: 0 0 0 2px var(--bg-elevated); }
 .stage__done { font-style: normal; color: var(--success); }
 .film__warn { position: absolute; top: 19px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--bg-elevated); }
@@ -830,3 +836,23 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .sheet__meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sheet__actions { position: absolute; top: 4px; right: 4px; display: none; gap: 2px; }
 .sheet__item:hover .sheet__actions { display: flex; }
+
+/* Barre dei comandi della foto: icone sole, compatte; «⋯» per le foto minuscole. */
+.spread__toolbar { padding: 3px 4px; gap: 1px; }
+.spread__toolbar .icon-btn { width: 28px; height: 28px; }
+.spread__toolbar--more { padding: 2px; border-radius: 999px; }
+.spread__toolbar--more .icon-btn { width: 26px; height: 26px; border-radius: 999px; }
+.spread__toolbar--menu { flex-wrap: wrap; justify-content: flex-start; }
+.shape-btn { position: relative; }
+.shape-glyph { display: block; margin: auto; }
+.shape-grid { display: grid; grid-template-columns: repeat(6, 38px); gap: 4px; padding: 2px; }
+.shape-opt { display: grid; place-items: center; align-content: center; gap: 1px; width: 38px; height: 42px; padding: 2px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.shape-opt small { font-size: 9px; line-height: 1; opacity: 0.8; }
+.shape-opt:hover { background: var(--bg-hover); color: var(--text); }
+.shape-opt.is-current { border-color: var(--accent-bright); background: var(--accent-soft); color: var(--accent-bright); }
+.shape-current { margin: 6px 2px 0; }
+.shape-custom { grid-column: 1 / -1; }
+.spread__toolbar .straighten { flex: 1 1 auto; min-width: 0; gap: 4px; padding: 0 2px; }
+.spread__toolbar .straighten input[type="range"] { flex: 1 1 90px; width: auto; min-width: 70px; max-width: 220px; height: 26px; accent-color: var(--accent-bright); cursor: pointer; }
+.spread__toolbar .straighten input[type="range"]::-webkit-slider-thumb { width: 18px; height: 18px; }
+.spread__toolbar .straighten__num { width: 46px; }

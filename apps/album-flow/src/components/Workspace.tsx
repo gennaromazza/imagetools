@@ -7,7 +7,7 @@ import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCa
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
-import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, shapeKeepsAlignment, toggleItemLock } from "../model/items";
+import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
 import { rotateAssetQuarter, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
 import { countItems, findItem, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas } from "../model/spreads";
@@ -75,6 +75,13 @@ interface Toast { message: string; undo?: boolean }
 const EMPTY_IDS: readonly string[] = [];
 
 /** L'editor: cronologia, selezione, gesti sulle foto, libreria, importazione, esportazione. */
+/** Perché un cambio di layout non si può fare (spread finito o pagina bloccata), in una frase; null se si può. */
+function layoutRefusal(spread: { done?: boolean; areas: ReadonlyArray<{ locked?: boolean }> } | undefined, areaIndex: number): string | null {
+  if (spread?.done) return "Spread finito: riaprilo (D) per cambiare il layout.";
+  if (spread?.areas[areaIndex]?.locked) return "Layout bloccato: sbloccalo (lucchetto) per cambiarlo.";
+  return null;
+}
+
 export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial = false }: WorkspaceProps) {
   const [history, setHistoryState] = useState<History<AlbumProjectV2>>(() => createHistory(initial));
   // La cronologia più recente vive anche in una ref: i comandi si applicano in modo sincrono (una sola volta, anche in
@@ -433,24 +440,26 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     },
     dropAssets: (target, ids) => {
       const area = spread?.areas[target.areaIndex];
+      if (area?.locked && !(target.zone === "center" && target.itemId)) { notify("Layout bloccato: puoi sostituire una foto (rilascio al centro), ma per aggiungerne sblocca il layout (lucchetto)."); return; }
       commit((p) => dropOnSpread(p, spreadId, target, { kind: "assets", assetIds: ids }));
       setLibSelection([]); // la selezione non deve restare: il trascinamento successivo porterebbe di nuovo tutte le stesse foto
       setActiveArea(target.areaIndex);
       if (area && area.items.length + ids.length > 12 && target.zone !== "center") notify("Un'area contiene al massimo 12 foto.");
       else { const note = usedNote(ids, index); if (note) notify(`Foto aggiunta.${note}`, true); }
     },
-    dropItem: (target, itemId) => { commit((p) => dropOnSpread(p, spreadId, target, { kind: "item", itemId })); setActiveArea(target.areaIndex); },
+    dropItem: (target, itemId) => {
+      const source = findItem(historyRef.current.present, itemId);
+      if ((spread?.areas[target.areaIndex]?.locked && !(target.zone === "center" && target.itemId)) || (source?.area.locked && source.spread.id === spread?.id && !(target.zone === "center" && target.itemId))) { notify("Layout bloccato: puoi scambiare due foto (rilascio al centro), ma per spostarle sblocca il layout (lucchetto)."); return; }
+      commit((p) => dropOnSpread(p, spreadId, target, { kind: "item", itemId }));
+      setActiveArea(target.areaIndex);
+    },
     setDraft,
     commitRatio: (i, path, ratio) => { setDraft(null); commit((p) => setDividerRatio(p, spreadId, i, path, ratio), `ratio:${spreadId}:${i}:${path}`); },
     resetRatio: (i, path) => commit((p) => resetDividerRatio(p, spreadId, i, path)),
     commitView: (itemId, view) => {
       setDraft(null);
-      // Le foto restano allineate: una forma che nessuna disposizione allineata permette non si applica (lo si dice); per metterla a piacere si sblocca il layout.
-      if (view.shape && !shapeKeepsAlignment(historyRef.current.present, itemId, view.shape)) {
-        notify("Con questa disposizione la forma non entra senza disallineare le foto. Cambia layout, oppure sblocca il layout della pagina («Sposta le foto liberamente») per metterla dove vuoi.");
-        return;
-      }
       commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle, shape: view.shape }), `view:${itemId}`);
+      if (view.shape && findItem(historyRef.current.present, itemId)?.area.locked) notify("Layout bloccato: la forma vale solo dentro la cella e le altre foto non si spostano. Sblocca il layout (lucchetto) per riallinearle.");
     },
     style: (i, changes, key, relayout) => commit((p) => setAreaStyle(p, spreadId, i, changes, relayout), key ? `style:${spreadId}:${i}:${key}` : undefined),
     align: (i, align) => commit((p) => alignArea(p, spreadId, i, align)),
@@ -497,7 +506,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       else { commit((p) => saveFavoriteLayout(p, spreadId, i)); notify("Layout salvato nei preferiti: lo ritrovi tra i layout con lo stesso numero di foto."); }
     },
     openLayouts: (open) => { setLayoutsOpen(open); if (open) setDesignOpen(false); },
-    applyLayout: (i, candidate) => commit((p) => applyCandidate(p, spreadId, i, candidate, templates)),
+    applyLayout: (i, candidate) => { const why = layoutRefusal(spread, i); if (why) { notify(why); return; } commit((p) => applyCandidate(p, spreadId, i, candidate, templates)); },
     newTemplate: (i) => { const area = spread?.areas[i]; setTemplateEdit({ seed: area && spread ? seedFromArea(area, templateTarget(spread, i)) ?? { kind: "tree", target: templateTarget(spread, i) } : undefined }); setDialog("template"); },
     editTemplate: (templateId, asCopy) => { const found = templates.find((candidate) => candidate.id === templateId); const initial = found && asCopy ? { ...found, id: createTemplateId(), name: `${found.name} (copia)`, createdAt: new Date().toISOString() } : found; if (initial) { setTemplateEdit({ initial }); setDialog("template"); } },
     deleteTemplate: (templateId) => { const old = templates.find((candidate) => candidate.id === templateId); storeTemplates(removeTemplate(templates, templateId)); notify(`Template «${old?.name ?? ""}» eliminato.`); },
@@ -509,7 +518,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     commitFrame: (itemId, frame) => commit((p) => setFrame(p, itemId, frame), `frame:${itemId}`),
     orderFrame: (itemId, where) => commit((p) => reorderFrame(p, itemId, where)),
     rotateFrame: (itemId, delta) => commit((p) => { const f = findItem(p, itemId); const current = f?.area.free?.[itemId]; return current ? setFrame(p, itemId, { rotation: current.rotation + delta }) : p; }, `rotate:${itemId}`),
-    applyFavorite: (i, favoriteId) => commit((p) => applyFavoriteLayout(p, spreadId, i, favoriteId)),
+    applyFavorite: (i, favoriteId) => { const why = layoutRefusal(spread, i); if (why) { notify(why); return; } commit((p) => applyFavoriteLayout(p, spreadId, i, favoriteId)); },
     removeFavorite: (favoriteId) => commit((p) => removeFavoriteLayout(p, favoriteId)),
     applyStyle: (i, scope) => { commit((p) => (scope === "spread" ? applyStyleToSpread(p, spreadId, i) : applyStyleToAlbum(p, spreadId, i))); notify(scope === "spread" ? "Stile copiato sull'intero spread." : "Stile copiato su tutto l'album."); },
     deleteSpread: () => { commit((p) => removeSpread(p, spreadId)); setSelectedItemId(null); notify(`Spread ${index + 1} eliminato.`, true); },
@@ -702,7 +711,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
         case "?": setDialog("shortcuts"); return;
         default:
       }
-      if (/^[1-9]$/.test(event.key) && state.spread && state.spread.areas[state.areaIndex].items.length > 0) { commit((p) => applyCandidateByNumber(p, state.spread!.id, state.areaIndex, Number(event.key), templates)); return; }
+      if (/^[1-9]$/.test(event.key) && state.spread && state.spread.areas[state.areaIndex].items.length > 0) { const why = layoutRefusal(state.spread, state.areaIndex); if (why) { notify(why); return; } commit((p) => applyCandidateByNumber(p, state.spread!.id, state.areaIndex, Number(event.key), templates)); return; }
       if (key === "0") { if (state.selectedItemId) commit((p) => resetItemView(p, state.selectedItemId!)); else setZoom(1); }
       else if ((key === "," || key === ".") && state.cropMode && state.selectedItemId) {
         const current = findItem(historyRef.current.present, state.selectedItemId)?.item.angle ?? 0;
@@ -890,6 +899,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           project={project}
           assets={assets}
           current={index}
+          activeArea={activeArea}
           onSelect={goTo}
           onAdd={() => { commit((p) => addSpread(p)); setSpreadIndex(count); setSelectedItemId(null); setActiveArea(0); }}
           onAddAt={(at) => { commit((p) => addSpread(p, at)); setSpreadIndex(at); setSelectedItemId(null); setActiveArea(0); }}

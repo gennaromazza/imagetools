@@ -87,7 +87,8 @@ export function resolveDropTarget(areas: readonly DropArea[], x: number, y: numb
     if (area.cells.length === 0) return { areaIndex, itemId: null, zone: "area" };
     if (area.free) {
       const top = area.cells.filter((cell) => pointInRect(x, y, cell.rect)).sort((a, b) => (b.z ?? 0) - (a.z ?? 0))[0];
-      return top ? { areaIndex, itemId: top.itemId, zone: "center" } : null;
+      // Sopra una foto la si sostituisce; su uno spazio vuoto della pagina la foto nuova si aggiunge senza spostare le altre.
+      return top ? { areaIndex, itemId: top.itemId, zone: "center" } : { areaIndex, itemId: null, zone: "area" };
     }
     if (area.cells.length >= 2 && area.dividers) {
       const smart = smartTarget(area, areaIndex, x, y);

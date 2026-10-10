@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, previewDropRect, replaceItemAsset, resetItemView, setItemView, shapeKeepsAlignment, swapItems, toggleItemLock } from "./items";
+import { appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, previewDropRect, replaceItemAsset, resetItemView, setItemView, swapItems, toggleItemLock } from "./items";
 import { addSpread, duplicateSpread } from "./spreads";
 import { renderSpreadSvg } from "../render/spread-svg";
 import { applyCandidate, areaCandidates, setAreaStyle } from "./areas";
-import { areaPhotos, effectiveAspect, itemAspect, spreadGeometry, type Project } from "./project";
+import { areaPhotos, effectiveAspect, itemAspect, placementStyle, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { SHAPE_SNAP, placeItem } from "./placement";
 import { SHAPE_PRESETS, presetForShape } from "./shapes";
@@ -48,29 +48,6 @@ for (const mode of ["fill", "fit"] as const) {
     }
   });
 }
-
-test("forma per foto: shapeKeepsAlignment dice se la forma lascia le foto allineate (cella con quella forma) e vale sempre per foto sola o pagina libera", () => {
-  for (const mode of ["fit", "fill"] as const) {
-    for (const count of [2, 3, 4, 5]) {
-      const base = album(count, mode);
-      for (const preset of SHAPE_PRESETS) {
-        for (const item of itemsOf(base)) {
-          const changed = setItemView(base, item.id, { shape: preset.ratio });
-          assertProjectInvariants(changed, `${mode}/${count}/${preset.id}`);
-          const cell = spreadGeometry(changed, changed.spreads[0]).flatMap((geometry) => geometry.cells).find((candidate) => candidate.itemId === item.id)!;
-          const aligned = Math.abs(cell.rect.w / cell.rect.h / preset.ratio - 1) < SHAPE_SNAP;
-          assert.equal(shapeKeepsAlignment(base, item.id, preset.ratio), aligned, `${mode}/${count}/${preset.id}: la risposta non corrisponde alla cella`);
-        }
-      }
-    }
-  }
-});
-
-test("forma per foto: una foto sola nella pagina o una disposizione libera non hanno vincoli di allineamento", () => {
-  const single = album(1, "fit");
-  for (const preset of SHAPE_PRESETS) assert.equal(shapeKeepsAlignment(single, itemsOf(single)[0].id, preset.ratio), true);
-  assert.equal(shapeKeepsAlignment(single, "nessuna", 1), true);
-});
 
 test("forma per foto: le altre foto non cambiano, «Come la cella» e il ripristino la tolgono", () => {
   const base = album(3, "fit");
@@ -155,13 +132,20 @@ test("forma per foto: i layout proposti la trattano con la forma scelta, non con
   assert.ok(ratioOf(after) < ratioOf(before), `cella più alta che larga rispetto a prima: ${ratioOf(after)} vs ${ratioOf(before)}`);
 });
 
-test("forma per foto: se la cella ha già quasi la forma scelta la foto la riempie, senza fasce bianche; altrimenti resta la finestra", () => {
+test("forma per foto: la finestra ha sempre la forma esatta (un 1:1 è quadrato); riempie la cella solo se è già della stessa forma", () => {
   const style = { borderCm: 0, mode: "fit" as const, align: "center" as const };
   const asset = makeProject(1).assets[0];
   const item = { zoom: 1, cx: 0.5, cy: 0.5, shape: 0.75 };
-  // cella 0,67 e forma 3:4 (come nello spread dell'utente): la foto riempie la cella
+  // cella 0,674 e forma 3:4: prima (tolleranza del 12%) la foto riempiva la cella e non era 3:4; ora è una finestra esatta
   const near = placeItem({ x: 0, y: 0, w: 331, h: 491 }, item, asset, style, null);
-  assert.deepEqual([near.content.w, near.content.h], [331, 491]);
+  assert.ok(Math.abs(near.content.w / near.content.h / 0.75 - 1) < 1e-9, "3:4 esatto");
+  assert.deepEqual([near.content.w, Number(near.content.h.toFixed(3))], [331, 441.333]);
+  // cella che ha già la forma (entro lo 0,5%): la foto la riempie, senza fasce sottili
+  const same = placeItem({ x: 0, y: 0, w: 300, h: 400 }, item, asset, style, null);
+  assert.deepEqual([same.content.w, same.content.h], [300, 400]);
+  // un quadrato 1:1 in una cella 1,06:1 resta quadrato
+  const square = placeItem({ x: 0, y: 0, w: 159, h: 150 }, { ...item, shape: 1 }, asset, style, null);
+  assert.ok(Math.abs(square.content.w - square.content.h) < 1e-9, "1:1 quadrato");
   for (const mode of ["fit", "fill"] as const) {
     const wide = placeItem({ x: 0, y: 0, w: 288, h: 213 }, item, asset, { ...style, mode }, null);
     assert.ok(Math.abs(wide.content.w / wide.content.h / 0.75 - 1) < 1e-6, `${mode}: cella larga, resta la finestra 3:4`);
@@ -226,9 +210,11 @@ test("audit — celle, pulsanti e casi d'uso con la forma: duplica spread, sosti
   const preview = previewDropRect(filled.settings.sheet, filled.spreads[0], assets, dropTarget, { assetId: "a4" });
   const after = dropOnSpread(filled, id, dropTarget, { kind: "assets", assetIds: ["a4"] });
   const added = itemsOf(after).find((item) => !itemsOf(filled).some((old) => old.id === item.id))!;
-  const real = spreadGeometry(after, after.spreads[0])[0].cells.find((cell) => cell.itemId === added.id)!.rect;
+  const realCell = spreadGeometry(after, after.spreads[0])[0].cells.find((cell) => cell.itemId === added.id)!;
+  const afterArea = after.spreads[0].areas[0];
+  const real = placeItem(realCell.rect, added, after.assets.find((asset) => asset.id === added.assetId), placementStyle(afterArea, realCell), null, realCell.anchor).content;
   assert.ok(preview, "anteprima presente");
-  for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(preview![key] - real[key]) < 1e-6, `anteprima ${key}: ${preview![key]} ≠ ${real[key]}`);
+  for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(preview![key] - real[key]) < 1e-3, `anteprima ${key}: ${preview![key]} ≠ ${real[key]}`);
   // l'esportazione SVG ritaglia nella finestra della forma
   const svg = renderSpreadSvg(project, project.spreads[0]);
   const placement = placed(project).placement;

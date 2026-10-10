@@ -254,6 +254,9 @@ export function generateLayouts(photos: readonly LayoutPhoto[], options: Generat
     const samples = fast ? 80 : 2500;
     for (let index = 0; index < samples; index += 1) pool.push(randomTree(photos, 0, n - 1, target, rng));
   }
+  // Foto con proporzioni molto diverse (una panoramica accanto a una verticale stretta): tutte le divisioni naturali sarebbero scartate come
+  // troppo sbilanciate. Si ripiega sulle forme strutturate (che le accettano), così un layout c'è sempre.
+  if (pool.length === 0) pool.push(...structuredTrees(photos));
 
   const scoreAll = (trees: LayoutNode[]): Scored[] => {
     const seen = new Set<string>();

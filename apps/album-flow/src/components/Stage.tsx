@@ -7,11 +7,11 @@ import { isFavoriteLayout } from "../model/areas";
 import { BACKGROUND_SWATCHES, STYLE_LIMITS } from "../model/defaults";
 import { clampAngle, itemBorderColor, placeItem, wheelNotches, type ItemView } from "../model/placement";
 import { itemAspect } from "../model/project";
-import { SHAPE_PRESETS, presetForShape } from "../model/shapes";
+import { ShapePicker } from "./ShapePicker";
 import { isScopeLocked, type LockScope } from "../model/layoutLock";
 import { textInsertionPoint } from "../model/design";
 import { getSnapEnabled, setSnapEnabled, subscribeSnap } from "../model/snapSettings";
-import { areaGeometryFor, hasFreeLayout } from "../model/project";
+import { areaGeometryFor, hasFreeLayout, placementStyle } from "../model/project";
 import { AreaStrip } from "./AreaStrip";
 import { DesignPanel, type DesignActions, type DesignTab } from "./DesignPanel";
 import type { DesignHandlers } from "./DesignLayers";
@@ -238,7 +238,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     const asset = assets.get(found.item.assetId);
     const geometry = areaGeometryFor(sheet, spread, found.index);
     const cell = geometry.cells.find((candidate) => candidate.itemId === itemId);
-    const placement = cell ? placeItem(cell.rect, found.item, asset, found.area.style, null, cell.anchor) : null;
+    const placement = cell ? placeItem(cell.rect, found.item, asset, placementStyle(found.area, cell), null, cell.anchor) : null;
     const canCrop = !found.item.locked;
     const captured = formatTime(asset?.captureTimeMs);
     // Quattro lati: sopra l'inquadratura, a sinistra rotazione e bordo, a destra guarda/modifica/info, sotto raddrizza (in ritaglio), blocco e cestino.
@@ -246,20 +246,13 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       <>
         <IconButton icon="crop" label={canCrop ? "Ritaglia e sposta nello slot (Invio)" : found.item.locked ? "Foto bloccata" : "Per ritagliare passa a «Riempi lo spazio»"} active={cropMode} disabled={!canCrop} onClick={() => actions.toggleCrop(itemId)} size={16} />
         {canCrop ? (
-          <label className="straighten" title="Forma della foto: la foto prende questa proporzione dentro la sua cella (ritaglio)">
-            <span>Forma{newShape.isNew ? <span className="new-pill">Nuovo</span> : null}</span>
-            <select aria-label="Forma della foto" onFocus={newShape.markSeen} value={found.item.shape ? (presetForShape(found.item.shape)?.id ?? (Math.abs(found.item.shape / itemAspect(asset) - 1) < 0.01 ? "original" : "custom")) : "cell"} onChange={(event) => {
-              const value = event.target.value;
-              if (value === "cell") actions.commitView(itemId, { shape: null });
-              else if (value === "original") actions.commitView(itemId, { shape: Number(itemAspect(asset).toFixed(4)) });
-              else { const preset = SHAPE_PRESETS.find((candidate) => candidate.id === value); if (preset) actions.commitView(itemId, { shape: preset.ratio }); }
-            }}>
-              <option value="cell">Come la cella</option>
-              <option value="original">Originale della foto</option>
-              {SHAPE_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
-              {found.item.shape && !presetForShape(found.item.shape) && Math.abs(found.item.shape / itemAspect(asset) - 1) >= 0.01 ? <option value="custom">Personalizzata</option> : null}
-            </select>
-          </label>
+          <ShapePicker
+            shape={found.item.shape}
+            originalAspect={itemAspect(asset)}
+            isNew={newShape.isNew}
+            onSeen={newShape.markSeen}
+            onPick={(shape) => actions.commitView(itemId, { shape })}
+          />
         ) : null}
       </>
     );
@@ -318,7 +311,6 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         {cropMode && canCrop ? (
           <WheelAngle value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })}>
             <IconButton icon="level" label="Raddrizza con una linea: trascina lungo l'orizzonte o lungo un lato che deve essere verticale" active={lineTool} onClick={actions.toggleLineTool} size={16} />
-            <span className="straighten__label">Raddrizza</span>
             <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" title="Rotella del mouse qui sopra: 0,1° a scatto (Maiusc: 1°). Anche , e . da tastiera. Doppio clic: azzera" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
             <AngleField value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })} />
             <button type="button" className="icon-btn" title="Azzera il raddrizzamento" aria-label="Azzera il raddrizzamento" disabled={!found.item.angle} onClick={() => actions.commitView(itemId, { angle: 0 })}>0°</button>

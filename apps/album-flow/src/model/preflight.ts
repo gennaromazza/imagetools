@@ -1,7 +1,7 @@
 import { crossesFold } from "../engine/geometry";
 import { duplicatedAssetIds, unusedAssets } from "./library";
 import { placeItem } from "./placement";
-import { areaGeometry, assetMap, type Project } from "./project";
+import { areaGeometry, assetMap, placementStyle, type Project } from "./project";
 
 export const MIN_EFFECTIVE_DPI = 150;
 
@@ -49,7 +49,7 @@ export function preflightReport(project: Project): PreflightReport {
         if (!asset) { issues.push({ level: "error", message: `${label}: una foto non è più nella libreria.`, spreadIndex, itemId: item.id }); continue; }
         const cell = geometry.cells.find((candidate) => candidate.itemId === item.id);
         if (!cell) continue;
-        const placement = placeItem(cell.rect, item, asset, area.style, null, cell.anchor);
+        const placement = placeItem(cell.rect, item, asset, placementStyle(area, cell), null, cell.anchor);
         if (placement.dpi < MIN_EFFECTIVE_DPI) {
           lowResolution += 1;
           issues.push({ level: "warning", message: `${label}: ${asset.fileName} a ${Math.round(placement.dpi)} dpi effettivi (consigliati almeno ${MIN_EFFECTIVE_DPI}).`, spreadIndex, itemId: item.id });

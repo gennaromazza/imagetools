@@ -1,7 +1,7 @@
-import type { AlbumArea, AlbumAssetV2, AlbumItem, AlbumProjectV2, AlbumSpread, AreaStyle, SheetSpec } from "@photo-tools/shared-types";
-import { areaOuterRects, freeCells, insetRect, layoutCells, type Divider, type LeafCell, type RatioOverrides, type Rect } from "../engine/geometry";
+import type { AlbumArea, AlbumAssetV2, AlbumItem, AlbumProjectV2, AlbumSpread, AreaStyle, LayoutNode, SheetSpec } from "@photo-tools/shared-types";
+import { MAX_RATIO, MIN_RATIO, alignFactor, areaOuterRects, freeCells, insetRect, layoutCells, type Divider, type LeafCell, type RatioOverrides, type Rect } from "../engine/geometry";
 import type { LayoutPhoto } from "../engine/generate";
-import { leafIds, removeLeaf, naturalRatios } from "../engine/tree";
+import { leafIds, removeLeaf, naturalRatios, pathOfLeaf, setRatioAt, type NaturalOptions } from "../engine/tree";
 import { DEFAULT_AREA_STYLE, DEFAULT_SHEET } from "./defaults";
 import { newId } from "./ids";
 
@@ -177,7 +177,8 @@ export function areaGeometryFor(sheet: SheetSpec, spread: AlbumSpread, areaIndex
   const inner = insetRect(outer, area.style.paddingCm * 10);
   const gapMm = Math.max(0, area.style.gapCm * 10);
   if (hasFreeLayout(area)) return { outer, inner, gapMm, cells: freeCells(area.items.map((item) => ({ itemId: item.id, frame: area.free![item.id] })), inner), dividers: [] };
-  const { cells, dividers } = layoutCells(area.layout, inner, gapMm, overrides);
+  const { cells: raw, dividers } = layoutCells(area.layout, inner, gapMm, overrides, alignFactor(area.style.align));
+  const cells = isWindowedArea(area, raw) ? raw.map((cell) => ({ ...cell, windowed: true })) : raw;
   return { outer, inner, gapMm, cells, dividers };
 }
 
@@ -210,14 +211,108 @@ export function needsShapeAlignment(area: AlbumArea): boolean {
 }
 
 /**
- * Regola di impaginazione: con «foto intera» le foto devono risultare allineate (stessa altezza in una riga, stessa larghezza
- * in una colonna). L'area si regola sulle proporzioni reali delle foto; le aree libere e il modo «riempi» non cambiano.
+ * Stile con cui le foto dell'area stanno nelle celle. Se una foto ha una forma scelta, l'area funziona come «foto intera» anche in «riempi»:
+ * le foto sono finestre esatte e allineate tra loro (le celle seguono le proporzioni), invece di una finestra più piccola accanto a foto che
+ * riempiono tutta la cella, che non risulterebbero a filo.
  */
-export function alignedForFit(project: Project, area: AlbumArea, inner: { w: number; h: number }, gapMm: number): AlbumArea {
-  if (!needsShapeAlignment(area) || !area.layout || area.items.length < 2 || hasFreeLayout(area)) return area;
+export function placementStyle(area: AlbumArea, cell?: { windowed?: boolean }): AreaStyle {
+  if (area.style.mode !== "fill" || hasFreeLayout(area)) return area.style;
+  // Con la cella (o l'area) segnata «a finestre» le foto sono finestre esatte; senza indicazione si assume che con una forma scelta lo siano.
+  const windowed = cell ? Boolean(cell.windowed) : area.items.some((item) => Boolean(item.shape));
+  return windowed ? { ...area.style, mode: "fit" } : area.style;
+}
+
+/**
+ * In «riempi» con forme scelte: se la cella di ogni foto con forma ha già quella proporzione (al netto del bordo), le altre foto riempiono le loro
+ * celle e la pagina resta piena. Se una forma non è raggiungibile con questa disposizione, l'area funziona come «foto intera» (finestre esatte
+ * e allineate): vero quando almeno una cella con forma non ha la sua proporzione.
+ */
+export function isWindowedArea(area: Pick<AlbumArea, "style" | "items">, cells: readonly LeafCell[]): boolean {
+  if (area.style.mode !== "fill") return false;
+  return area.items.some((item) => {
+    if (!item.shape) return false;
+    const cell = cells.find((candidate) => candidate.itemId === item.id);
+    if (!cell) return false;
+    const border = Math.max(0, Math.min((item.borderCm ?? area.style.borderCm) * 10, Math.min(cell.rect.w, cell.rect.h) / 4));
+    const h = cell.rect.h - border * 2;
+    return !(h > 0.01) || Math.abs((cell.rect.w - border * 2) / h / item.shape - 1) >= 0.002;
+  });
+}
+
+/** Bordo e allineamento che entrano nel calcolo dei rapporti «naturali» di un'area. */
+export function naturalOptions(area: { style: AreaStyle; items: readonly Pick<AlbumItem, "id" | "borderCm">[] }): NaturalOptions {
+  const border = new Map(area.items.map((item) => [item.id, Math.max(0, (item.borderCm ?? area.style.borderCm) * 10)]));
+  return { borderMmOf: (id) => border.get(id) ?? Math.max(0, area.style.borderCm * 10), align: alignFactor(area.style.align) };
+}
+
+/**
+ * Regola i rapporti delle divisioni perché la cella di ogni foto con una forma scelta abbia esattamente quella proporzione
+ * (al netto del bordo): si prova prima la divisione più vicina alla foto, poi quelle più in alto. Restituisce il nuovo albero
+ * (lo stesso se non cambia nulla) oppure `null` se una forma non è raggiungibile con questa disposizione.
+ */
+export function fitShapedCells(area: AlbumArea, inner: { w: number; h: number }, gapMm: number): LayoutNode | null {
+  if (!area.layout) return null;
+  const shapedItems = area.items.filter((item) => item.shape);
+  if (shapedItems.length === 0) return null;
+  const size: Rect = { x: 0, y: 0, w: inner.w, h: inner.h };
+  let tree: LayoutNode = area.layout;
+  for (const item of shapedItems) {
+    const shape = item.shape!;
+    const borderOf = (rect: Rect) => Math.max(0, Math.min((item.borderCm ?? area.style.borderCm) * 10, Math.min(rect.w, rect.h) / 4));
+    const aspectIn = (candidate: LayoutNode): number | null => {
+      const rect = layoutCells(candidate, size, gapMm).cells.find((cell) => cell.itemId === item.id)?.rect;
+      if (!rect) return null;
+      const border = borderOf(rect);
+      const h = rect.h - border * 2;
+      return h > 0.01 ? (rect.w - border * 2) / h : null;
+    };
+    const reached = (candidate: LayoutNode) => { const aspect = aspectIn(candidate); return aspect !== null && Math.abs(aspect / shape - 1) < 0.002; };
+    if (reached(tree)) continue;
+    const path = pathOfLeaf(tree, item.id);
+    if (path === null) return null;
+    let work = tree;
+    let done = false;
+    for (let depth = path.length - 1; depth >= 0 && !done; depth -= 1) {
+      const prefix = path.slice(0, depth);
+      const at = (ratio: number) => setRatioAt(work, prefix, ratio);
+      const gap = (candidate: LayoutNode) => (aspectIn(candidate) ?? shape) - shape;
+      const low = gap(at(MIN_RATIO));
+      const high = gap(at(MAX_RATIO));
+      if (low * high > 0) { work = at(Math.abs(low) < Math.abs(high) ? MIN_RATIO : MAX_RATIO); continue; }
+      let lo = MIN_RATIO;
+      let hi = MAX_RATIO;
+      for (let step = 0; step < 40; step += 1) {
+        const mid = (lo + hi) / 2;
+        const value = gap(at(mid));
+        // la larghezza della cella cresce con il rapporto di una divisione in riga e cala in una in colonna; si segue il segno agli estremi
+        if ((value < 0) === (low < 0)) lo = mid; else hi = mid;
+      }
+      work = at(Number(((lo + hi) / 2).toFixed(6)));
+      done = reached(work);
+    }
+    if (!done) return null;
+    tree = work;
+  }
+  return tree;
+}
+
+/**
+ * Regola di impaginazione: con «foto intera» le foto devono risultare allineate (stessa altezza in una riga, stessa larghezza
+ * in una colonna), anche con bordo, spazio tra le foto e allineamento scelti. L'area si regola sulle proporzioni reali delle foto;
+ * le aree libere, quelle con il layout bloccato e il modo «riempi» (senza forme) non cambiano.
+ */
+export function alignedForFit(project: Project, area: AlbumArea, inner: { w: number; h: number }, gapMm: number, fitShapes = true): AlbumArea {
+  if (!needsShapeAlignment(area) || !area.layout || area.items.length < 2 || hasFreeLayout(area) || area.locked) return area;
+  // «Riempi» con foto di forma scelta: le foto con forma prendono esattamente la loro proporzione e le altre riempiono lo spazio
+  // ritagliandosi, così i bordi restano allineati e non avanzano fasce bianche (come nei programmi di impaginazione).
+  // (non quando si sta solo passando da «foto intera» a «riempi»: con un clic la disposizione non deve cambiare)
+  if (fitShapes && area.style.mode !== "fit") {
+    const shaped = fitShapedCells(area, inner, gapMm);
+    if (shaped) return shaped === area.layout ? area : { ...area, layout: shaped };
+  }
   const assets = assetMap(project);
   const byItem = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))]));
-  const layout = naturalRatios(area.layout, (id) => byItem.get(id) ?? 1.5, inner, gapMm);
+  const layout = naturalRatios(area.layout, (id) => byItem.get(id) ?? 1.5, inner, gapMm, naturalOptions(area));
   return layout === area.layout ? area : { ...area, layout };
 }
 
@@ -230,7 +325,7 @@ export function alignChanged(before: Project, after: Project): Project {
     const areas = spread.areas.map((area, index) => {
       if (old?.areas[index] === area) return area;
       const geometry = areaGeometryFor(after.settings.sheet, spread, index);
-      const next = alignedForFit(after, area, geometry.inner, geometry.gapMm);
+      const next = alignedForFit(after, area, geometry.inner, geometry.gapMm, old?.areas[index]?.style.mode === area.style.mode);
       if (next !== area) changed = true;
       return next;
     });

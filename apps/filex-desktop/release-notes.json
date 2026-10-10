@@ -703,6 +703,18 @@
       "Nuovo: un nuovo spread eredita la divisione e lo stile (spazio, margine, bordo, modo, sfondo) dello spread precedente, invece di partire sempre da «metà» con le impostazioni di base.",
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
+    ],
+    "0.2.31": [
+      "Corretto: le foto restano sempre allineate. Il formato scelto per una foto (1:1, 3:2, 2:3…) è esatto: un 1:1 è davvero quadrato. Bordo, spazio tra le foto e «Allinea» entrano nel calcolo e le foto si riallineano quando li cambi.",
+      "Corretto: in «foto intera» e con forme scelte i separatori non si trascinano più (le divisioni seguono le proporzioni delle foto). In «riempi», la foto con una forma ha la cella esatta di quella forma, le altre riempiono e la pagina resta piena.",
+      "Migliorato: «Mescola», le frecce, il browser dei layout e i tasti 1-9 non propongono più layout identici, e anche una panoramica accanto a una verticale stretta ha sempre un layout.",
+      "Migliorato: trascinando insieme più foto sul bordo di una foto, le foto successive stanno affiancate sul lato perpendicolare (due foto sotto una foto larga formano una riga sotto di essa).",
+      "Corretto: «Sposta le foto liberamente» non sposta più le foto; aggiungere una foto a una pagina libera non azzera le posizioni (la nuova arriva a cascata) e si può rilasciare una foto su uno spazio vuoto.",
+      "Corretto: una foto libera più grande del foglio si vede solo nella parte che sta nel foglio.",
+      "Corretto: il lucchetto protegge davvero il layout (forma, sostituzioni, rilasci e divisione non lo cambiano) e dice perché un'azione non si può fare; cambiare la divisione non fa più perdere il blocco in silenzio.",
+      "Nuovo: striscia delle miniature con lo spread aperto ben riconoscibile (cornice, freccia, numero evidenziato) e la pagina attiva (sinistra o destra) evidenziata; il trattino del capitolo non si confonde più.",
+      "Nuovo: comandi della foto più compatti: il formato si sceglie con piccole icone in scala, il raddrizzamento si adatta alla foto, e sulle foto piccole i comandi diventano due colonne o un solo «⋯» che si apre fuori dalla foto.",
+      "Nuovo: 90 nuovi testi per i racconti in nove temi (Mani, Amore, Racconto, Storia, Emozioni, Ritratti di coppia, Bellezza ed essenza, Fotografia, Ricordo ed eternità), nella scheda Racconto di «Personalizza»."
     ]
   }
 }

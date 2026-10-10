@@ -1,12 +1,12 @@
 import type { AlbumArea, AlbumSpread, AreaStyle, AreaTemplate, FavoriteLayout, LayoutNode } from "@photo-tools/shared-types";
-import { MAX_RATIO, MIN_RATIO, clampRatio } from "../engine/geometry";
+import { MAX_RATIO, MIN_RATIO, alignFactor, clampRatio, layoutCells } from "../engine/geometry";
 import { generateLayoutsCached, type LayoutCandidate } from "../engine/generate";
 import { applyShape, countLeaves, leafIds, mirrorHorizontal, mirrorVertical, naturalRatios, nodeAt, setRatioAt, shapeOfTree } from "../engine/tree";
 import { STYLE_LIMITS, clampNumber } from "./defaults";
 import { newId } from "./ids";
 import { orientationOf } from "./import";
 import { matchTemplates, templateArea, type TemplateMatch } from "./templates";
-import { alignedForFit, areaGeometry, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, mapSpread, needsShapeAlignment, normalizeArea, replaceArea, touch, findSpread, type Project } from "./project";
+import { alignChanged, alignedForFit, areaGeometry, fitShapedCells, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, mapSpread, naturalOptions, needsShapeAlignment, normalizeArea, replaceArea, touch, findSpread, type Project } from "./project";
 
 const MAX_CANDIDATES = 24;
 
@@ -20,7 +20,19 @@ export function areaCandidates(project: Project, spread: AlbumSpread, areaIndex:
   // «Foto intera» (o foto con una forma scelta): stessa disposizione, ma con le divisioni regolate perché le foto risultino allineate.
   const assets = assetMap(project);
   const byItem = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))]));
-  return candidates.map((candidate) => ({ ...candidate, tree: naturalRatios(candidate.tree, (id) => byItem.get(id) ?? 1.5, geometry.inner, geometry.gapMm) }));
+  const options = naturalOptions(area);
+  // In «riempi» con forme scelte si cerca prima la cella esatta (le altre foto riempiono); altrimenti rapporti naturali (finestre allineate).
+  const aligned = candidates.map((candidate) => ({ ...candidate, tree: (area.style.mode !== "fit" ? fitShapedCells({ ...area, layout: candidate.tree }, geometry.inner, geometry.gapMm) : null) ?? naturalRatios(candidate.tree, (id) => byItem.get(id) ?? 1.5, geometry.inner, geometry.gapMm, options) }));
+  // Con i rapporti naturali le varianti che differivano solo per le divisioni diventano identiche: ogni layout proposto resta una volta sola.
+  const align = alignFactor(area.style.align);
+  const seen = new Set<string>();
+  return aligned.filter((candidate) => {
+    const signature = layoutCells(candidate.tree, geometry.inner, geometry.gapMm, undefined, align).cells
+      .map((cell) => `${cell.itemId}:${Math.round(cell.rect.x)},${Math.round(cell.rect.y)},${Math.round(cell.rect.w)},${Math.round(cell.rect.h)}`).join(";");
+    if (seen.has(signature)) return false;
+    seen.add(signature);
+    return true;
+  });
 }
 
 /** Rigenera il layout di un'area con il candidato `index` (0 = il migliore). Non cambia le foto. */
@@ -121,17 +133,21 @@ export function sanitizeStyle(style: AreaStyle): AreaStyle {
 }
 
 /**
- * Quando cambia il modo (riempi ↔ foto intera) la disposizione resta la stessa: con «riempi» le celle occupano tutto lo
- * spazio (spariscono i bordi vuoti sopra e sotto), con la foto intera le divisioni si regolano sulle proporzioni delle foto.
+ * Quando cambia lo stile la disposizione resta la stessa, ma le foto restano allineate: con «riempi» le celle occupano tutto lo
+ * spazio, con la foto intera le divisioni si regolano sulle proporzioni delle foto e dipendono anche da spazio tra le foto, margine,
+ * bordo e allineamento, quindi si ricalcolano quando uno di questi cambia (non solo il modo).
  */
+const ALIGNMENT_KEYS = ["mode", "gapCm", "paddingCm", "borderCm", "align"] as const;
 function adaptToMode(project: Project, spread: AlbumSpread, before: AlbumSpread, relayout = false): AlbumSpread {
   if (spread.done) return spread;
   const areas = spread.areas.map((area, index) => {
-    if (!before.areas[index] || before.areas[index].style.mode === area.style.mode || area.items.length === 0) return area;
+    const old = before.areas[index];
+    if (!old || ALIGNMENT_KEYS.every((key) => old.style[key] === area.style[key]) || area.items.length === 0) return area;
     // Con `relayout` (Alt + clic su «Modo») si sceglie anche la disposizione migliore per il nuovo modo.
-    if (relayout) return relayoutArea(project, spread, index, 0);
+    if (relayout && old.style.mode !== area.style.mode && !area.locked) return relayoutArea(project, spread, index, 0);
     const geometry = areaGeometry(project, spread, index);
-    return alignedForFit(project, area, geometry.inner, geometry.gapMm);
+    // Solo il modo cambia: la disposizione resta (le forme non si rifanno); se cambiano spazio, margine o bordo si riallinea tutto.
+    return alignedForFit(project, area, geometry.inner, geometry.gapMm, old.style.mode === area.style.mode);
   });
   return areas.some((area, index) => area !== spread.areas[index]) ? { ...spread, areas } : spread;
 }
@@ -193,7 +209,8 @@ export function applyStyleToAlbum(project: Project, spreadId: string, areaIndex:
 export function setDividerRatio(project: Project, spreadId: string, areaIndex: number, path: string, ratio: number): Project {
   return mapSpread(project, spreadId, (spread) => {
     const area = spread.areas[areaIndex];
-    if (!area?.layout) return spread;
+    // Con le foto allineate («foto intera» o forme scelte) le divisioni seguono le proporzioni delle foto: non si spostano a mano.
+    if (!area?.layout || needsShapeAlignment(area)) return spread;
     const node = nodeAt(area.layout, path);
     if (!node || node.kind !== "split") return spread;
     const next = clampRatio(Number(ratio.toFixed(5)));
@@ -209,17 +226,19 @@ export function resetDividerRatio(project: Project, spreadId: string, areaIndex:
   if (!found || !area?.layout) return project;
   const node = nodeAt(area.layout, path);
   if (!node || node.kind !== "split") return project;
+  const geometry = areaGeometry(project, found.spread, areaIndex);
+  // Aree allineate: si riallinea tutta l'area (è l'unico stato valido).
+  if (needsShapeAlignment(area)) {
+    const next = alignedForFit(project, area, geometry.inner, geometry.gapMm);
+    return next === area ? project : mapSpread(project, spreadId, (spread) => replaceArea(spread, areaIndex, next));
+  }
+  // «Riempi»: rapporto naturale di quel separatore, con spazio tra le foto e bordo come nel calcolo dell'allineamento.
   const assets = assetMap(project);
-  const aspectOf = (n: LayoutNode): number => {
-    if (n.kind === "leaf") { const leaf = area.items.find((item) => item.id === n.itemId); return leaf ? effectiveAspect(leaf, assets.get(leaf.assetId)) : 1; }
-    const a = aspectOf(n.first);
-    const b = aspectOf(n.second);
-    return n.dir === "row" ? a + b : 1 / (1 / a + 1 / b);
-  };
-  const a = aspectOf(node.first);
-  const b = aspectOf(node.second);
-  const natural = node.dir === "row" ? a / (a + b) : b / (a + b);
-  return setDividerRatio(project, spreadId, areaIndex, path, clampNumber(natural, MIN_RATIO, MAX_RATIO));
+  const aspects = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))]));
+  const natural = naturalRatios(area.layout, (id) => aspects.get(id) ?? 1.5, geometry.inner, geometry.gapMm, naturalOptions(area));
+  const target = nodeAt(natural, path);
+  if (!target || target.kind !== "split") return project;
+  return setDividerRatio(project, spreadId, areaIndex, path, clampNumber(target.ratio, MIN_RATIO, MAX_RATIO));
 }
 
 export function mirrorArea(project: Project, spreadId: string, areaIndex: number, axis: "horizontal" | "vertical"): Project {
@@ -332,5 +351,6 @@ export function setAlbumGap(project: Project, gapCm: number): { project: Project
     });
     return changed ? { ...spread, areas } : spread;
   });
-  return { project: touch({ ...project, settings: { ...project.settings, defaultStyle: { ...project.settings.defaultStyle, gapCm: next } }, spreads }), updated };
+  const changed = touch({ ...project, settings: { ...project.settings, defaultStyle: { ...project.settings.defaultStyle, gapCm: next } }, spreads });
+  return { project: alignChanged(project, changed), updated };
 }

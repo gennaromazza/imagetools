@@ -291,7 +291,7 @@ test("rilascio su una disposizione libera: conta la foto più in alto e c'è sol
   const area = { rect: { x: 0, y: 0, w: 200, h: 200 }, cells, free: true };
   assert.deepEqual(resolveDropTarget([area], 75, 75), { areaIndex: 0, itemId: "sopra", zone: "center" }, "dove si sovrappongono vince la più alta");
   assert.deepEqual(resolveDropTarget([area], 10, 10), { areaIndex: 0, itemId: "sotto", zone: "center" });
-  assert.equal(resolveDropTarget([area], 180, 20), null, "fuori da ogni foto: nessun rilascio");
+  assert.deepEqual(resolveDropTarget([area], 180, 20), { areaIndex: 0, itemId: null, zone: "area" }, "spazio vuoto della pagina libera: la foto nuova si aggiunge senza spostare le altre");
   assert.equal(resolveDropTarget([area], 1, 1)?.node, undefined, "niente zone intelligenti sul bordo");
 });
 

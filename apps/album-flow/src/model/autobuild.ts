@@ -1,5 +1,5 @@
 import type { AlbumAssetV2, AlbumItem, AlbumSpread, AreaFitMode } from "@photo-tools/shared-types";
-import { areaOuterRects, insetRect } from "../engine/geometry";
+import { alignFactor, areaOuterRects, insetRect } from "../engine/geometry";
 import { estimateCost, generateLayoutsCached } from "../engine/generate";
 import { naturalRatios } from "../engine/tree";
 import { sortAssets, unusedAssets } from "./library";
@@ -121,7 +121,7 @@ export function autoBuildAlbum(project: Project, options: AutoBuildOptions): Pro
     lastCount = assets.length;
     // «Foto intera»: le divisioni si regolano sulle foto, così risultano allineate.
     const aspects = new Map(items.map((item, index) => [item.id, itemAspect(assets[index])]));
-    const tree = picked && options.fitMode === "fit" ? naturalRatios(picked.tree, (id) => aspects.get(id) ?? 1.5, rect, gapMm) : picked?.tree ?? null;
+    const tree = picked && options.fitMode === "fit" ? naturalRatios(picked.tree, (id) => aspects.get(id) ?? 1.5, rect, gapMm, { borderMmOf: () => Math.max(0, style.borderCm * 10), align: alignFactor(style.align) }) : picked?.tree ?? null;
     return normalizeArea({ ...createArea(style), items, layout: tree, seed: choice });
   };
 

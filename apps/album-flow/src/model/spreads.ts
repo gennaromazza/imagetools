@@ -114,6 +114,7 @@ function splitBuckets(project: Project, spread: AlbumSpread, mode: AlbumSplitMod
 export function splitRefusal(project: Project, spreadId: string, mode: AlbumSplitMode): string | null {
   const found = findSpread(project, spreadId);
   if (!found || found.spread.split === mode) return null;
+  if (found.spread.areas.some((area) => area.locked)) return "Il layout di questo spread è bloccato: sbloccalo (lucchetto) per cambiare la divisione.";
   const biggest = Math.max(...splitBuckets(project, found.spread, mode).map((bucket) => bucket.length));
   return biggest > MAX_ITEMS_PER_AREA ? `Con questa divisione una pagina avrebbe ${biggest} foto: il massimo è ${MAX_ITEMS_PER_AREA}. Togline qualcuna e riprova.` : null;
 }
@@ -126,6 +127,8 @@ export function setSplitMode(project: Project, spreadId: string, mode: AlbumSpli
   const found = findSpread(project, spreadId);
   if (!found || found.spread.split === mode) return project;
   const { spread } = found;
+  // Cambiare divisione rigenera i layout: con un layout bloccato non si fa (il blocco non si perde in silenzio).
+  if (spread.areas.some((area) => area.locked)) return project;
 
   const rects = areaOuterRects(project.settings.sheet, mode);
   const style = (index: number) => ({ ...(spread.areas[index] ?? spread.areas[0]).style });

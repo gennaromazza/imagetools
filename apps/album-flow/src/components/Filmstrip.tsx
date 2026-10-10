@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetV2, AlbumProjectV2 } from "@photo-tools/shared-types";
 import { beginDrag, currentDrag, endDrag } from "./dnd";
+import { SPLIT_FRACTION } from "../engine/geometry";
 import { Icon } from "./icons";
 import { SpreadView } from "./SpreadView";
 import { ContextMenu } from "./ui";
@@ -9,6 +10,8 @@ export interface FilmstripProps {
   project: AlbumProjectV2;
   assets: ReadonlyMap<string, AlbumAssetV2>;
   current: number;
+  /** Pagina attiva dello spread aperto (0 = sinistra, 1 = destra): si evidenzia sulla miniatura. */
+  activeArea?: number;
   onSelect: (index: number) => void;
   onAdd: () => void;
   /** Il «+» che compare tra due miniature: nuovo spread vuoto in quella posizione. */
@@ -46,7 +49,7 @@ function Gap({ index, onDropNew, onAddAt }: { index: number; onDropNew: Filmstri
   );
 }
 
-export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, onDuplicate, onRemove, onMove, onDropNew, onDropOn }: FilmstripProps) {
+export function Filmstrip({ project, assets, current, activeArea = 0, onSelect, onAdd, onAddAt, onDuplicate, onRemove, onMove, onDropNew, onDropOn }: FilmstripProps) {
   const currentRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   // La rotella sulla striscia sfoglia le miniature (scorrimento orizzontale); sullo spread la rotella resta per zoom e raddrizzamento, così non si confonde con le azioni sulle foto.
@@ -119,10 +122,17 @@ export function Filmstrip({ project, assets, current, onSelect, onAdd, onAddAt, 
               aria-label={`Spread ${index + 1}${chapter ? `, ${chapter.title}` : ""}, ${photos} foto`}
               aria-current={index === current ? "true" : undefined}
               data-spread-index={index}
-              title={`Spread ${index + 1} · ${photos} foto${chapter ? ` · ${chapter.title}` : ""}${empty ? " · pagina vuota" : ""}`}
+              title={`Spread ${index + 1}${index === current ? " (aperto)" : ""} · ${photos} foto${chapter ? ` · ${chapter.title}` : ""}${empty ? " · pagina vuota" : ""}`}
             >
               <span className="film__num">{index + 1}</span>
-              <div className="film__thumb"><SpreadView sheet={project.settings.sheet} spread={spread} assets={assets} variant="thumb" /></div>
+              <div className="film__thumb">
+                <SpreadView sheet={project.settings.sheet} spread={spread} assets={assets} variant="thumb" />
+                {index === current && spread.areas.length > 1 ? (
+                  <span className="film__pages" aria-hidden="true">
+                    {spread.areas.map((area, areaIndex) => <i key={area.id} className={areaIndex === Math.min(activeArea, spread.areas.length - 1) ? "is-active" : ""} style={{ flex: areaIndex === 0 ? SPLIT_FRACTION[spread.split] : 1 - SPLIT_FRACTION[spread.split] }} />)}
+                  </span>
+                ) : null}
+              </div>
               <span className="film__bar" style={{ background: chapter?.color ?? "transparent" }} />
               {empty && photos > 0 ? <span className="film__warn" aria-label="Pagina vuota" /> : null}
               {spread.done ? <span className="film__done" aria-label="Spread finito" title="Finito"><Icon name="check" size={9} strokeWidth={3} /></span> : null}

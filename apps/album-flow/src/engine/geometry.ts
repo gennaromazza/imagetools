@@ -16,6 +16,9 @@ export const MAX_RATIO = 1 - MIN_RATIO;
 export const SPLIT_FRACTION: Record<AlbumSplitMode, number> = { full: 1, half: 1 / 2, third: 1 / 3, "two-thirds": 2 / 3 };
 export const SPLIT_MODES: readonly AlbumSplitMode[] = ["full", "half", "third", "two-thirds"];
 
+/** Dove va il blocco di foto «intere» quando avanza spazio: 0 = in alto a sinistra, 0,5 = al centro, 1 = in basso a destra. */
+export const alignFactor = (align: string | undefined): number => (align === "start" ? 0 : align === "end" ? 1 : 0.5);
+
 export function clampRatio(value: number): number {
   if (!Number.isFinite(value)) return 0.5;
   return Math.min(Math.max(value, MIN_RATIO), MAX_RATIO);
@@ -53,6 +56,8 @@ export interface LeafCell {
   z?: number;
   /** Ancoraggio della foto in «foto intera» (0 = a sinistra/in alto, 1 = a destra/in basso): le foto ai bordi si avvicinano al centro. */
   anchor?: { x: number; y: number };
+  /** In «riempi» con forme scelte non raggiungibili: le foto di quest'area sono finestre esatte e allineate (come in «foto intera»). */
+  windowed?: boolean;
 }
 
 export interface Divider {
@@ -77,13 +82,15 @@ export function layoutCells(
   rect: Rect,
   gapMm: number,
   overrides?: RatioOverrides,
+  /** Per le celle che toccano due bordi opposti: dove sta la foto (vedi `alignFactor`). */
+  align = 0.5,
 ): { cells: LeafCell[]; dividers: Divider[] } {
   const cells: LeafCell[] = [];
   const dividers: Divider[] = [];
   const gap = Math.max(0, gapMm);
 
   interface Edges { l: boolean; r: boolean; t: boolean; b: boolean }
-  const pull = (near: boolean, far: boolean) => (near && !far ? 1 : far && !near ? 0 : 0.5);
+  const pull = (near: boolean, far: boolean) => (near && !far ? 1 : far && !near ? 0 : near && far ? align : 0.5);
   const visit = (node: LayoutNode, area: Rect, path: string, edges: Edges = { l: true, r: true, t: true, b: true }) => {
     if (node.kind === "leaf") {
       cells.push({ itemId: node.itemId, path, rect: area, anchor: { x: pull(edges.l, edges.r), y: pull(edges.t, edges.b) } });

@@ -5,7 +5,7 @@ import { leafIds } from "../engine/tree";
 import { TEMPLATE_SEED_BASE, layoutChoices, alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, areaCandidates, favoritesFor, isFavoriteLayout, mirrorArea, removeFavoriteLayout, resetDividerRatio, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "./areas";
 import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, previewDropRect, removeItem, replaceItemAsset, resetItemView, setItemView, swapItems, toggleItemLock } from "./items";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSplitMode, swapAreas } from "./spreads";
-import { findItem, itemAspect, spreadGeometry, type Project } from "./project";
+import { findItem, itemAspect, placementStyle, spreadGeometry, type Project } from "./project";
 import { assertProjectInvariants, makeAsset, makeProject } from "./fixtures";
 import { setItemBorder } from "./items";
 import { itemBorderColor, placeItem as placeItemForBorder } from "./placement";
@@ -291,10 +291,12 @@ test("candidati: applicare un candidato per indice o per numero (tasti 1-9)", ()
   const project = filled(3, 0);
   const id = firstSpreadId(project);
   const candidates = areaCandidates(project, project.spreads[0], 0);
-  const third = applyCandidate(project, id, 0, 2);
-  assert.deepEqual(third.spreads[0].areas[0].layout, candidates[2].tree);
-  assert.equal(third.spreads[0].areas[0].seed, 2);
-  assert.deepEqual(applyCandidateByNumber(project, id, 0, 3).spreads[0].areas[0].layout, candidates[2].tree);
+  assert.ok(candidates.length >= 2, "in «foto intera» restano solo i layout davvero diversi");
+  const last = candidates.length - 1;
+  const picked = applyCandidate(project, id, 0, last);
+  assert.deepEqual(picked.spreads[0].areas[0].layout, candidates[last].tree);
+  assert.equal(picked.spreads[0].areas[0].seed, last);
+  assert.deepEqual(applyCandidateByNumber(project, id, 0, last + 1).spreads[0].areas[0].layout, candidates[last].tree);
   assert.equal(applyCandidate(project, id, 0, 99), project);
   assert.equal(applyCandidate(project, id, 4, 0), project);
 });
@@ -329,9 +331,11 @@ test("stile: limiti, collegamento tra le aree e copia su spread e album", () => 
   assertProjectInvariants(album, "stile");
 });
 
-test("separatori: rapporto limitato, riportato al naturale e specchi del layout", () => {
+test("separatori: rapporto limitato, riportato al naturale e specchi del layout (in «foto intera» le divisioni non si spostano a mano)", () => {
   let project = filled(2, 0);
   const id = firstSpreadId(project);
+  assert.equal(setDividerRatio(project, id, 0, "", 0.37), project, "foto allineate: il separatore non si trascina");
+  project = setAreaStyle(project, id, 0, { mode: "fill" });
   const layout = project.spreads[0].areas[0].layout!;
   assert.equal(layout.kind, "split");
   const moved = setDividerRatio(project, id, 0, "", 0.37);
@@ -725,7 +729,10 @@ test("template libero: foto che si sovrappongono, rotazione e livelli, e cosa lo
   const removed = removeItem(project, area.items[2].id);
   assert.ok(hasFreeLayout(removed.spreads[0].areas[0]) && removed.spreads[0].areas[0].items.length === 2);
   assertProjectInvariants(removed, "foto tolta");
-  assert.ok(!hasFreeLayout(appendAssets(project, id, 0, ["a9"]).spreads[0].areas[0]));
+  const appended = appendAssets(project, id, 0, ["a9"]).spreads[0].areas[0];
+  assert.ok(hasFreeLayout(appended), "aggiungere una foto non azzera le posizioni libere");
+  for (const item of area.items) assert.deepEqual(appended.free![item.id], area.free![item.id], "le foto già presenti restano dove sono");
+  assert.equal(appended.items.length, area.items.length + 1);
   assert.ok(!hasFreeLayout(shuffleArea(project, id, 0).spreads[0].areas[0]));
   assert.ok(!hasFreeLayout(applyCandidateByNumber(project, id, 0, 1).spreads[0].areas[0]));
   assertProjectInvariants(shuffleArea(project, id, 0), "dopo mescola");
@@ -1083,7 +1090,15 @@ test("layout libero: una pagina automatica diventa libera senza cambiare a vista
   const project = filled(4, 3);
   const id = firstSpreadId(project);
   const spread = project.spreads[0];
-  const before = areaGeometry(project, spread, 0).cells.map((cell) => ({ id: cell.itemId, rect: cell.rect }));
+  const windowsOf = (p: Project) => {
+    const sp = p.spreads[0];
+    const area0 = sp.areas[0];
+    return areaGeometry(p, sp, 0).cells.map((cell) => {
+      const item = area0.items.find((candidate) => candidate.id === cell.itemId)!;
+      return { id: cell.itemId, rect: placeItem(cell.rect, item, p.assets.find((asset) => asset.id === item.assetId), placementStyle(area0, cell), null, cell.anchor).content };
+    });
+  };
+  const before = windowsOf(project);
 
   const free = makeAreaFree(project, id, 0);
   assert.notEqual(free, project);
@@ -1091,10 +1106,10 @@ test("layout libero: una pagina automatica diventa libera senza cambiare a vista
   assert.ok(hasFreeLayout(area), "ogni foto ha la sua cornice");
   assert.ok(area.layout, "il layout ad albero resta come riserva");
   assertProjectInvariants(free, "pagina resa libera");
-  const after = areaGeometry(free, free.spreads[0], 0).cells;
-  for (const cell of before) {
-    const now = after.find((candidate) => candidate.itemId === cell.id)!;
-    for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(now.rect[key] - cell.rect[key]) < 0.05, `${cell.id}: ${key} cambiata a vista`);
+  const after = windowsOf(free);
+  for (const window of before) {
+    const now = after.find((candidate) => candidate.id === window.id)!;
+    for (const key of ["x", "y", "w", "h"] as const) assert.ok(Math.abs(now.rect[key] - window.rect[key]) < 0.05, `${window.id}: ${key} cambiata a vista`);
   }
   assert.equal(makeAreaFree(free, id, 0), free, "già libera: nessun cambiamento");
   assert.equal(makeAreaFree(project, id, 7), project);

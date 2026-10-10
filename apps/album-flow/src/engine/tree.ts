@@ -197,7 +197,14 @@ export function validateTree(tree: LayoutNode | null, expectedIds?: readonly str
  *
  * Ogni ramo ha due funzioni lineari: larghezza necessaria a una data altezza e altezza necessaria a una data larghezza.
  */
-export function naturalRatios(tree: LayoutNode, aspectOf: (itemId: string) => number, size: { w: number; h: number }, gapMm: number): LayoutNode {
+export interface NaturalOptions {
+  /** Spessore (mm) del bordo di ogni foto: la parte visibile è la cella meno il bordo su ogni lato, quindi il bordo entra nel calcolo. */
+  borderMmOf?: (itemId: string) => number;
+  /** Dove sta il blocco quando avanza spazio: 0 = in alto a sinistra, 0,5 = al centro (default), 1 = in basso a destra. */
+  align?: number;
+}
+
+export function naturalRatios(tree: LayoutNode, aspectOf: (itemId: string) => number, size: { w: number; h: number }, gapMm: number, options: NaturalOptions = {}): LayoutNode {
   const gap = Math.max(0, gapMm);
   interface Fit { width: { a: number; b: number }; height: { a: number; b: number } }
   const fits = new Map<LayoutNode, Fit>();
@@ -205,7 +212,9 @@ export function naturalRatios(tree: LayoutNode, aspectOf: (itemId: string) => nu
     let fit: Fit;
     if (node.kind === "leaf") {
       const aspect = Math.max(0.05, aspectOf(node.itemId));
-      fit = { width: { a: aspect, b: 0 }, height: { a: 1 / aspect, b: 0 } };
+      // La parte visibile (aspect) sta dentro la cella meno il bordo `b` per lato: larghezza = aspect·(h − 2b) + 2b, altezza = (w − 2b)/aspect + 2b.
+      const border2 = 2 * Math.max(0, options.borderMmOf?.(node.itemId) ?? 0);
+      fit = { width: { a: aspect, b: border2 * (1 - aspect) }, height: { a: 1 / aspect, b: border2 * (1 - 1 / aspect) } };
     } else {
       const f = measure(node.first);
       const s = measure(node.second);
@@ -260,7 +269,8 @@ export function naturalRatios(tree: LayoutNode, aspectOf: (itemId: string) => nu
   const block = heightAtFullWidth <= size.h
     ? { w: size.w, h: heightAtFullWidth }
     : { w: root.width.a * size.h + root.width.b, h: size.h };
-  const padX = Math.max(0, (size.w - block.w) / 2);
-  const padY = Math.max(0, (size.h - block.h) / 2);
-  return assign(tree, size.w, size.h, { l: padX, r: padX, t: padY, b: padY });
+  const align = Math.min(1, Math.max(0, options.align ?? 0.5));
+  const spareX = Math.max(0, size.w - block.w);
+  const spareY = Math.max(0, size.h - block.h);
+  return assign(tree, size.w, size.h, { l: spareX * align, r: spareX * (1 - align), t: spareY * align, b: spareY * (1 - align) });
 }

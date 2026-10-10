@@ -65,8 +65,31 @@ function straightView(content: Rect, aspect: number, zoom: number, cx: number, c
   return { zoom: z, crop, image: { x: content.x + content.w / 2 - centerX * W, y: content.y + content.h / 2 - centerY * H, w: W, h: H } };
 }
 
-/** Scarto relativo sotto il quale la cella conta già come «della forma scelta». */
-export const SHAPE_SNAP = 0.12;
+/** Scarto relativo (0,1%, cioè gli arrotondamenti del calcolo) sotto il quale la cella conta già come «della forma scelta»: oltre, la foto è una finestra esatta di quella forma. */
+export const SHAPE_SNAP = 0.001;
+
+/**
+ * Quanto di un rettangolo (percentuali delle sue misure) esce dai limiti del contenitore, per tagliare la parte fuori: una foto libera più grande
+ * del foglio si vede solo dentro il foglio. Null se sta tutta dentro.
+ */
+export function overflowInset(bounds: Rect, rect: Rect): { top: number; right: number; bottom: number; left: number } | null {
+  if (rect.w <= 0 || rect.h <= 0) return null;
+  const top = (Math.max(0, bounds.y - rect.y) / rect.h) * 100;
+  const right = (Math.max(0, rect.x + rect.w - (bounds.x + bounds.w)) / rect.w) * 100;
+  const bottom = (Math.max(0, rect.y + rect.h - (bounds.y + bounds.h)) / rect.h) * 100;
+  const left = (Math.max(0, bounds.x - rect.x) / rect.w) * 100;
+  return top || right || bottom || left ? { top, right, bottom, left } : null;
+}
+
+/** Lato più corto (px sullo schermo) sotto il quale i comandi di una foto diventano un solo pulsante «⋯» (minuscola) o due colonne (piccola). */
+export const TOOLBAR_TINY_PX = 150;
+export const TOOLBAR_COMPACT_PX = 260;
+
+/** Come si mostrano i comandi della foto selezionata in base alla sua grandezza sullo schermo: quattro barre, due colonne o un solo «⋯». */
+export function toolbarModeFor(minSidePx: number): "full" | "compact" | "tiny" {
+  if (minSidePx < TOOLBAR_TINY_PX) return "tiny";
+  return minSidePx < TOOLBAR_COMPACT_PX ? "compact" : "full";
+}
 
 /** Colore del bordo di una foto: il suo, se l'ha, altrimenti quello dell'area. */
 export const itemBorderColor = (item: Pick<AlbumItem, "borderColor">, style: Pick<AreaStyle, "borderColor">): string => item.borderColor ?? style.borderColor;
@@ -86,12 +109,11 @@ export function placeItem(frame: Rect, item: Pick<AlbumItem, "zoom" | "cx" | "cy
   const fitted = style.mode === "fit" && !shape && zoom <= MIN_ZOOM + 1e-6 && requestedAngle === 0;
   const angle = fitted ? 0 : requestedAngle;
   const factor = style.align === "start" ? 0 : style.align === "end" ? 1 : 0.5;
-  const auto = !style.align || style.align === "center";
   // Posiziona nella cella un rettangolo con le proporzioni date (la foto intera, oppure la forma scelta).
   const inside = (ratio: number): Rect => {
     const w = ratio > content.w / content.h ? content.w : content.h * ratio;
     const h = ratio > content.w / content.h ? content.w / ratio : content.h;
-    return { x: content.x + (content.w - w) * (auto && anchor ? anchor.x : factor), y: content.y + (content.h - h) * (auto && anchor ? anchor.y : factor), w, h };
+    return { x: content.x + (content.w - w) * (anchor ? anchor.x : factor), y: content.y + (content.h - h) * (anchor ? anchor.y : factor), w, h };
   };
   // La finestra: la parte della cella in cui si vede la foto (la foto la riempie).
   // - forma scelta: una finestra di quella forma; se la cella ha già (quasi) quella forma la foto riempie tutta la cella (niente fasce bianche sottili);

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { resolveDropTarget, type DropTarget } from "../engine/drop";
 import { spreadSizeMm } from "../engine/geometry";
 import { appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, previewDropRect, removeItem, replaceItemAsset, setItemView, swapItems, toggleItemLock } from "./items";
+import { setAreaStyle } from "./areas";
 import { reorderAssets, sortAssets } from "./library";
 import { placeItem } from "./placement";
 import { addSpread } from "./spreads";
@@ -357,4 +358,49 @@ test("assegnazione — scambiare due foto non ricrea gli spread che non c'entran
   after.spreads.forEach((spread, index) => { if (index !== 1) assert.equal(spread, project.spreads[index], `lo spread ${index + 1} non deve cambiare oggetto`); });
   assert.notEqual(after.spreads[1], project.spreads[1]);
   assertProjectInvariants(after, "scambio");
+});
+
+test("assegnazione — due foto rilasciate sotto una foto larga formano una riga sotto di essa, non una colonna di strisce", () => {
+  let project = addSpread(makeProject(8), 0, "full");
+  const id = project.spreads[0].id;
+  project = appendAssets(project, id, 0, ["a0"]);
+  const wide = project.spreads[0].areas[0].items[0];
+  for (const target of [{ areaIndex: 0, itemId: wide.id, zone: "bottom" as const }, { areaIndex: 0, itemId: null, zone: "bottom" as const, node: "" }]) {
+    const after = dropOnSpread(project, id, target, { kind: "assets", assetIds: ["a1", "a2"] });
+    assert.equal(total(after), 3, `${target.node ?? target.itemId}: le due foto vengono aggiunte`);
+    const cells = spreadGeometry(after, after.spreads[0])[0].cells;
+    const items = after.spreads[0].areas[0].items;
+    const first = cells.find((cell) => cell.itemId === items.find((item) => item.assetId === "a1")!.id)!.rect;
+    const second = cells.find((cell) => cell.itemId === items.find((item) => item.assetId === "a2")!.id)!.rect;
+    const top = cells.find((cell) => cell.itemId === wide.id)!.rect;
+    assert.ok(Math.abs(first.y - second.y) < 1e-6 && Math.abs(first.h - second.h) < 1e-6, "le due foto stanno sulla stessa riga");
+    assert.ok(second.x > first.x, "ordine di lettura rispettato");
+    assert.ok(first.y >= top.y + top.h - 1e-6, "la riga sta sotto la foto larga");
+    assertProjectInvariants(after, "riga sotto");
+  }
+});
+
+test("forma — in «riempi» la cella della foto con forma prende esattamente quella proporzione e la pagina resta piena", () => {
+  let project = addSpread(makeProject(10), 0, "full");
+  const id = project.spreads[0].id;
+  project = appendAssets(project, id, 0, ["a0", "a1", "a2", "a3"]);
+  project = setAreaStyle(project, id, 0, { mode: "fill" });
+  let reachedCount = 0;
+  for (const index of [0, 1, 2, 3]) {
+    const item = project.spreads[0].areas[0].items[index];
+    const shaped = setItemView(project, item.id, { shape: 2 / 3 });
+    const area = shaped.spreads[0].areas[0];
+    const geometry = spreadGeometry(shaped, shaped.spreads[0])[0];
+    const cell = geometry.cells.find((candidate) => candidate.itemId === item.id)!;
+    const border = Math.min(area.style.borderCm * 10, Math.min(cell.rect.w, cell.rect.h) / 4);
+    const aspect = (cell.rect.w - border * 2) / (cell.rect.h - border * 2);
+    if (Math.abs(aspect / (2 / 3) - 1) < 0.01) {
+      reachedCount += 1;
+      const covered = geometry.cells.reduce((sum, c) => sum + c.rect.w * c.rect.h, 0);
+      const free = geometry.inner.w * geometry.inner.h - covered;
+      assert.ok(free < geometry.inner.w * geometry.inner.h * 0.03 + geometry.gapMm * (geometry.inner.w + geometry.inner.h) * 4, `foto ${index}: la pagina resta piena (${free.toFixed(0)} mm² liberi)`);
+    }
+    assertProjectInvariants(shaped, `forma ${index}`);
+  }
+  assert.ok(reachedCount >= 3, `la forma scelta viene raggiunta in ${reachedCount} casi su 4`);
 });
