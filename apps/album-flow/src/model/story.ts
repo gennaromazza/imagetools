@@ -39,7 +39,7 @@ export const STORY_SPACE_LABEL: Record<StorySpace, string> = {
 };
 
 /** Categorie che vanno bene in qualunque punto dell'album. */
-const UNIVERSAL: ReadonlySet<StoryCategory> = new Set(["universali", "poetici", "microcopy", "cinematografici", "citazioni"]);
+const UNIVERSAL: ReadonlySet<StoryCategory> = new Set(["universali", "poetici", "microcopy", "cinematografici", "citazioni", "mani", "amore", "racconto", "storia", "emozioni", "ritratti_coppia", "bellezza", "fotografia", "ricordo"]);
 const OPENING_ONLY: ReadonlySet<StoryCategory> = new Set(["aperture"]);
 const CLOSING_ONLY: ReadonlySet<StoryCategory> = new Set(["finale", "chiusure"]);
 

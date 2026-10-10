@@ -12,7 +12,7 @@ import {
   filterStories, inferPhase, insertStory, isStoryUsed, partsForProposal, planAlbumStories, proposalFromUnit, proposeStory, rankStories,
   replaceWithStory, scoreStory, spaceOfArea, storyContextFor, suggestStoryForSpread, textSimilarity, usedStories, usedTextKeys, type StoryContext,
 } from "./story";
-import { STORY_CATEGORIES, STORY_LENGTHS, STORY_LIBRARY, STORY_PLACEMENTS, STORY_TONES, STORY_TYPES, lengthOfText, storyById, storyKey } from "./storyLibrary";
+import { COLLECTION_CATEGORIES, STORY_CATEGORIES, STORY_LENGTHS, STORY_LIBRARY, STORY_PLACEMENTS, STORY_TONES, STORY_TYPES, lengthOfText, storyById, storyKey } from "./storyLibrary";
 
 /** Contesto di prova con ciò che serve: si cambia solo quello che interessa al singolo caso. */
 function context(overrides: Partial<StoryContext> = {}): StoryContext {
@@ -62,7 +62,7 @@ test("libreria narrativa: oltre trecento voci, tutte le categorie richieste, ide
 
 test("libreria narrativa: niente luoghi comuni da bigliettino, niente prima persona singolare, citazioni separate dalle frasi originali", () => {
   const banned = [/due anime/i, /l['’]amore è/i, /viaggio più bello/i, /per sempre insieme/i, /oggi inizia il viaggio/i, /due cuori/i, /nuova vita/i, /san valentino/i];
-  for (const unit of STORY_LIBRARY.filter((candidate) => candidate.original)) {
+  for (const unit of STORY_LIBRARY.filter((candidate) => candidate.original && !COLLECTION_CATEGORIES.has(candidate.category))) {
     const text = `${unit.title ?? ""} ${unit.text ?? ""}`;
     for (const pattern of banned) assert.doesNotMatch(text, pattern, `${unit.id}: luogo comune`);
     assert.doesNotMatch(text, /\b(io|mio|mia|miei|mie|me stess[oa])\b/i, `${unit.id}: prima persona singolare`);
@@ -332,4 +332,17 @@ test("album intero: due piani consecutivi non si ripetono e un album diverso ric
   // Le pagine che hanno già un testo non si toccano, quindi il secondo giro riempie solo altre pagine e non ripete.
   for (const entry of second.planned) assert.ok(!firstTexts.has(storyKey(entry.proposal.text ?? entry.proposal.title ?? "")));
   assert.ok(first.planned.length > 0);
+});
+
+test("raccolta a nove temi: 90 testi con titolo e paragrafo, dieci per tema, riconoscibili e selezionabili per la ricerca", () => {
+  const collection = STORY_LIBRARY.filter((unit) => COLLECTION_CATEGORIES.has(unit.category));
+  assert.equal(COLLECTION_CATEGORIES.size, 9);
+  assert.equal(collection.length, 90);
+  for (const category of COLLECTION_CATEGORIES) assert.equal(collection.filter((unit) => unit.category === category).length, 10, category);
+  assert.ok(collection.every((unit) => unit.title && unit.text && unit.original));
+  const first = collection.find((unit) => unit.title === "Dove cominciano le promesse");
+  assert.ok(first?.text?.startsWith("Ci sono promesse che non hanno bisogno di parole"));
+  assert.ok(collection.some((unit) => unit.title === "Per sempre, in una pagina" && unit.category === "ricordo"));
+  assert.equal(filterStories({ query: "Il mestiere di ricordare" }).length, 1);
+  assert.equal(filterStories({ categories: ["fotografia"] }).length, 10);
 });

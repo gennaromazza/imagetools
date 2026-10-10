@@ -8,10 +8,14 @@
  * d'ordine), quindi le voci nuove vanno sempre in coda a ciascun elenco per non cambiare quelli esistenti.
  */
 
+import { COLLECTION_SPECS } from "./storyCollection";
+
 export const STORY_CATEGORIES = [
   "aperture", "preparativi", "casa", "famiglia", "amici", "attesa", "incontro", "cerimonia", "sguardi", "ritratto_coppia",
   "intimita", "dettagli", "invitati", "ricevimento", "festa", "spontaneita", "tramonto", "notte", "finale",
   "universali", "poetici", "microcopy", "cinematografici", "chiusure", "citazioni",
+  // Raccolta a nove temi (storyCollection.ts), in coda per non cambiare gli identificativi esistenti.
+  "mani", "amore", "racconto", "storia", "emozioni", "ritratti_coppia", "bellezza", "fotografia", "ricordo",
 ] as const;
 export type StoryCategory = (typeof STORY_CATEGORIES)[number];
 
@@ -58,6 +62,7 @@ export const STORY_CATEGORY_LABEL: Record<StoryCategory, string> = {
   dettagli: "Dettagli", invitati: "Gli invitati", ricevimento: "Il ricevimento", festa: "La festa", spontaneita: "Spontaneità",
   tramonto: "Tramonto", notte: "La notte", finale: "Finale", universali: "Universali", poetici: "Poetici", microcopy: "Parole brevi",
   cinematografici: "Cinematografici", chiusure: "Chiusure", citazioni: "Citazioni d'autore",
+  mani: "Mani", amore: "Amore", racconto: "Racconto", storia: "Storia", emozioni: "Emozioni", ritratti_coppia: "Ritratti di coppia", bellezza: "Bellezza ed essenza", fotografia: "Fotografia", ricordo: "Ricordo ed eternità",
 };
 
 export const STORY_TYPE_LABEL: Record<StoryType, string> = {
@@ -414,9 +419,13 @@ const SPECS: readonly Spec[] = [
       "E ogni volta sembrerà di essere di nuovo lì.",
     ],
   },
+  ...COLLECTION_SPECS,
 ];
 
 /** Parole e brevissime espressioni per quando lo spazio è minimo. */
+/** Categorie della raccolta a nove temi: scritte dall'utente, quindi fuori dai controlli di stile sulle frasi originali. */
+export const COLLECTION_CATEGORIES: ReadonlySet<StoryCategory> = new Set(COLLECTION_SPECS.map((spec) => spec.category));
+
 const MICROCOPY: readonly string[] = [
   "L'attesa", "Finalmente", "Insieme", "Qui", "Adesso", "Noi", "Sempre", "Ancora", "Vicini", "Un istante", "Quel momento", "Senza parole",
   "Prima", "Dopo", "Insieme, ancora", "Da qui", "Per sempre", "Oggi", "Il giorno", "La notte", "Tutto comincia", "Eccoci", "Finalmente insieme",
