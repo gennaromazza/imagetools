@@ -328,6 +328,9 @@ export interface ToolbarParts { top: ReactNode; bottom: ReactNode; left: ReactNo
 type ToolbarSide = "top" | "bottom" | "left" | "right" | "more" | "menu";
 /** Distanza dai bordi della foto: i separatori e le zone di rilascio sui bordi restano raggiungibili. */
 const INSET = 16;
+const LEAN_TOOLBAR_KEY = "filex.albumFlow.photoToolbar";
+/** Barra discreta di base: solo chi sceglie «tutti i comandi» la vede completa. */
+const readLeanToolbar = (): boolean => { try { return localStorage.getItem(LEAN_TOOLBAR_KEY) !== "full"; } catch { return true; } };
 const TOOLBAR_SIDES: readonly ToolbarSide[] = ["top", "bottom", "left", "right", "more", "menu"];
 
 /**
@@ -342,7 +345,11 @@ function FloatingToolbar({ rect, size, container, parts, away }: { rect: Rect; s
   const cellPx = boxWidth > 0 ? { w: (rect.w * boxWidth) / size.width, h: (rect.h * boxWidth) / size.width } : null;
   const minSide = cellPx ? Math.min(cellPx.w, cellPx.h) : Infinity;
   const mode = toolbarModeFor(minSide);
-  const tiny = mode === "tiny";
+  // Di base la barra è discreta: un solo «⋯» sull'angolo (come per le foto minuscole); «Mostra sempre tutti i comandi» la riporta completa.
+  const [lean, setLean] = useState(readLeanToolbar);
+  const chooseLean = (next: boolean) => { setLean(next); try { localStorage.setItem(LEAN_TOOLBAR_KEY, next ? "lean" : "full"); } catch { /* senza archivio resta valida la scelta di questa sessione */ } };
+  const tinyPhoto = mode === "tiny";
+  const tiny = tinyPhoto || lean;
   const compact = mode === "compact";
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => { if (!tiny) setMenuOpen(false); }, [tiny]);
@@ -352,15 +359,18 @@ function FloatingToolbar({ rect, size, container, parts, away }: { rect: Rect; s
     document.addEventListener("pointerdown", close, true);
     return () => document.removeEventListener("pointerdown", close, true);
   }, [menuOpen]);
-  const everything = <>{parts.top}{parts.left}{parts.right}{parts.straighten}{parts.bottom}</>;
+  // Il raddrizzamento resta sulla foto mentre la si ritaglia (è lì che serve); fuori dal ritaglio non c'è.
+  const leanStraighten = lean && !tinyPhoto ? parts.straighten : null;
+  const everything = <>{parts.top}{parts.left}{parts.right}{leanStraighten ? null : parts.straighten}{parts.bottom}{lean ? <button type="button" className="icon-btn" title="Mostra sempre tutti i comandi sulla foto" aria-label="Mostra sempre tutti i comandi" onClick={() => { chooseLean(false); setMenuOpen(false); }}><Icon name="plus" size={16} /></button> : null}</>;
   const bars: Partial<Record<ToolbarSide, ReactNode>> = tiny
     ? {
       more: <button type="button" className={`icon-btn${menuOpen ? " is-active" : ""}`} aria-label="Comandi della foto" aria-expanded={menuOpen} title="Comandi della foto" onClick={() => setMenuOpen((on) => !on)}><Icon name="dots" size={16} /></button>,
       menu: menuOpen ? everything : null,
+      ...(leanStraighten ? { bottom: leanStraighten } : {}),
     }
     : compact
       ? { left: parts.top || parts.left ? <>{parts.top}{parts.left}</> : null, right: <>{parts.right}{parts.bottom}</>, bottom: parts.straighten }
-      : { top: parts.top, left: parts.left, right: parts.right, bottom: parts.straighten || parts.bottom ? <>{parts.straighten}{parts.bottom}</> : null };
+      : { top: <>{parts.top}<button type="button" className="icon-btn" title="Barra discreta: un solo pulsante «⋯» sulla foto" aria-label="Barra discreta" onClick={() => chooseLean(true)}><Icon name="minus" size={16} /></button></>, left: parts.left, right: parts.right, bottom: parts.straighten || parts.bottom ? <>{parts.straighten}{parts.bottom}</> : null };
   const refs = useRef<Partial<Record<ToolbarSide, HTMLDivElement | null>>>({});
   const [pos, setPos] = useState<Partial<Record<ToolbarSide, { x: number; y: number }>> | null>(null);
   const [tick, setTick] = useState(0);
@@ -651,6 +661,14 @@ function SpreadViewInner(props: SpreadViewProps) {
 
       {showGuides && interactive ? [0, 1].map((side) => (
         <div key={side} className="spread__safe" style={{ left: pct(((side * page + margin) / size.width) * 100), top: pct((margin / size.height) * 100), width: pct(((page - margin * 2) / size.width) * 100), height: pct(((size.height - margin * 2) / size.height) * 100) }} />
+      )) : null}
+
+      {/* Il centro di ogni pagina, sopra le foto: con «Guide» sempre, altrimenti mentre si trascina una foto (soprattutto nelle disposizioni libere, dove niente lo segna). */}
+      {interactive && (showGuides || draft?.kind === "frame") ? geometry.map((entry, areaIndex) => (
+        <div key={`center-${spread.areas[areaIndex].id}`} aria-hidden="true">
+          <span className="spread__center spread__center--x" style={{ left: pct(((entry.outer.x + entry.outer.w / 2) / size.width) * 100), top: pct((entry.outer.y / size.height) * 100), height: pct((entry.outer.h / size.height) * 100) }} />
+          <span className="spread__center spread__center--y" style={{ top: pct(((entry.outer.y + entry.outer.h / 2) / size.height) * 100), left: pct((entry.outer.x / size.width) * 100), width: pct((entry.outer.w / size.width) * 100) }} />
+        </div>
       )) : null}
 
       {interactive ? spread.areas.map((area, areaIndex) => (area.locked ? (

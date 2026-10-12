@@ -227,11 +227,12 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const two = spread.areas.length > 1;
 
   // Chiude i pannelli quando si cambia spread.
-  useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setLockOpen(false); setPhotoMenu(null); setBorderFor(null); }, [spread.id]);
+  useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setLockOpen(false); setPhotoMenu(null); setBorderFor(null); setSliderFor(null); }, [spread.id]);
 
   const newShape = useNewFeature("forma-foto");
   const newBorder = useNewFeature("bordo-foto");
   const [borderFor, setBorderFor] = useState<string | null>(null);
+  const [sliderFor, setSliderFor] = useState<string | null>(null);
   const toolbar = useCallback((itemId: string): ToolbarParts | null => {
     const found = spread.areas.flatMap((candidate, index) => candidate.items.map((item) => ({ item, area: candidate, index }))).find((entry) => entry.item.id === itemId);
     if (!found) return null;
@@ -311,9 +312,17 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         {cropMode && canCrop ? (
           <WheelAngle value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })}>
             <IconButton icon="level" label="Raddrizza con una linea: trascina lungo l'orizzonte o lungo un lato che deve essere verticale" active={lineTool} onClick={actions.toggleLineTool} size={16} />
-            <input type="range" min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" title="Rotella del mouse qui sopra: 0,1° a scatto (Maiusc: 1°). Anche , e . da tastiera. Doppio clic: azzera" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
             <AngleField value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })} />
             <button type="button" className="icon-btn" title="Azzera il raddrizzamento" aria-label="Azzera il raddrizzamento" disabled={!found.item.angle} onClick={() => actions.commitView(itemId, { angle: 0 })}>0°</button>
+            {/* Il cursore largo non sta più nella barra: si apre solo se serve, e la rotella sulla foto o le frecce nel numero bastano per i ritocchi fini. */}
+            <div className="anchor">
+              <IconButton icon="sliders" label="Cursore dell'angolo" active={sliderFor === itemId} onClick={() => setSliderFor(sliderFor === itemId ? null : itemId)} size={16} />
+              <Popover open={sliderFor === itemId} onClose={() => setSliderFor(null)} side="top" className="popover--info">
+                <WheelAngle value={found.item.angle ?? 0} onChange={(angle) => actions.commitView(itemId, { angle })}>
+                  <input type="range" style={{ width: 180 }} min={-45} max={45} step={0.1} value={found.item.angle ?? 0} aria-label="Raddrizza la foto" title="Rotella del mouse qui sopra: 0,1° a scatto (Maiusc: 1°). Doppio clic: azzera" onChange={(event) => actions.commitView(itemId, { angle: Number(event.target.value) })} onDoubleClick={() => actions.commitView(itemId, { angle: 0 })} />
+                </WheelAngle>
+              </Popover>
+            </div>
           </WheelAngle>
         ) : null}
       </>
@@ -325,7 +334,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       </>
     );
     return { top, left, right, bottom, straighten };
-  }, [actions, assets, borderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
+  }, [actions, assets, borderFor, sliderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */
   const photoMenuItems = (itemId: string): MenuItem[] => {
@@ -535,7 +544,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
           <button type="button" className={`chip${design.open ? " is-active" : ""}`} onClick={design.onToggle} aria-pressed={design.open} title="Sfondi a immagine, testi in stile rivista, frasi e grafiche" onClickCapture={newDesign.markSeen}>Personalizza{newDesign.isNew ? <span className="new-pill">Nuovo</span> : null}</button>
           <button type="button" className={`chip${sizes ? " is-active" : ""}`} onClick={actions.toggleSizes} aria-pressed={sizes} title="Mostra su ogni foto la misura stampata e la risoluzione (S)">Misure</button>
           <button type="button" className={`chip${snapOn ? " is-active" : ""}`} onClick={() => setSnapEnabled(!snapOn)} aria-pressed={snapOn} title="Calamite: le foto libere, i testi e le grafiche si agganciano a bordi, centro e piega mentre li sposti. Spegnile per muoverli senza scatti">Calamite</button>
-          <button type="button" className={`chip${guides ? " is-active" : ""}`} onClick={actions.toggleGuides} aria-pressed={guides} title="Mostra zona sicura e piega (G)">Guide</button>
+          <button type="button" className={`chip${guides ? " is-active" : ""}`} onClick={actions.toggleGuides} aria-pressed={guides} title="Mostra zona sicura, piega e centro di ogni pagina (G)">Guide</button>
         </div>
       </footer>
       {photoMenu ? <ContextMenu x={photoMenu.x} y={photoMenu.y} items={photoMenuItems(photoMenu.itemId)} onClose={() => setPhotoMenu(null)} /> : null}

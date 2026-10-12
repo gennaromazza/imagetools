@@ -704,6 +704,13 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.32": [
+      "Nuovo: la scheda «Libreria» di «Personalizza» inserisce le frasi come il «Racconto»: scelta della pagina, stile «Automatico (come Racconto)» (carattere, misura e posizione dalla frase e dalla pagina) e «Usa nel testo selezionato» per cambiare il testo lasciando lo stile. Dopo l'inserimento si resta sulla Libreria.",
+      "Nuovo: il centro di ogni pagina si vede bene con «Guide» e mentre si trascina una foto, anche nelle disposizioni libere.",
+      "Migliorato: la barra dei comandi sulla foto è discreta di base (un solo «⋯»); «Mostra sempre tutti i comandi» la riporta completa.",
+      "Migliorato: il raddrizzamento è più piccolo: il cursore si apre da una piccola icona accanto al campo dell'angolo.",
+      "Migliorato: sui notebook le strisce laterali degli spread sono più strette e più basse e non scorrono più."
+    ],
     "0.2.31": [
       "Corretto: le foto restano sempre allineate. Il formato scelto per una foto (1:1, 3:2, 2:3…) è esatto: un 1:1 è davvero quadrato. Bordo, spazio tra le foto e «Allinea» entrano nel calcolo e le foto si riallineano quando li cambi.",
       "Corretto: in «foto intera» e con forme scelte i separatori non si trascinano più (le divisioni seguono le proporzioni delle foto). In «riempi», la foto con una forma ha la cella esatta di quella forma, le altre riempiono e la pagina resta piena.",

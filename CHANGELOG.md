@@ -32,6 +32,14 @@
 
 
 
+## 2026-10-12 - Album Flow 0.2.32
+
+- Nuovo: la scheda «Libreria» di «Personalizza» inserisce le frasi come il «Racconto»: c'è la scelta della pagina (sinistra o destra), lo stile «Automatico (come Racconto)» sceglie carattere e misura dalla lunghezza della frase e dalla pagina (a metà se è libera, in basso se ci sono foto, colore leggibile sullo sfondo) e, con un testo selezionato, l'icona con le frecce ne cambia il testo lasciandone lo stile. Dopo l'inserimento si resta sulla Libreria.
+- Nuovo: il centro di ogni pagina si vede bene: con «Guide» e mentre si trascina una foto compaiono due linee tratteggiate (verticale e orizzontale) sopra le foto, anche nelle disposizioni libere.
+- Migliorato: la barra dei comandi sulla foto è discreta di base (un solo «⋯» sull'angolo); «Mostra sempre tutti i comandi» la riporta completa e la scelta resta memorizzata.
+- Migliorato: il raddrizzamento è più piccolo: campo dell'angolo e «0°» nella barra, il cursore si apre da una piccola icona.
+- Migliorato: sui notebook le strisce laterali degli spread sono più strette e più basse e non scorrono più.
+
 ## 2026-10-10 - Album Flow 0.2.31
 
 - Corretto: le foto restano sempre allineate. Il formato scelto per una foto (1:1, 3:2, 2:3…) è esatto: un 1:1 è davvero quadrato. Bordo, spazio tra le foto e «Allinea» entrano nel calcolo e le foto si riallineano quando li cambi.

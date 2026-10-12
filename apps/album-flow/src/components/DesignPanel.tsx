@@ -23,7 +23,8 @@ const PRESET_GROUPS: ReadonlyArray<readonly [string, readonly TextPreset[]]> = (
 })();
 
 export interface DesignActions {
-  addText: (options: NewTextOptions) => void;
+  /** Con `stay` resta sulla scheda in cui si è (la «Libreria») invece di passare a «Testo» per modificare il nuovo elemento. */
+  addText: (options: NewTextOptions, behavior?: { stay?: boolean }) => void;
   addGraphic: (options: NewGraphicOptions) => void;
   update: (overlayId: string, patch: OverlayPatch) => void;
   remove: (overlayId: string) => void;
@@ -43,6 +44,10 @@ export interface DesignActions {
   insertStoryUnit: (unitId: string, areaIndex: number) => boolean;
   /** Cambia il testo di un elemento con quello di una voce della libreria, lasciandone lo stile. */
   replaceWithStoryUnit: (overlayId: string, unitId: string) => void;
+  /** Aggiunge alla pagina una frase della «Libreria» con le regole del Racconto (stile dalla lunghezza, misura dalla pagina). `backdrop` è il colore sotto il testo. Restituisce false se non c'è posto. */
+  insertPhrase: (text: string, areaIndex: number, backdrop?: string) => boolean;
+  /** Cambia il testo di un elemento con una frase, lasciandone lo stile. */
+  replaceWithPhrase: (overlayId: string, text: string) => void;
   /** Mette i testi narrativi sulle pagine libere di tutto l'album; restituisce quanti ne ha aggiunti. */
   planStories: () => number;
   removeOverlays: (overlayIds: readonly string[]) => void;
@@ -411,25 +416,31 @@ function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle
 // Libreria
 // ---------------------------------------------------------------------------
 
-function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles, insertAt }: { actions: DesignActions; phrases: Phrase[]; setPhrases: (next: Phrase[]) => void; savedStyles: SavedTextStyle[]; setSavedStyles: (next: SavedTextStyle[]) => void; insertAt: { x: number; y: number } }) {
+/** Valore del menu «Stile» che inserisce le frasi come il Racconto: lo stile lo sceglie la pagina, non chi clicca. */
+const AUTO_STYLE = "auto";
+
+function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles, insertAt, areaIndex, selected }: { actions: DesignActions; phrases: Phrase[]; setPhrases: (next: Phrase[]) => void; savedStyles: SavedTextStyle[]; setSavedStyles: (next: SavedTextStyle[]) => void; insertAt: { x: number; y: number }; areaIndex: number; selected: SpreadOverlay | undefined }) {
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState("tutte");
   const [draft, setDraft] = useState("");
   const [draftGroup, setDraftGroup] = useState("Le mie");
-  const [styleId, setStyleId] = useState("headline");
+  const [styleId, setStyleId] = useState(AUTO_STYLE);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
   const groups = useMemo(() => phraseGroups(phrases), [phrases]);
   const shown = phrases.filter((phrase) => (group === "tutte" || phrase.group === group) && (!query.trim() || phrase.text.toLowerCase().includes(query.trim().toLowerCase())));
+  const canReplace = selected?.kind === "text";
   const insert = (phrase: Phrase) => {
+    if (styleId === AUTO_STYLE) { if (actions.insertPhrase(phrase.text, areaIndex)) actions.notify("Frase aggiunta alla pagina."); return; }
     const saved = savedStyles.find((entry) => entry.id === styleId);
-    actions.addText(saved ? { presetId: "body", style: saved.style, styleName: saved.name, text: phrase.text, at: insertAt } : { presetId: styleId, text: phrase.text, at: insertAt });
+    actions.addText(saved ? { presetId: "body", style: saved.style, styleName: saved.name, text: phrase.text, at: insertAt } : { presetId: styleId, text: phrase.text, at: insertAt }, { stay: true });
   };
   return (
     <div className="design__section">
       <div className="design__head"><h4>Le mie frasi</h4><span className="small muted">{phrases.length}</span></div>
       <div className="design__inline">
         <input className="input" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cerca una frase" aria-label="Cerca nelle frasi" />
-        <select className="input" value={styleId} onChange={(event) => setStyleId(event.target.value)} aria-label="Stile con cui inserire le frasi" title="Stile con cui inserire le frasi">
+        <select className="input" value={styleId} onChange={(event) => setStyleId(event.target.value)} aria-label="Stile con cui inserire le frasi" title="Automatico: come nel Racconto, stile e misura dipendono dalla lunghezza della frase e dalla pagina">
+          <option value={AUTO_STYLE}>Automatico (come Racconto)</option>
           <optgroup label="Stili">{TEXT_PRESETS.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</optgroup>
           {savedStyles.length ? <optgroup label="I tuoi stili">{savedStyles.map((saved) => <option key={saved.id} value={saved.id}>{saved.name}</option>)}</optgroup> : null}
         </select>
@@ -437,6 +448,7 @@ function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles,
       <div className="design__chips">
         {["tutte", ...groups].map((name) => <button key={name} type="button" className={`chip${group === name ? " is-active" : ""}`} aria-pressed={group === name} onClick={() => setGroup(name)}>{name === "tutte" ? "Tutte" : name}</button>)}
       </div>
+      {canReplace ? <p className="small muted">Hai un testo selezionato: l'icona con le frecce accanto a una frase ne cambia il testo e lascia lo stile.</p> : null}
       <ul className="design__phrases">
         {shown.map((phrase) => (
           <li key={phrase.id}>
@@ -449,6 +461,7 @@ function LibraryTab({ actions, phrases, setPhrases, savedStyles, setSavedStyles,
               <>
                 <button type="button" className="design__phrase" onClick={() => insert(phrase)} title="Inserisci nello spread">{phrase.text}</button>
                 <span className="design__phrase-tools">
+                  {canReplace && selected ? <IconButton icon="swap" label="Usa nel testo selezionato" onClick={() => actions.replaceWithPhrase(selected.id, phrase.text)} size={14} /> : null}
                   <IconButton icon="pencil" label="Modifica" onClick={() => setEditing({ id: phrase.id, text: phrase.text })} size={14} />
                   <IconButton icon="trash" label="Elimina" danger onClick={() => setPhrases(removePhrase(phrases, phrase.id))} size={14} />
                 </span>
@@ -541,7 +554,7 @@ export function DesignPanel({ project, spread, two, areaIndex, tab, onTab, selec
   const scopeOf = !two ? "spread" : areaIndex === 0 ? "left" : "right";
   const pictured = backgroundsOf(spread).find((background) => background.scope === "spread" || background.scope === scopeOf);
   const backdrop = (pictured && pictured.opacity >= 0.6 ? BUILTIN_BACKDROP[pictured.mediaId] : undefined) ?? spread.areas[Math.min(areaIndex, spread.areas.length - 1)].style.background;
-  const designActions = useMemo<DesignActions>(() => ({ ...actions, addText: (options) => actions.addText({ backdrop, ...options }) }), [actions, backdrop]);
+  const designActions = useMemo<DesignActions>(() => ({ ...actions, addText: (options, behavior) => actions.addText({ backdrop, ...options }, behavior), insertPhrase: (text, index) => actions.insertPhrase(text, index, backdrop) }), [actions, backdrop]);
 
   const setPhrases = useCallback((next: Phrase[]) => { setPhrasesState(next); if (!savePhrases(next)) actions.notify("Non riesco a salvare l'archivio delle frasi."); }, [actions]);
   const setSavedStyles = useCallback((next: SavedTextStyle[]) => { setSavedStylesState(next); if (!saveSavedStyles(next)) actions.notify("Non riesco a salvare gli stili."); }, [actions]);
@@ -576,7 +589,7 @@ export function DesignPanel({ project, spread, two, areaIndex, tab, onTab, selec
         ) : null}
         {tab === "story" ? <><div className="design__section"><InsertTarget two={two} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} actions={designActions} /></div><StoryTab project={project} spread={spread} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} selected={selected} actions={designActions} /></> : null}
         {tab === "graphics" ? <GraphicsTab actions={designActions} insertAt={insertAt} /> : null}
-        {tab === "library" ? <LibraryTab actions={designActions} phrases={phrases} setPhrases={setPhrases} savedStyles={savedStyles} setSavedStyles={setSavedStyles} insertAt={insertAt} /> : null}
+        {tab === "library" ? <><div className="design__section"><InsertTarget two={two} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} actions={designActions} /></div><LibraryTab actions={designActions} phrases={phrases} setPhrases={setPhrases} savedStyles={savedStyles} setSavedStyles={setSavedStyles} insertAt={insertAt} areaIndex={Math.min(areaIndex, spread.areas.length - 1)} selected={selected} /></> : null}
       </div>
     </aside>
   );

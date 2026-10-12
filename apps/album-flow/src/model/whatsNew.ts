@@ -21,6 +21,32 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.32",
+    date: "2026-10-12",
+    headline: "Libreria come il Racconto, centro pagina visibile e comandi più discreti",
+    items: [
+      {
+        title: "Le frasi della Libreria come nel Racconto",
+        text: "Scegli la pagina, lascia «Automatico (come Racconto)» e la frase prende da sola carattere, misura e posizione (a metà se la pagina è libera, in basso se ci sono foto). Con un testo selezionato, l'icona con le frecce ne cambia il testo e lascia lo stile. Dopo l'inserimento resti sulla Libreria.",
+        where: ["Personalizza", "Libreria", "Dove va il testo", "Automatico (come Racconto)", "Usa nel testo selezionato"],
+      },
+      {
+        title: "Il centro della pagina si vede",
+        text: "Con «Guide» e mentre trascini una foto compaiono due linee tratteggiate che si incrociano nel centro di ogni pagina, anche nelle disposizioni libere.",
+        where: ["Guide", "G"],
+      },
+      {
+        title: "Comandi della foto più discreti",
+        text: "Sulla foto selezionata resta un solo «⋯», che apre i comandi fuori dalla foto. Il raddrizzamento è più piccolo: il cursore si apre da una piccola icona accanto all'angolo. Se preferisci la barra completa, scegli «Mostra sempre tutti i comandi».",
+        where: ["Comandi della foto", "Mostra sempre tutti i comandi", "Cursore dell'angolo"],
+      },
+      {
+        title: "Strisce laterali più compatte sul notebook",
+        text: "Sugli schermi bassi le strisce a sinistra e a destra dello spread sono più strette e più basse, e i comandi stanno senza scorrere.",
+      },
+    ],
+  },
+  {
     version: "0.2.31",
     date: "2026-10-10",
     headline: "Foto sempre allineate, formati esatti e comandi più leggeri",

@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import type { SpreadTextOverlay } from "@photo-tools/shared-types";
 import { DEFAULT_AUTO_BUILD, autoBuildAlbum } from "./autobuild";
 import { assignAssets, createChapter } from "./chapters";
-import { overlaysOf } from "./design";
+import { addGraphicOverlay, overlaysOf } from "./design";
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { appendAssets } from "./items";
 import type { Project } from "./project";
 import { addSpread, setSpreadDone } from "./spreads";
 import {
-  filterStories, inferPhase, insertStory, isStoryUsed, partsForProposal, planAlbumStories, proposalFromUnit, proposeStory, rankStories,
-  replaceWithStory, scoreStory, spaceOfArea, storyContextFor, suggestStoryForSpread, textSimilarity, usedStories, usedTextKeys, type StoryContext,
+  filterStories, inferPhase, insertPhrase, insertStory, isStoryUsed, partsForProposal, planAlbumStories, proposalFromUnit, proposeStory, rankStories,
+  replaceWithPhrase, replaceWithStory, scoreStory, spaceOfArea, storyContextFor, suggestStoryForSpread, textSimilarity, usedStories, usedTextKeys, type StoryContext,
 } from "./story";
 import { COLLECTION_CATEGORIES, STORY_CATEGORIES, STORY_LENGTHS, STORY_LIBRARY, STORY_PLACEMENTS, STORY_TONES, STORY_TYPES, lengthOfText, storyById, storyKey } from "./storyLibrary";
 
@@ -298,6 +298,62 @@ test("sostituzione manuale: il testo selezionato prende quello della voce scelta
   const quote = STORY_LIBRARY.find((candidate) => candidate.type === "quote")!;
   assert.equal(textsOn(replaceWithStory(made.project, project.spreads[0].id, target.id, quote), 0).find((text) => text.id === target.id)!.text, `«${quote.text}»`);
   assert.equal(replaceWithStory(made.project, project.spreads[0].id, "x", unit), made.project);
+});
+
+test("frasi della Libreria: stessa composizione del Racconto (stile dalla lunghezza, misura dalla pagina, a metà o in basso), colore leggibile", () => {
+  const project = albumWithFreePages(3);
+  const spreadId = project.spreads[1].id;
+  const shortPhrase = "  Ci sono giorni che restano.  ";
+  const longPhrase = "Il sole filtrava tra le tende quando tutto è cominciato. Ogni sguardo raccontava più di quanto le parole potessero dire, e nessuno aveva fretta di arrivare altrove.";
+
+  const free = insertPhrase(project, spreadId, 1, shortPhrase)!;
+  const [freeText] = textsOn(free.project, 1);
+  assert.equal(free.overlayIds.length, 1, "una frase è un solo elemento");
+  assert.equal(freeText.text, "Ci sono giorni che restano.", "spazi attorno tolti");
+  assert.equal(freeText.styleName, "Occhiello", "frase breve: occhiello");
+  assert.ok(freeText.x >= 0.5 - 1e-6 && freeText.x + freeText.w <= 1 + 1e-6, "dentro la pagina destra");
+  assert.ok(freeText.y > 0.2 && freeText.y < 0.7, "a metà di una pagina libera");
+
+  const long = insertPhrase(project, spreadId, 1, longPhrase)!;
+  assert.equal(textsOn(long.project, 1)[0].styleName, "Testo", "frase lunga: paragrafo");
+
+  const photos = insertPhrase(project, spreadId, 0, shortPhrase)!;
+  const [photoText] = textsOn(photos.project, 1);
+  assert.ok(photoText.y >= 0.5 - 1e-6, "con foto sta in basso");
+  assert.ok(photoText.w < freeText.w, "più stretta dove ci sono le foto");
+  assert.ok(photoText.x + photoText.w <= 0.5 + 1e-6, "dentro la pagina sinistra");
+
+  const dark = insertPhrase(project, spreadId, 1, shortPhrase, "#111111")!;
+  assert.notEqual(textsOn(dark.project, 1)[0].color, freeText.color, "su sfondo scuro il colore cambia per leggersi");
+
+  assert.equal(insertPhrase(project, spreadId, 1, "   "), null, "una frase vuota non aggiunge nulla");
+  assert.equal(insertPhrase(project, "x", 0, shortPhrase), null);
+  assert.equal(insertPhrase(project, spreadId, 9, shortPhrase), null);
+  assertProjectInvariants(free.project, "frase dalla libreria");
+  assertProjectInvariants(long.project, "frase lunga dalla libreria");
+  assertProjectInvariants(photos.project, "frase su pagina con foto");
+});
+
+test("frasi della Libreria: «Usa nel testo selezionato» cambia il testo e lascia lo stile; grafiche e frasi vuote non cambiano nulla", () => {
+  const project = albumWithFreePages(2);
+  const spreadId = project.spreads[0].id;
+  const made = insertPhrase(project, spreadId, 1, "Prima frase")!;
+  const target = textsOn(made.project, 0)[0];
+
+  const replaced = replaceWithPhrase(made.project, spreadId, target.id, "  Seconda frase\r\ncon un a capo  ");
+  const after = textsOn(replaced, 0).find((text) => text.id === target.id)!;
+  assert.equal(after.text, "Seconda frase\ncon un a capo");
+  assert.equal(after.font, target.font);
+  assert.equal(after.sizePt, target.sizePt);
+  assert.equal(after.styleName, target.styleName);
+  assertProjectInvariants(replaced, "frase sostituita");
+
+  assert.equal(replaceWithPhrase(made.project, spreadId, target.id, "  "), made.project, "frase vuota");
+  assert.equal(replaceWithPhrase(made.project, spreadId, "x", "Altro"), made.project, "elemento mancante");
+  assert.equal(replaceWithPhrase(made.project, "x", target.id, "Altro"), made.project, "spread mancante");
+  const graphic = addGraphicOverlay(made.project, spreadId, { mediaId: "g1", aspect: 1 });
+  assert.ok(graphic.overlayId);
+  assert.equal(replaceWithPhrase(graphic.project, spreadId, graphic.overlayId!, "Altro"), graphic.project, "una grafica non ha testo");
 });
 
 // ------------------------------------------------------------------ album intero

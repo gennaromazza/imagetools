@@ -1,6 +1,6 @@
 import type { AlbumSpread } from "@photo-tools/shared-types";
 import { areaOuterRects, spreadSizeMm } from "../engine/geometry";
-import { addTextParts, overlaysOf, removeOverlay, updateOverlay, type TextPartInput } from "./design";
+import { addTextParts, cleanText, overlaysOf, removeOverlay, updateOverlay, type TextPartInput } from "./design";
 import { findSpread, type Project } from "./project";
 import {
   STORY_LIBRARY, STORY_CATEGORIES, storyDisplayText, storyKey,
@@ -413,8 +413,11 @@ function boxFractionFor(space: StorySpace, pageFraction: number): number {
   return Math.min(wanted, pageFraction * 0.8);
 }
 
-/** Aggiunge il testo a una pagina dello spread: a metà pagina se è libera, in basso se ci sono foto. Restituisce gli elementi creati. */
-export function insertStory(project: Project, spreadId: string, areaIndex: number, proposal: StoryProposal, space?: StorySpace): { project: Project; overlayIds: string[] } | null {
+/**
+ * Aggiunge il testo a una pagina dello spread: a metà pagina se è libera, in basso se ci sono foto. Restituisce gli elementi creati.
+ * `backdrop` è il colore (o lo sfondo a immagine) che sta sotto il testo su una pagina libera; senza, vale il colore dell'area.
+ */
+export function insertStory(project: Project, spreadId: string, areaIndex: number, proposal: StoryProposal, space?: StorySpace, backdrop?: string): { project: Project; overlayIds: string[] } | null {
   const found = findSpread(project, spreadId);
   const area = found?.spread.areas[areaIndex];
   if (!found || !area) return null;
@@ -430,10 +433,32 @@ export function insertStory(project: Project, spreadId: string, areaIndex: numbe
     width: fraction,
     at: { x: (page.x + page.w / 2) / width, y: free ? 0.5 : 0.8 },
     centerY: free,
-    backdrop: free ? area.style.background : undefined,
+    backdrop: free ? backdrop ?? area.style.background : undefined,
     mainPresetId: parts[0].presetId,
   });
   return made.overlayIds.length ? { project: made.project, overlayIds: made.overlayIds } : null;
+}
+
+/** Una frase scritta a mano (dalla «Libreria») come proposta: senza titolo né autore, così carattere e misura li decide la pagina. */
+export function proposalFromPhrase(text: string): StoryProposal {
+  return { kind: "paragraph", text: cleanText(text).trim(), category: "universali", tone: "reflective", unitIds: [] };
+}
+
+/**
+ * Mette una frase della «Libreria» sulla pagina con le stesse regole del «Racconto»: frase breve in corsivo da occhiello, testo lungo in
+ * paragrafo, larghezza in proporzione alla pagina, a metà se è libera e in basso se ci sono foto. Una frase vuota non aggiunge nulla.
+ */
+export function insertPhrase(project: Project, spreadId: string, areaIndex: number, text: string, backdrop?: string): { project: Project; overlayIds: string[] } | null {
+  if (!text.trim()) return null;
+  return insertStory(project, spreadId, areaIndex, proposalFromPhrase(text), undefined, backdrop);
+}
+
+/** Cambia il testo di un elemento di testo già sullo spread con una frase, lasciandone lo stile. Grafiche, elementi mancanti e frasi vuote non cambiano nulla. */
+export function replaceWithPhrase(project: Project, spreadId: string, overlayId: string, text: string): Project {
+  const found = findSpread(project, spreadId);
+  const target = found ? overlaysOf(found.spread).find((overlay) => overlay.id === overlayId) : undefined;
+  if (!target || target.kind !== "text" || !text.trim()) return project;
+  return updateOverlay(project, spreadId, overlayId, { text: cleanText(text).trim() });
 }
 
 export interface SuggestOptions extends ContextOptions {

@@ -41,7 +41,7 @@ import { driveAvailable } from "../desktop/cloud";
 import { alignOverlayToPage } from "../model/designAlign";
 import { makeAreaFree, restoreAutomatic, setAreaLocked, setSpreadLock } from "../model/layoutLock";
 import { canvasMeasure } from "../render/fonts";
-import { insertStory, planAlbumStories, proposalFromUnit, replaceWithStory, suggestStoryForSpread, type SuggestResult } from "../model/story";
+import { insertPhrase, insertStory, planAlbumStories, proposalFromUnit, replaceWithPhrase, replaceWithStory, suggestStoryForSpread, type SuggestResult } from "../model/story";
 import { storyById } from "../model/storyLibrary";
 import { addGraphicOverlay, addTextOverlay, addTextStack, duplicateOverlay, orderOverlay, groupOverlays, moveOverlayGroup, removeOverlay, scaleOverlays, setAlbumBackground, setSpreadBackground, ungroupOverlay, updateOverlay, updateSpreadBackground } from "../model/design";
 import { IconButton } from "./ui";
@@ -576,12 +576,14 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
 
   // ------------------------------------------------------------- sfondi, testi e grafiche
   const designActions: DesignActions = useMemo(() => ({
-    addText: (options) => {
+    addText: (options, behavior) => {
       if (!spreadId) return;
       let created: string | null = null;
       commit((p) => { const made = addTextStack(p, spreadId, options); created = made.overlayId; return made.project; });
       if (!created) { notify("Su questo spread ci sono già troppi elementi."); return; }
-      setSelectedOverlayId(created); setSelectedItemId(null); setCropMode(false); setDesignTab("text"); setFocusSignal((value) => value + 1);
+      setSelectedOverlayId(created); setSelectedItemId(null); setCropMode(false);
+      // Dalla «Libreria» si resta dove si è: si inseriscono più frasi di fila senza tornare a cercarle.
+      if (!behavior?.stay) { setDesignTab("text"); setFocusSignal((value) => value + 1); }
     },
     addGraphic: (options) => {
       if (!spreadId) return;
@@ -626,6 +628,14 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       const unit = storyById(unitId);
       if (unit) commit((p) => replaceWithStory(p, spreadId, overlayId, unit));
     },
+    insertPhrase: (text, areaIndex, backdrop) => {
+      if (!spreadId || !text.trim()) return false;
+      const out = { ok: false };
+      commit((p) => { const made = insertPhrase(p, spreadId, areaIndex, text, backdrop); out.ok = Boolean(made); return made ? made.project : p; });
+      if (!out.ok) notify("Su questo spread ci sono già troppi elementi.");
+      return out.ok;
+    },
+    replaceWithPhrase: (overlayId, text) => commit((p) => replaceWithPhrase(p, spreadId, overlayId, text)),
     planStories: () => {
       const out = { count: 0 };
       commit((p) => { const plan = planAlbumStories(p); out.count = plan.planned.length; return plan.planned.length ? plan.project : p; });

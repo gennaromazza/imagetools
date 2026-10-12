@@ -7,6 +7,7 @@ import { applyFavoriteLayout, applyCandidateByNumber, applyStyleToAlbum, applySt
 import { DEFAULT_AUTO_BUILD, autoBuildAlbum, fillSpread } from "./autobuild";
 import { applyTemplate, matchTemplates, reorderFrame, sanitizeTemplate, setFrame } from "./templates";
 import { applyChapterPreset, assignAssets, BUILTIN_CHAPTER_PRESETS, createChapter, moveChapter, removeChapter } from "./chapters";
+import { overlaysOf } from "./design";
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { applyImport, dedupeRawJpgPairs, planImport, type ImportCandidate } from "./import";
 import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, swapItems, toggleItemLock } from "./items";
@@ -15,7 +16,7 @@ import { parseAlbumProject, serializeAlbumProject } from "./portability";
 import { preflightReport } from "./preflight";
 import { areaGeometry, createEmptyProject, type Project } from "./project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, removeSpread, setSpreadDone, setSplitMode, swapAreas } from "./spreads";
-import { suggestStoryForSpread } from "./story";
+import { insertPhrase, replaceWithPhrase, suggestStoryForSpread } from "./story";
 
 /**
  * Casi d'uso dell'intero modello di Album Flow, dalla cartella di foto all'album pronto da esportare.
@@ -338,6 +339,20 @@ const OPERATIONS: Operation[] = [
       // «Rigenera»: sostituisce la proposta appena fatta con un'altra, senza lasciare elementi orfani.
       const again = first && r() < 0.5 ? suggestStoryForSpread(first.project, spread.id, Math.floor(r() * spread.areas.length), { attempt: 1, replace: first.overlayIds }) : null;
       return again?.project ?? first?.project ?? p;
+    },
+  },
+  {
+    name: "frase dalla libreria",
+    run: (p, r) => {
+      const spread = maybe(r, p.spreads);
+      if (!spread) return p;
+      const phrase = pick(r, ["Ci sono giorni che restano.", "Il sole filtrava tra le tende quando tutto è cominciato. Ogni sguardo raccontava più di quanto le parole potessero dire, e nessuno aveva fretta di arrivare altrove.", "Una riga\ncon un a capo"]);
+      const made = insertPhrase(p, spread.id, Math.floor(r() * spread.areas.length), phrase, pick(r, [undefined, "#111111", "#f4efe6"]));
+      // «Usa nel testo selezionato»: cambia il testo di un elemento già presente (se ce n'è uno).
+      const texts = overlaysOf(spread).filter((overlay) => overlay.kind === "text");
+      const target = texts.length && r() < 0.5 ? pick(r, texts) : null;
+      const base = made?.project ?? p;
+      return target ? replaceWithPhrase(base, spread.id, target.id, phrase) : base;
     },
   },
   {
