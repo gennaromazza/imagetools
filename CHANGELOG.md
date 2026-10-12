@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-12 - Album Flow 0.2.33
+
+- Nuovo: 56 nuove frasi di partenza nella Libreria di «Personalizza», in cinque gruppi: Racconto (15), Famiglia (12), Fotografia e ricordi (15), Momenti ed emozioni (8) e Infanzia e crescita (6). Chi ha già una libreria le riceve una sola volta, senza perdere le proprie frasi né far ricomparire quelle cancellate.
+
 ## 2026-10-12 - Album Flow 0.2.32
 
 - Nuovo: la scheda «Libreria» di «Personalizza» inserisce le frasi come il «Racconto»: c'è la scelta della pagina (sinistra o destra), lo stile «Automatico (come Racconto)» sceglie carattere e misura dalla lunghezza della frase e dalla pagina (a metà se è libera, in basso se ci sono foto, colore leggibile sullo sfondo) e, con un testo selezionato, l'icona con le frecce ne cambia il testo lasciandone lo stile. Dopo l'inserimento si resta sulla Libreria.

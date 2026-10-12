@@ -5,7 +5,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { SpreadTextOverlay } from "@photo-tools/shared-types";
 import { MAX_OVERLAYS_PER_SPREAD, cleanText, overlayLimits, addGraphicOverlay, addTextOverlay, addTextStack, backgroundsOf, duplicateOverlay, fontIdsOfSpread, mediaIdsOfSpread, orderOverlay, overlaysInPaintOrder, overlaysOf, removeOverlay, scaleOverlays, textInsertionPoint, groupMembers, groupOverlays, moveOverlayGroup, ungroupOverlay, setAlbumBackground, setSpreadBackground, updateOverlay, updateSpreadBackground } from "./design";
-import { LIBRARY_KEYS, NEW_SEED_PHRASES, SEED_PHRASES, SEED_VERSION, addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle } from "./designLibrary";
+import { LIBRARY_KEYS, NEW_SEED_PHRASES, SEED_PHRASES, SEED_VERSION, STORY_SEED_PHRASES, MORE_STORY_SEED_PHRASES, addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, removeSavedStyle, savePhrases, saveSavedStyles, updatePhrase, upsertSavedStyle } from "./designLibrary";
+
+/** Testi narrativi di partenza (tutte le versioni dalla 3): una libreria già salvata li riceve insieme. */
+const STORY_TOTAL = STORY_SEED_PHRASES.length + MORE_STORY_SEED_PHRASES.length;
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
 import { addSpread, setSpreadDone } from "./spreads";
@@ -334,7 +337,7 @@ test("archivio: frasi di partenza, aggiungere senza doppioni, modificare, raggru
 
 test("archivio: dati rovinati non rompono nulla e gli stili salvati restano in regola", () => {
   assert.equal(loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: "{non json" })).length, SEED_PHRASES.length);
-  assert.equal(loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "a", text: "ok", group: 5 }, { id: 7 }, null, "x"]) })).length, 1 + NEW_SEED_PHRASES.length, "una libreria già salvata riceve le frasi nuove");
+  assert.equal(loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "a", text: "ok", group: 5 }, { id: 7 }, null, "x"]) })).length, 1 + NEW_SEED_PHRASES.length + STORY_TOTAL, "una libreria già salvata riceve le frasi nuove");
   assert.deepEqual(loadPhrases(null).length, SEED_PHRASES.length);
   assert.deepEqual(loadSavedStyles(memoryStorage({ [LIBRARY_KEYS.styles]: "[1,2]" })), []);
 
@@ -476,7 +479,7 @@ test("modelli per il matrimonio: più di trenta, tutti validi, con testi già sc
 test("archivio: le frasi di partenza nuove si aggiungono una sola volta e una cancellazione resta cancellata", () => {
   const storage = memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "mia", text: "Una frase mia", group: "Le mie" }]) });
   const first = loadPhrases(storage);
-  assert.equal(first.length, 1 + NEW_SEED_PHRASES.length);
+  assert.equal(first.length, 1 + NEW_SEED_PHRASES.length + STORY_TOTAL);
   assert.equal(first[0].text, "Una frase mia", "le tue restano al loro posto");
   assert.equal(storage.getItem(LIBRARY_KEYS.seedVersion), String(SEED_VERSION));
   assert.equal(loadPhrases(storage).length, first.length, "il secondo caricamento non aggiunge nulla");
@@ -484,7 +487,17 @@ test("archivio: le frasi di partenza nuove si aggiungono una sola volta e una ca
   assert.equal(savePhrases(removed, storage), true);
   assert.equal(loadPhrases(storage).length, removed.length, "la frase cancellata non ricompare");
   const twice = loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: JSON.stringify([{ id: "x", text: NEW_SEED_PHRASES[0].text, group: NEW_SEED_PHRASES[0].group }]) }));
-  assert.equal(twice.length, NEW_SEED_PHRASES.length, "niente doppioni con una frase già presente");
+  assert.equal(twice.length, NEW_SEED_PHRASES.length + STORY_TOTAL, "niente doppioni con una frase già presente");
+  // Chi ha già la versione 2 riceve soltanto i testi narrativi nuovi (non le frasi brevi della versione 2).
+  const mine = JSON.stringify([{ id: "mia", text: "Una frase mia", group: "Le mie" }]);
+  const upgraded = loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: mine, [LIBRARY_KEYS.seedVersion]: "2" }));
+  assert.equal(upgraded.length, 1 + STORY_TOTAL);
+  assert.ok(upgraded.slice(1).every((phrase) => ["Racconto", "Famiglia", "Fotografia e ricordi", "Momenti ed emozioni", "Infanzia e crescita"].includes(phrase.group)));
+  // Chi ha la versione 3 riceve solo le nuove di famiglia, fotografia e momenti.
+  const fromV3 = loadPhrases(memoryStorage({ [LIBRARY_KEYS.phrases]: mine, [LIBRARY_KEYS.seedVersion]: "3" }));
+  assert.equal(fromV3.length, 1 + MORE_STORY_SEED_PHRASES.length);
+  assert.equal(STORY_SEED_PHRASES.length, 15);
+  assert.equal(MORE_STORY_SEED_PHRASES.length, 41);
 });
 
 // ------------------------------------------------------------------ posizione, contenuto e allineamenti

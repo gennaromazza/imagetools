@@ -704,6 +704,9 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.33": [
+      "Nuovo: 56 nuove frasi di partenza nella Libreria di «Personalizza», in cinque gruppi: Racconto, Famiglia, Fotografia e ricordi, Momenti ed emozioni, Infanzia e crescita. Le ricevi una sola volta, senza perdere le tue frasi."
+    ],
     "0.2.32": [
       "Nuovo: la scheda «Libreria» di «Personalizza» inserisce le frasi come il «Racconto»: scelta della pagina, stile «Automatico (come Racconto)» (carattere, misura e posizione dalla frase e dalla pagina) e «Usa nel testo selezionato» per cambiare il testo lasciando lo stile. Dopo l'inserimento si resta sulla Libreria.",
       "Nuovo: il centro di ogni pagina si vede bene con «Guide» e mentre si trascina una foto, anche nelle disposizioni libere.",

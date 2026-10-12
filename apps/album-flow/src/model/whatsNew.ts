@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.33",
+    date: "2026-10-12",
+    headline: "56 nuove frasi nella Libreria",
+    items: [
+      {
+        title: "56 nuove frasi di partenza",
+        text: "Nella Libreria trovi nuovi gruppi di frasi da inserire in pagina: Racconto, Famiglia, Fotografia e ricordi, Momenti ed emozioni, Infanzia e crescita. Si modificano e si cancellano come le tue, e una cancellata non ricompare.",
+        where: ["Personalizza", "Libreria", "Racconto", "Famiglia", "Fotografia e ricordi", "Momenti ed emozioni", "Infanzia e crescita"],
+      },
+    ],
+  },
+  {
     version: "0.2.32",
     date: "2026-10-12",
     headline: "Libreria come il Racconto, centro pagina visibile e comandi più discreti",
