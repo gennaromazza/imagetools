@@ -21,6 +21,38 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.34",
+    date: "2026-10-14",
+    headline: "Esportazione più sicura e testi sotto controllo",
+    items: [
+      {
+        title: "L'esportazione parte solo quando vuoi tu",
+        text: "Le schede JPG e SVG scelgono il formato; si esporta dal pulsante «Esporta», dopo aver regolato risoluzione, qualità e spread.",
+        where: ["Esporta", "Esporta N spread"],
+      },
+      {
+        title: "Avviso prima di sostituire i file",
+        text: "Se nella cartella ci sono già file con gli stessi nomi, vedi l'elenco e decidi se sostituirli. Dopo l'esportazione la cartella si apre sul file creato.",
+        where: ["Esporta", "Sostituisci"],
+      },
+      {
+        title: "Testi sempre visibili e controllati",
+        text: "Ogni testo nuovo parte in rosso acceso, così non si perde su una foto scura. Prima dell'export i testi sopra una foto, trasparenti, minuscoli, fuori pagina o ancora rossi vengono segnalati e vanno confermati.",
+        where: ["Esporta", "Controlli", "Ho controllato i testi"],
+      },
+      {
+        title: "Ricerca che trova il nome incollato",
+        text: "Incollando il nome lungo di una foto, con prefisso e suffisso aggiunti all'importazione, la Libreria la trova comunque.",
+        where: ["Libreria", "Cerca"],
+      },
+      {
+        title: "Anteprima cliente più da album",
+        text: "Movimento di pagina, piega al centro, clic su metà sinistra o destra per sfogliare, barra di avanzamento e foto che compaiono subito.",
+        where: ["Anteprima cliente"],
+      },
+    ],
+  },
+  {
     version: "0.2.33",
     date: "2026-10-12",
     headline: "56 nuove frasi nella Libreria",

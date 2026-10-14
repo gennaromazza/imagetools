@@ -102,10 +102,20 @@ interface CellProps {
   handlers: Pick<SpreadViewProps, "onSelectItem" | "onTogglePick" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & { onCommitFrameRect?: (itemId: string, rect: Rect) => void };
 }
 
+/** Pixel utili a schermo pieno: niente 2400 px su un monitor che ne mostra meno (decodifica e lettura più veloci). */
+export function presentPixels(): number {
+  const ratio = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+  const width = typeof window === "undefined" ? 1600 : window.innerWidth;
+  return Math.min(2400, Math.max(1200, Math.round(width * ratio)));
+}
+
 const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, picked, cropActive, view, lowDpi, showSizes, free, snapTargets, lineTool, handlers }: CellProps) {
   // Lavorazione veloce: anteprime leggere; la qualità piena solo per la foto selezionata o in ritaglio e nell'anteprima cliente.
-  const pixels = variant === "thumb" ? 200 : variant === "present" ? 2400 : selected || cropActive ? 1400 : 720;
-  const src = useAssetSrc(asset, pixels);
+  const pixels = variant === "thumb" ? 200 : variant === "present" ? presentPixels() : selected || cropActive ? 1400 : 720;
+  // Anteprima cliente: subito la versione leggera (spesso già in cache), poi quella nitida sopra.
+  const sharp = useAssetSrc(asset, pixels);
+  const quick = useAssetSrc(asset, variant === "present" ? 720 : pixels);
+  const src = sharp || quick;
   const style = useMemo(() => placementStyle(area, cell), [area, cell]);
   const placement = useMemo(() => placeItem(cell.rect, item, asset, style, view, cell.anchor), [cell.anchor, cell.rect, item, asset, style, view]);
   const interactive = variant === "stage";

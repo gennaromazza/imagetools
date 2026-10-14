@@ -869,3 +869,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .spread__toolbar .straighten input[type="range"] { flex: 1 1 90px; width: auto; min-width: 70px; max-width: 220px; height: 26px; accent-color: var(--accent-bright); cursor: pointer; }
 .spread__toolbar .straighten input[type="range"]::-webkit-slider-thumb { width: 18px; height: 18px; }
 .spread__toolbar .straighten__num { width: 46px; }
+
+.present__stage { perspective: 2200px; }
+.present__book { position: relative; width: min(100%, calc((100vh - 140px) * var(--spread-ratio, 2))); transform-origin: 50% 50%; will-change: transform, opacity; }
+.present__book .spread { width: 100%; }
+.present__book--next { animation: book-next 0.42s cubic-bezier(0.22, 0.8, 0.28, 1); }
+.present__book--prev { animation: book-prev 0.42s cubic-bezier(0.22, 0.8, 0.28, 1); }
+@keyframes book-next { from { opacity: 0; transform: translateX(5%) rotateY(-9deg) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes book-prev { from { opacity: 0; transform: translateX(-5%) rotateY(9deg) scale(0.97); } to { opacity: 1; transform: none; } }
+.present__fold { position: absolute; top: 0; bottom: 0; left: 50%; width: 7%; transform: translateX(-50%); pointer-events: none; background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.28) 46%, rgba(255, 255, 255, 0.07) 50%, rgba(0, 0, 0, 0.28) 54%, transparent); mix-blend-mode: multiply; }
+.present__turn { position: absolute; top: 0; bottom: 0; width: 50%; border: 0; background: transparent; cursor: pointer; }
+.present__turn--prev { left: 0; cursor: w-resize; }
+.present__turn--next { right: 0; cursor: e-resize; }
+.present__turn:disabled { cursor: default; }
+.present__progress { display: block; width: min(320px, 50vw); height: 3px; margin: 0 auto 8px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.present__progress > span { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+@media (prefers-reduced-motion: reduce) { .present__book--next, .present__book--prev { animation: none; } }

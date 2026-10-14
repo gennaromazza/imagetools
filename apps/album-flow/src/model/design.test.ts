@@ -12,7 +12,7 @@ const STORY_TOTAL = STORY_SEED_PHRASES.length + MORE_STORY_SEED_PHRASES.length;
 import { assertProjectInvariants, makeProject } from "./fixtures";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
 import { addSpread, setSpreadDone } from "./spreads";
-import { BASE_GROUP, FONT_FAMILIES, TEXT_PRESETS, WEDDING_TEXT_TEMPLATES, contrastRatio, fontInfo, nearestFace, readableOn, sanitizeTextStyle } from "./typography";
+import { BASE_GROUP, FONT_FAMILIES, TEXT_PRESETS, WEDDING_TEXT_TEMPLATES, contrastRatio, fontInfo, PROVISIONAL_TEXT_COLOR, nearestFace, readableOn, sanitizeTextStyle } from "./typography";
 import { renderBackgroundsSvg, renderOverlaysSvg, overlayBox } from "../render/design-svg";
 import { approximateMeasure, layoutText } from "../render/text-layout";
 import { renderSpreadSvg } from "../render/spread-svg";
@@ -365,12 +365,14 @@ test("leggibilità: il testo inserito su uno sfondo scuro (o chiaro) cambia colo
   const { project, spreadId } = withSpread();
   for (const preset of TEXT_PRESETS) {
     for (const backdrop of ["#000000", "#ffffff", "#2b312d", "#f4efe6"]) {
-      const made = addTextOverlay(project, spreadId, { presetId: preset.id, backdrop });
+      const made = addTextOverlay(project, spreadId, { presetId: preset.id, backdrop, keepColor: true });
       const placed = textOf(made.project, made.overlayId!);
       assert.ok((contrastRatio(placed.color, backdrop) ?? 0) >= 3, `${preset.id} su ${backdrop}: colore ${placed.color} illeggibile`);
     }
   }
-  const plain = addTextOverlay(project, spreadId, { presetId: "masthead" });
+  const plain = addTextOverlay(project, spreadId, { presetId: "masthead", keepColor: true });
+  const fresh = addTextOverlay(project, spreadId, { presetId: "masthead" });
+  assert.equal(textOf(fresh.project, fresh.overlayId!).color, PROVISIONAL_TEXT_COLOR, "di norma parte col rosso provvisorio");
   assert.equal(textOf(plain.project, plain.overlayId!).color, "#111111", "senza sfondo noto non cambia");
 });
 

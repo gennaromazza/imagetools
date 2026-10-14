@@ -2,7 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import type { AlbumProjectV2 } from "@photo-tools/shared-types";
 import { hasDesktop, revealInFolder } from "../desktop/api";
 import { preflightReport } from "../model/preflight";
-import { browserWriter, chooseDesktopWriter, exportProjectFile, exportSpreads, spreadPixelSize } from "../render/export";
+import { browserWriter, chooseDesktopWriter, existingNamesIn, exportProjectFile, exportSpreads, spreadFileName, spreadPixelSize, type DesktopWriter } from "../render/export";
+import { safeFileName, type ExportWriter } from "../render/export-core";
 import { Icon } from "./icons";
 import { Field, Modal, Segmented } from "./ui";
 
@@ -33,44 +34,70 @@ export function ExportDialog({ project, currentIndex, onClose, onStatus, onGoTo 
   const [rangeText, setRangeText] = useState("");
   const [dpi, setDpi] = useState(Math.min(300, project.settings.sheet.dpi || 300));
   const [quality, setQuality] = useState(92);
+  const [textsChecked, setTextsChecked] = useState(false);
+  const [format, setFormat] = useState<"jpg" | "svg">("jpg");
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** File con lo stesso nome già nella cartella scelta: si attende la conferma prima di sostituirli. */
+  const [pending, setPending] = useState<{ writer: DesktopWriter; names: string[]; go: () => Promise<void> } | null>(null);
   const signal = useRef({ cancelled: false });
   const busy = progress !== null;
   const blocked = report.errors > 0;
+  const textsPending = report.stats.textWarnings > 0 && !textsChecked;
   const range = useMemo(() => parseSpreadRange(rangeText, project.spreads.length), [rangeText, project.spreads.length]);
   const indexes = scope === "all" ? project.spreads.map((_, index) => index) : scope === "current" ? [currentIndex] : range.indexes;
   const size = spreadPixelSize(project, dpi);
   const desktop = hasDesktop();
 
-  async function run(kind: "jpg" | "svg") {
+  /** Sceglie la cartella e, se contiene già file con questi nomi, chiede conferma prima di sostituirli. */
+  async function withWriter(fileNames: string[], action: (writer: ExportWriter) => Promise<void>) {
     setError(null);
-    signal.current = { cancelled: false };
     try {
-      const writer = desktop ? await chooseDesktopWriter() : browserWriter();
+      if (!desktop) { await action(browserWriter()); return; }
+      const writer = await chooseDesktopWriter();
       if (!writer) return;
-      setProgress({ done: 0, total: indexes.length });
-      const result = await exportSpreads(project, writer, { kind, dpi, quality: quality / 100, spreads: indexes, signal: signal.current, onProgress: (done, total) => setProgress({ done, total }) });
-      onStatus(signal.current.cancelled ? `Esportazione interrotta dopo ${result.count} spread.` : `${result.count} ${result.count === 1 ? "spread esportato" : "spread esportati"} in ${kind.toUpperCase()} (${writer.where()}).`);
-      if (result.written[0] && desktop) void revealInFolder(result.written[0]);
-      onClose();
+      const names = await existingNamesIn(writer.directory, fileNames);
+      if (names.length === 0) { await action(writer); return; }
+      setPending({ writer, names, go: async () => { writer.setReplace(true); await action(writer); } });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : "Esportazione non riuscita.");
       setProgress(null);
     }
   }
 
+  async function run(kind: "jpg" | "svg") {
+    await withWriter(indexes.map((index) => spreadFileName(project, index, kind)), async (writer) => {
+      signal.current = { cancelled: false };
+      try {
+        setProgress({ done: 0, total: indexes.length });
+        const result = await exportSpreads(project, writer, { kind, dpi, quality: quality / 100, spreads: indexes, signal: signal.current, onProgress: (done, total) => setProgress({ done, total }) });
+        onStatus(signal.current.cancelled ? `Esportazione interrotta dopo ${result.count} spread.` : `${result.count} ${result.count === 1 ? "spread esportato" : "spread esportati"} in ${kind.toUpperCase()} (${writer.where()}).`);
+        if (result.written[0] && desktop) void revealInFolder(result.written[0]);
+        onClose();
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : "Esportazione non riuscita.");
+        setProgress(null);
+      }
+    });
+  }
+
   async function saveProject() {
-    try {
-      const writer = desktop ? await chooseDesktopWriter() : browserWriter();
-      if (!writer) return;
-      const path = await exportProjectFile(project, writer);
-      onStatus("Progetto salvato in un file FileX Album.");
-      if (path) void revealInFolder(path);
-      onClose();
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : "Impossibile salvare il progetto.");
-    }
+    await withWriter([`${safeFileName(project.projectName)}.filex-album.json`], async (writer) => {
+      try {
+        const path = await exportProjectFile(project, writer);
+        onStatus("Progetto salvato in un file FileX Album.");
+        if (path) void revealInFolder(path);
+        onClose();
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : "Impossibile salvare il progetto.");
+      }
+    });
+  }
+
+  async function confirmReplace() {
+    const current = pending;
+    setPending(null);
+    if (current) await current.go();
   }
 
   const issues = report.issues.filter((issue) => issue.level !== "info" || report.issues.length < 8);
@@ -117,11 +144,11 @@ export function ExportDialog({ project, currentIndex, onClose, onStatus, onGoTo 
       </div>
 
       <div className="export-grid">
-        <button type="button" className="export-card" disabled={blocked || busy || indexes.length === 0} onClick={() => void run("jpg")}>
+        <button type="button" className="export-card" aria-pressed={format === "jpg"} style={format === "jpg" ? { outline: "2px solid var(--accent)" } : undefined} disabled={busy} onClick={() => setFormat("jpg")}>
           <Icon name="image" size={22} /><strong>JPG per spread</strong>
           <span>Un file per spread, abbondanza inclusa: il formato richiesto dalla maggior parte dei laboratori.</span>
         </button>
-        <button type="button" className="export-card" disabled={blocked || busy || indexes.length === 0} onClick={() => void run("svg")}>
+        <button type="button" className="export-card" aria-pressed={format === "svg"} style={format === "svg" ? { outline: "2px solid var(--accent)" } : undefined} disabled={busy} onClick={() => setFormat("svg")}>
           <Icon name="layouts" size={22} /><strong>SVG per spread</strong>
           <span>Vettoriale con le foto incorporate, per verifiche o ritocchi in un programma grafico.</span>
         </button>
@@ -130,6 +157,29 @@ export function ExportDialog({ project, currentIndex, onClose, onStatus, onGoTo 
           <span>File .filex-album.json con capitoli, layout e ritagli, da riaprire o condividere.</span>
         </button>
       </div>
+
+      {report.stats.textWarnings > 0 ? (
+        <label className="notice notice--warn" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={textsChecked} onChange={(event) => setTextsChecked(event.target.checked)} />
+          <span>Ho controllato i {report.stats.textWarnings} testi segnalati qui sopra: sono leggibili e voluti.</span>
+        </label>
+      ) : null}
+      <div style={{ display: "flex", justifyContent: "flex-end", margin: "12px 0" }}>
+        <button type="button" className="btn btn--primary" disabled={blocked || textsPending || busy || indexes.length === 0} onClick={() => void run(format)}>
+          Esporta {indexes.length} {indexes.length === 1 ? "spread" : "spread"} in {format.toUpperCase()}
+        </button>
+      </div>
+
+      {pending ? (
+        <div className="notice notice--warn" role="alertdialog" aria-label="File già presenti">
+          <p><strong>{pending.names.length === 1 ? "Un file con lo stesso nome è già" : `${pending.names.length} file con lo stesso nome sono già`} in questa cartella e verr{pending.names.length === 1 ? "à sostituito" : "anno sostituiti"}.</strong></p>
+          <p className="muted small">{pending.names.slice(0, 6).join(", ")}{pending.names.length > 6 ? `, …e altri ${pending.names.length - 6}` : ""}</p>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" className="btn" onClick={() => setPending(null)}>Annulla</button>
+            <button type="button" className="btn btn--primary" onClick={() => void confirmReplace()}>Sostituisci {pending.names.length === 1 ? "il file" : `i ${pending.names.length} file`}</button>
+          </div>
+        </div>
+      ) : null}
 
       {progress ? (
         <div className="progress" role="status" aria-live="polite">

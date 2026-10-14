@@ -184,6 +184,10 @@ const api: FileXDesktopApi = {
     ipcRenderer.invoke("filex:write-file", absolutePath, bytes),
   writeFilesAtomically: (directoryPath, files) =>
     ipcRenderer.invoke("filex:write-files-atomically", directoryPath, files),
+  listOutputFolderFileNames: (directoryPath) =>
+    ipcRenderer.invoke("filex:list-output-folder-file-names", directoryPath),
+  writeFilesReplacing: (directoryPath, files) =>
+    ipcRenderer.invoke("filex:write-files-replacing", directoryPath, files),
   beginAtomicWriteTransaction: (directoryPath) =>
     ipcRenderer.invoke("filex:begin-atomic-write-transaction", directoryPath),
   stageAtomicWriteTransactionFile: (transactionId, file) =>

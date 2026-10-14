@@ -8,6 +8,7 @@ import { IMAGE_EXTENSIONS, applyImport, assetFromCandidate, candidateKey, folder
 import { assetUsage, clearRatings, setRatingPolicy, assetsInTab, compareAssets, duplicatedAssetIds, filterAssets, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, sortAssets, toggleAssetTag, unusedAssets } from "./library";
 import { parseAlbumProject, projectProblem, repairOversizedAreas, serializeAlbumProject } from "./portability";
 import { preflightReport } from "./preflight";
+import { addTextOverlay, updateOverlay } from "./design";
 import { createDemoProject, loadProjects, mergeIncomingProject, projectFromHandoff, saveProjects, STAGES, stageLabel } from "./store";
 import { appendAssets, toggleItemLock } from "./items";
 import { addSpread, setSplitMode, setSpreadDone, splitRefusal } from "./spreads";
@@ -447,6 +448,23 @@ test("controlli: una foto a tutto foglio attraversa la piega e viene segnalata c
   assert.equal(report.stats.foldCrossings, 1);
   assert.equal(report.issues.find((issue) => issue.level === "info" && /piega/.test(issue.message))?.level, "info");
   assert.equal(report.errors, 0);
+});
+
+test("controlli: un testo sopra una foto, quasi trasparente o dello stesso colore dello sfondo viene segnalato", () => {
+  let project = addSpread(makeProject(3), 0, "full");
+  const spreadId = project.spreads[0].id;
+  project = appendAssets(project, spreadId, 0, ["a0"]);
+  const made = addTextOverlay(project, spreadId, { presetId: "headline", text: "Scritta nascosta", at: { x: 0.3, y: 0.4 } });
+  assert.ok(made.overlayId);
+  const over = preflightReport(made.project);
+  assert.equal(over.stats.texts, 1);
+  assert.ok(over.issues.some((issue) => issue.level === "warning" && /Scritta nascosta/.test(issue.message) && /sopra una foto/.test(issue.message)), "testo sopra la foto: avviso");
+
+  const faded = updateOverlay(made.project, spreadId, made.overlayId!, { opacity: 0.1 });
+  assert.ok(preflightReport(faded).issues.some((issue) => /quasi trasparente/.test(issue.message)));
+
+  const empty = updateOverlay(made.project, spreadId, made.overlayId!, { text: "  " });
+  assert.ok(preflightReport(empty).issues.some((issue) => /è vuoto/.test(issue.message)));
 });
 
 // ------------------------------------------------------------------ Selector

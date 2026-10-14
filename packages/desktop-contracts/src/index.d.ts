@@ -1431,6 +1431,8 @@ export interface FileXDesktopApi {
     saveNewFileAs: (suggestedName: string, bytes: Uint8Array) => Promise<string | null>;
     writeFile: (absolutePath: string, bytes: Uint8Array) => Promise<boolean>;
     writeFilesAtomically: (directoryPath: string, files: DesktopAtomicWriteFile[]) => Promise<string[]>;
+    listOutputFolderFileNames: (directoryPath: string) => Promise<string[]>;
+    writeFilesReplacing: (directoryPath: string, files: DesktopAtomicWriteFile[]) => Promise<string[]>;
     beginAtomicWriteTransaction: (directoryPath: string) => Promise<string>;
     stageAtomicWriteTransactionFile: (transactionId: string, file: DesktopAtomicWriteFile) => Promise<void>;
     commitAtomicWriteTransaction: (transactionId: string) => Promise<string[]>;

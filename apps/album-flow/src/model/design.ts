@@ -3,7 +3,7 @@ import { newId } from "./ids";
 import { mapSpread, findSpread, type Project } from "./project";
 import { spreadSizeMm } from "../engine/geometry";
 import { approximateMeasure, layoutText } from "../render/text-layout";
-import { TEXT_LIMITS, fontInfo, readableOn, sanitizeTextStyle, textPreset } from "./typography";
+import { PROVISIONAL_TEXT_COLOR, TEXT_LIMITS, fontInfo, readableOn, sanitizeTextStyle, textPreset } from "./typography";
 
 /** Testi, grafiche e sfondi a immagine degli spread: tutte le funzioni restituiscono lo stesso progetto se non cambia nulla. */
 
@@ -64,6 +64,8 @@ export interface NewTextOptions {
   groupId?: string;
   /** Colore dello sfondo dove finisce il testo: se il colore dello stile non si leggerebbe, ne usa uno chiaro o scuro. */
   backdrop?: string;
+  /** Mantiene il colore dello stile (corretto per leggersi sullo sfondo) invece di quello provvisorio. */
+  keepColor?: boolean;
 }
 
 /** Aggiunge un testo sopra le foto. Restituisce il progetto e l'identificativo del nuovo elemento (null se rifiutato). */
@@ -74,7 +76,8 @@ export function addTextOverlay(project: Project, spreadId: string, options: NewT
   if (current.length >= MAX_OVERLAYS_PER_SPREAD) return { project, overlayId: null };
   const preset = textPreset(options.presetId ?? "body");
   const merged = sanitizeTextStyle({ ...preset.style, ...options.style });
-  const style = { ...merged, color: readableOn(merged.color, options.backdrop) };
+  // Colore provvisorio e ben visibile (vedi PROVISIONAL_TEXT_COLOR): lo si cambia di proposito, non lo si dimentica per caso.
+  const style = { ...merged, color: options.keepColor ? readableOn(merged.color, options.backdrop) : PROVISIONAL_TEXT_COLOR };
   const width = clamp(options.width ?? preset.width, TEXT_LIMITS.width.min, TEXT_LIMITS.width.max);
   const center = options.at ?? { x: 0.5, y: 0.5 };
   const overlay: SpreadTextOverlay = {

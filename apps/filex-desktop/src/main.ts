@@ -7,6 +7,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdir
 import {
   mkdtemp,
   readFile as readFileAsync,
+  rename as renameAsync,
   rm as rmAsync,
   stat as statAsync,
   writeFile as writeFileAsync,
@@ -89,7 +90,7 @@ import {
   writePhotoSelectorProjectFileDesktop,
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
-import { AtomicOutputTransactionManager } from "./atomic-output-transaction.js";
+import { AtomicOutputTransactionManager, normalizeAtomicOutputFileName } from "./atomic-output-transaction.js";
 import {
   configureDesktopImageService,
   clearDesktopImageMemoryCaches,
@@ -750,6 +751,35 @@ function normalizeUint8Array(payload: unknown): Uint8Array {
 }
 
 const atomicOutputTransactions = new AtomicOutputTransactionManager();
+
+/** Nomi dei soli file presenti nella cartella di output (per avvisare prima di sostituire). */
+function listOutputFolderFileNamesDesktop(directoryPathInput: string): string[] {
+  const directoryPath = resolveValidDirectoryPath(directoryPathInput);
+  if (!directoryPath) throw new Error("Cartella di output non valida o non disponibile.");
+  return readdirSync(directoryPath, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
+}
+
+/** Scrive i file sostituendo gli omonimi: ogni file prima completo su un temporaneo nella stessa cartella, poi rinominato sul nome finale. */
+async function writeFilesReplacingDesktop(directoryPathInput: string, filesInput: DesktopAtomicWriteFile[]): Promise<string[]> {
+  const directoryPath = resolveValidDirectoryPath(directoryPathInput);
+  if (!directoryPath) throw new Error("Cartella di output non valida o non disponibile.");
+  if (!Array.isArray(filesInput) || filesInput.length === 0) throw new Error("Il batch di output deve contenere almeno un file.");
+  const saved: string[] = [];
+  for (const input of filesInput) {
+    const fileName = normalizeAtomicOutputFileName(input?.fileName);
+    const destination = join(directoryPath, fileName);
+    const partial = join(directoryPath, `.filex-part-${randomBytes(12).toString("hex")}.tmp`);
+    try {
+      await writeFileAsync(partial, normalizeUint8Array(input?.bytes));
+      await renameAsync(partial, destination);
+    } catch (error) {
+      await rmAsync(partial, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    saved.push(destination);
+  }
+  return saved;
+}
 
 async function writeFilesAtomicallyDesktop(
   directoryPathInput: string,
@@ -2077,6 +2107,12 @@ function registerIpcHandlers(): void {
     "filex:write-files-atomically",
     (event, directoryPath: string, files: DesktopAtomicWriteFile[]) =>
       writeFilesAtomicallyDesktop(directoryPath, files, event.sender.id),
+  );
+  ipcMain.handle("filex:list-output-folder-file-names", (_event, directoryPath: string) =>
+    listOutputFolderFileNamesDesktop(directoryPath),
+  );
+  ipcMain.handle("filex:write-files-replacing", (_event, directoryPath: string, files: DesktopAtomicWriteFile[]) =>
+    writeFilesReplacingDesktop(directoryPath, files),
   );
   ipcMain.handle("filex:begin-atomic-write-transaction", async (event, directoryPathInput: string) => {
     const directoryPath = resolveValidDirectoryPath(directoryPathInput);

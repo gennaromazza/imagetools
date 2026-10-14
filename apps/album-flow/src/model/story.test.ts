@@ -1,3 +1,4 @@
+import { PROVISIONAL_TEXT_COLOR } from "./typography";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SpreadTextOverlay } from "@photo-tools/shared-types";
@@ -324,7 +325,8 @@ test("frasi della Libreria: stessa composizione del Racconto (stile dalla lunghe
   assert.ok(photoText.x + photoText.w <= 0.5 + 1e-6, "dentro la pagina sinistra");
 
   const dark = insertPhrase(project, spreadId, 1, shortPhrase, "#111111")!;
-  assert.notEqual(textsOn(dark.project, 1)[0].color, freeText.color, "su sfondo scuro il colore cambia per leggersi");
+  assert.equal(textsOn(dark.project, 1)[0].color, PROVISIONAL_TEXT_COLOR, "ogni testo nuovo parte col colore rosso provvisorio, anche su sfondo scuro");
+  assert.equal(freeText.color, PROVISIONAL_TEXT_COLOR);
 
   assert.equal(insertPhrase(project, spreadId, 1, "   "), null, "una frase vuota non aggiunge nulla");
   assert.equal(insertPhrase(project, "x", 0, shortPhrase), null);

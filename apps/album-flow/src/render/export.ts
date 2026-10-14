@@ -72,20 +72,42 @@ export function browserWriter(): ExportWriter {
   };
 }
 
-/** Con l'app desktop si sceglie una cartella una volta sola; la scrittura è atomica e non sovrascrive. */
-export async function chooseDesktopWriter(): Promise<(ExportWriter & { directory: string }) | null> {
+/** Percorso completo di un file dentro la cartella scelta (il separatore è quello della cartella). */
+function inFolder(directory: string, fileName: string): string {
+  return `${directory}${directory.includes("\\") ? "\\" : "/"}${fileName}`;
+}
+
+/** Writer desktop: con `setReplace(true)` (dopo conferma) i file con lo stesso nome vengono sostituiti; altrimenti gli omonimi sono rinominati. */
+export type DesktopWriter = ExportWriter & { directory: string; setReplace(replace: boolean): void };
+
+/** Con l'app desktop si sceglie una cartella una volta sola. */
+export async function chooseDesktopWriter(): Promise<DesktopWriter | null> {
   const api = getDesktop();
   if (!api?.chooseOutputFolder || !api.writeFilesAtomically) return null;
   const directory = await api.chooseOutputFolder();
   if (!directory) return null;
+  let replace = false;
   return {
     directory,
+    setReplace(value) { replace = value && Boolean(api.writeFilesReplacing); },
     async write(fileName, bytes) {
+      if (replace && api.writeFilesReplacing) return (await api.writeFilesReplacing(directory, [{ fileName, bytes }]))[0] ?? null;
       const written = await api.writeFilesAtomically(directory, [{ fileName, bytes }]);
-      return written[0] ?? null;
+      // La scrittura atomica restituisce il solo nome del file: serve il percorso completo per aprire la cartella.
+      return written[0] ? inFolder(directory, written[0]) : null;
     },
     where: () => directory,
   };
+}
+
+/** Quali di `names` esistono già nella cartella (maiuscole ignorate, come su Windows e macOS). */
+export async function existingNamesIn(directory: string, names: readonly string[]): Promise<string[]> {
+  const list = getDesktop()?.listOutputFolderFileNames;
+  if (!list) return [];
+  try {
+    const present = new Set((await list(directory)).map((name) => name.toLocaleLowerCase()));
+    return names.filter((name) => present.has(name.toLocaleLowerCase()));
+  } catch { return []; }
 }
 
 /** Sfondi a immagine, testi e grafiche di uno spread, pronti per un SVG autonomo: immagini della libreria, font incorporati, testo misurato con i font veri. */

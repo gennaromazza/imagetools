@@ -32,6 +32,16 @@
 
 
 
+## 2026-10-14 - Album Flow 0.2.34
+
+- Corretto: nella finestra «Esporta l'album» le schede JPG e SVG scelgono soltanto il formato; l'esportazione parte dal pulsante «Esporta N spread», così puoi regolare prima risoluzione, qualità e spread.
+- Nuovo: se la cartella scelta contiene già file con gli stessi nomi, compare un avviso con l'elenco e si sostituiscono solo dopo conferma («Sostituisci»). Prima gli omonimi venivano rinominati.
+- Corretto: dopo l'esportazione la cartella si apre davvero sul file creato.
+- Nuovo: ogni testo appena aggiunto (manuale, Racconto, Libreria, stili) parte in rosso acceso, per non lasciarlo mimetizzato su una foto scura. Il colore si cambia come sempre.
+- Nuovo: i controlli prima dell'export segnalano i testi sopra una foto, quasi trasparenti, minuscoli, vuoti, fuori pagina, del colore dello sfondo o ancora rossi, con «Vai» per raggiungerli. Con testi segnalati l'esportazione richiede la spunta «Ho controllato i testi».
+- Migliorato: la ricerca per nome file trova la foto anche incollando il nome lungo con prefisso e suffisso aggiunti all'importazione.
+- Migliorato: l'anteprima per il cliente è più simile a un album (movimento di pagina, piega centrale, clic su metà pagina, barra di avanzamento), carica in anticipo gli spread vicini e mostra subito una versione leggera delle foto.
+
 ## 2026-10-12 - Album Flow 0.2.33
 
 - Nuovo: 56 nuove frasi di partenza nella Libreria di «Personalizza», in cinque gruppi: Racconto (15), Famiglia (12), Fotografia e ricordi (15), Momenti ed emozioni (8) e Infanzia e crescita (6). Chi ha già una libreria le riceve una sola volta, senza perdere le proprie frasi né far ricomparire quelle cancellate.

@@ -1765,6 +1765,10 @@ export interface FileXDesktopApi {
   saveNewFileAs: (suggestedName: string, bytes: Uint8Array) => Promise<string | null>;
   writeFile: (absolutePath: string, bytes: Uint8Array) => Promise<boolean>;
   writeFilesAtomically: (directoryPath: string, files: DesktopAtomicWriteFile[]) => Promise<string[]>;
+  /** Nomi dei file presenti in una cartella di output, per avvisare prima di sostituirli. */
+  listOutputFolderFileNames: (directoryPath: string) => Promise<string[]>;
+  /** Scrive sostituendo i file con lo stesso nome (temporaneo + rinomina); restituisce i percorsi completi. */
+  writeFilesReplacing: (directoryPath: string, files: DesktopAtomicWriteFile[]) => Promise<string[]>;
   beginAtomicWriteTransaction: (directoryPath: string) => Promise<string>;
   stageAtomicWriteTransactionFile: (transactionId: string, file: DesktopAtomicWriteFile) => Promise<void>;
   commitAtomicWriteTransaction: (transactionId: string) => Promise<string[]>;

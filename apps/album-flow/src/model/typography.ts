@@ -100,6 +100,12 @@ export function sanitizeTextStyle(spec: Partial<TextStyleSpec> & { font?: string
 const channel = (value: number) => { const v = value / 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
 
 /** Luminanza relativa (0 nero … 1 bianco) di un colore #rgb / #rrggbb; null se non è leggibile. */
+/**
+ * Colore provvisorio di ogni testo appena aggiunto: un rosso acceso che si nota subito, su foto chiare e scure.
+ * Così un testo non ancora rifinito (o mimetizzato) non arriva in stampa senza che ce se ne accorga; i controlli prima dell'export lo segnalano.
+ */
+export const PROVISIONAL_TEXT_COLOR = "#ff2d55";
+
 export function luminanceOf(color: string): number | null {
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})([0-9a-f]{2})?$/i.exec(color.trim());
   if (!hex) return null;

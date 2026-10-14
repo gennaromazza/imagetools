@@ -84,11 +84,26 @@ export interface LibraryFilter {
   usage?: "all" | "unused" | "used";
 }
 
+const stemOf = (name: string) => name.replace(/\.[a-z0-9]{2,5}$/i, "");
+
+/** Vero se il testo cercato corrisponde al nome file. Accetta anche un nome incollato più lungo
+ *  (prefisso numerico e suffisso casuale aggiunti dall'importazione): basta che contenga il nome originale. */
+export function fileNameMatches(fileName: string, query: string): boolean {
+  const needle = query.trim().toLocaleLowerCase();
+  if (!needle) return true;
+  const name = fileName.toLocaleLowerCase();
+  if (name.includes(needle)) return true;
+  const stem = stemOf(name);
+  if (stem.length >= 4 && needle.includes(stem)) return true;
+  const needleStem = stemOf(needle);
+  return needleStem.split(/[^\p{L}\p{N}]+/u).some((token) => token.length >= 4 && /\d/.test(token) && stem.includes(token) && token.length >= Math.min(stem.length, 6));
+}
+
 export function filterAssets(project: Project, assets: readonly AlbumAssetV2[], filter: LibraryFilter): AlbumAssetV2[] {
   const needle = (filter.query ?? "").trim().toLocaleLowerCase();
   const usage = filter.usage && filter.usage !== "all" ? assetUsage(project) : null;
   return assets.filter((asset) => {
-    if (needle && !asset.fileName.toLocaleLowerCase().includes(needle)) return false;
+    if (needle && !fileNameMatches(asset.fileName, needle)) return false;
     if (filter.exactRating !== undefined) { if ((asset.rating ?? 0) !== filter.exactRating) return false; }
     else if (filter.minRating && (asset.rating ?? 0) < filter.minRating) return false;
     if (filter.labelId && !(asset.labelIds ?? []).includes(filter.labelId)) return false;
