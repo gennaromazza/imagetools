@@ -1,5 +1,6 @@
 import { type CSSProperties, type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { accumulateWheel } from "../model/placement";
 import { Icon, type IconName } from "./icons";
 
 // ---------------------------------------------------------------------------
@@ -214,6 +215,7 @@ export function NumberField({ label, value, min, max, step, onChange, title }: {
   const clamp = useCallback((next: number) => Math.min(max, Math.max(min, Math.round(next / step) * step)), [max, min, step]);
   // Rotellina del mouse sopra il campo (senza doverlo selezionare): su aumenta, giù diminuisce; Maiusc = passi da 10.
   const wrapper = useRef<HTMLDivElement>(null);
+  const wheelRest = useRef(0);
   const live = useRef({ value, step, onChange, clamp });
   live.current = { value, step, onChange, clamp };
   useEffect(() => {
@@ -221,8 +223,13 @@ export function NumberField({ label, value, min, max, step, onChange, title }: {
     if (!element) return;
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
+      // Il touchpad manda molti eventi piccoli per ogni strisciata: si accumulano in passi interi (vedi accumulateWheel).
+      const delta = event.deltaY || event.deltaX;
+      const gathered = accumulateWheel(wheelRest.current, delta, event.deltaMode);
+      wheelRest.current = gathered.rest;
+      if (gathered.steps === 0) return;
       const { value: current, step: unit, onChange: change, clamp: fit } = live.current;
-      const next = Number(fit(current + (event.deltaY < 0 ? 1 : -1) * unit * (event.shiftKey ? 10 : 1)).toFixed(3));
+      const next = Number(fit(current + gathered.steps * unit * (event.shiftKey ? 10 : 1)).toFixed(3));
       if (next !== current) { change(next); setDraft(null); }
     };
     element.addEventListener("wheel", onWheel, { passive: false });
@@ -234,7 +241,7 @@ export function NumberField({ label, value, min, max, step, onChange, title }: {
     setDraft(null);
   };
   return (
-    <div ref={wrapper} className="numfield" title={title ? `${title} Rotellina del mouse: cambia il valore (Maiusc = più veloce).` : "Rotellina del mouse: cambia il valore (Maiusc = più veloce)."}>
+    <div ref={wrapper} className="numfield" title={title ? `${title} Rotellina o due dita sul touchpad: cambiano il valore (Maiusc = più veloce). Trascina la sigla per cambiarlo con il dito.` : "Rotellina o due dita sul touchpad: cambiano il valore (Maiusc = più veloce). Trascina la sigla per cambiarlo con il dito."}>
       <span
         className="numfield__label"
         onPointerDown={(event) => { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); scrub.current = { startY: event.clientY, start: value }; }}

@@ -186,6 +186,24 @@ export function wheelNotches(delta: number): number {
   return clampNumber(magnitude / 100, 0.05, 1);
 }
 
+/** Spostamento (in pixel) che vale un passo di un campo numerico: un classico scatto del mouse (100) è un passo, sul touchpad ne servono 30. */
+export const WHEEL_PIXELS_PER_STEP = 30;
+
+/**
+ * Trasforma gli eventi della rotella in passi interi di un campo numerico. Il touchpad manda decine di eventi piccoli per ogni
+ * strisciata: senza accumulo ogni evento varrebbe un passo e il valore schizzerebbe al massimo. `rest` è il resto da riportare
+ * all'evento successivo; `steps` è positivo per strisciate verso l'alto (aumenta).
+ */
+export function accumulateWheel(rest: number, deltaY: number, deltaMode = 0): { steps: number; rest: number } {
+  const pixels = deltaMode === 1 ? deltaY * 33 : deltaMode === 2 ? deltaY * 400 : deltaY;
+  if (!Number.isFinite(pixels) || pixels === 0) return { steps: 0, rest };
+  // Un mouse a scatti manda un solo evento grande: vale sempre almeno un passo.
+  const unit = Math.abs(pixels) >= 100 ? 100 : WHEEL_PIXELS_PER_STEP;
+  const total = (Math.sign(rest) === Math.sign(pixels) ? rest : 0) + pixels;
+  const whole = Math.trunc(total / unit);
+  return { steps: whole === 0 ? 0 : -whole, rest: total - whole * unit };
+}
+
 function isRotatedQuarter(asset: AlbumAssetV2): boolean {
   return asset.rotationDegrees === 90 || asset.rotationDegrees === 270;
 }

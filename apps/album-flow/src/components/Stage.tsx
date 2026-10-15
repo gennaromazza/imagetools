@@ -5,7 +5,7 @@ import { spreadSizeMm } from "../engine/geometry";
 import { hasDesktop } from "../desktop/api";
 import { isFavoriteLayout } from "../model/areas";
 import { BACKGROUND_SWATCHES, STYLE_LIMITS } from "../model/defaults";
-import { clampAngle, itemBorderColor, placeItem, wheelNotches, type ItemView } from "../model/placement";
+import { accumulateWheel, clampAngle, itemBorderColor, placeItem, wheelNotches, type ItemView } from "../model/placement";
 import { itemAspect } from "../model/project";
 import { ShapePicker } from "./ShapePicker";
 import { isScopeLocked, type LockScope } from "../model/layoutLock";
@@ -226,23 +226,39 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const count = project.spreads.length;
   const two = spread.areas.length > 1;
 
-  // Touchpad: il pinch (che il browser manda come rotella + Ctrl) o Ctrl + rotella ingrandisce il foglio invece di ingrandire tutta
-  // l'interfaccia. Dentro una foto in ritaglio la rotella resta della foto (la gestisce SpreadView).
+  // Touchpad e rotella sul foglio (fuori dal ritaglio, dove la rotella è della foto):
+  //  · pinch (rotella + Ctrl) o Ctrl + rotella: ingrandisce il foglio invece di ingrandire tutta l'interfaccia;
+  //  · Maiusc + due dita su/giù: cambia lo spazio tra le foto; Maiusc + Alt: il margine della pagina attiva;
+  //  · doppio clic o doppio tocco sullo sfondo: il foglio torna a «Adatta alla finestra».
   const zoomNow = useRef(zoom);
   zoomNow.current = zoom;
-  const cropNow = useRef(cropMode);
-  cropNow.current = cropMode;
+  const live = useRef({ cropMode, style: area.style, areaIndex });
+  live.current = { cropMode, style: area.style, areaIndex };
+  const wheelRest = useRef(0);
   useEffect(() => {
     const element = centerRef.current;
     if (!element) return;
     const onWheel = (event: WheelEvent) => {
-      if (!event.ctrlKey && !event.metaKey) return;
-      if (cropNow.current && (event.target as HTMLElement | null)?.closest?.(".cell--selected")) return;
+      if (event.defaultPrevented) return;
+      const state = live.current;
+      if (event.ctrlKey || event.metaKey) {
+        if (state.cropMode && (event.target as HTMLElement | null)?.closest?.(".cell--selected")) return;
+        event.preventDefault();
+        const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+        const next = Math.min(3, Math.max(0.4, zoomNow.current * Math.exp(-delta * 0.01)));
+        zoomNow.current = next;
+        actions.setZoom(Number(next.toFixed(2)));
+        return;
+      }
+      if (!event.shiftKey || state.cropMode) return;
       event.preventDefault();
-      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
-      const next = Math.min(3, Math.max(0.4, zoomNow.current * Math.exp(-delta * 0.01)));
-      zoomNow.current = next;
-      actions.setZoom(Number(next.toFixed(2)));
+      const which = event.altKey ? ("paddingCm" as const) : ("gapCm" as const);
+      const gathered = accumulateWheel(wheelRest.current, event.deltaY || event.deltaX, event.deltaMode);
+      wheelRest.current = gathered.rest;
+      if (gathered.steps === 0) return;
+      const limits = STYLE_LIMITS[which];
+      const value = Math.min(limits.max, Math.max(limits.min, Number((state.style[which] + gathered.steps * limits.step).toFixed(3))));
+      if (value !== state.style[which]) actions.style(state.areaIndex, { [which]: value }, which === "gapCm" ? "gap" : "padding");
     };
     element.addEventListener("wheel", onWheel, { passive: false });
     return () => element.removeEventListener("wheel", onWheel);
@@ -474,7 +490,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     <main className="stage" aria-label="Area di lavoro">
       <div className="stage__row">
         {strip("left")}
-        <div className={`stage__center${design.open ? " stage__center--drawer" : ""}`} ref={centerRef} data-testid="stage-center">
+        <div className={`stage__center${design.open ? " stage__center--drawer" : ""}`} ref={centerRef} data-testid="stage-center" onDoubleClick={(event) => { if (event.target === event.currentTarget) actions.setZoom(1); }}>
           <div className="stage__spread" style={{ width: width || undefined }}>
             <SpreadView
               sheet={sheet}

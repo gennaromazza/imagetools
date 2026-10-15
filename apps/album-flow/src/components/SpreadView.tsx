@@ -137,7 +137,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     if (!element || !interactive) return;
     const onWheel = (event: WheelEvent) => {
       const state = live.current;
-      const quick = !state.canCrop && state.canAdjust && event.altKey;
+      const quick = !state.canCrop && state.canAdjust && event.altKey && !event.shiftKey; // Maiusc + rotella sul foglio regola spazio e margine (Stage)
       if (!state.canCrop && !quick) return;
       event.preventDefault();
       // In ritaglio: Ctrl/⌘ o Alt + rotella (e la sola rotella con lo strumento «linea» acceso) raddrizzano; la rotella semplice zooma.

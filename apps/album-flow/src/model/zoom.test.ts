@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SHAPE_PRESETS } from "./shapes";
-import { placeItem, clampAngle, nextWheelZoom, wheelNotches, type Placement } from "./placement";
+import { placeItem, clampAngle, accumulateWheel, nextWheelZoom, wheelNotches, type Placement } from "./placement";
 import { appendAssets, resetItemView, setItemView } from "./items";
 import { addSpread } from "./spreads";
 import { setAreaStyle, setDividerRatio } from "./areas";
@@ -292,4 +292,22 @@ test("audit zoom — touchpad e rotelle a scorrimento fluido: tanti piccoli even
   let back = fine;
   for (let i = 0; i < 10; i += 1) back = nextWheelZoom(back, back, false, wheelNotches(10));
   assert.ok(Math.abs(back - 1) < 1e-9);
+});
+
+test("rotella: il touchpad accumula, il mouse a scatti vale un passo", () => {
+  // un classico scatto del mouse = un passo (su = aumenta)
+  assert.deepEqual(accumulateWheel(0, -100), { steps: 1, rest: 0 });
+  assert.deepEqual(accumulateWheel(0, 100), { steps: -1, rest: 0 });
+  // una strisciata di touchpad: 20 eventi da 3 px (60 px) = 2 passi, non 20
+  let rest = 0;
+  let total = 0;
+  for (let i = 0; i < 20; i += 1) { const result = accumulateWheel(rest, -3); rest = result.rest; total += result.steps; }
+  assert.equal(total, 2);
+  // stesso verso: il resto si somma ma non basta ancora per un passo
+  assert.equal(accumulateWheel(20, 5).steps, 0);
+  // cambiando verso il resto si azzera: nessun passo fantasma
+  assert.equal(accumulateWheel(-20, 5).rest, 5);
+  // rotella a righe (Firefox): una riga ≈ un passo
+  assert.equal(accumulateWheel(0, -1, 1).steps, 1);
+  assert.deepEqual(accumulateWheel(0, 0), { steps: 0, rest: 0 });
 });
