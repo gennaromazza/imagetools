@@ -48,6 +48,9 @@ export interface AreaStripProps {
   onLock: (locked: boolean) => void;
   onFree: () => void;
   onRestore: () => void;
+  /** Striscia ripiegata: resta solo il pulsante per riaprirla (schermi piccoli). */
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }
 
 /** Striscia verticale di controlli di un'area di lavoro: mescola, spazio, margine, bordo, modo, allineamento, divisione. */
@@ -59,8 +62,24 @@ export function AreaStrip(props: AreaStripProps) {
   const style = area.style;
   const empty = area.items.length === 0;
 
+  const edgeIcon: IconName = (side === "left") === !props.collapsed ? "chevronLeft" : "chevronRight";
+  const toggle = (
+    <button type="button" className="strip__fold" title={props.collapsed ? "Mostra i controlli di questa pagina" : "Nascondi i controlli per dare più spazio al foglio"} aria-label={props.collapsed ? "Mostra i controlli della pagina" : "Nascondi i controlli della pagina"} aria-expanded={!props.collapsed} onClick={props.onToggleCollapsed}>
+      <Icon name={edgeIcon} size={16} />
+    </button>
+  );
+  if (props.collapsed) {
+    return (
+      <aside className={`strip strip--${side} strip--collapsed${active ? " is-active" : ""}`} aria-label={`Controlli ${side === "left" ? "della pagina sinistra" : "della pagina destra"} (nascosti)`} onPointerDownCapture={props.onActivate}>
+        {toggle}
+        <StripButton icon="shuffle" label="Cambia disposizione delle foto (↑ ↓)" onClick={props.onShuffle} disabled={empty} />
+      </aside>
+    );
+  }
+
   return (
     <aside className={`strip strip--${side}${active ? " is-active" : ""}`} aria-label={`Controlli ${side === "left" ? "della pagina sinistra" : "della pagina destra"}`} onPointerDownCapture={props.onActivate}>
+      {toggle}
       <Group caption="MESCOLA">
         <StripButton icon="shuffle" label="Cambia disposizione delle foto (↑ ↓)" onClick={props.onShuffle} disabled={empty} />
       </Group>

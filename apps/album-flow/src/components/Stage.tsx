@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import type { AlbumAssetV2, AlbumProjectV2, AlbumSpread, AlbumSplitMode, AreaAlign, AreaStyle, AreaTemplate } from "@photo-tools/shared-types";
 import type { DropTarget } from "../engine/drop";
 import { spreadSizeMm } from "../engine/geometry";
@@ -213,6 +213,15 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const snapOn = useSyncExternalStore(subscribeSnap, getSnapEnabled);
   const [lockOpen, setLockOpen] = useState(false);
   const desktop = hasDesktop();
+  // Strisce dei comandi ripiegabili (schermi piccoli): la scelta resta per le prossime aperture.
+  const [folded, setFolded] = useState<{ left: boolean; right: boolean }>(() => {
+    try { const saved = JSON.parse(localStorage.getItem("filex.albumFlow.stripFolded") ?? "{}"); return { left: Boolean(saved.left), right: Boolean(saved.right) }; } catch { return { left: false, right: false }; }
+  });
+  const toggleFolded = (side: "left" | "right") => setFolded((current) => {
+    const next = { ...current, [side]: !current[side] };
+    try { localStorage.setItem("filex.albumFlow.stripFolded", JSON.stringify(next)); } catch { /* preferenza non critica */ }
+    return next;
+  });
   const [photoMenu, setPhotoMenu] = useState<{ x: number; y: number; itemId: string } | null>(null);
 
   const sheet = project.settings.sheet;
@@ -478,6 +487,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         onLock={(locked) => actions.lockArea(index, locked)}
         onFree={() => actions.freeArea(index)}
         onRestore={() => actions.restoreArea(index)}
+        collapsed={folded[side]}
+        onToggleCollapsed={() => toggleFolded(side)}
       />
     );
   };
@@ -487,7 +498,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const where = !two ? "foglio intero" : areaIndex === 0 ? "pagina sinistra" : "pagina destra";
 
   return (
-    <main className="stage" aria-label="Area di lavoro">
+    <main className="stage" aria-label="Area di lavoro" style={{ ...(folded.left ? { "--strip-l": "34px" } : null), ...(folded.right ? { "--strip-r": "34px" } : null) } as CSSProperties}>
       <div className="stage__row">
         {strip("left")}
         <div className={`stage__center${design.open ? " stage__center--drawer" : ""}`} ref={centerRef} data-testid="stage-center" onDoubleClick={(event) => { if (event.target === event.currentTarget) actions.setZoom(1); }}>
