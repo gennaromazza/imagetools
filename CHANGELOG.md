@@ -32,6 +32,14 @@
 
 
 
+## 2026-10-15 - Album Flow 0.2.35
+
+- Nuovo: sul touchpad il pinch (due dita che si allargano o si chiudono) ingrandisce e riduce il foglio, come Ctrl + rotella; il doppio clic sullo sfondo lo riporta a «Adatta alla finestra».
+- Nuovo: Maiusc + due dita su e giù sul foglio cambiano lo spazio tra le foto; con Alt anche il margine della pagina attiva.
+- Corretto: sui campi Spazio, Margine e Bordo la strisciata a due dita del touchpad ora cambia il valore un passo ogni poco movimento, invece di schizzare al massimo.
+- Nuovo: le strisce dei comandi accanto al foglio si possono ripiegare con la freccia in alto, per dare più spazio al foglio sui notebook; la scelta resta per le aperture successive. Sotto i 1280 px di larghezza passano al formato compatto e la barra inferiore va a capo.
+- Migliorato: se «Modo», Spazio, Margine o Bordo non adattano le foto perché il layout è bloccato, lo spread è segnato come finito, la disposizione è libera o ci sono foto con forma scelta, compare un avviso che spiega il motivo.
+
 ## 2026-10-14 - Album Flow 0.2.34
 
 - Corretto: nella finestra «Esporta l'album» le schede JPG e SVG scelgono soltanto il formato; l'esportazione parte dal pulsante «Esporta N spread», così puoi regolare prima risoluzione, qualità e spread.

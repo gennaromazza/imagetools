@@ -21,6 +21,33 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.35",
+    date: "2026-10-15",
+    headline: "Gesti del touchpad e comandi adattivi per i notebook",
+    items: [
+      {
+        title: "Pinch per ingrandire il foglio",
+        text: "Sul touchpad allarga o chiudi due dita per ingrandire o ridurre il foglio; il doppio clic sullo sfondo lo riporta a misura di finestra.",
+        where: ["Pinch sul touchpad", "Ctrl/⌘ + rotella", "Doppio clic sullo sfondo"],
+      },
+      {
+        title: "Spazio e margine con due dita",
+        text: "Tieni premuto Maiusc e fai scorrere due dita su e giù sul foglio per cambiare lo spazio tra le foto; con Alt cambi il margine. Nei campi Spazio, Margine e Bordo la strisciata ora procede a piccoli passi.",
+        where: ["Maiusc + due dita", "Maiusc + Alt + due dita", "Spazio", "Margine", "Bordo"],
+      },
+      {
+        title: "Comandi ripiegabili sui notebook",
+        text: "Le strisce accanto al foglio si ripiegano con la freccia in alto per dare più spazio alle foto; sugli schermi stretti diventano compatte e la barra inferiore va a capo.",
+        where: ["Freccia in alto della striscia"],
+      },
+      {
+        title: "«Modo» spiega perché non cambia",
+        text: "Se il layout è bloccato, lo spread è finito, la disposizione è libera o ci sono foto con forma scelta, un avviso dice perché le foto non si adattano e come fare.",
+        where: ["Modo", "Lucchetto"],
+      },
+    ],
+  },
+  {
     version: "0.2.34",
     date: "2026-10-14",
     headline: "Esportazione più sicura e testi sotto controllo",
