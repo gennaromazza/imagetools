@@ -9,7 +9,7 @@ import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorCh
 import { applyImport, folderOf, planImport } from "../model/import";
 import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
 import { rotateAssetQuarter, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
-import { countItems, findItem, nowIso, touch } from "../model/project";
+import { countItems, findItem, hasFreeLayout, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas } from "../model/spreads";
 import { STAGES } from "../model/store";
 import { canRedo, canUndo, createHistory, pushHistory, redo, replacePresent, undo, type History } from "../history";
@@ -461,7 +461,16 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       commit((p) => setItemView(p, itemId, { zoom: view.zoom, cx: view.cx, cy: view.cy, angle: view.angle, shape: view.shape }), `view:${itemId}`);
       if (view.shape && findItem(historyRef.current.present, itemId)?.area.locked) notify("Layout bloccato: la forma vale solo dentro la cella e le altre foto non si spostano. Sblocca il layout (lucchetto) per riallinearle.");
     },
-    style: (i, changes, key, relayout) => commit((p) => setAreaStyle(p, spreadId, i, changes, relayout), key ? `style:${spreadId}:${i}:${key}` : undefined),
+    style: (i, changes, key, relayout) => {
+      commit((p) => setAreaStyle(p, spreadId, i, changes, relayout), key ? `style:${spreadId}:${i}:${key}` : undefined);
+      // «Modo» (e spazio, margine, bordo) non riadatta le foto in alcuni casi: lo si dice, invece di sembrare un pulsante rotto.
+      const target = spread?.areas[i];
+      if (!target || target.items.length === 0 || !("mode" in changes || "gapCm" in changes || "paddingCm" in changes || "borderCm" in changes)) return;
+      if (spread?.done) notify("Spread segnato come finito: lo stile cambia ma le foto non si riadattano. Riaprilo (tasto D) per adattarle.");
+      else if (target.locked) notify("Layout bloccato: lo stile cambia ma le foto restano dove sono. Sblocca il lucchetto per adattarle.");
+      else if (hasFreeLayout(target)) notify("Disposizione libera: le foto non si adattano da sole. Usa «Torna al layout automatico» per adattarle.");
+      else if ("mode" in changes && target.items.some((item) => item.shape)) notify("Alcune foto hanno una forma scelta: restano a finestra esatta anche in «Riempi». Togli la forma per vedere la differenza.");
+    },
     align: (i, align) => commit((p) => alignArea(p, spreadId, i, align)),
     split: (mode) => {
       const refusal = splitRefusal(historyRef.current.present, spreadId, mode);

@@ -226,6 +226,28 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   const count = project.spreads.length;
   const two = spread.areas.length > 1;
 
+  // Touchpad: il pinch (che il browser manda come rotella + Ctrl) o Ctrl + rotella ingrandisce il foglio invece di ingrandire tutta
+  // l'interfaccia. Dentro una foto in ritaglio la rotella resta della foto (la gestisce SpreadView).
+  const zoomNow = useRef(zoom);
+  zoomNow.current = zoom;
+  const cropNow = useRef(cropMode);
+  cropNow.current = cropMode;
+  useEffect(() => {
+    const element = centerRef.current;
+    if (!element) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      if (cropNow.current && (event.target as HTMLElement | null)?.closest?.(".cell--selected")) return;
+      event.preventDefault();
+      const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+      const next = Math.min(3, Math.max(0.4, zoomNow.current * Math.exp(-delta * 0.01)));
+      zoomNow.current = next;
+      actions.setZoom(Number(next.toFixed(2)));
+    };
+    element.addEventListener("wheel", onWheel, { passive: false });
+    return () => element.removeEventListener("wheel", onWheel);
+  }, [centerRef, actions]);
+
   // Chiude i pannelli quando si cambia spread.
   useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setLockOpen(false); setPhotoMenu(null); setBorderFor(null); setSliderFor(null); }, [spread.id]);
 
