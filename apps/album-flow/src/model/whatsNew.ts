@@ -21,6 +21,28 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.36",
+    date: "2026-10-16",
+    headline: "Mescola rispetta i tuoi ritagli e le strisce tornano allineate",
+    items: [
+      {
+        title: "Mescola mantiene il ritaglio",
+        text: "Se hai ingrandito o spostato una foto, cambiando layout con Mescola, i layout proposti o i tasti 1-9 nella nuova cella si vede ancora la parte che avevi scelto. Dopo aver scelto il formato di una foto, Mescola propone comunque altre disposizioni.",
+        where: ["Mescola", "Layout", "Ritaglia e sposta nello slot", "Forma della foto", "Tasti 1-9"],
+      },
+      {
+        title: "Strisce allineate sugli schermi piccoli",
+        text: "Spazio, Margine e Bordo stanno nella colonna senza essere tagliati, e le strisce a sinistra e a destra del foglio sono di nuovo allineate. Le strisce ripiegabili della versione precedente non ci sono più.",
+        where: ["Spazio", "Margine", "Bordo"],
+      },
+      {
+        title: "Dividi con foto libere",
+        text: "Cambiando la divisione di uno spread con foto libere, nessuna foto resta fuori dalla pagina.",
+        where: ["Dividi"],
+      },
+    ],
+  },
+  {
     version: "0.2.35",
     date: "2026-10-15",
     headline: "Gesti del touchpad e comandi adattivi per i notebook",

@@ -32,6 +32,14 @@
 
 
 
+## 2026-10-16 - Album Flow 0.2.36
+
+- Corretto: sugli schermi piccoli le strisce a sinistra e a destra del foglio tornano allineate. Spazio e Margine uscivano dalla colonna e venivano tagliati («cm» ora sta sotto il valore), Bordo occupa tutta la riga e le sigle non vanno a capo. Le strisce ripiegabili della 0.2.35 sono state tolte: non servono più.
+- Corretto: dopo aver ritagliato una foto (ingrandita o spostata), Mescola, i layout proposti e i tasti 1-9 ne mantengono il taglio: nella nuova cella si vede ancora tutta la parte che avevi scelto.
+- Corretto: dopo aver scelto il formato di una foto («Quadrata 1:1», 3:2…) Mescola non resta più ferma con poche foto: propone anche altre disposizioni, con il formato applicato nelle celle.
+- Corretto: «Dividi» su una pagina con foto libere non lascia più foto quasi tutte fuori pagina.
+- Nuovo test automatico che prova ogni pulsante di uno spread e le loro combinazioni (oltre 2000 passi casuali), raggiungibile dalla Dev Console.
+
 ## 2026-10-15 - Album Flow 0.2.35
 
 - Nuovo: sul touchpad il pinch (due dita che si allargano o si chiudono) ingrandisce e riduce il foglio, come Ctrl + rotella; il doppio clic sullo sfondo lo riporta a «Adatta alla finestra».
