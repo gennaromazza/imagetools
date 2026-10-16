@@ -704,6 +704,10 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.38": [
+      "Corretto: le strisce dei comandi a sinistra e a destra del foglio si adattano allo spazio che la zona di lavoro ha davvero, non all'altezza della finestra. Su schermi ad alta risoluzione con scala di Windows (per esempio 2880 × 1800 al 200%) la striscia verticale non ci stava e tagliava i pulsanti in fondo («Collega» e «Scambia»): ora passa da sola al formato a due colonne.",
+      "Corretto: con il touchpad, dopo il doppio clic su una foto (ritaglio) il pinch ingrandisce la foto invece di raddrizzarla. Ctrl, Alt o ⌘ premuti davvero raddrizzano come prima."
+    ],
     "0.2.37": [
       "Corretto: sui portatili con schermo piccolo o scala di Windows al 125-150% la finestra di Album Flow usciva dallo schermo (strisce di destra e pulsanti in alto tagliati, tasto di chiusura fuori vista). Ora la finestra si adatta all'area utile dello schermo e si apre centrata."
     ],

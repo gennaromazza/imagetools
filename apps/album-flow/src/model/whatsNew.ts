@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.38",
+    date: "2026-10-16",
+    headline: "Strisce sempre al loro posto e pinch giusto nel ritaglio",
+    items: [
+      {
+        title: "Strisce adattate allo spazio reale",
+        text: "Le strisce a sinistra e a destra del foglio passano al formato a due colonne quando non c'è abbastanza altezza, anche sugli schermi ad alta risoluzione con scala di Windows: nessun pulsante resta tagliato e le due strisce sono uguali.",
+        where: ["Collega", "Scambia", "Mescola", "Layout"],
+      },
+      {
+        title: "Pinch del touchpad nel ritaglio",
+        text: "Dopo il doppio clic su una foto, allargare o chiudere due dita sul touchpad ingrandisce o riduce la foto, senza raddrizzarla. Per raddrizzare tieni premuto Ctrl o Alt e usa la rotella.",
+        where: ["Doppio clic sulla foto", "Pinch sul touchpad", "Ctrl + rotella", "Alt + rotella"],
+      },
+    ],
+  },
+  {
     version: "0.2.37",
     date: "2026-10-16",
     headline: "La finestra sta dentro lo schermo del portatile",
