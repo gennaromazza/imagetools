@@ -159,6 +159,7 @@ import {
   listAvailableTools,
   openInstalledTool,
 } from "./updater.js";
+import { fitWindowToWorkArea } from "./window-fit.js";
 import { findDesktopToolByRuntimeToken, getDesktopToolOrDefault, getSuiteManagedTools } from "./tool-manifest.js";
 import {
   checkSuiteUpdate,
@@ -2732,12 +2733,16 @@ function startArchivioFlowSdWatcher(): void {
 async function createMainWindow(): Promise<void> {
   writeBootLog("Creating main window");
   const windowTitle = `${requestedTool.productName} — Versione ${app.getVersion()}`;
+  // Su un portatile (schermo piccolo o scala di Windows al 125-150%) l'area utile può essere più piccola della finestra prevista dal catalogo:
+  // la finestra usciva dallo schermo e le strisce dei comandi a destra restavano tagliate. Dimensioni e minimi si limitano all'area utile.
+  const workArea = screen.getPrimaryDisplay().workArea;
+  const fitted = fitWindowToWorkArea(
+    { width: requestedTool.defaultWindowWidth, height: requestedTool.defaultWindowHeight, minWidth: requestedTool.minWindowWidth, minHeight: requestedTool.minWindowHeight },
+    workArea,
+  );
   const windowInstance = new BrowserWindow({
     title: windowTitle,
-    width: requestedTool.defaultWindowWidth,
-    height: requestedTool.defaultWindowHeight,
-    minWidth: requestedTool.minWindowWidth,
-    minHeight: requestedTool.minWindowHeight,
+    ...fitted,
     autoHideMenuBar: true,
     backgroundColor: "#181d1a",
     icon: loadToolIcon() ?? resolveWindowIcon(),
