@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.37",
+    date: "2026-10-16",
+    headline: "La finestra sta dentro lo schermo del portatile",
+    items: [
+      {
+        title: "Finestra adattata allo schermo",
+        text: "Su portatili con schermo piccolo o con la scala di Windows al 125-150% la finestra non esce più dallo schermo: le strisce di destra, i pulsanti in alto e il tasto di chiusura restano visibili. La finestra si apre centrata e occupa al massimo lo spazio disponibile.",
+        where: ["Strisce dei comandi", "Barra in alto"],
+      },
+    ],
+  },
+  {
     version: "0.2.36",
     date: "2026-10-16",
     headline: "Mescola rispetta i tuoi ritagli e le strisce tornano allineate",

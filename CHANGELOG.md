@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-16 - Album Flow 0.2.37
+
+- Corretto: sui portatili con schermo piccolo o scala di Windows al 125-150% la finestra di Album Flow usciva dallo schermo (strisce di destra e pulsanti in alto tagliati, tasto di chiusura fuori vista). Ora la finestra si adatta all'area utile dello schermo e si apre centrata.
+
 ## 2026-10-16 - Album Flow 0.2.36
 
 - Corretto: sugli schermi piccoli le strisce a sinistra e a destra del foglio tornano allineate. Spazio e Margine uscivano dalla colonna e venivano tagliati («cm» ora sta sotto il valore), Bordo occupa tutta la riga e le sigle non vanno a capo. Le strisce ripiegabili della 0.2.35 sono state tolte: non servono più.
