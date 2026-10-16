@@ -2,11 +2,13 @@ import type { AlbumArea, AlbumSpread, AreaStyle, AreaTemplate, FavoriteLayout, L
 import { MAX_RATIO, MIN_RATIO, alignFactor, clampRatio, layoutCells } from "../engine/geometry";
 import { generateLayoutsCached, type LayoutCandidate } from "../engine/generate";
 import { applyShape, countLeaves, leafIds, mirrorHorizontal, mirrorVertical, naturalRatios, nodeAt, setRatioAt, shapeOfTree } from "../engine/tree";
-import { STYLE_LIMITS, clampNumber } from "./defaults";
+import { MAX_ZOOM, STYLE_LIMITS, clampNumber } from "./defaults";
+import { baseCrop, cropCenter, cropForView } from "../slot-geometry";
 import { newId } from "./ids";
+import { placeItem } from "./placement";
 import { orientationOf } from "./import";
 import { matchTemplates, templateArea, type TemplateMatch } from "./templates";
-import { alignChanged, alignedForFit, areaGeometry, fitShapedCells, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, mapSpread, naturalOptions, needsShapeAlignment, normalizeArea, replaceArea, touch, findSpread, type Project } from "./project";
+import { alignChanged, alignedForFit, areaGeometry, fitShapedCells, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, itemAspect, mapSpread, naturalOptions, needsShapeAlignment, normalizeArea, placementStyle, replaceArea, touch, findSpread, type Project } from "./project";
 
 const MAX_CANDIDATES = 24;
 
@@ -21,18 +23,27 @@ export function areaCandidates(project: Project, spread: AlbumSpread, areaIndex:
   const assets = assetMap(project);
   const byItem = new Map(area.items.map((item) => [item.id, effectiveAspect(item, assets.get(item.assetId))]));
   const options = naturalOptions(area);
-  // In «riempi» con forme scelte si cerca prima la cella esatta (le altre foto riempiono); altrimenti rapporti naturali (finestre allineate).
-  const aligned = candidates.map((candidate) => ({ ...candidate, tree: (area.style.mode !== "fit" ? fitShapedCells({ ...area, layout: candidate.tree }, geometry.inner, geometry.gapMm) : null) ?? naturalRatios(candidate.tree, (id) => byItem.get(id) ?? 1.5, geometry.inner, geometry.gapMm, options) }));
-  // Con i rapporti naturali le varianti che differivano solo per le divisioni diventano identiche: ogni layout proposto resta una volta sola.
   const align = alignFactor(area.style.align);
   const seen = new Set<string>();
-  return aligned.filter((candidate) => {
-    const signature = layoutCells(candidate.tree, geometry.inner, geometry.gapMm, undefined, align).cells
-      .map((cell) => `${cell.itemId}:${Math.round(cell.rect.x)},${Math.round(cell.rect.y)},${Math.round(cell.rect.w)},${Math.round(cell.rect.h)}`).join(";");
-    if (seen.has(signature)) return false;
-    seen.add(signature);
-    return true;
-  });
+  const alignAll = (list: readonly LayoutCandidate[]): LayoutCandidate[] => list
+    // In «riempi» con forme scelte si cerca prima la cella esatta (le altre foto riempiono); altrimenti rapporti naturali (finestre allineate).
+    .map((candidate) => ({ ...candidate, tree: (area.style.mode !== "fit" ? fitShapedCells({ ...area, layout: candidate.tree }, geometry.inner, geometry.gapMm) : null) ?? naturalRatios(candidate.tree, (id) => byItem.get(id) ?? 1.5, geometry.inner, geometry.gapMm, options) }))
+    // Con i rapporti naturali le varianti che differivano solo per le divisioni diventano identiche: ogni layout proposto resta una volta sola.
+    .filter((candidate) => {
+      const signature = layoutCells(candidate.tree, geometry.inner, geometry.gapMm, undefined, align).cells
+        .map((cell) => `${cell.itemId}:${Math.round(cell.rect.x)},${Math.round(cell.rect.y)},${Math.round(cell.rect.w)},${Math.round(cell.rect.h)}`).join(";");
+      if (seen.has(signature)) return false;
+      seen.add(signature);
+      return true;
+    });
+  const result = alignAll(candidates);
+  // Con una forma scelta il motore, che disegna le disposizioni su quella proporzione, può proporne poche (e tutte uguali una volta allineate):
+  // Mescola restava ferma. Si aggiungono allora le disposizioni calcolate sulle foto intere, con la forma applicata nelle loro celle.
+  if (result.length < 2 && area.items.some((item) => item.shape)) {
+    const whole = area.items.map((item) => ({ id: item.id, aspect: itemAspect(assets.get(item.assetId)) }));
+    result.push(...alignAll(generateLayoutsCached(whole, { rect: geometry.inner, gapMm: geometry.gapMm, limit })));
+  }
+  return result;
 }
 
 /** Rigenera il layout di un'area con il candidato `index` (0 = il migliore). Non cambia le foto. */
@@ -42,7 +53,47 @@ export function relayoutArea(project: Project, spread: AlbumSpread, areaIndex: n
   const candidates = areaCandidates(project, spread, areaIndex);
   if (candidates.length === 0) return area;
   const chosen = Math.min(Math.max(index, 0), candidates.length - 1);
-  return normalizeArea({ ...area, layout: candidates[chosen].tree, seed: chosen, free: undefined });
+  return keepCrops(project, spread, areaIndex, normalizeArea({ ...area, layout: candidates[chosen].tree, seed: chosen, free: undefined }));
+}
+
+/**
+ * Il ritaglio fatto a mano resta lo stesso quando il layout cambia (Mescola, layout proposti, tasti 1-9): per ogni foto ingrandita o spostata
+ * si calcola la parte che si vedeva e, nella nuova cella, si sceglie lo zoom più alto che la contiene tutta, attorno allo stesso centro.
+ * Senza questo, una cella di altra proporzione mostrava un'altra porzione della foto e il taglio andava rifatto dopo ogni cambio.
+ * Le foto bloccate, con una forma scelta o raddrizzate, e quelle lasciate com'erano, non cambiano.
+ */
+export function keepCrops(project: Project, spread: AlbumSpread, areaIndex: number, next: AlbumArea): AlbumArea {
+  const before = spread.areas[areaIndex];
+  if (!before || hasFreeLayout(next) || next.items.length === 0) return next;
+  const assets = assetMap(project);
+  const oldCells = areaGeometry(project, spread, areaIndex).cells;
+  const newCells = areaGeometry(project, replaceArea(spread, areaIndex, next), areaIndex).cells;
+  let changed = false;
+  const items = next.items.map((item) => {
+    const old = before.items.find((candidate) => candidate.id === item.id);
+    const asset = assets.get(item.assetId);
+    const oldCell = oldCells.find((cell) => cell.itemId === item.id);
+    const newCell = newCells.find((cell) => cell.itemId === item.id);
+    if (!old || !asset || !oldCell || !newCell || item.locked || item.shape || (item.angle ?? 0) !== 0 || old.shape) return item;
+    const fitted = before.style.mode === "fit" && old.zoom <= 1 + 1e-6;
+    if (fitted) return item;
+    const seen = placeItem(oldCell.rect, old, asset, placementStyle(before, oldCell), null, oldCell.anchor);
+    const plain = placeItem(oldCell.rect, { ...old, zoom: 1, cx: 0.5, cy: 0.5 }, asset, placementStyle(before, oldCell), null, oldCell.anchor);
+    const same = (a: number, b: number) => Math.abs(a - b) < 0.002;
+    if (same(seen.crop.cropLeft, plain.crop.cropLeft) && same(seen.crop.cropTop, plain.crop.cropTop) && same(seen.crop.cropWidth, plain.crop.cropWidth) && same(seen.crop.cropHeight, plain.crop.cropHeight)) return item;
+    const window = placeItem(newCell.rect, { ...item, zoom: 1, cx: 0.5, cy: 0.5 }, asset, placementStyle(next, newCell), null, newCell.anchor).content;
+    const imageAspect = itemAspect(asset);
+    const viewAspect = window.w / window.h;
+    const base = baseCrop(imageAspect, viewAspect);
+    const needWidth = Math.max(seen.crop.cropWidth, seen.crop.cropHeight * (viewAspect / Math.max(imageAspect, 0.01)));
+    const zoom = Number(clampNumber(base.cropWidth / Math.min(needWidth, base.cropWidth), 1, MAX_ZOOM).toFixed(4));
+    const center = cropCenter(seen.crop);
+    const crop = cropForView(imageAspect, viewAspect, zoom, center.x, center.y);
+    const kept = cropCenter(crop);
+    changed = true;
+    return { ...item, zoom, cx: Number(kept.x.toFixed(5)), cy: Number(kept.y.toFixed(5)) };
+  });
+  return changed ? { ...next, items } : next;
 }
 
 /** I template dell'utente hanno un seme a parte: 1000 + posizione tra i template adatti. */
@@ -87,7 +138,7 @@ export function shuffleArea(project: Project, spreadId: string, areaIndex: numbe
     if (choices.length < 2) return spread;
     const next = (currentPosition(area, choices) + direction + choices.length * 2) % choices.length;
     const result = choiceAsArea(area, choices[next]);
-    return result ? replaceArea(spread, areaIndex, result) : spread;
+    return result ? replaceArea(spread, areaIndex, keepCrops(project, spread, areaIndex, result)) : spread;
   });
 }
 
@@ -107,7 +158,7 @@ export function applyCandidate(project: Project, spreadId: string, areaIndex: nu
     const choice = layoutChoices(project, spread, areaIndex, templates)[candidateIndex];
     if (!choice) return spread;
     const result = choiceAsArea(area, choice);
-    return result ? replaceArea(spread, areaIndex, result) : spread;
+    return result ? replaceArea(spread, areaIndex, keepCrops(project, spread, areaIndex, result)) : spread;
   });
 }
 

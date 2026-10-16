@@ -331,7 +331,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 
 .strip { width: var(--strip-w); flex: none; display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 10px 5px; overflow-y: auto; overflow-x: hidden; }
 .strip__group { display: grid; justify-items: center; gap: 2px; width: 100%; }
-.strip__caption { font-size: 9.5px; letter-spacing: 0.12em; color: var(--text-faint); }
+.strip__caption { font-size: 9.5px; letter-spacing: 0.12em; color: var(--text-faint); max-width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strip__group { min-width: 0; }
 .strip.is-active .strip__caption { color: var(--accent); }
 .strip__btn { display: grid; place-items: center; width: 46px; height: 34px; border: 1px solid var(--line); border-radius: 12px; background: rgba(43, 49, 45, 0.8); color: var(--text-muted); transition: background 0.15s, color 0.15s, border-color 0.15s; }
 .strip__btn:hover:not(:disabled) { background: #3a423c; color: var(--text); border-color: var(--line-strong); }
@@ -341,9 +342,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .strip__btn--danger { color: #e8a79d; background: rgba(150, 60, 50, 0.35); border-color: rgba(217, 140, 130, 0.35); }
 .strip__btn--danger:hover:not(:disabled) { background: rgba(170, 70, 60, 0.55); color: #fff; }
 .strip__pair { display: flex; gap: 6px; }
-.strip__fold { display: grid; place-items: center; width: 100%; flex: none; height: 22px; border: 0; border-radius: 8px; background: transparent; color: var(--text-faint); }
-.strip__fold:hover { background: rgba(255, 255, 255, 0.06); color: var(--text); }
-
 .strip__pair .strip__btn { width: 38px; height: 32px; border-radius: 10px; }
 
 /* spread e foto */
@@ -432,8 +430,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .divider:hover .divider__bar::after, .divider.is-active .divider__bar::after { opacity: 1; }
 
 /* browser dei layout */
-.layouts { position: absolute; z-index: 30; top: 0; bottom: 0; right: var(--strip-r, var(--strip-w)); width: min(430px, 44%); display: flex; flex-direction: column; background: rgba(35, 41, 37, 0.97); border-left: 1px solid var(--line-strong); box-shadow: -18px 0 50px rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px); }
-.layouts--left { right: auto; left: var(--strip-l, var(--strip-w)); border-left: 0; border-right: 1px solid var(--line-strong); box-shadow: 18px 0 50px rgba(0, 0, 0, 0.4); }
+.layouts { position: absolute; z-index: 30; top: 0; bottom: 0; right: var(--strip-w); width: min(430px, 44%); display: flex; flex-direction: column; background: rgba(35, 41, 37, 0.97); border-left: 1px solid var(--line-strong); box-shadow: -18px 0 50px rgba(0, 0, 0, 0.4); backdrop-filter: blur(8px); }
+.layouts--left { right: auto; left: var(--strip-w); border-left: 0; border-right: 1px solid var(--line-strong); box-shadow: 18px 0 50px rgba(0, 0, 0, 0.4); }
 .layouts__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; padding: 14px 16px 8px; }
 .layouts__head h3 { font-size: 15px; }
 .layouts__body { overflow: auto; padding: 4px 16px 16px; display: grid; gap: 14px; align-content: start; }
@@ -644,7 +642,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 @media (max-height: 880px), (max-width: 1280px) {
   /* Notebook: strisce a due colonne ma strette (più spazio al foglio) e comandi più bassi, così stanno senza scorrere. */
   .stage { --strip-w: 118px; }
-  .strip { display: grid; grid-template-columns: 1fr 1fr; align-content: start; justify-items: center; gap: 5px 2px; padding: 6px 4px; }
+  .strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: start; justify-items: center; gap: 5px 2px; padding: 6px 4px; }
+  .strip__group--wide { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px 6px; }
+  .strip__group--wide .strip__caption { flex-basis: 100%; }
   .strip__pair { grid-column: 1 / -1; }
   .strip__group { gap: 1px; }
   .strip__caption { font-size: 8.5px; letter-spacing: 0.08em; }
@@ -652,6 +652,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   .strip__pair .strip__btn { width: 34px; height: 28px; }
   .strip .numfield__input { width: 40px; padding: 3px 1px; font-size: 12.5px; }
   .strip .numfield__label { font-size: 9px; }
+  /* «cm» sotto il numero: affiancati superavano la colonna (54 px) e venivano tagliati, con le due strisce che sembravano storte. */
+  .strip .numfield { flex-direction: column-reverse; gap: 0; max-width: 100%; }
+  .strip .numfield__label { padding: 0; line-height: 1.1; }
+  .strip .numfield__input { max-width: 100%; box-sizing: border-box; }
 }
 @media (max-height: 740px), (max-width: 1100px) {
   .strip__caption { display: none; }
@@ -663,8 +667,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   .stage__bar-group--end { justify-content: center; }
   .stage__sep { display: none; }
 }
-.strip.strip--collapsed { display: flex; width: 34px; padding: 6px 2px; gap: 6px; overflow: hidden; }
-.strip.strip--collapsed .strip__btn { width: 28px; height: 28px; }
 /* Touchpad e schermi tattili: il foglio scorre e si ingrandisce con i gesti; trascinare una foto non fa scorrere la pagina. */
 .stage__center { overscroll-behavior: contain; scrollbar-width: thin; }
 .stage__spread .cell__content { touch-action: none; }

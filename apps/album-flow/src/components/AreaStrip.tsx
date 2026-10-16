@@ -15,8 +15,8 @@ const SPLIT_ICONS: Record<AlbumSplitMode, IconName> = { full: "splitFull", half:
 const ALIGN_LABELS: Record<AreaAlign, string> = { start: "In alto a sinistra", center: "Al centro", end: "In basso a destra" };
 const ALIGN_ICONS: Record<AreaAlign, IconName> = { start: "alignStart", center: "alignCenter", end: "alignEnd" };
 
-function Group({ caption, children }: { caption: string; children: ReactNode }) {
-  return <div className="strip__group"><span className="strip__caption">{caption}</span>{children}</div>;
+function Group({ caption, children, wide }: { caption: string; children: ReactNode; wide?: boolean }) {
+  return <div className={`strip__group${wide ? " strip__group--wide" : ""}`}><span className="strip__caption">{caption}</span>{children}</div>;
 }
 
 function StripButton({ icon, label, onClick, active, disabled, tone }: { icon: IconName; label: string; onClick?: (event: React.MouseEvent) => void; active?: boolean; disabled?: boolean; tone?: "gold" | "danger" }) {
@@ -48,9 +48,6 @@ export interface AreaStripProps {
   onLock: (locked: boolean) => void;
   onFree: () => void;
   onRestore: () => void;
-  /** Striscia ripiegata: resta solo il pulsante per riaprirla (schermi piccoli). */
-  collapsed: boolean;
-  onToggleCollapsed: () => void;
 }
 
 /** Striscia verticale di controlli di un'area di lavoro: mescola, spazio, margine, bordo, modo, allineamento, divisione. */
@@ -62,24 +59,8 @@ export function AreaStrip(props: AreaStripProps) {
   const style = area.style;
   const empty = area.items.length === 0;
 
-  const edgeIcon: IconName = (side === "left") === !props.collapsed ? "chevronLeft" : "chevronRight";
-  const toggle = (
-    <button type="button" className="strip__fold" title={props.collapsed ? "Mostra i controlli di questa pagina" : "Nascondi i controlli per dare più spazio al foglio"} aria-label={props.collapsed ? "Mostra i controlli della pagina" : "Nascondi i controlli della pagina"} aria-expanded={!props.collapsed} onClick={props.onToggleCollapsed}>
-      <Icon name={edgeIcon} size={16} />
-    </button>
-  );
-  if (props.collapsed) {
-    return (
-      <aside className={`strip strip--${side} strip--collapsed${active ? " is-active" : ""}`} aria-label={`Controlli ${side === "left" ? "della pagina sinistra" : "della pagina destra"} (nascosti)`} onPointerDownCapture={props.onActivate}>
-        {toggle}
-        <StripButton icon="shuffle" label="Cambia disposizione delle foto (↑ ↓)" onClick={props.onShuffle} disabled={empty} />
-      </aside>
-    );
-  }
-
   return (
     <aside className={`strip strip--${side}${active ? " is-active" : ""}`} aria-label={`Controlli ${side === "left" ? "della pagina sinistra" : "della pagina destra"}`} onPointerDownCapture={props.onActivate}>
-      {toggle}
       <Group caption="MESCOLA">
         <StripButton icon="shuffle" label="Cambia disposizione delle foto (↑ ↓)" onClick={props.onShuffle} disabled={empty} />
       </Group>
@@ -120,7 +101,7 @@ export function AreaStrip(props: AreaStripProps) {
       <Group caption="MARGINE">
         <NumberField label="cm" value={style.paddingCm} {...STYLE_LIMITS.paddingCm} onChange={(value) => props.onStyle({ paddingCm: value }, "padding")} title="Margine attorno alle foto (cm)" />
       </Group>
-      <Group caption="BORDO">
+      <Group caption="BORDO" wide>
         <NumberField label="cm" value={style.borderCm} {...STYLE_LIMITS.borderCm} onChange={(value) => props.onStyle({ borderCm: value }, "border")} title="Spessore del bordo di ogni foto (cm)" />
         <ColorDots value={style.borderColor} swatches={["#000000", "#ffffff"]} onChange={(color) => props.onStyle({ borderColor: color })} label="Colore del bordo" />
       </Group>

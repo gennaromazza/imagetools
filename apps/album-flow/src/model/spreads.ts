@@ -160,7 +160,11 @@ export function setSplitMode(project: Project, spreadId: string, mode: AlbumSpli
       if (inner.w <= 0 || inner.h <= 0 || area.items.some((item) => !placed.has(item.id))) return;
       const free = Object.fromEntries(area.items.map((item) => {
         const old = placed.get(item.id)!;
-        return [item.id, sanitizeFrame({ x: (old.rect.x - inner.x) / inner.w, y: (old.rect.y - inner.y) / inner.h, w: old.rect.w / inner.w, h: old.rect.h / inner.h, rotation: old.rotation, z: old.z })];
+        const frame = { x: (old.rect.x - inner.x) / inner.w, y: (old.rect.y - inner.y) / inner.h, w: old.rect.w / inner.w, h: old.rect.h / inner.h };
+        // Una foto a cavallo della piega o nel margine può finire quasi tutta fuori dalla nuova pagina: la si riporta dentro (solo quell'asse).
+        const visible = (start: number, size: number) => Math.max(0, Math.min(start + size, 1) - Math.max(start, 0)) / Math.max(size, 1e-6);
+        const pull = (start: number, size: number) => (visible(start, size) < 0.5 ? Math.min(Math.max(start, 0), Math.max(0, 1 - size)) : start);
+        return [item.id, sanitizeFrame({ ...frame, x: pull(frame.x, frame.w), y: pull(frame.y, frame.h), rotation: old.rotation, z: old.z })];
       }));
       relaid = replaceArea(relaid, areaIndex, { ...area, free });
     });
