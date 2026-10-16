@@ -639,9 +639,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .shortcuts dl div { display: grid; grid-template-columns: minmax(110px, 40%) 1fr; gap: 10px; align-items: start; font-size: 12.5px; }
 .shortcuts dd { color: var(--text-muted); }
 
-@media (max-height: 880px), (max-width: 1280px) {
-  /* Notebook: strisce a due colonne ma strette (più spazio al foglio) e comandi più bassi, così stanno senza scorrere. */
-  .stage { --strip-w: 118px; }
+/* Le strisce si adattano allo spazio che ha davvero la zona di lavoro (non all'altezza della finestra: libreria, pellicola e barre ne tolgono
+   una parte variabile): sotto 560 px di altezza o 1280 di larghezza passano a due colonne strette, così non scorrono né tagliano i pulsanti. */
+.stage__row { container-type: size; container-name: stagerow; }
+@container stagerow (max-height: 560px) or (max-width: 1280px) {
+  .strip, .layouts { --strip-w: 118px; }
   .strip { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: start; justify-items: center; gap: 5px 2px; padding: 6px 4px; }
   .strip__group--wide { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px 6px; }
   .strip__group--wide .strip__caption { flex-basis: 100%; }
@@ -657,7 +659,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
   .strip .numfield__label { padding: 0; line-height: 1.1; }
   .strip .numfield__input { max-width: 100%; box-sizing: border-box; }
 }
-@media (max-height: 740px), (max-width: 1100px) {
+@container stagerow (max-height: 400px) or (max-width: 1100px) {
   .strip__caption { display: none; }
 }
 @media (max-width: 1500px) {

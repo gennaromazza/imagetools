@@ -7,7 +7,7 @@ import { dropHighlight, resolveDropTarget, type DropTarget } from "../engine/dro
 import { spreadSizeMm, type Divider, type LeafCell, type Rect } from "../engine/geometry";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import { previewDropRect } from "../model/items";
-import { angleFromLine, clampAngle, describeSize, itemBorderColor, nextWheelZoom, placeItem, toolbarModeFor, wheelNotches, type ItemView } from "../model/placement";
+import { angleFromLine, clampAngle, describeSize, itemBorderColor, nextWheelZoom, placeItem, toolbarModeFor, wheelIntent, wheelNotches, type ItemView } from "../model/placement";
 import { mediaIdsOfSpread } from "../model/design";
 import { useMediaUrls } from "../hooks/useMedia";
 import { BackgroundLayer, OverlayLayer, type DesignHandlers } from "./DesignLayers";
@@ -24,6 +24,16 @@ export type Draft =
   | { kind: "ratio"; areaIndex: number; path: string; ratio: number }
   | { kind: "view"; itemId: string; view: Partial<ItemView> }
   | { kind: "frame"; itemId: string; rect: Rect; guides?: SnapGuide[] };
+
+/** Ctrl (o ⌘) davvero premuto: il pinch del touchpad arriva come rotella con Ctrl, ma senza che il tasto sia giù. */
+let controlHeld = false;
+if (typeof window !== "undefined") {
+  const track = (down: boolean) => (event: KeyboardEvent) => { if (event.key === "Control" || event.key === "Meta") controlHeld = down; };
+  window.addEventListener("keydown", track(true), true);
+  window.addEventListener("keyup", track(false), true);
+  window.addEventListener("blur", () => { controlHeld = false; });
+}
+const controlIsDown = () => controlHeld;
 
 export interface SpreadViewProps {
   sheet: SheetSpec;
@@ -137,11 +147,12 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     if (!element || !interactive) return;
     const onWheel = (event: WheelEvent) => {
       const state = live.current;
-      const quick = !state.canCrop && state.canAdjust && event.altKey && !event.shiftKey; // Maiusc + rotella sul foglio regola spazio e margine (Stage)
-      if (!state.canCrop && !quick) return;
+      const intent = wheelIntent({ ctrl: event.ctrlKey, meta: event.metaKey, alt: event.altKey, shift: event.shiftKey, ctrlHeld: controlIsDown(), canCrop: state.canCrop, canAdjust: state.canAdjust, lineTool: state.lineTool });
+      if (intent === "none") return;
       event.preventDefault();
-      // In ritaglio: Ctrl/⌘ o Alt + rotella (e la sola rotella con lo strumento «linea» acceso) raddrizzano; la rotella semplice zooma.
-      const rotate = state.canCrop ? event.altKey || event.ctrlKey || event.metaKey || state.lineTool : event.ctrlKey || event.metaKey;
+      const rotate = intent === "rotate";
+      // Il pinch manda eventi piccoli e continui: lo zoom segue la quantità (come per il foglio) invece di fare un passo a evento.
+      const pinch = event.ctrlKey && !controlIsDown();
       if (rotate) {
         const delta = event.deltaY || event.deltaX;
         const direction = delta < 0 ? -1 : 1;
@@ -150,7 +161,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
         state.handlers.onCommitView?.(state.itemId, { angle });
         return;
       }
-      const zoom = nextWheelZoom(state.stored, state.zoom, event.deltaY < 0, wheelNotches(event.deltaY));
+      const zoom = nextWheelZoom(state.stored, state.zoom, event.deltaY < 0, pinch ? Math.abs(event.deltaY) * 0.105 : wheelNotches(event.deltaY));
       state.stored = zoom; // come per il raddrizzamento: gli scatti veloci si sommano anche prima del ridisegno
       state.zoom = zoom;
       state.handlers.onCommitView?.(state.itemId, { zoom });

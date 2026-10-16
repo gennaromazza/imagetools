@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SHAPE_PRESETS } from "./shapes";
-import { placeItem, clampAngle, accumulateWheel, nextWheelZoom, wheelNotches, type Placement } from "./placement";
+import { placeItem, clampAngle, accumulateWheel, nextWheelZoom, wheelIntent, wheelNotches, type Placement } from "./placement";
 import { appendAssets, resetItemView, setItemView } from "./items";
 import { addSpread } from "./spreads";
 import { setAreaStyle, setDividerRatio } from "./areas";
@@ -310,4 +310,24 @@ test("rotella: il touchpad accumula, il mouse a scatti vale un passo", () => {
   // rotella a righe (Firefox): una riga ≈ un passo
   assert.equal(accumulateWheel(0, -1, 1).steps, 1);
   assert.deepEqual(accumulateWheel(0, 0), { steps: 0, rest: 0 });
+});
+
+test("rotella e pinch sulla foto: il pinch in ritaglio ingrandisce, non raddrizza", () => {
+  const base = { ctrl: false, meta: false, alt: false, shift: false, ctrlHeld: false, canCrop: true, canAdjust: true, lineTool: false };
+  // in ritaglio: rotella semplice = zoom; pinch del touchpad (Ctrl nell'evento ma tasto non premuto) = zoom
+  assert.equal(wheelIntent(base), "zoom");
+  assert.equal(wheelIntent({ ...base, ctrl: true, ctrlHeld: false }), "zoom", "pinch: ingrandisce");
+  // Ctrl davvero premuto, Alt o ⌘: raddrizza (come prima)
+  assert.equal(wheelIntent({ ...base, ctrl: true, ctrlHeld: true }), "rotate");
+  assert.equal(wheelIntent({ ...base, alt: true }), "rotate");
+  assert.equal(wheelIntent({ ...base, meta: true }), "rotate");
+  assert.equal(wheelIntent({ ...base, lineTool: true }), "rotate");
+  // fuori dal ritaglio: serve Alt; senza, la rotella e il pinch non toccano la foto (il pinch ingrandisce il foglio)
+  const out = { ...base, canCrop: false };
+  assert.equal(wheelIntent(out), "none");
+  assert.equal(wheelIntent({ ...out, ctrl: true }), "none");
+  assert.equal(wheelIntent({ ...out, alt: true }), "zoom");
+  assert.equal(wheelIntent({ ...out, alt: true, ctrl: true, ctrlHeld: true }), "rotate");
+  assert.equal(wheelIntent({ ...out, alt: true, shift: true }), "none", "Maiusc + Alt regola il margine del foglio");
+  assert.equal(wheelIntent({ ...out, alt: true, canAdjust: false }), "none", "foto bloccata");
 });

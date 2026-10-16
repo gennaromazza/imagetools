@@ -204,6 +204,21 @@ export function accumulateWheel(rest: number, deltaY: number, deltaMode = 0): { 
   return { steps: whole === 0 ? 0 : -whole, rest: total - whole * unit };
 }
 
+/**
+ * Cosa fa la rotella (o il pinch del touchpad) sopra una foto. Il pinch arriva al browser come rotella con Ctrl premuto anche se Ctrl non lo è:
+ * `ctrlHeld` dice se il tasto è davvero giù. In ritaglio il pinch ingrandisce la foto (prima raddrizzava, in conflitto con il doppio clic e lo zoom);
+ * con Ctrl, Alt o ⌘ premuti davvero la rotella raddrizza; fuori dal ritaglio serve Alt (zoom rapido) e Ctrl/⌘ + Alt raddrizza.
+ */
+export function wheelIntent(input: { ctrl: boolean; meta: boolean; alt: boolean; shift?: boolean; ctrlHeld: boolean; canCrop: boolean; canAdjust: boolean; lineTool: boolean }): "zoom" | "rotate" | "none" {
+  const pinch = input.ctrl && !input.ctrlHeld && !input.alt && !input.meta;
+  if (input.canCrop) {
+    if (pinch) return "zoom";
+    return input.alt || input.ctrl || input.meta || input.lineTool ? "rotate" : "zoom";
+  }
+  if (!(input.canAdjust && input.alt && !input.shift)) return "none";
+  return input.ctrl || input.meta ? "rotate" : "zoom";
+}
+
 function isRotatedQuarter(asset: AlbumAssetV2): boolean {
   return asset.rotationDegrees === 90 || asset.rotationDegrees === 270;
 }
