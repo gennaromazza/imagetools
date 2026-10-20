@@ -1,6 +1,6 @@
 import type { AlbumArea, AlbumSpread, FreeFrame } from "@photo-tools/shared-types";
 import type { Rect } from "../engine/geometry";
-import { areaGeometryFor, assetMap, findSpread, hasFreeLayout, mapSpread, normalizeArea, placementStyle, replaceArea, touch, type Project } from "./project";
+import { alignedForFit, areaGeometryFor, assetMap, findSpread, hasFreeLayout, mapSpread, normalizeArea, placementStyle, replaceArea, touch, type Project } from "./project";
 import { placeItem } from "./placement";
 import { sanitizeFrame } from "./templates";
 
@@ -44,17 +44,23 @@ export function isScopeLocked(spread: Pick<AlbumSpread, "areas">, scope: LockSco
 }
 
 /**
- * Cornici per foto nuove in una pagina libera: a cascata, con le proporzioni della foto, sopra le altre. Le foto già presenti restano dove sono
- * (aggiungere una foto non deve annullare le posizioni scelte a mano).
+ * Cornici per foto nuove in una pagina libera, con le proporzioni della foto, sopra le altre. Le foto già presenti restano dove sono
+ * (aggiungere una foto non deve annullare le posizioni scelte a mano). Con `at` (punto del rilascio, mm nello spread) la prima foto si
+ * centra lì e le altre la seguono a cascata; senza, partono dall'angolo in alto a sinistra.
  */
-export function withNewFreeFrames(area: AlbumArea, created: ReadonlyArray<{ id: string; aspect: number }>, inner: Rect): AlbumArea {
+export function withNewFreeFrames(area: AlbumArea, created: ReadonlyArray<{ id: string; aspect: number }>, inner: Rect, at?: { x: number; y: number }): AlbumArea {
   const free: Record<string, FreeFrame> = { ...(area.free ?? {}) };
   const top = Math.max(-1, ...Object.values(free).map((frame) => frame.z)) + 1;
   created.forEach(({ id, aspect }, order) => {
     const w = 0.34;
     const h = Math.min(0.9, (w * inner.w) / Math.max(inner.h, 1) / Math.max(0.2, aspect));
     const step = 0.05 * (order % 6);
-    free[id] = sanitizeFrame({ x: 0.06 + step, y: 0.06 + step, w, h, rotation: 0, z: top + order });
+    const origin = at && inner.w > 0 && inner.h > 0
+      ? { x: (at.x - inner.x) / inner.w - w / 2, y: (at.y - inner.y) / inner.h - h / 2 }
+      : { x: 0.06, y: 0.06 };
+    // Il punto del rilascio può essere vicino al bordo: la foto resta tutta nella pagina.
+    const inside = (start: number, size: number) => (at ? Math.min(Math.max(start, 0), Math.max(0, 1 - size)) : start);
+    free[id] = sanitizeFrame({ x: inside(origin.x + step, w), y: inside(origin.y + step, h), w, h, rotation: 0, z: top + order });
   });
   return { ...area, free };
 }
@@ -85,10 +91,16 @@ export function makeAreaFree(project: Project, spreadId: string, areaIndex: numb
   return touch(mapSpread(project, spreadId, (spread) => replaceArea(spread, areaIndex, { ...area, free })));
 }
 
-/** Torna al layout automatico che c'era prima di renderla libera (le posizioni scelte a mano si perdono). */
+/**
+ * Torna al layout automatico (le posizioni scelte a mano si perdono): quello che c'era prima di renderla libera oppure, se nel frattempo sono
+ * arrivate foto o la pagina viene da un template libero, il layout calcolato per quelle foto (lo tengono aggiornato le operazioni sulla pagina).
+ * In «foto intera» le foto tornano allineate.
+ */
 export function restoreAutomatic(project: Project, spreadId: string, areaIndex: number): Project {
   const found = findSpread(project, spreadId);
   const area = found?.spread.areas[areaIndex];
   if (!found || !area || !hasFreeLayout(area) || isAreaLocked(area)) return project;
-  return touch(mapSpread(project, spreadId, (spread) => replaceArea(spread, areaIndex, normalizeArea({ ...area, free: undefined }))));
+  const plain = normalizeArea({ ...area, free: undefined });
+  const { inner, gapMm } = areaGeometryFor(project.settings.sheet, replaceArea(found.spread, areaIndex, plain), areaIndex);
+  return touch(mapSpread(project, spreadId, (spread) => replaceArea(spread, areaIndex, alignedForFit(project, plain, inner, gapMm))));
 }

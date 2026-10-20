@@ -1,4 +1,4 @@
-import { pointInRect, rectCenter, type Divider, type LeafCell, type Rect } from "./geometry";
+import { paintOrder, pointInCell, pointInRect, rectCenter, type Divider, type LeafCell, type Rect } from "./geometry";
 import type { InsertSide } from "./tree";
 
 /** Dove cade una foto trascinata sullo spread e cosa deve succedere (vedi AF-002, sezione Gesti). */
@@ -17,6 +17,8 @@ export interface DropTarget {
   node?: string;
   /** Zona da evidenziare per i rilasci su un ramo (mm nello spread). */
   highlight?: Rect;
+  /** Spazio vuoto di una pagina libera: punto del rilascio (mm nello spread), dove arriva la foto. */
+  point?: { x: number; y: number };
 }
 
 export interface DropArea {
@@ -79,17 +81,24 @@ function smartTarget(area: DropArea, areaIndex: number, x: number, y: number): D
   return { areaIndex, itemId: null, zone: divider.dir === "row" ? "left" : "top", node: `${divider.path}1`, highlight };
 }
 
-/** Risolve il punto (mm nello spread) nel bersaglio del rilascio. Restituisce null fuori da ogni area. */
-export function resolveDropTarget(areas: readonly DropArea[], x: number, y: number): DropTarget | null {
+/**
+ * Risolve il punto (mm nello spread) nel bersaglio del rilascio. Restituisce null fuori da ogni area.
+ * `ignoreItemId`: la foto che si sta trascinando, che non è un bersaglio di sé stessa.
+ */
+export function resolveDropTarget(areas: readonly DropArea[], x: number, y: number, ignoreItemId?: string): DropTarget | null {
+  // Conta la foto visibile più in alto sotto il punto, in qualunque pagina (stesso ordine di disegno dello schermo): una foto libera che sborda
+  // nell'altra pagina si sostituisce o si scambia lì dove la si vede, invece di far finire la foto nella pagina che le sta sotto.
+  const under = paintOrder(areas.flatMap((area, areaIndex) => area.cells.map((cell, index) => ({ cell, areaIndex, index }))))
+    .filter((entry) => entry.cell.itemId !== ignoreItemId && pointInCell(x, y, entry.cell));
+  const top = under[under.length - 1];
+  if (top && areas[top.areaIndex].free) return { areaIndex: top.areaIndex, itemId: top.cell.itemId, zone: "center" };
   for (let areaIndex = 0; areaIndex < areas.length; areaIndex += 1) {
-    const area = areas[areaIndex];
-    if (!pointInRect(x, y, area.rect)) continue;
+    const whole = areas[areaIndex];
+    if (!pointInRect(x, y, whole.rect)) continue;
+    // Su uno spazio vuoto di una pagina libera la foto arriva nel punto del rilascio, senza spostare le altre.
+    if (whole.free) return { areaIndex, itemId: null, zone: "area", point: { x, y } };
+    const area = ignoreItemId && whole.cells.some((cell) => cell.itemId === ignoreItemId) ? { ...whole, cells: whole.cells.filter((cell) => cell.itemId !== ignoreItemId) } : whole;
     if (area.cells.length === 0) return { areaIndex, itemId: null, zone: "area" };
-    if (area.free) {
-      const top = area.cells.filter((cell) => pointInRect(x, y, cell.rect)).sort((a, b) => (b.z ?? 0) - (a.z ?? 0))[0];
-      // Sopra una foto la si sostituisce; su uno spazio vuoto della pagina la foto nuova si aggiunge senza spostare le altre.
-      return top ? { areaIndex, itemId: top.itemId, zone: "center" } : { areaIndex, itemId: null, zone: "area" };
-    }
     if (area.cells.length >= 2 && area.dividers) {
       const smart = smartTarget(area, areaIndex, x, y);
       if (smart) return smart;

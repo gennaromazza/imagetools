@@ -3,10 +3,11 @@ import { alignFactor, areaOuterRects, insetRect, layoutCells, type Rect } from "
 import type { DropTarget } from "../engine/drop";
 import { insertAtNode, insertBeside, leaf, leafIds, naturalRatios, removeLeaf, renameLeaf, type InsertSide } from "../engine/tree";
 import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_SPREADS, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, STYLE_LIMITS, clampNumber } from "./defaults";
-import { relayoutArea } from "./areas";
+import { areaCandidates, relayoutArea } from "./areas";
 import { clampAngle, placeItem } from "./placement";
 import { alignChanged, alignedForFit, areaGeometry, assetMap, createItem, findItem, effectiveAspect, hasFreeLayout, isWindowedArea, naturalOptions, needsShapeAlignment, findSpread, itemAspect, mapSpread, normalizeArea, placementStyle, replaceArea, touch, type Project } from "./project";
 import { withNewFreeFrames } from "./layoutLock";
+import { sanitizeFrame } from "./templates";
 import { cropCenter, cropForView } from "../slot-geometry";
 import { addSpread } from "./spreads";
 
@@ -37,10 +38,20 @@ function capacity(area: AlbumArea): number {
 }
 
 /**
- * Aggiunge foto a un'area e ricalcola il layout migliore (Invio, rilascio di più foto, rilascio su un'area vuota).
- * Con `afterItemId` le nuove foto seguono quella nell'ordine di lettura, altrimenti vanno in fondo.
+ * Albero di riserva di una pagina libera dopo l'arrivo di foto: il layout calcolato migliore per tutte le sue foto, come in una pagina automatica.
+ * Così «Torna al layout automatico» mostra un layout vero (non una fila di strisce). `probe` contiene già le foto nuove (con `free` azzerato).
  */
-function appendAssetsRaw(project: Project, spreadId: string, areaIndex: number, assetIds: readonly string[], afterItemId?: string): Project {
+function freeFallback(project: Project, probe: AlbumSpread, areaIndex: number): { layout: LayoutNode; seed: number } | null {
+  const best = areaCandidates(project, probe, areaIndex, 1)[0];
+  return best ? { layout: best.tree, seed: 0 } : null;
+}
+
+/**
+ * Aggiunge foto a un'area e ricalcola il layout migliore (Invio, rilascio di più foto, rilascio su un'area vuota).
+ * Con `afterItemId` le nuove foto seguono quella nell'ordine di lettura, altrimenti vanno in fondo. In una pagina libera le foto nuove arrivano
+ * nel punto `at` (mm nello spread) se c'è, altrimenti a cascata dall'angolo.
+ */
+function appendAssetsRaw(project: Project, spreadId: string, areaIndex: number, assetIds: readonly string[], afterItemId?: string, at?: { x: number; y: number }): Project {
   const valid = assetIds.filter((id) => assetExists(project, id));
   if (valid.length === 0) return project;
   return updateArea(project, spreadId, areaIndex, (area, spread) => {
@@ -48,17 +59,18 @@ function appendAssetsRaw(project: Project, spreadId: string, areaIndex: number, 
     // Layout bloccato: non si aggiungono foto (cambierebbe la disposizione protetta).
     if (room === 0 || area.locked) return area;
     const created = valid.slice(0, room).map(createItem);
-    const at = afterItemId ? area.items.findIndex((item) => item.id === afterItemId) : -1;
-    const items = at >= 0 ? [...area.items.slice(0, at + 1), ...created, ...area.items.slice(at + 1)] : [...area.items, ...created];
+    const after = afterItemId ? area.items.findIndex((item) => item.id === afterItemId) : -1;
+    const items = after >= 0 ? [...area.items.slice(0, after + 1), ...created, ...area.items.slice(after + 1)] : [...area.items, ...created];
     // Layout provvisorio (catena di foglie) per far partire la rigenerazione con le foto nell'ordine giusto.
     const layout = items.slice(1).reduce((acc, item) => ({ kind: "split" as const, dir: "row" as const, ratio: 0.5, first: acc, second: leaf(item.id) }), leaf(items[0].id));
-    const probe = replaceArea(spread, areaIndex, { ...area, items, layout });
-    const relaid = relayoutArea(project, probe, areaIndex, 0);
-    // Pagina libera: le foto già presenti restano dove sono, le nuove arrivano a cascata (prima si azzeravano tutte le posizioni).
-    if (!hasFreeLayout(area)) return relaid;
+    const probe = replaceArea(spread, areaIndex, { ...area, items, layout, free: undefined });
+    // Il ritaglio fatto a mano delle foto già presenti si conserva rispetto alla pagina vera (`spread`), non alla catena provvisoria.
+    if (!hasFreeLayout(area)) return relayoutArea(project, probe, areaIndex, 0, spread);
+    // Pagina libera: le foto già presenti restano dove sono, con il loro ritaglio; cambia solo il layout di riserva.
     const assets = assetMap(project);
     const { inner } = areaGeometry(project, probe, areaIndex);
-    return normalizeArea(withNewFreeFrames({ ...relaid, free: area.free }, created.map((item) => ({ id: item.id, aspect: itemAspect(assets.get(item.assetId)) })), inner));
+    const fallback = freeFallback(project, probe, areaIndex) ?? { layout, seed: area.seed };
+    return normalizeArea(withNewFreeFrames({ ...area, items, ...fallback }, created.map((item) => ({ id: item.id, aspect: itemAspect(assets.get(item.assetId)) })), inner, at));
   });
 }
 
@@ -140,11 +152,14 @@ function moveItem(project: Project, itemId: string, spreadId: string, target: Dr
   if (targetArea.items.length === 0 || !targetArea.layout) {
     arrival = normalizeArea({ ...targetArea, layout: leaf(moved.id), items: [moved], seed: 0 });
   } else if (target.zone === "area") {
-    // Il bersaglio «area» vale per un'area vuota o per uno spazio vuoto di una pagina libera (la foto arriva a cascata, le altre restano ferme).
+    // Il bersaglio «area» vale per un'area vuota o per uno spazio vuoto di una pagina libera: la foto arriva nel punto del rilascio (o a cascata)
+    // e le altre restano ferme; l'albero di riserva diventa il layout calcolato per tutte le foto della pagina.
     if (!hasFreeLayout(targetArea) || sameArea) return project;
     const inner = areaGeometry(project, targetSpread, target.areaIndex).inner;
     const layout = insertAtNode(targetArea.layout, "", moved.id, "right");
-    arrival = normalizeArea(withNewFreeFrames({ ...targetArea, layout, items: [...others, moved], free: targetArea.free }, [{ id: moved.id, aspect: effectiveAspect(moved, assetMap(project).get(moved.assetId)) }], inner));
+    const items = [...others, moved];
+    const fallback = freeFallback(project, replaceArea(targetSpread, target.areaIndex, { ...targetArea, layout, items, free: undefined }), target.areaIndex) ?? { layout, seed: targetArea.seed };
+    arrival = normalizeArea(withNewFreeFrames({ ...targetArea, items, ...fallback, free: targetArea.free }, [{ id: moved.id, aspect: effectiveAspect(moved, assetMap(project).get(moved.assetId)) }], inner, target.point));
   } else if (target.node !== undefined) {
     // Il percorso del ramo vale per l'albero com'è ADESSO: si inserisce prima (con un nome provvisorio) e si toglie dopo la foto dal vecchio posto.
     const TEMP = `${moved.id}~arrivo`;
@@ -164,9 +179,70 @@ function moveItem(project: Project, itemId: string, spreadId: string, target: Dr
   if (!leafIds(arrival.layout).includes(moved.id) || arrival.items.length !== others.length + 1) return project;
 
   if (sameArea) return mapSpread(project, spreadId, (spread) => replaceArea(spread, target.areaIndex, arrival));
-  const departure = normalizeArea({ ...source.area, layout: removeLeaf(source.area.layout, moved.id), items: source.area.items.filter((item) => item.id !== moved.id) });
-  const without = mapSpread(project, source.spread.id, (spread) => replaceArea(spread, source.areaIndex, departure));
+  const without = mapSpread(project, source.spread.id, (spread) => replaceArea(spread, source.areaIndex, departureOf(source.area, moved.id)));
   return mapSpread(without, spreadId, (spread) => replaceArea(spread, target.areaIndex, arrival));
+}
+
+/** La pagina da cui parte una foto: il layout si richiude attorno al vuoto; in una pagina libera le altre foto restano dove sono. */
+function departureOf(area: AlbumArea, itemId: string): AlbumArea {
+  return normalizeArea({ ...area, layout: removeLeaf(area.layout, itemId), items: area.items.filter((item) => item.id !== itemId) });
+}
+
+/** Controlli comuni agli spostamenti verso un'altra pagina dello stesso spread; null se lo spostamento non si può fare. */
+function crossPageMove(project: Project, itemId: string, areaIndex: number) {
+  const source = findItem(project, itemId);
+  if (!source || source.areaIndex === areaIndex || source.item.locked || source.area.locked) return null;
+  const target = source.spread.areas[areaIndex];
+  if (!target || target.locked || capacity(target) === 0) return null;
+  const without = replaceArea(source.spread, source.areaIndex, departureOf(source.area, itemId));
+  return { source, target, without, moved: source.item };
+}
+
+/**
+ * Sposta una foto nell'altra pagina dello stesso spread (menu «Sposta nella pagina …»), dalla pagina libera come da quella automatica:
+ * in una pagina vuota la riempie, in una pagina libera arriva a cascata senza spostare le altre, in una pagina automatica il layout si
+ * ricalcola come quando si aggiunge una foto. La foto tiene identità e ritaglio.
+ */
+function moveItemToAreaRaw(project: Project, itemId: string, areaIndex: number): Project {
+  const move = crossPageMove(project, itemId, areaIndex);
+  if (!move) return project;
+  const { source, target, without, moved } = move;
+  let arrival: AlbumArea;
+  if (target.items.length === 0 || !target.layout) arrival = normalizeArea({ ...target, layout: leaf(moved.id), items: [moved], seed: 0, free: undefined });
+  else {
+    const items = [...target.items, moved];
+    const chain = insertAtNode(target.layout, "", moved.id, "right");
+    const probe = replaceArea(without, areaIndex, { ...target, items, layout: chain, free: undefined });
+    if (hasFreeLayout(target)) {
+      const fallback = freeFallback(project, probe, areaIndex) ?? { layout: chain, seed: target.seed };
+      const { inner } = areaGeometry(project, probe, areaIndex);
+      arrival = normalizeArea(withNewFreeFrames({ ...target, items, ...fallback }, [{ id: moved.id, aspect: effectiveAspect(moved, assetMap(project).get(moved.assetId)) }], inner));
+    } else arrival = relayoutArea(project, probe, areaIndex, 0, source.spread);
+  }
+  if (!leafIds(arrival.layout).includes(moved.id)) return project;
+  return mapSpread(project, source.spread.id, () => replaceArea(without, areaIndex, arrival));
+}
+
+/**
+ * Una foto di una pagina libera trascinata sopra un'altra pagina libera dello stesso spread: passa a quella pagina e resta esattamente dove è
+ * stata lasciata (`rect`, mm nello spread), con la sua rotazione e il suo livello. Le altre foto non si muovono.
+ */
+function moveFrameToAreaRaw(project: Project, itemId: string, areaIndex: number, rect: Rect): Project {
+  const move = crossPageMove(project, itemId, areaIndex);
+  if (!move || !move.target.layout || !hasFreeLayout(move.target) || !(rect.w > 0 && rect.h > 0)) return project;
+  const { source, target, without, moved } = move;
+  const items = [...target.items, moved];
+  const chain = insertAtNode(target.layout!, "", moved.id, "right");
+  const probe = replaceArea(without, areaIndex, { ...target, items, layout: chain, free: undefined });
+  const fallback = freeFallback(project, probe, areaIndex) ?? { layout: chain, seed: target.seed };
+  const { inner } = areaGeometry(project, probe, areaIndex);
+  if (inner.w <= 0 || inner.h <= 0) return project;
+  const old = source.area.free?.[moved.id];
+  const z = old?.z ?? Math.max(-1, ...Object.values(target.free!).map((frame) => frame.z)) + 1;
+  const frame = sanitizeFrame({ x: (rect.x - inner.x) / inner.w, y: (rect.y - inner.y) / inner.h, w: rect.w / inner.w, h: rect.h / inner.h, rotation: old?.rotation ?? 0, z });
+  const arrival = normalizeArea({ ...target, items, ...fallback, free: { ...target.free!, [moved.id]: frame } });
+  if (!hasFreeLayout(arrival)) return project;
+  return mapSpread(project, source.spread.id, () => replaceArea(without, areaIndex, arrival));
 }
 
 /** Foto dalla libreria rilasciate lungo il bordo dell'area o tra due foto: la prima si infila accanto al ramo, le altre la seguono. */
@@ -200,8 +276,8 @@ function dropOnSpreadRaw(project: Project, spreadId: string, target: DropTarget,
   if (!found || !area) return project;
   // Layout bloccato: si possono sostituire e scambiare foto (la disposizione resta), non aggiungerne né spostarne dentro o fuori.
   if (area.locked && !(target.zone === "center" && target.itemId)) return project;
-  // Pagina libera: le foto non hanno zone di inserimento a fianco; fuori da una foto la nuova arriva a cascata e le altre restano ferme.
-  if (hasFreeLayout(area) && !(target.zone === "center" && target.itemId)) target = { areaIndex: target.areaIndex, itemId: null, zone: "area" };
+  // Pagina libera: le foto non hanno zone di inserimento a fianco; fuori da una foto la nuova arriva nel punto del rilascio e le altre restano ferme.
+  if (hasFreeLayout(area) && !(target.zone === "center" && target.itemId)) target = { areaIndex: target.areaIndex, itemId: null, zone: "area", ...(target.point ? { point: target.point } : {}) };
 
   if (source.kind === "item") {
     if (target.zone === "center" && target.itemId) return swapItems(project, source.itemId, target.itemId);
@@ -211,7 +287,7 @@ function dropOnSpreadRaw(project: Project, spreadId: string, target: DropTarget,
   const assetIds = source.assetIds.filter((id) => assetExists(project, id));
   if (assetIds.length === 0) return project;
 
-  if (target.zone === "area" || (!target.itemId && target.node === undefined) || !area.layout) return appendAssets(project, spreadId, target.areaIndex, assetIds);
+  if (target.zone === "area" || (!target.itemId && target.node === undefined) || !area.layout) return appendAssets(project, spreadId, target.areaIndex, assetIds, undefined, target.point);
 
   if (target.node !== undefined) return insertAssetsAtNode(project, spreadId, target, assetIds);
 
@@ -459,7 +535,14 @@ export function previewDropRect(
   const outer = areaOuterRects(sheet, spread.split)[target.areaIndex];
   if (!area || !outer) return null;
   const inner = insetRect(outer, area.style.paddingCm * 10);
-  if (target.zone === "area") return inner;
+  if (target.zone === "area") {
+    // Pagina libera: la foto arriva centrata nel punto del rilascio, con le sue proporzioni (come nel rilascio vero).
+    if (!target.point || !hasFreeLayout(area)) return inner;
+    const draggedItem = dragged.itemId ? spread.areas.flatMap((candidate) => candidate.items).find((item) => item.id === dragged.itemId) : undefined;
+    const aspect = draggedItem ? effectiveAspect(draggedItem, assets.get(draggedItem.assetId)) : itemAspect(assets.get(dragged.assetId));
+    const frame = withNewFreeFrames({ ...area, free: {} }, [{ id: "__anteprima__", aspect }], inner, target.point).free!.__anteprima__;
+    return { x: inner.x + frame.x * inner.w, y: inner.y + frame.y * inner.h, w: frame.w * inner.w, h: frame.h * inner.h };
+  }
   if (target.zone === "center" && target.itemId && area.layout && !hasFreeLayout(area)) return previewReplaceRect(area, inner, assets, target.itemId, dragged);
   if (!area.layout || target.zone === "center") return null;
   const TMP = "__anteprima__";
@@ -504,3 +587,5 @@ export const removeItems = aligned(removeItemsRaw);
 export const swapItems = aligned(swapItemsRaw);
 export const dropOnSpread = aligned(dropOnSpreadRaw);
 export const moveToSpread = aligned(moveToSpreadRaw);
+export const moveItemToArea = aligned(moveItemToAreaRaw);
+export const moveFrameToArea = aligned(moveFrameToAreaRaw);

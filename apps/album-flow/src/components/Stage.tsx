@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { AlbumAssetV2, AlbumProjectV2, AlbumSpread, AlbumSplitMode, AreaAlign, AreaStyle, AreaTemplate } from "@photo-tools/shared-types";
 import type { DropTarget } from "../engine/drop";
-import { spreadSizeMm } from "../engine/geometry";
+import { spreadSizeMm, type Rect } from "../engine/geometry";
 import { hasDesktop } from "../desktop/api";
 import { isFavoriteLayout } from "../model/areas";
 import { BACKGROUND_SWATCHES, STYLE_LIMITS } from "../model/defaults";
@@ -83,6 +83,10 @@ export interface StageActions {
   commitFrame: (itemId: string, frame: { x: number; y: number; w: number; h: number }) => void;
   orderFrame: (itemId: string, where: "front" | "back") => void;
   rotateFrame: (itemId: string, deltaDeg: number) => void;
+  /** Foto libera trascinata sull'altra pagina libera: passa lì restando dove è stata lasciata (mm nello spread). */
+  moveFrameAcross: (itemId: string, areaIndex: number, rect: Rect) => void;
+  /** Sposta la foto nell'altra pagina dello spread (menu della foto). */
+  moveToPage: (itemId: string, areaIndex: number) => void;
   /** Ruota la foto (in tutto l'album) di un quarto di giro: 1 = orario, -1 = antiorario. */
   rotatePhoto: (itemId: string, quarter: 1 | -1) => void;
   /** Accende o spegne lo strumento «linea»: si traccia una linea lungo l'orizzonte e la foto si raddrizza. */
@@ -295,7 +299,9 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         ) : null}
       </>
     );
-    const left = canCrop || hasFreeLayout(found.area) ? (
+    // Rotazione e livello delle foto libere cambiano la disposizione: con il layout bloccato (lucchetto) non ci sono.
+    const movable = hasFreeLayout(found.area) && !found.area.locked;
+    const left = canCrop || movable ? (
       <>
         {canCrop ? (
           <>
@@ -303,7 +309,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
             <IconButton icon="rotateRight" label="Ruota la foto di 90° a destra (in tutto l'album)" onClick={() => actions.rotatePhoto(itemId, 1)} size={16} />
           </>
         ) : null}
-        {hasFreeLayout(found.area) ? (
+        {movable ? (
           <>
             <button type="button" className="icon-btn" title="Ruota a sinistra di 5°" aria-label="Ruota a sinistra" onClick={() => actions.rotateFrame(itemId, -5)}>↺</button>
             <button type="button" className="icon-btn" title="Ruota a destra di 5°" aria-label="Ruota a destra" onClick={() => actions.rotateFrame(itemId, 5)}>↻</button>
@@ -381,7 +387,9 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     const asset = assets.get(found.item.assetId);
     const hasFile = desktop && Boolean(asset?.absolutePath);
     const canCrop = !found.item.locked;
-    const free = hasFreeLayout(found.area);
+    const free = hasFreeLayout(found.area) && !found.area.locked;
+    // Sposta nell'altra pagina: con due pagine, foto e pagina di partenza non bloccate.
+    const otherPage = spread.areas.length === 2 ? 1 - found.index : -1;
     const spreadItemIds = spread.areas.flatMap((candidate) => candidate.items.map((item) => item.id));
     const multi = pickedItemIds.length > 1 && pickedItemIds.includes(itemId) ? pickedItemIds : null;
     return [
@@ -397,6 +405,9 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       ...(free ? [
         { label: "Porta davanti alle altre", icon: "chevronUp" as const, onClick: () => actions.orderFrame(itemId, "front") },
         { label: "Porta dietro le altre", icon: "chevronDown" as const, onClick: () => actions.orderFrame(itemId, "back") },
+      ] : []),
+      ...(otherPage >= 0 ? [
+        { label: otherPage === 1 ? "Sposta nella pagina destra" : "Sposta nella pagina sinistra", icon: "swap" as const, disabled: found.item.locked, onClick: () => actions.moveToPage(itemId, otherPage) },
       ] : []),
       { separator: true, label: "-" },
       multi
@@ -418,7 +429,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       <button type="button" className="bar-btn" title="Riempi le pagine vuote con le prossime foto non usate (F)" aria-label="Riempi lo spread con le prossime foto" onClick={actions.fillSpread} disabled={!spread.areas.some((candidate) => candidate.items.length === 0)}><Icon name="wand" size={18} /></button>
       <button type="button" className="bar-btn bar-btn--gold" title="Cambia disposizione a tutto lo spread" aria-label="Cambia disposizione a tutto lo spread" onClick={actions.shuffleSpread} disabled={spread.areas.every((candidate) => candidate.items.length === 0)}><Icon name="shuffle" size={18} /></button>
       <button type="button" className={`bar-btn${layoutsOpen ? " is-active" : ""}`} title="Tutti i layout possibili per questa pagina (B)" aria-label="Mostra tutti i layout" aria-pressed={layoutsOpen} onClick={() => actions.openLayouts(!layoutsOpen)}><Icon name="layouts" size={18} /></button>
-      <button type="button" className={`bar-btn${favorite ? " is-active" : ""}`} title={favorite ? "Questo layout è nei preferiti" : "Salva questo layout nei preferiti"} aria-label="Salva il layout nei preferiti" aria-pressed={favorite} disabled={area.items.length === 0} onClick={() => actions.toggleFavorite(areaIndex)}><Icon name="heart" size={18} style={{ fill: favorite ? "currentColor" : "none" }} /></button>
+      <button type="button" className={`bar-btn${favorite ? " is-active" : ""}`} title={hasFreeLayout(area) ? "Una disposizione libera si salva come template: Tutti i layout (B) → «Salva questa»" : favorite ? "Questo layout è nei preferiti" : "Salva questo layout nei preferiti"} aria-label="Salva il layout nei preferiti" aria-pressed={favorite} disabled={area.items.length === 0 || hasFreeLayout(area)} onClick={() => actions.toggleFavorite(areaIndex)}><Icon name="heart" size={18} style={{ fill: favorite ? "currentColor" : "none" }} /></button>
       <div className="anchor">
         <button type="button" className={`bar-btn${applyOpen ? " is-active" : ""}`} title="Applica questo stile a più pagine" aria-label="Applica lo stile a più pagine" onClick={() => setApplyOpen(!applyOpen)}><Icon name="applyAll" size={18} /></button>
         <Popover open={applyOpen} onClose={() => setApplyOpen(false)} side="top" className="popover--wide">
@@ -520,6 +531,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               onResetRatio={actions.resetRatio}
               onCommitView={actions.commitView}
               onCommitFrame={actions.commitFrame}
+              onMoveFrameAcross={actions.moveFrameAcross}
               renderToolbar={toolbar}
               design={design.handlers}
               photosLocked={design.open}

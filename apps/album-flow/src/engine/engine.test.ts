@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LayoutNode } from "@photo-tools/shared-types";
-import { MAX_RATIO, MIN_RATIO, areaOuterRects, crossesFold, insetRect, layoutCells, spreadSizeMm, type LeafCell, type Rect } from "./geometry";
+import { BEHIND_LEVEL, MAX_RATIO, MIN_RATIO, areaOuterRects, crossesFold, insetRect, layoutCells, paintOrder, pointInCell, spreadSizeMm, type LeafCell, type Rect } from "./geometry";
 import { clearLayoutCache, estimateCost, generateLayouts, generateLayoutsCached, scoreTree, type LayoutPhoto } from "./generate";
 import { resolveDropTarget, dropHighlight } from "./drop";
 import { applyShape, countLeaves, hasLeaf, naturalRatios, insertAtNode, insertBeside, leaf, leafIds, mirrorHorizontal, mirrorVertical, nodeAt, pathOfLeaf, removeLeaf, renameLeaf, setRatioAt, shapeOfTree, split, swapLeaves, treeKind, validateTree } from "./tree";
@@ -291,8 +291,30 @@ test("rilascio su una disposizione libera: conta la foto più in alto e c'è sol
   const area = { rect: { x: 0, y: 0, w: 200, h: 200 }, cells, free: true };
   assert.deepEqual(resolveDropTarget([area], 75, 75), { areaIndex: 0, itemId: "sopra", zone: "center" }, "dove si sovrappongono vince la più alta");
   assert.deepEqual(resolveDropTarget([area], 10, 10), { areaIndex: 0, itemId: "sotto", zone: "center" });
-  assert.deepEqual(resolveDropTarget([area], 180, 20), { areaIndex: 0, itemId: null, zone: "area" }, "spazio vuoto della pagina libera: la foto nuova si aggiunge senza spostare le altre");
+  assert.deepEqual(resolveDropTarget([area], 180, 20), { areaIndex: 0, itemId: null, zone: "area", point: { x: 180, y: 20 } }, "spazio vuoto della pagina libera: la foto nuova arriva nel punto del rilascio senza spostare le altre");
   assert.equal(resolveDropTarget([area], 1, 1)?.node, undefined, "niente zone intelligenti sul bordo");
+});
+
+test("due pagine, una libera: ordine di disegno unico e rilascio sulla foto che si vede, anche quando sborda nell'altra pagina", () => {
+  // Pagina sinistra libera (0-100) con una foto che sborda a destra; pagina destra automatica (100-200) con una foto.
+  const left = (z: number): LeafCell => ({ itemId: "libera", path: "", rect: { x: 60, y: 10, w: 80, h: 40 }, z });
+  const right: LeafCell = { itemId: "auto", path: "", rect: { x: 110, y: 5, w: 80, h: 90 } };
+  const areas = (z: number) => [
+    { rect: { x: 0, y: 0, w: 100, h: 100 }, cells: [left(z)], dividers: [], free: true },
+    { rect: { x: 100, y: 0, w: 100, h: 100 }, cells: [right], dividers: [] },
+  ];
+  const order = (z: number) => paintOrder([{ cell: left(z), areaIndex: 0, index: 0 }, { cell: right, areaIndex: 1, index: 0 }]).map((entry) => entry.cell.itemId);
+  assert.deepEqual(order(0), ["auto", "libera"], "una foto libera sta davanti a quelle dei layout automatici");
+  assert.deepEqual(order(BEHIND_LEVEL), ["libera", "auto"], "«Porta dietro» la mette sotto anche alle foto dell'altra pagina");
+  assert.deepEqual(resolveDropTarget(areas(0), 120, 30), { areaIndex: 0, itemId: "libera", zone: "center" }, "sulla parte che sborda vale la foto libera, che è quella che si vede");
+  assert.equal(resolveDropTarget(areas(BEHIND_LEVEL), 120, 30)?.itemId, "auto", "dietro: vale la foto dell'altra pagina che le sta sopra");
+  assert.equal(resolveDropTarget(areas(0), 120, 80)?.areaIndex, 1, "fuori dalla foto libera vale la pagina sotto il punto");
+  assert.deepEqual(resolveDropTarget(areas(0), 30, 80), { areaIndex: 0, itemId: null, zone: "area", point: { x: 30, y: 80 } }, "spazio vuoto della pagina libera: arriva nel punto");
+  // La foto trascinata non è un bersaglio di sé stessa: sotto di lei c'è la foto dell'altra pagina.
+  assert.equal(resolveDropTarget(areas(0), 120, 30, "libera")?.itemId, "auto");
+  // Cornici ruotate: il punto si misura nella cornice girata.
+  const tilted = { rect: { x: 0, y: 40, w: 100, h: 20 }, rotation: 90 };
+  assert.ok(pointInCell(50, 10, tilted) && !pointInCell(10, 50, tilted), "una cornice girata di 90° si colpisce dove la si vede");
 });
 
 test("albero: una foto si infila accanto a un intero ramo, o lungo tutto il bordo", () => {

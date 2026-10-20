@@ -68,7 +68,7 @@ export function AreaStrip(props: AreaStripProps) {
         <div className="anchor">
           <StripButton
             icon={props.locked ? "lock" : "unlock"}
-            label={props.locked ? "Layout bloccato: Mescola e Auto Build non lo toccano. Clic per le opzioni" : props.free ? "Layout libero: sposta le foto a piacere. Clic per le opzioni" : "Layout della pagina: sblocca per spostare le foto a piacere o proteggilo"}
+            label={props.locked ? "Layout bloccato: le foto restano ferme, Mescola e Auto Build non lo toccano. Clic per le opzioni" : props.free ? "Layout libero: sposta le foto a piacere, anche sull'altra pagina. Clic per le opzioni" : "Layout della pagina: sblocca per spostare le foto a piacere o proteggilo"}
             active={props.locked}
             tone={props.locked ? "gold" : undefined}
             onClick={() => { setConfirmBack(false); setPopover(popover === "layout" ? null : "layout"); }}
@@ -91,7 +91,7 @@ export function AreaStrip(props: AreaStripProps) {
             <button type="button" className="popover__row" onClick={() => { props.onLock(!props.locked); setPopover(null); }}>
               <Icon name={props.locked ? "unlock" : "lock"} size={15} /> {props.locked ? "Sblocca il layout" : "Proteggi il layout"}
             </button>
-            <p className="popover__hint">{props.locked ? "Bloccato: Mescola, i layout proposti e Auto Build lasciano questa pagina com'è." : "Proteggi il layout per non perdere le posizioni quando usi Mescola o Auto Build. Sbloccata, la pagina si può ridisegnare."}</p>
+            <p className="popover__hint">{props.locked ? "Bloccato: le foto restano ferme (puoi solo sostituirle o scambiarle) e Mescola, i layout proposti e Auto Build lasciano questa pagina com'è." : props.free ? "Libera: trascina una foto sull'altra pagina per spostarla lì. Mescola di tutto lo spread non la tocca; Mescola di questa pagina e Auto Build la ridisegnano: proteggila per tenerla com'è." : "Proteggi il layout per non perdere le posizioni quando usi Mescola o Auto Build. Sbloccata, la pagina si può ridisegnare."}</p>
           </Popover>
         </div>
       </Group>

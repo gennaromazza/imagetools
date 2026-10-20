@@ -3,8 +3,8 @@ import { areaOuterRects, type Rect } from "../engine/geometry";
 import { MAX_ITEMS_PER_AREA, MAX_SPREADS } from "./defaults";
 import { relayoutArea } from "./areas";
 import { newId } from "./ids";
-import { areaGeometry, areaGeometryFor, createArea, createSpread, findSpread, hasFreeLayout, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
-import { sanitizeFrame } from "./templates";
+import { alignChanged, areaGeometry, areaGeometryFor, createArea, createSpread, findSpread, hasFreeLayout, mapSpread, normalizeArea, replaceArea, touch, type Project } from "./project";
+import { refitFrames, sanitizeFrame } from "./templates";
 
 /**
  * Aggiunge uno spread vuoto. Senza una divisione esplicita eredita quella dello spread che lo precede (o, in testa, di quello che lo segue),
@@ -81,13 +81,34 @@ export function clearSpread(project: Project, spreadId: string): Project {
   });
 }
 
+/** Perché «Scambia le pagine» non si può fare, in una frase; null se si può. */
+export function swapRefusal(project: Project, spreadId: string): string | null {
+  const spread = findSpread(project, spreadId)?.spread;
+  if (!spread || spread.areas.length < 2) return null;
+  if (spread.done) return "Spread finito: riaprilo (D) per scambiare le pagine.";
+  if (spread.areas.some((area) => area.locked)) return "Layout bloccato: sbloccalo (lucchetto) per scambiare le pagine.";
+  return null;
+}
+
+/**
+ * Scambia il contenuto delle due pagine (foto, layout, disposizione libera); lo stile resta legato alla posizione (sinistra/destra).
+ * Non si fa con un layout bloccato né su uno spread finito. Le cornici libere si adattano alla nuova pagina senza deformarsi
+ * (con un terzo / due terzi le pagine hanno misure diverse) e in «foto intera» le foto si riallineano.
+ */
 export function swapAreas(project: Project, spreadId: string): Project {
-  return mapSpread(project, spreadId, (spread) => {
+  if (swapRefusal(project, spreadId)) return project;
+  const swapped = mapSpread(project, spreadId, (spread) => {
     if (spread.areas.length < 2) return spread;
     const [a, b] = spread.areas;
-    // Si scambiano foto e layout; lo stile resta legato alla posizione (sinistra/destra).
-    return { ...spread, areas: [{ ...a, layout: b.layout, items: b.items, seed: b.seed, free: b.free }, { ...b, layout: a.layout, items: a.items, seed: a.seed, free: a.free }] };
+    // L'area utile dipende dalla posizione (larghezza della pagina) e dal margine, che resta lì con lo stile.
+    const inner = (index: number) => areaGeometry(project, spread, index).inner;
+    const freeFor = (from: typeof a, fromIndex: number, toIndex: number) => (from.free ? refitFrames(from.free, inner(fromIndex), inner(toIndex)) : undefined);
+    return { ...spread, areas: [
+      { ...a, layout: b.layout, items: b.items, seed: b.seed, free: freeFor(b, 1, 0) },
+      { ...b, layout: a.layout, items: a.items, seed: a.seed, free: freeFor(a, 0, 1) },
+    ] };
   });
+  return alignChanged(project, swapped);
 }
 
 /** Foto di ogni area dopo il cambio di divisione, in ordine di lettura: il centro decide la pagina, con un foglio intero vanno tutte insieme. */
@@ -149,13 +170,19 @@ export function setSplitMode(project: Project, spreadId: string, mode: AlbumSpli
       layout: area.items.length === 0 ? null : area.items.slice(1).reduce<NonNullable<typeof area.layout>>((acc, item) => ({ kind: "split", dir: "row", ratio: 0.5, first: acc, second: { kind: "leaf", itemId: item.id } }), { kind: "leaf", itemId: area.items[0].id }),
     })),
   };
-  let relaid: AlbumSpread = { ...staged, areas: staged.areas.map((_, index) => normalizeArea(relayoutArea(project, staged, index, 0))) };
+  // Il ritaglio fatto a mano si conserva rispetto allo spread vero, non alla catena provvisoria.
+  let relaid: AlbumSpread = { ...staged, areas: staged.areas.map((_, index) => normalizeArea(relayoutArea(project, staged, index, 0, spread))) };
   // Con la disposizione libera le foto restano dove sono: ogni cornice si ricalcola sulla nuova pagina in cui cade, a vista non si muove nulla.
-  if (spread.areas.some((area) => hasFreeLayout(area))) {
+  // Diventa libera solo una pagina che riceve almeno una foto da una pagina libera: una pagina automatica resta automatica.
+  const fromFree = new Set(spread.areas.filter((area) => hasFreeLayout(area)).flatMap((area) => area.items.map((item) => item.id)));
+  if (fromFree.size > 0) {
     const placed = new Map<string, { rect: Rect; rotation: number; z: number }>();
+    const original = new Map(spread.areas.flatMap((area) => area.items.map((item) => [item.id, item] as const)));
     spread.areas.forEach((_, areaIndex) => areaGeometry(project, spread, areaIndex).cells.forEach((cell, index) => placed.set(cell.itemId, { rect: cell.rect, rotation: cell.rotation ?? 0, z: cell.z ?? index })));
-    relaid.areas.forEach((area, areaIndex) => {
-      if (area.items.length === 0) return;
+    relaid.areas.forEach((relaidArea, areaIndex) => {
+      if (relaidArea.items.length === 0 || !relaidArea.items.some((item) => fromFree.has(item.id))) return;
+      // A vista non si muove nulla: anche il ritaglio resta quello di prima (il ricalcolo sul layout automatico qui non vale).
+      const area = { ...relaidArea, items: relaidArea.items.map((item) => original.get(item.id) ?? item) };
       const { inner } = areaGeometryFor(project.settings.sheet, relaid, areaIndex);
       if (inner.w <= 0 || inner.h <= 0 || area.items.some((item) => !placed.has(item.id))) return;
       const free = Object.fromEntries(area.items.map((item) => {

@@ -7,10 +7,10 @@ import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCa
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
-import { alignArea, appendAssets, dropOnSpread, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
+import { alignArea, appendAssets, dropOnSpread, moveFrameToArea, moveItemToArea, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
 import { rotateAssetQuarter, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
 import { countItems, findItem, hasFreeLayout, nowIso, touch } from "../model/project";
-import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas } from "../model/spreads";
+import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas, swapRefusal } from "../model/spreads";
 import { STAGES } from "../model/store";
 import { canRedo, canUndo, createHistory, pushHistory, redo, replacePresent, undo, type History } from "../history";
 import { ContactSheet } from "./ContactSheet";
@@ -478,7 +478,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       commit((p) => setSplitMode(p, spreadId, mode)); setActiveArea(0); setSelectedItemId(null);
     },
     link: () => commit((p) => setLinked(p, spreadId, !spread?.linked)),
-    swapAreas: () => commit((p) => swapAreas(p, spreadId)),
+    swapAreas: () => {
+      const refusal = swapRefusal(historyRef.current.present, spreadId);
+      if (refusal) { notify(refusal); return; }
+      commit((p) => swapAreas(p, spreadId));
+    },
     shuffleArea: (i) => {
       if (spread?.done) { notify("Spread finito: riaprilo (D) per cambiare il layout."); return; }
       if (spread?.areas[i]?.locked) { notify("Layout bloccato: sbloccalo (lucchetto) per cambiarlo."); return; }
@@ -487,10 +491,14 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     shuffleSpread: () => {
       if (spread?.done) { notify("Spread finito: riaprilo (D) per cambiare il layout."); return; }
       if (spread?.areas.every((area) => area.locked)) { notify("Layout bloccato: sbloccalo (lucchetto) per cambiarlo."); return; }
+      // Le pagine libere non si rimescolano da qui: le posizioni scelte a mano non si perdono per cambiare l'altra pagina.
+      const free = spread?.areas.filter((area) => hasFreeLayout(area) && !area.locked).length ?? 0;
+      if (free > 0 && spread?.areas.every((area) => area.locked || area.items.length === 0 || hasFreeLayout(area))) { notify("Le pagine libere non si mescolano con tutto lo spread: usa Mescola nella striscia della pagina (le foto tornano ai layout automatici)."); return; }
       commit((p) => shuffleSpread(p, spreadId, 1, templates));
+      if (free > 0) notify("La pagina libera è rimasta com'è: per rimescolarla usa Mescola nella sua striscia.");
     },
-    lockArea: (i, locked) => { commit((p) => setAreaLocked(p, spreadId, i, locked)); notify(locked ? "Layout bloccato: Mescola e Auto Build non lo toccano." : "Layout sbloccato."); },
-    lockSpread: (scope, locked) => { commit((p) => setSpreadLock(p, spreadId, scope, locked)); notify(locked ? "Layout bloccato: Mescola e Auto Build non lo toccano." : "Layout sbloccato."); },
+    lockArea: (i, locked) => { commit((p) => setAreaLocked(p, spreadId, i, locked)); notify(locked ? "Layout bloccato: le foto restano ferme e Mescola e Auto Build non lo toccano." : "Layout sbloccato."); },
+    lockSpread: (scope, locked) => { commit((p) => setSpreadLock(p, spreadId, scope, locked)); notify(locked ? "Layout bloccato: le foto restano ferme e Mescola e Auto Build non lo toccano." : "Layout sbloccato."); },
     freeArea: (i) => {
       const before = historyRef.current.present;
       commit((p) => makeAreaFree(p, spreadId, i));
@@ -525,6 +533,24 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       try { storeTemplates(upsertTemplate(templates, { ...made, name: `${made.kind === "free" ? "Libero" : "Divisioni"} ${made.count} foto` })); notify("Layout salvato nei tuoi template: lo trovi nell'elenco dei layout."); } catch (error) { notify(error instanceof Error ? error.message : "Template non salvato."); }
     },
     commitFrame: (itemId, frame) => commit((p) => setFrame(p, itemId, frame), `frame:${itemId}`),
+    moveFrameAcross: (itemId, areaIndex, rect) => {
+      const before = historyRef.current.present;
+      const found = findItem(before, itemId);
+      if (found?.spread.areas[areaIndex]?.locked) { notify("Layout bloccato nell'altra pagina: sbloccalo (lucchetto) per portarci la foto."); return; }
+      commit((p) => moveFrameToArea(p, itemId, areaIndex, rect));
+      if (historyRef.current.present === before) notify("La foto non si può spostare lì: l'altra pagina ha già 12 foto.");
+      else setActiveArea(areaIndex);
+    },
+    moveToPage: (itemId, areaIndex) => {
+      const before = historyRef.current.present;
+      const found = findItem(before, itemId);
+      if (!found) return;
+      if (found.item.locked) { notify("La foto è bloccata: sbloccala (L) per spostarla."); return; }
+      if (found.area.locked || found.spread.areas[areaIndex]?.locked) { notify("Layout bloccato: sbloccalo (lucchetto) per spostare le foto tra le pagine."); return; }
+      commit((p) => moveItemToArea(p, itemId, areaIndex));
+      if (historyRef.current.present === before) notify("La foto non si può spostare: l'altra pagina ha già 12 foto.");
+      else { setActiveArea(areaIndex); setSelectedItemId(itemId); }
+    },
     orderFrame: (itemId, where) => commit((p) => reorderFrame(p, itemId, where)),
     rotateFrame: (itemId, delta) => commit((p) => { const f = findItem(p, itemId); const current = f?.area.free?.[itemId]; return current ? setFrame(p, itemId, { rotation: current.rotation + delta }) : p; }, `rotate:${itemId}`),
     applyFavorite: (i, favoriteId) => { const why = layoutRefusal(spread, i); if (why) { notify(why); return; } commit((p) => applyFavoriteLayout(p, spreadId, i, favoriteId)); },

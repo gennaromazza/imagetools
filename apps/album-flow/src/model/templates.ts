@@ -1,10 +1,10 @@
 import type { AlbumArea, AlbumAssetV2, AlbumSpread, AreaTemplate, FreeFrame, LayoutNode, SheetSpec, TemplateTarget } from "@photo-tools/shared-types";
-import { areaOuterRects, insetRect, layoutCells, type Rect } from "../engine/geometry";
-import { cropFraction } from "../engine/generate";
+import { BEHIND_LEVEL, areaOuterRects, insetRect, layoutCells, type Rect } from "../engine/geometry";
+import { cropFraction, generateLayoutsCached } from "../engine/generate";
 import { applyShape, countLeaves, leaf, leafIds, shapeOfTree, split } from "../engine/tree";
 import { newId } from "./ids";
 import { MAX_ITEMS_PER_AREA } from "./defaults";
-import { areaGeometry, assetMap, effectiveAspect, hasFreeLayout, mapSpread, nowIso, normalizeArea, replaceArea, touch, findItem, type Project } from "./project";
+import { alignedForFit, areaGeometry, assetMap, effectiveAspect, hasFreeLayout, mapSpread, nowIso, normalizeArea, replaceArea, touch, findItem, type Project } from "./project";
 
 /**
  * Template disegnati dall'utente: si salvano nel computer (valgono per tutti gli album), si riconoscono dal numero di foto e
@@ -239,12 +239,25 @@ export function templateArea(area: AlbumArea, template: AreaTemplate, order?: re
   return normalizeArea({ ...area, items, layout: chainTree(ids), seed: 0, free });
 }
 
+/**
+ * Rifinisce un'area a cui è stato appena applicato un template, con le misure vere della pagina:
+ * - ad albero: in «foto intera» (o con forme scelte) le divisioni si regolano perché le foto risultino allineate, come per i layout calcolati;
+ * - libero: l'albero di riserva diventa il layout calcolato migliore per quelle foto, così «Torna al layout automatico» non mostra una fila di strisce.
+ */
+export function finishTemplateArea(project: Project, spread: AlbumSpread, areaIndex: number, next: AlbumArea): AlbumArea {
+  const { inner, gapMm } = areaGeometry(project, replaceArea(spread, areaIndex, { ...next, free: undefined }), areaIndex);
+  if (!hasFreeLayout(next)) return alignedForFit(project, next, inner, gapMm);
+  const assets = assetMap(project);
+  const best = generateLayoutsCached(next.items.map((item) => ({ id: item.id, aspect: effectiveAspect(item, assets.get(item.assetId)) })), { rect: inner, gapMm, limit: 1 })[0];
+  return best ? normalizeArea({ ...next, layout: best.tree }) : next;
+}
+
 export function applyTemplate(project: Project, spreadId: string, areaIndex: number, template: AreaTemplate, order?: readonly number[]): Project {
   return mapSpread(project, spreadId, (spread) => {
     const area = spread.areas[areaIndex];
     if (!area || spread.done || area.locked) return spread;
     const next = templateArea(area, template, order);
-    return next ? replaceArea(spread, areaIndex, next) : spread;
+    return next ? replaceArea(spread, areaIndex, finishTemplateArea(project, spread, areaIndex, next)) : spread;
   });
 }
 
@@ -262,10 +275,13 @@ export function templateFromArea(project: Project, spreadId: string, areaIndex: 
 // Cornici libere dentro l'album
 // ---------------------------------------------------------------------------
 
-/** Cambia posizione, misure o rotazione della cornice di una foto in una disposizione libera. */
+/**
+ * Cambia posizione, misure o rotazione della cornice di una foto in una disposizione libera.
+ * Con il layout della pagina bloccato (lucchetto) le foto restano ferme: si possono solo sostituire o scambiare.
+ */
 export function setFrame(project: Project, itemId: string, change: Partial<FreeFrame>): Project {
   const found = findItem(project, itemId);
-  if (!found || !hasFreeLayout(found.area) || found.item.locked) return project;
+  if (!found || !hasFreeLayout(found.area) || found.item.locked || found.area.locked) return project;
   const old = found.area.free![itemId];
   const next = sanitizeFrame({ ...old, ...change });
   if (JSON.stringify(next) === JSON.stringify(old)) return project;
@@ -275,14 +291,38 @@ export function setFrame(project: Project, itemId: string, change: Partial<FreeF
   });
 }
 
-/** Porta una foto davanti a tutte le altre (o dietro) in una disposizione libera. */
+/**
+ * Porta una foto davanti a tutte le altre (o dietro) in una disposizione libera. Contano le foto libere di tutto lo spread, così una foto
+ * che sborda nell'altra pagina va davvero sopra (o sotto) anche a quelle; «dietro» la porta anche sotto le foto dei layout automatici
+ * (vedi `paintOrder`, lo stesso ordine a schermo e nell'esportazione).
+ */
 export function reorderFrame(project: Project, itemId: string, where: "front" | "back"): Project {
   const found = findItem(project, itemId);
   if (!found || !hasFreeLayout(found.area)) return project;
-  const levels = Object.values(found.area.free!).map((frame) => frame.z);
-  // Dietro: sotto anche le foto dell'altra pagina (a schermo le foto non libere stanno a livello 2, le libere a 10 + z).
-  const z = where === "front" ? Math.max(...levels) + 1 : Math.min(Math.min(...levels) - 1, -9);
-  return setFrame(project, itemId, { z });
+  const levels = found.spread.areas.filter((area) => hasFreeLayout(area)).flatMap((area) => area.items.filter((item) => item.id !== itemId).map((item) => area.free![item.id].z));
+  const own = found.area.free![itemId].z;
+  // Già davanti (o dietro) a tutte: nessun cambio, così i livelli non crescono a ogni clic.
+  if (where === "front") return own > BEHIND_LEVEL && levels.every((level) => own > level) ? project : setFrame(project, itemId, { z: Math.max(BEHIND_LEVEL + 1, ...levels.map((level) => level + 1)) });
+  return own <= BEHIND_LEVEL && levels.every((level) => own < level) ? project : setFrame(project, itemId, { z: Math.min(BEHIND_LEVEL, ...levels.map((level) => level - 1)) });
+}
+
+/**
+ * Cornici libere di una pagina portate su una pagina di altre misure (scambio delle pagine, un terzo ↔ due terzi, margini diversi):
+ * la composizione si riduce o si ingrandisce in modo uniforme e resta centrata, così ogni foto mantiene le sue proporzioni.
+ */
+export function refitFrames(free: Record<string, FreeFrame>, from: Rect, to: Rect): Record<string, FreeFrame> {
+  if (from.w <= 0 || from.h <= 0 || to.w <= 0 || to.h <= 0) return free;
+  const scale = Math.min(to.w / from.w, to.h / from.h);
+  const offsetX = (to.w - from.w * scale) / 2;
+  const offsetY = (to.h - from.h * scale) / 2;
+  if (Math.abs(scale - 1) < 1e-9 && Math.abs(offsetX) < 1e-9 && Math.abs(offsetY) < 1e-9) return free;
+  return Object.fromEntries(Object.entries(free).map(([id, frame]) => [id, sanitizeFrame({
+    ...frame,
+    x: (offsetX + frame.x * from.w * scale) / to.w,
+    y: (offsetY + frame.y * from.h * scale) / to.h,
+    w: (frame.w * from.w * scale) / to.w,
+    h: (frame.h * from.h * scale) / to.h,
+  })]));
 }
 
 /** Foto della disposizione libera dalla più in primo piano alla più in fondo (per capire chi sta sopra). */

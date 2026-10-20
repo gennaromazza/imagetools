@@ -1,5 +1,5 @@
 import type { AlbumAssetV2, AlbumSpread } from "@photo-tools/shared-types";
-import { areaOuterRects, spreadSizeMm } from "../engine/geometry";
+import { areaOuterRects, paintOrder, spreadSizeMm } from "../engine/geometry";
 import { itemBorderColor, placeItem } from "../model/placement";
 import { areaGeometry, assetMap, placementStyle, type Project } from "../model/project";
 import { renderBackgroundsSvg, renderOverlaysSvg, type DesignContext } from "./design-svg";
@@ -47,39 +47,39 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
   const backgroundImages = options.design ? renderBackgroundsSvg(project, spread, options.design) : "";
   const overlays = options.design ? renderOverlaysSvg(project, spread, options.design) : "";
   let needsMono = false;
-  const cells = spread.areas.map((area, areaIndex) => {
-    const geometry = areaGeometry(project, spread, areaIndex);
-    // Nelle disposizioni libere si disegna dal livello più basso al più alto; ogni foto ruota attorno al suo centro.
-    const ordered = geometry.cells.some((cell) => cell.z !== undefined) ? [...geometry.cells].sort((a, b) => (a.z ?? 0) - (b.z ?? 0)) : geometry.cells;
-    return ordered.map((cell) => {
-      const item = area.items.find((candidate) => candidate.id === cell.itemId);
-      if (!item) throw new Error("Elemento mancante nel layout.");
-      const asset = assets.get(item.assetId);
-      const placement = placeItem(cell.rect, item, asset, placementStyle(area, cell), null, cell.anchor);
-      const { frame, content, borderMm } = placement;
-      const border = borderMm > 0 ? `<rect x="${n(content.x - borderMm)}" y="${n(content.y - borderMm)}" width="${n(content.w + borderMm * 2)}" height="${n(content.h + borderMm * 2)}" fill="${attr(itemBorderColor(item, area.style))}"/>` : "";
-      const url = asset?.previewUrl;
-      const usable = url && (!options.forPrint || url.startsWith("data:image/"));
-      const turn = (inner: string) => (cell.rotation ? `<g transform="rotate(${n(cell.rotation)} ${n(cell.rect.x + cell.rect.w / 2)} ${n(cell.rect.y + cell.rect.h / 2)})">${inner}</g>` : inner);
-      if (!usable || !asset) return turn(`${border}<rect x="${n(content.x)}" y="${n(content.y)}" width="${n(content.w)}" height="${n(content.h)}" fill="#d8d2c6"/>`);
-      const clipId = `c${spreadIndex}-${safeId(item.id)}`;
-      const quarter = asset.rotationDegrees === 90 || asset.rotationDegrees === 270;
-      const cx = placement.image.x + placement.image.w / 2;
-      const cy = placement.image.y + placement.image.h / 2;
-      const elementW = quarter ? placement.image.h : placement.image.w;
-      const elementH = quarter ? placement.image.w : placement.image.h;
-      const rotate = asset.rotationDegrees ? ` transform="rotate(${asset.rotationDegrees} ${n(cx)} ${n(cy)})"` : "";
-      if (area.style.mono) needsMono = true;
-      const filter = area.style.mono ? ' filter="url(#mono)"' : "";
-      const clip = `<clipPath id="${clipId}"><rect x="${n(content.x)}" y="${n(content.y)}" width="${n(content.w)}" height="${n(content.h)}"/></clipPath>`;
-      if (placement.angle) {
-        // Foto raddrizzata: il ritaglio resta dritto, l'immagine ruota attorno al centro della parte visibile.
-        return turn(`${border}${clip}<g clip-path="url(#${clipId})"><g transform="rotate(${n(placement.angle)} ${n(content.x + content.w / 2)} ${n(content.y + content.h / 2)})">`
-          + `<image href="${attr(url)}" x="${n(cx - elementW / 2)}" y="${n(cy - elementH / 2)}" width="${n(elementW)}" height="${n(elementH)}" preserveAspectRatio="none"${rotate}${filter}/></g></g>`);
-      }
-      return turn(`${border}${clip}`
-        + `<image href="${attr(url)}" x="${n(cx - elementW / 2)}" y="${n(cy - elementH / 2)}" width="${n(elementW)}" height="${n(elementH)}" preserveAspectRatio="none"${rotate}${filter} clip-path="url(#${clipId})"/>`);
-    }).join("");
+  const geometries = spread.areas.map((_, areaIndex) => areaGeometry(project, spread, areaIndex));
+  // Tutte le foto dello spread nello stesso ordine di disegno dello schermo (`paintOrder`), dal livello più basso al più alto anche tra le due
+  // pagine: una foto libera che sborda nell'altra pagina sta sopra o sotto come a schermo. Ogni foto ruota attorno al suo centro.
+  const ordered = paintOrder(geometries.flatMap((geometry, areaIndex) => geometry.cells.map((cell, index) => ({ cell, areaIndex, index }))));
+  const cells = ordered.map(({ cell, areaIndex }) => {
+    const area = spread.areas[areaIndex];
+    const item = area.items.find((candidate) => candidate.id === cell.itemId);
+    if (!item) throw new Error("Elemento mancante nel layout.");
+    const asset = assets.get(item.assetId);
+    const placement = placeItem(cell.rect, item, asset, placementStyle(area, cell), null, cell.anchor);
+    const { frame, content, borderMm } = placement;
+    const border = borderMm > 0 ? `<rect x="${n(content.x - borderMm)}" y="${n(content.y - borderMm)}" width="${n(content.w + borderMm * 2)}" height="${n(content.h + borderMm * 2)}" fill="${attr(itemBorderColor(item, area.style))}"/>` : "";
+    const url = asset?.previewUrl;
+    const usable = url && (!options.forPrint || url.startsWith("data:image/"));
+    const turn = (inner: string) => (cell.rotation ? `<g transform="rotate(${n(cell.rotation)} ${n(cell.rect.x + cell.rect.w / 2)} ${n(cell.rect.y + cell.rect.h / 2)})">${inner}</g>` : inner);
+    if (!usable || !asset) return turn(`${border}<rect x="${n(content.x)}" y="${n(content.y)}" width="${n(content.w)}" height="${n(content.h)}" fill="#d8d2c6"/>`);
+    const clipId = `c${spreadIndex}-${safeId(item.id)}`;
+    const quarter = asset.rotationDegrees === 90 || asset.rotationDegrees === 270;
+    const cx = placement.image.x + placement.image.w / 2;
+    const cy = placement.image.y + placement.image.h / 2;
+    const elementW = quarter ? placement.image.h : placement.image.w;
+    const elementH = quarter ? placement.image.w : placement.image.h;
+    const rotate = asset.rotationDegrees ? ` transform="rotate(${asset.rotationDegrees} ${n(cx)} ${n(cy)})"` : "";
+    if (area.style.mono) needsMono = true;
+    const filter = area.style.mono ? ' filter="url(#mono)"' : "";
+    const clip = `<clipPath id="${clipId}"><rect x="${n(content.x)}" y="${n(content.y)}" width="${n(content.w)}" height="${n(content.h)}"/></clipPath>`;
+    if (placement.angle) {
+      // Foto raddrizzata: il ritaglio resta dritto, l'immagine ruota attorno al centro della parte visibile.
+      return turn(`${border}${clip}<g clip-path="url(#${clipId})"><g transform="rotate(${n(placement.angle)} ${n(content.x + content.w / 2)} ${n(content.y + content.h / 2)})">`
+        + `<image href="${attr(url)}" x="${n(cx - elementW / 2)}" y="${n(cy - elementH / 2)}" width="${n(elementW)}" height="${n(elementH)}" preserveAspectRatio="none"${rotate}${filter}/></g></g>`);
+    }
+    return turn(`${border}${clip}`
+      + `<image href="${attr(url)}" x="${n(cx - elementW / 2)}" y="${n(cy - elementH / 2)}" width="${n(elementW)}" height="${n(elementH)}" preserveAspectRatio="none"${rotate}${filter} clip-path="url(#${clipId})"/>`);
   }).join("");
 
   let guides = "";

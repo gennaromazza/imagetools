@@ -367,7 +367,9 @@ test("layout preferiti: salva la forma, non duplica, si riapplica a foto diverse
   const favoriteId = project.favoriteLayouts[0].id;
   const applied = applyFavoriteLayout(project, id, 1, favoriteId);
   assert.deepEqual(leafIds(applied.spreads[0].areas[1].layout), itemsOf(applied, 1).map((i) => i.id));
-  assert.equal(JSON.stringify(applied.spreads[0].areas[1].layout).replaceAll(/"itemId":"[^"]+"/g, ""), JSON.stringify(project.spreads[0].areas[0].layout).replaceAll(/"itemId":"[^"]+"/g, ""), "stessa struttura");
+  // Stessa struttura; in «foto intera» le divisioni si regolano sulle foto nuove perché risultino allineate (come i layout calcolati).
+  const structure = (layout: unknown) => JSON.stringify(layout).replaceAll(/"itemId":"[^"]+"/g, "").replaceAll(/"ratio":[-0-9.e]+/g, "");
+  assert.equal(structure(applied.spreads[0].areas[1].layout), structure(project.spreads[0].areas[0].layout), "stessa struttura");
   const two = filled(2, 0);
   assert.equal(applyFavoriteLayout({ ...two, favoriteLayouts: project.favoriteLayouts }, firstSpreadId(two), 0, favoriteId).spreads[0].areas[0].layout, two.spreads[0].areas[0].layout, "numero di foto diverso: nulla");
   assert.equal(removeFavoriteLayout(project, favoriteId).favoriteLayouts.length, 0);

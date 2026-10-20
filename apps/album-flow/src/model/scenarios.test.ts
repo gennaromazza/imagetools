@@ -9,8 +9,9 @@ import { applyTemplate, matchTemplates, reorderFrame, sanitizeTemplate, setFrame
 import { applyChapterPreset, assignAssets, BUILTIN_CHAPTER_PRESETS, createChapter, moveChapter, removeChapter } from "./chapters";
 import { overlaysOf } from "./design";
 import { assertProjectInvariants, makeProject } from "./fixtures";
+import { makeAreaFree, restoreAutomatic, setAreaLocked } from "./layoutLock";
 import { applyImport, dedupeRawJpgPairs, planImport, type ImportCandidate } from "./import";
-import { alignArea, appendAssets, dropOnSpread, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, swapItems, toggleItemLock } from "./items";
+import { alignArea, appendAssets, dropOnSpread, moveFrameToArea, moveItemToArea, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, swapItems, toggleItemLock } from "./items";
 import { assetUsage, duplicatedAssetIds, removeAssets, reorderAssets, setRating, setSortKey, sortAssets, toggleAssetTag, unusedAssets } from "./library";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
 import { preflightReport } from "./preflight";
@@ -329,6 +330,19 @@ const OPERATIONS: Operation[] = [
   { name: "duplica spread", run: (p, r) => (p.spreads.length > 0 && p.spreads.length < 60 ? duplicateSpread(p, pick(r, p.spreads).id) : p) },
   { name: "svuota spread", run: (p, r) => (p.spreads.length ? clearSpread(p, pick(r, p.spreads).id) : p) },
   { name: "scambia pagine", run: (p, r) => (p.spreads.length ? swapAreas(p, pick(r, p.spreads).id) : p) },
+  { name: "pagina libera", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? makeAreaFree(p, spread.id, Math.floor(r() * spread.areas.length)) : p; } },
+  { name: "torna al layout automatico", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? restoreAutomatic(p, spread.id, Math.floor(r() * spread.areas.length)) : p; } },
+  { name: "blocca o sblocca pagina", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? setAreaLocked(p, spread.id, Math.floor(r() * spread.areas.length), r() < 0.4) : p; } },
+  { name: "sposta nell'altra pagina", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry && entry.spread.areas.length === 2 ? moveItemToArea(p, entry.item.id, 1 - entry.areaIndex) : p; } },
+  {
+    name: "cornice trascinata sull'altra pagina",
+    run: (p, r) => {
+      const entry = maybe(r, itemsOf(p));
+      if (!entry || entry.spread.areas.length !== 2) return p;
+      const inner = areaGeometry(p, entry.spread, 1 - entry.areaIndex).inner;
+      return moveFrameToArea(p, entry.item.id, 1 - entry.areaIndex, { x: inner.x + r() * inner.w * 0.6, y: inner.y + r() * inner.h * 0.6, w: 20 + r() * inner.w * 0.5, h: 20 + r() * inner.h * 0.5 });
+    },
+  },
   { name: "divisione", run: (p, r) => (p.spreads.length ? setSplitMode(p, pick(r, p.spreads).id, pick(r, MODES)) : p) },
   {
     name: "testo narrativo",

@@ -7,6 +7,8 @@ import { setAreaStyle } from "../model/areas";
 import { assertProjectInvariants, makeAsset, makeProject } from "../model/fixtures";
 import { findSpread, itemAspect, type Project } from "../model/project";
 import { renderSpreadSvg, spreadSizeWithBleedMm } from "./spread-svg";
+import { makeAreaFree } from "../model/layoutLock";
+import { reorderFrame, setFrame } from "../model/templates";
 
 const cell = { x: 10, y: 20, w: 200, h: 100 };
 const item = { zoom: 1, cx: 0.5, cy: 0.5 };
@@ -274,4 +276,27 @@ test("provino ed esportazione: dopo avere riordinato gli spread i file escono ne
   const reopened = parseAlbumProject(serializeAlbumProject(reordered));
   assert.deepEqual(reopened.spreads.map((spread) => spread.id), reordered.spreads.map((spread) => spread.id));
   assert.deepEqual([0, 1, 2, 3, 4, 5].map((i) => photoOf(reopened, i)[0]), expected);
+});
+
+test("esportazione: una foto libera che sborda nell'altra pagina sta sopra o sotto come a schermo («Porta davanti» / «Porta dietro»)", () => {
+  let project = makeProject(6);
+  project = { ...project, assets: project.assets.map((asset) => ({ ...asset, previewUrl: `data:image/jpeg;base64,${asset.id}` })) };
+  project = addSpread(project, 0, "half");
+  const id = project.spreads[0].id;
+  project = appendAssets(project, id, 0, ["a0", "a1"]);
+  project = appendAssets(project, id, 1, ["a2", "a3"]);
+  // La pagina destra è libera e una sua foto entra per buona parte nella pagina sinistra.
+  project = makeAreaFree(project, id, 1);
+  const moving = findSpread(project, id)!.spread.areas[1].items[0];
+  project = setFrame(project, moving.id, { x: -0.7, y: 0.1, w: 1.4, h: 0.8 });
+  const position = (svg: string, assetId: string) => svg.indexOf(`base64,${assetId}"`);
+  for (const where of ["front", "back"] as const) {
+    const ordered = reorderFrame(project, moving.id, where);
+    const svg = renderSpreadSvg(ordered, findSpread(ordered, id)!.spread);
+    const left = findSpread(ordered, id)!.spread.areas[0].items.map((item) => position(svg, item.assetId));
+    const free = position(svg, moving.assetId);
+    assert.ok(free >= 0 && left.every((value) => value >= 0));
+    if (where === "front") assert.ok(left.every((value) => value < free), "davanti: disegnata dopo le foto della pagina sinistra");
+    else assert.ok(left.every((value) => value > free), "dietro: disegnata prima delle foto della pagina sinistra");
+  }
 });

@@ -141,3 +141,30 @@ export function freeCells(entries: ReadonlyArray<{ itemId: string; frame: { x: n
     z: frame.z,
   }));
 }
+
+/** Livello sotto cui una foto libera sta dietro anche alle foto dei layout automatici (lo usa «Porta dietro le altre»). */
+export const BEHIND_LEVEL = -9;
+
+/** Fascia di disegno: -1 foto libere «dietro», 0 foto dei layout automatici, 1 foto libere davanti. */
+export function stackBand(cell: Pick<LeafCell, "z">): -1 | 0 | 1 {
+  if (cell.z === undefined) return 0;
+  return cell.z <= BEHIND_LEVEL ? -1 : 1;
+}
+
+/**
+ * Ordine di disegno di tutte le foto di uno spread, dalla più in fondo alla più in alto. Vale per lo schermo, per l'esportazione e per
+ * capire quale foto sta sotto il puntatore: una foto libera che sborda nell'altra pagina deve apparire (ed essere colpita) allo stesso modo ovunque.
+ */
+export function paintOrder<T extends { cell: Pick<LeafCell, "z">; areaIndex: number; index: number }>(entries: readonly T[]): T[] {
+  return [...entries].sort((a, b) => stackBand(a.cell) - stackBand(b.cell) || (a.cell.z ?? 0) - (b.cell.z ?? 0) || a.areaIndex - b.areaIndex || a.index - b.index);
+}
+
+/** Il punto cade dentro la cella, tenendo conto della rotazione delle cornici libere. */
+export function pointInCell(x: number, y: number, cell: Pick<LeafCell, "rect" | "rotation">): boolean {
+  if (!cell.rotation) return pointInRect(x, y, cell.rect);
+  const c = rectCenter(cell.rect);
+  const rad = (-cell.rotation * Math.PI) / 180;
+  const dx = x - c.x;
+  const dy = y - c.y;
+  return pointInRect(c.x + dx * Math.cos(rad) - dy * Math.sin(rad), c.y + dx * Math.sin(rad) + dy * Math.cos(rad), cell.rect);
+}

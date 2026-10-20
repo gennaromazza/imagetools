@@ -4,7 +4,7 @@ import { getSnapEnabled } from "../model/snapSettings";
 import { type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetV2, AlbumItem, AlbumArea, AlbumSpread, SheetSpec } from "@photo-tools/shared-types";
 import { dropHighlight, resolveDropTarget, type DropTarget } from "../engine/drop";
-import { spreadSizeMm, type Divider, type LeafCell, type Rect } from "../engine/geometry";
+import { paintOrder, spreadSizeMm, stackBand, type Divider, type LeafCell, type Rect } from "../engine/geometry";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import { previewDropRect } from "../model/items";
 import { angleFromLine, clampAngle, describeSize, itemBorderColor, nextWheelZoom, placeItem, toolbarModeFor, wheelIntent, wheelNotches, type ItemView } from "../model/placement";
@@ -76,11 +76,18 @@ export interface SpreadViewProps {
   photosLocked?: boolean;
   /** Una foto di una disposizione libera è stata spostata o ridimensionata (frazioni dell'area utile). */
   onCommitFrame?: (itemId: string, frame: { x: number; y: number; w: number; h: number }) => void;
+  /** Una foto libera trascinata sopra l'altra pagina, a sua volta libera: passa a quella pagina restando dove è stata lasciata (mm nello spread). */
+  onMoveFrameAcross?: (itemId: string, areaIndex: number, rect: Rect) => void;
   /** Contenuto della barra che compare sulla foto selezionata. */
   renderToolbar?: (itemId: string) => ToolbarParts | null;
 }
 
 const pct = (value: number) => `${Number(value.toFixed(4))}%`;
+
+type DropHint = { target: DropTarget; rect: Rect } | null;
+/** Stesso bersaglio e stesso riquadro: non serve ridisegnare (nelle pagine libere il riquadro segue il puntatore). */
+const sameHint = (a: DropHint, b: DropHint): boolean => a === b || (a !== null && b !== null && a.target.areaIndex === b.target.areaIndex && a.target.itemId === b.target.itemId
+  && a.target.zone === b.target.zone && a.target.node === b.target.node && Math.abs(a.rect.x - b.rect.x) < 0.5 && Math.abs(a.rect.y - b.rect.y) < 0.5 && Math.abs(a.rect.w - b.rect.w) < 0.5 && Math.abs(a.rect.h - b.rect.h) < 0.5);
 const SNAPS = [0.5, 1 / 3, 2 / 3];
 /** Distanza (pixel sullo schermo) entro cui una foto si aggancia alle altre durante lo spostamento. */
 const SNAP_PX = 6;
@@ -109,7 +116,13 @@ interface CellProps {
   snapTargets?: Array<{ id: string; rect: Rect }>;
   /** Lo strumento «linea» del raddrizzamento è acceso per questa foto. */
   lineTool: boolean;
-  handlers: Pick<SpreadViewProps, "onSelectItem" | "onTogglePick" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & { onCommitFrameRect?: (itemId: string, rect: Rect) => void };
+  handlers: Pick<SpreadViewProps, "onSelectItem" | "onTogglePick" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & {
+    onCommitFrameRect?: (itemId: string, rect: Rect) => void;
+    /** La foto libera trascinata è sopra un punto dello spread: mostra se lasciandola lì passerebbe all'altra pagina (null = fine del gesto). */
+    onFrameOver?: (itemId: string, pointer: { clientX: number; clientY: number } | null) => void;
+    /** Rilascio della foto libera: true se è passata all'altra pagina (allora la cornice non si salva qui). */
+    onFrameDrop?: (itemId: string, clientX: number, clientY: number, rect: Rect) => boolean;
+  };
 }
 
 /** Pixel utili a schermo pieno: niente 2400 px su un monitor che ne mostra meno (decodifica e lettura più veloci). */
@@ -170,7 +183,8 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     return () => element.removeEventListener("wheel", onWheel);
   }, [interactive]);
 
-  const freeFrame = free && interactive && !item.locked;
+  // Con il layout della pagina bloccato (lucchetto) le foto libere restano ferme: si trascinano solo per sostituirle o scambiarle, come nelle pagine automatiche.
+  const freeFrame = free && interactive && !item.locked && !area.locked;
   const frameDrag = useRef<{ mode: "move" | "resize"; x: number; y: number; rect: Rect; mmPerPx: number; moved: boolean } | null>(null);
   const startFrame = (event: React.PointerEvent, mode: "move" | "resize") => {
     const parent = ref.current?.parentElement?.getBoundingClientRect();
@@ -202,13 +216,17 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
   const moveFrame = (event: React.PointerEvent) => {
     const rect = frameRect(event);
     if (rect) handlers.onDraft?.({ kind: "frame", itemId: item.id, rect, guides: snapGuides.current });
+    if (frameDrag.current?.mode === "move") handlers.onFrameOver?.(item.id, { clientX: event.clientX, clientY: event.clientY });
   };
   const endFrame = (event: React.PointerEvent) => {
     const drag = frameDrag.current;
     const rect = frameRect(event);
     frameDrag.current = null;
     handlers.onDraft?.(null);
-    if (drag?.moved && rect) handlers.onCommitFrameRect?.(item.id, rect);
+    if (!drag?.moved || !rect) { handlers.onFrameOver?.(item.id, null); return; }
+    // Lasciata sopra l'altra pagina la foto passa a quella pagina; altrimenti resta nella sua, nella nuova posizione.
+    if (drag.mode === "move" && handlers.onFrameDrop?.(item.id, event.clientX, event.clientY, rect)) return;
+    handlers.onCommitFrameRect?.(item.id, rect);
   };
 
   // Strumento «linea»: si traccia una linea sullo schermo lungo l'orizzonte (o un lato che deve essere verticale) e la foto si raddrizza di conseguenza.
@@ -307,7 +325,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       mono={area.style.mono}
       borderColor={itemBorderColor(item, area.style)}
       className={classes}
-      style={cell.z !== undefined ? { zIndex: Math.min(25, Math.max(1, 10 + cell.z)), transform: cell.rotation ? `rotate(${cell.rotation}deg)` : undefined } : undefined}
+      style={cell.z !== undefined ? { zIndex: stackBand(cell) < 0 ? 1 : 10, transform: cell.rotation ? `rotate(${cell.rotation}deg)` : undefined } : undefined}
       alt={asset?.fileName}
       data-item-id={item.id}
       data-asset-id={item.assetId}
@@ -563,8 +581,42 @@ function SpreadViewInner(props: SpreadViewProps) {
     return { target, rect: preview ?? dropHighlight({ ...target, highlight: undefined }, cell, geometry[target.areaIndex].outer) };
   }, [geometry, toMm, sheet, spread, assets]);
 
-  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect }),
-    [props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect]);
+  /**
+   * Una foto libera spostata col puntatore fin sopra l'altra pagina: dove andrebbe lasciandola lì. Su una pagina libera passa a quella pagina
+   * restando dove la si vede (si evidenzia la pagina); su una pagina automatica o vuota vale il rilascio normale (bordo, centro, spazio vuoto).
+   * Le funzioni leggono i valori da una ref: restano le stesse durante il gesto e le celle non si ridisegnano tutte a ogni movimento.
+   */
+  const crossing = useRef({ geometry, spread, sheet, assets, toMm, onDropItem: props.onDropItem, onMoveFrameAcross: props.onMoveFrameAcross });
+  crossing.current = { geometry, spread, sheet, assets, toMm, onDropItem: props.onDropItem, onMoveFrameAcross: props.onMoveFrameAcross };
+  const crossTarget = useCallback((itemId: string, clientX: number, clientY: number): { target: DropTarget; rect: Rect } | null => {
+    const { geometry: areasNow, spread: spreadNow, sheet: sheetNow, assets: assetsNow, toMm: toSpread } = crossing.current;
+    const from = spreadNow.areas.findIndex((area) => area.items.some((item) => item.id === itemId));
+    const point = toSpread(clientX, clientY);
+    const target = from < 0 ? null : resolveDropTarget(areasNow.map((g, index) => ({ rect: g.outer, cells: g.cells, dividers: g.dividers, free: hasFreeLayout(spreadNow.areas[index]) })), point.x, point.y, itemId);
+    if (!target || target.areaIndex === from) return null;
+    const area = spreadNow.areas[target.areaIndex];
+    if (hasFreeLayout(area)) return { target: { areaIndex: target.areaIndex, itemId: null, zone: "area" }, rect: areasNow[target.areaIndex].inner };
+    if (target.zone === "center" && target.itemId && area.items.find((candidate) => candidate.id === target.itemId)?.locked) return null;
+    const assetId = spreadNow.areas[from].items.find((item) => item.id === itemId)?.assetId ?? "";
+    const cell = target.itemId ? areasNow[target.areaIndex].cells.find((candidate) => candidate.itemId === target.itemId)?.rect ?? null : null;
+    return { target, rect: previewDropRect(sheetNow, spreadNow, assetsNow, target, { assetId, itemId }) ?? dropHighlight({ ...target, highlight: undefined }, cell, areasNow[target.areaIndex].outer) };
+  }, []);
+  const frameOver = useCallback((itemId: string, pointer: { clientX: number; clientY: number } | null) => {
+    const found = pointer ? crossTarget(itemId, pointer.clientX, pointer.clientY) : null;
+    setHint((previous) => (sameHint(previous, found) ? previous : found));
+  }, [crossTarget]);
+  const frameDrop = useCallback((itemId: string, clientX: number, clientY: number, rect: Rect): boolean => {
+    const found = crossTarget(itemId, clientX, clientY);
+    setHint(null);
+    if (!found) return false;
+    const { spread: spreadNow, onDropItem, onMoveFrameAcross } = crossing.current;
+    if (hasFreeLayout(spreadNow.areas[found.target.areaIndex])) onMoveFrameAcross?.(itemId, found.target.areaIndex, rect);
+    else onDropItem?.(found.target, itemId);
+    return true;
+  }, [crossTarget]);
+
+  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect, onFrameOver: frameOver, onFrameDrop: frameDrop }),
+    [props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect, frameOver, frameDrop]);
 
   const onDragOver = (event: React.DragEvent) => {
     const payload = currentDrag();
@@ -575,7 +627,7 @@ function SpreadViewInner(props: SpreadViewProps) {
     if (found.target.zone === "center" && found.target.itemId && spread.areas[found.target.areaIndex]?.items.find((candidate) => candidate.id === found.target.itemId)?.locked) { setHint(null); return; }
     event.preventDefault();
     event.dataTransfer.dropEffect = payload.kind === "assets" ? "copy" : "move";
-    setHint((previous) => (previous && previous.target.areaIndex === found.target.areaIndex && previous.target.itemId === found.target.itemId && previous.target.zone === found.target.zone && previous.target.node === found.target.node ? previous : found));
+    setHint((previous) => (sameHint(previous, found) ? previous : found));
   };
   const onDrop = (event: React.DragEvent) => {
     const payload = currentDrag();
@@ -625,8 +677,10 @@ function SpreadViewInner(props: SpreadViewProps) {
         ) : null;
       })}
 
-      {spread.areas.map((area, areaIndex) =>
-        geometry[areaIndex].cells.map((cell) => {
+      {/* Le foto nell'ordine di disegno di tutto lo spread (lo stesso dell'esportazione e del rilascio): una foto libera che sborda nell'altra pagina
+          sta sopra o sotto come nel JPG. A parità di livello CSS decide l'ordine nel documento. */}
+      {paintOrder(geometry.flatMap((entry, areaIndex) => entry.cells.map((cell, index) => ({ cell, areaIndex, index })))).map(({ cell, areaIndex }) => {
+          const area = spread.areas[areaIndex];
           const item = area.items.find((candidate) => candidate.id === cell.itemId);
           if (!item) return null;
           return (
@@ -652,7 +706,7 @@ function SpreadViewInner(props: SpreadViewProps) {
               handlers={handlers}
             />
           );
-        }))}
+        })}
 
       {draft?.kind === "frame" && draft.guides?.length ? draft.guides.map((guide, index) => (
         <span
@@ -675,8 +729,8 @@ function SpreadViewInner(props: SpreadViewProps) {
 
       <div className="spread__fold" aria-hidden="true" />
 
-      {/* Con le foto allineate («foto intera» o forme scelte) i separatori non si trascinano: le divisioni seguono le proporzioni delle foto. */}
-      {interactive ? spread.areas.map((area, areaIndex) => (needsShapeAlignment(area) ? [] : geometry[areaIndex].dividers).map((divider) => (
+      {/* Con le foto allineate («foto intera» o forme scelte) i separatori non si trascinano: le divisioni seguono le proporzioni delle foto. Né con il layout bloccato. */}
+      {interactive ? spread.areas.map((area, areaIndex) => (needsShapeAlignment(area) || area.locked ? [] : geometry[areaIndex].dividers).map((divider) => (
         <DividerHandle key={`${area.id}-${divider.path}`} divider={divider} areaIndex={areaIndex} size={size} toMm={toMm} onDraft={props.onDraft} onCommit={props.onCommitRatio} onReset={props.onResetRatio} />
       ))) : null}
 
@@ -693,7 +747,7 @@ function SpreadViewInner(props: SpreadViewProps) {
       )) : null}
 
       {interactive ? spread.areas.map((area, areaIndex) => (area.locked ? (
-        <span key={`lock-${area.id}`} className="spread__locked" title="Layout bloccato: Mescola e Auto Build non lo toccano" style={{ left: pct((geometry[areaIndex].outer.x / size.width) * 100), top: pct((geometry[areaIndex].outer.y / size.height) * 100) }}>
+        <span key={`lock-${area.id}`} className="spread__locked" title="Layout bloccato: le foto restano ferme e Mescola e Auto Build non lo toccano (puoi sostituirle o scambiarle)" style={{ left: pct((geometry[areaIndex].outer.x / size.width) * 100), top: pct((geometry[areaIndex].outer.y / size.height) * 100) }}>
           <Icon name="lock" size={12} /> Layout bloccato
         </span>
       ) : null)) : null}

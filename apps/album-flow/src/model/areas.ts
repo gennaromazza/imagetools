@@ -1,5 +1,5 @@
-import type { AlbumArea, AlbumSpread, AreaStyle, AreaTemplate, FavoriteLayout, LayoutNode } from "@photo-tools/shared-types";
-import { MAX_RATIO, MIN_RATIO, alignFactor, clampRatio, layoutCells } from "../engine/geometry";
+import type { AlbumArea, AlbumItem, AlbumSpread, AreaStyle, AreaTemplate, FavoriteLayout, LayoutNode } from "@photo-tools/shared-types";
+import { MAX_RATIO, MIN_RATIO, alignFactor, clampRatio, layoutCells, type LeafCell } from "../engine/geometry";
 import { generateLayoutsCached, type LayoutCandidate } from "../engine/generate";
 import { applyShape, countLeaves, leafIds, mirrorHorizontal, mirrorVertical, naturalRatios, nodeAt, setRatioAt, shapeOfTree } from "../engine/tree";
 import { MAX_ZOOM, STYLE_LIMITS, clampNumber } from "./defaults";
@@ -7,7 +7,7 @@ import { baseCrop, cropCenter, cropForView } from "../slot-geometry";
 import { newId } from "./ids";
 import { placeItem } from "./placement";
 import { orientationOf } from "./import";
-import { matchTemplates, templateArea, type TemplateMatch } from "./templates";
+import { finishTemplateArea, matchTemplates, templateArea, type TemplateMatch } from "./templates";
 import { alignChanged, alignedForFit, areaGeometry, fitShapedCells, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, itemAspect, mapSpread, naturalOptions, needsShapeAlignment, normalizeArea, placementStyle, replaceArea, touch, findSpread, type Project } from "./project";
 
 const MAX_CANDIDATES = 24;
@@ -46,14 +46,18 @@ export function areaCandidates(project: Project, spread: AlbumSpread, areaIndex:
   return result;
 }
 
-/** Rigenera il layout di un'area con il candidato `index` (0 = il migliore). Non cambia le foto. */
-export function relayoutArea(project: Project, spread: AlbumSpread, areaIndex: number, index = 0): AlbumArea {
+/**
+ * Rigenera il layout di un'area con il candidato `index` (0 = il migliore). Non cambia le foto.
+ * `from`: lo spread com'era davvero prima dell'operazione, se `spread` contiene un layout provvisorio (per esempio la catena di foglie con cui
+ * partono l'aggiunta di foto e il cambio di divisione): il ritaglio fatto a mano si conserva rispetto a ciò che si vedeva lì, non alla catena.
+ */
+export function relayoutArea(project: Project, spread: AlbumSpread, areaIndex: number, index = 0, from: AlbumSpread = spread): AlbumArea {
   const area = spread.areas[areaIndex];
   if (area.items.length === 0) return area.layout === null && area.seed === 0 ? area : { ...area, layout: null, seed: 0 };
   const candidates = areaCandidates(project, spread, areaIndex);
   if (candidates.length === 0) return area;
   const chosen = Math.min(Math.max(index, 0), candidates.length - 1);
-  return keepCrops(project, spread, areaIndex, normalizeArea({ ...area, layout: candidates[chosen].tree, seed: chosen, free: undefined }));
+  return keepCrops(project, spread, areaIndex, normalizeArea({ ...area, layout: candidates[chosen].tree, seed: chosen, free: undefined }), from);
 }
 
 /**
@@ -61,20 +65,29 @@ export function relayoutArea(project: Project, spread: AlbumSpread, areaIndex: n
  * si calcola la parte che si vedeva e, nella nuova cella, si sceglie lo zoom più alto che la contiene tutta, attorno allo stesso centro.
  * Senza questo, una cella di altra proporzione mostrava un'altra porzione della foto e il taglio andava rifatto dopo ogni cambio.
  * Le foto bloccate, con una forma scelta o raddrizzate, e quelle lasciate com'erano, non cambiano.
+ * La parte che si vedeva si cerca nello spread `from` (di base `spread`), in qualunque pagina: una foto può arrivare dall'altra pagina.
  */
-export function keepCrops(project: Project, spread: AlbumSpread, areaIndex: number, next: AlbumArea): AlbumArea {
-  const before = spread.areas[areaIndex];
-  if (!before || hasFreeLayout(next) || next.items.length === 0) return next;
+export function keepCrops(project: Project, spread: AlbumSpread, areaIndex: number, next: AlbumArea, from: AlbumSpread = spread): AlbumArea {
+  if (!spread.areas[areaIndex] || hasFreeLayout(next) || next.items.length === 0) return next;
   const assets = assetMap(project);
-  const oldCells = areaGeometry(project, spread, areaIndex).cells;
+  const ids = new Set(next.items.map((item) => item.id));
+  const seenBefore = new Map<string, { item: AlbumItem; area: AlbumArea; cell: LeafCell }>();
+  from.areas.forEach((area, index) => {
+    if (!area.items.some((item) => ids.has(item.id))) return;
+    const cells = areaGeometry(project, from, index).cells;
+    for (const item of area.items) {
+      const cell = cells.find((candidate) => candidate.itemId === item.id);
+      if (cell && ids.has(item.id)) seenBefore.set(item.id, { item, area, cell });
+    }
+  });
   const newCells = areaGeometry(project, replaceArea(spread, areaIndex, next), areaIndex).cells;
   let changed = false;
   const items = next.items.map((item) => {
-    const old = before.items.find((candidate) => candidate.id === item.id);
+    const previous = seenBefore.get(item.id);
     const asset = assets.get(item.assetId);
-    const oldCell = oldCells.find((cell) => cell.itemId === item.id);
     const newCell = newCells.find((cell) => cell.itemId === item.id);
-    if (!old || !asset || !oldCell || !newCell || item.locked || item.shape || (item.angle ?? 0) !== 0 || old.shape) return item;
+    if (!previous || !asset || !newCell || item.locked || item.shape || (item.angle ?? 0) !== 0 || previous.item.shape) return item;
+    const { item: old, area: before, cell: oldCell } = previous;
     const fitted = before.style.mode === "fit" && old.zoom <= 1 + 1e-6;
     if (fitted) return item;
     const seen = placeItem(oldCell.rect, old, asset, placementStyle(before, oldCell), null, oldCell.anchor);
@@ -114,10 +127,11 @@ export function layoutChoices(project: Project, spread: AlbumSpread, areaIndex: 
   return [...calculated.slice(0, 1), ...own, ...calculated.slice(1)];
 }
 
-function choiceAsArea(area: AlbumArea, choice: LayoutChoice): AlbumArea | null {
+function choiceAsArea(project: Project, spread: AlbumSpread, areaIndex: number, choice: LayoutChoice): AlbumArea | null {
+  const area = spread.areas[areaIndex];
   if (choice.kind === "calculated") return normalizeArea({ ...area, layout: choice.candidate.tree, seed: choice.seed, free: undefined });
   const applied = templateArea(area, choice.match.template, choice.match.order);
-  return applied ? { ...applied, seed: choice.seed } : null;
+  return applied ? { ...finishTemplateArea(project, spread, areaIndex, applied), seed: choice.seed } : null;
 }
 
 /** Posizione del layout attuale nell'elenco (dal seme), 0 se non si riconosce. */
@@ -137,17 +151,20 @@ export function shuffleArea(project: Project, spreadId: string, areaIndex: numbe
     const choices = layoutChoices(project, spread, areaIndex, templates);
     if (choices.length < 2) return spread;
     const next = (currentPosition(area, choices) + direction + choices.length * 2) % choices.length;
-    const result = choiceAsArea(area, choices[next]);
+    const result = choiceAsArea(project, spread, areaIndex, choices[next]);
     return result ? replaceArea(spread, areaIndex, keepCrops(project, spread, areaIndex, result)) : spread;
   });
 }
 
-/** Shuffle di tutte le aree dello spread (ognuna rispetta la propria divisione). */
+/**
+ * Shuffle di tutte le aree dello spread (ognuna rispetta la propria divisione). Le pagine a disposizione libera restano come sono: le posizioni
+ * scelte a mano non si perdono per rimescolare l'altra pagina (Mescola della singola pagina, invece, le riporta ai layout automatici).
+ */
 export function shuffleSpread(project: Project, spreadId: string, direction: 1 | -1 = 1, templates: readonly AreaTemplate[] = []): Project {
   const found = findSpread(project, spreadId);
   if (!found) return project;
   let result = project;
-  found.spread.areas.forEach((_, areaIndex) => { result = shuffleArea(result, spreadId, areaIndex, direction, templates); });
+  found.spread.areas.forEach((area, areaIndex) => { if (!hasFreeLayout(area)) result = shuffleArea(result, spreadId, areaIndex, direction, templates); });
   return result;
 }
 
@@ -157,7 +174,7 @@ export function applyCandidate(project: Project, spreadId: string, areaIndex: nu
     if (spread.done || !area || area.locked) return spread;
     const choice = layoutChoices(project, spread, areaIndex, templates)[candidateIndex];
     if (!choice) return spread;
-    const result = choiceAsArea(area, choice);
+    const result = choiceAsArea(project, spread, areaIndex, choice);
     return result ? replaceArea(spread, areaIndex, keepCrops(project, spread, areaIndex, result)) : spread;
   });
 }
@@ -261,7 +278,8 @@ export function setDividerRatio(project: Project, spreadId: string, areaIndex: n
   return mapSpread(project, spreadId, (spread) => {
     const area = spread.areas[areaIndex];
     // Con le foto allineate («foto intera» o forme scelte) le divisioni seguono le proporzioni delle foto: non si spostano a mano.
-    if (!area?.layout || needsShapeAlignment(area)) return spread;
+    // Con il layout bloccato (lucchetto) le divisioni restano ferme.
+    if (!area?.layout || area.locked || hasFreeLayout(area) || needsShapeAlignment(area)) return spread;
     const node = nodeAt(area.layout, path);
     if (!node || node.kind !== "split") return spread;
     const next = clampRatio(Number(ratio.toFixed(5)));
@@ -274,7 +292,7 @@ export function setDividerRatio(project: Project, spreadId: string, areaIndex: n
 export function resetDividerRatio(project: Project, spreadId: string, areaIndex: number, path: string): Project {
   const found = findSpread(project, spreadId);
   const area = found?.spread.areas[areaIndex];
-  if (!found || !area?.layout) return project;
+  if (!found || !area?.layout || area.locked || hasFreeLayout(area)) return project;
   const node = nodeAt(area.layout, path);
   if (!node || node.kind !== "split") return project;
   const geometry = areaGeometry(project, found.spread, areaIndex);
@@ -295,13 +313,16 @@ export function resetDividerRatio(project: Project, spreadId: string, areaIndex:
 export function mirrorArea(project: Project, spreadId: string, areaIndex: number, axis: "horizontal" | "vertical"): Project {
   return mapSpread(project, spreadId, (spread) => {
     const area = spread.areas[areaIndex];
-    if (!area?.layout || countLeaves(area.layout) < 2) return spread;
+    if (!area?.layout || area.locked || countLeaves(area.layout) < 2) return spread;
     if (hasFreeLayout(area)) {
       const free = Object.fromEntries(Object.entries(area.free!).map(([id, f]) => [id, axis === "horizontal" ? { ...f, x: Number((1 - f.x - f.w).toFixed(6)), rotation: -f.rotation } : { ...f, y: Number((1 - f.y - f.h).toFixed(6)), rotation: -f.rotation }]));
       return replaceArea(spread, areaIndex, { ...area, free });
     }
     const layout = axis === "horizontal" ? mirrorHorizontal(area.layout) : mirrorVertical(area.layout);
-    return replaceArea(spread, areaIndex, normalizeArea({ ...area, layout, free: undefined }));
+    const mirrored = normalizeArea({ ...area, layout, free: undefined });
+    const { inner, gapMm } = areaGeometry(project, spread, areaIndex);
+    // Specchiando cambiano i vicini di ogni foto: in «foto intera» le divisioni si riallineano.
+    return replaceArea(spread, areaIndex, alignedForFit(project, mirrored, inner, gapMm));
   });
 }
 
@@ -309,9 +330,13 @@ export function mirrorArea(project: Project, spreadId: string, areaIndex: number
 // Layout preferiti
 // ---------------------------------------------------------------------------
 
+/**
+ * Salva la forma del layout di un'area tra i preferiti. Una disposizione libera non è un albero: si salva come template
+ * («Salva come template»), qui non si salva l'albero di riserva che a schermo non si vede.
+ */
 export function saveFavoriteLayout(project: Project, spreadId: string, areaIndex: number, name?: string): Project {
   const area = findSpread(project, spreadId)?.spread.areas[areaIndex];
-  if (!area?.layout) return project;
+  if (!area?.layout || hasFreeLayout(area)) return project;
   const itemCount = countLeaves(area.layout);
   const shape = shapeOfTree(area.layout);
   const signature = JSON.stringify(shape);
@@ -326,7 +351,7 @@ export function removeFavoriteLayout(project: Project, favoriteId: string): Proj
 }
 
 export function isFavoriteLayout(project: Project, area: AlbumArea): boolean {
-  if (!area.layout) return false;
+  if (!area.layout || hasFreeLayout(area)) return false;
   const signature = JSON.stringify(shapeOfTree(area.layout));
   return project.favoriteLayouts.some((favorite) => JSON.stringify(favorite.layout) === signature);
 }
@@ -340,9 +365,12 @@ export function applyFavoriteLayout(project: Project, spreadId: string, areaInde
   if (!favorite) return project;
   return mapSpread(project, spreadId, (spread) => {
     const area = spread.areas[areaIndex];
-    if (!area || area.items.length !== favorite.itemCount) return spread;
+    if (!area || spread.done || area.locked || area.items.length !== favorite.itemCount) return spread;
     const layout = applyShape(favorite.layout, leafIds(area.layout));
-    return layout ? replaceArea(spread, areaIndex, normalizeArea({ ...area, layout, free: undefined })) : spread;
+    if (!layout) return spread;
+    // Come i layout calcolati e i template: in «foto intera» la forma resta, le divisioni si regolano perché le foto risultino allineate.
+    const { inner, gapMm } = areaGeometry(project, spread, areaIndex);
+    return replaceArea(spread, areaIndex, keepCrops(project, spread, areaIndex, alignedForFit(project, normalizeArea({ ...area, layout, free: undefined }), inner, gapMm)));
   });
 }
 
