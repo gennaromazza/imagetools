@@ -32,6 +32,17 @@
 
 
 
+## 2026-10-20 - Album Flow 0.2.39
+
+- Migliorato: le foto passano da una pagina all'altra nei due sensi anche quando una delle due è a disposizione libera. Trascina la foto sull'altra pagina (la pagina d'arrivo si evidenzia) oppure usa «Sposta nella pagina destra» / «Sposta nella pagina sinistra» dal tasto destro sulla foto; in una pagina libera la foto arriva dove la lasci.
+- Corretto: «Torna al layout automatico» mostrava una fila di strisce dopo un template libero o dopo l'arrivo di una foto dall'altra pagina; ora ripristina un layout vero, con le foto allineate in «Foto intera».
+- Corretto: in «Foto intera» i template a divisioni e i layout preferiti disallineavano le foto; ora tengono la loro forma e le divisioni si regolano perché le foto restino a filo.
+- Corretto: cambiando la divisione dello spread con una sola pagina libera diventava libera anche l'altra. Aggiungere una foto o cambiare divisione non cambia più il ritaglio fatto a mano delle altre foto.
+- Corretto: «Scambia le due pagine» portava il layout bloccato nella pagina sbloccata e schiacciava le foto libere con le divisioni un terzo / due terzi; ora con il lucchetto o con lo spread finito non scambia e lo spiega, e le foto restano allineate e nelle loro proporzioni.
+- Corretto: una foto libera che sborda nell'altra pagina poteva comparire sopra a schermo e sotto nel JPG esportato (o il contrario con «Porta dietro le altre»), e una foto rilasciata su quella parte finiva nella pagina sotto. Ora schermo, esportazione e rilascio seguono lo stesso ordine.
+- Migliorato: Mescola di tutto lo spread lascia com'è la pagina libera e lo dice con un messaggio; Mescola della singola pagina la riporta ai layout automatici.
+- Migliorato: con il lucchetto le foto della pagina restano ferme anche a mano (spostamento, misura, rotazione e livello delle foto libere, separatori, specchio); si possono ancora sostituire e scambiare. Il cuore dei preferiti non salva più una pagina libera: si salva come template.
+
 ## 2026-10-20 - Image Select Pro 0.1.47
 
 - Selezione con il controller: supporto ai pad Xbox 360 e generici (Gamepad API). Croce o levetta sinistra spostano la foto attiva, LT/RT scorrono le foto, A = Pick, X = Scartata, Back/View = Neutra, LB/RB = una stella in meno o in più, Y = zoom, Start/Menu apre e chiude l'anteprima, B la chiude, la levetta destra sposta la foto ingrandita. Ogni pulsante riusa le scorciatoie da tastiera già esistenti, quindi valgono le stesse regole su selezione multipla e avanzamento automatico; un pulsante tenuto premuto classifica una sola volta.

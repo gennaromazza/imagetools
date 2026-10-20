@@ -21,6 +21,38 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.39",
+    date: "2026-10-20",
+    headline: "Foto tra le pagine anche con il posizionamento libero, template sempre allineati",
+    items: [
+      {
+        title: "Sposta le foto tra le pagine",
+        text: "Le foto passano da una pagina all'altra nei due sensi anche quando una pagina è libera: trascina la foto sull'altra pagina (la pagina d'arrivo si evidenzia) o usa il tasto destro sulla foto. In una pagina libera la foto arriva dove la lasci.",
+        where: ["Sposta nella pagina destra", "Sposta nella pagina sinistra", "Sposta le foto liberamente"],
+      },
+      {
+        title: "Ritorno al layout automatico in ordine",
+        text: "Dopo un template libero o una foto arrivata dall'altra pagina, «Torna al layout automatico» ripristina un layout vero, con le foto allineate in «Foto intera».",
+        where: ["Layout", "Torna al layout automatico…"],
+      },
+      {
+        title: "Template e preferiti allineati in «Foto intera»",
+        text: "I tuoi template a divisioni e i layout preferiti tengono la loro forma e regolano le divisioni perché le foto restino a filo, come i layout calcolati.",
+        where: ["Mescola", "Tutti i layout (B)", "Salva questo layout nei preferiti"],
+      },
+      {
+        title: "Lucchetto e Mescola rispettano il lavoro a mano",
+        text: "Con il lucchetto le foto della pagina restano ferme (puoi solo sostituirle o scambiarle). Mescola di tutto lo spread lascia com'è la pagina libera, e «Scambia le due pagine» non sposta più un layout bloccato.",
+        where: ["Proteggi il layout", "Cambia disposizione a tutto lo spread", "Scambia le due pagine"],
+      },
+      {
+        title: "Esportazione uguale allo schermo",
+        text: "Una foto libera che sborda nell'altra pagina sta sopra o sotto come la vedi anche nel JPG esportato, e una foto rilasciata lì va su quella che vedi. Aggiungendo foto o cambiando divisione il ritaglio fatto a mano non cambia.",
+        where: ["Porta davanti alle altre", "Porta dietro le altre", "Esporta"],
+      },
+    ],
+  },
+  {
     version: "0.2.38",
     date: "2026-10-16",
     headline: "Strisce sempre al loro posto e pinch giusto nel ritaglio",
