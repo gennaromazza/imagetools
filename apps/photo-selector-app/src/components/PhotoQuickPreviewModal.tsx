@@ -146,6 +146,23 @@ const FULL_QUALITY_PREVIEW_MAX_DIMENSION = 8000;
 const QUICK_PREVIEW_INTERACTIVE_ZOOM = 2.2;
 const UI_SEPARATOR = " | ";
 const STAR_SYMBOL = "\u2605";
+type RatingBadgeMode = "always" | "on-change" | "off";
+const RATING_BADGE_STORAGE_KEY = "filex.quickPreviewRatingBadge";
+const RATING_BADGE_ORDER: RatingBadgeMode[] = ["always", "on-change", "off"];
+const RATING_BADGE_LABELS: Record<RatingBadgeMode, string> = {
+  always: "Sempre",
+  "on-change": "Al cambio foto",
+  off: "Nascosta"
+};
+
+function readRatingBadgeMode(): RatingBadgeMode {
+  try {
+    const stored = window.localStorage.getItem(RATING_BADGE_STORAGE_KEY);
+    return RATING_BADGE_ORDER.find((mode) => mode === stored) ?? "always";
+  } catch {
+    return "always";
+  }
+}
 
 function getVirtualStripRange(
   totalCount: number,
@@ -327,6 +344,18 @@ export function PhotoQuickPreviewModal({
     lastRenderedAssetName: "",
   });
   const [zoomLevel, setZoomLevel] = useState(startZoomed ? 2.2 : 1);
+  const [ratingBadgeMode, setRatingBadgeMode] = useState<RatingBadgeMode>(readRatingBadgeMode);
+  const cycleRatingBadgeMode = useCallback(() => {
+    setRatingBadgeMode((current) => {
+      const next = RATING_BADGE_ORDER[(RATING_BADGE_ORDER.indexOf(current) + 1) % RATING_BADGE_ORDER.length];
+      try {
+        window.localStorage.setItem(RATING_BADGE_STORAGE_KEY, next);
+      } catch {
+        // Preferenza non persistita: resta valida per la sessione.
+      }
+      return next;
+    });
+  }, []);
   const [keepZoomState, setKeepZoomState] = useState(keepZoomOnNavigate);
   const keepZoomStateRef = useRef(keepZoomState);
   keepZoomStateRef.current = keepZoomState;
@@ -2768,6 +2797,307 @@ export function PhotoQuickPreviewModal({
       ) : null}
 
       <div className="quick-preview__main" onClick={(event) => event.stopPropagation()}>
+        <div
+          className={[
+            "quick-preview__stage",
+            stageColorClass,
+            compareMode && compareAsset
+              ? "quick-preview__stage--compare"
+              : zoomLevel > 1.05
+                ? isPanning
+                  ? "quick-preview__stage--zoomed quick-preview__stage--panning"
+                  : "quick-preview__stage--zoomed"
+                : "",
+          ].join(" ").trim()}
+          ref={stageRef}
+          onWheel={(event) => {
+            if (compareMode) {
+              return;
+            }
+            event.preventDefault();
+            const nextZoom = zoomLevel + (event.deltaY < 0 ? 0.25 : -0.25);
+            if (nextZoom <= 1) {
+              panOffsetRef.current = { x: 0, y: 0 };
+              setPanOffset({ x: 0, y: 0 });
+            }
+            applyZoom(nextZoom);
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) {
+              return;
+            }
+            const pointerTarget = event.target;
+            if (
+              pointerTarget instanceof HTMLElement
+              && pointerTarget.closest("button, input, select, textarea")
+            ) {
+              return;
+            }
+
+            if (compareMode) {
+              return;
+            }
+
+            if (zoomLevel <= 1.05) {
+              swipeDragRef.current = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+              };
+              event.currentTarget.setPointerCapture(event.pointerId);
+              return;
+            }
+
+            event.preventDefault();
+            panDragRef.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startY: event.clientY,
+              originX: panOffsetRef.current.x,
+              originY: panOffsetRef.current.y,
+            };
+            setIsPanning(true);
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+          onPointerMove={(event) => {
+            const drag = panDragRef.current;
+            if (!drag || drag.pointerId !== event.pointerId || compareMode || zoomLevel <= 1.05) {
+              return;
+            }
+            event.preventDefault();
+            const deltaX = event.clientX - drag.startX;
+            const deltaY = event.clientY - drag.startY;
+            commitPanOffset(clampPan(drag.originX + deltaX, drag.originY + deltaY));
+          }}
+          onPointerUp={(event) => {
+            if (panDragRef.current?.pointerId === event.pointerId) {
+              persistPendingPanOffset();
+              panDragRef.current = null;
+              setIsPanning(false);
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+              return;
+            }
+
+            if (swipeDragRef.current?.pointerId === event.pointerId) {
+              const swipe = swipeDragRef.current;
+              swipeDragRef.current = null;
+
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+
+              const deltaX = event.clientX - swipe.startX;
+              const deltaY = event.clientY - swipe.startY;
+              if (Math.abs(deltaX) >= 56 && Math.abs(deltaY) <= 48) {
+                handleNavigate(deltaX < 0 ? "next" : "previous");
+              }
+            }
+          }}
+          onPointerCancel={(event) => {
+            if (panDragRef.current?.pointerId === event.pointerId) {
+              persistPendingPanOffset();
+              panDragRef.current = null;
+              setIsPanning(false);
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+            }
+            if (swipeDragRef.current?.pointerId === event.pointerId) {
+              swipeDragRef.current = null;
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }
+            }
+          }}
+          onLostPointerCapture={() => {
+            if (panDragRef.current) {
+              persistPendingPanOffset();
+            }
+            panDragRef.current = null;
+            setIsPanning(false);
+            swipeDragRef.current = null;
+          }}
+        >
+          {!compareMode && ratingBadgeMode !== "off" && (rating > 0 || pickStatus !== "unmarked" || colorLabel) ? (
+            <div
+              key={ratingBadgeMode === "on-change" ? `${asset.id}-${rating}-${pickStatus}-${colorLabel ?? "none"}` : "static"}
+              className={
+                ratingBadgeMode === "on-change"
+                  ? "quick-preview__status-badge quick-preview__status-badge--flash"
+                  : "quick-preview__status-badge"
+              }
+              role="status"
+            >
+              {rating > 0 ? (
+                <span className="quick-preview__status-stars" aria-label={`${rating} stelle`}>
+                  {[1, 2, 3, 4, 5].map((value) => (
+                    <span key={value} className={value <= rating ? "quick-preview__status-star--on" : undefined}>
+                      {STAR_SYMBOL}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+              {pickStatus !== "unmarked" ? (
+                <span className={`quick-preview__status-pick quick-preview__status-pick--${pickStatus}`}>
+                  {PICK_STATUS_LABELS[pickStatus]}
+                </span>
+              ) : null}
+              {colorLabel ? (
+                <span
+                  className={`asset-color-dot asset-color-dot--${colorLabel} quick-preview__status-dot`}
+                  title={COLOR_LABEL_NAMES[colorLabel]}
+                />
+              ) : null}
+            </div>
+          ) : null}
+
+          {zoomLevel > 1.05 && !compareMode ? (
+            <div className="quick-preview__stage-tools" onClick={(event) => event.stopPropagation()}>
+              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(-160, 0)} aria-label="Sposta a sinistra">←</button>
+              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(0, -160)} aria-label="Sposta in alto">↑</button>
+              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(0, 160)} aria-label="Sposta in basso">↓</button>
+              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(160, 0)} aria-label="Sposta a destra">→</button>
+            </div>
+          ) : null}
+
+          {zoomLevel > 1.05 && !compareMode && activePreviewAssetNeedsManagedPreview && !activeResolvedDetailPreview ? (
+            <div className="quick-preview__quality-badge" role="status">Caricamento qualità piena…</div>
+          ) : null}
+
+          {previousAsset ? (
+            <button
+              type="button"
+              className="quick-preview__nav quick-preview__nav--prev"
+              onClick={() => handleNavigate("previous")}
+            >
+              {"<"}
+            </button>
+          ) : null}
+
+          {compareMode && compareAsset ? (
+            <div className="quick-preview__compare-grid">
+              <div className={`quick-preview__compare-panel ${stageColorClass}`}>
+                <span className="quick-preview__compare-label">Corrente</span>
+                {displayPreviewUrl ? (
+                  <img
+                    src={displayPreviewUrl}
+                    alt={asset.fileName}
+                    className="quick-preview__image quick-preview__image--compare"
+                    draggable={canExternalDrag}
+                    decoding="sync"
+                    onError={handleMainPreviewError}
+                    onDoubleClick={toggleNativeFullscreen}
+                    onDragStart={(event) => handleExternalDragStart(asset.id, event)}
+                    style={{
+                      transform: `rotate(${rotationDegrees}deg) scale(${currentCompareRotationFitScale})`,
+                    }}
+                  />
+                ) : (
+                  <div className="quick-preview__placeholder">
+                    <span className="quick-preview__loading-badge">Preparazione preview</span>
+                  </div>
+                )}
+                {previewIsFallback ? (
+                  <span className="quick-preview__loading-badge quick-preview__loading-badge--overlay">
+                    Fit preview in arrivo
+                  </span>
+                ) : null}
+              </div>
+              <div className={`quick-preview__compare-panel ${comparePanelColorClass}`}>
+                <span className="quick-preview__compare-label">{compareAsset.fileName}</span>
+                {displayComparePreviewUrl ? (
+                  <img
+                    src={displayComparePreviewUrl}
+                    alt={compareAsset.fileName}
+                    className="quick-preview__image quick-preview__image--compare"
+                    draggable={canExternalDrag}
+                    decoding="sync"
+                    onError={handleComparePreviewError}
+                    onDoubleClick={toggleNativeFullscreen}
+                    onDragStart={(event) => handleExternalDragStart(compareAsset.id, event)}
+                    style={{
+                      transform: `rotate(${compareRotationDegrees}deg) scale(${compareRotationFitScale})`,
+                    }}
+                  />
+                ) : (
+                  <div className="quick-preview__placeholder">
+                    <span className="quick-preview__loading-badge">Preparazione preview</span>
+                  </div>
+                )}
+                {comparePreviewIsFallback ? (
+                  <span className="quick-preview__loading-badge quick-preview__loading-badge--overlay">
+                    Fit preview in arrivo
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : displayPreviewUrl ? (
+            <img
+              ref={mainImageRef}
+              src={displayPreviewUrl}
+              alt={asset.fileName}
+              className={
+                zoomLevel > 1.05
+                  ? isPanning
+                    ? "quick-preview__image quick-preview__image--zoomed quick-preview__image--panning"
+                    : "quick-preview__image quick-preview__image--zoomed"
+                  : "quick-preview__image"
+              }
+              draggable={canExternalDrag && zoomLevel <= 1.05}
+              decoding="async"
+              onLoad={handleMainPreviewLoad}
+              onError={handleMainPreviewError}
+              onDoubleClick={toggleNativeFullscreen}
+              onDragStart={(event) => {
+                if (zoomLevel > 1.05) {
+                  event.preventDefault();
+                  return;
+                }
+                handleExternalDragStart(asset.id, event);
+              }}
+              style={{
+                transform: buildImageTransform(isPanning ? panOffsetRef.current : panOffset, zoomLevel),
+              }}
+            />
+          ) : (
+            <div className="quick-preview__placeholder">
+              <span className="quick-preview__loading-badge">Preparazione preview</span>
+            </div>
+          )}
+          {previewIsFallback && !compareMode ? (
+            <span className="quick-preview__loading-badge quick-preview__loading-badge--overlay">
+              Fit preview in arrivo
+            </span>
+          ) : null}
+          {classificationFeedback ? (
+            <span
+              key={`overlay-${classificationFeedback.token}`}
+              className={[
+                "quick-preview__classification-overlay",
+                `quick-preview__classification-overlay--${classificationFeedback.kind}`,
+                classificationFeedback.kind === "label" && classificationFeedback.tone
+                  ? `quick-preview__classification-overlay--${classificationFeedback.tone}`
+                  : "",
+              ].join(" ").trim()}
+              aria-live="polite"
+            >
+              {classificationFeedback.label}
+            </span>
+          ) : null}
+
+          {nextAsset ? (
+            <button
+              type="button"
+              className="quick-preview__nav quick-preview__nav--next"
+              onClick={() => handleNavigate("next")}
+            >
+              {">"}
+            </button>
+          ) : null}
+        </div>
+
         <div className="quick-preview__chrome">
           <div className="quick-preview__title">
             <strong>{asset.fileName}</strong>
@@ -2802,6 +3132,14 @@ export function PhotoQuickPreviewModal({
             {sidebarCollapsed ? "Apri pannelli" : "Compatta pannelli"}
           </button>
           <span className="quick-preview__stars">{formatAssetStars(asset)}</span>
+          <button
+            type="button"
+            className="ghost-button quick-preview__action"
+            onClick={cycleRatingBadgeMode}
+            title="Mostra stelle, stato e colore sopra la foto: sempre, solo al cambio foto o mai"
+          >
+            Valutazione: {RATING_BADGE_LABELS[ratingBadgeMode]}
+          </button>
             {classificationFeedback ? (
               <span
                 key={classificationFeedback.token}
@@ -3126,274 +3464,6 @@ export function PhotoQuickPreviewModal({
                 })}
               </div>
             </div>
-          ) : null}
-        </div>
-
-        <div
-          className={[
-            "quick-preview__stage",
-            stageColorClass,
-            compareMode && compareAsset
-              ? "quick-preview__stage--compare"
-              : zoomLevel > 1.05
-                ? isPanning
-                  ? "quick-preview__stage--zoomed quick-preview__stage--panning"
-                  : "quick-preview__stage--zoomed"
-                : "",
-          ].join(" ").trim()}
-          ref={stageRef}
-          onWheel={(event) => {
-            if (compareMode) {
-              return;
-            }
-            event.preventDefault();
-            const nextZoom = zoomLevel + (event.deltaY < 0 ? 0.25 : -0.25);
-            if (nextZoom <= 1) {
-              panOffsetRef.current = { x: 0, y: 0 };
-              setPanOffset({ x: 0, y: 0 });
-            }
-            applyZoom(nextZoom);
-          }}
-          onPointerDown={(event) => {
-            if (event.button !== 0) {
-              return;
-            }
-            const pointerTarget = event.target;
-            if (
-              pointerTarget instanceof HTMLElement
-              && pointerTarget.closest("button, input, select, textarea")
-            ) {
-              return;
-            }
-
-            if (compareMode) {
-              return;
-            }
-
-            if (zoomLevel <= 1.05) {
-              swipeDragRef.current = {
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startY: event.clientY,
-              };
-              event.currentTarget.setPointerCapture(event.pointerId);
-              return;
-            }
-
-            event.preventDefault();
-            panDragRef.current = {
-              pointerId: event.pointerId,
-              startX: event.clientX,
-              startY: event.clientY,
-              originX: panOffsetRef.current.x,
-              originY: panOffsetRef.current.y,
-            };
-            setIsPanning(true);
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            const drag = panDragRef.current;
-            if (!drag || drag.pointerId !== event.pointerId || compareMode || zoomLevel <= 1.05) {
-              return;
-            }
-            event.preventDefault();
-            const deltaX = event.clientX - drag.startX;
-            const deltaY = event.clientY - drag.startY;
-            commitPanOffset(clampPan(drag.originX + deltaX, drag.originY + deltaY));
-          }}
-          onPointerUp={(event) => {
-            if (panDragRef.current?.pointerId === event.pointerId) {
-              persistPendingPanOffset();
-              panDragRef.current = null;
-              setIsPanning(false);
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
-              return;
-            }
-
-            if (swipeDragRef.current?.pointerId === event.pointerId) {
-              const swipe = swipeDragRef.current;
-              swipeDragRef.current = null;
-
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
-
-              const deltaX = event.clientX - swipe.startX;
-              const deltaY = event.clientY - swipe.startY;
-              if (Math.abs(deltaX) >= 56 && Math.abs(deltaY) <= 48) {
-                handleNavigate(deltaX < 0 ? "next" : "previous");
-              }
-            }
-          }}
-          onPointerCancel={(event) => {
-            if (panDragRef.current?.pointerId === event.pointerId) {
-              persistPendingPanOffset();
-              panDragRef.current = null;
-              setIsPanning(false);
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
-            }
-            if (swipeDragRef.current?.pointerId === event.pointerId) {
-              swipeDragRef.current = null;
-              if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-                event.currentTarget.releasePointerCapture(event.pointerId);
-              }
-            }
-          }}
-          onLostPointerCapture={() => {
-            if (panDragRef.current) {
-              persistPendingPanOffset();
-            }
-            panDragRef.current = null;
-            setIsPanning(false);
-            swipeDragRef.current = null;
-          }}
-        >
-          {zoomLevel > 1.05 && !compareMode ? (
-            <div className="quick-preview__stage-tools" onClick={(event) => event.stopPropagation()}>
-              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(-160, 0)} aria-label="Sposta a sinistra">←</button>
-              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(0, -160)} aria-label="Sposta in alto">↑</button>
-              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(0, 160)} aria-label="Sposta in basso">↓</button>
-              <button type="button" className="quick-preview__pan-button" onClick={() => handlePanControl(160, 0)} aria-label="Sposta a destra">→</button>
-            </div>
-          ) : null}
-
-          {zoomLevel > 1.05 && !compareMode && activePreviewAssetNeedsManagedPreview && !activeResolvedDetailPreview ? (
-            <div className="quick-preview__quality-badge" role="status">Caricamento qualità piena…</div>
-          ) : null}
-
-          {previousAsset ? (
-            <button
-              type="button"
-              className="quick-preview__nav quick-preview__nav--prev"
-              onClick={() => handleNavigate("previous")}
-            >
-              {"<"}
-            </button>
-          ) : null}
-
-          {compareMode && compareAsset ? (
-            <div className="quick-preview__compare-grid">
-              <div className={`quick-preview__compare-panel ${stageColorClass}`}>
-                <span className="quick-preview__compare-label">Corrente</span>
-                {displayPreviewUrl ? (
-                  <img
-                    src={displayPreviewUrl}
-                    alt={asset.fileName}
-                    className="quick-preview__image quick-preview__image--compare"
-                    draggable={canExternalDrag}
-                    decoding="sync"
-                    onError={handleMainPreviewError}
-                    onDoubleClick={toggleNativeFullscreen}
-                    onDragStart={(event) => handleExternalDragStart(asset.id, event)}
-                    style={{
-                      transform: `rotate(${rotationDegrees}deg) scale(${currentCompareRotationFitScale})`,
-                    }}
-                  />
-                ) : (
-                  <div className="quick-preview__placeholder">
-                    <span className="quick-preview__loading-badge">Preparazione preview</span>
-                  </div>
-                )}
-                {previewIsFallback ? (
-                  <span className="quick-preview__loading-badge quick-preview__loading-badge--overlay">
-                    Fit preview in arrivo
-                  </span>
-                ) : null}
-              </div>
-              <div className={`quick-preview__compare-panel ${comparePanelColorClass}`}>
-                <span className="quick-preview__compare-label">{compareAsset.fileName}</span>
-                {displayComparePreviewUrl ? (
-                  <img
-                    src={displayComparePreviewUrl}
-                    alt={compareAsset.fileName}
-                    className="quick-preview__image quick-preview__image--compare"
-                    draggable={canExternalDrag}
-                    decoding="sync"
-                    onError={handleComparePreviewError}
-                    onDoubleClick={toggleNativeFullscreen}
-                    onDragStart={(event) => handleExternalDragStart(compareAsset.id, event)}
-                    style={{
-                      transform: `rotate(${compareRotationDegrees}deg) scale(${compareRotationFitScale})`,
-                    }}
-                  />
-                ) : (
-                  <div className="quick-preview__placeholder">
-                    <span className="quick-preview__loading-badge">Preparazione preview</span>
-                  </div>
-                )}
-                {comparePreviewIsFallback ? (
-                  <span className="quick-preview__loading-badge quick-preview__loading-badge--overlay">
-                    Fit preview in arrivo
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          ) : displayPreviewUrl ? (
-            <img
-              ref={mainImageRef}
-              src={displayPreviewUrl}
-              alt={asset.fileName}
-              className={
-                zoomLevel > 1.05
-                  ? isPanning
-                    ? "quick-preview__image quick-preview__image--zoomed quick-preview__image--panning"
-                    : "quick-preview__image quick-preview__image--zoomed"
-                  : "quick-preview__image"
-              }
-              draggable={canExternalDrag && zoomLevel <= 1.05}
-              decoding="async"
-              onLoad={handleMainPreviewLoad}
-              onError={handleMainPreviewError}
-              onDoubleClick={toggleNativeFullscreen}
-              onDragStart={(event) => {
-                if (zoomLevel > 1.05) {
-                  event.preventDefault();
-                  return;
-                }
-                handleExternalDragStart(asset.id, event);
-              }}
-              style={{
-                transform: buildImageTransform(isPanning ? panOffsetRef.current : panOffset, zoomLevel),
-              }}
-            />
-          ) : (
-            <div className="quick-preview__placeholder">
-              <span className="quick-preview__loading-badge">Preparazione preview</span>
-            </div>
-          )}
-          {previewIsFallback && !compareMode ? (
-            <span className="quick-preview__loading-badge quick-preview__loading-badge--overlay">
-              Fit preview in arrivo
-            </span>
-          ) : null}
-          {classificationFeedback ? (
-            <span
-              key={`overlay-${classificationFeedback.token}`}
-              className={[
-                "quick-preview__classification-overlay",
-                `quick-preview__classification-overlay--${classificationFeedback.kind}`,
-                classificationFeedback.kind === "label" && classificationFeedback.tone
-                  ? `quick-preview__classification-overlay--${classificationFeedback.tone}`
-                  : "",
-              ].join(" ").trim()}
-              aria-live="polite"
-            >
-              {classificationFeedback.label}
-            </span>
-          ) : null}
-
-          {nextAsset ? (
-            <button
-              type="button"
-              className="quick-preview__nav quick-preview__nav--next"
-              onClick={() => handleNavigate("next")}
-            >
-              {">"}
-            </button>
           ) : null}
         </div>
 

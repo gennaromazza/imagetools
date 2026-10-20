@@ -3346,10 +3346,6 @@ img {
   transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.quick-preview--focus-mode .quick-preview__main {
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-
 .quick-preview--focus-mode .quick-preview__meta-bar,
 .quick-preview--focus-mode .quick-preview__dock {
   display: none;
@@ -3357,10 +3353,6 @@ img {
 
 .quick-preview:not(.quick-preview--focus-mode) {
   grid-template-columns: 220px minmax(0, 1fr);
-}
-
-.quick-preview:not(.quick-preview--focus-mode) .quick-preview__main {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .quick-preview__sidebar {
@@ -3380,7 +3372,9 @@ img {
 
 .quick-preview__main {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  /* Palco in cima (1fr), poi barra titolo/azioni, valutazioni e dock: tutti auto. */
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-rows: auto;
   gap: 0.9rem;
   padding: 1.25rem;
   overflow: hidden;
@@ -3887,6 +3881,62 @@ img {
 
 .quick-preview__stage--compare {
   padding: 1rem;
+}
+
+/* Badge di stato (stelle, pick, colore) sopra la foto, in alto a sinistra. */
+.quick-preview__status-badge {
+  position: absolute;
+  top: 0.85rem;
+  left: 0.85rem;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(10, 10, 9, 0.72);
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+
+.quick-preview__status-badge--flash {
+  animation: quick-preview-status-flash 3.2s ease-out forwards;
+}
+
+@keyframes quick-preview-status-flash {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.quick-preview__status-stars {
+  display: inline-flex;
+  gap: 0.1rem;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.22);
+}
+
+.quick-preview__status-star--on {
+  color: #ffd57a;
+  text-shadow: 0 0 8px rgba(255, 213, 122, 0.55);
+}
+
+.quick-preview__status-pick {
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #10120f;
+}
+
+.quick-preview__status-pick--picked { background: #7fce8a; }
+.quick-preview__status-pick--rejected { background: #e08a7d; }
+
+.quick-preview__status-dot {
+  width: 20px;
+  height: 20px;
 }
 
 .quick-preview__stage-tools {

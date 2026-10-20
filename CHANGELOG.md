@@ -32,6 +32,11 @@
 
 
 
+## 2026-10-20 - Image Select Pro 0.1.48
+
+- Nuovo: nell'anteprima grande un badge sopra la foto, in alto a sinistra, mostra a colpo d'occhio le stelle assegnate (in oro, le altre in grigio), Pick o Scartata e il pallino del colore; non compare se la foto non ha niente di assegnato e non compare nel Confronto. Il pulsante «Valutazione: …» della barra lo imposta su Sempre, Al cambio foto (visibile circa tre secondi poi sfuma) o Nascosta; la scelta resta su questo PC.
+- Migliorato: nell'anteprima grande la barra con nome file, dimensioni e pulsanti passa sotto la foto, seguita da Stelle, Stato, Colore e dalla fascia delle miniature; la foto occupa tutta la parte alta e l'ordine con il tasto Tab segue quello che si vede. Corretto anche il calcolo dell'altezza quando si apre il pannello Condividi.
+
 ## 2026-10-20 - Album Flow 0.2.39
 
 - Migliorato: le foto passano da una pagina all'altra nei due sensi anche quando una delle due è a disposizione libera. Trascina la foto sull'altra pagina (la pagina d'arrivo si evidenzia) oppure usa «Sposta nella pagina destra» / «Sposta nella pagina sinistra» dal tasto destro sulla foto; in una pagina libera la foto arriva dove la lasci.

@@ -522,6 +522,10 @@
       "Puoi selezionare le foto con un controller: pad Xbox 360 o generico. Croce o levetta sinistra spostano la foto, A = Pick, X = Scartata, Back = Neutra, LB/RB = stelle, Y = zoom, Start apre e chiude l'anteprima grande.",
       "I pulsanti sono personalizzabili da Info > Personalizza pulsanti: premi Assegna e poi il pulsante sul pad. La mappatura resta su questo PC.",
       "Le Impostazioni sono divise in schede (Generale, Etichette, Controller, Prestazioni, Filtri, Diagnostica), piu' ordinate e con i dati tecnici di cache e RAM raccolti in Dettagli tecnici."
+    ],
+    "0.1.48": [
+      "Nell'anteprima grande vedi subito come hai classificato lo scatto: un badge sopra la foto, in alto a sinistra, mostra le stelle in oro, Pick o Scartata e il pallino del colore. Il pulsante Valutazione nella barra lo mostra sempre, solo al cambio foto o mai.",
+      "La barra con il nome del file e i pulsanti ora sta sotto la foto, con Stelle, Stato e Colore: la foto resta in alto e lo sguardo non deve cercare le etichette."
     ]
   },
   "id-photo": {
