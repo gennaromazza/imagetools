@@ -6387,3 +6387,62 @@ img {
   pointer-events: none;
   z-index: 5;
 }
+/* ── Mappatura pulsanti del controller ── */
+
+.gamepad-mapping {
+  z-index: 7200;
+}
+
+.gamepad-mapping__panel {
+  width: min(620px, 100%);
+}
+
+.gamepad-mapping__hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.gamepad-mapping__list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gamepad-mapping__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.gamepad-mapping__row--listening {
+  border-color: var(--line-strong);
+  background: var(--accent-soft);
+}
+
+.gamepad-mapping__label {
+  min-width: 0;
+  font-size: 0.88rem;
+}
+
+.gamepad-mapping__kbd--pressed {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.shortcut-help__customize {
+  justify-self: start;
+}
+
+@media (max-width: 520px) {
+  .gamepad-mapping__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}

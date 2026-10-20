@@ -88,6 +88,8 @@ import {
 } from "../services/photo-sort-cache";
 import { logDesktopEvent, readCaptureTimes, renamePhotoFiles } from "../services/desktop-store";
 import { useToast } from "./ToastProvider";
+import { useGamepadControls } from "../hooks/useGamepadControls";
+import { GamepadMappingModal, useGamepadStore } from "./GamepadMappingModal";
 import { DockableWorkspace } from "./workspace/DockableWorkspace";
 import { useWorkspacePanelLayout } from "./workspace/useWorkspacePanelLayout";
 import { getThumbnailView } from "../services/thumbnail-view-store";
@@ -3396,6 +3398,31 @@ export function PhotoSelector({
     }
   };
 
+  // Controller di gioco (pad Xbox 360 o generico): riusa le scorciatoie da tastiera.
+  const { editorOpen: isGamepadMappingOpen } = useGamepadStore();
+  useGamepadControls({
+    previewOpen: previewAssetId !== null,
+    getCurrentRating: () => {
+      const targetId = previewAssetId
+        ?? resolveClassificationTargetIds(selectedIdsRef.current, focusedPhotoId)[0];
+      return targetId ? photos.find((photo) => photo.id === targetId)?.rating : undefined;
+    },
+    openPreview: () => {
+      const targetId = focusedPhotoId ?? selectedIdsRef.current[0] ?? visiblePhotoIds[0];
+      if (targetId) {
+        openPreview(targetId);
+      }
+    },
+    onConnectionChange: (connected) => {
+      addToast(
+        connected
+          ? "Controller collegato. Comandi e personalizzazione dei pulsanti in «Info»."
+          : "Controller scollegato",
+        connected ? "success" : "info",
+      );
+    },
+  });
+
   const handleModalAssetUpdate = useLatestCallback((assetId: string, changes: PhotoMetadataChanges) => {
     applyPhotoChanges(assetId, changes, "modal");
   });
@@ -4880,6 +4907,8 @@ export function PhotoSelector({
           </div>
         </section>
       )}
+
+      {isGamepadMappingOpen ? <GamepadMappingModal /> : null}
 
       <PhotoQuickPreviewModal
         asset={previewAssetWithUrl}

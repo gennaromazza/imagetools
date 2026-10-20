@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PHOTO_CLASSIFICATION_SHORTCUTS } from "../services/photo-classification";
+import { describeGamepadMapping, setGamepadMappingEditorOpen } from "../services/gamepad-controls";
+import { useGamepadStore } from "./GamepadMappingModal";
 
 interface PhotoClassificationHelpButtonProps {
   className?: string;
@@ -11,6 +13,7 @@ export function PhotoClassificationHelpButton({
   title = "Scorciatoie"
 }: PhotoClassificationHelpButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const { mapping: gamepadMapping } = useGamepadStore();
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -64,6 +67,25 @@ export function PhotoClassificationHelpButton({
               </li>
             ))}
           </ul>
+          <strong className="shortcut-help__title">Controller (pad Xbox o generico)</strong>
+          <ul className="shortcut-help__list">
+            {describeGamepadMapping(gamepadMapping).map((item) => (
+              <li key={`${item.control}-${item.description}`} className="shortcut-help__item">
+                <kbd className="shortcut-help__kbd">{item.control}</kbd>
+                <span>{item.description}</span>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className="ghost-button ghost-button--small shortcut-help__customize"
+            onClick={() => {
+              setIsOpen(false);
+              setGamepadMappingEditorOpen(true);
+            }}
+          >
+            Personalizza pulsanti…
+          </button>
         </div>
       ) : null}
     </div>
