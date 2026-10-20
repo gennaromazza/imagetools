@@ -517,6 +517,11 @@
       "Selezione della griglia piu' coerente: il lasso ricalcola le foto a ogni movimento (restringerlo toglie le foto non piu' toccate), sostituisce la selezione e con Maiusc, Ctrl o Cmd la aggiunge; un clic sullo sfondo o un lasso vuoto deselezionano tutto.",
       "Ctrl+A seleziona le foto visibili e, premuto di nuovo, le deseleziona. Dopo lasso o Ctrl+A il focus passa a una foto selezionata.",
       "Le scorciatoie di classificazione valgono per tutta la selezione quando contiene piu' foto, anche se il focus e' altrove; con una sola foto valgono per quella col focus."
+    ],
+    "0.1.47": [
+      "Puoi selezionare le foto con un controller: pad Xbox 360 o generico. Croce o levetta sinistra spostano la foto, A = Pick, X = Scartata, Back = Neutra, LB/RB = stelle, Y = zoom, Start apre e chiude l'anteprima grande.",
+      "I pulsanti sono personalizzabili da Info > Personalizza pulsanti: premi Assegna e poi il pulsante sul pad. La mappatura resta su questo PC.",
+      "Le Impostazioni sono divise in schede (Generale, Etichette, Controller, Prestazioni, Filtri, Diagnostica), piu' ordinate e con i dati tecnici di cache e RAM raccolti in Dettagli tecnici."
     ]
   },
   "id-photo": {

@@ -32,6 +32,12 @@
 
 
 
+## 2026-10-20 - Image Select Pro 0.1.47
+
+- Selezione con il controller: supporto ai pad Xbox 360 e generici (Gamepad API). Croce o levetta sinistra spostano la foto attiva, LT/RT scorrono le foto, A = Pick, X = Scartata, Back/View = Neutra, LB/RB = una stella in meno o in più, Y = zoom, Start/Menu apre e chiude l'anteprima, B la chiude, la levetta destra sposta la foto ingrandita. Ogni pulsante riusa le scorciatoie da tastiera già esistenti, quindi valgono le stesse regole su selezione multipla e avanzamento automatico; un pulsante tenuto premuto classifica una sola volta.
+- Pulsanti personalizzabili: da «Info» > «Personalizza pulsanti…» (o dalla scheda Controller delle Impostazioni) si assegna ogni comando al pulsante premuto sul pad; un pulsante comanda una sola azione e la mappatura resta su questo PC. I pad senza layout standard mostrano «Pulsante N».
+- Impostazioni riorganizzate in sei schede (Generale, Etichette, Controller, Prestazioni, Filtri, Diagnostica) al posto di un'unica colonna lunga; i dati tecnici di cache e RAM sono raccolti in «Dettagli tecnici», chiusi di default. Le funzioni non cambiano.
+
 ## 2026-10-16 - Album Flow 0.2.38
 
 - Corretto: le strisce dei comandi a sinistra e a destra del foglio si adattano allo spazio che la zona di lavoro ha davvero, non all'altezza della finestra. Su schermi ad alta risoluzione con scala di Windows (per esempio 2880 × 1800 al 200%) la striscia verticale non ci stava e tagliava i pulsanti in fondo («Collega» e «Scambia»): ora passa da sola al formato a due colonne.

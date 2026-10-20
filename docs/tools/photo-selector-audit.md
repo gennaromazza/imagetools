@@ -80,6 +80,8 @@ Il controllo statico verifica:
 | SELECT-08 | Rotazione dalla card o dalla Quick Preview con più foto selezionate | Ruota soltanto la foto corrente; la rotazione dell'intera selezione è disponibile esclusivamente nel menu Azioni con conteggio esplicito. |
 | SELECT-09 | Doppio click sulla card o sul checkbox | La selezione cambia una sola volta e l'anteprima si apre senza un secondo toggle. |
 | SELECT-10 | Import XMP in background durante una modifica locale della selezione | La modifica locale più recente non viene sovrascritta da un record XMP letto in precedenza. |
+| SELECT-11 | Controller collegato, pulsante A premuto e tenuto | La foto attiva (o l'intera selezione) diventa Pick una sola volta; croce e levetta sinistra spostano il focus e ripetono come un tasto tenuto premuto. |
+| SELECT-12 | Riassegnazione di un pulsante da Info > Personalizza pulsanti | Il nuovo pulsante comanda l'azione scelta e il vecchio non risponde più; un pulsante già usato lascia libera l'altra azione e la mappatura resta dopo il riavvio. |
 | BROWSE-01 | Elenco cartelle recenti più alto della finestra | La pagina scorre fino all'ultima cartella mantenendo visibile la testata. |
 | MODE-01 | Avvio senza cartella | Selezione libera e Progetto master sono presentati come percorsi distinti, leggibili da tastiera e screen reader. |
 | MODE-02 | Apertura con CTA Selezione libera | Il callback riceve intento `free`; l’header mostra `Modalità libera` e non propone rinomina o correzione master. |
