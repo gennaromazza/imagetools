@@ -526,6 +526,10 @@
     "0.1.48": [
       "Nell'anteprima grande vedi subito come hai classificato lo scatto: un badge sopra la foto, in alto a sinistra, mostra le stelle in oro, Pick o Scartata e il pallino del colore. Il pulsante Valutazione nella barra lo mostra sempre, solo al cambio foto o mai.",
       "La barra con il nome del file e i pulsanti ora sta sotto la foto, con Stelle, Stato e Colore: la foto resta in alto e lo sguardo non deve cercare le etichette."
+    ],
+    "0.1.49": [
+      "La barra sotto la foto grande è più pulita: una sola riga con stelle, Confronta, zoom, Info e il pulsante Chiudi (✕).",
+      "Ruota, Schermo intero, Salva copia, Condividi e le impostazioni dell'anteprima (Stelle sulla foto, Avanza dopo classificazione, Mantieni zoom) sono raccolti nel nuovo menu «⋯»; il lucchetto accanto allo zoom attiva Mantieni zoom."
     ]
   },
   "id-photo": {

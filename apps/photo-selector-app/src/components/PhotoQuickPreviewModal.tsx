@@ -359,6 +359,30 @@ export function PhotoQuickPreviewModal({
   const [keepZoomState, setKeepZoomState] = useState(keepZoomOnNavigate);
   const keepZoomStateRef = useRef(keepZoomState);
   keepZoomStateRef.current = keepZoomState;
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!moreMenuOpen) {
+      return;
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!moreMenuRef.current?.contains(event.target as Node)) {
+        setMoreMenuOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setMoreMenuOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape, true);
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape, true);
+    };
+  }, [moreMenuOpen]);
   const [shareOpen, setShareOpen] = useState(false);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const [shareTone, setShareTone] = useState<"info" | "success" | "error">("info");
@@ -3106,7 +3130,7 @@ export function PhotoQuickPreviewModal({
               {asset.width > 0 && asset.height > 0
                 ? ` | ${((asset.width * asset.height) / 1_000_000).toFixed(1)} MP`
                 : ""}
-              {usage ? ` | Foglio ${usage.pageNumber}` : " | Non ancora usata nel layout"}
+              {usage ? ` | Foglio ${usage.pageNumber}` : " | Non usata"}
             </span>
             {asset.xmpHasEdits ? (
               <span className="quick-preview__xmp-badge" title="Metadati XMP rilevati">
@@ -3121,132 +3145,17 @@ export function PhotoQuickPreviewModal({
           </div>
 
         <div className="quick-preview__actions">
-          <button
-            type="button"
-            className={sidebarCollapsed ? "ghost-button quick-preview__action quick-preview__action--active" : "ghost-button quick-preview__action"}
-            onClick={toggleSidebarCollapsed}
-            aria-controls="quick-preview-sidebar"
-            aria-expanded={!sidebarCollapsed}
-            title={sidebarCollapsed ? "Apri filtri e dock" : "Compatta filtri e dock"}
-          >
-            {sidebarCollapsed ? "Apri pannelli" : "Compatta pannelli"}
-          </button>
           <span className="quick-preview__stars">{formatAssetStars(asset)}</span>
           <button
             type="button"
-            className="ghost-button quick-preview__action"
-            onClick={cycleRatingBadgeMode}
-            title="Mostra stelle, stato e colore sopra la foto: sempre, solo al cambio foto o mai"
+            className={compareMode ? "ghost-button quick-preview__action quick-preview__action--active" : "ghost-button quick-preview__action"}
+            onClick={() => setCompareMode((current) => !current)}
+            disabled={!nextAsset && !previousAsset}
           >
-            Valutazione: {RATING_BADGE_LABELS[ratingBadgeMode]}
+            {compareMode ? "Chiudi confronto" : "Confronta"}
           </button>
-            {classificationFeedback ? (
-              <span
-                key={classificationFeedback.token}
-                className={[
-                  "quick-preview__feedback",
-                  `quick-preview__feedback--${classificationFeedback.kind}`,
-                  classificationFeedback.kind === "label" && classificationFeedback.tone
-                    ? `quick-preview__feedback--${classificationFeedback.tone}`
-                    : "",
-                ].join(" ").trim()}
-                aria-live="polite"
-              >
-                {classificationFeedback.label}
-              </span>
-            ) : null}
-            <PhotoClassificationHelpButton title="Scorciatoie preview foto" />
-            {onAutoAdvanceOnActionChange ? (
-              <button
-                type="button"
-                className={`quick-preview__auto-advance${
-                  autoAdvanceOnAction ? " quick-preview__auto-advance--on" : " quick-preview__auto-advance--off"
-                }`}
-                onClick={() => onAutoAdvanceOnActionChange(!autoAdvanceOnAction)}
-                role="switch"
-                aria-checked={autoAdvanceOnAction}
-                aria-label="Avanza dopo classificazione"
-                title={autoAdvanceOnAction
-                  ? "Dopo una classificazione da tastiera passa alla foto successiva. Premi per disattivare."
-                  : "Resta sulla foto dopo la classificazione. Usa le frecce per andare avanti o indietro."}
-              >
-                <span>Avanza dopo classificazione</span>
-                <span className="quick-preview__switch-track" aria-hidden="true">
-                  <span className="quick-preview__switch-thumb" />
-                </span>
-                <strong>{autoAdvanceOnAction ? "ON" : "OFF"}</strong>
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className={`quick-preview__auto-advance${keepZoomState ? " quick-preview__auto-advance--on" : " quick-preview__auto-advance--off"}`}
-              onClick={() => setKeepZoomState((current) => !current)}
-              role="switch"
-              aria-checked={keepZoomState}
-              aria-label="Mantieni zoom durante lo sfoglio"
-              title="Mantiene ingrandimento e punto osservato passando alla foto precedente o successiva"
-            >
-              <span>Mantieni zoom</span>
-              <span className="quick-preview__switch-track" aria-hidden="true">
-                <span className="quick-preview__switch-thumb" />
-              </span>
-              <strong>{keepZoomState ? "ON" : "OFF"}</strong>
-            </button>
-            <span
-              className="quick-preview__perf-badge"
-              title={`Benchmark locale della quick preview | ${quickPreviewPerf.sourceBreakdown}`}
-            >
-              {`Fit ${quickPreviewPerf.fitLatencyMs ?? "n/d"} ms${UI_SEPARATOR}Detail ${quickPreviewPerf.detailLatencyMs ?? "n/d"} ms${UI_SEPARATOR}Hit ${quickPreviewPerf.warmHitRate ?? "n/d"}%${UI_SEPARATOR}${quickPreviewPerf.lastRenderedSource}`}
-            </span>
-            <button
-              type="button"
-              className={
-                compareMode
-                  ? "ghost-button quick-preview__action quick-preview__action--active"
-                  : "ghost-button quick-preview__action"
-              }
-              onClick={() => setCompareMode((current) => !current)}
-              disabled={!nextAsset && !previousAsset}
-            >
-              {compareMode ? "Chiudi confronto" : "Confronta"}
-            </button>
-            <button
-              type="button"
-              className="ghost-button quick-preview__action"
-              onClick={toggleZoom}
-            >
-              {zoomLevel > 1.05 ? "Adatta" : "Zoom 220%"}
-            </button>
-            {onRotateAsset ? (
-              <div className="quick-preview__rotation-actions" aria-label="Rotazione foto">
-                <button
-                  type="button"
-                  className="ghost-button quick-preview__action"
-                  onClick={() => updateRotation("left")}
-                  title="Ruota 90° a sinistra"
-                >
-                  ↶ Sinistra
-                </button>
-                <button
-                  type="button"
-                  className="ghost-button quick-preview__action"
-                  onClick={() => updateRotation("right")}
-                  title="Ruota 90° a destra · Ctrl+R"
-                  aria-keyshortcuts="Control+R"
-                >
-                  ↷ Destra
-                </button>
-              </div>
-            ) : null}
-            <button
-              type="button"
-              className="ghost-button quick-preview__action"
-              onClick={toggleNativeFullscreen}
-            >
-              Fullscreen
-            </button>
+          <div className="quick-preview__zoom-group">
             <label className="quick-preview__zoom-control" title="Zoom immagine">
-              <span>Zoom</span>
               <input
                 type="range"
                 min={1}
@@ -3261,24 +3170,134 @@ export function PhotoQuickPreviewModal({
             <button
               type="button"
               className="ghost-button quick-preview__action"
-              onClick={() => void saveAssetAs(asset.id)}
-              title="Salva una copia del file in una posizione a scelta per aprirlo in un editor esterno (Photoshop, Lightroom, ecc.)"
+              onClick={toggleZoom}
+              title={zoomLevel > 1.05 ? "Torna a vista intera" : "Ingrandisci al 220%"}
             >
-              Salva copia
+              {zoomLevel > 1.05 ? "Adatta" : "220%"}
             </button>
             <button
               type="button"
-              className="ghost-button quick-preview__action"
-              onClick={() => { setShareOpen((value) => !value); setShareMessage(null); setWaAskPhone(false); }}
-              aria-expanded={shareOpen}
-              title="Copia o invia la foto al cliente (WhatsApp, email)"
+              className={keepZoomState ? "ghost-button quick-preview__action quick-preview__action--active quick-preview__icon-action" : "ghost-button quick-preview__action quick-preview__icon-action"}
+              onClick={() => setKeepZoomState((current) => !current)}
+              role="switch"
+              aria-checked={keepZoomState}
+              aria-label="Mantieni zoom durante lo sfoglio"
+              title={keepZoomState
+                ? "Mantieni zoom: attivo. Passando alla foto successiva restano ingrandimento e punto osservato."
+                : "Mantieni zoom: disattivo. Attivalo per conservare ingrandimento e punto osservato passando da una foto all'altra."}
             >
-              Condividi
-            </button>
-            <button type="button" className="ghost-button quick-preview__action" onClick={onClose}>
-              Chiudi
+              {keepZoomState ? "🔒" : "🔓"}
             </button>
           </div>
+          <PhotoClassificationHelpButton title="Scorciatoie preview foto" />
+          <div className="quick-preview__more" ref={moreMenuRef}>
+            <button
+              type="button"
+              className={moreMenuOpen ? "ghost-button quick-preview__action quick-preview__action--active" : "ghost-button quick-preview__action"}
+              onClick={() => setMoreMenuOpen((current) => !current)}
+              aria-haspopup="menu"
+              aria-expanded={moreMenuOpen}
+              aria-label="Altre azioni"
+              title="Ruota, schermo intero, salva, condividi e impostazioni"
+            >
+              ⋯
+            </button>
+            {moreMenuOpen ? (
+              <div className="quick-preview__more-menu" role="menu">
+                {onRotateAsset ? (
+                  <>
+                    <button type="button" role="menuitem" className="quick-preview__more-item" onClick={() => updateRotation("left")}>
+                      <span>↶ Ruota a sinistra</span>
+                    </button>
+                    <button type="button" role="menuitem" className="quick-preview__more-item" onClick={() => updateRotation("right")} aria-keyshortcuts="Control+R">
+                      <span>↷ Ruota a destra</span>
+                      <kbd>Ctrl+R</kbd>
+                    </button>
+                  </>
+                ) : null}
+                <button type="button" role="menuitem" className="quick-preview__more-item" onClick={() => { setMoreMenuOpen(false); void toggleNativeFullscreen(); }}>
+                  <span>Schermo intero</span>
+                  <kbd>F</kbd>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="quick-preview__more-item"
+                  onClick={() => { setMoreMenuOpen(false); void saveAssetAs(asset.id); }}
+                  title="Salva una copia del file in una posizione a scelta per aprirlo in un editor esterno (Photoshop, Lightroom, ecc.)"
+                >
+                  <span>Salva copia</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="quick-preview__more-item"
+                  onClick={() => { setMoreMenuOpen(false); setShareOpen((value) => !value); setShareMessage(null); setWaAskPhone(false); }}
+                  title="Copia o invia la foto al cliente (WhatsApp, email)"
+                >
+                  <span>Condividi…</span>
+                </button>
+                <div className="quick-preview__more-separator" role="separator" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="quick-preview__more-item"
+                  onClick={cycleRatingBadgeMode}
+                  title="Mostra stelle, stato e colore sopra la foto: sempre, solo al cambio foto o mai"
+                >
+                  <span>Stelle sulla foto</span>
+                  <em>{RATING_BADGE_LABELS[ratingBadgeMode]}</em>
+                </button>
+                {onAutoAdvanceOnActionChange ? (
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={autoAdvanceOnAction}
+                    className="quick-preview__more-item"
+                    onClick={() => onAutoAdvanceOnActionChange(!autoAdvanceOnAction)}
+                    title={autoAdvanceOnAction
+                      ? "Dopo una classificazione da tastiera passa alla foto successiva. Premi per disattivare."
+                      : "Resta sulla foto dopo la classificazione. Usa le frecce per andare avanti o indietro."}
+                  >
+                    <span>Avanza dopo classificazione</span>
+                    <em>{autoAdvanceOnAction ? "Sì" : "No"}</em>
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={keepZoomState}
+                  className="quick-preview__more-item"
+                  onClick={() => setKeepZoomState((current) => !current)}
+                  title="Mantiene ingrandimento e punto osservato passando alla foto precedente o successiva"
+                >
+                  <span>Mantieni zoom</span>
+                  <em>{keepZoomState ? "Sì" : "No"}</em>
+                </button>
+                <div className="quick-preview__more-separator" role="separator" />
+                <span
+                  className="quick-preview__perf-badge"
+                  title={`Benchmark locale della quick preview | ${quickPreviewPerf.sourceBreakdown}`}
+                >
+                  {`Fit ${quickPreviewPerf.fitLatencyMs ?? "n/d"} ms${UI_SEPARATOR}Detail ${quickPreviewPerf.detailLatencyMs ?? "n/d"} ms${UI_SEPARATOR}Hit ${quickPreviewPerf.warmHitRate ?? "n/d"}%${UI_SEPARATOR}${quickPreviewPerf.lastRenderedSource}`}
+                </span>
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className={sidebarCollapsed ? "ghost-button quick-preview__action quick-preview__action--active" : "ghost-button quick-preview__action"}
+            onClick={toggleSidebarCollapsed}
+            aria-controls="quick-preview-sidebar"
+            aria-expanded={!sidebarCollapsed}
+            title={sidebarCollapsed ? "Apri filtri e dock" : "Compatta filtri e dock"}
+          >
+            {sidebarCollapsed ? "Apri pannelli" : "Compatta pannelli"}
+          </button>
+          <button type="button" className="ghost-button quick-preview__action quick-preview__close" onClick={onClose} aria-label="Chiudi" title="Chiudi (Esc)">
+            ✕
+          </button>
+        </div>
         </div>
 
         {shareOpen ? (

@@ -6557,3 +6557,97 @@ img {
   justify-content: space-between;
   gap: 0.5rem;
 }
+/* Barra inferiore Quick Preview: una riga, azioni rare nel menu ⋯ */
+.quick-preview__actions {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.quick-preview__title {
+  min-width: 0;
+}
+
+.quick-preview__title strong,
+.quick-preview__title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-preview__zoom-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.quick-preview__zoom-control {
+  padding: 0.3rem 0.6rem;
+}
+
+.quick-preview__icon-action {
+  padding-inline: 0.55rem;
+}
+
+.quick-preview__close {
+  padding-inline: 0.7rem;
+}
+
+.quick-preview__more {
+  position: relative;
+}
+
+.quick-preview__more-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  z-index: 30;
+  display: grid;
+  gap: 0.1rem;
+  min-width: 17rem;
+  padding: 0.4rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  background: rgba(20, 22, 26, 0.97);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+}
+
+.quick-preview__more-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.7rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-preview__more-item:hover,
+.quick-preview__more-item:focus-visible {
+  background: rgba(255, 255, 255, 0.09);
+  outline: none;
+}
+
+.quick-preview__more-item kbd,
+.quick-preview__more-item em {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.75rem;
+  font-style: normal;
+}
+
+.quick-preview__more-separator {
+  height: 1px;
+  margin: 0.25rem 0.3rem;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.quick-preview__more-menu .quick-preview__perf-badge {
+  margin: 0.1rem 0.3rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.68rem;
+}

@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-20 - Image Select Pro 0.1.49
+
+- Migliorato: nell'anteprima grande la barra sotto la foto è ora una sola riga ordinata. Restano a vista le stelle, Confronta, lo zoom (slider, percentuale, «Adatta» e un lucchetto per «Mantieni zoom»), Info, «Apri pannelli» e la ✕ per chiudere. Ruota sinistra/destra, Schermo intero, Salva copia, Condividi, «Stelle sulla foto», «Avanza dopo classificazione» e «Mantieni zoom» sono nel nuovo menu «⋯». I dati di benchmark non occupano più la barra: compaiono in piccolo in fondo al menu. Il pulsante zoom mostra «220%» o «Adatta» e la riga info del file è più corta.
+
 ## 2026-10-20 - Image Select Pro 0.1.48
 
 - Nuovo: nell'anteprima grande un badge sopra la foto, in alto a sinistra, mostra a colpo d'occhio le stelle assegnate (in oro, le altre in grigio), Pick o Scartata e il pallino del colore; non compare se la foto non ha niente di assegnato e non compare nel Confronto. Il pulsante «Valutazione: …» della barra lo imposta su Sempre, Al cambio foto (visibile circa tre secondi poi sfuma) o Nascosta; la scelta resta su questo PC.
