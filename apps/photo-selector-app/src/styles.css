@@ -5582,7 +5582,7 @@ img {
   top: 0;
   right: 0;
   bottom: 0;
-  width: 280px;
+  width: 340px;
   z-index: 1600;
   background: rgba(28, 33, 30, 0.97);
   border-left: 1px solid var(--line);
@@ -6445,4 +6445,65 @@ img {
   .gamepad-mapping__row {
     grid-template-columns: minmax(0, 1fr) auto;
   }
+}
+
+.photo-selector__settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 2.9rem;
+  background: rgba(28, 33, 30, 0.97);
+  z-index: 1;
+}
+
+.photo-selector__settings-tab {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.photo-selector__settings-tab:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.photo-selector__settings-tab--active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.photo-selector__settings-details {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.photo-selector__settings-details > summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.photo-selector__settings-gamepad-list {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.78rem;
+}
+
+.photo-selector__settings-gamepad-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }

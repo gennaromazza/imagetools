@@ -30,6 +30,54 @@ function firstConnectedPad(): Gamepad | null {
   return navigator.getGamepads().find((pad): pad is Gamepad => Boolean(pad?.connected)) ?? null;
 }
 
+/** Scheda «Controller» delle impostazioni: stato del pad, mappatura attuale e accesso alla finestra di assegnazione. */
+export function GamepadSettingsSection() {
+  const { mapping } = useGamepadStore();
+  const [pad, setPad] = useState<ConnectedPad | null>(() => {
+    const current = firstConnectedPad();
+    return current ? { name: current.id, standardLayout: current.mapping === "standard" } : null;
+  });
+
+  useEffect(() => {
+    const refresh = () => {
+      const current = firstConnectedPad();
+      setPad(current ? { name: current.id, standardLayout: current.mapping === "standard" } : null);
+    };
+    window.addEventListener("gamepadconnected", refresh);
+    window.addEventListener("gamepaddisconnected", refresh);
+    return () => {
+      window.removeEventListener("gamepadconnected", refresh);
+      window.removeEventListener("gamepaddisconnected", refresh);
+    };
+  }, []);
+
+  const standardLayout = pad?.standardLayout ?? true;
+
+  return (
+    <>
+      <p className="photo-selector__settings-empty">
+        {pad
+          ? `Collegato: ${pad.name}`
+          : "Nessun controller rilevato: collegalo e premi un pulsante qualsiasi."}
+      </p>
+      <ul className="photo-selector__settings-gamepad-list">
+        {GAMEPAD_COMMANDS.map(({ command, label }) => (
+          <li key={command}>
+            <span>{label}</span>
+            <kbd className="shortcut-help__kbd">{gamepadButtonName(mapping[command], standardLayout)}</kbd>
+          </li>
+        ))}
+      </ul>
+      <p className="photo-selector__settings-empty">
+        La levetta sinistra sposta sempre la foto attiva; la destra sposta la foto ingrandita in anteprima.
+      </p>
+      <button type="button" className="ghost-button ghost-button--small" onClick={() => setGamepadMappingEditorOpen(true)}>
+        Personalizza pulsanti…
+      </button>
+    </>
+  );
+}
+
 /**
  * Finestra per riassegnare i pulsanti del controller: si sceglie un comando,
  * si preme il pulsante sul pad e la mappatura viene salvata su questo PC.

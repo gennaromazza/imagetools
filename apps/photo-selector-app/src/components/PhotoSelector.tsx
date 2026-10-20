@@ -89,7 +89,7 @@ import {
 import { logDesktopEvent, readCaptureTimes, renamePhotoFiles } from "../services/desktop-store";
 import { useToast } from "./ToastProvider";
 import { useGamepadControls } from "../hooks/useGamepadControls";
-import { GamepadMappingModal, useGamepadStore } from "./GamepadMappingModal";
+import { GamepadMappingModal, GamepadSettingsSection, useGamepadStore } from "./GamepadMappingModal";
 import { DockableWorkspace } from "./workspace/DockableWorkspace";
 import { useWorkspacePanelLayout } from "./workspace/useWorkspacePanelLayout";
 import { getThumbnailView } from "../services/thumbnail-view-store";
@@ -191,6 +191,17 @@ function useLatestCallback<Args extends unknown[], Result>(
   callbackRef.current = callback;
   return useCallback((...args: Args) => callbackRef.current(...args), []);
 }
+type SettingsTab = "general" | "labels" | "controller" | "performance" | "filters" | "diagnostics";
+
+const SETTINGS_TABS: ReadonlyArray<{ id: SettingsTab; label: string }> = [
+  { id: "general", label: "Generale" },
+  { id: "labels", label: "Etichette" },
+  { id: "controller", label: "Controller" },
+  { id: "performance", label: "Prestazioni" },
+  { id: "filters", label: "Filtri" },
+  { id: "diagnostics", label: "Diagnostica" },
+];
+
 type PhotoMetadataChanges = Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel" | "customLabels" | "rotationDegrees">>;
 type BatchPulseKind = "dot" | "label";
 type PreviewFeedbackKind = "star" | "pill" | "dot" | "label";
@@ -618,6 +629,7 @@ export function PhotoSelector({
   const [isAdvancedFiltersOpen, setIsAdvancedFiltersOpen] = useState(false);
   const [isSelectionActionsOpen, setIsSelectionActionsOpen] = useState(false);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [isCompareOpen, setIsCompareOpen] = useState(false);
   const [captureById, setCaptureById] = useState<Map<string, CaptureTimeInfo>>(() => new Map());
   const [captureReady, setCaptureReady] = useState(false);
@@ -4952,6 +4964,139 @@ export function PhotoSelector({
             </div>
           ) : null}
 
+          <div className="photo-selector__settings-tabs" role="tablist" aria-label="Sezioni impostazioni">
+            {SETTINGS_TABS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={settingsTab === item.id}
+                className={settingsTab === item.id ? "photo-selector__settings-tab photo-selector__settings-tab--active" : "photo-selector__settings-tab"}
+                onClick={() => setSettingsTab(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          {settingsTab === "general" ? (
+            <>
+          <div className="photo-selector__settings-section">
+            <h4 className="photo-selector__settings-section-title">Comportamento</h4>
+            <label
+              className="photo-selector__settings-color-row"
+              style={{ alignItems: "center" }}
+              title="Quando attivo, dopo una scorciatoia di rating/pick/colore/etichetta il focus si sposta sulla foto successiva (flusso Photo Mechanic)."
+            >
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Auto-advance</span>
+              <input
+                type="checkbox"
+                checked={autoAdvanceOnAction}
+                onChange={(event) => handleAutoAdvanceChange(event.target.checked)}
+              />
+            </label>
+          </div>
+
+          <div className="photo-selector__settings-section">
+            <h4 className="photo-selector__settings-section-title">
+              Editor esterno
+              <button
+                type="button"
+                className="photo-selector__settings-info-btn"
+                title="Imposta il percorso assoluto della cartella radice sul tuo PC (es. C:\Foto\Matrimonio). Questo permette di copiare il percorso completo di un file per aprirlo in Photoshop o qualsiasi altro editor esterno."
+              >
+                ?
+              </button>
+            </h4>
+            <label className="photo-selector__settings-color-row">
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Cartella radice</span>
+              <input
+                type="text"
+                className="photo-selector__settings-color-input"
+                value={effectiveRootFolderPath}
+                onChange={(e) => {
+                  setRootFolderPathOverridePersisted(e.target.value);
+                }}
+                placeholder={sourceFolderPath || "C:\\Utenti\\Foto\\Matrimonio"}
+                spellCheck={false}
+              />
+            </label>
+            <div className="photo-selector__settings-preset-row">
+              <button
+                type="button"
+                className="ghost-button ghost-button--small"
+                onClick={() => setRootFolderPathOverridePersisted("")}
+                disabled={!rootFolderPathOverride.trim()}
+                title="Torna a usare automaticamente la cartella aperta"
+              >
+                Usa cartella aperta
+              </button>
+            </div>
+            <label className="photo-selector__settings-color-row">
+              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Editor</span>
+              <div className="photo-selector__settings-input-with-button">
+                <input
+                  type="text"
+                  className="photo-selector__settings-color-input"
+                  value={preferredEditorPath}
+                  onChange={(e) => setPreferredEditorPathPersisted(e.target.value)}
+                  placeholder={installedEditorCandidates[0]?.path ?? "C:\\Program Files\\Adobe\\Adobe Photoshop 2026\\Photoshop.exe"}
+                  spellCheck={false}
+                />
+              </div>
+            </label>
+            <div className="photo-selector__settings-browse-row">
+              <button
+                type="button"
+                className="photo-selector__settings-browse-prominent"
+                onClick={() => void handleBrowsePreferredEditor()}
+                title="Seleziona l'eseguibile dell'editor (Photoshop.exe, ecc.)"
+              >
+                📂 Sfoglia editor...
+              </button>
+            </div>
+            <div className="photo-selector__settings-preset-row photo-selector__settings-editor-presets">
+              {(installedEditorCandidates.length > 0 ? installedEditorCandidates : KNOWN_EDITOR_PRESET_PATHS.map((path) => ({
+                path,
+                label: path.match(/Adobe Photoshop \d{4}/i)?.[0]?.replace(/^Adobe\s+/i, "") ?? "Photoshop",
+              }))).map((candidate) => (
+                <button
+                  key={candidate.path}
+                  type="button"
+                  className="ghost-button ghost-button--small"
+                  onClick={() => setPreferredEditorPathPersisted(candidate.path)}
+                  title={`Imposta percorso ${candidate.label}`}
+                >
+                  {candidate.label}
+                </button>
+              ))}
+            </div>
+            <p
+              className={`photo-selector__settings-path-status photo-selector__settings-path-status--${editorPathStatus.kind}`}
+            >
+              {editorPathStatus.text}
+            </p>
+            {installedEditorCandidates.length > 0 ? (
+              <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                Editor rilevato: {installedEditorCandidates[0].path}
+              </p>
+            ) : null}
+            <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+              {rootFolderPathOverride.trim()
+                ? `Override manuale attivo. Cartella aperta: ${sourceFolderPath || "n/d"}`
+                : sourceFolderPath
+                  ? `Auto dalla cartella aperta: ${sourceFolderPath}`
+                  : "Si auto-compila quando apri una cartella in modalità desktop."}
+            </p>
+            <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+              Usato per "Apri con editor" e "Copia percorso" nel menu contestuale.
+            </p>
+          </div>
+            </>
+          ) : null}
+
+          {settingsTab === "labels" ? (
+            <>
           <div className="photo-selector__settings-section">
             <h4 className="photo-selector__settings-section-title">Nomi etichette colore</h4>
             {COLOR_LABELS.map((label) => (
@@ -5129,103 +5274,20 @@ export function PhotoSelector({
               ) : null}
             </div>
           </div>
+            </>
+          ) : null}
 
+          {settingsTab === "controller" ? (
+            <>
           <div className="photo-selector__settings-section">
-            <h4 className="photo-selector__settings-section-title">
-              Editor esterno
-              <button
-                type="button"
-                className="photo-selector__settings-info-btn"
-                title="Imposta il percorso assoluto della cartella radice sul tuo PC (es. C:\Foto\Matrimonio). Questo permette di copiare il percorso completo di un file per aprirlo in Photoshop o qualsiasi altro editor esterno."
-              >
-                ?
-              </button>
-            </h4>
-            <label className="photo-selector__settings-color-row">
-              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Cartella radice</span>
-              <input
-                type="text"
-                className="photo-selector__settings-color-input"
-                value={effectiveRootFolderPath}
-                onChange={(e) => {
-                  setRootFolderPathOverridePersisted(e.target.value);
-                }}
-                placeholder={sourceFolderPath || "C:\\Utenti\\Foto\\Matrimonio"}
-                spellCheck={false}
-              />
-            </label>
-            <div className="photo-selector__settings-preset-row">
-              <button
-                type="button"
-                className="ghost-button ghost-button--small"
-                onClick={() => setRootFolderPathOverridePersisted("")}
-                disabled={!rootFolderPathOverride.trim()}
-                title="Torna a usare automaticamente la cartella aperta"
-              >
-                Usa cartella aperta
-              </button>
-            </div>
-            <label className="photo-selector__settings-color-row">
-              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Editor</span>
-              <div className="photo-selector__settings-input-with-button">
-                <input
-                  type="text"
-                  className="photo-selector__settings-color-input"
-                  value={preferredEditorPath}
-                  onChange={(e) => setPreferredEditorPathPersisted(e.target.value)}
-                  placeholder={installedEditorCandidates[0]?.path ?? "C:\\Program Files\\Adobe\\Adobe Photoshop 2026\\Photoshop.exe"}
-                  spellCheck={false}
-                />
-              </div>
-            </label>
-            <div className="photo-selector__settings-browse-row">
-              <button
-                type="button"
-                className="photo-selector__settings-browse-prominent"
-                onClick={() => void handleBrowsePreferredEditor()}
-                title="Seleziona l'eseguibile dell'editor (Photoshop.exe, ecc.)"
-              >
-                📂 Sfoglia editor...
-              </button>
-            </div>
-            <div className="photo-selector__settings-preset-row photo-selector__settings-editor-presets">
-              {(installedEditorCandidates.length > 0 ? installedEditorCandidates : KNOWN_EDITOR_PRESET_PATHS.map((path) => ({
-                path,
-                label: path.match(/Adobe Photoshop \d{4}/i)?.[0]?.replace(/^Adobe\s+/i, "") ?? "Photoshop",
-              }))).map((candidate) => (
-                <button
-                  key={candidate.path}
-                  type="button"
-                  className="ghost-button ghost-button--small"
-                  onClick={() => setPreferredEditorPathPersisted(candidate.path)}
-                  title={`Imposta percorso ${candidate.label}`}
-                >
-                  {candidate.label}
-                </button>
-              ))}
-            </div>
-            <p
-              className={`photo-selector__settings-path-status photo-selector__settings-path-status--${editorPathStatus.kind}`}
-            >
-              {editorPathStatus.text}
-            </p>
-            {installedEditorCandidates.length > 0 ? (
-              <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
-                Editor rilevato: {installedEditorCandidates[0].path}
-              </p>
-            ) : null}
-            <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
-              {rootFolderPathOverride.trim()
-                ? `Override manuale attivo. Cartella aperta: ${sourceFolderPath || "n/d"}`
-                : sourceFolderPath
-                  ? `Auto dalla cartella aperta: ${sourceFolderPath}`
-                  : "Si auto-compila quando apri una cartella in modalità desktop."}
-            </p>
-            <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
-              Usato per "Apri con editor" e "Copia percorso" nel menu contestuale.
-            </p>
+            <h4 className="photo-selector__settings-section-title">Controller</h4>
+            <GamepadSettingsSection />
           </div>
+            </>
+          ) : null}
 
+          {settingsTab === "performance" ? (
+            <>
           <div className="photo-selector__settings-section">
             <h4 className="photo-selector__settings-section-title">
               Prestazioni
@@ -5266,18 +5328,6 @@ export function PhotoSelector({
                 onChange={(event) => handleSortCacheEnabledChange(event.target.checked)}
               />
             </label>
-            <label
-              className="photo-selector__settings-color-row"
-              style={{ alignItems: "center" }}
-              title="Quando attivo, dopo una scorciatoia di rating/pick/colore/etichetta il focus si sposta sulla foto successiva (flusso Photo Mechanic)."
-            >
-              <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", minWidth: 90 }}>Auto-advance</span>
-              <input
-                type="checkbox"
-                checked={autoAdvanceOnAction}
-                onChange={(event) => handleAutoAdvanceChange(event.target.checked)}
-              />
-            </label>
             <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
               Profilo attivo: {
                 selectedThumbnailProfile === "ultra-fast"
@@ -5308,36 +5358,6 @@ export function PhotoSelector({
                 ) : null}
                 <small>La GPU accelera rendering e scorrimento; la decodifica RAW/JPEG usa la pipeline nativa CPU.</small>
               </div>
-            </div>
-            {performanceSnapshot ? (
-              <>
-                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
-                  Primo thumbnail: {formatMilliseconds(performanceSnapshot.folderOpenToFirstThumbnailMs)} | Griglia completa: {formatMilliseconds(performanceSnapshot.folderOpenToGridCompleteMs)}
-                </p>
-                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
-                  Cache colpite: {performanceSnapshot.cachedThumbnailCount}/{performanceSnapshot.totalThumbnailCount} | Letture disco: {formatBytes(performanceSnapshot.bytesRead)}
-                </p>
-                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
-                  RAW: {formatBytes(performanceSnapshot.rawBytesRead)} | Standard: {formatBytes(performanceSnapshot.standardBytesRead)}
-                </p>
-              </>
-            ) : null}
-            <div className="photo-selector__settings-diagnostics">
-              <label className="photo-selector__settings-toggle">
-                <span>Registra dati tecnici sulle prestazioni (solo in locale)</span>
-                <input
-                  type="checkbox"
-                  checked={perfDiagnosticsEnabled}
-                  onChange={(event) => handlePerfDiagnosticsToggle(event.target.checked)}
-                />
-              </label>
-              <p className="photo-selector__settings-empty">
-                Misura scatti dell’interfaccia e caratteristiche del PC. Non contiene nomi di file né percorsi e non viene mai inviato: puoi esportarlo e mandarlo tu all’assistenza.
-              </p>
-              <button type="button" className="icon-button" onClick={handlePerfDiagnosticsExport} disabled={!perfDiagnosticsEnabled}>
-                Esporta diagnostica
-              </button>
-              {perfDiagnosticsFeedback ? <small role="status">{perfDiagnosticsFeedback}</small> : null}
             </div>
             {desktopThumbnailCacheInfo?.systemTotalMemoryBytes != null && onRamBudgetPresetChange ? (
               <RamBudgetSection
@@ -5469,6 +5489,8 @@ export function PhotoSelector({
                   ? " (nessun limite)."
                   : ` su ${formatBytes(desktopThumbnailCacheInfo.diskBudgetBytes)}.`}
               </p>
+              <details className="photo-selector__settings-details">
+                <summary>Dettagli tecnici</summary>
               {typeof desktopThumbnailCacheInfo.rawRenderCacheHit === "number" ? (
                 <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
                   RAW render cache hit (sessione): {desktopThumbnailCacheInfo.rawRenderCacheHit}
@@ -5501,9 +5523,14 @@ export function PhotoSelector({
                   Percorso consigliato: {cacheLocationSummary.recommended}
                 </p>
               ) : null}
+              </details>
             </div>
           ) : null}
+            </>
+          ) : null}
 
+          {settingsTab === "filters" ? (
+            <>
           <div className="photo-selector__settings-section">
             <h4 className="photo-selector__settings-section-title">
               Preset filtri
@@ -5556,6 +5583,46 @@ export function PhotoSelector({
               </div>
             ))}
           </div>
+            </>
+          ) : null}
+
+          {settingsTab === "diagnostics" ? (
+            <>
+          <div className="photo-selector__settings-section">
+            <h4 className="photo-selector__settings-section-title">Diagnostica prestazioni</h4>
+            {performanceSnapshot ? (
+              <>
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  Primo thumbnail: {formatMilliseconds(performanceSnapshot.folderOpenToFirstThumbnailMs)} | Griglia completa: {formatMilliseconds(performanceSnapshot.folderOpenToGridCompleteMs)}
+                </p>
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  Cache colpite: {performanceSnapshot.cachedThumbnailCount}/{performanceSnapshot.totalThumbnailCount} | Letture disco: {formatBytes(performanceSnapshot.bytesRead)}
+                </p>
+                <p className="photo-selector__settings-empty" style={{ marginTop: "0.3rem" }}>
+                  RAW: {formatBytes(performanceSnapshot.rawBytesRead)} | Standard: {formatBytes(performanceSnapshot.standardBytesRead)}
+                </p>
+              </>
+            ) : null}
+            <div className="photo-selector__settings-diagnostics">
+              <label className="photo-selector__settings-toggle">
+                <span>Registra dati tecnici sulle prestazioni (solo in locale)</span>
+                <input
+                  type="checkbox"
+                  checked={perfDiagnosticsEnabled}
+                  onChange={(event) => handlePerfDiagnosticsToggle(event.target.checked)}
+                />
+              </label>
+              <p className="photo-selector__settings-empty">
+                Misura scatti dell’interfaccia e caratteristiche del PC. Non contiene nomi di file né percorsi e non viene mai inviato: puoi esportarlo e mandarlo tu all’assistenza.
+              </p>
+              <button type="button" className="icon-button" onClick={handlePerfDiagnosticsExport} disabled={!perfDiagnosticsEnabled}>
+                Esporta diagnostica
+              </button>
+              {perfDiagnosticsFeedback ? <small role="status">{perfDiagnosticsFeedback}</small> : null}
+            </div>
+          </div>
+            </>
+          ) : null}
         </aside>
       )}
 
