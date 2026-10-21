@@ -530,6 +530,10 @@
     "0.1.49": [
       "La barra sotto la foto grande è più pulita: una sola riga con stelle, Confronta, zoom, Info e il pulsante Chiudi (✕).",
       "Ruota, Schermo intero, Salva copia, Condividi e le impostazioni dell'anteprima (Stelle sulla foto, Avanza dopo classificazione, Mantieni zoom) sono raccolti nel nuovo menu «⋯»; il lucchetto accanto allo zoom attiva Mantieni zoom."
+    ],
+    "0.1.50": [
+      "Maiusc+clic nella griglia sostituisce la selezione con il nuovo intervallo: per scegliere un altro gruppo di foto non devi più deselezionare a mano quello precedente.",
+      "Per aggiungere un intervallo a quello che hai già selezionato usa Ctrl+Maiusc+clic (Cmd+Maiusc su Mac)."
     ]
   },
   "id-photo": {

@@ -32,6 +32,10 @@
 
 
 
+## 2026-10-21 - Image Select Pro 0.1.50
+
+- Corretto: Maiusc+clic nella griglia ora sostituisce la selezione con il nuovo intervallo invece di aggiungerlo a quella precedente. Dopo aver lavorato sulle foto 1–20, Maiusc+clic sulla 21 e poi sulla 40 lascia selezionate solo le 21–40, senza deselezionare a mano il gruppo precedente. Per aggiungere un intervallo alla selezione esistente usa Ctrl+Maiusc+clic (Cmd+Maiusc su Mac), come già avviene con il lasso.
+
 ## 2026-10-20 - Image Select Pro 0.1.49
 
 - Migliorato: nell'anteprima grande la barra sotto la foto è ora una sola riga ordinata. Restano a vista le stelle, Confronta, lo zoom (slider, percentuale, «Adatta» e un lucchetto per «Mantieni zoom»), Info, «Apri pannelli» e la ✕ per chiudere. Ruota sinistra/destra, Schermo intero, Salva copia, Condividi, «Stelle sulla foto», «Avanza dopo classificazione» e «Mantieni zoom» sono nel nuovo menu «⋯». I dati di benchmark non occupano più la barra: compaiono in piccolo in fondo al menu. Il pulsante zoom mostra «220%» o «Adatta» e la riga info del file è più corta.
