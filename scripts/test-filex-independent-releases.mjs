@@ -234,7 +234,8 @@ assert(
     && releaseWorkflow.includes("test:batch-print-layout-bug-hunt")
     && releaseWorkflow.includes("steps.release.outputs.component == 'id-photo' || steps.release.outputs.component == 'batch-print-layout'")
     && /run:\s+npm\.cmd run test:id-photo(?:\r?\n|$)/u.test(releaseWorkflow)
-    && releaseWorkflow.includes("git branch -r --contains $env:GITHUB_SHA")
+    && releaseWorkflow.includes("git merge-base --is-ancestor $env:GITHUB_SHA refs/remotes/origin/main")
+    && !releaseWorkflow.includes("git branch -r --contains $env:GITHUB_SHA")
     && releaseWorkflow.includes('"refs/heads/main"')
     && !releaseWorkflow.includes("Build FileX Suite installer"),
   "Il workflow non e' selettivo per componente.",
