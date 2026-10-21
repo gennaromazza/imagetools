@@ -5,6 +5,7 @@ import {
   pickSelectionAnchor,
   resolveClassificationTargetIds,
   resolveLassoSelection,
+  resolveRangeSelection,
   shouldSelectAllVisible,
   type LassoRect,
 } from "./photo-selection.js";
@@ -38,6 +39,22 @@ describe("lasso", () => {
 
   it("con Maiusc o Ctrl aggiunge senza duplicare", () => {
     assert.deepEqual(resolveLassoSelection(["x", "a"], new Set(["a", "b"]), true), ["x", "a", "b"]);
+  });
+});
+
+describe("Maiusc+click", () => {
+  it("sostituisce la selezione precedente con il nuovo intervallo, in entrambe le direzioni", () => {
+    assert.deepEqual(resolveRangeSelection(["a", "b"], ids, 2, 4, false), ["c", "d", "e"]);
+    assert.deepEqual(resolveRangeSelection(["a", "b"], ids, 4, 2, false), ["c", "d", "e"]);
+  });
+
+  it("con Ctrl/Cmd+Maiusc aggiunge l'intervallo senza duplicare", () => {
+    assert.deepEqual(resolveRangeSelection(["a", "c"], ids, 2, 3, true), ["a", "c", "d"]);
+  });
+
+  it("ignora un'ancora o una foto non più visibile", () => {
+    assert.equal(resolveRangeSelection(["a"], ids, -1, 3, false), null);
+    assert.equal(resolveRangeSelection(["a"], ids, 1, -1, false), null);
   });
 });
 

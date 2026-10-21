@@ -102,6 +102,7 @@ import {
   pickSelectionAnchor,
   resolveClassificationTargetIds,
   resolveLassoSelection,
+  resolveRangeSelection,
   resolveRotationTargetIds,
   shouldSelectAllVisible,
   togglePhotoSelection,
@@ -2939,21 +2940,18 @@ export function PhotoSelector({
   const togglePhoto = useLatestCallback((id: string, event?: React.MouseEvent) => {
     setFocusedPhotoId(id);
 
-    // Shift+click range selection
+    // Maiusc+click sostituisce la selezione con l'intervallo; Ctrl/Cmd+Maiusc+click lo aggiunge.
     if (event?.shiftKey && lastClickedIdRef.current) {
-      const lastIdx = visiblePhotoIndexById.get(lastClickedIdRef.current) ?? -1;
-      const curIdx = visiblePhotoIndexById.get(id) ?? -1;
-      if (lastIdx >= 0 && curIdx >= 0) {
-        const rangeSelection = new Set(selectedIdsRef.current);
-        const [from, to] = lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
-        for (let i = from; i <= to; i++) {
-          const rangeId = visiblePhotoIds[i];
-          if (rangeId) {
-            rangeSelection.add(rangeId);
-          }
-        }
+      const rangeSelection = resolveRangeSelection(
+        selectedIdsRef.current,
+        visiblePhotoIds,
+        visiblePhotoIndexById.get(lastClickedIdRef.current) ?? -1,
+        visiblePhotoIndexById.get(id) ?? -1,
+        event.ctrlKey || event.metaKey,
+      );
+      if (rangeSelection) {
         lastClickedIdRef.current = id;
-        commitSelection(Array.from(rangeSelection));
+        commitSelection(rangeSelection);
         return;
       }
     }

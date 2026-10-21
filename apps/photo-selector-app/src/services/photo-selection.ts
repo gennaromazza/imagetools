@@ -94,6 +94,31 @@ export function resolveLassoSelection(
   return Array.from(next);
 }
 
+/**
+ * Esito di Maiusc+click: l'intervallo tra l'ancora e la foto cliccata diventa la nuova
+ * selezione; con Ctrl/Cmd+Maiusc si aggiunge a quella esistente. Indici fuori griglia → null.
+ */
+export function resolveRangeSelection(
+  baseIds: readonly string[],
+  visibleIds: readonly string[],
+  anchorIndex: number,
+  targetIndex: number,
+  additive: boolean,
+): string[] | null {
+  if (anchorIndex < 0 || targetIndex < 0) {
+    return null;
+  }
+  const next = new Set(additive ? baseIds : []);
+  const [from, to] = anchorIndex < targetIndex ? [anchorIndex, targetIndex] : [targetIndex, anchorIndex];
+  for (let i = from; i <= to; i++) {
+    const rangeId = visibleIds[i];
+    if (rangeId) {
+      next.add(rangeId);
+    }
+  }
+  return Array.from(next);
+}
+
 /** Foto che riceve il focus e l'ancora di Maiusc+click dopo lasso o Ctrl+A. */
 export function pickSelectionAnchor(
   selectedIds: ReadonlySet<string>,
