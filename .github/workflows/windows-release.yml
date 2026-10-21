@@ -89,8 +89,10 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           git fetch origin main:refs/remotes/origin/main --no-tags
-          $mainBranches = @(git branch -r --contains $env:GITHUB_SHA)
-          if ($mainBranches -notmatch "origin/main") {
+          # Chiede a Git se il commit è antenato di main: «branch -r --contains» con -notmatch
+          # falliva quando il commit era anche in un altro branch remoto.
+          git merge-base --is-ancestor $env:GITHUB_SHA refs/remotes/origin/main
+          if ($LASTEXITCODE -ne 0) {
             throw "La release deve puntare a un commit gia integrato in main: $env:GITHUB_SHA"
           }
           if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ github.ref }}" -ne "refs/heads/main") {
