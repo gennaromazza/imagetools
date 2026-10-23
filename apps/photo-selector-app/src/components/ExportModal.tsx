@@ -153,22 +153,27 @@ export function ExportModal({ fileCount, rawCount, inputPaths, onClose }: Export
             <p>Motore Image Converter integrato: nessuna app da aprire, nessuna reimportazione.</p>
           </div>
         </div>
-        <div className="modal-panel__body" style={{ display: "grid", gap: "0.7rem" }}>
+        <div className="modal-panel__body modal-panel__body--scroll" style={{ display: "grid", gap: "0.7rem", minWidth: 0 }}>
           {phase === "setup" ? (
             <>
-              <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.85rem" }}>
+              <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.85rem", minWidth: 0 }}>
                 Preset di partenza
                 <select
                   value={presetId}
                   onChange={(event) => setPresetId(event.target.value as ImageConverterPresetId)}
-                  style={{ padding: "0.45rem 0.6rem", borderRadius: 10 }}
+                  style={{ padding: "0.45rem 0.6rem", borderRadius: 10, width: "100%", minWidth: 0 }}
                 >
                   {presets.map((preset) => (
                     <option key={preset.id} value={preset.id} title={preset.description}>
-                      {preset.name} — {preset.description}
+                      {preset.name}
                     </option>
                   ))}
                 </select>
+                {presets.find((preset) => preset.id === presetId)?.description ? (
+                  <span style={{ fontSize: "0.78rem", opacity: 0.7 }}>
+                    {presets.find((preset) => preset.id === presetId)?.description}
+                  </span>
+                ) : null}
               </label>
               <div style={{ display: "flex", gap: "0.7rem", flexWrap: "wrap" }}>
                 <label style={{ display: "grid", gap: "0.3rem", fontSize: "0.85rem" }}>
@@ -214,7 +219,7 @@ export function ExportModal({ fileCount, rawCount, inputPaths, onClose }: Export
                     value={outputDirectory}
                     onChange={(event) => setOutputDirectory(event.target.value)}
                     placeholder="Predefinita di Image Converter"
-                    style={{ flex: 1, padding: "0.45rem 0.6rem", borderRadius: 10 }}
+                    style={{ flex: 1, minWidth: 0, padding: "0.45rem 0.6rem", borderRadius: 10 }}
                   />
                   <button type="button" className="secondary-button" style={{ padding: "0.45rem 0.85rem", fontSize: "0.84rem" }} onClick={() => { void handleChooseDirectory(); }}>
                     Scegli…
@@ -231,7 +236,7 @@ export function ExportModal({ fileCount, rawCount, inputPaths, onClose }: Export
               </label>
               {rawCount > 0 ? (
                 <p style={{ fontSize: "0.8rem", opacity: 0.75, margin: 0 }}>
-                  {rawCount === 1 ? "1 RAW verrà saltato" : `${rawCount} RAW verranno saltati`}: per i RAW usa il preset DNG da Image Converter.
+                  {rawCount === 1 ? "1 RAW verrà convertito" : `${rawCount} RAW verranno convertiti`} con l'anteprima JPEG incorporata dalla fotocamera: le modifiche fatte in Camera Raw non vengono applicate. Per includerle esporta da Camera Raw o Photoshop.
                 </p>
               ) : null}
               {inputPaths.length === 0 ? (
