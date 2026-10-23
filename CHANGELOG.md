@@ -32,6 +32,13 @@
 
 
 
+## 2026-10-23 - Image Select Pro 0.1.52
+
+- Nuovo: raffiche e foto quasi uguali. Image Select Pro riconosce gli scatti fatti a raffica (stessa fotocamera, pochi istanti di distanza) e le foto della stessa inquadratura scattate poco dopo, confrontando le miniature. Ogni variante ha in basso a sinistra un badge «≈ 2/5»; la foto consigliata, in oro con la scritta «Consigliata», è scelta in base alle stelle e poi a nitidezza ed esposizione.
+- Nuovo: pannello «Simili», dal pulsante «Simili (N)» nella barra in basso o con un clic sul badge di una foto. Mostra ogni gruppo con la consigliata per prima: un clic su una foto la tiene (Pick) e segna come Scartate le altre varianti, in un solo passo che si annulla con Ctrl+Z; i file non vengono toccati. «Tieni la consigliata», «Seleziona», «Confronta» e il filtro «Solo da decidere» aiutano a passare in fretta da un gruppo all'altro.
+- Nuovo: se un gruppo è sbagliato, «Separa» lo scioglie, la × su una foto la toglie dal gruppo e «Unisci la selezione come simili» crea un gruppo a mano. Le correzioni valgono finché la cartella resta aperta; «Ripristina gruppi automatici» le annulla.
+- Migliorato: il riconoscimento è lo stesso di Album Flow e lavora in background a griglia ferma, senza rallentare lo scorrimento; dare stelle cambia solo la foto consigliata, senza ricalcolare i gruppi.
+
 ## 2026-10-23 - Album Flow 0.2.40
 
 - Nuovo: ritaglio libero con le maniglie. Con il ritaglio aperto (doppio clic sulla foto, Invio o il pulsante «Ritaglia» sulla foto) compaiono otto maniglie su lati e angoli: trascini un bordo dove vuoi, senza seguire le proporzioni, e la foto resta ferma: si taglia solo ciò che esce dalla cornice. Maiusc su un angolo mantiene le proporzioni; il bordo si ferma dove finisce la foto. Funziona anche con la foto raddrizzata, in «Foto intera» e in «Riempi lo spazio».

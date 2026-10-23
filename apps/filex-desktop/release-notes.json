@@ -538,6 +538,11 @@
     "0.1.51": [
       "La finestra «Esporta» non è più tagliata: il menu dei preset mostra il nome con la descrizione sotto e il pulsante «Esporta» è sempre visibile.",
       "La nota sui RAW ora dice la verità: i RAW vengono convertiti dall'anteprima JPEG della fotocamera, senza le modifiche di Camera Raw."
+    ],
+    "0.1.52": [
+      "Raffiche e foto quasi uguali si riconoscono da sole: ogni variante ha un badge «≈ 2/5» e la foto consigliata (stelle, poi nitidezza ed esposizione) è in oro.",
+      "Dal pulsante «Simili» un clic tiene la foto migliore e scarta le altre varianti, in un solo passo annullabile con Ctrl+Z.",
+      "«Separa», la × su una foto e «Unisci la selezione come simili» correggono i gruppi finché la cartella resta aperta."
     ]
   },
   "id-photo": {
