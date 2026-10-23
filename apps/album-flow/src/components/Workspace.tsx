@@ -22,6 +22,7 @@ import { ExportDialog } from "./ExportDialog";
 import { SocialStudio } from "./SocialStudio";
 import { FormatDialog } from "./FormatDialog";
 import { TemplateEditor, seedFromArea, type TemplateSeed } from "./TemplateEditor";
+import { cropFrameTo } from "../model/freeCrop";
 import { applyTemplate as applyTemplateModel, applyTemplatesToAlbum, createTemplateId, loadTemplates, removeTemplate, reorderFrame, saveTemplates, setFrame, templateFromArea, templateTarget, upsertTemplate } from "../model/templates";
 import { Filmstrip } from "./Filmstrip";
 import { Icon } from "./icons";
@@ -554,6 +555,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       try { storeTemplates(upsertTemplate(templates, { ...made, name: `${made.kind === "free" ? "Libero" : "Divisioni"} ${made.count} foto` })); notify("Layout salvato nei tuoi template: lo trovi nell'elenco dei layout."); } catch (error) { notify(error instanceof Error ? error.message : "Template non salvato."); }
     },
     commitFrame: (itemId, frame) => commit((p) => setFrame(p, itemId, frame), `frame:${itemId}`),
+    commitFrameCrop: (itemId, rect) => commit((p) => cropFrameTo(p, itemId, rect), `crop:${itemId}`),
     moveFrameAcross: (itemId, areaIndex, rect) => {
       const before = historyRef.current.present;
       const found = findItem(before, itemId);

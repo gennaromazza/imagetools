@@ -725,6 +725,12 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.40": [
+      "Nuovo: ritaglio libero con le maniglie. Con il ritaglio aperto (doppio clic sulla foto, Invio o il pulsante «Ritaglia» sulla foto) compaiono otto maniglie su lati e angoli: trascini un bordo dove vuoi, senza seguire le proporzioni, e la foto resta ferma: si taglia solo ciò che esce dalla cornice. Maiusc su un angolo mantiene le proporzioni; il bordo si ferma dove finisce la foto. Funziona anche con la foto raddrizzata, in «Foto intera» e in «Riempi lo spazio».",
+      "Migliorato: al primo ritaglio libero la pagina diventa a disposizione libera senza cambiare a vista, e «Torna al layout automatico» la riporta com'era.",
+      "Migliorato: sulla foto selezionata il piccolo «⋯» è diventato una capsula scura ben visibile con «Ritaglia» e «⋯», leggibile anche su foto chiare; i comandi completi restano dietro «⋯» e nel tasto destro.",
+      "Corretto: trascinando il separatore della libreria le barre dei comandi a sinistra e a destra del foglio non passano più da una a due colonne (con i nomi di spazio, margine e bordo che sparivano): il formato a due colonne dipende ora dalla finestra, non dall'altezza della zona di lavoro."
+    ],
     "0.2.39": [
       "Migliorato: le foto passano da una pagina all'altra nei due sensi anche quando una delle due è a disposizione libera. Trascina la foto sull'altra pagina (la pagina d'arrivo si evidenzia) oppure usa «Sposta nella pagina destra» / «Sposta nella pagina sinistra» dal tasto destro sulla foto; in una pagina libera la foto arriva dove la lasci.",
       "Corretto: «Torna al layout automatico» mostrava una fila di strisce dopo un template libero o dopo l'arrivo di una foto dall'altra pagina; ora ripristina un layout vero, con le foto allineate in «Foto intera».",

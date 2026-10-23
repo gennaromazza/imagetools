@@ -9,6 +9,7 @@ import { applyTemplate, matchTemplates, reorderFrame, sanitizeTemplate, setFrame
 import { applyChapterPreset, assignAssets, BUILTIN_CHAPTER_PRESETS, createChapter, moveChapter, removeChapter } from "./chapters";
 import { overlaysOf } from "./design";
 import { assertProjectInvariants, makeProject } from "./fixtures";
+import { cropFrameTo, visibleFrame } from "./freeCrop";
 import { makeAreaFree, restoreAutomatic, setAreaLocked } from "./layoutLock";
 import { applyImport, dedupeRawJpgPairs, planImport, type ImportCandidate } from "./import";
 import { alignArea, appendAssets, dropOnSpread, moveFrameToArea, moveItemToArea, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, swapItems, toggleItemLock } from "./items";
@@ -321,6 +322,7 @@ const OPERATIONS: Operation[] = [
   { name: "applica un template", run: (p, r) => { const spread = maybe(r, p.spreads); if (!spread) return p; const areaIndex = Math.floor(r() * spread.areas.length); const match = pick(r, [undefined, ...matchTemplates(p, spread, areaIndex, FUZZ_TEMPLATES)]); return match ? applyTemplate(p, spread.id, areaIndex, match.template, match.order) : p; } },
   { name: "bordo di una foto", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setItemBorder(p, entry.item.id, r() < 0.2 ? { cm: null, color: null } : { cm: r() * 1.6, color: pick(r, ["#000000", "#ffffff", "#aa2233"]) }) : p; } },
   { name: "sposta una cornice", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setFrame(p, entry.item.id, { x: r(), y: r(), w: 0.1 + r() * 0.8, h: 0.1 + r() * 0.8, rotation: (r() - 0.5) * 90 }) : p; } },
+  { name: "ritaglio libero con le maniglie", run: (p, r) => { const entry = maybe(r, itemsOf(p)); const base = entry ? visibleFrame(p.settings.sheet, entry.spread, entry.areaIndex, entry.item.id, p.assets.find((asset) => asset.id === entry.item.assetId)) : null; if (!entry || !base) return p; const left = r() * 0.4; const top = r() * 0.4; return cropFrameTo(p, entry.item.id, { x: base.x + base.w * left, y: base.y + base.h * top, w: base.w * (0.2 + r() * (0.8 - left)), h: base.h * (0.2 + r() * (0.8 - top)) }); } },
   { name: "cornice davanti o dietro", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? reorderFrame(p, entry.item.id, r() < 0.5 ? "front" : "back") : p; } },
   { name: "riempi spread", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? fillSpread(p, spread.id, 1 + Math.floor(r() * 4)) : p; } },
   // Foto simili e momenti: correzioni ai gruppi, varianti nella cella, Auto Build e riempimento con l'analisi della libreria.

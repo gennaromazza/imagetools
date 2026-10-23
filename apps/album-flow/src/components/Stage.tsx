@@ -83,6 +83,8 @@ export interface StageActions {
   deleteTemplate: (templateId: string) => void;
   saveAsTemplate: (areaIndex: number) => void;
   commitFrame: (itemId: string, frame: { x: number; y: number; w: number; h: number }) => void;
+  /** Ritaglio libero: la cornice va in `rect` (mm nello spread) e la foto resta ferma; la pagina diventa libera. */
+  commitFrameCrop: (itemId: string, rect: Rect) => void;
   orderFrame: (itemId: string, where: "front" | "back") => void;
   rotateFrame: (itemId: string, deltaDeg: number) => void;
   /** Foto libera trascinata sull'altra pagina libera: passa lì restando dove è stata lasciata (mm nello spread). */
@@ -93,8 +95,7 @@ export interface StageActions {
   rotatePhoto: (itemId: string, quarter: 1 | -1) => void;
   /** Accende o spegne lo strumento «linea»: si traccia una linea lungo l'orizzonte e la foto si raddrizza. */
   toggleLineTool: () => void;
-  finishLineTool: () => void;
-  fillSpread: () => void;
+  finishLineTool: () => void;  fillSpread: () => void;
   toggleDone: () => void;
   /** Tasto A / Maiusc+A: la variante simile successiva o precedente nella cella. */
   cycleAlternative: (itemId: string, step: 1 | -1) => void;
@@ -390,7 +391,12 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         <IconButton icon="trash" label="Togli dallo spread (Canc)" danger onClick={() => actions.removeItem(itemId)} size={16} />
       </>
     );
-    return { top, left, right, bottom, straighten };
+    // Il comando più usato sta nella capsula sempre visibile sulla foto, accanto al «⋯».
+    const quick = (
+      <>
+        <IconButton icon="crop" label={canCrop ? "Ritaglia e sposta nello slot (Invio)" : "Foto bloccata"} active={cropMode} disabled={!canCrop} onClick={() => actions.toggleCrop(itemId)} size={18} />      </>
+    );
+    return { top, left, right, bottom, straighten, quick };
   }, [actions, alternatives, assets, borderFor, sliderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */
@@ -548,6 +554,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               onResetRatio={actions.resetRatio}
               onCommitView={actions.commitView}
               onCommitFrame={actions.commitFrame}
+              onCommitCrop={actions.commitFrameCrop}
               onMoveFrameAcross={actions.moveFrameAcross}
               renderToolbar={toolbar}
               altLabels={altLabels}

@@ -11,6 +11,7 @@ import { angleFromLine, clampAngle, describeSize, itemBorderColor, nextWheelZoom
 import { mediaIdsOfSpread } from "../model/design";
 import { useMediaUrls } from "../hooks/useMedia";
 import { BackgroundLayer, OverlayLayer, type DesignHandlers } from "./DesignLayers";
+import { planFrameCrop, type FrameCrop } from "../model/freeCrop";
 import { areaGeometryFor, hasFreeLayout, needsShapeAlignment, placementStyle, type AreaGeometry } from "../model/project";
 import { cropCenter } from "../slot-geometry";
 import { PhotoBox } from "./PhotoBox";
@@ -23,7 +24,7 @@ export type SpreadVariant = "stage" | "thumb" | "present";
 export type Draft =
   | { kind: "ratio"; areaIndex: number; path: string; ratio: number }
   | { kind: "view"; itemId: string; view: Partial<ItemView> }
-  | { kind: "frame"; itemId: string; rect: Rect; guides?: SnapGuide[] };
+  | { kind: "frame"; itemId: string; rect: Rect; guides?: SnapGuide[]; /** Ritaglio libero: inquadratura che tiene ferma la foto mentre la cornice cambia. */ view?: Partial<ItemView> };
 
 /** Ctrl (o ⌘) davvero premuto: il pinch del touchpad arriva come rotella con Ctrl, ma senza che il tasto sia giù. */
 let controlHeld = false;
@@ -76,6 +77,8 @@ export interface SpreadViewProps {
   photosLocked?: boolean;
   /** Una foto di una disposizione libera è stata spostata o ridimensionata (frazioni dell'area utile). */
   onCommitFrame?: (itemId: string, frame: { x: number; y: number; w: number; h: number }) => void;
+  /** Ritaglio libero: la cornice della foto va in questo rettangolo (mm nello spread) e la foto resta ferma. */
+  onCommitCrop?: (itemId: string, rect: Rect) => void;
   /** Una foto libera trascinata sopra l'altra pagina, a sua volta libera: passa a quella pagina restando dove è stata lasciata (mm nello spread). */
   onMoveFrameAcross?: (itemId: string, areaIndex: number, rect: Rect) => void;
   /** Contenuto della barra che compare sulla foto selezionata. */
@@ -122,6 +125,9 @@ interface CellProps {
   altLabel?: string;
   handlers: Pick<SpreadViewProps, "onSelectItem" | "onTogglePick" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & {
     onCommitFrameRect?: (itemId: string, rect: Rect) => void;
+    /** Ritaglio libero: cosa servirebbe per portare la cornice in `rect` tenendo ferma la foto (null = non si può). */
+    onPlanCrop?: (itemId: string, rect: Rect) => FrameCrop | null;
+    onCommitCropRect?: (itemId: string, rect: Rect) => void;
     /** La foto libera trascinata è sopra un punto dello spread: mostra se lasciandola lì passerebbe all'altra pagina (null = fine del gesto). */
     onFrameOver?: (itemId: string, pointer: { clientX: number; clientY: number } | null) => void;
     /** Rilascio della foto libera: true se è passata all'altra pagina (allora la cornice non si salva qui). */
@@ -134,6 +140,29 @@ export function presentPixels(): number {
   const ratio = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   const width = typeof window === "undefined" ? 1600 : window.innerWidth;
   return Math.min(2400, Math.max(1200, Math.round(width * ratio)));
+}
+
+type CropEdge = "n" | "e" | "s" | "w" | "ne" | "se" | "sw" | "nw";
+const CROP_EDGES: readonly CropEdge[] = ["n", "e", "s", "w", "ne", "se", "sw", "nw"];
+
+/** Cornice dopo aver trascinato un lato o un angolo di (dx, dy) mm; con `keepRatio` un angolo mantiene le proporzioni di partenza. */
+export function cropRectFor(base: Rect, edge: CropEdge, dx: number, dy: number, keepRatio: boolean): Rect {
+  let left = base.x;
+  let top = base.y;
+  let right = base.x + base.w;
+  let bottom = base.y + base.h;
+  if (edge.includes("w")) left += dx;
+  if (edge.includes("e")) right += dx;
+  if (edge.includes("n")) top += dy;
+  if (edge.includes("s")) bottom += dy;
+  if (keepRatio && edge.length === 2) {
+    const scale = Math.max((right - left) / base.w, (bottom - top) / base.h);
+    const w = base.w * scale;
+    const h = base.h * scale;
+    if (edge.includes("w")) left = right - w; else right = left + w;
+    if (edge.includes("n")) top = bottom - h; else bottom = top + h;
+  }
+  return { x: Math.min(left, right), y: Math.min(top, bottom), w: Math.abs(right - left), h: Math.abs(bottom - top) };
 }
 
 const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, picked, cropActive, view, lowDpi, showSizes, free, snapTargets, lineTool, altLabel, handlers }: CellProps) {
@@ -231,6 +260,47 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     // Lasciata sopra l'altra pagina la foto passa a quella pagina; altrimenti resta nella sua, nella nuova posizione.
     if (drag.mode === "move" && handlers.onFrameDrop?.(item.id, event.clientX, event.clientY, rect)) return;
     handlers.onCommitFrameRect?.(item.id, rect);
+  };
+
+  // Ritaglio libero: in modalità ritaglio i lati e gli angoli della cornice si trascinano dove si vuole e la foto resta ferma.
+  const cropHandles = canCrop && interactive && Boolean(asset) && !area.locked && (cell.rotation ?? 0) === 0 && Boolean(handlers.onPlanCrop) && !(canCrop && lineTool);
+  const cropDrag = useRef<{ edge: CropEdge; x: number; y: number; base: Rect; mmPerPx: number; last: FrameCrop | null; moved: boolean } | null>(null);
+  const visible: Rect = { x: placement.content.x - placement.borderMm, y: placement.content.y - placement.borderMm, w: placement.content.w + placement.borderMm * 2, h: placement.content.h + placement.borderMm * 2 };
+  const startCrop = (event: React.PointerEvent, edge: CropEdge) => {
+    const parent = ref.current?.parentElement?.getBoundingClientRect();
+    if (!parent || parent.width === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    cropDrag.current = { edge, x: event.clientX, y: event.clientY, base: visible, mmPerPx: origin.w / parent.width, last: null, moved: false };
+  };
+  const moveCrop = (event: React.PointerEvent) => {
+    const drag = cropDrag.current;
+    if (!drag || !handlers.onPlanCrop) return;
+    event.stopPropagation();
+    if (Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) > 2) drag.moved = true;
+    const wanted = cropRectFor(drag.base, drag.edge, (event.clientX - drag.x) * drag.mmPerPx, (event.clientY - drag.y) * drag.mmPerPx, event.shiftKey);
+    let plan = handlers.onPlanCrop(item.id, wanted);
+    if (!plan) {
+      // Oltre i limiti della foto: la cornice si ferma sul punto valido più vicino (ricerca a metà strada tra l'ultimo valido e quello voluto).
+      let near = drag.last?.rect ?? drag.base;
+      let far = wanted;
+      for (let step = 0; step < 7; step += 1) {
+        const mid = { x: (near.x + far.x) / 2, y: (near.y + far.y) / 2, w: (near.w + far.w) / 2, h: (near.h + far.h) / 2 };
+        const found = handlers.onPlanCrop(item.id, mid);
+        if (found) { near = mid; plan = found; } else far = mid;
+      }
+    }
+    if (plan) drag.last = plan;
+    if (drag.last) handlers.onDraft?.({ kind: "frame", itemId: item.id, rect: drag.last.rect, view: drag.last.view });
+  };
+  const endCrop = (event: React.PointerEvent) => {
+    const drag = cropDrag.current;
+    if (!drag) return;
+    event.stopPropagation();
+    cropDrag.current = null;
+    handlers.onDraft?.(null);
+    if (drag.moved && drag.last) handlers.onCommitCropRect?.(item.id, drag.last.rect);
   };
 
   // Strumento «linea»: si traccia una linea sullo schermo lungo l'orizzonte (o un lato che deve essere verticale) e la foto si raddrizza di conseguenza.
@@ -346,6 +416,22 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       onPointerUp={onPointerUp}
     >
       {canCrop ? <span className="cell__grid" /> : null}
+      {cropHandles ? (
+        <span className="cell__crop-frame" style={{ left: pct(((visible.x - placement.frame.x) / placement.frame.w) * 100), top: pct(((visible.y - placement.frame.y) / placement.frame.h) * 100), width: pct((visible.w / placement.frame.w) * 100), height: pct((visible.h / placement.frame.h) * 100) }}>
+          {CROP_EDGES.map((edge) => (
+            <span
+              key={edge}
+              className={`crop-handle crop-handle--${edge}`}
+              title="Trascina per ritagliare questo lato; Maiusc sugli angoli mantiene le proporzioni"
+              onPointerDown={(event) => startCrop(event, edge)}
+              onPointerMove={moveCrop}
+              onPointerUp={endCrop}
+              onClick={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => event.stopPropagation()}
+            />
+          ))}
+        </span>
+      ) : null}
       {lineActive ? <span className="cell__hint">Trascina lungo l'orizzonte, o lungo un lato che deve essere verticale</span> : null}
       {line ? createPortal(
         <svg className="straight-line" aria-hidden="true">
@@ -368,7 +454,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
 });
 
 /** I comandi della foto selezionata, divisi per lato: ogni lato è una barra piccola (null = nessuna barra). */
-export interface ToolbarParts { top: ReactNode; bottom: ReactNode; left: ReactNode; right: ReactNode; /** Cursore del raddrizzamento (solo in ritaglio): barra larga, sempre orizzontale. */ straighten: ReactNode }
+export interface ToolbarParts { top: ReactNode; bottom: ReactNode; left: ReactNode; right: ReactNode; /** Cursore del raddrizzamento (solo in ritaglio): barra larga, sempre orizzontale. */ straighten: ReactNode; /** Ritaglia: il comando più usato, in una capsula visibile accanto al «⋯». */ quick: ReactNode }
 type ToolbarSide = "top" | "bottom" | "left" | "right" | "more" | "menu";
 /** Distanza dai bordi della foto: i separatori e le zone di rilascio sui bordi restano raggiungibili. */
 const INSET = 16;
@@ -408,7 +494,7 @@ function FloatingToolbar({ rect, size, container, parts, away }: { rect: Rect; s
   const everything = <>{parts.top}{parts.left}{parts.right}{leanStraighten ? null : parts.straighten}{parts.bottom}{lean ? <button type="button" className="icon-btn" title="Mostra sempre tutti i comandi sulla foto" aria-label="Mostra sempre tutti i comandi" onClick={() => { chooseLean(false); setMenuOpen(false); }}><Icon name="plus" size={16} /></button> : null}</>;
   const bars: Partial<Record<ToolbarSide, ReactNode>> = tiny
     ? {
-      more: <button type="button" className={`icon-btn${menuOpen ? " is-active" : ""}`} aria-label="Comandi della foto" aria-expanded={menuOpen} title="Comandi della foto" onClick={() => setMenuOpen((on) => !on)}><Icon name="dots" size={16} /></button>,
+      more: <>{parts.quick}<button type="button" className={`icon-btn${menuOpen ? " is-active" : ""}`} aria-label="Comandi della foto" aria-expanded={menuOpen} title="Tutti i comandi della foto" onClick={() => setMenuOpen((on) => !on)}><Icon name="dots" size={18} /></button></>,
       menu: menuOpen ? everything : null,
       ...(leanStraighten ? { bottom: leanStraighten } : {}),
     }
@@ -558,6 +644,15 @@ function SpreadViewInner(props: SpreadViewProps) {
   }), [interactive, sheet, spread, size.width]);
   const latest = useRef({ geometry, onCommitFrame: props.onCommitFrame });
   latest.current = { geometry, onCommitFrame: props.onCommitFrame };
+  const cropLatest = useRef({ sheet, spread, assets, onCommitCrop: props.onCommitCrop });
+  cropLatest.current = { sheet, spread, assets, onCommitCrop: props.onCommitCrop };
+  const planCrop = useCallback((itemId: string, rect: Rect) => {
+    const { sheet: currentSheet, spread: currentSpread, assets: currentAssets } = cropLatest.current;
+    const areaIndex = currentSpread.areas.findIndex((candidate) => candidate.items.some((item) => item.id === itemId));
+    const item = areaIndex < 0 ? undefined : currentSpread.areas[areaIndex].items.find((candidate) => candidate.id === itemId);
+    return item ? planFrameCrop(currentSheet, currentSpread, areaIndex, itemId, currentAssets.get(item.assetId), rect) : null;
+  }, []);
+  const commitCropRect = useCallback((itemId: string, rect: Rect) => cropLatest.current.onCommitCrop?.(itemId, rect), []);
   const commitFrameRect = useCallback((itemId: string, rect: Rect) => {
     const entry = latest.current.geometry.find((g) => g.cells.some((cell) => cell.itemId === itemId));
     if (!entry) return;
@@ -620,8 +715,8 @@ function SpreadViewInner(props: SpreadViewProps) {
     return true;
   }, [crossTarget]);
 
-  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect, onFrameOver: frameOver, onFrameDrop: frameDrop }),
-    [props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect, frameOver, frameDrop]);
+  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect, onPlanCrop: planCrop, onCommitCropRect: commitCropRect, onFrameOver: frameOver, onFrameDrop: frameDrop }),
+    [props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect, planCrop, commitCropRect, frameOver, frameDrop]);
 
   const onDragOver = (event: React.DragEvent) => {
     const payload = currentDrag();
@@ -702,7 +797,7 @@ function SpreadViewInner(props: SpreadViewProps) {
               highlighted={highlightItemId === item.id}
               picked={Boolean(props.pickedItemIds?.includes(item.id))}
               cropActive={cropMode}
-              view={draft?.kind === "view" && draft.itemId === item.id ? draft.view : null}
+              view={(draft?.kind === "view" || draft?.kind === "frame") && draft.itemId === item.id ? draft.view ?? null : null}
               lowDpi={lowDpi}
               showSizes={showSizes}
               free={hasFreeLayout(area)}
