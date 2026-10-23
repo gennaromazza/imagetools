@@ -8,8 +8,17 @@ import { areaGeometry, type Project } from "./project";
 import { analyzeLibrary } from "./similar";
 import { pagesOf, shot, weddingProject } from "./similarFixtures";
 
-const OPTIONS: AutoBuildOptions = { ...DEFAULT_AUTO_BUILD, splitMode: "half", respectChapters: false, photosPerArea: 3 };
+const OPTIONS: AutoBuildOptions = { ...DEFAULT_AUTO_BUILD, splitMode: "half", respectChapters: false, photosPerArea: 3, onePerGroup: true };
 const placedIds = (project: Project) => pagesOf(project).flat();
+
+test("Auto Build: «una per gruppo» è spenta di default, così entrano tutte le foto scelte", () => {
+  // Sulle 626 foto di un matrimonio reale un gruppo univa due foto all'altare con persone diverse:
+  // con l'opzione accesa di default una delle due sarebbe rimasta fuori dall'album senza avviso.
+  assert.equal(DEFAULT_AUTO_BUILD.onePerGroup, false);
+  const project = weddingProject();
+  const built = autoBuildAlbum(project, { ...DEFAULT_AUTO_BUILD, splitMode: "half", respectChapters: false, photosPerArea: 3 }, analyzeLibrary(project));
+  assert.equal(placedIds(built).length, project.assets.length, "di default entrano tutte, raffiche comprese");
+});
 
 test("Auto Build: una sola foto per raffica (la consigliata), tutte le altre una volta", () => {
   const project = weddingProject();

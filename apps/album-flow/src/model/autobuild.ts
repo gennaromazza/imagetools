@@ -35,7 +35,9 @@ export const DEFAULT_AUTO_BUILD: AutoBuildOptions = {
   scope: "all",
   varyLayouts: true,
   fitMode: "fit",
-  onePerGroup: true,
+  // Spenta: dal Selector arriva una selezione già fatta, e un gruppo sbagliato (foto di gruppo diverse all'altare)
+  // lascerebbe fuori una foto scelta senza che il fotografo se ne accorga. Le pile e il tasto A restano.
+  onePerGroup: false,
   followMoments: true,
   heroLargest: true,
 };

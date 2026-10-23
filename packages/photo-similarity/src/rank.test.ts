@@ -35,6 +35,33 @@ test("migliore del gruppo: a parità di stelle la più nitida, poi l'esposizione
   assert.equal(tie.reason, "prima della serie");
 });
 
+test("migliore del gruppo: «prima della serie» solo se è davvero il primo scatto", () => {
+  // Sulle foto reali la consigliata di una raffica era spesso la seconda o la quarta, vinta di poco
+  // in nitidezza, ma il motivo diceva «prima della serie».
+  const base = sceneFingerprint(8);
+  const slightly = rankGroup([
+    photo("a", 0, { fingerprint: { ...base, sharpness: 100 } }),
+    photo("b", 1, { fingerprint: { ...base, sharpness: 105 } }),
+  ]);
+  assert.deepEqual(slightly.order, ["b", "a"]);
+  assert.equal(slightly.reason, "di poco più nitida");
+
+  const first = rankGroup([
+    photo("a", 0, { fingerprint: { ...base, sharpness: 105 } }),
+    photo("b", 1, { fingerprint: { ...base, sharpness: 100 } }),
+  ]);
+  assert.deepEqual(first.order, ["a", "b"]);
+  assert.equal(first.reason, "prima della serie");
+
+  const mixed = rankGroup([
+    photo("a", 0, { fingerprint: { ...base, sharpness: 104, clipHigh: 0.05 } }),
+    photo("b", 1, { fingerprint: { ...base, sharpness: 100, clipHigh: 0 } }),
+    photo("c", 2, { fingerprint: { ...base, sharpness: 102, clipHigh: 0.02 } }),
+  ]);
+  assert.equal(mixed.order[0], "b");
+  assert.equal(mixed.reason, "esposizione migliore", "vince la luce, non l'ordine di scatto");
+});
+
 test("migliore del gruppo: casi limite", () => {
   assert.deepEqual(rankGroup([]), { order: [], reason: "" });
   assert.deepEqual(rankGroup([photo("solo", 0)]), { order: ["solo"], reason: "" });

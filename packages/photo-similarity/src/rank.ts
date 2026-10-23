@@ -24,20 +24,25 @@ export function rankGroup(photos: readonly SimilarityPhoto[]): RankedGroup {
     return stars + sharp + exposure;
   };
   const scored = photos.map((photo, position) => ({ photo, position, score: score(photo) }));
-  scored.sort((a, b) => b.score - a.score
-    || (a.photo.captureTimeMs ?? Number.POSITIVE_INFINITY) - (b.photo.captureTimeMs ?? Number.POSITIVE_INFINITY)
-    || a.position - b.position);
+  const shotOrder = (a: (typeof scored)[number], b: (typeof scored)[number]) =>
+    (a.photo.captureTimeMs ?? Number.POSITIVE_INFINITY) - (b.photo.captureTimeMs ?? Number.POSITIVE_INFINITY) || a.position - b.position;
+  const firstShot = [...scored].sort(shotOrder)[0].photo;
+  scored.sort((a, b) => b.score - a.score || shotOrder(a, b));
   const best = scored[0].photo;
   const others = scored.slice(1).map((entry) => entry.photo);
-  return { order: scored.map((entry) => entry.photo.id), reason: reasonFor(best, others) };
+  return { order: scored.map((entry) => entry.photo.id), reason: reasonFor(best, others, best === firstShot) };
 }
 
-function reasonFor(best: SimilarityPhoto, others: readonly SimilarityPhoto[]): string {
+function reasonFor(best: SimilarityPhoto, others: readonly SimilarityPhoto[], isFirstShot: boolean): string {
   if (others.length === 0) return "";
   const stars = best.rating ?? 0;
   if (stars > 0 && others.every((photo) => (photo.rating ?? 0) < stars)) return stars === 1 ? "1 stella" : `${stars} stelle`;
   const sharp = best.fingerprint?.sharpness;
   if (sharp !== undefined && others.every((photo) => photo.fingerprint && photo.fingerprint.sharpness * 1.1 < sharp)) return "più nitida";
   if (best.fingerprint && others.every((photo) => exposurePenalty(photo) > exposurePenalty(best) + 0.01)) return "esposizione migliore";
-  return "prima della serie";
+  if (isFirstShot) return "prima della serie";
+  // Ha vinto di poco: si dice per cosa, senza chiamarla «prima» se non lo è.
+  if (sharp !== undefined && others.every((photo) => (photo.fingerprint?.sharpness ?? 0) <= sharp)) return "di poco più nitida";
+  if (best.fingerprint && others.every((photo) => exposurePenalty(photo) >= exposurePenalty(best))) return "esposizione migliore";
+  return "nitidezza ed esposizione";
 }
