@@ -12,6 +12,7 @@
     "@photo-tools/core": "0.1.0",
     "@photo-tools/layout-engine": "0.1.0",
     "@photo-tools/photo-metadata": "0.1.0",
+    "@photo-tools/photo-similarity": "0.1.0",
     "@photo-tools/shared-types": "0.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

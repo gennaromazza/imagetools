@@ -211,6 +211,14 @@ export interface AlbumAssetV2 extends ImageAsset {
   selectorRating?: number;
 }
 
+/** Correzioni del fotografo ai gruppi di foto simili trovati da Album Flow («Separa», «Togli dal gruppo», «Unisci come simili»). */
+export interface AlbumSimilarityOverrides {
+  /** Coppie di foto dichiarate «non simili»: non stanno mai nello stesso gruppo. */
+  apart: Array<[string, string]>;
+  /** Gruppi uniti a mano: le foto stanno sempre insieme. */
+  together: string[][];
+}
+
 export interface AlbumProjectSettingsV2 {
   sheet: SheetSpec;
   sortKey: AlbumSortKey;
@@ -236,4 +244,6 @@ export interface AlbumProjectV2 {
   spreads: AlbumSpread[];
   favoriteLayouts: FavoriteLayout[];
   settings: AlbumProjectSettingsV2;
+  /** Correzioni ai gruppi di foto simili; assente = nessuna correzione (i gruppi sono quelli calcolati). */
+  similarity?: AlbumSimilarityOverrides;
 }

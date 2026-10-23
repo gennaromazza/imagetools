@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { AlbumProjectV2 } from "@photo-tools/shared-types";
 import { hasDesktop, revealInFolder } from "../desktop/api";
 import { preflightReport } from "../model/preflight";
+import type { LibraryAnalysis } from "../model/similar";
 import { browserWriter, chooseDesktopWriter, existingNamesIn, exportProjectFile, exportSpreads, spreadFileName, spreadPixelSize, type DesktopWriter } from "../render/export";
 import { safeFileName, type ExportWriter } from "../render/export-core";
 import { Icon } from "./icons";
@@ -22,14 +23,16 @@ export function parseSpreadRange(text: string, count: number): { indexes: number
 }
 
 /** Esportazione: controlli prima della stampa, poi JPG o SVG per spread e file progetto. */
-export function ExportDialog({ project, currentIndex, onClose, onStatus, onGoTo }: {
+export function ExportDialog({ project, analysis, currentIndex, onClose, onStatus, onGoTo }: {
   project: AlbumProjectV2;
+  /** Momenti e foto simili: aggiungono gli avvisi su foto quasi uguali, momenti sparsi e bianco e nero accanto al colore. */
+  analysis?: LibraryAnalysis;
   currentIndex: number;
   onClose: () => void;
   onStatus: (message: string) => void;
   onGoTo: (spreadIndex: number) => void;
 }) {
-  const report = useMemo(() => preflightReport(project), [project]);
+  const report = useMemo(() => preflightReport(project, analysis), [project, analysis]);
   const [scope, setScope] = useState<"all" | "current" | "range">("all");
   const [rangeText, setRangeText] = useState("");
   const [dpi, setDpi] = useState(Math.min(300, project.settings.sheet.dpi || 300));

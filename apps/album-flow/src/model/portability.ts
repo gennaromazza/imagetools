@@ -147,6 +147,20 @@ function validateProject(value: unknown): asserts value is AlbumProjectV2 {
 
   if (p.coverAssetId !== undefined && (typeof p.coverAssetId !== "string" || !assetIds.has(p.coverAssetId))) fail("La copertina usa una foto che non esiste nella libreria.");
 
+  if (p.similarity !== undefined) {
+    const similarity = record(p.similarity, "similarity");
+    for (const raw of list(similarity.apart, "similarity.apart")) {
+      const pair = list(raw, "similarity.apart[]");
+      if (pair.length !== 2) fail("similarity.apart: ogni voce è una coppia di foto.");
+      const [a, b] = pair.map((id) => text(id, "similarity.apart[]"));
+      if (a === b || !assetIds.has(a) || !assetIds.has(b)) fail("Le correzioni dei gruppi di foto simili citano una foto che non esiste.");
+    }
+    for (const raw of list(similarity.together, "similarity.together")) {
+      const group = list(raw, "similarity.together[]").map((id) => text(id, "similarity.together[]"));
+      if (group.length < 2 || new Set(group).size !== group.length || group.some((id) => !assetIds.has(id))) fail("Un gruppo di foto simili unito a mano non è valido.");
+    }
+  }
+
   const labelIds = new Set<string>();
   for (const raw of list(p.labels, "labels")) {
     const label = record(raw, "labels[]");

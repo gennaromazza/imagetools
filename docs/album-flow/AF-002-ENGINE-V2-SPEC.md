@@ -104,6 +104,14 @@ Un template ha un **tipo di area** (pagina, foglio intero, un terzo, due terzi) 
 
 Il controllo di coerenza ammette sovrapposizioni solo nelle aree libere. Schermo, esportazione SVG/JPG e rilascio usano lo stesso ordine di disegno di tutto lo spread (`paintOrder`): foto libere «dietro» (livello ≤ -9), poi le foto dei layout automatici, poi le altre foto libere dal livello più basso al più alto; ogni foto ruota attorno al proprio centro. Il rilascio vale sulla foto che si vede sotto il puntatore, anche se appartiene all'altra pagina.
 
+## Momenti e foto simili (23 ottobre 2026)
+
+**Dove sta la logica.** Nel pacchetto condiviso `@photo-tools/photo-similarity` (puro, usabile anche da Image Select Pro): `findMoments` (pause tra gli scatti con soglia che segue il ritmo del tratto), `findSimilarGroups` (raffiche dall'ora di scatto, quasi uguali dall'impronta visiva, correzioni del fotografo che vincono sempre), `computeFingerprint` (dHash 64 bit, colore medio Lab, croma per il bianco e nero, nitidezza, luci e ombre da una miniatura), `rankGroup` (stelle prima, poi nitidezza ed esposizione, poi il primo scatto), `rankForSpread`. In Album Flow `model/similar.ts` (analisi, pile, «da usare», varianti nella cella, suggerimenti, avvisi) e `model/similarityOverrides.ts`.
+
+**Cosa si salva.** Solo le correzioni del fotografo, nel file dell'album: `project.similarity = { apart, together }` (campo facoltativo dello schema v2, decisione dell'utente). La foto «scelta» di un gruppo non si salva: è quella usata nell'album. Impronte e modelli di fotocamera stanno in un archivio locale per album (`filex.albumFlow.signals.<projectId>`), ricalcolabili; la miniatura letta è quella da 200 px della libreria.
+
+**Regole.** Una foto usata rende «alternative» le altre del suo gruppo: non contano tra le foto da usare, non entrano in Auto Build («una per gruppo»), F, U e «Adatte a questo spread». Il tasto A cambia la foto nella stessa cella (stessa forma = stessa inquadratura). Auto Build con «una pagina non mescola due momenti» vale solo con l'ordine per ora di scatto e non crea pagine vuote (uno spread può avere due momenti, uno per pagina). La protagonista (almeno 4 stelle, più di tutte le altre della pagina) prende la cella più grande tra i layout che ritagliano al massimo 0,12 in più del migliore; l'ordine di lettura non cambia.
+
 ## Schermata di impaginazione
 
 Griglia (altezze a 1540×980): barra superiore 48 px; zona di lavoro con lo spread grande al centro; striscia degli spread in miniatura (88 px di altezza, con numero e colore del capitolo); separatore trascinabile; libreria a tutta larghezza con schede capitolo (altezza automatica `clamp(176px, 26vh, 300px)`, regolabile a mano e comprimibile fino alla sola barra delle schede). Nessun pannello fisso a destra.

@@ -80,6 +80,8 @@ export interface SpreadViewProps {
   onMoveFrameAcross?: (itemId: string, areaIndex: number, rect: Rect) => void;
   /** Contenuto della barra che compare sulla foto selezionata. */
   renderToolbar?: (itemId: string) => ToolbarParts | null;
+  /** Segnalino delle varianti simili per id dell'elemento («2/3»). */
+  altLabels?: ReadonlyMap<string, string>;
 }
 
 const pct = (value: number) => `${Number(value.toFixed(4))}%`;
@@ -116,6 +118,8 @@ interface CellProps {
   snapTargets?: Array<{ id: string; rect: Rect }>;
   /** Lo strumento «linea» del raddrizzamento è acceso per questa foto. */
   lineTool: boolean;
+  /** La foto ha varianti simili: posizione tra le varianti («2/3»). */
+  altLabel?: string;
   handlers: Pick<SpreadViewProps, "onSelectItem" | "onTogglePick" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & {
     onCommitFrameRect?: (itemId: string, rect: Rect) => void;
     /** La foto libera trascinata è sopra un punto dello spread: mostra se lasciandola lì passerebbe all'altra pagina (null = fine del gesto). */
@@ -132,7 +136,7 @@ export function presentPixels(): number {
   return Math.min(2400, Math.max(1200, Math.round(width * ratio)));
 }
 
-const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, picked, cropActive, view, lowDpi, showSizes, free, snapTargets, lineTool, handlers }: CellProps) {
+const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, picked, cropActive, view, lowDpi, showSizes, free, snapTargets, lineTool, altLabel, handlers }: CellProps) {
   // Lavorazione veloce: anteprime leggere; la qualità piena solo per la foto selezionata o in ritaglio e nell'anteprima cliente.
   const pixels = variant === "thumb" ? 200 : variant === "present" ? presentPixels() : selected || cropActive ? 1400 : 720;
   // Anteprima cliente: subito la versione leggera (spesso già in cache), poi quella nitida sopra.
@@ -356,6 +360,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       {freeFrame && selected && !canCrop ? <span className="cell__resize" style={{ right: pct(((placement.frame.x + placement.frame.w - placement.content.x - placement.content.w) / placement.frame.w) * 100), bottom: pct(((placement.frame.y + placement.frame.h - placement.content.y - placement.content.h) / placement.frame.h) * 100) }} title="Trascina per ridimensionare (le proporzioni restano)" onPointerDown={(event) => startFrame(event, "resize")} onPointerMove={moveFrame} onPointerUp={endFrame} /> : null}
       {interactive && selected ? <span className="cell__name">{asset?.fileName.replace(/\.[^.]+$/, "")}</span> : null}
       {interactive && item.locked ? <span className="cell__badge cell__badge--lock"><Icon name="lock" size={12} /></span> : null}
+      {interactive && altLabel && !selected ? <span className="cell__alts" title="Questa foto ha varianti simili: selezionala e premi A per scorrerle">{altLabel}</span> : null}
       {interactive && showSizes ? (() => { const size = describeSize(placement); return <span className={`cell__size cell__size--${size.level}`} title="Misura stampata della foto e risoluzione effettiva">{size.widthCm.toLocaleString("it-IT")} × {size.heightCm.toLocaleString("it-IT")} cm · {size.dpi} dpi</span>; })() : null}
       {interactive && !showSizes && placement.dpi < lowDpi ? <span className="cell__badge cell__badge--warn" title={`Risoluzione effettiva ${Math.round(placement.dpi)} dpi`}>{Math.round(placement.dpi)} dpi</span> : null}
     </PhotoBox>
@@ -703,6 +708,7 @@ function SpreadViewInner(props: SpreadViewProps) {
               free={hasFreeLayout(area)}
               snapTargets={snapTargetsByArea[areaIndex]}
               lineTool={Boolean(props.straightenTool) && selectedItemId === item.id}
+              altLabel={props.altLabels?.get(item.id)}
               handlers={handlers}
             />
           );

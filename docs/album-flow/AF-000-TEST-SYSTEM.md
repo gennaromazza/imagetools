@@ -19,6 +19,12 @@ Aggiornato il 1 ottobre 2026 per la versione 2 (motore dinamico, editor a strisc
 | `test:album-flow-license` | Avvisi di licenza nell'app (errore, tolleranza, prova gratuita) | 4 |
 | `test:album-flow-relink` | Percorsi Windows, UNC, macOS/Linux; rifiuto di traversal | 4 |
 | `test:photo-metadata-xmp` | Pacchetto XMP condiviso con Image Select Pro: stelle, etichette, colori, campi di altri programmi, file illeggibili | 8 |
+| `test:photo-similarity` | Pacchetto condiviso `@photo-tools/photo-similarity`: momenti dalle pause (soglia adattiva), raffiche (stessa fotocamera e orientamento), foto quasi uguali dall'impronta visiva solo se vicine nel tempo, niente catene né gruppi enormi, correzioni del fotografo, file senza ora, impronta (spostamenti, rumore, scene diverse, bianco e nero, nitidezza, esposizione), migliore del gruppo, foto adatte a uno spread. Immagini sintetiche | 28 |
+| `test:album-flow-similar-library` | Pile di simili in libreria, «da usare» una per gruppo, intestazioni dei momenti e selezione delle consigliate, correzioni salvate nel file (riapertura, rimozione, reinvio dal Selector, file rovinati), archivio locale delle impronte | 10 |
+| `test:album-flow-similar-alternatives` | Tasto A / Maiusc+A nella cella: giro delle varianti, stessa cella e layout, inquadratura tenuta o ripartita, foto bloccate, nessuna foto duplicata, cento passi casuali | 5 |
+| `test:album-flow-similar-suggest` | «Adatte a questo spread» e tasti F/U con i momenti: stesso momento prima, una per raffica, niente alternative già usate, bianco e nero, stelle | 5 |
+| `test:album-flow-similar-autobuild` | Auto Build: una foto per gruppo, pagine che non mescolano momenti (solo con ordine per ora), identico a prima senza analisi, gruppi già nell'album esclusi, protagonista nella cella più grande | 6 |
+| `test:album-flow-similar-preflight` | Avvisi prima dell'esportazione: quasi uguali sullo stesso spread, momento sparso in spread lontani, bianco e nero accanto al colore | 4 |
 
 Gli invarianti controllati dopo ogni operazione dei test d'uso (`assertProjectInvariants`): id unici, albero valido, ordine delle foto uguale all'ordine di lettura delle foglie, nessuna cella fuori dall'area o sovrapposta, nessuna foto deformata (zoom e centro entro i limiti), riferimenti esistenti, ogni foto in un solo capitolo, salvataggio che restituisce lo stesso progetto.
 
@@ -29,6 +35,7 @@ Il fuzz è deterministico (semi fissi) e fallisce se meno della metà delle oper
 - Clic, trascinamenti, scorciatoie e aspetto: l'interfaccia è stata provata a mano in Chrome (anteprima a piena risoluzione) ma non esiste un runner DOM nel repository.
 - La finestra Electron, il pacchetto installato, macOS, la scrittura delle stelle nei file XMP con l'app desktop.
 - Qualità di stampa e fedeltà dei colori.
+- Foto simili su album veri: le soglie di momenti, raffiche e impronta (`DEFAULT_MOMENT_OPTIONS`, `DEFAULT_GROUP_OPTIONS`) sono provate solo su dati sintetici; la lettura delle miniature nell'app (canvas) non ha un test automatico.
 
 ## Prova visiva ripetibile (non fa parte del gate)
 

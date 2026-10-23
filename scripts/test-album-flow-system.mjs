@@ -80,6 +80,19 @@ for (const letter of tagLetters) {
 }
 assert.ok(!tagLetters.includes("s") && workspace.includes('key === "s") actions.toggleSizes()'), "S è riservato alle misure delle foto");
 
+// Momenti e foto simili: logica nel pacchetto condiviso con il Selector, modello di Album Flow, interfaccia e scorciatoie.
+const similarityPackage = read("packages", "photo-similarity", "src", "index.ts");
+for (const name of ["findMoments", "findSimilarGroups", "computeFingerprint", "rankGroup", "rankForSpread"]) assert.ok(similarityPackage.includes(name), `il pacchetto condiviso photo-similarity non esporta ${name}`);
+assert.ok(JSON.parse(read("apps", "album-flow", "package.json")).dependencies["@photo-tools/photo-similarity"], "Album Flow deve usare il pacchetto condiviso photo-similarity, non una copia");
+const similar = src("model/similar.ts");
+for (const name of ["analyzeLibrary", "stackEntries", "todoAssets", "momentPicks", "cycleAlternative", "suggestForSpread", "similarityIssues"]) assert.ok(similar.includes(`export function ${name}`), `model/similar.ts: ${name} assente`);
+assert.ok(src("model/similarityOverrides.ts").includes("export function joinPhotos") && src("model/portability.ts").includes("similarity.apart"), "correzioni dei gruppi di simili (salvate e validate nel file dell'album) assenti");
+assert.ok(workspace.includes('key === "a"') && workspace.includes("cycleAlternative"), "il tasto A (varianti simili nella cella) non è collegato");
+assert.ok(!tagLetters.includes("a"), "A è riservato alle varianti simili");
+assert.ok(dock.includes("SUGGESTED_TAB") && dock.includes("dock__moment") && dock.includes("thumb__stack"), "libreria senza scheda «Adatte a questo spread», intestazioni dei momenti o pile di simili");
+assert.ok(src("components/Stage.tsx").includes("AlternativesPicker") && src("components/SpreadView.tsx").includes("cell__alts"), "varianti simili assenti dalla barra della foto o dalle celle");
+assert.ok(src("components/AutoBuildDialog.tsx").includes("onePerGroup") && src("components/AutoBuildDialog.tsx").includes("followMoments"), "opzioni di Auto Build per foto simili e momenti assenti");
+
 // ---------------------------------------------------------------- stile FileX
 const css = src("styles.css");
 for (const token of ["--bg: #1f2421", "--bg-panel: #2b312d", "--accent: #b89a63", "--text: #f2ece5", "--radius-md: 18px"]) {
@@ -106,19 +119,21 @@ const rootPackage = JSON.parse(read("package.json"));
 const scripts = rootPackage.scripts;
 const albumScripts = Object.keys(scripts).filter((name) => name.startsWith("test:album-flow-") && name !== "test:album-flow-all");
 const consoleServer = read("apps", "filex-dev-console", "server", "index.ts");
-for (const name of [...albumScripts, "test:album-flow-all", "test:photo-metadata-xmp"]) {
+const sharedScripts = ["test:photo-metadata-xmp", "test:photo-similarity"];
+for (const name of [...albumScripts, "test:album-flow-all", ...sharedScripts]) {
   assert.ok(consoleServer.includes(`"${name}":`), `descrizione Dev Console mancante per ${name}`);
 }
 assert.ok(consoleServer.includes('name.startsWith("test:album-flow-")'), "categoria Album Flow non associata ai test");
+assert.ok(consoleServer.includes('if (name === "test:photo-similarity") return "album-flow";'), "il test del pacchetto photo-similarity deve stare nella categoria Album Flow della Dev Console");
 const all = scripts["test:album-flow-all"];
-for (const name of [...albumScripts, "test:photo-metadata-xmp"]) {
+for (const name of [...albumScripts, ...sharedScripts]) {
   if (name === "test:album-flow-system") continue;
   assert.ok(all.includes(`npm run ${name}`), `${name} non rientra in test:album-flow-all`);
 }
 assert.ok(all.includes("npm run test:album-flow-system"), "il controllo di sistema non rientra in test:album-flow-all");
 
 const referenced = new Set();
-for (const name of [...albumScripts, "test:photo-metadata-xmp"]) {
+for (const name of [...albumScripts, ...sharedScripts]) {
   for (const match of String(scripts[name]).matchAll(/([\w./-]+\.(?:test\.ts|mjs))/g)) {
     referenced.add(match[1]);
     assert.ok(existsSync(join(root, match[1])), `lo script ${name} punta a un file inesistente: ${match[1]}`);
@@ -133,6 +148,8 @@ function walk(directory) {
 const tests = walk(join(root, "apps", "album-flow", "src")).filter((file) => file.endsWith(".test.ts")).map((file) => relative(root, file).split("\\").join("/"));
 assert.ok(tests.length >= 8, "ci si aspettano almeno otto file di test per Album Flow");
 for (const file of tests) assert.ok(referenced.has(file), `test non raggiungibile da nessuno script (e quindi dalla Dev Console): ${file}`);
+const sharedTests = walk(join(root, "packages", "photo-similarity", "src")).filter((file) => file.endsWith(".test.ts")).map((file) => relative(root, file).split("\\").join("/"));
+for (const file of sharedTests) assert.ok(referenced.has(file), `test del pacchetto photo-similarity non raggiungibile da test:photo-similarity: ${file}`);
 
 // ------------------------------------------------- percorsi dei file statici
 // Nel pacchetto Electron la pagina si carica da file: un percorso assoluto come "/logo.png" punta alla radice del disco e

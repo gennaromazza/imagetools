@@ -19,6 +19,8 @@ import { Icon } from "./icons";
 import { useNewFeature } from "../hooks/useNewFeature";
 import { LayoutBrowser } from "./LayoutBrowser";
 import { SpreadView, type Draft, type ToolbarParts } from "./SpreadView";
+import { AlternativesPicker } from "./AlternativesPicker";
+import type { CellAlternatives } from "../model/similar";
 import { ColorDots, ContextMenu, IconButton, NumberField, Popover, Stars, type MenuItem } from "./ui";
 
 export interface StageActions {
@@ -94,6 +96,10 @@ export interface StageActions {
   finishLineTool: () => void;
   fillSpread: () => void;
   toggleDone: () => void;
+  /** Tasto A / Maiusc+A: la variante simile successiva o precedente nella cella. */
+  cycleAlternative: (itemId: string, step: 1 | -1) => void;
+  /** Mette nella cella una variante simile scelta guardandola. */
+  chooseAlternative: (itemId: string, assetId: string) => void;
 }
 
 export interface StageProps {
@@ -115,6 +121,8 @@ export interface StageProps {
   sizes: boolean;
   layoutsOpen: boolean;
   templates: readonly AreaTemplate[];
+  /** Varianti simili delle foto di questo spread, per id dell'elemento. */
+  alternatives: ReadonlyMap<string, CellAlternatives>;
   actions: StageActions;
   design: {
     open: boolean;
@@ -209,8 +217,10 @@ function AngleField({ value, onChange }: { value: number; onChange: (angle: numb
   );
 }
 
-export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, pickedItemIds, cropMode, lineTool, draft, zoom, guides, sizes, layoutsOpen, templates, actions, design }: StageProps) {
+export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, pickedItemIds, cropMode, lineTool, draft, zoom, guides, sizes, layoutsOpen, templates, alternatives, actions, design }: StageProps) {
   const [centerRef, centerSize] = useElementSize<HTMLDivElement>();
+  // Segnalino «2/3» sulle celle che hanno varianti simili.
+  const altLabels = useMemo(() => new Map([...alternatives].map(([itemId, entry]) => [itemId, `${entry.index + 1}/${entry.ids.length}`])), [alternatives]);
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -297,6 +307,9 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
             onPick={(shape) => actions.commitView(itemId, { shape })}
           />
         ) : null}
+        {alternatives.get(itemId) ? (
+          <AlternativesPicker alternatives={alternatives.get(itemId)!} assets={assets} locked={Boolean(found.item.locked)} onStep={(step) => actions.cycleAlternative(itemId, step)} onPick={(assetId) => actions.chooseAlternative(itemId, assetId)} />
+        ) : null}
       </>
     );
     // Rotazione e livello delle foto libere cambiano la disposizione: con il layout bloccato (lucchetto) non ci sono.
@@ -378,7 +391,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       </>
     );
     return { top, left, right, bottom, straighten };
-  }, [actions, assets, borderFor, sliderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
+  }, [actions, alternatives, assets, borderFor, sliderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */
   const photoMenuItems = (itemId: string): MenuItem[] => {
@@ -402,6 +415,10 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
       { label: "Ruota a sinistra di 90°", icon: "rotateLeft", disabled: found.item.locked, onClick: () => actions.rotatePhoto(itemId, -1) },
       { label: "Ruota a destra di 90°", icon: "rotateRight", disabled: found.item.locked, onClick: () => actions.rotatePhoto(itemId, 1) },
       { label: "Sostituisci con la foto scelta in libreria", icon: "image", disabled: found.item.locked, onClick: () => actions.replaceWithSelection(itemId) },
+      ...(alternatives.get(itemId) ? [{
+        label: "Varianti simili", icon: "layouts" as const, hint: "A", disabled: found.item.locked,
+        children: alternatives.get(itemId)!.ids.map((id) => ({ label: `${assets.get(id)?.fileName.replace(/\.[^.]+$/, "") ?? id}${id === found.item.assetId ? " (questa)" : ""}`, disabled: id === found.item.assetId, onClick: () => actions.chooseAlternative(itemId, id) })),
+      }] : []),
       ...(free ? [
         { label: "Porta davanti alle altre", icon: "chevronUp" as const, onClick: () => actions.orderFrame(itemId, "front") },
         { label: "Porta dietro le altre", icon: "chevronDown" as const, onClick: () => actions.orderFrame(itemId, "back") },
@@ -533,6 +550,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               onCommitFrame={actions.commitFrame}
               onMoveFrameAcross={actions.moveFrameAcross}
               renderToolbar={toolbar}
+              altLabels={altLabels}
               design={design.handlers}
               photosLocked={design.open}
             />

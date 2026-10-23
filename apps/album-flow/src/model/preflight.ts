@@ -3,6 +3,7 @@ import { crossesFold, spreadSizeMm } from "../engine/geometry";
 import { duplicatedAssetIds, unusedAssets } from "./library";
 import { placeItem } from "./placement";
 import { areaGeometry, assetMap, placementStyle, type Project } from "./project";
+import { similarityIssues, type LibraryAnalysis } from "./similar";
 import { PROVISIONAL_TEXT_COLOR, contrastRatio } from "./typography";
 
 export const MIN_EFFECTIVE_DPI = 150;
@@ -77,8 +78,8 @@ function textIssues(project: Project, spread: Project["spreads"][number], spread
   return { issues, texts, warned };
 }
 
-/** Controlli prima dell'export: bloccanti (errori), da valutare (avvisi) e informativi. */
-export function preflightReport(project: Project): PreflightReport {
+/** Controlli prima dell'export: bloccanti (errori), da valutare (avvisi) e informativi. Con l'analisi della libreria anche foto simili e momenti. */
+export function preflightReport(project: Project, analysis?: LibraryAnalysis): PreflightReport {
   const issues: PreflightIssue[] = [];
   const sheet = project.settings.sheet;
   if (![sheet.widthCm, sheet.heightCm].every((value) => Number.isFinite(value) && value > 0)) issues.push({ level: "error", message: "Formato pagina non valido." });
@@ -125,6 +126,8 @@ export function preflightReport(project: Project): PreflightReport {
       }
     });
   });
+
+  if (analysis) issues.push(...similarityIssues(project, analysis));
 
   const duplicates = duplicatedAssetIds(project).length;
   if (duplicates > 0) issues.push({ level: "warning", message: `${duplicates} ${duplicates === 1 ? "foto è usata" : "foto sono usate"} più di una volta.` });

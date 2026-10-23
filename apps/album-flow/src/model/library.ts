@@ -1,6 +1,7 @@
 import type { AlbumAssetTag, AlbumAssetV2, AlbumSortKey } from "@photo-tools/shared-types";
 import { removeItems } from "./items";
 import { alignChanged, touch, type Project } from "./project";
+import { withSimilarityCleaned } from "./similarityOverrides";
 
 const collator = new Intl.Collator("it", { numeric: true, sensitivity: "base" });
 
@@ -176,11 +177,12 @@ export function removeAssets(project: Project, assetIds: readonly string[]): Pro
   const itemIds = project.spreads.flatMap((spread) => spread.areas.flatMap((area) => area.items.filter((item) => doomed.has(item.assetId)).map((item) => item.id)));
   const cleaned = removeItems(project, itemIds);
   const { coverAssetId, ...withoutCover } = cleaned;
-  return touch({
+  const assets = cleaned.assets.filter((asset) => !doomed.has(asset.id));
+  return touch(withSimilarityCleaned({
     ...(coverAssetId && !doomed.has(coverAssetId) ? cleaned : withoutCover),
-    assets: cleaned.assets.filter((asset) => !doomed.has(asset.id)),
+    assets,
     chapters: cleaned.chapters.map((chapter) => ({ ...chapter, assetIds: chapter.assetIds.filter((id) => !doomed.has(id)) })),
-  });
+  }));
 }
 
 /**

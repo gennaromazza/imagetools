@@ -92,6 +92,10 @@ export function assertProjectInvariants(project: Project, label = ""): void {
   const assetIds = new Set(project.assets.map((asset) => asset.id));
   assert.equal(assetIds.size, project.assets.length, `${label}: foto duplicate`);
   if (project.coverAssetId !== undefined) assert.ok(assetIds.has(project.coverAssetId), `${label}: la copertina punta a una foto che non esiste`);
+  if (project.similarity) {
+    for (const [a, b] of project.similarity.apart) assert.ok(a !== b && assetIds.has(a) && assetIds.has(b), `${label}: una coppia «non simili» cita una foto che non esiste`);
+    for (const group of project.similarity.together) assert.ok(group.length >= 2 && new Set(group).size === group.length && group.every((id) => assetIds.has(id)), `${label}: un gruppo unito a mano non è valido`);
+  }
   const spreadIds = new Set<string>();
   const areaIds = new Set<string>();
   const itemIds = new Set<string>();

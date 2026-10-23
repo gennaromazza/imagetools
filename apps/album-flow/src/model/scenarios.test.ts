@@ -18,6 +18,8 @@ import { preflightReport } from "./preflight";
 import { areaGeometry, createEmptyProject, type Project } from "./project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, removeSpread, setSpreadDone, setSplitMode, swapAreas } from "./spreads";
 import { insertPhrase, replaceWithPhrase, suggestStoryForSpread } from "./story";
+import { analyzeLibrary, cycleAlternative } from "./similar";
+import { detachPhoto, joinPhotos, separatePhotos } from "./similarityOverrides";
 
 /**
  * Casi d'uso dell'intero modello di Album Flow, dalla cartella di foto all'album pronto da esportare.
@@ -321,6 +323,13 @@ const OPERATIONS: Operation[] = [
   { name: "sposta una cornice", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setFrame(p, entry.item.id, { x: r(), y: r(), w: 0.1 + r() * 0.8, h: 0.1 + r() * 0.8, rotation: (r() - 0.5) * 90 }) : p; } },
   { name: "cornice davanti o dietro", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? reorderFrame(p, entry.item.id, r() < 0.5 ? "front" : "back") : p; } },
   { name: "riempi spread", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? fillSpread(p, spread.id, 1 + Math.floor(r() * 4)) : p; } },
+  // Foto simili e momenti: correzioni ai gruppi, varianti nella cella, Auto Build e riempimento con l'analisi della libreria.
+  { name: "unisci come simili", run: (p, r) => (p.assets.length >= 3 ? joinPhotos(p, [pick(r, p.assets).id, pick(r, p.assets).id, pick(r, p.assets).id]) : p) },
+  { name: "separa un gruppo di simili", run: (p, r) => { const group = maybe(r, analyzeLibrary(p).groups); return group ? separatePhotos(p, group.photoIds) : p; } },
+  { name: "togli dal gruppo delle simili", run: (p, r) => { const group = maybe(r, analyzeLibrary(p).groups); return group ? detachPhoto(p, pick(r, group.photoIds), group.photoIds) : p; } },
+  { name: "scorri le varianti simili", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? cycleAlternative(p, analyzeLibrary(p), entry.item.id, r() < 0.5 ? 1 : -1) : p; } },
+  { name: "auto build con simili e momenti", run: (p, r) => (r() < 0.3 || unusedAssets(p).length ? autoBuildAlbum(p, { ...DEFAULT_AUTO_BUILD, scope: r() < 0.3 ? "all" : "unused" }, analyzeLibrary(p)) : p) },
+  { name: "riempi con i momenti", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? fillSpread(p, spread.id, 1 + Math.floor(r() * 4), analyzeLibrary(p)) : p; } },
   { name: "segna finito", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? setSpreadDone(p, spread.id, r() < 0.5) : p; } },
   { name: "foto in uno spread nuovo", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry && p.spreads.length < 60 ? moveToNewSpread(p, Math.floor(r() * (p.spreads.length + 1)), { kind: "item", itemId: entry.item.id }).project : p; } },
   { name: "foto su un altro spread", run: (p, r) => { const entry = maybe(r, itemsOf(p)); const spread = maybe(r, p.spreads); return entry && spread ? moveToSpread(p, spread.id, { kind: "item", itemId: entry.item.id }) : p; } },

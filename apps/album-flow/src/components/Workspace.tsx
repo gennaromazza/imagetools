@@ -46,6 +46,10 @@ import { storyById } from "../model/storyLibrary";
 import { addGraphicOverlay, addTextOverlay, addTextStack, duplicateOverlay, orderOverlay, groupOverlays, moveOverlayGroup, removeOverlay, scaleOverlays, setAlbumBackground, setSpreadBackground, ungroupOverlay, updateOverlay, updateSpreadBackground } from "../model/design";
 import { IconButton } from "./ui";
 import { useStableCallbacks } from "../hooks/useStableCallbacks";
+import { useSimilarity } from "../hooks/useSimilarity";
+import { chooseAlternative, cycleAlternative, spreadAlternatives, suggestForSpread, type CellAlternatives, type SpreadSuggestion } from "../model/similar";
+import { clearSimilarityOverrides, detachPhoto, joinPhotos, separatePhotos } from "../model/similarityOverrides";
+import { SUGGESTED_TAB } from "./LibraryDock";
 
 const isTyping = (target: EventTarget | null) => {
   const element = target as HTMLElement | null;
@@ -73,6 +77,8 @@ export interface WorkspaceProps {
 interface Toast { message: string; undo?: boolean }
 
 const EMPTY_IDS: readonly string[] = [];
+const NO_ALTERNATIVES: ReadonlyMap<string, CellAlternatives> = new Map();
+const NO_SUGGESTIONS: readonly SpreadSuggestion[] = [];
 
 /** L'editor: cronologia, selezione, gesti sulle foto, libreria, importazione, esportazione. */
 /** Perché un cambio di layout non si può fare (spread finito o pagina bloccata), in una frase; null se si può. */
@@ -173,6 +179,13 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   const index = Math.min(spreadIndex, Math.max(count - 1, 0));
   const spread = project.spreads[index];
   const areaIndex = spread ? Math.min(activeArea, spread.areas.length - 1) : 0;
+  // Momenti e foto simili: l'analisi dipende solo dalla libreria; i comandi la leggono dalla ref (gestori stabili).
+  const { analysis, progress: similarityProgress } = useSimilarity(project);
+  const analysisRef = useRef(analysis);
+  analysisRef.current = analysis;
+  const [grouping, setGrouping] = useState(() => readNumber("filex.albumFlow.groupSimilar", 1) === 1);
+  const alternatives = useMemo(() => (spread ? spreadAlternatives(project, analysis, spread.id, usage) : NO_ALTERNATIVES), [analysis, project, spread, usage]);
+  const suggestions = useMemo(() => (spread && libTab === SUGGESTED_TAB ? suggestForSpread(project, analysis, spread.id, 30, usage) : NO_SUGGESTIONS), [analysis, libTab, project, spread, usage]);
 
   useEffect(() => { if (spreadIndex !== index) setSpreadIndex(index); }, [index, spreadIndex]);
   useEffect(() => {
@@ -509,11 +522,19 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       if (!spread) return;
       if (spread.done) { notify("Spread finito: riaprilo (D) per modificarlo."); return; }
       const before = unusedAssets(historyRef.current.present).length;
-      commit((p) => fillSpread(p, spreadId));
+      commit((p) => fillSpread(p, spreadId, 3, analysisRef.current));
       const added = before - unusedAssets(historyRef.current.present).length;
       notify(added > 0 ? `${added} ${added === 1 ? "foto aggiunta" : "foto aggiunte"} allo spread ${index + 1}.` : before === 0 ? "Non ci sono più foto da usare." : "Lo spread non ha pagine vuote da riempire.", added > 0);
     },
     toggleDone: () => { if (!spread) return; commit((p) => setSpreadDone(p, spreadId, !spread.done)); notify(spread.done ? `Spread ${index + 1} riaperto.` : `Spread ${index + 1} segnato come finito: Auto Build e Mescola non lo toccano.`, true); },
+    cycleAlternative: (itemId, step) => {
+      const before = historyRef.current.present;
+      commit((p) => cycleAlternative(p, analysisRef.current, itemId, step));
+      if (historyRef.current.present !== before) return;
+      const found = findItem(before, itemId);
+      notify(found?.item.locked ? "Foto bloccata: sbloccala (L) per cambiarla." : "Questa foto non ha varianti simili libere.");
+    },
+    chooseAlternative: (itemId, assetId) => commit((p) => chooseAlternative(p, analysisRef.current, itemId, assetId)),
     toggleFavorite: (i) => {
       const area = spread?.areas[i];
       if (!area?.layout) return;
@@ -720,12 +741,14 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
         else if (key === "d") actions.toggleDone();
         else if (key === "n") { const next = nextEmptySpread(historyRef.current.present, state.index); if (next >= 0) goTo(next); else notify("Nessuno spread ha pagine vuote."); }
         else {
-          const [asset] = nextUnusedAssets(historyRef.current.present, 1, state.spread.areas.flatMap((area) => area.items.map((item) => item.assetId)));
+          const [asset] = nextUnusedAssets(historyRef.current.present, 1, state.spread.areas.flatMap((area) => area.items.map((item) => item.assetId)), analysisRef.current);
           if (asset) placeAssets([asset.id]); else notify("Non ci sono più foto da usare.");
         }
         return;
       }
       if (mod || event.altKey) return;
+      // A / Maiusc+A: la variante simile successiva o precedente della foto selezionata nello spread.
+      if (key === "a" && state.selectedItemId && state.zone === "stage") { event.preventDefault(); actions.cycleAlternative(state.selectedItemId, event.shiftKey ? -1 : 1); return; }
       switch (event.key) {
         case "ArrowLeft": event.preventDefault(); goTo(state.index - 1); return;
         case "ArrowRight": event.preventDefault(); goTo(state.index + 1); return;
@@ -799,7 +822,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   const runAutoBuild = (options: AutoBuildOptions, useTemplates = false) => {
     setDialog(null);
     try {
-      const plain = autoBuildAlbum(project, options);
+      const plain = autoBuildAlbum(project, options, analysis);
       if (plain === project) { notify("Tutte le foto sono già nell'album."); return; }
       const firstNew = options.scope === "unused" ? project.spreads.length : 0;
       // I template dell'utente si usano dove il numero di foto coincide e il ritaglio è paragonabile; gli spread finiti restano come sono.
@@ -863,6 +886,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     onTag: tagMany,
     onManageChapters: () => setDialog("chapters"),
     onRemoveItem: (itemId: string) => actions.removeItem(itemId),
+    onGrouping: (on: boolean) => { setGrouping(on); writeNumber("filex.albumFlow.groupSimilar", on ? 1 : 2); },
+    onSeparate: (ids: string[]) => { commit((p) => separatePhotos(p, ids)); notify(`Gruppo separato: ${ids.length} foto tornano singole.`, true); },
+    onDetach: (assetId: string, groupIds: string[]) => { commit((p) => detachPhoto(p, assetId, groupIds)); notify("Foto tolta dal gruppo delle simili.", true); },
+    onJoin: (ids: string[]) => { commit((p) => joinPhotos(p, ids)); notify(`${ids.length} foto unite come simili: nella libreria diventano una pila.`, true); },
+    onResetGroups: () => { commit((p) => clearSimilarityOverrides(p)); notify("Gruppi delle foto simili ripristinati come calcolati.", true); },
   });
 
   return (
@@ -919,6 +947,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           sizes={sizes}
           layoutsOpen={layoutsOpen}
           templates={templates}
+          alternatives={alternatives}
           actions={actions}
           design={{ open: designOpen, tab: designTab, focusSignal, selectedOverlayId, extraOverlayIds, actions: designActions, handlers: designHandlers, onToggle: () => { setDesignOpen((on) => { if (on) setSelectedOverlayId(null); return !on; }); }, onTab: setDesignTab }}
         />
@@ -996,6 +1025,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
         thumbSize={thumbSize}
         collapsed={dockCollapsed}
         revealAsset={revealAsset}
+        analysis={analysis}
+        analysisProgress={similarityProgress}
+        grouping={grouping}
+        suggestions={suggestions}
+        hasSpreadPhotos={Boolean(spread?.areas.some((area) => area.items.length > 0))}
         {...libraryHandlers}
       />
 
@@ -1021,9 +1055,9 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           onRemove={(i) => { commit((p) => removeSpread(p, p.spreads[i].id)); notify(`Spread ${i + 1} eliminato.`, true); }}
         />
       ) : null}
-      {dialog === "autobuild" ? <AutoBuildDialog project={project} templateCount={templates.length} onClose={() => setDialog(null)} onRun={runAutoBuild} /> : null}
+      {dialog === "autobuild" ? <AutoBuildDialog project={project} analysis={analysis} templateCount={templates.length} onClose={() => setDialog(null)} onRun={runAutoBuild} /> : null}
       {dialog === "social" ? <SocialStudio project={project} onClose={() => setDialog(null)} onStatus={notify} onImportFolder={() => { reopenSocial.current = true; setDialog(null); if (desktop) void importFolder(); else fileInput.current?.click(); }} onImportFiles={() => { reopenSocial.current = true; setDialog(null); fileInput.current?.click(); }} /> : null}
-      {dialog === "export" ? <ExportDialog project={project} currentIndex={index} onClose={() => setDialog(null)} onStatus={notify} onGoTo={goTo} /> : null}
+      {dialog === "export" ? <ExportDialog project={project} analysis={analysis} currentIndex={index} onClose={() => setDialog(null)} onStatus={notify} onGoTo={goTo} /> : null}
       {dialog === "format" ? <FormatDialog sheet={project.settings.sheet} gapCm={project.settings.defaultStyle.gapCm} onClose={() => setDialog(null)} onApply={(sheet, gapCm) => { const out = { updated: 0 }; commit((p) => { const gapped = setAlbumGap(touch({ ...p, settings: { ...p.settings, sheet } }), gapCm); out.updated = gapped.updated; return gapped.project; }); setDialog(null); notify(out.updated > 0 ? `Formato e spazio aggiornati: ${out.updated} ${out.updated === 1 ? "pagina" : "pagine"} con il nuovo spazio tra le foto.` : "Formato cambiato: i layout si sono adattati al nuovo foglio.", true); }} /> : null}
       {dialog === "template" && templateEdit ? <TemplateEditor sheet={project.settings.sheet} style={project.settings.defaultStyle} initial={templateEdit.initial} seed={templateEdit.seed} onClose={() => { setDialog(null); setTemplateEdit(null); }} onSave={(template) => { try { storeTemplates(upsertTemplate(templates, template)); notify(`Template «${template.name}» salvato.`); setDialog(null); setTemplateEdit(null); } catch (error) { notify(error instanceof Error ? error.message : "Template non salvato."); } }} /> : null}
       {dialog === "cloud" ? <CloudDialog project={project} onClose={() => setDialog(null)} onOpenCopy={(copy) => { setDialog(null); onOpenCopy?.(copy); }} /> : null}

@@ -8,6 +8,7 @@ I package condivisi sono:
 - `@photo-tools/desktop-contracts`
 - `@photo-tools/filesystem`
 - `@photo-tools/layout-engine`
+- `@photo-tools/photo-similarity` (momenti e foto simili, condiviso da Album Flow e, in prospettiva, da Image Select Pro; test: `npm run test:photo-similarity`)
 - `@photo-tools/presets`
 - `@photo-tools/shared-types`
 - `@photo-tools/ui-schema`
