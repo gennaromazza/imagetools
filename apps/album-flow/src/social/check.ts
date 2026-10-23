@@ -4,7 +4,7 @@ import { repeatedTexts } from "./edit-text";
 import { buildSlide } from "./build";
 import { envFor } from "./plan";
 import { templateOf } from "./templates";
-import { MAX_SLIDES, MIN_SLIDES, type Carousel } from "./types";
+import { MAX_SLIDES, MIN_SLIDES, photosShown, type Carousel } from "./types";
 
 export interface SocialIssue {
   level: "error" | "warning" | "info";
@@ -59,6 +59,15 @@ export function carouselReport(carousel: Carousel, project: Project): SocialRepo
   });
   for (const [id, uses] of seen) {
     if (uses > 1) issues.push({ level: "info", message: `La foto ${assets.get(id)?.fileName ?? id} compare in ${uses} slide.` });
+  }
+  // Il fotografo ha segnato delle foto «Per i social»: se il carosello ne usa altre, glielo si dice (può essere una scelta sua, ma non deve essere una sorpresa).
+  const marked = new Set(project.assets.filter((asset) => asset.albumTags?.includes("social")).map((asset) => asset.id));
+  if (marked.size > 0) {
+    const outside = [...new Set(carousel.slides.flatMap((slide) => photosShown(slide)))].filter((id) => assets.has(id) && !marked.has(id));
+    if (outside.length > 0) {
+      const names = outside.slice(0, 3).map((id) => assets.get(id)!.fileName).join(", ");
+      issues.push({ level: "info", message: `${outside.length} ${outside.length === 1 ? "foto non è segnata" : "foto non sono segnate"} «Per i social»: ${names}${outside.length > 3 ? "…" : ""}.` });
+    }
   }
   if (!carousel.brand.handle.trim()) issues.push({ level: "info", message: "Aggiungi il tuo profilo (@nome): compare in alcune slide." });
   const errors = issues.filter((issue) => issue.level === "error").length;

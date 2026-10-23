@@ -35,7 +35,7 @@ const pano: SlideTemplate = {
 };
 
 const mockup: SlideTemplate = {
-  id: "sh-mockup", set: "shared", role: "mockup", label: "Le pagine dell'album", note: "Una doppia pagina vera dell'album in una scena", tone: "light", slots: [], needsSpread: true,
+  id: "sh-mockup", set: "shared", role: "mockup", label: "Le pagine dell'album", note: "Una doppia pagina vera dell'album in una scena", promo: true, tone: "light", slots: [], needsSpread: true,
   fields: [
     field("kicker", "Sopra", "Dentro l'album"),
     field("title", "Titolo", "Sfoglia le pagine"),
@@ -71,7 +71,7 @@ const mockup: SlideTemplate = {
 };
 
 const closing: SlideTemplate = {
-  id: "sh-closing", set: "shared", role: "cta", label: "Chiusura con foto tonda", note: "Foto tonda, un grazie calligrafico e il pulsante per contattarti", tone: "dark", slots: ["portrait"],
+  id: "sh-closing", set: "shared", role: "cta", label: "Chiusura con foto tonda", note: "Foto tonda, un grazie calligrafico e il pulsante per contattarti", promo: true, tone: "dark", slots: ["portrait"],
   fields: [
     field("thanks", "Ringraziamento", "Grazie"),
     field("line", "Frase", "Per ogni sguardo, ogni dettaglio, ogni emozione", true),

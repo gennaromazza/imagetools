@@ -58,7 +58,7 @@ const collage: SlideTemplate = {
 };
 
 const saveDate: SlideTemplate = {
-  id: "ga-savedate", set: "galleria", role: "collage", label: "Invito a quattro foto", note: "Foto con bordo bianco sovrapposte e data in basso", tone: "light", slots: ["portrait", "landscape", "portrait", "landscape"],
+  id: "ga-savedate", set: "galleria", role: "collage", label: "Invito a quattro foto", note: "Foto con bordo bianco sovrapposte e data in basso", promo: true, tone: "light", slots: ["portrait", "landscape", "portrait", "landscape"],
   variants: [{ script: "Ricordatevi", title: "La festa", invite: "vi aspettano per festeggiare", date: "Domenica 14 giugno 2026", place: "Masseria Il Fico, Lecce" }],
   fields: [
     field("script", "Parola calligrafica", "Segnatevi"),

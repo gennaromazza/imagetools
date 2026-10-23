@@ -5,7 +5,7 @@ import { hasDesktop } from "../desktop/api";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import { useNewFeature } from "../hooks/useNewFeature";
 import { useStableCallbacks } from "../hooks/useStableCallbacks";
-import { assetsInTab, filterAssets, hoverPreviewSize, type AssetUsageRef, type LibraryTab } from "../model/library";
+import { assetsInTab, countTagged, filterAssets, hoverPreviewSize, type AssetUsageRef, type LibraryTab } from "../model/library";
 import { formatClock, isAlternative, momentHeaders, momentPicks, stackEntries, todoAssets, type LibraryAnalysis, type LibraryEntry, type SpreadSuggestion } from "../model/similar";
 import { beginDrag, currentDrag, endDrag } from "./dnd";
 import { Icon } from "./icons";
@@ -185,8 +185,9 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
   const [labelId, setLabelId] = useState("");
   const [origin, setOrigin] = useState<"all" | "selector" | "manual">("all");
   const [usageFilter, setUsageFilter] = useState<"all" | "unused" | "used">("all");
-  const filtersOn = (stars !== "any" ? 1 : 0) + (labelId ? 1 : 0) + (origin !== "all" ? 1 : 0);
-  const resetFilters = () => { setStars("any"); setAtLeast(false); setLabelId(""); setOrigin("all"); setUsageFilter("all"); setQuery(""); };
+  const [socialOnly, setSocialOnly] = useState(false);
+  const filtersOn = (stars !== "any" ? 1 : 0) + (labelId ? 1 : 0) + (origin !== "all" ? 1 : 0) + (socialOnly ? 1 : 0);
+  const resetFilters = () => { setStars("any"); setAtLeast(false); setLabelId(""); setOrigin("all"); setUsageFilter("all"); setSocialOnly(false); setQuery(""); };
   const [popover, setPopover] = useState<null | "filter" | "import" | "sort">(null);
   const [menu, setMenu] = useState<{ x: number; y: number; asset: AlbumAssetV2 } | null>(null);
   const [dropTab, setDropTab] = useState<string | null>(null);
@@ -209,7 +210,8 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
   const newSuggested = useNewFeature("adatte-spread");
   const [openStacks, setOpenStacks] = useState<ReadonlySet<string>>(() => new Set());
   const tabAssets = useMemo(() => (suggestedTab ? [] : assetsInTab(project, tab)), [project, tab, suggestedTab]);
-  const filtered = useMemo(() => filterAssets(project, tabAssets, { query, ...(stars === "any" ? {} : atLeast && stars !== "0" ? { minRating: Number(stars) } : { exactRating: Number(stars) }), labelId: labelId || undefined, origin, usage: usageFilter }), [project, tabAssets, query, stars, atLeast, labelId, origin, usageFilter]);
+  const filtered = useMemo(() => filterAssets(project, tabAssets, { query, ...(stars === "any" ? {} : atLeast && stars !== "0" ? { minRating: Number(stars) } : { exactRating: Number(stars) }), labelId: labelId || undefined, origin, usage: usageFilter, ...(socialOnly ? { tag: "social" as const } : {}) }), [project, tabAssets, query, stars, atLeast, labelId, origin, usageFilter, socialOnly]);
+  const socialCount = useMemo(() => countTagged(project.assets, "social"), [project.assets]);
   // Con le pile, «Non usate» non mostra le alternative di un gruppo già nell'album: non sono foto da sistemare.
   const visible = useMemo(() => (grouping && usageFilter === "unused" ? filtered.filter((asset) => !isAlternative(analysis, usage, asset.id)) : filtered), [analysis, filtered, grouping, usage, usageFilter]);
   const entries: LibraryEntry[] = useMemo(() => {
@@ -478,6 +480,11 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
             <Icon name="check" size={14} />
             {usedCount} usate
           </button>
+          <button type="button" className={`dock__unused${socialOnly ? " is-active" : ""}`} onClick={() => setSocialOnly(!socialOnly)} aria-pressed={socialOnly}
+            title={socialCount > 0 ? "Mostra solo le foto segnate «Per i social» (tasto I): sono quelle che il carosello usa" : "Nessuna foto è segnata «Per i social»: tasto destro sulla foto → «Segna come» → «Per i social», oppure il tasto I"}>
+            <Icon name="image" size={14} />
+            {socialCount} <span className="dock__tab-long">per i </span>social
+          </button>
           <div className="dock__zoom" title="Dimensione delle miniature">
             <button type="button" className="icon-btn icon-btn--sm" onClick={() => props.onThumbSize(Math.max(THUMB_MIN, thumbSize - 25))} aria-label="Miniature più piccole"><Icon name="minus" size={13} /></button>
             <input type="range" min={THUMB_MIN} max={THUMB_MAX} step={5} value={thumbSize} onChange={(event) => props.onThumbSize(Number(event.target.value))} aria-label="Dimensione delle miniature" />
@@ -485,7 +492,7 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
           </div>
           <label className="dock__search"><Icon name="search" size={14} /><input type="search" placeholder="Cerca" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Cerca per nome file" /></label>
           <div className="anchor">
-            <button type="button" className={`dock__unused${filtersOn ? " is-active" : ""}`} onClick={() => setPopover(popover === "filter" ? null : "filter")} title="Filtra per stelle, etichette, origine o uso" aria-label="Filtra"><Icon name="filter" size={14} /> Filtri{filtersOn ? ` (${filtersOn})` : ""}</button>
+            <button type="button" className={`dock__unused${filtersOn ? " is-active" : ""}`} onClick={() => setPopover(popover === "filter" ? null : "filter")} title="Filtra per stelle, etichette, origine, uso o foto «Per i social»" aria-label="Filtra"><Icon name="filter" size={14} /> Filtri{filtersOn ? ` (${filtersOn})` : ""}</button>
             <Popover open={popover === "filter"} onClose={() => setPopover(null)} side="top" className="popover--wide">
               <div className="popover__section">
                 <span className="field__label">Stelle</span>
@@ -511,6 +518,12 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
                   </select>
                 </div>
               ) : null}
+              <div className="popover__section">
+                <span className="field__label">Segnalini</span>
+                <div className="segmented">
+                  {([[false, "Tutte"], [true, `Per i social (${socialCount})`]] as const).map(([value, label]) => <button key={String(value)} type="button" className={socialOnly === value ? "is-active" : ""} aria-pressed={socialOnly === value} onClick={() => setSocialOnly(value)}>{label}</button>)}
+                </div>
+              </div>
               <div className="popover__section">
                 <span className="field__label">Uso</span>
                 <div className="segmented">

@@ -42,7 +42,7 @@ const cover: SlideTemplate = {
 };
 
 const offset: SlideTemplate = {
-  id: "mo-offset", set: "moda", role: "hero", label: "Riquadro e colonna colorata", note: "Foto verticale su una colonna di colore con riquadro informativo", tone: "dark", slots: ["portrait"],
+  id: "mo-offset", set: "moda", role: "hero", label: "Riquadro e colonna colorata", note: "Foto verticale su una colonna di colore con riquadro informativo", promo: true, tone: "dark", slots: ["portrait"],
   variants: [{ label: "Il nostro metodo", body: "Ascolto, osservazione e tempo: così nasce una foto che somiglia davvero alle persone." }],
   fields: [
     field("label", "Etichetta", "Chi siamo"),
@@ -78,7 +78,7 @@ const offset: SlideTemplate = {
 };
 
 const circle: SlideTemplate = {
-  id: "mo-circle", set: "moda", role: "moment", label: "Cerchio che esce dal bordo", note: "Foto tonda tagliata dal bordo, badge e titolo in basso", tone: "dark", slots: ["any", "any"],
+  id: "mo-circle", set: "moda", role: "moment", label: "Cerchio che esce dal bordo", note: "Foto tonda tagliata dal bordo, badge e titolo in basso", promo: true, tone: "dark", slots: ["any", "any"],
   variants: [{ title: "Luce\ndi stagione", badge: "Edizione\nspeciale", body: "Dal tramonto alla sera, ogni scena ha la sua luce." }],
   fields: [
     field("title", "Titolo", "Momenti\nspeciali", true),
@@ -143,7 +143,7 @@ const lookbook: SlideTemplate = {
 };
 
 const panel: SlideTemplate = {
-  id: "mo-panel", set: "moda", role: "hero", label: "Colonna colorata e titolo", note: "Foto su una colonna tenue con titolo e pulsante a destra", tone: "dark", slots: ["portrait"],
+  id: "mo-panel", set: "moda", role: "hero", label: "Colonna colorata e titolo", note: "Foto su una colonna tenue con titolo e pulsante a destra", promo: true, tone: "dark", slots: ["portrait"],
   variants: [{ title: "I nostri\ndettagli", body: "Mani, tessuti, luce di traverso: sono i particolari a far somigliare le foto a chi le guarda.", badge: "Da\nvedere" }],
   fields: [
     field("title", "Titolo", "Il nostro\nstile", true),

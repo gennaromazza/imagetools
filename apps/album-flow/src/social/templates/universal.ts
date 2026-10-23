@@ -31,7 +31,7 @@ const full: SlideTemplate = {
 };
 
 const split: SlideTemplate = {
-  id: "sh-split", set: "shared", role: "hero", label: "Metà foto, metà testo", note: "Foto verticale a sinistra e un testo a destra", tone: "light", slots: ["portrait"],
+  id: "sh-split", set: "shared", role: "hero", label: "Metà foto, metà testo", note: "Foto verticale a sinistra e un testo a destra", promo: true, tone: "light", slots: ["portrait"],
   variants: [{ title: "Luce\ne tempo", body: "Aspettare il momento giusto è metà del lavoro: l'altra metà è farsi dimenticare." }],
   fields: [
     field("title", "Titolo", "Il dettaglio\nfa la differenza", true),
@@ -101,7 +101,7 @@ const trio: SlideTemplate = {
 };
 
 const statement: SlideTemplate = {
-  id: "sh-statement", set: "shared", role: "quote", label: "Solo parole", note: "Una frase grande, senza foto", tone: "dark", slots: [],
+  id: "sh-statement", set: "shared", role: "quote", label: "Solo parole", note: "Una frase grande, senza foto", promo: true, tone: "dark", slots: [],
   variants: [{ kicker: "Il nostro modo", text: "Meno pose,\npiù verità", script: "sempre" }, { kicker: "Promessa", text: "Ogni foto\nè una promessa", script: "mantenuta" }],
   fields: [
     field("kicker", "Sopra", "Credo che"),

@@ -271,6 +271,11 @@ export interface SlideTemplate {
   label: string;
   /** Una riga per chi sceglie il modello. */
   note: string;
+  /**
+   * Modello di vendita o di contatto (prenotazioni, domande frequenti, date, recensioni, elenchi di servizi…): un carosello «Solo foto»
+   * non lo propone mai da solo; resta nell'elenco dei modelli, in un gruppo a parte.
+   */
+  promo?: boolean;
   tone: Tone;
   /** Forma delle foto richieste, nell'ordine degli spazi. */
   slots: readonly SlotKind[];
@@ -344,6 +349,16 @@ export interface Carousel {
   setId: SetId;
   brand: BrandKit;
   slides: Slide[];
+  /**
+   * Le foto del carosello: le uniche tra cui scelgono da sole piano, «Riscegli le foto», «Altra variante», le slide nuove e i cambi di modello.
+   * Assente (caroselli vecchi) = le foto segnate «Per i social» dell'album, se ce ne sono; altrimenti tutte le non scartate.
+   */
+  assetIds?: string[];
+  /**
+   * `true` = il carosello propone anche i modelli di vendita (prenota, domande frequenti, data, recensione…); `false` = solo foto.
+   * Assente (caroselli vecchi) = si deduce dalle slide: vendita se ne ha almeno una.
+   */
+  promo?: boolean;
   /** Numero che dà un ordine diverso ai modelli (e qualche specchio) a ogni carosello; 0 o assente = l'ordine di base dello stile. */
   seed?: number;
   /** Le foto in testa alla classifica quando il carosello è stato creato: se cambiano (stelle, segnalini) si propone di riscegliere. */

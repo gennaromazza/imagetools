@@ -8,7 +8,7 @@ import { loadBrand } from "../social/store";
 import { MAX_SLIDES, MIN_SLIDES, type Carousel, type SetId } from "../social/types";
 import { Icon } from "./icons";
 import { SocialPhotoPicker } from "./SocialPhotoPicker";
-import { Modal } from "./ui";
+import { Modal, Segmented } from "./ui";
 
 /** Quante miniature mostrare prima di «+N»: bastano a riconoscere la scelta. */
 const SHOWN = 14;
@@ -30,7 +30,8 @@ export function initialSelection(project: Project): { ids: string[]; marked: boo
 
 /**
  * Creazione guidata di un carosello: si vedono le foto scelte per i social, si propone il numero di slide che serve per usarle tutte
- * e lo si può cambiare prima di creare. Il carosello nasce già con quelle foto (e solo quelle).
+ * e lo si può cambiare prima di creare. Il carosello nasce già con quelle foto (e solo quelle) e, se non si chiede altro, «Solo foto»:
+ * le slide di vendita (prenota, domande frequenti, data, recensione, pagine dell'album) si accendono con un clic.
  */
 export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
   project: Project;
@@ -46,13 +47,14 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
   const [picking, setPicking] = useState(false);
   const [manual, setManual] = useState<number | null>(null);
   const [seed] = useState(freshSeed);
+  const [promo, setPromo] = useState(false);
 
-  const suggested = useMemo(() => suggestSlideCount(project, chosen, setId, seed), [project, chosen, setId, seed]);
+  const suggested = useMemo(() => suggestSlideCount(project, chosen, setId, seed, promo), [project, chosen, setId, seed, promo]);
   const count = Math.max(MIN_SLIDES, Math.min(MAX_SLIDES, manual ?? suggested));
   const brand = useMemo(() => loadBrand() ?? setBrand(defaultBrand(""), setId), [setId]);
-  const planned = useMemo(() => (chosen.length ? planCarousel(project, { setId, format: "feed", count, brand, name: title, assetIds: chosen, seed }) : null), [project, chosen, setId, count, brand, title, seed]);
+  const planned = useMemo(() => (chosen.length ? planCarousel(project, { setId, format: "feed", count, brand, name: title, assetIds: chosen, seed, promo }) : null), [project, chosen, setId, count, brand, title, seed, promo]);
 
-  const stats = useMemo(() => planCoverage(project, chosen, count, setId, seed), [project, chosen, count, setId, seed]);
+  const stats = useMemo(() => planCoverage(project, chosen, count, setId, seed, promo), [project, chosen, count, setId, seed, promo]);
 
   const assetOf = (id: string) => project.assets.find((asset) => asset.id === id);
   const toggle = (id: string) => { setChosen((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id])); setSource("manual"); setManual(null); };
@@ -85,6 +87,15 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
               {chosen.length === 0 ? <span className="muted small">Nessuna foto: scegline qualcuna.</span> : null}
             </div>
             <p className="muted small">{source === "marked" ? "Sono le foto che hai segnato «Per i social» in libreria." : source === "best" ? "Nessuna foto è segnata «Per i social»: parto dalle migliori. Puoi cambiarle." : "Scelta fatta a mano."}</p>
+          </div>
+
+          <div className="social-new__block">
+            <div className="social-new__head"><h4>Tipo di carosello</h4></div>
+            <Segmented<"photos" | "promo"> label="Tipo di carosello" value={promo ? "promo" : "photos"} onChange={(value) => setPromo(value === "promo")}
+              options={[{ value: "photos", label: "Solo foto" }, { value: "promo", label: "Con slide di vendita" }]} />
+            <p className="muted small">{promo
+              ? "Aggiunge slide per presentarti: prenota, domande frequenti, data da segnare, recensione, le pagine dell'album. Puoi cambiarle o toglierle dopo."
+              : "Le tue foto in layout diversi, al massimo con una parola o una frase breve. Niente slide di vendita: le puoi aggiungere dopo, una per una."}</p>
           </div>
 
           <div className="social-new__block">

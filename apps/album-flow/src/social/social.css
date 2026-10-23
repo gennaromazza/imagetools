@@ -64,6 +64,9 @@
 .social__tray { position: absolute; left: 16px; right: 16px; bottom: calc(100% + 6px); z-index: 2; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--bg-elevated); box-shadow: var(--shadow); }
 
 /* Pannello della slide */
+.social__tray-title { flex-basis: 100%; margin-top: 4px; }
+.social-pool { display: grid; gap: 4px; }
+.social-pool .social-new__mini { width: 36px; height: 36px; border-radius: 6px; }
 .social-tiles { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .social-tile { display: grid; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 10px; background: transparent; text-align: center; }
 .social-tile:hover { border-color: var(--line-strong); }

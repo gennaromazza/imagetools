@@ -33,6 +33,58 @@ export interface RankedPhoto {
 /** Un panorama vero è molto più largo che alto: stessa soglia di Auto Build. */
 export { PANORAMA_ASPECT };
 
+// ---------------------------------------------------------------------------
+// Le foto del carosello
+// ---------------------------------------------------------------------------
+
+/** Le foto segnate «Per i social» tra quelle già classificate (la classifica resta com'è), o, se nessuna è segnata o tutte sono scartate, tutte. */
+function startingPool(project: Project, ranked: readonly RankedPhoto[]): string[] {
+  const marked = new Set(project.assets.filter((asset) => asset.albumTags?.includes("social")).map((asset) => asset.id));
+  const picked = marked.size > 0 ? ranked.filter((photo) => marked.has(photo.assetId)) : [];
+  return (picked.length > 0 ? picked : ranked).map((photo) => photo.assetId);
+}
+
+/** Le foto del carosello su una classifica già fatta: vedi `carouselPoolIds`. Una sola classifica per chiamata, perché si usa anche per ogni miniatura dei modelli. */
+function poolOn(project: Project, ranked: readonly RankedPhoto[], carousel: Pick<Carousel, "assetIds" | "slides">): Set<string> {
+  const valid = new Set(ranked.map((photo) => photo.assetId));
+  const own = (carousel.assetIds ?? []).filter((id) => valid.has(id));
+  const ids = new Set(own.length > 0 ? own : startingPool(project, ranked));
+  for (const slide of carousel.slides) for (const id of photosShown(slide)) if (valid.has(id)) ids.add(id);
+  return ids;
+}
+
+/** Le foto segnate «Per i social» (non scartate), dalla più adatta. */
+export function markedPhotoIds(project: Project): string[] {
+  if (!project.assets.some((asset) => asset.albumTags?.includes("social"))) return [];
+  const marked = new Set(project.assets.filter((asset) => asset.albumTags?.includes("social")).map((asset) => asset.id));
+  return rankPhotos(project).filter((photo) => marked.has(photo.assetId)).map((photo) => photo.assetId);
+}
+
+/** Da dove sceglie un carosello che non ha una lista sua: le foto segnate «Per i social», se ce ne sono; altrimenti tutte le non scartate. */
+export function defaultPoolIds(project: Project): string[] {
+  return startingPool(project, rankPhotos(project));
+}
+
+/**
+ * Le foto del carosello: la sua lista (`assetIds`) o, se non ne ha, quella di partenza dell'album; più quelle che mostra già, perché una foto
+ * messa a mano resta sua. Sono le uniche tra cui scelgono da sole piano, «Riscegli le foto», «Altra variante», slide nuove e cambi di modello.
+ */
+export function carouselPoolIds(project: Project, carousel: Pick<Carousel, "assetIds" | "slides">): string[] {
+  return [...poolOn(project, rankPhotos(project), carousel)];
+}
+
+/** La classifica ristretta alle foto del carosello (stesso ordine della classifica dell'album). */
+export function carouselRanked(project: Project, carousel: Pick<Carousel, "assetIds" | "slides">): RankedPhoto[] {
+  const ranked = rankPhotos(project);
+  const pool = poolOn(project, ranked, carousel);
+  return ranked.filter((photo) => pool.has(photo.assetId));
+}
+
+/** Il carosello propone anche i modelli di vendita? Quelli vecchi senza indicazione lo dicono le loro slide. */
+export function isPromoCarousel(carousel: Pick<Carousel, "promo" | "slides">): boolean {
+  return carousel.promo ?? carousel.slides.some((slide) => Boolean(templateOf(slide.templateId)?.promo));
+}
+
 /**
  * Le foto dell'album dalla più adatta in giù: stelle, scelte del Selector, copertina e foto principali, e quelle che il fotografo
  * ha già impaginato. Le foto scartate non entrano mai.
@@ -104,8 +156,13 @@ export interface PlanOptions {
   count: number;
   brand: BrandKit;
   name?: string;
-  /** Limita la scelta a queste foto (per esempio la selezione fatta nella libreria). */
+  /**
+   * Le foto del carosello: ne sceglie solo tra queste, e il carosello se le ricorda. Senza, parte dalle foto segnate «Per i social»
+   * (o da tutte, se nessuna è segnata) e non salva nessuna lista.
+   */
   assetIds?: readonly string[];
+  /** Propone anche i modelli di vendita (prenota, domande frequenti, data, recensione…): senza, il carosello è «Solo foto». */
+  promo?: boolean;
   /** Dà un ordine diverso ai modelli (e qualche specchio): senza, o con 0, esce sempre la trama di base dello stile. */
   seed?: number;
   /** Foto da mettere per prime, nell'ordine dato (per cambiare stile senza perdere le scelte). */
@@ -151,27 +208,28 @@ function blankSlide(templateId: string): Slide {
 const NO_BRAND: BrandKit = { name: "", handle: "", paletteId: "", fontPairId: "" };
 
 /** Quante delle foto date finiscono davvero nel carosello se ha `count` slide, e quante compaiono più di una volta. */
-export function planCoverage(project: Project, assetIds: readonly string[], count: number, setId: SetId = "editoriale", seed = 0): { used: number; repeated: number } {
-  const planned = planCarousel(project, { setId, format: "feed", count, brand: NO_BRAND, assetIds, seed });
+export function planCoverage(project: Project, assetIds: readonly string[], count: number, setId: SetId = "editoriale", seed = 0, promo = false): { used: number; repeated: number } {
+  const planned = planCarousel(project, { setId, format: "feed", count, brand: NO_BRAND, assetIds, seed, promo });
   const wanted = new Set(assetIds);
   const uses = new Map<string, number>();
   for (const slide of planned.slides) if (!slide.span || slide.span.index === 0) for (const id of slide.photos) if (id && wanted.has(id)) uses.set(id, (uses.get(id) ?? 0) + 1);
   return { used: uses.size, repeated: [...uses.values()].filter((times) => times > 1).length };
 }
 
-export const photosUsedAt = (project: Project, assetIds: readonly string[], count: number, setId: SetId = "editoriale", seed = 0): number =>
-  planCoverage(project, assetIds, count, setId, seed).used;
+export const photosUsedAt = (project: Project, assetIds: readonly string[], count: number, setId: SetId = "editoriale", seed = 0, promo = false): number =>
+  planCoverage(project, assetIds, count, setId, seed, promo).used;
 
 /**
  * Il numero di slide che serve perché tutte le foto scelte trovino posto: il più piccolo che le contiene tutte senza ripeterne,
  * oppure, se ripetere è inevitabile, il più piccolo che le contiene tutte (almeno `MIN_SLIDES`, al massimo `MAX_SLIDES`).
  */
-export function suggestSlideCount(project: Project, assetIds: readonly string[], setId: SetId = "editoriale", seed = 0): number {
-  const wanted = new Set(project.assets.filter((asset) => asset.pickStatus !== "rejected" && assetIds.includes(asset.id)).map((asset) => asset.id)).size;
+export function suggestSlideCount(project: Project, assetIds: readonly string[], setId: SetId = "editoriale", seed = 0, promo = false): number {
+  const chosen = new Set(assetIds);
+  const wanted = new Set(project.assets.filter((asset) => asset.pickStatus !== "rejected" && chosen.has(asset.id)).map((asset) => asset.id)).size;
   if (wanted <= MIN_SLIDES) return MIN_SLIDES;
   let firstFull = 0;
   for (let count = MIN_SLIDES; count <= MAX_SLIDES; count += 1) {
-    const { used, repeated } = planCoverage(project, assetIds, count, setId, seed);
+    const { used, repeated } = planCoverage(project, assetIds, count, setId, seed, promo);
     if (used < wanted) continue;
     if (repeated === 0) return count;
     if (!firstFull) firstFull = count;
@@ -211,9 +269,11 @@ function avoidRepeatedPhrases(slides: Slide[], brand: BrandKit, albumName: strin
 export function planCarousel(project: Project, options: PlanOptions): Carousel {
   const count = clampCount(options.count);
   const set = setInfo(options.setId);
-  const pool = rankPhotos(project, options.assetIds ? new Set(options.assetIds) : undefined);
+  const promo = Boolean(options.promo);
+  const own = options.assetIds ? [...new Set(options.assetIds)] : null;
+  const pool = rankPhotos(project, new Set(own ?? defaultPoolIds(project)));
   const seed = options.seed && options.seed > 0 ? Math.floor(options.seed) : 0;
-  const arc = arcFor(set, seed);
+  const arc = arcFor(set, seed, promo);
   const ids: string[] = [arc.open];
   for (let index = 0; index < count - 2; index += 1) ids.push(arc.middle[index % arc.middle.length]);
   if (count >= 2) ids.push(arc.close);
@@ -227,8 +287,8 @@ export function planCarousel(project: Project, options: PlanOptions): Carousel {
     for (let part = 0; part < 2; part += 1) slides[at + part] = { ...blankSlide("sh-pano"), photos: [pano.assetId], span: { index: part, count: 2 } };
     panoId = pano.assetId;
   }
-  // Una doppia pagina vera dell'album, prima della chiusura.
-  const spreadIds = count >= 5 ? rankSpreads(project, pool) : [];
+  // Una doppia pagina vera dell'album, prima della chiusura: è una slide da vetrina, quindi solo nel carosello con i modelli di vendita.
+  const spreadIds = promo && count >= 5 ? rankSpreads(project, pool) : [];
   if (spreadIds.length > 0) slides[count - 2] = { ...blankSlide("sh-mockup"), spreadId: spreadIds[0], spreadId2: spreadIds[1] ?? null };
 
   // I modelli universali prendono il fondo dallo stile (scuro, chiaro o alternato).
@@ -269,7 +329,7 @@ export function planCarousel(project: Project, options: PlanOptions): Carousel {
   }
   avoidRepeatedPhrases(slides, options.brand, project.projectName, options.setId);
   const now = nowIso();
-  return { id: newId("car"), name: options.name?.trim() || "Carosello", format: options.format, setId: options.setId, brand: options.brand, slides, ...(seed ? { seed } : {}), basis: selectionBasis(project), caption: "", createdAt: now, updatedAt: now };
+  return { id: newId("car"), name: options.name?.trim() || "Carosello", format: options.format, setId: options.setId, brand: options.brand, slides, ...(own ? { assetIds: own } : {}), promo, ...(seed ? { seed } : {}), basis: selectionBasis(project), caption: "", createdAt: now, updatedAt: now };
 }
 
 /** Impronta della scelta: le prime foto della classifica. Cambia quando cambiano stelle, segnalini «Per i social» o scarti. */
@@ -282,9 +342,26 @@ export function selectionChanged(project: Project, carousel: Carousel): boolean 
   return carousel.basis !== undefined && carousel.basis !== selectionBasis(project);
 }
 
-/** Sceglie di nuovo le foto con le stelle e i segnalini di adesso, tenendo stile, colori, formato, numero di slide e testi scritti. */
-export function reselectPhotos(project: Project, carousel: Carousel): Carousel {
-  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed: carousel.seed });
+/**
+ * Le foto su cui rifare il piano: quelle del carosello (con le foto messe a mano), e la lista si salva solo se il carosello ne aveva una sua.
+ * Senza lista sua il carosello ripesca da solo le foto segnate «Per i social» (o tutte, se nessuna è segnata).
+ */
+const replanPool = (project: Project, carousel: Carousel): { assetIds: string[] } => ({ assetIds: carouselPoolIds(project, carousel) });
+
+/** Toglie dal piano appena fatto la lista delle foto se il carosello di partenza non ne aveva una sua. */
+function withOwnPool<T extends { assetIds?: string[] }>(next: T, carousel: Carousel): T {
+  if (carousel.assetIds !== undefined) return next;
+  const { assetIds: _pool, ...rest } = next;
+  return rest as T;
+}
+
+/**
+ * Sceglie di nuovo le foto, tenendo stile, colori, formato, numero di slide e testi scritti. Con `refreshPool` riparte dalle foto segnate
+ * «Per i social» di adesso (o da tutte, se nessuna è segnata) invece che dalla lista del carosello.
+ */
+export function reselectPhotos(project: Project, carousel: Carousel, refreshPool = false): Carousel {
+  const pool = refreshPool ? {} : replanPool(project, carousel);
+  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed: carousel.seed, promo: isPromoCarousel(carousel), ...pool });
   const slides = next.slides.map((slide, index) => {
     const before = carousel.slides[index];
     const template = templateOf(slide.templateId);
@@ -293,7 +370,7 @@ export function reselectPhotos(project: Project, carousel: Carousel): Carousel {
     const { flip: _flip, tone: _tone, ...clean } = slide;
     return { ...clean, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.tone ? { tone: before.tone } : {}), ...(before.flip ? { flip: true } : {}), ...(before.free && !slide.span ? { free: before.free } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}), ...(before.hidden ? { hidden: before.hidden } : {}) };
   });
-  return { ...next, id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
+  return { ...withOwnPool(next, carousel), id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
 }
 
 /** Un seme nuovo per ogni carosello creato: due caroselli fatti in momenti diversi dallo stesso album non escono uguali. */
@@ -308,22 +385,39 @@ export function freshSeed(): number {
 export function variation(project: Project, carousel: Carousel, seed = freshSeed()): Carousel {
   const prefer: string[] = [];
   for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
-  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed, prefer });
+  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed, prefer, promo: isPromoCarousel(carousel), ...replanPool(project, carousel) });
+  return carryTextsByTemplate(next, carousel);
+}
+
+/** Il piano nuovo con i testi (e la loro posizione e stile) delle slide che usano lo stesso modello nel carosello di prima, e l'impronta di prima. */
+function carryTextsByTemplate(next: Carousel, carousel: Carousel): Carousel {
   const byTemplate = new Map<string, Slide[]>();
   for (const slide of carousel.slides) byTemplate.set(slide.templateId, [...(byTemplate.get(slide.templateId) ?? []), slide]);
   const slides = next.slides.map((slide) => {
     const before = byTemplate.get(slide.templateId)?.shift();
     return before && Object.keys(before.texts).length ? { ...slide, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}), ...(before.hidden ? { hidden: before.hidden } : {}) } : slide;
   });
-  const { basis: _basis, ...rest } = next;
+  const { basis: _basis, ...rest } = withOwnPool(next, carousel);
   return { ...rest, ...(carousel.basis !== undefined ? { basis: carousel.basis } : {}), id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
+}
+
+/**
+ * Passa da «Solo foto» a «Con modelli di vendita» e viceversa: stesso stile, stesse foto, stessi testi dove il modello resta lo stesso,
+ * ma la trama cambia (con la vendita tornano prenota, domande frequenti, data, recensione, le pagine dell'album…).
+ */
+export function setCarouselPromo(project: Project, carousel: Carousel, promo: boolean): Carousel {
+  if (isPromoCarousel(carousel) === promo) return carousel.promo === promo ? carousel : { ...carousel, promo };
+  const prefer: string[] = [];
+  for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
+  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed: carousel.seed, prefer, promo, ...replanPool(project, carousel) });
+  return carryTextsByTemplate(next, carousel);
 }
 
 /** Cambia stile mantenendo foto e testi: le foto già scelte restano, nello stesso ordine; i testi passano alle slide nella stessa posizione. */
 export function restyle(project: Project, carousel: Carousel, setId: SetId): Carousel {
   const prefer: string[] = [];
   for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
-  const next = planCarousel(project, { setId, format: carousel.format, count: carousel.slides.length, brand: setBrand(carousel.brand, setId), name: carousel.name, prefer, seed: carousel.seed });
+  const next = planCarousel(project, { setId, format: carousel.format, count: carousel.slides.length, brand: setBrand(carousel.brand, setId), name: carousel.name, prefer, seed: carousel.seed, promo: isPromoCarousel(carousel), ...replanPool(project, carousel) });
   const slides = next.slides.map((slide, index) => {
     const before = carousel.slides[index];
     const template = templateOf(slide.templateId);
@@ -333,7 +427,7 @@ export function restyle(project: Project, carousel: Carousel, setId: SetId): Car
     return { ...slide, texts, ...(before.free && !slide.span && !before.span ? { free: before.free } : {}), ...(before.textOffset && before.templateId === slide.templateId ? { textOffset: before.textOffset } : {}), ...(before.layerOffset && before.templateId === slide.templateId ? { layerOffset: before.layerOffset } : {}), ...(before.hidden && before.templateId === slide.templateId ? { hidden: before.hidden } : {}) };
   });
   // Cambiare stile non riscegle le foto: l'impronta resta quella di prima, così l'avviso «le stelle sono cambiate» non sparisce.
-  const { basis: _basis, ...rest } = next;
+  const { basis: _basis, ...rest } = withOwnPool(next, carousel);
   return { ...rest, ...(carousel.basis !== undefined ? { basis: carousel.basis } : {}), id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
 }
 

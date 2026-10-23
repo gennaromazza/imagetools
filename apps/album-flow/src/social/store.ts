@@ -111,6 +111,7 @@ export function parseCarousel(raw: unknown): Carousel | null {
   });
   if (complete.length < 2) return null;
   const setId = SETS.some((set) => set.id === raw.setId) ? (raw.setId as Carousel["setId"]) : SETS[0].id;
+  const assetIds = Array.isArray(raw.assetIds) ? [...new Set(raw.assetIds.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 80))].slice(0, 5000) : [];
   const now = new Date().toISOString();
   return {
     id: str(raw.id, "", 80) || `car-${Math.random().toString(36).slice(2, 10)}`,
@@ -119,6 +120,8 @@ export function parseCarousel(raw: unknown): Carousel | null {
     setId,
     brand,
     slides: complete,
+    ...(assetIds.length > 0 ? { assetIds } : {}),
+    ...(typeof raw.promo === "boolean" ? { promo: raw.promo } : {}),
     ...(typeof raw.basis === "string" ? { basis: raw.basis.slice(0, 600) } : {}),
     ...(Number.isInteger(raw.seed) && (raw.seed as number) > 0 && (raw.seed as number) < 2 ** 31 ? { seed: raw.seed as number } : {}),
     caption: str(raw.caption, "", 2200),

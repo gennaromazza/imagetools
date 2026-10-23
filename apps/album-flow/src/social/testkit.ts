@@ -25,8 +25,9 @@ export function album(options: { photos?: number; panorama?: boolean; spreads?: 
 export const measure = approximateMeasure;
 export const envOf = (project: Project) => envFor(project, measure);
 
+/** Con tutti i modelli (anche quelli di vendita): i test del motore provano la trama completa. Il «Solo foto» ha i suoi test. */
 export const plan = (project: Project, overrides: Partial<Parameters<typeof planCarousel>[1]> = {}): Carousel =>
-  planCarousel(project, { setId: "editoriale", format: "feed", count: 8, brand: defaultBrand(project.projectName), ...overrides });
+  planCarousel(project, { setId: "editoriale", format: "feed", count: 8, brand: defaultBrand(project.projectName), promo: true, ...overrides });
 
 /** Una slide con quel modello, foto vere negli spazi e testi predefiniti. */
 export function slideFor(templateId: string, project: Project, offset = 0): Slide {

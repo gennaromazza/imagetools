@@ -84,12 +84,15 @@ test("trascinare e zoom sotto i testi: la foto si trova per geometria", () => {
 
 test("creazione guidata: il numero proposto contiene tutte le foto scelte", () => {
   const chosen = project.assets.filter((asset) => asset.pickStatus !== "rejected").slice(0, 14).map((asset) => asset.id);
-  const count = suggestSlideCount(project, chosen, "editoriale", 7);
-  assert.ok(count >= MIN_SLIDES && count <= MAX_SLIDES);
-  assert.equal(photosUsedAt(project, chosen, count, "editoriale", 7), chosen.length);
-  
-  assert.equal(suggestSlideCount(project, chosen.slice(0, 1)), MIN_SLIDES);
-  assert.equal(suggestSlideCount(project, project.assets.map((asset) => asset.id)), MAX_SLIDES);
+  for (const promo of [false, true]) {
+    const count = suggestSlideCount(project, chosen, "editoriale", 7, promo);
+    assert.ok(count >= MIN_SLIDES && count <= MAX_SLIDES);
+    assert.equal(photosUsedAt(project, chosen, count, "editoriale", 7, promo), chosen.length);
+    assert.equal(suggestSlideCount(project, chosen.slice(0, 1), "editoriale", 0, promo), MIN_SLIDES);
+  }
+  // Con tutte le foto dell'album servono tante slide: con i modelli di vendita (meno foto per slide) il tetto di Instagram, altrimenti poco meno.
+  assert.equal(suggestSlideCount(project, project.assets.map((asset) => asset.id), "editoriale", 0, true), MAX_SLIDES);
+  assert.ok(suggestSlideCount(project, project.assets.map((asset) => asset.id)) >= 15);
 });
 
 test("caroselli già salvati: si rileggono identici e il formato resta lo stesso", () => {

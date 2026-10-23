@@ -2,7 +2,7 @@ import { newId } from "../model/ids";
 import { nowIso, type Project } from "../model/project";
 import { framingEquals, normalizeFraming } from "./framing";
 import { normalizeTextStyles } from "./textstyle";
-import { pickForSlot, pickReused, rankPhotos, rankSpreads, slotFit, type RankedPhoto } from "./plan";
+import { carouselRanked, isPromoCarousel, pickForSlot, pickReused, rankPhotos, rankSpreads, slotFit, type RankedPhoto } from "./plan";
 import { FLEX_TONE_IDS, arcFor, setInfo, templateOf, toneForFlex } from "./templates";
 import { FREE_MIN_SIZE, MAX_FREE_FRAMES, MAX_SLIDES, MIN_SLIDES, formatOf, photosShown, type BrandKit, type Carousel, type FreeFrame, type Layer, type PhotoFraming, type PhotoLayer, type Slide, type SlotKind, type SocialFormatId, type Tone } from "./types";
 
@@ -197,7 +197,7 @@ export function reselectSlidePhotos(carousel: Carousel, project: Project, slideI
   return mapSlide(carousel, slideId, (slide) => {
     const template = templateOf(slide.templateId);
     if (!template || slide.span || slide.free || template.slots.length === 0) return slide;
-    const pool = rankPhotos(project);
+    const pool = carouselRanked(project, carousel);
     const taken = usedAssetIds(carousel);
     const before = new Set(slide.photos.filter((id): id is string => Boolean(id)));
     const chosen: Array<string | null> = [];
@@ -214,10 +214,46 @@ export function reselectSlidePhotos(carousel: Carousel, project: Project, slideI
   });
 }
 
-/** Foto dell'album non ancora usate nel carosello, dalla più adatta. */
+/** Foto del carosello non ancora usate, dalla più adatta. */
 export function unusedRanked(carousel: Carousel, project: Project): RankedPhoto[] {
   const used = usedAssetIds(carousel);
-  return rankPhotos(project).filter((photo) => !used.has(photo.assetId));
+  return carouselRanked(project, carousel).filter((photo) => !used.has(photo.assetId));
+}
+
+/**
+ * Cambia le foto del carosello (quelle tra cui sceglie da solo). Le slide che usano già foto della lista non cambiano; dove c'è una foto
+ * tolta dalla lista ne entra un'altra della lista (una nuova se c'è, altrimenti la meno ripetuta). Un panorama non cambia. Lista vuota: non fa nulla.
+ */
+export function setCarouselPool(carousel: Carousel, project: Project, assetIds: readonly string[]): Carousel {
+  const valid = new Set(rankPhotos(project).map((photo) => photo.assetId));
+  const pool = [...new Set(assetIds)].filter((id) => valid.has(id));
+  if (pool.length === 0) return carousel;
+  const inPool = new Set(pool);
+  const ranked = rankPhotos(project, inPool);
+  const taken = new Set([...usedAssetIds(carousel)].filter((id) => inPool.has(id)));
+  const uses = new Map<string, number>();
+  for (const slide of carousel.slides) for (const id of photosShown(slide)) if (inPool.has(id)) uses.set(id, (uses.get(id) ?? 0) + 1);
+  const replacement = (kind: SlotKind, same: ReadonlyArray<string | null>): string | null => {
+    const pick = pickForSlot(kind, ranked, taken, new Map()) ?? pickReused(kind, ranked, uses, new Set(same.filter((id): id is string => Boolean(id))));
+    if (!pick) return null;
+    taken.add(pick.assetId);
+    uses.set(pick.assetId, (uses.get(pick.assetId) ?? 0) + 1);
+    return pick.assetId;
+  };
+  const slides = carousel.slides.map((slide) => {
+    const template = templateOf(slide.templateId);
+    if (!template || slide.span) return slide;
+    if (slide.free) {
+      if (!slide.free.some((frame) => frame.assetId && !inPool.has(frame.assetId))) return slide;
+      return { ...slide, free: slide.free.map((frame) => (frame.assetId && !inPool.has(frame.assetId) ? { ...frame, assetId: replacement("any", slide.free!.map((other) => other.assetId)) } : frame)) };
+    }
+    if (!slide.photos.some((id) => id && !inPool.has(id))) return slide;
+    const photos = slide.photos.map((id, index) => (id && !inPool.has(id) ? replacement(template.slots[index] ?? "any", slide.photos) ?? id : id));
+    const framing = slide.framing?.map((item, index) => (photos[index] === slide.photos[index] ? item : null));
+    const { framing: _framing, ...rest } = slide;
+    return { ...rest, photos, ...(framing?.some(Boolean) ? { framing } : {}) };
+  });
+  return touch({ ...carousel, assetIds: pool, slides });
 }
 
 /** Cambia il modello di una slide tenendo le foto negli stessi spazi, completando quelli nuovi con le foto migliori ancora libere. */
@@ -228,7 +264,7 @@ export function setSlideTemplate(carousel: Carousel, project: Project, slideId: 
     // Un panorama non cambia modello a pezzi: per toglierlo si elimina e si aggiunge un'altra slide.
     if (slide.templateId === templateId || slide.span) return slide;
     const taken = new Set(usedAssetIds(carousel));
-    const pool = rankPhotos(project);
+    const pool = carouselRanked(project, carousel);
     const photos = template.slots.map((kind, index) => {
       const keep = slide.photos[index];
       if (keep) return keep;
@@ -325,7 +361,7 @@ export function addSlide(carousel: Carousel, project: Project, templateId: strin
   const template = templateOf(templateId);
   if (!template || carousel.slides.length >= MAX_SLIDES) return carousel;
   const taken = usedAssetIds(carousel);
-  const pool = rankPhotos(project);
+  const pool = carouselRanked(project, carousel);
   const chosen: Array<string | null> = [];
   const photos = template.slots.map((kind) => {
     const pick = choosePhoto(kind, pool, taken, carousel, chosen);
@@ -353,7 +389,7 @@ export function resizeCarousel(carousel: Carousel, project: Project, count: numb
   while (next.slides.length < target) {
     const counts = new Map<string, number>();
     for (const slide of next.slides) counts.set(slide.templateId, (counts.get(slide.templateId) ?? 0) + 1);
-    const templateId = arcFor(set, carousel.seed ?? 0).middle.sort((a, b) => (counts.get(a) ?? 0) - (counts.get(b) ?? 0))[0];
+    const templateId = arcFor(set, carousel.seed ?? 0, isPromoCarousel(carousel)).middle.sort((a, b) => (counts.get(a) ?? 0) - (counts.get(b) ?? 0))[0];
     const penultimate = next.slides[Math.max(0, next.slides.length - 2)];
     const added = addSlide(next, project, templateId, penultimate.id);
     if (added === next) break;

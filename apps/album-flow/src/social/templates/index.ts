@@ -21,29 +21,31 @@ export interface SetInfo {
   flexTone: "dark" | "light" | "alternate";
   /** La «trama» del carosello: apertura, slide di mezzo (si ripetono se ne servono di più), chiusura. */
   arc: { open: string; middle: readonly string[]; close: string };
-  /** Chiusure alternative: con un seme diverso da 0 se ne può scegliere una al posto di quella di base. */
+  /** Chiusure alternative: con un seme diverso da 0 se ne può scegliere una al posto di quella di base (solo nel carosello con i modelli di vendita). */
   closeAlt?: readonly string[];
+  /** Apertura e chiusura del carosello «Solo foto»: sempre con una foto, mai con pulsanti o inviti a contattare. */
+  simple: { open: string; close: string };
 }
 
 export const SETS: readonly SetInfo[] = [
   {
     id: "editoriale", label: "Editoriale", note: "Titoli giganti, fondi scuri e crema, testo dietro la foto",
-    paletteId: "bosco", fontPairId: "moda", flexTone: "alternate",
+    paletteId: "bosco", fontPairId: "moda", flexTone: "alternate", simple: { open: "ed-hero", close: "ed-caption" },
     arc: { open: "ed-cover", middle: ["ed-hero", "ed-sandwich", "sh-mosaic4", "ed-quote", "ed-list", "sh-hero3", "sh-grid", "sh-polaroid", "sh-polaroid3", "sh-full", "sh-statement", "sh-wall4", "sh-split", "sh-arch", "sh-duo", "sh-trio", "ed-numbers", "ed-caption", "ed-triptych", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-columns4", "sh-polaroid4", "sh-film4", "sh-row3", "sh-circles3", "sh-stack4", "sh-arches3", "sh-lead3", "sh-letter3", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "ed-cta" },
   },
   {
     id: "galleria", label: "Galleria", note: "Carta chiara, cornice sottile, foto sfalsate con bordo bianco",
-    paletteId: "avorio", fontPairId: "galleria", flexTone: "light",
+    paletteId: "avorio", fontPairId: "galleria", flexTone: "light", simple: { open: "ga-collage", close: "ga-solo" },
     arc: { open: "ga-collage", middle: ["ga-solo", "ga-savedate", "sh-hero3", "ga-editorial", "ga-pair", "sh-polaroid3", "sh-grid", "sh-polaroid", "sh-arch", "sh-stack4", "sh-statement", "sh-columns4", "sh-split", "sh-duo", "sh-full", "sh-trio", "ga-film", "ga-letter", "ga-stack", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-mosaic4", "sh-polaroid4", "sh-film4", "sh-row3", "sh-circles3", "sh-arches3", "sh-lead3", "sh-wall4", "sh-letter3", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "sh-closing" },
   },
   {
     id: "moda", label: "Moda", note: "Riquadri colorati, ritagli tondi, badge e pulsanti",
-    paletteId: "salvia", fontPairId: "classico", flexTone: "dark",
+    paletteId: "salvia", fontPairId: "classico", flexTone: "dark", simple: { open: "mo-cover", close: "sh-solo-card" },
     arc: { open: "mo-cover", middle: ["mo-offset", "mo-circle", "sh-circles3", "mo-lookbook", "mo-panel", "sh-mosaic4", "sh-grid", "sh-arch", "sh-arches3", "sh-polaroid", "sh-statement", "sh-lead3", "sh-split", "sh-duo", "sh-full", "sh-trio", "mo-stripes", "mo-sticker", "mo-duo-circle", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-columns4", "sh-hero3", "sh-polaroid3", "sh-polaroid4", "sh-film4", "sh-row3", "sh-stack4", "sh-wall4", "sh-letter3", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "sh-closing" },
   },
   {
     id: "cinema", label: "Cinema", note: "Sfondi sfocati, strisce di foto, bande da pellicola",
-    paletteId: "notte", fontPairId: "solenne", flexTone: "dark",
+    paletteId: "notte", fontPairId: "solenne", flexTone: "dark", simple: { open: "ci-full", close: "ci-letterbox" },
     arc: { open: "ci-full", middle: ["ci-strip", "sh-film4", "ci-scope", "ci-duo", "sh-lead3", "ci-quote", "sh-statement", "sh-letter3", "sh-split", "sh-row3", "sh-grid", "sh-arch", "sh-trio", "sh-polaroid", "sh-duo", "sh-full", "ci-letterbox", "ci-diptych", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-mosaic4", "sh-columns4", "sh-hero3", "sh-polaroid3", "sh-polaroid4", "sh-circles3", "sh-stack4", "sh-arches3", "sh-wall4", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "sh-closing" },
     closeAlt: ["ci-credits"],
   },
@@ -54,10 +56,13 @@ export const TEMPLATES: readonly SlideTemplate[] = [...EDITORIALE, ...EDITORIALE
 /**
  * La trama di uno stile per un dato seme. Con 0 (o senza seme) è quella di base, sempre uguale; con un altro numero i modelli di mezzo
  * si dispongono in un ordine diverso (e a volte la chiusura cambia): due caroselli creati in momenti diversi non escono uguali.
+ * Con `promo` falso (carosello «Solo foto») restano solo i modelli con almeno una foto e senza testi di vendita, e apertura e chiusura hanno sempre una foto.
  */
-export function arcFor(set: SetInfo, seed = 0): { open: string; middle: string[]; close: string } {
-  const middle = [...set.arc.middle];
-  if (!seed) return { open: set.arc.open, middle, close: set.arc.close };
+export function arcFor(set: SetInfo, seed = 0, promo = true): { open: string; middle: string[]; close: string } {
+  const open = promo ? set.arc.open : set.simple.open;
+  const baseClose = promo ? set.arc.close : set.simple.close;
+  const middle = promo ? [...set.arc.middle] : simpleMiddle(set);
+  if (!seed) return { open, middle, close: baseClose };
   const random = mulberry32(seed);
   const shuffle = (list: string[]) => {
     for (let index = list.length - 1; index > 0; index -= 1) {
@@ -74,9 +79,17 @@ export function arcFor(set: SetInfo, seed = 0): { open: string; middle: string[]
     if (own.length) middle.push(own.shift()!);
     if (common.length) middle.push(common.shift()!);
   }
-  const alternatives = set.closeAlt ?? [];
-  const close = alternatives.length > 0 && random() < 0.5 ? alternatives[Math.floor(random() * alternatives.length)] : set.arc.close;
-  return { open: set.arc.open, middle, close };
+  const alternatives = promo ? set.closeAlt ?? [] : [];
+  const close = alternatives.length > 0 && random() < 0.5 ? alternatives[Math.floor(random() * alternatives.length)] : baseClose;
+  return { open, middle, close };
+}
+
+/** I modelli di mezzo di un carosello «Solo foto»: quelli della trama dello stile con una foto o più e senza testi di vendita. */
+export function simpleMiddle(set: SetInfo): string[] {
+  return set.arc.middle.filter((id) => {
+    const template = BY_ID.get(id);
+    return Boolean(template) && !template!.promo && template!.slots.length > 0 && id !== set.simple.open && id !== set.simple.close;
+  });
 }
 
 /** Il fondo di un modello universale nella posizione indicata, secondo lo stile. */

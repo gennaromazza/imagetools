@@ -103,7 +103,7 @@ const sandwich: SlideTemplate = {
 };
 
 const quote: SlideTemplate = {
-  id: "ed-quote", set: "editoriale", role: "quote", label: "Recensione su foto", note: "Foto in bianco e nero con riquadro, stelle e frase", tone: "dark", slots: ["any"],
+  id: "ed-quote", set: "editoriale", role: "quote", label: "Recensione su foto", note: "Foto in bianco e nero con riquadro, stelle e frase", promo: true, tone: "dark", slots: ["any"],
   variants: [{ heading: "Parole\ndi chi c'era", quote: "Ci avete fatto emozionare", body: "Ogni foto ci ha riportato lì, con il cuore in gola come quel giorno.", who: "Giulia e Marco" }],
   fields: [
     field("heading", "Titolo calligrafico", "Cosa dicono\ngli sposi", true),
@@ -145,7 +145,7 @@ const quote: SlideTemplate = {
 };
 
 const list: SlideTemplate = {
-  id: "ed-list", set: "editoriale", role: "list", label: "Titolo, foto e lista", note: "Elenco numerato accanto a una foto verticale", tone: "light", slots: ["portrait"],
+  id: "ed-list", set: "editoriale", role: "list", label: "Titolo, foto e lista", note: "Elenco numerato accanto a una foto verticale", promo: true, tone: "light", slots: ["portrait"],
   variants: [{ kicker: "Consigli", title: "Cinque cose\nda sapere", items: "Scegli la luce giusta\nDai tempo alle emozioni\nNon rincorrere la posa\nCura i dettagli\nGoditi il giorno", foot: "Il resto lo facciamo noi" }],
   fields: [
     field("kicker", "Sopra il titolo", "Fotografia · Matrimonio"),
@@ -187,7 +187,7 @@ const list: SlideTemplate = {
 };
 
 const cta: SlideTemplate = {
-  id: "ed-cta", set: "editoriale", role: "cta", label: "Chiusura con pulsante", note: "Nome gigante, foto che lo sovrappone e pulsante", tone: "light", slots: ["portrait"],
+  id: "ed-cta", set: "editoriale", role: "cta", label: "Chiusura con pulsante", note: "Nome gigante, foto che lo sovrappone e pulsante", promo: true, tone: "light", slots: ["portrait"],
   fields: [
     field("kicker", "Sopra il nome", "Fotografia · Video"),
     field("title", "Nome", ({ brand, albumName }) => studioOf(brand, albumName)),

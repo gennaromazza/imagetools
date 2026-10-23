@@ -113,7 +113,7 @@ const film: SlideTemplate = {
 };
 
 const letter: SlideTemplate = {
-  id: "ga-letter", set: "galleria", role: "quote", label: "Lettera", note: "Un biglietto scritto a mano con una foto inclinata in un angolo", tone: "light", slots: ["any"],
+  id: "ga-letter", set: "galleria", role: "quote", label: "Lettera", note: "Un biglietto scritto a mano con una foto inclinata in un angolo", promo: true, tone: "light", slots: ["any"],
   variants: [{ greeting: "Carissimi,", body: "Vi scriviamo dopo aver rivisto ogni scatto: ci sono tornate in mente le voci, i profumi, le risate. Grazie per averci permesso di esserci.", signature: "con affetto" }],
   fields: [
     field("greeting", "Saluto", "Cari sposi,"),
@@ -192,7 +192,7 @@ const stripes: SlideTemplate = {
 };
 
 const sticker: SlideTemplate = {
-  id: "mo-sticker", set: "moda", role: "hero", label: "Foto con bollino", note: "Foto a tutta pagina, un grande bollino colorato e un titolo", tone: "dark", slots: ["any"],
+  id: "mo-sticker", set: "moda", role: "hero", label: "Foto con bollino", note: "Foto a tutta pagina, un grande bollino colorato e un titolo", promo: true, tone: "dark", slots: ["any"],
   variants: [{ badge: "Solo\nper\nvoi", title: "Edizione limitata", button: "Scrivici" }],
   fields: [field("badge", "Bollino", "Nuovo\nalbum", true), field("title", "Titolo", "Nuove storie"), field("button", "Pulsante", "Scopri di più")],
   build(ctx) {
@@ -260,7 +260,7 @@ const letterbox: SlideTemplate = {
 };
 
 const credits: SlideTemplate = {
-  id: "ci-credits", set: "cinema", role: "cta", label: "Titoli di coda", note: "Il nome in grande e l'elenco di chi ha fatto cosa, come nei film", tone: "dark", slots: [],
+  id: "ci-credits", set: "cinema", role: "cta", label: "Titoli di coda", note: "Il nome in grande e l'elenco di chi ha fatto cosa, come nei film", promo: true, tone: "dark", slots: [],
   variants: [{ kicker: "Con la collaborazione di", items: "Luce naturale\nPazienza\nUn po' di fortuna\nMolta emozione" }],
   fields: [
     field("kicker", "Sopra", "Un film di"),
@@ -310,7 +310,7 @@ const diptych: SlideTemplate = {
 // ---------------------------------------------------------------------------
 
 const faq: SlideTemplate = {
-  id: "sh-faq", set: "shared", role: "quote", label: "Domanda e risposta", note: "Una domanda frequente con la sua risposta, senza foto", tone: "dark", slots: [],
+  id: "sh-faq", set: "shared", role: "quote", label: "Domanda e risposta", note: "Una domanda frequente con la sua risposta, senza foto", promo: true, tone: "dark", slots: [],
   variants: [{ question: "Quanto tempo serve per le foto?", answer: "Di solito le prime anteprime arrivano in una settimana, l'album finito dopo alcune settimane." }, { question: "Fate anche gli album?", answer: "Sì: dall'impaginazione alla stampa, con la stessa cura delle foto." }],
   fields: [
     field("kicker", "Sopra", "Domande frequenti"),
@@ -338,7 +338,7 @@ const faq: SlideTemplate = {
 };
 
 const book: SlideTemplate = {
-  id: "sh-book", set: "shared", role: "cta", label: "Prenota con foto", note: "Titolo e pulsante sopra, una foto arrotondata sotto", tone: "light", slots: ["any"],
+  id: "sh-book", set: "shared", role: "cta", label: "Prenota con foto", note: "Titolo e pulsante sopra, una foto arrotondata sotto", promo: true, tone: "light", slots: ["any"],
   variants: [{ title: "Raccontiamo la vostra storia", script: "insieme", button: "Parliamone" }],
   fields: [field("title", "Titolo", "Prenota la tua data", true), field("script", "Parola calligrafica", "con noi"), field("button", "Pulsante", "Scrivimi ora")],
   build(ctx) {
@@ -358,7 +358,7 @@ const book: SlideTemplate = {
 };
 
 const checklist: SlideTemplate = {
-  id: "sh-checklist", set: "shared", role: "list", label: "Elenco con spunte", note: "Un titolo e cinque voci con la loro spunta, senza foto", tone: "light", slots: [],
+  id: "sh-checklist", set: "shared", role: "list", label: "Elenco con spunte", note: "Un titolo e cinque voci con la loro spunta, senza foto", promo: true, tone: "light", slots: [],
   variants: [{ title: "Prima del grande giorno", items: "Scegli l'orario della luce migliore\nPreparate i dettagli in un unico posto\nDelegate una persona di fiducia\nRespirate\nGodetevi ogni minuto" }],
   fields: [field("title", "Titolo", "Cosa preparare", true), field("items", "Elenco (una voce per riga)", "Gli anelli e i dettagli\nUna lista dei parenti\nScarpe comode\nIl programma della giornata\nUn sorriso", true)],
   build(ctx) {
@@ -401,7 +401,7 @@ const polaroidDuo: SlideTemplate = {
 };
 
 const date: SlideTemplate = {
-  id: "sh-date", set: "shared", role: "cta", label: "Data da segnare", note: "Foto in alto e la data in grande, come un invito", tone: "dark", slots: ["any"],
+  id: "sh-date", set: "shared", role: "cta", label: "Data da segnare", note: "Foto in alto e la data in grande, come un invito", promo: true, tone: "dark", slots: ["any"],
   variants: [{ script: "ci vediamo il", day: "14", month: "Giugno", year: "2027", place: "Villa dei Cipressi" }],
   fields: [field("script", "Parola calligrafica", "segnati la data"), field("day", "Giorno", "22"), field("month", "Mese", "Marzo"), field("year", "Anno", "2028"), field("place", "Luogo", "Villa dei Cipressi, Firenze")],
   build(ctx) {

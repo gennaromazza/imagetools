@@ -83,6 +83,13 @@ export interface LibraryFilter {
   /** «selector»: solo foto arrivate dalla selezione di Image Select Pro; «manual»: solo quelle aggiunte qui. */
   origin?: "all" | "selector" | "manual";
   usage?: "all" | "unused" | "used";
+  /** Solo foto con questo segnalino («Per i social», «Copertina»…). */
+  tag?: AlbumAssetTag;
+}
+
+/** Quante foto portano il segnalino indicato (per il contatore accanto al filtro). */
+export function countTagged(assets: readonly AlbumAssetV2[], tag: AlbumAssetTag): number {
+  return assets.reduce((total, asset) => total + (asset.albumTags?.includes(tag) ? 1 : 0), 0);
 }
 
 const stemOf = (name: string) => name.replace(/\.[a-z0-9]{2,5}$/i, "");
@@ -110,6 +117,7 @@ export function filterAssets(project: Project, assets: readonly AlbumAssetV2[], 
     if (filter.labelId && !(asset.labelIds ?? []).includes(filter.labelId)) return false;
     if (filter.origin === "selector" && asset.selectionOrder === undefined) return false;
     if (filter.origin === "manual" && asset.selectionOrder !== undefined) return false;
+    if (filter.tag && !asset.albumTags?.includes(filter.tag)) return false;
     if (usage) {
       const used = usage.has(asset.id);
       if (filter.usage === "unused" && used) return false;
