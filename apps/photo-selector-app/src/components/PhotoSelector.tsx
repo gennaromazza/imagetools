@@ -23,12 +23,13 @@ import {
   EMPTY_SIMILARITY_OVERRIDES,
   hasSimilarityOverrides,
   joinPhotos,
-  planKeepOne,
+  planKeepSet,
   separatePhotos,
   type SessionSimilarityOverrides,
   type SimilarGroupView,
 } from "../services/similar-photos";
-import { SimilarPhotosPanel } from "./SimilarPhotosPanel";
+import { planCloseGroup, planDiscardSoft } from "../services/similar-insights";
+import { SimilarPhotosWorkspace } from "./SimilarPhotosWorkspace";
 import { PhotoCard } from "./PhotoCard";
 import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
 import { ConfirmModal } from "./ConfirmModal";
@@ -2754,6 +2755,8 @@ export function PhotoSelector({
       }
       // Quick preview open: let it handle keys
       if (previewAssetId) return;
+      // La schermata «Simili» ha le sue scorciatoie: la griglia sotto non deve reagire.
+      if (isSimilarOpen) return;
 
       const target = event.target;
       if (target instanceof HTMLElement && target.closest("select, input, textarea")) return;
@@ -2925,6 +2928,7 @@ export function PhotoSelector({
       focusedPhotoId,
       hasActiveFilters,
       isCompareOpen,
+      isSimilarOpen,
       onSelectionChange,
       openPreview,
       openCompare,
@@ -3709,16 +3713,17 @@ export function PhotoSelector({
     setIsSimilarOpen(true);
   });
 
-  // «Tieni questa»: Pick alla scelta e Scartata alle altre varianti in un solo passo (un solo Ctrl+Z).
-  const keepSimilarVariant = useLatestCallback((group: SimilarGroupView, keepId: string) => {
+  // Decisioni sui gruppi di simili: Pick e Scartata in un solo passo (un solo Ctrl+Z).
+  // Restituisce il testo dell'esito per la schermata «Simili», null se nulla è cambiato.
+  const applySimilarDecision = useLatestCallback((pick: readonly string[], reject: readonly string[], message: string): string | null => {
     if (!onPhotosChange) {
-      return;
+      return null;
     }
-    const { pick, reject } = planKeepOne(group.photoIds, keepId);
+    const picked = new Set(pick);
     const rejected = new Set(reject);
     const changedIds: string[] = [];
     const nextPhotos = readLatestPhotos().map((photo) => {
-      const nextStatus: PickStatus | null = photo.id === pick ? "picked" : rejected.has(photo.id) ? "rejected" : null;
+      const nextStatus: PickStatus | null = picked.has(photo.id) ? "picked" : rejected.has(photo.id) ? "rejected" : null;
       if (!nextStatus || photo.pickStatus === nextStatus) {
         return photo;
       }
@@ -3726,17 +3731,62 @@ export function PhotoSelector({
       return { ...photo, pickStatus: nextStatus };
     });
     if (changedIds.length === 0) {
-      return;
+      return null;
     }
     freezeViewForClassification(changedIds, sortBy);
     photosRef.current = nextPhotos;
     onPhotosChange(nextPhotos);
-    pushTimelineEntry(`Tenuta ${assetById.get(pick)?.fileName ?? "1 foto"}, scartate ${reject.length} varianti`);
+    pushTimelineEntry(message);
+    return message;
   });
 
-  const selectSimilarGroup = useLatestCallback((photoIds: string[]) => {
+  const pickStatusesNow = () => new Map(readLatestPhotos().map((photo) => [photo.id, photo.pickStatus] as const));
+
+  // «Tieni»: Pick alle scelte e Scartata alle altre varianti.
+  const keepSimilarVariants = useLatestCallback((group: SimilarGroupView, keepIds: string[]) => {
+    const { pick, reject } = planKeepSet(group.photoIds, keepIds);
+    const kept = pick.length === 1 ? `Tenuta ${assetById.get(pick[0]!)?.fileName ?? "1 foto"}` : `Tenute ${pick.length} foto`;
+    return applySimilarDecision(pick, reject, `${kept}, scartate ${reject.length} ${reject.length === 1 ? "variante" : "varianti"}`);
+  });
+
+  // «Scarta le altre»: restano i Pick già dati, le varianti ancora neutre vengono scartate.
+  const closeSimilarGroup = useLatestCallback((group: SimilarGroupView) => {
+    const statuses = pickStatusesNow();
+    const { keep, reject } = planCloseGroup(group.photoIds, (id) => statuses.get(id));
+    if (keep.length === 0 || reject.length === 0) {
+      return null;
+    }
+    return applySimilarDecision([], reject, `Gruppo chiuso: ${keep.length} ${keep.length === 1 ? "tenuta" : "tenute"}, ${reject.length} ${reject.length === 1 ? "scartata" : "scartate"}`);
+  });
+
+  // «Scarta le più morbide»: solo le varianti mosse o fuori fuoco ancora neutre, senza decidere il gruppo.
+  const discardSoftSimilarVariants = useLatestCallback((group: SimilarGroupView) => {
+    const statuses = pickStatusesNow();
+    const soft = planDiscardSoft(group.insights.softIds, (id) => statuses.get(id));
+    if (soft.length === 0) {
+      return null;
+    }
+    return applySimilarDecision([], soft, `Scartate ${soft.length} ${soft.length === 1 ? "variante più morbida" : "varianti più morbide"}`);
+  });
+
+  // Dalla schermata «Simili» alla griglia: chiude la schermata, seleziona le foto e porta in vista quella indicata.
+  const showSimilarInGrid = useLatestCallback((photoIds: string[], focusId: string) => {
     commitSelection(photoIds);
-    pushTimelineEntry(`Selezionate ${photoIds.length} varianti dello stesso scatto`);
+    setIsSimilarOpen(false);
+    if (photoIds.length > 1) {
+      pushTimelineEntry(`Selezionate ${photoIds.length} varianti dello stesso scatto`);
+    }
+    if (!visiblePhotoIdSet.has(focusId)) {
+      addToast("La foto è nascosta dai filtri della griglia: azzerali per vederla.", "info");
+      return;
+    }
+    setFocusedPhotoId(focusId);
+    scrollPhotoIntoView(focusId, "auto");
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        gridRef.current?.querySelector<HTMLElement>(`[data-preview-asset-id="${focusId}"]`)?.focus();
+      });
+    });
   });
 
   const compareSimilarGroup = useLatestCallback((photoIds: string[]) => {
@@ -4880,21 +4930,35 @@ export function PhotoSelector({
       )}
 
       {isSimilarOpen && (
-        <SimilarPhotosPanel
+        <SimilarPhotosWorkspace
           groups={similarGroupsInGridOrder}
           assetById={assetById}
-          focusGroupId={similarFocusGroupId}
+          initialGroupId={similarFocusGroupId}
           analyzedCount={similarPhotos.analyzedCount}
           totalCount={photos.length}
           isAnalyzing={similarPhotos.isAnalyzing}
           selectedCount={selectedIds.length}
           hasOverrides={hasSimilarityOverrides(similarityOverrides)}
           editable={!!onPhotosChange}
-          onKeep={keepSimilarVariant}
-          onSelect={selectSimilarGroup}
+          canUndo={canUndo}
+          keysSuspended={isCompareOpen}
+          thumbnailProfile={selectedThumbnailProfile}
+          customLabelsCatalog={customLabelsCatalog}
+          customLabelColors={effectiveCustomLabelColors}
+          customLabelShortcuts={customLabelShortcuts}
+          autoAdvanceOnAction={autoAdvanceOnAction}
+          onAutoAdvanceOnActionChange={handleAutoAdvanceChange}
+          onClose={() => setIsSimilarOpen(false)}
+          onUndo={handleUndoClick}
+          onUpdatePhoto={handleModalAssetUpdate}
+          onRotatePhoto={handleRotatePhoto}
+          onKeep={keepSimilarVariants}
+          onCloseGroup={closeSimilarGroup}
+          onDiscardSoft={discardSoftSimilarVariants}
           onCompare={compareSimilarGroup}
           onSeparate={separateSimilarGroup}
           onDetach={detachFromSimilarGroup}
+          onShowInGrid={showSimilarInGrid}
           onJoinSelection={joinSelectionAsSimilar}
           onResetOverrides={() => setSimilarityOverrides(EMPTY_SIMILARITY_OVERRIDES)}
         />

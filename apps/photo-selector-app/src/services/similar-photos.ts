@@ -7,6 +7,7 @@ import {
 } from "@photo-tools/photo-similarity";
 import type { ImageAsset } from "@photo-tools/shared-types";
 import type { CaptureTimeInfo } from "./photo-sort-cache";
+import { computeGroupInsights, type GroupInsights } from "./similar-insights";
 
 /**
  * Raffiche e foto quasi uguali in Image Select Pro: il riconoscimento è quello del pacchetto
@@ -74,6 +75,8 @@ export interface SimilarGroupView {
   recommendedId: string;
   /** Perché è consigliata («5 stelle», «più nitida»…). */
   reason: string;
+  /** Cosa dicono i numeri: nitidezza relativa, luci, varianti mosse. */
+  insights: GroupInsights;
 }
 
 export interface SimilarMembership {
@@ -102,7 +105,7 @@ export function buildSimilarPhotosView(groups: readonly SimilarGroup[], photos: 
     group.photoIds.forEach((id, index) => {
       membershipById.set(id, { groupId: group.id, position: index + 1, size: group.photoIds.length, recommended: id === recommendedId });
     });
-    return { id: group.id, kind: group.kind, photoIds: group.photoIds, ranked: order, recommendedId, reason };
+    return { id: group.id, kind: group.kind, photoIds: group.photoIds, ranked: order, recommendedId, reason, insights: computeGroupInsights(members) };
   });
   return { groups: views, membershipById };
 }
@@ -119,10 +122,85 @@ export function planKeepOne(photoIds: readonly string[], keepId: string): { pick
   return { pick: keepId, reject: photoIds.filter((id) => id !== keepId) };
 }
 
+/** Si tengono più varianti (di pose diverse, di solito si salva più di una): le scelte diventano Pick, le altre Scartate. */
+export function planKeepSet(photoIds: readonly string[], keepIds: readonly string[]): { pick: string[]; reject: string[] } {
+  const keep = new Set(keepIds);
+  if (keep.size === 0 || [...keep].some((id) => !photoIds.includes(id))) throw new Error("Le foto scelte non fanno parte del gruppo.");
+  return { pick: photoIds.filter((id) => keep.has(id)), reject: photoIds.filter((id) => !keep.has(id)) };
+}
+
 /** Un gruppo è da decidere finché nessuna variante è Pick. */
 export function isGroupDecided(photoIds: readonly string[], pickStatusById: (id: string) => ImageAsset["pickStatus"]): boolean {
   return photoIds.some((id) => pickStatusById(id) === "picked");
 }
+
+type PickStatusOf = (id: string) => ImageAsset["pickStatus"];
+
+/**
+ * Gruppi della schermata «Simili». Con «Solo da decidere» il gruppo aperto resta in elenco anche
+ * dopo la scelta, così la lista non si sposta mentre il fotografo ci sta lavorando.
+ */
+export function filterSimilarGroups(
+  groups: readonly SimilarGroupView[],
+  pickStatusOf: PickStatusOf,
+  onlyUndecided: boolean,
+  keepGroupId: string | null,
+): SimilarGroupView[] {
+  if (!onlyUndecided) return [...groups];
+  return groups.filter((group) => group.id === keepGroupId || !isGroupDecided(group.photoIds, pickStatusOf));
+}
+
+/**
+ * Prossimo gruppo da decidere dopo `afterGroupId`, ripartendo dall'inizio in fondo all'elenco.
+ * Il gruppo di partenza non conta mai: subito dopo «Tieni» i suoi stati non sono ancora aggiornati.
+ */
+export function nextUndecidedGroupId(
+  groups: readonly SimilarGroupView[],
+  afterGroupId: string | null,
+  pickStatusOf: PickStatusOf,
+): string | null {
+  const start = afterGroupId ? groups.findIndex((group) => group.id === afterGroupId) + 1 : 0;
+  for (let step = 0; step < groups.length; step += 1) {
+    const group = groups[(start + step) % groups.length]!;
+    if (group.id !== afterGroupId && !isGroupDecided(group.photoIds, pickStatusOf)) return group.id;
+  }
+  return null;
+}
+
+/** Gruppo aperto dopo un cambiamento dell'elenco: lo stesso se c'è ancora, altrimenti quello nella stessa posizione. */
+export function resolveActiveGroupId(
+  groups: readonly SimilarGroupView[],
+  activeGroupId: string | null,
+  lastIndex: number,
+): string | null {
+  if (groups.length === 0) return null;
+  if (activeGroupId && groups.some((group) => group.id === activeGroupId)) return activeGroupId;
+  return groups[Math.min(Math.max(lastIndex, 0), groups.length - 1)]!.id;
+}
+
+/**
+ * Quante colonne danno le foto più grandi nello spazio libero: vince la disposizione in cui la foto
+ * (di proporzioni `aspect`, larghezza / altezza) occupa più larghezza, tolto lo spazio dei comandi
+ * sotto ogni scheda. A parità, meno colonne.
+ */
+export function bestGridLayout(count: number, aspect: number, width: number, height: number, chromePx: number, gapPx: number): { columns: number; photoWidth: number } {
+  if (count <= 1) return { columns: 1, photoWidth: width > 0 && height > 0 && aspect > 0 ? Math.min(width, (height - chromePx) * aspect) : 0 };
+  const fallback = { columns: Math.min(count, 3), photoWidth: 0 };
+  if (width <= 0 || height <= 0 || !(aspect > 0)) return fallback;
+  let best = fallback;
+  for (let columns = 1; columns <= count; columns += 1) {
+    const rows = Math.ceil(count / columns);
+    const cellWidth = (width - gapPx * (columns - 1)) / columns;
+    const stageHeight = (height - gapPx * (rows - 1)) / rows - chromePx;
+    if (cellWidth < 100 || stageHeight < 60) continue;
+    const photoWidth = Math.min(cellWidth, stageHeight * aspect);
+    if (photoWidth > best.photoWidth) best = { columns, photoWidth };
+  }
+  return best;
+}
+
+export const bestGridColumns = (count: number, aspect: number, width: number, height: number, chromePx: number, gapPx: number): number =>
+  bestGridLayout(count, aspect, width, height, chromePx, gapPx).columns;
 
 /** Correzioni del fotografo, solo per la sessione: coppie «non simili» e gruppi uniti a mano. */
 export interface SessionSimilarityOverrides {
