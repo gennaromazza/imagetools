@@ -534,6 +534,10 @@
     "0.1.50": [
       "Maiusc+clic nella griglia sostituisce la selezione con il nuovo intervallo: per scegliere un altro gruppo di foto non devi più deselezionare a mano quello precedente.",
       "Per aggiungere un intervallo a quello che hai già selezionato usa Ctrl+Maiusc+clic (Cmd+Maiusc su Mac)."
+    ],
+    "0.1.51": [
+      "La finestra «Esporta» non è più tagliata: il menu dei preset mostra il nome con la descrizione sotto e il pulsante «Esporta» è sempre visibile.",
+      "La nota sui RAW ora dice la verità: i RAW vengono convertiti dall'anteprima JPEG della fotocamera, senza le modifiche di Camera Raw."
     ]
   },
   "id-photo": {

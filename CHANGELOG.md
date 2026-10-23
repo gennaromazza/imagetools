@@ -32,6 +32,11 @@
 
 
 
+## 2026-10-23 - Image Select Pro 0.1.51
+
+- Corretto: nella finestra «Esporta» il menu «Preset di partenza» mostrava nome e descrizione sulla stessa riga; il testo lungo allargava il contenuto oltre il riquadro e tagliava il campo «Cartella di destinazione», il pulsante «Scegli…» e il pulsante «Esporta». Ora il menu mostra solo il nome, la descrizione sta sotto, e il contenuto scorre se la finestra è bassa.
+- Corretto: la nota sui RAW diceva che sarebbero stati saltati, ma vengono convertiti. Ora spiega che escono dall'anteprima JPEG incorporata dalla fotocamera, senza le modifiche di Camera Raw, e che per includerle si esporta da Camera Raw o Photoshop.
+
 ## 2026-10-21 - Image Select Pro 0.1.50
 
 - Corretto: Maiusc+clic nella griglia ora sostituisce la selezione con il nuovo intervallo invece di aggiungerlo a quella precedente. Dopo aver lavorato sulle foto 1–20, Maiusc+clic sulla 21 e poi sulla 40 lascia selezionate solo le 21–40, senza deselezionare a mano il gruppo precedente. Per aggiungere un intervallo alla selezione esistente usa Ctrl+Maiusc+clic (Cmd+Maiusc su Mac), come già avviene con il lasso.
