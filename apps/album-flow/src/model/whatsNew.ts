@@ -21,6 +21,28 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.40",
+    date: "2026-10-23",
+    headline: "Ritaglio libero con le maniglie e comandi più visibili sulla foto",
+    items: [
+      {
+        title: "Ritaglio libero con le maniglie",
+        text: "Con il ritaglio aperto trascini i lati e gli angoli della cornice dove vuoi, senza seguire le proporzioni: la foto resta ferma e si taglia solo ciò che esce. Maiusc su un angolo mantiene le proporzioni, il bordo si ferma dove finisce la foto. Funziona anche con la foto raddrizzata.",
+        where: ["Ritaglia e sposta nello slot", "Torna al layout automatico…"],
+      },
+      {
+        title: "Capsula «Ritaglia» sulla foto",
+        text: "Sulla foto selezionata il piccolo «⋯» è diventato una capsula scura ben visibile con «Ritaglia» e «⋯»: si legge anche sulle foto chiare. Gli altri comandi restano dietro «⋯» e nel tasto destro.",
+        where: ["Ritaglia (sulla foto)", "Comandi della foto"],
+      },
+      {
+        title: "Barre dei comandi ferme mentre ridimensioni la libreria",
+        text: "Trascinando il separatore della libreria le barre a sinistra e a destra del foglio non cambiano più disposizione e mantengono i nomi di spazio, margine e bordo.",
+        where: ["Spazio", "Margine", "Bordo"],
+      },
+    ],
+  },
+  {
     version: "0.2.39",
     date: "2026-10-20",
     headline: "Foto tra le pagine anche con il posizionamento libero, template sempre allineati",

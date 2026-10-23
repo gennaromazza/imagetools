@@ -32,6 +32,13 @@
 
 
 
+## 2026-10-23 - Album Flow 0.2.40
+
+- Nuovo: ritaglio libero con le maniglie. Con il ritaglio aperto (doppio clic sulla foto, Invio o il pulsante «Ritaglia» sulla foto) compaiono otto maniglie su lati e angoli: trascini un bordo dove vuoi, senza seguire le proporzioni, e la foto resta ferma: si taglia solo ciò che esce dalla cornice. Maiusc su un angolo mantiene le proporzioni; il bordo si ferma dove finisce la foto. Funziona anche con la foto raddrizzata, in «Foto intera» e in «Riempi lo spazio».
+- Migliorato: al primo ritaglio libero la pagina diventa a disposizione libera senza cambiare a vista, e «Torna al layout automatico» la riporta com'era.
+- Migliorato: sulla foto selezionata il piccolo «⋯» è diventato una capsula scura ben visibile con «Ritaglia» e «⋯», leggibile anche su foto chiare; i comandi completi restano dietro «⋯» e nel tasto destro.
+- Corretto: trascinando il separatore della libreria le barre dei comandi a sinistra e a destra del foglio non passano più da una a due colonne (con i nomi di spazio, margine e bordo che sparivano): il formato a due colonne dipende ora dalla finestra, non dall'altezza della zona di lavoro.
+
 ## 2026-10-23 - Image Select Pro 0.1.51
 
 - Corretto: nella finestra «Esporta» il menu «Preset di partenza» mostrava nome e descrizione sulla stessa riga; il testo lungo allargava il contenuto oltre il riquadro e tagliava il campo «Cartella di destinazione», il pulsante «Scegli…» e il pulsante «Esporta». Ora il menu mostra solo il nome, la descrizione sta sotto, e il contenuto scorre se la finestra è bassa.
