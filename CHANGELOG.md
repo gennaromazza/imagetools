@@ -32,6 +32,15 @@
 
 
 
+## 2026-10-23 - Album Flow 0.2.41
+
+- Nuovo: raffiche e foto simili in pile. Nella libreria gli scatti a raffica e le foto ripetute della stessa inquadratura stanno in una pila «×3» con in cima la consigliata, scelta per stelle e poi per nitidezza ed esposizione; il clic sulla pila la apre. Con il tasto destro «Togli dal gruppo delle simili», «Separa il gruppo (non sono simili)» e, con più foto selezionate, «Unisci … foto come simili»: le correzioni si salvano nel file dell'album e «Ripristina i gruppi automatici» le annulla.
+- Nuovo: tasto A e Maiusc+A sulla foto selezionata passano alla variante successiva o precedente dello stesso scatto senza cambiare la cornice; le frecce accanto alla foto fanno lo stesso.
+- Nuovo: momenti della giornata dalle pause tra gli scatti. Un clic sull'ora di un momento in libreria ne seleziona le consigliate; la scheda «Adatte a questo spread» propone le foto dello stesso momento e con toni simili a quelle già in pagina; F e U pescano dal momento giusto.
+- Nuovo: Auto Build con «Una pagina non mescola due momenti» e l'interruttore «Una sola foto per gruppo di simili». L'interruttore è spento di default, così entrano tutte le foto scelte nel Selector: sulle foto di un matrimonio reale un gruppo univa due foto all'altare con persone diverse, e accesa una delle due sarebbe rimasta fuori senza avviso.
+- Nuovo: i controlli prima dell'export avvisano di due foto quasi uguali nello stesso spread, del bianco e nero accanto al colore e di un momento diviso tra due spread.
+- Corretto: il motivo della foto consigliata diceva «prima della serie» anche quando non era il primo scatto; ora dice «di poco più nitida» o «esposizione migliore».
+
 ## 2026-10-23 - Image Select Pro 0.1.52
 
 - Nuovo: raffiche e foto quasi uguali. Image Select Pro riconosce gli scatti fatti a raffica (stessa fotocamera, pochi istanti di distanza) e le foto della stessa inquadratura scattate poco dopo, confrontando le miniature. Ogni variante ha in basso a sinistra un badge «≈ 2/5»; la foto consigliata, in oro con la scritta «Consigliata», è scelta in base alle stelle e poi a nitidezza ed esposizione.

@@ -730,6 +730,12 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.41": [
+      "Raffiche e foto simili in pile nella libreria, con in cima la consigliata (stelle, poi nitidezza ed esposizione); con il tasto destro separi o unisci i gruppi e la correzione resta nell'album.",
+      "Tasto A e Maiusc+A: sulla foto selezionata passi alla variante successiva o precedente dello stesso scatto senza cambiare la cornice.",
+      "Momenti della giornata: clic sull'ora per selezionarne le consigliate, scheda «Adatte a questo spread» e Auto Build che non mescola due momenti in una pagina.",
+      "In Auto Build «Una sola foto per gruppo di simili» è spenta di default: entrano tutte le foto che hai scelto."
+    ],
     "0.2.40": [
       "Nuovo: ritaglio libero con le maniglie. Con il ritaglio aperto (doppio clic sulla foto, Invio o il pulsante «Ritaglia» sulla foto) compaiono otto maniglie su lati e angoli: trascini un bordo dove vuoi, senza seguire le proporzioni, e la foto resta ferma: si taglia solo ciò che esce dalla cornice. Maiusc su un angolo mantiene le proporzioni; il bordo si ferma dove finisce la foto. Funziona anche con la foto raddrizzata, in «Foto intera» e in «Riempi lo spazio».",
       "Migliorato: al primo ritaglio libero la pagina diventa a disposizione libera senza cambiare a vista, e «Torna al layout automatico» la riporta com'era.",

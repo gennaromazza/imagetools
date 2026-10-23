@@ -21,6 +21,38 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.41",
+    date: "2026-10-23",
+    headline: "Raffiche e foto simili raccolte in pile, momenti della giornata e varianti con il tasto A",
+    items: [
+      {
+        title: "Pile di foto simili nella libreria",
+        text: "Le raffiche e gli scatti ripetuti della stessa inquadratura stanno in una pila «×3»: in cima c'è la consigliata, scelta per stelle e poi per nitidezza ed esposizione. Con il tasto destro togli una foto dal gruppo o separi un gruppo sbagliato; con più foto selezionate le unisci come simili. Le correzioni si salvano nel file dell'album.",
+        where: ["×3 sulla miniatura", "Togli dal gruppo delle simili", "Separa il gruppo (non sono simili)", "Unisci … foto come simili", "Ripristina i gruppi automatici"],
+      },
+      {
+        title: "Cambia variante senza rifare la pagina",
+        text: "Sulla foto selezionata A passa alla variante successiva dello stesso scatto e Maiusc+A alla precedente: la cornice resta la stessa. Le frecce accanto alla foto fanno lo stesso con il mouse.",
+        where: ["A · Maiusc+A", "Variante simile successiva (A)", "Variante simile precedente (Maiusc+A)"],
+      },
+      {
+        title: "Momenti della giornata",
+        text: "La libreria raccoglie le foto in momenti, dalle pause tra gli scatti: un clic sull'ora di un momento ne seleziona le consigliate. La scheda «Adatte a questo spread» propone le foto dello stesso momento e con toni simili a quelle già in pagina, e F e U pescano dal momento giusto.",
+        where: ["Ora del momento in libreria", "Adatte a questo spread", "F", "U"],
+      },
+      {
+        title: "Auto Build con i momenti, e tutte le tue foto",
+        text: "Auto Build non mescola due momenti nella stessa pagina. «Una sola foto per gruppo di simili» è spenta di default: entrano tutte le foto che hai scelto nel Selector. Accendila se vuoi solo la consigliata di ogni gruppo; le altre restano alternative con A.",
+        where: ["Auto Build", "Una pagina non mescola due momenti", "Una sola foto per gruppo di simili"],
+      },
+      {
+        title: "Controlli prima dell'export",
+        text: "I controlli avvisano se nello stesso spread ci sono due foto quasi uguali, se una foto in bianco e nero sta accanto a foto a colori e se un momento è diviso tra due spread.",
+        where: ["Controlli"],
+      },
+    ],
+  },
+  {
     version: "0.2.40",
     date: "2026-10-23",
     headline: "Ritaglio libero con le maniglie e comandi più visibili sulla foto",
