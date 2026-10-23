@@ -32,6 +32,15 @@
 
 
 
+## 2026-10-23 - Album Flow 0.2.42
+
+- Nuovo: caroselli «Solo foto». Un carosello nuovo contiene soltanto le foto, in layout diversi e al massimo con una parola o una frase breve: niente più «Prenota», domande frequenti, data da segnare, recensione, elenchi di servizi o pagine dell'album, che prima comparivano in ogni stile. Nella creazione guidata si sceglie «Solo foto» o «Con slide di vendita»; sotto «Stile» si passa dall'uno all'altro tenendo foto e testi dei modelli che restano; le singole slide di vendita si aggiungono a mano dal gruppo «Vendita e contatti» (anche nell'elenco dei modelli). 18 modelli sono marcati come «di vendita»; ogni stile ha apertura e chiusura con una foto. I caroselli già salvati non cambiano: se contengono slide di vendita restano «Con vendita».
+- Corretto: il carosello prendeva anche foto non segnate «Per i social». Solo il piano iniziale rispettava la selezione; «Riscegli le foto», «Altra variante», cambio di stile, slide nuove, cambio di modello e «Riscegli» della singola slide ripescavano da tutto l'album, e le foto segnate erano solo favorite con un punteggio. Ora il carosello ha le sue «Foto del carosello» (le segnate «Per i social», o la scelta fatta nella creazione guidata) e ogni scelta automatica resta lì dentro; una foto messa a mano resta del carosello. «Scegli le foto…» (colonna di sinistra) aggiunge o toglie foto e sostituisce quelle tolte che erano già in una slide.
+- Nuovo: filtro «Per i social» nella libreria. Accanto a «da usare» e «usate» c'è «N per i social», e in Filtri la sezione «Segnalini»; si somma agli altri filtri.
+- Nuovo: la finestra di esportazione segnala (come informazione, senza bloccare) le foto del carosello che non sono segnate «Per i social» quando l'album ne ha di segnate.
+- Migliorato: l'avviso «sono cambiate le stelle o le foto segnate» chiarisce che «Riscegli le foto» riparte dalle foto segnate adesso.
+- Test: nuovo `social-simple.test.ts` (modelli di vendita, «Solo foto» in ogni stile/formato/seme, passaggio da un tipo all'altro, foto del carosello in ogni operazione automatica, salvataggio, avviso in esportazione, filtro della libreria), raggiungibile dalla Dev Console con `test:album-flow-social`.
+
 ## 2026-10-23 - Album Flow 0.2.41
 
 - Nuovo: raffiche e foto simili in pile. Nella libreria gli scatti a raffica e le foto ripetute della stessa inquadratura stanno in una pila «×3» con in cima la consigliata, scelta per stelle e poi per nitidezza ed esposizione; il clic sulla pila la apre. Con il tasto destro «Togli dal gruppo delle simili», «Separa il gruppo (non sono simili)» e, con più foto selezionate, «Unisci … foto come simili»: le correzioni si salvano nel file dell'album e «Ripristina i gruppi automatici» le annulla.

@@ -21,6 +21,33 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.42",
+    date: "2026-10-23",
+    headline: "Caroselli più semplici: solo foto, solo quelle che segni per i social, e il filtro in libreria",
+    items: [
+      {
+        title: "Caroselli «Solo foto»",
+        text: "Un carosello nuovo contiene soltanto le tue foto, in layout diversi e al massimo con una parola o una frase breve: niente più «Prenota», domande frequenti, data da segnare, recensione o pagine dell'album. Se ti servono, scegli «Con slide di vendita» nella creazione guidata o «Con vendita» sotto «Stile»; oppure aggiungi una singola slide a mano dal gruppo «Vendita e contatti». I caroselli che avevi già non cambiano.",
+        where: ["Tipo di carosello", "Solo foto", "Con slide di vendita", "Con vendita", "Vendita e contatti"],
+      },
+      {
+        title: "Il carosello usa solo le foto che gli dai",
+        text: "Piano, «Riscegli le foto», «Altra variante», cambio di stile, slide nuove e cambio di modello scelgono soltanto tra le «Foto del carosello»: di partenza quelle segnate «Per i social» (o quelle che scegli nella creazione guidata). Prima potevano entrare anche altre foto dell'album. Con «Scegli le foto…» aggiungi o togli foto in qualsiasi momento: una foto tolta che sta già in una slide viene sostituita da un'altra dell'elenco.",
+        where: ["Foto del carosello", "Scegli le foto…", "Riscegli le foto"],
+      },
+      {
+        title: "Le foto «Per i social» nei filtri della libreria",
+        text: "Accanto a «da usare» e «usate» c'è il pulsante «N per i social»: un clic mostra solo le foto che hai segnato (tasto I). Lo trovi anche in Filtri, sezione «Segnalini», e si somma agli altri filtri.",
+        where: ["N per i social", "Filtri", "Segnalini", "I"],
+      },
+      {
+        title: "Un avviso se il carosello esce dalla selezione",
+        text: "Se hai segnato delle foto «Per i social» ma il carosello ne usa anche altre, la finestra di esportazione te lo dice, con i nomi dei file: può essere una tua scelta, ma non resta una sorpresa.",
+        where: ["Esporta"],
+      },
+    ],
+  },
+  {
     version: "0.2.41",
     date: "2026-10-23",
     headline: "Raffiche e foto simili raccolte in pile, momenti della giornata e varianti con il tasto A",

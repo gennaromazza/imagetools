@@ -730,6 +730,11 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.42": [
+      "Caroselli «Solo foto»: un carosello nuovo contiene solo le tue foto, senza slide di vendita (prenota, domande frequenti, data, recensione, pagine dell'album); le trovi con «Con vendita» o dal gruppo «Vendita e contatti».",
+      "Il carosello usa solo le sue «Foto del carosello» (di partenza quelle segnate «Per i social»): Riscegli le foto, Altra variante, cambio di stile e slide nuove non pescano più dal resto dell'album; con «Scegli le foto…» le cambi.",
+      "Libreria: pulsante «N per i social» e filtro «Segnalini» per vedere solo le foto segnate; l'esportazione avvisa se il carosello usa foto non segnate."
+    ],
     "0.2.41": [
       "Raffiche e foto simili in pile nella libreria, con in cima la consigliata (stelle, poi nitidezza ed esposizione); con il tasto destro separi o unisci i gruppi e la correzione resta nell'album.",
       "Tasto A e Maiusc+A: sulla foto selezionata passi alla variante successiva o precedente dello stesso scatto senza cambiare la cornice.",
