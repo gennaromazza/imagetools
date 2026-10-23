@@ -35,6 +35,11 @@ interface PhotoCardProps {
   isSelected: boolean;
   groupBadge?: string | null;
   isGroupLeader?: boolean;
+  /** Raffica o foto quasi uguali: «≈ 2/5», con la consigliata evidenziata. */
+  similarLabel?: string | null;
+  similarTitle?: string | null;
+  isSimilarRecommended?: boolean;
+  onSimilarBadgeClick?: (id: string) => void;
   onToggle: (id: string, event?: React.MouseEvent) => void;
   onUpdatePhoto: (
     id: string,
@@ -101,6 +106,10 @@ export const PhotoCard = memo(
     isSelected,
     groupBadge = null,
     isGroupLeader = false,
+    similarLabel = null,
+    similarTitle = null,
+    isSimilarRecommended = false,
+    onSimilarBadgeClick,
     onToggle,
     onUpdatePhoto,
     onApplyShortcutChanges,
@@ -527,15 +536,34 @@ export const PhotoCard = memo(
             </button>
           </div>
 
-          {isRawJpgGroup ? (
-            <span
-              className="asset-pick-badge asset-raw-badge photo-card__raw-badge"
-              title={`${photo.fileName} + ${photo.companionFileName ?? "RAW"}`}
-            >
-              RAW + JPG
-            </span>
-          ) : raw ? (
-            <span className="asset-pick-badge asset-raw-badge photo-card__raw-badge">RAW</span>
+          {/* In basso a sinistra: i pulsanti che compaiono al passaggio del mouse stanno in alto. */}
+          {isRawJpgGroup || raw || similarLabel ? (
+            <div className="photo-card__bottom-badges">
+              {isRawJpgGroup ? (
+                <span
+                  className="asset-pick-badge asset-raw-badge photo-card__raw-badge"
+                  title={`${photo.fileName} + ${photo.companionFileName ?? "RAW"}`}
+                >
+                  RAW + JPG
+                </span>
+              ) : raw ? (
+                <span className="asset-pick-badge asset-raw-badge photo-card__raw-badge">RAW</span>
+              ) : null}
+              {similarLabel ? (
+                <button
+                  type="button"
+                  className={`photo-card__similar-badge${isSimilarRecommended ? " photo-card__similar-badge--recommended" : ""}`}
+                  title={similarTitle ?? undefined}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onSimilarBadgeClick?.(photo.id);
+                  }}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                >
+                  {similarLabel}
+                </button>
+              ) : null}
+            </div>
           ) : null}
 
           <div
@@ -698,6 +726,9 @@ export const PhotoCard = memo(
     prev.isSelected === next.isSelected &&
     prev.groupBadge === next.groupBadge &&
     prev.isGroupLeader === next.isGroupLeader &&
+    prev.similarLabel === next.similarLabel &&
+    prev.similarTitle === next.similarTitle &&
+    prev.isSimilarRecommended === next.isSimilarRecommended &&
     prev.editable === next.editable &&
     prev.canExternalDrag === next.canExternalDrag &&
     prev.disableNonEssentialUi === next.disableNonEssentialUi &&

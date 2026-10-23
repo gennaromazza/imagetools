@@ -2120,6 +2120,261 @@ img {
   z-index: 110;
 }
 
+/* ── Pannello «Simili»: raffiche e foto quasi uguali ─────────────────── */
+
+.photo-selector__similar-panel {
+  position: fixed;
+  bottom: 50px;
+  left: 1rem;
+  right: 1rem;
+  z-index: 110;
+  max-height: min(62vh, 640px);
+  overflow-y: auto;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  /* Opaco: le miniature della griglia sotto confonderebbero quelle del pannello. */
+  background:
+    linear-gradient(180deg, rgba(184, 154, 99, 0.1), rgba(255, 255, 255, 0.02)),
+    #141715;
+}
+
+.photo-selector__similar-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem 1rem;
+}
+
+.photo-selector__similar-summary {
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.photo-selector__similar-summary strong {
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.photo-selector__similar-progress {
+  color: var(--accent-strong);
+}
+
+.photo-selector__similar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.photo-selector__similar-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.photo-selector__similar-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.photo-selector__similar-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.photo-selector__similar-group {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.photo-selector__similar-group--focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.photo-selector__similar-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.photo-selector__similar-group-head strong {
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.photo-selector__similar-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.photo-selector__similar-primary {
+  border-color: var(--accent);
+  color: #f5dea8;
+}
+
+.photo-selector__similar-strip {
+  display: flex;
+  gap: 0.55rem;
+  margin: 0;
+  /* Spazio per la × «Togli dal gruppo», che sporge dall'angolo. */
+  padding: 0.45rem 0.45rem 0.25rem 0.1rem;
+  list-style: none;
+  overflow-x: auto;
+}
+
+.photo-selector__similar-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  display: grid;
+  gap: 0.25rem;
+  width: 148px;
+}
+
+.photo-selector__similar-keep {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: rgba(12, 14, 13, 0.85);
+  cursor: pointer;
+}
+
+.photo-selector__similar-keep img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.photo-selector__similar-keep:disabled {
+  cursor: default;
+}
+
+.photo-selector__similar-thumb--recommended .photo-selector__similar-keep {
+  border-color: var(--accent);
+}
+
+.photo-selector__similar-thumb--rejected .photo-selector__similar-keep img {
+  opacity: 0.45;
+}
+
+.photo-selector__similar-keep:not(:disabled):hover,
+.photo-selector__similar-keep:focus-visible {
+  border-color: var(--accent-strong);
+  outline: none;
+}
+
+.photo-selector__similar-keep-hint {
+  position: absolute;
+  inset: auto 0 0;
+  padding: 0.3rem;
+  background: rgba(12, 14, 13, 0.82);
+  color: #f5dea8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+.photo-selector__similar-keep:not(:disabled):hover .photo-selector__similar-keep-hint,
+.photo-selector__similar-keep:focus-visible .photo-selector__similar-keep-hint {
+  opacity: 1;
+}
+
+.photo-selector__similar-tag {
+  position: absolute;
+  top: 0.3rem;
+  left: 0.3rem;
+  padding: 0.12rem 0.4rem;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #1f2421;
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+
+.photo-selector__similar-status {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+}
+
+.photo-selector__similar-placeholder {
+  color: var(--text-muted);
+}
+
+.photo-selector__similar-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.photo-selector__similar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.photo-selector__similar-stars {
+  flex: 0 0 auto;
+  color: #ffe0a2;
+}
+
+.photo-selector__similar-detach {
+  position: absolute;
+  top: -0.35rem;
+  right: -0.35rem;
+  display: grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 100ms ease;
+}
+
+.photo-selector__similar-thumb:hover .photo-selector__similar-detach,
+.photo-selector__similar-detach:focus-visible {
+  opacity: 1;
+}
+
+.photo-selector__similar-more {
+  justify-self: center;
+}
+
 .photo-selector__grid {
   grid-area: auto;
   display: grid;
@@ -2468,13 +2723,44 @@ img {
   font-weight: 600;
 }
 
-/* ── RAW badge (bottom-left) ─────────────────────────────────────────── */
+/* Raffica o foto quasi uguali: «≈ 2/5», la consigliata in oro. */
+.photo-card__similar-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.16rem 0.45rem;
+  border: 1px solid rgba(212, 193, 170, 0.35);
+  border-radius: 999px;
+  background: rgba(12, 14, 13, 0.82);
+  color: var(--accent-strong);
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+}
 
-.photo-card__raw-badge {
+.photo-card__similar-badge:hover,
+.photo-card__similar-badge:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.photo-card__similar-badge--recommended {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #1f2421;
+}
+
+/* ── RAW e foto simili (bottom-left, la foto simile sopra il RAW) ────── */
+
+.photo-card__bottom-badges {
   position: absolute;
   bottom: 0.35rem;
   left: 0.35rem;
   z-index: 2;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: 0.3rem;
 }
 
 /* ── Star rating (bottom-right) ──────────────────────────────────────── */

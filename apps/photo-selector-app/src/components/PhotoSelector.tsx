@@ -17,6 +17,18 @@ import { RenameModal } from "./RenameModal";
 import type { RenamePatternOptions } from "../services/rename-pattern";
 import { ExportModal } from "./ExportModal";
 import { findLikelyDuplicateGroups } from "../services/duplicate-groups";
+import { useSimilarPhotos } from "../hooks/useSimilarPhotos";
+import {
+  detachPhoto,
+  EMPTY_SIMILARITY_OVERRIDES,
+  hasSimilarityOverrides,
+  joinPhotos,
+  planKeepOne,
+  separatePhotos,
+  type SessionSimilarityOverrides,
+  type SimilarGroupView,
+} from "../services/similar-photos";
+import { SimilarPhotosPanel } from "./SimilarPhotosPanel";
 import { PhotoCard } from "./PhotoCard";
 import { PhotoSelectionContextMenu } from "./PhotoSelectionContextMenu";
 import { ConfirmModal } from "./ConfirmModal";
@@ -718,6 +730,22 @@ export function PhotoSelector({
     }
     return missing;
   }, [captureById, captureReady, captureSupported, photos]);
+
+  // Raffiche e foto quasi uguali (pacchetto condiviso con Album Flow). Le correzioni del
+  // fotografo valgono per la sessione: una nuova cartella riparte dai gruppi automatici.
+  const [similarityOverrides, setSimilarityOverrides] = useState<SessionSimilarityOverrides>(EMPTY_SIMILARITY_OVERRIDES);
+  const [isSimilarOpen, setIsSimilarOpen] = useState(false);
+  const [similarFocusGroupId, setSimilarFocusGroupId] = useState<string | null>(null);
+  useEffect(() => {
+    setSimilarityOverrides(EMPTY_SIMILARITY_OVERRIDES);
+    setSimilarFocusGroupId(null);
+  }, [sourceFolderPath]);
+  const similarPhotos = useSimilarPhotos({
+    photos,
+    captureById,
+    overrides: similarityOverrides,
+    isThumbnailLoading,
+  });
 
   const clockSkewNotice = useMemo(() => {
     if (!captureSupported || !captureReady || photos.length < 10) {
@@ -2276,9 +2304,19 @@ export function PhotoSelector({
   const renderedPhotoCardMeta = useMemo(() => renderedPhotos.map((photo) => {
     const groupKey = photoGroupKeyById.get(photo.id);
     const groupInfo = groupKey ? photoGroupInfoByKey.get(groupKey) : null;
+    const membership = similarPhotos.membershipById.get(photo.id);
+    const similar = membership
+      ? {
+          similarLabel: `${membership.recommended ? "Consigliata" : "≈"} ${membership.position}/${membership.size}`,
+          similarTitle: membership.recommended
+            ? `Consigliata tra ${membership.size} varianti dello stesso scatto (stelle, poi nitidezza ed esposizione). Clic: apri il gruppo.`
+            : `Variante ${membership.position} di ${membership.size} dello stesso scatto. Clic: apri il gruppo.`,
+          isSimilarRecommended: membership.recommended,
+        }
+      : { similarLabel: null, similarTitle: null, isSimilarRecommended: false };
 
     if (!groupInfo || groupInfo.size <= 1) {
-      return { photo, groupBadge: null, isGroupLeader: false };
+      return { photo, groupBadge: null, isGroupLeader: false, ...similar };
     }
 
     const badgeParts: string[] = [];
@@ -2296,8 +2334,9 @@ export function PhotoSelector({
       photo,
       groupBadge: badgeParts.join(" + "),
       isGroupLeader: groupInfo.leaderId === photo.id,
+      ...similar,
     };
-  }), [photoGroupInfoByKey, photoGroupKeyById, renderedPhotos]);
+  }), [photoGroupInfoByKey, photoGroupKeyById, renderedPhotos, similarPhotos.membershipById]);
   // The spacer is itself a CSS-grid row, so the grid inserts one gap after it.
   // Subtract that gap or every virtual-window change shifts the cards downward.
   const topSpacerHeight = Math.max(0, (virtualRows[0]?.start ?? 0) - GRID_GAP_PX);
@@ -3651,6 +3690,82 @@ export function PhotoSelector({
     pushTimelineEntry(`Tenuta la prima foto, scartati ${rest.length} probabili duplicati`);
   }
 
+  // Gruppi nell'ordine della griglia, calcolato solo a pannello aperto.
+  const similarGroupsInGridOrder = useMemo(() => {
+    if (!isSimilarOpen) {
+      return similarPhotos.groups;
+    }
+    const indexById = new Map(sortedPhotoIds.map((id, index) => [id, index]));
+    return similarPhotos.groups
+      .map((group) => ({ group, first: Math.min(...group.photoIds.map((id) => indexById.get(id) ?? Number.MAX_SAFE_INTEGER)) }))
+      .sort((left, right) => left.first - right.first)
+      .map(({ group }) => group);
+  }, [isSimilarOpen, similarPhotos.groups, sortedPhotoIds]);
+
+  const openSimilarGroupForPhoto = useLatestCallback((photoId: string) => {
+    setSimilarFocusGroupId(similarPhotos.membershipById.get(photoId)?.groupId ?? null);
+    // Pannello Batch e Simili occupano lo stesso spazio in basso.
+    setIsBatchToolsOpen(false);
+    setIsSimilarOpen(true);
+  });
+
+  // «Tieni questa»: Pick alla scelta e Scartata alle altre varianti in un solo passo (un solo Ctrl+Z).
+  const keepSimilarVariant = useLatestCallback((group: SimilarGroupView, keepId: string) => {
+    if (!onPhotosChange) {
+      return;
+    }
+    const { pick, reject } = planKeepOne(group.photoIds, keepId);
+    const rejected = new Set(reject);
+    const changedIds: string[] = [];
+    const nextPhotos = readLatestPhotos().map((photo) => {
+      const nextStatus: PickStatus | null = photo.id === pick ? "picked" : rejected.has(photo.id) ? "rejected" : null;
+      if (!nextStatus || photo.pickStatus === nextStatus) {
+        return photo;
+      }
+      changedIds.push(photo.id);
+      return { ...photo, pickStatus: nextStatus };
+    });
+    if (changedIds.length === 0) {
+      return;
+    }
+    freezeViewForClassification(changedIds, sortBy);
+    photosRef.current = nextPhotos;
+    onPhotosChange(nextPhotos);
+    pushTimelineEntry(`Tenuta ${assetById.get(pick)?.fileName ?? "1 foto"}, scartate ${reject.length} varianti`);
+  });
+
+  const selectSimilarGroup = useLatestCallback((photoIds: string[]) => {
+    commitSelection(photoIds);
+    pushTimelineEntry(`Selezionate ${photoIds.length} varianti dello stesso scatto`);
+  });
+
+  const compareSimilarGroup = useLatestCallback((photoIds: string[]) => {
+    commitSelection(photoIds);
+    if (photoIds.some((id) => !visiblePhotoIdSet.has(id))) {
+      addToast("Alcune varianti sono nascoste dai filtri: azzerali per confrontarle tutte.", "info");
+    }
+    setIsCompareOpen(true);
+  });
+
+  const separateSimilarGroup = useLatestCallback((group: SimilarGroupView) => {
+    setSimilarityOverrides((current) => separatePhotos(current, group.photoIds));
+    addToast("Gruppo separato per questa sessione. «Ripristina gruppi automatici» lo ricompone.", "info");
+  });
+
+  const detachFromSimilarGroup = useLatestCallback((group: SimilarGroupView, photoId: string) => {
+    setSimilarityOverrides((current) => detachPhoto(current, photoId, group.photoIds));
+  });
+
+  const joinSelectionAsSimilar = useLatestCallback(() => {
+    const ids = selectedIdsRef.current;
+    if (ids.length < 2) {
+      return;
+    }
+    setSimilarityOverrides((current) => joinPhotos(current, ids));
+    setSimilarFocusGroupId(null);
+    addToast(`${ids.length} foto unite come varianti dello stesso scatto per questa sessione.`, "info");
+  });
+
   function addVisibleToSelection() {
     const nextSelection = new Set(selectedIdsRef.current);
     for (const photoId of visiblePhotoIds) {
@@ -4545,13 +4660,17 @@ export function PhotoSelector({
                 aria-hidden="true"
               />
             ) : null}
-            {renderedPhotoCardMeta.map(({ photo, groupBadge, isGroupLeader }) => (
+            {renderedPhotoCardMeta.map(({ photo, groupBadge, isGroupLeader, similarLabel, similarTitle, isSimilarRecommended }) => (
               <PhotoCard
                 key={photo.id}
                 photo={photo}
                 isSelected={selectedSet.has(photo.id)}
                 groupBadge={groupBadge}
                 isGroupLeader={isGroupLeader}
+                similarLabel={similarLabel}
+                similarTitle={similarTitle}
+                isSimilarRecommended={isSimilarRecommended}
+                onSimilarBadgeClick={openSimilarGroupForPhoto}
                 onToggle={togglePhoto}
                 onUpdatePhoto={handleUpdatePhoto}
                 onApplyShortcutChanges={handleShortcutClassification}
@@ -4681,7 +4800,10 @@ export function PhotoSelector({
           {selectedIds.length > 0 && (
             <button 
               className="ghost-button ghost-button--small" 
-              onClick={() => setIsBatchToolsOpen(!isBatchToolsOpen)}
+              onClick={() => {
+                if (!isBatchToolsOpen) setIsSimilarOpen(false);
+                setIsBatchToolsOpen(!isBatchToolsOpen);
+              }}
             >
               {isBatchToolsOpen ? "Chiudi Batch" : "Apri Batch"}
             </button>
@@ -4695,6 +4817,21 @@ export function PhotoSelector({
               title="Raggruppa le foto con stesso peso e stesse dimensioni: probabili duplicati"
             >
               {isDuplicatesOpen ? "Chiudi duplicati" : `Duplicati (${duplicateGroups.length})`}
+            </button>
+          )}
+          {(similarPhotos.groups.length > 0 || isSimilarOpen) && (
+            <button
+              type="button"
+              className="ghost-button ghost-button--small"
+              onClick={() => {
+                setSimilarFocusGroupId(null);
+                setIsBatchToolsOpen(false);
+                setIsSimilarOpen((open) => !open);
+              }}
+              aria-expanded={isSimilarOpen}
+              title="Raffiche e foto quasi uguali: tieni la migliore di ogni scatto senza perdere le altre"
+            >
+              {isSimilarOpen ? "Chiudi simili" : `Simili (${similarPhotos.groups.length})`}
             </button>
           )}
         </div>
@@ -4740,6 +4877,27 @@ export function PhotoSelector({
             ))}
           </ul>
         </section>
+      )}
+
+      {isSimilarOpen && (
+        <SimilarPhotosPanel
+          groups={similarGroupsInGridOrder}
+          assetById={assetById}
+          focusGroupId={similarFocusGroupId}
+          analyzedCount={similarPhotos.analyzedCount}
+          totalCount={photos.length}
+          isAnalyzing={similarPhotos.isAnalyzing}
+          selectedCount={selectedIds.length}
+          hasOverrides={hasSimilarityOverrides(similarityOverrides)}
+          editable={!!onPhotosChange}
+          onKeep={keepSimilarVariant}
+          onSelect={selectSimilarGroup}
+          onCompare={compareSimilarGroup}
+          onSeparate={separateSimilarGroup}
+          onDetach={detachFromSimilarGroup}
+          onJoinSelection={joinSelectionAsSimilar}
+          onResetOverrides={() => setSimilarityOverrides(EMPTY_SIMILARITY_OVERRIDES)}
+        />
       )}
 
       {isBatchToolsOpen && selectedIds.length > 0 && (
