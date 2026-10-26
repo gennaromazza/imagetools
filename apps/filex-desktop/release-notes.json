@@ -543,6 +543,12 @@
       "Raffiche e foto quasi uguali si riconoscono da sole: ogni variante ha un badge «≈ 2/5» e la foto consigliata (stelle, poi nitidezza ed esposizione) è in oro.",
       "Dal pulsante «Simili» un clic tiene la foto migliore e scarta le altre varianti, in un solo passo annullabile con Ctrl+Z.",
       "«Separa», la × su una foto e «Unisci la selezione come simili» correggono i gruppi finché la cartella resta aperta."
+    ],
+    "0.1.53": [
+      "«Simili» ora è a tutto schermo, gruppo per gruppo: un clic sceglie la foto senza decidere nulla e lo Spazio la ingrandisce, limitato alle foto del gruppo.",
+      "Per tenere una foto usa «Tieni solo questa», P o Invio; con P su più foto e poi «Scarta le altre» ne tieni più di una.",
+      "La lente (L) ingrandisce lo stesso punto su tutte le varianti, per confrontare occhi e dettagli.",
+      "Dopo ogni decisione compare «Annulla»; «Scarta le più morbide» toglie solo le varianti mosse o fuori fuoco."
     ]
   },
   "id-photo": {

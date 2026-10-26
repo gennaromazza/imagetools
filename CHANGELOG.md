@@ -32,6 +32,15 @@
 
 
 
+## 2026-10-26 - Image Select Pro 0.1.53
+
+- Corretto: nel pannello «Simili» lo Spazio su una foto appena cliccata la teneva (Pick) e scartava le altre varianti invece di ingrandirla. Ora un clic sulla foto la sceglie e basta, lo Spazio apre l'anteprima grande limitata alle foto del gruppo (con gli stessi tasti della griglia) e per tenere una foto si usa «Tieni solo questa», P o Invio.
+- Nuovo: «Simili» è una schermata a tutto schermo, gruppo per gruppo: varianti grandi in ordine di scatto con stelle e Pick/Scartata/Neutra su ognuna (tasti 1-5, P, X, U), elenco dei gruppi a lato, ← → tra le foto, ↑ ↓ tra i gruppi, N per il prossimo da decidere ed Esc per tornare alla griglia. «Nella griglia» chiude la schermata e porta la foto in vista.
+- Nuovo: lente (L, rotella per l'ingrandimento): lo stesso punto ingrandito su tutte le varianti, per confrontare occhi e dettagli.
+- Nuovo: più foto da tenere nello stesso gruppo: P su ognuna, poi Invio o «Scarta le altre» chiude il gruppo. «Scarta le più morbide» scarta solo le varianti nettamente meno nitide (sotto il 70% della migliore). Con foto a colori e in bianco e nero nello stesso gruppo non c'è una consigliata, perché il contrasto del bianco e nero falserebbe la nitidezza.
+- Nuovo: dopo ogni decisione un avviso con «Annulla»; Ctrl+Z riporta anche al gruppo annullato. Le anteprime dei prossimi gruppi si preparano in anticipo.
+- Corretto: il motivo della foto consigliata diceva «prima della serie» anche quando non era il primo scatto; ora dice «di poco più nitida» o «esposizione migliore».
+
 ## 2026-10-23 - Album Flow 0.2.42
 
 - Nuovo: caroselli «Solo foto». Un carosello nuovo contiene soltanto le foto, in layout diversi e al massimo con una parola o una frase breve: niente più «Prenota», domande frequenti, data da segnare, recensione, elenchi di servizi o pagine dell'album, che prima comparivano in ogni stile. Nella creazione guidata si sceglie «Solo foto» o «Con slide di vendita»; sotto «Stile» si passa dall'uno all'altro tenendo foto e testi dei modelli che restano; le singole slide di vendita si aggiungono a mano dal gruppo «Vendita e contatti» (anche nell'elenco dei modelli). 18 modelli sono marcati come «di vendita»; ogni stile ha apertura e chiusura con una foto. I caroselli già salvati non cambiano: se contengono slide di vendita restano «Con vendita».
