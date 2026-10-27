@@ -2,9 +2,9 @@ import { newId } from "../model/ids";
 import { nowIso, type Project } from "../model/project";
 import { framingEquals, normalizeFraming } from "./framing";
 import { normalizeTextStyles } from "./textstyle";
-import { carouselRanked, isPromoCarousel, pickForSlot, pickReused, rankPhotos, rankSpreads, slotFit, type RankedPhoto } from "./plan";
-import { FLEX_TONE_IDS, arcFor, setInfo, templateOf, toneForFlex } from "./templates";
-import { FREE_MIN_SIZE, MAX_FREE_FRAMES, MAX_SLIDES, MIN_SLIDES, formatOf, photosShown, type BrandKit, type Carousel, type FreeFrame, type Layer, type PhotoFraming, type PhotoLayer, type Slide, type SlotKind, type SocialFormatId, type Tone } from "./types";
+import { carouselPoolIds, carouselRanked, isPromoCarousel, pickForSlot, pickReused, rankPhotos, rankSpreads, slotFit, type RankedPhoto } from "./plan";
+import { FLEX_TONE_IDS, arcFor, setInfo, templateOf, templatesForSet, toneForFlex } from "./templates";
+import { FREE_MIN_SIZE, MAX_FREE_FRAMES, MAX_SLIDES, MIN_SLIDES, formatOf, photosShown, type BrandKit, type Carousel, type FreeFrame, type Layer, type PhotoFraming, type PhotoLayer, type Slide, type SlideTemplate, type SlotKind, type SocialFormatId, type Tone } from "./types";
 
 /** Modifiche al carosello: funzioni pure `(carousel, …) => carousel`. Se non cambia nulla restituiscono lo stesso oggetto. */
 
@@ -189,28 +189,71 @@ function choosePhoto(kind: SlotKind, pool: readonly RankedPhoto[], taken: Readon
   return pickForSlot(kind, pool, taken, new Map()) ?? pickReused(kind, pool, uses, new Set(current.filter((id): id is string => Boolean(id))));
 }
 
+/** La slide con un altro modello e queste foto: i testi dei campi che il modello ha ancora restano, il resto (inquadrature, panorama, modo libero) si azzera. */
+function retemplate(slide: Slide, template: SlideTemplate, photos: Array<string | null>): Slide {
+  const texts: Record<string, string> = {};
+  for (const field of template.fields) if (slide.texts[field.key] !== undefined) texts[field.key] = slide.texts[field.key];
+  const { span: _span, spreadId: _spread, spreadId2: _spread2, framing: _framing, textStyle: _style, free: _free, textOffset: _offset, layerOffset: _layerOffset, hidden: _hidden, ...rest } = slide;
+  const textStyle = normalizeTextStyles(slide.textStyle, template.fields.map((field) => field.key));
+  return { ...rest, templateId: template.id, photos, texts, ...(textStyle ? { textStyle } : {}) };
+}
+
 /**
- * Riscegli le foto di una sola slide: per ogni spazio la migliore foto non usata altrove nel carosello (e diversa da quelle di adesso, così
- * a ogni clic ne esce una nuova); se le foto nuove finiscono, la meno ripetuta. L'inquadratura torna quella predefinita. Un panorama non cambia.
+ * Riscegli le foto di una sola slide: mai foto già usate in un'altra slide (né quelle che la slide ha adesso, così ne esce una nuova),
+ * tra le foto del carosello. Se le foto libere bastano per il modello di adesso e hanno la forma giusta, il modello resta; altrimenti la slide
+ * passa a un altro modello dello stesso stile (e dello stesso tipo: di vendita o no) con tante foto quante ce ne sono di libere, scegliendo
+ * quello che le valorizza meglio. Senza nessuna foto libera, la slide non cambia. L'inquadratura torna quella predefinita. Un panorama non cambia.
  */
 export function reselectSlidePhotos(carousel: Carousel, project: Project, slideId: string): Carousel {
   return mapSlide(carousel, slideId, (slide) => {
     const template = templateOf(slide.templateId);
     if (!template || slide.span || slide.free || template.slots.length === 0) return slide;
-    const pool = carouselRanked(project, carousel);
-    const taken = usedAssetIds(carousel);
-    const before = new Set(slide.photos.filter((id): id is string => Boolean(id)));
-    const chosen: Array<string | null> = [];
-    const photos = template.slots.map((kind, index) => {
-      const pick = pickForSlot(kind, pool, taken, new Map())
-        ?? pickReused(kind, pool, new Map(), new Set([...chosen.filter((id): id is string => Boolean(id)), ...(index < slide.photos.length ? [] : before)]));
-      chosen.push(pick?.assetId ?? slide.photos[index] ?? null);
-      if (pick) taken.add(pick.assetId);
-      return pick?.assetId ?? slide.photos[index] ?? null;
-    });
-    if (photos.every((id, index) => id === slide.photos[index])) return slide;
-    const { framing: _framing, ...rest } = slide;
-    return { ...rest, photos };
+    const blocked = new Set<string>(slide.photos.filter((id): id is string => Boolean(id)));
+    for (const other of carousel.slides) if (other.id !== slide.id) for (const id of photosShown(other)) blocked.add(id);
+    const free = carouselRanked(project, carousel).filter((photo) => !blocked.has(photo.assetId));
+    if (free.length === 0) return slide;
+    const aspectOf = new Map(free.map((photo) => [photo.assetId, photo.aspect]));
+    /** Le foto libere per gli spazi di un modello, e la forma peggiore che è toccata a uno spazio (0 = sbagliata, 0,5 accettabile, 1 giusta). */
+    const fill = (candidate: SlideTemplate): { photos: string[]; worst: number; average: number } | null => {
+      if (candidate.slots.length > free.length) return null;
+      const taken = new Set<string>();
+      const photos: string[] = [];
+      let sum = 0;
+      let worst = 1;
+      for (const kind of candidate.slots) {
+        const pick = pickForSlot(kind, free, taken, new Map());
+        if (!pick) return null;
+        taken.add(pick.assetId);
+        photos.push(pick.assetId);
+        const fit = slotFit(kind, aspectOf.get(pick.assetId) ?? 1);
+        sum += fit;
+        worst = Math.min(worst, fit);
+      }
+      return { photos, worst, average: sum / candidate.slots.length };
+    };
+    const same = fill(template);
+    if (same && same.worst > 0) return { ...(({ framing: _framing, ...rest }) => rest)(slide), photos: same.photos };
+    const uses = new Map<string, number>();
+    for (const other of carousel.slides) uses.set(other.templateId, (uses.get(other.templateId) ?? 0) + 1);
+    /** Il modello che valorizza meglio le foto libere; con `sameKind` solo tra quelli dello stesso tipo (di vendita o no) di quello di adesso. */
+    const search = (sameKind: boolean) => {
+      let found: { candidate: SlideTemplate; photos: string[]; score: number } | null = null;
+      for (const candidate of templatesForSet(carousel.setId)) {
+        if (candidate.id === slide.templateId || candidate.id === "sh-pano" || candidate.needsSpread || candidate.slots.length === 0) continue;
+        if (sameKind && Boolean(candidate.promo) !== Boolean(template.promo)) continue;
+        const result = fill(candidate);
+        if (!result || result.worst === 0) continue;
+        // Meglio forme giuste, lo stesso ruolo e un numero di foto vicino a quello di prima; un modello già molto usato nel carosello vale un po' meno.
+        const score = result.average * 10 + (candidate.role === template.role ? 2 : 0) - Math.abs(candidate.slots.length - template.slots.length) * 0.6 - (uses.get(candidate.id) ?? 0) * 0.3;
+        if (!found || score > found.score) found = { candidate, photos: result.photos, score };
+      }
+      return found;
+    };
+    const best = search(true) ?? search(false);
+    if (best) return retemplate(slide, best.candidate, best.photos);
+    // Nessun modello con la forma giusta per le foto libere: si tiene quello di adesso con le foto che ci stanno, anche se non perfette.
+    if (same) return { ...(({ framing: _framing, ...rest }) => rest)(slide), photos: same.photos };
+    return slide;
   });
 }
 
@@ -218,6 +261,19 @@ export function reselectSlidePhotos(carousel: Carousel, project: Project, slideI
 export function unusedRanked(carousel: Carousel, project: Project): RankedPhoto[] {
   const used = usedAssetIds(carousel);
   return carouselRanked(project, carousel).filter((photo) => !used.has(photo.assetId));
+}
+
+/**
+ * Mette delle foto tra quelle del carosello senza toccare le slide: serve quando una foto si sceglie a mano (o si decide di tenere una foto
+ * che non è segnata «Per i social»), così le scelte automatiche successive la considerano del carosello. Le foto scartate o inesistenti si ignorano.
+ */
+export function addToPool(carousel: Carousel, project: Project, assetIds: readonly string[]): Carousel {
+  const valid = new Set(rankPhotos(project).map((photo) => photo.assetId));
+  const current = carouselPoolIds(project, carousel);
+  const have = new Set(current);
+  const fresh = [...new Set(assetIds)].filter((id) => valid.has(id) && !have.has(id));
+  if (fresh.length === 0) return carousel;
+  return touch({ ...carousel, assetIds: [...current, ...fresh] });
 }
 
 /**

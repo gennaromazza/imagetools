@@ -48,9 +48,7 @@ function startingPool(project: Project, ranked: readonly RankedPhoto[]): string[
 function poolOn(project: Project, ranked: readonly RankedPhoto[], carousel: Pick<Carousel, "assetIds" | "slides">): Set<string> {
   const valid = new Set(ranked.map((photo) => photo.assetId));
   const own = (carousel.assetIds ?? []).filter((id) => valid.has(id));
-  const ids = new Set(own.length > 0 ? own : startingPool(project, ranked));
-  for (const slide of carousel.slides) for (const id of photosShown(slide)) if (valid.has(id)) ids.add(id);
-  return ids;
+  return new Set(own.length > 0 ? own : startingPool(project, ranked));
 }
 
 /** Le foto segnate «Per i social» (non scartate), dalla più adatta. */
@@ -66,8 +64,10 @@ export function defaultPoolIds(project: Project): string[] {
 }
 
 /**
- * Le foto del carosello: la sua lista (`assetIds`) o, se non ne ha, quella di partenza dell'album; più quelle che mostra già, perché una foto
- * messa a mano resta sua. Sono le uniche tra cui scelgono da sole piano, «Riscegli le foto», «Altra variante», slide nuove e cambi di modello.
+ * Le foto del carosello: la sua lista (`assetIds`) o, se non ne ha, quella di partenza dell'album (le segnate «Per i social», se ce ne sono).
+ * Sono le uniche tra cui scelgono da sole piano, «Riscegli le foto», «Altra variante», slide nuove e cambi di modello. Una foto che una slide
+ * mostra già NON ne fa parte per questo: le foto messe a mano entrano nella lista quando le si sceglie (`addToPool`), e quelle rimaste da prima
+ * (caroselli fatti quando la selezione non contava) si vedono con `outsidePoolIds` e si sostituiscono o si tengono con un clic.
  */
 export function carouselPoolIds(project: Project, carousel: Pick<Carousel, "assetIds" | "slides">): string[] {
   return [...poolOn(project, rankPhotos(project), carousel)];
@@ -78,6 +78,17 @@ export function carouselRanked(project: Project, carousel: Pick<Carousel, "asset
   const ranked = rankPhotos(project);
   const pool = poolOn(project, ranked, carousel);
   return ranked.filter((photo) => pool.has(photo.assetId));
+}
+
+/**
+ * Le foto che le slide mostrano ma che non fanno parte delle foto del carosello: non segnate «Per i social» (o scartate) e mai scelte a mano.
+ * Un panorama non si conta: lo si sceglie apposta e si cambia solo per intero.
+ */
+export function outsidePoolIds(project: Project, carousel: Pick<Carousel, "assetIds" | "slides">): string[] {
+  const pool = poolOn(project, rankPhotos(project), carousel);
+  const outside = new Set<string>();
+  for (const slide of carousel.slides) if (!slide.span) for (const id of photosShown(slide)) if (!pool.has(id)) outside.add(id);
+  return [...outside];
 }
 
 /** Il carosello propone anche i modelli di vendita? Quelli vecchi senza indicazione lo dicono le loro slide. */

@@ -9,7 +9,7 @@ import { carouselReport } from "../social/check";
 import { FONT_PAIRS, PALETTES, brandFontIds, defaultBrand, fontPairOf } from "../social/brand";
 import {
   acceptSelection, addPanorama, addSlide, duplicateSlide, moveSlide, removeSlide, renameCarousel, replacePhoto, resetSlideText, setCaption, setFormat, setSlideSpread,
-  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, reselectSlidePhotos, resizeCarousel, setCarouselPool, unusedRanked, hideElement, resetMovedElements, setFreeFrame, showHiddenElements, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
+  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, addToPool, reselectSlidePhotos, resizeCarousel, setCarouselPool, unusedRanked, hideElement, resetMovedElements, setFreeFrame, showHiddenElements, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
 } from "../social/edit";
 import { dedupeTexts, repeatedTexts, setSlideTextStyle, suggestCarouselTexts, suggestFieldText, suggestSlideTexts } from "../social/edit-text";
 import { buildSlide } from "../social/build";
@@ -19,7 +19,7 @@ import { SNAP_MARGIN, snapBox, snapLines, snapTargets, snapValue, type Guide } f
 import { layoutOf } from "../social/kit";
 import { usePhotoDrag, type DropTarget } from "../social/usePhotoDrag";
 import { usePreviewInteraction, type ElementKind, type PreviewMode } from "../social/usePreviewInteraction";
-import { carouselPoolIds, envFor, isPromoCarousel, reselectPhotos, restyle, selectionBasis, selectionChanged, setCarouselPromo, variation } from "../social/plan";
+import { carouselPoolIds, envFor, isPromoCarousel, outsidePoolIds, reselectPhotos, restyle, selectionBasis, selectionChanged, setCarouselPromo, variation } from "../social/plan";
 import { renderSlideSvg } from "../social/render";
 import { loadCarousels, saveBrand, saveCarousels } from "../social/store";
 import { SETS, setInfo, templateOf, templatesForSet } from "../social/templates";
@@ -412,6 +412,13 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const availablePhotos = unusedRanked(carousel, project).map((ranked) => assetOf(ranked.assetId)).filter((asset): asset is AlbumAssetV2 => Boolean(asset));
   const poolIds = carouselPoolIds(project, carousel);
   const promoNow = isPromoCarousel(carousel);
+  // Foto in uso che non sono tra le foto del carosello (caroselli fatti quando la selezione non contava, o foto poi scartate).
+  const outsideIds = outsidePoolIds(project, carousel);
+  const rejectedIds = new Set(project.assets.filter((asset) => asset.pickStatus === "rejected").map((asset) => asset.id));
+  const keepableOutside = outsideIds.filter((id) => !rejectedIds.has(id));
+  const markedIds = new Set(project.assets.filter((asset) => asset.albumTags?.includes("social")).map((asset) => asset.id));
+  const poolAdded = poolIds.filter((id) => !markedIds.has(id)).length;
+  const rejectedMarked = project.assets.filter((asset) => asset.pickStatus === "rejected" && asset.albumTags?.includes("social")).length;
   const hasMarked = project.assets.some((asset) => asset.albumTags?.includes("social"));
   const toneNow: Tone = slide.tone ?? template?.tone ?? "dark";
 
@@ -532,6 +539,22 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
         </div>
       ) : null}
 
+      {outsideIds.length > 0 ? (
+        <div className="social__notice" role="status">
+          <Icon name="info" size={16} />
+          <span>
+            {outsideIds.length === 1 ? "Una foto in uso non è" : `${outsideIds.length} foto in uso non sono`} tra le foto del carosello
+            {hasMarked ? " (non segnate «Per i social» o scartate)" : " (scartate)"}: le scelte automatiche non {outsideIds.length === 1 ? "la" : "le"} userebbero più.
+          </span>
+          <button type="button" className="btn btn--sm btn--primary" onClick={() => commit((current) => setCarouselPool(current, project, carouselPoolIds(project, current)))}
+            title="Mette al loro posto altre foto del carosello; le altre slide non cambiano">Sostituiscile</button>
+          {keepableOutside.length > 0 ? (
+            <button type="button" className="btn btn--sm btn--ghost" onClick={() => commit((current) => addToPool(current, project, outsidePoolIds(project, current)))}
+              title="Le aggiunge alle foto del carosello">Tienile</button>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="social__body">
         <aside className="social__side social__side--left" aria-label="Stile">
           <h3>Foto del carosello</h3>
@@ -542,7 +565,8 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             </div>
             <p className="muted small social-hint">
               Le scelte automatiche usano solo queste {poolIds.length} foto{poolIds.some((id) => !usedNow.has(id)) ? ` (${poolIds.filter((id) => !usedNow.has(id)).length} non ancora usate)` : ""}.
-              {hasMarked ? " Di partenza sono quelle segnate «Per i social»." : " Nessuna foto è segnata «Per i social»: parte dalle migliori."}
+              {!hasMarked ? " Nessuna foto è segnata «Per i social»: parte dalle migliori." : poolAdded > 0 ? ` ${poolAdded === 1 ? "Una non è segnata" : `${poolAdded} non sono segnate`} «Per i social»: l'hai aggiunta tu.` : " Sono quelle segnate «Per i social»."}
+              {rejectedMarked > 0 ? ` ${rejectedMarked === 1 ? "Una foto segnata è scartata" : `${rejectedMarked} foto segnate sono scartate`} e non entra.` : ""}
             </p>
             <button type="button" className="btn btn--sm social__full" onClick={() => setPoolDraft(poolIds)} title="Aggiungi o togli foto: il carosello non ne userà altre"><Icon name="plus" size={14} /> Scegli le foto…</button>
           </div>
@@ -593,8 +617,16 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           <h3>Aiuto automatico</h3>
           <Segmented<"slide" | "all"> label="A cosa si applica" value={scope} onChange={setScope}
             options={[{ value: "slide", label: `Slide ${selectedIndex + 1}` }, { value: "all", label: "Tutto il carosello" }]} />
-          <button type="button" className="btn btn--sm social__full social-auto" onClick={() => commit((current) => (scope === "all" ? reselectPhotos(project, current) : reselectSlidePhotos(current, project, slide.id)))}
-            title="Sceglie di nuovo le foto tra quelle del carosello, con le stelle di adesso. Sostituisce le foto scelte a mano: puoi annullare.">
+          <button type="button" className="btn btn--sm social__full social-auto" onClick={() => {
+            if (scope === "all") { commit((current) => reselectPhotos(project, current)); return; }
+            // Una slide sola: mai foto già usate altrove; se non bastano cambia modello, e se non ce ne sono lo dice.
+            const next = reselectSlidePhotos(carousel, project, slide.id);
+            if (next === carousel) { onStatus(slide.span || slide.free ? "Questa slide (panorama o disposizione libera) non si riscegle da qui." : "Non ci sono altre foto libere tra quelle del carosello: aggiungine con «Scegli le foto…»."); return; }
+            commit(() => next);
+            const changed = next.slides.find((item) => item.id === slide.id);
+            if (changed && changed.templateId !== slide.templateId) onStatus(`Poche foto libere per «${template?.label ?? "questo modello"}»: ho scelto «${templateOf(changed.templateId)?.label ?? "un altro modello"}», che le usa meglio.`);
+          }}
+            title="Sceglie di nuovo le foto, mai quelle già usate in altre slide; se ne mancano cambia il modello della slide. Con «Tutto il carosello» sceglie di nuovo tutte le foto. Sostituisce le foto scelte a mano: puoi annullare.">
             <Icon name="wand" size={14} /> Riscegli le foto
           </button>
           <button type="button" className="btn btn--sm social__full social-auto" onClick={() => {
@@ -815,10 +847,11 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           wideOnly={picker.kind === "panorama"}
           onClose={() => setPicker(null)}
           onPick={(assetId) => {
-            if (picker.kind === "panorama") { setPicker(null); afterEdit(addPanorama(carousel, assetId, Number(panoCount), slide.id)); return; }
+            if (picker.kind === "panorama") { setPicker(null); afterEdit(addPanorama(addToPool(carousel, project, [assetId]), assetId, Number(panoCount), slide.id)); return; }
             commit((current) => {
-              const target = current.slides.find((item) => item.id === picker.slideId);
-              return target?.free ? (target.free[picker.slot] ? setFreeFramePhoto(current, picker.slideId, target.free[picker.slot].id, assetId) : current) : replacePhoto(current, picker.slideId, picker.slot, assetId);
+              const base = addToPool(current, project, [assetId]);
+              const target = base.slides.find((item) => item.id === picker.slideId);
+              return target?.free ? (target.free[picker.slot] ? setFreeFramePhoto(base, picker.slideId, target.free[picker.slot].id, assetId) : base) : replacePhoto(base, picker.slideId, picker.slot, assetId);
             });
             setPicker(null);
           }}

@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { countTagged, filterAssets } from "../model/library";
-import type { Project } from "../model/project";
+import { itemAspect, type Project } from "../model/project";
 import { assertCarouselInvariants, carouselReport } from "./check";
-import { addSlide, replacePhoto, reselectSlidePhotos, resizeCarousel, setCarouselPool, setSlideTemplate, unusedRanked, usedAssetIds } from "./edit";
-import { carouselPoolIds, defaultPoolIds, isPromoCarousel, markedPhotoIds, planCarousel, reselectPhotos, restyle, setCarouselPromo, variation } from "./plan";
+import { addSlide, addToPool, replacePhoto, reselectSlidePhotos, resizeCarousel, setCarouselPool, setSlideTemplate, unusedRanked, usedAssetIds } from "./edit";
+import { carouselPoolIds, defaultPoolIds, isPromoCarousel, markedPhotoIds, outsidePoolIds, planCarousel, reselectPhotos, restyle, setCarouselPromo, variation } from "./plan";
 import { parseCarousel } from "./store";
 import { SETS, TEMPLATES, simpleMiddle, templateOf, templatesForSet } from "./templates";
 import { album, plan } from "./testkit";
-import { SOCIAL_FORMATS } from "./types";
+import { SOCIAL_FORMATS, photosShown, type Carousel, type Slide } from "./types";
 import { defaultBrand } from "./brand";
 
 // «Solo foto» e foto del carosello: un carosello semplice non propone slide di vendita e sceglie solo tra le foto segnate «Per i social».
@@ -181,14 +181,22 @@ test("foto del carosello: piano e ogni modifica automatica restano dentro le fot
   }
 });
 
-test("foto del carosello: una foto messa a mano resta del carosello; la lista scelta resta anche cambiando stile e variante", () => {
+test("foto del carosello: una foto scelta a mano entra nell'elenco; la lista scelta resta anche cambiando stile e variante", () => {
   const { project, marked } = markedAlbum();
   const outsider = project.assets.find((asset) => asset.pickStatus !== "rejected" && !marked.includes(asset.id) && asset.id !== project.assets[7].id)!.id;
   const carousel = simple(project, { count: 8, seed: 2 });
   const first = carousel.slides.findIndex((slide) => !slide.span && slide.photos.length > 0);
-  const hand = replacePhoto(carousel, carousel.slides[first].id, 0, outsider);
+  // Messa in una slide senza passare dalla scelta (come in un carosello vecchio) la foto non fa parte dell'elenco: lo si vede, non la si ripesca.
+  const stray = replacePhoto(carousel, carousel.slides[first].id, 0, outsider);
+  assert.deepEqual(outsidePoolIds(project, stray), [outsider]);
+  assert.ok(!carouselPoolIds(project, stray).includes(outsider));
+  // Scelta a mano (addToPool + replacePhoto, come fa la finestra «Scegli la foto»): fa parte dell'elenco e le scelte automatiche la rispettano.
+  const hand = replacePhoto(addToPool(carousel, project, [outsider]), carousel.slides[first].id, 0, outsider);
   assert.ok(carouselPoolIds(project, hand).includes(outsider), "la foto messa a mano fa parte delle foto del carosello");
-  assert.ok(!carouselPoolIds(project, carousel).includes(outsider));
+  assert.deepEqual(outsidePoolIds(project, hand), []);
+  assert.equal(addToPool(hand, project, [outsider]), hand, "già nell'elenco: nessun cambiamento");
+  assert.equal(addToPool(carousel, project, [marked[0]]), carousel, "già tra le segnate: nessun cambiamento e nessun elenco salvato");
+  assert.equal(addToPool(carousel, project, ["non-esiste"]), carousel);
   for (const next of [restyle(project, hand, "cinema"), variation(project, hand, 12), reselectSlidePhotos(hand, project, hand.slides[(first + 1) % hand.slides.length].id)]) {
     const outside = [...usedAssetIds(next)].filter((id) => !marked.includes(id) && id !== outsider);
     assert.deepEqual(outside, [], "nessun'altra foto non segnata entra");
@@ -209,6 +217,111 @@ test("foto del carosello: una foto messa a mano resta del carosello; la lista sc
   assert.equal(refreshed.assetIds, undefined);
   assert.ok(carouselPoolIds(moreMarked, refreshed).includes(extra));
   assertCarouselInvariants(refreshed, moreMarked);
+});
+
+test("caroselli vecchi: le foto non segnate rimaste nelle slide non rientrano da sole; un clic le sostituisce o le tiene", () => {
+  // Come un carosello fatto prima: nessuna selezione, quindi pesca da tutto l'album; poi il fotografo segna le sue foto.
+  const plain = album();
+  const legacy = planCarousel(plain, { setId: "galleria", format: "feed", count: 12, brand: defaultBrand(plain.projectName), seed: 4 });
+  const { assetIds: _own, ...old } = legacy;
+  const used = [...usedAssetIds(old)];
+  assert.ok(used.length >= 20, "il carosello vecchio usa tante foto");
+  const marked = plain.assets.filter((asset) => asset.pickStatus !== "rejected" && asset.id !== plain.assets[7].id && !used.slice(0, 15).includes(asset.id)).slice(0, 19).map((asset) => asset.id);
+  const project = mark(plain, marked);
+  const strays = outsidePoolIds(project, old);
+  assert.ok(strays.length >= 10, `slide con foto non segnate: ${strays.length}`);
+  assert.ok(carouselPoolIds(project, old).every((id) => marked.includes(id)), "le foto già in uso non entrano nell'elenco da sole");
+
+  // Ogni scelta automatica, anche con meno foto segnate degli spazi, resta dentro le segnate.
+  for (const next of [reselectPhotos(project, old), variation(project, old, 9), restyle(project, old, "moda"), resizeCarousel(old, project, 20)]) {
+    assertCarouselInvariants(next, project);
+    const stillOutside = outsidePoolIds(project, next);
+    // Solo «ingrandire» lascia le slide di prima così come sono: le foto nuove, comunque, sono tutte segnate.
+    if (next.slides.length === old.slides.length) assert.deepEqual(stillOutside, [], "nessuna foto non segnata dopo la scelta automatica");
+    else for (const slide of next.slides.slice(old.slides.length - 1)) assert.ok(photosShown(slide).every((id) => marked.includes(id) || old.slides.some((before) => photosShown(before).includes(id))));
+  }
+
+  // «Sostituiscile»: le foto fuori elenco lasciano il posto a foto segnate, il resto non cambia.
+  const replaced = setCarouselPool(old, project, carouselPoolIds(project, old));
+  assertCarouselInvariants(replaced, project);
+  assert.deepEqual(outsidePoolIds(project, replaced), []);
+  // «Tienile»: le foto restano dove sono e fanno parte dell'elenco.
+  const kept = addToPool(old, project, strays);
+  assert.deepEqual(outsidePoolIds(project, kept), []);
+  assert.deepEqual(kept.slides.map((slide) => slide.photos), old.slides.map((slide) => slide.photos), "le slide non cambiano");
+  assert.ok(strays.every((id) => carouselPoolIds(project, kept).includes(id)));
+});
+
+/** Un carosello di prova con slide fatte a mano (foto e modelli decisi qui), per provare «Riscegli le foto» di una slide. */
+function handmade(project: Project, pool: readonly string[], slides: ReadonlyArray<[string, ReadonlyArray<string>]>): Carousel {
+  const base = simple(project, { count: 3, assetIds: pool });
+  return { ...base, slides: slides.map(([templateId, photos], index): Slide => ({ id: `m${index}`, templateId, photos: [...photos], texts: {} })) };
+}
+
+test("riscegli le foto di una slide: mai foto già usate in altre slide e mai le stesse che la slide ha già", () => {
+  const { project, marked } = markedAlbum();
+  const carousel = simple(project, { count: 4, seed: 8, assetIds: marked });
+  let changed = 0;
+  for (const slide of carousel.slides) {
+    const next = reselectSlidePhotos(carousel, project, slide.id);
+    if (next === carousel) continue;
+    changed += 1;
+    assertCarouselInvariants(next, project);
+    const after = next.slides.find((item) => item.id === slide.id)!;
+    const elsewhere = new Set(carousel.slides.filter((item) => item.id !== slide.id).flatMap((item) => photosShown(item)));
+    const shown = photosShown(after);
+    assert.equal(new Set(shown).size, shown.length, "la stessa foto due volte nella slide");
+    assert.ok(shown.every((id) => !elsewhere.has(id) && !slide.photos.includes(id) && marked.includes(id)), `${slide.templateId}: foto già usata o non segnata`);
+    for (const other of carousel.slides) if (other.id !== slide.id) assert.equal(next.slides.find((item) => item.id === other.id), other, "le altre slide non cambiano");
+  }
+  assert.ok(changed >= 1, "almeno una slide ha foto libere");
+});
+
+test("riscegli le foto di una slide: se le foto libere non bastano cambia modello, e se non ce ne sono non cambia nulla", () => {
+  const { project, marked } = markedAlbum();
+  const [a, b, c, d, e, f, g] = marked;
+  // Sette foto: sei in uso (una slide da una foto, una da quattro, una da una foto); ne resta una sola libera per la slide da quattro.
+  const carousel = handmade(project, [a, b, c, d, e, f, g], [["sh-solo-full", [a]], ["sh-grid", [b, c, d, e]], ["sh-solo-full", [f]]]);
+  const next = reselectSlidePhotos(carousel, project, "m1");
+  assertCarouselInvariants(next, project);
+  const after = next.slides[1];
+  const template = templateOf(after.templateId)!;
+  assert.notEqual(after.templateId, "sh-grid", "una foto sola non riempie un modello da quattro: la slide cambia modello");
+  assert.equal(template.slots.length, 1, "un modello con una foto sola");
+  assert.equal(template.promo, undefined, "e dello stesso tipo: non diventa una slide di vendita");
+  assert.deepEqual(after.photos, [g], "con l'unica foto libera");
+  assert.equal(next.slides[0], carousel.slides[0]);
+  assert.equal(next.slides[2], carousel.slides[2]);
+
+  // Con due foto libere sceglie un modello da una o due foto, mai da quattro.
+  const two = handmade(project, [a, b, c, d, e, f, g, marked[7]], [["sh-solo-full", [a]], ["sh-grid", [b, c, d, e]], ["sh-solo-full", [f]]]);
+  const afterTwo = reselectSlidePhotos(two, project, "m1").slides[1];
+  assert.ok(templateOf(afterTwo.templateId)!.slots.length <= 2 && afterTwo.photos.length >= 1);
+  assert.ok(afterTwo.photos.every((id) => id === g || id === marked[7]));
+
+  // Nessuna foto libera: la slide non cambia (e il carosello è lo stesso oggetto, così l'interfaccia può dirlo).
+  const full = handmade(project, [a, b, c, d, e, f], [["sh-solo-full", [a]], ["sh-grid", [b, c, d, e]], ["sh-solo-full", [f]]]);
+  assert.equal(reselectSlidePhotos(full, project, "m1"), full);
+  // Una slide che resta al suo modello se le foto libere bastano e hanno la forma giusta.
+  const roomy = handmade(project, marked, [["sh-solo-full", [a]], ["sh-duo", [b, c]], ["sh-solo-full", [f]]]);
+  const stays = reselectSlidePhotos(roomy, project, "m1").slides[1];
+  assert.equal(stays.templateId, "sh-duo");
+  assert.notDeepEqual(stays.photos, [b, c]);
+});
+
+test("riscegli le foto di una slide: se le foto libere hanno la forma sbagliata sceglie un modello adatto", () => {
+  const { project, marked } = markedAlbum();
+  const aspect = (id: string) => itemAspect(project.assets.find((asset) => asset.id === id)!);
+  const landscape = marked.filter((id) => aspect(id) >= 1.3);
+  const portrait = marked.filter((id) => aspect(id) <= 0.9);
+  assert.ok(landscape.length >= 3 && portrait.length >= 3, "l'album di prova ha foto di tutte le forme");
+  // Una slide verticale (ad arco, una foto alta) e, libere, solo foto orizzontali.
+  const carousel = handmade(project, [portrait[0], landscape[0], landscape[1]], [["sh-arch", [portrait[0]]], ["sh-solo-full", [landscape[0]]]]);
+  const next = reselectSlidePhotos(carousel, project, "m0");
+  const after = next.slides[0];
+  assert.deepEqual(after.photos, [landscape[1]]);
+  assert.notEqual(after.templateId, "sh-arch", "un modello verticale non va bene per una foto orizzontale");
+  assert.ok(templateOf(after.templateId)!.slots.every((kind) => kind !== "portrait"));
 });
 
 test("foto del carosello: «Scegli le foto» sostituisce quelle tolte, non tocca le altre e rifiuta una lista vuota", () => {
