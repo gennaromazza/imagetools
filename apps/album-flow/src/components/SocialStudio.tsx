@@ -19,7 +19,7 @@ import { SNAP_MARGIN, snapBox, snapLines, snapTargets, snapValue, type Guide } f
 import { layoutOf } from "../social/kit";
 import { usePhotoDrag, type DropTarget } from "../social/usePhotoDrag";
 import { usePreviewInteraction, type ElementKind, type PreviewMode } from "../social/usePreviewInteraction";
-import { carouselPoolIds, envFor, isPromoCarousel, outsidePoolIds, reselectPhotos, restyle, selectionBasis, selectionChanged, setCarouselPromo, variation } from "../social/plan";
+import { carouselPoolIds, envFor, isPromoCarousel, outsidePoolIds, reselectPhotos, reselectRanked, restyle, selectionBasis, selectionChanged, setCarouselPromo, variation } from "../social/plan";
 import { renderSlideSvg } from "../social/render";
 import { loadCarousels, saveBrand, saveCarousels } from "../social/store";
 import { SETS, setInfo, templateOf, templatesForSet } from "../social/templates";
@@ -422,6 +422,15 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const hasMarked = project.assets.some((asset) => asset.albumTags?.includes("social"));
   const toneNow: Tone = slide.tone ?? template?.tone ?? "dark";
 
+  /** «Riscegli le foto» di tutto il carosello: sempre sulle foto segnate; se non bastano per le slide, è il numero di slide a ridursi, e lo dice. */
+  const reselectAll = () => {
+    const next = reselectPhotos(project, carousel);
+    commit(() => next);
+    if (next.slides.length < carousel.slides.length) {
+      onStatus(`Le foto da usare sono ${reselectRanked(project, carousel).length}: bastano per ${next.slides.length} slide senza ripetere foto, quindi il carosello passa da ${carousel.slides.length} a ${next.slides.length} slide. Puoi annullare.`);
+    }
+  };
+
   const afterEdit = (next: Carousel, pickId?: (before: Set<string>) => string | undefined) => {
     const before = new Set(carousel.slides.map((item) => item.id));
     commit(() => next);
@@ -533,8 +542,8 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
       {selectionChanged(project, carousel) ? (
         <div className="social__notice" role="status">
           <Icon name="info" size={16} />
-          <span>Da quando hai creato questo carosello sono cambiate le stelle o le foto segnate «Per i social». Le foto scelte non si aggiornano da sole: «Riscegli le foto» riparte dalle foto segnate adesso.</span>
-          <button type="button" className="btn btn--sm btn--primary" onClick={() => commit((current) => reselectPhotos(project, current, true))}>Riscegli le foto</button>
+          <span>Da quando hai creato questo carosello sono cambiate le stelle o le foto segnate «Per i social». Le foto scelte non si aggiornano da sole: «Riscegli le foto» riparte dalle foto segnate adesso e, se non bastano per le slide, riduce le slide.</span>
+          <button type="button" className="btn btn--sm btn--primary" onClick={reselectAll}>Riscegli le foto</button>
           <button type="button" className="btn btn--sm btn--ghost" onClick={() => commit((current) => acceptSelection(current, selectionBasis(project)))}>Tienilo così</button>
         </div>
       ) : null}
@@ -618,7 +627,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
           <Segmented<"slide" | "all"> label="A cosa si applica" value={scope} onChange={setScope}
             options={[{ value: "slide", label: `Slide ${selectedIndex + 1}` }, { value: "all", label: "Tutto il carosello" }]} />
           <button type="button" className="btn btn--sm social__full social-auto" onClick={() => {
-            if (scope === "all") { commit((current) => reselectPhotos(project, current)); return; }
+            if (scope === "all") { reselectAll(); return; }
             // Una slide sola: mai foto già usate altrove; se non bastano cambia modello, e se non ce ne sono lo dice.
             const next = reselectSlidePhotos(carousel, project, slide.id);
             if (next === carousel) { onStatus(slide.span || slide.free ? "Questa slide (panorama o disposizione libera) non si riscegle da qui." : "Non ci sono altre foto libere tra quelle del carosello: aggiungine con «Scegli le foto…»."); return; }
@@ -626,7 +635,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             const changed = next.slides.find((item) => item.id === slide.id);
             if (changed && changed.templateId !== slide.templateId) onStatus(`Poche foto libere per «${template?.label ?? "questo modello"}»: ho scelto «${templateOf(changed.templateId)?.label ?? "un altro modello"}», che le usa meglio.`);
           }}
-            title="Sceglie di nuovo le foto, mai quelle già usate in altre slide; se ne mancano cambia il modello della slide. Con «Tutto il carosello» sceglie di nuovo tutte le foto. Sostituisce le foto scelte a mano: puoi annullare.">
+            title="Sceglie di nuovo le foto, sempre tra quelle segnate «Per i social»: per una slide mai foto già usate in altre slide (se ne mancano cambia il modello della slide); per tutto il carosello, se le foto non bastano, si riducono le slide. Sostituisce le foto scelte a mano: puoi annullare.">
             <Icon name="wand" size={14} /> Riscegli le foto
           </button>
           <button type="button" className="btn btn--sm social__full social-auto" onClick={() => {
@@ -642,7 +651,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             <Icon name="shuffle" size={14} /> Evita frasi ripetute{repeats.length > 0 ? ` (${repeats.length})` : ""}
           </button>
           <p className="muted small social-hint">{scope === "all"
-            ? "Agisce su tutte le slide e sceglie solo tra le foto del carosello (di partenza, quelle segnate «Per i social»: clic destro in libreria → «Segna come»), prima quelle con più stelle."
+            ? "Agisce su tutte le slide. «Riscegli le foto» usa solo le foto segnate «Per i social» (clic destro in libreria → «Segna come»), prima quelle con più stelle; se non bastano per tutte le slide, le slide si riducono."
             : `Agisce solo sulla slide ${selectedIndex + 1}. Ogni clic propone qualcosa di nuovo.`}</p>
 
           <h3>Il tuo studio</h3>

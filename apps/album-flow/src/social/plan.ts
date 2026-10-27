@@ -81,6 +81,19 @@ export function carouselRanked(project: Project, carousel: Pick<Carousel, "asset
 }
 
 /**
+ * Dove pesca «Riscegli le foto»: sempre le foto segnate «Per i social» di adesso (non scartate), anche se il carosello ha una lista sua o ne
+ * ha di più; solo se nessuna foto è segnata, le foto del carosello.
+ */
+export function reselectRanked(project: Project, carousel: Pick<Carousel, "assetIds" | "slides">): RankedPhoto[] {
+  const ranked = rankPhotos(project);
+  const marked = new Set(project.assets.filter((asset) => asset.albumTags?.includes("social")).map((asset) => asset.id));
+  const picked = marked.size > 0 ? ranked.filter((photo) => marked.has(photo.assetId)) : [];
+  if (picked.length > 0) return picked;
+  const pool = poolOn(project, ranked, carousel);
+  return ranked.filter((photo) => pool.has(photo.assetId));
+}
+
+/**
  * Le foto che le slide mostrano ma che non fanno parte delle foto del carosello: non segnate «Per i social» (o scartate) e mai scelte a mano.
  * Un panorama non si conta: lo si sceglie apposta e si cambia solo per intero.
  */
@@ -249,6 +262,18 @@ export function suggestSlideCount(project: Project, assetIds: readonly string[],
 }
 
 /**
+ * Il numero di slide più alto, fino a `count`, con cui nessuna foto della lista compare due volte: se le foto non bastano per tutte le slide,
+ * sono le slide a ridursi (mai sotto `MIN_SLIDES`). Se le foto bastano, il numero resta quello.
+ */
+export function fitSlideCount(project: Project, assetIds: readonly string[], count: number, setId: SetId = "editoriale", seed = 0, promo = false): number {
+  const top = clampCount(count);
+  for (let candidate = top; candidate > MIN_SLIDES; candidate -= 1) {
+    if (planCoverage(project, assetIds, candidate, setId, seed, promo).repeated === 0) return candidate;
+  }
+  return MIN_SLIDES;
+}
+
+/**
  * Due modelli diversi possono proporre la stessa frase: nel carosello nuovo ogni frase compare una volta sola.
  * Si usa prima una variante del modello, poi una proposta dalla libreria editoriale. Nome dello studio e dell'album restano com'è giusto.
  */
@@ -367,21 +392,28 @@ function withOwnPool<T extends { assetIds?: string[] }>(next: T, carousel: Carou
 }
 
 /**
- * Sceglie di nuovo le foto, tenendo stile, colori, formato, numero di slide e testi scritti. Con `refreshPool` riparte dalle foto segnate
- * «Per i social» di adesso (o da tutte, se nessuna è segnata) invece che dalla lista del carosello.
+ * Sceglie di nuovo le foto di tutto il carosello, sempre tra le foto segnate «Per i social» di adesso (se nessuna è segnata, tra quelle del
+ * carosello), tenendo stile, colori, formato e testi scritti. Se le foto non bastano per le slide che ci sono, è il numero di slide a ridursi
+ * (`fitSlideCount`): nessuna foto si ripete. Una slide con disposizione libera la tiene solo se le sue foto sono tra quelle scelte.
+ * La lista del carosello torna quella di partenza (le segnate).
  */
-export function reselectPhotos(project: Project, carousel: Carousel, refreshPool = false): Carousel {
-  const pool = refreshPool ? {} : replanPool(project, carousel);
-  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed: carousel.seed, promo: isPromoCarousel(carousel), ...pool });
+export function reselectPhotos(project: Project, carousel: Carousel): Carousel {
+  const ids = reselectRanked(project, carousel).map((photo) => photo.assetId);
+  const fromMarks = markedPhotoIds(project).length > 0;
+  const promo = isPromoCarousel(carousel);
+  const count = fitSlideCount(project, ids, carousel.slides.length, carousel.setId, carousel.seed ?? 0, promo);
+  const chosen = new Set(ids);
+  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count, brand: carousel.brand, name: carousel.name, seed: carousel.seed, promo, ...(fromMarks ? {} : replanPool(project, carousel)) });
   const slides = next.slides.map((slide, index) => {
     const before = carousel.slides[index];
     const template = templateOf(slide.templateId);
     if (!before || !template || before.templateId !== slide.templateId) return slide;
+    const keepFree = Boolean(before.free) && !slide.span && before.free!.every((frame) => !frame.assetId || chosen.has(frame.assetId));
     // Le foto si riscelgono; tutto il resto (testi e loro stile, fondo, specchio) resta com'era.
     const { flip: _flip, tone: _tone, ...clean } = slide;
-    return { ...clean, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.tone ? { tone: before.tone } : {}), ...(before.flip ? { flip: true } : {}), ...(before.free && !slide.span ? { free: before.free } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}), ...(before.hidden ? { hidden: before.hidden } : {}) };
+    return { ...clean, texts: { ...before.texts }, ...(before.textStyle ? { textStyle: before.textStyle } : {}), ...(before.tone ? { tone: before.tone } : {}), ...(before.flip ? { flip: true } : {}), ...(keepFree ? { free: before.free } : {}), ...(before.textOffset ? { textOffset: before.textOffset } : {}), ...(before.layerOffset ? { layerOffset: before.layerOffset } : {}), ...(before.hidden ? { hidden: before.hidden } : {}) };
   });
-  return { ...withOwnPool(next, carousel), id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
+  return { ...(fromMarks ? next : withOwnPool(next, carousel)), id: carousel.id, createdAt: carousel.createdAt, caption: carousel.caption, slides };
 }
 
 /** Un seme nuovo per ogni carosello creato: due caroselli fatti in momenti diversi dallo stesso album non escono uguali. */

@@ -2,7 +2,7 @@ import { newId } from "../model/ids";
 import { nowIso, type Project } from "../model/project";
 import { framingEquals, normalizeFraming } from "./framing";
 import { normalizeTextStyles } from "./textstyle";
-import { carouselPoolIds, carouselRanked, isPromoCarousel, pickForSlot, pickReused, rankPhotos, rankSpreads, slotFit, type RankedPhoto } from "./plan";
+import { carouselPoolIds, carouselRanked, isPromoCarousel, pickForSlot, pickReused, rankPhotos, rankSpreads, reselectRanked, slotFit, type RankedPhoto } from "./plan";
 import { FLEX_TONE_IDS, arcFor, setInfo, templateOf, templatesForSet, toneForFlex } from "./templates";
 import { FREE_MIN_SIZE, MAX_FREE_FRAMES, MAX_SLIDES, MIN_SLIDES, formatOf, photosShown, type BrandKit, type Carousel, type FreeFrame, type Layer, type PhotoFraming, type PhotoLayer, type Slide, type SlideTemplate, type SlotKind, type SocialFormatId, type Tone } from "./types";
 
@@ -199,8 +199,8 @@ function retemplate(slide: Slide, template: SlideTemplate, photos: Array<string 
 }
 
 /**
- * Riscegli le foto di una sola slide: mai foto già usate in un'altra slide (né quelle che la slide ha adesso, così ne esce una nuova),
- * tra le foto del carosello. Se le foto libere bastano per il modello di adesso e hanno la forma giusta, il modello resta; altrimenti la slide
+ * Riscegli le foto di una sola slide: sempre tra le foto segnate «Per i social» di adesso (se nessuna è segnata, tra quelle del carosello), mai
+ * foto già usate in un'altra slide (né quelle che la slide ha adesso, così ne esce una nuova). Se le foto libere bastano per il modello di adesso e hanno la forma giusta, il modello resta; altrimenti la slide
  * passa a un altro modello dello stesso stile (e dello stesso tipo: di vendita o no) con tante foto quante ce ne sono di libere, scegliendo
  * quello che le valorizza meglio. Senza nessuna foto libera, la slide non cambia. L'inquadratura torna quella predefinita. Un panorama non cambia.
  */
@@ -210,7 +210,7 @@ export function reselectSlidePhotos(carousel: Carousel, project: Project, slideI
     if (!template || slide.span || slide.free || template.slots.length === 0) return slide;
     const blocked = new Set<string>(slide.photos.filter((id): id is string => Boolean(id)));
     for (const other of carousel.slides) if (other.id !== slide.id) for (const id of photosShown(other)) blocked.add(id);
-    const free = carouselRanked(project, carousel).filter((photo) => !blocked.has(photo.assetId));
+    const free = reselectRanked(project, carousel).filter((photo) => !blocked.has(photo.assetId));
     if (free.length === 0) return slide;
     const aspectOf = new Map(free.map((photo) => [photo.assetId, photo.aspect]));
     /** Le foto libere per gli spazi di un modello, e la forma peggiore che è toccata a uno spazio (0 = sbagliata, 0,5 accettabile, 1 giusta). */

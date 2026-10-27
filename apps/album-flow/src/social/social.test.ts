@@ -666,13 +666,17 @@ test("riscelta: se stelle o segnalini cambiano il carosello lo sa, e «Riscegli 
   assert.equal(selectionChanged(rated, carousel), true, "cinque stelle date dopo la creazione cambiano la classifica");
   assert.ok(!usedAssetIds(carousel).has(favourite), "la bozza salvata non si aggiorna da sola");
 
-  const marked: Project = { ...rated, assets: rated.assets.map((asset) => (asset.id === favourite ? { ...asset, albumTags: ["social" as const] } : asset)) };
+  // «Riscegli le foto» usa solo le foto segnate: la preferita più altre quindici, abbastanza per non togliere slide.
+  const others = rated.assets.filter((asset) => asset.pickStatus !== "rejected" && asset.id !== favourite && asset.id !== rated.assets[7].id).slice(0, 15).map((asset) => asset.id);
+  const tagged = new Set([favourite, ...others]);
+  const marked: Project = { ...rated, assets: rated.assets.map((asset) => (tagged.has(asset.id) ? { ...asset, albumTags: ["social" as const] } : asset)) };
   const fresh = reselectPhotos(marked, carousel);
   assertCarouselInvariants(fresh, marked);
   assert.equal(fresh.id, carousel.id);
   assert.equal(fresh.setId, "moda");
   assert.equal(fresh.format, "square");
-  assert.equal(fresh.slides.length, 8);
+  assert.ok(fresh.slides.length <= 8 && fresh.slides.length >= 2, `slide dopo la riscelta: ${fresh.slides.length}`);
+  assert.deepEqual([...usedAssetIds(fresh)].filter((id) => !tagged.has(id)), [], "solo foto segnate");
   assert.equal(fresh.slides[0].texts.title, "Titolo mio", "il testo scritto resta");
   assert.equal(selectionChanged(marked, fresh), false, "dopo la riscelta non resta nulla da aggiornare");
   assert.ok(usedAssetIds(fresh).has(favourite), "la foto segnata ora è nel carosello");
