@@ -736,6 +736,10 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.44": [
+      "«Riscegli le foto» usa sempre e soltanto le foto segnate «Per i social» di adesso, anche per la singola slide; le foto aggiunte a mano e non segnate non rientrano.",
+      "Se le foto segnate non bastano per le slide, «Riscegli le foto» riduce il numero di slide invece di ripetere foto, e te lo dice; con foto in abbondanza il numero resta."
+    ],
     "0.2.43": [
       "Caroselli già fatti: le foto non segnate «Per i social» rimaste nelle slide non rientrano più tra le foto del carosello; un avviso in alto le mostra con «Sostituiscile» e «Tienile», e una foto scelta a mano entra nell'elenco da sola.",
       "«Riscegli le foto» di una slide non ripete mai foto già usate: con poche foto libere o di forma sbagliata la slide passa a un altro modello adatto, e senza foto libere ti dice di aggiungerne."

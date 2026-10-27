@@ -32,6 +32,13 @@
 
 
 
+## 2026-10-27 - Album Flow 0.2.44
+
+- Corretto: «Riscegli le foto» usa sempre e soltanto le foto segnate «Per i social» di adesso, anche se il carosello aveva un elenco più largo (foto aggiunte a mano e non segnate non rientrano) o più stretto (le segnate lasciate fuori tornano). Solo se nessuna foto è segnata pesca tra le foto del carosello. Dopo la riscelta la lista del carosello torna quella di partenza (le segnate).
+- Migliorato: se le foto segnate non bastano per le slide, «Riscegli le foto» di tutto il carosello riduce il numero di slide al più alto con cui nessuna foto si ripete (`fitSlideCount`, mai sotto 2) invece di ripetere foto, e un messaggio lo dice; con foto in abbondanza il numero resta. Una slide con disposizione libera la tiene solo se le sue foto sono tra quelle scelte. Nota: con pochissime foto segnate (meno di quelle che servono ad apertura e chiusura dello stile, per esempio meno di sei in «Galleria») qualche ripetizione resta, perché le slide non scendono sotto 2.
+- Migliorato: anche «Riscegli le foto» di una sola slide pesca sempre tra le foto segnate di adesso (oltre a non mettere mai foto già usate e a cambiare modello se le libere non bastano).
+- Test: `social-simple.test.ts` e `social.test.ts` provano la riscelta sulle sole foto segnate, la riduzione delle slide senza ripetizioni, il numero invariato con foto in abbondanza, la foto aggiunta a mano che non rientra e la disposizione libera.
+
 ## 2026-10-27 - Album Flow 0.2.43
 
 - Corretto: nei caroselli già fatti restavano foto non segnate «Per i social». Nella 0.2.42 le foto già mostrate da una slide venivano considerate sempre «del carosello»: quelle rimaste da prima (quando le scelte automatiche pescavano da tutto l'album) restavano nell'elenco e «Riscegli le foto» le ripescava, soprattutto quando le foto segnate erano meno degli spazi. Ora le foto del carosello sono solo quelle dell'elenco (`assetIds`, o le segnate «Per i social»); una foto scelta a mano con «Scegli la foto» o il panorama entra nell'elenco da sola.

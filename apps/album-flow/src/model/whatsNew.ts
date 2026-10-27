@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.44",
+    date: "2026-10-27",
+    headline: "«Riscegli le foto» usa sempre le foto segnate, e se non bastano si riducono le slide",
+    items: [
+      {
+        title: "«Riscegli le foto» solo sulle foto segnate",
+        text: "Con «Riscegli le foto» il carosello pesca sempre e soltanto tra le foto segnate «Per i social» di adesso, anche se prima avevi scelto un elenco diverso con «Scegli le foto…». Una foto aggiunta a mano e non segnata non rientra. Se nessuna foto è segnata, usa le foto del carosello.",
+        where: ["Riscegli le foto", "Tutto il carosello", "Slide N"],
+      },
+      {
+        title: "Poche foto: si riducono le slide, non si ripetono le foto",
+        text: "Se le foto segnate non bastano per tutte le slide, «Riscegli le foto» riduce il numero di slide al più alto che permette di non ripetere nessuna foto, e te lo dice (puoi annullare). Con foto in abbondanza il numero di slide resta com'è. Una slide con disposizione libera resta com'è solo se le sue foto sono tra quelle scelte.",
+        where: ["Riscegli le foto", "Tutto il carosello", "Numero di slide"],
+      },
+    ],
+  },
+  {
     version: "0.2.43",
     date: "2026-10-27",
     headline: "Caroselli: le foto non segnate non rientrano più, e «Riscegli le foto» di una slide non ripete foto già usate",
