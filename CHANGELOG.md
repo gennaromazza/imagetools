@@ -32,6 +32,13 @@
 
 
 
+## 2026-10-27 - Album Flow 0.2.43
+
+- Corretto: nei caroselli già fatti restavano foto non segnate «Per i social». Nella 0.2.42 le foto già mostrate da una slide venivano considerate sempre «del carosello»: quelle rimaste da prima (quando le scelte automatiche pescavano da tutto l'album) restavano nell'elenco e «Riscegli le foto» le ripescava, soprattutto quando le foto segnate erano meno degli spazi. Ora le foto del carosello sono solo quelle dell'elenco (`assetIds`, o le segnate «Per i social»); una foto scelta a mano con «Scegli la foto» o il panorama entra nell'elenco da sola.
+- Nuovo: avviso in alto quando una slide mostra foto fuori elenco (non segnate o scartate), con «Sostituiscile» (le cambia con foto dell'elenco, le altre slide non cambiano) e «Tienile» (le aggiunge all'elenco). In «Foto del carosello» si vede anche quante foto dell'elenco non sono segnate e quante foto segnate sono scartate.
+- Migliorato: «Riscegli le foto» di una sola slide non mette mai foto già usate in altre slide (né quelle che la slide ha già, così ne esce una nuova). Se le foto libere non bastano per il modello, o hanno la forma sbagliata, la slide passa a un altro modello dello stesso stile e tipo con tante foto quante ce ne sono (testi dei campi comuni conservati) e un messaggio lo dice; senza foto libere non cambia nulla e suggerisce «Scegli le foto…».
+- Test: `social-simple.test.ts` riproduce il carosello vecchio con foto non segnate (ogni scelta automatica resta nelle segnate, «Sostituiscile» e «Tienile») e prova «Riscegli le foto» di una slide (mai foto già usate, cambio di modello con poche foto o forma sbagliata, nessuna foto libera).
+
 ## 2026-10-26 - Image Select Pro 0.1.53
 
 - Corretto: nel pannello «Simili» lo Spazio su una foto appena cliccata la teneva (Pick) e scartava le altre varianti invece di ingrandirla. Ora un clic sulla foto la sceglie e basta, lo Spazio apre l'anteprima grande limitata alle foto del gruppo (con gli stessi tasti della griglia) e per tenere una foto si usa «Tieni solo questa», P o Invio.

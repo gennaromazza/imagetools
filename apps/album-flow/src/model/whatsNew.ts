@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.43",
+    date: "2026-10-27",
+    headline: "Caroselli: le foto non segnate non rientrano più, e «Riscegli le foto» di una slide non ripete foto già usate",
+    items: [
+      {
+        title: "Foto non segnate nei caroselli già fatti",
+        text: "Un carosello creato prima poteva avere slide con foto non segnate «Per i social», e quelle restavano tra le foto del carosello e venivano riscelte ogni volta. Ora le foto del carosello sono solo quelle dell'elenco (le segnate, o quelle che scegli tu) e, se una slide mostra foto fuori elenco, in alto compare un avviso: «Sostituiscile» le cambia con foto dell'elenco senza toccare le altre slide, «Tienile» le aggiunge all'elenco. Una foto che scegli a mano da «Scegli la foto» entra nell'elenco da sola.",
+        where: ["Foto del carosello", "Sostituiscile", "Tienile", "Scegli le foto…"],
+      },
+      {
+        title: "«Riscegli le foto» di una slide: niente foto già usate",
+        text: "Con «Slide N» selezionato, «Riscegli le foto» non mette mai foto già presenti in altre slide e propone sempre foto nuove. Se le foto libere non bastano per il modello (o hanno la forma sbagliata) la slide passa a un altro modello dello stesso stile con tante foto quante ce ne sono, e te lo dice. Se non ce n'è nessuna libera non cambia nulla e ti suggerisce di aggiungerne con «Scegli le foto…».",
+        where: ["Aiuto automatico", "Slide N", "Riscegli le foto", "Scegli le foto…"],
+      },
+    ],
+  },
+  {
     version: "0.2.42",
     date: "2026-10-23",
     headline: "Caroselli più semplici: solo foto, solo quelle che segni per i social, e il filtro in libreria",

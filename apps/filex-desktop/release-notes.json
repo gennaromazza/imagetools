@@ -736,6 +736,10 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.43": [
+      "Caroselli già fatti: le foto non segnate «Per i social» rimaste nelle slide non rientrano più tra le foto del carosello; un avviso in alto le mostra con «Sostituiscile» e «Tienile», e una foto scelta a mano entra nell'elenco da sola.",
+      "«Riscegli le foto» di una slide non ripete mai foto già usate: con poche foto libere o di forma sbagliata la slide passa a un altro modello adatto, e senza foto libere ti dice di aggiungerne."
+    ],
     "0.2.42": [
       "Caroselli «Solo foto»: un carosello nuovo contiene solo le tue foto, senza slide di vendita (prenota, domande frequenti, data, recensione, pagine dell'album); le trovi con «Con vendita» o dal gruppo «Vendita e contatti».",
       "Il carosello usa solo le sue «Foto del carosello» (di partenza quelle segnate «Per i social»): Riscegli le foto, Altra variante, cambio di stile e slide nuove non pescano più dal resto dell'album; con «Scegli le foto…» le cambi.",
