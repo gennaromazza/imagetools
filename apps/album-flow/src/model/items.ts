@@ -2,8 +2,8 @@ import type { AlbumArea, AlbumAssetV2, AlbumItem, AlbumSpread, LayoutNode, Sheet
 import { alignFactor, areaOuterRects, insetRect, layoutCells, type Rect } from "../engine/geometry";
 import type { DropTarget } from "../engine/drop";
 import { insertAtNode, insertBeside, leaf, leafIds, naturalRatios, removeLeaf, renameLeaf, type InsertSide } from "../engine/tree";
-import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_SPREADS, MAX_ZOOM, MIN_SHAPE, MIN_ZOOM, STYLE_LIMITS, clampNumber } from "./defaults";
-import { areaCandidates, relayoutArea } from "./areas";
+import { MAX_ITEMS_PER_AREA, MAX_SHAPE, MAX_SPREADS, MAX_ZOOM, MIN_CELL_MM, MIN_SHAPE, MIN_ZOOM, STYLE_LIMITS, clampNumber } from "./defaults";
+import { areaCandidates, relayoutArea, settleCellFloor } from "./areas";
 import { clampAngle, placeItem } from "./placement";
 import { alignChanged, alignedForFit, areaGeometry, assetMap, createItem, findItem, effectiveAspect, hasFreeLayout, isWindowedArea, naturalOptions, needsShapeAlignment, findSpread, itemAspect, mapSpread, normalizeArea, placementStyle, replaceArea, touch, type Project } from "./project";
 import { withNewFreeFrames } from "./layoutLock";
@@ -92,8 +92,23 @@ function removeItemRaw(project: Project, itemId: string): Project {
     replaceArea(spread, found.areaIndex, normalizeArea({ ...found.area, layout, items: found.area.items.filter((item) => item.id !== itemId) })));
 }
 
+/** Toglie le foto dallo spread senza guardare il lucchetto della pagina: serve a chi toglie la foto dall'album (non può restare un riferimento). */
 function removeItemsRaw(project: Project, itemIds: readonly string[]): Project {
-  return itemIds.reduce((current, id) => removeItem(current, id), project);
+  return itemIds.reduce((current, id) => removeItemRaw(current, id), project);
+}
+
+/** Perché «Togli dallo spread» non si può fare (foto bloccata o pagina con il layout bloccato), in una frase; null se si può. */
+export function removeRefusal(project: Project, itemId: string): string | null {
+  const found = findItem(project, itemId);
+  if (!found) return null;
+  if (found.item.locked) return "La foto è bloccata: sbloccala (L) per toglierla dallo spread.";
+  if (found.area.locked) return "Layout bloccato: sbloccalo (lucchetto) per togliere la foto, oppure sostituiscila con un'altra.";
+  return null;
+}
+
+/** Toglie una foto dalla pagina, come «Canc»: non vale per una foto bloccata né per una pagina con il layout bloccato. */
+function removeItemGuarded(project: Project, itemId: string): Project {
+  return removeRefusal(project, itemId) ? project : removeItemRaw(project, itemId);
 }
 
 function exchange(a: AlbumItem, b: AlbumItem): [AlbumItem, AlbumItem] {
@@ -427,7 +442,7 @@ export function moveToNewSpread(project: Project, atIndex: number, source: DropS
   let next = dropOnSpread(created, spreadId, { areaIndex: 0, itemId: null, zone: "area" }, { kind: "assets", assetIds });
   if (source.kind === "item") {
     next = withMovedView(next, spreadId, new Set(), findItem(project, source.itemId)?.item);
-    next = removeItem(next, source.itemId);
+    next = removeItemRaw(next, source.itemId);
   }
   return { project: alignChanged(project, next), spreadId };
 }
@@ -471,7 +486,7 @@ function moveToSpreadRaw(project: Project, spreadId: string, source: DropSource)
   if (next === project) return project;
   if (source.kind === "item") {
     next = withMovedView(next, spreadId, existing, findItem(project, source.itemId)?.item);
-    next = removeItem(next, source.itemId);
+    next = removeItemRaw(next, source.itemId);
   }
   return next;
 }
@@ -572,20 +587,29 @@ export function previewDropRect(
   const previewCells = layoutCells(layout, inner, Math.max(0, area.style.gapCm * 10), undefined, alignFactor(area.style.align)).cells;
   const leaf = previewCells.find((candidate) => candidate.itemId === TMP);
   if (!leaf) return null;
+  // Se la foto lì renderebbe una cella troppo piccola il rilascio ridispone la pagina (vedi `settleCellFloor`): il riquadro esatto non esiste.
+  const smallestOf = (cells: ReadonlyArray<{ rect: Rect }>) => cells.reduce((side, cell) => Math.min(side, cell.rect.w, cell.rect.h), Infinity);
+  const smallestNow = smallestOf(layoutCells(area.layout, inner, Math.max(0, area.style.gapCm * 10), undefined, alignFactor(area.style.align)).cells);
+  if (!area.locked && smallestOf(previewCells) < MIN_CELL_MM && smallestOf(previewCells) < smallestNow - 0.5) return null;
   // «Foto intera» (o area con forme): la foto non riempie la cella, quindi si mostra lo spazio che occuperà davvero (non l'intera cella).
   const style = placementStyle(area, { windowed: isWindowedArea(area, previewCells) });
   if (style.mode === "fit") return placeItem(leaf.rect, { zoom: 1, cx: 0.5, cy: 0.5 }, assets.get(dragged.assetId), style, null, leaf.anchor).content;
   return leaf.rect;
 }
 
-// Ogni operazione che cambia foto o disposizione riallinea le aree in «foto intera» (vedi alignedForFit).
-const aligned = <Args extends unknown[]>(fn: (project: Project, ...args: Args) => Project) => (project: Project, ...args: Args): Project => alignChanged(project, fn(project, ...args));
+// Ogni operazione che cambia foto o disposizione riallinea le aree in «foto intera» (vedi alignedForFit) e, se una cella è diventata
+// troppo piccola per colpa dell'operazione, ridispone le foto della pagina (vedi settleCellFloor).
+const aligned = <Args extends unknown[]>(fn: (project: Project, ...args: Args) => Project) => (project: Project, ...args: Args): Project => settleCellFloor(project, alignChanged(project, fn(project, ...args))).project;
 export const appendAssets = aligned(appendAssetsRaw);
 export const replaceItemAsset = aligned(replaceItemAssetRaw);
-export const removeItem = aligned(removeItemRaw);
+export const removeItem = aligned(removeItemGuarded);
 export const removeItems = aligned(removeItemsRaw);
 export const swapItems = aligned(swapItemsRaw);
-export const dropOnSpread = aligned(dropOnSpreadRaw);
+/** Come `dropOnSpread`, ma dice anche se la pagina è stata ridisposta perché la foto lì sarebbe diventata troppo piccola. */
+export function dropOnSpreadPlanned(project: Project, spreadId: string, target: DropTarget, source: DropSource): { project: Project; rebuilt: boolean } {
+  return settleCellFloor(project, alignChanged(project, dropOnSpreadRaw(project, spreadId, target, source)));
+}
+export const dropOnSpread = (project: Project, spreadId: string, target: DropTarget, source: DropSource): Project => dropOnSpreadPlanned(project, spreadId, target, source).project;
 export const moveToSpread = aligned(moveToSpreadRaw);
 export const moveItemToArea = aligned(moveItemToAreaRaw);
 export const moveFrameToArea = aligned(moveFrameToAreaRaw);

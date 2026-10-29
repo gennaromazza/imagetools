@@ -1,8 +1,9 @@
 import type { SpreadTextOverlay } from "@photo-tools/shared-types";
 import { crossesFold, spreadSizeMm } from "../engine/geometry";
+import { MIN_CELL_MM } from "./defaults";
 import { duplicatedAssetIds, unusedAssets } from "./library";
 import { placeItem } from "./placement";
-import { areaGeometry, assetMap, placementStyle, type Project } from "./project";
+import { areaGeometry, assetMap, hasFreeLayout, placementStyle, type Project } from "./project";
 import { similarityIssues, type LibraryAnalysis } from "./similar";
 import { PROVISIONAL_TEXT_COLOR, contrastRatio } from "./typography";
 
@@ -19,7 +20,7 @@ export interface PreflightReport {
   issues: PreflightIssue[];
   errors: number;
   warnings: number;
-  stats: { spreads: number; photos: number; emptyAreas: number; unused: number; duplicates: number; lowResolution: number; foldCrossings: number; texts: number; textWarnings: number };
+  stats: { spreads: number; photos: number; emptyAreas: number; unused: number; duplicates: number; lowResolution: number; tooSmall: number; foldCrossings: number; texts: number; textWarnings: number };
 }
 
 const PT_MM = 25.4 / 72;
@@ -90,6 +91,7 @@ export function preflightReport(project: Project, analysis?: LibraryAnalysis): P
   let photos = 0;
   let emptyAreas = 0;
   let lowResolution = 0;
+  let tooSmall = 0;
   let foldCrossings = 0;
   let texts = 0;
   let textWarnings = 0;
@@ -119,6 +121,12 @@ export function preflightReport(project: Project, analysis?: LibraryAnalysis): P
           lowResolution += 1;
           issues.push({ level: "warning", message: `${label}: ${asset.fileName} a ${Math.round(placement.dpi)} dpi effettivi (consigliati almeno ${MIN_EFFECTIVE_DPI}).`, spreadIndex, itemId: item.id });
         }
+        // Una foto minuscola (o schiacciata a zero) ha moltissimi dpi, quindi il controllo sopra non la vede: in stampa sparisce.
+        const side = Math.min(placement.content.w, placement.content.h);
+        if (!hasFreeLayout(area) && side < MIN_CELL_MM) {
+          tooSmall += 1;
+          issues.push({ level: "warning", message: `${label}: ${asset.fileName} misura ${side < 1 ? "meno di 1" : Math.round(side)} mm sul lato corto, troppo poco per vedersi in stampa.`, spreadIndex, itemId: item.id });
+        }
         if (crossesFold(cell.rect, foldX)) {
           foldCrossings += 1;
           issues.push({ level: "info", message: `${label}: ${asset.fileName} attraversa la piega centrale.`, spreadIndex, itemId: item.id });
@@ -138,6 +146,6 @@ export function preflightReport(project: Project, analysis?: LibraryAnalysis): P
     issues,
     errors: issues.filter((issue) => issue.level === "error").length,
     warnings: issues.filter((issue) => issue.level === "warning").length,
-    stats: { spreads: project.spreads.length, photos, emptyAreas, unused, duplicates, lowResolution, foldCrossings, texts, textWarnings },
+    stats: { spreads: project.spreads.length, photos, emptyAreas, unused, duplicates, lowResolution, tooSmall, foldCrossings, texts, textWarnings },
   };
 }

@@ -3,12 +3,12 @@ import type { AlbumAssetTag, AlbumProjectV2, AlbumSortKey, AlbumStage, AreaTempl
 import { shapeOfTree } from "../engine/tree";
 import { getDesktop, hasDesktop, openInEditor, refreshChangedFiles, revealInFolder, writeRatingToXmp } from "../desktop/api";
 import { candidatesFromFiles, chooseFolderAndScan, fileKey, scanDroppedPaths } from "../desktop/importer";
-import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, mirrorArea, removeFavoriteLayout, resetDividerRatio, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "../model/areas";
+import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, mirrorArea, removeFavoriteLayout, resetDividerRatio, sanitizeStyle, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "../model/areas";
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
-import { alignArea, appendAssets, dropOnSpread, moveFrameToArea, moveItemToArea, moveRefusal, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
-import { rotateAssetQuarter, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
+import { alignArea, appendAssets, dropOnSpreadPlanned, moveFrameToArea, moveItemToArea, moveRefusal, moveToNewSpread, moveToSpread, removeItem, removeRefusal, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
+import { rotateAssetQuarter, rotationRefusal, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
 import { countItems, findItem, hasFreeLayout, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas, swapRefusal } from "../model/spreads";
 import { STAGES } from "../model/store";
@@ -78,6 +78,8 @@ export interface WorkspaceProps {
 interface Toast { message: string; undo?: boolean }
 
 const EMPTY_IDS: readonly string[] = [];
+/** Dopo un rilascio che avrebbe lasciato la foto troppo piccola: la pagina è stata ridisposta (vedi `settleCellFloor`). */
+const REBUILT_NOTE = "Lì la foto sarebbe diventata troppo piccola: ho ridisposto le foto della pagina.";
 const NO_ALTERNATIVES: ReadonlyMap<string, CellAlternatives> = new Map();
 const NO_SUGGESTIONS: readonly SpreadSuggestion[] = [];
 
@@ -455,17 +457,21 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     dropAssets: (target, ids) => {
       const area = spread?.areas[target.areaIndex];
       if (area?.locked && !(target.zone === "center" && target.itemId)) { notify("Layout bloccato: puoi sostituire una foto (rilascio al centro), ma per aggiungerne sblocca il layout (lucchetto)."); return; }
-      commit((p) => dropOnSpread(p, spreadId, target, { kind: "assets", assetIds: ids }));
+      let rebuilt = false;
+      commit((p) => { const plan = dropOnSpreadPlanned(p, spreadId, target, { kind: "assets", assetIds: ids }); rebuilt = plan.rebuilt; return plan.project; });
       setLibSelection([]); // la selezione non deve restare: il trascinamento successivo porterebbe di nuovo tutte le stesse foto
       setActiveArea(target.areaIndex);
-      if (area && area.items.length + ids.length > 12 && target.zone !== "center") notify("Un'area contiene al massimo 12 foto.");
+      if (rebuilt) notify(`${REBUILT_NOTE}${usedNote(ids, index)}`, true);
+      else if (area && area.items.length + ids.length > 12 && target.zone !== "center") notify("Un'area contiene al massimo 12 foto.");
       else { const note = usedNote(ids, index); if (note) notify(`Foto aggiunta.${note}`, true); }
     },
     dropItem: (target, itemId) => {
       const source = findItem(historyRef.current.present, itemId);
       if ((spread?.areas[target.areaIndex]?.locked && !(target.zone === "center" && target.itemId)) || (source?.area.locked && source.spread.id === spread?.id && !(target.zone === "center" && target.itemId))) { notify("Layout bloccato: puoi scambiare due foto (rilascio al centro), ma per spostarle sblocca il layout (lucchetto)."); return; }
-      commit((p) => dropOnSpread(p, spreadId, target, { kind: "item", itemId }));
+      let rebuilt = false;
+      commit((p) => { const plan = dropOnSpreadPlanned(p, spreadId, target, { kind: "item", itemId }); rebuilt = plan.rebuilt; return plan.project; });
       setActiveArea(target.areaIndex);
+      if (rebuilt) notify(REBUILT_NOTE, true);
     },
     setDraft,
     commitRatio: (i, path, ratio) => { setDraft(null); commit((p) => setDividerRatio(p, spreadId, i, path, ratio), `ratio:${spreadId}:${i}:${path}`); },
@@ -477,6 +483,13 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     },
     style: (i, changes, key, relayout) => {
       commit((p) => setAreaStyle(p, spreadId, i, changes, relayout), key ? `style:${spreadId}:${i}:${key}` : undefined);
+      // Margine, spazio e bordo hanno un massimo che dipende dalla pagina e dal numero di foto: se il valore chiesto è stato fermato, lo si dice.
+      const settled = historyRef.current.present.spreads.find((candidate) => candidate.id === spreadId)?.areas[i]?.style;
+      const requested = spread?.areas[i] ? sanitizeStyle({ ...spread.areas[i].style, ...changes }) : null;
+      if (settled && requested && (["gapCm", "paddingCm", "borderCm"] as const).some((name) => name in changes && Math.abs(settled[name] - requested[name]) > 1e-6)) {
+        notify("Oltre questo valore le foto di questa pagina diventerebbero troppo piccole: l'ho fermato qui.");
+        return;
+      }
       // «Modo» (e spazio, margine, bordo) non riadatta le foto in alcuni casi: lo si dice, invece di sembrare un pulsante rotto.
       const target = spread?.areas[i];
       if (!target || target.items.length === 0 || !("mode" in changes || "gapCm" in changes || "paddingCm" in changes || "borderCm" in changes)) return;
@@ -585,7 +598,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     mirror: (i) => commit((p) => mirrorArea(p, spreadId, i, "horizontal")),
     editItem: (itemId) => { const found = findItem(project, itemId); if (found) void edit(found.item.assetId); },
     removeItem: (itemId) => {
-      if (findItem(project, itemId)?.item.locked) { notify("La foto è bloccata: sbloccala (L) per toglierla dallo spread."); return; }
+      const why = removeRefusal(historyRef.current.present, itemId);
+      if (why) { notify(why); return; }
       commit((p) => removeItem(p, itemId));
       setSelectedItemId(null);
       setCropMode(false);
@@ -595,7 +609,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     rotatePhoto: (itemId, quarter) => {
       const found = findItem(project, itemId);
       if (!found) return;
-      if (found.item.locked) { notify("La foto è bloccata: sbloccala (L) per ruotarla."); return; }
+      const why = rotationRefusal(project, found.item.assetId);
+      if (why) { notify(why); return; }
       commit((p) => rotateAssetQuarter(p, found.item.assetId, quarter));
     },
     toggleLineTool: () => setLineTool((on) => !on),
@@ -879,8 +894,12 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     onRemove: (ids: string[]) => { commit((p) => removeAssets(p, ids)); setLibSelection([]); notify(`${ids.length === 1 ? "Foto rimossa" : `${ids.length} foto rimosse`} dall'album (i file restano sul disco).`, true); },
     onLocalize: localize,
     onRotate: (assetIds: string[], quarter: 1 | -1) => {
-      commit((p) => assetIds.reduce((current, id) => rotateAssetQuarter(current, id, quarter), p));
-      notify(`${assetIds.length === 1 ? "Foto ruotata" : `${assetIds.length} foto ruotate`} di 90° a ${quarter === 1 ? "destra" : "sinistra"}.`, true);
+      // Una foto bloccata in uno spread non si ruota (la rotazione vale per il file, quindi cambierebbe anche quel punto).
+      const allowed = assetIds.filter((id) => !rotationRefusal(historyRef.current.present, id));
+      if (allowed.length === 0) { notify(rotationRefusal(historyRef.current.present, assetIds[0]) ?? "Nessuna foto da ruotare."); return; }
+      commit((p) => allowed.reduce((current, id) => rotateAssetQuarter(current, id, quarter), p));
+      const skipped = assetIds.length - allowed.length;
+      notify(`${allowed.length === 1 ? "Foto ruotata" : `${allowed.length} foto ruotate`} di 90° a ${quarter === 1 ? "destra" : "sinistra"}.${skipped ? ` ${skipped === 1 ? "Una non è stata ruotata perché è bloccata" : `${skipped} non sono state ruotate perché sono bloccate`} in uno spread.` : ""}`, true);
     },
     onSetCover: (assetId: string) => { commit((p) => setCoverAsset(p, assetId)); notify("Copertina del progetto impostata: la vedi nella Home.", true); },
     onSetSort: (key: AlbumSortKey) => commit((p) => setSortKey(p, key)),

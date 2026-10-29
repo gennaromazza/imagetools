@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AlbumAssetTag, AlbumSortKey, AlbumSplitMode, AreaStyle } from "@photo-tools/shared-types";
-import type { DropTarget } from "../engine/drop";
+import { resolveDropTarget, type DropArea, type DropTarget } from "../engine/drop";
 import { mulberry32 } from "../engine/rng";
 import { applyFavoriteLayout, applyCandidateByNumber, applyStyleToAlbum, applyStyleToSpread, favoritesFor, mirrorArea, resetDividerRatio, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "./areas";
 import { DEFAULT_AUTO_BUILD, autoBuildAlbum, fillSpread } from "./autobuild";
@@ -13,10 +13,10 @@ import { cropFrameTo, visibleFrame } from "./freeCrop";
 import { makeAreaFree, restoreAutomatic, setAreaLocked } from "./layoutLock";
 import { applyImport, dedupeRawJpgPairs, planImport, type ImportCandidate } from "./import";
 import { alignArea, appendAssets, dropOnSpread, moveFrameToArea, moveItemToArea, moveToNewSpread, moveToSpread, removeItem, replaceItemAsset, resetItemView, setItemBorder, setItemView, swapItems, toggleItemLock } from "./items";
-import { assetUsage, duplicatedAssetIds, removeAssets, reorderAssets, setRating, setSortKey, sortAssets, toggleAssetTag, unusedAssets } from "./library";
+import { assetUsage, duplicatedAssetIds, removeAssets, reorderAssets, rotateAssetQuarter, setRating, setSortKey, sortAssets, toggleAssetTag, unusedAssets } from "./library";
 import { parseAlbumProject, serializeAlbumProject } from "./portability";
 import { preflightReport } from "./preflight";
-import { areaGeometry, createEmptyProject, type Project } from "./project";
+import { areaGeometry, createEmptyProject, hasFreeLayout, type Project } from "./project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, removeSpread, setSpreadDone, setSplitMode, swapAreas } from "./spreads";
 import { insertPhrase, replaceWithPhrase, suggestStoryForSpread } from "./story";
 import { analyzeLibrary, cycleAlternative } from "./similar";
@@ -414,6 +414,22 @@ const OPERATIONS: Operation[] = [
       return dropOnSpread(p, spread.id, target, { kind: "item", itemId: source.id });
     },
   },
+  {
+    // Come l'interfaccia: un punto qualunque dello spread diventa il bersaglio del rilascio (centro, bordo, tra due foto, bordo dell'area, spazio vuoto).
+    name: "rilascia da un punto del foglio",
+    run: (p, r) => {
+      const spread = maybe(r, p.spreads);
+      if (!spread || p.assets.length === 0) return p;
+      const areas: DropArea[] = spread.areas.map((area, index) => { const g = areaGeometry(p, spread, index); return { rect: g.outer, cells: g.cells, dividers: g.dividers, free: hasFreeLayout(area) }; });
+      const target = resolveDropTarget(areas, r() * p.settings.sheet.widthCm * 20, r() * p.settings.sheet.heightCm * 10);
+      if (!target) return p;
+      const items = spread.areas.flatMap((area) => area.items);
+      const dragged = items.length > 0 && r() < 0.4 ? pick(r, items) : null;
+      if (dragged && target.itemId === dragged.id) return p;
+      return dropOnSpread(p, spread.id, target, dragged ? { kind: "item", itemId: dragged.id } : { kind: "assets", assetIds: [pick(r, p.assets).id] });
+    },
+  },
+  { name: "ruota una foto", run: (p, r) => { const asset = maybe(r, p.assets); return asset ? rotateAssetQuarter(p, asset.id, r() < 0.5 ? 1 : -1) : p; } },
   { name: "togli foto", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? removeItem(p, entry.item.id) : p; } },
   {
     name: "scambia due foto",

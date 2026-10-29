@@ -27,7 +27,12 @@ export function setAreaLocked(project: Project, spreadId: string, areaIndex: num
   const area = found?.spread.areas[areaIndex];
   if (!found || !area || isAreaLocked(area) === locked) return project;
   const { locked: _old, ...rest } = area;
-  return touch(mapSpread(project, spreadId, (spread) => replaceArea(spread, areaIndex, locked ? { ...rest, locked: true } : rest)));
+  if (locked) return touch(mapSpread(project, spreadId, (spread) => replaceArea(spread, areaIndex, { ...rest, locked: true })));
+  // Sbloccando, le foto si riallineano: con il lucchetto una forma scelta o un bordo cambiato non spostavano le altre foto (e l'interfaccia promette
+  // che lo sblocco le sistema). Uno spread finito non si riadatta, come per lo stile.
+  const { inner, gapMm } = areaGeometryFor(project.settings.sheet, replaceArea(found.spread, areaIndex, rest), areaIndex);
+  const settled = found.spread.done ? rest : alignedForFit(project, rest, inner, gapMm);
+  return touch(mapSpread(project, spreadId, (spread) => replaceArea(spread, areaIndex, settled)));
 }
 
 /** Blocca o sblocca la pagina sinistra, la destra o tutto il foglio. */

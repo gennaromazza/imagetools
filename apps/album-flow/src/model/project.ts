@@ -190,6 +190,16 @@ export function spreadGeometry(project: Project, spread: AlbumSpread, overrides?
   return spread.areas.map((_, index) => areaGeometry(project, spread, index, overrides?.[index]));
 }
 
+/**
+ * Lato più corto (mm) tra le celle di un'area; Infinity se l'area è vuota o libera (le cornici libere le decide chi impagina).
+ * Misura la cella, non la finestra della foto: in «foto intera» le due coincidono a meno del bordo.
+ */
+export function smallestCellMm(project: Project, spread: AlbumSpread, areaIndex: number): number {
+  const area = spread.areas[areaIndex];
+  if (!area || area.items.length === 0 || hasFreeLayout(area)) return Infinity;
+  return areaGeometry(project, spread, areaIndex).cells.reduce((side, cell) => Math.min(side, cell.rect.w, cell.rect.h), Infinity);
+}
+
 /** Foto di un'area, nell'ordine di lettura, con le proporzioni per il generatore di layout. */
 export function areaPhotos(project: Project, area: AlbumArea): LayoutPhoto[] {
   const assets = assetMap(project);

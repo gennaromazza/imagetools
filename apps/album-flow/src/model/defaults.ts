@@ -42,6 +42,10 @@ export const MIN_SHAPE = 0.2;
 export const MAX_SHAPE = 5;
 export const MAX_ITEMS_PER_AREA = 12;
 export const MAX_SPREADS = 400;
+/** Lato più corto (mm) sotto cui la cella di una foto non è più utilizzabile: i layout fatti a mano non scendono sotto questa soglia se un altro layout lo evita. */
+export const MIN_CELL_MM = 15;
+/** Lato più corto (mm) che l'area utile di una pagina deve conservare: il margine non la riduce oltre. */
+export const MIN_INNER_MM = 50;
 
 export function clampNumber(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) return min;

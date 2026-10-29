@@ -1,19 +1,32 @@
 import type { AlbumArea, AlbumItem, AlbumSpread, AreaStyle, AreaTemplate, FavoriteLayout, LayoutNode } from "@photo-tools/shared-types";
-import { MAX_RATIO, MIN_RATIO, alignFactor, clampRatio, layoutCells, type LeafCell } from "../engine/geometry";
+import { MAX_RATIO, MIN_RATIO, alignFactor, areaOuterRects, clampRatio, layoutCells, type LeafCell } from "../engine/geometry";
 import { generateLayoutsCached, type LayoutCandidate } from "../engine/generate";
 import { applyShape, countLeaves, leafIds, mirrorHorizontal, mirrorVertical, naturalRatios, nodeAt, setRatioAt, shapeOfTree } from "../engine/tree";
-import { MAX_ZOOM, STYLE_LIMITS, clampNumber } from "./defaults";
+import { MAX_ZOOM, MIN_CELL_MM, MIN_INNER_MM, STYLE_LIMITS, clampNumber } from "./defaults";
 import { baseCrop, cropCenter, cropForView } from "../slot-geometry";
 import { newId } from "./ids";
 import { placeItem } from "./placement";
 import { orientationOf } from "./import";
 import { finishTemplateArea, matchTemplates, templateArea, type TemplateMatch } from "./templates";
-import { alignChanged, alignedForFit, areaGeometry, fitShapedCells, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, itemAspect, mapSpread, naturalOptions, needsShapeAlignment, normalizeArea, placementStyle, replaceArea, touch, findSpread, type Project } from "./project";
+import { alignChanged, alignedForFit, areaGeometry, fitShapedCells, areaPhotos, assetMap, effectiveAspect, hasFreeLayout, itemAspect, mapSpread, naturalOptions, needsShapeAlignment, normalizeArea, placementStyle, replaceArea, smallestCellMm, touch, findSpread, type Project } from "./project";
 
 const MAX_CANDIDATES = 24;
 
-/** Layout candidati (dal migliore) per un'area, calcolati sulle foto attuali e sullo stile dell'area. */
+/**
+ * Layout candidati (dal migliore) per un'area, calcolati sulle foto attuali e sullo stile dell'area.
+ * Un candidato con una cella di meno di 1 mm (con tante foto e lo spazio al massimo, o foto molto allungate) non è un layout: la foto sparirebbe.
+ * Si scarta, a meno che non ne restino altri.
+ */
 export function areaCandidates(project: Project, spread: AlbumSpread, areaIndex: number, limit = MAX_CANDIDATES): LayoutCandidate[] {
+  const all = rawAreaCandidates(project, spread, areaIndex, limit);
+  if (all.length < 2) return all;
+  const { inner, gapMm } = areaGeometry(project, spread, areaIndex);
+  const align = alignFactor(spread.areas[areaIndex].style.align);
+  const sound = all.filter((candidate) => layoutCells(candidate.tree, inner, gapMm, undefined, align).cells.every((cell) => Math.min(cell.rect.w, cell.rect.h) >= 1));
+  return sound.length > 0 ? sound : all;
+}
+
+function rawAreaCandidates(project: Project, spread: AlbumSpread, areaIndex: number, limit = MAX_CANDIDATES): LayoutCandidate[] {
   const area = spread.areas[areaIndex];
   if (!area || area.items.length === 0) return [];
   const geometry = areaGeometry(project, spread, areaIndex);
@@ -109,6 +122,51 @@ export function keepCrops(project: Project, spread: AlbumSpread, areaIndex: numb
   return changed ? { ...next, items } : next;
 }
 
+/**
+ * Rete di sicurezza dei layout fatti a mano: rilasciare foto sul bordo, scambiarle o cambiare le proporzioni può schiacciare una cella
+ * fino a pochi millimetri (o a zero, e la foto sparisce). Se un'area è scesa sotto `MIN_CELL_MM` per colpa di questa operazione, le stesse
+ * foto, nello stesso ordine, si ridispongono con il primo layout calcolato che le tiene sopra la soglia (o, se nessuno ci riesce, con quello
+ * che le tiene più grandi). Un'area che non peggiora, bloccata, libera o con una sola foto non cambia: non si corregge ciò che non si è toccato.
+ * `from` è lo spread com'era prima, per conservare il ritaglio fatto a mano.
+ */
+export function ensureCellFloor(project: Project, spread: AlbumSpread, areaIndex: number, before: number, from: AlbumSpread = spread): AlbumArea {
+  const area = spread.areas[areaIndex];
+  if (!area || area.locked || area.items.length < 2 || hasFreeLayout(area)) return area;
+  const current = smallestCellMm(project, spread, areaIndex);
+  if (current >= MIN_CELL_MM || current >= before - 0.5) return area;
+  const candidates = areaCandidates(project, spread, areaIndex);
+  let best: AlbumArea | null = null;
+  let bestSide = current;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = keepCrops(project, spread, areaIndex, normalizeArea({ ...area, layout: candidates[index].tree, seed: index, free: undefined }), from);
+    const side = smallestCellMm(project, replaceArea(spread, areaIndex, candidate), areaIndex);
+    if (side > bestSide + 0.5) { best = candidate; bestSide = side; if (side >= MIN_CELL_MM) break; }
+  }
+  return best ?? area;
+}
+
+/**
+ * Applica `ensureCellFloor` alle aree cambiate da un'operazione (`after` rispetto a `before`). `rebuilt` dice se almeno un'area è stata
+ * ridisposta, così l'interfaccia può spiegarlo invece di far sembrare il rilascio ignorato.
+ */
+export function settleCellFloor(before: Project, after: Project): { project: Project; rebuilt: boolean } {
+  if (after === before) return { project: after, rebuilt: false };
+  let rebuilt = false;
+  const spreads = after.spreads.map((spread) => {
+    const old = before.spreads.find((candidate) => candidate.id === spread.id);
+    const areas = spread.areas.map((area, index) => {
+      const previous = old?.areas[index];
+      if (previous === area) return area;
+      const was = old && previous && previous.id === area.id ? smallestCellMm(before, old, index) : Infinity;
+      const fixed = ensureCellFloor(after, spread, index, was, old ?? spread);
+      if (fixed !== area) rebuilt = true;
+      return fixed;
+    });
+    return areas.some((area, index) => area !== spread.areas[index]) ? { ...spread, areas } : spread;
+  });
+  return rebuilt ? { project: { ...after, spreads }, rebuilt } : { project: after, rebuilt };
+}
+
 /** I template dell'utente hanno un seme a parte: 1000 + posizione tra i template adatti. */
 export const TEMPLATE_SEED_BASE = 1000;
 
@@ -201,6 +259,45 @@ export function sanitizeStyle(style: AreaStyle): AreaStyle {
 }
 
 /**
+ * Il margine e lo spazio tra le foto che una pagina può davvero avere. I limiti dei cursori (spazio fino a 3 cm, margine fino a 10 cm) valgono per
+ * qualunque pagina, ma su un terzo di foglio o con dodici foto portano le celle a zero millimetri. Un aumento si ferma quindi al valore più alto che
+ * lascia all'area utile almeno `MIN_INNER_MM` per lato e a ogni cella almeno `MIN_CELL_MM` (o quanto lasciava già il valore di prima, se era meno).
+ * Le diminuzioni passano sempre. `wanted` è lo stile già ripulito da `sanitizeStyle`.
+ */
+const LIMITED_KEYS = ["gapCm", "paddingCm", "borderCm"] as const;
+export function usableStyle(project: Project, spread: AlbumSpread, areaIndex: number, wanted: AreaStyle): AreaStyle {
+  const area = spread.areas[areaIndex];
+  if (!area) return wanted;
+  let style = wanted;
+  const outer = areaOuterRects(project.settings.sheet, spread.split)[areaIndex];
+  if (outer && style.paddingCm > area.style.paddingCm) {
+    const room = Math.floor(((Math.min(outer.w, outer.h) - MIN_INNER_MM) / 20) * 10) / 10;
+    if (style.paddingCm > room) style = { ...style, paddingCm: Math.max(area.style.paddingCm, room) };
+  }
+  if (area.items.length < 2 || hasFreeLayout(area)) return style;
+  // La cella più piccola con questo stile, con le divisioni già riallineate come farà `adaptToMode`.
+  const sideWith = (candidateStyle: AreaStyle): number => {
+    const candidate: AlbumArea = { ...area, style: candidateStyle };
+    const { inner, gapMm } = areaGeometry(project, replaceArea(spread, areaIndex, candidate), areaIndex);
+    const settled = alignedForFit(project, candidate, inner, gapMm, area.style.mode === candidateStyle.mode);
+    return smallestCellMm(project, replaceArea(spread, areaIndex, settled), areaIndex);
+  };
+  const required = Math.min(MIN_CELL_MM, sideWith(area.style));
+  for (const key of LIMITED_KEYS) {
+    if (!(style[key] > area.style[key]) || sideWith(style) >= required - 1e-6) continue;
+    let low = area.style[key];
+    let high = style[key];
+    for (let step = 0; step < 14; step += 1) {
+      const mid = (low + high) / 2;
+      if (sideWith({ ...style, [key]: mid }) >= required - 1e-6) low = mid; else high = mid;
+    }
+    const grid = STYLE_LIMITS[key].step;
+    style = { ...style, [key]: Math.max(area.style[key], Number((Math.floor(low / grid + 1e-9) * grid).toFixed(2))) };
+  }
+  return style;
+}
+
+/**
  * Quando cambia lo stile la disposizione resta la stessa, ma le foto restano allineate: con «riempi» le celle occupano tutto lo
  * spazio, con la foto intera le divisioni si regolano sulle proporzioni delle foto e dipendono anche da spazio tra le foto, margine,
  * bordo e allineamento, quindi si ricalcolano quando uno di questi cambia (non solo il modo).
@@ -225,10 +322,16 @@ export function setAreaStyle(project: Project, spreadId: string, areaIndex: numb
   return mapSpread(project, spreadId, (spread) => {
     if (!spread.areas[areaIndex]) return spread;
     const targets = spread.linked ? spread.areas.map((_, index) => index) : [areaIndex];
+    const usable = new Map(targets.map((index) => [index, usableStyle(project, spread, index, sanitizeStyle({ ...spread.areas[index].style, ...changes }))] as const));
+    // Con le pagine collegate gli stili restano uguali: vale il limite più stretto delle due.
+    if (spread.linked) for (const key of LIMITED_KEYS) if (key in changes) {
+      const common = Math.min(...targets.map((index) => usable.get(index)![key]));
+      for (const index of targets) usable.set(index, { ...usable.get(index)!, [key]: common });
+    }
     let changed = false;
     const areas = spread.areas.map((area, index) => {
       if (!targets.includes(index)) return area;
-      const style = sanitizeStyle({ ...area.style, ...changes });
+      const style = usable.get(index)!;
       if (JSON.stringify(style) === JSON.stringify(area.style)) return area;
       changed = true;
       return { ...area, style };
@@ -255,7 +358,7 @@ export function applyStyleToSpread(project: Project, spreadId: string, areaIndex
   return mapSpread(project, spreadId, (spread) => {
     const source = spread.areas[areaIndex]?.style;
     if (!source) return spread;
-    return adaptToMode(project, { ...spread, areas: spread.areas.map((area) => ({ ...area, style: { ...source } })) }, spread);
+    return adaptToMode(project, { ...spread, areas: spread.areas.map((area, index) => ({ ...area, style: usableStyle(project, spread, index, { ...source }) })) }, spread);
   });
 }
 
@@ -266,7 +369,7 @@ export function applyStyleToAlbum(project: Project, spreadId: string, areaIndex:
   return touch({
     ...project,
     settings: { ...project.settings, defaultStyle: { ...source } },
-    spreads: project.spreads.map((spread) => adaptToMode(project, { ...spread, areas: spread.areas.map((area) => ({ ...area, style: { ...source } })) }, spread)),
+    spreads: project.spreads.map((spread) => adaptToMode(project, { ...spread, areas: spread.areas.map((area, index) => ({ ...area, style: usableStyle(project, spread, index, { ...source }) })) }, spread)),
   });
 }
 
@@ -422,11 +525,11 @@ export function setAlbumGap(project: Project, gapCm: number): { project: Project
   const spreads = project.spreads.map((spread) => {
     if (spread.done) return spread;
     let changed = false;
-    const areas = spread.areas.map((area) => {
+    const areas = spread.areas.map((area, index) => {
       if (Math.abs(area.style.gapCm - previous) > 1e-9) return area;
       changed = true;
       updated += 1;
-      return { ...area, style: { ...area.style, gapCm: next } };
+      return { ...area, style: usableStyle(project, spread, index, { ...area.style, gapCm: next }) };
     });
     return changed ? { ...spread, areas } : spread;
   });

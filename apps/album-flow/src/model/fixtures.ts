@@ -125,6 +125,8 @@ export function assertProjectInvariants(project: Project, label = ""): void {
       const overlapAllowed = hasFreeLayout(area);
       geometry.cells.forEach((cell, i) => {
         assert.ok(cell.rect.w > 0 && cell.rect.h > 0, `${where}: cella vuota`);
+        // Una cella di meno di 1 mm non si vede e non si stampa: la foto sparirebbe (le cornici libere le decide la persona).
+        if (!overlapAllowed) assert.ok(Math.min(cell.rect.w, cell.rect.h) >= 1, `${where}: cella schiacciata a ${Math.min(cell.rect.w, cell.rect.h).toFixed(2)} mm`);
         if (overlapAllowed) assertMostlyInside(geometry.inner, cell.rect, where);
         else assertInside(geometry.inner, cell.rect, where);
         const item = area.items.find((candidate) => candidate.id === cell.itemId)!;

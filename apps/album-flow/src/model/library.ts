@@ -194,12 +194,25 @@ export function removeAssets(project: Project, assetIds: readonly string[]): Pro
 }
 
 /**
+ * Perché una foto non si può ruotare, in una frase; null se si può. La rotazione vale per il file, quindi per ogni punto dell'album in cui compare:
+ * se in uno qualunque la foto è bloccata, la rotazione la cambierebbe di nascosto (altra proporzione, altro ritaglio).
+ */
+export function rotationRefusal(project: Project, assetId: string): string | null {
+  for (const [spreadIndex, spread] of project.spreads.entries()) {
+    if (spread.areas.some((area) => area.items.some((item) => item.assetId === assetId && item.locked))) {
+      return `La foto è bloccata nello spread ${spreadIndex + 1}: sbloccala (L) per ruotarla.`;
+    }
+  }
+  return null;
+}
+
+/**
  * Ruota una foto di un quarto di giro (1 = in senso orario, -1 = antiorario) dappertutto: libreria, spread ed esportazione.
  * Le inquadrature seguono la foto: il centro del ritaglio ruota con l'immagine; zoom, raddrizzamento e forma restano quelli scelti.
  */
 export function rotateAssetQuarter(project: Project, assetId: string, quarter: 1 | -1): Project {
   const asset = project.assets.find((candidate) => candidate.id === assetId);
-  if (!asset) return project;
+  if (!asset || rotationRefusal(project, assetId)) return project;
   const rotationDegrees = ((((asset.rotationDegrees ?? 0) + 90 * quarter) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
   const round = (value: number) => Number(Math.min(1, Math.max(0, value)).toFixed(5));
   const turn = (cx: number, cy: number): [number, number] => (quarter === 1 ? [1 - cy, cx] : [cy, 1 - cx]);
