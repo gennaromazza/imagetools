@@ -21,6 +21,38 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.45",
+    date: "2026-10-29",
+    headline: "Impaginare a mano non schiaccia più le foto, e il lucchetto vale davvero",
+    items: [
+      {
+        title: "Nessuna foto schiacciata a pochi millimetri",
+        text: "Quando riempi una pagina trascinando foto sul bordo o tra due foto, o ne scambi due, nessuna foto scende sotto 15 mm di lato. Se un rilascio la ridurrebbe troppo, Album Flow ridispone le foto della pagina e te lo dice (puoi annullare). Prima una foto poteva restare di pochi millimetri o sparire in stampa.",
+        where: ["Trascina una foto sullo spread", "Scambia due foto"],
+      },
+      {
+        title: "Margine e spazio si fermano dove le foto restano visibili",
+        text: "Il margine e lo spazio tra le foto hanno un massimo che dipende dalla pagina e da quante foto contiene: oltre, le foto diventerebbero troppo piccole e il valore si ferma lì, con un messaggio. Diminuire funziona sempre.",
+        where: ["Spazio tra le foto", "Margine attorno alle foto"],
+      },
+      {
+        title: "Il lucchetto protegge davvero la pagina",
+        text: "Con il layout bloccato «Togli dallo spread» (Canc) non toglie più foto dalla pagina: puoi sostituirle o scambiarle, e per toglierle sblocchi il layout. Quando sblocchi, le foto in «foto intera» si riallineano da sole (non negli spread segnati come finiti).",
+        where: ["Layout della pagina", "Proteggi il layout", "Togli dallo spread (Canc)"],
+      },
+      {
+        title: "Una foto bloccata non si ruota di nascosto",
+        text: "La rotazione vale per il file, quindi cambiava anche gli altri spread dove la foto era bloccata. Ora, se la foto è bloccata in un qualunque spread, non si ruota e il messaggio dice dove; le altre foto selezionate si ruotano.",
+        where: ["Ruota la foto di 90° a sinistra", "Ruota a destra (90°)"],
+      },
+      {
+        title: "Avviso prima di esportare",
+        text: "Il controllo prima dell'export segnala le foto che misurano meno di 15 mm sul lato corto: prima una foto minuscola non veniva vista, perché ha moltissimi dpi.",
+        where: ["Esporta"],
+      },
+    ],
+  },
+  {
     version: "0.2.44",
     date: "2026-10-27",
     headline: "«Riscegli le foto» usa sempre le foto segnate, e se non bastano si riducono le slide",

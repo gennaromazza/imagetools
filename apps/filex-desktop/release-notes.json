@@ -736,6 +736,12 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.45": [
+      "Corretto: riempiendo una pagina a mano (rilasci sul bordo o tra due foto, scambi) una foto poteva restare di pochi millimetri o sparire in stampa. Ora nessuna foto scende sotto 15 mm: se un gesto la ridurrebbe troppo, le foto della pagina si ridispongono e un messaggio lo spiega.",
+      "Corretto: margine, spazio tra le foto e bordo si fermano al massimo che la pagina e le sue foto permettono, invece di portare le celle a zero; diminuire funziona sempre.",
+      "Corretto: «Togli dallo spread» (Canc) rispetta il lucchetto della pagina; sbloccare riallinea le foto in «foto intera»; una foto bloccata in un qualunque spread non si ruota.",
+      "Migliorato: il controllo prima dell'export avvisa delle foto sotto i 15 mm sul lato corto."
+    ],
     "0.2.44": [
       "«Riscegli le foto» usa sempre e soltanto le foto segnate «Per i social» di adesso, anche per la singola slide; le foto aggiunte a mano e non segnate non rientrano.",
       "Se le foto segnate non bastano per le slide, «Riscegli le foto» riduce il numero di slide invece di ripetere foto, e te lo dice; con foto in abbondanza il numero resta."

@@ -32,6 +32,16 @@
 
 
 
+## 2026-10-29 - Album Flow 0.2.45
+
+- Corretto: riempiendo una pagina a mano (rilasci sul bordo o tra due foto, scambi, aggiunte) le foto potevano ridursi a pochi millimetri o a zero e sparire in stampa senza alcun avviso: nelle prove con «foto intera» su mezza pagina, con 8 foto una cella scendeva sotto i 2 cm nel 61% dei casi e a 12 foto circa una volta su trenta arrivava a 0 mm. Ora nessuna cella scende sotto 15 mm (`MIN_CELL_MM`) per colpa di un gesto: se succederebbe, le stesse foto, nello stesso ordine, si ridispongono con il primo layout calcolato che rispetta la soglia (`settleCellFloor`, chiamato da `aligned`; `dropOnSpreadPlanned` dice se è successo) e un messaggio lo spiega. Non tocca pagine bloccate, libere o non peggiorate dal gesto. `areaCandidates` scarta inoltre i candidati con una cella sotto 1 mm.
+- Corretto: margine, spazio tra le foto e bordo avevano limiti validi per qualunque pagina (spazio fino a 3 cm, margine fino a 10 cm): su un terzo di foglio o con dodici foto portavano le celle a zero. Ora un aumento si ferma dove l'area utile resta di almeno 5 cm per lato e nessuna cella scende sotto soglia (`usableStyle`); vale anche con le pagine collegate e con «Applica a tutto l'album». Le diminuzioni passano sempre e, se il valore è stato fermato, un messaggio lo dice.
+- Corretto: «Togli dallo spread» (Canc) ignorava il lucchetto della pagina e richiudeva il layout bloccato (`removeRefusal`). Togliere la foto dall'album la toglie comunque anche dalle pagine bloccate.
+- Corretto: sbloccare una pagina non riallineava le foto, anche se il messaggio di una forma scelta a pagina bloccata dice «sblocca per riallinearle». Ora le foto in «foto intera» si riallineano (come con «Allinea foto»); non nello spread segnato come finito.
+- Corretto: ruotare una foto la ruotava anche negli altri spread dove era bloccata. Ora una foto bloccata in un qualunque spread non si ruota (`rotationRefusal`); dalla libreria le altre foto selezionate si ruotano e il messaggio dice quante sono state saltate.
+- Migliorato: il controllo prima dell'export avvisa delle foto che misurano meno di 15 mm sul lato corto (`stats.tooSmall`): prima una foto minuscola aveva moltissimi dpi e il controllo non la vedeva.
+- Test: `manual.test.ts` (`test:album-flow-manual`, nella Dev Console) riempie pagine con 160 prove di rilasci in punti casuali, prova scambi in pagine fitte, stili estremi, lucchetto, sblocco, rotazione e controllo prima dell'export; il fuzz di `scenarios.test.ts` ha due operazioni in più (rilascio da un punto del foglio, rotazione) e gli invarianti rifiutano celle sotto 1 mm.
+
 ## 2026-10-27 - Album Flow 0.2.44
 
 - Corretto: «Riscegli le foto» usa sempre e soltanto le foto segnate «Per i social» di adesso, anche se il carosello aveva un elenco più largo (foto aggiunte a mano e non segnate non rientrano) o più stretto (le segnate lasciate fuori tornano). Solo se nessuna foto è segnata pesca tra le foto del carosello. Dopo la riscelta la lista del carosello torna quella di partenza (le segnate).
