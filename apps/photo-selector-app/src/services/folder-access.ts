@@ -6,6 +6,7 @@ import type {
 } from "@photo-tools/desktop-contracts";
 import type { ImageAsset } from "@photo-tools/shared-types";
 import { preloadImageUrls } from "./image-cache";
+import { groupEntriesByBaseName } from "./raw-jpg-pairing";
 import {
   getDesktopRecentFolders,
   removeDesktopRecentFolder,
@@ -567,113 +568,6 @@ export function remapAssetStoresForRename(
   if (companionFileName !== undefined) {
     assetCompanionFileNameStore.set(newId, companionFileName);
   }
-}
-
-function getEntryParentPath(relativePath: string): string {
-  const idx = relativePath.lastIndexOf("/");
-  return idx >= 0 ? relativePath.slice(0, idx) : "";
-}
-
-function getEntryBaseName(name: string): string {
-  const idx = name.lastIndexOf(".");
-  return (idx >= 0 ? name.slice(0, idx) : name).toLowerCase();
-}
-
-interface EntryGroup {
-  primary: FolderEntry;
-  companion?: FolderEntry;
-}
-
-function groupEntriesByBaseName(entries: FolderEntry[]): EntryGroup[] {
-  // Bucket by parent path + base name (case-insensitive). Within a bucket,
-  // a JPG/JPEG entry pairs with a RAW entry to form a single grouped asset
-  // (JPG as primary, RAW as companion). Any other entries pass through as
-  // singletons preserving original order.
-  type Bucket = { jpgs: FolderEntry[]; raws: FolderEntry[]; others: FolderEntry[] };
-  const bucketByKey = new Map<string, Bucket>();
-  const bucketKeyOrder: string[] = [];
-  const orderIndex = new Map<FolderEntry, number>();
-
-  entries.forEach((entry, index) => {
-    orderIndex.set(entry, index);
-    const parent = getEntryParentPath(entry.relativePath);
-    const base = getEntryBaseName(entry.name);
-    const key = `${parent.toLowerCase()}::${base}`;
-    let bucket = bucketByKey.get(key);
-    if (!bucket) {
-      bucket = { jpgs: [], raws: [], others: [] };
-      bucketByKey.set(key, bucket);
-      bucketKeyOrder.push(key);
-    }
-
-    const ext = extOf(entry.name);
-    if (ext === ".jpg" || ext === ".jpeg") {
-      bucket.jpgs.push(entry);
-    } else if (RAW_EXTENSIONS.has(ext)) {
-      bucket.raws.push(entry);
-    } else {
-      bucket.others.push(entry);
-    }
-  });
-
-  const groupsByPrimary = new Map<FolderEntry, EntryGroup>();
-
-  for (const key of bucketKeyOrder) {
-    const bucket = bucketByKey.get(key)!;
-    const usedRaws = new Set<FolderEntry>();
-    // Pair each JPG with the first unused RAW in the same bucket.
-    for (const jpg of bucket.jpgs) {
-      const companionRaw = bucket.raws.find((raw) => !usedRaws.has(raw));
-      if (companionRaw) {
-        usedRaws.add(companionRaw);
-        groupsByPrimary.set(jpg, { primary: jpg, companion: companionRaw });
-      } else {
-        groupsByPrimary.set(jpg, { primary: jpg });
-      }
-    }
-    for (const raw of bucket.raws) {
-      if (!usedRaws.has(raw)) {
-        groupsByPrimary.set(raw, { primary: raw });
-      }
-    }
-    for (const other of bucket.others) {
-      groupsByPrimary.set(other, { primary: other });
-    }
-  }
-
-  // Emit groups in original file order so existing sorts and prefetch logic
-  // remain stable for users who added a RAW companion mid-folder.
-  const ordered: EntryGroup[] = [];
-  const emitted = new Set<FolderEntry>();
-  for (const entry of entries) {
-    const group = groupsByPrimary.get(entry);
-    if (!group || group.primary !== entry || emitted.has(group.primary)) {
-      continue;
-    }
-    emitted.add(group.primary);
-    if (group.companion) {
-      emitted.add(group.companion);
-    }
-    ordered.push(group);
-  }
-
-  // Sanity-check: anything not yet emitted (companion before primary in iteration
-  // order, or unexpected duplicates) is appended as a standalone group.
-  for (const entry of entries) {
-    if (!emitted.has(entry)) {
-      const group = groupsByPrimary.get(entry);
-      if (group && group.primary === entry) {
-        emitted.add(entry);
-        if (group.companion) emitted.add(group.companion);
-        ordered.push(group);
-      }
-    }
-  }
-
-  ordered.sort((left, right) =>
-    (orderIndex.get(left.primary) ?? 0) - (orderIndex.get(right.primary) ?? 0));
-
-  return ordered;
 }
 
 export function getAssetCompanionAbsolutePath(assetId: string): string | null {

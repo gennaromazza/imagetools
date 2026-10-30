@@ -32,6 +32,13 @@
 
 
 
+## 2026-10-30 - Image Select Pro 0.1.54
+
+- Corretto: RAW e JPG della stessa foto tenuti in cartelle diverse (per esempio «RAW» e «JPG») comparivano come due schede separate, perché l'abbinamento funzionava solo con i due file nella stessa cartella. Ora l'abbinamento vale anche tra cartelle diverse e lo scatto resta una sola scheda con il badge «RAW + JPG» (`groupEntriesByBaseName`).
+- Prudenza: tra cartelle diverse il nome uguale non basta, perché il contatore di una fotocamera può ripartire (IMG_0001 in due servizi diversi). I due file si uniscono solo se sono gli unici candidati con quel nome e sono stati scritti a meno di 60 secondi l'uno dall'altro; senza una data di modifica attendibile, o con più candidati ugualmente vicini, restano separati. Nella stessa cartella non cambia nulla.
+- Interno: la logica d'abbinamento è in `raw-jpg-pairing.ts` (prima stava dentro `folder-access.ts`) con 12 prove in `raw-jpg-pairing.test.ts` (`test:photo-selector-raw-jpg-pairing`, nella Dev Console).
+- Da sapere: la scheda di una coppia sta nella cartella del JPG, quindi il filtro per la cartella «RAW» non la mostra; copia, sposta e Cestino agiscono su entrambi i file anche se stanno in cartelle diverse.
+
 ## 2026-10-29 - Album Flow 0.2.45
 
 - Corretto: riempiendo una pagina a mano (rilasci sul bordo o tra due foto, scambi, aggiunte) le foto potevano ridursi a pochi millimetri o a zero e sparire in stampa senza alcun avviso: nelle prove con «foto intera» su mezza pagina, con 8 foto una cella scendeva sotto i 2 cm nel 61% dei casi e a 12 foto circa una volta su trenta arrivava a 0 mm. Ora nessuna cella scende sotto 15 mm (`MIN_CELL_MM`) per colpa di un gesto: se succederebbe, le stesse foto, nello stesso ordine, si ridispongono con il primo layout calcolato che rispetta la soglia (`settleCellFloor`, chiamato da `aligned`; `dropOnSpreadPlanned` dice se è successo) e un messaggio lo spiega. Non tocca pagine bloccate, libere o non peggiorate dal gesto. `areaCandidates` scarta inoltre i candidati con una cella sotto 1 mm.

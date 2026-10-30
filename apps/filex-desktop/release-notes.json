@@ -549,6 +549,11 @@
       "Per tenere una foto usa «Tieni solo questa», P o Invio; con P su più foto e poi «Scarta le altre» ne tieni più di una.",
       "La lente (L) ingrandisce lo stesso punto su tutte le varianti, per confrontare occhi e dettagli.",
       "Dopo ogni decisione compare «Annulla»; «Scarta le più morbide» toglie solo le varianti mosse o fuori fuoco."
+    ],
+    "0.1.54": [
+      "Se RAW e JPG della stessa foto stanno in cartelle diverse (per esempio «RAW» e «JPG») ora compaiono come un'unica scheda con il badge «RAW + JPG», come già accadeva nella stessa cartella.",
+      "L'abbinamento tra cartelle è prudente: servono lo stesso nome e file scritti a meno di un minuto l'uno dall'altro, così due scatti diversi con lo stesso numero non vengono uniti per errore.",
+      "Copia, sposta e Cestino agiscono sempre su entrambi i file della coppia."
     ]
   },
   "id-photo": {
