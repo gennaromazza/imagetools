@@ -21,6 +21,38 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.46",
+    date: "2026-11-02",
+    headline: "Più foto insieme nelle pagine libere, e le foto simili si scelgono guardandole",
+    items: [
+      {
+        title: "Scegli più foto con un rettangolo",
+        text: "In una pagina libera trascina sullo sfondo: le foto sfiorate dal rettangolo si scelgono insieme (con Maiusc le aggiungi a quelle già scelte, con Ctrl/⌘ + A le scegli tutte). Esc toglie la selezione.",
+        where: ["Layout → Sposta le foto liberamente", "Trascina sullo sfondo della pagina", "Ctrl/⌘ + A"],
+      },
+      {
+        title: "Sposta e ridimensiona il gruppo",
+        text: "Trascinando una foto della selezione si muove tutto il gruppo, con la calamita sul riquadro che lo contiene (Alt = senza aggancio). Le quattro maniglie sugli angoli ingrandiscono o riducono tutte le foto insieme, senza deformarle. Le frecce spostano di 1 mm, con Maiusc di 10 mm.",
+        where: ["Maniglie d'angolo del gruppo", "Frecce · Maiusc + frecce"],
+      },
+      {
+        title: "Allinea e distribuisci",
+        text: "Con due o più foto scelte compare la barra «N foto»: allinea a sinistra, al centro, a destra, in alto, al centro in verticale, in basso, e distribuisci con lo stesso spazio tra le foto (da tre foto in su).",
+        where: ["Barra «N foto» sopra lo spread"],
+      },
+      {
+        title: "Distanze e copie",
+        text: "Mentre sposti una foto vedi la distanza in cm dalle foto vicine. Con Ctrl/⌘ + trascinamento copi la foto o il gruppo: l'originale resta, la copia nasce dove lasci, con lo stesso ritaglio e bordo. Una pagina piena (12 foto) o con il layout bloccato non riceve copie.",
+        where: ["Ctrl/⌘ + trascina una foto"],
+      },
+      {
+        title: "Foto simili: guardale e scegli",
+        text: "Ogni foto che ha varianti simili mostra «N simili»: un clic apre le miniature accanto alla foto, passando il mouse la foto sullo spread cambia solo per prova e il clic la sceglie. Esc chiude le miniature; A e Maiusc+A scorrono le varianti come prima.",
+        where: ["Segnalino «N simili» sulla foto"],
+      },
+    ],
+  },
+  {
     version: "0.2.45",
     date: "2026-10-29",
     headline: "Impaginare a mano non schiaccia più le foto, e il lucchetto vale davvero",

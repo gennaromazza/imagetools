@@ -741,6 +741,11 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.46": [
+      "Nuovo: nelle pagine libere trascini sullo sfondo per scegliere più foto (rettangolo di selezione, Maiusc per aggiungere, Ctrl/⌘ + A per tutte) e le sposti, le ingrandisci o le riduci insieme dalle maniglie d'angolo, con la calamita e senza deformarle.",
+      "Nuovo: frecce per spostare di 1 mm (Maiusc 10 mm), barra «Allinea e distribuisci», distanze in cm dalle foto vicine mentre trascini e Ctrl/⌘ + trascinamento per copiare una foto o un gruppo.",
+      "Migliorato: le foto con varianti simili mostrano «N simili»; un clic apre le miniature, passando il mouse la foto cambia solo per prova e il clic la sceglie."
+    ],
     "0.2.45": [
       "Corretto: riempiendo una pagina a mano (rilasci sul bordo o tra due foto, scambi) una foto poteva restare di pochi millimetri o sparire in stampa. Ora nessuna foto scende sotto 15 mm: se un gesto la ridurrebbe troppo, le foto della pagina si ridispongono e un messaggio lo spiega.",
       "Corretto: margine, spazio tra le foto e bordo si fermano al massimo che la pagina e le sue foto permettono, invece di portare le celle a zero; diminuire funziona sempre.",

@@ -70,6 +70,24 @@ for (const sitemap of ["sitemap.xml", "sitemap-filex-suite.xml"]) {
   assert.ok(readFileSync(join(root, "website", sitemap), "utf8").includes("/strumenti/album-flow/caroselli-instagram/"), `la pagina caroselli manca in ${sitemap}`);
 }
 assert.ok(readFileSync(join(root, "website", "strumenti", "album-flow", "index.html"), "utf8").includes("caroselli-instagram/index.html"), "la pagina di Album Flow deve rimandare a quella dei caroselli");
+// Pagina del sito sulle pagine libere: esiste, è coerente, dichiara i limiti e non rimanda a file mancanti.
+const freePagePath = join(root, "website", "strumenti", "album-flow", "pagine-libere");
+assert.ok(existsSync(join(freePagePath, "index.html")), "pagina del sito sulle pagine libere assente");
+const freePage = readFileSync(join(freePagePath, "index.html"), "utf8");
+assert.ok(freePage.includes('rel="canonical" href="https://filexsuite.com/strumenti/album-flow/pagine-libere/"'), "canonical della pagina sulle pagine libere errato");
+assert.ok(freePage.includes("Album Flow") && freePage.includes("FileX All Access") && freePage.includes("Specifiche tecniche") && freePage.includes("12 foto"), "la pagina sulle pagine libere deve nominare Album Flow, All Access, le specifiche e il limite delle 12 foto");
+for (const block of freePage.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
+for (const reference of freePage.matchAll(/(?:src|href)="((?:\.\.\/)+(?:assets|strumenti|guide|supporto|privacy|termini)[^"#]*)"/g)) {
+  const target = join(freePagePath, reference[1]);
+  assert.ok(existsSync(target) || existsSync(join(target, "index.html")), `la pagina sulle pagine libere rimanda a un file che non c'è: ${reference[1]}`);
+}
+for (const sitemap of ["sitemap.xml", "sitemap-filex-suite.xml"]) {
+  assert.ok(readFileSync(join(root, "website", sitemap), "utf8").includes("/strumenti/album-flow/pagine-libere/"), `la pagina sulle pagine libere manca in ${sitemap}`);
+}
+assert.ok(readFileSync(join(root, "website", "strumenti", "album-flow", "index.html"), "utf8").includes("pagine-libere/index.html"), "la pagina di Album Flow deve rimandare a quella sulle pagine libere");
+// Gesti sulle pagine libere e varianti simili: i pezzi dell'interfaccia esistono e sono collegati.
+assert.ok(src("engine/arrange.ts").includes("export function gapMeasures") && src("model/freeGroup.ts").includes("export function duplicateFrames") && src("components/AlignBar.tsx").includes("Distribuisci"), "gesti di gruppo delle pagine libere assenti");
+assert.ok(src("components/AlternativesStrip.tsx").includes("onPreview") && src("components/SpreadView.tsx").includes("AlternativesStrip"), "striscia delle varianti simili sullo spread assente");
 // Le lettere mostrate nel menu «Segna come» (K, P, M, I) devono essere davvero i tasti che segnano la foto, in libreria, sullo spread e
 // nel visualizzatore, e non devono coincidere con altre scorciatoie (es. S = misure delle foto).
 const tagLetters = [...src("components/LibraryDock.tsx").matchAll(/(?:cover|panorama|main|social): "([A-Z])"/g)].map((match) => match[1].toLowerCase());
