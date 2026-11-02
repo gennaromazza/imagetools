@@ -16,6 +16,8 @@ import { planFrameCrop, type FrameCrop } from "../model/freeCrop";
 import { areaGeometryFor, hasFreeLayout, needsShapeAlignment, placementStyle, type AreaGeometry } from "../model/project";
 import { cropCenter } from "../slot-geometry";
 import { PhotoBox } from "./PhotoBox";
+import { AlternativesStrip } from "./AlternativesStrip";
+import type { CellAlternatives } from "../model/similar";
 import { currentDrag, endDrag, beginDrag } from "./dnd";
 import { Icon } from "./icons";
 
@@ -92,6 +94,9 @@ export interface SpreadViewProps {
   renderToolbar?: (itemId: string) => ToolbarParts | null;
   /** Segnalino delle varianti simili per id dell'elemento («2/3»). */
   altLabels?: ReadonlyMap<string, string>;
+  /** Le varianti simili di ogni foto dello spread: il segnalino sulla foto apre la striscia per sceglierle. */
+  alternatives?: ReadonlyMap<string, CellAlternatives>;
+  onChooseAlternative?: (itemId: string, assetId: string) => void;
 }
 
 /** Le foto libere e mobili (né bloccate né in una pagina con il layout bloccato) tra quelle della selezione multipla, con la cornice attuale. */
@@ -143,6 +148,8 @@ interface CellProps {
     onCommitFrameRect?: (itemId: string, rect: Rect) => void;
     /** Pressione su una foto della selezione multipla: true se parte lo spostamento di gruppo (allora la foto non si muove da sola). */
     onGroupDown?: (event: React.PointerEvent, itemId: string) => boolean;
+    /** Clic sul segnalino «N simili» di una foto: apre o chiude la striscia delle varianti. */
+    onOpenAlternatives?: (itemId: string, areaIndex: number) => void;
     /** Ctrl/⌘ + trascinamento di una foto libera: la copia nasce nel rettangolo dato (mm nello spread). */
     onCommitCopies?: (frames: Boxed[]) => void;
     /** Ritaglio libero: cosa servirebbe per portare la cornice in `rect` tenendo ferma la foto (null = non si può). */
@@ -472,7 +479,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       {freeFrame && selected && !canCrop ? <span className="cell__resize" style={{ right: pct(((placement.frame.x + placement.frame.w - placement.content.x - placement.content.w) / placement.frame.w) * 100), bottom: pct(((placement.frame.y + placement.frame.h - placement.content.y - placement.content.h) / placement.frame.h) * 100) }} title="Trascina per ridimensionare (le proporzioni restano)" onPointerDown={(event) => startFrame(event, "resize")} onPointerMove={moveFrame} onPointerUp={endFrame} /> : null}
       {interactive && selected ? <span className="cell__name">{asset?.fileName.replace(/\.[^.]+$/, "")}</span> : null}
       {interactive && item.locked ? <span className="cell__badge cell__badge--lock"><Icon name="lock" size={12} /></span> : null}
-      {interactive && altLabel && !selected ? <span className="cell__alts" title="Questa foto ha varianti simili: selezionala e premi A per scorrerle">{altLabel}</span> : null}
+      {interactive && altLabel ? <button type="button" className="cell__alts" title="Questa foto ha varianti simili: clicca per vederle e scegliere (oppure A / Maiusc+A per scorrerle)" onPointerDown={(event) => event.stopPropagation()} onDoubleClick={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); handlers.onOpenAlternatives?.(item.id, areaIndex); }}>{altLabel}</button> : null}
       {interactive && showSizes ? (() => { const size = describeSize(placement); return <span className={`cell__size cell__size--${size.level}`} title="Misura stampata della foto e risoluzione effettiva">{size.widthCm.toLocaleString("it-IT")} × {size.heightCm.toLocaleString("it-IT")} cm · {size.dpi} dpi</span>; })() : null}
       {interactive && !showSizes && placement.dpi < lowDpi ? <span className="cell__badge cell__badge--warn" title={`Risoluzione effettiva ${Math.round(placement.dpi)} dpi`}>{Math.round(placement.dpi)} dpi</span> : null}
     </PhotoBox>
@@ -847,6 +854,20 @@ function SpreadViewInner(props: SpreadViewProps) {
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
   };
+  // Varianti simili: striscia aperta dal segnalino sulla foto e anteprima (la foto dello spread cambia solo per prova).
+  const [altOpen, setAltOpen] = useState<string | null>(null);
+  const [altPreview, setAltPreview] = useState<{ itemId: string; assetId: string } | null>(null);
+  const closeAlternatives = useCallback(() => setAltOpen(null), []);
+  useEffect(() => { setAltOpen(null); setAltPreview(null); }, [spread.id]);
+  const openAlternatives = useCallback((itemId: string, areaIndex: number) => {
+    props.onActivateArea?.(areaIndex);
+    props.onSelectItem?.(itemId, areaIndex);
+    setAltPreview(null);
+    setAltOpen((current) => (current === itemId ? null : itemId));
+  }, [props.onActivateArea, props.onSelectItem]);
+  const altOpenRef = useRef<string | null>(null);
+  altOpenRef.current = altOpen;
+  const previewAlternative = useCallback((assetId: string | null) => setAltPreview(assetId !== null && altOpenRef.current ? { itemId: altOpenRef.current, assetId } : null), []);
   const copyFrames = useCallback((frames: Boxed[]) => groupLatest.current.onCommitFrames?.(frames, { copy: true }), []);
   const startMarquee = (event: React.PointerEvent) => {
     const now = groupLatest.current;
@@ -887,8 +908,8 @@ function SpreadViewInner(props: SpreadViewProps) {
     window.addEventListener("pointercancel", onCancel);
   };
 
-  const handlers = useMemo(() => ({ onGroupDown: startGroup, onCommitCopies: copyFrames, onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect, onPlanCrop: planCrop, onCommitCropRect: commitCropRect, onFrameOver: frameOver, onFrameDrop: frameDrop }),
-    [startGroup, copyFrames, props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect, planCrop, commitCropRect, frameOver, frameDrop]);
+  const handlers = useMemo(() => ({ onGroupDown: startGroup, onOpenAlternatives: openAlternatives, onCommitCopies: copyFrames, onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect, onPlanCrop: planCrop, onCommitCropRect: commitCropRect, onFrameOver: frameOver, onFrameDrop: frameDrop }),
+    [startGroup, openAlternatives, copyFrames, props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect, planCrop, commitCropRect, frameOver, frameDrop]);
 
   const onDragOver = (event: React.DragEvent) => {
     const payload = currentDrag();
@@ -961,7 +982,7 @@ function SpreadViewInner(props: SpreadViewProps) {
               key={item.id}
               cell={cell}
               item={item}
-              asset={assets.get(item.assetId)}
+              asset={assets.get(altPreview && altPreview.itemId === item.id ? altPreview.assetId : item.assetId)}
               area={area}
               areaIndex={areaIndex}
               origin={origin}
@@ -1040,6 +1061,19 @@ function SpreadViewInner(props: SpreadViewProps) {
         const rect = geometry.flatMap((g) => g.cells).find((cell) => cell.itemId === selectedItemId)?.rect;
         const parts = rect ? props.renderToolbar(selectedItemId) : null;
         return rect && parts ? <FloatingToolbar key={selectedItemId} rect={rect} size={size} container={ref} parts={parts} away={draft !== null} /> : null;
+      })() : null}
+
+      {interactive && altOpen && props.alternatives?.get(altOpen) ? (() => {
+        const entry = geometry.flatMap((g) => g.cells).find((cell) => cell.itemId === altOpen);
+        const item = spread.areas.flatMap((area) => area.items).find((candidate) => candidate.id === altOpen);
+        if (!entry || !item) return null;
+        const below = entry.rect.y + entry.rect.h < size.height * 0.72;
+        const style = {
+          left: pct(Math.min(88, Math.max(12, ((entry.rect.x + entry.rect.w / 2) / size.width) * 100))),
+          top: pct(((below ? entry.rect.y + entry.rect.h : entry.rect.y) / size.height) * 100),
+          transform: below ? "translate(-50%, 8px)" : "translate(-50%, calc(-100% - 8px))",
+        };
+        return <AlternativesStrip key={altOpen} alternatives={props.alternatives.get(altOpen)!} assets={assets} locked={Boolean(item.locked)} style={style} onPreview={previewAlternative} onPick={(assetId) => props.onChooseAlternative?.(altOpen, assetId)} onClose={closeAlternatives} />;
       })() : null}
 
       <div className="spread__fold" aria-hidden="true" />

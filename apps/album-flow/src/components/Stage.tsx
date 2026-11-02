@@ -232,7 +232,7 @@ function AngleField({ value, onChange }: { value: number; onChange: (angle: numb
 export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, pickedItemIds, cropMode, lineTool, draft, zoom, guides, sizes, layoutsOpen, templates, alternatives, actions, design }: StageProps) {
   const [centerRef, centerSize] = useElementSize<HTMLDivElement>();
   // Segnalino «2/3» sulle celle che hanno varianti simili.
-  const altLabels = useMemo(() => new Map([...alternatives].map(([itemId, entry]) => [itemId, `${entry.index + 1}/${entry.ids.length}`])), [alternatives]);
+  const altLabels = useMemo(() => new Map([...alternatives].map(([itemId, entry]) => [itemId, entry.ids.length === 2 ? "1 simile" : `${entry.ids.length - 1} simili`])), [alternatives]);
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const [applyOpen, setApplyOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -573,6 +573,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               onMoveFrameAcross={actions.moveFrameAcross}
               renderToolbar={toolbar}
               altLabels={altLabels}
+              alternatives={alternatives}
+              onChooseAlternative={actions.chooseAlternative}
               design={design.handlers}
               photosLocked={design.open}
             />

@@ -575,7 +575,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .dock__analysis { display: inline-flex; align-items: center; gap: 5px; color: var(--text-faint); font-size: 11.5px; white-space: nowrap; }
 .dock__tab--suggested svg { color: var(--accent); }
 @media (max-width: 1280px) { .dock__tab-long { display: none; } }
-.cell__alts { position: absolute; left: 8px; bottom: 8px; z-index: 6; padding: 2px 8px; border-radius: 999px; background: rgba(24, 28, 25, 0.82); color: var(--accent-bright); font-size: 10.5px; font-weight: 700; pointer-events: none; }
+.cell__alts { position: absolute; left: 8px; bottom: 8px; z-index: 9; padding: 2px 9px; border: 1px solid var(--accent); border-radius: 999px; background: rgba(24, 28, 25, 0.88); color: var(--accent-bright); font-size: 10.5px; font-weight: 700; pointer-events: auto; cursor: pointer; }
+.cell__alts:hover { background: var(--accent); color: #1c211e; }
+.alts-strip { position: absolute; z-index: 70; max-width: 84%; padding: 8px 10px 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: rgba(24, 28, 25, 0.97); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); }
+.alts-strip__hint { margin: 0 0 6px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.alts-strip__row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.alts-strip__row .alts__choice { flex: 0 0 auto; }
+.alts-strip__row .alts__choice:disabled { opacity: 0.55; }
 .alts { display: inline-flex; align-items: center; gap: 2px; }
 .alts__count { position: relative; min-width: 38px; height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--accent-bright); font-size: 12px; font-weight: 700; }
 .alts__count:hover, .alts__count.is-active { background: var(--accent-soft); }

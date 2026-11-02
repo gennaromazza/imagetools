@@ -5,10 +5,10 @@ import { useNewFeature } from "../hooks/useNewFeature";
 import type { CellAlternatives } from "../model/similar";
 import { IconButton, Popover } from "./ui";
 
-function Choice({ asset, active, onPick }: { asset: AlbumAssetV2 | undefined; active: boolean; onPick: () => void }) {
+export function Choice({ asset, active, onPick, onHover, disabled }: { asset: AlbumAssetV2 | undefined; active: boolean; onPick: () => void; onHover?: (on: boolean) => void; disabled?: boolean }) {
   const src = useAssetSrc(asset, 200);
   return (
-    <button type="button" className={`alts__choice${active ? " is-active" : ""}`} onClick={onPick} title={asset?.fileName ?? ""} aria-pressed={active}>
+    <button type="button" className={`alts__choice${active ? " is-active" : ""}`} onClick={onPick} onMouseEnter={onHover ? () => onHover(true) : undefined} onFocus={onHover ? () => onHover(true) : undefined} onBlur={onHover ? () => onHover(false) : undefined} disabled={disabled} title={asset?.fileName ?? ""} aria-pressed={active}>
       {src ? <img src={src} alt="" draggable={false} style={asset?.rotationDegrees ? { transform: `rotate(${asset.rotationDegrees}deg)` } : undefined} /> : <span className="thumb__ph" />}
       <span>{asset ? asset.fileName.replace(/\.[^.]+$/, "") : ""}</span>
     </button>
