@@ -6,6 +6,7 @@ import { mulberry32 } from "../engine/rng";
 import { applyFavoriteLayout, applyCandidateByNumber, applyStyleToAlbum, applyStyleToSpread, favoritesFor, mirrorArea, resetDividerRatio, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "./areas";
 import { DEFAULT_AUTO_BUILD, autoBuildAlbum, fillSpread } from "./autobuild";
 import { applyTemplate, matchTemplates, reorderFrame, sanitizeTemplate, setFrame } from "./templates";
+import { alignFrames, distributeFrames, duplicateFrames, nudgeFrames } from "./freeGroup";
 import { applyChapterPreset, assignAssets, BUILTIN_CHAPTER_PRESETS, createChapter, moveChapter, removeChapter } from "./chapters";
 import { overlaysOf } from "./design";
 import { assertProjectInvariants, makeProject } from "./fixtures";
@@ -323,6 +324,8 @@ const OPERATIONS: Operation[] = [
   { name: "bordo di una foto", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setItemBorder(p, entry.item.id, r() < 0.2 ? { cm: null, color: null } : { cm: r() * 1.6, color: pick(r, ["#000000", "#ffffff", "#aa2233"]) }) : p; } },
   { name: "sposta una cornice", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? setFrame(p, entry.item.id, { x: r(), y: r(), w: 0.1 + r() * 0.8, h: 0.1 + r() * 0.8, rotation: (r() - 0.5) * 90 }) : p; } },
   { name: "ritaglio libero con le maniglie", run: (p, r) => { const entry = maybe(r, itemsOf(p)); const base = entry ? visibleFrame(p.settings.sheet, entry.spread, entry.areaIndex, entry.item.id, p.assets.find((asset) => asset.id === entry.item.assetId)) : null; if (!entry || !base) return p; const left = r() * 0.4; const top = r() * 0.4; return cropFrameTo(p, entry.item.id, { x: base.x + base.w * left, y: base.y + base.h * top, w: base.w * (0.2 + r() * (0.8 - left)), h: base.h * (0.2 + r() * (0.8 - top)) }); } },
+  { name: "gesti di gruppo (frecce, allinea, distribuisci)", run: (p, r) => { const spread = maybe(r, p.spreads); const ids = spread ? spread.areas.flatMap((area) => area.items.map((item) => item.id)).filter(() => r() < 0.7) : []; if (ids.length === 0) return p; const kind = Math.floor(r() * 3); return kind === 0 ? nudgeFrames(p, ids, (r() - 0.5) * 40, (r() - 0.5) * 40) : kind === 1 ? alignFrames(p, ids, pick(r, ["left", "hcenter", "right", "top", "vcenter", "bottom"] as const)) : distributeFrames(p, ids, r() < 0.5 ? "x" : "y"); } },
+  { name: "copia di foto libere trascinando", run: (p, r) => { const entry = maybe(r, itemsOf(p)); const rect = entry ? areaGeometry(p, entry.spread, entry.areaIndex).cells.find((cell) => cell.itemId === entry.item.id)?.rect : undefined; return entry && rect ? duplicateFrames(p, [{ id: entry.item.id, rect: { ...rect, x: rect.x + (r() - 0.5) * 80, y: rect.y + (r() - 0.5) * 80 } }]) : p; } },
   { name: "cornice davanti o dietro", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? reorderFrame(p, entry.item.id, r() < 0.5 ? "front" : "back") : p; } },
   { name: "riempi spread", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? fillSpread(p, spread.id, 1 + Math.floor(r() * 4)) : p; } },
   // Foto simili e momenti: correzioni ai gruppi, varianti nella cella, Auto Build e riempimento con l'analisi della libreria.

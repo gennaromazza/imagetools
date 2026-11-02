@@ -20,6 +20,9 @@ import { useNewFeature } from "../hooks/useNewFeature";
 import { LayoutBrowser } from "./LayoutBrowser";
 import { SpreadView, type Draft, type ToolbarParts } from "./SpreadView";
 import { AlternativesPicker } from "./AlternativesPicker";
+import { AlignBar } from "./AlignBar";
+import { movableFrames } from "../model/freeGroup";
+import type { AlignMode, Boxed } from "../engine/arrange";
 import type { CellAlternatives } from "../model/similar";
 import { ColorDots, ContextMenu, IconButton, NumberField, Popover, Stars, type MenuItem } from "./ui";
 
@@ -57,6 +60,14 @@ export interface StageActions {
   editItem: (itemId: string) => void;
   /** Maiusc+clic: aggiunge o toglie una foto dalla selezione multipla dello spread. */
   togglePick: (itemId: string, areaIndex: number) => void;
+  /** Selezione a rettangolo: queste foto formano la selezione multipla (una sola = foto selezionata, nessuna = niente). */
+  pickItems: (itemIds: string[], areaIndex: number) => void;
+  /** Più foto libere spostate insieme: ogni cornice nel suo rettangolo (mm nello spread). */
+  commitFrames: (frames: Boxed[], options?: { copy?: boolean }) => void;
+  /** Ctrl/⌘ + A: sceglie tutte le foto libere dello spread. */
+  pickAll: () => void;
+  alignGroup: (mode: AlignMode) => void;
+  distributeGroup: (axis: "x" | "y") => void;
   /** Apre nell'editor esterno (Photoshop o altro) le foto indicate, in un'unica richiesta. */
   editItems: (itemIds: string[]) => void;
   removeItem: (itemId: string) => void;
@@ -518,6 +529,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
 
   const newDesign = useNewFeature("personalizza");
   const bg = useMemo(() => BACKGROUND_SWATCHES, []);
+  // Allinea e distribuisci hanno senso solo con almeno due foto libere e non bloccate tra quelle scelte.
+  const pickedMovable = useMemo(() => (pickedItemIds.length > 1 ? movableFrames(project, pickedItemIds).length : 0), [project, pickedItemIds]);
   const where = !two ? "foglio intero" : areaIndex === 0 ? "pagina sinistra" : "pagina destra";
 
   return (
@@ -539,6 +552,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               highlightItemId={highlightItemId}
               pickedItemIds={pickedItemIds}
               onTogglePick={actions.togglePick}
+              onPickItems={actions.pickItems}
+              onCommitFrames={actions.commitFrames}
               cropMode={cropMode}
               straightenTool={lineTool && cropMode}
               onStraightenDone={actions.finishLineTool}
@@ -561,6 +576,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               design={design.handlers}
               photosLocked={design.open}
             />
+            {!design.open && pickedMovable > 1 ? <AlignBar count={pickedMovable} onAlign={actions.alignGroup} onDistribute={actions.distributeGroup} /> : null}
           </div>
         </div>
         {strip("right")}

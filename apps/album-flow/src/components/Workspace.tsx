@@ -23,6 +23,7 @@ import { SocialStudio } from "./SocialStudio";
 import { FormatDialog } from "./FormatDialog";
 import { TemplateEditor, seedFromArea, type TemplateSeed } from "./TemplateEditor";
 import { cropFrameTo } from "../model/freeCrop";
+import { alignFrames, applyFrameRects, distributeFrames, duplicateFrames, movableFrames, nudgeFrames } from "../model/freeGroup";
 import { applyTemplate as applyTemplateModel, applyTemplatesToAlbum, createTemplateId, loadTemplates, removeTemplate, reorderFrame, saveTemplates, setFrame, templateFromArea, templateTarget, upsertTemplate } from "../model/templates";
 import { Filmstrip } from "./Filmstrip";
 import { Icon } from "./icons";
@@ -111,6 +112,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   // Selezione multipla dello spread (Maiusc+clic): vale per «Modifica nell'editor»; un clic normale la azzera.
   const [pickedItemIds, setPickedItemIds] = useState<string[]>([]);
+  const pickedRef = useRef(pickedItemIds);
+  pickedRef.current = pickedItemIds;
   // «Personalizza»: pannello di sfondi, testi e libreria; il testo o la grafica selezionati stanno sopra le foto.
   const [designOpen, setDesignOpen] = useState(false);
   const [designTab, setDesignTab] = useState<DesignTab>("text");
@@ -445,6 +448,35 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       });
     },
     editItems: (itemIds) => void editMany(itemIds),
+    pickItems: (itemIds, i) => {
+      setZone("stage"); setActiveArea(i); setSelectedOverlayId(null); setCropMode(false);
+      // Una sola foto presa dal rettangolo è una foto selezionata come le altre; più foto formano la selezione multipla (senza foto singola selezionata).
+      setPickedItemIds(itemIds.length > 1 ? itemIds : []);
+      setSelectedItemId(itemIds.length === 1 ? itemIds[0] : null);
+    },
+    commitFrames: (frames, options) => {
+      if (!options?.copy) { commit((p) => applyFrameRects(p, frames)); return; }
+      // Copia: le nuove foto si riconoscono dagli id che prima non c'erano, e diventano la selezione (così si possono rimettere a posto subito).
+      const before = historyRef.current.present;
+      const known = new Set(before.spreads.flatMap((s) => s.areas.flatMap((a) => a.items.map((item) => item.id))));
+      commit((p) => duplicateFrames(p, frames));
+      const after = historyRef.current.present;
+      if (after === before) { notify("Non si può copiare: la pagina è piena (12 foto) o ha il layout bloccato."); return; }
+      const created = after.spreads.flatMap((s) => s.areas.flatMap((a) => a.items.map((item) => item.id))).filter((id) => !known.has(id));
+      setSelectedOverlayId(null); setCropMode(false);
+      setPickedItemIds(created.length > 1 ? created : []);
+      setSelectedItemId(created.length === 1 ? created[0] : null);
+    },
+    pickAll: () => {
+      const current = historyRef.current.present.spreads.find((s) => s.id === spreadId);
+      const ids = movableFrames(historyRef.current.present, current ? current.areas.flatMap((a) => a.items.map((item) => item.id)) : []).map((frame) => frame.id);
+      if (ids.length === 0) { notify("Per sceglierle tutte, la pagina deve essere libera (Layout → Sposta le foto liberamente)."); return; }
+      setZone("stage"); setSelectedOverlayId(null); setCropMode(false);
+      setPickedItemIds(ids.length > 1 ? ids : []);
+      setSelectedItemId(ids.length === 1 ? ids[0] : null);
+    },
+    alignGroup: (mode) => commit((p) => alignFrames(p, pickedRef.current, mode)),
+    distributeGroup: (axis) => commit((p) => distributeFrames(p, pickedRef.current, axis)),
     selectItem: (itemId, i) => { setPickedItemIds([]); setZone("stage"); setActiveArea(i); setSelectedOverlayId(null); setSelectedItemId(itemId); if (!itemId) setCropMode(false); else setCropMode((on) => (itemId === selectedItemId ? on : false)); },
     toggleCrop: (itemId) => {
       const found = findItem(project, itemId);
@@ -746,6 +778,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       const key = event.key.toLowerCase();
       if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) doRedo(); else doUndo(); return; }
       if (mod && key === "y") { event.preventDefault(); doRedo(); return; }
+      if (mod && key === "a" && state.spread && state.zone === "stage") { event.preventDefault(); actions.pickAll(); return; }
       if (mod && key === "d") { event.preventDefault(); if (state.spread) actions.duplicateSpread(); return; }
       if (!mod && key === "v" && state.count > 1) { event.preventDefault(); setDialog("contact"); return; }
       if (mod && key === "b") { event.preventDefault(); setDialog("autobuild"); return; }
@@ -766,6 +799,18 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       if (mod || event.altKey) return;
       // A / Maiusc+A: la variante simile successiva o precedente della foto selezionata nello spread.
       if (key === "a" && state.selectedItemId && state.zone === "stage") { event.preventDefault(); actions.cycleAlternative(state.selectedItemId, event.shiftKey ? -1 : 1); return; }
+      // Frecce con foto libere scelte: spostano la foto (o il gruppo) di 1 mm, con Maiusc di 10 mm. Senza foto libere scelte restano la navigazione tra gli spread.
+      if (event.key.startsWith("Arrow") && state.zone === "stage" && !state.cropMode) {
+        const ids = pickedRef.current.length > 1 ? pickedRef.current : state.selectedItemId ? [state.selectedItemId] : [];
+        if (ids.length > 0 && movableFrames(historyRef.current.present, ids).length > 0) {
+          const step = event.shiftKey ? 10 : 1;
+          const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+          const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+          event.preventDefault();
+          commit((p) => nudgeFrames(p, ids, dx, dy), `nudge:${ids.join(",")}`);
+          return;
+        }
+      }
       switch (event.key) {
         case "ArrowLeft": event.preventDefault(); goTo(state.index - 1); return;
         case "ArrowRight": event.preventDefault(); goTo(state.index + 1); return;
@@ -781,6 +826,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           if (state.lineTool) setLineTool(false);
           else if (state.cropMode) setCropMode(false);
           else if (state.selectedOverlayId) setSelectedOverlayId(null);
+          else if (pickedRef.current.length > 0) setPickedItemIds([]);
           else if (state.selectedItemId) setSelectedItemId(null);
           else if (state.libSelection.length) setLibSelection([]);
           else if (state.layoutsOpen) setLayoutsOpen(false);

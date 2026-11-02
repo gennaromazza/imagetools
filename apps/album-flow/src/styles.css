@@ -309,7 +309,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .stage--empty { place-items: center; display: grid; }
 .stage__row { flex: 1; min-height: 0; display: flex; align-items: stretch; position: relative; }
 .stage__center { flex: 1; min-width: 0; overflow: auto; display: grid; place-items: center; padding: 10px 12px; }
-.stage__spread { margin: auto; }
+.stage__spread { margin: auto; position: relative; }
+.group-bar { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 60; display: inline-flex; align-items: center; gap: 2px; padding: 3px 6px; border-radius: 999px; background: rgba(24, 28, 25, 0.94); border: 1px solid var(--accent); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
+.group-bar .icon-btn { width: 28px; height: 28px; }
+.group-bar__count { padding: 0 8px 0 6px; font-size: 11px; font-weight: 700; color: var(--accent-bright); white-space: nowrap; }
+.group-bar__sep { width: 1px; height: 18px; margin: 0 4px; background: rgba(255, 255, 255, 0.18); }
 /* Con «Personalizza» aperto lo spread si sposta nello spazio libero: il pannello (stessa larghezza di .layouts) non deve coprire ciò che si sta modificando. */
 .stage__center--drawer { padding-right: min(430px, 44%); }
 .stage__bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; height: 42px; border-top: 1px solid var(--line); background: rgba(24, 28, 25, 0.6); flex: none; }
@@ -367,6 +371,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .spread__center { position: absolute; z-index: 39; pointer-events: none; opacity: 0.85; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
 .spread__center--x { width: 1px; margin-left: -0.5px; background: repeating-linear-gradient(180deg, var(--accent-bright) 0 7px, transparent 7px 12px); }
 .spread__center--y { height: 1px; margin-top: -0.5px; background: repeating-linear-gradient(90deg, var(--accent-bright) 0 7px, transparent 7px 12px); }
+.spread__group { position: absolute; z-index: 42; pointer-events: none; border: 1px dashed var(--accent-bright); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35); }
+.spread__group-handle { position: absolute; z-index: 43; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 3px; background: var(--accent-bright); border: 1px solid rgba(0, 0, 0, 0.55); pointer-events: auto; touch-action: none; }
+.spread__group-handle--nwse { cursor: nwse-resize; }
+.spread__group-handle--nesw { cursor: nesw-resize; }
+.spread__gap { position: absolute; z-index: 41; pointer-events: none; background: #ff5c8a; }
+.spread__gap--x { height: 1px; margin-top: -0.5px; }
+.spread__gap--y { width: 1px; margin-left: -0.5px; }
+.spread__gap em { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 1px 6px; border-radius: 999px; background: #ff5c8a; color: #fff; font-size: 10px; font-style: normal; font-weight: 700; white-space: nowrap; }
+.spread__ghost { position: absolute; z-index: 41; pointer-events: none; border: 2px dashed var(--accent-bright); background: rgba(212, 184, 125, 0.14); }
+.spread__marquee { position: absolute; z-index: 41; pointer-events: none; border: 1px solid var(--accent-bright); background: rgba(212, 184, 125, 0.16); }
 .spread__snap { position: absolute; z-index: 40; pointer-events: none; background: var(--accent-bright); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45); }
 .spread__snap--x { width: 1px; margin-left: -0.5px; }
 .spread__snap--y { height: 1px; margin-top: -0.5px; }

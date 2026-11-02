@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import { snapMove, snapResize, type SnapGuide } from "../engine/snap";
+import { gapMeasures, groupScaleFactor, marqueeHits, rectFromPoints, scaleRects, translateRect, unionRect, type Boxed, type GapMeasure } from "../engine/arrange";
 import { getSnapEnabled } from "../model/snapSettings";
 import { type ReactNode, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetV2, AlbumItem, AlbumArea, AlbumSpread, SheetSpec } from "@photo-tools/shared-types";
@@ -24,7 +25,9 @@ export type SpreadVariant = "stage" | "thumb" | "present";
 export type Draft =
   | { kind: "ratio"; areaIndex: number; path: string; ratio: number }
   | { kind: "view"; itemId: string; view: Partial<ItemView> }
-  | { kind: "frame"; itemId: string; rect: Rect; guides?: SnapGuide[]; /** Ritaglio libero: inquadratura che tiene ferma la foto mentre la cornice cambia. */ view?: Partial<ItemView> };
+  | { kind: "frame"; itemId: string; rect: Rect; guides?: SnapGuide[]; /** Distanze dalle foto vicine. */ gaps?: GapMeasure[]; /** Ctrl/⌘ + trascinamento: l'originale resta e `rect` è dove nascerà la copia. */ copy?: boolean; /** Ritaglio libero: inquadratura che tiene ferma la foto mentre la cornice cambia. */ view?: Partial<ItemView> }
+  /** Più foto libere spostate insieme (mm nello spread). */
+  | { kind: "group"; rects: Boxed[]; guides?: SnapGuide[]; gaps?: GapMeasure[]; copy?: boolean };
 
 /** Ctrl (o ⌘) davvero premuto: il pinch del touchpad arriva come rotella con Ctrl, ma senza che il tasto sia giù. */
 let controlHeld = false;
@@ -51,6 +54,10 @@ export interface SpreadViewProps {
   pickedItemIds?: readonly string[];
   /** Maiusc+clic su una foto: la aggiunge o la toglie dalla selezione multipla. */
   onTogglePick?: (itemId: string, areaIndex: number) => void;
+  /** Selezione a rettangolo trascinando sullo sfondo: le foto sfiorate (con Maiusc si aggiungono a quelle già scelte). */
+  onPickItems?: (itemIds: string[], areaIndex: number) => void;
+  /** Più foto libere spostate insieme: ogni cornice nel suo nuovo rettangolo (mm nello spread). */
+  onCommitFrames?: (frames: Boxed[], options?: { copy?: boolean }) => void;
   cropMode?: boolean;
   draft?: Draft | null;
   lowDpi?: number;
@@ -85,6 +92,15 @@ export interface SpreadViewProps {
   renderToolbar?: (itemId: string) => ToolbarParts | null;
   /** Segnalino delle varianti simili per id dell'elemento («2/3»). */
   altLabels?: ReadonlyMap<string, string>;
+}
+
+/** Le foto libere e mobili (né bloccate né in una pagina con il layout bloccato) tra quelle della selezione multipla, con la cornice attuale. */
+function freeMembers(geometry: readonly AreaGeometry[], spread: AlbumSpread, picked: readonly string[]): Boxed[] {
+  return geometry.flatMap((entry, areaIndex) => {
+    const area = spread.areas[areaIndex];
+    if (!hasFreeLayout(area) || area.locked) return [];
+    return entry.cells.filter((cell) => picked.includes(cell.itemId) && !area.items.find((candidate) => candidate.id === cell.itemId)?.locked).map((cell) => ({ id: cell.itemId, rect: cell.rect }));
+  });
 }
 
 const pct = (value: number) => `${Number(value.toFixed(4))}%`;
@@ -125,6 +141,10 @@ interface CellProps {
   altLabel?: string;
   handlers: Pick<SpreadViewProps, "onSelectItem" | "onTogglePick" | "onContextItem" | "onToggleCrop" | "onDraft" | "onCommitView" | "renderToolbar" | "onStraightenDone"> & {
     onCommitFrameRect?: (itemId: string, rect: Rect) => void;
+    /** Pressione su una foto della selezione multipla: true se parte lo spostamento di gruppo (allora la foto non si muove da sola). */
+    onGroupDown?: (event: React.PointerEvent, itemId: string) => boolean;
+    /** Ctrl/⌘ + trascinamento di una foto libera: la copia nasce nel rettangolo dato (mm nello spread). */
+    onCommitCopies?: (frames: Boxed[]) => void;
     /** Ritaglio libero: cosa servirebbe per portare la cornice in `rect` tenendo ferma la foto (null = non si può). */
     onPlanCrop?: (itemId: string, rect: Rect) => FrameCrop | null;
     onCommitCropRect?: (itemId: string, rect: Rect) => void;
@@ -218,20 +238,22 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
 
   // Con il layout della pagina bloccato (lucchetto) le foto libere restano ferme: si trascinano solo per sostituirle o scambiarle, come nelle pagine automatiche.
   const freeFrame = free && interactive && !item.locked && !area.locked;
-  const frameDrag = useRef<{ mode: "move" | "resize"; x: number; y: number; rect: Rect; mmPerPx: number; moved: boolean } | null>(null);
+  const frameDrag = useRef<{ mode: "move" | "resize"; x: number; y: number; rect: Rect; mmPerPx: number; moved: boolean; copy: boolean } | null>(null);
   const startFrame = (event: React.PointerEvent, mode: "move" | "resize") => {
     const parent = ref.current?.parentElement?.getBoundingClientRect();
     if (!parent || parent.width === 0) return;
     event.preventDefault();
     event.stopPropagation();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    frameDrag.current = { mode, x: event.clientX, y: event.clientY, rect: cell.rect, mmPerPx: origin.w / parent.width, moved: false };
+    frameDrag.current = { mode, x: event.clientX, y: event.clientY, rect: cell.rect, mmPerPx: origin.w / parent.width, moved: false, copy: mode === "move" && (event.ctrlKey || event.metaKey) };
     if (mode === "move") handlers.onSelectItem?.(item.id, areaIndex);
   };
   const snapGuides = useRef<SnapGuide[]>([]);
+  const frameGaps = useRef<GapMeasure[]>([]);
   const frameRect = (event: React.PointerEvent): Rect | null => {
     const drag = frameDrag.current;
     snapGuides.current = [];
+    frameGaps.current = [];
     if (!drag) return null;
     const dx = (event.clientX - drag.x) * drag.mmPerPx;
     const dy = (event.clientY - drag.y) * drag.mmPerPx;
@@ -240,15 +262,18 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       ? { ...drag.rect, x: drag.rect.x + dx, y: drag.rect.y + dy }
       : (() => { const w = Math.max(8, drag.rect.w + Math.max(dx, (dy * drag.rect.w) / drag.rect.h)); return { ...drag.rect, w, h: (w * drag.rect.h) / drag.rect.w }; })();
     // Aggancio come negli editor grafici: bordi e centri si attaccano a quelli delle altre foto e dell'area, con una linea guida. Alt = senza aggancio.
-    if (event.altKey || !snapTargets || !getSnapEnabled()) return raw;
+    // Le distanze dalle foto vicine si mostrano sempre (anche con Alt); l'aggancio no.
+    const photos = snapTargets?.filter((target) => target.id !== item.id && !target.id.startsWith("__")).map((target) => target.rect) ?? [];
+    if (event.altKey || !snapTargets || !getSnapEnabled()) { frameGaps.current = gapMeasures(raw, photos); return raw; }
     const targets = snapTargets.filter((target) => target.id !== item.id).map((target) => target.rect);
     const snapped = drag.mode === "move" ? snapMove(raw, targets, FRAME_SNAP_PX * drag.mmPerPx, { targetCenters: false }) : snapResize(raw, targets, FRAME_SNAP_PX * drag.mmPerPx);
     snapGuides.current = snapped.guides;
+    frameGaps.current = gapMeasures(snapped.rect, photos);
     return snapped.rect;
   };
   const moveFrame = (event: React.PointerEvent) => {
     const rect = frameRect(event);
-    if (rect) handlers.onDraft?.({ kind: "frame", itemId: item.id, rect, guides: snapGuides.current });
+    if (rect) handlers.onDraft?.({ kind: "frame", itemId: item.id, rect, guides: snapGuides.current, gaps: frameGaps.current, copy: frameDrag.current?.copy });
     if (frameDrag.current?.mode === "move") handlers.onFrameOver?.(item.id, { clientX: event.clientX, clientY: event.clientY });
   };
   const endFrame = (event: React.PointerEvent) => {
@@ -257,6 +282,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     frameDrag.current = null;
     handlers.onDraft?.(null);
     if (!drag?.moved || !rect) { handlers.onFrameOver?.(item.id, null); return; }
+    if (drag.copy) { handlers.onFrameOver?.(item.id, null); handlers.onCommitCopies?.([{ id: item.id, rect }]); return; }
     // Lasciata sopra l'altra pagina la foto passa a quella pagina; altrimenti resta nella sua, nella nuova posizione.
     if (drag.mode === "move" && handlers.onFrameDrop?.(item.id, event.clientX, event.clientY, rect)) return;
     handlers.onCommitFrameRect?.(item.id, rect);
@@ -339,7 +365,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     if (lineActive) { startLine(event); return; }
     // Alt + trascinamento (come in AlbumTeller): riposiziona la foto nella cella senza aprire il ritaglio, così come Alt + rotella la ingrandisce.
     const quickPan = event.altKey && !canCrop && interactive && !item.locked && !freeFrame && event.button === 0 && Boolean(asset);
-    if (freeFrame && !canCrop) { startFrame(event, "move"); return; }
+    if (freeFrame && !canCrop) { if (picked && handlers.onGroupDown?.(event, item.id)) return; startFrame(event, "move"); return; }
     if (!canCrop && !quickPan) return;
     if (quickPan) handlers.onSelectItem?.(item.id, areaIndex);
     event.preventDefault();
@@ -628,7 +654,11 @@ function SpreadViewInner(props: SpreadViewProps) {
   const overrides = useMemo(() => (draft?.kind === "ratio" ? { [draft.areaIndex]: { [draft.path]: draft.ratio } } : undefined), [draft]);
   const geometry: AreaGeometry[] = useMemo(() => spread.areas.map((_, index) => {
     const base = areaGeometryFor(sheet, spread, index, overrides?.[index]);
-    return draft?.kind === "frame" && base.cells.some((cell) => cell.itemId === draft.itemId)
+    if (draft?.kind === "group" && !draft.copy) {
+      const moved = new Map(draft.rects.map((entry) => [entry.id, entry.rect]));
+      return base.cells.some((cell) => moved.has(cell.itemId)) ? { ...base, cells: base.cells.map((cell) => (moved.has(cell.itemId) ? { ...cell, rect: moved.get(cell.itemId)! } : cell)) } : base;
+    }
+    return draft?.kind === "frame" && !draft.copy && base.cells.some((cell) => cell.itemId === draft.itemId)
       ? { ...base, cells: base.cells.map((cell) => (cell.itemId === draft.itemId ? { ...cell, rect: draft.rect } : cell)) }
       : base;
   }), [sheet, spread, overrides, draft]);
@@ -715,8 +745,150 @@ function SpreadViewInner(props: SpreadViewProps) {
     return true;
   }, [crossTarget]);
 
-  const handlers = useMemo(() => ({ onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect, onPlanCrop: planCrop, onCommitCropRect: commitCropRect, onFrameOver: frameOver, onFrameDrop: frameDrop }),
-    [props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect, planCrop, commitCropRect, frameOver, frameDrop]);
+  // Gesti su più foto libere: spostamento di gruppo (una foto della selezione multipla trascinata) e selezione a rettangolo (trascinando sullo sfondo).
+  // I movimenti si seguono sulla finestra e leggono i valori da una ref: il gesto non dipende dai ridisegni a ogni movimento.
+  const groupLatest = useRef({ geometry, spread, size, picked: props.pickedItemIds, selectedItemId, snapTargetsByArea, onDraft: props.onDraft, onCommitFrames: props.onCommitFrames, onPickItems: props.onPickItems, activeArea });
+  groupLatest.current = { geometry, spread, size, picked: props.pickedItemIds, selectedItemId, snapTargetsByArea, onDraft: props.onDraft, onCommitFrames: props.onCommitFrames, onPickItems: props.onPickItems, activeArea };
+  const [marquee, setMarquee] = useState<Rect | null>(null);
+  const [marqueeIds, setMarqueeIds] = useState<readonly string[]>([]);
+  /** Dopo un trascinamento il clic che il browser genera sullo sfondo o sulla foto non deve azzerare la selezione appena fatta. */
+  const swallowClick = () => {
+    const stop = (event: Event) => { event.stopPropagation(); event.preventDefault(); };
+    window.addEventListener("click", stop, true);
+    window.setTimeout(() => window.removeEventListener("click", stop, true), 0);
+  };
+  const startGroup = useCallback((event: React.PointerEvent, itemId: string): boolean => {
+    const now = groupLatest.current;
+    const picked = now.picked ?? [];
+    const box = ref.current?.getBoundingClientRect();
+    if (event.shiftKey || event.button !== 0 || picked.length < 2 || !picked.includes(itemId) || !box || box.width === 0) return false;
+    const members = freeMembers(now.geometry, now.spread, picked);
+    if (members.length < 2 || !members.some((member) => member.id === itemId)) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    const mmPerPx = now.size.width / box.width;
+    const ids = new Set(members.map((member) => member.id));
+    const targets = now.snapTargetsByArea.flatMap((list) => list ?? []).filter((target) => !ids.has(target.id)).map((target) => target.rect);
+    const start = unionRect(members.map((member) => member.rect));
+    const [startX, startY] = [event.clientX, event.clientY];
+    const copy = event.ctrlKey || event.metaKey;
+    const photos = now.geometry.flatMap((entry) => entry.cells).filter((cell) => !ids.has(cell.itemId)).map((cell) => cell.rect);
+    let last: Boxed[] | null = null;
+    let moved = false;
+    const onMove = (move: PointerEvent) => {
+      const px = move.clientX - startX;
+      const py = move.clientY - startY;
+      if (Math.abs(px) + Math.abs(py) > 2) moved = true;
+      if (!moved) return;
+      let dx = px * mmPerPx;
+      let dy = py * mmPerPx;
+      let guides: SnapGuide[] = [];
+      // Il riquadro che contiene tutto il gruppo si aggancia come una foto sola; Alt = senza aggancio.
+      if (!move.altKey && getSnapEnabled() && targets.length > 0) {
+        const snapped = snapMove(translateRect(start, dx, dy), targets, FRAME_SNAP_PX * mmPerPx, { targetCenters: false });
+        dx = snapped.rect.x - start.x;
+        dy = snapped.rect.y - start.y;
+        guides = snapped.guides;
+      }
+      last = members.map((member) => ({ id: member.id, rect: translateRect(member.rect, dx, dy) }));
+      groupLatest.current.onDraft?.({ kind: "group", rects: last, guides, gaps: gapMeasures(translateRect(start, dx, dy), photos), copy });
+    };
+    const finish = (commitIt: boolean) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      groupLatest.current.onDraft?.(null);
+      if (!moved) return;
+      swallowClick();
+      if (commitIt && last) groupLatest.current.onCommitFrames?.(last, copy ? { copy } : undefined);
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+    return true;
+  }, []);
+  /** Maniglia d'angolo del gruppo: tutte le foto si ingrandiscono o riducono insieme (proporzioni di ognuna invariate) tenendo fermo l'angolo opposto. */
+  const startGroupScale = (event: React.PointerEvent, sx: 1 | -1, sy: 1 | -1) => {
+    const now = groupLatest.current;
+    const box = ref.current?.getBoundingClientRect();
+    const members = freeMembers(now.geometry, now.spread, now.picked ?? []);
+    if (event.button !== 0 || !box || box.width === 0 || members.length < 2) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const mmPerPx = now.size.width / box.width;
+    const frame = unionRect(members.map((member) => member.rect));
+    const anchor = { x: sx > 0 ? frame.x : frame.x + frame.w, y: sy > 0 ? frame.y : frame.y + frame.h };
+    // Una cornice libera non scende sotto il 4% della sua pagina (`sanitizeFrame`): oltre quel limite la foto si deformerebbe, quindi il gruppo si ferma prima.
+    const minFactor = Math.max(0.05, ...now.geometry.flatMap((entry) => members.filter((member) => entry.cells.some((cell) => cell.itemId === member.id)).map((member) => 1.02 * Math.max((0.04 * entry.inner.w) / member.rect.w, (0.04 * entry.inner.h) / member.rect.h))));
+    const [startX, startY] = [event.clientX, event.clientY];
+    let last: Boxed[] | null = null;
+    let moved = false;
+    const onMove = (move: PointerEvent) => {
+      if (Math.abs(move.clientX - startX) + Math.abs(move.clientY - startY) > 2) moved = true;
+      if (!moved) return;
+      const factor = groupScaleFactor(frame, sx, sy, (move.clientX - startX) * mmPerPx, (move.clientY - startY) * mmPerPx, minFactor);
+      last = scaleRects(members, anchor, factor);
+      groupLatest.current.onDraft?.({ kind: "group", rects: last });
+    };
+    const finish = (commitIt: boolean) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      groupLatest.current.onDraft?.(null);
+      if (!moved) return;
+      swallowClick();
+      if (commitIt && last) groupLatest.current.onCommitFrames?.(last);
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+  };
+  const copyFrames = useCallback((frames: Boxed[]) => groupLatest.current.onCommitFrames?.(frames, { copy: true }), []);
+  const startMarquee = (event: React.PointerEvent) => {
+    const now = groupLatest.current;
+    const box = ref.current?.getBoundingClientRect();
+    if (!interactive || props.photosLocked || event.button !== 0 || !box || box.width === 0 || !now.spread.areas.some((area) => hasFreeLayout(area))) return;
+    if ((event.target as HTMLElement).closest(".cell, .divider, .spread__toolbar, .design-box, .design-group, .spread__empty-chip, button, input")) return;
+    event.preventDefault();
+    const toMmPoint = (clientX: number, clientY: number) => ({ x: ((clientX - box.left) / box.width) * now.size.width, y: ((clientY - box.top) / box.height) * now.size.height });
+    const from = toMmPoint(event.clientX, event.clientY);
+    const additive = event.shiftKey;
+    const kept = additive ? [...(now.picked ?? []), ...(now.selectedItemId ? [now.selectedItemId] : [])] : [];
+    const candidates: Boxed[] = now.geometry.flatMap((entry, areaIndex) => (hasFreeLayout(now.spread.areas[areaIndex]) ? entry.cells.map((cell) => ({ id: cell.itemId, rect: cell.rect })) : []));
+    let hits: string[] = [];
+    let moved = false;
+    const onMove = (move: PointerEvent) => {
+      if (Math.abs(move.clientX - event.clientX) + Math.abs(move.clientY - event.clientY) > 3) moved = true;
+      if (!moved) return;
+      const to = toMmPoint(move.clientX, move.clientY);
+      const rect = rectFromPoints(from.x, from.y, to.x, to.y);
+      hits = marqueeHits(rect, candidates);
+      setMarquee(rect);
+      setMarqueeIds(hits);
+    };
+    const finish = (commitIt: boolean) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      setMarquee(null);
+      setMarqueeIds([]);
+      if (!moved) return;
+      swallowClick();
+      if (commitIt) groupLatest.current.onPickItems?.([...new Set([...kept, ...hits])], groupLatest.current.activeArea);
+    };
+    const onUp = () => finish(true);
+    const onCancel = () => finish(false);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
+  };
+
+  const handlers = useMemo(() => ({ onGroupDown: startGroup, onCommitCopies: copyFrames, onSelectItem: props.onSelectItem, onTogglePick: props.onTogglePick, onContextItem: props.onContextItem, onToggleCrop: props.onToggleCrop, onDraft: props.onDraft, onCommitView: props.onCommitView, renderToolbar: props.renderToolbar, onStraightenDone: props.onStraightenDone, onCommitFrameRect: commitFrameRect, onPlanCrop: planCrop, onCommitCropRect: commitCropRect, onFrameOver: frameOver, onFrameDrop: frameDrop }),
+    [startGroup, copyFrames, props.onSelectItem, props.onTogglePick, props.onContextItem, props.onToggleCrop, props.onDraft, props.onCommitView, props.renderToolbar, props.onStraightenDone, commitFrameRect, planCrop, commitCropRect, frameOver, frameDrop]);
 
   const onDragOver = (event: React.DragEvent) => {
     const payload = currentDrag();
@@ -747,9 +919,10 @@ function SpreadViewInner(props: SpreadViewProps) {
   return (
     <div
       ref={ref}
-      className={`spread spread--${variant}${draft?.kind === "ratio" || draft?.kind === "frame" || draft?.kind === "view" ? " is-resizing" : ""}${props.photosLocked ? " is-photos-locked" : ""}${hint ? " is-dropping" : ""}`}
+      className={`spread spread--${variant}${draft?.kind === "ratio" || draft?.kind === "frame" || draft?.kind === "group" || draft?.kind === "view" ? " is-resizing" : ""}${props.photosLocked ? " is-photos-locked" : ""}${hint ? " is-dropping" : ""}`}
       style={{ aspectRatio: `${size.width} / ${size.height}` }}
       onClick={() => { if (interactive) props.onSelectItem?.(null, activeArea); }}
+      onPointerDown={startMarquee}
       onDragOver={onDragOver}
       onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setHint(null); }}
       onDrop={onDrop}
@@ -795,7 +968,7 @@ function SpreadViewInner(props: SpreadViewProps) {
               variant={variant}
               selected={selectedItemId === item.id}
               highlighted={highlightItemId === item.id}
-              picked={Boolean(props.pickedItemIds?.includes(item.id))}
+              picked={Boolean(props.pickedItemIds?.includes(item.id)) || marqueeIds.includes(item.id)}
               cropActive={cropMode}
               view={(draft?.kind === "view" || draft?.kind === "frame") && draft.itemId === item.id ? draft.view ?? null : null}
               lowDpi={lowDpi}
@@ -809,7 +982,7 @@ function SpreadViewInner(props: SpreadViewProps) {
           );
         })}
 
-      {draft?.kind === "frame" && draft.guides?.length ? draft.guides.map((guide, index) => (
+      {(draft?.kind === "frame" || draft?.kind === "group") && draft.guides?.length ? draft.guides.map((guide, index) => (
         <span
           key={`${guide.axis}-${index}`}
           className={`spread__snap spread__snap--${guide.axis}`}
@@ -820,9 +993,50 @@ function SpreadViewInner(props: SpreadViewProps) {
         />
       )) : null}
 
+      {interactive && !props.photosLocked && !cropMode && (props.pickedItemIds?.length ?? 0) > 1 ? (() => {
+        const members = freeMembers(geometry, spread, props.pickedItemIds ?? []);
+        if (members.length < 2) return null;
+        const frame = unionRect(members.map((member) => member.rect));
+        const corners: Array<{ sx: 1 | -1; sy: 1 | -1; x: number; y: number }> = [
+          { sx: -1, sy: -1, x: frame.x, y: frame.y }, { sx: 1, sy: -1, x: frame.x + frame.w, y: frame.y },
+          { sx: -1, sy: 1, x: frame.x, y: frame.y + frame.h }, { sx: 1, sy: 1, x: frame.x + frame.w, y: frame.y + frame.h },
+        ];
+        return (
+          <div aria-hidden="true">
+            <span className="spread__group" style={{ left: pct((frame.x / size.width) * 100), top: pct((frame.y / size.height) * 100), width: pct((frame.w / size.width) * 100), height: pct((frame.h / size.height) * 100) }} />
+            {corners.map((corner) => (
+              <span
+                key={`${corner.sx}${corner.sy}`}
+                className={`spread__group-handle spread__group-handle--${corner.sx === corner.sy ? "nwse" : "nesw"}`}
+                style={{ left: pct((corner.x / size.width) * 100), top: pct((corner.y / size.height) * 100) }}
+                title="Trascina per ingrandire o ridurre tutte le foto scelte (le proporzioni restano)"
+                onPointerDown={(event) => startGroupScale(event, corner.sx, corner.sy)}
+                onClick={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+              />
+            ))}
+          </div>
+        );
+      })() : null}
+
+      {(draft?.kind === "frame" || draft?.kind === "group") && draft.gaps?.length ? draft.gaps.map((gap, index) => (
+        <span
+          key={`gap-${gap.axis}-${index}`}
+          className={`spread__gap spread__gap--${gap.axis}`}
+          aria-hidden="true"
+          style={gap.axis === "x"
+            ? { left: pct((gap.from / size.width) * 100), top: pct((gap.at / size.height) * 100), width: pct(((gap.to - gap.from) / size.width) * 100) }
+            : { top: pct((gap.from / size.height) * 100), left: pct((gap.at / size.width) * 100), height: pct(((gap.to - gap.from) / size.height) * 100) }}
+        ><em>{(gap.mm / 10).toLocaleString("it-IT", { maximumFractionDigits: 1 })} cm</em></span>
+      )) : null}
+
+      {(draft?.kind === "frame" || draft?.kind === "group") && draft.copy ? (draft.kind === "frame" ? [draft.rect] : draft.rects.map((entry) => entry.rect)).map((rect, index) => (
+        <span key={`copy-${index}`} className="spread__ghost" aria-hidden="true" style={{ left: pct((rect.x / size.width) * 100), top: pct((rect.y / size.height) * 100), width: pct((rect.w / size.width) * 100), height: pct((rect.h / size.height) * 100) }} />
+      )) : null}
+
       <OverlayLayer sheet={sheet} spread={spread} media={media} interactive={interactive} handlers={props.design} />
 
-      {interactive && selectedItemId && props.renderToolbar && draft?.kind !== "frame" ? (() => {
+      {interactive && selectedItemId && props.renderToolbar && draft?.kind !== "frame" && draft?.kind !== "group" ? (() => {
         const rect = geometry.flatMap((g) => g.cells).find((cell) => cell.itemId === selectedItemId)?.rect;
         const parts = rect ? props.renderToolbar(selectedItemId) : null;
         return rect && parts ? <FloatingToolbar key={selectedItemId} rect={rect} size={size} container={ref} parts={parts} away={draft !== null} /> : null;
@@ -840,7 +1054,7 @@ function SpreadViewInner(props: SpreadViewProps) {
       )) : null}
 
       {/* Il centro di ogni pagina, sopra le foto: con «Guide» sempre, altrimenti mentre si trascina una foto (soprattutto nelle disposizioni libere, dove niente lo segna). */}
-      {interactive && (showGuides || draft?.kind === "frame") ? geometry.map((entry, areaIndex) => (
+      {interactive && (showGuides || draft?.kind === "frame" || draft?.kind === "group") ? geometry.map((entry, areaIndex) => (
         <div key={`center-${spread.areas[areaIndex].id}`} aria-hidden="true">
           <span className="spread__center spread__center--x" style={{ left: pct(((entry.outer.x + entry.outer.w / 2) / size.width) * 100), top: pct((entry.outer.y / size.height) * 100), height: pct((entry.outer.h / size.height) * 100) }} />
           <span className="spread__center spread__center--y" style={{ top: pct(((entry.outer.y + entry.outer.h / 2) / size.height) * 100), left: pct((entry.outer.x / size.width) * 100), width: pct((entry.outer.w / size.width) * 100) }} />
@@ -863,6 +1077,8 @@ function SpreadViewInner(props: SpreadViewProps) {
           <span>+ {props.insertMarker.label}</span>
         </div>
       ) : null}
+
+      {marquee ? <div className="spread__marquee" aria-hidden="true" style={{ left: pct((marquee.x / size.width) * 100), top: pct((marquee.y / size.height) * 100), width: pct((marquee.w / size.width) * 100), height: pct((marquee.h / size.height) * 100) }} /> : null}
 
       {hint ? <div className={`spread__hint spread__hint--${hint.target.zone}`} style={{ left: pct((hint.rect.x / size.width) * 100), top: pct((hint.rect.y / size.height) * 100), width: pct((hint.rect.w / size.width) * 100), height: pct((hint.rect.h / size.height) * 100) }} /> : null}
     </div>
