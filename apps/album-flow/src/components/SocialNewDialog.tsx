@@ -4,11 +4,12 @@ import { useAssetSrc } from "../hooks/useAssetSrc";
 import type { Project } from "../model/project";
 import { defaultBrand } from "../social/brand";
 import { freshSeed, planCarousel, planCoverage, rankPhotos, setBrand, suggestSlideCount } from "../social/plan";
+import { setInfo } from "../social/templates";
 import { loadBrand } from "../social/store";
 import { MAX_SLIDES, MIN_SLIDES, type Carousel, type SetId } from "../social/types";
 import { Icon } from "./icons";
 import { SocialPhotoPicker } from "./SocialPhotoPicker";
-import { Modal, Segmented } from "./ui";
+import { Modal, Segmented, Switch } from "./ui";
 
 /** Quante miniature mostrare prima di «+N»: bastano a riconoscere la scelta. */
 const SHOWN = 14;
@@ -48,11 +49,13 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
   const [manual, setManual] = useState<number | null>(null);
   const [seed] = useState(freshSeed);
   const [promo, setPromo] = useState(false);
+  const [whole, setWhole] = useState(false);
+  const plain = Boolean(setInfo(setId).plain);
 
   const suggested = useMemo(() => suggestSlideCount(project, chosen, setId, seed, promo), [project, chosen, setId, seed, promo]);
   const count = Math.max(MIN_SLIDES, Math.min(MAX_SLIDES, manual ?? suggested));
   const brand = useMemo(() => loadBrand() ?? setBrand(defaultBrand(""), setId), [setId]);
-  const planned = useMemo(() => (chosen.length ? planCarousel(project, { setId, format: "feed", count, brand, name: title, assetIds: chosen, seed, promo }) : null), [project, chosen, setId, count, brand, title, seed, promo]);
+  const planned = useMemo(() => (chosen.length ? planCarousel(project, { setId, format: "feed", count, brand, name: title, assetIds: chosen, seed, promo, whole }) : null), [project, chosen, setId, count, brand, title, seed, promo, whole]);
 
   const stats = useMemo(() => planCoverage(project, chosen, count, setId, seed, promo), [project, chosen, count, setId, seed, promo]);
 
@@ -90,6 +93,15 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
           </div>
 
           <div className="social-new__block">
+            <div className="social-new__head"><h4>Foto intere</h4></div>
+            <Switch checked={whole || plain} onChange={setWhole} label="Non ritagliare le foto" />
+            <p className="muted small">{whole || plain
+              ? "Ogni foto si vede intera dentro il suo spazio, con il fondo della slide attorno, e senza forme tonde o ad arco. Lo cambi anche dopo."
+              : "Di base i modelli ritagliano la foto per riempire lo spazio. Attivalo per vederle sempre intere (lo stile «Minimal» è già così)."}</p>
+          </div>
+
+          {plain ? null : (
+          <div className="social-new__block">
             <div className="social-new__head"><h4>Tipo di carosello</h4></div>
             <Segmented<"photos" | "promo"> label="Tipo di carosello" value={promo ? "promo" : "photos"} onChange={(value) => setPromo(value === "promo")}
               options={[{ value: "photos", label: "Solo foto" }, { value: "promo", label: "Con slide di vendita" }]} />
@@ -97,6 +109,7 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
               ? "Aggiunge slide per presentarti: prenota, domande frequenti, data da segnare, recensione, le pagine dell'album. Puoi cambiarle o toglierle dopo."
               : "Le tue foto in layout diversi, al massimo con una parola o una frase breve. Niente slide di vendita: le puoi aggiungere dopo, una per una."}</p>
           </div>
+          )}
 
           <div className="social-new__block">
             <div className="social-new__head"><h4>Numero di slide</h4><strong className="social-new__count">{count}</strong></div>

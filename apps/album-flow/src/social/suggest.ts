@@ -27,6 +27,7 @@ const PREFERRED_TONES: Readonly<Record<SetId, readonly StoryTone[]>> = {
   galleria: ["elegant", "poetic", "intimate"],
   moda: ["editorial", "minimal", "celebratory"],
   cinema: ["cinematic", "reflective", "poetic"],
+  minimal: ["minimal", "reflective", "elegant"],
 };
 
 interface Candidate { text: string; tone: StoryTone }

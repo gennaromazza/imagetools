@@ -187,6 +187,8 @@ export interface PlanOptions {
   assetIds?: readonly string[];
   /** Propone anche i modelli di vendita (prenota, domande frequenti, data, recensione…): senza, il carosello è «Solo foto». */
   promo?: boolean;
+  /** Foto intere: nessuna foto viene ritagliata (vedi `Carousel.whole`). */
+  whole?: boolean;
   /** Dà un ordine diverso ai modelli (e qualche specchio): senza, o con 0, esce sempre la trama di base dello stile. */
   seed?: number;
   /** Foto da mettere per prime, nell'ordine dato (per cambiare stile senza perdere le scelte). */
@@ -305,7 +307,7 @@ function avoidRepeatedPhrases(slides: Slide[], brand: BrandKit, albumName: strin
 export function planCarousel(project: Project, options: PlanOptions): Carousel {
   const count = clampCount(options.count);
   const set = setInfo(options.setId);
-  const promo = Boolean(options.promo);
+  const promo = Boolean(options.promo) && !set.plain;
   const own = options.assetIds ? [...new Set(options.assetIds)] : null;
   const pool = rankPhotos(project, new Set(own ?? defaultPoolIds(project)));
   const seed = options.seed && options.seed > 0 ? Math.floor(options.seed) : 0;
@@ -365,7 +367,7 @@ export function planCarousel(project: Project, options: PlanOptions): Carousel {
   }
   avoidRepeatedPhrases(slides, options.brand, project.projectName, options.setId);
   const now = nowIso();
-  return { id: newId("car"), name: options.name?.trim() || "Carosello", format: options.format, setId: options.setId, brand: options.brand, slides, ...(own ? { assetIds: own } : {}), promo, ...(seed ? { seed } : {}), basis: selectionBasis(project), caption: "", createdAt: now, updatedAt: now };
+  return { id: newId("car"), name: options.name?.trim() || "Carosello", format: options.format, setId: options.setId, brand: options.brand, slides, ...(own ? { assetIds: own } : {}), promo, ...(options.whole ? { whole: true } : {}), ...(seed ? { seed } : {}), basis: selectionBasis(project), caption: "", createdAt: now, updatedAt: now };
 }
 
 /** Impronta della scelta: le prime foto della classifica. Cambia quando cambiano stelle, segnalini «Per i social» o scarti. */
@@ -403,7 +405,7 @@ export function reselectPhotos(project: Project, carousel: Carousel): Carousel {
   const promo = isPromoCarousel(carousel);
   const count = fitSlideCount(project, ids, carousel.slides.length, carousel.setId, carousel.seed ?? 0, promo);
   const chosen = new Set(ids);
-  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count, brand: carousel.brand, name: carousel.name, seed: carousel.seed, promo, ...(fromMarks ? {} : replanPool(project, carousel)) });
+  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count, brand: carousel.brand, name: carousel.name, seed: carousel.seed, promo, whole: carousel.whole, ...(fromMarks ? {} : replanPool(project, carousel)) });
   const slides = next.slides.map((slide, index) => {
     const before = carousel.slides[index];
     const template = templateOf(slide.templateId);
@@ -428,7 +430,7 @@ export function freshSeed(): number {
 export function variation(project: Project, carousel: Carousel, seed = freshSeed()): Carousel {
   const prefer: string[] = [];
   for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
-  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed, prefer, promo: isPromoCarousel(carousel), ...replanPool(project, carousel) });
+  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed, prefer, promo: isPromoCarousel(carousel), whole: carousel.whole, ...replanPool(project, carousel) });
   return carryTextsByTemplate(next, carousel);
 }
 
@@ -452,7 +454,7 @@ export function setCarouselPromo(project: Project, carousel: Carousel, promo: bo
   if (isPromoCarousel(carousel) === promo) return carousel.promo === promo ? carousel : { ...carousel, promo };
   const prefer: string[] = [];
   for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
-  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed: carousel.seed, prefer, promo, ...replanPool(project, carousel) });
+  const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed: carousel.seed, prefer, promo, whole: carousel.whole, ...replanPool(project, carousel) });
   return carryTextsByTemplate(next, carousel);
 }
 
@@ -460,7 +462,7 @@ export function setCarouselPromo(project: Project, carousel: Carousel, promo: bo
 export function restyle(project: Project, carousel: Carousel, setId: SetId): Carousel {
   const prefer: string[] = [];
   for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
-  const next = planCarousel(project, { setId, format: carousel.format, count: carousel.slides.length, brand: setBrand(carousel.brand, setId), name: carousel.name, prefer, seed: carousel.seed, promo: isPromoCarousel(carousel), ...replanPool(project, carousel) });
+  const next = planCarousel(project, { setId, format: carousel.format, count: carousel.slides.length, brand: setBrand(carousel.brand, setId), name: carousel.name, prefer, seed: carousel.seed, promo: isPromoCarousel(carousel), whole: carousel.whole, ...replanPool(project, carousel) });
   const slides = next.slides.map((slide, index) => {
     const before = carousel.slides[index];
     const template = templateOf(slide.templateId);

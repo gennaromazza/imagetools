@@ -122,6 +122,7 @@ export function parseCarousel(raw: unknown): Carousel | null {
     slides: complete,
     ...(assetIds.length > 0 ? { assetIds } : {}),
     ...(typeof raw.promo === "boolean" ? { promo: raw.promo } : {}),
+    ...(raw.whole === true ? { whole: true } : {}),
     ...(typeof raw.basis === "string" ? { basis: raw.basis.slice(0, 600) } : {}),
     ...(Number.isInteger(raw.seed) && (raw.seed as number) > 0 && (raw.seed as number) < 2 ** 31 ? { seed: raw.seed as number } : {}),
     caption: str(raw.caption, "", 2200),

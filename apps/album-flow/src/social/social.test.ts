@@ -699,6 +699,7 @@ test("venti slide: ogni stile ha abbastanza modelli da non ripetere gli stessi l
     const carousel = plan(project, { setId: set.id, count: 20 });
     assert.equal(carousel.slides.length, 20);
     assertCarouselInvariants(carousel, project);
+    if (set.id === "minimal") continue; // pochi modelli per scelta: vedi social-whole.test.ts
     const uses = new Map<string, number>();
     for (const slide of carousel.slides) uses.set(slide.templateId, (uses.get(slide.templateId) ?? 0) + 1);
     const distinct = [...uses.keys()].filter((id) => id !== "sh-pano").length;
@@ -757,6 +758,7 @@ test("varianti: ogni modello che può tornare due volte in un carosello ha testi
   const project = album();
   for (const set of SETS) {
     const carousel = plan(project, { setId: set.id, count: 20 });
+    if (set.id === "minimal") continue; // nessun testo da variare
     const seen = new Map<string, string[]>();
     for (const slide of carousel.slides) {
       if (slide.span || slide.templateId === "sh-mockup") continue;

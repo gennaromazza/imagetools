@@ -21,6 +21,28 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.49",
+    date: "2026-11-03",
+    headline: "Caroselli con foto intere e stile Minimal, tasto «Per i social» corretto",
+    items: [
+      {
+        title: "Non ritagliare le foto nei caroselli",
+        text: "Un interruttore fa sì che ogni foto si veda intera dentro il suo spazio, con il fondo della slide attorno, in qualunque stile e modello: niente ritagli e niente forme tonde o ad arco. Le inquadrature che scegli a mano restano e i panorami non cambiano.",
+        where: ["Carosello › Stile › «Non ritagliare le foto»", "Nuovo carosello › «Foto intere»"],
+      },
+      {
+        title: "Stile «Minimal»",
+        text: "Un quinto stile per chi vuole solo le foto: fondo chiaro, foto sempre intere, nessun testo, nessuna forma, nessuna slide di vendita. Ci sono modelli con una, due, tre e quattro foto.",
+        where: ["Carosello › Stile › «Minimal»"],
+      },
+      {
+        title: "«Per i social» dallo spread",
+        text: "Il tasto I segna la foto che hai selezionato sullo spread, non una foto rimasta selezionata in libreria. Con più foto scelte insieme la segnalazione si mette a tutte o si toglie a tutte.",
+        where: ["Tasto I", "Tasto destro sulla foto › «Segna «Per i social»»"],
+      },
+    ],
+  },
+  {
     version: "0.2.48",
     date: "2026-11-03",
     headline: "Usa più foto simili, barre della foto più pulite",

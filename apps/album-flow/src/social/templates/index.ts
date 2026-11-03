@@ -6,6 +6,7 @@ import { MODA } from "./moda";
 import { SHARED } from "./shared";
 import { mulberry32 } from "../../engine/rng";
 import { CINEMA_MORE, EDITORIALE_MORE, GALLERIA_MORE, MODA_MORE } from "./more";
+import { MINIMAL } from "./minimal";
 import { FLEX_TONE_IDS, UNIVERSAL } from "./universal";
 
 export { FLEX_TONE_IDS };
@@ -25,6 +26,8 @@ export interface SetInfo {
   closeAlt?: readonly string[];
   /** Apertura e chiusura del carosello «Solo foto»: sempre con una foto, mai con pulsanti o inviti a contattare. */
   simple: { open: string; close: string };
+  /** Stile senza testi né modelli di vendita (Minimal): non propone mai le slide di vendita, nemmeno con «Con vendita». */
+  plain?: boolean;
 }
 
 export const SETS: readonly SetInfo[] = [
@@ -49,9 +52,14 @@ export const SETS: readonly SetInfo[] = [
     arc: { open: "ci-full", middle: ["ci-strip", "sh-film4", "ci-scope", "ci-duo", "sh-lead3", "ci-quote", "sh-statement", "sh-letter3", "sh-split", "sh-row3", "sh-grid", "sh-arch", "sh-trio", "sh-polaroid", "sh-duo", "sh-full", "ci-letterbox", "ci-diptych", "sh-faq", "sh-checklist", "sh-polaroid-duo", "sh-book", "sh-date", "sh-strips", "sh-mosaic4", "sh-columns4", "sh-hero3", "sh-polaroid3", "sh-polaroid4", "sh-circles3", "sh-stack4", "sh-arches3", "sh-wall4", "sh-solo-full", "sh-solo-inset", "sh-solo-mat", "sh-solo-frame", "sh-solo-caption", "sh-solo-circle", "sh-solo-band", "sh-solo-card"], close: "sh-closing" },
     closeAlt: ["ci-credits"],
   },
+  {
+    id: "minimal", label: "Minimal", note: "Solo foto intere su fondo chiaro: niente testi, niente forme, niente ritagli",
+    paletteId: "grafite", fontPairId: "moda", flexTone: "light", plain: true, simple: { open: "mn-single", close: "mn-single" },
+    arc: { open: "mn-single", middle: ["mn-full", "mn-airy", "mn-duo", "mn-stack", "mn-quad", "mn-rows3"], close: "mn-single" },
+  },
 ];
 
-export const TEMPLATES: readonly SlideTemplate[] = [...EDITORIALE, ...EDITORIALE_MORE, ...GALLERIA, ...GALLERIA_MORE, ...MODA, ...MODA_MORE, ...CINEMA, ...CINEMA_MORE, ...SHARED, ...UNIVERSAL];
+export const TEMPLATES: readonly SlideTemplate[] = [...EDITORIALE, ...EDITORIALE_MORE, ...GALLERIA, ...GALLERIA_MORE, ...MODA, ...MODA_MORE, ...CINEMA, ...CINEMA_MORE, ...MINIMAL, ...SHARED, ...UNIVERSAL];
 
 /**
  * La trama di uno stile per un dato seme. Con 0 (o senza seme) è quella di base, sempre uguale; con un altro numero i modelli di mezzo
@@ -107,9 +115,9 @@ export function setInfo(id: SetId): SetInfo {
   return SETS.find((set) => set.id === id) ?? SETS[0];
 }
 
-/** Modelli tra cui scegliere in uno stile: i suoi, poi quelli comuni (panorama, album, chiusura). */
+/** Modelli tra cui scegliere in uno stile: i suoi, poi quelli comuni (panorama, album, chiusura). Lo stile Minimal non ha testi né forme: dei comuni solo il panorama. */
 export function templatesForSet(id: SetId): SlideTemplate[] {
-  const own = TEMPLATES.filter((template) => template.set === id || template.set === "shared");
+  const own = TEMPLATES.filter((template) => template.set === id || (template.set === "shared" && (id !== "minimal" || template.id === "sh-pano")));
   // I modelli più semplici (una foto, quasi senza testo) stanno in testa: sono quelli che si cercano per primi.
   return [...own.filter((template) => template.id.startsWith("sh-solo-")), ...own.filter((template) => !template.id.startsWith("sh-solo-"))];
 }

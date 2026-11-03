@@ -34,6 +34,8 @@ const PROMO_IDS = ["ci-credits", "ed-cta", "ed-list", "ed-quote", "ga-letter", "
 test("modelli di vendita: sono quelli noti, ognuno ha un posto tra i modelli e i semplici sono la maggioranza", () => {
   assert.deepEqual(TEMPLATES.filter((template) => template.promo).map((template) => template.id).sort(), [...PROMO_IDS].sort(), "i modelli di vendita sono una lista decisa, non un caso");
   for (const set of SETS) {
+    // Minimal è volutamente piccolo e senza testi né modelli di vendita: ha la sua prova in social-whole.test.ts.
+    if (set.id === "minimal") continue;
     const all = templatesForSet(set.id);
     assert.ok(all.some((template) => template.promo), `${set.id}: i modelli di vendita restano tra quelli tra cui scegliere`);
     assert.ok(all.filter((template) => !template.promo && template.slots.length > 0).length >= 22, `${set.id}: pochi modelli semplici`);

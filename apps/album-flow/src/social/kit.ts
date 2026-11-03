@@ -76,6 +76,15 @@ export interface TextSpec {
 
 export interface Frame { x: number; y: number; w: number; h: number }
 
+/** La parte di una cornice che sta dentro la tela (un modello può far uscire la foto dal bordo: una foto intera deve restare visibile tutta). */
+function insideCanvas(frame: Frame, width: number, height: number): Frame {
+  const x = Math.max(0, frame.x);
+  const y = Math.max(0, frame.y);
+  const w = Math.min(width, frame.x + frame.w) - x;
+  const h = Math.min(height, frame.y + frame.h) - y;
+  return w > 0 && h > 0 ? { x, y, w, h } : frame;
+}
+
 /** La finestra di forma `shape` più grande che sta dentro la cornice, centrata (come la «forma» delle foto nei fotolibri). */
 export function fitWindow(frame: Frame, shape: number): Frame {
   if (!Number.isFinite(shape) || shape <= 0) return frame;
@@ -191,14 +200,22 @@ export class Scene {
   path(spec: Omit<PathLayer, "kind" | "id">): PathLayer { return this.push({ kind: "path", id: this.id(), ...spec }); }
   gradient(spec: Omit<GradientLayer, "kind" | "id">): GradientLayer { return this.push({ kind: "gradient", id: this.id(), ...spec }); }
 
-  photo(slot: number, frame: Frame, extras: Partial<Omit<PhotoLayer, "kind" | "id" | "slot" | "x" | "y" | "w" | "h">> = {}): PhotoLayer {
+  /**
+   * Una foto nel suo spazio. Con `whole` (o con «foto intere» scelto per il carosello) la foto non si ritaglia: la finestra prende le sue proporzioni,
+   * sta centrata nello spazio e la forma resta rettangolare. Valgono sempre le scelte fatte a mano (zoom, forma), gli sfondi sfocati (che coprono
+   * tutta la slide) e i panorami (le parti devono combaciare).
+   */
+  photo(slot: number, frame: Frame, extras: Partial<Omit<PhotoLayer, "kind" | "id" | "slot" | "x" | "y" | "w" | "h">> = {}, whole = false): PhotoLayer {
     // Gli sfondi sfocati non si inquadrano: copiano solo la foto. Nei panorami non si cambia la forma (le parti devono combaciare).
     const framing = extras.blur ? null : this.ctx.framing[slot] ?? null;
-    const target = framing?.shape && !this.ctx.span ? fitWindow(frame, framing.shape) : frame;
+    const aspect = this.ctx.photos[slot]?.aspect;
+    const entire = (whole || Boolean(this.ctx.whole)) && !extras.blur && !this.ctx.span && !framing && aspect !== undefined && Number.isFinite(aspect) && aspect > 0;
+    const target = entire ? fitWindow(insideCanvas(frame, this.width, this.height), aspect!) : framing?.shape && !this.ctx.span ? fitWindow(frame, framing.shape) : frame;
     return this.push({
       kind: "photo", id: this.id(), slot, assetId: this.ctx.photos[slot]?.assetId ?? null,
       x: round(target.x), y: round(target.y), w: round(target.w), h: round(target.h), mask: "rect",
       zoom: framing?.zoom ?? 1, cx: framing?.cx ?? 0.5, cy: framing?.cy ?? 0.5, ...extras,
+      ...(entire ? { mask: "rect" as const } : {}),
     });
   }
 

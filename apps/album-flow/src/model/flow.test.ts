@@ -5,7 +5,7 @@ import { DEFAULT_AUTO_BUILD, MAX_AUTO_PER_AREA, PANORAMA_ASPECT, autoBuildAlbum,
 import { BUILTIN_CHAPTER_PRESETS, CHAPTER_COLORS, applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, chapterOfAsset } from "./chapters";
 import { COMMON_FORMATS, formatKey, formatLabel, fromCm, isValidFormat, loadFavoriteFormats, loadRecentFormats, pushRecentFormat, sheetFromFormat, toCm, toggleFavoriteFormat } from "./formats";
 import { IMAGE_EXTENSIONS, applyImport, assetFromCandidate, candidateKey, folderGroups, isImageFileName, normalizePathKey, planImport, withoutFolders, type ImportCandidate } from "./import";
-import { assetUsage, clearRatings, setRatingPolicy, assetsInTab, compareAssets, duplicatedAssetIds, filterAssets, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, sortAssets, toggleAssetTag, unusedAssets } from "./library";
+import { assetUsage, clearRatings, setRatingPolicy, assetsInTab, compareAssets, duplicatedAssetIds, filterAssets, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, sortAssets, toggleAssetTag, toggleAssetsTag, unusedAssets } from "./library";
 import { parseAlbumProject, projectProblem, repairOversizedAreas, serializeAlbumProject } from "./portability";
 import { preflightReport } from "./preflight";
 import { addTextOverlay, updateOverlay } from "./design";
@@ -737,4 +737,17 @@ test("spread finiti: Mescola e Auto Build non li toccano e restano al loro posto
   assertProjectInvariants(rebuilt, "ricostruito con uno spread finito");
   assert.equal(setSpreadDone(setSpreadDone(project, keepId, false), keepId, false).spreads[1].done, false);
   assert.equal(parseAlbumProject(serializeAlbumProject(project)).spreads[1].done, true, "il segno si salva");
+});
+
+test("segnare più foto insieme: se manca a una si mette a tutte, se ce l'hanno tutte si toglie a tutte", () => {
+  const project = createDemoProject();
+  const [a, b, c] = project.assets.map((asset) => asset.id);
+  const tagsOf = (p: typeof project, id: string) => p.assets.find((asset) => asset.id === id)!.albumTags ?? [];
+  const mixed = toggleAssetTag(project, a, "social");
+  const all = toggleAssetsTag(mixed, [a, b, c], "social");
+  assert.deepEqual([a, b, c].map((id) => tagsOf(all, id).includes("social")), [true, true, true], "una foto già segnata non viene tolta: le altre si aggiungono");
+  const none = toggleAssetsTag(all, [a, b, c], "social");
+  assert.deepEqual([a, b, c].map((id) => tagsOf(none, id).includes("social")), [false, false, false], "se ce l'hanno tutte si toglie a tutte");
+  assert.equal(toggleAssetsTag(project, ["inesistente"], "social"), project);
+  assert.equal(toggleAssetsTag(project, [], "social"), project);
 });

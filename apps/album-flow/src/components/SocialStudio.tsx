@@ -9,7 +9,7 @@ import { carouselReport } from "../social/check";
 import { FONT_PAIRS, PALETTES, brandFontIds, defaultBrand, fontPairOf } from "../social/brand";
 import {
   acceptSelection, addPanorama, addSlide, duplicateSlide, moveSlide, removeSlide, renameCarousel, replacePhoto, resetSlideText, setCaption, setFormat, setSlideSpread,
-  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, addToPool, reselectSlidePhotos, resizeCarousel, setCarouselPool, unusedRanked, hideElement, resetMovedElements, setFreeFrame, showHiddenElements, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, updateBrand, usedAssetIds,
+  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, addToPool, reselectSlidePhotos, resizeCarousel, setCarouselPool, unusedRanked, hideElement, resetMovedElements, setFreeFrame, showHiddenElements, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, setWholePhotos, updateBrand, usedAssetIds,
 } from "../social/edit";
 import { dedupeTexts, repeatedTexts, setSlideTextStyle, suggestCarouselTexts, suggestFieldText, suggestSlideTexts } from "../social/edit-text";
 import { buildSlide } from "../social/build";
@@ -33,7 +33,7 @@ import { SocialNewDialog } from "./SocialNewDialog";
 import { SocialFraming } from "./SocialFraming";
 import { SocialTextFields } from "./SocialTextFields";
 import { SocialPhotoPicker } from "./SocialPhotoPicker";
-import { Segmented } from "./ui";
+import { Segmented, Switch } from "./ui";
 
 const MAGNETS_KEY = "filex.albumFlow.social.magnets";
 
@@ -590,11 +590,21 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             ))}
           </div>
           <p className="muted small social-hint">{setInfo(carousel.setId).note}. Cambiare stile mantiene le foto e i testi.</p>
-          <Segmented<"photos" | "promo"> label="Tipo di carosello" value={promoNow ? "promo" : "photos"} onChange={(value) => commit((current) => setCarouselPromo(project, current, value === "promo"))}
-            options={[{ value: "photos", label: "Solo foto" }, { value: "promo", label: "Con vendita" }]} />
-          <p className="muted small social-hint">{promoNow
-            ? "Comprende le slide per presentarti: prenota, domande frequenti, data, recensione, pagine dell'album."
-            : "Niente slide di vendita. Le trovi comunque tra i modelli, in «Vendita e contatti»."}</p>
+          {setInfo(carousel.setId).plain ? null : (
+            <>
+              <Segmented<"photos" | "promo"> label="Tipo di carosello" value={promoNow ? "promo" : "photos"} onChange={(value) => commit((current) => setCarouselPromo(project, current, value === "promo"))}
+                options={[{ value: "photos", label: "Solo foto" }, { value: "promo", label: "Con vendita" }]} />
+              <p className="muted small social-hint">{promoNow
+                ? "Comprende le slide per presentarti: prenota, domande frequenti, data, recensione, pagine dell'album."
+                : "Niente slide di vendita. Le trovi comunque tra i modelli, in «Vendita e contatti»."}</p>
+            </>
+          )}
+          <Switch checked={Boolean(carousel.whole) || Boolean(setInfo(carousel.setId).plain)} onChange={(on) => commit((current) => setWholePhotos(current, on))} label="Non ritagliare le foto" />
+          <p className="muted small social-hint">{setInfo(carousel.setId).plain
+            ? "Nello stile Minimal le foto sono sempre intere."
+            : carousel.whole
+              ? "Ogni foto si vede intera dentro il suo spazio, con il fondo della slide attorno, e senza forme tonde o ad arco. Le inquadrature scelte a mano restano; i panorami non cambiano."
+              : "Di base i modelli ritagliano la foto per riempire lo spazio. Attivalo per vederle sempre intere."}</p>
           <button type="button" className="btn btn--sm social__full" onClick={() => commit((current) => variation(project, current))} title="Stesse foto e stessi testi, ma modelli in un altro ordine e qualche slide specchiata: per non fare sempre lo stesso carosello">
             <Icon name="shuffle" size={14} /> Altra variante
           </button>

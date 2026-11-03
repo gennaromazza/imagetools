@@ -88,6 +88,7 @@ export function buildSlide(carousel: Carousel, index: number, env: BuildEnv): Sl
     spread: slide.spreadId ? env.spreads.get(slide.spreadId) ?? null : null,
     spread2: slide.spreadId2 ? env.spreads.get(slide.spreadId2) ?? null : null,
     span: slide.span ?? null,
+    whole: Boolean(carousel.whole),
     index,
     total: carousel.slides.length,
     measure: env.measure,

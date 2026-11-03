@@ -14,13 +14,14 @@ const sequence = (carousel: ReturnType<typeof plan>) => carousel.slides.map((sli
 
 test("catalogo: molti modelli per stile e nessuno dimenticato fuori dalle trame", () => {
   assert.ok(TEMPLATES.length >= 50, `solo ${TEMPLATES.length} modelli in totale`);
-  for (const set of SETS) assert.ok(templatesForSet(set.id).length >= 25, `${set.id}: ${templatesForSet(set.id).length} modelli tra cui scegliere`);
+  for (const set of SETS.filter((candidate) => candidate.id !== "minimal")) assert.ok(templatesForSet(set.id).length >= 25, `${set.id}: ${templatesForSet(set.id).length} modelli tra cui scegliere`);
   const reachable = new Set<string>(["sh-pano", "sh-mockup"]);
   for (const set of SETS) for (const id of [set.arc.open, set.arc.close, ...set.arc.middle, ...(set.closeAlt ?? [])]) reachable.add(id);
   const orphans = TEMPLATES.filter((template) => !reachable.has(template.id)).map((template) => template.id);
   assert.deepEqual(orphans, [], `modelli che nessuna trama propone mai: ${orphans.join(", ")}`);
   for (const set of SETS) {
     assert.equal(new Set(set.arc.middle).size, set.arc.middle.length, `${set.id}: modelli doppi nella trama`);
+    if (set.id === "minimal") continue; // pochi modelli per scelta (solo foto): vedi social-whole.test.ts
     assert.ok(set.arc.middle.length >= 18, `${set.id}: trama di mezzo troppo corta (${set.arc.middle.length})`);
   }
 });

@@ -60,6 +60,13 @@ export function updateBrand(carousel: Carousel, patch: Partial<BrandKit>): Carou
   return same ? carousel : touch({ ...carousel, brand });
 }
 
+/** Foto intere sì o no per tutto il carosello: cambia solo il modo di disegnare, foto, testi e modelli restano quelli. */
+export function setWholePhotos(carousel: Carousel, whole: boolean): Carousel {
+  if (Boolean(carousel.whole) === whole) return carousel;
+  const { whole: _before, ...rest } = carousel;
+  return touch(whole ? { ...rest, whole: true } : rest);
+}
+
 export function setSlideText(carousel: Carousel, slideId: string, key: string, value: string): Carousel {
   return mapGroup(carousel, slideId, (slide) => (slide.texts[key] === value ? slide : { ...slide, texts: { ...slide.texts, [key]: value.slice(0, 600) } }));
 }

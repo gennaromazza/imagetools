@@ -8,7 +8,7 @@ import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type Aut
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
 import { alignArea, appendAssets, dropOnSpreadPlanned, moveFrameToArea, moveItemToArea, moveRefusal, moveToNewSpread, moveToSpread, removeItem, removeRefusal, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
-import { rotateAssetQuarter, rotationRefusal, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetTag, type LibraryTab } from "../model/library";
+import { rotateAssetQuarter, rotationRefusal, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetsTag, type LibraryTab } from "../model/library";
 import { countItems, findItem, hasFreeLayout, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas, swapRefusal } from "../model/spreads";
 import { STAGES } from "../model/store";
@@ -290,7 +290,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   const rate = useCallback((assetId: string, rating: number) => commit((p) => setRating(p, assetId, rating)), [commit]);
   const rateMany = useCallback((ids: string[], rating: number) => commit((p) => ids.reduce((current, id) => setRating(current, id, rating), p)), [commit]);
   const tagMany = useCallback((ids: string[], tag: AlbumAssetTag) => {
-    commit((p) => ids.reduce((current, id) => toggleAssetTag(current, id, tag), p));
+    commit((p) => toggleAssetsTag(p, ids, tag));
     notify(tag === "social"
       ? "Segnalazione aggiornata: nel carosello le foto «Per i social» vengono scelte per prime (pulsante «Riscegli le foto» se ne hai già uno)."
       : "Segnalazione aggiornata: con Auto Build le foto «copertina» e «principale» hanno un'area propria, il «panorama» un foglio intero.");
@@ -862,7 +862,11 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       else if (key === "l" && state.selectedItemId) actions.lockItem(state.selectedItemId);
       else if ((key === "k" || key === "p" || key === "m" || key === "i")) {
         const tag: AlbumAssetTag = key === "k" ? "cover" : key === "p" ? "panorama" : key === "i" ? "social" : "main";
-        const ids = state.libSelection.length ? state.libSelection : state.selectedItemId ? [findItem(historyRef.current.present, state.selectedItemId)?.item.assetId ?? ""].filter(Boolean) : [];
+        // Vale la foto che hai in mano: con il focus sullo spread la foto (o le foto scelte) dello spread, con il focus in libreria la selezione della libreria.
+        // Senza questa distinzione una selezione rimasta in libreria vinceva sempre, e il tasto sullo spread segnava un'altra foto.
+        const stageItems = pickedRef.current.length > 1 ? pickedRef.current : state.selectedItemId ? [state.selectedItemId] : [];
+        const stageIds = [...new Set(stageItems.map((itemId) => findItem(historyRef.current.present, itemId)?.item.assetId ?? "").filter(Boolean))];
+        const ids = state.zone === "library" ? (state.libSelection.length ? state.libSelection : stageIds) : (stageIds.length ? stageIds : state.libSelection);
         if (ids.length) tagMany(ids, tag);
       }
     };

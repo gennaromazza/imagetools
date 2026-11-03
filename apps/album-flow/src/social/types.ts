@@ -182,7 +182,7 @@ export type Layer = RectLayer | EllipseLayer | LineLayer | PathLayer | GradientL
 export type SlideRole = "cover" | "hero" | "collage" | "quote" | "list" | "pano" | "mockup" | "cta" | "moment";
 export type SlotKind = "portrait" | "landscape" | "any";
 export type Tone = "dark" | "light";
-export type SetId = "editoriale" | "galleria" | "moda" | "cinema";
+export type SetId = "editoriale" | "galleria" | "moda" | "cinema" | "minimal";
 
 export type TextColorChoice = "ink" | "accent" | "light" | "dark" | "soft";
 export type TextFontChoice = "display" | "script" | "body";
@@ -245,6 +245,8 @@ export interface TemplateCtx {
   /** Seconda doppia pagina (il mockup ne mostra due impilate sui formati alti). */
   spread2: SpreadRef | null;
   span: { index: number; count: number } | null;
+  /** Foto intere: nessuna foto viene ritagliata, ognuna si vede tutta dentro il suo spazio (il resto è il fondo della slide). */
+  whole?: boolean;
   /** Posizione della slide e numero totale (per «02/08»). */
   index: number;
   total: number;
@@ -359,6 +361,11 @@ export interface Carousel {
    * Assente (caroselli vecchi) = si deduce dalle slide: vendita se ne ha almeno una.
    */
   promo?: boolean;
+  /**
+   * `true` = nessuna foto viene ritagliata: in ogni modello la foto si vede intera dentro il suo spazio, con il fondo della slide attorno,
+   * e senza forme (tonde, ad arco). Le inquadrature scelte a mano restano. I panorami, che devono combaciare tra le slide, non cambiano.
+   */
+  whole?: boolean;
   /** Numero che dà un ordine diverso ai modelli (e qualche specchio) a ogni carosello; 0 o assente = l'ordine di base dello stile. */
   seed?: number;
   /** Le foto in testa alla classifica quando il carosello è stato creato: se cambiano (stelle, segnalini) si propone di riscegliere. */

@@ -151,6 +151,15 @@ export function toggleAssetTag(project: Project, assetId: string, tag: AlbumAsse
   });
 }
 
+/** Segna più foto insieme: se manca a qualcuna si mette a tutte, se ce l'hanno tutte si toglie a tutte (invertirle una per una scambierebbe lo stato di quelle miste). */
+export function toggleAssetsTag(project: Project, assetIds: readonly string[], tag: AlbumAssetTag): Project {
+  const known = [...new Set(assetIds)].filter((id) => project.assets.some((asset) => asset.id === id));
+  if (known.length === 0) return project;
+  const has = (id: string) => project.assets.find((asset) => asset.id === id)?.albumTags?.includes(tag) ?? false;
+  const remove = known.every(has);
+  return known.reduce((current, id) => (has(id) === remove ? toggleAssetTag(current, id, tag) : current), project);
+}
+
 /**
  * Porta le foto davanti a `beforeAssetId` nella lista corrente (null = in fondo) e passa all'ordine manuale.
  * `visibleIds` è l'elenco mostrato, nell'ordine attuale.
