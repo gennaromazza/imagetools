@@ -53,3 +53,13 @@ test("ridimensionamento: il bordo destro o in basso si attacca e le proporzioni 
   assert.equal(bottom.rect.y + bottom.rect.h, 130);
   assert.ok(Math.abs(bottom.rect.w / bottom.rect.h - 60 / 29) < 1e-9);
 });
+
+test("centro della pagina: il centro di una foto o di un gruppo si aggancia a un punto-centro anche senza altre foto", () => {
+  const center = box(300, 200, 0, 0);
+  const result = snapMove(box(240, 150, 118, 100), [center], 4, { targetCenters: false });
+  assert.equal(result.rect.x + result.rect.w / 2, 300, "centrata in orizzontale");
+  assert.equal(result.rect.y + result.rect.h / 2, 200, "centrata in verticale");
+  assert.equal(result.guides.length, 2, "una linea guida per asse");
+  const far = snapMove(box(100, 100, 50, 50), [center], 4, { targetCenters: false });
+  assert.deepEqual(far.rect, box(100, 100, 50, 50), "lontano dal centro non si muove");
+});

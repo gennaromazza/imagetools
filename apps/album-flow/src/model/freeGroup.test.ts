@@ -146,3 +146,10 @@ test("duplica trascinando: la copia nasce nel punto scelto con inquadratura, bor
   full = duplicateFrames(full, [{ id: fullIds[0], rect: target }]);
   assert.equal(full.spreads[0].areas[0].items.length, 12, "pagina piena: nessuna copia");
 });
+
+test("duplica: una copia sopra l'originale (Ctrl+clic con un tremito) non si crea", () => {
+  const { project, ids } = freeAlbum(3);
+  const original = movableFrames(project, [ids[0]])[0].rect;
+  assert.equal(duplicateFrames(project, [{ id: ids[0], rect: { ...original, x: original.x + 1, y: original.y - 1 } }]), project);
+  assert.notEqual(duplicateFrames(project, [{ id: ids[0], rect: { ...original, x: original.x + 5 } }]), project);
+});

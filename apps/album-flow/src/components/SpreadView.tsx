@@ -119,6 +119,8 @@ const SNAPS = [0.5, 1 / 3, 2 / 3];
 const SNAP_PX = 6;
 /** Le foto delle disposizioni libere si agganciano da più vicino e ai soli bordi: lo spostamento resta fluido. */
 const FRAME_SNAP_PX = 4;
+/** Sotto questa distanza (pixel) Ctrl/⌘ + trascinamento non crea la copia. */
+const COPY_MIN_PX = 10;
 
 interface CellProps {
   cell: LeafCell;
@@ -245,14 +247,14 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
 
   // Con il layout della pagina bloccato (lucchetto) le foto libere restano ferme: si trascinano solo per sostituirle o scambiarle, come nelle pagine automatiche.
   const freeFrame = free && interactive && !item.locked && !area.locked;
-  const frameDrag = useRef<{ mode: "move" | "resize"; x: number; y: number; rect: Rect; mmPerPx: number; moved: boolean; copy: boolean } | null>(null);
+  const frameDrag = useRef<{ mode: "move" | "resize"; x: number; y: number; rect: Rect; mmPerPx: number; moved: boolean; far: boolean; copy: boolean } | null>(null);
   const startFrame = (event: React.PointerEvent, mode: "move" | "resize") => {
     const parent = ref.current?.parentElement?.getBoundingClientRect();
     if (!parent || parent.width === 0) return;
     event.preventDefault();
     event.stopPropagation();
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-    frameDrag.current = { mode, x: event.clientX, y: event.clientY, rect: cell.rect, mmPerPx: origin.w / parent.width, moved: false, copy: mode === "move" && (event.ctrlKey || event.metaKey) };
+    frameDrag.current = { mode, x: event.clientX, y: event.clientY, rect: cell.rect, mmPerPx: origin.w / parent.width, moved: false, far: false, copy: mode === "move" && (event.ctrlKey || event.metaKey) };
     if (mode === "move") handlers.onSelectItem?.(item.id, areaIndex);
   };
   const snapGuides = useRef<SnapGuide[]>([]);
@@ -265,6 +267,8 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     const dx = (event.clientX - drag.x) * drag.mmPerPx;
     const dy = (event.clientY - drag.y) * drag.mmPerPx;
     if (Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) > 2) drag.moved = true;
+    // La copia (Ctrl/⌘ + trascinamento) parte solo con un trascinamento vero: un Ctrl+clic con la mano che trema non deve lasciare foto sovrapposte.
+    if (Math.abs(event.clientX - drag.x) + Math.abs(event.clientY - drag.y) > COPY_MIN_PX) drag.far = true;
     const raw: Rect = drag.mode === "move"
       ? { ...drag.rect, x: drag.rect.x + dx, y: drag.rect.y + dy }
       : (() => { const w = Math.max(8, drag.rect.w + Math.max(dx, (dy * drag.rect.w) / drag.rect.h)); return { ...drag.rect, w, h: (w * drag.rect.h) / drag.rect.w }; })();
@@ -289,7 +293,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     frameDrag.current = null;
     handlers.onDraft?.(null);
     if (!drag?.moved || !rect) { handlers.onFrameOver?.(item.id, null); return; }
-    if (drag.copy) { handlers.onFrameOver?.(item.id, null); handlers.onCommitCopies?.([{ id: item.id, rect }]); return; }
+    if (drag.copy) { handlers.onFrameOver?.(item.id, null); if (drag.far) handlers.onCommitCopies?.([{ id: item.id, rect }]); return; }
     // Lasciata sopra l'altra pagina la foto passa a quella pagina; altrimenti resta nella sua, nella nuova posizione.
     if (drag.mode === "move" && handlers.onFrameDrop?.(item.id, event.clientX, event.clientY, rect)) return;
     handlers.onCommitFrameRect?.(item.id, rect);
@@ -441,7 +445,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       onDragStart={(event) => { if (pan.current || event.altKey) { event.preventDefault(); return; } beginDrag(event, { kind: "item", itemId: item.id }); }}
       onMouseMove={(event) => { if (!interactive) return; const grab = event.altKey && !canCrop && !item.locked && !freeFrame; if (grab !== (event.currentTarget.style.cursor === "grab")) event.currentTarget.style.cursor = grab ? "grab" : ""; }}
       onDragEnd={endDrag}
-      onClick={(event) => { if (interactive) { event.stopPropagation(); if (event.shiftKey && handlers.onTogglePick) handlers.onTogglePick(item.id, areaIndex); else handlers.onSelectItem?.(item.id, areaIndex); } }}
+      onClick={(event) => { if (interactive) { event.stopPropagation(); if ((event.shiftKey || event.ctrlKey || event.metaKey) && handlers.onTogglePick) handlers.onTogglePick(item.id, areaIndex); else handlers.onSelectItem?.(item.id, areaIndex); } }}
       onDoubleClick={(event) => { if (interactive) { event.stopPropagation(); handlers.onToggleCrop?.(item.id); } }}
       onContextMenu={(event) => { if (!interactive || !handlers.onContextItem) return; event.preventDefault(); event.stopPropagation(); if (!picked) handlers.onSelectItem?.(item.id, areaIndex); handlers.onContextItem(item.id, areaIndex, event.clientX, event.clientY); }}
       onPointerDown={onPointerDown}
@@ -677,6 +681,8 @@ function SpreadViewInner(props: SpreadViewProps) {
       ...base.cells.map((cell) => ({ id: cell.itemId, rect: cell.rect })),
       { id: "__area", rect: base.inner },
       { id: "__fold", rect: { x: size.width / 2, y: base.inner.y, w: 0, h: base.inner.h } },
+      // Il centro della pagina: una foto o un gruppo si centrano nella pagina (e, con la piega, nello spread) anche senza altre foto con cui allinearsi.
+      { id: "__center", rect: { x: base.inner.x + base.inner.w / 2, y: base.inner.y + base.inner.h / 2, w: 0, h: 0 } },
     ];
   }), [interactive, sheet, spread, size.width]);
   const latest = useRef({ geometry, onCommitFrame: props.onCommitFrame });
@@ -782,10 +788,12 @@ function SpreadViewInner(props: SpreadViewProps) {
     const photos = now.geometry.flatMap((entry) => entry.cells).filter((cell) => !ids.has(cell.itemId)).map((cell) => cell.rect);
     let last: Boxed[] | null = null;
     let moved = false;
+    let far = false;
     const onMove = (move: PointerEvent) => {
       const px = move.clientX - startX;
       const py = move.clientY - startY;
       if (Math.abs(px) + Math.abs(py) > 2) moved = true;
+      if (Math.abs(px) + Math.abs(py) > COPY_MIN_PX) far = true;
       if (!moved) return;
       let dx = px * mmPerPx;
       let dy = py * mmPerPx;
@@ -807,7 +815,7 @@ function SpreadViewInner(props: SpreadViewProps) {
       groupLatest.current.onDraft?.(null);
       if (!moved) return;
       swallowClick();
-      if (commitIt && last) groupLatest.current.onCommitFrames?.(last, copy ? { copy } : undefined);
+      if (commitIt && last && (!copy || far)) groupLatest.current.onCommitFrames?.(last, copy ? { copy } : undefined);
     };
     const onUp = () => finish(true);
     const onCancel = () => finish(false);
@@ -1067,11 +1075,12 @@ function SpreadViewInner(props: SpreadViewProps) {
         const entry = geometry.flatMap((g) => g.cells).find((cell) => cell.itemId === altOpen);
         const item = spread.areas.flatMap((area) => area.items).find((candidate) => candidate.id === altOpen);
         if (!entry || !item) return null;
-        const below = entry.rect.y + entry.rect.h < size.height * 0.72;
+        // Sotto la foto se resta spazio nello spread; altrimenti (foto alta fino al bordo) dentro la foto, appoggiata in basso sopra il segnalino: mai fuori dal foglio.
+        const below = size.height - (entry.rect.y + entry.rect.h) >= size.height * 0.28;
         const style = {
           left: pct(Math.min(88, Math.max(12, ((entry.rect.x + entry.rect.w / 2) / size.width) * 100))),
-          top: pct(((below ? entry.rect.y + entry.rect.h : entry.rect.y) / size.height) * 100),
-          transform: below ? "translate(-50%, 8px)" : "translate(-50%, calc(-100% - 8px))",
+          top: pct(((entry.rect.y + entry.rect.h) / size.height) * 100),
+          transform: below ? "translate(-50%, 8px)" : "translate(-50%, calc(-100% - 36px))",
         };
         return <AlternativesStrip key={altOpen} alternatives={props.alternatives.get(altOpen)!} assets={assets} locked={Boolean(item.locked)} style={style} onPreview={previewAlternative} onPick={(assetId) => props.onChooseAlternative?.(altOpen, assetId)} onClose={closeAlternatives} />;
       })() : null}

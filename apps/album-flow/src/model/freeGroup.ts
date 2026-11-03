@@ -56,6 +56,9 @@ export function duplicateFrames(project: Project, copies: readonly Boxed[]): Pro
   for (const { id, rect } of copies) {
     const found = findItem(next, id);
     if (!found || found.item.locked || found.area.locked || !hasFreeLayout(found.area)) continue;
+    // Una copia esattamente sopra l'originale non serve a nessuno: resterebbe nascosta e raddoppierebbe la foto in stampa.
+    const original = areaGeometryFor(next.settings.sheet, found.spread, found.areaIndex).cells.find((cell) => cell.itemId === id)?.rect;
+    if (original && Math.abs(original.x - rect.x) < 2 && Math.abs(original.y - rect.y) < 2) continue;
     const spreadId = found.spread.id;
     const grown = appendAssets(next, spreadId, found.areaIndex, [found.item.assetId]);
     const area = grown.spreads.find((spread) => spread.id === spreadId)?.areas[found.areaIndex];
