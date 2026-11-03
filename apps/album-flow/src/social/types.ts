@@ -366,6 +366,11 @@ export interface Carousel {
    * e senza forme (tonde, ad arco). Le inquadrature scelte a mano restano. I panorami, che devono combaciare tra le slide, non cambiano.
    */
   whole?: boolean;
+  /**
+   * `true` = carosello fatto a mano («Da zero»): le slide partono vuote, le foto di ogni slide le sceglie l'utente e il modello si propone dopo,
+   * in base a quante foto ci sono. Le funzioni che rifanno il piano da sole (riscelta, variante, numero di slide, vendita) non lo toccano.
+   */
+  manual?: boolean;
   /** Numero che dà un ordine diverso ai modelli (e qualche specchio) a ogni carosello; 0 o assente = l'ordine di base dello stile. */
   seed?: number;
   /** Le foto in testa alla classifica quando il carosello è stato creato: se cambiano (stelle, segnalini) si propone di riscegliere. */

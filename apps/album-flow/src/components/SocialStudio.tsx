@@ -9,7 +9,7 @@ import { carouselReport } from "../social/check";
 import { FONT_PAIRS, PALETTES, brandFontIds, defaultBrand, fontPairOf } from "../social/brand";
 import {
   acceptSelection, addPanorama, addSlide, duplicateSlide, moveSlide, removeSlide, renameCarousel, replacePhoto, resetSlideText, setCaption, setFormat, setSlideSpread,
-  addFreePhoto, bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, addToPool, reselectSlidePhotos, resizeCarousel, setCarouselPool, unusedRanked, hideElement, resetMovedElements, setFreeFrame, showHiddenElements, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, setWholePhotos, updateBrand, usedAssetIds,
+  bestSlotFor, enterFreeMode, leaveFreeMode, removeFreeFrame, reorderFreeFrame, addToPool, reselectSlidePhotos, resizeCarousel, setCarouselPool, unusedRanked, hideElement, resetMovedElements, setFreeFrame, showHiddenElements, setFreeFramePhoto, setLayerOffset, setTextOffset, swapPhotos, type PhotoSpot, setSlideFlip, setSlideFraming, setSlideTemplate, setSlideText, setSlideTone, setWholePhotos, updateBrand, usedAssetIds,
 } from "../social/edit";
 import { dedupeTexts, repeatedTexts, setSlideTextStyle, suggestCarouselTexts, suggestFieldText, suggestSlideTexts } from "../social/edit-text";
 import { buildSlide } from "../social/build";
@@ -19,16 +19,17 @@ import { SNAP_MARGIN, snapBox, snapLines, snapTargets, snapValue, type Guide } f
 import { layoutOf } from "../social/kit";
 import { usePhotoDrag, type DropTarget } from "../social/usePhotoDrag";
 import { usePreviewInteraction, type ElementKind, type PreviewMode } from "../social/usePreviewInteraction";
-import { carouselPoolIds, envFor, isPromoCarousel, outsidePoolIds, reselectPhotos, reselectRanked, restyle, selectionBasis, selectionChanged, setCarouselPromo, variation } from "../social/plan";
+import { carouselPoolIds, envFor, isPromoCarousel, outsidePoolIds, planCarousel, reselectPhotos, reselectRanked, restyle, selectionBasis, selectionChanged, setBrand, setCarouselPromo, variation } from "../social/plan";
 import { renderSlideSvg } from "../social/render";
 import { loadCarousels, saveBrand, saveCarousels } from "../social/store";
-import { SETS, setInfo, templateOf, templatesForSet } from "../social/templates";
+import { BLANK_ID, SETS, setInfo, templateOf, templatesForSet } from "../social/templates";
 import { MAX_SLIDES, SOCIAL_FORMATS, formatOf, type Carousel, type PhotoLayer, type Slide, type Tone } from "../social/types";
 import { clearPreviewCache, useBrandFonts, usePreviewMedia } from "../social/useSocialMedia";
 import "../social/social.css";
 import { Icon } from "./icons";
 import { SocialExportDialog } from "./SocialExportDialog";
 import { SocialFreePanel } from "./SocialFreePanel";
+import { addPhotosToSlide, applyTemplateToPhotos, availableInOrder, isOwnTemplate, photoCountOf, templatesForCount, tidySlide } from "../social/manual";
 import { SocialNewDialog } from "./SocialNewDialog";
 import { SocialFraming } from "./SocialFraming";
 import { SocialTextFields } from "./SocialTextFields";
@@ -143,9 +144,18 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const selectedIndex = carousel ? Math.max(0, carousel.slides.findIndex((slide) => slide.id === selectedId)) : 0;
   const slide = carousel?.slides[selectedIndex] ?? null;
   const template = slide && carousel ? templateOf(slide.templateId) ?? templateOf(setInfo(carousel.setId).arc.open) : undefined;
+  // Una slide vuota di un carosello a mano apre subito la scheda delle foto: è la prima cosa da fare.
+  const emptyManual = Boolean(carousel?.manual && slide?.free && slide.free.length === 0);
+  useEffect(() => { if (emptyManual) setTab("photos"); }, [emptyManual, slide?.id]);
 
   const photosSignature = carousel ? carousel.slides.map((item) => item.photos.join(",") + (item.free ? `|${item.free.map((frame) => frame.assetId).join(",")}` : "")).join(";") : "";
-  const setPreviews = useMemo(() => (carousel ? SETS.map((set) => ({ set, carousel: restyle(project, carousel, set.id) })) : []),
+  const setPreviews = useMemo(() => (carousel ? SETS.map((set) => ({
+    set,
+    // Un carosello a mano ha slide vuote o scelte da te: l'anteprima dello stile mostra un piccolo esempio con le tue foto.
+    carousel: carousel.manual
+      ? planCarousel(project, { setId: set.id, format: carousel.format, count: 2, brand: setBrand(carousel.brand, set.id), assetIds: carousel.assetIds ?? [], whole: carousel.whole })
+      : restyle(project, carousel, set.id),
+  })) : []),
     // La proposta dei set dipende dalle foto scelte e dalla marca, non dai testi.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [project, photosSignature, carousel?.format, carousel?.brand.name, carousel?.brand.handle, carousel?.promo, carousel?.assetIds]);
@@ -154,13 +164,21 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const deferredSlide = deferredCarousel?.slides.find((item) => item.id === slide?.id) ?? null;
   const tiles = useMemo(() => {
     if (!deferredCarousel || !deferredSlide || deferredSlide.span) return [];
+    // Slide libera (o vuota): i modelli si propongono solo dopo, in base a quante foto ci sono, e usano esattamente le tue foto.
+    if (deferredSlide.free) {
+      const aspectOf = (assetId: string) => env.photos.get(assetId)?.aspect;
+      return templatesForCount(deferredCarousel, photoCountOf(deferredSlide)).map((candidate) => {
+        const trial = applyTemplateToPhotos(deferredCarousel, deferredSlide.id, candidate.id, aspectOf);
+        return { template: candidate, carousel: trial, index: trial.slides.findIndex((item) => item.id === deferredSlide.id) };
+      });
+    }
     return templatesForSet(deferredCarousel.setId)
-      .filter((candidate) => candidate.id !== "sh-pano" && (candidate.id !== "sh-mockup" || project.spreads.length > 0))
+      .filter((candidate) => candidate.id !== "sh-pano" && candidate.id !== BLANK_ID && (candidate.id !== "sh-mockup" || project.spreads.length > 0))
       .map((candidate) => {
         const trial = setSlideTemplate(deferredCarousel, project, deferredSlide.id, candidate.id);
         return { template: candidate, carousel: trial, index: trial.slides.findIndex((item) => item.id === deferredSlide.id) };
       });
-  }, [deferredCarousel, deferredSlide, project]);
+  }, [deferredCarousel, deferredSlide, project, env]);
 
   const wantedAssets = useMemo(() => {
     const ids = new Set<string>();
@@ -409,7 +427,10 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
   const framingSlot = slide.free ? Math.min(activeSlot, Math.max(0, slide.free.length - 1)) : Math.min(activeSlot, Math.max(0, slide.photos.length - 1));
   const hasFramingPhoto = slide.free ? false : Boolean(slide.photos[framingSlot]);
   // Altre foto disponibili: quelle del carosello (di partenza, le segnate «Per i social») che nessuna slide usa ancora.
-  const availablePhotos = unusedRanked(carousel, project).map((ranked) => assetOf(ranked.assetId)).filter((asset): asset is AlbumAssetV2 => Boolean(asset));
+  // Nel carosello a mano l'elenco va in ordine di scatto, senza classifica: le foto le scegli tu.
+  const availablePhotos = carousel.manual
+    ? availableInOrder(carousel, project)
+    : unusedRanked(carousel, project).map((ranked) => assetOf(ranked.assetId)).filter((asset): asset is AlbumAssetV2 => Boolean(asset));
   const poolIds = carouselPoolIds(project, carousel);
   const promoNow = isPromoCarousel(carousel);
   // Foto in uso che non sono tra le foto del carosello (caroselli fatti quando la selezione non contava, o foto poi scartate).
@@ -572,11 +593,15 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
               {poolIds.slice(0, 7).map((id) => <PoolMini key={id} asset={assetOf(id)} />)}
               {poolIds.length > 7 ? <span className="social-new__more">+{poolIds.length - 7}</span> : null}
             </div>
+            {carousel.manual ? (
+              <p className="muted small social-hint">Le {poolIds.length} foto tra cui scegli per le slide{poolIds.some((id) => !usedNow.has(id)) ? ` (${poolIds.filter((id) => !usedNow.has(id)).length} non ancora usate)` : ""}. Con «Scegli le foto…» ne aggiungi o ne togli.</p>
+            ) : (
             <p className="muted small social-hint">
               Le scelte automatiche usano solo queste {poolIds.length} foto{poolIds.some((id) => !usedNow.has(id)) ? ` (${poolIds.filter((id) => !usedNow.has(id)).length} non ancora usate)` : ""}.
               {!hasMarked ? " Nessuna foto è segnata «Per i social»: parte dalle migliori." : poolAdded > 0 ? ` ${poolAdded === 1 ? "Una non è segnata" : `${poolAdded} non sono segnate`} «Per i social»: l'hai aggiunta tu.` : " Sono quelle segnate «Per i social»."}
               {rejectedMarked > 0 ? ` ${rejectedMarked === 1 ? "Una foto segnata è scartata" : `${rejectedMarked} foto segnate sono scartate`} e non entra.` : ""}
             </p>
+            )}
             <button type="button" className="btn btn--sm social__full" onClick={() => setPoolDraft(poolIds)} title="Aggiungi o togli foto: il carosello non ne userà altre"><Icon name="plus" size={14} /> Scegli le foto…</button>
           </div>
 
@@ -590,7 +615,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             ))}
           </div>
           <p className="muted small social-hint">{setInfo(carousel.setId).note}. Cambiare stile mantiene le foto e i testi.</p>
-          {setInfo(carousel.setId).plain ? null : (
+          {setInfo(carousel.setId).plain || carousel.manual ? null : (
             <>
               <Segmented<"photos" | "promo"> label="Tipo di carosello" value={promoNow ? "promo" : "photos"} onChange={(value) => commit((current) => setCarouselPromo(project, current, value === "promo"))}
                 options={[{ value: "photos", label: "Solo foto" }, { value: "promo", label: "Con vendita" }]} />
@@ -605,17 +630,23 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             : carousel.whole
               ? "Ogni foto si vede intera dentro il suo spazio, con il fondo della slide attorno, e senza forme tonde o ad arco. Le inquadrature scelte a mano restano; i panorami non cambiano."
               : "Di base i modelli ritagliano la foto per riempire lo spazio. Attivalo per vederle sempre intere."}</p>
-          <button type="button" className="btn btn--sm social__full" onClick={() => commit((current) => variation(project, current))} title="Stesse foto e stessi testi, ma modelli in un altro ordine e qualche slide specchiata: per non fare sempre lo stesso carosello">
-            <Icon name="shuffle" size={14} /> Altra variante
-          </button>
+          {carousel.manual ? (
+            <p className="notice social-hint">Carosello fatto a mano: scegli tu le foto di ogni slide e, solo dopo, il modello. Aggiungi le slide con «Vuota» sotto l'anteprima.</p>
+          ) : (
+            <>
+            <button type="button" className="btn btn--sm social__full" onClick={() => commit((current) => variation(project, current))} title="Stesse foto e stessi testi, ma modelli in un altro ordine e qualche slide specchiata: per non fare sempre lo stesso carosello">
+              <Icon name="shuffle" size={14} /> Altra variante
+            </button>
 
-          <h3>Numero di slide</h3>
-          <div className="social-count">
-            <input type="range" min={2} max={MAX_SLIDES} step={1} value={carousel.slides.length} aria-label="Numero di slide"
-              onChange={(event) => commit((current) => resizeCarousel(current, project, Number(event.target.value)), "count")} />
-            <strong>{carousel.slides.length}</strong>
-          </div>
-          <p className="muted small social-hint">Instagram ne accetta fino a {MAX_SLIDES}. Si aggiungono e si tolgono prima della chiusura, senza toccare le altre.</p>
+            <h3>Numero di slide</h3>
+            <div className="social-count">
+              <input type="range" min={2} max={MAX_SLIDES} step={1} value={carousel.slides.length} aria-label="Numero di slide"
+                onChange={(event) => commit((current) => resizeCarousel(current, project, Number(event.target.value)), "count")} />
+              <strong>{carousel.slides.length}</strong>
+            </div>
+            <p className="muted small social-hint">Instagram ne accetta fino a {MAX_SLIDES}. Si aggiungono e si tolgono prima della chiusura, senza toccare le altre.</p>
+            </>
+          )}
 
           <h3>Colori</h3>
           <div className="social-palettes">
@@ -705,7 +736,8 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
                 </button>
               ))}
               <div className="social__add">
-                <button type="button" className="btn btn--sm" disabled={carousel.slides.length >= MAX_SLIDES} onClick={() => setAdding((value) => !value)}><Icon name="plus" size={14} /> Slide</button>
+                <button type="button" className="btn btn--sm" disabled={carousel.slides.length >= MAX_SLIDES} onClick={() => { setAdding(false); afterEdit(addSlide(carousel, project, BLANK_ID, slide.id)); setTab("photos"); }} title="Una slide vuota: scegli tu le foto e il modello viene dopo"><Icon name="plus" size={14} /> Vuota</button>
+                {carousel.manual ? null : <button type="button" className="btn btn--sm" disabled={carousel.slides.length >= MAX_SLIDES} onClick={() => setAdding((value) => !value)}><Icon name="plus" size={14} /> Slide</button>}
                 <button type="button" className="btn btn--sm" disabled={carousel.slides.length + 2 > MAX_SLIDES} onClick={() => setPicker({ kind: "panorama" })} title="Una foto larga distesa su più slide: invita a scorrere"><Icon name="columns" size={14} /> Panorama</button>
               </div>
             </div>
@@ -713,7 +745,7 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             {adding ? (
               <div className="social__tray" role="menu" aria-label="Aggiungi una slide">
                 {(() => {
-                  const addable = templatesForSet(carousel.setId).filter((candidate) => candidate.id !== "sh-pano" && (candidate.id !== "sh-mockup" || project.spreads.length > 0));
+                  const addable = templatesForSet(carousel.setId).filter((candidate) => candidate.id !== "sh-pano" && candidate.id !== BLANK_ID && (candidate.id !== "sh-mockup" || project.spreads.length > 0));
                   const chip = (candidate: (typeof addable)[number]) => (
                     <button key={candidate.id} type="button" className="chip" role="menuitem" title={candidate.note} onClick={() => { setAdding(false); afterEdit(addSlide(carousel, project, candidate.id, slide.id)); }}>{candidate.label}</button>
                   );
@@ -753,12 +785,36 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
             <>
               {(() => {
                 const tileButton = (tile: (typeof tiles)[number]) => (
-                  <button key={tile.template.id} type="button" className={`social-tile${tile.template.id === slide.templateId ? " is-active" : ""}`} onClick={() => commit((current) => setSlideTemplate(current, project, slide.id, tile.template.id))} title={tile.template.note}>
+                  <button key={tile.template.id} type="button" className={`social-tile${tile.template.id === slide.templateId ? " is-active" : ""}`} onClick={() => commit((current) => (slide.free ? applyTemplateToPhotos(current, slide.id, tile.template.id, (assetId) => env.photos.get(assetId)?.aspect) : setSlideTemplate(current, project, slide.id, tile.template.id)))} title={tile.template.note}>
                     <SlideView svg={tileSvgs[tiles.indexOf(tile)] ?? ""} className="social-slide--tile" />
                     <span>{tile.template.label}</span>
                   </button>
                 );
                 const promoTiles = tiles.filter((tile) => tile.template.promo);
+                if (slide.free) {
+                  const count = photoCountOf(slide);
+                  return (
+                    <>
+                      <h4>Modelli per {count === 1 ? "1 foto" : `${count} foto`}</h4>
+                      {count === 0 ? (
+                        <p className="notice social-hint">La slide è vuota. Nella scheda <strong>Foto</strong> scegli le foto che vuoi: quando ci sono, qui compaiono i modelli adatti a quante sono.</p>
+      ) : tiles.length === 0 ? (
+                        <p className="notice social-hint">Per {count} foto non ci sono modelli: lascia la disposizione libera, oppure sposta qualche foto in un'altra slide.</p>
+                      ) : (
+                        <>
+                          <p className="muted small social-hint">Le tue foto restano quelle, nell'ordine in cui le hai messe; il modello decide solo come stanno nella slide. Dalla scheda Foto torni alla disposizione libera.</p>
+                          {tiles.some((tile) => isOwnTemplate(carousel, tile.template)) ? <div className="social-tiles">{tiles.filter((tile) => isOwnTemplate(carousel, tile.template)).map(tileButton)}</div> : null}
+                          {tiles.some((tile) => !isOwnTemplate(carousel, tile.template)) ? (
+                            <>
+                              <h4>Altri stili</h4>
+                              <div className="social-tiles">{tiles.filter((tile) => !isOwnTemplate(carousel, tile.template)).map(tileButton)}</div>
+                            </>
+                          ) : null}
+                        </>
+                      )}
+                    </>
+                  );
+                }
                 return (
                   <>
                     <h4>Modello</h4>
@@ -792,13 +848,14 @@ export function SocialStudio({ project, onClose, onStatus, onImportFolder, onImp
 
           {tab === "photos" && !inPanorama && template ? (
             <SocialFreePanel
-              slide={slide} selected={framingSlot} onSelect={setActiveSlot} assetOf={assetOf} available={availablePhotos} hasMarked={hasMarked}
+              slide={slide} selected={framingSlot} onSelect={setActiveSlot} assetOf={assetOf} available={availablePhotos} hasMarked={hasMarked} manual={carousel.manual}
               onEnter={() => commit((current) => enterFreeMode(current, slide.id, mainLayers))}
               onLeave={() => commit((current) => leaveFreeMode(current, slide.id))}
               onPatch={(frameId, patch, key) => commit((current) => setFreeFrame(current, slide.id, frameId, patch), key)}
               onRemove={(frameId) => commit((current) => removeFreeFrame(current, slide.id, frameId))}
               onReorder={(frameId, to) => commit((current) => reorderFreeFrame(current, slide.id, frameId, to))}
-              onAdd={(assetId) => commit((current) => addFreePhoto(current, slide.id, assetId, env.photos.get(assetId)?.aspect ?? 1))}
+              onAdd={(assetId) => commit((current) => addPhotosToSlide(current, slide.id, [assetId], (id) => env.photos.get(id)?.aspect))}
+              onTidy={() => commit((current) => tidySlide(current, slide.id, (id) => env.photos.get(id)?.aspect))}
               onUseHere={(assetId) => commit((current) => replacePhoto(current, slide.id, framingSlot, assetId))}
               onPick={(index) => setPicker({ kind: "slot", slideId: slide.id, slot: index })}
             />

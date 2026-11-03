@@ -3,6 +3,7 @@ import type { AlbumAssetV2 } from "@photo-tools/shared-types";
 import { useAssetSrc } from "../hooks/useAssetSrc";
 import type { Project } from "../model/project";
 import { defaultBrand } from "../social/brand";
+import { blankCarousel } from "../social/manual";
 import { freshSeed, planCarousel, planCoverage, rankPhotos, setBrand, suggestSlideCount } from "../social/plan";
 import { setInfo } from "../social/templates";
 import { loadBrand } from "../social/store";
@@ -50,12 +51,19 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
   const [seed] = useState(freshSeed);
   const [promo, setPromo] = useState(false);
   const [whole, setWhole] = useState(false);
+  /** «Da zero»: slide vuote, le foto le scegli tu e i modelli si propongono dopo; «Automatico»: un carosello già composto. */
+  const [how, setHow] = useState<"scratch" | "auto">("scratch");
+  const scratch = how === "scratch";
   const plain = Boolean(setInfo(setId).plain);
 
   const suggested = useMemo(() => suggestSlideCount(project, chosen, setId, seed, promo), [project, chosen, setId, seed, promo]);
   const count = Math.max(MIN_SLIDES, Math.min(MAX_SLIDES, manual ?? suggested));
   const brand = useMemo(() => loadBrand() ?? setBrand(defaultBrand(""), setId), [setId]);
-  const planned = useMemo(() => (chosen.length ? planCarousel(project, { setId, format: "feed", count, brand, name: title, assetIds: chosen, seed, promo, whole }) : null), [project, chosen, setId, count, brand, title, seed, promo, whole]);
+  const planned = useMemo(() => {
+    if (!chosen.length) return null;
+    if (scratch) return blankCarousel(project, { setId: "minimal", format: "feed", brand, name: title, assetIds: chosen, whole });
+    return planCarousel(project, { setId, format: "feed", count, brand, name: title, assetIds: chosen, seed, promo, whole });
+  }, [project, chosen, scratch, setId, count, brand, title, seed, promo, whole]);
 
   const stats = useMemo(() => planCoverage(project, chosen, count, setId, seed, promo), [project, chosen, count, setId, seed, promo]);
 
@@ -65,7 +73,7 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
 
   return (
     <>
-      <Modal title="Nuovo carosello" subtitle="Scegli le foto e quante slide vuoi: il resto lo propone Album Flow." onClose={picking ? () => setPicking(false) : onCancel}
+      <Modal title="Nuovo carosello" subtitle="Scegli come impaginare e quali foto usare." onClose={picking ? () => setPicking(false) : onCancel}
         footer={(
           <>
             <button type="button" className="btn btn--ghost" onClick={onCancel}>Annulla</button>
@@ -75,6 +83,15 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
         <div className="social-new">
           <label className="field"><span className="field__label">Nome</span>
             <input className="input" value={title} maxLength={60} onChange={(event) => setTitle(event.target.value)} /></label>
+
+          <div className="social-new__block">
+            <div className="social-new__head"><h4>Come vuoi impaginare</h4></div>
+            <Segmented<"scratch" | "auto"> label="Come vuoi impaginare" value={how} onChange={setHow}
+              options={[{ value: "scratch", label: "Impaginazione manuale" }, { value: "auto", label: "Impaginazione automatica" }]} />
+            <p className="muted small">{scratch
+              ? "Parti da slide vuote: metti tu le foto in ogni slide, nell'ordine che preferisci (le trovi in ordine di scatto). Solo dopo ti propongo i modelli adatti a quante foto hai messo in quella slide."
+              : "Album Flow compone un carosello già pronto con le foto migliori e le accosta da solo: poi lo ritocchi. L'accostamento è automatico."}</p>
+          </div>
 
           <div className="social-new__block">
             <div className="social-new__head">
@@ -100,7 +117,7 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
               : "Di base i modelli ritagliano la foto per riempire lo spazio. Attivalo per vederle sempre intere (lo stile «Minimal» è già così)."}</p>
           </div>
 
-          {plain ? null : (
+          {plain || scratch ? null : (
           <div className="social-new__block">
             <div className="social-new__head"><h4>Tipo di carosello</h4></div>
             <Segmented<"photos" | "promo"> label="Tipo di carosello" value={promo ? "promo" : "photos"} onChange={(value) => setPromo(value === "promo")}
@@ -111,6 +128,7 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
           </div>
           )}
 
+          {scratch ? null : (
           <div className="social-new__block">
             <div className="social-new__head"><h4>Numero di slide</h4><strong className="social-new__count">{count}</strong></div>
             <input type="range" min={MIN_SLIDES} max={MAX_SLIDES} step={1} value={count} aria-label="Numero di slide" onChange={(event) => setManual(Number(event.target.value))} />
@@ -120,6 +138,7 @@ export function SocialNewDialog({ project, name, setId, onCreate, onCancel }: {
             {chosen.length > 0 && missing > 0 ? <p className="notice social-new__warn"><Icon name="info" size={15} /> Con {count} slide entrano {stats.used} foto su {chosen.length}: alza il numero per usarle tutte.</p> : null}
             {chosen.length > 0 && missing <= 0 && stats.repeated > 0 ? <p className="notice social-new__warn"><Icon name="info" size={15} /> Con {count} slide {stats.repeated === 1 ? "una foto compare" : `${stats.repeated} foto compaiono`} due volte per riempire tutti gli spazi: con meno slide alcune foto resterebbero fuori.</p> : null}
           </div>
+          )}
         </div>
       </Modal>
       {picking ? (

@@ -741,6 +741,9 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.50": [
+      "Nuovo: caroselli con impaginazione manuale: parti da slide vuote, metti tu le foto in ogni slide (in ordine di scatto) e solo dopo scegli tra i modelli adatti a quante foto hai messo; in alternativa resta l'impaginazione automatica."
+    ],
     "0.2.49": [
       "Nuovo: caroselli con l'interruttore «Non ritagliare le foto»: ogni foto si vede intera, con il fondo della slide attorno, in qualunque stile.",
       "Nuovo: stile «Minimal» per i caroselli, solo foto intere su fondo chiaro, senza testi né forme.",

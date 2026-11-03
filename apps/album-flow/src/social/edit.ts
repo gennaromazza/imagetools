@@ -3,7 +3,7 @@ import { nowIso, type Project } from "../model/project";
 import { framingEquals, normalizeFraming } from "./framing";
 import { normalizeTextStyles } from "./textstyle";
 import { carouselPoolIds, carouselRanked, isPromoCarousel, pickForSlot, pickReused, rankPhotos, rankSpreads, reselectRanked, slotFit, type RankedPhoto } from "./plan";
-import { FLEX_TONE_IDS, arcFor, setInfo, templateOf, templatesForSet, toneForFlex } from "./templates";
+import { BLANK_ID, FLEX_TONE_IDS, arcFor, setInfo, templateOf, templatesForSet, toneForFlex } from "./templates";
 import { FREE_MIN_SIZE, MAX_FREE_FRAMES, MAX_SLIDES, MIN_SLIDES, formatOf, photosShown, type BrandKit, type Carousel, type FreeFrame, type Layer, type PhotoFraming, type PhotoLayer, type Slide, type SlideTemplate, type SlotKind, type SocialFormatId, type Tone } from "./types";
 
 /** Modifiche al carosello: funzioni pure `(carousel, …) => carousel`. Se non cambia nulla restituiscono lo stesso oggetto. */
@@ -433,7 +433,8 @@ export function addSlide(carousel: Carousel, project: Project, templateId: strin
     return pick?.assetId ?? null;
   });
   const ranked = template.needsSpread ? rankSpreads(project, pool) : [];
-  const slide: Slide = { id: newId("sl"), templateId, photos, texts: {}, ...(template.needsSpread ? { spreadId: ranked[0] ?? null, spreadId2: ranked[1] ?? null } : {}) };
+  // La slide vuota nasce già in disposizione libera, senza foto: le mette l'utente.
+  const slide: Slide = { id: newId("sl"), templateId, photos, texts: {}, ...(templateId === BLANK_ID ? { free: [] } : {}), ...(template.needsSpread ? { spreadId: ranked[0] ?? null, spreadId2: ranked[1] ?? null } : {}) };
   const after = afterSlideId ? carousel.slides.findIndex((candidate) => candidate.id === afterSlideId) : carousel.slides.length - 1;
   let at = after < 0 ? carousel.slides.length : after + 1;
   if (after >= 0) at = spanRange(carousel, after)[1] + 1;
@@ -446,6 +447,7 @@ export function addSlide(carousel: Carousel, project: Project, templateId: strin
  * Le slide nuove seguono la trama dello stile, scegliendo ogni volta il modello meno usato e con testi diversi nelle ripetizioni.
  */
 export function resizeCarousel(carousel: Carousel, project: Project, count: number): Carousel {
+  if (carousel.manual) return carousel; // le slide di un carosello a mano le aggiunge e le toglie l'utente
   const target = Math.max(MIN_SLIDES, Math.min(MAX_SLIDES, Math.round(count)));
   const set = setInfo(carousel.setId);
   let next = carousel;

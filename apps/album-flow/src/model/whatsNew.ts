@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.50",
+    date: "2026-11-03",
+    headline: "Caroselli: impagini tu le foto, i modelli arrivano dopo",
+    items: [
+      {
+        title: "Impaginazione manuale dei caroselli",
+        text: "Quando crei un carosello puoi scegliere «Impaginazione manuale»: le slide partono vuote e le foto di ogni slide le metti tu, nell'ordine che preferisci (le trovi in ordine di scatto). Si dispongono da sole in ordine, con le foto intere, e puoi spostarle a mano.",
+        where: ["Carosello › Nuovo › «Impaginazione manuale»", "Scheda «Foto» della slide", "«Ordina le foto»", "Pulsante «Vuota» sotto l'anteprima"],
+      },
+      {
+        title: "Modelli in base a quante foto hai messo",
+        text: "Dopo aver messo le foto in una slide, nella scheda «Modello» compaiono i modelli adatti a quel numero di foto: prima quelli del tuo stile, poi gli altri. Il modello usa le tue foto così come sono, senza aggiungerne altre né cambiarne l'ordine. Da «Foto» torni alla disposizione libera.",
+        where: ["Scheda «Modello» › «Modelli per N foto»", "Scheda «Foto» › «Libera»"],
+      },
+    ],
+  },
+  {
     version: "0.2.49",
     date: "2026-11-03",
     headline: "Caroselli con foto intere e stile Minimal, tasto «Per i social» corretto",

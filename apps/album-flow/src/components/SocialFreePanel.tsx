@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AlbumAssetV2 } from "@photo-tools/shared-types";
 import { useAssetSrc } from "../hooks/useAssetSrc";
+import { BLANK_ID } from "../social/templates";
 import { MAX_FREE_FRAMES, type FreeFrame, type PhotoMask, type Slide } from "../social/types";
 import { Icon } from "./icons";
 import { Segmented } from "./ui";
@@ -23,19 +24,23 @@ const MASKS: Array<{ value: PhotoMask; label: string }> = [{ value: "rect", labe
  * Foto della slide in «modo libero» (spostare, ridimensionare, ruotare, sovrapporre) e foto ancora disponibili:
  * quelle segnate «Per i social» che il carosello non usa ancora.
  */
-export function SocialFreePanel({ slide, selected, onSelect, assetOf, available, hasMarked, onEnter, onLeave, onPatch, onRemove, onReorder, onAdd, onUseHere, onPick }: {
+export function SocialFreePanel({ slide, selected, onSelect, assetOf, available, hasMarked, manual, onEnter, onLeave, onPatch, onRemove, onReorder, onAdd, onTidy, onUseHere, onPick }: {
   slide: Slide;
   selected: number;
   onSelect: (index: number) => void;
   assetOf: (id: string | null | undefined) => AlbumAssetV2 | undefined;
   available: AlbumAssetV2[];
   hasMarked: boolean;
+  /** Carosello fatto a mano: l'elenco delle foto è in ordine di scatto e ogni foto si sceglie a mano. */
+  manual?: boolean;
   onEnter: () => void;
   onLeave: () => void;
   onPatch: (frameId: string, patch: Partial<Omit<FreeFrame, "id">>, key?: string) => void;
   onRemove: (frameId: string) => void;
   onReorder: (frameId: string, to: "front" | "back" | "up" | "down") => void;
   onAdd: (assetId: string) => void;
+  /** Rimette in ordine le foto della slide (griglia con foto intere). */
+  onTidy: () => void;
   onUseHere: (assetId: string) => void;
   onPick: (index: number) => void;
 }) {
@@ -45,8 +50,10 @@ export function SocialFreePanel({ slide, selected, onSelect, assetOf, available,
   return (
     <div className="social-free">
       <h4>Disposizione</h4>
-      <Segmented<"model" | "free"> label="Disposizione delle foto" value={frames ? "free" : "model"} onChange={(value) => (value === "free" ? onEnter() : onLeave())}
-        options={[{ value: "model", label: "Del modello" }, { value: "free", label: "Libera" }]} />
+      {slide.templateId === BLANK_ID ? null : (
+        <Segmented<"model" | "free"> label="Disposizione delle foto" value={frames ? "free" : "model"} onChange={(value) => (value === "free" ? onEnter() : onLeave())}
+          options={[{ value: "model", label: "Del modello" }, { value: "free", label: "Libera" }]} />
+      )}
       <p className="muted small social-hint">{frames
         ? "Trascina la foto nell'anteprima con «Sposta», ridimensionala con le maniglie, girala con il cerchio in alto. Le foto si sovrappongono: l'ultima sta sopra."
         : "Clicca una foto nell'anteprima: le maniglie ai bordi la ridimensionano e passano da sole alla disposizione libera."}</p>
@@ -71,6 +78,7 @@ export function SocialFreePanel({ slide, selected, onSelect, assetOf, available,
                 <button type="button" className={`chip${frame.shadow ? " is-active" : ""}`} aria-pressed={Boolean(frame.shadow)} onClick={() => onPatch(frame.id, { shadow: !frame.shadow })}>Ombra</button>
               </div>
               <div className="btn-row">
+                <button type="button" className="btn btn--sm" onClick={onTidy} title="Mette in ordine tutte le foto della slide, intere, in una griglia">Ordina le foto</button>
                 <button type="button" className="btn btn--sm" onClick={() => onReorder(frame.id, "front")} title="Porta davanti a tutte">Davanti</button>
                 <button type="button" className="btn btn--sm" onClick={() => onReorder(frame.id, "back")} title="Porta dietro a tutte">Dietro</button>
                 <button type="button" className="btn btn--sm" onClick={() => onPick(Math.min(selected, frames.length - 1))}>Cambia foto…</button>
@@ -82,15 +90,15 @@ export function SocialFreePanel({ slide, selected, onSelect, assetOf, available,
         </>
       ) : null}
 
-      <h4>Altre foto disponibili <span className="muted">· {available.length}</span></h4>
+      <h4>{manual ? "Foto del carosello" : "Altre foto disponibili"} <span className="muted">· {available.length}</span></h4>
       {available.length === 0 ? (
-        <p className="muted small social-hint">{hasMarked
+        <p className="muted small social-hint">{manual ? "Tutte le foto del carosello sono già nelle slide. Per averne altre: «Scegli le foto…» a sinistra." : hasMarked
           ? "Tutte le foto segnate «Per i social» sono già nel carosello."
           : "Nessuna foto segnata «Per i social». In libreria: tasto destro sulla foto → «Segna come» → «Per i social» (o il tasto I). Quelle non ancora usate compaiono qui."}</p>
       ) : (
         <>
           <p className="muted small social-hint">{frames
-            ? (frames.length >= MAX_FREE_FRAMES ? "Hai raggiunto il massimo di foto in questa slide." : "Clic su una foto per aggiungerla alla slide.")
+            ? (frames.length >= MAX_FREE_FRAMES ? "Hai raggiunto il massimo di foto in questa slide." : manual ? (frames.length === 0 ? "Clic sulle foto che vuoi in questa slide, nell'ordine che preferisci: sono in ordine di scatto." : "Clic su un'altra foto per aggiungerla (si mettono in ordine da sole, finché non ne sposti una).") : "Clic su una foto per aggiungerla alla slide.")
             : "Clic su una foto per metterla nello spazio selezionato."}</p>
           <div className="social-avail">
             {available.slice(0, shown).map((asset) => (

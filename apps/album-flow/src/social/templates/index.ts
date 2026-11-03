@@ -6,10 +6,12 @@ import { MODA } from "./moda";
 import { SHARED } from "./shared";
 import { mulberry32 } from "../../engine/rng";
 import { CINEMA_MORE, EDITORIALE_MORE, GALLERIA_MORE, MODA_MORE } from "./more";
+import { BLANK } from "./blank";
 import { MINIMAL } from "./minimal";
 import { FLEX_TONE_IDS, UNIVERSAL } from "./universal";
 
 export { FLEX_TONE_IDS };
+export { BLANK_ID } from "./blank";
 
 export interface SetInfo {
   id: SetId;
@@ -59,7 +61,7 @@ export const SETS: readonly SetInfo[] = [
   },
 ];
 
-export const TEMPLATES: readonly SlideTemplate[] = [...EDITORIALE, ...EDITORIALE_MORE, ...GALLERIA, ...GALLERIA_MORE, ...MODA, ...MODA_MORE, ...CINEMA, ...CINEMA_MORE, ...MINIMAL, ...SHARED, ...UNIVERSAL];
+export const TEMPLATES: readonly SlideTemplate[] = [...EDITORIALE, ...EDITORIALE_MORE, ...GALLERIA, ...GALLERIA_MORE, ...MODA, ...MODA_MORE, ...CINEMA, ...CINEMA_MORE, ...MINIMAL, ...SHARED, ...BLANK, ...UNIVERSAL];
 
 /**
  * La trama di uno stile per un dato seme. Con 0 (o senza seme) è quella di base, sempre uguale; con un altro numero i modelli di mezzo
@@ -117,7 +119,7 @@ export function setInfo(id: SetId): SetInfo {
 
 /** Modelli tra cui scegliere in uno stile: i suoi, poi quelli comuni (panorama, album, chiusura). Lo stile Minimal non ha testi né forme: dei comuni solo il panorama. */
 export function templatesForSet(id: SetId): SlideTemplate[] {
-  const own = TEMPLATES.filter((template) => template.set === id || (template.set === "shared" && (id !== "minimal" || template.id === "sh-pano")));
+  const own = TEMPLATES.filter((template) => template.set === id || (template.set === "shared" && (id !== "minimal" || template.id === "sh-pano" || template.id === "sh-blank")));
   // I modelli più semplici (una foto, quasi senza testo) stanno in testa: sono quelli che si cercano per primi.
   return [...own.filter((template) => template.id.startsWith("sh-solo-")), ...own.filter((template) => !template.id.startsWith("sh-solo-"))];
 }

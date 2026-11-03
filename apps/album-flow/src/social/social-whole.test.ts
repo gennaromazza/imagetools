@@ -91,7 +91,7 @@ test("Minimal: solo foto, nessun testo, nessuna forma, nessun elemento che non s
   assert.equal(set.id, "minimal");
   const own = templatesForSet("minimal");
   assert.ok(own.filter((template) => template.set === "minimal").length >= 6, "ha più modelli: uno, due, tre e quattro foto");
-  assert.deepEqual(own.filter((template) => template.set === "shared").map((template) => template.id), ["sh-pano"], "dei modelli comuni solo il panorama");
+  assert.deepEqual(own.filter((template) => template.set === "shared").map((template) => template.id), ["sh-pano", "sh-blank"], "dei modelli comuni solo il panorama e la slide vuota");
   for (const template of own.filter((entry) => entry.set === "minimal")) {
     assert.equal(template.fields.length, 0, `${template.id}: niente testi`);
     assert.ok(!template.promo && !template.needsSpread && template.slots.length > 0, `${template.id}: né vendita né album`);

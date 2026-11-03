@@ -400,6 +400,7 @@ function withOwnPool<T extends { assetIds?: string[] }>(next: T, carousel: Carou
  * La lista del carosello torna quella di partenza (le segnate).
  */
 export function reselectPhotos(project: Project, carousel: Carousel): Carousel {
+  if (carousel.manual) return carousel;
   const ids = reselectRanked(project, carousel).map((photo) => photo.assetId);
   const fromMarks = markedPhotoIds(project).length > 0;
   const promo = isPromoCarousel(carousel);
@@ -428,6 +429,7 @@ export function freshSeed(): number {
  * I testi scritti passano alle slide che usano lo stesso modello nella nuova trama.
  */
 export function variation(project: Project, carousel: Carousel, seed = freshSeed()): Carousel {
+  if (carousel.manual) return carousel;
   const prefer: string[] = [];
   for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
   const next = planCarousel(project, { setId: carousel.setId, format: carousel.format, count: carousel.slides.length, brand: carousel.brand, name: carousel.name, seed, prefer, promo: isPromoCarousel(carousel), whole: carousel.whole, ...replanPool(project, carousel) });
@@ -451,6 +453,7 @@ function carryTextsByTemplate(next: Carousel, carousel: Carousel): Carousel {
  * ma la trama cambia (con la vendita tornano prenota, domande frequenti, data, recensione, le pagine dell'album…).
  */
 export function setCarouselPromo(project: Project, carousel: Carousel, promo: boolean): Carousel {
+  if (carousel.manual) return carousel;
   if (isPromoCarousel(carousel) === promo) return carousel.promo === promo ? carousel : { ...carousel, promo };
   const prefer: string[] = [];
   for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
@@ -460,6 +463,8 @@ export function setCarouselPromo(project: Project, carousel: Carousel, promo: bo
 
 /** Cambia stile mantenendo foto e testi: le foto già scelte restano, nello stesso ordine; i testi passano alle slide nella stessa posizione. */
 export function restyle(project: Project, carousel: Carousel, setId: SetId): Carousel {
+  // Un carosello a mano cambia solo vestito (colori e font dello stile): le slide e le foto le ha scelte l'utente.
+  if (carousel.manual) return carousel.setId === setId ? carousel : { ...carousel, setId, brand: setBrand(carousel.brand, setId), updatedAt: nowIso() };
   const prefer: string[] = [];
   for (const slide of carousel.slides) for (const id of photosShown(slide)) if (!prefer.includes(id)) prefer.push(id);
   const next = planCarousel(project, { setId, format: carousel.format, count: carousel.slides.length, brand: setBrand(carousel.brand, setId), name: carousel.name, prefer, seed: carousel.seed, promo: isPromoCarousel(carousel), whole: carousel.whole, ...replanPool(project, carousel) });
