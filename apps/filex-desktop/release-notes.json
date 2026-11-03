@@ -741,6 +741,10 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.48": [
+      "Nuovo: dalla striscia delle foto simili puoi usare anche altre foto dello stesso gruppo: il «+» su una miniatura la aggiunge allo spread accanto alla tua, «Usa tutte» aggiunge tutte le simili libere.",
+      "Corretto: le barre «ritaglia» e «⋯» sulla foto non lasciano più capsule scure sovrapposte su alcuni PC (niente sfocatura né dissolvenza, ombra leggera)."
+    ],
     "0.2.47": [
       "Corretto: nelle pagine libere una foto o un gruppo si agganciano al centro della pagina (e, con la piega, al centro dello spread) anche senza altre foto con cui allinearsi.",
       "Corretto: Ctrl/⌘ + trascinamento copia solo con un trascinamento vero e mai sopra l'originale; Ctrl/⌘ + clic aggiunge o toglie la foto dalla selezione multipla.",

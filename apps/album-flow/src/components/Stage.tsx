@@ -112,6 +112,7 @@ export interface StageActions {
   cycleAlternative: (itemId: string, step: 1 | -1) => void;
   /** Mette nella cella una variante simile scelta guardandola. */
   chooseAlternative: (itemId: string, assetId: string) => void;
+  addAlternatives: (itemId: string, assetIds: string[]) => void;
 }
 
 export interface StageProps {
@@ -575,6 +576,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               altLabels={altLabels}
               alternatives={alternatives}
               onChooseAlternative={actions.chooseAlternative}
+              onAddAlternatives={actions.addAlternatives}
               design={design.handlers}
               photosLocked={design.open}
             />

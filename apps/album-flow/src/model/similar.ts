@@ -3,10 +3,11 @@ import {
   findMoments, findSimilarGroups, isMonochrome, rankForSpread, rankGroup,
   type Moment, type PhotoFingerprint, type SimilarGroup, type SimilarityPhoto,
 } from "@photo-tools/photo-similarity";
-import { replaceItemAsset } from "./items";
+import { MAX_ITEMS_PER_AREA } from "./defaults";
+import { appendAssets, replaceItemAsset } from "./items";
 import { assetUsage, sortAssets } from "./library";
 import type { PreflightIssue } from "./preflight";
-import { alignChanged, findItem, findSpread, itemAspect, mapSpread, replaceArea, type Project } from "./project";
+import { alignChanged, areaGeometryFor, findItem, findSpread, itemAspect, mapSpread, replaceArea, type Project } from "./project";
 
 /**
  * Momenti e foto simili in Album Flow: funzioni pure sopra il pacchetto condiviso `@photo-tools/photo-similarity`.
@@ -220,6 +221,52 @@ export function chooseAlternative(project: Project, analysis: LibraryAnalysis, i
   const items = found.area.items.map((item): AlbumItem => (item.id === itemId ? { ...item, assetId } : item));
   const next = mapSpread(project, found.spread.id, (spread) => replaceArea(spread, found.areaIndex, { ...found.area, items }));
   return alignChanged(project, next);
+}
+
+/** Perché non si possono affiancare altre foto simili a questa, in una frase; null se si può. */
+export function addAlternativesRefusal(project: Project, itemId: string): string | null {
+  const found = findItem(project, itemId);
+  if (!found) return "Foto non trovata.";
+  if (found.area.locked) return "Il layout di questa pagina è bloccato: sbloccalo per aggiungere altre foto.";
+  if (found.area.items.length >= MAX_ITEMS_PER_AREA) return `Un'area contiene al massimo ${MAX_ITEMS_PER_AREA} foto.`;
+  return null;
+}
+
+/**
+ * Usa anche altre foto simili (non al posto di questa): le mette sullo stesso spread, nella stessa pagina, dopo la foto di partenza.
+ * Servono foto del suo gruppo ancora libere. In una pagina libera ogni foto nuova parte accanto a quella di partenza (a destra, o a sinistra se
+ * manca posto), mai sopra di lei. Se la pagina è bloccata o piena il progetto non cambia (vedi `addAlternativesRefusal`).
+ */
+export function addAlternatives(project: Project, analysis: LibraryAnalysis, itemId: string, assetIds: readonly string[]): Project {
+  const found = findItem(project, itemId);
+  if (!found || addAlternativesRefusal(project, itemId)) return project;
+  const alternatives = alternativesForAsset(analysis, assetUsage(project), found.item.assetId);
+  if (!alternatives) return project;
+  const wanted = [...new Set(assetIds)].filter((id) => id !== found.item.assetId && alternatives.ids.includes(id));
+  const frame = found.area.free?.[itemId];
+  const { inner } = areaGeometryFor(project.settings.sheet, found.spread, found.areaIndex);
+  let current = project;
+  let after = itemId;
+  wanted.forEach((assetId, order) => {
+    let at: { x: number; y: number } | undefined;
+    if (frame && inner.w > 0 && inner.h > 0) {
+      // Le nuove foto sono larghe il 34% della pagina: accanto (a destra, poi a sinistra) se c'è posto, altrimenti a cascata sopra la prima, sempre scostate.
+      const right = frame.x + frame.w + 0.19 + order * 0.36;
+      const left = frame.x - 0.19 - order * 0.36;
+      const cy = frame.y + frame.h / 2;
+      const beside = right <= 0.83 ? right : left >= 0.17 ? left : null;
+      const cascade = 0.07 * (order + 1);
+      const center = beside === null ? { x: frame.x + frame.w / 2 + cascade, y: cy + cascade } : { x: beside, y: cy };
+      at = { x: inner.x + center.x * inner.w, y: inner.y + center.y * inner.h };
+    }
+    const known = new Set(findItem(current, itemId)?.area.items.map((item) => item.id));
+    const next = appendAssets(current, found.spread.id, found.areaIndex, [assetId], after, at);
+    const added = findItem(next, itemId)?.area.items.find((item) => !known.has(item.id));
+    if (!added) return;
+    current = next;
+    after = added.id;
+  });
+  return current;
 }
 
 /** Tasto A (avanti) e Maiusc+A (indietro): la variante successiva o precedente nella cella, in giro. */

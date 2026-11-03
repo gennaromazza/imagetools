@@ -49,7 +49,7 @@ import { addGraphicOverlay, addTextOverlay, addTextStack, duplicateOverlay, orde
 import { IconButton } from "./ui";
 import { useStableCallbacks } from "../hooks/useStableCallbacks";
 import { useSimilarity } from "../hooks/useSimilarity";
-import { chooseAlternative, cycleAlternative, spreadAlternatives, suggestForSpread, type CellAlternatives, type SpreadSuggestion } from "../model/similar";
+import { addAlternatives, addAlternativesRefusal, chooseAlternative, cycleAlternative, spreadAlternatives, suggestForSpread, type CellAlternatives, type SpreadSuggestion } from "../model/similar";
 import { clearSimilarityOverrides, detachPhoto, joinPhotos, separatePhotos } from "../model/similarityOverrides";
 import { SUGGESTED_TAB } from "./LibraryDock";
 
@@ -581,6 +581,14 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       notify(found?.item.locked ? "Foto bloccata: sbloccala (L) per cambiarla." : "Questa foto non ha varianti simili libere.");
     },
     chooseAlternative: (itemId, assetId) => commit((p) => chooseAlternative(p, analysisRef.current, itemId, assetId)),
+    addAlternatives: (itemId, assetIds) => {
+      const why = addAlternativesRefusal(historyRef.current.present, itemId);
+      if (why) { notify(why); return; }
+      const before = assetUsage(historyRef.current.present).size;
+      commit((p) => addAlternatives(p, analysisRef.current, itemId, assetIds));
+      const added = assetUsage(historyRef.current.present).size - before;
+      notify(added > 0 ? `${added === 1 ? "Foto simile aggiunta" : `${added} foto simili aggiunte`} allo spread (Ctrl/⌘ + Z per annullare).` : "Nessuna foto simile libera da aggiungere.", added > 0);
+    },
     toggleFavorite: (i) => {
       const area = spread?.areas[i];
       if (!area?.layout) return;

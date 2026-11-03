@@ -438,7 +438,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .cell__size--bad { background: rgba(217, 140, 130, 0.97); color: #2a1210; }
 .cell__badge--warn { left: 8px; background: rgba(224, 183, 102, 0.96); color: #2a2418; }
 .cell__badge--lock { right: 8px; background: rgba(24, 28, 25, 0.88); color: var(--accent-bright); padding: 4px 6px; display: grid; place-items: center; }
-.cell__toolbar { position: absolute; z-index: 20; bottom: 26px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 12px; background: rgba(24, 28, 25, 0.94); backdrop-filter: blur(6px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); cursor: default; }
+.cell__toolbar { position: absolute; z-index: 20; bottom: 26px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; padding: 4px 6px; border: 1px solid var(--line-strong); border-radius: 12px; background: rgb(24, 28, 25); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45); cursor: default; }
 
 .spread__toolbar { bottom: auto; transform: none; z-index: 60; flex-wrap: wrap; align-items: center; justify-content: center; max-width: calc(100% - 8px); }
 .spread__toolbar .icon-btn--danger { margin-left: 10px; }
@@ -447,7 +447,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .spread__toolbar label.straighten select { width: 96px; }
 .spread__toolbar--col label.straighten select { width: 38px; }
 .spread__toolbar.is-away { opacity: 0; pointer-events: none; }
-.spread__toolbar { transition: opacity 0.12s; }
+
 .spread__toolbar--col { flex-direction: column; flex-wrap: nowrap; padding: 6px 4px; }
 .spread__toolbar--col .straighten { flex-direction: column; padding: 2px 0; gap: 3px; }
 .spread__toolbar--col .straighten > span { display: none; }
@@ -578,7 +578,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .cell__alts { position: absolute; left: 8px; bottom: 8px; z-index: 9; padding: 2px 9px; border: 1px solid var(--accent); border-radius: 999px; background: rgba(24, 28, 25, 0.88); color: var(--accent-bright); font-size: 10.5px; font-weight: 700; pointer-events: auto; cursor: pointer; }
 .cell__alts:hover { background: var(--accent); color: #1c211e; }
 .alts-strip { position: absolute; z-index: 70; max-width: 84%; padding: 8px 10px 10px; border: 1px solid var(--accent); border-radius: var(--radius); background: rgba(24, 28, 25, 0.97); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); }
-.alts-strip__hint { margin: 0 0 6px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.alts-strip__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 6px; }
+.alts-strip__hint { margin: 0; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.alts-strip__all { flex: 0 0 auto; padding: 2px 9px; border: 1px solid var(--accent); border-radius: 999px; background: transparent; color: var(--accent-bright); font-size: 11px; cursor: pointer; }
+.alts-strip__all:hover { background: var(--accent-soft); }
+.alts-strip__item { position: relative; flex: 0 0 auto; }
+.alts-strip__add { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; padding: 0; border: 1px solid var(--accent); border-radius: 999px; background: rgb(24, 28, 25); color: var(--accent-bright); font-size: 15px; line-height: 1; cursor: pointer; }
+.alts-strip__add:hover { background: var(--accent); color: #1b1f1c; }
 .alts-strip__row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
 .alts-strip__row .alts__choice { flex: 0 0 auto; }
 .alts-strip__row .alts__choice:disabled { opacity: 0.55; }
@@ -940,7 +946,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .spread__toolbar { padding: 3px 4px; gap: 1px; }
 .spread__toolbar .icon-btn { width: 28px; height: 28px; }
 /* Capsula sulla foto (Ritaglia, Raddrizza, «⋯»): fondo scuro pieno e bordo chiaro, così si legge su qualsiasi immagine; pulsanti da 34 px. */
-.spread__toolbar--more { flex-wrap: nowrap; padding: 3px; gap: 2px; border-radius: 999px; background: rgba(18, 21, 19, 0.96); border-color: rgba(236, 228, 214, 0.55); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 8px 22px rgba(0, 0, 0, 0.6); }
+.spread__toolbar--more { flex-wrap: nowrap; padding: 3px; gap: 2px; border-radius: 999px; background: rgb(18, 21, 19); border-color: rgba(236, 228, 214, 0.55); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.45); }
 .spread__toolbar--more .icon-btn { width: 34px; height: 34px; border-radius: 999px; }
 .spread__toolbar--more .icon-btn.is-active { background: var(--accent-soft); color: var(--accent-bright); }
 .spread__toolbar--menu { flex-wrap: wrap; justify-content: flex-start; }

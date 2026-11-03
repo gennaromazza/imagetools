@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.48",
+    date: "2026-11-03",
+    headline: "Usa più foto simili, barre della foto più pulite",
+    items: [
+      {
+        title: "Usa anche le altre foto simili",
+        text: "Dalla striscia delle foto simili puoi tenere più foto dello stesso gruppo, non solo sceglierne una: il «+» su una miniatura la aggiunge allo spread accanto alla foto di partenza, «Usa tutte» le aggiunge tutte. Un clic sulla miniatura continua a sostituire la foto attuale. Ctrl/⌘ + Z annulla.",
+        where: ["Segnalino «N simili» sulla foto", "«+» su una miniatura", "«Usa tutte»"],
+      },
+      {
+        title: "Barre della foto più pulite",
+        text: "Le barre «ritaglia» e «⋯» sulla foto selezionata hanno ora uno sfondo pieno e un'ombra leggera: non lasciano più capsule scure sovrapposte nei punti dove la barra era stata prima.",
+        where: ["Barra sulla foto selezionata"],
+      },
+    ],
+  },
+  {
     version: "0.2.47",
     date: "2026-11-03",
     headline: "Centro pagina con la calamita, copie solo volute, foto simili sempre visibili",

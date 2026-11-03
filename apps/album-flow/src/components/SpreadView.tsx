@@ -97,6 +97,8 @@ export interface SpreadViewProps {
   /** Le varianti simili di ogni foto dello spread: il segnalino sulla foto apre la striscia per sceglierle. */
   alternatives?: ReadonlyMap<string, CellAlternatives>;
   onChooseAlternative?: (itemId: string, assetId: string) => void;
+  /** «Usa anche questa»: affianca altre foto simili alla foto, senza sostituirla. */
+  onAddAlternatives?: (itemId: string, assetIds: string[]) => void;
 }
 
 /** Le foto libere e mobili (né bloccate né in una pagina con il layout bloccato) tra quelle della selezione multipla, con la cornice attuale. */
@@ -1082,7 +1084,7 @@ function SpreadViewInner(props: SpreadViewProps) {
           top: pct(((entry.rect.y + entry.rect.h) / size.height) * 100),
           transform: below ? "translate(-50%, 8px)" : "translate(-50%, calc(-100% - 36px))",
         };
-        return <AlternativesStrip key={altOpen} alternatives={props.alternatives.get(altOpen)!} assets={assets} locked={Boolean(item.locked)} style={style} onPreview={previewAlternative} onPick={(assetId) => props.onChooseAlternative?.(altOpen, assetId)} onClose={closeAlternatives} />;
+        return <AlternativesStrip key={altOpen} alternatives={props.alternatives.get(altOpen)!} assets={assets} locked={Boolean(item.locked)} style={style} onPreview={previewAlternative} onPick={(assetId) => props.onChooseAlternative?.(altOpen, assetId)} onAdd={(assetIds) => props.onAddAlternatives?.(altOpen, assetIds)} onClose={closeAlternatives} />;
       })() : null}
 
       <div className="spread__fold" aria-hidden="true" />

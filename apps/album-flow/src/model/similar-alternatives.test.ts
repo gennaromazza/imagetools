@@ -2,8 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { appendAssets, setItemView, toggleItemLock } from "./items";
 import { addSpread } from "./spreads";
+import { makeAreaFree, setAreaLocked } from "./layoutLock";
 import { assertProjectInvariants } from "./fixtures";
-import { alternativesForItem, analyzeLibrary, chooseAlternative, cycleAlternative, spreadAlternatives } from "./similar";
+import { addAlternatives, addAlternativesRefusal, alternativesForItem, analyzeLibrary, chooseAlternative, cycleAlternative, spreadAlternatives } from "./similar";
 import { shot, weddingProject } from "./similarFixtures";
 import type { Project } from "./project";
 
@@ -100,3 +101,43 @@ test("alternative: cento passi casuali su uno spread con due raffiche restano co
     assert.equal(project.spreads[0].areas[0].items.length, 3, "il numero di foto non cambia");
   }
 });
+
+test("alternative: «usa anche» affianca le simili senza sostituire la foto, e mai due volte la stessa", () => {
+  const project = withPage(weddingProject(), ["c0", "b2", "c1"]);
+  const analysis = analyzeLibrary(project);
+  const itemId = itemOf(project, "b2").id;
+  const both = addAlternatives(project, analysis, itemId, ["b1", "b3", "b1", "c0", "inesistente"]);
+  assert.deepEqual(assetsOnPage(both), ["c0", "b2", "b1", "b3", "c1"], "dopo la foto di partenza, nell'ordine chiesto; fuori gruppo e doppioni ignorati");
+  assertProjectInvariants(both, "usa anche");
+  assert.equal(itemOf(both, "b2").id, itemId, "la foto di partenza è la stessa cella");
+  assert.equal(addAlternatives(both, analyzeLibrary(both), itemId, ["b1"]), both, "una foto già usata non si aggiunge di nuovo");
+  assert.equal(addAlternatives(project, analysis, itemId, ["c1"]), project, "una foto fuori dal gruppo non si aggiunge");
+  assert.equal(addAlternativesRefusal(project, itemId), null);
+});
+
+test("alternative: «usa anche» in una pagina libera mette la nuova foto accanto, non sopra", () => {
+  let project = withPage(weddingProject(), ["b2"]);
+  const analysis = analyzeLibrary(project);
+  const spreadId = project.spreads[0].id;
+  project = makeAreaFree(project, spreadId, 0);
+  const itemId = itemOf(project, "b2").id;
+  const next = addAlternatives(project, analysis, itemId, ["b1", "b3"]);
+  const free = next.spreads[0].areas[0].free!;
+  const frames = next.spreads[0].areas[0].items.map((item) => free[item.id]);
+  assert.equal(frames.length, 3);
+  for (let i = 0; i < frames.length; i += 1) for (let j = i + 1; j < frames.length; j += 1) {
+    const same = Math.abs(frames[i].x - frames[j].x) < 0.01 && Math.abs(frames[i].y - frames[j].y) < 0.01;
+    assert.equal(same, false, `le foto ${i} e ${j} non partono nello stesso punto`);
+  }
+  assertProjectInvariants(next, "usa anche, pagina libera");
+});
+
+test("alternative: «usa anche» non tocca una pagina bloccata o piena", () => {
+  const project = withPage(weddingProject(), ["b2"]);
+  const analysis = analyzeLibrary(project);
+  const itemId = itemOf(project, "b2").id;
+  const locked = setAreaLocked(project, project.spreads[0].id, 0, true);
+  assert.match(addAlternativesRefusal(locked, itemId) ?? "", /bloccato/);
+  assert.equal(addAlternatives(locked, analysis, itemId, ["b1"]), locked);
+});
+

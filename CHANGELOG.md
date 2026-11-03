@@ -39,6 +39,11 @@
 - Interno: la logica d'abbinamento è in `raw-jpg-pairing.ts` (prima stava dentro `folder-access.ts`) con 12 prove in `raw-jpg-pairing.test.ts` (`test:photo-selector-raw-jpg-pairing`, nella Dev Console).
 - Da sapere: la scheda di una coppia sta nella cartella del JPG, quindi il filtro per la cartella «RAW» non la mostra; copia, sposta e Cestino agiscono su entrambi i file anche se stanno in cartelle diverse.
 
+## 2026-11-03 - Album Flow 0.2.48
+
+- Nuovo: dalla striscia delle foto simili («N simili» sulla foto) si possono usare anche altre foto dello stesso gruppo, non solo sostituire quella attuale. Il «+» su una miniatura la aggiunge allo spread, nella stessa pagina e dopo la foto di partenza; «Usa tutte (N)» aggiunge tutte le simili libere in un colpo solo. In una pagina libera le nuove foto partono accanto alla prima (a destra, a sinistra se non c'è posto) o a cascata, mai sopra. Con la pagina bloccata o con 12 foto non si aggiunge nulla e un messaggio dice perché; Ctrl/⌘ + Z annulla. Funzione pura `addAlternatives` in `model/similar.ts`, con tre test in `similar-alternatives.test.ts`.
+- Corretto: le barre della foto selezionata («ritaglia» e «⋯», raddrizzamento) usavano sfocatura dello sfondo, ombra larga e dissolvenza: su alcuni PC lasciavano capsule scure sovrapposte nei punti dove la barra era stata prima. Ora hanno sfondo pieno e ombra leggera, senza sfocatura né dissolvenza. Non riproducibile con le foto di prova: se sull'album vero le capsule fantasma tornano, serve il gesto che le fa comparire.
+
 ## 2026-11-03 - Album Flow 0.2.47
 
 - Corretto: spostando una foto o un gruppo nelle pagine libere la calamita non centrava nella pagina: i bersagli erano solo i bordi delle altre foto, i bordi dell'area e la piega, ma non il centro della pagina. Ora il centro di ogni pagina è un punto di aggancio (orizzontale e verticale; con la piega anche il centro dello spread), per una foto sola e per un gruppo; Alt resta «senza aggancio».
