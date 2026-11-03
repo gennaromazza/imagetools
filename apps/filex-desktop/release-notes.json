@@ -741,6 +741,11 @@
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
     ],
+    "0.2.47": [
+      "Corretto: nelle pagine libere una foto o un gruppo si agganciano al centro della pagina (e, con la piega, al centro dello spread) anche senza altre foto con cui allinearsi.",
+      "Corretto: Ctrl/⌘ + trascinamento copia solo con un trascinamento vero e mai sopra l'originale; Ctrl/⌘ + clic aggiunge o toglie la foto dalla selezione multipla.",
+      "Corretto: la striscia delle foto simili non esce più dal foglio con le foto alte."
+    ],
     "0.2.46": [
       "Nuovo: nelle pagine libere trascini sullo sfondo per scegliere più foto (rettangolo di selezione, Maiusc per aggiungere, Ctrl/⌘ + A per tutte) e le sposti, le ingrandisci o le riduci insieme dalle maniglie d'angolo, con la calamita e senza deformarle.",
       "Nuovo: frecce per spostare di 1 mm (Maiusc 10 mm), barra «Allinea e distribuisci», distanze in cm dalle foto vicine mentre trascini e Ctrl/⌘ + trascinamento per copiare una foto o un gruppo.",

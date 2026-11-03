@@ -39,6 +39,13 @@
 - Interno: la logica d'abbinamento è in `raw-jpg-pairing.ts` (prima stava dentro `folder-access.ts`) con 12 prove in `raw-jpg-pairing.test.ts` (`test:photo-selector-raw-jpg-pairing`, nella Dev Console).
 - Da sapere: la scheda di una coppia sta nella cartella del JPG, quindi il filtro per la cartella «RAW» non la mostra; copia, sposta e Cestino agiscono su entrambi i file anche se stanno in cartelle diverse.
 
+## 2026-11-03 - Album Flow 0.2.47
+
+- Corretto: spostando una foto o un gruppo nelle pagine libere la calamita non centrava nella pagina: i bersagli erano solo i bordi delle altre foto, i bordi dell'area e la piega, ma non il centro della pagina. Ora il centro di ogni pagina è un punto di aggancio (orizzontale e verticale; con la piega anche il centro dello spread), per una foto sola e per un gruppo; Alt resta «senza aggancio».
+- Corretto: Ctrl/⌘ + trascinamento creava una copia anche con un clic appena tremato, lasciando foto identiche sovrapposte e nascoste (e raddoppiate in stampa). Ora la copia parte solo oltre 10 px di trascinamento, `duplicateFrames` non crea mai una copia a meno di 2 mm dall'originale e Ctrl/⌘ + clic aggiunge o toglie la foto dalla selezione multipla, come Maiusc + clic.
+- Corretto: la striscia delle varianti simili, aperta dal segnalino «N simili», usciva dal foglio con le foto alte fino al bordo dello spread. Ora sta sotto la foto se resta almeno il 28% dello spread, altrimenti dentro la foto, appoggiata in basso sopra il segnalino.
+- Test: `snap.test.ts` ha il caso del punto-centro della pagina e `freeGroup.test.ts` quello della copia sopra l'originale.
+
 ## 2026-11-02 - Album Flow 0.2.46
 
 - Nuovo: gesti da programma di grafica nelle pagine libere (Layout → «Sposta le foto liberamente»). Trascinando sullo sfondo si traccia un rettangolo di selezione che prende le foto sfiorate, in qualunque direzione (Maiusc le aggiunge); Ctrl/⌘ + A sceglie tutte le foto libere dello spread; Esc toglie la selezione. Trascinando una foto della selezione si muove tutto il gruppo con la calamita sul riquadro che lo contiene (Alt = senza aggancio); quattro maniglie d'angolo ingrandiscono o riducono tutte le foto insieme tenendo fermo l'angolo opposto, senza deformarne nessuna e fermandosi prima del limite del 4% della pagina. Frecce: 1 mm, Maiusc + frecce: 10 mm (senza foto libere scelte restano la navigazione tra gli spread). Con due o più foto mobili compare la barra «N foto» con sei allineamenti e «distribuisci» in orizzontale e verticale (spazi uguali, servono tre foto). Logica pura in `engine/arrange.ts` e `model/freeGroup.ts`; foto bloccate e pagine con il layout bloccato restano ferme.

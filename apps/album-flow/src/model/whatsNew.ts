@@ -21,6 +21,28 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.47",
+    date: "2026-11-03",
+    headline: "Centro pagina con la calamita, copie solo volute, foto simili sempre visibili",
+    items: [
+      {
+        title: "Centra con la calamita",
+        text: "Spostando una foto o un gruppo nelle pagine libere, il centro della pagina (e quello dello spread, con la piega) attira il centro della foto o del gruppo, anche se non ci sono altre foto con cui allinearsi. Alt = senza aggancio.",
+        where: ["Calamite", "Trascina una foto o un gruppo"],
+      },
+      {
+        title: "Copie solo quando le vuoi",
+        text: "Ctrl/⌘ + trascinamento copia la foto solo se trascini davvero (non con un clic appena tremato) e mai sopra l'originale. Ctrl/⌘ + clic aggiunge o toglie una foto dalla selezione multipla, come Maiusc + clic.",
+        where: ["Ctrl/⌘ + trascina una foto", "Ctrl/⌘ + clic"],
+      },
+      {
+        title: "Le foto simili restano dentro il foglio",
+        text: "La striscia con le varianti, aperta dal segnalino «N simili», sta sotto la foto o, se la foto arriva fino al bordo dello spread, dentro la foto in basso: non viene più tagliata.",
+        where: ["Segnalino «N simili» sulla foto"],
+      },
+    ],
+  },
+  {
     version: "0.2.46",
     date: "2026-11-02",
     headline: "Più foto insieme nelle pagine libere, e le foto simili si scelgono guardandole",
