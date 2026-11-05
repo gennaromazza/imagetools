@@ -1,0 +1,337 @@
+[
+  {
+    "album": "album A",
+    "formato": "35x25",
+    "doppie": 49,
+    "fotoUsate": 209,
+    "fotoInLibreria": 487,
+    "percentualeUsata": 43,
+    "fotoPerDoppia": {
+      "media": 4.3,
+      "mediana": 3,
+      "max": 12
+    },
+    "split": {
+      "half": 36,
+      "full": 13
+    },
+    "fogliInteriConUnaFoto": 0,
+    "fotoNeiFogliInteri": [
+      2,
+      3,
+      3,
+      3,
+      3,
+      4,
+      4,
+      6,
+      7,
+      7,
+      8,
+      11,
+      12
+    ],
+    "doppieUnaFotoPerPagina": 14,
+    "pagineVuote(testo/nero)": 1,
+    "fotoPerArea": {
+      "0": 1,
+      "1": 44,
+      "2": 12,
+      "3": 7,
+      "4": 13,
+      "6": 1,
+      "7": 2,
+      "8": 2,
+      "9": 1,
+      "11": 1,
+      "12": 1
+    },
+    "areeDaUnaFoto(orientamento)": {
+      "o": 42,
+      "v": 2
+    },
+    "mode": {
+      "fill": 77,
+      "fit": 7
+    },
+    "paddingCm": {
+      "0": 78,
+      "2": 3,
+      "1.7": 2,
+      "1.8": 1
+    },
+    "gapCm": {
+      "0.05": 53,
+      "0.2": 16,
+      "0": 7,
+      "0.15": 4,
+      "0.3": 3
+    },
+    "sfondiConMargine": {
+      "#ffffff": 6
+    },
+    "areeBN": 2,
+    "areeConBordo": 0,
+    "dispFree": 3,
+    "testiEGrafiche": 7,
+    "doppieConTesto": [
+      1,
+      2,
+      11
+    ],
+    "stelleUsate": {
+      "0": 209
+    },
+    "stelleNonUsate": {
+      "0": 276,
+      "5": 2
+    },
+    "tagAlbum": {
+      "panorama": 3,
+      "social": 22
+    },
+    "capitoli": [
+      "chiesa",
+      "ristorante",
+      "esterne"
+    ],
+    "formePiuUsate(2-4 foto)": {
+      "R(o,o)": 10,
+      "R(C(o,o),C(o,o))": 8,
+      "R(C(o,o),o)": 4,
+      "C(R(o,o),R(o,o))": 3,
+      "R(o,R(o,o))": 3,
+      "C(o,o)": 2
+    },
+    "ritmo(F=foglio intero,1=1-2 foto,M=3-5,G=6+)": "11FG1111MMM1M1GMFFMFMFFFFGMGFFGF1MMMM1MG1111MFF1M"
+  },
+  {
+    "album": "album B",
+    "formato": "40x30",
+    "doppie": 55,
+    "fotoUsate": 282,
+    "fotoInLibreria": 599,
+    "percentualeUsata": 47,
+    "fotoPerDoppia": {
+      "media": 5.1,
+      "mediana": 4,
+      "max": 12
+    },
+    "split": {
+      "half": 32,
+      "full": 23
+    },
+    "fogliInteriConUnaFoto": 0,
+    "fotoNeiFogliInteri": [
+      2,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      5,
+      5,
+      5,
+      6,
+      6,
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "doppieUnaFotoPerPagina": 6,
+    "pagineVuote(testo/nero)": 1,
+    "fotoPerArea": {
+      "0": 1,
+      "1": 26,
+      "2": 13,
+      "3": 16,
+      "4": 12,
+      "5": 6,
+      "6": 5,
+      "7": 1,
+      "8": 2,
+      "9": 2,
+      "10": 1,
+      "11": 1,
+      "12": 1
+    },
+    "areeDaUnaFoto(orientamento)": {
+      "o": 25,
+      "v": 1
+    },
+    "mode": {
+      "fill": 63,
+      "fit": 23
+    },
+    "paddingCm": {
+      "0": 77,
+      "2.4": 1,
+      "2.1": 1,
+      "3.1": 1,
+      "2": 1
+    },
+    "gapCm": {
+      "0.05": 36,
+      "0.1": 29,
+      "0.15": 13,
+      "0.2": 6,
+      "0": 2
+    },
+    "sfondiConMargine": {
+      "#ffffff": 9
+    },
+    "areeBN": 0,
+    "areeConBordo": 0,
+    "dispFree": 5,
+    "testiEGrafiche": 3,
+    "doppieConTesto": [
+      1
+    ],
+    "stelleUsate": {
+      "0": 282
+    },
+    "stelleNonUsate": {
+      "0": 317
+    },
+    "tagAlbum": {
+      "social": 24
+    },
+    "capitoli": [
+      "Casa sposo",
+      "Casa sposa",
+      "Chiesa",
+      "Esterni",
+      "Ristorante",
+      "Festa"
+    ],
+    "formePiuUsate(2-4 foto)": {
+      "R(o,o)": 13,
+      "R(C(o,o),o)": 6,
+      "R(o,R(o,o))": 6,
+      "R(C(o,o),C(o,o))": 3,
+      "R(o,C(o,o))": 3,
+      "R(C(o,o),R(o,o))": 2
+    },
+    "ritmo(F=foglio intero,1=1-2 foto,M=3-5,G=6+)": "1MMMGGFFFGMGMMMMMMMGFFGGGFMFFFF1FF11MF1FMFFFFF11FFGGFGF"
+  },
+  {
+    "album": "album C",
+    "formato": "40x30",
+    "doppie": 47,
+    "fotoUsate": 234,
+    "fotoInLibreria": 574,
+    "percentualeUsata": 41,
+    "fotoPerDoppia": {
+      "media": 5.0,
+      "mediana": 4,
+      "max": 12
+    },
+    "split": {
+      "half": 26,
+      "full": 21
+    },
+    "fogliInteriConUnaFoto": 0,
+    "fotoNeiFogliInteri": [
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      4,
+      5,
+      5,
+      5,
+      5,
+      6,
+      6,
+      11,
+      12
+    ],
+    "doppieUnaFotoPerPagina": 4,
+    "pagineVuote(testo/nero)": 0,
+    "fotoPerArea": {
+      "1": 19,
+      "2": 13,
+      "3": 14,
+      "4": 12,
+      "5": 6,
+      "6": 5,
+      "8": 2,
+      "11": 1,
+      "12": 1
+    },
+    "areeDaUnaFoto(orientamento)": {
+      "o": 17,
+      "v": 2
+    },
+    "mode": {
+      "fill": 52,
+      "fit": 21
+    },
+    "paddingCm": {
+      "0": 66,
+      "2": 4,
+      "4.7": 1,
+      "2.1": 1,
+      "1.6": 1
+    },
+    "gapCm": {
+      "0.1": 61,
+      "0.2": 5,
+      "0": 4,
+      "0.15": 2,
+      "0.05": 1
+    },
+    "sfondiConMargine": {
+      "#ffffff": 7
+    },
+    "areeBN": 3,
+    "areeConBordo": 0,
+    "dispFree": 6,
+    "testiEGrafiche": 4,
+    "doppieConTesto": [
+      1
+    ],
+    "stelleUsate": {
+      "0": 197,
+      "1": 37
+    },
+    "stelleNonUsate": {
+      "0": 311,
+      "1": 29
+    },
+    "tagAlbum": {},
+    "capitoli": [
+      "Casa sposo",
+      "Casa sposa",
+      "Chiesa",
+      "Esterni",
+      "Ristorante"
+    ],
+    "formePiuUsate(2-4 foto)": {
+      "R(o,o)": 11,
+      "R(C(o,o),o)": 5,
+      "C(R(o,o),R(o,o))": 3,
+      "R(o,C(o,o))": 3,
+      "R(o,R(o,o))": 3,
+      "R(o,R(o,R(o,o)))": 2
+    },
+    "ritmo(F=foglio intero,1=1-2 foto,M=3-5,G=6+)": "1GM1GMGM1MFMFFMMFFMFGFFMGFGFFFGFFFMM1FFFGFMFFGM"
+  }
+]

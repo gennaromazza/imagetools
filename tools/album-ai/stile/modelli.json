@@ -1,0 +1,1073 @@
+[
+ {
+  "id": "m001",
+  "target": "page",
+  "firma": "R(v,v)",
+  "foto": 2,
+  "usi": 27,
+  "album": 3,
+  "rapporti": [
+   0.5007
+  ]
+ },
+ {
+  "id": "m002",
+  "target": "page",
+  "firma": "R(C(o,o),v)",
+  "foto": 3,
+  "usi": 12,
+  "album": 3,
+  "rapporti": [
+   0.5308,
+   0.5
+  ]
+ },
+ {
+  "id": "m003",
+  "target": "page",
+  "firma": "R(C(o,o),C(o,o))",
+  "foto": 4,
+  "usi": 10,
+  "album": 3,
+  "rapporti": [
+   0.5,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m004",
+  "target": "page",
+  "firma": "C(R(o,o),R(o,o))",
+  "foto": 4,
+  "usi": 5,
+  "album": 3,
+  "rapporti": [
+   0.5,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m005",
+  "target": "full",
+  "firma": "R(v,R(o,v))",
+  "foto": 3,
+  "usi": 4,
+  "album": 3,
+  "rapporti": [
+   0.2351,
+   0.6923
+  ]
+ },
+ {
+  "id": "m006",
+  "target": "page",
+  "firma": "R(v,C(o,o))",
+  "foto": 3,
+  "usi": 4,
+  "album": 2,
+  "rapporti": [
+   0.4716,
+   0.5
+  ]
+ },
+ {
+  "id": "m007",
+  "target": "page",
+  "firma": "C(o,o)",
+  "foto": 2,
+  "usi": 3,
+  "album": 2,
+  "rapporti": [
+   0.5
+  ]
+ },
+ {
+  "id": "m008",
+  "target": "full",
+  "firma": "R(v,R(v,o))",
+  "foto": 3,
+  "usi": 3,
+  "album": 2,
+  "rapporti": [
+   0.2351,
+   0.316
+  ]
+ },
+ {
+  "id": "m009",
+  "target": "full",
+  "firma": "R(v,R(v,R(v,v)))",
+  "foto": 4,
+  "usi": 3,
+  "album": 2,
+  "rapporti": [
+   0.2498,
+   0.3331,
+   0.5
+  ]
+ },
+ {
+  "id": "m010",
+  "target": "page",
+  "firma": "R(C(o,v),C(o,o))",
+  "foto": 4,
+  "usi": 2,
+  "album": 2,
+  "rapporti": [
+   0.3978,
+   0.3893,
+   0.5
+  ]
+ },
+ {
+  "id": "m011",
+  "target": "full",
+  "firma": "R(R(R(v,v),v),v)",
+  "foto": 4,
+  "usi": 2,
+  "album": 2,
+  "rapporti": [
+   0.7446,
+   0.6721,
+   0.5114
+  ]
+ },
+ {
+  "id": "m012",
+  "target": "full",
+  "firma": "R(o,R(C(o,o),v))",
+  "foto": 4,
+  "usi": 2,
+  "album": 2,
+  "rapporti": [
+   0.5142,
+   0.5292,
+   0.5
+  ]
+ },
+ {
+  "id": "m013",
+  "target": "full",
+  "firma": "R(o,o)",
+  "foto": 2,
+  "usi": 2,
+  "album": 2,
+  "rapporti": [
+   0.5
+  ]
+ },
+ {
+  "id": "m014",
+  "target": "full",
+  "firma": "R(o,R(v,v))",
+  "foto": 3,
+  "usi": 2,
+  "album": 2,
+  "rapporti": [
+   0.5289,
+   0.5
+  ]
+ },
+ {
+  "id": "m015",
+  "target": "full",
+  "firma": "R(o,C(R(o,R(o,o)),R(C(o,o),o)))",
+  "foto": 7,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5002,
+   0.344,
+   0.3328,
+   0.5,
+   0.3326,
+   0.4744
+  ]
+ },
+ {
+  "id": "m016",
+  "target": "page",
+  "firma": "C(R(C(o,o),C(R(o,o),R(v,o))),R(R(o,o),o))",
+  "foto": 9,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.6921,
+   0.3741,
+   0.5,
+   0.4194,
+   0.4963,
+   0.3054,
+   0.6656,
+   0.5035
+  ]
+ },
+ {
+  "id": "m017",
+  "target": "full",
+  "firma": "R(o,R(C(o,C(o,o)),C(R(o,o),o)))",
+  "foto": 7,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.465,
+   0.3333,
+   0.3333,
+   0.5,
+   0.3333,
+   0.5
+  ]
+ },
+ {
+  "id": "m018",
+  "target": "full",
+  "firma": "R(o,R(C(o,C(o,o)),C(o,o)))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5455,
+   0.4,
+   0.3333,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m019",
+  "target": "full",
+  "firma": "R(R(R(o,v),C(v,v)),R(C(v,v),C(v,v)))",
+  "foto": 8,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.7645,
+   0.8417,
+   0.6323,
+   0.5,
+   0.5,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m020",
+  "target": "page",
+  "firma": "R(C(R(C(o,o),v),R(o,o)),C(C(o,o),o))",
+  "foto": 8,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.66,
+   0.6804,
+   0.5278,
+   0.5,
+   0.501,
+   0.669,
+   0.5
+  ]
+ },
+ {
+  "id": "m021",
+  "target": "full",
+  "firma": "C(R(R(R(R(o,v),C(o,o)),o),C(o,o)),R(R(R(R(o,o),o),o),o))",
+  "foto": 12,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5843,
+   0.8548,
+   0.6604,
+   0.7429,
+   0.6923,
+   0.5363,
+   0.5363,
+   0.8,
+   0.75,
+   0.6667,
+   0.5
+  ]
+ },
+ {
+  "id": "m022",
+  "target": "full",
+  "firma": "R(R(C(R(o,o),o),C(o,o)),R(C(o,C(o,o)),C(R(o,o),o)))",
+  "foto": 11,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5388,
+   0.572,
+   0.3404,
+   0.5,
+   0.5,
+   0.3311,
+   0.3396,
+   0.4803,
+   0.3404,
+   0.5
+  ]
+ },
+ {
+  "id": "m023",
+  "target": "full",
+  "firma": "R(v,R(v,R(v,C(o,o))))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.2419,
+   0.3198,
+   0.4719,
+   0.5
+  ]
+ },
+ {
+  "id": "m024",
+  "target": "full",
+  "firma": "R(C(o,o),R(v,v))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.3,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m025",
+  "target": "page",
+  "firma": "R(C(o,R(o,o)),C(o,C(v,o)))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.7396,
+   0.6647,
+   0.5,
+   0.2386,
+   0.6859
+  ]
+ },
+ {
+  "id": "m026",
+  "target": "page",
+  "firma": "R(C(R(o,o),o),C(v,o))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.6592,
+   0.2983,
+   0.5,
+   0.6923
+  ]
+ },
+ {
+  "id": "m027",
+  "target": "page",
+  "firma": "R(v,C(R(o,v),o))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4304,
+   0.4173,
+   0.6923
+  ]
+ },
+ {
+  "id": "m028",
+  "target": "full",
+  "firma": "R(v,R(v,R(v,C(R(v,v),o))))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.2458,
+   0.3265,
+   0.4859,
+   0.5277,
+   0.5
+  ]
+ },
+ {
+  "id": "m029",
+  "target": "full",
+  "firma": "R(R(R(C(v,v),C(v,v)),v),C(R(R(v,v),v),R(R(v,o),v)))",
+  "foto": 11,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5571,
+   0.465,
+   0.5,
+   0.5,
+   0.5,
+   0.5862,
+   0.6667,
+   0.5,
+   0.7647,
+   0.3077
+  ]
+ },
+ {
+  "id": "m030",
+  "target": "page",
+  "firma": "R(v,C(R(v,v),o))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4859,
+   0.5273,
+   0.5
+  ]
+ },
+ {
+  "id": "m031",
+  "target": "page",
+  "firma": "R(R(C(o,C(o,o)),v),C(C(C(o,o),o),o))",
+  "foto": 8,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.7603,
+   0.4255,
+   0.3494,
+   0.4583,
+   0.7259,
+   0.6942,
+   0.5544
+  ]
+ },
+ {
+  "id": "m032",
+  "target": "page",
+  "firma": "C(R(C(o,o),o),R(o,o))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5719,
+   0.3383,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m033",
+  "target": "full",
+  "firma": "R(R(v,C(v,v)),R(C(R(v,v),R(o,o)),C(o,o)))",
+  "foto": 9,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.3745,
+   0.6674,
+   0.5,
+   0.5526,
+   0.6914,
+   0.5,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m034",
+  "target": "page",
+  "firma": "R(C(v,o),v)",
+  "foto": 3,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4223,
+   0.6923
+  ]
+ },
+ {
+  "id": "m035",
+  "target": "full",
+  "firma": "R(C(R(o,o),o),R(v,o))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.3148,
+   0.3592,
+   0.5,
+   0.3077
+  ]
+ },
+ {
+  "id": "m036",
+  "target": "full",
+  "firma": "R(C(R(o,o),o),R(C(o,R(o,o)),C(o,o)))",
+  "foto": 8,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.3633,
+   0.3376,
+   0.5,
+   0.5717,
+   0.6624,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m037",
+  "target": "full",
+  "firma": "R(v,R(v,v))",
+  "foto": 3,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.3742,
+   0.4008
+  ]
+ },
+ {
+  "id": "m038",
+  "target": "full",
+  "firma": "R(o,R(o,v))",
+  "foto": 3,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4086,
+   0.6923
+  ]
+ },
+ {
+  "id": "m039",
+  "target": "full",
+  "firma": "R(C(R(R(o,o),o),R(o,C(o,o))),R(C(o,R(o,o)),C(C(o,o),o)))",
+  "foto": 12,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5,
+   0.351,
+   0.6675,
+   0.5,
+   0.6679,
+   0.457,
+   0.6678,
+   0.6489,
+   0.5,
+   0.6493,
+   0.543
+  ]
+ },
+ {
+  "id": "m040",
+  "target": "full",
+  "firma": "R(o,R(C(o,R(v,v)),v))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5219,
+   0.5142,
+   0.4733,
+   0.5
+  ]
+ },
+ {
+  "id": "m041",
+  "target": "page",
+  "firma": "R(o,C(o,o))",
+  "foto": 3,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m042",
+  "target": "full",
+  "firma": "R(o,R(v,C(o,o)))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5142,
+   0.471,
+   0.5
+  ]
+ },
+ {
+  "id": "m043",
+  "target": "full",
+  "firma": "R(C(o,o),R(v,o))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.2566,
+   0.5,
+   0.3077
+  ]
+ },
+ {
+  "id": "m044",
+  "target": "page",
+  "firma": "C(R(R(o,o),o),C(R(R(R(o,o),o),o),R(o,o)))",
+  "foto": 9,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.314,
+   0.6671,
+   0.5,
+   0.3241,
+   0.7506,
+   0.6672,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m045",
+  "target": "page",
+  "firma": "R(C(o,C(o,R(o,o))),C(o,o))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4442,
+   0.4007,
+   0.6609,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m046",
+  "target": "page",
+  "firma": "R(C(v,C(o,o)),C(R(o,o),o))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.2604,
+   0.5281,
+   0.4925,
+   0.3353,
+   0.5
+  ]
+ },
+ {
+  "id": "m047",
+  "target": "page",
+  "firma": "R(C(o,C(o,C(o,o))),C(R(o,o),o))",
+  "foto": 7,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.2719,
+   0.2565,
+   0.326,
+   0.4853,
+   0.3379,
+   0.5
+  ]
+ },
+ {
+  "id": "m048",
+  "target": "page",
+  "firma": "C(R(o,C(o,o)),R(o,o))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5717,
+   0.6612,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m049",
+  "target": "full",
+  "firma": "R(C(o,C(o,o)),R(C(o,o),o))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.1813,
+   0.3379,
+   0.4885,
+   0.333,
+   0.5
+  ]
+ },
+ {
+  "id": "m050",
+  "target": "page",
+  "firma": "R(C(o,R(o,o)),C(C(o,o),o))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.669,
+   0.6516,
+   0.5,
+   0.6524,
+   0.5385
+  ]
+ },
+ {
+  "id": "m051",
+  "target": "page",
+  "firma": "C(R(o,o),R(o,v))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4194,
+   0.5,
+   0.6813
+  ]
+ },
+ {
+  "id": "m052",
+  "target": "page",
+  "firma": "R(C(o,R(v,o)),v)",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5702,
+   0.5788,
+   0.3077
+  ]
+ },
+ {
+  "id": "m053",
+  "target": "full",
+  "firma": "R(R(v,C(o,o)),R(v,o))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.395,
+   0.4717,
+   0.5,
+   0.3077
+  ]
+ },
+ {
+  "id": "m054",
+  "target": "full",
+  "firma": "R(R(C(o,o),v),R(v,o))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.395,
+   0.5283,
+   0.5,
+   0.3077
+  ]
+ },
+ {
+  "id": "m055",
+  "target": "full",
+  "firma": "R(C(o,R(o,o)),R(C(o,o),v))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4212,
+   0.6674,
+   0.5554,
+   0.486,
+   0.5
+  ]
+ },
+ {
+  "id": "m056",
+  "target": "page",
+  "firma": "C(R(o,o),o)",
+  "foto": 3,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.3326,
+   0.5
+  ]
+ },
+ {
+  "id": "m057",
+  "target": "full",
+  "firma": "R(v,R(C(o,o),R(v,v)))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.242,
+   0.3586,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m058",
+  "target": "full",
+  "firma": "R(v,R(v,R(C(R(v,v),o),v)))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.2458,
+   0.3265,
+   0.5141,
+   0.5277,
+   0.5
+  ]
+ },
+ {
+  "id": "m059",
+  "target": "page",
+  "firma": "R(C(v,v),R(v,C(o,C(o,o))))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.2211,
+   0.5,
+   0.5745,
+   0.3444,
+   0.47
+  ]
+ },
+ {
+  "id": "m060",
+  "target": "full",
+  "firma": "R(v,R(R(v,v),o))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.19,
+   0.4714,
+   0.5
+  ]
+ },
+ {
+  "id": "m061",
+  "target": "full",
+  "firma": "R(R(v,v),R(o,v))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.3812,
+   0.5,
+   0.6923
+  ]
+ },
+ {
+  "id": "m062",
+  "target": "page",
+  "firma": "C(R(o,o),R(C(o,o),o))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.428,
+   0.5,
+   0.3442,
+   0.5
+  ]
+ },
+ {
+  "id": "m063",
+  "target": "full",
+  "firma": "R(R(C(v,v),o),C(o,o))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.6927,
+   0.2298,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m064",
+  "target": "page",
+  "firma": "R(C(v,o),C(o,R(v,C(o,o))))",
+  "foto": 6,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4035,
+   0.6923,
+   0.486,
+   0.4163,
+   0.5
+  ]
+ },
+ {
+  "id": "m065",
+  "target": "page",
+  "firma": "R(R(C(o,o),C(v,v)),C(R(v,v),C(v,v)))",
+  "foto": 8,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.7961,
+   0.6969,
+   0.5,
+   0.5,
+   0.1969,
+   0.4709,
+   0.5
+  ]
+ },
+ {
+  "id": "m066",
+  "target": "page",
+  "firma": "R(R(v,C(v,v)),v)",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.6011,
+   0.6682,
+   0.5
+  ]
+ },
+ {
+  "id": "m067",
+  "target": "full",
+  "firma": "R(C(o,o),R(o,o))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.199,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m068",
+  "target": "full",
+  "firma": "R(R(o,v),o)",
+  "foto": 3,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.5914,
+   0.6923
+  ]
+ },
+ {
+  "id": "m069",
+  "target": "full",
+  "firma": "R(R(v,v),o)",
+  "foto": 3,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4305,
+   0.5977
+  ]
+ },
+ {
+  "id": "m070",
+  "target": "page",
+  "firma": "C(R(o,C(C(o,o),o)),R(R(o,o),R(o,o)))",
+  "foto": 8,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.7238,
+   0.7519,
+   0.6936,
+   0.5553,
+   0.5,
+   0.5,
+   0.5
+  ]
+ },
+ {
+  "id": "m071",
+  "target": "full",
+  "firma": "R(o,R(v,R(v,v)))",
+  "foto": 4,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4275,
+   0.3326,
+   0.5
+  ]
+ },
+ {
+  "id": "m072",
+  "target": "full",
+  "firma": "R(R(R(C(C(o,o),o),C(o,R(o,o))),C(o,o)),C(C(o,o),o))",
+  "foto": 11,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.8191,
+   0.6671,
+   0.3323,
+   0.6628,
+   0.5113,
+   0.6624,
+   0.5,
+   0.5,
+   0.6628,
+   0.5113
+  ]
+ },
+ {
+  "id": "m073",
+  "target": "full",
+  "firma": "C(R(C(R(o,o),R(o,o)),R(R(o,o),o)),R(R(v,v),R(o,R(o,v))))",
+  "foto": 12,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.456,
+   0.2489,
+   0.5127,
+   0.5,
+   0.5,
+   0.6672,
+   0.5,
+   0.2669,
+   0.5,
+   0.4084,
+   0.6923
+  ]
+ },
+ {
+  "id": "m074",
+  "target": "page",
+  "firma": "C(R(o,o),R(v,R(v,o)))",
+  "foto": 5,
+  "usi": 1,
+  "album": 1,
+  "rapporti": [
+   0.4877,
+   0.5,
+   0.234,
+   0.3077
+  ]
+ }
+]

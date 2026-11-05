@@ -1,0 +1,35 @@
+{
+  "nota": "Frasi originali per questo matrimonio, sobrie e legate a ciò che si vede. Le citazioni di canzoni le sceglie Gennaro: lo slot «citazione» resta vuoto.",
+  "apertura": {
+    "nomi": "Sposa & Sposo",
+    "data": "GG · MM · AAAA"
+  },
+  "capitoli": {
+    "casa-sposo": [
+      "…",
+      "…"
+    ],
+    "casa-sposa": [
+      "…",
+      "…"
+    ],
+    "chiesa": [
+      "…",
+      "…"
+    ],
+    "esterni": [
+      "…",
+      "…"
+    ],
+    "ristorante": [
+      "…",
+      "…"
+    ]
+  },
+  "citazione": {
+    "capitolo": "esterni",
+    "testo": "",
+    "autore": "",
+    "nota": "da scegliere: un verso di una canzone italiana con titolo e autore"
+  }
+}

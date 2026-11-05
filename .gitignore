@@ -43,3 +43,7 @@ test-output.txt
 .release-smoke-*/
 .release-license-smoke-*/
 worktrees/
+
+# Album AI (tools/album-ai): foto e dati dei clienti per lavoro, cache Python
+tools/album-ai/lavori/
+tools/album-ai/**/__pycache__/

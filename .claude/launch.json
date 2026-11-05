@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "anteprima-album-ai",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4290", "--bind", "127.0.0.1", "--directory", "tools/album-ai/lavori"],
+      "port": 4290
+    }
+  ]
+}

@@ -1,0 +1,106 @@
+{
+  "nome": "Stile Gennaro (Image Studio)",
+  "versione": 1,
+  "aggiornato": "2026-11-04",
+  "fonti": [
+    "album A (Album Flow, 49 doppie, 209 foto)",
+    "album B (Album Flow, 55 doppie, 282 foto)",
+    "album C (Album Flow, 47 doppie, 234 foto)",
+    "bozze D, E, F (JPG, prima metà vista)"
+  ],
+  "formato": { "widthCm": 40, "heightCm": 30, "nota": "pagina 40×30, doppia 80×30; usato in 2 album su 3" },
+
+  "dimensioni": {
+    "doppie": { "min": 50, "obiettivo": 53, "max": 55, "nota": "di solito 50 fogli; fino a 55 solo se ci sono molte foto belle (detto da Gennaro, 2026-11-05)" },
+    "fotoPerDoppiaMedia": { "min": 4.3, "obiettivo": 4.8, "max": 5.2 },
+    "quotaDellaSelezione": { "min": 0.40, "obiettivo": 0.45, "max": 0.48, "nota": "vale se la selezione è quella definitiva" }
+  },
+
+  "regoleFisse": {
+    "fogliInteriConUnaFoto": 0,
+    "quotaFogliInteri": { "min": 0.40, "max": 0.60, "nota": "matrimonio di prova finalizzato da Gennaro: 50% fogli interi" },
+    "fotoPerFoglioIntero": { "min": 2, "max": 12 },
+    "fotoSolaInPagina": "solo orizzontale (verticali al massimo 2 per album)",
+    "verticali": "in coppia o in colonna con altre foto",
+    "doppieLeggereConsecutive": 0,
+    "doppiaLeggera": "1-2 foto",
+    "aperturaFuoriSequenza": true,
+    "apertura": "pagina sinistra nera con testo, a destra una foto orizzontale forte presa dalla fine della giornata",
+    "testi": "solo nella prima doppia",
+    "piegaLibera": "nessun volto o soggetto principale sulla piega nei fogli interi"
+  },
+
+  "stilePredefinito": { "mode": "fill", "paddingCm": 0, "gapCm": 0.1, "background": "#ffffff", "mono": false },
+  "paginaDiPausa": {
+    "stile": { "mode": "fit", "paddingCm": 2, "gapCm": 0.15, "background": "#ffffff" },
+    "perAlbum": { "min": 0, "max": 0, "nota": "2026-11-05: poco bianco, gli sposi vogliono foto a tutta pagina" },
+    "quando": "pagina di dettagli o un momento intimo, mai due di fila"
+  },
+  "biancoENero": { "areePerAlbum": { "min": 0, "max": 0, "nota": "2026-11-05: il B/N lo decide Gennaro; restano solo le foto che consegna già in B/N, a fogli interi" }, "quando": "accento su una pagina o una sequenza, mai un capitolo intero" },
+
+  "capitoli": [
+    { "id": "apertura", "titolo": "Apertura", "doppie": 1 },
+    { "id": "casa-sposo", "titolo": "Casa sposo", "quota": 0.16, "doppie": { "min": 8, "max": 9 }, "momenti": ["preparazione sposo"] },
+    { "id": "casa-sposa", "titolo": "Casa sposa", "quota": 0.29, "doppie": { "min": 14, "max": 16 }, "fotoPerDoppia": 4.3, "momenti": ["preparazione sposa", "uscita"], "nota": "include l'uscita della sposa da casa" },
+    { "id": "chiesa", "titolo": "Chiesa", "quota": 0.18, "doppie": { "min": 10, "max": 11 }, "fotoPerDoppia": 6, "momenti": ["cerimonia", "uscita"], "nota": "include l'uscita dalla chiesa e il rinfresco sul sagrato" },
+    { "id": "esterni", "titolo": "Esterni", "quota": 0.23, "doppie": { "min": 11, "max": 12 }, "fotoPerDoppia": 3, "momenti": ["ritratti di coppia"], "nota": "poche foto grandi per foglio (2-3)" },
+    { "id": "ristorante", "titolo": "Ristorante", "quota": 0.16, "doppie": { "min": 8, "max": 9 }, "momenti": ["ricevimento"], "fotoPerDoppia": 7, "fattoreScene": 2.5, "nota": "2026-11-05: la festa (balli) è il momento più bello: fogli ricchi da 9-12 foto" }
+  ],
+  "ordineCapitoli": "a blocchi: prima lo sposo, poi la sposa (la sposa ha quasi il doppio dello spazio)",
+
+  "ritmo": {
+    "sequenzaFotoPerDoppia": [5, 6, 2, 4, 7, 3, 5, 2, 6, 8],
+    "nota": "media 4,8; le doppie leggere (2) non sono mai consecutive; dopo una leggera viene una densa"
+  },
+  "scene": {
+    "pausaSecondi": 120,
+    "fotoBase": 5,
+    "fotoPerMinuto": 0.9,
+    "nota": "una scena finisce dopo 2 minuti senza scatti; al massimo 4 foto + 0,7 per minuto di durata (terrazza di 4 minuti: 7; cerimonia di 19 minuti: 17)"
+  },
+  "ripartizione": {
+    "crescitaMassima": 0.5,
+    "nota": "le doppie che un capitolo non riesce a riempire con foto diverse passano ai capitoli con foto buone avanzate; nessun capitolo cresce oltre il 50% della sua quota"
+  },
+  "valorizzaCoppia": {
+    "capitoli": ["esterni"],
+    "fattoreScene": 1.5,
+    "variantiPerGruppo": 2,
+    "ritaglioStretto": 1.0,
+    "ritaglioLieve": 1.0,
+    "nota": "le foto dei soli sposi sono poche e preziose: limite per scena più largo; una variante simile con un gesto diverso torna nell'album, ritagliata (primo piano accanto al campo largo) o in bianco e nero"
+  },
+  "sequenze": {
+    "max": 0,
+    "perCapitolo": 1,
+    "foto": { "min": 3, "max": 4 },
+    "durataMassimaSecondi": 30,
+    "nota": "le raffiche belle si mettono in sequenza, a blocchi da 3 o 4 su una pagina sola, in bianco e nero; mai vicine tra loro"
+  },
+  "diversita": {
+    "hash": 18,
+    "colore": 35,
+    "secondi": 300,
+    "nota": "due foto così simili non devono mai stare su pagine diverse: o insieme in un blocco, o una sola"
+  },
+  "varieta": {
+    "modelli": "stile/modelli.json",
+    "quotaNovita": 0.25,
+    "distanzaStessoModello": 4,
+    "pesoTuoiModelli": 0.1,
+    "miscelaRapporti": 0.25,
+    "seme": 7,
+    "nota": "di base le tue composizioni reali (estrai_modelli.py), anche a specchio; circa una doppia su 4 cerca una composizione nuova; la stessa composizione non torna entro 4 aree"
+  },
+  "dispositivi": {
+    "preferiti": ["R(o,o)", "R(C(o,o),C(o,o))", "R(C(o,o),o)", "R(o,C(o,o))", "C(R(o,o),R(o,o))"],
+    "struttura": "colonne affiancate: una verticale da sola, orizzontali impilate a 2 o 3"
+  },
+  "segnali": {
+    "stelle": "non informative (quasi tutte 0): la forza viene dall'analisi delle foto",
+    "tagSocial": "presenti in 2 album su 3, non legati all'impaginazione"
+  },
+  "daChiarire": [
+    "Sposo e sposa a blocchi (album Album Flow) o alternati (bozza D)?"
+  ]
+}
