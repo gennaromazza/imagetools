@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.51",
+    date: "2026-11-06",
+    headline: "Lightroom vede segno, colore ed etichette",
+    items: [
+      {
+        title: "Segno e colore nei file, come in Lightroom",
+        text: "Dal tasto destro su una o più foto puoi segnarle come selezionate o scartate e dare un colore. Vengono scritti nel file XMP accanto alla foto insieme alle stelle, e Lightroom li legge come stato e come etichetta colore. Le etichette personalizzate arrivano in Lightroom come parole chiave.",
+        where: ["Libreria › tasto destro › «Segno»", "Libreria › tasto destro › «Colore»"],
+      },
+      {
+        title: "Scrivi e rileggi da Lightroom",
+        text: "Per far vedere a Lightroom ciò che c'è già nell'album usa «Scrivi nei file per Lightroom». Dopo aver lavorato in Lightroom, «Rileggi da Lightroom» riporta nell'album stelle, segno e colore cambiati. In Lightroom: Metadati › Leggi metadati dal file.",
+        where: ["Libreria › filtro › «Lightroom» › «Scrivi nei file per Lightroom»", "Libreria › filtro › «Lightroom» › «Rileggi da Lightroom»"],
+      },
+    ],
+  },
+  {
     version: "0.2.50",
     date: "2026-11-03",
     headline: "Caroselli: impagini tu le foto, i modelli arrivano dopo",

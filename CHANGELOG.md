@@ -39,6 +39,18 @@
 - Interno: la logica d'abbinamento è in `raw-jpg-pairing.ts` (prima stava dentro `folder-access.ts`) con 12 prove in `raw-jpg-pairing.test.ts` (`test:photo-selector-raw-jpg-pairing`, nella Dev Console).
 - Da sapere: la scheda di una coppia sta nella cartella del JPG, quindi il filtro per la cartella «RAW» non la mostra; copia, sposta e Cestino agiscono su entrambi i file anche se stanno in cartelle diverse.
 
+## 2026-11-06 - Album Flow 0.2.51
+
+- Nuovo: Lightroom vede le tue classificazioni. Dal menu di una foto della libreria (tasto destro) i nuovi «Segno» (selezionata, scartata, nessuno) e «Colore» (rosso, giallo, verde, blu, viola) valgono anche per più foto insieme e vengono scritti nel file XMP accanto alla foto, come già le stelle: Lightroom li legge come stato e come etichetta colore (con «Solo di questo album» i file non cambiano). Le etichette personalizzate arrivano in Lightroom come parole chiave.
+- Nuovo: nel filtro della libreria, sezione «Lightroom»: «Scrivi nei file per Lightroom» scrive in tutti i file segno, colore ed etichette (le stelle di un file già esistente non si toccano); «Rileggi da Lightroom» riporta nell'album stelle, segno e colore cambiati in Lightroom (con «Solo di questo album» le stelle restano le tue). In Lightroom serve Metadati › Leggi metadati dal file; per i JPG Lightroom legge l'XMP incorporato nel file, non il sidecar.
+- Interno: `upsertXmpFlags`, `readXmpKeywords` e `dc:subject` in `packages/photo-metadata`; `setPickStatus`, `setColorLabel`, `applySidecarReadings` in `model/library.ts`; `lightroom.test.ts` (`test:album-flow-lightroom`, nella Dev Console) e nuovi casi in `test:photo-metadata-xmp`.
+
+## 2026-11-06 - Image Select Pro 0.1.55
+
+- Corretto: P e X ora si comportano come in Lightroom: premuti su una foto già selezionata (o scartata) tolgono lo stato. Con più foto selezionate lo stato si toglie solo se ce l'hanno tutte; U, stelle e colori non cambiano. Vale in griglia, anteprima veloce, striscia e foto simili.
+- Nuovo: le etichette personalizzate vengono scritte anche come parole chiave nel file XMP, quindi Lightroom le mostra nel pannello Parole chiave (le tue parole chiave restano).
+- Interno: `toggleOffPickShortcut` in `photo-classification.ts`, `pick-toggle.test.ts` (`test:photo-selector-pick-toggle`, nella Dev Console).
+
 ## 2026-11-03 - Album Flow 0.2.50
 
 - Nuovo: caroselli con impaginazione manuale. Alla creazione di un carosello si sceglie «Impaginazione manuale» (predefinita) o «Impaginazione automatica». Con la manuale le slide partono vuote: le foto di ogni slide le metti tu, nell'ordine che preferisci (l'elenco è in ordine di scatto, senza classifica), e si dispongono da sole in una griglia con le foto intere, finché non ne sposti una a mano; «Ordina le foto» rimette tutto in ordine. Solo dopo, nella scheda «Modello», compaiono i modelli adatti a quante foto hai messo in quella slide («Modelli per N foto», prima quelli del tuo stile e poi «Altri stili»): il modello usa esattamente le tue foto, ognuna nello spazio che le sta meglio, senza aggiungerne né toglierne. Dalla scheda «Foto» si torna alla disposizione libera. Le slide si aggiungono con «Vuota»; stile, colori e «Non ritagliare le foto» cambiano solo l'aspetto. Nel carosello a mano nessuna funzione automatica rifà le slide (riscelta, variante, numero di slide, vendita).

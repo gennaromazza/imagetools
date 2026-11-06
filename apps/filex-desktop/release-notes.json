@@ -554,6 +554,10 @@
       "Se RAW e JPG della stessa foto stanno in cartelle diverse (per esempio «RAW» e «JPG») ora compaiono come un'unica scheda con il badge «RAW + JPG», come già accadeva nella stessa cartella.",
       "L'abbinamento tra cartelle è prudente: servono lo stesso nome e file scritti a meno di un minuto l'uno dall'altro, così due scatti diversi con lo stesso numero non vengono uniti per errore.",
       "Copia, sposta e Cestino agiscono sempre su entrambi i file della coppia."
+    ],
+    "0.1.55": [
+      "Corretto: i tasti P e X, premuti su una foto già selezionata o scartata, ora tolgono lo stato, come in Lightroom (con più foto, solo se ce l'hanno tutte).",
+      "Nuovo: le etichette personalizzate compaiono in Lightroom come parole chiave, senza toccare le tue."
     ]
   },
   "id-photo": {
@@ -740,6 +744,10 @@
       "Nuovo: un nuovo spread eredita la divisione e lo stile (spazio, margine, bordo, modo, sfondo) dello spread precedente, invece di partire sempre da «metà» con le impostazioni di base.",
       "Migliorato: chiudendo la vista grande (Spazio) aperta dalla libreria, la libreria torna alla foto in cui eri arrivato scorrendo e la seleziona.",
       "Corretto: il «+» tra le miniature sparisce durante il trascinamento di una foto e un clic subito dopo un rilascio non aggiunge uno spread vuoto in più."
+    ],
+    "0.2.51": [
+      "Nuovo: Lightroom vede le tue classificazioni. Dal tasto destro su una foto, «Segno» (selezionata, scartata, nessuno) e «Colore» finiscono nel file XMP accanto alla foto, insieme alle stelle; le etichette personalizzate diventano parole chiave.",
+      "Nuovo: nel filtro della libreria, «Lightroom»: «Scrivi nei file per Lightroom» e «Rileggi da Lightroom» (stelle, segno e colore cambiati in Lightroom tornano nell'album). In Lightroom: Metadati › Leggi metadati dal file."
     ],
     "0.2.50": [
       "Nuovo: caroselli con impaginazione manuale: parti da slide vuote, metti tu le foto in ogni slide (in ordine di scatto) e solo dopo scegli tra i modelli adatti a quante foto hai messo; in alternativa resta l'impaginazione automatica."
