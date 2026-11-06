@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetTag, AlbumProjectV2, AlbumSortKey, AlbumStage, AreaTemplate } from "@photo-tools/shared-types";
 import { shapeOfTree } from "../engine/tree";
-import { getDesktop, hasDesktop, openInEditor, refreshChangedFiles, revealInFolder, writeRatingToXmp } from "../desktop/api";
+import { getDesktop, hasDesktop, openInEditor, refreshChangedFiles, revealInFolder, readSidecar, writeFlagsToXmp, writeRatingToXmp } from "../desktop/api";
 import { candidatesFromFiles, chooseFolderAndScan, fileKey, scanDroppedPaths } from "../desktop/importer";
 import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, mirrorArea, removeFavoriteLayout, resetDividerRatio, sanitizeStyle, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "../model/areas";
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
 import { applyChapterPreset, assignAssets, createChapter, moveChapter, recolorChapter, removeChapter, renameChapter, type ChapterPreset } from "../model/chapters";
 import { applyImport, folderOf, planImport } from "../model/import";
 import { alignArea, appendAssets, dropOnSpreadPlanned, moveFrameToArea, moveItemToArea, moveRefusal, moveToNewSpread, moveToSpread, removeItem, removeRefusal, replaceItemAsset, resetItemView, setItemBorder, setItemView, toggleItemLock } from "../model/items";
-import { rotateAssetQuarter, rotationRefusal, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetsTag, type LibraryTab } from "../model/library";
+import { applySidecarReadings, setColorLabel, setPickStatus, rotateAssetQuarter, rotationRefusal, setCoverAsset, assetUsage, unusedAssets, clearRatings, setRatingPolicy, locateAsset, removeAssets, reorderAssets, setRating, setSortKey, toggleAssetsTag, type LibraryTab } from "../model/library";
 import { countItems, findItem, hasFreeLayout, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas, swapRefusal } from "../model/spreads";
 import { STAGES } from "../model/store";
@@ -91,6 +91,8 @@ function layoutRefusal(spread: { done?: boolean; areas: ReadonlyArray<{ locked?:
   if (spread?.areas[areaIndex]?.locked) return "Layout bloccato: sbloccalo (lucchetto) per cambiarlo.";
   return null;
 }
+
+type SidecarColor = "red" | "yellow" | "green" | "blue" | "purple" | null;
 
 export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial = false }: WorkspaceProps) {
   const [history, setHistoryState] = useState<History<AlbumProjectV2>>(() => createHistory(initial));
@@ -248,6 +250,60 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       }
     }
   }, [project.assets, notify]);
+
+  // Segno (selezionata/scartata), colore ed etichette: stesso schema delle stelle. Le etichette vanno nel file anche come parole chiave, che Lightroom mostra.
+  const flagsKey = (asset: { pickStatus?: string; colorLabel?: string | null; customLabels?: string[] }) => `${asset.pickStatus ?? "unmarked"}|${asset.colorLabel ?? ""}|${(asset.customLabels ?? []).join("")}`;
+  const flags = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    for (const asset of project.assets) {
+      const key = flagsKey(asset);
+      const known = flags.current.get(asset.id);
+      if (known === undefined) flags.current.set(asset.id, key);
+      else if (known !== key) {
+        flags.current.set(asset.id, key);
+        if (asset.absolutePath && getDesktop() && project.settings.ratingPolicy !== "project") void writeFlagsToXmp(asset.absolutePath, { pickStatus: asset.pickStatus ?? "unmarked", colorLabel: asset.colorLabel ?? null, customLabels: asset.customLabels ?? [] }).then((ok) => { if (!ok) notify("Non sono riuscito a scrivere il segno o il colore nel file XMP: restano salvati nell'album."); });
+      }
+    }
+  }, [project.assets, project.settings.ratingPolicy, notify]);
+
+  const pickMany = useCallback((ids: string[], status: "picked" | "rejected" | "unmarked") => commit((p) => setPickStatus(p, ids, status)), [commit]);
+  const colorMany = useCallback((ids: string[], color: "red" | "yellow" | "green" | "blue" | "purple" | null) => commit((p) => setColorLabel(p, ids, color)), [commit]);
+
+  // Scrive in tutti i file XMP segno, colore ed etichette (anche come parole chiave): per far vedere a Lightroom ciò che c'è già nell'album.
+  const writeAllToLightroom = useCallback(async () => {
+    const assets = historyRef.current.present.assets.filter((asset) => asset.absolutePath);
+    if (!getDesktop() || assets.length === 0) { notify("Serve l'app desktop e foto prese da una cartella."); return; }
+    notify(`Scrivo i dati di ${assets.length} foto nei file XMP…`);
+    let failed = 0;
+    for (let offset = 0; offset < assets.length; offset += 6) {
+      await Promise.all(assets.slice(offset, offset + 6).map(async (asset) => {
+        flags.current.set(asset.id, flagsKey(asset));
+        const ok = await writeFlagsToXmp(asset.absolutePath!, { pickStatus: asset.pickStatus ?? "unmarked", colorLabel: asset.colorLabel ?? null, customLabels: asset.customLabels ?? [], ratingIfNew: asset.rating ?? 0 });
+        if (!ok) failed += 1;
+      }));
+    }
+    notify(failed ? `Scritti i file XMP, ma ${failed} non sono riuscito a scriverli.` : "Fatto. In Lightroom: Metadati → Leggi metadati dal file.", true);
+  }, [notify]);
+
+  // Rilegge dai file XMP stelle, segno e colore cambiati fuori (per esempio in Lightroom).
+  const readFromLightroom = useCallback(async () => {
+    const assets = historyRef.current.present.assets.filter((asset) => asset.absolutePath);
+    if (!getDesktop() || assets.length === 0) { notify("Serve l'app desktop e foto prese da una cartella."); return; }
+    notify(`Leggo i file XMP di ${assets.length} foto…`);
+    const readings: Array<{ assetId: string; rating: number | null; pickStatus: "picked" | "rejected" | "unmarked"; colorLabel: SidecarColor }> = [];
+    for (let offset = 0; offset < assets.length; offset += 8) {
+      await Promise.all(assets.slice(offset, offset + 8).map(async (asset) => {
+        const info = await readSidecar(asset.absolutePath!);
+        if (info) readings.push({ assetId: asset.id, rating: info.rating, pickStatus: info.pickStatus, colorLabel: info.colorLabel });
+      }));
+    }
+    const result = applySidecarReadings(historyRef.current.present, readings);
+    if (result.changed === 0) { notify("Nessuna differenza: l'album è già allineato ai file XMP.", true); return; }
+    // I valori letti sono già nel file: non vanno riscritti.
+    for (const asset of result.project.assets) { flags.current.set(asset.id, flagsKey(asset)); ratings.current.set(asset.id, asset.rating ?? 0); }
+    commit(() => result.project);
+    notify(result.changed === 1 ? "Aggiornata 1 foto da Lightroom." : `Aggiornate ${result.changed} foto da Lightroom.`, true);
+  }, [commit, notify]);
 
   const goTo = useCallback((next: number) => {
     setSpreadIndex(Math.min(Math.max(next, 0), Math.max(count - 1, 0)));
@@ -943,6 +999,10 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     onOpenViewer: openViewer,
     onRate: rate,
     onRateMany: rateMany,
+    onPickMany: pickMany,
+    onColorMany: colorMany,
+    onWriteLightroom: writeAllToLightroom,
+    onReadLightroom: readFromLightroom,
     onAssign: assign,
     onImportFolder: () => void importFolder(),
     onImportFiles: () => fileInput.current?.click(),

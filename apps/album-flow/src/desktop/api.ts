@@ -1,5 +1,6 @@
 import type { DesktopRenderedImage, FileXDesktopApi } from "@photo-tools/desktop-contracts";
-import { parseXmpState, readXmpRating, upsertXmpRating } from "@photo-tools/photo-metadata";
+import { parseXmpState, readXmpRating, upsertXmpFlags, upsertXmpRating, type XmpFlags } from "@photo-tools/photo-metadata";
+import type { ColorLabel } from "@photo-tools/shared-types";
 
 /** Accesso all'app desktop FileX. Ogni funzione ha un comportamento sensato anche senza (browser, test, anteprima web). */
 export function getDesktop(): FileXDesktopApi | null {
@@ -237,10 +238,27 @@ export async function writeRatingToXmp(path: string, rating: number): Promise<bo
   }
 }
 
+/**
+ * Scrive scarto/selezione, colore ed etichette (anche come parole chiave per Lightroom) nel file XMP accanto alla foto.
+ * Stelle, selezione del Selector e regolazioni di Lightroom non cambiano. Restituisce false se non è possibile.
+ */
+export async function writeFlagsToXmp(path: string, flags: XmpFlags): Promise<boolean> {
+  const api = getDesktop();
+  if (!api?.readSidecarXmp || !api.writeSidecarXmp) return false;
+  try {
+    const existing = await api.readSidecarXmp(path);
+    return await api.writeSidecarXmp(path, upsertXmpFlags(existing, flags));
+  } catch {
+    return false;
+  }
+}
+
 export interface SidecarInfo {
   rating: number | null;
   selected: boolean | null;
   labels: string[];
+  pickStatus: "picked" | "rejected" | "unmarked";
+  colorLabel: ColorLabel | null;
 }
 
 export async function readSidecar(path: string): Promise<SidecarInfo | null> {
@@ -250,7 +268,7 @@ export async function readSidecar(path: string): Promise<SidecarInfo | null> {
     const xml = await api.readSidecarXmp(path);
     if (!xml) return null;
     const state = parseXmpState(xml);
-    return { rating: readXmpRating(xml), selected: state.selected ?? null, labels: state.customLabels ?? [] };
+    return { rating: readXmpRating(xml), selected: state.selected ?? null, labels: state.customLabels ?? [], pickStatus: state.pickStatus ?? "unmarked", colorLabel: state.colorLabel ?? null };
   } catch {
     return null;
   }

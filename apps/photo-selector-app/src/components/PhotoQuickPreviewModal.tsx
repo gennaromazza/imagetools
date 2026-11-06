@@ -42,7 +42,8 @@ import {
   matchesPhotoFilters,
   PICK_STATUS_LABELS,
   RAW_EXTENSIONS,
-  resolvePhotoClassificationShortcut
+  resolvePhotoClassificationShortcut,
+  toggleOffPickShortcut
 } from "../services/photo-classification";
 import type { ThumbnailProfile } from "../services/photo-selector-preferences";
 import {
@@ -2207,12 +2208,15 @@ export function PhotoQuickPreviewModal({
         return;
       }
 
-      const shortcutChanges = resolvePhotoClassificationShortcut({
+      const rawShortcutChanges = resolvePhotoClassificationShortcut({
         key: event.key,
         code: event.code,
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey
       });
+      const shortcutChanges = rawShortcutChanges
+        ? toggleOffPickShortcut(rawShortcutChanges, [getAssetPickStatus(asset)])
+        : null;
 
       if (shortcutChanges) {
         event.preventDefault();

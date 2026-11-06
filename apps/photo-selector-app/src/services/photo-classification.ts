@@ -167,6 +167,19 @@ export function getColorShortcutHint(colorLabel: ColorLabel): string {
   }
 }
 
+/**
+ * Come in Lightroom, ripremere P (o X) su foto che hanno già quello stato lo toglie.
+ * Con più foto lo stato si toglie solo se lo hanno tutte; altrimenti si applica a tutte.
+ */
+export function toggleOffPickShortcut<T extends Partial<Pick<ImageAsset, "pickStatus">>>(
+  changes: T,
+  currentStatuses: ReadonlyArray<PickStatus | undefined>,
+): T {
+  const wanted = changes.pickStatus;
+  if ((wanted !== "picked" && wanted !== "rejected") || currentStatuses.length === 0) return changes;
+  return currentStatuses.every((status) => status === wanted) ? { ...changes, pickStatus: "unmarked" } : changes;
+}
+
 export function resolvePhotoClassificationShortcut(
   input: PhotoShortcutInput
 ): Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">> | null {

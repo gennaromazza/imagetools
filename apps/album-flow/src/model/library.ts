@@ -1,4 +1,4 @@
-import type { AlbumAssetTag, AlbumAssetV2, AlbumSortKey } from "@photo-tools/shared-types";
+import type { AlbumAssetTag, AlbumAssetV2, AlbumSortKey, ColorLabel, PickStatus } from "@photo-tools/shared-types";
 import { removeItems } from "./items";
 import { alignChanged, touch, type Project } from "./project";
 import { withSimilarityCleaned } from "./similarityOverrides";
@@ -137,6 +137,50 @@ export function setRating(project: Project, assetId: string, rating: number): Pr
   const asset = project.assets.find((candidate) => candidate.id === assetId);
   if (!asset || (asset.rating ?? 0) === value) return project;
   return touch({ ...project, assets: project.assets.map((candidate) => (candidate.id === assetId ? { ...candidate, rating: value } : candidate)) });
+}
+
+/** Selezionata / scartata / senza segno, come in Lightroom (P, X, U). Vale per più foto insieme. */
+export function setPickStatus(project: Project, assetIds: readonly string[], status: PickStatus): Project {
+  const ids = new Set(assetIds);
+  if (!project.assets.some((asset) => ids.has(asset.id) && (asset.pickStatus ?? "unmarked") !== status)) return project;
+  return touch({ ...project, assets: project.assets.map((asset) => (ids.has(asset.id) && (asset.pickStatus ?? "unmarked") !== status ? { ...asset, pickStatus: status } : asset)) });
+}
+
+/** Etichetta colore (rosso, giallo, verde, blu, viola) o nessuna. Lightroom la legge come etichetta colore della foto. */
+export function setColorLabel(project: Project, assetIds: readonly string[], color: ColorLabel | null): Project {
+  const ids = new Set(assetIds);
+  if (!project.assets.some((asset) => ids.has(asset.id) && (asset.colorLabel ?? null) !== color)) return project;
+  return touch({ ...project, assets: project.assets.map((asset) => (ids.has(asset.id) && (asset.colorLabel ?? null) !== color ? { ...asset, colorLabel: color } : asset)) });
+}
+
+/** Ciò che un file XMP dice di una foto: stelle, segno e colore, come li ha lasciati Lightroom (o il Selector). */
+export interface SidecarReading {
+  assetId: string;
+  rating: number | null;
+  pickStatus: PickStatus;
+  colorLabel: ColorLabel | null;
+}
+
+/**
+ * Riporta nell'album ciò che è cambiato nei file XMP (per esempio dopo aver lavorato in Lightroom).
+ * Le stelle seguono la regola dell'album: con «Solo di questo album» restano le tue.
+ */
+export function applySidecarReadings(project: Project, readings: readonly SidecarReading[]): { project: Project; changed: number } {
+  const byId = new Map(readings.map((reading) => [reading.assetId, reading]));
+  const stars = project.settings.ratingPolicy !== "project";
+  let changed = 0;
+  const assets = project.assets.map((asset) => {
+    const reading = byId.get(asset.id);
+    if (!reading) return asset;
+    const rating = stars && reading.rating !== null ? reading.rating : asset.rating;
+    const next: AlbumAssetV2 = { ...asset, pickStatus: reading.pickStatus, colorLabel: reading.colorLabel };
+    if (rating !== undefined) { next.rating = rating; if (stars && reading.rating !== null) next.selectorRating = reading.rating; }
+    const same = (asset.rating ?? 0) === (next.rating ?? 0) && (asset.pickStatus ?? "unmarked") === reading.pickStatus && (asset.colorLabel ?? null) === reading.colorLabel;
+    if (same) return asset;
+    changed += 1;
+    return next;
+  });
+  return { project: changed ? touch({ ...project, assets }) : project, changed };
 }
 
 export function toggleAssetTag(project: Project, assetId: string, tag: AlbumAssetTag): Project {

@@ -12,7 +12,8 @@ import {
   getAssetRating,
   matchesPhotoFilters,
   PICK_STATUS_LABELS,
-  resolvePhotoClassificationShortcut
+  resolvePhotoClassificationShortcut,
+  toggleOffPickShortcut
 } from "../services/photo-classification";
 
 interface RibbonUsage {
@@ -373,12 +374,15 @@ function PhotoRibbonContent({
                   });
                 }}
                 onKeyDown={(event) => {
-                  const shortcutChanges = resolvePhotoClassificationShortcut({
+                  const rawShortcutChanges = resolvePhotoClassificationShortcut({
                     key: event.key,
                     code: event.code,
                     ctrlKey: event.ctrlKey,
                     metaKey: event.metaKey
                   });
+                  const shortcutChanges = rawShortcutChanges
+                    ? toggleOffPickShortcut(rawShortcutChanges, [asset.pickStatus])
+                    : null;
 
                   if (shortcutChanges) {
                     event.preventDefault();

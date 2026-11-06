@@ -153,6 +153,12 @@ export interface LibraryDockProps {
   onManageChapters: () => void;
   onRemoveItem: (itemId: string) => void;
   onRateMany: (assetIds: string[], rating: number) => void;
+  /** Selezionata / scartata / senza segno, e colore: finiscono nei file XMP che legge Lightroom. */
+  onPickMany: (assetIds: string[], status: "picked" | "rejected" | "unmarked") => void;
+  onColorMany: (assetIds: string[], color: "red" | "yellow" | "green" | "blue" | "purple" | null) => void;
+  /** Scrive in tutti i file XMP segno, colore ed etichette (anche come parole chiave); rilegge ciò che è cambiato in Lightroom. */
+  onWriteLightroom: () => void;
+  onReadLightroom: () => void;
   /** Quando è vero resta visibile solo la barra delle schede: più spazio allo spread. */
   collapsed: boolean;
   /** Fa scorrere la libreria fino a una foto (cambia `n` per ripetere la richiesta). */
@@ -396,6 +402,8 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
         ],
       },
       { label: "Valuta", icon: "star", children: [0, 1, 2, 3, 4, 5].map((rating) => ({ label: rating === 0 ? "Nessuna stella" : "★".repeat(rating), onClick: () => props.onRateMany(ids, rating) })) },
+      { label: "Segno", icon: "check", children: ([["picked", "Selezionata"], ["rejected", "Scartata"], ["unmarked", "Nessun segno"]] as const).map(([status, label]) => ({ label, onClick: () => props.onPickMany(ids, status) })) },
+      { label: "Colore", icon: "tag", children: ([["red", "Rosso"], ["yellow", "Giallo"], ["green", "Verde"], ["blue", "Blu"], ["purple", "Viola"], [null, "Nessun colore"]] as const).map(([color, label]) => ({ label, onClick: () => props.onColorMany(ids, color) })) },
       { label: "Segna come", icon: "tag", children: (["cover", "panorama", "main", "social"] as AlbumAssetTag[]).map((tag) => ({ label: `${TAG_NAME[tag]} (${TAG_LABEL[tag]})`, onClick: () => props.onTag(ids, tag) })) },
       ...(similar.length ? [{ label: "Foto simili", icon: "layouts" as const, children: similar }] : []),
       { separator: true, label: "-" },
@@ -541,6 +549,13 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
                 <label className="radio"><input type="radio" name="rating-policy" checked={(project.settings.ratingPolicy ?? "selector") === "selector"} onChange={() => props.onSetRatingPolicy("selector")} /> Quelle di Image Select Pro (anche nei file XMP)</label>
                 <label className="radio"><input type="radio" name="rating-policy" checked={project.settings.ratingPolicy === "project"} onChange={() => props.onSetRatingPolicy("project")} /> Solo di questo album (i file XMP non cambiano)</label>
                 <button type="button" className="btn btn--sm" onClick={props.onClearRatings}>Azzera le stelle di questo album</button>
+              </div>
+              <div className="popover__section">
+                <span className="field__label">Lightroom</span>
+                <span className="muted small">Stelle, segno, colore ed etichette stanno nei file XMP accanto alle foto. Per le etichette in Lightroom compaiono come parole chiave.</span>
+                <button type="button" className="btn btn--sm" disabled={!desktop} onClick={() => { setPopover(null); props.onWriteLightroom(); }}>Scrivi nei file per Lightroom</button>
+                <button type="button" className="btn btn--sm" disabled={!desktop} onClick={() => { setPopover(null); props.onReadLightroom(); }}>Rileggi da Lightroom</button>
+                <span className="muted small">In Lightroom: Metadati → Leggi metadati dal file. Per i JPG Lightroom legge l'XMP incorporato nel file, non questo.</span>
               </div>
               <button type="button" className="btn btn--sm" onClick={resetFilters}>Azzera i filtri</button>
             </Popover>

@@ -15,7 +15,7 @@ class StrictDOMParser {
 }
 Object.assign(globalThis, { DOMParser: StrictDOMParser, XMLSerializer });
 
-const { parseXmpState, readXmpRating, upsertXmpRating, upsertXmpState } = await import("./xmp-sidecar");
+const { parseXmpState, readXmpKeywords, readXmpRating, upsertXmpFlags, upsertXmpRating, upsertXmpState } = await import("./xmp-sidecar");
 
 // Sidecar reale scritto da Image Select Pro (etichetta personalizzata, selezionata, 2 stelle).
 const SELECTOR_XMP = `<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/">
@@ -88,4 +88,59 @@ test("stelle: la scrittura è stabile (riscrivere lo stesso valore non cambia il
   const once = upsertXmpRating(SELECTOR_XMP, 4);
   const twice = upsertXmpRating(once, 4);
   assert.deepEqual(parseXmpState(twice), parseXmpState(once));
+});
+
+// --- Lightroom: colore, scarto, etichette come parole chiave ---------------------------------
+
+test("Lightroom: il colore e lo scarto cambiano senza toccare stelle, selezione e regolazioni", () => {
+  const colored = upsertXmpFlags(ADOBE_XMP, { colorLabel: "green" });
+  const state = parseXmpState(colored);
+  assert.equal(state.colorLabel, "green");
+  assert.equal(state.rating, 1, "le stelle restano");
+  assert.match(colored, /xmp:Label="Green"/, "Lightroom legge il nome del colore in xmp:Label");
+  assert.match(colored, /crs:Exposure2012="\+0\.45"/);
+
+  const rejected = upsertXmpFlags(colored, { pickStatus: "rejected" });
+  assert.equal(parseXmpState(rejected).pickStatus, "rejected");
+  assert.match(rejected, /xmp:Rating="-1"/, "Adobe segna lo scarto con -1");
+  assert.equal(parseXmpState(rejected).colorLabel, "green", "il colore non si perde con lo scarto");
+
+  const restored = upsertXmpFlags(rejected, { pickStatus: "unmarked" });
+  assert.equal(parseXmpState(restored).pickStatus === "rejected", false);
+  assert.equal(parseXmpState(restored).rating, 1);
+  assert.equal(parseXmpState(upsertXmpFlags(restored, { colorLabel: null })).colorLabel ?? null, null);
+});
+
+test("Lightroom: le etichette personalizzate compaiono anche come parole chiave", () => {
+  const written = upsertXmpFlags(SELECTOR_XMP, { customLabels: ["A", "Cerimonia"] });
+  assert.deepEqual(readXmpKeywords(written), ["A", "Cerimonia"]);
+  assert.deepEqual(parseXmpState(written).customLabels, ["A", "Cerimonia"]);
+  assert.equal(parseXmpState(written).selected, true);
+});
+
+test("Lightroom: le parole chiave tue restano, quelle nostre si aggiornano e si tolgono", () => {
+  const withMine = ADOBE_XMP.replace("</rdf:RDF>", "").replace("/></", `><dc:subject xmlns:dc="http://purl.org/dc/elements/1.1/"><rdf:Bag><rdf:li>Famiglia</rdf:li></rdf:Bag></dc:subject></rdf:Description></rdf:RDF></`);
+  const once = upsertXmpFlags(withMine, { customLabels: ["Torta"] });
+  assert.deepEqual(readXmpKeywords(once), ["Famiglia", "Torta"]);
+  const renamed = upsertXmpFlags(once, { customLabels: ["Brindisi"] });
+  assert.deepEqual(readXmpKeywords(renamed), ["Famiglia", "Brindisi"], "la vecchia etichetta esce, la parola chiave tua resta");
+  const cleared = upsertXmpFlags(renamed, { customLabels: [] });
+  assert.deepEqual(readXmpKeywords(cleared), ["Famiglia"]);
+  const noMine = upsertXmpFlags(SELECTOR_XMP, { customLabels: ["X"] });
+  assert.deepEqual(readXmpKeywords(upsertXmpFlags(noMine, { customLabels: [] })), [], "senza altre parole chiave il campo sparisce");
+});
+
+test("Lightroom: nessuna parola chiave doppia e scrittura stabile", () => {
+  const once = upsertXmpFlags(SELECTOR_XMP, { customLabels: ["A"] });
+  const twice = upsertXmpFlags(once, { customLabels: ["A"] });
+  assert.deepEqual(readXmpKeywords(twice), ["A"]);
+  assert.deepEqual(parseXmpState(twice), parseXmpState(once));
+});
+
+test("Lightroom: cambiando stelle o colore in Lightroom, la lettura li vede", () => {
+  const fromLightroom = ADOBE_XMP.replace('xmp:Rating="1"', 'xmp:Rating="4"').replace('xmp:Label="Red"', 'xmp:Label="Blue"');
+  const state = parseXmpState(fromLightroom);
+  assert.equal(state.rating, 4);
+  assert.equal(state.colorLabel, "blue");
+  assert.equal(parseXmpState(ADOBE_XMP.replace('xmp:Rating="1"', 'xmp:Rating="-1"')).pickStatus, "rejected");
 });

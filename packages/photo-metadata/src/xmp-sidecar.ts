@@ -5,6 +5,7 @@ const RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
 const XMP_NS = "http://ns.adobe.com/xap/1.0/";
 const MICROSOFT_PHOTO_NS = "http://ns.microsoft.com/photo/1.0/";
 const PHOTOSUITE_NS = "https://imagetool.local/ns/photosuite/1.0/";
+const DC_NS = "http://purl.org/dc/elements/1.1/";
 
 export interface XmpState {
   rating?: number;
@@ -178,6 +179,67 @@ function upsertCustomLabels(doc: Document, desc: Element, labels: string[]): voi
     bag.appendChild(item);
   }
   container.appendChild(bag);
+}
+
+function findKeywordContainer(doc: Document): Element | null {
+  for (const description of getDescriptionElements(doc)) {
+    for (const child of getElementChildren(description)) {
+      if (isNamespacedProperty(child, DC_NS, "dc", "subject")) return child;
+    }
+  }
+  return null;
+}
+
+function keywordItems(container: Element): Element[] {
+  return Array.from(container.getElementsByTagNameNS(RDF_NS, "li"));
+}
+
+/**
+ * Lightroom, Bridge e Camera Raw mostrano le parole chiave di `dc:subject`: le etichette personalizzate vi vengono
+ * rispecchiate. Si toccano solo le parole che erano già nostre (`previous`), le altre parole chiave restano.
+ */
+function syncKeywords(doc: Document, desc: Element, previous: string[], labels: string[]): void {
+  const mine = new Set(previous.map((value) => value.toLocaleLowerCase()));
+  let container = findKeywordContainer(doc);
+  if (container) {
+    for (const item of keywordItems(container)) {
+      if (mine.has((item.textContent ?? "").trim().toLocaleLowerCase())) item.parentNode?.removeChild(item);
+    }
+  }
+  const present = new Set(container ? keywordItems(container).map((item) => (item.textContent ?? "").trim().toLocaleLowerCase()) : []);
+  const toAdd = labels.filter((label) => !present.has(label.toLocaleLowerCase()));
+  if (toAdd.length > 0) {
+    if (!container) {
+      container = doc.createElementNS(DC_NS, "dc:subject");
+      container.appendChild(doc.createElementNS(RDF_NS, "rdf:Bag"));
+      desc.appendChild(container);
+    }
+    let bag = Array.from(container.childNodes).find((node): node is Element => node.nodeType === 1);
+    if (!bag) {
+      bag = doc.createElementNS(RDF_NS, "rdf:Bag");
+      container.appendChild(bag);
+    }
+    for (const label of toAdd) {
+      const item = doc.createElementNS(RDF_NS, "rdf:li");
+      item.textContent = label;
+      bag.appendChild(item);
+    }
+  }
+  if (container && keywordItems(container).length === 0) container.parentNode?.removeChild(container);
+}
+
+/** Parole chiave (`dc:subject`) di un sidecar XMP: sono quelle che Lightroom mostra nel pannello Parole chiave. */
+export function readXmpKeywords(xml: string | null): string[] {
+  if (!xml) return [];
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(xml, "application/xml");
+  } catch {
+    return [];
+  }
+  if (doc.getElementsByTagName("parsererror").length > 0) return [];
+  const container = findKeywordContainer(doc);
+  return container ? keywordItems(container).map((item) => (item.textContent ?? "").trim()).filter(Boolean) : [];
 }
 
 function readCustomLabelTones(el: Element): Record<string, LabelTone> | undefined {
@@ -422,6 +484,8 @@ export function upsertXmpState(
 
   desc.setAttributeNS(PHOTOSUITE_NS, "photosuite:Selected", selected ? "True" : "False");
   const normalizedLabels = normalizeCustomLabels(asset.customLabels);
+  const previousLabels = getDescriptionElements(doc).map(readCustomLabels).find((labels) => labels !== undefined) ?? [];
+  syncKeywords(doc, desc, previousLabels, normalizedLabels);
   upsertCustomLabels(doc, desc, normalizedLabels);
   upsertCustomLabelTones(doc, desc, normalizedLabels, customLabelTones);
 
@@ -443,6 +507,31 @@ export function upsertXmpRating(existingXml: string | null, rating: number): str
     pickStatus: state.pickStatus ?? "unmarked",
     colorLabel: state.colorLabel ?? null,
     customLabels: state.customLabels ?? [],
+  } as ImageAsset;
+  return upsertXmpState(existingXml, asset, state.selected ?? false, state.customLabelTones);
+}
+
+export interface XmpFlags {
+  pickStatus?: PickStatus;
+  colorLabel?: ColorLabel | null;
+  customLabels?: string[];
+  /** Stelle da usare SOLO se il sidecar non esiste ancora: in un file esistente le stelle non si toccano. */
+  ratingIfNew?: number;
+}
+
+/**
+ * Aggiorna scarto/selezione, colore ed etichette personalizzate (queste anche come parole chiave per Lightroom),
+ * lasciando intatti stelle, selezione del Selector e regolazioni. Ciò che non è indicato resta com'è.
+ */
+export function upsertXmpFlags(existingXml: string | null, flags: XmpFlags): string {
+  const state = existingXml && existingXml.trim().length > 0
+    ? parseXmpState(existingXml)
+    : ({ hasCameraRawAdjustments: false, hasPhotoshopAdjustments: false } as XmpState);
+  const asset = {
+    rating: state.rating ?? (existingXml && existingXml.trim().length > 0 ? 0 : clampRating(flags.ratingIfNew ?? 0)),
+    pickStatus: flags.pickStatus ?? state.pickStatus ?? "unmarked",
+    colorLabel: flags.colorLabel !== undefined ? flags.colorLabel : state.colorLabel ?? null,
+    customLabels: flags.customLabels ?? state.customLabels ?? [],
   } as ImageAsset;
   return upsertXmpState(existingXml, asset, state.selected ?? false, state.customLabelTones);
 }

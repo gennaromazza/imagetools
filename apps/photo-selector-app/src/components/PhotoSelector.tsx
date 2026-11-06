@@ -73,6 +73,7 @@ import {
   getAssetRating,
   matchesPhotoFilters,
   resolvePhotoClassificationShortcut,
+  toggleOffPickShortcut,
 } from "../services/photo-classification";
 import {
   CUSTOM_LABEL_SHORTCUT_OPTIONS,
@@ -3445,7 +3446,9 @@ export function PhotoSelector({
       pushTimelineEntry("Nessuna foto attiva: seleziona o clicca una foto prima di classificare");
       return;
     }
-    applyBatchChanges(targetIds, changes, "grid");
+    const targetSet = new Set(targetIds);
+    const toggled = toggleOffPickShortcut(changes, photos.filter((photo) => targetSet.has(photo.id)).map((photo) => photo.pickStatus));
+    applyBatchChanges(targetIds, toggled, "grid");
     if (targetIds.length === 1) {
       handleAfterShortcutClassification(targetIds[0]);
     }

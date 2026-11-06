@@ -10,6 +10,7 @@ import {
   getAssetRating,
   PICK_STATUS_LABELS,
   resolvePhotoClassificationShortcut,
+  toggleOffPickShortcut,
 } from "../services/photo-classification";
 import { getAssetRotation, type RotationDirection } from "../services/photo-rotation";
 import type { CustomLabelShortcut, CustomLabelTone, ThumbnailProfile } from "../services/photo-selector-preferences";
@@ -640,12 +641,13 @@ export function SimilarPhotosWorkspace({
       }
 
       if (!live.editable || !live.currentPhotoId) return;
-      const changes = resolvePhotoClassificationShortcut({
+      const rawChanges = resolvePhotoClassificationShortcut({
         key: event.key,
         code: event.code,
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey,
       });
+      const changes = rawChanges ? toggleOffPickShortcut(rawChanges, [live.pickStatusOf(live.currentPhotoId)]) : null;
       if (changes) {
         event.preventDefault();
         if (!event.repeat) live.onUpdatePhoto(live.currentPhotoId, changes);

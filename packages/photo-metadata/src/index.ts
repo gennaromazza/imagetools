@@ -1,4 +1,4 @@
-export { parseXmpState, readXmpRating, upsertXmpRating, upsertXmpState, type XmpState } from "./xmp-sidecar";
+export { parseXmpState, readXmpKeywords, readXmpRating, upsertXmpFlags, upsertXmpRating, upsertXmpState, type XmpFlags, type XmpState } from "./xmp-sidecar";
 export {
   getFolderLabelTones,
   isLabelTone,
