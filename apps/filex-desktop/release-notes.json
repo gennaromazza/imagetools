@@ -749,6 +749,11 @@
       "Nuovo: Lightroom vede le tue classificazioni. Dal tasto destro su una foto, «Segno» (selezionata, scartata, nessuno) e «Colore» finiscono nel file XMP accanto alla foto, insieme alle stelle; le etichette personalizzate diventano parole chiave.",
       "Nuovo: nel filtro della libreria, «Lightroom»: «Scrivi nei file per Lightroom» e «Rileggi da Lightroom» (stelle, segno e colore cambiati in Lightroom tornano nell'album). In Lightroom: Metadati › Leggi metadati dal file."
     ],
+    "0.2.52": [
+      "Nuovo: nella libreria le foto simili si vedono tutte di base (pile aperte), così non si sceglie per errore; la casella «Mostra tutte le foto di ogni gruppo» nei filtri riporta le pile chiuse.",
+      "Nuovo: pulsante «Simili» nella barra della libreria per attivare o disattivare il raggruppamento in un clic.",
+      "Nuovo: nella vista grande (Spazio) Backspace aggiunge all'elenco tutte le foto simili del gruppo, restando sulla foto mostrata; un secondo Backspace le nasconde."
+    ],
     "0.2.50": [
       "Nuovo: caroselli con impaginazione manuale: parti da slide vuote, metti tu le foto in ogni slide (in ordine di scatto) e solo dopo scegli tra i modelli adatti a quante foto hai messo; in alternativa resta l'impaginazione automatica."
     ],
