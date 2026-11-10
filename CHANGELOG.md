@@ -39,6 +39,12 @@
 - Interno: la logica d'abbinamento è in `raw-jpg-pairing.ts` (prima stava dentro `folder-access.ts`) con 12 prove in `raw-jpg-pairing.test.ts` (`test:photo-selector-raw-jpg-pairing`, nella Dev Console).
 - Da sapere: la scheda di una coppia sta nella cartella del JPG, quindi il filtro per la cartella «RAW» non la mostra; copia, sposta e Cestino agiscono su entrambi i file anche se stanno in cartelle diverse.
 
+## 2026-11-10 - Album Flow 0.2.52
+
+- Nuovo: nella libreria le foto simili si vedono tutte di base (pile aperte), così non si sceglie per errore; la casella «Mostra tutte le foto di ogni gruppo (pile aperte)» nei filtri riporta le pile chiuse, e la scelta si ricorda.
+- Nuovo: pulsante «Simili» nella barra della libreria per attivare o disattivare raggruppamento e momenti in un clic (prima stava solo nei filtri).
+- Nuovo: nella vista grande (Spazio) Backspace aggiunge all'elenco tutte le foto simili del gruppo della foto mostrata, restando su quella; un secondo Backspace le nasconde.
+
 ## 2026-11-06 - Album Flow 0.2.51
 
 - Nuovo: Lightroom vede le tue classificazioni. Dal menu di una foto della libreria (tasto destro) i nuovi «Segno» (selezionata, scartata, nessuno) e «Colore» (rosso, giallo, verde, blu, viola) valgono anche per più foto insieme e vengono scritti nel file XMP accanto alla foto, come già le stelle: Lightroom li legge come stato e come etichetta colore (con «Solo di questo album» i file non cambiano). Le etichette personalizzate arrivano in Lightroom come parole chiave.

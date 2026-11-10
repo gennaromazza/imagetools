@@ -1212,6 +1212,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           ids={viewer.ids}
           startIndex={viewer.index}
           usage={usage}
+          similarOf={(assetId) => analysis.groupOf.get(assetId)}
           onIndex={(assetId) => { lastViewedRef.current = assetId; }}
           onClose={() => {
             const last = lastViewedRef.current;

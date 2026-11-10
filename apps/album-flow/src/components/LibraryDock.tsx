@@ -214,7 +214,18 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
   const { analysis, grouping, suggestions } = props;
   const suggestedTab = tab === SUGGESTED_TAB;
   const newSuggested = useNewFeature("adatte-spread");
-  const [openStacks, setOpenStacks] = useState<ReadonlySet<string>>(() => new Set());
+  // Di base le pile sono aperte (si vedono tutte le simili, così non si sceglie per errore); `flipped` sono le eccezioni a quel comportamento.
+  const [stacksOpenByDefault, setStacksOpenByDefault] = useState(() => { try { return window.localStorage.getItem("filex.albumFlow.stacksClosed") !== "1"; } catch { return true; } });
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(() => new Set());
+  const openStacks = useMemo<ReadonlySet<string>>(
+    () => new Set(analysis.groups.filter((group) => stacksOpenByDefault !== flipped.has(group.id)).map((group) => group.id)),
+    [analysis, flipped, stacksOpenByDefault],
+  );
+  const setAllStacks = useCallback((open: boolean) => {
+    setStacksOpenByDefault(open);
+    setFlipped(new Set());
+    try { window.localStorage.setItem("filex.albumFlow.stacksClosed", open ? "0" : "1"); } catch { /* senza archivio il valore resta per questa sessione */ }
+  }, []);
   const tabAssets = useMemo(() => (suggestedTab ? [] : assetsInTab(project, tab)), [project, tab, suggestedTab]);
   const filtered = useMemo(() => filterAssets(project, tabAssets, { query, ...(stars === "any" ? {} : atLeast && stars !== "0" ? { minRating: Number(stars) } : { exactRating: Number(stars) }), labelId: labelId || undefined, origin, usage: usageFilter, ...(socialOnly ? { tag: "social" as const } : {}) }), [project, tabAssets, query, stars, atLeast, labelId, origin, usageFilter, socialOnly]);
   const socialCount = useMemo(() => countTagged(project.assets, "social"), [project.assets]);
@@ -232,7 +243,7 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
     const todoIds = new Set((todo ?? []).map((asset) => asset.id));
     return new Map(momentHeaders(entries, analysis, todoIds).map((header) => [header.at, header]));
   }, [analysis, entries, grouping, project.settings.sortKey, suggestedTab, todo]);
-  const toggleStack = useCallback((groupId: string) => setOpenStacks((current) => {
+  const toggleStack = useCallback((groupId: string) => setFlipped((current) => {
     const next = new Set(current);
     if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
     return next;
@@ -493,6 +504,10 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
             <Icon name="image" size={14} />
             {socialCount} <span className="dock__tab-long">per i </span>social
           </button>
+          <button type="button" className={`dock__unused${grouping ? " is-active" : ""}`} onClick={() => props.onGrouping(!grouping)} aria-pressed={grouping}
+            title={grouping ? "Foto simili raggruppate in pile e momenti: clic per disattivare" : "Foto simili non raggruppate: clic per attivare pile e momenti"}>
+            <Icon name="layouts" size={14} /> Simili <span className="dock__tab-long">{grouping ? "sì" : "no"}</span>
+          </button>
           <div className="dock__zoom" title="Dimensione delle miniature">
             <button type="button" className="icon-btn icon-btn--sm" onClick={() => props.onThumbSize(Math.max(THUMB_MIN, thumbSize - 25))} aria-label="Miniature più piccole"><Icon name="minus" size={13} /></button>
             <input type="range" min={THUMB_MIN} max={THUMB_MAX} step={5} value={thumbSize} onChange={(event) => props.onThumbSize(Number(event.target.value))} aria-label="Dimensione delle miniature" />
@@ -542,6 +557,7 @@ export const LibraryDock = memo(function LibraryDock(props: LibraryDockProps) {
                 <span className="field__label">Foto simili e momenti</span>
                 <label className="radio"><input type="checkbox" checked={grouping} onChange={(event) => props.onGrouping(event.target.checked)} /> Raggruppa le foto simili in pile e mostra i momenti</label>
                 <span className="muted small">{analysis.groups.length} {analysis.groups.length === 1 ? "gruppo di simili" : "gruppi di simili"} · {analysis.moments.length} {analysis.moments.length === 1 ? "momento" : "momenti"}</span>
+                <label className="radio"><input type="checkbox" checked={stacksOpenByDefault} disabled={!grouping} onChange={(event) => setAllStacks(event.target.checked)} /> Mostra tutte le foto di ogni gruppo (pile aperte)</label>
                 {project.similarity ? <button type="button" className="btn btn--sm" onClick={props.onResetGroups}>Ripristina i gruppi automatici</button> : null}
               </div>
               <div className="popover__section">

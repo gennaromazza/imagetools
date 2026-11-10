@@ -30,6 +30,8 @@ export interface PhotoViewerProps {
   onAssign: (assetId: string, chapterId: string | null) => void;
   onTag: (assetId: string, tag: AlbumAssetTag) => void;
   onIndex?: (assetId: string) => void;
+  /** Gruppo di foto simili di una foto (ordine di scatto), se ne ha uno. */
+  similarOf?: (assetId: string) => { id: string; photoIds: readonly string[] } | undefined;
 }
 
 const MAX_VIEW_ZOOM = 8;
@@ -40,9 +42,39 @@ interface PreviewView { zoom: number; x: number; y: number }
 
 /** Vista grande di una foto (Spazio): frecce per scorrere, 0-5 per le stelle, Invio per metterla nel foglio. */
 export function PhotoViewer(props: PhotoViewerProps) {
-  const { project, ids, usage } = props;
-  const [index, setIndex] = useState(Math.min(Math.max(props.startIndex, 0), Math.max(ids.length - 1, 0)));
+  const { project, usage } = props;
+  const [index, setIndex] = useState(Math.min(Math.max(props.startIndex, 0), Math.max(props.ids.length - 1, 0)));
   const byId = useMemo(() => new Map(project.assets.map((asset) => [asset.id, asset])), [project.assets]);
+  // Gruppi di foto simili aperti con Backspace: le altre foto del gruppo si inseriscono subito dopo quella mostrata.
+  const [openGroups, setOpenGroups] = useState<ReadonlySet<string>>(() => new Set());
+  const ids = useMemo(() => {
+    if (openGroups.size === 0 || !props.similarOf) return props.ids;
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const push = (id: string) => { if (!seen.has(id) && byId.has(id)) { seen.add(id); out.push(id); } };
+    for (const id of props.ids) {
+      push(id);
+      const group = props.similarOf(id);
+      if (group && openGroups.has(group.id)) group.photoIds.forEach(push);
+    }
+    return out;
+  }, [byId, openGroups, props.ids, props.similarOf]);
+  const currentGroup = props.similarOf?.(ids[index] ?? "");
+  const groupSize = currentGroup ? currentGroup.photoIds.filter((id) => byId.has(id)).length : 0;
+  const groupOpen = !!currentGroup && openGroups.has(currentGroup.id);
+  /** Backspace: mostra (o torna a nascondere) tutte le foto simili del gruppo della foto mostrata, restando su questa. */
+  const toggleGroup = () => {
+    if (!currentGroup || groupSize < 2) return;
+    const current = ids[index];
+    const next = new Set(openGroups);
+    if (next.has(currentGroup.id)) next.delete(currentGroup.id); else next.add(currentGroup.id);
+    const rebuilt: string[] = [];
+    const seen = new Set<string>();
+    const push = (id: string) => { if (!seen.has(id) && byId.has(id)) { seen.add(id); rebuilt.push(id); } };
+    for (const id of props.ids) { push(id); const group = props.similarOf?.(id); if (group && next.has(group.id)) group.photoIds.forEach(push); }
+    setOpenGroups(next);
+    setIndex(Math.max(0, rebuilt.indexOf(current)));
+  };
   const asset: AlbumAssetV2 | undefined = byId.get(ids[index]);
   const small = useAssetSrc(asset, 720);
   const large = useAssetSrc(asset, 2400);
@@ -94,6 +126,7 @@ export function PhotoViewer(props: PhotoViewerProps) {
       if (event.key === "Escape" || event.key === " ") { stop(); props.onClose(); }
       else if (event.key === "ArrowRight" || event.key === "ArrowDown") { stop(); move(1); }
       else if (event.key === "ArrowLeft" || event.key === "ArrowUp") { stop(); move(-1); }
+      else if (event.key === "Backspace") { stop(); toggleGroup(); }
       else if (event.key === "Home") { stop(); setIndex(0); }
       else if (event.key === "End") { stop(); setIndex(ids.length - 1); }
       else if (event.key === "+" || event.key === "=") { stop(); zoomTo(view.zoom * 1.25); }
@@ -118,6 +151,7 @@ export function PhotoViewer(props: PhotoViewerProps) {
         <div className="viewer__title">
           <strong>{asset.fileName}</strong>
           <span className="muted small">{index + 1} di {ids.length}{chapter ? ` · ${chapter.title}` : ""}{uses.length ? ` · nello spread ${uses.map((use) => use.spreadIndex + 1).join(", ")}` : " · non ancora usata"}</span>
+          {groupSize >= 2 ? <button type="button" className={`chip${groupOpen ? " is-active" : ""}`} onClick={toggleGroup} title="Foto simili di questo gruppo (Backspace)">{groupOpen ? `Simili: ${groupSize} (Backspace per nasconderle)` : `${groupSize} foto simili (Backspace per vederle)`}</button> : null}
         </div>
         <div className="viewer__zoom" role="group" aria-label="Zoom dell'anteprima (non cambia il foglio)">
           <IconButton icon="minus" label="Riduci (−)" onClick={() => zoomTo(view.zoom / 1.25)} disabled={view.zoom <= 1} size={16} />

@@ -21,6 +21,28 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.52",
+    date: "2026-11-10",
+    headline: "Foto simili sempre sotto gli occhi",
+    items: [
+      {
+        title: "Le foto simili si vedono tutte",
+        text: "Di base la libreria mostra tutte le foto di ogni gruppo di simili, così non scegli per errore quella sbagliata. Chi preferisce le pile chiuse può spegnere «Mostra tutte le foto di ogni gruppo» nei filtri; il pulsante «×3» sulla miniatura apre e chiude il singolo gruppo.",
+        where: ["Libreria › Filtri › «Mostra tutte le foto di ogni gruppo (pile aperte)»"],
+      },
+      {
+        title: "Pulsante «Simili» per accendere e spegnere i gruppi",
+        text: "Nella barra della libreria il nuovo pulsante attiva o disattiva in un clic il raggruppamento delle foto simili e dei momenti.",
+        where: ["Libreria › pulsante «Simili»"],
+      },
+      {
+        title: "Backspace nella vista grande apre il gruppo",
+        text: "Guardando una foto in grande con le pile chiuse, Backspace aggiunge all'elenco tutte le altre foto simili di quel gruppo, restando sulla foto in cui eri. Un secondo Backspace le nasconde.",
+        where: ["Vista grande (Spazio) › tasto Backspace"],
+      },
+    ],
+  },
+  {
     version: "0.2.51",
     date: "2026-11-06",
     headline: "Lightroom vede segno, colore ed etichette",
