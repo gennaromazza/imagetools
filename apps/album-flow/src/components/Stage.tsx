@@ -66,6 +66,9 @@ export interface StageActions {
   commitFrames: (frames: Boxed[], options?: { copy?: boolean }) => void;
   /** Ctrl/⌘ + A: sceglie tutte le foto libere dello spread. */
   pickAll: () => void;
+  togglePickMode: () => void;
+  toggleMarqueeMode: () => void;
+  marqueeDone: () => void;
   alignGroup: (mode: AlignMode) => void;
   distributeGroup: (axis: "x" | "y") => void;
   /** Apre nell'editor esterno (Photoshop o altro) le foto indicate, in un'unica richiesta. */
@@ -126,6 +129,8 @@ export interface StageProps {
   /** Foto aggiunte alla selezione con Maiusc+clic (la foto selezionata ne fa sempre parte). */
   pickedItemIds: readonly string[];
   cropMode: boolean;
+  pickMode: boolean;
+  marqueeMode: boolean;
   /** Lo strumento «linea» del raddrizzamento è acceso. */
   lineTool: boolean;
   draft: Draft | null;
@@ -230,7 +235,7 @@ function AngleField({ value, onChange }: { value: number; onChange: (angle: numb
   );
 }
 
-export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, pickedItemIds, cropMode, lineTool, draft, zoom, guides, sizes, layoutsOpen, templates, alternatives, actions, design }: StageProps) {
+export function Stage({ project, spread, spreadIndex, assets, activeArea, selectedItemId, highlightItemId, pickedItemIds, cropMode, pickMode, marqueeMode, lineTool, draft, zoom, guides, sizes, layoutsOpen, templates, alternatives, actions, design }: StageProps) {
   const [centerRef, centerSize] = useElementSize<HTMLDivElement>();
   // Segnalino «2/3» sulle celle che hanno varianti simili.
   const altLabels = useMemo(() => new Map([...alternatives].map(([itemId, entry]) => [itemId, entry.ids.length === 2 ? "1 simile" : `${entry.ids.length - 1} simili`])), [alternatives]);
@@ -502,6 +507,27 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     </div>
   );
 
+  // Ritaglio e scelta delle foto: sempre nella barra, fuori dal foglio, solo icone (il testo si legge al passaggio del mouse).
+  // Restano al loro posto anche quando non servono (spenti) così la barra non cambia altezza e il foglio non si ridimensiona.
+  const freeActive = hasFreeLayout(area) && !area.locked;
+  const anyFree = spread.areas.some((candidate) => hasFreeLayout(candidate) && !candidate.locked);
+  const selectedFrame = selectedItemId ? spread.areas.flatMap((candidate) => candidate.items).find((item) => item.id === selectedItemId) : undefined;
+  const photoTools = (
+    <div className="stage__tools" role="toolbar" aria-label="Ritaglio e scelta delle foto">
+      <button type="button" className={`bar-btn${cropMode ? " bar-btn--gold" : ""}`} aria-pressed={cropMode} aria-label={cropMode ? "Chiudi il ritaglio" : "Ritaglia la foto scelta"}
+        title={cropMode ? "Chiudi il ritaglio (Invio o Esc). Intanto trascina la foto per inquadrarla e usa la rotella per ingrandirla" : selectedFrame ? (selectedFrame.locked ? "Foto bloccata: sbloccala per ritagliarla" : "Ritaglia la foto scelta: trascina per inquadrarla, rotella per ingrandirla (doppio clic sulla foto o Invio)") : "Ritaglia: prima scegli una foto"}
+        disabled={!cropMode && (!selectedFrame || selectedFrame.locked)} onClick={() => selectedItemId && actions.toggleCrop(selectedItemId)}><Icon name="crop" size={18} /></button>
+      <button type="button" className={`bar-btn${pickMode && anyFree ? " is-active" : ""}`} aria-pressed={pickMode && anyFree} aria-label="Scegli più foto"
+        title={anyFree ? (pickMode ? "Scelta di più foto accesa: ogni clic aggiunge o toglie una foto. Clic qui per spegnerla" : "Scegli più foto: con questo acceso ogni clic su una foto la aggiunge o la toglie, poi si spostano e allineano insieme (anche con Maiusc o Ctrl/⌘ + clic)") : "Scegli più foto: disponibile quando la pagina è libera (sblocca il layout dal lucchetto)"}
+        disabled={!anyFree} onClick={actions.togglePickMode}><Icon name="pickMany" size={18} /></button>
+      <button type="button" className={`bar-btn${marqueeMode && anyFree ? " is-active" : ""}`} aria-pressed={marqueeMode && anyFree} aria-label="Selezione ad area"
+        title={anyFree ? (marqueeMode ? "Selezione ad area accesa: trascina un rettangolo sul foglio, anche sopra le foto. Clic qui per spegnerla" : "Selezione ad area: trascina un rettangolo sul foglio, anche sopra le foto, per sceglierle in una volta (poi si spostano insieme)") : "Selezione ad area: disponibile quando la pagina è libera (sblocca il layout dal lucchetto)"}
+        disabled={!anyFree} onClick={actions.toggleMarqueeMode}><Icon name="marquee" size={18} /></button>
+      <button type="button" className="bar-btn" aria-label="Scegli tutte le foto" title={anyFree ? "Scegli tutte le foto libere dello spread (Ctrl/⌘ + A)" : "Scegli tutte le foto: disponibile quando la pagina è libera"} disabled={!anyFree} onClick={actions.pickAll}><Icon name="selectAll" size={18} /></button>
+      <button type="button" className="bar-btn" aria-label="Torna al layout automatico" title={freeActive ? "Torna al layout automatico: le foto tornano dove le aveva messe il programma (Annulla le riporta dove le avevi messe)" : "Torna al layout automatico: disponibile quando questa pagina è libera"} disabled={!freeActive} onClick={() => actions.restoreArea(areaIndex)}><Icon name="restoreAuto" size={18} /></button>
+    </div>
+  );
+
   const strip = (side: "left" | "right") => {
     const index = Math.min(side === "left" ? 0 : 1, spread.areas.length - 1);
     return (
@@ -556,6 +582,9 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
               onPickItems={actions.pickItems}
               onCommitFrames={actions.commitFrames}
               cropMode={cropMode}
+              pickMode={pickMode}
+              marqueeMode={marqueeMode}
+              onMarqueeDone={actions.marqueeDone}
               straightenTool={lineTool && cropMode}
               onStraightenDone={actions.finishLineTool}
               draft={draft}
@@ -631,6 +660,8 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
           <button type="button" className="bar-btn" title="Aggiungi uno spread vuoto dopo questo" aria-label="Aggiungi uno spread dopo questo" onClick={actions.addSpreadAfter}><Icon name="plus" size={18} /></button>
           <span className="stage__sep" aria-hidden="true" />
           {spreadActions}
+          <span className="stage__sep" aria-hidden="true" />
+          {photoTools}
         </div>
         <div className="stage__bar-group stage__bar-group--end">
           <IconButton icon="minus" label="Riduci (−)" onClick={() => actions.setZoom(Math.max(0.4, Number((zoom - 0.15).toFixed(2))))} size={15} />

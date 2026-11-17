@@ -122,6 +122,31 @@ export function resolveDropTarget(areas: readonly DropArea[], x: number, y: numb
   return null;
 }
 
+const SIDE_WORDS: Record<InsertSide, string> = { left: "a sinistra", right: "a destra", top: "sopra", bottom: "sotto" };
+
+/**
+ * Cosa succede se si lascia la foto qui, in parole: `hint` si legge mentre si trascina (prima di lasciare), `done` dopo il rilascio (con «Annulla»).
+ * `kind`: foto della libreria («assets») o foto già nello spread («item»).
+ */
+export function describeDrop(target: DropTarget, kind: "assets" | "item"): { hint: string; done: string } {
+  const moving = kind === "item";
+  if (target.zone === "center") {
+    return target.itemId
+      ? (moving ? { hint: "Scambia le due foto", done: "Foto scambiate." } : { hint: "Sostituisce questa foto", done: "Foto sostituita." })
+      : { hint: "", done: "" };
+  }
+  if (target.zone === "area") {
+    if (target.point) return { hint: moving ? "Sposta la foto qui" : "Aggiunge la foto qui", done: moving ? "Foto spostata." : "Foto aggiunta." };
+    return { hint: moving ? "Sposta la foto in questa pagina" : "Aggiunge la foto a questa pagina", done: moving ? "Foto spostata." : "Foto aggiunta." };
+  }
+  if (target.node === "") {
+    const column = target.zone === "left" || target.zone === "right";
+    return { hint: `${column ? "Nuova colonna" : "Nuova riga"} ${SIDE_WORDS[target.zone]}`, done: column ? "Foto messa in una nuova colonna." : "Foto messa in una nuova riga." };
+  }
+  if (target.node !== undefined) return { hint: "Si infila tra le due foto", done: "Foto inserita tra le due." };
+  return { hint: `Inserisce accanto, ${SIDE_WORDS[target.zone]}`, done: "Foto inserita." };
+}
+
 /** Rettangolo da evidenziare per un bersaglio: mezza cella dal lato di inserimento, tutta la cella per il centro. */
 export function dropHighlight(target: DropTarget, cell: Rect | null, area: Rect): Rect {
   if (target.highlight) return target.highlight;

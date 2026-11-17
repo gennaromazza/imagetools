@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetTag, AlbumProjectV2, AlbumSortKey, AlbumStage, AreaTemplate } from "@photo-tools/shared-types";
 import { shapeOfTree } from "../engine/tree";
+import { describeDrop } from "../engine/drop";
 import { getDesktop, hasDesktop, openInEditor, refreshChangedFiles, revealInFolder, readSidecar, writeFlagsToXmp, writeRatingToXmp } from "../desktop/api";
 import { candidatesFromFiles, chooseFolderAndScan, fileKey, scanDroppedPaths } from "../desktop/importer";
 import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, mirrorArea, removeFavoriteLayout, resetDividerRatio, sanitizeStyle, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "../model/areas";
@@ -126,6 +127,10 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   useEffect(() => { if (!selectedOverlayId) setExtraOverlayIds([]); }, [selectedOverlayId]);
   const [highlightItemId, setHighlightItemId] = useState<string | null>(null);
   const [cropMode, setCropMode] = useState(false);
+  /** «Scegli più foto»: ogni clic su una foto la aggiunge o la toglie dalla selezione, senza tastiera (solo sulle pagine libere). */
+  const [pickMode, setPickMode] = useState(false);
+  /** «Selezione ad area»: finché è accesa, trascinare (anche sopra una foto) traccia il rettangolo di selezione; si spegne da sola a fine gesto. */
+  const [marqueeMode, setMarqueeMode] = useState(false);
   const [lineTool, setLineTool] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [libTab, setLibTab] = useState<LibraryTab>("all");
@@ -307,7 +312,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
 
   const goTo = useCallback((next: number) => {
     setSpreadIndex(Math.min(Math.max(next, 0), Math.max(count - 1, 0)));
-    setSelectedItemId(null); setPickedItemIds([]); setSelectedOverlayId(null); setCropMode(false); setDraft(null); setActiveArea(0);
+    setSelectedItemId(null); setPickedItemIds([]); setSelectedOverlayId(null); setCropMode(false); setPickMode(false); setMarqueeMode(false); setDraft(null); setActiveArea(0);
   }, [count]);
 
   const doUndo = useCallback(() => { lastCoalesce.current = null; setHistory(undo(historyRef.current)); setDraft(null); }, [setHistory]);
@@ -523,6 +528,9 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       setPickedItemIds(created.length > 1 ? created : []);
       setSelectedItemId(created.length === 1 ? created[0] : null);
     },
+    togglePickMode: () => { setCropMode(false); setMarqueeMode(false); setPickMode((on) => !on); },
+    toggleMarqueeMode: () => { setCropMode(false); setPickMode(false); setMarqueeMode((on) => !on); },
+    marqueeDone: () => setMarqueeMode(false),
     pickAll: () => {
       const current = historyRef.current.present.spreads.find((s) => s.id === spreadId);
       const ids = movableFrames(historyRef.current.present, current ? current.areas.flatMap((a) => a.items.map((item) => item.id)) : []).map((frame) => frame.id);
@@ -551,7 +559,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       setActiveArea(target.areaIndex);
       if (rebuilt) notify(`${REBUILT_NOTE}${usedNote(ids, index)}`, true);
       else if (area && area.items.length + ids.length > 12 && target.zone !== "center") notify("Un'area contiene al massimo 12 foto.");
-      else { const note = usedNote(ids, index); if (note) notify(`Foto aggiunta.${note}`, true); }
+      else notify(`${describeDrop(target, "assets").done}${usedNote(ids, index)}`, true);
     },
     dropItem: (target, itemId) => {
       const source = findItem(historyRef.current.present, itemId);
@@ -559,7 +567,9 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       let rebuilt = false;
       commit((p) => { const plan = dropOnSpreadPlanned(p, spreadId, target, { kind: "item", itemId }); rebuilt = plan.rebuilt; return plan.project; });
       setActiveArea(target.areaIndex);
+      // Ogni rilascio dice cosa è successo e si annulla con un clic (prima solo il ripiegamento del layout lo diceva).
       if (rebuilt) notify(REBUILT_NOTE, true);
+      else notify(describeDrop(target, "item").done, true);
     },
     setDraft,
     commitRatio: (i, path, ratio) => { setDraft(null); commit((p) => setDividerRatio(p, spreadId, i, path, ratio), `ratio:${spreadId}:${i}:${path}`); },
@@ -619,7 +629,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       commit((p) => makeAreaFree(p, spreadId, i));
       notify(historyRef.current.present === before ? "Non c'è nulla da liberare: la pagina è vuota o bloccata." : "Ora puoi spostare e ridimensionare le foto a piacere (Ctrl/⌘ + Z per annullare).");
     },
-    restoreArea: (i) => { commit((p) => restoreAutomatic(p, spreadId, i)); notify("Tornato al layout di prima."); },
+    restoreArea: (i) => { commit((p) => restoreAutomatic(p, spreadId, i)); notify("Tornato al layout di prima. Annulla rimette le foto dove le avevi messe.", true); },
     fillSpread: () => {
       if (!spread) return;
       if (spread.done) { notify("Spread finito: riaprilo (D) per modificarlo."); return; }
@@ -664,7 +674,13 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       try { storeTemplates(upsertTemplate(templates, { ...made, name: `${made.kind === "free" ? "Libero" : "Divisioni"} ${made.count} foto` })); notify("Layout salvato nei tuoi template: lo trovi nell'elenco dei layout."); } catch (error) { notify(error instanceof Error ? error.message : "Template non salvato."); }
     },
     commitFrame: (itemId, frame) => commit((p) => setFrame(p, itemId, frame), `frame:${itemId}`),
-    commitFrameCrop: (itemId, rect) => commit((p) => cropFrameTo(p, itemId, rect), `crop:${itemId}`),
+    commitFrameCrop: (itemId, rect) => {
+      // Ritagliare i bordi rende libera la pagina: lo si dice, perché da lì le foto non si adattano più da sole.
+      const wasFree = (() => { const before = findItem(historyRef.current.present, itemId); return before ? hasFreeLayout(before.area) : true; })();
+      commit((p) => cropFrameTo(p, itemId, rect), `crop:${itemId}`);
+      const after = findItem(historyRef.current.present, itemId);
+      if (!wasFree && after && hasFreeLayout(after.area)) notify("Ritaglio fatto: la pagina ora è libera e le foto si spostano a piacere. Per tornare al layout automatico usa «Torna al layout automatico» in basso sullo spread.", true);
+    },
     moveFrameAcross: (itemId, areaIndex, rect) => {
       const before = historyRef.current.present;
       const found = findItem(before, itemId);
@@ -1079,6 +1095,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           highlightItemId={highlightItemId}
           pickedItemIds={pickedItemIds.length > 1 ? pickedItemIds : EMPTY_IDS}
           cropMode={cropMode}
+          pickMode={pickMode && spread.areas.some((candidate) => hasFreeLayout(candidate))}
+          marqueeMode={marqueeMode && spread.areas.some((candidate) => hasFreeLayout(candidate))}
           lineTool={lineTool}
           draft={draft}
           zoom={zoom}

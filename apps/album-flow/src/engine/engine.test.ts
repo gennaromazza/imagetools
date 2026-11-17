@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { LayoutNode } from "@photo-tools/shared-types";
 import { BEHIND_LEVEL, MAX_RATIO, MIN_RATIO, areaOuterRects, crossesFold, insetRect, layoutCells, paintOrder, pointInCell, spreadSizeMm, type LeafCell, type Rect } from "./geometry";
 import { clearLayoutCache, estimateCost, generateLayouts, generateLayoutsCached, scoreTree, type LayoutPhoto } from "./generate";
-import { resolveDropTarget, dropHighlight } from "./drop";
+import { resolveDropTarget, dropHighlight, describeDrop } from "./drop";
 import { applyShape, countLeaves, hasLeaf, naturalRatios, insertAtNode, insertBeside, leaf, leafIds, mirrorHorizontal, mirrorVertical, nodeAt, pathOfLeaf, removeLeaf, renameLeaf, setRatioAt, shapeOfTree, split, swapLeaves, treeKind, validateTree } from "./tree";
 
 const SHEET = { widthCm: 30, heightCm: 30 };
@@ -256,6 +256,29 @@ test("rilascio: centro, bordi, spazio tra le foto e aree vuote", () => {
   assert.deepEqual(empty, { areaIndex: 0, itemId: null, zone: "area" });
   const second = resolveDropTarget([{ rect: { x: 0, y: 0, w: 100, h: 100 }, cells: [] }, { rect: { x: 100, y: 0, w: 100, h: 100 }, cells: [] }], 150, 50);
   assert.equal(second?.areaIndex, 1);
+});
+
+test("rilascio: la frase mostrata prima di lasciare dice cosa succede davvero (scambia, sostituisce, inserisce, nuova riga)", () => {
+  const tree = split("row", 0.5, leaf("a"), leaf("b"));
+  const rect = { x: 0, y: 0, w: 300, h: 100 };
+  const { cells } = layoutCells(tree, rect, 10);
+  const a = cells[0].rect;
+  const center = resolveDropTarget([{ rect, cells }], a.x + a.w / 2, a.y + a.h / 2)!;
+  assert.equal(describeDrop(center, "item").hint, "Scambia le due foto");
+  assert.equal(describeDrop(center, "assets").hint, "Sostituisce questa foto");
+  assert.equal(describeDrop(center, "item").done, "Foto scambiate.");
+  const side = resolveDropTarget([{ rect, cells }], a.x + 2, a.y + a.h / 2)!;
+  assert.equal(describeDrop(side, "item").hint, "Inserisce accanto, a sinistra");
+  assert.equal(describeDrop({ areaIndex: 0, itemId: null, zone: "top", node: "" }, "assets").hint, "Nuova riga sopra");
+  assert.equal(describeDrop({ areaIndex: 0, itemId: null, zone: "right", node: "" }, "assets").hint, "Nuova colonna a destra");
+  assert.equal(describeDrop({ areaIndex: 0, itemId: null, zone: "left", node: "01" }, "item").hint, "Si infila tra le due foto");
+  assert.equal(describeDrop({ areaIndex: 0, itemId: null, zone: "area", point: { x: 1, y: 1 } }, "item").hint, "Sposta la foto qui");
+  assert.equal(describeDrop({ areaIndex: 0, itemId: null, zone: "area" }, "assets").hint, "Aggiunge la foto a questa pagina");
+  // ogni bersaglio possibile ha una frase, sia prima sia dopo il rilascio
+  for (const target of [center, side, { areaIndex: 0, itemId: null, zone: "area" as const }]) for (const kind of ["assets", "item"] as const) {
+    const text = describeDrop(target, kind);
+    assert.ok(text.hint.length > 0 && text.done.length > 0, `${target.zone}/${kind}`);
+  }
 });
 
 test("rilascio: evidenziazione coerente con la zona", () => {

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { snapMove, snapResize } from "./snap";
+import { snapEqualGaps, snapMove, snapResize } from "./snap";
+import { gapMeasures } from "./arrange";
 
 const box = (x: number, y: number, w: number, h: number) => ({ x, y, w, h });
 
@@ -62,4 +63,50 @@ test("centro della pagina: il centro di una foto o di un gruppo si aggancia a un
   assert.equal(result.guides.length, 2, "una linea guida per asse");
   const far = snapMove(box(100, 100, 50, 50), [center], 4, { targetCenters: false });
   assert.deepEqual(far.rect, box(100, 100, 50, 50), "lontano dal centro non si muove");
+});
+
+test("stessa distanza: la foto si ferma al centro tra due vicine, con lo stesso spazio a destra e a sinistra", () => {
+  const left = box(0, 0, 40, 60);
+  const right = box(200, 0, 40, 60);
+  // lo spazio libero è 200 - 40 = 160, la foto è larga 50: a x = 40 + 55 = 95 i due spazi sono uguali (55 mm)
+  const result = snapEqualGaps(box(93, 0, 50, 60), [left, right], 4);
+  assert.equal(result.rect.x, 95);
+  assert.equal(result.matched.x, 55);
+  const gaps = gapMeasures(result.rect, [left, right], result.matched);
+  assert.equal(gaps.length, 2);
+  assert.ok(gaps.every((gap) => gap.equal), "i due spazi si evidenziano come uguali");
+  // fuori soglia non cambia nulla
+  assert.deepEqual(snapEqualGaps(box(80, 0, 50, 60), [left, right], 4).rect, box(80, 0, 50, 60));
+});
+
+test("stessa distanza: ripete lo spazio già presente tra due altre foto, sui due assi", () => {
+  const a = box(0, 0, 40, 40);
+  const b = box(52, 0, 40, 40); // spazio di 12 mm tra a e b
+  // una terza foto accanto a b: dovrebbe stare a 12 mm → x = 92 + 12 = 104
+  const next = snapEqualGaps(box(106, 0, 40, 40), [a, b], 4);
+  assert.equal(next.rect.x, 104);
+  assert.equal(next.matched.x, 12);
+  // lo stesso in verticale: sotto a, a 12 mm da b? (b non la sovrappone in x) → sotto b a 12 mm da una coppia verticale
+  const top = box(300, 0, 40, 30);
+  const below = box(300, 42, 40, 30); // spazio verticale 12 mm
+  const vertical = snapEqualGaps(box(300, 86, 40, 30), [top, below], 4);
+  assert.equal(vertical.rect.y, 84);
+  assert.equal(vertical.matched.y, 12);
+});
+
+test("stessa distanza: non si aggancia dove le foto si toccherebbero né con spazi non adiacenti", () => {
+  const a = box(0, 0, 40, 40);
+  const middle = box(60, 0, 40, 40);
+  const far = box(140, 0, 40, 40);
+  // a e far hanno 100 mm di distanza ma con middle in mezzo: non è uno spazio da ripetere (gli spazi veri sono 20 e 40)
+  const result = snapEqualGaps(box(222, 0, 40, 40), [a, middle, far], 4);
+  assert.equal(result.matched.x, 40, "si ripete lo spazio tra middle e far");
+  assert.equal(result.rect.x, 220);
+  const notHundred = snapEqualGaps(box(281, 0, 40, 40), [a, middle, far], 4);
+  assert.equal(notHundred.matched.x, undefined, "i 100 mm tra a e far non sono uno spazio da ripetere");
+  assert.equal(notHundred.rect.x, 281);
+  // foto senza vicine sull'asse: nessun aggancio
+  assert.deepEqual(snapEqualGaps(box(0, 500, 40, 40), [a], 4).matched, {});
+  // gli assi si possono escludere
+  assert.equal(snapEqualGaps(box(106, 0, 40, 40), [a, box(52, 0, 40, 40)], 4, { x: false, y: true }).rect.x, 106);
 });

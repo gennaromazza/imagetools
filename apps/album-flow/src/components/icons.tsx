@@ -63,6 +63,10 @@ const PATHS = {
   clock: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
   user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.500 20a7.500 7.500 0 0 1 15 0",
   archive: "M3.500 5h17v4h-17zM5 9v10.500h14V9M10 13h4",
+  marquee: "M4 4h3M10 4h4M17 4h3M20 7v3M20 14v3M20 20h-3M14 20h-4M7 20H4M4 17v-3M4 10V7M9.500 9.500h5v5h-5z",
+  pickMany: "M3.500 3.500h10v10h-10zM10.500 10.500h10v10h-10zM13 16l2.200 2.200 3.800-4.400",
+  selectAll: "M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4M9 12l2 2 4-4",
+  restoreAuto: "M3 12a9 9 0 1 0 3-6.700L3 8M3 3v5h5M9.500 9.500h5v5h-5z",
 } as const;
 
 export type IconName = keyof typeof PATHS;

@@ -69,7 +69,7 @@ export function AreaStrip(props: AreaStripProps) {
           <StripButton
             icon={props.locked ? "lock" : "unlock"}
             label={props.locked ? "Layout bloccato: le foto restano ferme, Mescola e Auto Build non lo toccano. Clic per le opzioni" : props.free ? "Layout libero: sposta le foto a piacere, anche sull'altra pagina. Clic per le opzioni" : "Layout della pagina: sblocca per spostare le foto a piacere o proteggilo"}
-            active={props.locked}
+            active={props.locked || props.free}
             tone={props.locked ? "gold" : undefined}
             onClick={() => { setConfirmBack(false); setPopover(popover === "layout" ? null : "layout"); }}
           />

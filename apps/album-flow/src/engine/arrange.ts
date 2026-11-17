@@ -82,6 +82,8 @@ export interface GapMeasure {
   to: number;
   at: number;
   mm: number;
+  /** Lo stesso spazio compare anche dall'altro lato o tra altre due foto: il numero si evidenzia. */
+  equal?: boolean;
 }
 
 const overlapMid = (aStart: number, aEnd: number, bStart: number, bEnd: number): number | null => {
@@ -94,7 +96,7 @@ const overlapMid = (aStart: number, aEnd: number, bStart: number, bEnd: number):
  * Le distanze tra la foto trascinata e le foto più vicine nelle quattro direzioni (come le misure in Canva): per ogni lato la foto che le sta
  * di fronte, con la parte in comune dell'altro asse, e lo spazio vuoto che le separa. Le foto che si sovrappongono non hanno distanza.
  */
-export function gapMeasures(rect: Rect, others: readonly Rect[]): GapMeasure[] {
+export function gapMeasures(rect: Rect, others: readonly Rect[], matched: { x?: number; y?: number } = {}): GapMeasure[] {
   const out: GapMeasure[] = [];
   const best = (candidates: GapMeasure[]) => { if (candidates.length) out.push(candidates.reduce((a, b) => (b.mm < a.mm ? b : a))); };
   const right: GapMeasure[] = [];
@@ -114,7 +116,13 @@ export function gapMeasures(rect: Rect, others: readonly Rect[]): GapMeasure[] {
     }
   }
   [right, left, below, above].forEach(best);
-  return out.filter((gap) => gap.mm > 0.05);
+  const shown = out.filter((gap) => gap.mm > 0.05);
+  // Evidenzia gli spazi uguali: due distanze uguali tra loro, oppure quella ottenuta dall'aggancio «stessa distanza».
+  return shown.map((gap) => {
+    const target = matched[gap.axis];
+    const twin = shown.some((other) => other !== gap && Math.abs(other.mm - gap.mm) < 0.05);
+    return twin || (target !== undefined && Math.abs(target - gap.mm) < 0.05) ? { ...gap, equal: true } : gap;
+  });
 }
 
 export const translateRect = (rect: Rect, dx: number, dy: number): Rect => ({ ...rect, x: rect.x + dx, y: rect.y + dy });
