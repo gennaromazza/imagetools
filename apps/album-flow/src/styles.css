@@ -325,7 +325,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .stage__count { font-size: 13px; color: var(--text-muted); min-width: 108px; text-align: center; white-space: nowrap; }
 .stage__sep { width: 1px; height: 22px; background: var(--line); margin: 0 6px; flex: none; }
 .stage__tools { display: flex; align-items: center; gap: 5px; }
-.bar-btn { display: inline-grid; place-items: center; width: 32px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 9px; background: rgba(43, 49, 45, 0.8); color: var(--text-muted); flex: none; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+.bar-btn { position: relative; display: inline-grid; place-items: center; width: 32px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 9px; background: rgba(43, 49, 45, 0.8); color: var(--text-muted); flex: none; transition: background 0.15s, color 0.15s, border-color 0.15s; }
 .bar-btn:hover:not(:disabled) { background: #3a423c; color: var(--text); border-color: var(--line-strong); }
 .bar-btn.is-active { background: var(--accent-soft); color: var(--accent-bright); border-color: var(--accent); }
 .bar-btn--gold { background: linear-gradient(180deg, #c9ac72, #a98b55); color: #1c211e; border-color: transparent; }

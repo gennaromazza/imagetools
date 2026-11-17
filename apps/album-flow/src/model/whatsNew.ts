@@ -21,6 +21,43 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.53",
+    date: "2026-11-17",
+    headline: "Pagina libera più chiara, selezione ad area e lente nell'anteprima",
+    items: [
+      {
+        title: "I comandi della pagina libera stanno fuori dal foglio",
+        text: "Ritaglio, «Scegli più foto», «Selezione ad area», «Scegli tutte le foto» e «Torna al layout automatico» sono icone nella barra in basso: non coprono più il foglio, il testo si legge passando il mouse e restano al loro posto (spenti) quando non servono. Non serve più ricordare le scorciatoie da tastiera.",
+        where: ["Barra in basso › icone «Ritaglia la foto scelta», «Scegli più foto», «Selezione ad area», «Scegli tutte le foto», «Torna al layout automatico»"],
+      },
+      {
+        title: "Selezione ad area sopra le foto",
+        text: "Con «Selezione ad area» acceso trascini un rettangolo anche sopra le foto, per sceglierne molte in una volta e poi spostarle, allinearle o ridimensionarle insieme.",
+        where: ["Barra in basso › «Selezione ad area»"],
+      },
+      {
+        title: "Stessa distanza tra le foto",
+        text: "Spostando una foto o un gruppo, la calamita aggancia anche lo spazio uguale a quello tra due altre foto, e le quote in centimetri diventano verdi con il segno «=» quando le distanze coincidono.",
+        where: ["Pagina libera › trascina una foto vicino alle altre"],
+      },
+      {
+        title: "Il rilascio ti dice cosa farà e si annulla",
+        text: "Mentre trascini una foto sul foglio, accanto al riquadro compare la frase che spiega cosa succede («Scambia le due foto», «Nuova colonna a sinistra»…). Dopo il rilascio un avviso conferma l'azione con il pulsante «Annulla».",
+        where: ["Trascinamento sullo spread › frase accanto al riquadro e avviso con «Annulla»"],
+      },
+      {
+        title: "Strisce laterali sempre in una colonna",
+        text: "Le strisce di comandi ai lati del foglio restano ordinate in una sola colonna e si adattano da sole alle finestre piccole. Il pulsante per scambiare le pagine sta sotto quello del collegamento.",
+        where: ["Strisce ai lati del foglio"],
+      },
+      {
+        title: "Lente nell'anteprima per il cliente",
+        text: "Nell'anteprima a schermo intero la lente in alto accende le zone sulle foto: un clic apre la foto in grande, con zoom, rotella, trascinamento e frecce per passare alla successiva. Esc chiude prima la foto e poi l'anteprima.",
+        where: ["Anteprima cliente › lente «Ingrandisci le foto»"],
+      },
+    ],
+  },
+  {
     version: "0.2.52",
     date: "2026-11-10",
     headline: "Foto simili sempre sotto gli occhi",

@@ -39,6 +39,16 @@
 - Interno: la logica d'abbinamento è in `raw-jpg-pairing.ts` (prima stava dentro `folder-access.ts`) con 12 prove in `raw-jpg-pairing.test.ts` (`test:photo-selector-raw-jpg-pairing`, nella Dev Console).
 - Da sapere: la scheda di una coppia sta nella cartella del JPG, quindi il filtro per la cartella «RAW» non la mostra; copia, sposta e Cestino agiscono su entrambi i file anche se stanno in cartelle diverse.
 
+## 2026-11-17 - Album Flow 0.2.53
+
+- Nuovo: i comandi della pagina libera non coprono più il foglio. Ritaglio, «Scegli più foto», «Selezione ad area», «Scegli tutte le foto» e «Torna al layout automatico» sono icone nella barra in basso (testo al passaggio del mouse, spente quando non servono); sono spariti i pulsanti dentro il foglio e anche «Fine ritaglio» sulla foto.
+- Nuovo: «Selezione ad area»: con il pulsante acceso il rettangolo si trascina anche sopra le foto, per sceglierne molte e muoverle, allinearle o ridimensionarle insieme; «Scegli più foto» e Maiusc/Ctrl + clic non azzerano più la scelta quando si prende una foto.
+- Nuovo: stessa distanza tra le foto. Spostando o ridimensionando una foto (o un gruppo) la calamita aggancia lo spazio uguale a quello tra altre due foto e le quote in cm diventano verdi con «=» quando coincidono (`snapEqualGaps`, `gapMeasures`).
+- Nuovo: mentre si trascina una foto la frase accanto al riquadro dice cosa succederà («Scambia le due foto», «Nuova colonna a sinistra»…) e dopo il rilascio un avviso conferma con «Annulla» (`describeDrop`); un ritaglio che rende libera la pagina lo segnala e «Torna al layout automatico» ha il suo avviso con «Annulla».
+- Migliorato: le strisce ai lati del foglio restano in una colonna ordinata con livelli compatto e minimo (container query), la barra inferiore va sempre a capo e il pulsante di scambio delle pagine sta sotto quello del collegamento.
+- Nuovo: nell'anteprima per il cliente la lente in alto accende le zone sulle foto e un clic apre la foto in grande con zoom, rotella, trascinamento, frecce e Esc (nuovo `PreviewLightbox.tsx`).
+- Interno: prove nuove in `snap.test.ts` ed `engine.test.ts` (già in `test:album-flow-snap` e `test:album-flow-engine`, nella Dev Console). Da sapere: i gesti (calamita «=», rilascio con frase) hanno solo prove sulla logica, non test automatici dell'interfaccia.
+
 ## 2026-11-10 - Album Flow 0.2.52
 
 - Nuovo: nella libreria le foto simili si vedono tutte di base (pile aperte), così non si sceglie per errore; la casella «Mostra tutte le foto di ogni gruppo (pile aperte)» nei filtri riporta le pile chiuse, e la scelta si ricorda.

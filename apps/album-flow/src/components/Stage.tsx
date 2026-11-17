@@ -509,6 +509,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
 
   // Ritaglio e scelta delle foto: sempre nella barra, fuori dal foglio, solo icone (il testo si legge al passaggio del mouse).
   // Restano al loro posto anche quando non servono (spenti) così la barra non cambia altezza e il foglio non si ridimensiona.
+  const newMarquee = useNewFeature("selezione-ad-area");
   const freeActive = hasFreeLayout(area) && !area.locked;
   const anyFree = spread.areas.some((candidate) => hasFreeLayout(candidate) && !candidate.locked);
   const selectedFrame = selectedItemId ? spread.areas.flatMap((candidate) => candidate.items).find((item) => item.id === selectedItemId) : undefined;
@@ -522,7 +523,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         disabled={!anyFree} onClick={actions.togglePickMode}><Icon name="pickMany" size={18} /></button>
       <button type="button" className={`bar-btn${marqueeMode && anyFree ? " is-active" : ""}`} aria-pressed={marqueeMode && anyFree} aria-label="Selezione ad area"
         title={anyFree ? (marqueeMode ? "Selezione ad area accesa: trascina un rettangolo sul foglio, anche sopra le foto. Clic qui per spegnerla" : "Selezione ad area: trascina un rettangolo sul foglio, anche sopra le foto, per sceglierle in una volta (poi si spostano insieme)") : "Selezione ad area: disponibile quando la pagina è libera (sblocca il layout dal lucchetto)"}
-        disabled={!anyFree} onClick={actions.toggleMarqueeMode}><Icon name="marquee" size={18} /></button>
+        disabled={!anyFree} onClick={() => { newMarquee.markSeen(); actions.toggleMarqueeMode(); }}><Icon name="marquee" size={18} />{newMarquee.isNew ? <span className="new-dot" aria-hidden="true" /> : null}</button>
       <button type="button" className="bar-btn" aria-label="Scegli tutte le foto" title={anyFree ? "Scegli tutte le foto libere dello spread (Ctrl/⌘ + A)" : "Scegli tutte le foto: disponibile quando la pagina è libera"} disabled={!anyFree} onClick={actions.pickAll}><Icon name="selectAll" size={18} /></button>
       <button type="button" className="bar-btn" aria-label="Torna al layout automatico" title={freeActive ? "Torna al layout automatico: le foto tornano dove le aveva messe il programma (Annulla le riporta dove le avevi messe)" : "Torna al layout automatico: disponibile quando questa pagina è libera"} disabled={!freeActive} onClick={() => actions.restoreArea(areaIndex)}><Icon name="restoreAuto" size={18} /></button>
     </div>

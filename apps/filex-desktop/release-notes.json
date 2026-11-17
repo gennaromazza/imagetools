@@ -754,6 +754,12 @@
       "Nuovo: pulsante «Simili» nella barra della libreria per attivare o disattivare il raggruppamento in un clic.",
       "Nuovo: nella vista grande (Spazio) Backspace aggiunge all'elenco tutte le foto simili del gruppo, restando sulla foto mostrata; un secondo Backspace le nasconde."
     ],
+    "0.2.53": [
+      "Nuovo: i comandi della pagina libera sono icone nella barra in basso, fuori dal foglio (ritaglio, «Scegli più foto», «Selezione ad area», «Scegli tutte le foto», «Torna al layout automatico»), con il testo al passaggio del mouse.",
+      "Nuovo: «Selezione ad area» sopra le foto e calamita «stessa distanza» con quote verdi «=»; mentre trascini, una frase dice cosa farà il rilascio e dopo compare l'avviso con «Annulla».",
+      "Migliorato: strisce laterali sempre in una colonna ordinata e pulsante di scambio pagine sotto quello del collegamento.",
+      "Nuovo: nell'anteprima per il cliente la lente apre le foto in grande con zoom, rotella, trascinamento e frecce."
+    ],
     "0.2.50": [
       "Nuovo: caroselli con impaginazione manuale: parti da slide vuote, metti tu le foto in ogni slide (in ordine di scatto) e solo dopo scegli tra i modelli adatti a quante foto hai messo; in alternativa resta l'impaginazione automatica."
     ],
