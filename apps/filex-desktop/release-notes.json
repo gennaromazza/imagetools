@@ -754,6 +754,11 @@
       "Nuovo: pulsante «Simili» nella barra della libreria per attivare o disattivare il raggruppamento in un clic.",
       "Nuovo: nella vista grande (Spazio) Backspace aggiunge all'elenco tutte le foto simili del gruppo, restando sulla foto mostrata; un secondo Backspace le nasconde."
     ],
+    "0.2.55": [
+      "Nuovo: «Ritocco colore» sulla foto: luminosità, contrasto, saturazione, temperatura e tinta, senza toccare il file; si vede nell'album e nell'esportazione.",
+      "Nuovo: abbinamento dei colori con le altre foto dello spread («Adatta questa foto», «Uniforma lo spread»), con correzioni leggere che puoi ritoccare.",
+      "Nuovo: «Salva sul file…» scrive la correzione sul JPG originale dopo la tua conferma, con copia di sicurezza e «Ripristina l'originale»; Photoshop resta disponibile."
+    ],
     "0.2.54": [
       "Migliorato: la calamita delle foto libere si sente di più (aggancio più ampio, centro con centro e distanza standard tra le foto) e le linee guida sono più visibili.",
       "Nuovo: «Aggiungi sotto» nella scheda Testo: con un testo selezionato aggiungi un altro paragrafo, un occhiello o un titolo sotto il blocco, già agganciato e con lo stesso colore."

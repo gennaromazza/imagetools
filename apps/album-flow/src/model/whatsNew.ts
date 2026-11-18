@@ -21,6 +21,28 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.55",
+    date: "2026-11-18",
+    headline: "Ritocco colore e abbinamento ai colori dello spread",
+    items: [
+      {
+        title: "Ritocco colore sulla foto",
+        text: "Regola luminosità, contrasto, saturazione, temperatura e tinta di una foto direttamente in Album Flow. La correzione si vede nell'album e nell'esportazione e non tocca il file: con «Reimposta» la foto torna com'era.",
+        where: ["Foto selezionata › «⋯» › «Ritocco colore»"],
+      },
+      {
+        title: "Abbina i colori alle altre foto dello spread",
+        text: "«Adatta questa foto» avvicina i colori di una foto alle altre dello spread; «Uniforma lo spread» le avvicina tutte tra loro. Il risultato è una correzione leggera che puoi ritoccare con i cursori o annullare.",
+        where: ["Ritocco colore › «Adatta questa foto»", "Ritocco colore › «Uniforma lo spread»"],
+      },
+      {
+        title: "Salva la correzione sul file originale",
+        text: "Quando sei soddisfatto puoi scrivere la correzione sul JPG originale, così la trovi uguale anche in una galleria online o in stampa. Chiede conferma prima di sovrascrivere, conserva una copia dell'originale e «Ripristina l'originale» la rimette com'era. Per ritocchi più profondi resta «Modifica nell'editor» (Photoshop).",
+        where: ["Ritocco colore › «Salva sul file…»", "Ritocco colore › «Ripristina l'originale»"],
+      },
+    ],
+  },
+  {
     version: "0.2.54",
     date: "2026-11-18",
     headline: "Calamite più decise e testi che continuano sotto",
