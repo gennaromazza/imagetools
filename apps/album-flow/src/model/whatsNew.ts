@@ -21,6 +21,23 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.54",
+    date: "2026-11-18",
+    headline: "Calamite più decise e testi che continuano sotto",
+    items: [
+      {
+        title: "La calamita si sente di più",
+        text: "Spostando una foto nella pagina libera, i bordi e il centro si agganciano da più lontano, e una foto accanto o sotto un'altra si ferma proprio alla distanza «spazio tra le foto» della pagina. Le linee guida sono più spesse, così vedi subito quando sei allineato. Tieni premuto Alt per muovere senza calamita.",
+        where: ["Pagina libera › trascina una foto vicino alle altre", "Barra in basso › «Calamite»"],
+      },
+      {
+        title: "Aggiungi sotto: un altro paragrafo senza ricominciare",
+        text: "Con un testo selezionato puoi aggiungere sotto un altro paragrafo, un occhiello, una riga piccola, un titolo o una didascalia. Il nuovo testo ha la stessa larghezza e lo stesso colore, resta agganciato al blocco e, se in fondo alla pagina non c'è posto, il blocco sale da solo.",
+        where: ["Personalizza › Testo › «Aggiungi sotto»"],
+      },
+    ],
+  },
+  {
     version: "0.2.53",
     date: "2026-11-17",
     headline: "Pagina libera più chiara, selezione ad area e lente nell'anteprima",

@@ -39,6 +39,12 @@
 - Interno: la logica d'abbinamento è in `raw-jpg-pairing.ts` (prima stava dentro `folder-access.ts`) con 12 prove in `raw-jpg-pairing.test.ts` (`test:photo-selector-raw-jpg-pairing`, nella Dev Console).
 - Da sapere: la scheda di una coppia sta nella cartella del JPG, quindi il filtro per la cartella «RAW» non la mostra; copia, sposta e Cestino agiscono su entrambi i file anche se stanno in cartelle diverse.
 
+## 2026-11-18 - Album Flow 0.2.54
+
+- Migliorato: la calamita delle foto nelle pagine libere si sente di più. Aggancia entro 7 px (prima 4), le linee guida sono più spesse, il centro di una foto si allinea al centro di un'altra (due foto una sotto l'altra con larghezze diverse si centrano) e una foto accanto o sotto un'altra si ferma alla distanza «spazio tra le foto» della pagina, anche quando non ci sono altre foto da imitare (`snapMove`, `snapEqualGaps` con `standardGaps`). Vale anche per lo spostamento di più foto insieme; Alt la esclude e il pulsante «Calamite» la spegne.
+- Nuovo: «Aggiungi sotto» nella scheda Testo. Con un testo selezionato si continua il blocco (Paragrafo, Occhiello, Riga piccola, Titolo, Didascalia) senza tornare all'elenco degli stili: il nuovo testo nasce sotto tutto il blocco con la stessa larghezza, lo stesso asse e lo stesso colore e resta agganciato al gruppo. Se sotto non c'è posto nella pagina il blocco sale quanto serve; se nemmeno così ci sta, un avviso lo dice e non cambia nulla (`addTextBelow`).
+- Interno: prove nuove in `snap.test.ts` (`test:album-flow-snap`) e `design.test.ts` (`test:album-flow-design`), già nella Dev Console. Da sapere: i gesti sono stati provati nell'app Electron in sviluppo; non c'è un test automatico dell'interfaccia.
+
 ## 2026-11-17 - Album Flow 0.2.53
 
 - Nuovo: i comandi della pagina libera non coprono più il foglio. Ritaglio, «Scegli più foto», «Selezione ad area», «Scegli tutte le foto» e «Torna al layout automatico» sono icone nella barra in basso (testo al passaggio del mouse, spente quando non servono); sono spariti i pulsanti dentro il foglio e anche «Fine ritaglio» sulla foto.

@@ -924,6 +924,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .relink__list { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; font-size: 12px; }
 
 /* Novità dopo un aggiornamento */
+.design__new { color: var(--accent-bright); font-weight: 600; text-transform: none; letter-spacing: 0; }
 .new-dot { position: absolute; top: 2px; right: 2px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-bright); pointer-events: none; }
 .new-pill { margin-left: 6px; padding: 1px 7px; border-radius: 999px; background: var(--accent-bright); color: #1c211e; font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; vertical-align: middle; }
 .whatsnew { display: grid; gap: 18px; max-height: 60vh; overflow: auto; padding-right: 4px; }

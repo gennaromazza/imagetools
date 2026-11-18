@@ -6,6 +6,7 @@ import { addPhrase, loadPhrases, loadSavedStyles, phraseGroups, removePhrase, re
 import { importMediaFile, listMedia, mediaVersion, removeMedia, subscribeMedia, type MediaKind, type MediaRecord } from "../model/mediaStore";
 import { BASE_GROUP, FONT_CATEGORY_LABEL, FONT_FAMILIES, TEXT_PRESETS, fontInfo, fontStack, nearestFace, textPreset, type TextPreset } from "../model/typography";
 import { forgetMediaUrl } from "../hooks/useMedia";
+import { useNewFeature } from "../hooks/useNewFeature";
 import { installFonts, loadFonts } from "../render/fonts";
 import { Icon } from "./icons";
 import type { AlignTo } from "../model/designAlign";
@@ -314,9 +315,10 @@ const BELOW_STYLES: ReadonlyArray<readonly [string, string, string]> = [
 
 /** «Aggiungi sotto»: con un testo selezionato si continua il blocco (altri paragrafi, un titolo, una riga) senza tornare all'elenco degli stili. */
 function AddBelow({ overlay, groupSize, actions }: { overlay: SpreadOverlay; groupSize: number; actions: DesignActions }) {
+  const feature = useNewFeature("aggiungi-sotto");
   return (
-    <div className="design__section design__below">
-      <h4>Aggiungi sotto</h4>
+    <div className="design__section design__below" onClick={feature.markSeen}>
+      <h4>Aggiungi sotto{feature.isNew ? <span className="design__new"> · novità</span> : null}</h4>
       <div className="design__chips" role="group" aria-label="Aggiungi un testo sotto questo blocco">
         {BELOW_STYLES.map(([presetId, label, hint]) => <button key={presetId} type="button" className="chip" title={`${hint}: nasce sotto ${groupSize > 1 ? "il blocco" : "questo testo"}, con la stessa larghezza e lo stesso colore`} onClick={() => actions.addTextBelow(overlay.id, { presetId })}><Icon name="plus" size={12} /> {label}</button>)}
       </div>
