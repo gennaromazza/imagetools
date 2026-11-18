@@ -36,6 +36,11 @@ export function redo<T>(history: History<T>): History<T> {
   return { past: [...history.past, history.present], present: next, future: rest };
 }
 
+/** Applica la stessa trasformazione a ogni stato (passato, presente e futuro): per cambiamenti che nessun annulla deve far tornare indietro. */
+export function mapHistory<T>(history: History<T>, transform: (state: T) => T): History<T> {
+  return { past: history.past.map(transform), present: transform(history.present), future: history.future.map(transform) };
+}
+
 /** Sostituisce lo stato corrente mantenendo la cronologia: serve a fondere modifiche continue (slider, rotella). */
 export function replacePresent<T>(history: History<T>, next: T): History<T> {
   return Object.is(next, history.present) ? history : { ...history, present: next, future: [] };

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AlbumAssetTag, AlbumProjectV2, AlbumSortKey, AlbumStage, AreaTemplate } from "@photo-tools/shared-types";
 import { shapeOfTree } from "../engine/tree";
 import { describeDrop } from "../engine/drop";
-import { getDesktop, hasDesktop, openInEditor, refreshChangedFiles, revealInFolder, readSidecar, writeFlagsToXmp, writeRatingToXmp } from "../desktop/api";
+import { getDesktop, hasDesktop, hasOriginalBackup, openInEditor, refreshChangedFiles, restoreOriginalFile, revealInFolder, readSidecar, writeColorToFile, writeFlagsToXmp, writeRatingToXmp } from "../desktop/api";
+import { sampleAssets } from "../desktop/colorSample";
+import { colorTransform, saturationMatrix } from "../model/colorAdjust";
+import { matchSpread, matchToOthers, setColorAdjust, spreadAssetIds, withoutColorAdjust } from "../model/colorOps";
+import type { ColorEditorActions } from "./ColorEditor";
 import { candidatesFromFiles, chooseFolderAndScan, fileKey, scanDroppedPaths } from "../desktop/importer";
 import { setAlbumGap, alignFitAreas, refreshAssetShapes, applyCandidate, applyCandidateByNumber, applyFavoriteLayout, applyStyleToAlbum, applyStyleToSpread, mirrorArea, removeFavoriteLayout, resetDividerRatio, sanitizeStyle, saveFavoriteLayout, setAreaStyle, setDividerRatio, setLinked, shuffleArea, shuffleSpread } from "../model/areas";
 import { autoBuildAlbum, fillSpread, nextEmptySpread, nextUnusedAssets, type AutoBuildOptions } from "../model/autobuild";
@@ -13,7 +17,7 @@ import { applySidecarReadings, setColorLabel, setPickStatus, rotateAssetQuarter,
 import { countItems, findItem, hasFreeLayout, nowIso, touch } from "../model/project";
 import { addSpread, clearSpread, duplicateSpread, moveSpread, moveSpreads, removeSpread, setSpreadDone, setSplitMode, splitRefusal, swapAreas, swapRefusal } from "../model/spreads";
 import { STAGES } from "../model/store";
-import { canRedo, canUndo, createHistory, pushHistory, redo, replacePresent, undo, type History } from "../history";
+import { canRedo, canUndo, createHistory, mapHistory, pushHistory, redo, replacePresent, undo, type History } from "../history";
 import { ContactSheet } from "./ContactSheet";
 import { AutoBuildDialog } from "./AutoBuildDialog";
 import { ChapterManager } from "./ChapterManager";
@@ -499,6 +503,50 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
 
   // -------------------------------------------------------------------- azioni dello spread
   const spreadId = spread?.id ?? "";
+  /** Ritocco colore: cursori, abbinamento ai colori dello spread, scrittura sul file originale (dopo la conferma nel pannello) e ripristino. */
+  const colorActions = useMemo<ColorEditorActions>(() => ({
+    adjust: (assetId, adjust) => commit((p) => setColorAdjust(p, [assetId], adjust), `adj:${assetId}`),
+    match: async (assetId, scope) => {
+      const now = historyRef.current.present;
+      const ids = spreadAssetIds(now, spreadId);
+      const samples = await sampleAssets(now.assets.filter((asset) => ids.includes(asset.id)));
+      if (samples.size < 2 || !samples.has(assetId)) return "Non riesco a leggere abbastanza foto dello spread per confrontarle.";
+      const before = historyRef.current.present;
+      commit((p) => (scope === "spread" ? matchSpread(p, spreadId, samples) : matchToOthers(p, spreadId, assetId, samples)));
+      if (historyRef.current.present === before) return scope === "spread" ? "Le foto dello spread hanno già colori simili: non serve cambiare nulla." : "Questa foto ha già colori simili alle altre: non serve cambiare nulla.";
+      return scope === "spread" ? "Colori dello spread uniformati. Puoi ritoccare ogni foto o annullare." : "Foto adattata alle altre dello spread. Puoi ritoccarla o annullare.";
+    },
+    save: async (assetId) => {
+      const asset = historyRef.current.present.assets.find((candidate) => candidate.id === assetId);
+      if (!asset?.absolutePath) return { ok: false, message: "Questa foto non ha un file sul disco." };
+      if (!asset.colorAdjust) return { ok: false, message: "Non c'è nessuna correzione da scrivere." };
+      const t = colorTransform(asset.colorAdjust);
+      const result = await writeColorToFile(asset.absolutePath, { matrix: saturationMatrix(t.saturation).flat(), slope: t.slope, intercept: t.intercept });
+      if (!result.ok) return result;
+      // Il file ora contiene la correzione: si rilegge l'immagine e la correzione esce dal progetto, in ogni passo della cronologia
+      // (un «Annulla» non deve riapplicarla sopra un file già corretto).
+      await refreshChangedFiles([asset.absolutePath]);
+      const size = await getDesktop()?.getImageDimensions?.(asset.absolutePath).catch(() => null);
+      setHistory(mapHistory(historyRef.current, (state) => withoutColorAdjust(state, assetId)));
+      if (size) commit((p) => refreshAssetShapes(p, [{ assetId, width: size.width, height: size.height }]));
+      return result;
+    },
+    restore: async (assetId) => {
+      const asset = historyRef.current.present.assets.find((candidate) => candidate.id === assetId);
+      if (!asset?.absolutePath) return { ok: false, message: "Questa foto non ha un file sul disco." };
+      const result = await restoreOriginalFile(asset.absolutePath);
+      if (!result.ok) return result;
+      await refreshChangedFiles([asset.absolutePath]);
+      const size = await getDesktop()?.getImageDimensions?.(asset.absolutePath).catch(() => null);
+      if (size) commit((p) => refreshAssetShapes(p, [{ assetId, width: size.width, height: size.height }]));
+      return result;
+    },
+    hasBackup: async (assetId) => {
+      const asset = historyRef.current.present.assets.find((candidate) => candidate.id === assetId);
+      return asset?.absolutePath ? hasOriginalBackup(asset.absolutePath) : false;
+    },
+  }), [commit, setHistory, spreadId]);
+
   const actions: StageActions = useMemo(() => ({
     activateArea: (i) => setActiveArea(i),
     togglePick: (itemId, i) => {
@@ -728,6 +776,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     toggleLineTool: () => setLineTool((on) => !on),
     finishLineTool: () => setLineTool(false),
     viewItem,
+    color: colorActions,
     revealItem: (itemId) => { const found = findItem(project, itemId); if (found) void reveal(found.item.assetId); },
     copyItemName: (itemId) => { const found = findItem(project, itemId); if (found) void copyName([found.item.assetId]); },
     setCover: (itemId) => { const found = findItem(project, itemId); if (!found) return; commit((p) => setCoverAsset(p, found.item.assetId)); notify("Copertina del progetto impostata: la vedi nella Home.", true); },

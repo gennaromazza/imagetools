@@ -143,6 +143,10 @@ function validateProject(value: unknown): asserts value is AlbumProjectV2 {
     optionalNumber(asset.captureTimeMs, `assets[${index}].captureTimeMs`, 0);
     if (asset.albumTags !== undefined) for (const tag of list(asset.albumTags, `assets[${index}].albumTags`)) oneOf(tag, ["cover", "panorama", "main", "social"], "albumTags");
     if (asset.labelIds !== undefined) list(asset.labelIds, `assets[${index}].labelIds`).forEach((label) => text(label, "labelIds"));
+    if (asset.colorAdjust !== undefined) {
+      const adjust = record(asset.colorAdjust, `assets[${index}].colorAdjust`);
+      for (const key of ["brightness", "contrast", "saturation", "temperature", "tint"]) optionalNumber(adjust[key], `assets[${index}].colorAdjust.${key}`, -100, 100);
+    }
   }
 
   if (p.coverAssetId !== undefined && (typeof p.coverAssetId !== "string" || !assetIds.has(p.coverAssetId))) fail("La copertina usa una foto che non esiste nella libreria.");

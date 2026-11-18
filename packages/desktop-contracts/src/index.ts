@@ -781,6 +781,18 @@ export interface DesktopPersistedState {
   sourceId?: string;
 }
 
+/** Correzione colore già pronta da scrivere su un JPG: matrice 3×3 di saturazione (9 numeri) e, per R, G, B, pendenza e intercetta (scala 0-1). */
+export interface DesktopPhotoColorTransform {
+  matrix: number[];
+  slope: number[];
+  intercept: number[];
+}
+
+export interface DesktopPhotoColorWriteResult {
+  ok: boolean;
+  message: string;
+}
+
 export interface DesktopSidecarXmpInfo {
   xml: string;
   lastModified: number;
@@ -1798,6 +1810,12 @@ export interface FileXDesktopApi {
   readSidecarXmp: (absolutePath: string) => Promise<string | null>;
   readSidecarXmpInfo: (absolutePath: string) => Promise<DesktopSidecarXmpInfo | null>;
   writeSidecarXmp: (absolutePath: string, xml: string) => Promise<boolean>;
+  /** Scrive la correzione colore sul file JPG (con copia di sicurezza dell'originale al primo salvataggio). */
+  applyPhotoColorToFile: (absolutePath: string, transform: DesktopPhotoColorTransform) => Promise<DesktopPhotoColorWriteResult>;
+  /** Rimette il file com'era prima della prima correzione scritta da Album Flow. */
+  restorePhotoOriginal: (absolutePath: string) => Promise<DesktopPhotoColorWriteResult>;
+  /** Esiste una copia di sicurezza dell'originale di questo file? */
+  hasPhotoOriginalBackup: (absolutePath: string) => Promise<boolean>;
   browseArchivioFolder: () => Promise<string | null>;
   getArchivioSettings: () => Promise<ArchivioSettings>;
   saveArchivioSettings: (settings: Partial<ArchivioSettings>) => Promise<ArchivioSettings>;

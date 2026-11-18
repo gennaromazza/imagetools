@@ -454,6 +454,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
       src={src}
       rotation={asset?.rotationDegrees}
       mono={area.style.mono}
+      adjust={asset?.colorAdjust}
       borderColor={itemBorderColor(item, area.style)}
       className={classes}
       style={cell.z !== undefined ? { zIndex: stackBand(cell) < 0 ? 1 : 10, transform: cell.rotation ? `rotate(${cell.rotation}deg)` : undefined } : undefined}

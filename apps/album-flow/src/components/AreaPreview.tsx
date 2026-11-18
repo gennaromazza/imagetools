@@ -8,7 +8,7 @@ import { PhotoBox } from "./PhotoBox";
 
 function PreviewCell({ asset, placement, mono, borderColor, origin, style }: { asset: AlbumAssetV2 | undefined; placement: ReturnType<typeof placeItem>; mono: boolean; borderColor: string; origin: { x: number; y: number; w: number; h: number }; style?: React.CSSProperties }) {
   const src = useAssetSrc(asset, 360);
-  return <PhotoBox origin={origin} placement={placement} src={src} rotation={asset?.rotationDegrees} mono={mono} borderColor={borderColor} style={style} />;
+  return <PhotoBox origin={origin} placement={placement} src={src} rotation={asset?.rotationDegrees} mono={mono} adjust={asset?.colorAdjust} borderColor={borderColor} style={style} />;
 }
 
 /**

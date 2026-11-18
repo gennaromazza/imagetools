@@ -195,7 +195,23 @@ export interface AlbumChapterV2 {
   assetIds: string[];
 }
 
+/**
+ * Correzione colore di una foto, non distruttiva: i valori vanno da -100 a 100 e lo zero non cambia nulla (un campo assente vale zero).
+ * Si vede sullo schermo e nell'esportazione; solo con la conferma del fotografo viene scritta sul file originale.
+ */
+export interface PhotoColorAdjust {
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  /** Positivo = più caldo, negativo = più freddo. */
+  temperature?: number;
+  /** Positivo = verso il magenta, negativo = verso il verde. */
+  tint?: number;
+}
+
 export interface AlbumAssetV2 extends ImageAsset {
+  /** Correzione colore (luminosità, contrasto, saturazione, temperatura, tinta) applicata a schermo e nell'esportazione; assente = foto com'è. */
+  colorAdjust?: PhotoColorAdjust;
   /** Percorso assoluto sul disco quando la foto arriva dall'app desktop. */
   absolutePath?: string;
   /** Ordine scelto in Image Select Pro, se la foto arriva da lì. */

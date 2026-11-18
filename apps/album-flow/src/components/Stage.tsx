@@ -20,6 +20,8 @@ import { useNewFeature } from "../hooks/useNewFeature";
 import { LayoutBrowser } from "./LayoutBrowser";
 import { SpreadView, type Draft, type ToolbarParts } from "./SpreadView";
 import { AlternativesPicker } from "./AlternativesPicker";
+import { ColorEditor, type ColorEditorActions } from "./ColorEditor";
+import { isNeutralAdjust } from "../model/colorAdjust";
 import { AlignBar } from "./AlignBar";
 import { movableFrames } from "../model/freeGroup";
 import type { AlignMode, Boxed } from "../engine/arrange";
@@ -77,6 +79,8 @@ export interface StageActions {
   lockItem: (itemId: string) => void;
   setItemBorder: (itemId: string, change: { cm?: number | null; color?: string | null }) => void;
   viewItem: (itemId: string) => void;
+  /** Ritocco colore della foto (luminosità, contrasto, saturazione, temperatura, tinta), abbinamento ai colori dello spread e scrittura sul file. */
+  color: ColorEditorActions;
   revealItem: (itemId: string) => void;
   copyItemName: (itemId: string) => void;
   locateInLibrary: (itemId: string) => void;
@@ -297,10 +301,12 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
   }, [centerRef, actions]);
 
   // Chiude i pannelli quando si cambia spread.
-  useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setLockOpen(false); setPhotoMenu(null); setBorderFor(null); setSliderFor(null); }, [spread.id]);
+  useEffect(() => { setInfoFor(null); setApplyOpen(false); setSettingsOpen(false); setLockOpen(false); setPhotoMenu(null); setBorderFor(null); setSliderFor(null); setColorFor(null); }, [spread.id]);
 
   const newShape = useNewFeature("forma-foto");
   const newBorder = useNewFeature("bordo-foto");
+  const newColor = useNewFeature("ritocco-colore");
+  const [colorFor, setColorFor] = useState<string | null>(null);
   const [borderFor, setBorderFor] = useState<string | null>(null);
   const [sliderFor, setSliderFor] = useState<string | null>(null);
   const toolbar = useCallback((itemId: string): ToolbarParts | null => {
@@ -366,7 +372,16 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
     const right = (
       <>
         <IconButton icon="eye" label="Guarda in grande (Spazio)" onClick={() => actions.viewItem(itemId)} size={16} />
-        {desktop && asset?.absolutePath ? <IconButton icon="pencil" label="Modifica nell'editor" onClick={() => actions.editItem(itemId)} size={16} /> : null}
+        {asset ? (
+          <div className="anchor">
+            <IconButton icon="colorAdjust" label={newColor.isNew ? "Ritocco colore: luminosità, contrasto, saturazione e abbinamento allo spread — novità" : "Ritocco colore: luminosità, contrasto, saturazione e abbinamento allo spread"} active={colorFor === itemId || !isNeutralAdjust(asset.colorAdjust)} onClick={() => { newColor.markSeen(); setColorFor(colorFor === itemId ? null : itemId); }} size={16} />
+            {newColor.isNew ? <span className="new-dot" aria-hidden="true" /> : null}
+            <Popover open={colorFor === itemId} onClose={() => setColorFor(null)} side="top" className="popover--color">
+              <ColorEditor asset={asset} photosInSpread={new Set(spread.areas.flatMap((candidate) => candidate.items.map((item) => item.assetId))).size} canWriteFile={desktop && Boolean(asset.absolutePath) && /\.jpe?g$/i.test(asset.absolutePath ?? "")} actions={actions.color} />
+            </Popover>
+          </div>
+        ) : null}
+        {desktop && asset?.absolutePath ? <IconButton icon="pencil" label="Modifica nell'editor (Photoshop)" onClick={() => actions.editItem(itemId)} size={16} /> : null}
         <div className="anchor">
           <IconButton icon="info" label="Informazioni sulla foto" active={infoFor === itemId} onClick={() => setInfoFor(infoFor === itemId ? null : itemId)} size={16} />
           <Popover open={infoFor === itemId} onClose={() => setInfoFor(null)} side="top" className="popover--info">
@@ -414,7 +429,7 @@ export function Stage({ project, spread, spreadIndex, assets, activeArea, select
         <IconButton icon="crop" label={canCrop ? "Ritaglia e sposta nello slot (Invio)" : "Foto bloccata"} active={cropMode} disabled={!canCrop} onClick={() => actions.toggleCrop(itemId)} size={18} />      </>
     );
     return { top, left, right, bottom, straighten, quick };
-  }, [actions, alternatives, assets, borderFor, sliderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
+  }, [actions, alternatives, assets, borderFor, colorFor, newColor.isNew, newColor.markSeen, sliderFor, cropMode, desktop, infoFor, lineTool, newBorder.isNew, newBorder.markSeen, newShape.isNew, newShape.markSeen, sheet, spread]);
 
   /** Voci del tasto destro su una foto dello spread. */
   const photoMenuItems = (itemId: string): MenuItem[] => {

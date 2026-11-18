@@ -1,4 +1,4 @@
-import type { DesktopRenderedImage, FileXDesktopApi } from "@photo-tools/desktop-contracts";
+import type { DesktopPhotoColorTransform, DesktopRenderedImage, FileXDesktopApi } from "@photo-tools/desktop-contracts";
 import { parseXmpState, readXmpRating, upsertXmpFlags, upsertXmpRating, type XmpFlags } from "@photo-tools/photo-metadata";
 import type { ColorLabel } from "@photo-tools/shared-types";
 
@@ -220,6 +220,24 @@ export async function openInEditor(paths: string | readonly string[]): Promise<{
   const result = await api.openWithEditor(editor, list).catch((error: unknown) => ({ ok: false, error: String(error) }));
   const ok = Boolean((result as { ok?: boolean }).ok);
   return { ok, message: ok ? (list.length > 1 ? `${list.length} foto aperte nell'editor.` : "Foto aperta nell'editor.") : "Non sono riuscito ad aprire l'editor." };
+}
+
+/** Scrive la correzione colore sul file JPG (con copia di sicurezza dell'originale). Senza app desktop non si può. */
+export async function writeColorToFile(path: string, transform: DesktopPhotoColorTransform): Promise<{ ok: boolean; message: string }> {
+  const api = getDesktop();
+  if (!api?.applyPhotoColorToFile) return { ok: false, message: "Scrivere sul file richiede l'app desktop FileX aggiornata." };
+  try { return await api.applyPhotoColorToFile(path, transform); } catch { return { ok: false, message: "Non sono riuscito a scrivere la correzione sul file." }; }
+}
+
+/** Rimette il file com'era prima della prima correzione scritta da Album Flow. */
+export async function restoreOriginalFile(path: string): Promise<{ ok: boolean; message: string }> {
+  const api = getDesktop();
+  if (!api?.restorePhotoOriginal) return { ok: false, message: "Il ripristino richiede l'app desktop FileX aggiornata." };
+  try { return await api.restorePhotoOriginal(path); } catch { return { ok: false, message: "Non sono riuscito a ripristinare l'originale." }; }
+}
+
+export async function hasOriginalBackup(path: string): Promise<boolean> {
+  try { return (await getDesktop()?.hasPhotoOriginalBackup?.(path)) ?? false; } catch { return false; }
 }
 
 export function forgetEditor(): void {

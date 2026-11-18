@@ -91,6 +91,7 @@ import {
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
 import { AtomicOutputTransactionManager, normalizeAtomicOutputFileName } from "./atomic-output-transaction.js";
+import { applyColorToJpeg, hasOriginalBackup, restoreOriginalJpeg } from "./photo-color-service.js";
 import {
   configureDesktopImageService,
   clearDesktopImageMemoryCaches,
@@ -2175,6 +2176,17 @@ function registerIpcHandlers(): void {
   );
   ipcMain.handle("filex:write-sidecar-xmp", (_event, absolutePath: string, xml: string) =>
     writeSidecarXmpForAssetPath(absolutePath, xml),
+  );
+  // Correzione colore di Album Flow scritta sul JPG: l'originale resta al sicuro nella cartella dati del programma.
+  const photoOriginalsDir = () => join(app.getPath("userData"), "album-flow-originals");
+  ipcMain.handle("filex:apply-photo-color-to-file", (_event, absolutePath: string, transform: unknown) =>
+    applyColorToJpeg(sanitizeDesktopPath(absolutePath), transform, photoOriginalsDir()),
+  );
+  ipcMain.handle("filex:restore-photo-original", (_event, absolutePath: string) =>
+    restoreOriginalJpeg(sanitizeDesktopPath(absolutePath), photoOriginalsDir()),
+  );
+  ipcMain.handle("filex:has-photo-original-backup", (_event, absolutePath: string) =>
+    hasOriginalBackup(sanitizeDesktopPath(absolutePath), photoOriginalsDir()),
   );
   ipcMain.handle("filex:browse-archivio-folder", () => browseArchivioFolderDesktop());
   ipcMain.handle("filex:notify-backup-guard-project", (_event, notification: unknown) => {

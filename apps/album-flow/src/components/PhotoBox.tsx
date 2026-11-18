@@ -1,5 +1,7 @@
 import { type CSSProperties, type ReactNode, forwardRef } from "react";
 import type { Rect } from "../engine/geometry";
+import type { PhotoColorAdjust } from "@photo-tools/shared-types";
+import { adjustCssFilter } from "../model/colorAdjust";
 import { imageBox, overflowInset, type Placement } from "../model/placement";
 
 const pct = (value: number) => `${Number(value.toFixed(4))}%`;
@@ -11,6 +13,8 @@ export interface PhotoBoxProps {
   src: string;
   rotation?: number;
   mono?: boolean;
+  /** Correzione colore della foto (luminosità, contrasto…), vista a schermo come filtro. */
+  adjust?: PhotoColorAdjust;
   borderColor?: string;
   className?: string;
   style?: CSSProperties;
@@ -20,7 +24,7 @@ export interface PhotoBoxProps {
 
 /** Una foto dentro la sua cella: cornice, bordo, area visibile e immagine (posizionata e ruotata) in percentuali del contenitore. */
 export const PhotoBox = forwardRef<HTMLDivElement, PhotoBoxProps & React.HTMLAttributes<HTMLDivElement>>(function PhotoBox(
-  { origin, placement, src, rotation, mono, borderColor, className = "", style, children, alt = "", ...rest },
+  { origin, placement, src, rotation, mono, adjust, borderColor, className = "", style, children, alt = "", ...rest },
   ref,
 ) {
   const { frame, content, image, borderMm } = placement;
@@ -40,7 +44,7 @@ export const PhotoBox = forwardRef<HTMLDivElement, PhotoBoxProps & React.HTMLAtt
       alt={alt}
       draggable={false}
       className={mono ? "is-mono" : undefined}
-      style={{ left: pct(box.left), top: pct(box.top), width: pct(box.width), height: pct(box.height), transform: box.rotate ? `rotate(${box.rotate}deg)` : undefined }}
+      style={{ left: pct(box.left), top: pct(box.top), width: pct(box.width), height: pct(box.height), transform: box.rotate ? `rotate(${box.rotate}deg)` : undefined, filter: adjustCssFilter(adjust, mono) }}
     />
   ) : <span className="cell__ph" />;
   return (

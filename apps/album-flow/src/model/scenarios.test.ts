@@ -10,6 +10,7 @@ import { alignFrames, distributeFrames, duplicateFrames, nudgeFrames } from "./f
 import { applyChapterPreset, assignAssets, BUILTIN_CHAPTER_PRESETS, createChapter, moveChapter, removeChapter } from "./chapters";
 import { overlaysOf } from "./design";
 import { assertProjectInvariants, makeProject } from "./fixtures";
+import { setColorAdjust } from "./colorOps";
 import { cropFrameTo, visibleFrame } from "./freeCrop";
 import { makeAreaFree, restoreAutomatic, setAreaLocked } from "./layoutLock";
 import { applyImport, dedupeRawJpgPairs, planImport, type ImportCandidate } from "./import";
@@ -327,6 +328,7 @@ const OPERATIONS: Operation[] = [
   { name: "gesti di gruppo (frecce, allinea, distribuisci)", run: (p, r) => { const spread = maybe(r, p.spreads); const ids = spread ? spread.areas.flatMap((area) => area.items.map((item) => item.id)).filter(() => r() < 0.7) : []; if (ids.length === 0) return p; const kind = Math.floor(r() * 3); return kind === 0 ? nudgeFrames(p, ids, (r() - 0.5) * 40, (r() - 0.5) * 40) : kind === 1 ? alignFrames(p, ids, pick(r, ["left", "hcenter", "right", "top", "vcenter", "bottom"] as const)) : distributeFrames(p, ids, r() < 0.5 ? "x" : "y"); } },
   { name: "copia di foto libere trascinando", run: (p, r) => { const entry = maybe(r, itemsOf(p)); const rect = entry ? areaGeometry(p, entry.spread, entry.areaIndex).cells.find((cell) => cell.itemId === entry.item.id)?.rect : undefined; return entry && rect ? duplicateFrames(p, [{ id: entry.item.id, rect: { ...rect, x: rect.x + (r() - 0.5) * 80, y: rect.y + (r() - 0.5) * 80 } }]) : p; } },
   { name: "cornice davanti o dietro", run: (p, r) => { const entry = maybe(r, itemsOf(p)); return entry ? reorderFrame(p, entry.item.id, r() < 0.5 ? "front" : "back") : p; } },
+  { name: "correzione colore di una foto", run: (p, r) => { const asset = maybe(r, p.assets); const v = () => (r() - 0.5) * 240; return asset ? setColorAdjust(p, [asset.id], r() < 0.25 ? undefined : { brightness: v(), contrast: v(), saturation: v(), temperature: v(), tint: v() }) : p; } },
   { name: "riempi spread", run: (p, r) => { const spread = maybe(r, p.spreads); return spread ? fillSpread(p, spread.id, 1 + Math.floor(r() * 4)) : p; } },
   // Foto simili e momenti: correzioni ai gruppi, varianti nella cella, Auto Build e riempimento con l'analisi della libreria.
   { name: "unisci come simili", run: (p, r) => (p.assets.length >= 3 ? joinPhotos(p, [pick(r, p.assets).id, pick(r, p.assets).id, pick(r, p.assets).id]) : p) },

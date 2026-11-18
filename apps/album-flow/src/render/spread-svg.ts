@@ -1,5 +1,6 @@
 import type { AlbumAssetV2, AlbumSpread } from "@photo-tools/shared-types";
 import { areaOuterRects, paintOrder, spreadSizeMm } from "../engine/geometry";
+import { adjustFilterId, adjustFilterSvg } from "../model/colorAdjust";
 import { itemBorderColor, placeItem } from "../model/placement";
 import { areaGeometry, assetMap, placementStyle, type Project } from "../model/project";
 import { renderBackgroundsSvg, renderOverlaysSvg, type DesignContext } from "./design-svg";
@@ -47,6 +48,7 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
   const backgroundImages = options.design ? renderBackgroundsSvg(project, spread, options.design) : "";
   const overlays = options.design ? renderOverlaysSvg(project, spread, options.design) : "";
   let needsMono = false;
+  const adjustFilters = new Map<string, string>();
   const geometries = spread.areas.map((_, areaIndex) => areaGeometry(project, spread, areaIndex));
   // Tutte le foto dello spread nello stesso ordine di disegno dello schermo (`paintOrder`), dal livello più basso al più alto anche tra le due
   // pagine: una foto libera che sborda nell'altra pagina sta sopra o sotto come a schermo. Ogni foto ruota attorno al suo centro.
@@ -70,8 +72,11 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
     const elementW = quarter ? placement.image.h : placement.image.w;
     const elementH = quarter ? placement.image.w : placement.image.h;
     const rotate = asset.rotationDegrees ? ` transform="rotate(${asset.rotationDegrees} ${n(cx)} ${n(cy)})"` : "";
-    if (area.style.mono) needsMono = true;
-    const filter = area.style.mono ? ' filter="url(#mono)"' : "";
+    // Correzione colore della foto: un filtro per ogni correzione diversa (con il bianco e nero dentro, se la pagina è in B/N).
+    const adjusted = adjustFilterSvg(asset.colorAdjust, Boolean(area.style.mono));
+    if (adjusted) adjustFilters.set(adjustFilterId(asset.colorAdjust, Boolean(area.style.mono)), adjusted);
+    else if (area.style.mono) needsMono = true;
+    const filter = adjusted ? ` filter="url(#${adjustFilterId(asset.colorAdjust, Boolean(area.style.mono))})"` : area.style.mono ? ' filter="url(#mono)"' : "";
     const clip = `<clipPath id="${clipId}"><rect x="${n(content.x)}" y="${n(content.y)}" width="${n(content.w)}" height="${n(content.h)}"/></clipPath>`;
     if (placement.angle) {
       // Foto raddrizzata: il ritaglio resta dritto, l'immagine ruota attorno al centro della parte visibile.
@@ -91,6 +96,7 @@ export function renderSpreadSvg(project: Project, spread: AlbumSpread, assets: R
   }
   const monoFilter = needsMono ? '<filter id="mono" color-interpolation-filters="sRGB"><feColorMatrix type="saturate" values="0"/></filter>' : "";
   const fontStyle = options.design?.fontCss && overlays ? `<style>${options.design.fontCss}</style>` : "";
-  const defs = monoFilter || fontStyle ? `<defs>${fontStyle}${monoFilter}</defs>` : "";
+  const adjustDefs = [...adjustFilters.values()].join("");
+  const defs = monoFilter || fontStyle || adjustDefs ? `<defs>${fontStyle}${monoFilter}${adjustDefs}</defs>` : "";
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${n(-bleed)} ${n(-bleed)} ${n(width + bleed * 2)} ${n(height + bleed * 2)}" width="${n(width + bleed * 2)}mm" height="${n(height + bleed * 2)}mm" role="img" aria-label="Spread ${spreadIndex + 1}">${defs}${backgrounds}${backgroundImages}${cells}${overlays}${guides}</svg>`;
 }

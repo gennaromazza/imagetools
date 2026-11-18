@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HISTORY_LIMIT, canRedo, canUndo, createHistory, pushHistory, redo, resetHistory, undo } from "./history";
+import { HISTORY_LIMIT, canRedo, canUndo, createHistory, mapHistory, pushHistory, redo, resetHistory, undo } from "./history";
 
 test("annulla e ripeti percorrono gli stati in ordine", () => {
   let h = createHistory(0);
@@ -26,4 +26,17 @@ test("stato identico non crea passi e la cronologia è limitata", () => {
   for (let i = 1; i <= HISTORY_LIMIT + 50; i += 1) big = pushHistory(big, i);
   assert.equal(big.past.length, HISTORY_LIMIT);
   assert.equal(resetHistory(big, 7).past.length, 0);
+});
+test("mapHistory: la stessa trasformazione vale per passato, presente e futuro, e i passi restano quelli", () => {
+  let h = createHistory({ n: 1, tag: "a" });
+  h = pushHistory(h, { n: 2, tag: "a" });
+  h = pushHistory(h, { n: 3, tag: "a" });
+  h = undo(h);
+  const mapped = mapHistory(h, (state) => ({ ...state, tag: "b" }));
+  assert.deepEqual(mapped.past.map((s) => s.n), [1]);
+  assert.equal(mapped.present.n, 2);
+  assert.deepEqual(mapped.future.map((s) => s.n), [3]);
+  assert.ok([...mapped.past, mapped.present, ...mapped.future].every((s) => s.tag === "b"));
+  assert.equal(canUndo(mapped), true);
+  assert.equal(canRedo(mapped), true);
 });
