@@ -41,7 +41,7 @@ import { useMissingPhotos } from "../hooks/useMissingPhotos";
 import { useNewFeature } from "../hooks/useNewFeature";
 import { applyRelink } from "../model/relinkAssets";
 import { driveAvailable } from "../desktop/cloud";
-import { alignOverlayToPage } from "../model/designAlign";
+import { addTextBelow, alignOverlayToPage } from "../model/designAlign";
 import { makeAreaFree, restoreAutomatic, setAreaLocked, setSpreadLock } from "../model/layoutLock";
 import { canvasMeasure } from "../render/fonts";
 import { insertPhrase, insertStory, planAlbumStories, proposalFromUnit, replaceWithPhrase, replaceWithStory, suggestStoryForSpread, type SuggestResult } from "../model/story";
@@ -769,6 +769,14 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       setSelectedOverlayId(created); setSelectedItemId(null); setCropMode(false);
       // Dalla «Libreria» si resta dove si è: si inseriscono più frasi di fila senza tornare a cercarle.
       if (!behavior?.stay) { setDesignTab("text"); setFocusSignal((value) => value + 1); }
+    },
+    addTextBelow: (overlayId, options) => {
+      if (!spreadId) return;
+      const out: { id: string | null; reason?: "limit" | "room" } = { id: null };
+      commit((p) => { const made = addTextBelow(p, spreadId, overlayId, options, canvasMeasure); out.id = made.overlayId; out.reason = made.reason; return made.project; });
+      if (!out.id) { notify(out.reason === "room" ? "Sotto non c'è più posto in questa pagina: riduci il testo o spostalo più in alto." : "Su questo spread ci sono già troppi elementi."); return; }
+      setSelectedOverlayId(out.id); setSelectedItemId(null); setCropMode(false); setExtraOverlayIds([]);
+      setFocusSignal((value) => value + 1);
     },
     addGraphic: (options) => {
       if (!spreadId) return;

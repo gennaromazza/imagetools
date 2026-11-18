@@ -110,3 +110,25 @@ test("stessa distanza: non si aggancia dove le foto si toccherebbero né con spa
   // gli assi si possono escludere
   assert.equal(snapEqualGaps(box(106, 0, 40, 40), [a, box(52, 0, 40, 40)], 4, { x: false, y: true }).rect.x, 106);
 });
+
+test("aggancio a bordi: il centro della foto si allinea al centro di un'altra, anche con larghezze diverse (foto una sotto l'altra)", () => {
+  const above = box(100, 50, 200, 60);
+  const result = snapMove(box(152, 130, 100, 40), [above], 4, { targetCenters: false });
+  assert.equal(result.rect.x, 150, "centro con centro: 100 + 200/2 = 150 + 100/2");
+  assert.ok(result.guides.some((guide) => guide.axis === "x" && Math.abs(guide.at - 200) < 1e-9), "linea guida sul centro comune");
+  // senza i centri la foto non scatta sul centro di un bersaglio per il bordo
+  const edge = snapMove(box(204, 130, 50, 40), [above], 3, { targetCenters: false });
+  assert.equal(edge.rect.x, 204, "il bordo della foto non si attacca al centro del bersaglio");
+});
+
+test("spazio standard: una foto sotto un'altra si ferma alla distanza dell'album, anche senza altre foto da imitare", () => {
+  const above = box(100, 50, 80, 60);
+  const moving = box(100, 114, 80, 40);
+  const snapped = snapEqualGaps(moving, [above], 3, { x: false, y: true }, [5]);
+  assert.equal(snapped.rect.y, 115, "110 + 5");
+  assert.equal(snapped.matched.y, 5);
+  assert.equal(snapEqualGaps(moving, [above], 3, { x: false, y: true }).rect.y, 114, "senza lo spazio standard non c'è nulla da ripetere");
+  assert.equal(snapEqualGaps(box(100, 130, 80, 40), [above], 3, { x: false, y: true }, [5]).rect.y, 130, "troppo lontana: nessun aggancio");
+  const sideBySide = snapEqualGaps(box(183, 50, 40, 60), [above], 3, { x: true, y: false }, [5]);
+  assert.equal(sideBySide.rect.x, 185, "vale anche in orizzontale");
+});

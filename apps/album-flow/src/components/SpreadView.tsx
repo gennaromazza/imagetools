@@ -125,8 +125,8 @@ const sameHint = (a: DropHint, b: DropHint): boolean => a === b || (a !== null &
 const SNAPS = [0.5, 1 / 3, 2 / 3];
 /** Distanza (pixel sullo schermo) entro cui una foto si aggancia alle altre durante lo spostamento. */
 const SNAP_PX = 6;
-/** Le foto delle disposizioni libere si agganciano da più vicino e ai soli bordi: lo spostamento resta fluido. */
-const FRAME_SNAP_PX = 4;
+/** Le foto delle disposizioni libere si agganciano ai bordi (e al centro con il centro) entro questa distanza in pixel: abbastanza per sentire la calamita, poco per non frenare. */
+const FRAME_SNAP_PX = 7;
 /** Sotto questa distanza (pixel) Ctrl/⌘ + trascinamento non crea la copia. */
 const COPY_MIN_PX = 10;
 
@@ -153,6 +153,8 @@ interface CellProps {
   free: boolean;
   /** Rettangoli a cui la foto si aggancia spostandola (altre foto, bordi e centro dell'area, piega); solo nelle disposizioni libere. */
   snapTargets?: Array<{ id: string; rect: Rect }>;
+  /** Spazi standard (mm) a cui la foto si ferma dalle vicine: lo «spazio tra le foto» della pagina. */
+  standardGaps?: readonly number[];
   /** Lo strumento «linea» del raddrizzamento è acceso per questa foto. */
   lineTool: boolean;
   /** La foto ha varianti simili: posizione tra le varianti («2/3»). */
@@ -205,7 +207,7 @@ export function cropRectFor(base: Rect, edge: CropEdge, dx: number, dy: number, 
   return { x: Math.min(left, right), y: Math.min(top, bottom), w: Math.abs(right - left), h: Math.abs(bottom - top) };
 }
 
-const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, picked, cropActive, pickMode, marqueeMode, view, lowDpi, showSizes, free, snapTargets, lineTool, altLabel, handlers }: CellProps) {
+const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, variant, selected, highlighted, picked, cropActive, pickMode, marqueeMode, view, lowDpi, showSizes, free, snapTargets, standardGaps, lineTool, altLabel, handlers }: CellProps) {
   // Lavorazione veloce: anteprime leggere; la qualità piena solo per la foto selezionata o in ritaglio e nell'anteprima cliente.
   const pixels = variant === "thumb" ? 200 : variant === "present" ? presentPixels() : selected || cropActive ? 1400 : 720;
   // Anteprima cliente: subito la versione leggera (spesso già in cache), poi quella nitida sopra.
@@ -293,7 +295,7 @@ const Cell = memo(function Cell({ cell, item, asset, area, areaIndex, origin, va
     snapGuides.current = snapped.guides;
     // «Stessa distanza»: sugli assi dove la foto non si è già agganciata a un bordo, si ferma dove lo spazio dalle vicine è uguale.
     const equal = drag.mode === "move"
-      ? snapEqualGaps(snapped.rect, photos, FRAME_SNAP_PX * drag.mmPerPx, { x: Math.abs(snapped.rect.x - raw.x) < 1e-6, y: Math.abs(snapped.rect.y - raw.y) < 1e-6 })
+      ? snapEqualGaps(snapped.rect, photos, FRAME_SNAP_PX * drag.mmPerPx, { x: Math.abs(snapped.rect.x - raw.x) < 1e-6, y: Math.abs(snapped.rect.y - raw.y) < 1e-6 }, standardGaps)
       : { rect: snapped.rect, matched: {} };
     frameGaps.current = gapMeasures(equal.rect, photos, equal.matched);
     return equal.rect;
@@ -703,6 +705,8 @@ function SpreadViewInner(props: SpreadViewProps) {
       { id: "__center", rect: { x: base.inner.x + base.inner.w / 2, y: base.inner.y + base.inner.h / 2, w: 0, h: 0 } },
     ];
   }), [interactive, sheet, spread, size.width]);
+  // Lo «spazio tra le foto» delle pagine libere: una foto accanto o sotto un'altra si ferma proprio a quella distanza.
+  const standardGapsByArea = useMemo(() => spread.areas.map((area) => [area.style.gapCm * 10]), [spread]);
   const latest = useRef({ geometry, onCommitFrame: props.onCommitFrame });
   latest.current = { geometry, onCommitFrame: props.onCommitFrame };
   const cropLatest = useRef({ sheet, spread, assets, onCommitCrop: props.onCommitCrop });
@@ -778,8 +782,8 @@ function SpreadViewInner(props: SpreadViewProps) {
 
   // Gesti su più foto libere: spostamento di gruppo (una foto della selezione multipla trascinata) e selezione a rettangolo (trascinando sullo sfondo).
   // I movimenti si seguono sulla finestra e leggono i valori da una ref: il gesto non dipende dai ridisegni a ogni movimento.
-  const groupLatest = useRef({ geometry, spread, size, picked: props.pickedItemIds, selectedItemId, snapTargetsByArea, onDraft: props.onDraft, onCommitFrames: props.onCommitFrames, onPickItems: props.onPickItems, activeArea });
-  groupLatest.current = { geometry, spread, size, picked: props.pickedItemIds, selectedItemId, snapTargetsByArea, onDraft: props.onDraft, onCommitFrames: props.onCommitFrames, onPickItems: props.onPickItems, activeArea };
+  const groupLatest = useRef({ geometry, spread, size, picked: props.pickedItemIds, selectedItemId, snapTargetsByArea, standardGapsByArea, onDraft: props.onDraft, onCommitFrames: props.onCommitFrames, onPickItems: props.onPickItems, activeArea });
+  groupLatest.current = { geometry, spread, size, picked: props.pickedItemIds, selectedItemId, snapTargetsByArea, standardGapsByArea, onDraft: props.onDraft, onCommitFrames: props.onCommitFrames, onPickItems: props.onPickItems, activeArea };
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const [marqueeIds, setMarqueeIds] = useState<readonly string[]>([]);
   /** Dopo un trascinamento il clic che il browser genera sullo sfondo o sulla foto non deve azzerare la selezione appena fatta. */
@@ -824,7 +828,7 @@ function SpreadViewInner(props: SpreadViewProps) {
         dy = snapped.rect.y - start.y;
         guides = snapped.guides;
         const edgeRect = translateRect(start, dx, dy);
-        const equal = snapEqualGaps(edgeRect, photos, FRAME_SNAP_PX * mmPerPx, { x: Math.abs(dx - px * mmPerPx) < 1e-6, y: Math.abs(dy - py * mmPerPx) < 1e-6 });
+        const equal = snapEqualGaps(edgeRect, photos, FRAME_SNAP_PX * mmPerPx, { x: Math.abs(dx - px * mmPerPx) < 1e-6, y: Math.abs(dy - py * mmPerPx) < 1e-6 }, now.standardGapsByArea.flat());
         dx += equal.rect.x - edgeRect.x;
         dy += equal.rect.y - edgeRect.y;
         matched = equal.matched;
@@ -1032,6 +1036,7 @@ function SpreadViewInner(props: SpreadViewProps) {
               showSizes={showSizes}
               free={hasFreeLayout(area)}
               snapTargets={snapTargetsByArea[areaIndex]}
+              standardGaps={standardGapsByArea[areaIndex]}
               lineTool={Boolean(props.straightenTool) && selectedItemId === item.id}
               altLabel={props.altLabels?.get(item.id)}
               handlers={handlers}

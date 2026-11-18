@@ -16,7 +16,7 @@ import { BASE_GROUP, FONT_FAMILIES, TEXT_PRESETS, WEDDING_TEXT_TEMPLATES, contra
 import { renderBackgroundsSvg, renderOverlaysSvg, overlayBox } from "../render/design-svg";
 import { approximateMeasure, layoutText } from "../render/text-layout";
 import { renderSpreadSvg } from "../render/spread-svg";
-import { alignOverlayToPage, groupFrame, overlayFrame, overlaySnapTargets, pageForFrame, resizeKeepingCorner } from "./designAlign";
+import { addTextBelow, alignOverlayToPage, groupFrame, overlayFrame, overlaySnapTargets, pageForFrame, resizeKeepingCorner } from "./designAlign";
 import { spreadSizeMm } from "../engine/geometry";
 import { snapMove } from "../engine/snap";
 import { appendAssets } from "./items";
@@ -717,4 +717,61 @@ test("scala con un angolo fermo: il punto di rotazione resta dov'è e il blocco 
   assert.ok(Math.abs(Math.min(...after.map((item) => item.x)) - left) < 0.002, "il bordo sinistro non si muove");
   assert.ok(Math.abs(Math.min(...after.map((item) => item.y)) - top) < 0.002, "il bordo alto non si muove");
   assert.ok(Math.max(...after.map((item) => item.x + item.w)) > Math.max(...before.map((item) => item.x + item.w)), "il blocco cresce verso destra");
+});
+
+test("aggiungi sotto: un altro paragrafo nasce sotto il blocco, agganciato, con stessa larghezza, asse e colore", () => {
+  const { project, spreadId } = withSpread();
+  const sheet = project.settings.sheet;
+  const measure = approximateMeasure;
+  const stack = addTextStack(project, spreadId, { presetId: "headline", at: { x: 0.25, y: 0.2 } });
+  const before = overlaysOf(stack.project.spreads[0]) as SpreadTextOverlay[];
+  const frameBefore = groupFrame(sheet, stack.project.spreads[0], stack.overlayId!, measure)!;
+  const made = addTextBelow(stack.project, spreadId, stack.overlayId!, { presetId: "body" }, measure);
+  assert.ok(made.overlayId, "il paragrafo si aggiunge");
+  const after = overlaysOf(made.project.spreads[0]) as SpreadTextOverlay[];
+  assert.equal(after.length, before.length + 1);
+  const created = after.find((overlay) => overlay.id === made.overlayId)!;
+  const lowest = before.reduce((a, b) => (overlayFrame(sheet, b, measure).y > overlayFrame(sheet, a, measure).y ? b : a));
+  assert.equal(created.w, lowest.w, "stessa larghezza del pezzo più in basso");
+  assert.equal(created.x, lowest.x, "stesso asse");
+  assert.equal(created.color, lowest.color, "stesso colore: non torna quello provvisorio");
+  const frameCreated = overlayFrame(sheet, created, measure);
+  assert.ok(frameCreated.y >= frameBefore.y + frameBefore.h - 1e-6, "sta sotto tutto il blocco");
+  assert.ok(created.groupId && after.filter((overlay) => overlay.groupId === created.groupId).length === before.length + 1, "tutto il blocco e il nuovo testo sono nello stesso gruppo");
+  // se ne può aggiungere ancora, sempre in fondo
+  const again = addTextBelow(made.project, spreadId, made.overlayId!, { presetId: "body" }, measure);
+  assert.ok(again.overlayId);
+  const third = (overlaysOf(again.project.spreads[0]) as SpreadTextOverlay[]).find((overlay) => overlay.id === again.overlayId)!;
+  assert.ok(overlayFrame(sheet, third, measure).y >= frameCreated.y + frameCreated.h - 1e-6, "il secondo paragrafo sta sotto il primo");
+  assertProjectInvariants(again.project);
+});
+
+test("aggiungi sotto: un testo da solo forma un gruppo col nuovo; l'asse centrato si mantiene", () => {
+  const { project, spreadId } = withSpread();
+  const first = addTextOverlay(project, spreadId, { presetId: "signature", text: "Elena & Marco", at: { x: 0.25, y: 0.3 } });
+  const made = addTextBelow(first.project, spreadId, first.overlayId!, { presetId: "kicker" }, approximateMeasure);
+  const list = overlaysOf(made.project.spreads[0]) as SpreadTextOverlay[];
+  assert.equal(list.length, 2);
+  assert.ok(list[0].groupId && list[0].groupId === list[1].groupId, "agganciati");
+  assert.equal(list[1].align, "center", "il testo centrato resta centrato");
+});
+
+test("aggiungi sotto: in fondo alla pagina il blocco sale; senza posto non cambia nulla; elemento inesistente", () => {
+  const { project, spreadId } = withSpread();
+  const sheet = project.settings.sheet;
+  const measure = approximateMeasure;
+  const low = addTextOverlay(project, spreadId, { presetId: "body", text: "Fine pagina", at: { x: 0.25, y: 0.94 } });
+  const made = addTextBelow(low.project, spreadId, low.overlayId!, { presetId: "body" }, measure);
+  assert.ok(made.overlayId, "il blocco sale per far posto");
+  const frame = groupFrame(sheet, made.project.spreads[0], made.overlayId!, measure)!;
+  const page = pageForFrame(sheet, made.project.spreads[0], frame);
+  assert.ok(frame.y + frame.h <= page.y + page.h + 0.01, "il blocco resta dentro la pagina");
+
+  const huge = addTextOverlay(project, spreadId, { presetId: "body", text: "parola ".repeat(900), at: { x: 0.25, y: 0.1 } });
+  const refused = addTextBelow(huge.project, spreadId, huge.overlayId!, { presetId: "body" }, measure);
+  assert.equal(refused.overlayId, null);
+  assert.equal(refused.reason, "room");
+  assert.equal(refused.project, huge.project, "nessuna modifica se non c'è posto");
+
+  assert.equal(addTextBelow(project, spreadId, "non-esiste", {}, measure).project, project);
 });

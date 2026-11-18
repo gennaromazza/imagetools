@@ -24,18 +24,26 @@ interface Hit {
   target: Rect;
 }
 
-/** Il candidato più vicino (entro la soglia) tra i punti `mine` e i punti dei `targets`; parità entro EPSILON restano tutte. */
-function nearest(mine: readonly number[], targets: readonly Rect[], pick: (rect: Rect) => number[], threshold: number): Hit[] {
+/** Un gruppo di confronti: i punti `mine` della foto contro i punti `pick` di ogni bersaglio. */
+interface Channel {
+  mine: readonly number[];
+  pick: (rect: Rect) => number[];
+}
+
+/** Il candidato più vicino (entro la soglia) tra tutti i confronti dei `channels`; parità entro EPSILON restano tutte. */
+function nearest(channels: readonly Channel[], targets: readonly Rect[], threshold: number): Hit[] {
   let best = Infinity;
   const hits: Hit[] = [];
-  for (const target of targets) {
-    for (const at of pick(target)) {
-      for (const point of mine) {
-        const delta = at - point;
-        const distance = Math.abs(delta);
-        if (distance > threshold) continue;
-        if (distance < best - EPSILON) { best = distance; hits.length = 0; }
-        if (distance <= best + EPSILON) hits.push({ delta, at, target });
+  for (const channel of channels) {
+    for (const target of targets) {
+      for (const at of channel.pick(target)) {
+        for (const point of channel.mine) {
+          const delta = at - point;
+          const distance = Math.abs(delta);
+          if (distance > threshold) continue;
+          if (distance < best - EPSILON) { best = distance; hits.length = 0; }
+          if (distance <= best + EPSILON) hits.push({ delta, at, target });
+        }
       }
     }
   }
@@ -62,13 +70,19 @@ const guidesFor = (rect: Rect, hits: readonly Hit[], axis: "x" | "y"): SnapGuide
 /**
  * Aggancio (calamita) durante lo spostamento: bordo sinistro/centro/destro e alto/centro/basso della foto si attaccano a quelli
  * delle altre foto e dei bordi dell'area (`targets`) entro `threshold` mm. Restituisce il rettangolo agganciato e le linee guida.
+ * Con `targetCenters: false` i bersagli offrono i soli bordi (meno scatti quando ci sono molte foto), ma il centro della foto si
+ * allinea comunque al centro dei bersagli: due foto una sotto l'altra si centrano anche se hanno larghezze diverse.
  */
 export function snapMove(rect: Rect, targets: readonly Rect[], threshold: number, options: { targetCenters?: boolean } = {}): SnapResult {
-  // Senza i centri degli altri elementi l'aggancio resta ai soli bordi (e alla piega): meno scatti quando ci sono molte foto.
-  const edgesX = options.targetCenters === false ? (r: Rect) => [r.x, r.x + r.w] : xs;
-  const edgesY = options.targetCenters === false ? (r: Rect) => [r.y, r.y + r.h] : ys;
-  const hitsX = nearest(xs(rect), targets, edgesX, threshold);
-  const hitsY = nearest(ys(rect), targets, edgesY, threshold);
+  const edgesOnly = options.targetCenters === false;
+  const channelsX: Channel[] = edgesOnly
+    ? [{ mine: [rect.x, rect.x + rect.w], pick: (r) => [r.x, r.x + r.w] }, { mine: [rect.x + rect.w / 2], pick: (r) => [r.x, r.x + r.w / 2, r.x + r.w] }]
+    : [{ mine: xs(rect), pick: xs }];
+  const channelsY: Channel[] = edgesOnly
+    ? [{ mine: [rect.y, rect.y + rect.h], pick: (r) => [r.y, r.y + r.h] }, { mine: [rect.y + rect.h / 2], pick: (r) => [r.y, r.y + r.h / 2, r.y + r.h] }]
+    : [{ mine: ys(rect), pick: ys }];
+  const hitsX = nearest(channelsX, targets, threshold);
+  const hitsY = nearest(channelsY, targets, threshold);
   const snapped: Rect = { ...rect, x: rect.x + (hitsX[0]?.delta ?? 0), y: rect.y + (hitsY[0]?.delta ?? 0) };
   return { rect: snapped, guides: [...guidesFor(snapped, hitsX, "x"), ...guidesFor(snapped, hitsY, "y")] };
 }
@@ -84,7 +98,7 @@ interface EqualGapHit {
 }
 
 /** Su un asse: la foto si ferma dove lo spazio da una vicina è uguale all'altro lato o a uno spazio già presente tra due altre foto. */
-function equalGapOnAxis(rect: Rect, others: readonly Rect[], threshold: number, axis: "x" | "y"): EqualGapHit | null {
+function equalGapOnAxis(rect: Rect, others: readonly Rect[], threshold: number, axis: "x" | "y", standardGaps: readonly number[]): EqualGapHit | null {
   const pos = (r: Rect) => (axis === "x" ? r.x : r.y);
   const len = (r: Rect) => (axis === "x" ? r.w : r.h);
   const cross = (r: Rect) => (axis === "x" ? r.y : r.x);
@@ -113,6 +127,9 @@ function equalGapOnAxis(rect: Rect, others: readonly Rect[], threshold: number, 
     }
   }
 
+  // Lo spazio standard dell'album vale come uno spazio già presente, anche se tra le altre foto non c'è.
+  for (const gap of standardGaps) if (gap > MIN_GAP_MM && !known.some((value) => Math.abs(value - gap) < 0.01)) known.push(gap);
+
   const candidates: Array<{ at: number; mm: number }> = [];
   const free = (at: number): boolean => (!left || at - end(left) >= MIN_GAP_MM) && (!right || pos(right) - (at + len(rect)) >= MIN_GAP_MM);
   if (left && right) {
@@ -140,17 +157,17 @@ export interface EqualGapSnap {
 
 /**
  * «Stessa distanza»: durante lo spostamento la foto si ferma dove lo spazio da una vicina è uguale a quello dall'altro lato (foto al centro tra
- * due) o a uno spazio già presente tra due altre foto, entro `threshold` mm. `axes` dice su quali assi provare (gli altri sono già agganciati ai bordi).
+ * due) o a uno spazio già presente tra due altre foto (o a uno degli spazi standard `standardGaps`, per esempio quello dell'album), entro `threshold` mm. `axes` dice su quali assi provare (gli altri sono già agganciati ai bordi).
  */
-export function snapEqualGaps(rect: Rect, others: readonly Rect[], threshold: number, axes: { x: boolean; y: boolean } = { x: true, y: true }): EqualGapSnap {
+export function snapEqualGaps(rect: Rect, others: readonly Rect[], threshold: number, axes: { x: boolean; y: boolean } = { x: true, y: true }, standardGaps: readonly number[] = []): EqualGapSnap {
   const matched: EqualGapSnap["matched"] = {};
   let { x, y } = rect;
   if (axes.x) {
-    const hit = equalGapOnAxis(rect, others, threshold, "x");
+    const hit = equalGapOnAxis(rect, others, threshold, "x", standardGaps);
     if (hit) { x += hit.delta; matched.x = hit.mm; }
   }
   if (axes.y) {
-    const hit = equalGapOnAxis({ ...rect, x }, others, threshold, "y");
+    const hit = equalGapOnAxis({ ...rect, x }, others, threshold, "y", standardGaps);
     if (hit) { y += hit.delta; matched.y = hit.mm; }
   }
   return { rect: { ...rect, x, y }, matched };
@@ -162,8 +179,8 @@ export function snapEqualGaps(rect: Rect, others: readonly Rect[], threshold: nu
  */
 export function snapResize(rect: Rect, targets: readonly Rect[], threshold: number): SnapResult {
   const aspect = rect.w / rect.h;
-  const right = nearest([rect.x + rect.w], targets, xs, threshold);
-  const bottom = nearest([rect.y + rect.h], targets, ys, threshold);
+  const right = nearest([{ mine: [rect.x + rect.w], pick: xs }], targets, threshold);
+  const bottom = nearest([{ mine: [rect.y + rect.h], pick: ys }], targets, threshold);
   const dx = right[0] ? Math.abs(right[0].delta) : Infinity;
   const dy = bottom[0] ? Math.abs(bottom[0].delta) : Infinity;
   if (!Number.isFinite(dx) && !Number.isFinite(dy)) return { rect, guides: [] };

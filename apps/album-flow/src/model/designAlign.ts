@@ -1,9 +1,10 @@
-import type { AlbumSpread, SpreadOverlay } from "@photo-tools/shared-types";
+import type { AlbumSpread, SpreadOverlay, TextStyleSpec } from "@photo-tools/shared-types";
 import { areaOuterRects, spreadSizeMm, type Rect } from "../engine/geometry";
 import { overlayBox } from "../render/design-svg";
 import type { TextMeasure } from "../render/text-layout";
-import { groupMembers, moveOverlayGroup, overlaysOf } from "./design";
+import { addTextOverlay, groupMembers, groupOverlays, moveOverlayGroup, overlaysOf } from "./design";
 import { areaGeometryFor, findSpread, type Project } from "./project";
+import { TEXT_LIMITS, textPreset } from "./typography";
 
 /**
  * Allineamenti e calamite dei testi e delle grafiche: tutto in millimetri sullo spread, senza DOM.
@@ -69,6 +70,78 @@ export function alignOverlayToPage(project: Project, spreadId: string, overlayId
   else dy = page.y + page.h - (frame.y + frame.h);
   if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return project;
   return moveOverlayGroup(project, spreadId, overlayId, dx / width, dy / height);
+}
+
+export interface TextBelowOptions {
+  /** Stile del nuovo testo (predefinito «Testo», cioè il paragrafo). */
+  presetId?: string;
+  text?: string;
+  /** Colore della pagina dove finisce il testo: serve a scegliere un colore che si legga. */
+  backdrop?: string;
+}
+
+export type TextBelowResult = { project: Project; overlayId: string | null; reason?: "limit" | "room" };
+
+/** Spazio tra due testi sovrapposti, in frazione dell'altezza dello spread (lo stesso dei modelli già composti). */
+const BELOW_GAP = 0.018;
+
+/**
+ * Aggiunge un testo subito sotto l'elemento indicato (o sotto tutto il suo gruppo), con la stessa larghezza, lo stesso asse e lo stesso colore,
+ * e lo aggancia al gruppo: titolo e paragrafi si spostano insieme. Se sotto non c'è più posto nella pagina, il blocco sale quanto serve;
+ * se nemmeno così ci sta, non cambia nulla (`reason: "room"`).
+ */
+export function addTextBelow(project: Project, spreadId: string, overlayId: string, options: TextBelowOptions, measure: TextMeasure): TextBelowResult {
+  const found = findSpread(project, spreadId);
+  const anchor = found ? overlaysOf(found.spread).find((overlay) => overlay.id === overlayId) : undefined;
+  if (!found || !anchor) return { project, overlayId: null };
+  const sheet = project.settings.sheet;
+  const { height } = spreadSizeMm(sheet);
+  const members = groupMembers(found.spread, overlayId);
+  // Il riferimento è l'elemento più in basso del gruppo (di preferenza un testo): da lui il nuovo testo prende larghezza, asse e colore.
+  const bottomOf = (overlay: SpreadOverlay) => { const frame = overlayFrame(sheet, overlay, measure); return frame.y + frame.h; };
+  const lowest = (list: readonly SpreadOverlay[]) => list.reduce((a, b) => (bottomOf(b) > bottomOf(a) ? b : a));
+  const texts = members.filter((member) => member.kind === "text");
+  const reference = lowest(texts.length ? texts : members);
+  const frame = groupFrame(sheet, found.spread, overlayId, measure);
+  if (!frame) return { project, overlayId: null };
+
+  const preset = textPreset(options.presetId ?? "body");
+  const referenceText = reference.kind === "text" ? reference : null;
+  const centered = referenceText?.align === "center" || referenceText?.align === "right";
+  const style: Partial<TextStyleSpec> = {
+    ...(referenceText ? { color: referenceText.color } : {}),
+    ...(centered && referenceText ? { align: referenceText.align } : {}),
+  };
+  const boxW = Math.min(reference.w, TEXT_LIMITS.width.max);
+  const y = (frame.y + frame.h) / height + BELOW_GAP;
+  const made = addTextOverlay(project, spreadId, {
+    presetId: preset.id,
+    text: options.text,
+    style,
+    keepColor: Boolean(referenceText),
+    backdrop: options.backdrop,
+    at: { x: reference.x + boxW / 2, y },
+    width: boxW,
+  });
+  if (!made.overlayId) return { project, overlayId: null, reason: "limit" };
+
+  // Aggancio: il nuovo testo entra nel gruppo (o ne nasce uno con l'elemento di partenza).
+  let next = groupOverlays(made.project, spreadId, [overlayId, made.overlayId]);
+  const grown = findSpread(next, spreadId);
+  const grownFrame = grown ? groupFrame(sheet, grown.spread, made.overlayId, measure) : null;
+  if (!grown || !grownFrame) return { project, overlayId: null, reason: "room" };
+
+  // Oltre il fondo della pagina il blocco sale, ma non oltre il suo bordo alto.
+  const page = pageForFrame(sheet, grown.spread, grownFrame);
+  const overflow = grownFrame.y + grownFrame.h - (page.y + page.h);
+  if (overflow > 1e-6) {
+    if (overflow > grownFrame.y - page.y + 1e-6) return { project, overlayId: null, reason: "room" };
+    next = moveOverlayGroup(next, spreadId, made.overlayId, 0, -overflow / height);
+    const moved = findSpread(next, spreadId);
+    const movedFrame = moved ? groupFrame(sheet, moved.spread, made.overlayId, measure) : null;
+    if (!movedFrame || movedFrame.y + movedFrame.h - (page.y + page.h) > 1e-3) return { project, overlayId: null, reason: "room" };
+  }
+  return { project: next, overlayId: made.overlayId };
 }
 
 /**

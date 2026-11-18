@@ -25,6 +25,8 @@ const PRESET_GROUPS: ReadonlyArray<readonly [string, readonly TextPreset[]]> = (
 export interface DesignActions {
   /** Con `stay` resta sulla scheda in cui si è (la «Libreria») invece di passare a «Testo» per modificare il nuovo elemento. */
   addText: (options: NewTextOptions, behavior?: { stay?: boolean }) => void;
+  /** Aggiunge un testo (paragrafo, titolo, riga piccola…) sotto l'elemento o il gruppo indicato, agganciato a lui; resta selezionato per scriverci subito. */
+  addTextBelow: (overlayId: string, options: { presetId?: string; text?: string; backdrop?: string }) => void;
   addGraphic: (options: NewGraphicOptions) => void;
   update: (overlayId: string, patch: OverlayPatch) => void;
   remove: (overlayId: string) => void;
@@ -301,6 +303,28 @@ function ElementActions({ overlay, actions, groupSize }: { overlay: SpreadOverla
   );
 }
 
+/** Gli stili con cui si prosegue un blocco di testo: il nuovo pezzo nasce sotto, con la stessa larghezza e lo stesso colore. */
+const BELOW_STYLES: ReadonlyArray<readonly [string, string, string]> = [
+  ["body", "Paragrafo", "Un altro paragrafo di testo corrente"],
+  ["deck", "Occhiello", "Due righe che introducono"],
+  ["kicker", "Riga piccola", "Sottotitolo in maiuscole, piccolo"],
+  ["headline", "Titolo", "Un titolo grande"],
+  ["caption", "Didascalia", "Nota piccola"],
+];
+
+/** «Aggiungi sotto»: con un testo selezionato si continua il blocco (altri paragrafi, un titolo, una riga) senza tornare all'elenco degli stili. */
+function AddBelow({ overlay, groupSize, actions }: { overlay: SpreadOverlay; groupSize: number; actions: DesignActions }) {
+  return (
+    <div className="design__section design__below">
+      <h4>Aggiungi sotto</h4>
+      <div className="design__chips" role="group" aria-label="Aggiungi un testo sotto questo blocco">
+        {BELOW_STYLES.map(([presetId, label, hint]) => <button key={presetId} type="button" className="chip" title={`${hint}: nasce sotto ${groupSize > 1 ? "il blocco" : "questo testo"}, con la stessa larghezza e lo stesso colore`} onClick={() => actions.addTextBelow(overlay.id, { presetId })}><Icon name="plus" size={12} /> {label}</button>)}
+      </div>
+      <p className="small muted">Il nuovo testo resta agganciato: si sposta insieme al resto del blocco. Per un altro stile, «Fatto: torna agli stili».</p>
+    </div>
+  );
+}
+
 function GraphicEditor({ overlay, actions }: { overlay: Extract<SpreadOverlay, { kind: "graphic" }>; actions: DesignActions }) {
   const set = (patch: OverlayPatch) => actions.update(overlay.id, patch);
   return (
@@ -374,6 +398,7 @@ function TextTab({ spread, selected, extraIds, actions, savedStyles, onSaveStyle
       {selected ? (
         <>
           <ElementActions overlay={selected} actions={actions} groupSize={groupMembers(spread, selected.id).length} />
+          <AddBelow overlay={selected} groupSize={groupMembers(spread, selected.id).length} actions={actions} />
           <AlignControls overlay={selected} actions={actions} />
           {selected.kind === "text" ? <TextEditor overlay={selected} actions={actions} savedStyles={savedStyles} onSaveStyle={onSaveStyle} onSavePhrase={onSavePhrase} textRef={textRef} /> : <GraphicEditor overlay={selected} actions={actions} />}
           <div className="design__section"><button type="button" className="btn btn--sm" onClick={() => actions.select(null)}>Fatto: torna agli stili</button></div>
@@ -554,7 +579,7 @@ export function DesignPanel({ project, spread, two, areaIndex, tab, onTab, selec
   const scopeOf = !two ? "spread" : areaIndex === 0 ? "left" : "right";
   const pictured = backgroundsOf(spread).find((background) => background.scope === "spread" || background.scope === scopeOf);
   const backdrop = (pictured && pictured.opacity >= 0.6 ? BUILTIN_BACKDROP[pictured.mediaId] : undefined) ?? spread.areas[Math.min(areaIndex, spread.areas.length - 1)].style.background;
-  const designActions = useMemo<DesignActions>(() => ({ ...actions, addText: (options, behavior) => actions.addText({ backdrop, ...options }, behavior), insertPhrase: (text, index) => actions.insertPhrase(text, index, backdrop) }), [actions, backdrop]);
+  const designActions = useMemo<DesignActions>(() => ({ ...actions, addText: (options, behavior) => actions.addText({ backdrop, ...options }, behavior), addTextBelow: (overlayId, options) => actions.addTextBelow(overlayId, { backdrop, ...options }), insertPhrase: (text, index) => actions.insertPhrase(text, index, backdrop) }), [actions, backdrop]);
 
   const setPhrases = useCallback((next: Phrase[]) => { setPhrasesState(next); if (!savePhrases(next)) actions.notify("Non riesco a salvare l'archivio delle frasi."); }, [actions]);
   const setSavedStyles = useCallback((next: SavedTextStyle[]) => { setSavedStylesState(next); if (!saveSavedStyles(next)) actions.notify("Non riesco a salvare gli stili."); }, [actions]);
