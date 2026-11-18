@@ -21,6 +21,18 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.56",
+    date: "2026-11-18",
+    headline: "Salvataggio sul file più sicuro",
+    items: [
+      {
+        title: "Salva sul file solo dove i colori restano fedeli",
+        text: "Il salvataggio della correzione sul JPG ora si ferma, con un messaggio chiaro, per le foto CMYK, in scala di grigi o con un profilo colore diverso da sRGB (come Adobe RGB): su queste i colori scritti nel file non coinciderebbero con quelli che vedi. Per queste foto usa «Modifica nell'editor». In questi casi il file non viene toccato e non resta nessuna copia.",
+        where: ["Ritocco colore › «Salva sul file…»"],
+      },
+    ],
+  },
+  {
     version: "0.2.55",
     date: "2026-11-18",
     headline: "Ritocco colore e abbinamento ai colori dello spread",

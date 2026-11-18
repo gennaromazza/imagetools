@@ -39,6 +39,12 @@
 - Interno: la logica d'abbinamento è in `raw-jpg-pairing.ts` (prima stava dentro `folder-access.ts`) con 12 prove in `raw-jpg-pairing.test.ts` (`test:photo-selector-raw-jpg-pairing`, nella Dev Console).
 - Da sapere: la scheda di una coppia sta nella cartella del JPG, quindi il filtro per la cartella «RAW» non la mostra; copia, sposta e Cestino agiscono su entrambi i file anche se stanno in cartelle diverse.
 
+## 2026-11-18 - Album Flow 0.2.56
+
+- Migliorato: «Salva sul file…» del ritocco colore ora rifiuta con un messaggio chiaro i JPG che non può correggere in modo fedele: foto CMYK, in scala di grigi o con un profilo colore diverso da sRGB (Adobe RGB, Display P3…), perché sul file i colori non coinciderebbero con quelli visti a schermo; per queste foto resta «Modifica nell'editor» (Photoshop). Il file non viene toccato e non resta nessuna copia di sicurezza.
+- Migliorato: la copia di sicurezza dell'originale si fa solo quando la nuova immagine è pronta, così un'elaborazione fallita non lascia copie inutili.
+- Interno: prove nuove in `photo-color-service.test.ts` (`test:album-flow-adjust-file`, nella Dev Console). Da sapere, dall'audit: se si sposta la cartella delle foto dopo una correzione, la copia di sicurezza (legata al percorso del file) non viene ritrovata e una nuova correzione ne salverebbe una del file già corretto; il canale di scrittura accetta solo veri JPG ma non verifica che il file appartenga all'album.
+
 ## 2026-11-18 - Album Flow 0.2.55
 
 - Nuovo: «Ritocco colore» sulla foto (pulsante nella barra della foto selezionata, dal «⋯»): luminosità, contrasto, saturazione, temperatura e tinta (da -100 a 100) e «Reimposta». La correzione è non distruttiva: sta nel progetto (`AlbumAssetV2.colorAdjust`, campo facoltativo, un file album vecchio si apre uguale) e si vede nell'album, nelle anteprime dei layout e nell'esportazione; il file della foto non cambia.
