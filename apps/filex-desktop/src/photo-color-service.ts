@@ -73,14 +73,10 @@ export async function applyColorToJpeg(filePath: string, transformInput: unknown
   try {
     const meta = await sharp(source, { failOn: "none" }).metadata();
     if (meta.format !== "jpeg") return { ok: false, message: "Il file non è un vero JPG." };
-    if ((meta.channels ?? 3) < 3) return { ok: false, message: "Le foto in scala di grigi non si correggono." };
-
-    const backup = originalBackupPath(filePath, backupDir);
-    if (!(await exists(backup))) {
-      await fs.mkdir(backupDir, { recursive: true });
-      await fs.writeFile(backup, source, { flag: "wx" });
-      await fs.writeFile(`${backup}.json`, JSON.stringify({ originalPath: filePath, savedAt: new Date().toISOString() }), "utf8");
-    }
+    // Solo JPG a colori RGB: in scala di grigi o CMYK la matrice 3×3 non vale. Un profilo diverso da sRGB (Adobe RGB, Display P3…) darebbe sul
+    // file colori diversi da quelli visti a schermo (il filtro lavora in sRGB), quindi non si tocca.
+    if (meta.channels !== 3 || (meta.space && meta.space !== "srgb")) return { ok: false, message: "Si correggono solo le foto JPG a colori RGB (non in scala di grigi né CMYK)." };
+    if (meta.icc && !meta.icc.toString("latin1").replace(/\u0000/g, "").includes("sRGB")) return { ok: false, message: "La foto ha un profilo colore diverso da sRGB (per esempio Adobe RGB): per non alterarne i colori usa l'editor esterno." };
 
     const m = transform.matrix;
     const matrix: [[number, number, number], [number, number, number], [number, number, number]] = [[m[0], m[1], m[2]], [m[3], m[4], m[5]], [m[6], m[7], m[8]]];
@@ -90,6 +86,13 @@ export async function applyColorToJpeg(filePath: string, transformInput: unknown
       .keepMetadata()
       .jpeg({ quality: 95, chromaSubsampling: "4:4:4", mozjpeg: false })
       .toFile(temp);
+    // La copia di sicurezza si fa solo quando la nuova immagine è pronta: un'elaborazione fallita non lascia copie inutili.
+    const backup = originalBackupPath(filePath, backupDir);
+    if (!(await exists(backup))) {
+      await fs.mkdir(backupDir, { recursive: true });
+      await fs.writeFile(backup, source, { flag: "wx" });
+      await fs.writeFile(`${backup}.json`, JSON.stringify({ originalPath: filePath, savedAt: new Date().toISOString() }), "utf8");
+    }
     await fs.rename(temp, filePath);
     return { ok: true, message: "Correzione scritta sul file. L'originale resta al sicuro e si può ripristinare." };
   } catch (error) {

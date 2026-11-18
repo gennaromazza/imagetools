@@ -126,3 +126,32 @@ test("correzione sul file: rifiuta file non JPG, valori fuori scala, file mancan
     assert.ok(isJpegPath("C:/foto/A.JPG") && isJpegPath("/x/y.jpeg") && !isJpegPath("a.png") && !isJpegPath("a.tif"));
   } finally { await ws.done(); }
 });
+
+test("correzione sul file: rifiuta JPG CMYK, in scala di grigi o con profilo diverso da sRGB, senza lasciare copie né toccare il file", async () => {
+  const model = await albumModel();
+  const ws = await workspace();
+  try {
+    const input = toInput(model, { brightness: 15 });
+    const make = async (name: string, build: (image: sharp.Sharp) => sharp.Sharp) => {
+      const file = join(ws.dir, name);
+      const base = sharp({ create: { width: 16, height: 16, channels: 3, background: "#6688aa" } });
+      await fs.writeFile(file, await build(base).jpeg({ quality: 95 }).toBuffer());
+      return file;
+    };
+    const cases: Array<[string, (image: sharp.Sharp) => sharp.Sharp]> = [
+      ["cmyk.jpg", (image) => image.toColourspace("cmyk")],
+      ["grigi.jpg", (image) => image.toColourspace("b-w")],
+      ["p3.jpg", (image) => image.withIccProfile("p3")],
+    ];
+    for (const [name, build] of cases) {
+      const file = await make(name, build);
+      const before = await fs.readFile(file);
+      const result = await applyColorToJpeg(file, input, ws.backups);
+      assert.equal(result.ok, false, `${name}: deve essere rifiutato`);
+      assert.deepEqual(await fs.readFile(file), before, `${name}: il file non cambia`);
+      assert.equal(await hasOriginalBackup(file, ws.backups), false, `${name}: nessuna copia di sicurezza`);
+    }
+    const srgb = await make("srgb.jpg", (image) => image.withIccProfile("srgb"));
+    assert.equal((await applyColorToJpeg(srgb, input, ws.backups)).ok, true, "un JPG con profilo sRGB si corregge");
+  } finally { await ws.done(); }
+});
