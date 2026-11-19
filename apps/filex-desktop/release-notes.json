@@ -558,6 +558,10 @@
     "0.1.55": [
       "Corretto: i tasti P e X, premuti su una foto già selezionata o scartata, ora tolgono lo stato, come in Lightroom (con più foto, solo se ce l'hanno tutte).",
       "Nuovo: le etichette personalizzate compaiono in Lightroom come parole chiave, senza toccare le tue."
+    ],
+    "0.1.56": [
+      "Corretto: nell'anteprima grande, tenendo premuto un tasto di classificazione (stelle, P, X, U, colori) non vengono più valutate a raffica le foto successive: un tasto premuto vale una sola decisione.",
+      "Corretto: se il file del progetto non si riesce a leggere (per esempio bloccato dall'antivirus o da un servizio di sincronizzazione), il salvataggio automatico non lo riscrive più da zero e non perde i dati del progetto master."
     ]
   },
   "id-photo": {

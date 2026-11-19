@@ -32,6 +32,12 @@
 
 
 
+## 2026-11-19 - Image Select Pro 0.1.56
+
+- Corretto: nell'anteprima grande, tenere premuto un tasto di classificazione (stelle, P, X, U, colori) non assegna più il voto a raffica alle foto successive. Con l'avanzamento automatico attivo un «5» tenuto premuto valutava foto consecutive e P o X facevano lampeggiare lo stato. Ora un tasto premuto vale una sola decisione.
+- Corretto: se il file del progetto non si riesce a leggere (per esempio bloccato dall'antivirus o da un servizio di sincronizzazione, oppure danneggiato) il salvataggio automatico non lo riscrive più da zero. Prima poteva perdere il tipo di progetto e l'identificativo del master, e la cartella non veniva più riconosciuta come master.
+- Interno: `resolvePhotoClassificationShortcut` ignora `KeyboardEvent.repeat`; `buildProjectFileAutosave` in `workspace-mode.ts`; `updatePhotoSelectorProjectFile` accetta `null` per rifiutare la scrittura. Prove in `pick-toggle.test.ts` e `project-file-autosave.test.ts` (`test:photo-selector-pick-toggle` e `test:photo-selector-project-autosave`, nella Dev Console).
+
 ## 2026-10-30 - Image Select Pro 0.1.54
 
 - Corretto: RAW e JPG della stessa foto tenuti in cartelle diverse (per esempio «RAW» e «JPG») comparivano come due schede separate, perché l'abbinamento funzionava solo con i due file nella stessa cartella. Ora l'abbinamento vale anche tra cartelle diverse e lo scatto resta una sola scheda con il badge «RAW + JPG» (`groupEntriesByBaseName`).
