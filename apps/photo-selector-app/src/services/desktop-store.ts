@@ -121,7 +121,8 @@ export async function readPhotoSelectorProjectFile(
 
 export async function updatePhotoSelectorProjectFile(
   rootPath: string,
-  update: (project: DesktopPhotoSelectorProjectFile | null) => DesktopPhotoSelectorProjectFile,
+  /** Restituisce il nuovo file, o null per rifiutare l'aggiornamento senza scrivere nulla. */
+  update: (project: DesktopPhotoSelectorProjectFile | null) => DesktopPhotoSelectorProjectFile | null,
 ): Promise<boolean> {
   const api = getDesktopApi();
   if (!api?.readPhotoSelectorProjectFile || !api.writePhotoSelectorProjectFile) {
@@ -130,7 +131,11 @@ export async function updatePhotoSelectorProjectFile(
 
   try {
     const current = await api.readPhotoSelectorProjectFile(rootPath);
-    return await api.writePhotoSelectorProjectFile(rootPath, update(current));
+    const next = update(current);
+    if (!next) {
+      return false;
+    }
+    return await api.writePhotoSelectorProjectFile(rootPath, next);
   } catch {
     return false;
   }

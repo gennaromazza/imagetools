@@ -21,6 +21,15 @@ test("con più foto lo stato si toglie solo se ce l'hanno tutte", () => {
   assert.equal(toggleOffPickShortcut(press("p"), ["picked", "unmarked"]).pickStatus, "picked");
 });
 
+test("un tasto tenuto premuto (repeat) non classifica: un gesto, una decisione", () => {
+  assert.equal(resolvePhotoClassificationShortcut({ key: "5", repeat: true }), null);
+  assert.equal(resolvePhotoClassificationShortcut({ key: "p", repeat: true }), null);
+  assert.equal(resolvePhotoClassificationShortcut({ key: "u", repeat: true }), null);
+  assert.equal(resolvePhotoClassificationShortcut({ key: "6", code: "Digit6", ctrlKey: true, repeat: true }), null);
+  assert.deepEqual(resolvePhotoClassificationShortcut({ key: "5", repeat: false }), { rating: 5 });
+  assert.deepEqual(resolvePhotoClassificationShortcut({ key: "5" }), { rating: 5 });
+});
+
 test("U, stelle e colori non cambiano; senza foto non cambia nulla", () => {
   assert.equal(toggleOffPickShortcut(press("u"), ["picked"]).pickStatus, "unmarked");
   assert.deepEqual(toggleOffPickShortcut(press("3"), ["picked"]), { rating: 3 });

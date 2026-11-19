@@ -50,6 +50,8 @@ export interface PhotoShortcutInput {
   code?: string;
   ctrlKey?: boolean;
   metaKey?: boolean;
+  /** `KeyboardEvent.repeat`: tasto tenuto premuto. Un gesto vale una sola decisione. */
+  repeat?: boolean;
 }
 
 function getFileExtension(fileName: string): string {
@@ -183,6 +185,12 @@ export function toggleOffPickShortcut<T extends Partial<Pick<ImageAsset, "pickSt
 export function resolvePhotoClassificationShortcut(
   input: PhotoShortcutInput
 ): Partial<Pick<ImageAsset, "rating" | "pickStatus" | "colorLabel">> | null {
+  // Tenere premuto un tasto non deve classificare a raffica (con l'avanzamento automatico
+  // valuterebbe foto consecutive, e P/X alternerebbero lo stato).
+  if (input.repeat) {
+    return null;
+  }
+
   const normalizedKey = input.key.toLowerCase();
   const usesModifier = Boolean(input.ctrlKey || input.metaKey);
 

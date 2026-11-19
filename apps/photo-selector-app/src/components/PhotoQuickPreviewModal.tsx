@@ -2212,7 +2212,8 @@ export function PhotoQuickPreviewModal({
         key: event.key,
         code: event.code,
         ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey
+        metaKey: event.metaKey,
+        repeat: event.repeat
       });
       const shortcutChanges = rawShortcutChanges
         ? toggleOffPickShortcut(rawShortcutChanges, [getAssetPickStatus(asset)])

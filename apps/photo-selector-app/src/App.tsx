@@ -164,6 +164,7 @@ import { mapCloudProjectToAssets, normalizeCloudPath } from "./services/cloud-pr
 import {
   buildFallbackSourceIdentity,
   buildFreeSelectionSnapshot,
+  buildProjectFileAutosave,
   buildWorkspaceAssetStates,
   getWorkspaceCatalogKey,
   shouldWriteProjectFile,
@@ -869,14 +870,14 @@ export function App() {
       previousStates: catalogAssetStatesRef.current,
     });
     if (current.workspaceMode === "project") {
-      const saved = await updatePhotoSelectorProjectFile(current.sourceFolderPath, (existingProject) => ({
-        ...existingProject,
-        schemaVersion: 1,
-        app: "image-select-pro",
-        updatedAt: timestamp,
-        projectName: current.projectName,
-        folderState: { activeAssetIds: current.activeAssetIds, assetStates },
-      })).catch(() => false);
+      const saved = await updatePhotoSelectorProjectFile(current.sourceFolderPath, (existingProject) =>
+        buildProjectFileAutosave(existingProject, {
+          projectName: current.projectName,
+          activeAssetIds: current.activeAssetIds,
+          assetStates,
+          updatedAt: timestamp,
+        }),
+      ).catch(() => false);
       if (saved) {
         catalogAssetStatesRef.current = assetStates;
       }
@@ -1140,17 +1141,14 @@ export function App() {
         catalogProjectActiveSignatureRef.current = activeSignature;
         catalogProjectNameRef.current = projectName;
         if (shouldWriteProjectFile(scheduledMode)) {
-          void updatePhotoSelectorProjectFile(scheduledFolderPath, (existingProject) => ({
-            ...existingProject,
-            schemaVersion: 1,
-            app: "image-select-pro",
-            updatedAt: Date.now(),
-            projectName,
-            folderState: {
+          void updatePhotoSelectorProjectFile(scheduledFolderPath, (existingProject) =>
+            buildProjectFileAutosave(existingProject, {
+              projectName,
               activeAssetIds,
               assetStates,
-            },
-          })).catch(() => false);
+              updatedAt: Date.now(),
+            }),
+          ).catch(() => false);
         } else if (scheduledSourceIdentity) {
           void saveFreeSelectionSnapshot(buildFreeSelectionSnapshot({
             source: scheduledSourceIdentity,

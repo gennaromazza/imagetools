@@ -1,6 +1,7 @@
 import type {
   DesktopFolderCatalogAssetState,
   DesktopFreeSelectionSnapshot,
+  DesktopPhotoSelectorProjectFile,
   DesktopSelectionMode,
   DesktopSourceIdentity,
 } from "@photo-tools/desktop-contracts";
@@ -60,6 +61,39 @@ export function getWorkspaceCatalogKey(
 
 export function shouldWriteProjectFile(mode: DesktopSelectionMode | null): boolean {
   return mode === "project";
+}
+
+export interface ProjectFileAutosavePatch {
+  projectName: string;
+  activeAssetIds: string[];
+  assetStates: DesktopFolderCatalogAssetState[];
+  updatedAt: number;
+}
+
+/**
+ * Salvataggio automatico dello stato nel file progetto. Parte sempre dal file esistente:
+ * se non si è riusciti a leggerlo (assente, JSON rotto, file bloccato da antivirus o sync)
+ * restituisce null e il file non viene toccato, altrimenti verrebbero persi projectMode,
+ * projectId e gli altri campi. La creazione da zero passa dai flussi espliciti.
+ */
+export function buildProjectFileAutosave(
+  existingProject: DesktopPhotoSelectorProjectFile | null,
+  patch: ProjectFileAutosavePatch,
+): DesktopPhotoSelectorProjectFile | null {
+  if (!existingProject) {
+    return null;
+  }
+  return {
+    ...existingProject,
+    schemaVersion: 1,
+    app: "image-select-pro",
+    updatedAt: patch.updatedAt,
+    projectName: patch.projectName,
+    folderState: {
+      activeAssetIds: patch.activeAssetIds,
+      assetStates: patch.assetStates,
+    },
+  };
 }
 
 export function buildWorkspaceAssetStates(
