@@ -178,6 +178,8 @@ const api: FileXDesktopApi = {
   getFreeSelectionSnapshot: (sourceId) => ipcRenderer.invoke("filex:get-free-selection-snapshot", sourceId),
   saveFreeSelectionSnapshot: (snapshot) => ipcRenderer.invoke("filex:save-free-selection-snapshot", snapshot),
   chooseOutputFolder: () => ipcRenderer.invoke("filex:choose-output-folder"),
+  ensureOutputSubfolder: (parentPath, name) =>
+    ipcRenderer.invoke("filex:ensure-output-subfolder", parentPath, name),
   saveNewFileAs: (suggestedName: string, bytes: Uint8Array) =>
     ipcRenderer.invoke("filex:save-new-file-as", suggestedName, bytes),
   writeFile: (absolutePath: string, bytes: Uint8Array) =>

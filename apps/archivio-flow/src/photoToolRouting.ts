@@ -13,7 +13,7 @@ export interface PhotoToolTargetDefinition {
 
 export const PHOTO_TOOL_TARGETS: readonly PhotoToolTargetDefinition[] = [
   { id: "image-party-frame", label: "Party Frame", selectionMode: "multiple" },
-  { id: "batch-print-layout", label: "Batch Layout", selectionMode: "multiple" },
+  { id: "batch-print-layout", label: "Print Flow", selectionMode: "multiple" },
   { id: "id-photo", label: "Photo ID", selectionMode: "single" },
 ] as const;
 

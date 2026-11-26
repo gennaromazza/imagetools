@@ -91,6 +91,7 @@ import {
   writeSidecarXmpForAssetPath,
 } from "./native-folder-service.js";
 import { AtomicOutputTransactionManager, normalizeAtomicOutputFileName } from "./atomic-output-transaction.js";
+import { ensureOutputSubfolder } from "./output-subfolder.js";
 import { applyColorToJpeg, hasOriginalBackup, restoreOriginalJpeg } from "./photo-color-service.js";
 import {
   configureDesktopImageService,
@@ -2116,6 +2117,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle("filex:write-files-replacing", (_event, directoryPath: string, files: DesktopAtomicWriteFile[]) =>
     writeFilesReplacingDesktop(directoryPath, files),
   );
+  ipcMain.handle("filex:ensure-output-subfolder", async (_event, parentPathInput: string, name: string) => {
+    const parentPath = resolveValidDirectoryPath(parentPathInput);
+    if (!parentPath) throw new Error("Cartella di output non valida o non disponibile.");
+    return ensureOutputSubfolder(parentPath, name);
+  });
   ipcMain.handle("filex:begin-atomic-write-transaction", async (event, directoryPathInput: string) => {
     const directoryPath = resolveValidDirectoryPath(directoryPathInput);
     if (!directoryPath) throw new Error("Cartella di output non valida o non disponibile.");

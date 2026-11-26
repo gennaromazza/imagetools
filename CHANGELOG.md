@@ -32,6 +32,14 @@
 
 
 
+## 2026-11-26 - Print Flow 0.3.0
+
+- Print Flow è stato rifatto: carichi le foto di un ordine, le dividi in gruppi (formato, «Riempi» o «Foto intera», bordino bianco, logo), controlli i ritagli ed esporti una cartella di JPG a 300 DPI per ogni gruppo, senza mai sovrascrivere.
+- Restano i formati Polaroid, Instax e Hi-Print con la loro cornice, il logo, le copie per foto e l'arrivo delle foto da Archivio Flow. L'ordine resta salvato alla chiusura.
+- Nuovo: «Ordine cliente» (la cartella di esportazione porta nome e data) o «Lavoro veloce» senza nome. Interfaccia ridisegnata nello stile della Suite.
+- JPG, PNG e WebP si esportano partendo dal file originale, senza ricompressioni intermedie.
+- Non ci sono più: più foto sullo stesso foglio, scelta della carta, export PDF, TIFF, PNG e ZIP, bianco e nero, segni di taglio.
+
 ## 2026-11-19 - Image Select Pro 0.1.56
 
 - Corretto: nell'anteprima grande, tenere premuto un tasto di classificazione (stelle, P, X, U, colori) non assegna più il voto a raffica alle foto successive. Con l'avanzamento automatico attivo un «5» tenuto premuto valutava foto consecutive e P o X facevano lampeggiare lo stato. Ora un tasto premuto vale una sola decisione.

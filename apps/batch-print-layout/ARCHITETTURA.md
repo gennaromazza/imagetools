@@ -1,60 +1,28 @@
 # Print Flow (workspace batch-print-layout) — architettura
 
-Percorso guidato a 5 passi: **Foto → Carta → Cosa stampi → Impagina → Esporta**.
-Ogni passo si sblocca quando il precedente è completo (`App.tsx`, array `gates`).
-
-## Una responsabilità per passo
-
-| Passo | Decide | Non tocca |
-|---|---|---|
-| Carta | carta e orientamento | margini, foto |
-| Cosa stampi | quante foto o che formato/misura; mostra quante ne entrano e i consigli (altra carta, orientamento, bordo vivo) | inquadratura, margini, ritocchi |
-| Impagina | margini e distanze, riempimento, inquadratura, bianco e nero, logo, bordo, segni di taglio | quantità e misura |
-
-I margini cambiano il conteggio: `updateSpacing` (in `useWorkbench`) li limita al massimo per cui la foto entra ancora nel foglio, così il percorso non si blocca.
-
-## Principio di progetto
-
-Tutto discende da quattro dati dell'utente e viene **derivato**, mai sincronizzato con effetti:
-
-```
-foto (+ copie)  ─┐
-obiettivo        ├─►  carta consigliata ─► carta scelta ─► misura foto ─► griglia ─► pagine
-carta + margini ─┤
-DPI             ─┘
-```
-
-Cambiare un dato ricalcola il resto in un solo passaggio (`useMemo` in `hooks/useWorkbench.ts`).
-Così il foglio e la misura della foto non possono più andare fuori sincrono.
-
-## Moduli
+Ritaglio in serie per ordini di stampa. Un ordine ha uno o più **gruppi** (formato, riempimento, bordino, logo, foto); l'export crea una cartella per gruppo e un JPG per stampa.
 
 | File | Ruolo | Testato |
 |---|---|---|
-| `src/print-engine.ts` | Geometria pura: preset, griglia, orientamento del foglio, misura per N foto, crop, paginazione. Usato anche da ID Photo. | `print-engine.test.ts` |
-| `src/print-planner.ts` | Logica del percorso guidato: obiettivo (`PrintGoal`), carte disponibili, valutazione di ogni carta, carta consigliata, consiglio sull'orientamento. Nessuna dipendenza da React. | `print-planner.test.ts` |
-| `src/render-export.ts` | Rendering su canvas ed export JPG/PNG/PDF/TIF/ZIP (scrittura atomica desktop). | `render-export.test.ts` |
-| `src/hooks/useWorkbench.ts` | Stato e azioni: import (cartella desktop, browser, handoff Archivio Flow), ritagli, editor esterno, export. È l'unico punto che tiene lo stato. | via UI |
-| `src/lib/assets.ts` | Import delle foto e gestione degli URL blob. | — |
-| `src/lib/crop-math.ts` | Zoom, rotazione e chiave di geometria del ritaglio. | — |
-| `src/components/steps/*` | Un componente per passo (solo presentazione). | — |
-| `src/components/SheetPreview.tsx` | Anteprima del foglio (canvas + strato cliccabile). | — |
-| `src/components/SheetThumb.tsx` | Miniatura vettoriale di una carta con le foto disposte. | — |
+| `src/order/model.ts` | Ordine, gruppi, foto, copie: funzioni pure | `order.test.ts` |
+| `src/order/geometry.ts` | Orientamento, bordino, ritaglio, DPI effettivi | `order.test.ts` |
+| `src/order/naming.ts` | Nomi di cartelle e file, mai in collisione | `order.test.ts` |
+| `src/order/storage.ts` | Salvataggio e riapertura (localStorage, dati validati) | `order.test.ts` |
+| `src/order/export.ts` | Export per gruppo, transazione atomica | `export.test.ts` |
+| `src/order/render.ts` | Canvas di una stampa | prova a schermo |
+| `src/ui/*` | Stato (`usePrintOrder`), importazione (`library`), componenti | prova a schermo |
 
 ## Regole da non rompere
 
-- **Ritagli**: salvati con la chiave di geometria (`cropGeometryKey`). Se cambia la misura/proporzione della foto, il ritaglio dell'utente non è più valido e si riparte dal taglio automatico; cambiare solo DPI o carta lo conserva.
-- **Carta consigliata** (`recommendPaperId`): minimizza la carta consumata (fogli × area). Letter non viene mai consigliata se esistono alternative. Per «quante foto per pagina» il default è A4.
-- **«N foto per pagina»**: `calculatePhotoSizeForCount` ammette celle vuote (5 foto → griglia 2×3) e verifica con il motore reale che ci stiano davvero; `paginateAssets(…, maxPerPage)` rispetta il numero scelto.
-- **Orientamento**: `auto` sceglie quello che contiene più foto; `portrait`/`landscape` sono vincolanti.
-- **Supporto originale** (`media: true` sui preset Hi-Print): compare come carta «uno per foglio», senza margini.
-- Anteprima e export usano lo stesso renderer; l'anteprima ha DPI limitati (`getPreviewRenderDpi`), l'export no.
+- `src/print-engine.ts` e `src/render-export.ts` sono usati da **ID Photo**: Print Flow li riusa e non li adatta a sé.
+- Anteprima (`ui/CropView.tsx`, CSS) ed export (`order/render.ts`, canvas) devono avere la stessa geometria.
+- Il formato segue l'orientamento della foto come la si vede, rotazione compresa; i formati con cornice no.
+- Cambiare formato, riempimento o bordino azzera i ritagli del gruppo.
+- La sottocartella di un gruppo si crea solo con `ensureOutputSubfolder` (processo principale).
+- Mai sovrascrivere file esistenti; gli originali non si toccano.
 
 ## Verifica
 
 ```powershell
-npm --workspace @photo-tools/batch-print-layout run test
-npx tsc --noEmit -p apps/batch-print-layout
+npm run test:batch-print-layout-bug-hunt
 ```
-
-La suite è raggiungibile dalla Dev Console come «Print Flow — Caccia bug» (`npm run test:batch-print-layout-bug-hunt`).

@@ -1774,6 +1774,8 @@ export interface FileXDesktopApi {
   getFreeSelectionSnapshot: (sourceId: string) => Promise<DesktopFreeSelectionSnapshot | null>;
   saveFreeSelectionSnapshot: (snapshot: DesktopFreeSelectionSnapshot) => Promise<DesktopFreeSelectionSnapshot>;
   chooseOutputFolder: () => Promise<string | null>;
+  /** Crea o riusa una sottocartella diretta di una cartella di output e ne restituisce il percorso. */
+  ensureOutputSubfolder: (parentPath: string, name: string) => Promise<string>;
   saveNewFileAs: (suggestedName: string, bytes: Uint8Array) => Promise<string | null>;
   writeFile: (absolutePath: string, bytes: Uint8Array) => Promise<boolean>;
   writeFilesAtomically: (directoryPath: string, files: DesktopAtomicWriteFile[]) => Promise<string[]>;
