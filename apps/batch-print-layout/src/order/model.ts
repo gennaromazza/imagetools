@@ -80,6 +80,7 @@ export interface Customer {
 
 export interface Order {
     version: 1;
+    id?: string;
     customer?: Customer;
     groups: OrderGroup[];
     logo: LogoSettings;
@@ -103,6 +104,7 @@ export function createGroup(format?: PrintFormat): OrderGroup {
 export function createOrder(): Order {
     return {
         version: 1,
+        id: createId(),
         groups: [createGroup()],
         logo: {
             path: null,
@@ -260,6 +262,73 @@ export function transferPhotos(order: Order, fromId: string, toId: string, photo
     }
 
     return { ...order, groups };
+}
+
+export type FormatTarget = { groupId: string } | { format: PrintFormat };
+
+/**
+ * Cambia il formato di singole foto («move») o ne aggiunge una seconda stampa («add»).
+ * Se il formato non c'è ancora nel lavoro nasce un gruppo con le impostazioni di quello di partenza.
+ * Spostando, la foto conserva il suo identificativo; il ritaglio riparte da quello automatico.
+ */
+export function assignPhotos(order: Order, photoIds: string[], target: FormatTarget, mode: "move" | "add"): Order {
+    const wanted = new Set(photoIds);
+    const source = order.groups.find(group => group.photos.some(photo => wanted.has(photo.id)));
+    if (!source) return order;
+
+    let groups = order.groups;
+    let destination = "groupId" in target
+        ? groups.find(group => group.id === target.groupId)
+        : groups.find(group => group.format.id === target.format.id);
+    if (!destination) {
+        if (!("format" in target)) return order;
+        destination = { ...createGroup(target.format), fitMode: source.fitMode, borderMm: source.borderMm, logoEnabled: source.logoEnabled };
+        groups = [...groups, destination];
+    }
+
+    const targetId = destination.id;
+    const present = new Set(destination.photos.map(photo => photo.sourceKey));
+    const incoming: OrderPhoto[] = [];
+    const leaving = new Set<string>();
+    for (const group of groups) {
+        if (group.id === targetId) continue;
+        for (const photo of group.photos) {
+            if (!wanted.has(photo.id)) continue;
+            leaving.add(photo.id);
+            if (present.has(photo.sourceKey)) continue;
+            present.add(photo.sourceKey);
+            incoming.push({ ...photo, id: mode === "move" ? photo.id : createId(), crop: undefined });
+        }
+    }
+    if (leaving.size === 0) return order;
+
+    return {
+        ...order,
+        groups: groups.map(group => {
+            if (group.id === targetId) return { ...group, photos: [...group.photos, ...incoming] };
+            if (mode === "move") return { ...group, photos: group.photos.filter(photo => !leaving.has(photo.id)) };
+            return group;
+        }),
+    };
+}
+
+/**
+ * Un file è stato ritoccato o sostituito: aggiorna tutte le stampe che lo usano.
+ * Se cambiano le proporzioni (per esempio dopo un'espansione) il ritaglio riparte da quello automatico.
+ */
+export function replaceSource(order: Order, sourceKey: string, source: PhotoSource): Order {
+    if (!order.groups.some(group => group.photos.some(photo => photo.sourceKey === sourceKey))) return order;
+    return {
+        ...order,
+        groups: order.groups.map(group => ({
+            ...group,
+            photos: group.photos.map(photo => {
+                if (photo.sourceKey !== sourceKey) return photo;
+                const sameShape = Math.abs(source.width / source.height - photo.width / photo.height) < 0.005;
+                return { ...source, id: photo.id, copies: photo.copies, crop: sameShape ? photo.crop : undefined };
+            }),
+        })),
+    };
 }
 
 export function countPrints(group: OrderGroup): number {

@@ -16,6 +16,15 @@ export function orderFolderName(customer: Customer | undefined): string | null {
     return `${sanitizeName(customer.name, "Cliente")} - ${customer.date}`;
 }
 
+/** Nome della copia da ritoccare: l'originale resta com'è. */
+export function workingCopyName(fileName: string, attempt = 1): string {
+    const dot = fileName.lastIndexOf(".");
+    const stem = dot < 0 ? fileName : fileName.slice(0, dot);
+    const extension = dot < 0 ? "" : fileName.slice(dot);
+    if (attempt === 1 && /_ritocco\d*$/i.test(stem)) return fileName;
+    return `${stem}_ritocco${attempt > 1 ? attempt : ""}${extension}`;
+}
+
 export function folderName(group: OrderGroup): string {
     let name = group.format.id;
     if (name.startsWith("custom-")) {

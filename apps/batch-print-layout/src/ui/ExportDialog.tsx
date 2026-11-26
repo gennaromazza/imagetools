@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Order, countPrints } from '../order/model';
 import { exportOrder, type ExportReport } from '../order/export';
 import { Folder, FolderOpen } from 'lucide-react';
+import { recordHistory } from '../order/history';
 import { folderNames, orderFolderName } from '../order/naming';
 import { effectiveDpi, LOW_DPI } from '../order/geometry';
 import type { OrderGroup, OrderPhoto } from '../order/model';
@@ -56,10 +57,28 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ order, thumbnails, o
         
         setError(null);
         try {
-            setReport(await exportOrder({
+            const result = await exportOrder({
                 order, outputPath: outPath, groupIds: targetIds, signal: abortCtrl.current.signal,
                 onProgress: (done, total, label) => setProgress({ done, total, label })
-            }, deps));
+            }, deps);
+            setReport(result);
+            const first = result.done[0];
+            if (first) {
+                const now = new Date().toISOString();
+                const exported = order.groups.filter(g => result.done.some(item => item.groupId === g.id));
+                recordHistory(window.localStorage, {
+                    id: order.id ?? now,
+                    customerName: order.customer?.name ?? "",
+                    createdAt: now,
+                    exportedAt: now,
+                    folderPath: first.folderPath,
+                    checkFile: first.sample,
+                    prints: result.done.reduce((sum, item) => sum + item.files, 0),
+                    formats: [...new Set(exported.map(g => g.format.label))],
+                });
+                // A lavoro finito la cartella si apre da sola.
+                if (!result.cancelled && result.failed.length === 0) void api.revealInFolder(first.folderPath);
+            }
         } catch (failure) {
             setError(failure instanceof Error ? failure.message : "Esportazione non riuscita.");
         } finally {
@@ -135,6 +154,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({ order, thumbnails, o
 
                 <div className="modal__actions">
                     <button type="button" className="btn btn--ghost" onClick={handleCancel}>{exporting ? 'Annulla' : 'Chiudi'}</button>
+                    {report && report.done.length > 0 && api ? (
+                        <button type="button" className="btn" onClick={() => void api.revealInFolder(report.done[0].folderPath)}><FolderOpen size={16} /> Apri cartella</button>
+                    ) : null}
                     {!report ? (
                         <button type="button" className="btn btn--primary" onClick={() => handleExport()} disabled={exporting || !outPath || validGroups.length === 0}>
                             {exporting ? "Esporto…" : `Esporta ${totalPrints} stampe`}

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { ArrowRight, UserRound, Zap } from "lucide-react";
 import { CUSTOMER_NAME_MAX } from "../order/model";
+import { OrderHistory } from "./OrderHistory";
 
 interface StartScreenProps {
   onCustomerOrder: (name: string) => void;
@@ -49,6 +50,8 @@ export function StartScreen({ onCustomerOrder, onQuickJob }: StartScreenProps) {
           </button>
         </section>
       </div>
+
+      <OrderHistory />
     </main>
   );
 }

@@ -220,6 +220,14 @@
       "Nuovo: Polaroid classica, Polaroid Round Frame e Instax Mini, Square e Wide hanno la cornice vera, con la foto in alto e il bordo inferiore ampio, insieme alla Polaroid Go.",
       "Nuovo: ogni foto ha le sue copie, le foto si riordinano trascinandole e si aggiungono trascinando file o intere cartelle sulla pagina. In «Impagina» regoli margini e distanze con il conteggio dei fogli dal vivo, inquadri trascinando le foto e rifinisci con bianco e nero, logo, bordo e segni di taglio.",
       "Corretto: i campi numerici non permettevano di scrivere misure come 15, l'anteprima non rispettava le misure del foglio e il numero di foto per pagina non veniva rispettato."
+    ],
+    "0.3.0": [
+      "Print Flow è tutto nuovo: carichi le foto di un ordine, scegli il formato (anche foto per foto), controlli i ritagli ed esporti una cartella di file pronti per ogni formato, a 300 DPI e senza sovrascrivere nulla.",
+      "Ordine cliente (la cartella porta nome e data) o lavoro veloce, cronologia dei lavori e apertura della cartella a fine esportazione.",
+      "Nel ritaglio vedi l'originale a piena risoluzione, il punteggio di stampa per ogni formato e la foto intera con il riquadro del taglio.",
+      "Modifica in Photoshop su una copia della foto, che si aggiorna quando salvi.",
+      "Stampe più pulite: riduzione di qualità, senza grana finta né bordi a scaletta.",
+      "Non ci sono più l'impaginazione di più foto sullo stesso foglio, la scelta della carta e l'esportazione PDF, TIFF, PNG e ZIP."
     ]
   },
   "archivio-flow": {

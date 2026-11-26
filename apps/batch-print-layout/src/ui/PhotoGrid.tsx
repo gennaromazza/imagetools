@@ -1,12 +1,19 @@
 import { useRef } from "react";
-import { Check, Crop, FolderPlus, ImagePlus, Images, Minus, Plus, Trash2 } from "lucide-react";
-import { effectiveDpi, LOW_DPI } from "../order/geometry";
-import type { LogoSettings, OrderGroup, OrderPhoto } from "../order/model";
-import { folderNames } from "../order/naming";
+import { Check, Crop, FolderPlus, ImagePlus, Images, Minus, Plus, Trash2, Wand2 } from "lucide-react";
+import { assessQuality } from "../order/quality";
+import type { FormatTarget, LogoSettings, OrderGroup, OrderPhoto } from "../order/model";
 import { CropView } from "./CropView";
+import { FormatSelect } from "./FormatSelect";
+
+export interface PhotoEntry {
+  group: OrderGroup;
+  photo: OrderPhoto;
+}
 
 interface PhotoGridProps {
-  group: OrderGroup;
+  entries: PhotoEntry[];
+  /** Formato in cui entrano le foto aggiunte da qui. */
+  intoLabel: string;
   allGroups: OrderGroup[];
   thumbnails: { urls: Map<string, string>; missing: Set<string> };
   logo: LogoSettings;
@@ -20,17 +27,15 @@ interface PhotoGridProps {
   onAddFiles: (files: File[]) => void;
   onAddFolder: () => void;
   onRemoveSelected: () => void;
-  onTransferSelected: (toId: string, mode: "copy" | "move") => void;
-  onSetCopies: (photoId: string, copies: number) => void;
+  onAssign: (photoIds: string[], target: FormatTarget, mode: "move" | "add") => void;
+  onSetCopies: (groupId: string, photoId: string, copies: number) => void;
+  onEdit: (photo: OrderPhoto) => void;
 }
 
-export function PhotoGrid({ group, allGroups, thumbnails, logo, logoUrl, selectedIds, busy, onToggleSelect, onSelectAll, onClearSelection, onOpenCrop, onAddFiles, onAddFolder, onRemoveSelected, onTransferSelected, onSetCopies }: PhotoGridProps) {
+export function PhotoGrid({ entries, intoLabel, allGroups, thumbnails, logo, logoUrl, selectedIds, busy, onToggleSelect, onSelectAll, onClearSelection, onOpenCrop, onAddFiles, onAddFolder, onRemoveSelected, onAssign, onSetCopies, onEdit }: PhotoGridProps) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const others = allGroups.filter((item) => item.id !== group.id);
-  // Gli stessi nomi delle cartelle: due formati uguali restano distinguibili.
-  const names = folderNames(allGroups);
   const canUseFolders = Boolean(window.filexDesktop);
-  const empty = group.photos.length === 0;
+  const empty = entries.length === 0;
 
   const addButtons = (
     <>
@@ -60,7 +65,7 @@ export function PhotoGrid({ group, allGroups, thumbnails, logo, logoUrl, selecte
       {empty ? (
         <div className="empty">
           <Images size={44} strokeWidth={1.4} />
-          <h2>Porta qui le foto da stampare in {group.format.label}</h2>
+          <h2>Porta qui le foto da stampare in {intoLabel}</h2>
           <p>Trascina file o cartelle, oppure usa i pulsanti. Il ritaglio parte in automatico.</p>
           <div className="empty__actions">{addButtons}</div>
         </div>
@@ -72,24 +77,7 @@ export function PhotoGrid({ group, allGroups, thumbnails, logo, logoUrl, selecte
             {selectedIds.size > 0 ? (
               <>
                 <strong className="toolbar__count">{selectedIds.size} selezionate</strong>
-                {others.length > 0 ? (
-                  <select
-                    aria-label="Sposta o copia in un altro formato"
-                    value=""
-                    onChange={(event) => {
-                      const [mode, id] = event.target.value.split(":");
-                      if (id) onTransferSelected(id, mode as "copy" | "move");
-                    }}
-                  >
-                    <option value="">Sposta o copia in…</option>
-                    <optgroup label="Copia in">
-                      {others.map((item) => <option key={item.id} value={`copy:${item.id}`}>{names.get(item.id)}</option>)}
-                    </optgroup>
-                    <optgroup label="Sposta in">
-                      {others.map((item) => <option key={item.id} value={`move:${item.id}`}>{names.get(item.id)}</option>)}
-                    </optgroup>
-                  </select>
-                ) : null}
+                <FormatSelect groups={allGroups} label="Formato delle foto selezionate" placeholder="Cambia formato…" onAssign={(target, mode) => onAssign([...selectedIds], target, mode)} />
                 <button type="button" className="btn btn--danger" onClick={onRemoveSelected}><Trash2 size={15} /> Rimuovi</button>
                 <button type="button" className="btn btn--ghost" onClick={onClearSelection}>Annulla selezione</button>
               </>
@@ -99,10 +87,10 @@ export function PhotoGrid({ group, allGroups, thumbnails, logo, logoUrl, selecte
           </div>
 
           <ul className="grid">
-            {group.photos.map((photo) => {
+            {entries.map(({ group, photo }) => {
               const missing = thumbnails.missing.has(photo.sourceKey);
               const selected = selectedIds.has(photo.id);
-              const dpi = effectiveDpi(group, photo);
+              const quality = assessQuality(group, photo);
               return (
                 <li key={photo.id} className={`card ${selected ? "card--selected" : ""}`}>
                   <button type="button" className="card__preview" onClick={() => onOpenCrop(photo)} aria-label={`Ritaglia ${photo.fileName}`}>
@@ -113,11 +101,18 @@ export function PhotoGrid({ group, allGroups, thumbnails, logo, logoUrl, selecte
                     <input type="checkbox" checked={selected} onChange={() => onToggleSelect(photo.id)} aria-label={`Seleziona ${photo.fileName}`} />
                   </label>
                   {missing ? <span className="badge badge--danger">File mancante</span> : null}
-                  {!missing && dpi > 0 && dpi < LOW_DPI ? <span className="badge" title={`${dpi} DPI in questo formato`}>Bassa risoluzione</span> : null}
-                  <div className="card__foot">
+                  {!missing && quality.level === "scarsa" ? <span className="badge" title={`${quality.dpi} DPI in questo formato`}>Non viene bene</span> : null}
+                  <div className="card__title">
+                    <span className={`dot dot--${quality.level}`} title={`Qualità ${quality.score}/100: ${quality.verdict}`} aria-label={`Qualità ${quality.score} su 100`} role="img" />
                     <span className="card__name" title={photo.fileName}>{photo.fileName}</span>
+                    {window.filexDesktop && photo.absolutePath ? (
+                      <button type="button" className="card__edit" onClick={() => onEdit(photo)} title="Modifica in Photoshop" aria-label={`Modifica ${photo.fileName} in Photoshop`}><Wand2 size={14} /></button>
+                    ) : null}
+                  </div>
+                  <div className="card__foot">
+                    <FormatSelect groups={allGroups} current={group.id} label={`Formato di ${photo.fileName}`} onAssign={(target, mode) => onAssign([photo.id], target, mode)} />
                     <div className="stepper" role="group" aria-label="Copie">
-                      <button type="button" onClick={() => onSetCopies(photo.id, photo.copies - 1)} disabled={photo.copies <= 1} aria-label="Una copia in meno"><Minus size={13} /></button>
+                      <button type="button" onClick={() => onSetCopies(group.id, photo.id, photo.copies - 1)} disabled={photo.copies <= 1} aria-label="Una copia in meno"><Minus size={13} /></button>
                       <input
                         type="number"
                         min="1"
@@ -126,10 +121,10 @@ export function PhotoGrid({ group, allGroups, thumbnails, logo, logoUrl, selecte
                         aria-label="Numero di copie"
                         onChange={(event) => {
                           const value = parseInt(event.target.value, 10);
-                          if (value > 0) onSetCopies(photo.id, value);
+                          if (value > 0) onSetCopies(group.id, photo.id, value);
                         }}
                       />
-                      <button type="button" onClick={() => onSetCopies(photo.id, photo.copies + 1)} disabled={photo.copies >= 999} aria-label="Una copia in più"><Plus size={13} /></button>
+                      <button type="button" onClick={() => onSetCopies(group.id, photo.id, photo.copies + 1)} disabled={photo.copies >= 999} aria-label="Una copia in più"><Plus size={13} /></button>
                     </div>
                   </div>
                 </li>

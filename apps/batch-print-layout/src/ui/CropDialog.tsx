@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { assessQuality, describePhoto, STRONG_CUT_PERCENT } from '../order/quality';
+import { loadFullImage } from './library';
 import { OrderGroup, OrderPhoto, LogoSettings } from '../order/model';
-import { Check, ChevronLeft, ChevronRight, RotateCw, Undo2 } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Maximize2, RotateCw, Undo2, Wand2 } from 'lucide-react';
 import { CropView } from './CropView';
 import { cropFor, rotateCrop, moveCrop, zoomCrop, toAsset, contentSpec } from '../order/geometry';
 import { createDefaultCrop, type BatchCropState } from '../print-engine';
@@ -17,12 +19,39 @@ interface CropDialogProps {
     onPrev: () => void;
     onNext: () => void;
     onSetCrop: (crop: BatchCropState | undefined) => void;
+    formatBar: React.ReactNode;
+    onEdit?: () => void;
+    onUseSavedFile?: () => void;
+    onChangeEditor?: () => void;
 }
 
 export const CropDialog: React.FC<CropDialogProps> = ({
-    group, photo, url, logo, logoUrl, index, total, onClose, onPrev, onNext, onSetCrop
+    group, photo, url, logo, logoUrl, index, total, onClose, onPrev, onNext, onSetCrop, formatBar, onEdit, onUseSavedFile, onChangeEditor
 }) => {
     const crop = cropFor(group, photo);
+    const quality = assessQuality(group, photo);
+    const details = describePhoto(photo);
+    const [showWhole, setShowWhole] = useState(false);
+    // Finché l'originale non è pronto si mostra la miniatura.
+    const [full, setFull] = useState<{ key: string; url: string } | null>(null);
+    useEffect(() => {
+        let active = true;
+        let loaded: string | null = null;
+        loadFullImage(photo)
+            .then(next => {
+                if (!next) return;
+                if (!active) return URL.revokeObjectURL(next);
+                loaded = next;
+                setFull({ key: photo.sourceKey, url: next });
+            })
+            .catch(() => undefined);
+        return () => {
+            active = false;
+            if (loaded) URL.revokeObjectURL(loaded);
+        };
+    }, [photo.sourceKey]);
+    const sharp = full?.key === photo.sourceKey;
+    const shownUrl = sharp ? full!.url : url;
     const baseCrop = createDefaultCrop(toAsset(photo), contentSpec(group, photo), group.fitMode, false, crop.rotation);
     const zoom = baseCrop.cropWidth / crop.cropWidth;
 
@@ -108,19 +137,52 @@ export const CropDialog: React.FC<CropDialogProps> = ({
                     <button type="button" className="btn" onClick={onClose}><Check size={16} /> Fatto (Esc)</button>
                 </header>
 
+                {formatBar}
+
                 <div className="cropper__stage">
                     <button type="button" className="cropper__nav" onClick={onPrev} disabled={index <= 1} aria-label="Foto precedente"><ChevronLeft size={22} /></button>
                     <div className="cropper__view">
-                        <CropView
-                            group={group} photo={photo} url={url} logo={logo} logoUrl={logoUrl}
-                            boxRef={boxRef} windowRef={windowRef}
-                            onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}
-                        />
+                        {showWhole ? (
+                            <div className="whole">
+                                <div className="whole__frame" style={{ aspectRatio: `${photo.width} / ${photo.height}`, width: `min(100cqw, calc(100cqh * ${photo.width / photo.height}))` }}>
+                                    {shownUrl ? <img src={shownUrl} alt={photo.fileName} /> : null}
+                                    {group.fitMode === 'cover' ? (
+                                        <i style={{ left: `${crop.cropLeft * 100}%`, top: `${crop.cropTop * 100}%`, width: `${crop.cropWidth * 100}%`, height: `${crop.cropHeight * 100}%` }} />
+                                    ) : null}
+                                </div>
+                            </div>
+                        ) : (
+                            <CropView
+                                group={group} photo={photo} url={shownUrl} logo={logo} logoUrl={logoUrl}
+                                boxRef={boxRef} windowRef={windowRef}
+                                onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}
+                            />
+                        )}
                     </div>
                     <button type="button" className="cropper__nav" onClick={onNext} disabled={index >= total} aria-label="Foto successiva"><ChevronRight size={22} /></button>
                 </div>
 
+                <div className="cropper__info">
+                    <span className={`score score--${quality.level}`}>
+                        <strong>{quality.score}</strong>/100 · {quality.verdict}
+                    </span>
+                    <span>{quality.dpi} DPI in {group.format.label}</span>
+                    <span className={quality.cutPercent > STRONG_CUT_PERCENT ? "cut cut--strong" : "cut"}>
+                        {quality.cutPercent > 0 ? `Taglio: ${quality.cutPercent}% della foto resta fuori` : "Nessun taglio"}
+                    </span>
+                    <span className="cropper__original">
+                        Originale: {details.pixels} · {details.megapixels}{details.fileSize ? ` · ${details.fileSize}` : ""} · fino a {details.largestPrint}
+                    </span>
+                    {!sharp && window.filexDesktop ? <span className="hint">Carico l'originale…</span> : null}
+                </div>
+
                 <footer className="cropper__foot">
+                    <button type="button" className="btn" aria-pressed={showWhole} onClick={() => setShowWhole(value => !value)}>
+                        <Maximize2 size={16} /> {showWhole ? "Torna al ritaglio" : "Vedi la foto intera"}
+                    </button>
+                    {onEdit ? <button type="button" className="btn" onClick={onEdit}><Wand2 size={16} /> Modifica in Photoshop</button> : null}
+                    {onUseSavedFile ? <button type="button" className="btn btn--ghost" onClick={onUseSavedFile}>Usa un file salvato…</button> : null}
+                    {onChangeEditor ? <button type="button" className="btn btn--ghost" onClick={onChangeEditor} title="Scegli quale Photoshop usare">Cambia Photoshop…</button> : null}
                     <button type="button" className="btn" onClick={() => stateRef.current.rotate()}><RotateCw size={16} /> Ruota 90° (R)</button>
                     {group.fitMode === 'cover' ? (
                         <label className="cropper__zoom">

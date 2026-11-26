@@ -1,4 +1,4 @@
-import type { Order, OrderGroup, OrderPhoto, LogoSettings } from "./model";
+import { createId, type Order, type OrderGroup, type OrderPhoto, type LogoSettings } from "./model";
 import type { BatchCropState } from "../print-engine";
 
 export const STORAGE_KEY = "print-flow:order:v1";
@@ -112,6 +112,7 @@ export function parseOrder(text: string): Order | null {
 
         return {
             version: 1,
+            id: typeof obj.id === "string" ? obj.id : createId(),
             ...(validCustomer ? { customer: validCustomer } : {}),
             groups: validGroups,
             logo: validLogo

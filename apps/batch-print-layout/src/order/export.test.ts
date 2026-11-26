@@ -40,6 +40,7 @@ describe("export dell'ordine", () => {
     const report = await exportOrder({ order: twoGroupOrder(), outputPath: "out" }, deps);
     expect(published).toEqual(["out/10x15/a.jpg", "out/10x15/a_copia2.jpg", "out/10x15/b.jpg", "out/10x15_bordo5mm/c.jpg"]);
     expect(report.done.map((item) => item.files)).toEqual([3, 1]);
+    expect(report.done[0]).toMatchObject({ folderPath: "out/10x15", sample: expect.stringContaining("a.jpg") });
   });
 
   it("con un cliente mette i formati dentro la sua cartella", async () => {

@@ -1,10 +1,12 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Images, Plus, Trash2 } from "lucide-react";
 import { effectiveBorderMm, hasFrame } from "../order/geometry";
 import { countPrints, type Order, type OrderGroup } from "../order/model";
 
 interface GroupListProps {
   order: Order;
-  selectedGroupId: string;
+  /** Null quando è aperta la vista «Tutte le foto». */
+  selectedGroupId: string | null;
+  onSelectAll: () => void;
   onSelectGroup: (id: string) => void;
   onAddGroup: () => void;
   onRemoveGroup: (id: string) => void;
@@ -17,7 +19,7 @@ function details(group: OrderGroup): string {
   return border > 0 ? `${fit} · bordino ${border} mm` : `${fit} · senza bordo`;
 }
 
-export function GroupList({ order, selectedGroupId, onSelectGroup, onAddGroup, onRemoveGroup }: GroupListProps) {
+export function GroupList({ order, selectedGroupId, onSelectAll, onSelectGroup, onAddGroup, onRemoveGroup }: GroupListProps) {
   const remove = (group: OrderGroup) => {
     if (group.photos.length > 0 && !window.confirm(`Il formato ${group.format.label} contiene ${group.photos.length} foto. Rimuoverlo?`)) return;
     onRemoveGroup(group.id);
@@ -25,6 +27,15 @@ export function GroupList({ order, selectedGroupId, onSelectGroup, onAddGroup, o
 
   return (
     <aside className="rail">
+      <div className={`format ${selectedGroupId === null ? "format--active" : ""}`}>
+        <button type="button" className="format__main" onClick={onSelectAll} aria-pressed={selectedGroupId === null}>
+          <span className="format__shape" aria-hidden="true"><Images size={22} /></span>
+          <span className="format__text">
+            <strong>Tutte le foto</strong>
+            <small>Formato foto per foto</small>
+          </span>
+        </button>
+      </div>
       <p className="eyebrow">Formati</p>
       <ul className="rail__list">
         {order.groups.map((group) => {
@@ -38,7 +49,7 @@ export function GroupList({ order, selectedGroupId, onSelectGroup, onAddGroup, o
                 <span className="format__text">
                   <strong title={group.format.label}>{group.format.label}</strong>
                   <small>{details(group)}</small>
-                  <small>{group.photos.length} foto · {countPrints(group)} stampe</small>
+                  <small>{group.photos.length} foto · {countPrints(group)} {countPrints(group) === 1 ? "stampa" : "stampe"}</small>
                 </span>
               </button>
               {order.groups.length > 1 ? (

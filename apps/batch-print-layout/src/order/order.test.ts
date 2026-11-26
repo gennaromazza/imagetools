@@ -3,6 +3,7 @@ import {
   ALL_FORMATS,
   addGroup,
   addPhotos,
+  assignPhotos,
   countPrints,
   createGroup,
   createOrder,
@@ -20,6 +21,8 @@ import {
 import { contentSpec, cropFor, effectiveBorderMm, effectiveDpi, rotateCrop, zoomCrop } from "./geometry";
 import { folderName, folderNames, orderFolderName, plannedFiles, sanitizeName } from "./naming";
 import { loadOrder, parseOrder, saveOrder } from "./storage";
+import { sourceScale } from "./render";
+import { resampleRgba } from "./resample";
 
 const source = (key: string, width = 6000, height = 4000): PhotoSource => ({ sourceKey: key, fileName: `${key}.jpg`, width, height });
 const photo = (width = 6000, height = 4000, extra: Partial<OrderPhoto> = {}): OrderPhoto =>
@@ -164,5 +167,74 @@ describe("ordine di un cliente", () => {
     const broken = parseOrder(JSON.stringify({ ...order, customer: { name: "X", date: "../.." } }));
     expect(broken).not.toBeNull();
     expect(broken?.customer).toBeUndefined();
+  });
+});
+
+describe("qualità di stampa", () => {
+  it("riduce senza creare disegni finti: righe di un pixel diventano grigio uniforme", () => {
+    const width = 800;
+    const source = new Uint8ClampedArray(width * 8 * 4);
+    for (let i = 0; i < source.length; i += 4) {
+      const value = (i / 4) % 2 === 0 ? 0 : 255;
+      source.set([value, value, value, 255], i);
+    }
+    const result = resampleRgba(source, width, 8, 90, 8);
+    const middle = Array.from({ length: 80 }, (_, x) => result[(4 * 90 + x + 5) * 4]);
+    expect(Math.max(...middle) - Math.min(...middle)).toBeLessThanOrEqual(4);
+    expect(middle[0]).toBeGreaterThan(120);
+    expect(middle[0]).toBeLessThan(135);
+  });
+
+  it("lascia intatto un colore pieno", () => {
+    const source = new Uint8ClampedArray(50 * 40 * 4).map((_, i) => [200, 40, 90, 255][i % 4]);
+    const result = resampleRgba(source, 50, 40, 17, 13);
+    expect(Array.from(result.slice(0, 4))).toEqual([200, 40, 90, 255]);
+    expect(Array.from(result.slice(-4))).toEqual([200, 40, 90, 255]);
+  });
+
+  it("calcola la riduzione dal ritaglio e non ingrandisce mai", () => {
+    const big = { group: group(), photo: photo(6000, 4000), width: 6000, height: 4000 };
+    expect(sourceScale(big, 300)).toBeCloseTo(1772 / 6000, 3);
+    expect(sourceScale({ ...big, photo: photo(600, 400), width: 600, height: 400 }, 300)).toBe(1);
+  });
+});
+
+describe("formato foto per foto", () => {
+  const loaded = () => addPhotos(createOrder(), "ignoto", []);
+  const withTwo = () => {
+    const order = loaded();
+    return addPhotos(order, order.groups[0].id, [source("a"), source("b")]);
+  };
+  const format = (id: string) => ALL_FORMATS.find((item) => item.id === id)!;
+
+  it("sposta una sola foto in un formato nuovo, che eredita le impostazioni", () => {
+    let order = withTwo();
+    order = updateGroup(order, order.groups[0].id, { borderMm: 4 });
+    const [first] = order.groups[0].photos;
+    const next = assignPhotos(order, [first.id], { format: format("13x18") }, "move");
+    expect(next.groups.map((item) => [item.format.id, item.photos.length])).toEqual([["10x15", 1], ["13x18", 1]]);
+    expect(next.groups[1].borderMm).toBe(4);
+    expect(next.groups[1].photos[0].id).toBe(first.id);
+    const back = assignPhotos(next, [first.id], { format: format("10x15") }, "move");
+    expect(back.groups.map((item) => item.photos.length)).toEqual([2, 0]);
+  });
+
+  it("aggiunge una seconda stampa senza togliere la prima e senza doppioni", () => {
+    const order = withTwo();
+    const [first] = order.groups[0].photos;
+    const twice = assignPhotos(order, [first.id], { format: format("13x18") }, "add");
+    expect(twice.groups.map((item) => item.photos.length)).toEqual([2, 1]);
+    expect(twice.groups[1].photos[0].id).not.toBe(first.id);
+    const again = assignPhotos(twice, [first.id], { groupId: twice.groups[1].id }, "add");
+    expect(again.groups[1].photos).toHaveLength(1);
+  });
+
+  it("assegna insieme foto di gruppi diversi e ignora bersagli inesistenti", () => {
+    let order = withTwo();
+    const ids = order.groups[0].photos.map((item) => item.id);
+    order = assignPhotos(order, [ids[0]], { format: format("13x18") }, "move");
+    const all = assignPhotos(order, ids, { format: format("15x20") }, "move");
+    expect(all.groups.map((item) => item.photos.length)).toEqual([0, 0, 2]);
+    expect(assignPhotos(order, ids, { groupId: "ignoto" }, "move")).toBe(order);
   });
 });

@@ -2,15 +2,16 @@ import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import { 
     Order, OrderGroup, OrderPhoto, LogoSettings, PrintFormat,
     createOrder, createGroup, addGroup, removeGroup, updateGroup, addPhotos,
-    removePhotos, setCopies, setCrop, transferPhotos, setCustomer
+    removePhotos, setCopies, setCrop, setCustomer, assignPhotos, replaceSource, type FormatTarget
 } from '../order/model';
 import type { BatchCropState } from '../print-engine';
 import { loadOrder, saveOrder, clearOrder } from '../order/storage';
+import { recordHistory } from '../order/history';
 import { bytesToObjectUrl } from '../lib/assets';
 import { 
     thumbnailStore, processFileArray, processDesktopFolder, processDesktopEntries, type ImportResult, 
     checkMissingAndLoadThumbnails, setBrowserLogo, clearBrowserLogo, 
-    getSharedLogoImage, renderPhotoForExport, loadLogoPreview 
+    getSharedLogoImage, renderPhotoForExport, loadLogoPreview, findChangedPhotos, openCopyInEditor, processDesktopFile 
 } from './library';
 
 /** Data locale di oggi in formato AAAA-MM-GG. */
@@ -162,7 +163,58 @@ export function usePrintOrder() {
         };
     }, [order.logo?.path]);
 
+    // Un ordine con un cliente entra in cronologia appena nasce, anche se non verrà mai esportato.
+    useEffect(() => {
+        if (!order.customer || !order.id) return;
+        recordHistory(window.localStorage, { id: order.id, customerName: order.customer.name, createdAt: new Date().toISOString() });
+    }, [order.id, order.customer?.name]);
+
+    // Tornando da Photoshop le foto salvate si aggiornano da sole.
+    useEffect(() => {
+        let checking = false;
+        const refresh = async () => {
+            if (checking || importingRef.current) return;
+            checking = true;
+            try {
+                const changed = await findChangedPhotos(orderRef.current.groups.flatMap(g => g.photos));
+                if (changed.length === 0) return;
+                setOrder(prev => changed.reduce((next, item) => replaceSource(next, item.sourceKey, item.source), prev));
+                setStatusMessage(changed.length === 1 ? `${changed[0].source.fileName}: aggiornata con le modifiche salvate.` : `${changed.length} foto aggiornate con le modifiche salvate.`);
+            } catch (error) {
+                reportFailure(error);
+            } finally {
+                checking = false;
+            }
+        };
+        window.addEventListener('focus', refresh);
+        return () => window.removeEventListener('focus', refresh);
+    }, []);
+
     const api = {
+        editInPhotoshop: async (photo: OrderPhoto) => {
+            try {
+                setStatusMessage("Apro la copia in Photoshop…");
+                const copy = await openCopyInEditor(photo);
+                setOrder(prev => replaceSource(prev, photo.sourceKey, copy));
+                setStatusMessage(`Stai modificando ${copy.fileName}. Salva in Photoshop e torna qui: si aggiorna da sola.`);
+            } catch (error) {
+                reportFailure(error);
+            }
+        },
+
+        useSavedFile: async (photo: OrderPhoto) => {
+            try {
+                const path = await window.filexDesktop?.chooseImageFile(photo.absolutePath);
+                if (!path) return;
+                const source = await processDesktopFile(path, path.split(/[\\/]/).pop()!);
+                if (!source) throw new Error("Il file scelto non è leggibile.");
+                setOrder(prev => replaceSource(prev, photo.sourceKey, source));
+                setStatusMessage(`Ora uso ${source.fileName}.`);
+            } catch (error) {
+                reportFailure(error);
+            }
+        },
+
         order,
         selectedGroupId,
         setSelectedGroupId,
@@ -211,9 +263,10 @@ export function usePrintOrder() {
             setOrder(prev => removePhotos(prev, groupId, photoIds));
         },
 
-        doTransferPhotos: (fromId: string, toId: string, photoIds: string[], mode: 'move' | 'copy') => {
-            setOrder(prev => transferPhotos(prev, fromId, toId, photoIds, mode));
-            setStatusMessage(`Foto ${mode === 'move' ? 'spostate' : 'copiate'} con successo.`);
+        doAssignPhotos: (photoIds: string[], target: FormatTarget, mode: 'move' | 'add') => {
+            setOrder(prev => assignPhotos(prev, photoIds, target, mode));
+            const many = photoIds.length > 1 ? `${photoIds.length} foto` : "Foto";
+            setStatusMessage(mode === 'move' ? `${many}: formato cambiato.` : `${many}: aggiunta una seconda stampa.`);
         },
 
         doSetCopies: (groupId: string, photoId: string, n: number) => {

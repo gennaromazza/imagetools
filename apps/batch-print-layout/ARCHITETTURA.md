@@ -10,6 +10,9 @@ Ritaglio in serie per ordini di stampa. Un ordine ha uno o più **gruppi** (form
 | `src/order/storage.ts` | Salvataggio e riapertura (localStorage, dati validati) | `order.test.ts` |
 | `src/order/export.ts` | Export per gruppo, transazione atomica | `export.test.ts` |
 | `src/order/render.ts` | Canvas di una stampa | prova a schermo |
+| `src/order/quality.ts` | Punteggio di stampa e dati dell'originale | `quality.test.ts` |
+| `src/order/resample.ts` | Riduzione di qualità prima dell'export | `order.test.ts` |
+| `src/order/history.ts` | Cronologia dei lavori | `history.test.ts` |
 | `src/ui/*` | Stato (`usePrintOrder`), importazione (`library`), componenti | prova a schermo |
 
 ## Regole da non rompere

@@ -2,6 +2,7 @@ import { OrderGroup, OrderPhoto, PhotoSource, LogoSettings } from '../order/mode
 import { contentSpec, cropFor } from '../order/geometry';
 import { getPhotoContentRectCm } from '../print-engine';
 import { renderPrintJpg } from '../order/render';
+import { workingCopyName } from '../order/naming';
 import { bytesToObjectUrl, hashString } from '../lib/assets';
 
 export const browserUrls = new Map<string, string>();
@@ -350,4 +351,95 @@ export async function renderPhotoForExport(
             URL.revokeObjectURL(url);
         }
     }
+}
+
+/** La foto a piena risoluzione per la finestra di ritaglio; null se non si può leggere. */
+export async function loadFullImage(photo: OrderPhoto): Promise<string | null> {
+    const api = window.filexDesktop;
+    if (!api || !photo.absolutePath) return null;
+    const mimeType = originalMimeType(photo.fileName);
+    if (mimeType) {
+        const file = await api.readFile(photo.absolutePath);
+        return file ? bytesToObjectUrl(file.bytes, mimeType) : null;
+    }
+    const preview = await api.getPreview(photo.absolutePath, {
+        maxDimension: 6000,
+        sourceFileKey: `${photo.size}:${photo.lastModified}`,
+    });
+    return preview ? bytesToObjectUrl(preview.bytes, preview.mimeType) : null;
+}
+
+/** Foto il cui file è cambiato su disco da quando è stata letta (per esempio salvata da Photoshop). */
+export async function findChangedPhotos(photos: OrderPhoto[]): Promise<Array<{ sourceKey: string; source: PhotoSource }>> {
+    const api = window.filexDesktop;
+    if (!api) return [];
+    const unique = new Map(photos.filter(p => p.absolutePath).map(p => [p.sourceKey, p]));
+    const list = [...unique.values()];
+    const changed: Array<{ sourceKey: string; source: PhotoSource }> = [];
+    for (let i = 0; i < list.length; i += 100) {
+        const chunk = list.slice(i, i + 100);
+        const stats = new Map((await api.statFiles(chunk.map(p => p.absolutePath!))).map(s => [s.absolutePath, s]));
+        for (const photo of chunk) {
+            const stat = stats.get(photo.absolutePath!);
+            if (!stat || (stat.size === photo.size && stat.lastModified === photo.lastModified)) continue;
+            // Un salvataggio a metà non è leggibile: si riprova al prossimo controllo.
+            const source = await processDesktopFile(photo.absolutePath!, photo.fileName).catch(() => null);
+            if (source) changed.push({ sourceKey: photo.sourceKey, source });
+        }
+    }
+    return changed;
+}
+
+const EDITOR_KEY = "print-flow:editor";
+
+async function editorPath(): Promise<string | null> {
+    const api = window.filexDesktop!;
+    const saved = window.localStorage.getItem(EDITOR_KEY);
+    if (saved && (await api.statFiles([saved])).length > 0) return saved;
+    const candidates = await api.getInstalledEditorCandidates();
+    const photoshops = candidates.filter(item => /photoshop/i.test(`${item.label} ${item.path}`));
+    // Con più versioni installate si chiede quale: scegliere da soli ne avvierebbe una non voluta.
+    return photoshops.length === 1 ? remember(photoshops[0].path) : chooseEditor(photoshops[0]?.path);
+}
+
+function remember(path: string): string {
+    window.localStorage.setItem(EDITOR_KEY, path);
+    return path;
+}
+
+/** Fa scegliere (o cambiare) il programma di ritocco e lo ricorda. */
+export async function chooseEditor(startFrom?: string): Promise<string | null> {
+    const current = startFrom ?? window.localStorage.getItem(EDITOR_KEY) ?? undefined;
+    const chosen = await window.filexDesktop?.chooseEditorExecutable(current);
+    return chosen ? remember(chosen) : null;
+}
+
+/** Apre in Photoshop una copia della foto accanto all'originale e restituisce la sorgente della copia. */
+export async function openCopyInEditor(photo: OrderPhoto): Promise<PhotoSource> {
+    const api = window.filexDesktop;
+    if (!api || !photo.absolutePath) throw new Error("La modifica in Photoshop è disponibile solo nell'app desktop.");
+    const editor = await editorPath();
+    if (!editor) throw new Error("Nessun editor scelto.");
+
+    const folder = photo.absolutePath.slice(0, photo.absolutePath.length - photo.fileName.length);
+    let name = workingCopyName(photo.fileName);
+    let copyPath = photo.absolutePath;
+    if (name !== photo.fileName) {
+        // Una copia già presente non si sovrascrive mai: potrebbe contenere un ritocco.
+        for (let attempt = 2; (await api.statFiles([folder + name])).length > 0; attempt += 1) {
+            if (attempt > 99) throw new Error("Troppe copie di ritocco per questa foto.");
+            name = workingCopyName(photo.fileName, attempt);
+        }
+        const original = await api.readFile(photo.absolutePath);
+        copyPath = folder + name;
+        if (!original || !(await api.writeFile(copyPath, original.bytes))) {
+            throw new Error("Impossibile creare la copia da ritoccare accanto alla foto (cartella o scheda in sola lettura?).");
+        }
+    }
+
+    const source = await processDesktopFile(copyPath, name);
+    if (!source) throw new Error("La copia da ritoccare non è leggibile.");
+    const result = await api.openWithEditor(editor, [copyPath]);
+    if (!result.ok) throw new Error(result.error || "Impossibile aprire Photoshop.");
+    return source;
 }

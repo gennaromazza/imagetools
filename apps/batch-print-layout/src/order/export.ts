@@ -20,7 +20,8 @@ export interface ExportOptions {
 }
 
 export interface ExportReport {
-    done: { groupId: string; folder: string; files: number }[];
+    /** folderPath è la cartella del formato; sample un file appena scritto al suo interno. */
+    done: { groupId: string; folder: string; files: number; folderPath: string; sample: string }[];
     failed: { groupId: string; folder: string; message: string }[];
     cancelled: boolean;
 }
@@ -72,7 +73,7 @@ export async function exportOrder(options: ExportOptions, deps: ExportDeps): Pro
                 filesByPhoto.set(plan.photoId, arr);
             }
 
-            await runDesktopAtomicWriteTransaction(deps.api, folderPath, async (stageFile) => {
+            const saved = await runDesktopAtomicWriteTransaction(deps.api, folderPath, async (stageFile) => {
                 for (const photo of group.photos) {
                     if (options.signal?.aborted) throw new Error("ABORTED");
                     
@@ -96,7 +97,8 @@ export async function exportOrder(options: ExportOptions, deps: ExportDeps): Pro
             });
 
             const totalFilesProduced = Array.from(filesByPhoto.values()).reduce((sum, arr) => sum + arr.length, 0);
-            report.done.push({ groupId: group.id, folder: label(folderName), files: totalFilesProduced });
+            const separator = folderPath.includes("\\") ? "\\" : "/";
+            report.done.push({ groupId: group.id, folder: label(folderName), files: totalFilesProduced, folderPath, sample: `${folderPath}${separator}${saved[0]}` });
 
         } catch (err) {
             const baseMessage = err instanceof Error ? err.message : String(err);

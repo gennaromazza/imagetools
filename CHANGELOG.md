@@ -37,7 +37,12 @@
 - Print Flow è stato rifatto: carichi le foto di un ordine, le dividi in gruppi (formato, «Riempi» o «Foto intera», bordino bianco, logo), controlli i ritagli ed esporti una cartella di JPG a 300 DPI per ogni gruppo, senza mai sovrascrivere.
 - Restano i formati Polaroid, Instax e Hi-Print con la loro cornice, il logo, le copie per foto e l'arrivo delle foto da Archivio Flow. L'ordine resta salvato alla chiusura.
 - Nuovo: «Ordine cliente» (la cartella di esportazione porta nome e data) o «Lavoro veloce» senza nome. Interfaccia ridisegnata nello stile della Suite.
-- JPG, PNG e WebP si esportano partendo dal file originale, senza ricompressioni intermedie.
+- JPG, PNG e WebP si esportano partendo dal file originale, ridotti alla misura di stampa con un filtro di qualità e salvati con il colore a piena risoluzione.
+- Nuova vista «Tutte le foto»: carichi la cartella una volta e scegli il formato foto per foto, anche dalla finestra di ritaglio.
+- Nel ritaglio vedi l'originale a piena risoluzione, i suoi dati, un punteggio di stampa per ogni formato e la foto intera con il riquadro del taglio.
+- «Modifica in Photoshop»: apre una copia accanto all'originale e si aggiorna quando salvi; con più versioni installate scegli tu quale usare.
+- Cronologia dei lavori nella schermata iniziale; a fine export la cartella si apre da sola.
+- Corretto: negli export lunghi con foto molto grandi compariva «The source image cannot be decoded».
 - Non ci sono più: più foto sullo stesso foglio, scelta della carta, export PDF, TIFF, PNG e ZIP, bianco e nero, segni di taglio.
 
 ## 2026-11-19 - Image Select Pro 0.1.56
