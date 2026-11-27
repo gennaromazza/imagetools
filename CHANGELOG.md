@@ -32,6 +32,11 @@
 
 
 
+## 2026-11-27 - FileX Suite 0.1.68
+
+- Nella Suite e nella FileX Dock lo strumento di stampa compare con il suo nome attuale, Print Flow, al posto di Batch Print Layout.
+- La scheda di Print Flow descrive il ritaglio in serie degli ordini di stampa. Allineati anche i testi del sito.
+
 ## 2026-11-26 - Print Flow 0.3.0
 
 - Print Flow è stato rifatto: carichi le foto di un ordine, le dividi in gruppi (formato, «Riempi» o «Foto intera», bordino bianco, logo), controlli i ritagli ed esporti una cartella di JPG a 300 DPI per ogni gruppo, senza mai sovrascrivere.

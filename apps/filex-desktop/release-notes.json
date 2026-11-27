@@ -625,6 +625,10 @@
     ],
     "0.1.64": [
       "Nuovo strumento nella Suite: Album Flow, il software di impaginazione per album fotografici incluso in FileX All Access. Compare nell'elenco dei tool, nel dock e nelle notifiche come gli altri e si avvia dalla Suite con le stesse regole di licenza. Icona di Album Flow e controllo della licenza dentro l'app."
+    ],
+    "0.1.68": [
+      "Nella Suite e nella FileX Dock lo strumento di stampa compare con il suo nome attuale, Print Flow, al posto di Batch Print Layout.",
+      "La scheda di Print Flow descrive il ritaglio in serie degli ordini di stampa."
     ]
   },
   "album-flow": {
