@@ -85,6 +85,21 @@ for (const sitemap of ["sitemap.xml", "sitemap-filex-suite.xml"]) {
   assert.ok(readFileSync(join(root, "website", sitemap), "utf8").includes("/strumenti/album-flow/pagine-libere/"), `la pagina sulle pagine libere manca in ${sitemap}`);
 }
 assert.ok(readFileSync(join(root, "website", "strumenti", "album-flow", "index.html"), "utf8").includes("pagine-libere/index.html"), "la pagina di Album Flow deve rimandare a quella sulle pagine libere");
+// Pagina del sito sul lavoro da due PC: esiste, è coerente, dichiara il requisito della lettera di unità e non rimanda a file mancanti.
+const twoPcPath = join(root, "website", "strumenti", "album-flow", "due-pc");
+assert.ok(existsSync(join(twoPcPath, "index.html")), "pagina del sito sul lavoro da due PC assente");
+const twoPc = readFileSync(join(twoPcPath, "index.html"), "utf8");
+assert.ok(twoPc.includes('rel="canonical" href="https://filexsuite.com/strumenti/album-flow/due-pc/"'), "canonical della pagina sui due PC errato");
+assert.ok(twoPc.includes("Salva sul file") && twoPc.includes("FileX All Access") && twoPc.includes("Specifiche tecniche") && twoPc.includes("stessa lettera"), "la pagina sui due PC deve nominare «Salva sul file», All Access, le specifiche e il requisito della stessa lettera di unità");
+for (const block of twoPc.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
+for (const reference of twoPc.matchAll(/(?:src|href)="((?:\.\.\/)+(?:assets|strumenti|guide|supporto|privacy|termini|pagine-libere|caroselli-instagram)[^"#]*)"/g)) {
+  const target = join(twoPcPath, reference[1]);
+  assert.ok(existsSync(target) || existsSync(join(target, "index.html")), `la pagina sui due PC rimanda a un file che non c'è: ${reference[1]}`);
+}
+for (const sitemap of ["sitemap.xml", "sitemap-filex-suite.xml"]) {
+  assert.ok(readFileSync(join(root, "website", sitemap), "utf8").includes("/strumenti/album-flow/due-pc/"), `la pagina sui due PC manca in ${sitemap}`);
+}
+assert.ok(readFileSync(join(root, "website", "strumenti", "album-flow", "index.html"), "utf8").includes("due-pc/index.html"), "la pagina di Album Flow deve rimandare a quella sui due PC");
 // Gesti sulle pagine libere e varianti simili: i pezzi dell'interfaccia esistono e sono collegati.
 assert.ok(src("engine/arrange.ts").includes("export function gapMeasures") && src("model/freeGroup.ts").includes("export function duplicateFrames") && src("components/AlignBar.tsx").includes("Distribuisci"), "gesti di gruppo delle pagine libere assenti");
 assert.ok(src("components/AlternativesStrip.tsx").includes("onPreview") && src("components/SpreadView.tsx").includes("AlternativesStrip"), "striscia delle varianti simili sullo spread assente");
