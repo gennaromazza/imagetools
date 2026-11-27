@@ -37,6 +37,7 @@ import { LibraryDock } from "./LibraryDock";
 import { PhotoViewer } from "./PhotoViewer";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import type { Draft } from "./SpreadView";
+import type { FileStatus } from "../model/fileLink";
 import { Stage, type StageActions } from "./Stage";
 import type { DesignActions, DesignTab } from "./DesignPanel";
 import { CloudDialog } from "./CloudDialog";
@@ -79,7 +80,21 @@ export interface WorkspaceProps {
   onOpenCopy?: (copy: AlbumProjectV2) => void;
   /** Il progetto nasce da «Nuovo carosello»: si apre subito la finestra dei social. */
   startInSocial?: boolean;
+  /** Album collegato a un file su disco (lavoro da due PC); undefined senza app desktop. */
+  fileStatus?: FileStatus | "unlinked";
+  /** «Salva sul file»: restituisce il messaggio da mostrare, o null se annullato. */
+  onSaveToFile?: () => Promise<string | null>;
+  /** Dopo «Esporta → Salva progetto»: il file scritto (può diventare il collegamento). */
+  onProjectFileSaved?: (path: string | null) => void;
 }
+
+const FILE_STATE: Record<FileStatus, { text: string; tone: "ok" | "warn" | "danger" }> = {
+  saved: { text: "Salvato sul file", tone: "ok" },
+  unsaved: { text: "Modifiche non salvate sul file", tone: "warn" },
+  "changed-elsewhere": { text: "Il file è stato cambiato da un altro PC", tone: "warn" },
+  conflict: { text: "Il file è stato cambiato da un altro PC", tone: "warn" },
+  unreachable: { text: "File non raggiungibile", tone: "danger" },
+};
 
 interface Toast { message: string; undo?: boolean }
 
@@ -99,7 +114,7 @@ function layoutRefusal(spread: { done?: boolean; areas: ReadonlyArray<{ locked?:
 
 type SidecarColor = "red" | "yellow" | "green" | "blue" | "purple" | null;
 
-export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial = false }: WorkspaceProps) {
+export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial = false, fileStatus, onSaveToFile, onProjectFileSaved }: WorkspaceProps) {
   const [history, setHistoryState] = useState<History<AlbumProjectV2>>(() => createHistory(initial));
   // La cronologia più recente vive anche in una ref: i comandi si applicano in modo sincrono (una sola volta, anche in
   // StrictMode) e due modifiche nello stesso istante si compongono invece di sovrascriversi.
@@ -108,6 +123,8 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   const project = history.present;
   const lastCoalesce = useRef<{ key: string; at: number } | null>(null);
   const first = useRef(true);
+  /** «Salva sul file» per la scorciatoia Ctrl/⌘+S (assegnato più sotto, a ogni render). */
+  const saveToFileRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     if (first.current) { first.current = false; return; }
@@ -909,10 +926,18 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
   keys.current = { spread, areaIndex, selectedItemId, selectedOverlayId, cropMode, lineTool, count, index, zone, libSelection, layoutsOpen };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (isTyping(event.target) || dialog || presenting || viewer || importSource) return;
-      const state = keys.current;
       const mod = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
+      // Ctrl/⌘+S vale anche mentre si scrive (per esempio il nome dell'album): prima si conferma il campo, poi si salva.
+      if (mod && !event.altKey && key === "s") {
+        event.preventDefault();
+        if (dialog || presenting || viewer || importSource || !saveToFileRef.current) return;
+        if (isTyping(event.target)) (event.target as HTMLElement).blur();
+        window.setTimeout(() => saveToFileRef.current?.(), 60);
+        return;
+      }
+      if (isTyping(event.target) || dialog || presenting || viewer || importSource) return;
+      const state = keys.current;
       if (mod && key === "z") { event.preventDefault(); if (event.shiftKey) doRedo(); else doUndo(); return; }
       if (mod && key === "y") { event.preventDefault(); doRedo(); return; }
       if (mod && key === "a" && state.spread && state.zone === "stage") { event.preventDefault(); actions.pickAll(); return; }
@@ -1053,6 +1078,16 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
     if (reopenSocial.current && project.assets.length > 0 && !importSource && !dialog) { reopenSocial.current = false; setDialog("social"); }
   }, [project.assets.length, importSource, dialog]);
   const newDrive = useNewFeature("drive");
+  const newSaveFile = useNewFeature("salva-file");
+  const [savingFile, setSavingFile] = useState(false);
+  const saveToFile = onSaveToFile ? async () => {
+    if (savingFile) return;
+    newSaveFile.markSeen();
+    setSavingFile(true);
+    try { const message = await onSaveToFile(); if (message) notify(message); } finally { setSavingFile(false); }
+  } : null;
+  saveToFileRef.current = saveToFile;
+  const fileState = fileStatus && fileStatus !== "unlinked" ? FILE_STATE[fileStatus] : null;
   const newSocial = useNewFeature("carosello");
   const rename = (name: string) => commit((p) => ({ ...p, projectName: name, updatedAt: nowIso() }));
   const setStage = (stage: AlbumStage) => commit((p) => (p.stage === stage ? p : touch({ ...p, stage })));
@@ -1132,11 +1167,27 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
           </select>
         </label>
         {missingIds.size > 0 ? <button type="button" className="btn btn--warn" onClick={() => setDialog("relink")} title="Alcune foto non si trovano più sul disco: indica dove sono adesso">{missingIds.size} {missingIds.size === 1 ? "foto non trovata" : "foto non trovate"} · Ricollega</button> : null}
-        {driveAvailable() ? <button type="button" className="btn" onClick={() => { newDrive.markSeen(); setDialog("cloud"); }} title="Backup del progetto su Google Drive (le foto non vengono caricate)"><Icon name="archive" size={16} /> Drive{newDrive.isNew ? <span className="new-pill">Nuovo</span> : null}</button> : null}
-        <button type="button" className="btn" onClick={() => setDialog("contact")} disabled={count < 2} title="Provino: tutti gli spread in una vista, per cambiare l'ordine (V)"><Icon name="grid" size={16} /> Provino</button>
-        <button type="button" className="btn" onClick={() => { newSocial.markSeen(); reopenSocial.current = false; setDialog("social"); }} title="Crea un carosello o una storia per Instagram con le foto di questo album"><Icon name="image" size={16} /> Carosello{newSocial.isNew ? <span className="new-pill">Nuovo</span> : null}</button>
-        <button type="button" className="btn" onClick={() => setDialog("autobuild")} disabled={!hasPhotos} title="Auto Build (Ctrl/⌘+B)"><Icon name="wand" size={16} /> Auto Build</button>
+        {driveAvailable() ? <button type="button" className="btn" onClick={() => { newDrive.markSeen(); setDialog("cloud"); }} title="Backup del progetto su Google Drive (le foto non vengono caricate)"><Icon name="archive" size={16} /> <span className="topbar__label">Drive</span>{newDrive.isNew ? <span className="new-pill">Nuovo</span> : null}</button> : null}
+        <button type="button" className="btn" onClick={() => setDialog("contact")} disabled={count < 2} title="Provino: tutti gli spread in una vista, per cambiare l'ordine (V)"><Icon name="grid" size={16} /> <span className="topbar__label">Provino</span></button>
+        <button type="button" className="btn" onClick={() => { newSocial.markSeen(); reopenSocial.current = false; setDialog("social"); }} title="Crea un carosello o una storia per Instagram con le foto di questo album"><Icon name="image" size={16} /> <span className="topbar__label">Carosello</span>{newSocial.isNew ? <span className="new-pill">Nuovo</span> : null}</button>
+        <button type="button" className="btn" onClick={() => setDialog("autobuild")} disabled={!hasPhotos} title="Auto Build (Ctrl/⌘+B)"><Icon name="wand" size={16} /> <span className="topbar__label">Auto Build</span></button>
         <IconButton icon="play" label="Anteprima per il cliente (F5)" onClick={() => setPresenting(true)} disabled={count === 0} size={20} className="icon-btn--round" />
+        {saveToFile ? (
+          <button
+            type="button"
+            className={`btn filesave${fileState ? ` filesave--${fileState.tone}` : ""}`}
+            onClick={() => void saveToFile()}
+            disabled={savingFile}
+            title={`Salva sul file (Ctrl/⌘+S)${fileState ? ` · ${fileState.text}` : " · L'album non è ancora collegato a un file: scegli la cartella, per esempio sul disco condiviso"}`}
+            aria-label={`Salva sul file${fileState ? `. ${fileState.text}` : ""}`}
+          >
+            <Icon name="folder" size={16} />
+            {fileState ? <span className="filesave__dot" aria-hidden="true" /> : null}
+            <span className="topbar__label">Salva sul file</span>
+            {fileState ? <span className="filesave__state">{fileState.text}</span> : null}
+            {newSaveFile.isNew ? <span className="new-pill">Nuovo</span> : null}
+          </button>
+        ) : null}
         <button type="button" className="btn btn--primary" onClick={() => setDialog("export")} disabled={count === 0} title="Esporta (Ctrl/⌘+E)"><Icon name="export" size={16} /> Esporta</button>
         <button type="button" className="btn btn--ghost" onClick={() => setDialog("shortcuts")} title="Guida con esempi e scorciatoie (?)"><Icon name="keyboard" size={16} /> Guida</button>
       </header>
@@ -1271,7 +1322,7 @@ export function Workspace({ initial, onChange, onExit, onOpenCopy, startInSocial
       ) : null}
       {dialog === "autobuild" ? <AutoBuildDialog project={project} analysis={analysis} templateCount={templates.length} onClose={() => setDialog(null)} onRun={runAutoBuild} /> : null}
       {dialog === "social" ? <SocialStudio project={project} onClose={() => setDialog(null)} onStatus={notify} onImportFolder={() => { reopenSocial.current = true; setDialog(null); if (desktop) void importFolder(); else fileInput.current?.click(); }} onImportFiles={() => { reopenSocial.current = true; setDialog(null); fileInput.current?.click(); }} /> : null}
-      {dialog === "export" ? <ExportDialog project={project} analysis={analysis} currentIndex={index} onClose={() => setDialog(null)} onStatus={notify} onGoTo={goTo} /> : null}
+      {dialog === "export" ? <ExportDialog project={project} analysis={analysis} currentIndex={index} onClose={() => setDialog(null)} onStatus={notify} onGoTo={goTo} onProjectSaved={onProjectFileSaved} /> : null}
       {dialog === "format" ? <FormatDialog sheet={project.settings.sheet} gapCm={project.settings.defaultStyle.gapCm} onClose={() => setDialog(null)} onApply={(sheet, gapCm) => { const out = { updated: 0 }; commit((p) => { const gapped = setAlbumGap(touch({ ...p, settings: { ...p.settings, sheet } }), gapCm); out.updated = gapped.updated; return gapped.project; }); setDialog(null); notify(out.updated > 0 ? `Formato e spazio aggiornati: ${out.updated} ${out.updated === 1 ? "pagina" : "pagine"} con il nuovo spazio tra le foto.` : "Formato cambiato: i layout si sono adattati al nuovo foglio.", true); }} /> : null}
       {dialog === "template" && templateEdit ? <TemplateEditor sheet={project.settings.sheet} style={project.settings.defaultStyle} initial={templateEdit.initial} seed={templateEdit.seed} onClose={() => { setDialog(null); setTemplateEdit(null); }} onSave={(template) => { try { storeTemplates(upsertTemplate(templates, template)); notify(`Template «${template.name}» salvato.`); setDialog(null); setTemplateEdit(null); } catch (error) { notify(error instanceof Error ? error.message : "Template non salvato."); } }} /> : null}
       {dialog === "cloud" ? <CloudDialog project={project} onClose={() => setDialog(null)} onOpenCopy={(copy) => { setDialog(null); onOpenCopy?.(copy); }} /> : null}

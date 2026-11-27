@@ -1,9 +1,9 @@
 import type { AlbumAssetV2, AlbumProjectV2, AlbumSpread } from "@photo-tools/shared-types";
 import { getDesktop } from "../desktop/api";
 import { assetToDataUrl } from "../hooks/useAssetSrc";
-import { mediaIdsOfSpread, mediaIdsOfProject, fontIdsOfSpread } from "../model/design";
-import { collectEmbeddedMedia, getMedia } from "../model/mediaStore";
-import { serializeAlbumProject } from "../model/portability";
+import { projectFileBytes } from "../desktop/projectFile";
+import { mediaIdsOfSpread, fontIdsOfSpread } from "../model/design";
+import { getMedia } from "../model/mediaStore";
 import { canvasMeasure, embeddedFontCss, loadFonts } from "./fonts";
 import { exportSpreadsWith, safeFileName, type ExportOptions, type ExportWriter } from "./export-core";
 
@@ -131,6 +131,5 @@ export async function exportSpreads(project: AlbumProjectV2, writer: ExportWrite
 }
 
 export async function exportProjectFile(project: AlbumProjectV2, writer: ExportWriter): Promise<string | null> {
-  const media = await collectEmbeddedMedia(mediaIdsOfProject(project));
-  return writer.write(`${safeFileName(project.projectName)}.filex-album.json`, new TextEncoder().encode(serializeAlbumProject(project, media)), "application/json");
+  return writer.write(`${safeFileName(project.projectName)}.filex-album.json`, await projectFileBytes(project), "application/json");
 }

@@ -1014,3 +1014,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
 .present__progress { display: block; width: min(320px, 50vw); height: 3px; margin: 0 auto 8px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
 .present__progress > span { display: block; height: 100%; background: var(--accent); transition: width 0.3s ease; }
 @media (prefers-reduced-motion: reduce) { .present__book--next, .present__book--prev { animation: none; } }
+/* «Salva sul file»: album collegato a un file su disco (lavoro da due PC). Lo stato resta leggibile anche solo dal pallino. */
+.filesave { gap: 6px; }
+.filesave__dot { width: 8px; height: 8px; border-radius: 999px; background: var(--success); flex: 0 0 auto; }
+.filesave--warn .filesave__dot { background: var(--warn); }
+.filesave--danger .filesave__dot { background: var(--danger); }
+.filesave__state { font-size: 11px; color: var(--text-muted); max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filesave--warn .filesave__state { color: var(--warn); }
+.filesave--danger .filesave__state { color: var(--danger); }
+@media (max-width: 1600px) { .filesave__state { display: none; } }
+/* Finestre strette (1100–1400 px): i pulsanti secondari della barra in alto restano solo icona, il nome è nel suggerimento. */
+@media (max-width: 1400px) { .topbar .topbar__label { display: none; } }

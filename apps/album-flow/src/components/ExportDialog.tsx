@@ -23,8 +23,10 @@ export function parseSpreadRange(text: string, count: number): { indexes: number
 }
 
 /** Esportazione: controlli prima della stampa, poi JPG o SVG per spread e file progetto. */
-export function ExportDialog({ project, analysis, currentIndex, onClose, onStatus, onGoTo }: {
+export function ExportDialog({ project, analysis, currentIndex, onClose, onStatus, onGoTo, onProjectSaved }: {
   project: AlbumProjectV2;
+  /** Dopo il salvataggio del progetto: il percorso del file scritto (null nel browser). */
+  onProjectSaved?: (path: string | null) => void;
   /** Momenti e foto simili: aggiungono gli avvisi su foto quasi uguali, momenti sparsi e bianco e nero accanto al colore. */
   analysis?: LibraryAnalysis;
   currentIndex: number;
@@ -88,6 +90,7 @@ export function ExportDialog({ project, analysis, currentIndex, onClose, onStatu
     await withWriter([`${safeFileName(project.projectName)}.filex-album.json`], async (writer) => {
       try {
         const path = await exportProjectFile(project, writer);
+        onProjectSaved?.(path);
         onStatus("Progetto salvato in un file FileX Album.");
         if (path) void revealInFolder(path);
         onClose();

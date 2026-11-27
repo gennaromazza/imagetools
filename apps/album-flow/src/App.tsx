@@ -9,7 +9,9 @@ import { parseAlbumProject, readEmbeddedMedia } from "./model/portability";
 import { restoreEmbeddedMedia } from "./model/mediaStore";
 import { WhatsNewDialog } from "./components/WhatsNewDialog";
 import { WHATS_NEW, lastSeenVersion, releasesToShow, rememberVersion, shouldShowWhatsNew, type WhatsNewRelease } from "./model/whatsNew";
-import { autoBackupEnabled, backupOnClose, projectsToBackup, loadBackupMarks, setAutoBackupEnabled } from "./desktop/autoBackup";
+import { autoBackupEnabled, backupOnClose, CLOSE_BACKUP_BUDGET_MS, projectsToBackup, loadBackupMarks, setAutoBackupEnabled } from "./desktop/autoBackup";
+import { FileSyncDialog } from "./components/FileSyncDialog";
+import { useFileSync } from "./hooks/useFileSync";
 import { backupToDrive, driveAvailable, driveStatus } from "./desktop/cloud";
 import { createEmptyProject, nowIso, touch } from "./model/project";
 import { newId } from "./model/ids";
@@ -56,18 +58,27 @@ export function App() {
   const changeAutoBackup = (on: boolean) => { setAutoBackup(on); setAutoBackupEnabled(on); };
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
+  const fileSyncRef = useRef<ReturnType<typeof useFileSync> | null>(null);
+  // Alla chiusura: prima gli album collegati a un file (solo se l'altro PC non l'ha cambiato), poi il backup su Drive.
   useEffect(() => {
     const api = window.filexDesktop;
-    if (!api?.onPrepareClose || !api.completeClosePreparation || !driveAvailable()) return;
+    if (!api?.onPrepareClose || !api.completeClosePreparation) return;
     const removePrepare = api.onPrepareClose(() => {
-      void backupOnClose(projectsRef.current, {
-        connected: async () => Boolean((await driveStatus())?.connected),
-        backup: (project) => backupToDrive(project),
-      }).catch(() => undefined).finally(() => { void api.completeClosePreparation(); });
+      const deadline = Date.now() + CLOSE_BACKUP_BUDGET_MS;
+      void (async () => {
+        await fileSyncRef.current?.saveOnClose(deadline).catch(() => undefined);
+        if (driveAvailable()) {
+          await backupOnClose(projectsRef.current, {
+            connected: async () => Boolean((await driveStatus())?.connected),
+            backup: (project) => backupToDrive(project),
+          }, Math.max(0, deadline - Date.now())).catch(() => undefined);
+        }
+      })().finally(() => { void api.completeClosePreparation(); });
     });
     // Se c'è qualcosa da salvare si chiede alla shell di aspettare; altrimenti la finestra si chiude subito.
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (!autoBackupEnabled() || projectsToBackup(projectsRef.current, loadBackupMarks()).length === 0) return;
+      const onDrive = driveAvailable() && autoBackupEnabled() && projectsToBackup(projectsRef.current, loadBackupMarks()).length > 0;
+      if (!onDrive && !fileSyncRef.current?.hasUnsavedLinked()) return;
       event.preventDefault();
       event.returnValue = "";
     };
@@ -87,6 +98,20 @@ export function App() {
   }, []);
 
   const onWorkspaceChange = useCallback((project: AlbumProjectV2) => upsert(project, false), [upsert]);
+
+  const openAlbum = useCallback((projectId: string) => { setStartInSocial(false); setActiveId(projectId); }, []);
+  const fileSync = useFileSync({ projectsRef, active, upsert, open: openAlbum, setBanner });
+  fileSyncRef.current = fileSync;
+  const activeFileId = active?.projectId;
+  const saveActiveToFile = useCallback(async () => (activeFileId ? fileSync.save(activeFileId) : null), [activeFileId, fileSync]);
+  const exitAlbum = useCallback(async () => {
+    if (activeFileId && !(await fileSync.confirmExit(activeFileId))) return;
+    setStartInSocial(false);
+    setActiveId(null);
+  }, [activeFileId, fileSync]);
+  const activeForLink = useRef(active);
+  activeForLink.current = active;
+  const onProjectFileSaved = useCallback((path: string | null) => { if (activeForLink.current) void fileSync.linkExported(activeForLink.current, path); }, [fileSync]);
 
   // Passaggio da Image Select Pro / Archivio Flow tramite l'app desktop.
   useEffect(() => {
@@ -157,6 +182,7 @@ export function App() {
 
   const remove = (projectId: string) => {
     setProjects((current) => current.filter((project) => project.projectId !== projectId));
+    fileSync.forget(projectId);
     if (activeId === projectId) setActiveId(null);
   };
 
@@ -170,7 +196,8 @@ export function App() {
     try {
       const writer = hasDesktop() ? await chooseDesktopWriter() : browserWriter();
       if (!writer) return;
-      await exportProjectFile(project, writer);
+      const path = await exportProjectFile(project, writer);
+      await fileSync.linkExported(project, path);
       setBanner(`Progetto «${project.projectName}» salvato (${writer.where()}).`);
     } catch (error) {
       setBanner(error instanceof Error ? error.message : "Impossibile salvare il progetto.");
@@ -179,6 +206,8 @@ export function App() {
 
   const importProjectFile = async (file: File | undefined) => {
     if (!file) return;
+    // Con l'app desktop il file resta collegato all'album; senza, si importa come prima.
+    if (await fileSync.openPicked(file)) return;
     try {
       const raw = await file.text();
       const project = parseAlbumProject(raw);
@@ -195,15 +224,26 @@ export function App() {
     <div className="album-app">
       {license ? <div className={`license-notice license-notice--${license.level}`} role={license.level === "error" ? "alert" : "status"}>{license.text}</div> : null}
       {whatsNew ? <WhatsNewDialog releases={whatsNew} onClose={closeWhatsNew} /> : null}
+      {fileSync.question ? <FileSyncDialog question={fileSync.question} /> : null}
       {active ? (
-        <Workspace key={`${active.projectId}:${revision}`} initial={active} startInSocial={startInSocial} onChange={onWorkspaceChange} onExit={() => { setStartInSocial(false); setActiveId(null); }} onOpenCopy={openCopy} />
+        <Workspace
+          key={`${active.projectId}:${revision}`}
+          initial={active}
+          startInSocial={startInSocial}
+          onChange={onWorkspaceChange}
+          onExit={() => void exitAlbum()}
+          onOpenCopy={openCopy}
+          fileStatus={fileSync.status}
+          onSaveToFile={fileSync.enabled ? saveActiveToFile : undefined}
+          onProjectFileSaved={onProjectFileSaved}
+        />
       ) : (
         <Home
           projects={projects}
           banner={saveFailed ? "Spazio di salvataggio locale esaurito: salva i progetti importanti in un file." : banner}
           legacy={initial.legacy}
           skipped={initial.skipped}
-          onOpen={(id) => { setStartInSocial(false); setActiveId(id); }}
+          onOpen={(id) => void fileSync.openFromHome(id)}
           autoBackup={autoBackup}
           onAutoBackup={driveAvailable() ? changeAutoBackup : undefined}
           onWhatsNew={openWhatsNew}
