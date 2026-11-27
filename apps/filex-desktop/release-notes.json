@@ -770,6 +770,11 @@
       "Nuovo: pulsante «Simili» nella barra della libreria per attivare o disattivare il raggruppamento in un clic.",
       "Nuovo: nella vista grande (Spazio) Backspace aggiunge all'elenco tutte le foto simili del gruppo, restando sulla foto mostrata; un secondo Backspace le nasconde."
     ],
+    "0.2.57": [
+      "Nuovo: «Salva sul file» (Ctrl/⌘+S) per lavorare sullo stesso album da due PC: l'album aperto da un file resta collegato a quel file e un pallino dice se è tutto salvato.",
+      "Nuovo: all'uscita dall'album chiede se salvare sul file; all'apertura avvisa se un altro PC ha salvato una versione più nuova, e il file non viene mai sovrascritto senza chiedere.",
+      "Migliorato: nelle finestre strette la barra in alto mostra solo le icone, così nessun pulsante esce dalla finestra."
+    ],
     "0.2.56": [
       "Migliorato: «Salva sul file…» rifiuta con un messaggio chiaro le foto CMYK, in scala di grigi o con profilo diverso da sRGB, che non si potrebbero correggere in modo fedele; il file non viene toccato.",
       "Migliorato: la copia di sicurezza dell'originale si fa solo quando la correzione è pronta."

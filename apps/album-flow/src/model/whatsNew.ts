@@ -21,6 +21,27 @@ export interface WhatsNewRelease {
 /** Dal più recente al più vecchio. */
 export const WHATS_NEW: readonly WhatsNewRelease[] = [
   {
+    version: "0.2.57",
+    date: "2026-11-27",
+    headline: "Lo stesso album su due PC",
+    items: [
+      {
+        title: "Salva l'album sul file, anche sul disco condiviso",
+        text: "Apri l'album da un file .filex-album.json (per esempio sul disco condiviso dello studio) e da lì resta collegato a quel file. Con «Salva sul file» in alto, accanto a «Esporta», lo aggiorni; il pallino ti dice se è tutto salvato (verde) o se ci sono modifiche non ancora nel file (giallo). La prima volta, se l'album non è collegato, scegli tu la cartella. Le foto non entrano nel file: sui due PC il disco delle foto deve avere la stessa lettera (per esempio E:).",
+        where: ["Salva sul file", "Ctrl/⌘+S", "Apri progetto…"],
+      },
+      {
+        title: "Nessuna modifica persa tra un PC e l'altro",
+        text: "Se esci dall'album con modifiche non salvate sul file, Album Flow te lo chiede. Se apri un album che l'altro PC ha salvato nel frattempo, ti avvisa e ti fa scegliere se caricarlo; e non sovrascrive mai il file se l'altro PC l'ha cambiato, senza chiedertelo. Chiudendo il programma salva da solo sul file, ma solo se nessun altro l'ha toccato.",
+        where: ["Album", "Home"],
+      },
+      {
+        title: "Barra in alto più compatta nelle finestre strette",
+        text: "Sotto i 1400 pixel di larghezza Drive, Provino, Carosello, Auto Build e Salva sul file mostrano solo l'icona: il nome compare passandoci sopra con il mouse, e nessun pulsante esce più dalla finestra.",
+      },
+    ],
+  },
+  {
     version: "0.2.56",
     date: "2026-11-18",
     headline: "Salvataggio sul file più sicuro",

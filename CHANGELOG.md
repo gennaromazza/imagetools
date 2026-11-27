@@ -32,6 +32,15 @@
 
 
 
+## 2026-11-27 - Album Flow 0.2.57
+
+- Nuovo: «Salva sul file» (in alto, accanto a «Esporta»; `Ctrl/⌘+S`) per lavorare sullo stesso album da due PC in rete. Un album aperto da un file `.filex-album.json` con «Apri progetto…» resta collegato a quel file su questo PC; il pallino accanto al pulsante dice se il file è aggiornato, se ci sono modifiche non salvate, se un altro PC l'ha cambiato o se non si raggiunge. Un album non ancora collegato chiede la cartella la prima volta.
+- Nuovo: uscendo dall'album con modifiche non salvate sul file chiede Salva / Non salvare / Annulla; aprendo un album collegato (dalla Home o da «Apri progetto…») avvisa se un altro PC ha salvato una versione più nuova o se il file è diverso, invece di sostituire l'album in silenzio come prima.
+- Nuovo: non sovrascrive mai il file se un altro PC l'ha cambiato senza chiedere (Sovrascrivi / Carica la sua versione / Annulla); alla chiusura del programma salva da solo sul file solo se nessun altro l'ha toccato, altrimenti lascia le modifiche su questo PC.
+- Migliorato: sotto 1400 px di larghezza Drive, Provino, Carosello, Auto Build e Salva sul file mostrano solo l'icona (il nome resta nel suggerimento): a 1100×740 nessun pulsante esce più dalla barra in alto.
+- Da sapere: il collegamento al file sta nell'archivio locale di ciascun PC (schema v2 invariato, nessun canale IPC nuovo); le foto non sono nel file, quindi i due PC devono vedere il disco delle foto con la stessa lettera (es. `E:`); i caroselli per i social non viaggiano nel file. Lavorare sullo stesso album nello stesso momento da due PC non è gestito: vince la versione salvata per ultima, dopo la domanda.
+- Interno: logica pura in `model/fileLink.ts`, accesso al disco in `desktop/projectFile.ts`, interfaccia in `hooks/useFileSync.ts` e `components/FileSyncDialog.tsx`; 14 prove in `test:album-flow-filelink` (nella Dev Console). Specifica e piano in `docs/superpowers/`.
+
 ## 2026-11-27 - FileX Suite 0.1.68
 
 - Nella Suite e nella FileX Dock lo strumento di stampa compare con il suo nome attuale, Print Flow, al posto di Batch Print Layout.
